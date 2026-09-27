@@ -31,7 +31,11 @@ import type { ModelProviderProfile, ProviderProfileRef } from './provider-profil
  *    It survives `delete` (a tombstone), so a replay of any older request stays
  *    rejected however many operations happened since and whatever the clock
  *    says.
- * 4. **Receipts** — the credential-free result of recent provisioning
+ * 4. **Request reservations** — a started provisioning request's id and
+ *    digest, reserved store-wide together with its pending marker and
+ *    replaced by its receipt, so an id reused with another digest is refused
+ *    before any side effect, on any profile.
+ * 5. **Receipts** — the credential-free result of recent provisioning
  *    requests, keyed by request id and bounded by count. They let a request
  *    whose ACK was lost read back the same stored result; replay protection
  *    does not depend on them (that is the watermark's job), so evicting an old
@@ -53,8 +57,24 @@ export interface ProviderCustodyPending {
   readonly operation: ProviderCustodyOperation;
   /** The provisioning request that set it; `null` for a direct registry write. */
   readonly requestId: string | null;
+  /** That request's immutable digest; present exactly when `requestId` is. */
+  readonly requestDigest: string | null;
   readonly operationGeneration: number | null;
   readonly since: string;
+}
+
+/**
+ * A store-wide reservation of a provisioning request id and its immutable
+ * digest, written in the same atomic step as the request's pending marker and
+ * replaced by the request's receipt (same lookup scope: request id across the
+ * whole store, never per profile). A reused id with a different digest is a
+ * conflict wherever it targets.
+ */
+export interface ProviderCustodyReservation {
+  readonly requestId: string;
+  readonly requestDigest: string;
+  readonly profileRef: ProviderProfileRef;
+  readonly operationGeneration: number;
 }
 
 /**

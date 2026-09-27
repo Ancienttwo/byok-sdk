@@ -92,6 +92,7 @@ export interface ProviderProvisioningIdentitySnapshot {
 export type SealedProvisioningReadback =
   | { readonly status: 'completed'; readonly result: ProviderProvisioningResult }
   | { readonly status: 'conflict' }
+  | { readonly status: 'interrupted' }
   | { readonly status: 'absent' };
 
 const REQUEST_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/u;
@@ -113,9 +114,43 @@ export async function readSealedProvisioningResult(input: {
     throw new ByokKeysError('PROVIDER_CUSTODY_STATE_INVALID', 'Readback requires a request id and a sha256 request digest');
   }
   const receipt = await input.profileStore.getReceipt(input.requestId);
-  if (receipt === undefined) return { status: 'absent' };
-  if (receipt.requestDigest !== input.requestDigest) return { status: 'conflict' };
-  return { status: 'completed', result: receipt.result };
+  if (receipt !== undefined) {
+    return receipt.requestDigest === input.requestDigest ? { status: 'completed', result: receipt.result } : { status: 'conflict' };
+  }
+  const reservation = await input.profileStore.getReservation(input.requestId);
+  if (reservation !== undefined) {
+    return reservation.requestDigest === input.requestDigest ? { status: 'interrupted' } : { status: 'conflict' };
+  }
+  return { status: 'absent' };
+}
+
+/**
+ * Under the configuration lock: settle a request id this store already knows
+ * (F4, F6). A receipt returns its stored result (same digest) or a conflict;
+ * a reservation without a receipt is a started request that never finished:
+ * the same digest is recorded as `local_commit_interrupted` on the profile it
+ * reserved (never redone), a different digest is a conflict with no write.
+ * `undefined` means the id is unknown to this store.
+ */
+async function settleKnownRequest(
+  profiles: ProviderProfileStore,
+  facts: RequestFacts,
+): Promise<ProviderProvisioningResult | undefined> {
+  const receipt = await profiles.getReceipt(facts.requestId);
+  if (receipt !== undefined) {
+    return receipt.requestDigest === facts.requestDigest ? receipt.result : rejectedResult(facts, null, 'request_conflict');
+  }
+  const reservation = await profiles.getReservation(facts.requestId);
+  if (reservation === undefined) return undefined;
+  if (reservation.requestDigest !== facts.requestDigest) return rejectedResult(facts, null, 'request_conflict');
+  const interrupted = rejectedResult(facts, reservation.profileRef, 'local_commit_interrupted');
+  await profiles.commitCustody({
+    profileRef: reservation.profileRef,
+    mutation: { kind: 'none' },
+    receipt: receiptOf(facts, reservation.profileRef, interrupted),
+    clearPending: false,
+  });
+  return interrupted;
 }
 
 function identityMatches(
@@ -251,6 +286,12 @@ export async function applySealedProviderProvisioning(
   const earlier = await readSealedProvisioningResult({ profileStore: profiles, requestId: header.requestId, requestDigest });
   if (earlier.status === 'completed') return earlier.result;
   if (earlier.status === 'conflict') return rejectedResult(facts, null, 'request_conflict');
+  if (earlier.status === 'interrupted') {
+    // Started here and never finished (F6): settle it without decrypting,
+    // whatever the current key or placement.
+    return withConfigurationLock(profiles, async () =>
+      (await settleKnownRequest(profiles, facts)) ?? rejectedResult(facts, null, 'local_commit_interrupted'));
+  }
 
   // 3. Current identity and routing for an undecided request.
   const identityRejection = identityMatches(identity, header);
@@ -289,11 +330,12 @@ export async function applySealedProviderProvisioning(
   let result: ProviderProvisioningResult;
   try {
     result = await withConfigurationLock(profiles, async () => {
-      const receipt = await profiles.getReceipt(header.requestId);
-      if (receipt !== undefined) {
-        if (receipt.requestDigest !== requestDigest) return rejectedResult(facts, profileRef, 'request_conflict');
+      // Store-wide request identity (F4, F6): a known id — completed or merely
+      // started — is settled before anything else, on any profile.
+      const known = await settleKnownRequest(profiles, facts);
+      if (known !== undefined) {
         replayed = true;
-        return receipt.result;
+        return known;
       }
       const recordRejection = async (code: ProviderProvisioningRejection): Promise<ProviderProvisioningResult> => {
         const rejected = rejectedResult(facts, profileRef, code);
@@ -307,13 +349,6 @@ export async function applySealedProviderProvisioning(
         });
         return rejected;
       };
-      // This very request started and was interrupted (F1): report it, never
-      // redo it. Recovery takes a higher generation that re-supplies the key,
-      // or a delete.
-      const pendingBefore = await profiles.getPending(profileRef);
-      if (pendingBefore !== undefined && pendingBefore.requestId === header.requestId) {
-        return recordRejection('local_commit_interrupted');
-      }
       // The watermark includes generations that started (pending), so an older
       // request can never overtake an interrupted newer one (F1).
       const watermark = await profiles.getOperationWatermark(profileRef);
@@ -336,6 +371,7 @@ export async function applySealedProviderProvisioning(
         profileRef,
         operation: header.operation,
         requestId: header.requestId,
+        requestDigest,
         operationGeneration: header.operationGeneration,
         since: options.now().toISOString(),
       });

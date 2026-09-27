@@ -103,7 +103,7 @@ describe.skipIf(!isSqliteAvailable())('registry custody (A4, A8)', () => {
 
   it('an interrupted change blocks readers and secret-less writers until a key is supplied', async () => {
     await registry().configure(OPENAI, OLD_KEY);
-    await profiles.markPending({ profileRef: 'openai', operation: 'configure', requestId: null, operationGeneration: null, since: '2026-09-28T05:00:00.000Z' });
+    await profiles.markPending({ profileRef: 'openai', operation: 'configure', requestId: null, requestDigest: null, operationGeneration: null, since: '2026-09-28T05:00:00.000Z' });
 
     await expect(registry().get('openai')).resolves.toMatchObject({ configuration_pending: true });
     await expect(registry().resolveDefaultModelProvider()).rejects.toMatchObject({ code: 'PROVIDER_CONFIGURATION_PENDING' });
@@ -184,7 +184,7 @@ describe('launcher custody snapshot (A4)', () => {
 
   it('refuses while pending, after the profile changed, and after it was removed', async () => {
     const { store, keys, subject, profile } = await setup();
-    await store.markPending({ profileRef: 'openai', operation: 'configure', requestId: 'r', operationGeneration: 2, since: '2026-09-28T05:00:00.000Z' });
+    await store.markPending({ profileRef: 'openai', operation: 'configure', requestId: 'r', requestDigest: `sha256:${'3'.repeat(64)}`, operationGeneration: 2, since: '2026-09-28T05:00:00.000Z' });
     await expect(readProviderCustodySnapshot({ profiles: store, profile, createSecretStore: () => keys })).rejects.toMatchObject({ code: 'PROVIDER_CONFIGURATION_PENDING' });
     await expect(assertProviderCustodyIdle({ profiles: store, profile })).rejects.toMatchObject({ code: 'PROVIDER_CONFIGURATION_PENDING' });
 

@@ -11,6 +11,7 @@ import {
   type ProviderCustodyCommit,
   type ProviderCustodyPending,
   type ProviderCustodyReceipt,
+  type ProviderCustodyReservation,
   type ProviderKeyCheckOutcome,
 } from './custody';
 import { ByokKeysError } from './errors';
@@ -159,8 +160,18 @@ CREATE TABLE IF NOT EXISTS provider_custody_pending (
   profile_ref          TEXT PRIMARY KEY,
   operation            TEXT NOT NULL CHECK (operation IN (${sqlList(PROVIDER_CUSTODY_OPERATIONS)})),
   request_id           TEXT,
+  request_digest       TEXT,
   operation_generation INTEGER CHECK (operation_generation IS NULL OR operation_generation > 0),
-  since                TEXT NOT NULL
+  since                TEXT NOT NULL,
+  CHECK ((request_id IS NULL) = (request_digest IS NULL))
+);
+`,
+  provider_custody_reservation: `
+CREATE TABLE IF NOT EXISTS provider_custody_reservation (
+  request_id           TEXT PRIMARY KEY,
+  request_digest       TEXT NOT NULL,
+  profile_ref          TEXT NOT NULL,
+  operation_generation INTEGER NOT NULL CHECK (operation_generation > 0)
 );
 `,
   provider_custody_watermark: `
@@ -226,8 +237,16 @@ interface PendingRow {
   operation: string;
   operation_generation: number | null;
   profile_ref: string;
+  request_digest: string | null;
   request_id: string | null;
   since: string;
+}
+
+interface ReservationRow {
+  operation_generation: number;
+  profile_ref: string;
+  request_digest: string;
+  request_id: string;
 }
 
 interface ReceiptRow {
@@ -473,24 +492,64 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
       profileRef: row.profile_ref,
       operation: row.operation as ProviderCustodyPending['operation'],
       requestId: row.request_id,
+      requestDigest: row.request_digest,
       operationGeneration: row.operation_generation === null ? null : Number(row.operation_generation),
       since: row.since,
     };
   }
 
+  async getReservation(requestId: string): Promise<ProviderCustodyReservation | undefined> {
+    const row = this.#database
+      .prepare('SELECT * FROM provider_custody_reservation WHERE request_id = ?')
+      .get(requestId) as ReservationRow | undefined;
+    return row === undefined
+      ? undefined
+      : {
+        requestId: row.request_id,
+        requestDigest: row.request_digest,
+        profileRef: row.profile_ref,
+        operationGeneration: Number(row.operation_generation),
+      };
+  }
+
   async markPending(pending: ProviderCustodyPending): Promise<void> {
+    if ((pending.requestId === null) !== (pending.requestDigest === null)
+      || (pending.requestId !== null && pending.operationGeneration === null)) {
+      throw new ByokKeysError('PROVIDER_CUSTODY_STATE_INVALID', 'A provisioning pending marker requires request id, digest and generation together');
+    }
     this.#transaction(() => {
+      if (pending.requestId !== null) {
+        // Store-wide request identity, in the same transaction as the marker
+        // and the watermark: one digest per id, never over a receipt.
+        const receipt = this.#database
+          .prepare('SELECT 1 AS present FROM provider_custody_receipt WHERE request_id = ?')
+          .get(pending.requestId);
+        const existing = this.#database
+          .prepare('SELECT request_digest FROM provider_custody_reservation WHERE request_id = ?')
+          .get(pending.requestId) as { request_digest: string } | undefined;
+        if (receipt !== undefined || (existing !== undefined && existing.request_digest !== pending.requestDigest)) {
+          throw new ByokKeysError('PROVIDER_CUSTODY_STATE_INVALID', 'Provisioning request id is already reserved');
+        }
+        this.#database
+          .prepare(
+            `INSERT INTO provider_custody_reservation (request_id, request_digest, profile_ref, operation_generation)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(request_id) DO NOTHING`,
+          )
+          .run(pending.requestId, pending.requestDigest, pending.profileRef, pending.operationGeneration);
+      }
       this.#database
         .prepare(
-          `INSERT INTO provider_custody_pending (profile_ref, operation, request_id, operation_generation, since)
-           VALUES (?, ?, ?, ?, ?)
+          `INSERT INTO provider_custody_pending (profile_ref, operation, request_id, request_digest, operation_generation, since)
+           VALUES (?, ?, ?, ?, ?, ?)
            ON CONFLICT(profile_ref) DO UPDATE SET
              operation = excluded.operation,
              request_id = excluded.request_id,
+             request_digest = excluded.request_digest,
              operation_generation = excluded.operation_generation,
              since = excluded.since`,
         )
-        .run(pending.profileRef, pending.operation, pending.requestId, pending.operationGeneration, pending.since);
+        .run(pending.profileRef, pending.operation, pending.requestId, pending.requestDigest, pending.operationGeneration, pending.since);
       if (pending.operationGeneration !== null) this.#raiseWatermark(pending.profileRef, pending.operationGeneration);
     });
   }
@@ -561,6 +620,7 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
       )
       .run(receipt.requestId, receipt.profileRef, receipt.operationGeneration, receipt.requestDigest, JSON.stringify(receipt.result));
     this.#raiseWatermark(receipt.profileRef, receipt.operationGeneration);
+    this.#database.prepare('DELETE FROM provider_custody_reservation WHERE request_id = ?').run(receipt.requestId);
     this.#database
       .prepare(
         `DELETE FROM provider_custody_receipt

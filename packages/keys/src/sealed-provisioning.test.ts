@@ -329,8 +329,11 @@ describe.skipIf(!isSqliteAvailable())('applySealedProviderProvisioning', () => {
   });
 
   describe('pending markers (D5)', () => {
-    async function leaveInterrupted(requestId: string, generation: number): Promise<void> {
-      await profiles.markPending({ profileRef: PROFILE_REF, operation: 'configure', requestId, operationGeneration: generation, since: NOW });
+    async function leaveInterrupted(request: ProviderProvisioningRequestV1): Promise<void> {
+      await profiles.markPending({
+        profileRef: PROFILE_REF, operation: 'configure', requestId: request.header.requestId,
+        requestDigest: await providerProvisioningRequestDigest(request), operationGeneration: request.header.operationGeneration, since: NOW,
+      });
       await secrets.set(SECRET_NAME, KEY_B);
     }
 
@@ -338,7 +341,7 @@ describe.skipIf(!isSqliteAvailable())('applySealedProviderProvisioning', () => {
       await configured();
       const expected = await expectedOf();
       const interrupted = await configureRequest(sealingKey, KEY_B, { requestId: 'req-2', generation: 2, expected, providerKind: 'openai', modelId: 'gpt-5.2' });
-      await leaveInterrupted('req-2', 2);
+      await leaveInterrupted(interrupted);
 
       expect(await apply(interrupted)).toMatchObject({ outcome: 'rejected', code: 'local_commit_interrupted' });
       await expect(profiles.getPending(PROFILE_REF)).resolves.toMatchObject({ requestId: 'req-2' });

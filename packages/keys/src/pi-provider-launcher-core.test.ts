@@ -403,7 +403,7 @@ describe('committed Pi spawn boundary', () => {
   it('refuses to read the key or spawn while a credential change is pending', async () => {
     const f = await fixture();
     try {
-      await f.profiles.markPending({ profileRef: 'custom', operation: 'configure', requestId: 'r1', operationGeneration: 2, since: timestamps.created_at });
+      await f.profiles.markPending({ profileRef: 'custom', operation: 'configure', requestId: 'r1', requestDigest: `sha256:${'3'.repeat(64)}`, operationGeneration: 2, since: timestamps.created_at });
       const get = vi.spyOn(f.store, 'get');
       const spawn = vi.fn(() => new ChildProcess());
       await expect(startPiProvider(f.provider, f.options, { ambient: {}, createSecretStore: () => f.store, spawn, profiles: f.profiles }))

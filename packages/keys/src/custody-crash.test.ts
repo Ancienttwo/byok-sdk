@@ -212,6 +212,43 @@ describe.skipIf(!isSqliteAvailable() || runtime.command === undefined)(`custody 
     });
   }
 
+  it('F6 killed after-secret-write: a same-id different-digest request (same and other profile) is a conflict after restart', async () => {
+    const requestPath = await seedOldVendor();
+    const enrollment = { tenantId: TENANT, deviceId: DEVICE };
+    let profileStore = new SqliteProviderProfileStore({ path: dbPath });
+    const secretStore = new FileSecretStore(secretPath);
+    const sealingKey = await new DeviceSealingKeyStore({ secretStore }).loadOrCreate(enrollment);
+    const binding = exactProviderProfileBinding((await profileStore.get(PROFILE_REF))!, []);
+    const expected = { profileRef: binding.profileRef, profileRevision: binding.profileRevision, profileHash: binding.profileHash };
+    const original = await replaceSecretRequest(sealingKey, 'sk-f6-original', { requestId: 'dup', generation: 2, expected });
+    await profileStore.close();
+    writeFileSync(requestPath, JSON.stringify(original));
+    const child = runChild('apply', {
+      dbPath, secretPath, requestPath, cutPoint: 'after-secret-write', now: NOW, tenantId: TENANT, deviceId: DEVICE, profileRef: PROFILE_REF,
+    });
+    expect(child.signal, String(child.stderr)).toBe('SIGKILL');
+
+    profileStore = new SqliteProviderProfileStore({ path: dbPath });
+    const otherAgent = '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d';
+    const otherRef = 'salesko-9a8b7c6d5e4f4a3b8c2d1e0f9a8b7c6d';
+    const apply = (request: unknown) => applySealedProviderProvisioning({
+      request, profileStore, secretStore, sealingKey,
+      resolveProfileRef: (agentId) => (agentId === otherAgent ? otherRef : PROFILE_REF),
+      readIdentity: async (agentId) => ({ ...placedIdentity(), placement: { agentId, placementRevision: 'placement-1' } }),
+      now: () => new Date(NOW),
+    });
+    const keyBefore = await secretStore.get(modelProviderSecretName(PROFILE_REF));
+    const sameProfile = await replaceSecretRequest(sealingKey, 'sk-f6-same', { requestId: 'dup', generation: 3, expected });
+    const otherProfile = await configureRequest(sealingKey, 'sk-f6-other', { requestId: 'dup', generation: 1, agentId: otherAgent });
+    expect(await apply(sameProfile)).toMatchObject({ outcome: 'rejected', code: 'request_conflict' });
+    expect(await apply(otherProfile)).toMatchObject({ outcome: 'rejected', code: 'request_conflict' });
+    await expect(secretStore.has(modelProviderSecretName(otherRef))).resolves.toBe(false);
+    await expect(secretStore.get(modelProviderSecretName(PROFILE_REF))).resolves.toBe(keyBefore);
+    expect(await apply(original)).toMatchObject({ outcome: 'rejected', code: 'local_commit_interrupted', requestId: 'dup' });
+    await profileStore.close();
+    expect(await launcherView()).toEqual({ refused: 'PROVIDER_CONFIGURATION_PENDING' });
+  });
+
   it('the configuration lock is cross-process and released by process death', async () => {
     await new SqliteProviderProfileStore({ path: dbPath }).close();
     const holder = spawn(runtime.command!, [...runtime.args, 'hold-lock', JSON.stringify({ dbPath })], { stdio: ['ignore', 'pipe', 'pipe'] });

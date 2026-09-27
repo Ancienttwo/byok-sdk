@@ -3,6 +3,7 @@ import {
   type ProviderCustodyCommit,
   type ProviderCustodyPending,
   type ProviderCustodyReceipt,
+  type ProviderCustodyReservation,
   type ProviderKeyCheckOutcome,
   PROVIDER_CUSTODY_RECEIPT_LIMIT,
   ProcessLocalMutex,
@@ -56,6 +57,13 @@ export interface ProviderProfileStore {
    * the moment it starts).
    */
   markPending(pending: ProviderCustodyPending): Promise<void>;
+  /**
+   * The store-wide reservation for a started provisioning request id, if it
+   * has not yet been replaced by a receipt. Written by `markPending` (a marker
+   * with a `requestId` reserves it with its digest in the same atomic step)
+   * and removed by the commit that writes the request's receipt.
+   */
+  getReservation(requestId: string): Promise<ProviderCustodyReservation | undefined>;
   /** Highest operation generation `profileRef` has consumed; survives delete. */
   getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined>;
   /** Stored receipt for a provisioning request id, if still retained. */
@@ -111,9 +119,14 @@ export class InMemoryProviderProfileStore implements ProviderProfileStore {
   readonly #pending = new Map<ProviderProfileRef, ProviderCustodyPending>();
   readonly #watermarks = new Map<ProviderProfileRef, number>();
   readonly #receipts = new Map<string, ProviderCustodyReceipt>();
+  readonly #reservations = new Map<string, ProviderCustodyReservation>();
 
   async close(): Promise<void> {
     this.#profiles.clear();
+  }
+
+  async getReservation(requestId: string): Promise<ProviderCustodyReservation | undefined> {
+    return this.#reservations.get(requestId);
   }
 
   acquireConfigurationLock(): Promise<ProviderConfigurationLock> {
@@ -125,7 +138,9 @@ export class InMemoryProviderProfileStore implements ProviderProfileStore {
   }
 
   async markPending(pending: ProviderCustodyPending): Promise<void> {
+    const reservation = reservationOf(pending, this.#reservations, this.#receipts);
     this.#pending.set(pending.profileRef, { ...pending });
+    if (reservation !== undefined) this.#reservations.set(reservation.requestId, reservation);
     raiseWatermark(this.#watermarks, pending);
   }
 
@@ -140,7 +155,10 @@ export class InMemoryProviderProfileStore implements ProviderProfileStore {
   async commitCustody(commit: ProviderCustodyCommit): Promise<void> {
     if (commit.mutation.kind === 'save') await this.save(commit.mutation.profile);
     if (commit.mutation.kind === 'delete') this.#profiles.delete(commit.profileRef);
-    if (commit.receipt !== undefined) applyReceipt(this.#receipts, this.#watermarks, commit.receipt);
+    if (commit.receipt !== undefined) {
+      applyReceipt(this.#receipts, this.#watermarks, commit.receipt);
+      this.#reservations.delete(commit.receipt.requestId);
+    }
     if (commit.clearPending) this.#pending.delete(commit.profileRef);
   }
 
@@ -234,4 +252,33 @@ export function raiseWatermark(watermarks: Map<ProviderProfileRef, number>, pend
   if (current === undefined || pending.operationGeneration > current) {
     watermarks.set(pending.profileRef, pending.operationGeneration);
   }
+}
+
+/**
+ * Validate a pending marker's request identity and return the reservation it
+ * must write. A request id may be reserved once, with one digest, and never
+ * over an existing receipt; anything else is a caller bug the store refuses.
+ */
+export function reservationOf(
+  pending: ProviderCustodyPending,
+  reservations: ReadonlyMap<string, ProviderCustodyReservation>,
+  receipts: ReadonlyMap<string, ProviderCustodyReceipt>,
+): ProviderCustodyReservation | undefined {
+  if ((pending.requestId === null) !== (pending.requestDigest === null)) {
+    throw new ByokKeysError('PROVIDER_CUSTODY_STATE_INVALID', 'A pending marker carries a request id exactly when it carries a request digest');
+  }
+  if (pending.requestId === null || pending.requestDigest === null) return undefined;
+  if (pending.operationGeneration === null) {
+    throw new ByokKeysError('PROVIDER_CUSTODY_STATE_INVALID', 'A provisioning pending marker requires an operation generation');
+  }
+  const existing = reservations.get(pending.requestId);
+  if (receipts.has(pending.requestId) || (existing !== undefined && existing.requestDigest !== pending.requestDigest)) {
+    throw new ByokKeysError('PROVIDER_CUSTODY_STATE_INVALID', 'Provisioning request id is already reserved');
+  }
+  return {
+    requestId: pending.requestId,
+    requestDigest: pending.requestDigest,
+    profileRef: pending.profileRef,
+    operationGeneration: pending.operationGeneration,
+  };
 }

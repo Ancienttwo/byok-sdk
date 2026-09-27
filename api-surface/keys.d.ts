@@ -90,7 +90,11 @@ import type { ModelProviderProfile, ProviderProfileRef } from './provider-profil
  *    It survives `delete` (a tombstone), so a replay of any older request stays
  *    rejected however many operations happened since and whatever the clock
  *    says.
- * 4. **Receipts** — the credential-free result of recent provisioning
+ * 4. **Request reservations** — a started provisioning request's id and
+ *    digest, reserved store-wide together with its pending marker and
+ *    replaced by its receipt, so an id reused with another digest is refused
+ *    before any side effect, on any profile.
+ * 5. **Receipts** — the credential-free result of recent provisioning
  *    requests, keyed by request id and bounded by count. They let a request
  *    whose ACK was lost read back the same stored result; replay protection
  *    does not depend on them (that is the watermark's job), so evicting an old
@@ -108,8 +112,23 @@ export interface ProviderCustodyPending {
     readonly operation: ProviderCustodyOperation;
     /** The provisioning request that set it; `null` for a direct registry write. */
     readonly requestId: string | null;
+    /** That request's immutable digest; present exactly when `requestId` is. */
+    readonly requestDigest: string | null;
     readonly operationGeneration: number | null;
     readonly since: string;
+}
+/**
+ * A store-wide reservation of a provisioning request id and its immutable
+ * digest, written in the same atomic step as the request's pending marker and
+ * replaced by the request's receipt (same lookup scope: request id across the
+ * whole store, never per profile). A reused id with a different digest is a
+ * conflict wherever it targets.
+ */
+export interface ProviderCustodyReservation {
+    readonly requestId: string;
+    readonly requestDigest: string;
+    readonly profileRef: ProviderProfileRef;
+    readonly operationGeneration: number;
 }
 /**
  * Closed set of device-side provisioning rejections. Never carries detail
@@ -732,7 +751,7 @@ export declare function buildPiProviderArgs(profile: ModelProviderProfile, deleg
  */
 export declare function buildPiPreparedArgs(delegatedArgs: readonly string[]): string[];
 // ==== @byok-sdk/keys dist/profile-store.d.ts ====
-import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderKeyCheckOutcome } from './custody';
+import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderCustodyReservation, type ProviderKeyCheckOutcome } from './custody';
 import { ByokKeysError } from './errors';
 import { type ModelProviderProfile, type ProviderProfileRef } from './provider-profile';
 /**
@@ -777,6 +796,13 @@ export interface ProviderProfileStore {
      * the moment it starts).
      */
     markPending(pending: ProviderCustodyPending): Promise<void>;
+    /**
+     * The store-wide reservation for a started provisioning request id, if it
+     * has not yet been replaced by a receipt. Written by `markPending` (a marker
+     * with a `requestId` reserves it with its digest in the same atomic step)
+     * and removed by the commit that writes the request's receipt.
+     */
+    getReservation(requestId: string): Promise<ProviderCustodyReservation | undefined>;
     /** Highest operation generation `profileRef` has consumed; survives delete. */
     getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined>;
     /** Stored receipt for a provisioning request id, if still retained. */
@@ -820,6 +846,7 @@ export declare function providerNotConfigured(profileRef: ProviderProfileRef): B
 export declare class InMemoryProviderProfileStore implements ProviderProfileStore {
     #private;
     close(): Promise<void>;
+    getReservation(requestId: string): Promise<ProviderCustodyReservation | undefined>;
     acquireConfigurationLock(): Promise<ProviderConfigurationLock>;
     getPending(profileRef: ProviderProfileRef): Promise<ProviderCustodyPending | undefined>;
     markPending(pending: ProviderCustodyPending): Promise<void>;
@@ -844,6 +871,12 @@ export declare function applyReceipt(receipts: Map<string, ProviderCustodyReceip
 export declare function recordReceiptKeyCheck(receipts: Map<string, ProviderCustodyReceipt>, watermarks: Map<ProviderProfileRef, number>, requestId: string, operationGeneration: number, keyCheck: ProviderKeyCheckOutcome): boolean;
 /** Consume a started operation's generation (never lowers the watermark). */
 export declare function raiseWatermark(watermarks: Map<ProviderProfileRef, number>, pending: ProviderCustodyPending): void;
+/**
+ * Validate a pending marker's request identity and return the reservation it
+ * must write. A request id may be reserved once, with one digest, and never
+ * over an existing receipt; anything else is a caller bug the store refuses.
+ */
+export declare function reservationOf(pending: ProviderCustodyPending, reservations: ReadonlyMap<string, ProviderCustodyReservation>, receipts: ReadonlyMap<string, ProviderCustodyReceipt>): ProviderCustodyReservation | undefined;
 // ==== @byok-sdk/keys dist/provider-catalog.d.ts ====
 import type { ModelProviderAdapter, ProviderAuthMode } from './provider-profile';
 /**
@@ -1352,6 +1385,8 @@ export type SealedProvisioningReadback = {
 } | {
     readonly status: 'conflict';
 } | {
+    readonly status: 'interrupted';
+} | {
     readonly status: 'absent';
 };
 /**
@@ -1586,7 +1621,7 @@ export declare class InMemorySecretStore<TName extends string = string> implemen
     set(name: TName, secret: string): Promise<void>;
 }
 // ==== @byok-sdk/keys dist/sqlite-profile-store.d.ts ====
-import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderKeyCheckOutcome } from './custody';
+import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderCustodyReservation, type ProviderKeyCheckOutcome } from './custody';
 import { type ProviderProfileStore } from './profile-store';
 import { type ModelProviderProfile, type ProviderProfileRef } from './provider-profile';
 export interface SqliteProviderProfileStoreOptions {
@@ -1639,6 +1674,7 @@ export declare class SqliteProviderProfileStore implements ProviderProfileStore 
      */
     acquireConfigurationLock(): Promise<ProviderConfigurationLock>;
     getPending(profileRef: ProviderProfileRef): Promise<ProviderCustodyPending | undefined>;
+    getReservation(requestId: string): Promise<ProviderCustodyReservation | undefined>;
     markPending(pending: ProviderCustodyPending): Promise<void>;
     getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined>;
     getReceipt(requestId: string): Promise<ProviderCustodyReceipt | undefined>;
@@ -1709,7 +1745,7 @@ export declare function secureSqliteFilePermissions(databasePath: string): void;
 export {};
 // ==== @byok-sdk/keys dist/truth-profile-store.d.ts ====
 import { type TenantId, type TruthStore } from '@byok-sdk/core';
-import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderKeyCheckOutcome } from './custody';
+import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderCustodyReservation, type ProviderKeyCheckOutcome } from './custody';
 import { type ProviderProfileStore } from './profile-store';
 import { type ModelProviderProfile, type ProviderProfileRef } from './provider-profile';
 export declare const PROVIDER_PROFILE_TRUTH_RECORD_KEY = "byok-sdk.keys/model-provider-registry-v1";
@@ -1741,6 +1777,7 @@ export declare class TruthStoreProviderProfileStore implements ProviderProfileSt
     close(): Promise<void>;
     acquireConfigurationLock(): Promise<ProviderConfigurationLock>;
     getPending(profileRef: ProviderProfileRef): Promise<ProviderCustodyPending | undefined>;
+    getReservation(requestId: string): Promise<ProviderCustodyReservation | undefined>;
     markPending(pending: ProviderCustodyPending): Promise<void>;
     getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined>;
     getReceipt(requestId: string): Promise<ProviderCustodyReceipt | undefined>;

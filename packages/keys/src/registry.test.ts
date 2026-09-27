@@ -174,6 +174,7 @@ describe('ProviderRegistry.configure', () => {
       acquireConfigurationLock: () => profiles.acquireConfigurationLock(),
       getPending: (profileRef) => profiles.getPending(profileRef),
       markPending: (pending) => profiles.markPending(pending),
+      getReservation: (requestId) => profiles.getReservation(requestId),
       getOperationWatermark: (profileRef) => profiles.getOperationWatermark(profileRef),
       getReceipt: (requestId) => profiles.getReceipt(requestId),
       commitCustody: async (commit) => {

@@ -130,6 +130,17 @@ and calls `applySealedProviderProvisioning`.
   fence covers exactly the placement/enrollment writers that update the local
   record while holding `withConfigurationLock(profileStore, …)`; a writer that
   changes placement outside that lock is not fenced by this check.
+- **Request identity.** Before any side effect, a request's id and immutable
+  digest are reserved store-wide (not per profile) in the same transaction
+  that writes its pending marker and raises its watermark; its receipt later
+  replaces the reservation in the same lookup scope. The same id with the same
+  digest settles to the stored result or, if it never finished, to
+  `local_commit_interrupted` (never redone); the same id with a different
+  digest is `request_conflict` with zero writes and leaves the original's
+  pending marker and receipt untouched, on any profile.
+  `readSealedProvisioningResult` reports `interrupted` for a reserved but
+  unfinished request. The in-memory and TruthStore adapters keep this state
+  process-local, as with the rest of their custody state.
 - **Generations.** An operation's generation is consumed the moment its
   pending marker is written (same transaction), so an older request can never
   overtake an interrupted newer one. The interrupted request itself reports

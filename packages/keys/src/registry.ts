@@ -245,6 +245,7 @@ export class ProviderRegistry {
         profileRef,
         operation: 'configure',
         requestId: null,
+        requestDigest: null,
         operationGeneration: null,
         since: this.#now().toISOString(),
       });
@@ -316,6 +317,7 @@ export class ProviderRegistry {
         profileRef,
         operation: 'replace_secret',
         requestId: null,
+        requestDigest: null,
         operationGeneration: null,
         since: this.#now().toISOString(),
       });
@@ -333,6 +335,7 @@ export class ProviderRegistry {
         profileRef,
         operation: 'delete',
         requestId: null,
+        requestDigest: null,
         operationGeneration: null,
         since: this.#now().toISOString(),
       });

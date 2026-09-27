@@ -102,16 +102,19 @@ describe.skipIf(!isSqliteAvailable())('F2: identity is re-validated inside the w
     const request = await configureRequest(sealingKey, 'k-placement', { requestId: 'placement', generation: 1 });
     const identity = { current: placedIdentity() as ProviderProvisioningIdentitySnapshot };
     let reads = 0;
-    let firstRead!: () => void;
-    const read = new Promise<void>((resolve) => { firstRead = resolve; });
     const set = vi.spyOn(secrets, 'set');
     const del = vi.spyOn(secrets, 'delete');
-    const lock = await profiles.acquireConfigurationLock();
+    const acquire = profiles.acquireConfigurationLock.bind(profiles);
+    const lock = await acquire();
+    // Deterministic interleaving: the change happens only once the applier is
+    // provably blocked on the configuration lock this test holds.
+    let atLock!: () => void;
+    const contenderAtLock = new Promise<void>((resolve) => { atLock = resolve; });
+    vi.spyOn(profiles, 'acquireConfigurationLock').mockImplementation(() => { atLock(); return acquire(); });
     const pending = apply(request, {
-      readIdentity: async () => { reads += 1; firstRead(); return identity.current; },
+      readIdentity: async () => { reads += 1; return identity.current; },
     });
-    await read;
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await contenderAtLock;
     change(identity);
     await lock.release();
     const result = await pending;
