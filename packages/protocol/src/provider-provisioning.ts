@@ -145,6 +145,41 @@ export const ProviderProvisioningProviderStatusSchema = z
   });
 export type ProviderProvisioningProviderStatus = z.infer<typeof ProviderProvisioningProviderStatusSchema>;
 
+/**
+ * Closed outcome set of the device's one post-apply check of the stored key
+ * against its vendor. It is a HINT for the Host UI, never a readiness input:
+ * a saved key is not a validated key, and a network failure does not block
+ * provisioning.
+ *
+ * - `credential_rejected`: the vendor explicitly refused the credential.
+ * - `rate_limited`, `quota_or_billing`, `model_not_permitted`: the credential
+ *   was accepted but the call could not be served for that reason.
+ * - `unreachable`, `timeout`: no vendor answer within the device's bounds.
+ * - `not_run`: no check was made (for example `delete`, or an endpoint without
+ *   credential auth).
+ *
+ * No vendor text, status body or error detail crosses this boundary.
+ */
+export const PROVIDER_PROVISIONING_KEY_CHECK_RESULTS = [
+  'ok',
+  'credential_rejected',
+  'rate_limited',
+  'quota_or_billing',
+  'model_not_permitted',
+  'unreachable',
+  'timeout',
+  'not_run',
+] as const;
+export const ProviderProvisioningKeyCheckResultSchema = z.enum(PROVIDER_PROVISIONING_KEY_CHECK_RESULTS);
+export type ProviderProvisioningKeyCheckResult = z.infer<typeof ProviderProvisioningKeyCheckResultSchema>;
+
+export const ProviderProvisioningKeyCheckSchema = z
+  .object({
+    result: ProviderProvisioningKeyCheckResultSchema,
+  })
+  .strict();
+export type ProviderProvisioningKeyCheck = z.infer<typeof ProviderProvisioningKeyCheckSchema>;
+
 const completionIdentity = {
   requestId: z.uuid(),
   operation: ProviderProvisioningOperationSchema,
@@ -158,6 +193,7 @@ const AppliedCompletionSchema = z
     ...completionIdentity,
     providerStatus: ProviderProvisioningProviderStatusSchema.nullable(),
     binding: ProviderProfileBindingSchema.nullable(),
+    keyCheck: ProviderProvisioningKeyCheckSchema,
   })
   .strict();
 
@@ -178,6 +214,8 @@ const RejectedCompletionSchema = z
  * `replace_secret` write a secret, so an applied result for either must report
  * `secretConfigured: true`. `replace_secret` leaves the profile revision and
  * hash unchanged; the binding it reports is the same exact binding as before.
+ * Every applied result carries the required `keyCheck` hint; a `delete` has no
+ * key left to check and must report `not_run`.
  */
 export const ProviderProvisioningCompletionSchema = z
   .discriminatedUnion('outcome', [AppliedCompletionSchema, RejectedCompletionSchema])
@@ -185,6 +223,9 @@ export const ProviderProvisioningCompletionSchema = z
     if (completion.outcome !== 'applied') return;
     const { operation, providerStatus, binding } = completion;
     if (operation === 'delete') {
+      if (completion.keyCheck.result !== 'not_run') {
+        ctx.addIssue({ code: 'custom', path: ['keyCheck', 'result'], message: 'an applied delete must report keyCheck not_run' });
+      }
       if (providerStatus !== null) {
         ctx.addIssue({ code: 'custom', path: ['providerStatus'], message: 'an applied delete reports no provider status' });
       }

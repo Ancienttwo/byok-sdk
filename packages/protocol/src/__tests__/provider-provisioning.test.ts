@@ -4,6 +4,7 @@ import {
   EnvelopeSchema,
   PROVIDER_PROVISIONING_CAPABILITY,
   PROVIDER_PROVISIONING_HOST_TERMINAL_CODES,
+  PROVIDER_PROVISIONING_KEY_CHECK_RESULTS,
   PROVIDER_PROVISIONING_REJECTION_CODES,
   PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION,
   ProviderProvisioningAvailablePayloadSchema,
@@ -45,6 +46,7 @@ function applied(overrides: Record<string, unknown> = {}): Record<string, unknow
     operationDigest: DIGEST,
     providerStatus: STATUS,
     binding: BINDING,
+    keyCheck: { result: 'ok' },
     ...overrides,
   };
 }
@@ -174,7 +176,9 @@ describe('provider provisioning completion', () => {
 
   it('accepts an applied delete only without status and binding', () => {
     expect(
-      ProviderProvisioningCompletionSchema.safeParse(applied({ operation: 'delete', providerStatus: null, binding: null })).success,
+      ProviderProvisioningCompletionSchema.safeParse(
+        applied({ operation: 'delete', providerStatus: null, binding: null, keyCheck: { result: 'not_run' } }),
+      ).success,
     ).toBe(true);
     expect(ProviderProvisioningCompletionSchema.safeParse(applied({ operation: 'delete' })).success).toBe(false);
     expect(ProviderProvisioningCompletionSchema.safeParse(applied({ providerStatus: null, binding: null })).success).toBe(false);
@@ -239,6 +243,42 @@ describe('provider provisioning completion', () => {
     expect(
       ProviderProvisioningCompletionSchema.safeParse(applied({ providerStatus: { ...STATUS, secret: 'sk-canary' } })).success,
     ).toBe(false);
+  });
+
+  it('requires a closed-set keyCheck hint on every applied result', () => {
+    for (const result of PROVIDER_PROVISIONING_KEY_CHECK_RESULTS) {
+      expect(ProviderProvisioningCompletionSchema.safeParse(applied({ keyCheck: { result } })).success, result).toBe(true);
+    }
+    const withoutKeyCheck = applied();
+    delete withoutKeyCheck['keyCheck'];
+    expect(ProviderProvisioningCompletionSchema.safeParse(withoutKeyCheck).success).toBe(false);
+    expect(ProviderProvisioningCompletionSchema.safeParse(applied({ keyCheck: { result: 'rejected' } })).success).toBe(false);
+    expect(ProviderProvisioningCompletionSchema.safeParse(applied({ keyCheck: { result: '401 invalid_api_key' } })).success).toBe(false);
+    expect(ProviderProvisioningCompletionSchema.safeParse(applied({ keyCheck: 'ok' })).success).toBe(false);
+  });
+
+  it('keeps vendor text and secrets out of keyCheck', () => {
+    for (const extra of [{ detail: 'Incorrect API key provided' }, { status: 401 }, { secret: 'sk-canary' }, { checkedAt: '2026-09-28T05:00:00.000Z' }]) {
+      expect(
+        ProviderProvisioningCompletionSchema.safeParse(applied({ keyCheck: { result: 'credential_rejected', ...extra } })).success,
+        JSON.stringify(extra),
+      ).toBe(false);
+    }
+  });
+
+  it('requires not_run for an applied delete', () => {
+    for (const result of PROVIDER_PROVISIONING_KEY_CHECK_RESULTS.filter((value) => value !== 'not_run')) {
+      expect(
+        ProviderProvisioningCompletionSchema.safeParse(
+          applied({ operation: 'delete', providerStatus: null, binding: null, keyCheck: { result } }),
+        ).success,
+        result,
+      ).toBe(false);
+    }
+  });
+
+  it('carries no keyCheck on a rejected completion', () => {
+    expect(ProviderProvisioningCompletionSchema.safeParse(rejected({ keyCheck: { result: 'not_run' } })).success).toBe(false);
   });
 
   it('does not mix rejection codes into applied or status into rejected', () => {

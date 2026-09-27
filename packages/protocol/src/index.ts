@@ -33,7 +33,10 @@ export {
   PROVIDER_PROVISIONING_REJECTION_CODES,
   PROVIDER_PROVISIONING_HOST_TERMINAL_CODES,
   PROVIDER_PROVISIONING_DISPOSITIONS,
+  PROVIDER_PROVISIONING_KEY_CHECK_RESULTS,
   ProviderProvisioningAvailablePayloadSchema,
+  ProviderProvisioningKeyCheckResultSchema,
+  ProviderProvisioningKeyCheckSchema,
   ProviderProvisioningOperationSchema,
   ProviderProvisioningOperationGenerationSchema,
   ProviderProvisioningOperationDigestSchema,
@@ -53,6 +56,8 @@ export type {
   ProviderProvisioningCompletion,
   ProviderProvisioningDisposition,
   ProviderProvisioningReadback,
+  ProviderProvisioningKeyCheckResult,
+  ProviderProvisioningKeyCheck,
 } from './provider-provisioning';
 
 export {

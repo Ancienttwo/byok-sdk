@@ -568,6 +568,12 @@ decimal, at most the PostgreSQL BIGINT maximum) and `operationDigest`
 auth mode or secret) and the exact `ProviderProfileBinding`, both `null` for
 `delete` and only for `delete`; `configure` and `replace_secret` must report
 `secretConfigured: true`, and `replace_secret` reports the unchanged binding.
+Every `applied` result also carries the required hint `keyCheck: { result }`,
+one of `ok | credential_rejected | rate_limited | quota_or_billing |
+model_not_permitted | unreachable | timeout | not_run`: the device's single
+post-apply vendor check of the stored key, with no vendor text, status or
+detail. It is advisory for the Host UI and never a readiness input; `delete`
+must report `not_run`.
 `rejected` adds one closed-set `code`; codes name the failed check and never a
 value. Re-sending an identical completion yields `idempotent` with the stored
 result and no rewrite; a different digest or result yields `conflict` with the
@@ -588,6 +594,15 @@ The device-proof operation a device signs when it registers its provider-secret
 sealing public key is `provider-secret-sealing-key.register`
 (`PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION`). Assertion audiences and
 route paths are Host vocabulary and are not part of this protocol.
+
+A Host built on `@byok-sdk/cloud` appends the notice with
+`enqueueProviderProvisioningNotice(tenant, deviceId, { requestId })`. It
+validates the strict payload first, then refuses (`agent_capability_missing`,
+no mailbox row) a device whose durable capabilities lack
+`provider-provisioning.v1`. The mailbox message id is derived from
+tenant, device and `requestId`, so a retried enqueue returns the existing row
+and seq. Cloud records no provisioning receipt: completion and readback are Host
+authority.
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 

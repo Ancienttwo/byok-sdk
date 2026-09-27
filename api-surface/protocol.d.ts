@@ -5666,8 +5666,8 @@ export { PermissionPolicySchema, PERMISSION_MODES } from './permission';
 export type { PermissionPolicy, PermissionMode } from './permission';
 export { PROVIDER_PROFILE_BINDING_CAPABILITY, PROVIDER_MODEL_CAPABILITIES, ProviderProfileRefSchema, ProviderProfileRevisionSchema, ProviderProfileHashSchema, ProviderModelCapabilitySchema, ProviderProfileBindingSchema, } from './provider-profile-binding';
 export type { ProviderProfileRef, ProviderProfileRevision, ProviderProfileHash, ProviderModelCapability, ProviderProfileBinding, } from './provider-profile-binding';
-export { PROVIDER_PROVISIONING_CAPABILITY, PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION, PROVIDER_PROVISIONING_OPERATIONS, PROVIDER_PROVISIONING_OPERATION_GENERATION_MAXIMUM, PROVIDER_PROVISIONING_REJECTION_CODES, PROVIDER_PROVISIONING_HOST_TERMINAL_CODES, PROVIDER_PROVISIONING_DISPOSITIONS, ProviderProvisioningAvailablePayloadSchema, ProviderProvisioningOperationSchema, ProviderProvisioningOperationGenerationSchema, ProviderProvisioningOperationDigestSchema, ProviderProvisioningRejectionCodeSchema, ProviderProvisioningProviderStatusSchema, ProviderProvisioningCompletionSchema, ProviderProvisioningDispositionSchema, ProviderProvisioningReadbackSchema, } from './provider-provisioning';
-export type { ProviderProvisioningAvailablePayload, ProviderProvisioningOperation, ProviderProvisioningOperationGeneration, ProviderProvisioningOperationDigest, ProviderProvisioningRejectionCode, ProviderProvisioningProviderStatus, ProviderProvisioningCompletion, ProviderProvisioningDisposition, ProviderProvisioningReadback, } from './provider-provisioning';
+export { PROVIDER_PROVISIONING_CAPABILITY, PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION, PROVIDER_PROVISIONING_OPERATIONS, PROVIDER_PROVISIONING_OPERATION_GENERATION_MAXIMUM, PROVIDER_PROVISIONING_REJECTION_CODES, PROVIDER_PROVISIONING_HOST_TERMINAL_CODES, PROVIDER_PROVISIONING_DISPOSITIONS, PROVIDER_PROVISIONING_KEY_CHECK_RESULTS, ProviderProvisioningAvailablePayloadSchema, ProviderProvisioningKeyCheckResultSchema, ProviderProvisioningKeyCheckSchema, ProviderProvisioningOperationSchema, ProviderProvisioningOperationGenerationSchema, ProviderProvisioningOperationDigestSchema, ProviderProvisioningRejectionCodeSchema, ProviderProvisioningProviderStatusSchema, ProviderProvisioningCompletionSchema, ProviderProvisioningDispositionSchema, ProviderProvisioningReadbackSchema, } from './provider-provisioning';
+export type { ProviderProvisioningAvailablePayload, ProviderProvisioningOperation, ProviderProvisioningOperationGeneration, ProviderProvisioningOperationDigest, ProviderProvisioningRejectionCode, ProviderProvisioningProviderStatus, ProviderProvisioningCompletion, ProviderProvisioningDisposition, ProviderProvisioningReadback, ProviderProvisioningKeyCheckResult, ProviderProvisioningKeyCheck, } from './provider-provisioning';
 export { AgentEventSchema, AgentEventSpillSchema, AGENT_EVENT_SPILL_UNSTORED_REASON_MAX_LENGTH, UnknownAgentEventSchema, AgentEventOrUnknownSchema, KNOWN_AGENT_EVENT_TYPES, isKnownAgentEvent, partitionAgentEvents, } from './agent-event';
 export type { AgentEvent, AgentEventSpill, UnknownAgentEvent, AgentEventOrUnknown } from './agent-event';
 export { AgentEgressPolicySchema, AgentEgressActivityPolicySchema, AgentReliableQuotaPolicySchema, ContentReadPolicySchema, AgentEgressLaneSchema, AgentEgressDropReasonSchema, AgentContentReadSurfaceSchema, AgentContentActorKindSchema, AgentContentActorSchema, AgentContentDecodeAsSchema, AgentContentMimeTypeSchema, AgentContentReadDecisionSchema, AgentContentReadDenialReasonSchema, AgentEgressContentHashSchema, AgentEgressPolicyRevisionSchema, AgentMessageContractSchema, AgentMessageContentTypeSchema, AgentMessageDestinationBindingSchema, AgentMessageFreshnessCursorSchema, AgentMessageServerContextSchema, AgentMessageEgressRequirementSchema, AGENT_MESSAGE_MAX_BYTES, AGENT_MESSAGE_EGRESS_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_CONTENT_WORKSPACE_READ_CAPABILITY, AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY, AGENT_CONTENT_ARTIFACT_READ_CAPABILITY, } from './agent-egress';
@@ -10218,6 +10218,46 @@ export declare const ProviderProvisioningProviderStatusSchema: z.ZodObject<{
 }, z.core.$strict>;
 export type ProviderProvisioningProviderStatus = z.infer<typeof ProviderProvisioningProviderStatusSchema>;
 /**
+ * Closed outcome set of the device's one post-apply check of the stored key
+ * against its vendor. It is a HINT for the Host UI, never a readiness input:
+ * a saved key is not a validated key, and a network failure does not block
+ * provisioning.
+ *
+ * - `credential_rejected`: the vendor explicitly refused the credential.
+ * - `rate_limited`, `quota_or_billing`, `model_not_permitted`: the credential
+ *   was accepted but the call could not be served for that reason.
+ * - `unreachable`, `timeout`: no vendor answer within the device's bounds.
+ * - `not_run`: no check was made (for example `delete`, or an endpoint without
+ *   credential auth).
+ *
+ * No vendor text, status body or error detail crosses this boundary.
+ */
+export declare const PROVIDER_PROVISIONING_KEY_CHECK_RESULTS: readonly ['ok', 'credential_rejected', 'rate_limited', 'quota_or_billing', 'model_not_permitted', 'unreachable', 'timeout', 'not_run'];
+export declare const ProviderProvisioningKeyCheckResultSchema: z.ZodEnum<{
+    credential_rejected: "credential_rejected";
+    model_not_permitted: "model_not_permitted";
+    not_run: "not_run";
+    ok: "ok";
+    quota_or_billing: "quota_or_billing";
+    rate_limited: "rate_limited";
+    timeout: "timeout";
+    unreachable: "unreachable";
+}>;
+export type ProviderProvisioningKeyCheckResult = z.infer<typeof ProviderProvisioningKeyCheckResultSchema>;
+export declare const ProviderProvisioningKeyCheckSchema: z.ZodObject<{
+    result: z.ZodEnum<{
+        credential_rejected: "credential_rejected";
+        model_not_permitted: "model_not_permitted";
+        not_run: "not_run";
+        ok: "ok";
+        quota_or_billing: "quota_or_billing";
+        rate_limited: "rate_limited";
+        timeout: "timeout";
+        unreachable: "unreachable";
+    }>;
+}, z.core.$strict>;
+export type ProviderProvisioningKeyCheck = z.infer<typeof ProviderProvisioningKeyCheckSchema>;
+/**
  * The terminal, credential-free result of one provisioning request, reported
  * by the device to the Host.
  *
@@ -10226,6 +10266,8 @@ export type ProviderProvisioningProviderStatus = z.infer<typeof ProviderProvisio
  * `replace_secret` write a secret, so an applied result for either must report
  * `secretConfigured: true`. `replace_secret` leaves the profile revision and
  * hash unchanged; the binding it reports is the same exact binding as before.
+ * Every applied result carries the required `keyCheck` hint; a `delete` has no
+ * key left to check and must report `not_run`.
  */
 export declare const ProviderProvisioningCompletionSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     requestId: z.ZodUUID;
@@ -10256,6 +10298,18 @@ export declare const ProviderProvisioningCompletionSchema: z.ZodDiscriminatedUni
             "image-input": "image-input";
         }>>;
     }, z.core.$strict>>;
+    keyCheck: z.ZodObject<{
+        result: z.ZodEnum<{
+            credential_rejected: "credential_rejected";
+            model_not_permitted: "model_not_permitted";
+            not_run: "not_run";
+            ok: "ok";
+            quota_or_billing: "quota_or_billing";
+            rate_limited: "rate_limited";
+            timeout: "timeout";
+            unreachable: "unreachable";
+        }>;
+    }, z.core.$strict>;
 }, z.core.$strict>, z.ZodObject<{
     requestId: z.ZodUUID;
     operation: z.ZodEnum<{
@@ -10356,6 +10410,18 @@ export declare const ProviderProvisioningReadbackSchema: z.ZodObject<{
                 "image-input": "image-input";
             }>>;
         }, z.core.$strict>>;
+        keyCheck: z.ZodObject<{
+            result: z.ZodEnum<{
+                credential_rejected: "credential_rejected";
+                model_not_permitted: "model_not_permitted";
+                not_run: "not_run";
+                ok: "ok";
+                quota_or_billing: "quota_or_billing";
+                rate_limited: "rate_limited";
+                timeout: "timeout";
+                unreachable: "unreachable";
+            }>;
+        }, z.core.$strict>;
     }, z.core.$strict>, z.ZodObject<{
         requestId: z.ZodUUID;
         operation: z.ZodEnum<{

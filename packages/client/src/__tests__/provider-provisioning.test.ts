@@ -54,6 +54,7 @@ function completionFor(requestId: string, kind: ReadbackKind): ProviderProvision
         modelId: 'glm-5.3-flash',
         requiredCapabilities: [],
       },
+      keyCheck: { result: 'ok' },
     };
   }
   const code = kind === 'expired' ? 'request_expired' : kind === 'rotated' ? 'sealing_key_rotated' : 'seal_open_failed';
