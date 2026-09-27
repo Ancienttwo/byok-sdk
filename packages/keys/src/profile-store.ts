@@ -49,7 +49,12 @@ export interface ProviderProfileStore {
   acquireConfigurationLock(): Promise<ProviderConfigurationLock>;
   /** The pending marker for `profileRef`, if a credential change is unfinished. */
   getPending(profileRef: ProviderProfileRef): Promise<ProviderCustodyPending | undefined>;
-  /** Durably record a pending marker (replacing any existing one for the same ref). */
+  /**
+   * Durably record a pending marker (replacing any existing one for the same
+   * ref). A marker that carries an operation generation raises the ref's
+   * watermark to it in the same atomic step (the generation is consumed from
+   * the moment it starts).
+   */
   markPending(pending: ProviderCustodyPending): Promise<void>;
   /** Highest operation generation `profileRef` has consumed; survives delete. */
   getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined>;
@@ -121,6 +126,7 @@ export class InMemoryProviderProfileStore implements ProviderProfileStore {
 
   async markPending(pending: ProviderCustodyPending): Promise<void> {
     this.#pending.set(pending.profileRef, { ...pending });
+    raiseWatermark(this.#watermarks, pending);
   }
 
   async getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined> {
@@ -219,4 +225,13 @@ export function recordReceiptKeyCheck(
   if (watermarks.get(receipt.profileRef) !== operationGeneration) return false;
   receipts.set(requestId, { ...receipt, result: { ...receipt.result, keyCheck } });
   return true;
+}
+
+/** Consume a started operation's generation (never lowers the watermark). */
+export function raiseWatermark(watermarks: Map<ProviderProfileRef, number>, pending: ProviderCustodyPending): void {
+  if (pending.operationGeneration === null) return;
+  const current = watermarks.get(pending.profileRef);
+  if (current === undefined || pending.operationGeneration > current) {
+    watermarks.set(pending.profileRef, pending.operationGeneration);
+  }
 }

@@ -133,6 +133,7 @@ export {
   PROVIDER_CUSTODY_RECEIPT_LIMIT,
   PROVIDER_KEY_CHECK_OUTCOMES,
   PROVIDER_PROVISIONING_REJECTIONS,
+  withConfigurationLock,
 } from './custody';
 export type {
   ProviderConfigurationLock,
@@ -157,9 +158,12 @@ export {
   PROVIDER_PROVISIONING_MAX_CLOCK_SKEW_MS,
   PROVIDER_PROVISIONING_SECRET_MAX_BYTES,
   applySealedProviderProvisioning,
+  readSealedProvisioningResult,
 } from './sealed-provisioning';
 export type {
   ApplySealedProviderProvisioningOptions,
+  ProviderProvisioningIdentitySnapshot,
+  SealedProvisioningReadback,
   ProviderProvisioningCutPoint,
   ProviderProvisioningFaultSeam,
 } from './sealed-provisioning';

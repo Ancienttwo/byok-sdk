@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-sealing-key';
-import { DEVICE, NOW, PROFILE_REF, TENANT, configureRequest, deleteRequest, replaceSecretRequest } from './fixtures/provisioning-requests';
+import { DEVICE, NOW, PROFILE_REF, TENANT, configureRequest, deleteRequest, placedIdentity, replaceSecretRequest } from './fixtures/provisioning-requests';
 import { readProviderCustodySnapshot } from './pi-provider-launcher-core';
 import { exactProviderProfileBinding } from './provider-profile';
 import { applySealedProviderProvisioning } from './sealed-provisioning';
@@ -135,8 +135,8 @@ namespace ByokPreFixProbe {
 
     const profileStore = new SqliteProviderProfileStore({ path: join(directory, 'provider-profile.sqlite') });
     const apply = (request: unknown) => applySealedProviderProvisioning({
-      request, profileStore, secretStore: secrets, sealingKey, enrollment,
-      resolveProfileRef: () => PROFILE_REF, isPlacedHere: async () => true, now: () => new Date(NOW),
+      request, profileStore, secretStore: secrets, sealingKey,
+      resolveProfileRef: () => PROFILE_REF, readIdentity: async () => placedIdentity(), now: () => new Date(NOW),
     });
     const expected = async () => {
       const binding = exactProviderProfileBinding((await profileStore.get(PROFILE_REF))!, []);

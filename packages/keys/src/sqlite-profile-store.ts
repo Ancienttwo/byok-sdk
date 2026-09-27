@@ -491,6 +491,7 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
              since = excluded.since`,
         )
         .run(pending.profileRef, pending.operation, pending.requestId, pending.operationGeneration, pending.since);
+      if (pending.operationGeneration !== null) this.#raiseWatermark(pending.profileRef, pending.operationGeneration);
     });
   }
 
@@ -542,6 +543,16 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
     return recorded;
   }
 
+  #raiseWatermark(profileRef: ProviderProfileRef, operationGeneration: number): void {
+    this.#database
+      .prepare(
+        `INSERT INTO provider_custody_watermark (profile_ref, operation_generation) VALUES (?, ?)
+         ON CONFLICT(profile_ref) DO UPDATE SET
+           operation_generation = MAX(provider_custody_watermark.operation_generation, excluded.operation_generation)`,
+      )
+      .run(profileRef, operationGeneration);
+  }
+
   #writeReceipt(receipt: ProviderCustodyReceipt): void {
     this.#database
       .prepare(
@@ -549,13 +560,7 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
          VALUES (?, ?, ?, ?, ?)`,
       )
       .run(receipt.requestId, receipt.profileRef, receipt.operationGeneration, receipt.requestDigest, JSON.stringify(receipt.result));
-    this.#database
-      .prepare(
-        `INSERT INTO provider_custody_watermark (profile_ref, operation_generation) VALUES (?, ?)
-         ON CONFLICT(profile_ref) DO UPDATE SET
-           operation_generation = MAX(provider_custody_watermark.operation_generation, excluded.operation_generation)`,
-      )
-      .run(receipt.profileRef, receipt.operationGeneration);
+    this.#raiseWatermark(receipt.profileRef, receipt.operationGeneration);
     this.#database
       .prepare(
         `DELETE FROM provider_custody_receipt

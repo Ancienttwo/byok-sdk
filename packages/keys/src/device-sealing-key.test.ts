@@ -41,7 +41,7 @@ describe('DeviceSealingKeyStore', () => {
     const request = await sealProviderProvisioningRequest({
       header: {
         tenantId: 'tenant-1', deviceId: 'device-1', agentId: 'agent-1', requestId: 'r1', operation: 'replace_secret',
-        operationGeneration: 1, expectedProfile: null, issuedAt: '2026-09-28T00:00:00.000Z', expiresAt: '2026-09-28T00:10:00.000Z',
+        operationGeneration: 1, expectedProfile: null, expectedEnrollmentRevision: 'e1', expectedPlacementRevision: 'p1', issuedAt: '2026-09-28T00:00:00.000Z', expiresAt: '2026-09-28T00:10:00.000Z',
       },
       config: { operation: 'replace_secret', agentId: 'agent-1', providerKind: 'zai' },
       recipient: { keyId: key.keyId, publicJwk: key.publicJwk },

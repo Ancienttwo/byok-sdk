@@ -14,7 +14,7 @@ import {
   type ProviderProvisioningResult,
   withConfigurationLock,
 } from './custody';
-import type { DeviceSealingEnrollment, DeviceSealingKey } from './device-sealing-key';
+import type { DeviceSealingKey } from './device-sealing-key';
 import { ByokKeysError } from './errors';
 import { PiModelConfigSchema } from './pi-model-config';
 import { modelProviderVendor } from './provider-catalog';
@@ -61,20 +61,82 @@ export interface ApplySealedProviderProvisioningOptions {
   readonly secretStore: SecretStore<ModelProviderSecretName>;
   /** This device's current sealing key (`DeviceSealingKeyStore.loadOrCreate`). */
   readonly sealingKey: DeviceSealingKey;
-  /** This device's current enrollment identity, supplied by the host. */
-  readonly enrollment: DeviceSealingEnrollment;
   /** Host glue: the local provider profile ref a bot's agent id maps to. */
   readonly resolveProfileRef: (agentId: string) => ProviderProfileRef;
-  /** Host glue: whether the agent is placed on this device right now. */
-  readonly isPlacedHere: (agentId: string) => Promise<boolean>;
+  /**
+   * Host glue: an exact snapshot of this device's enrollment and of the
+   * agent's local placement, read fresh on every call. It is called once
+   * before any decryption and again inside the configuration lock right
+   * before any credential-store write; the request's expected revisions must
+   * match both. It fences only placement/enrollment writers that change the
+   * local record while holding `profileStore.acquireConfigurationLock()`.
+   */
+  readonly readIdentity: (agentId: string) => Promise<ProviderProvisioningIdentitySnapshot>;
   readonly now: () => Date;
   /** When present, one bounded key check runs after an applied operation; otherwise `not_run`. */
   readonly keyCheck?: ProviderKeyCheckOptions;
   readonly faults?: ProviderProvisioningFaultSeam;
 }
 
+/** Exact, non-secret identity snapshot the host supplies (F2). */
+export interface ProviderProvisioningIdentitySnapshot {
+  readonly tenantId: string;
+  readonly deviceId: string;
+  /** Changes whenever this device id is re-enrolled / re-paired. */
+  readonly enrollmentRevision: string;
+  /** The agent's placement on this device, or `null` when it is not placed here. */
+  readonly placement: { readonly agentId: string; readonly placementRevision: string } | null;
+}
+
+/** Outcome of a readback-only lookup of a durable local result (F4). */
+export type SealedProvisioningReadback =
+  | { readonly status: 'completed'; readonly result: ProviderProvisioningResult }
+  | { readonly status: 'conflict' }
+  | { readonly status: 'absent' };
+
+const REQUEST_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/u;
+
+/**
+ * Readback-only path (F4): the durable local terminal result for `requestId`,
+ * matched against the immutable request digest the Host stored at submission
+ * (`providerProvisioningRequestDigest`). Needs no ciphertext, no sealing key,
+ * and no placement, and never decrypts or writes. A different digest under
+ * the same id is a conflict. `absent` means this device holds no result for
+ * the id (never applied here, or evicted beyond the retention bound).
+ */
+export async function readSealedProvisioningResult(input: {
+  readonly profileStore: ProviderProfileStore;
+  readonly requestId: string;
+  readonly requestDigest: string;
+}): Promise<SealedProvisioningReadback> {
+  if (!REQUEST_DIGEST_PATTERN.test(input.requestDigest) || input.requestId.length === 0 || input.requestId.length > 200) {
+    throw new ByokKeysError('PROVIDER_CUSTODY_STATE_INVALID', 'Readback requires a request id and a sha256 request digest');
+  }
+  const receipt = await input.profileStore.getReceipt(input.requestId);
+  if (receipt === undefined) return { status: 'absent' };
+  if (receipt.requestDigest !== input.requestDigest) return { status: 'conflict' };
+  return { status: 'completed', result: receipt.result };
+}
+
+function identityMatches(
+  identity: ProviderProvisioningIdentitySnapshot,
+  header: ProviderProvisioningRequestV1['header'],
+): ProviderProvisioningRejection | null {
+  if (identity.tenantId !== header.tenantId || identity.deviceId !== header.deviceId) return 'enrollment_mismatch';
+  if (identity.enrollmentRevision !== header.expectedEnrollmentRevision) return 'enrollment_mismatch';
+  if (
+    identity.placement === null
+    || identity.placement.agentId !== header.agentId
+    || identity.placement.placementRevision !== header.expectedPlacementRevision
+  ) {
+    return 'agent_not_placed';
+  }
+  return null;
+}
+
 interface RequestFacts {
   readonly requestId: string;
+  readonly requestDigest: string;
   readonly operation: ProviderProvisioningRequestV1['header']['operation'];
   readonly operationGeneration: number;
 }
@@ -86,6 +148,7 @@ function rejectedResult(
 ): ProviderProvisioningResult {
   return {
     requestId: facts?.requestId ?? null,
+    requestDigest: facts?.requestDigest ?? null,
     operation: facts?.operation ?? null,
     operationGeneration: facts?.operationGeneration ?? null,
     outcome: 'rejected',
@@ -166,24 +229,38 @@ export async function applySealedProviderProvisioning(
     return rejectedResult(undefined, null, 'request_invalid');
   }
   const { header, sealed } = request;
+  const requestDigest = await providerProvisioningRequestDigest(request);
   const facts: RequestFacts = {
     requestId: header.requestId,
+    requestDigest,
     operation: header.operation,
     operationGeneration: header.operationGeneration,
   };
+  const { profileStore: profiles, secretStore: secrets } = options;
 
-  if (header.tenantId !== options.enrollment.tenantId || header.deviceId !== options.enrollment.deviceId) {
+  // 1. Ownership: only a request addressed to this tenant/device may read or
+  //    write local custody state.
+  const identity = await options.readIdentity(header.agentId);
+  if (identity.tenantId !== header.tenantId || identity.deviceId !== header.deviceId) {
     return rejectedResult(facts, null, 'enrollment_mismatch');
   }
+  // 2. Receipt first (F4): a request this device already decided returns its
+  //    durable result before the current sealing key, placement, or any
+  //    decryption is consulted — so rotation, a placement change, or an
+  //    expired ciphertext never rewrites a historical fact.
+  const earlier = await readSealedProvisioningResult({ profileStore: profiles, requestId: header.requestId, requestDigest });
+  if (earlier.status === 'completed') return earlier.result;
+  if (earlier.status === 'conflict') return rejectedResult(facts, null, 'request_conflict');
+
+  // 3. Current identity and routing for an undecided request.
+  const identityRejection = identityMatches(identity, header);
+  if (identityRejection !== null) return rejectedResult(facts, null, identityRejection);
   if (sealed !== undefined && (
     sealed.keyId !== options.sealingKey.keyId
-    || options.sealingKey.enrollment.tenantId !== options.enrollment.tenantId
-    || options.sealingKey.enrollment.deviceId !== options.enrollment.deviceId
+    || options.sealingKey.enrollment.tenantId !== identity.tenantId
+    || options.sealingKey.enrollment.deviceId !== identity.deviceId
   )) {
     return rejectedResult(facts, null, 'sealing_key_rotated');
-  }
-  if (!(await options.isPlacedHere(header.agentId))) {
-    return rejectedResult(facts, null, 'agent_not_placed');
   }
   const refResult = ProviderProfileRefSchema.safeParse(options.resolveProfileRef(header.agentId));
   if (!refResult.success) {
@@ -203,8 +280,6 @@ export async function applySealedProviderProvisioning(
       return rejectedResult(facts, profileRef, 'seal_open_failed');
     }
   }
-  const requestDigest = await providerProvisioningRequestDigest(request);
-  const { profileStore: profiles, secretStore: secrets } = options;
   const secretName = modelProviderSecretName(profileRef);
   const fault = async (point: ProviderProvisioningCutPoint): Promise<void> => {
     await options.faults?.onCutPoint?.(point);
@@ -220,24 +295,37 @@ export async function applySealedProviderProvisioning(
         replayed = true;
         return receipt.result;
       }
-      const watermark = await profiles.getOperationWatermark(profileRef);
-      if (watermark !== undefined && header.operationGeneration <= watermark) {
-        return rejectedResult(facts, profileRef, 'operation_generation_stale');
-      }
-
-      // Every decision from here on consumes the generation and is recorded.
       const recordRejection = async (code: ProviderProvisioningRejection): Promise<ProviderProvisioningResult> => {
         const rejected = rejectedResult(facts, profileRef, code);
         await profiles.commitCustody({
           profileRef,
           mutation: { kind: 'none' },
-          receipt: receiptOf(facts, profileRef, requestDigest, rejected),
+          receipt: receiptOf(facts, profileRef, rejected),
           // A marker (this call's or an earlier one) means the credential
           // state is uncertain; a rejection never clears it.
           clearPending: false,
         });
         return rejected;
       };
+      // This very request started and was interrupted (F1): report it, never
+      // redo it. Recovery takes a higher generation that re-supplies the key,
+      // or a delete.
+      const pendingBefore = await profiles.getPending(profileRef);
+      if (pendingBefore !== undefined && pendingBefore.requestId === header.requestId) {
+        return recordRejection('local_commit_interrupted');
+      }
+      // The watermark includes generations that started (pending), so an older
+      // request can never overtake an interrupted newer one (F1).
+      const watermark = await profiles.getOperationWatermark(profileRef);
+      if (watermark !== undefined && header.operationGeneration <= watermark) {
+        return rejectedResult(facts, profileRef, 'operation_generation_stale');
+      }
+      // Identity inside the critical section (F2): placement or enrollment may
+      // have moved while this request waited for the lock.
+      const current = identityMatches(await options.readIdentity(header.agentId), header);
+      if (current !== null) return rejectedResult(facts, profileRef, current);
+
+      // Every decision from here on consumes the generation and is recorded.
       const decision = await decide(request, profileRef, secret, options);
       if (decision.kind === 'reject') return recordRejection(decision.code);
       if (decision.credential.kind !== 'keep' && !(await secrets.available())) {
@@ -282,7 +370,7 @@ export async function applySealedProviderProvisioning(
       await profiles.commitCustody({
         profileRef,
         mutation: decision.mutation,
-        receipt: receiptOf(facts, profileRef, requestDigest, applied),
+        receipt: receiptOf(facts, profileRef, applied),
         clearPending: true,
       });
       await fault('after-commit');
@@ -312,14 +400,13 @@ export async function applySealedProviderProvisioning(
 function receiptOf(
   facts: RequestFacts,
   profileRef: ProviderProfileRef,
-  requestDigest: string,
   result: ProviderProvisioningResult,
 ): ProviderCustodyReceipt {
   return {
     requestId: facts.requestId,
     profileRef,
     operationGeneration: facts.operationGeneration,
-    requestDigest,
+    requestDigest: facts.requestDigest,
     result,
   };
 }
@@ -360,7 +447,6 @@ async function decide(
       return reject('profile_changed');
     }
   }
-  if (pending !== undefined && pending.requestId === header.requestId) return reject('local_commit_interrupted');
 
   if (secret !== undefined) {
     try {

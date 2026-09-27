@@ -84,9 +84,12 @@ import type { ModelProviderProfile, ProviderProfileRef } from './provider-profil
  *    resolved by guessing: only a new operation that supplies a key (or a
  *    delete) replaces it.
  * 3. **Operation watermark** — the highest `operationGeneration` a profile
- *    ref has consumed. It survives `delete` (a tombstone), so a replay of any
- *    older request stays rejected however many operations happened since and
- *    whatever the clock says.
+ *    ref has consumed. A generation is consumed the moment its pending marker
+ *    is written (same transaction), not only when it commits, so an older
+ *    request can never overtake a newer one that started and was interrupted.
+ *    It survives `delete` (a tombstone), so a replay of any older request stays
+ *    rejected however many operations happened since and whatever the clock
+ *    says.
  * 4. **Receipts** — the credential-free result of recent provisioning
  *    requests, keyed by request id and bounded by count. They let a request
  *    whose ACK was lost read back the same stored result; replay protection
@@ -139,6 +142,12 @@ export interface ProviderProvisioningBinding {
  */
 export interface ProviderProvisioningResult {
     readonly requestId: string | null;
+    /**
+     * `providerProvisioningRequestDigest` of the immutable request (the value a
+     * Host stores at submission and reports as the completion's operation
+     * digest); `null` only when the request could not be parsed.
+     */
+    readonly requestDigest: string | null;
     readonly operation: ProviderCustodyOperation | null;
     readonly operationGeneration: number | null;
     readonly outcome: 'applied' | 'rejected';
@@ -152,6 +161,7 @@ export interface ProviderProvisioningResult {
 }
 export declare const ProviderProvisioningResultSchema: z.ZodObject<{
     requestId: z.ZodNullable<z.ZodString>;
+    requestDigest: z.ZodNullable<z.ZodString>;
     operation: z.ZodNullable<z.ZodEnum<{
         configure: "configure";
         delete: "delete";
@@ -500,12 +510,12 @@ export { SqliteProviderProfileStore } from './sqlite-profile-store';
 export type { SqliteProviderProfileStoreOptions } from './sqlite-profile-store';
 export { PROVIDER_PROFILE_TRUTH_RECORD_KEY, TruthStoreProviderProfileStore, } from './truth-profile-store';
 export type { TruthStoreProviderProfileStoreOptions } from './truth-profile-store';
-export { PROVIDER_CONFIGURATION_LOCK_WAIT_MS, PROVIDER_CUSTODY_RECEIPT_LIMIT, PROVIDER_KEY_CHECK_OUTCOMES, PROVIDER_PROVISIONING_REJECTIONS, } from './custody';
+export { PROVIDER_CONFIGURATION_LOCK_WAIT_MS, PROVIDER_CUSTODY_RECEIPT_LIMIT, PROVIDER_KEY_CHECK_OUTCOMES, PROVIDER_PROVISIONING_REJECTIONS, withConfigurationLock, } from './custody';
 export type { ProviderConfigurationLock, ProviderCustodyCommit, ProviderCustodyOperation, ProviderCustodyPending, ProviderCustodyReceipt, ProviderKeyCheckOutcome, ProviderProvisioningBinding, ProviderProvisioningRejection, ProviderProvisioningResult, } from './custody';
 export { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-sealing-key';
 export type { DeviceSealingEnrollment, DeviceSealingKey, DeviceSealingSecretName, } from './device-sealing-key';
-export { PROVIDER_PROVISIONING_MAX_CLOCK_SKEW_MS, PROVIDER_PROVISIONING_SECRET_MAX_BYTES, applySealedProviderProvisioning, } from './sealed-provisioning';
-export type { ApplySealedProviderProvisioningOptions, ProviderProvisioningCutPoint, ProviderProvisioningFaultSeam, } from './sealed-provisioning';
+export { PROVIDER_PROVISIONING_MAX_CLOCK_SKEW_MS, PROVIDER_PROVISIONING_SECRET_MAX_BYTES, applySealedProviderProvisioning, readSealedProvisioningResult, } from './sealed-provisioning';
+export type { ApplySealedProviderProvisioningOptions, ProviderProvisioningIdentitySnapshot, SealedProvisioningReadback, ProviderProvisioningCutPoint, ProviderProvisioningFaultSeam, } from './sealed-provisioning';
 export { PROVIDER_KEY_CHECK_TIMEOUT_MS, checkProviderKey } from './provider-key-check';
 export type { ProviderKeyCheckOptions } from './provider-key-check';
 export { ProviderRegistry } from './registry';
@@ -760,7 +770,12 @@ export interface ProviderProfileStore {
     acquireConfigurationLock(): Promise<ProviderConfigurationLock>;
     /** The pending marker for `profileRef`, if a credential change is unfinished. */
     getPending(profileRef: ProviderProfileRef): Promise<ProviderCustodyPending | undefined>;
-    /** Durably record a pending marker (replacing any existing one for the same ref). */
+    /**
+     * Durably record a pending marker (replacing any existing one for the same
+     * ref). A marker that carries an operation generation raises the ref's
+     * watermark to it in the same atomic step (the generation is consumed from
+     * the moment it starts).
+     */
     markPending(pending: ProviderCustodyPending): Promise<void>;
     /** Highest operation generation `profileRef` has consumed; survives delete. */
     getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined>;
@@ -827,6 +842,8 @@ export declare class InMemoryProviderProfileStore implements ProviderProfileStor
  */
 export declare function applyReceipt(receipts: Map<string, ProviderCustodyReceipt>, watermarks: Map<ProviderProfileRef, number>, receipt: ProviderCustodyReceipt): void;
 export declare function recordReceiptKeyCheck(receipts: Map<string, ProviderCustodyReceipt>, watermarks: Map<ProviderProfileRef, number>, requestId: string, operationGeneration: number, keyCheck: ProviderKeyCheckOutcome): boolean;
+/** Consume a started operation's generation (never lowers the watermark). */
+export declare function raiseWatermark(watermarks: Map<ProviderProfileRef, number>, pending: ProviderCustodyPending): void;
 // ==== @byok-sdk/keys dist/provider-catalog.d.ts ====
 import type { ModelProviderAdapter, ProviderAuthMode } from './provider-profile';
 /**
@@ -1274,7 +1291,7 @@ export declare class ProviderRegistry {
 }
 // ==== @byok-sdk/keys dist/sealed-provisioning.d.ts ====
 import { type ProviderProvisioningResult } from './custody';
-import type { DeviceSealingEnrollment, DeviceSealingKey } from './device-sealing-key';
+import type { DeviceSealingKey } from './device-sealing-key';
 import { type ProviderKeyCheckOptions } from './provider-key-check';
 import { type ProviderProfileRef } from './provider-profile';
 import type { ProviderProfileStore } from './profile-store';
@@ -1300,17 +1317,56 @@ export interface ApplySealedProviderProvisioningOptions {
     readonly secretStore: SecretStore<ModelProviderSecretName>;
     /** This device's current sealing key (`DeviceSealingKeyStore.loadOrCreate`). */
     readonly sealingKey: DeviceSealingKey;
-    /** This device's current enrollment identity, supplied by the host. */
-    readonly enrollment: DeviceSealingEnrollment;
     /** Host glue: the local provider profile ref a bot's agent id maps to. */
     readonly resolveProfileRef: (agentId: string) => ProviderProfileRef;
-    /** Host glue: whether the agent is placed on this device right now. */
-    readonly isPlacedHere: (agentId: string) => Promise<boolean>;
+    /**
+     * Host glue: an exact snapshot of this device's enrollment and of the
+     * agent's local placement, read fresh on every call. It is called once
+     * before any decryption and again inside the configuration lock right
+     * before any credential-store write; the request's expected revisions must
+     * match both. It fences only placement/enrollment writers that change the
+     * local record while holding `profileStore.acquireConfigurationLock()`.
+     */
+    readonly readIdentity: (agentId: string) => Promise<ProviderProvisioningIdentitySnapshot>;
     readonly now: () => Date;
     /** When present, one bounded key check runs after an applied operation; otherwise `not_run`. */
     readonly keyCheck?: ProviderKeyCheckOptions;
     readonly faults?: ProviderProvisioningFaultSeam;
 }
+/** Exact, non-secret identity snapshot the host supplies (F2). */
+export interface ProviderProvisioningIdentitySnapshot {
+    readonly tenantId: string;
+    readonly deviceId: string;
+    /** Changes whenever this device id is re-enrolled / re-paired. */
+    readonly enrollmentRevision: string;
+    /** The agent's placement on this device, or `null` when it is not placed here. */
+    readonly placement: {
+        readonly agentId: string;
+        readonly placementRevision: string;
+    } | null;
+}
+/** Outcome of a readback-only lookup of a durable local result (F4). */
+export type SealedProvisioningReadback = {
+    readonly status: 'completed';
+    readonly result: ProviderProvisioningResult;
+} | {
+    readonly status: 'conflict';
+} | {
+    readonly status: 'absent';
+};
+/**
+ * Readback-only path (F4): the durable local terminal result for `requestId`,
+ * matched against the immutable request digest the Host stored at submission
+ * (`providerProvisioningRequestDigest`). Needs no ciphertext, no sealing key,
+ * and no placement, and never decrypts or writes. A different digest under
+ * the same id is a conflict. `absent` means this device holds no result for
+ * the id (never applied here, or evicted beyond the retention bound).
+ */
+export declare function readSealedProvisioningResult(input: {
+    readonly profileStore: ProviderProfileStore;
+    readonly requestId: string;
+    readonly requestDigest: string;
+}): Promise<SealedProvisioningReadback>;
 /**
  * Apply one sealed provider provisioning request on the device (plan §3.4,
  * D4, D5, D8, A3, A4, A7, A9).

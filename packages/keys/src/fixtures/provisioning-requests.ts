@@ -14,6 +14,25 @@ export const PROFILE_REF = 'salesko-4f7c2d1e9a3b4c5d8e6f0a1b2c3d4e5f';
 export const ISSUED_AT = '2026-09-28T05:00:00.000Z';
 export const EXPIRES_AT = '2026-09-28T05:15:00.000Z';
 export const NOW = '2026-09-28T05:01:00.000Z';
+export const ENROLLMENT_REVISION = 'enrollment-1';
+export const PLACEMENT_REVISION = 'placement-1';
+
+/** The host identity snapshot a fully placed test device reports. */
+export function placedIdentity(overrides: {
+  enrollmentRevision?: string;
+  placementRevision?: string;
+  placed?: boolean;
+  deviceId?: string;
+} = {}) {
+  return {
+    tenantId: TENANT,
+    deviceId: overrides.deviceId ?? DEVICE,
+    enrollmentRevision: overrides.enrollmentRevision ?? ENROLLMENT_REVISION,
+    placement: overrides.placed === false
+      ? null
+      : { agentId: AGENT, placementRevision: overrides.placementRevision ?? PLACEMENT_REVISION },
+  };
+}
 
 export interface RequestOptions {
   readonly requestId: string;
@@ -24,6 +43,8 @@ export interface RequestOptions {
   readonly tenantId?: string;
   readonly deviceId?: string;
   readonly agentId?: string;
+  readonly enrollmentRevision?: string;
+  readonly placementRevision?: string;
 }
 
 function header(options: RequestOptions, operation: 'configure' | 'update_model' | 'replace_secret' | 'delete') {
@@ -35,6 +56,8 @@ function header(options: RequestOptions, operation: 'configure' | 'update_model'
     operation,
     operationGeneration: options.generation,
     expectedProfile: options.expected ?? null,
+    expectedEnrollmentRevision: options.enrollmentRevision ?? ENROLLMENT_REVISION,
+    expectedPlacementRevision: options.placementRevision ?? PLACEMENT_REVISION,
     issuedAt: options.issuedAt ?? ISSUED_AT,
     expiresAt: options.expiresAt ?? EXPIRES_AT,
   };

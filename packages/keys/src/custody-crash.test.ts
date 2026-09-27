@@ -22,9 +22,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { DeviceSealingKeyStore } from './device-sealing-key';
 import { FileSecretStore } from './fixtures/file-secret-store';
-import { AGENT, DEVICE, NOW, PROFILE_REF, TENANT, configureRequest } from './fixtures/provisioning-requests';
+import { DEVICE, NOW, PROFILE_REF, TENANT, configureRequest, placedIdentity, replaceSecretRequest } from './fixtures/provisioning-requests';
 import { readProviderCustodySnapshot } from './pi-provider-launcher-core';
 import { exactProviderProfileBinding } from './provider-profile';
+import { modelProviderSecretName } from './secret-store';
 import { applySealedProviderProvisioning, type ProviderProvisioningCutPoint } from './sealed-provisioning';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import { isSqliteAvailable } from './sqlite-support';
@@ -89,9 +90,8 @@ async function seedOldVendor(): Promise<string> {
     profileStore,
     secretStore,
     sealingKey,
-    enrollment,
     resolveProfileRef: () => PROFILE_REF,
-    isPlacedHere: async () => true,
+    readIdentity: async () => placedIdentity(),
     now: () => new Date(NOW),
   });
   expect(seeded.outcome).toBe('applied');
@@ -160,8 +160,8 @@ describe.skipIf(!isSqliteAvailable() || runtime.command === undefined)(`custody 
       const sealingKey = await new DeviceSealingKeyStore({ secretStore }).loadOrCreate(enrollment);
       const again = await applySealedProviderProvisioning({
         request: JSON.parse(readFileSync(requestPath, 'utf8')),
-        profileStore, secretStore, sealingKey, enrollment,
-        resolveProfileRef: () => PROFILE_REF, isPlacedHere: async (agentId) => agentId === AGENT, now: () => new Date(NOW),
+        profileStore, secretStore, sealingKey,
+        resolveProfileRef: () => PROFILE_REF, readIdentity: async () => placedIdentity(), now: () => new Date(NOW),
       });
       if (expected === 'refused') {
         expect(again).toMatchObject({ outcome: 'rejected', code: 'local_commit_interrupted' });
@@ -171,6 +171,44 @@ describe.skipIf(!isSqliteAvailable() || runtime.command === undefined)(`custody 
         expect(again).toMatchObject({ outcome: 'applied', requestId: 'move' });
       }
       await profileStore.close();
+    });
+  }
+
+  for (const cutPoint of ['after-pending', 'after-secret-write'] as const) {
+    it(`F1 killed ${cutPoint}: an older generation stays fenced after restart; only a higher generation with a key recovers`, async () => {
+      const requestPath = await seedOldVendor();
+      const enrollment = { tenantId: TENANT, deviceId: DEVICE };
+      let profileStore = new SqliteProviderProfileStore({ path: dbPath });
+      const secretStore = new FileSecretStore(secretPath);
+      const sealingKey = await new DeviceSealingKeyStore({ secretStore }).loadOrCreate(enrollment);
+      const binding = exactProviderProfileBinding((await profileStore.get(PROFILE_REF))!, []);
+      const expected = { profileRef: binding.profileRef, profileRevision: binding.profileRevision, profileHash: binding.profileHash };
+      const older = await replaceSecretRequest(sealingKey, 'sk-crash-older-2', { requestId: 'older', generation: 2, expected });
+      const newer = await replaceSecretRequest(sealingKey, 'sk-crash-newer-3', { requestId: 'newer', generation: 3, expected });
+      await profileStore.close();
+      writeFileSync(requestPath, JSON.stringify(newer));
+
+      const child = runChild('apply', {
+        dbPath, secretPath, requestPath, cutPoint, now: NOW, tenantId: TENANT, deviceId: DEVICE, profileRef: PROFILE_REF,
+      });
+      expect(child.signal, String(child.stderr)).toBe('SIGKILL');
+
+      // A fresh process view (restart): new store handles over the same files.
+      profileStore = new SqliteProviderProfileStore({ path: dbPath });
+      const apply = (request: unknown) => applySealedProviderProvisioning({
+        request, profileStore, secretStore, sealingKey,
+        resolveProfileRef: () => PROFILE_REF, readIdentity: async () => placedIdentity(), now: () => new Date(NOW),
+      });
+      const keyBefore = await secretStore.get(modelProviderSecretName(PROFILE_REF));
+      expect(await apply(older)).toMatchObject({ outcome: 'rejected', code: 'operation_generation_stale' });
+      expect(await apply(newer)).toMatchObject({ outcome: 'rejected', code: 'local_commit_interrupted' });
+      await expect(secretStore.get(modelProviderSecretName(PROFILE_REF))).resolves.toBe(keyBefore);
+      expect(await launcherView()).toEqual({ refused: 'PROVIDER_CONFIGURATION_PENDING' });
+
+      const recovery = await replaceSecretRequest(sealingKey, 'sk-crash-recovered-4', { requestId: 'recover', generation: 4, expected });
+      expect(await apply(recovery)).toMatchObject({ outcome: 'applied' });
+      await profileStore.close();
+      expect(await launcherView()).toEqual({ vendor: 'zai', key: 'sk-crash-recovered-4' });
     });
   }
 

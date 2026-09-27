@@ -13,6 +13,7 @@ import { DeviceSealingKeyStore } from '../device-sealing-key';
 import { applySealedProviderProvisioning } from '../sealed-provisioning';
 import { SqliteProviderProfileStore } from '../sqlite-profile-store';
 import { FileSecretStore } from './file-secret-store';
+import { placedIdentity } from './provisioning-requests';
 
 interface ApplyArgs {
   dbPath: string;
@@ -49,9 +50,8 @@ async function main(): Promise<void> {
     profileStore,
     secretStore,
     sealingKey,
-    enrollment,
     resolveProfileRef: () => args.profileRef,
-    isPlacedHere: async () => true,
+    readIdentity: async () => placedIdentity(),
     now: () => new Date(args.now),
     faults: {
       onCutPoint(point) {

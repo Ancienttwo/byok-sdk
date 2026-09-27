@@ -123,7 +123,7 @@ describe.skipIf(!isSqliteAvailable())('registry custody (A4, A8)', () => {
       receipt: {
         requestId: 'req-7', profileRef: 'openai', operationGeneration: 7, requestDigest: `sha256:${'1'.repeat(64)}`,
         result: {
-          requestId: 'req-7', operation: 'replace_secret', operationGeneration: 7, outcome: 'applied', code: null,
+          requestId: 'req-7', requestDigest: `sha256:${'1'.repeat(64)}`, operation: 'replace_secret', operationGeneration: 7, outcome: 'applied', code: null,
           profileRef: 'openai', binding: null, secretConfigured: true, keyCheck: 'not_run',
         },
       },
@@ -146,7 +146,7 @@ describe.skipIf(!isSqliteAvailable())('registry custody (A4, A8)', () => {
         receipt: {
           requestId: `req-${generation}`, profileRef: 'openai', operationGeneration: generation, requestDigest: `sha256:${'2'.repeat(64)}`,
           result: {
-            requestId: `req-${generation}`, operation: 'delete', operationGeneration: generation, outcome: 'applied', code: null,
+            requestId: `req-${generation}`, requestDigest: `sha256:${'2'.repeat(64)}`, operation: 'delete', operationGeneration: generation, outcome: 'applied', code: null,
             profileRef: 'openai', binding: null, secretConfigured: false, keyCheck: 'not_run',
           },
         },

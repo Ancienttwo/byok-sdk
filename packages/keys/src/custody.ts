@@ -25,9 +25,12 @@ import type { ModelProviderProfile, ProviderProfileRef } from './provider-profil
  *    resolved by guessing: only a new operation that supplies a key (or a
  *    delete) replaces it.
  * 3. **Operation watermark** — the highest `operationGeneration` a profile
- *    ref has consumed. It survives `delete` (a tombstone), so a replay of any
- *    older request stays rejected however many operations happened since and
- *    whatever the clock says.
+ *    ref has consumed. A generation is consumed the moment its pending marker
+ *    is written (same transaction), not only when it commits, so an older
+ *    request can never overtake a newer one that started and was interrupted.
+ *    It survives `delete` (a tombstone), so a replay of any older request stays
+ *    rejected however many operations happened since and whatever the clock
+ *    says.
  * 4. **Receipts** — the credential-free result of recent provisioning
  *    requests, keyed by request id and bounded by count. They let a request
  *    whose ACK was lost read back the same stored result; replay protection
@@ -119,6 +122,12 @@ export interface ProviderProvisioningBinding {
  */
 export interface ProviderProvisioningResult {
   readonly requestId: string | null;
+  /**
+   * `providerProvisioningRequestDigest` of the immutable request (the value a
+   * Host stores at submission and reports as the completion's operation
+   * digest); `null` only when the request could not be parsed.
+   */
+  readonly requestDigest: string | null;
   readonly operation: ProviderCustodyOperation | null;
   readonly operationGeneration: number | null;
   readonly outcome: 'applied' | 'rejected';
@@ -140,6 +149,7 @@ const BindingSchema = z.strictObject({
 
 export const ProviderProvisioningResultSchema = z.strictObject({
   requestId: z.string().min(1).max(200).nullable(),
+  requestDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/u).nullable(),
   operation: z.enum(PROVIDER_CUSTODY_OPERATIONS).nullable(),
   operationGeneration: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable(),
   outcome: z.enum(['applied', 'rejected']),

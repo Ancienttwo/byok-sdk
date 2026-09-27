@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { ProviderProvisioningRequestV1 } from '@byok-sdk/core';
+import { providerProvisioningRequestDigest, type ProviderProvisioningRequestV1 } from '@byok-sdk/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PROVIDER_CUSTODY_RECEIPT_LIMIT, type ProviderProvisioningResult } from './custody';
@@ -17,6 +17,7 @@ import {
   PROFILE_REF,
   TENANT,
   configureRequest,
+  placedIdentity,
   deleteRequest,
   replaceSecretRequest,
   updateModelRequest,
@@ -65,9 +66,8 @@ function options(request: unknown, overrides: Partial<ApplySealedProviderProvisi
     profileStore: profiles,
     secretStore: secrets,
     sealingKey,
-    enrollment: { tenantId: TENANT, deviceId: DEVICE },
     resolveProfileRef: () => PROFILE_REF,
-    isPlacedHere: async (agentId) => agentId === AGENT,
+    readIdentity: async () => placedIdentity(),
     now: () => clock,
     ...overrides,
   };
@@ -89,8 +89,9 @@ async function expectedOf(): Promise<{ profileRef: string; profileRevision: stri
 }
 
 async function configured(): Promise<ProviderProvisioningResult> {
-  const result = await apply(await configureRequest(sealingKey, KEY_A, { requestId: 'req-1', generation: 1 }));
-  expect(result).toMatchObject({ outcome: 'applied', code: null });
+  const request = await configureRequest(sealingKey, KEY_A, { requestId: 'req-1', generation: 1 });
+  const result = await apply(request);
+  expect(result).toMatchObject({ outcome: 'applied', code: null, requestDigest: await providerProvisioningRequestDigest(request) });
   return result;
 }
 
@@ -111,6 +112,7 @@ describe.skipIf(!isSqliteAvailable())('applySealedProviderProvisioning', () => {
       await expect(secrets.get(SECRET_NAME)).resolves.toBe(KEY_A);
       expect(result).toEqual({
         requestId: 'req-1',
+        requestDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
         operation: 'configure',
         operationGeneration: 1,
         outcome: 'applied',
@@ -161,10 +163,10 @@ describe.skipIf(!isSqliteAvailable())('applySealedProviderProvisioning', () => {
   describe('identity, integrity and routing checks', () => {
     it('rejects another enrollment, a rotated sealing key, and an agent placed elsewhere', async () => {
       const request = await configureRequest(sealingKey, KEY_A, { requestId: 'req-1', generation: 1 });
-      expect(await apply(request, { enrollment: { tenantId: TENANT, deviceId: 'device-other' } })).toMatchObject({ code: 'enrollment_mismatch' });
+      expect(await apply(request, { readIdentity: async () => placedIdentity({ deviceId: 'device-other' }) })).toMatchObject({ code: 'enrollment_mismatch' });
       const rotated = await new DeviceSealingKeyStore({ secretStore: new InMemorySecretStore() }).loadOrCreate({ tenantId: TENANT, deviceId: DEVICE });
       expect(await apply(request, { sealingKey: rotated })).toMatchObject({ code: 'sealing_key_rotated' });
-      expect(await apply(request, { isPlacedHere: async () => false })).toMatchObject({ code: 'agent_not_placed' });
+      expect(await apply(request, { readIdentity: async () => placedIdentity({ placed: false }) })).toMatchObject({ code: 'agent_not_placed' });
       await expect(profiles.getOperationWatermark(PROFILE_REF)).resolves.toBeUndefined();
     });
 

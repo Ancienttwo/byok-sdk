@@ -21,6 +21,7 @@ import {
   type ProviderProfileStore,
   applyReceipt,
   providerNotConfigured,
+  raiseWatermark,
   recordReceiptKeyCheck,
 } from './profile-store';
 import {
@@ -116,6 +117,7 @@ export class TruthStoreProviderProfileStore implements ProviderProfileStore {
 
   async markPending(pending: ProviderCustodyPending): Promise<void> {
     this.#pending.set(pending.profileRef, { ...pending });
+    raiseWatermark(this.#watermarks, pending);
   }
 
   async getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined> {

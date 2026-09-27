@@ -105,6 +105,36 @@ and calls `applySealedProviderProvisioning`.
   `update_model`, `replace_secret` or `delete`. It returns a credential-free
   `ProviderProvisioningResult` with a closed-set rejection code, and runs an
   optional bounded key check whose outcome is a hint only.
+- **Canonical host handler order** (the device's `providerProvisioning`
+  notice handler; `requestId` is the only notice payload):
+  1. If the Host reports the request terminal or its ciphertext is gone, it
+     still returns `{ requestId, requestDigest }` (the digest it stored at
+     submission, `providerProvisioningRequestDigest(request)`); call
+     `readSealedProvisioningResult({ profileStore, requestId, requestDigest })`
+     and report a `completed` result as-is. It needs no ciphertext, no sealing
+     key and no placement, and never decrypts or writes.
+  2. Otherwise fetch the request and call `applySealedProviderProvisioning`.
+     It checks tenant/device ownership, then returns any durable local result
+     for that `requestId` + digest **before** consulting the current sealing
+     key, placement or ciphertext (so rotation or a placement change never
+     rewrites a historical fact; a different digest is `request_conflict`),
+     and only then validates and applies.
+  3. Complete to the Host with the credential-free result and advance the
+     notice cursor only after the Host's durable readback.
+- **Identity fence.** Requests bind `expectedEnrollmentRevision` and
+  `expectedPlacementRevision` (in the AAD). `readIdentity(agentId)` must
+  return an exact snapshot (tenant, device, enrollment revision, and the
+  agent's placement revision or `null`); it is read before decryption and
+  again inside the configuration lock immediately before any credential-store
+  write, and any difference rejects with zero credential-store writes. The
+  fence covers exactly the placement/enrollment writers that update the local
+  record while holding `withConfigurationLock(profileStore, …)`; a writer that
+  changes placement outside that lock is not fenced by this check.
+- **Generations.** An operation's generation is consumed the moment its
+  pending marker is written (same transaction), so an older request can never
+  overtake an interrupted newer one. The interrupted request itself reports
+  `local_commit_interrupted` and is never redone; recovery is a higher
+  generation that re-supplies the key, or a delete.
 - `ProviderRegistry.replaceSecret(profileRef, secret)` changes only the
   credential; profile revision and hash — and every exact binding a Host
   holds — stay the same.
