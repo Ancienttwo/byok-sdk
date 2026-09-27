@@ -11,8 +11,11 @@
   `readSealedProvisioningResult`, `replaceSecret` and the device sealing key store.
 - **Changed (keys, BREAKING)** — `ProviderProfileStore` now requires the custody
   methods (`acquireConfigurationLock`, `getPending`, `markPending`,
-  `getOperationWatermark`, `getReceipt`, `commitCustody`, `recordKeyCheck`); a
-  custom 0.7.0 store no longer type checks.
+  `getOperationWatermark`, `getReceipt`, `getReservation`, `commitCustody`,
+  `recordKeyCheck`), and `ProviderCustodyPending` carries `requestDigest`; a
+  custom 0.7.0 store no longer type checks. A provisioning request id is
+  reserved store-wide with its digest before any side effect, so a same-id
+  request with a different digest is `request_conflict` on every profile.
 - **Changed (keys, BREAKING)** — `applySealedProviderProvisioning` takes
   `readIdentity(agentId)` instead of `isPlacedHere` / static `enrollment`, read
   before decryption and again under the configuration lock; placement and
@@ -28,7 +31,10 @@
   it now compiles and is exercised by a real-backend Windows CI suite.
 - **Fixed (client)** — a provisioning handler failure no longer reaches the
   daemon console verbatim; it surfaces as a closed
-  `ProviderProvisioningNoticeError`.
+  `ProviderProvisioningNoticeError`. The handler's returned readback is copied
+  once into inert plain data inside the same containment (accessors, Proxies and
+  class instances are refused as `readback_invalid`), so no Host code runs
+  outside it.
 - [Release notes](docs/releases/v0.23.0.md).
 
 
