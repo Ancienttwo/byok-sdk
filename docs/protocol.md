@@ -563,7 +563,11 @@ result the device reported, discriminated by `outcome`. Both arms carry
 `requestId`, `operation` (`configure | update_model | replace_secret |
 delete`), the non-secret monotonic `operationGeneration` (canonical positive
 decimal, at most the PostgreSQL BIGINT maximum) and `operationDigest`
-(lowercase `sha256:`). `applied` adds `providerStatus` (`profileRef`,
+(lowercase `sha256:`). `operationDigest` is pinned to the `@byok-sdk/core`
+`providerProvisioningRequestDigest(request)` of the immutable sealed request,
+the same value `@byok-sdk/keys` returns as `result.requestDigest`; a Host
+compares completions and stores its receipt against that value and no other
+digest. `applied` adds `providerStatus` (`profileRef`,
 `providerKind`, `modelId`, `capabilities`, `secretConfigured`; no endpoint,
 auth mode or secret) and the exact `ProviderProfileBinding`, both `null` for
 `delete` and only for `delete`; `configure` and `replace_secret` must report
@@ -597,6 +601,16 @@ conflicting outcomes, so a notice can never wedge the mailbox on a
 deterministic end state. A missing handler, a handler throw (transport or other
 unknown failure), or an invalid or mismatched readback leaves the row
 unacknowledged and the cursor behind it.
+
+The handler answers a redelivered or retried notice receipt-first: before it
+needs any ciphertext, sealing key or placement, it reads the device's durable
+local result for `requestId` + `requestDigest` (`@byok-sdk/keys`
+`readSealedProvisioningResult`) and reports that stored result. The Host's
+device-authenticated fetch response for a request therefore must return
+`{ requestId, requestDigest }` for every request it still knows, including a
+terminal request whose ciphertext the Host has already deleted; only the sealed
+secret may be absent from such a response, never the request identity or its
+digest.
 
 The device-proof operation a device signs when it registers its provider-secret
 sealing public key is `provider-secret-sealing-key.register`

@@ -80,7 +80,9 @@ export type ProviderProvisioningOperationGeneration = z.infer<typeof ProviderPro
 /**
  * SHA-256 of the canonical non-secret operation the device evaluated. Two
  * completions for one request id are the same result only when this digest
- * (and the rest of the completion) is identical.
+ * (and the rest of the completion) is identical. Pinned to `@byok-sdk/core`
+ * `providerProvisioningRequestDigest(request)` (the value `@byok-sdk/keys`
+ * returns as `result.requestDigest`); see docs/protocol.md §2.3.
  */
 export const ProviderProvisioningOperationDigestSchema = z
   .string()
