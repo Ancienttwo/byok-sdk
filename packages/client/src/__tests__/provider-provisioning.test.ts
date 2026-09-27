@@ -89,7 +89,7 @@ describe('provider provisioning notice processor', () => {
 
   it('fails closed when no handler is configured', async () => {
     const process = createProviderProvisioningNoticeProcessor({ ...identity, handler: undefined });
-    await expect(process({ requestId: REQUEST_A })).rejects.toBeInstanceOf(ProviderProvisioningNoticeError);
+    await expect(process({ requestId: REQUEST_A })).rejects.toMatchObject({ reason: 'handler_unconfigured' });
   });
 
   it('hands the host exactly a frozen { requestId }', async () => {
@@ -136,14 +136,19 @@ describe('provider provisioning notice processor', () => {
     await expect(process({ requestId: REQUEST_A })).rejects.toBeInstanceOf(ProviderProvisioningNoticeError);
   });
 
-  it('propagates a handler failure so the row stays un-acknowledged', async () => {
+  it('turns a handler failure into a closed error without its message or cause, so the row stays un-acknowledged', async () => {
     const process = createProviderProvisioningNoticeProcessor({
       ...identity,
       handler: async () => {
         throw new Error('host fetch transport failed');
       },
     });
-    await expect(process({ requestId: REQUEST_A })).rejects.toThrow('host fetch transport failed');
+    const error = await process({ requestId: REQUEST_A }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ProviderProvisioningNoticeError);
+    expect((error as ProviderProvisioningNoticeError).reason).toBe('handler_failed');
+    expect((error as ProviderProvisioningNoticeError).requestId).toBe(REQUEST_A);
+    expect((error as Error).message).not.toContain('host fetch transport failed');
+    expect((error as Error).cause).toBeUndefined();
   });
 });
 
