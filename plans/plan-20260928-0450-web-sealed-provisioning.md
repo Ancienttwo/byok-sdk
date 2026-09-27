@@ -49,6 +49,22 @@ Final authority: this plan（Fable 主循环综合定稿）。两轨报告只作
 | D16 | key 输入隔离 iframe | v1 不做；key 对话框页禁第三方脚本/session replay，严格 CSP | 另立小 WP 视需要 |
 | D17 | 旧粘贴 binding 的 bot | 数据模型不变，原样可用；首次编辑走新流程 | 当前生产仅测试数据 |
 
+## 2.1 Advisor 1 采纳（Codex，codex-advice-1.md 5e560598…，全部采纳，优先于 §2/§3 冲突处）
+
+- **A1（D1 安全声明）**：v1 长期接收密钥**不提供接收方私钥泄漏下的历史密文前向保密**；TTL 只缩短在线留存，轮换并销毁旧私钥只限制跨 epoch 暴露。epoch 必须绑定真实新密钥生成与旧私钥删除；re-pair/enrollment 变化必须生成新密钥，不得因 SecretStore 名已存在而复用。
+- **A2（D2 实现边界）**：S1 验收须含与一个独立 HPKE 实现（仅 devDependency/测试用）的双向互操作，以及错误长度、无效曲线点、错误/含私有字段的 JWK、截断 tag 等负例；API 收口为每请求一次性 seal/open，不暴露可复用 context。WebCrypto Ed25519 验签纳入浏览器矩阵。自实现 HPKE 发布前需专项安全审阅；向量 PASS 不等于已审计。
+- **A3（D4 顺序/CAS）**：所有配置操作在锁内校验 expected provider triple 与 enrollment/placement 身份，并携带非秘密的单调 `operationGeneration`（绑定进 AAD 与本地状态）；旧 generation 一律拒绝。纯 `replace_secret` 不升 provider revision/hash，也**不升 Host profile revision**，只更新 operation receipt 与 secret 状态。同 requestId+同摘要重试返回原结果不重写，摘要不同返回 conflict。
+- **A4（D5 读写一致）**：跨进程锁保护「重新读取并 exact-validate 当前 profile + pending 检查 + key 读取」的一致快照；覆盖所有 credential reader（registry client、launcher、key check）与所有 writer（configure/update_model/replace/remove）。本地最后一个 SQLite 事务同时提交 profile 变化、applied operation 摘要与 credential-free 完成结果，再清 pending。仅对仍 pending 的不确定操作要求重输 key；已本地完成而 ACK 丢失的操作重发同一无秘密结果。
+- **A5（D6 admission 快照）**：admission 同事务冻结完整不可变身份快照（AgentRef、placement/device、runtime、provider triple）；prepare 比较该快照而非仅 selection。未 prepare 的旧配置 turn 经规范 settlement/event/outbox 事务结算 `agent_profile_changed` 并释放队头；prepared-but-not-started 保留旧 binding 不重冻，设备 exact admission 拒绝时确定性结算 stale 原因；已运行保持冻结。语义 = 服务端受理瞬间的配置。
+- **A6（D7 声明）**：v1 信任 Salesko 设备身份公钥目录及其更新；能主动篡改目录/响应的攻击者可同时替换身份与 sealing 公钥。设备签名只检测 sealing key 单独被改。HPKE base mode 不认证发送者，授权依赖 API 会话。
+- **A7（D8 credential scope）**：`update_model` 保留 secret 的条件是旧记录与新候选的 endpoint/auth_mode/adapter 完全相同（不只 providerKind 相同）；不同则必须 configure 重输 key。`replace_secret` 校验其声明 scope 与当前 exact binding 一致。测试含「同 kind 旧 custom URL」与「catalog 升级同 kind 不同 URL」。
+- **A8（D10 remove）**：`keys remove` 走同一锁/pending/tombstone 与幂等结果，成功后立即触发状态失效上报（离线持久标记待上报）；只删 Salesko 的 authoring 命令，不删 SDK registry API。
+- **A9（D11 重放/过期）**：设备校验 `0 < expiresAt-issuedAt <= 15min` 与有限时钟偏差；ledger 不得按条数淘汰仍在窗口内的记录（用 generation high-watermark 或 backpressure），第 257 次后重放第 1 次仍拒绝，时钟回拨不复活过期操作。区分「截止前未应用」与「已应用、回执晚到」：本地 durable result 截止后仍可读回。expired/rejected/rotated 为可消费确定性终态，notice 重投得到终态后允许推进 cursor，不得因 410 卡住 mailbox。每 bot/device pending 上限与限流；置 NULL 只是逻辑清除。
+- **A10（D13 check）**：`rejected` 只指明确的凭证拒绝；429/余额/模型权限/网络归入其他闭集码；有超时、响应大小上限；绑定 operationGeneration，旧 check 不覆盖新状态；与 A4 同快照机制。
+- **A11（D14 范围）**：两种完成条件分列——SDK Windows v1 = Windows 真凭证库后端集成验证（CI windows 作业，含服务账户或同用户运行约定）；Salesko Windows 构建/安装/服务/网页全链路**未交付**，不计入本次完成，已向 Owner 报告。
+- **A12（D16 验收）**：承载 key 输入的整个 document 不加载第三方脚本/session replay（或独立 document 导航）；canary 验收先进入普通页再进 key 页。
+- **A13（D17 迁移）**：改名等非 provider 编辑不迁移；首次 provider 配置编辑提示重输 key，执行 configure 创建派生 ref，设备完成后 Host CAS 切换 binding；不回退读旧 ref、不复制旧 key、不先改 Host；旧 ref 不自动删除。
+
 ## 3. 协议（规范性摘要）
 
 1. **sealing key 注册**：local-agent 启动时 `DeviceSealingKeyStore.loadOrCreate()`（keys，P-256 私钥存 SecretStore 名 `device-sealing-p256-v1`）；host 用设备身份 key 对 canonical `{keyId, epoch, publicJwk}` 出 device proof（operation `provider-secret-sealing-key.register`），经 device assertion（audience `salesko.provider-sealing-key.v1`）注册；API 保存当前 key，旧 key retired，封给旧 key 的 pending 请求判 `sealing_key_rotated`。能力位 `provider-provisioning.v1`。
