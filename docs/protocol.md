@@ -289,6 +289,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `agent.egress.ack` | S→D | optional | **required** | exact `agentRef`, `sessionRef`, `policyRevision`, `eventId`, `cursor`, `receiptId` | Cloud durably recorded one reliable Agent event |
 | `agent.content.read` | S→D | optional | **required** | `requestId`, surface, actor, exact Agent/session/runtime/cwd, policy revision, relative target, MIME, decode mode, bounded policy | An independently authorized explicit content read is requested |
 | `agent.home.projection` | S→D | forbidden | **required** | exact `requestId`, AgentRef/profile revision, SHA-256 projection identity, bounded opaque JSON | A durable task-free projection targets one exact capable device |
+| `provider.provisioning.available` | S→D | forbidden | **required** | exactly `{ requestId }` (strict; nothing else) | A Host holds a sealed provider provisioning request for one exact device advertising `provider-provisioning.v1` (§2.3) |
 | `task.approve` | S→D | **required** | **required** | `{}`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.approve()` while `AwaitApproval` |
 | `task.reject` | S→D | **required** | **required** | `reason?`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.reject()` while `AwaitApproval` |
 | `task.cancel` | S→D | **required** | **required** | `reason?` | `TaskHandle.cancel()` from any non-terminal state |
@@ -524,6 +525,69 @@ resume and echoes exact AgentRef through claim/decline/terminal messages.
 `workspaceHint` has no precedence because it is absent from the strict Agent
 offer. Profile contents and non-`.byok` Agent files are opaque; `artifacts` is
 not a protocol field, schema, index, or required directory.
+
+### 2.3 Task-free sealed provider provisioning notice
+
+`provider.provisioning.available` is an additive message type gated by the
+additive device capability `provider-provisioning.v1`
+(`PROVIDER_PROVISIONING_CAPABILITY`). A daemon advertises it only while its
+Host injected a `providerProvisioning` handler, and a Host must not enqueue the
+notice to a device whose durable capabilities lack it. It forbids `task_id`,
+requires `seq`, and its payload is `.strict()` with exactly one field:
+
+```text
+{ requestId }   // UUID; any other field is a validation failure, never stripped
+```
+
+The notice is deliberately notice-and-fetch. Configuration, sealed provider
+secret and every provider or Agent identity travel only over the Host's own
+device-authenticated routes, which this SDK does not define. A mailbox retains
+unacknowledged rows and the daemon journals ordinary rows before it
+acknowledges them, so ciphertext inside the envelope would outlive the
+provisioning window in two places; the strict one-field payload makes that
+unrepresentable. The daemon consumes the notice ahead of the journal append and
+never records it there.
+
+The daemon hands the handler a fresh `{ requestId }` and waits for the Host's
+durable terminal readback (`ProviderProvisioningReadbackSchema`):
+
+```text
+{ tenantId, deviceId, requestId,
+  disposition: recorded | idempotent | conflict | host_terminal,
+  completion,            // the terminal fact the Host has STORED
+  completedAt }
+```
+
+`completion` (`ProviderProvisioningCompletionSchema`) is the credential-free
+result the device reported, discriminated by `outcome`. Both arms carry
+`requestId`, `operation` (`configure | update_model | replace_secret |
+delete`), the non-secret monotonic `operationGeneration` (canonical positive
+decimal, at most the PostgreSQL BIGINT maximum) and `operationDigest`
+(lowercase `sha256:`). `applied` adds `providerStatus` (`profileRef`,
+`providerKind`, `modelId`, `capabilities`, `secretConfigured`; no endpoint,
+auth mode or secret) and the exact `ProviderProfileBinding`, both `null` for
+`delete` and only for `delete`; `configure` and `replace_secret` must report
+`secretConfigured: true`, and `replace_secret` reports the unchanged binding.
+`rejected` adds one closed-set `code`; codes name the failed check and never a
+value. Re-sending an identical completion yields `idempotent` with the stored
+result and no rewrite; a different digest or result yields `conflict` with the
+stored result unchanged. `host_terminal` is valid only for a rejected
+completion the Host recorded on its own authority (`request_expired`,
+`sealing_key_rotated`), for example a request that expired before the device
+fetched it.
+
+Every readback is terminal; there is no `pending`. The cursor advances exactly
+when the handler resolves with a readback that validates and names this
+daemon's tenant, device and request, including expired, rotated, rejected and
+conflicting outcomes, so a notice can never wedge the mailbox on a
+deterministic end state. A missing handler, a handler throw (transport or other
+unknown failure), or an invalid or mismatched readback leaves the row
+unacknowledged and the cursor behind it.
+
+The device-proof operation a device signs when it registers its provider-secret
+sealing public key is `provider-secret-sealing-key.register`
+(`PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION`). Assertion audiences and
+route paths are Host vocabulary and are not part of this protocol.
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 

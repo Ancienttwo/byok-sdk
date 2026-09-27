@@ -185,6 +185,8 @@ export type {
   AgentContentReadSurfaceConfig,
   AgentReliableEgressInput,
 } from './daemon/create-daemon';
+export { ProviderProvisioningNoticeError } from './daemon/provider-provisioning';
+export type { ProviderProvisioningHandler, ProviderProvisioningNotice } from './daemon/provider-provisioning';
 export {
   AgentMemoryError,
   AgentMemoryRevisionConflictError,

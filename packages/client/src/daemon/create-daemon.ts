@@ -26,6 +26,7 @@ import {
   AGENT_INPUT_PREPARATION_CAPABILITY,
   TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   PROVIDER_PROFILE_BINDING_CAPABILITY,
+  PROVIDER_PROVISIONING_CAPABILITY,
   AgentContentReceiptPayloadSchema,
 } from '@byok-sdk/protocol';
 import type {
@@ -177,6 +178,10 @@ import type { AgentContentReceiptWithoutReliableIdentity, AgentReliableEgressRec
 import { AgentContentAuditStore } from './agent-content-audit-store';
 import { AgentHomeProjectionCompletionClient } from './agent-home-projection-client';
 import { InputPreparationCompletionClient } from './input-preparation-completion-client';
+import {
+  createProviderProvisioningNoticeProcessor,
+  type ProviderProvisioningHandler,
+} from './provider-provisioning';
 import {
   createRemoteInputPreparationHandler,
 } from './input-preparation-remote';
@@ -649,6 +654,21 @@ export interface DaemonConfig {
    */
   inputPreparation?: InputPreparationDaemonConfig;
   /**
+   * Host consumer for the task-free `provider.provisioning.available` notice
+   * (sealed provider provisioning). See {@link ProviderProvisioningHandler}.
+   *
+   * OFF by default, and the `provider-provisioning.v1` capability is advertised
+   * only while a handler is present, so a Host never enqueues a notice this
+   * daemon cannot consume. A notice that arrives anyway (a stale row, or a
+   * sender that ignored the capability) is NOT acknowledged: the daemon throws,
+   * the mailbox row is retained and the cursor stays behind it.
+   *
+   * The handler receives only `{ requestId }` and resolves with the Host's
+   * durable terminal readback; the cursor advances only after that readback
+   * validates against this tenant, device and request.
+   */
+  providerProvisioning?: ProviderProvisioningHandler;
+  /**
    * Operator input to the MCP toolset launch boundary
    * (`./trusted-launch-cwd.ts`), forwarded verbatim to
    * `TaskRunnerDeps.mcpLaunchCwd`.
@@ -1069,6 +1089,7 @@ function computeCapabilities(
   contentReadPolicies?: Readonly<Record<AgentContentReadSurface, AgentContentReadPolicySelection>>,
   providerProfileBindingConfigured = false,
   inputPreparationConfigured = false,
+  providerProvisioningConfigured = false,
 ): CapabilityFlag[] {
   const flags: CapabilityFlag[] = [];
   if (adapters.some((adapter) => adapter.descriptor.capabilities.steer)) flags.push('steer');
@@ -1102,6 +1123,9 @@ function computeCapabilities(
   // allocates a receipt, so an unconfigured device is refused at the Host
   // rather than handed a row it can only answer with a rejection.
   if (inputPreparationConfigured) flags.push(AGENT_INPUT_PREPARATION_CAPABILITY);
+  // Advertised only while the Host injected a handler: the Host's enqueue
+  // gate reads this flag, so an unconfigured device is never sent a notice.
+  if (providerProvisioningConfigured) flags.push(PROVIDER_PROVISIONING_CAPABILITY);
   if (agentEgressConfigured) {
     flags.push(
       AGENT_EGRESS_POLICY_CAPABILITY,
@@ -1345,6 +1369,9 @@ export function buildDaemonWithAdapters(
   overrides: DaemonOverrides = {},
   assertionProbe?: AssertionIssueProbe,
 ): Daemon {
+  if (config.providerProvisioning !== undefined && typeof config.providerProvisioning !== 'function') {
+    throw new Error('DaemonConfig.providerProvisioning must be a handler function when present');
+  }
   if (config.agentHome !== undefined && config.gitWorkspace !== undefined) {
     throw new Error(
       'DaemonConfig.agentHome and DaemonConfig.gitWorkspace are mutually exclusive; Agent home is the only workspace authority for Agent offers',
@@ -2169,6 +2196,7 @@ export function buildDaemonWithAdapters(
       agentContentReadPolicies,
       config.piByokLauncher !== undefined,
       inputPreparationService !== undefined,
+      config.providerProvisioning !== undefined,
     );
     const agentHomeProjectionCompletion = agentHomeManager?.supportsTaskFreeProjection() === true
       ? new AgentHomeProjectionCompletionClient({
@@ -2178,6 +2206,12 @@ export function buildDaemonWithAdapters(
           deviceId: record.deviceId,
         })
       : undefined;
+
+    const processProviderProvisioningNotice = createProviderProvisioningNoticeProcessor({
+      tenantId: record.tenantId,
+      deviceId: record.deviceId,
+      handler: config.providerProvisioning,
+    });
 
     /**
      * C07 G4-remote. Constructed UNCONDITIONALLY, unlike the projection client
@@ -2505,6 +2539,14 @@ export function buildDaemonWithAdapters(
       await handleRemoteInputPreparation(envelope.payload);
       return true;
     };
+    const handleProviderProvisioningEnvelope = async (envelope: Envelope): Promise<boolean> => {
+      if (envelope.type !== 'provider.provisioning.available') return false;
+      // Task-free and never journaled: it is consumed here, ahead of the
+      // journal append below, and resolves only on a durable terminal
+      // readback. Any throw keeps the row and the cursor for redelivery.
+      await processProviderProvisioningNotice(envelope.payload);
+      return true;
+    };
     const handleAgentEgressEnvelope = async (envelope: Envelope): Promise<boolean> => {
       if (envelope.type !== 'agent.egress.ack') return false;
       if (config.agentEgress === undefined) return true;
@@ -2686,6 +2728,7 @@ export function buildDaemonWithAdapters(
               observer.handleInboundEnvelope(envelope);
               if (await handleAgentHomeProjectionEnvelope(envelope)) return;
               if (await handleAgentInputPreparationEnvelope(envelope)) return;
+              if (await handleProviderProvisioningEnvelope(envelope)) return;
               if (await handleAgentEgressEnvelope(envelope)) return;
               if (await handleAgentContentReadEnvelope(envelope)) return;
               // S3b (L-003): §12.7.2.1's `emergency` row — "fail-closed，不 ack
@@ -2727,6 +2770,7 @@ export function buildDaemonWithAdapters(
               observer.handleInboundEnvelope(envelope);
               if (envelope.type === 'agent.home.projection') return handleAgentHomeProjectionEnvelope(envelope).then(() => undefined);
               if (envelope.type === 'agent.input.preparation') return handleAgentInputPreparationEnvelope(envelope).then(() => undefined);
+              if (envelope.type === 'provider.provisioning.available') return handleProviderProvisioningEnvelope(envelope).then(() => undefined);
               if (envelope.type === 'agent.egress.ack') return handleAgentEgressEnvelope(envelope).then(() => undefined);
               if (envelope.type === 'agent.message.disposition') return runner?.handleEnvelope(envelope) ?? Promise.resolve();
               if (envelope.type === 'agent.content.read') return handleAgentContentReadEnvelope(envelope).then(() => undefined);

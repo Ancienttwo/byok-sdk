@@ -26,6 +26,36 @@ export type {
 } from './provider-profile-binding';
 
 export {
+  PROVIDER_PROVISIONING_CAPABILITY,
+  PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION,
+  PROVIDER_PROVISIONING_OPERATIONS,
+  PROVIDER_PROVISIONING_OPERATION_GENERATION_MAXIMUM,
+  PROVIDER_PROVISIONING_REJECTION_CODES,
+  PROVIDER_PROVISIONING_HOST_TERMINAL_CODES,
+  PROVIDER_PROVISIONING_DISPOSITIONS,
+  ProviderProvisioningAvailablePayloadSchema,
+  ProviderProvisioningOperationSchema,
+  ProviderProvisioningOperationGenerationSchema,
+  ProviderProvisioningOperationDigestSchema,
+  ProviderProvisioningRejectionCodeSchema,
+  ProviderProvisioningProviderStatusSchema,
+  ProviderProvisioningCompletionSchema,
+  ProviderProvisioningDispositionSchema,
+  ProviderProvisioningReadbackSchema,
+} from './provider-provisioning';
+export type {
+  ProviderProvisioningAvailablePayload,
+  ProviderProvisioningOperation,
+  ProviderProvisioningOperationGeneration,
+  ProviderProvisioningOperationDigest,
+  ProviderProvisioningRejectionCode,
+  ProviderProvisioningProviderStatus,
+  ProviderProvisioningCompletion,
+  ProviderProvisioningDisposition,
+  ProviderProvisioningReadback,
+} from './provider-provisioning';
+
+export {
   AgentEventSchema,
   AgentEventSpillSchema,
   AGENT_EVENT_SPILL_UNSTORED_REASON_MAX_LENGTH,
