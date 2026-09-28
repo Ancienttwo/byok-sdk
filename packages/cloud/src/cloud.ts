@@ -627,8 +627,11 @@ export interface ByokCloud {
    * a second notice, and a retry naming a different `agentRef` for the same
    * intent fails `mailbox_receipt_mismatch`. After acked-row retention cleanup
    * a retry appends a new row with a new seq and `agentRef` is no longer
-   * compared, so the Host must keep `agentRef` fixed per `intentId`; the
-   * device fails closed (`fetch_invalid`/`readback_invalid`) on a mismatch.
+   * compared, so the Host must keep `agentRef` fixed per `intentId`. The
+   * device fails closed (`fetch_invalid`/`readback_invalid`) on a mismatched
+   * `agentId`, or on a mismatched `profileRevision` once its ledger row is
+   * pruned; while the row is live it replays its stored completion without
+   * comparing the notice's `profileRevision` (no write, no second CAS).
    * Approval, release, completion and readback are Host authority on Host
    * routes; this plane records no intent receipt of its own.
    */
