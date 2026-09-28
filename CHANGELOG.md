@@ -46,8 +46,11 @@
   cloud and devices together; recreate preparations with the Host systemPrompt,
   official identity and explicit memory selection. A device with leftover v7
   records refuses the lane with `input_preparation_record_log_unsupported`: stop
-  the daemon, run `byok-agent retire-input-preparation` (read-only preview), then
-  `--yes`, and restart. It moves the namespace to
+  the old daemon, stage the 0.23.0 CLI without starting the daemon (the host
+  product's installer decides how), run the new CLI's
+  `byok-agent retire-input-preparation` (read-only preview) and then `--yes`
+  against the original config/store, complete the cloud/device switch, and start
+  the daemon on 0.23.0; the command does not exist in the 0.22.0 CLI. It moves the namespace to
   `input-preparation-retired/<stamp>-v<versions>/` with a manifest and never
   deletes, converts or touches Agent home/memory. Skipping the drain cannot
   repair old entries.
