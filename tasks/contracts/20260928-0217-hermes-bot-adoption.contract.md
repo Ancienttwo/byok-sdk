@@ -28,6 +28,30 @@
 
 WP1-I acceptance gate FAIL（2026-09-28）指出 C6/验收第 7 条的 operator retirement 未实现也未登记延后；用户裁定「放进 WP1-I 实现」。追加范围：实现 operator 显式调用的一次性 `byok-agent` 子命令，把非当前 record version 的 `input-preparation/` 命名空间整体移入 store 内退役证据目录并写 manifest（各版本计数、records.jsonl sha256、artifact hash 清单）；不删除、不转换、不前向读取旧记录（结构化只读 version/pin 字段，不经 `replay()`）；默认只读列出/计数，`--yes` 才执行；daemon control online 或 owner lease 被占用即拒绝（复用 `doctor` 角色，不改 `daemon-owner.ts`）；任何 pin、混入当前版本、不可解析或未知版本即整体拒绝；路径限定在 storeDir，绝不触碰 Agent home/memory；严格启动拒绝保持不变。仅实现与测试，不对任何真实 store 执行。
 
+### Approved follow-up: WP2-I-D device memory CAS transport design
+
+用户经 Codex w2:pR 正式派发（2026-09-28）：补齐 WP2-I Host Bot 记忆提议生命周期所缺的 SDK device CAS 传输契约，交付可由 Owner 裁定的方案。仅研究与设计授权：不是 WP2-I 产品实现、发布或真实 store 操作授权。写入只限计划/研究/contract/notes/review 文档；新增 `docs/researches/2026-09-28-hermes-device-memory-cas-contract.md` 承载字段级契约，更新 `docs/researches/2026-09-28-hermes-host-lifecycle-design.md` 的 WP2-I 一节。SDK/Salesko 产品 source、tests、配置与真实数据只读。探索者只读；单一文档写入者；不 commit/push。
+
+### Approved follow-up: WP2I-S1 protocol/core implementation
+
+Owner 原话（2026-09-28，经 Codex w2:pR 转达）：「批准。与Claude讨论下一刀并派工」。Owner 未逐项提交问卷；以下映射是 Codex w2:pR 与 Claude w2:pT 协商后对该批准的解读：R3 = read 消费方向（作为后续 WP2I-H3 的目标；Salesko 当前运行事实仍为 `agentMemory: none`，本包不启用 read）；R16 = A release-time grant；R2 仅 lease 互斥，不承诺 next-turn-only；R5/WP2I-H3 的 Turn 暂缓只服务 liveness；R4 terminal purge、R6 canonical owner、R7 有限 forget、R9 用户 UI 起步、R10 `notes/host-<slug>.md`、R11 新 proposal 新审批且禁自动 rebase，均按已验收裁定表推荐记录。WP2-I-D 的 DESIGN ACCEPTED 保留；实现另需证据。
+
+本包只实现 WP2I-S1：`docs/researches/2026-09-28-hermes-device-memory-cas-contract.md` 字段表中的 protocol/core schema 与 `operationDigest`，message/envelope/codec/capability/export 登记，两份新测试、两份 protocol golden、protocol/core API surface。单一 Claude 执行 worker 独占下列 S1 路径，coordinator 独占六份协调文档，二者不写同一文件。不改 package.json、client、cloud、server、Salesko、docs/protocol.md 或其他路径；保留 WIP 与 PR #239。R16=A：不引入 `releaseNotAfter`、`releaseDigest`、`release_expired`。R10 属 Host 路径政策，S1 不放宽 SDK 现有 path 安全边界。不启用 capability 或 memory helper，不 commit/push/PR/merge/release，不启动 S2/S3/H1–H3。
+
+停点：既有 golden 条目任何变化；需要改 client/cloud/server/package.json；digest 不能复用既有 `canonicalizeJson`/content digest 原语；schema 需偏离已验收字段表；真实并发文件冲突；任何检查失败按每问题三轮 fail→fix→reverify 上限。
+
+### Approved follow-up: WP2I-S2 SDK client implementation
+
+用户在 w2:pT 直接指示「启动派工」（2026-09-28），作为 WP2I-S1 ACCEPTED 之后「下一刀 = WP2I-S2」建议的执行授权。本包只实现 `docs/researches/2026-09-28-hermes-device-memory-cas-contract.md` 的 WP2I-S2 行：daemon 侧 `agent.memory.intent.available` processor、`.byok/agent-memory-intents-v1.json` apply ledger（count-based reservation、windows 1–3、terminal 与 `ackedAt` durable barrier）、非 task 的 home-binding CAS 入口、capability 条件 advertise、Host transport hook 接口；plain-data snapshot 从 provider-provisioning 移出供两处复用。S1 验收转交的约束全部生效：无本地行 terminal-fetch 只接受 `host_terminal`/`recorded`/`idempotent`（`conflict` → `readback_invalid`，不 ack，零 ledger 写）；readback `conflict` 与 completion `conflict` 分别有正负用例；replace release 校验 `sha256(utf8(content)) === targetRevision`；`applied` 按 operation 校验（replace：`exists=true` 且 `revision === targetRevision`；delete：`exists=false` 且 `revision === sha256(empty)`，`targetRevision` 为 null），不重读当前文件推翻历史 receipt，不由 hash 推断 provenance；负控断言具体 issue path。
+
+单一 Claude 执行 worker 独占下列 S2 路径；coordinator 独占六份协调文档；S1 源码文件本包不改（若必须改，停并报告，S1 verdict 随之作废）。不改 cloud、server、docs、package.json、Salesko；不启用任何真实 Host transport、不对真实 store 执行；不 commit/push/PR。WP2I-S3 不在本包（`docs/protocol.md` 与 PR #239 重叠，另行派工）。
+
+停点（沿用设计 WP2I-S2 行 ①–⑤）：① 需放宽 `AgentMemoryTaskContext`；② 未能对 native 与 helper 两后端证明「conflict ⇒ 无 rename」（未证明的后端 conflict 映射 `uncertain`）；③ `AgentMemoryError` 无法用 typed 子类区分确定性失败与 I/O 失败（禁止解析 message）；④ 实测最大记录 + 分隔符 > `R_MAX`；⑤ ledger 写入无法证明 file fsync + rename + directory fsync 全部成功（该文件系统或 helper 后端不得 advertise）。另加：需要改 S1 源码、cloud/server/package.json；真实并发文件冲突；每问题 fail→fix→reverify 三轮上限。
+
+### Approved follow-up: WP2I-S2 identity-gate fix
+
+Codex w2:pR 裁定（2026-09-28）：`57aebf9f…` 最终 NOT ACCEPTED（identity-binding blocker），采用方案 A。只有与本机 enrollment 和 notice 绑定的 canonical intent 才能产生可持久化的 device completion。`validateRelease` 与 `validateWithheld` 先核对 intent `agentId`/`profileRevision` 等于 notice，再以本机 tenant/device 重算 `operationDigest`；任何身份或 digest 不符 → `fetch_invalid`，零 ledger、零 target CAS、零 completion、不 ack。content-only 缺陷同样先过该门。门后才允许 `path_invalid`/`content_invalid`/`memory_md_not_deletable` 或合法 withheld Host code 的 rejected。S1 两枚 rejection code 原样保留，无兼容消费路径。唯一写入者仅写 `packages/client/src/daemon/agent-memory-intent.ts` 与 `packages/client/src/__tests__/agent-memory-intent.test.ts`；公开 API 若需变化先停。不放宽 Host，不新增 terminal 或 operator 方法，不改 S1。此为 S2 第三次候选 gate、identity 问题首次修复；仍不通过则报告最小反例，不自动进入第四轮。
+
 ## Scope
 
 - In scope: User approved WP1-I full SDK memory-only implementation under the accepted WP1-I-C contract. Implement protocol v8, descriptor/identity, prepared counting/sealing/runtime binding, operation ACL and focused regressions; run required checks in this isolated worktree. Dependencies may be installed using the frozen lockfile here.
@@ -168,6 +192,30 @@ allowed_paths:
   - packages/cloud/src/cloud.ts
   - packages/cloud/src/capabilities.ts
   - tasks/todos.md
+  - docs/researches/2026-09-28-hermes-device-memory-cas-contract.md
+  - packages/protocol/src/agent-memory-intent.ts
+  - packages/protocol/src/messages.ts
+  - packages/protocol/src/envelope.ts
+  - packages/protocol/src/codec.ts
+  - packages/protocol/src/version.ts
+  - packages/protocol/src/index.ts
+  - packages/protocol/src/__tests__/agent-memory-intent.test.ts
+  - packages/core/src/agent-memory-intent.ts
+  - packages/core/src/index.ts
+  - packages/core/src/__tests__/agent-memory-intent.test.ts
+  - packages/core/src/__tests__/constraints.test.ts
+  - packages/client/src/daemon/agent-memory.ts
+  - packages/client/src/daemon/agent-memory-intent.ts
+  - packages/client/src/daemon/plain-data-snapshot.ts
+  - packages/client/src/daemon/provider-provisioning.ts
+  - packages/client/src/daemon/create-daemon.ts
+  - packages/client/src/agent-home.ts
+  - packages/client/src/index.ts
+  - packages/client/src/__tests__/agent-memory-intent.test.ts
+  - packages/client/src/__tests__/daemon-conn-hello-capabilities.test.ts
+  - packages/client/src/daemon/observer.ts
+  - packages/client/src/bin/format.ts
+  - packages/client/src/bin/audit-log.ts
 ```
 
 ## Delegation Contract
