@@ -2,15 +2,14 @@
 
 Status: CURRENT boundary contract.
 
-The registry's current `latest` is 0.22.0 / keys 0.7.0, published on 2026-09-25
-from the `v0.22.0` tag target (`0962f14f`) — see its
-[publication record](../../docs/releases/v0.22.0-publication.md), the
-[release notes](../../docs/releases/v0.22.0.md) and the
-[Salesko / Owner command sheet](../../docs/releases/v0.22.0-handoff.md) that
-defines its wire-7 drain, record rebuild and official-identity ruling
-prerequisites. The previous train is 0.21.0 / keys 0.6.2, published on
-2026-09-24/25 from the `v0.21.0` tag target (`8b7a2121`) — see its
-[publication record](../../docs/releases/v0.21.0-publication.md).
+The registry's current `latest` is 0.23.0 / keys 0.8.0, published on 2026-09-28
+from the `v0.23.0` tag target (`bcf65a3f`) — see its
+[publication record](../../docs/releases/v0.23.0-publication.md) and the
+[release notes](../../docs/releases/v0.23.0.md), which define the sealed
+provisioning keys store cut and the input-preparation v8 Host upgrade order.
+The previous train is 0.22.0 / keys 0.7.0, published on 2026-09-25 from the
+`v0.22.0` tag target (`0962f14f`) — see its
+[publication record](../../docs/releases/v0.22.0-publication.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
 
@@ -51,5 +50,7 @@ Version preparation does not authorize registry publication.
    3. Dry run `node scripts/release/publish.mjs --artifacts <dir>`. It refuses unless the frozen `release-manifest.json` names the release version and was packed from the current `HEAD`, and unless every tarball the publish set needs is present and re-hashes to its recorded sha256. It then prints the ordered publish plan with those digests. Nothing is published, read back or tagged.
    4. Release with `node scripts/release/publish.mjs --artifacts <dir> --execute`. Run interactively in Terminal.app for npm write 2FA. It refuses if the tag already exists, if `npm whoami` reports no account, or if `npm profile get --json` does not report `tfa.mode` `auth-and-writes` — there is no override. It then publishes each tarball in dependency order (`--provenance` only under GitHub Actions OIDC; a local release logs that no attestation is attached), reads the registry back, and only then creates the annotated `v<version>` tag carrying the source commit.
    5. Push the tag: `git push origin v<version>`. A tag exists only for a train the registry has already confirmed.
+
+   Interrupted local publishes (observed in 0.23.0): npm web-auth can fail a single publish with E403 when a browser confirmation does not complete, or retry the PUT after a successful publish and report "cannot publish over the previously published versions"; registry propagation can make the step-7 readback 404 for minutes. Re-run step 4 — `publish.mjs` treats a partially published version as the candidate and publishes only the missing packages from the same frozen tarballs — and/or wait and re-run `node scripts/release/registry-readback.mjs --manifest <dir>/release-manifest.json`. If every package is already on the registry, the script refuses to run again; after the standalone readback passes, create the annotated tag by hand with step 8's exact message (`v<version>`, blank line, `sourceGitSha <sha>`). Never repack.
 
    Artifacts expire after 30 days; past that, re-run CI on the same commit rather than repacking locally.

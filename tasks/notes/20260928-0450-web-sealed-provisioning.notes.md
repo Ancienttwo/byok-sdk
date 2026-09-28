@@ -144,7 +144,7 @@ Codex acceptance round 1, finding F3 (HIGH): a Host handler exception reached th
 
 ## Handoff to Salesko (H1/H3)
 
-SDK side is prepared as 0.23.0 / keys 0.8.0 (not published). Salesko obligations:
+SDK side is prepared as 0.23.0 / keys 0.8.0 (not published at the time of writing; published 2026-09-28, see `docs/releases/v0.23.0-publication.md`). Salesko obligations:
 
 - **H1 — request issuance:** the Host must set `expectedEnrollmentRevision` and `expectedPlacementRevision` (opaque `[A-Za-z0-9._:-]{1,128}`) on every sealed provisioning request; both are required in the core header and bound into the AAD, so there is no request without them.
 - **H1 — device fetch contract:** the device-authenticated fetch response must return `{ requestId, requestDigest }` for every request the Host still knows, including terminal requests whose ciphertext was already deleted (only the sealed secret may be absent). `requestDigest` = core `providerProvisioningRequestDigest(request)` = keys `result.requestDigest` = the completion `operationDigest` (docs/protocol.md §2.3).
