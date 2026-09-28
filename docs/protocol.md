@@ -621,8 +621,17 @@ digest.
 
 The device-proof operation a device signs when it registers its provider-secret
 sealing public key is `provider-secret-sealing-key.register`
-(`PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION`). Assertion audiences and
-route paths are Host vocabulary and are not part of this protocol.
+(`PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION`); a client-based device signs
+it with `createStoredDeviceProofSigner`. Assertion audiences and route paths
+are Host vocabulary and are not part of this protocol.
+
+`expectedEnrollmentRevision` is the decimal string of the device-proof key
+epoch the device's enrollment key is registered under: the Host issues
+`String(proof_key_epoch)` from its device row, and a client-based device reads
+the same value as `enrollmentRevision` from `readDeviceEnrollmentIdentity`
+(together with `tenantId`, `deviceId`, `proofKeyId` and `proofKeyEpoch`). It is
+monotonic across proof-key rotation for one device id; re-pair mints a new
+device id.
 
 A Host built on `@byok-sdk/cloud` appends the notice with
 `enqueueProviderProvisioningNotice(tenant, deviceId, { requestId })`. It

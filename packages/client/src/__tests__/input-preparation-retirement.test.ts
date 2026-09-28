@@ -10,6 +10,7 @@ import {
   InputPreparationRetirementConfirmationRequiredError,
   InputPreparationRetirementDaemonRunningError,
   InputPreparationRetirementRefusedError,
+  InputPreparationRetirementStoreBusyError,
   INPUT_PREPARATION_RETIREMENT_COMMAND,
 } from '../daemon/input-preparation-retirement';
 import {
@@ -190,7 +191,9 @@ describe('input-preparation retirement: refusals write nothing', () => {
     const before = await treeHash(seed.namespace);
     const lease = await acquireDaemonOwner(seed.storeDir, 'daemon');
     try {
-      expect(await refusal(execute(seed.storeDir))).toBeInstanceOf(DaemonOwnerActiveError);
+      const error = await refusal(execute(seed.storeDir));
+      expect(error).toBeInstanceOf(InputPreparationRetirementStoreBusyError);
+      expect((error as Error).cause).toBeInstanceOf(DaemonOwnerActiveError);
     } finally {
       await lease.release();
     }

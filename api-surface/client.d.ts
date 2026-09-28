@@ -4549,6 +4549,7 @@ export declare function runDeviceCommand(executable: string, args: readonly stri
 // ==== @byok-sdk/client dist/daemon/device-proof-signer.d.ts ====
 import { type DeviceProofEnvelopeV1 } from '@byok-sdk/core';
 import type { AuthManager } from './auth-manager';
+import { type DeviceEnrollmentIdentity } from './store';
 export interface DeviceProofRequest {
     readonly method: string;
     /** Exact origin-relative path, including the query string when present. */
@@ -4589,6 +4590,66 @@ export declare class StoredDeviceProofSigner implements DeviceProofSigner {
     constructor(options: StoredDeviceProofSignerOptions);
     sign(request: DeviceProofRequest): Promise<DeviceProofEnvelopeV1>;
 }
+declare const HOST_SIGNER_MESSAGES: {
+    readonly invalid_options: 'The device proof signer requires a product, the exact enrollment identity and a non-empty operation allowlist.';
+    readonly operation_not_allowed: 'The requested device proof operation is not in this signer\'s operation allowlist.';
+    readonly invalid_request: 'The device proof request is not a valid request binding.';
+    readonly unpaired: 'The device is not paired; no device proof can be signed.';
+    readonly re_pair_required: 'The device enrollment requires an explicit re-pair; no device proof can be signed.';
+    readonly enrollment_changed: 'The current device enrollment differs from the identity this signer was created for.';
+    readonly enrollment_unavailable: 'The device enrollment could not be read safely; no device proof was signed.';
+    readonly signing_failed: 'The device proof could not be signed.';
+};
+export type DeviceProofSignerErrorCode = keyof typeof HOST_SIGNER_MESSAGES;
+/**
+ * Closed-code failure of a host device-proof signer. It never carries a cause,
+ * OS diagnostic, path or key material.
+ */
+export declare class DeviceProofSignerError extends Error {
+    readonly code: DeviceProofSignerErrorCode;
+    constructor(code: DeviceProofSignerErrorCode);
+}
+export interface CreateStoredDeviceProofSignerOptions {
+    readonly productId: string;
+    /** Same store directory the daemon uses; omitted resolves the product default. */
+    readonly storeDir?: string;
+    /**
+     * The exact enrollment identity the host read with
+     * `readDeviceEnrollmentIdentity`. Every signature re-reads the enrollment and
+     * refuses (`enrollment_changed`) when tenant, device or proof key differ, so
+     * a re-pair between read and sign can never sign for a different device.
+     */
+    readonly identity: Pick<DeviceEnrollmentIdentity, 'tenantId' | 'deviceId' | 'proofKeyId' | 'proofKeyEpoch'>;
+    /**
+     * Host-defined device-proof operations this signer may sign (for example
+     * `provider-secret-sealing-key.register`). Any other operation is refused
+     * before the enrollment key is read.
+     */
+    readonly operations: readonly string[];
+    readonly clock?: () => Date;
+}
+/** A {@link DeviceProofSigner} scoped to one enrollment identity and an explicit operation allowlist. */
+export interface HostDeviceProofSigner extends DeviceProofSigner {
+    /** The frozen allowlist this signer was created with. */
+    readonly operations: readonly string[];
+}
+/**
+ * Create a host device-proof signer backed by the stored enrollment key.
+ *
+ * The signer holds no key material: each `sign` validates the operation and
+ * request binding, reads the current OS enrollment authority, checks it equals
+ * `identity`, signs core's canonical device-proof bytes (method, path, body
+ * SHA-256 and size, operation, resource, request id, time window) with the
+ * Ed25519 enrollment key and returns only the envelope. The private key is
+ * never returned, cached, logged or attached to an error.
+ *
+ * Security boundary: the allowlist scopes one signer instance; it is not a
+ * sandbox. Any code running as the device's OS account can already use the
+ * enrollment key, and verifiers must still bind operation, resource and body
+ * to their own route (as `@byok-sdk/cloud` `authenticateDeviceProof` does).
+ */
+export declare function createStoredDeviceProofSigner(options: CreateStoredDeviceProofSignerOptions): HostDeviceProofSigner;
+export {};
 // ==== @byok-sdk/client dist/daemon/environment.d.ts ====
 export { LOADER_ENV_DENY_PATTERNS, loaderEnvInjections } from '@byok-sdk/implementation-identity';
 /**
@@ -4839,6 +4900,203 @@ export declare function prependGitWorkspaceGuidance(instruction: string): string
 export declare function isGitWorkspaceConfig(value: unknown): value is GitWorkspaceConfig;
 export declare function canonicalWorkspaceRoot(value: string): Promise<string>;
 export { DEFAULT_MAX_OUTPUT_BYTES as GIT_WORKSPACE_MAX_OUTPUT_BYTES, DEFAULT_TIMEOUT_MS as GIT_WORKSPACE_TIMEOUT_MS };
+// ==== @byok-sdk/client dist/daemon/input-preparation-retirement.d.ts ====
+/**
+ * The bounded, operator-invoked retirement of an input-preparation namespace
+ * written at an older record schema version (the v8 cut's operator
+ * precondition, `docs/spec.md`; research contract C6).
+ *
+ * It is a MOVE, never a migration: the whole `<storeDir>/input-preparation/`
+ * directory is renamed, byte-for-byte, into
+ * `<storeDir>/input-preparation-retired/<stamp>-v<versions>/input-preparation/`
+ * with a manifest beside it. Nothing is deleted, converted or rewritten, and
+ * no old record is read forward: the log is read STRUCTURALLY — each line is
+ * `JSON.parse`d and only its `recordId`, `version` and `pin` fields are looked
+ * at, as untyped values. It never goes through `InputPreparationStore` or its
+ * `replay()`, whose strict startup refusal of an old record stays exactly as
+ * it is.
+ *
+ * Every path is derived from the resolved storeDir; Agent home and Agent
+ * memory are never touched.
+ *
+ * {@link retireInputPreparation} is the one public entry point (preview and
+ * execute); the `byok-agent retire-input-preparation` CLI is a thin renderer
+ * over the same function, so a branded host CLI can own this step without
+ * shipping the SDK CLI.
+ */
+export declare const INPUT_PREPARATION_RETIREMENT_COMMAND = "retire-input-preparation";
+export declare const INPUT_PREPARATION_RETIREMENT_MANIFEST_FORMAT = "byok.input-preparation.retirement-manifest";
+export declare const INPUT_PREPARATION_RETIREMENT_MANIFEST_VERSION = 1;
+declare const NAMESPACE_DIR = "input-preparation";
+export interface RetirementFileDigest {
+    readonly name: string;
+    readonly sha256: string;
+    readonly sizeBytes: number;
+}
+export interface InputPreparationNamespaceInspection {
+    /** `absent`: no namespace directory. `empty`: no record line and no artifact file. */
+    readonly status: 'absent' | 'empty' | 'present';
+    readonly namespacePath: string;
+    /** Non-empty lines in `records.jsonl`, parseable or not. */
+    readonly lineCount: number;
+    /** Lines that parsed to a JSON object. */
+    readonly recordCount: number;
+    /** Keyed by `JSON.stringify(version)`, or `missing` when the field is absent. */
+    readonly versionCounts: Readonly<Record<string, number>>;
+    /**
+     * Records whose EFFECTIVE line carries a `pin` field — a live pin. The fold
+     * mirrors `InputPreparationStore.replay()`: keyed by `recordId`, the last
+     * line for a key wins. A line whose `recordId` is not a string folds with
+     * nothing, so its pin always counts.
+     */
+    readonly pinnedRecordCount: number;
+    /** 1-based line numbers of lines that are not a JSON object. Line content is never reported. */
+    readonly unparseableLines: readonly number[];
+    readonly artifactFileCount: number;
+    /** Entries this namespace should not contain (relative to it); never followed or read. */
+    readonly unexpectedEntries: readonly string[];
+    readonly recordLog?: RetirementFileDigest;
+    readonly artifacts: readonly RetirementFileDigest[];
+}
+export interface InputPreparationRetirementManifest {
+    readonly format: typeof INPUT_PREPARATION_RETIREMENT_MANIFEST_FORMAT;
+    readonly version: typeof INPUT_PREPARATION_RETIREMENT_MANIFEST_VERSION;
+    readonly command: typeof INPUT_PREPARATION_RETIREMENT_COMMAND;
+    readonly retiredAt: string;
+    readonly currentRecordVersion: number;
+    readonly retiredRecordVersions: readonly number[];
+    readonly recordCountsByVersion: Readonly<Record<string, number>>;
+    readonly recordCount: number;
+    /** Relative to the manifest's own directory. */
+    readonly retiredNamespace: typeof NAMESPACE_DIR;
+    readonly recordLog: RetirementFileDigest;
+    readonly artifacts: readonly RetirementFileDigest[];
+}
+export type InputPreparationRetirementResult = {
+    readonly status: 'nothing-to-retire';
+    readonly inspection: InputPreparationNamespaceInspection;
+} | {
+    readonly status: 'retired';
+    readonly inspection: InputPreparationNamespaceInspection;
+    readonly retiredDir: string;
+    readonly manifestPath: string;
+    readonly manifest: InputPreparationRetirementManifest;
+};
+export declare class InputPreparationRetirementConfirmationRequiredError extends Error {
+    constructor();
+}
+export declare class InputPreparationRetirementDaemonRunningError extends Error {
+    constructor();
+}
+/** Another process (a daemon, pair, doctor or retirement) holds the store's owner lease. Nothing was written. */
+export declare class InputPreparationRetirementStoreBusyError extends Error {
+    constructor(options: {
+        cause: unknown;
+    });
+}
+export type InputPreparationRetirementRefusalReason = 'symlink' | 'not_a_directory' | 'not_a_regular_file' | 'unexpected_entry' | 'unparseable_line' | 'unsupported_version' | 'current_version_present' | 'pinned_record' | 'orphan_artifacts' | 'retired_target_exists';
+/** The namespace is not in a state this command may retire. Nothing was written. */
+export declare class InputPreparationRetirementRefusedError extends Error {
+    readonly reason: InputPreparationRetirementRefusalReason;
+    constructor(reason: InputPreparationRetirementRefusalReason, detail: string);
+}
+/**
+ * A step after the rename failed. Nothing is rolled back: the moved namespace
+ * stays where it landed, and this names the exact on-disk state.
+ */
+export declare class InputPreparationRetirementIncompleteError extends Error {
+    readonly step: 'sync_rename' | 'write_manifest';
+    readonly retiredNamespacePath: string;
+    readonly manifestPath: string;
+    constructor(step: 'sync_rename' | 'write_manifest', retiredNamespacePath: string, manifestPath: string, options: {
+        cause: unknown;
+    });
+}
+/**
+ * Read-only structural inspection of `<storeDir>/input-preparation/`. Writes
+ * nothing, and never parses a record past its `recordId`, `version` and `pin`
+ * fields.
+ */
+export declare function inspectInputPreparationNamespace(storeDir: string): Promise<InputPreparationNamespaceInspection>;
+export interface ExecuteInputPreparationRetirementOptions {
+    /** Must be `true` — the CLI's `--yes`. */
+    readonly confirmed: boolean;
+    /** Whether the daemon control socket answered; checked before the owner lease is taken. */
+    readonly controlOnline: boolean;
+    readonly clock?: () => Date;
+}
+/**
+ * Retire the namespace (package-internal core; hosts call
+ * {@link retireInputPreparation}). Refuses (typed, zero writes) unless confirmed, the
+ * control socket is offline, the `doctor` owner lease is acquired, and every
+ * record line parses, sits at an integer record version below
+ * {@link INPUT_PREPARATION_RECORD_VERSION} and carries no pin. An absent or
+ * empty namespace is a no-op.
+ */
+export declare function executeInputPreparationRetirement(storeDir: string, options: ExecuteInputPreparationRetirementOptions): Promise<InputPreparationRetirementResult>;
+/** The store {@link retireInputPreparation} acts on: the daemon's `productId` and `storeDir`. */
+export interface RetireInputPreparationTarget {
+    readonly productId: string;
+    /** Same value as `DaemonConfig.storeDir`; omitted resolves the product default. */
+    readonly storeDir?: string;
+}
+/**
+ * `preview`: read-only structural inspection, no socket probe, no lease, no
+ * write. `execute`: requires `confirmed: true` (the CLI's `--yes`).
+ */
+export type RetireInputPreparationInput = {
+    readonly mode: 'preview';
+} | {
+    readonly mode: 'execute';
+    readonly confirmed: true;
+};
+export type RetireInputPreparationResult = {
+    readonly status: 'inspected';
+    readonly inspection: InputPreparationNamespaceInspection;
+} | InputPreparationRetirementResult;
+/**
+ * Package-internal test seams (the CLI tests substitute the control probe and
+ * clock). The probe is structural so this module's declarations do not pull
+ * the CLI control client into the public type surface.
+ */
+export interface RetireInputPreparationSeams {
+    readonly clock?: () => Date;
+    readonly connectControl?: (options: {
+        storeDir: string;
+        productId: string;
+    }) => Promise<{
+        ok: true;
+        client: {
+            close(): void;
+        };
+    } | {
+        ok: false;
+        reason: string;
+    }>;
+}
+/** Package-internal: {@link retireInputPreparation} with its test seams. */
+export declare function runInputPreparationRetirement(target: RetireInputPreparationTarget, input: RetireInputPreparationInput, seams?: RetireInputPreparationSeams): Promise<RetireInputPreparationResult>;
+/**
+ * Programmatic form of `byok-agent retire-input-preparation` for the v8
+ * input-preparation record cut (`docs/spec.md`).
+ *
+ * `preview` inspects `<storeDir>/input-preparation/` and writes nothing.
+ * `execute` refuses, typed and with zero writes, while the daemon control
+ * socket answers ({@link InputPreparationRetirementDaemonRunningError}), while
+ * another process holds the store owner lease
+ * ({@link InputPreparationRetirementStoreBusyError}), and for a live pin, a
+ * current-version, mixed, unknown or missing record version, an unparseable
+ * line, orphan artifacts, an unexpected entry or any symbolic link
+ * ({@link InputPreparationRetirementRefusedError} with its `reason`). Otherwise
+ * it moves the whole namespace byte-for-byte under
+ * `<storeDir>/input-preparation-retired/` beside a manifest of per-file
+ * digests; nothing is ever deleted or converted. An absent or empty namespace
+ * is `nothing-to-retire`. A failure after the move is
+ * {@link InputPreparationRetirementIncompleteError}, naming where the bytes are.
+ * Run it before the daemon starts (for example from the host installer).
+ */
+export declare function retireInputPreparation(target: RetireInputPreparationTarget, input: RetireInputPreparationInput): Promise<RetireInputPreparationResult>;
+export {};
 // ==== @byok-sdk/client dist/daemon/input-preparation-store.d.ts ====
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INPUT_PREPARATION_VERSION, type InputPreparationBindingV1, type InputPreparationArtifactSummaryV1, type InputPreparationCounterEvidenceV1, type InputPreparationModelV1, type InputPreparationPinV1, type InputPreparationProjectionV1, type InputPreparationResidualKeyV1, type InputPreparationStateV1 } from '../input-preparation';
 /**
@@ -7302,7 +7560,7 @@ export interface ProjectedSkillPack {
 export declare function projectSkillPack(dataDir: string, name: string, targetDir: string): Promise<ProjectedSkillPack>;
 // ==== @byok-sdk/client dist/daemon/store.d.ts ====
 import { type EnsureSecureDirOptions } from '../util/secure-dir';
-import { DeviceCredentialStore, InMemoryDeviceCredentialStore, type DeviceMetadata } from './device-credential-store';
+import { DeviceCredentialStore, InMemoryDeviceCredentialStore, type DeviceMetadata, type DeviceRecord } from './device-credential-store';
 export type { DeviceMetadata, DeviceRecord } from './device-credential-store';
 /**
  * Non-secret projection of an authenticated device enrollment. This is the
@@ -7329,6 +7587,64 @@ export type DeviceEnrollmentStatus = {
     deviceId: string;
 } | {
     state: 're_pair_required';
+};
+/**
+ * Device-proof key id of the one key a local enrollment holds: the Ed25519
+ * identity key registered at pairing. The pairing contract registers that key
+ * as proof key `identity` at epoch `0` (`@byok-sdk/cloud`
+ * `DEVICE_IDENTITY_PROOF_KEY_ID` / `DEVICE_IDENTITY_PROOF_KEY_EPOCH`, stored as
+ * the device row's `proof_key_id` / `proof_key_epoch`); the pairing response
+ * carries neither value, so this is the local projection of that contract,
+ * held equal to cloud by a drift test. A future proof-key rotation must carry
+ * the epoch through its own authenticated response into the local record and
+ * replace this projection in the same cut.
+ */
+export declare const DEVICE_ENROLLMENT_PROOF_KEY_ID = "identity";
+/** Epoch of {@link DEVICE_ENROLLMENT_PROOF_KEY_ID}; see its documentation. */
+export declare const DEVICE_ENROLLMENT_PROOF_KEY_EPOCH = 0;
+/**
+ * Non-secret identity of the current authenticated enrollment: everything a
+ * host needs to address this device and to build device proofs or sealed
+ * provisioning identity snapshots, and nothing that authenticates it.
+ */
+export interface DeviceEnrollmentIdentity {
+    /** Authenticated tenant binding written only by pairing. */
+    readonly tenantId: string;
+    readonly deviceId: string;
+    /** Device-proof `keyId` the enrollment key is registered under. */
+    readonly proofKeyId: string;
+    /** Device-proof `keyEpoch` the enrollment key is registered under. */
+    readonly proofKeyEpoch: number;
+    /**
+     * Sealed provisioning `enrollmentRevision`: the decimal string of
+     * `proofKeyEpoch`. A Host issues the same value from its device row
+     * (`String(proof_key_epoch)`) as `expectedEnrollmentRevision`. It is
+     * monotonic across proof-key rotation for one device id; re-pair mints a new
+     * device id, so `(tenantId, deviceId, enrollmentRevision)` names exactly one
+     * enrollment key.
+     */
+    readonly enrollmentRevision: string;
+}
+/** Cold read of the enrollment identity; the non-paired states match {@link DeviceEnrollmentStatus}. */
+export type DeviceEnrollmentIdentityStatus = {
+    readonly state: 'unpaired';
+} | {
+    readonly state: 're_pair_required';
+} | ({
+    readonly state: 'paired';
+} & DeviceEnrollmentIdentity);
+/**
+ * Package-internal read of the complete enrollment authority. It is the one
+ * classification shared by the public status/identity reads and the host
+ * device-proof signer, and it never writes (no metadata reconcile).
+ */
+export type EnrollmentAuthorityRead = {
+    readonly state: 'unpaired';
+} | {
+    readonly state: 're_pair_required';
+} | {
+    readonly state: 'paired';
+    readonly record: DeviceRecord;
 };
 /**
  * A durable enrollment record cannot be used by any steady-state path. Only
@@ -7381,12 +7697,29 @@ export declare class DeviceStore {
     private openBounded;
 }
 /**
+ * Read and classify the canonical device store without writing anything.
+ * A legacy/tampered record remains distinct from an absent record so hosts can
+ * require explicit re-pair instead of silently changing semantics. Filesystem,
+ * pathname-safety and credential-provider failures intentionally remain errors.
+ */
+export declare function readEnrollmentAuthority(options: DeviceEnrollmentStatusOptions): Promise<EnrollmentAuthorityRead>;
+/** The public non-secret identity projection of one enrollment record. */
+export declare function enrollmentIdentityOf(record: DeviceMetadata): DeviceEnrollmentIdentity;
+/**
  * Read the canonical device store without projecting credential or tenant
- * material. A legacy/tampered record remains distinct from an absent record so
- * hosts can require explicit re-pair instead of silently changing semantics.
- * Filesystem and pathname-safety failures intentionally remain errors.
+ * material. See {@link readEnrollmentAuthority} for the state classification.
  */
 export declare function readDeviceEnrollmentStatus(options: DeviceEnrollmentStatusOptions): Promise<DeviceEnrollmentStatus>;
+/**
+ * Read the non-secret identity of the current enrollment: tenant, device and
+ * the device-proof key id/epoch, plus the derived sealed-provisioning
+ * `enrollmentRevision`. Never returns the access token, private key or public
+ * key, never writes, and uses the same classification as
+ * {@link readDeviceEnrollmentStatus}. It reads the calling process's OS
+ * credential set, so it observes the enrollment of the account the daemon runs
+ * as only when called as that account.
+ */
+export declare function readDeviceEnrollmentIdentity(options: DeviceEnrollmentStatusOptions): Promise<DeviceEnrollmentIdentityStatus>;
 // ==== @byok-sdk/client dist/daemon/task-runner.d.ts ====
 import { type AgentMessageContentType, type AgentEgressPolicy, type Envelope, type PermissionPolicy, type RuntimeId, type TerminalProjectionSelection, type TaskOfferPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferPreparedPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import { type McpStdioServerConfig, type McpToolsetConfig, type RuntimeAdapter } from '../types';
@@ -9955,8 +10288,18 @@ export { SqliteLocalTaskJournal, JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME
 export type { SqliteLocalTaskJournalOptions } from './daemon/journal/sqlite-journal';
 export { LocalStoragePressureEngine, LocalStoragePolicyError, LocalStorageEmergencyError, resolveLocalStoragePolicy, computePressureState, cleanupOrderFor, cleanupEligibleAt, createFilesystemCleanupExecutor, createStatfsFreeBytesProvider, JOURNAL_TASK_REF_PREFIX, DEFAULT_SOFT_BUDGET_RATIO, DEFAULT_HARD_BUDGET_RATIO, DEFAULT_ACK_CRITICAL_RESERVE_BYTES, DEFAULT_CLEANUP_BATCH_LIMIT, DEFAULT_INCREMENTAL_VACUUM_PAGES, DEFAULT_NORMAL_COMPACTION_INTERVAL_MS, DEFAULT_PRESSURE_COMPACTION_INTERVAL_MS, DEFAULT_RETENTION_MS, DEFAULT_LOG_ROTATION, } from './daemon/journal/storage-policy';
 export type { LocalStoragePolicy, LocalStoragePolicyInput, LocalStoragePressureEngineOptions, LogRotationPolicy, CompactionPolicy, StoragePressureState, StoragePressureEvent, StorageMeasurement, StorageStatusSnapshot, StorageTickResult, CleanupExecutor, CleanupExecution, TimerLike, } from './daemon/journal/storage-policy';
-export { readDeviceEnrollmentStatus } from './daemon/store';
-export type { DeviceEnrollment, DeviceEnrollmentStatus, DeviceEnrollmentStatusOptions, } from './daemon/store';
+export { readDeviceEnrollmentStatus, readDeviceEnrollmentIdentity } from './daemon/store';
+export type { DeviceEnrollment, DeviceEnrollmentIdentity, DeviceEnrollmentIdentityStatus, DeviceEnrollmentStatus, DeviceEnrollmentStatusOptions, } from './daemon/store';
+/**
+ * Host device proofs signed with the stored enrollment key, scoped to one
+ * enrollment identity and an explicit operation allowlist. The key never
+ * leaves the signer; `DeviceProofSigner` is also what `TruthMemoryClient` takes.
+ */
+export { createStoredDeviceProofSigner, DeviceProofSignerError } from './daemon/device-proof-signer';
+export type { CreateStoredDeviceProofSignerOptions, DeviceProofRequest, DeviceProofSigner, DeviceProofSignerErrorCode, HostDeviceProofSigner, } from './daemon/device-proof-signer';
+/** Programmatic `byok-agent retire-input-preparation` (preview/execute) for the v8 input-preparation cut. */
+export { retireInputPreparation, InputPreparationRetirementConfirmationRequiredError, InputPreparationRetirementDaemonRunningError, InputPreparationRetirementIncompleteError, InputPreparationRetirementRefusedError, InputPreparationRetirementStoreBusyError, } from './daemon/input-preparation-retirement';
+export type { InputPreparationNamespaceInspection, InputPreparationRetirementManifest, InputPreparationRetirementRefusalReason, InputPreparationRetirementResult, RetireInputPreparationInput, RetireInputPreparationResult, RetireInputPreparationTarget, RetirementFileDigest, } from './daemon/input-preparation-retirement';
 /**
  * Plan `skill-pack-delivery-channel`: the device half of the `skills.pack`
  * channel. The install pipeline and the two read APIs are public because the

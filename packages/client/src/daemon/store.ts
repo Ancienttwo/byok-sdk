@@ -46,6 +46,61 @@ export type DeviceEnrollmentStatus =
   | { state: 'paired'; deviceId: string }
   | { state: 're_pair_required' };
 
+/**
+ * Device-proof key id of the one key a local enrollment holds: the Ed25519
+ * identity key registered at pairing. The pairing contract registers that key
+ * as proof key `identity` at epoch `0` (`@byok-sdk/cloud`
+ * `DEVICE_IDENTITY_PROOF_KEY_ID` / `DEVICE_IDENTITY_PROOF_KEY_EPOCH`, stored as
+ * the device row's `proof_key_id` / `proof_key_epoch`); the pairing response
+ * carries neither value, so this is the local projection of that contract,
+ * held equal to cloud by a drift test. A future proof-key rotation must carry
+ * the epoch through its own authenticated response into the local record and
+ * replace this projection in the same cut.
+ */
+export const DEVICE_ENROLLMENT_PROOF_KEY_ID = 'identity';
+/** Epoch of {@link DEVICE_ENROLLMENT_PROOF_KEY_ID}; see its documentation. */
+export const DEVICE_ENROLLMENT_PROOF_KEY_EPOCH = 0;
+
+/**
+ * Non-secret identity of the current authenticated enrollment: everything a
+ * host needs to address this device and to build device proofs or sealed
+ * provisioning identity snapshots, and nothing that authenticates it.
+ */
+export interface DeviceEnrollmentIdentity {
+  /** Authenticated tenant binding written only by pairing. */
+  readonly tenantId: string;
+  readonly deviceId: string;
+  /** Device-proof `keyId` the enrollment key is registered under. */
+  readonly proofKeyId: string;
+  /** Device-proof `keyEpoch` the enrollment key is registered under. */
+  readonly proofKeyEpoch: number;
+  /**
+   * Sealed provisioning `enrollmentRevision`: the decimal string of
+   * `proofKeyEpoch`. A Host issues the same value from its device row
+   * (`String(proof_key_epoch)`) as `expectedEnrollmentRevision`. It is
+   * monotonic across proof-key rotation for one device id; re-pair mints a new
+   * device id, so `(tenantId, deviceId, enrollmentRevision)` names exactly one
+   * enrollment key.
+   */
+  readonly enrollmentRevision: string;
+}
+
+/** Cold read of the enrollment identity; the non-paired states match {@link DeviceEnrollmentStatus}. */
+export type DeviceEnrollmentIdentityStatus =
+  | { readonly state: 'unpaired' }
+  | { readonly state: 're_pair_required' }
+  | ({ readonly state: 'paired' } & DeviceEnrollmentIdentity);
+
+/**
+ * Package-internal read of the complete enrollment authority. It is the one
+ * classification shared by the public status/identity reads and the host
+ * device-proof signer, and it never writes (no metadata reconcile).
+ */
+export type EnrollmentAuthorityRead =
+  | { readonly state: 'unpaired' }
+  | { readonly state: 're_pair_required' }
+  | { readonly state: 'paired'; readonly record: DeviceRecord };
+
 const MAX_DEVICE_RECORD_BYTES = 256 * 1024;
 
 const REPAIR_REQUIRED_MESSAGE =
@@ -316,23 +371,23 @@ export class DeviceStore {
 }
 
 /**
- * Read the canonical device store without projecting credential or tenant
- * material. A legacy/tampered record remains distinct from an absent record so
- * hosts can require explicit re-pair instead of silently changing semantics.
- * Filesystem and pathname-safety failures intentionally remain errors.
+ * Read and classify the canonical device store without writing anything.
+ * A legacy/tampered record remains distinct from an absent record so hosts can
+ * require explicit re-pair instead of silently changing semantics. Filesystem,
+ * pathname-safety and credential-provider failures intentionally remain errors.
  */
-export async function readDeviceEnrollmentStatus(
+export async function readEnrollmentAuthority(
   options: DeviceEnrollmentStatusOptions,
-): Promise<DeviceEnrollmentStatus> {
+): Promise<EnrollmentAuthorityRead> {
   const storeDir = DeviceStore.resolveDir(options.productId, options.storeDir);
   try {
     const store = new DeviceStore(storeDir, undefined, options.productId);
     // Inspect the bounded projection even when the OS authority exists. A
     // legacy secret-bearing or otherwise invalid file is an explicit
-    // re-pair-required state; steady-state status must never hide or repair it.
+    // re-pair-required state; steady-state reads must never hide or repair it.
     const projection = await store.load();
     const authority = await store.credentials.read();
-    if (authority !== undefined) return { state: 'paired', deviceId: authority.deviceId };
+    if (authority !== undefined) return { state: 'paired', record: authority };
 
     // An enrollment projection without its OS authority is not an unpaired
     // machine: it is a partial/legacy state that requires explicit recovery.
@@ -345,4 +400,42 @@ export async function readDeviceEnrollmentStatus(
     }
     throw error;
   }
+}
+
+/** The public non-secret identity projection of one enrollment record. */
+export function enrollmentIdentityOf(record: DeviceMetadata): DeviceEnrollmentIdentity {
+  return {
+    tenantId: record.tenantId,
+    deviceId: record.deviceId,
+    proofKeyId: DEVICE_ENROLLMENT_PROOF_KEY_ID,
+    proofKeyEpoch: DEVICE_ENROLLMENT_PROOF_KEY_EPOCH,
+    enrollmentRevision: String(DEVICE_ENROLLMENT_PROOF_KEY_EPOCH),
+  };
+}
+
+/**
+ * Read the canonical device store without projecting credential or tenant
+ * material. See {@link readEnrollmentAuthority} for the state classification.
+ */
+export async function readDeviceEnrollmentStatus(
+  options: DeviceEnrollmentStatusOptions,
+): Promise<DeviceEnrollmentStatus> {
+  const read = await readEnrollmentAuthority(options);
+  return read.state === 'paired' ? { state: 'paired', deviceId: read.record.deviceId } : { state: read.state };
+}
+
+/**
+ * Read the non-secret identity of the current enrollment: tenant, device and
+ * the device-proof key id/epoch, plus the derived sealed-provisioning
+ * `enrollmentRevision`. Never returns the access token, private key or public
+ * key, never writes, and uses the same classification as
+ * {@link readDeviceEnrollmentStatus}. It reads the calling process's OS
+ * credential set, so it observes the enrollment of the account the daemon runs
+ * as only when called as that account.
+ */
+export async function readDeviceEnrollmentIdentity(
+  options: DeviceEnrollmentStatusOptions,
+): Promise<DeviceEnrollmentIdentityStatus> {
+  const read = await readEnrollmentAuthority(options);
+  return read.state === 'paired' ? { state: 'paired', ...enrollmentIdentityOf(read.record) } : { state: read.state };
 }
