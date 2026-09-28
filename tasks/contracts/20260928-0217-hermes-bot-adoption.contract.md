@@ -52,6 +52,14 @@ Owner 原话（2026-09-28，经 Codex w2:pR 转达）：「批准。与Claude讨
 
 Codex w2:pR 裁定（2026-09-28）：`57aebf9f…` 最终 NOT ACCEPTED（identity-binding blocker），采用方案 A。只有与本机 enrollment 和 notice 绑定的 canonical intent 才能产生可持久化的 device completion。`validateRelease` 与 `validateWithheld` 先核对 intent `agentId`/`profileRevision` 等于 notice，再以本机 tenant/device 重算 `operationDigest`；任何身份或 digest 不符 → `fetch_invalid`，零 ledger、零 target CAS、零 completion、不 ack。content-only 缺陷同样先过该门。门后才允许 `path_invalid`/`content_invalid`/`memory_md_not_deletable` 或合法 withheld Host code 的 rejected。S1 两枚 rejection code 原样保留，无兼容消费路径。唯一写入者仅写 `packages/client/src/daemon/agent-memory-intent.ts` 与 `packages/client/src/__tests__/agent-memory-intent.test.ts`；公开 API 若需变化先停。不放宽 Host，不新增 terminal 或 operator 方法，不改 S1。此为 S2 第三次候选 gate、identity 问题首次修复；仍不通过则报告最小反例，不自动进入第四轮。
 
+### Approved follow-up: WP2I-S3 SDK cloud notice producer + docs
+
+依据用户 2026-09-29「批准」（经 orchestrator 派工）：实现 `docs/researches/2026-09-28-hermes-device-memory-cas-contract.md`「实施工作包」的 WP2I-S3 行。范围：`ByokCloud.enqueueAgentMemoryIntentNotice(tenant, deviceId, { intentId, agentRef })`，形同 §2.3 provisioning notice 的 producer：先用 S1 `AgentMemoryIntentAvailablePayloadSchema` 严格解析，再以既有 `assertAgentCapabilities` 读 durable device 行（无 `agent-memory-intent.v1`、行缺失或 revoked → `agent_capability_missing`，零 mailbox 行），再经既有 `enqueueAgentControlEnvelope` 以 `uuidFromSha256({domain:'byok:agent-memory-intent-notice', tenant, deviceId, intentId})` 为 messageId 追加，重试复用同一行与 seq；同一 intent 换 `agentRef` 的重试 → `mailbox_receipt_mismatch`。不新增门控机制、不记 cloud intent receipt（approval/release/completion/readback 属 Host）。文档：`docs/protocol.md` 新 §2.4 与 §2 catalog 一行、`docs/spec.md` Durable Agent homes 一段，只写 S1/S2/S3 已实现行为；`api-surface/cloud.d.ts` 用仓库 `check:api-surface -- --update` 重生，仅 additive。
+
+单一 Claude 执行 worker 独占：`packages/cloud/src/cloud.ts`、`packages/cloud/src/index.ts`（仅导出 `AgentMemoryIntentNoticeInput`）、新 `packages/cloud/src/__tests__/agent-memory-intent-notice.test.ts`、`docs/protocol.md`、`docs/spec.md`、`api-surface/cloud.d.ts`，以及本 contract 与 notes 的 S3 条目。plan 复选框由 orchestrator 验收后勾选。S1（protocol/core）与 S2（client）源码冻结；不改 server、package.json、Salesko；不 push/PR/merge/tag/版本号/发布。
+
+停点：需要改 S1 schema（即作废已验收 S1）；需要改 client/protocol/core/package.json；需要新的门控机制或第二 authority；文档需描述未实现行为；任何检查失败最多两轮 fix，源码修复后重新冻结 subject。
+
 ## Scope
 
 - In scope: User approved WP1-I full SDK memory-only implementation under the accepted WP1-I-C contract. Implement protocol v8, descriptor/identity, prepared counting/sealing/runtime binding, operation ACL and focused regressions; run required checks in this isolated worktree. Dependencies may be installed using the frozen lockfile here.
@@ -216,6 +224,11 @@ allowed_paths:
   - packages/client/src/daemon/observer.ts
   - packages/client/src/bin/format.ts
   - packages/client/src/bin/audit-log.ts
+  - packages/cloud/src/index.ts
+  - packages/cloud/src/__tests__/agent-memory-intent-notice.test.ts
+  - docs/protocol.md
+  - docs/spec.md
+  - api-surface/cloud.d.ts
 ```
 
 ## Delegation Contract
