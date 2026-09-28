@@ -790,10 +790,16 @@ validation failure before any admission read. It then refuses, with
 capability snapshot lacks `agent-memory-intent.v1` or whose device row is
 missing or revoked. The mailbox message id is derived from
 `sha256({ domain: 'byok:agent-memory-intent-notice', tenant, deviceId,
-intentId })`, so a retried enqueue returns the existing row and seq. A retry
-that names a different `agentRef` for the same intent fails
-`mailbox_receipt_mismatch`. Cloud records no intent receipt: approval, release,
-completion and readback are Host authority on Host routes.
+intentId })`, so while the original mailbox row is retained a retried enqueue
+returns the existing row and seq, and a retry that names a different `agentRef`
+for the same intent fails `mailbox_receipt_mismatch`. After acked-row retention
+cleanup (`mailboxAckedRetentionMs`) a retry appends a new row with a new seq
+and `agentRef` is no longer compared, so the Host must keep `agentRef` fixed
+per `intentId`; the device replays safely (ledger idempotent readback, or the
+terminal fetch after prune) and fails closed (`fetch_invalid` or
+`readback_invalid`) on a mismatched `agentRef`. Cloud records no intent
+receipt: approval, release, completion and readback are Host authority on Host
+routes.
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 

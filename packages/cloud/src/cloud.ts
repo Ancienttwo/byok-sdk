@@ -621,10 +621,14 @@ export interface ByokCloud {
    * is validated strictly before admission, and admission happens before the
    * mailbox append, so a refused call leaves no delivery row behind.
    *
-   * Idempotent per (tenant, device, intentId): the mailbox message id is
-   * derived from that identity, so a retried enqueue returns the existing row
-   * and its seq instead of appending a second notice; a retry naming a
-   * different `agentRef` for the same intent fails `mailbox_receipt_mismatch`.
+   * Idempotent per (tenant, device, intentId) while the original mailbox row
+   * is retained: the mailbox message id is derived from that identity, so a
+   * retried enqueue returns the existing row and its seq instead of appending
+   * a second notice, and a retry naming a different `agentRef` for the same
+   * intent fails `mailbox_receipt_mismatch`. After acked-row retention cleanup
+   * a retry appends a new row with a new seq and `agentRef` is no longer
+   * compared, so the Host must keep `agentRef` fixed per `intentId`; the
+   * device fails closed (`fetch_invalid`/`readback_invalid`) on a mismatch.
    * Approval, release, completion and readback are Host authority on Host
    * routes; this plane records no intent receipt of its own.
    */
