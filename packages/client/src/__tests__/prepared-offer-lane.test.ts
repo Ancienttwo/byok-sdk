@@ -34,6 +34,7 @@ import { fingerprintPreparedToolSurface } from '../daemon/prepared-tool-surface'
 import { admitPreparedOffer } from '../daemon/prepared-offer-admission';
 import { preparedMemoryProjection, type PreparedAgentMemoryState } from '../daemon/prepared-agent-memory';
 import * as preparedAgentMemory from '../daemon/prepared-agent-memory';
+import * as agentMemory from '../daemon/agent-memory';
 import { mcpLaunchAttestation } from '../daemon/trusted-launch-cwd';
 import {
   realToolImplementationFsProbe,
@@ -1393,14 +1394,23 @@ describe('prepared Agent memory admission declines with its exact typed reason',
   });
 
   it('declines an unavailable secure platform as unsupported_input: agent_memory_unavailable without probing', async () => {
+    // Native Linux is available without any helper, so dropping the helper
+    // alone does not make the platform unavailable on every OS: force the
+    // single platform gate closed instead.
+    const available = vi.spyOn(agentMemory, 'isAgentMemorySecureFilesystemAvailable').mockReturnValue(false);
+    const resolve = vi.spyOn(preparedAgentMemory, 'resolvePreparedMemoryImplementation');
     const observe = vi.spyOn(preparedAgentMemory, 'observePreparedMemory');
     try {
-      const fixture = await memoryOnlyRunner({ agentMemoryFilesystemHelperBin: undefined });
+      const fixture = await memoryOnlyRunner();
       await fixture.runner.handleEnvelope(fixture.offer('task-memory-unavailable'));
       expect(declineReason(fixture.sent)).toBe('unsupported_input: agent_memory_unavailable');
+      expect(available).toHaveBeenCalled();
+      expect(resolve).not.toHaveBeenCalled();
       expect(observe).not.toHaveBeenCalled();
       nothingCommitted(fixture.sent, fixture.adapter, fixture.runner);
     } finally {
+      available.mockRestore();
+      resolve.mockRestore();
       observe.mockRestore();
     }
   });
