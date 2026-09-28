@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { isTenantId } from '@byok-sdk/core';
 import { atomicWriteFile } from '../util/atomic-write';
+import { pickPlainDataProperties } from '../util/plain-data';
 import { ensureSecureDir, type EnsureSecureDirOptions } from '../util/secure-dir';
 import {
   DeviceCredentialStore,
@@ -379,9 +380,10 @@ export class DeviceStore {
 export async function readEnrollmentAuthority(
   options: DeviceEnrollmentStatusOptions,
 ): Promise<EnrollmentAuthorityRead> {
-  const storeDir = DeviceStore.resolveDir(options.productId, options.storeDir);
+  const { productId, storeDir: configuredStoreDir } = readEnrollmentOptions(options);
+  const storeDir = DeviceStore.resolveDir(productId, configuredStoreDir);
   try {
-    const store = new DeviceStore(storeDir, undefined, options.productId);
+    const store = new DeviceStore(storeDir, undefined, productId);
     // Inspect the bounded projection even when the OS authority exists. A
     // legacy secret-bearing or otherwise invalid file is an explicit
     // re-pair-required state; steady-state reads must never hide or repair it.
@@ -400,6 +402,28 @@ export async function readEnrollmentAuthority(
     }
     throw error;
   }
+}
+
+/**
+ * Reads `productId` and `storeDir` exactly once each as plain data
+ * (`../util/plain-data`); other fields of a larger host config are never
+ * read. An accessor, Proxy, non-plain prototype or wrong type is a
+ * `TypeError` with no cause, before any filesystem or credential access.
+ */
+function readEnrollmentOptions(options: unknown): { productId: string; storeDir: string | undefined } {
+  const invalid = (): TypeError =>
+    new TypeError('device enrollment reads require a non-empty productId and an optional storeDir string, as plain data properties');
+  let picked: Record<'productId' | 'storeDir', unknown>;
+  try {
+    picked = pickPlainDataProperties(options, ['productId', 'storeDir']);
+  } catch {
+    throw invalid();
+  }
+  const { productId, storeDir } = picked;
+  if (typeof productId !== 'string' || productId.length === 0 || (storeDir !== undefined && typeof storeDir !== 'string')) {
+    throw invalid();
+  }
+  return { productId, storeDir };
 }
 
 /** The public non-secret identity projection of one enrollment record. */

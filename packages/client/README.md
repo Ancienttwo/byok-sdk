@@ -416,6 +416,13 @@ const proof = await signer.sign({ method: 'PUT', path, operation: PROVIDER_SECRE
   resource, requestId, body: sealingKeyClaimBytes });
 ```
 
+The options and every request are copied once into inert plain data (own
+enumerable data properties only; accessors, Proxies, symbol keys and non-plain
+prototypes are refused as `invalid_options` / `invalid_request`, and `body`
+must be an exact `Uint8Array`), and only that copy is checked and signed, so the
+operation checked against the allowlist is the operation signed. `readDeviceEnrollment*`
+and `retireInputPreparation` read their `productId`/`storeDir` and `mode`/`confirmed`
+the same way and reject anything else with a `TypeError` that has no cause.
 An operation outside `operations` is refused before the key is read; each
 signature re-reads the enrollment and refuses (`enrollment_changed`) if tenant,
 device or proof key no longer equal `identity`. Failures are

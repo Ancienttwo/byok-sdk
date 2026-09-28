@@ -8,6 +8,7 @@ import {
   type DeviceProofEnvelopeV1,
   type DeviceProofProtectedClaims,
 } from '@byok-sdk/core';
+import { snapshotPlainData } from '../util/plain-data';
 import { importPrivateKeyPem } from './device-keys';
 import type { AuthManager } from './auth-manager';
 import { enrollmentIdentityOf, readEnrollmentAuthority, type DeviceEnrollmentIdentity } from './store';
@@ -195,55 +196,52 @@ export interface HostDeviceProofSigner extends DeviceProofSigner {
  * to their own route (as `@byok-sdk/cloud` `authenticateDeviceProof` does).
  */
 export function createStoredDeviceProofSigner(options: CreateStoredDeviceProofSignerOptions): HostDeviceProofSigner {
-  const productId = options?.productId;
-  const identity = options?.identity;
-  const listed = options?.operations;
-  if (
-    typeof productId !== 'string' || productId.length === 0 ||
-    typeof identity !== 'object' || identity === null ||
-    typeof identity.tenantId !== 'string' || !isTenantId(identity.tenantId) ||
-    typeof identity.deviceId !== 'string' || identity.deviceId.length === 0 ||
-    typeof identity.proofKeyId !== 'string' || identity.proofKeyId.length === 0 ||
-    !Number.isSafeInteger(identity.proofKeyEpoch) || identity.proofKeyEpoch < 0 ||
-    !Array.isArray(listed) || listed.length === 0 ||
-    listed.some((operation) => typeof operation !== 'string' || operation.length === 0) ||
-    (options.storeDir !== undefined && typeof options.storeDir !== 'string') ||
-    (options.clock !== undefined && typeof options.clock !== 'function')
-  ) {
+  // Every touch of the host's options happens inside this one containment:
+  // one plain-data copy, then validation of the copy only. No getter, trap or
+  // host error can pass the closed-code boundary.
+  let config: SignerConfig;
+  try {
+    config = parseSignerOptions(snapshotPlainData(options, { maxDepth: 2, allowUndefined: true, allowFunctions: true }));
+  } catch {
     throw new DeviceProofSignerError('invalid_options');
   }
-  const expected = Object.freeze({
-    tenantId: identity.tenantId,
-    deviceId: identity.deviceId,
-    proofKeyId: identity.proofKeyId,
-    proofKeyEpoch: identity.proofKeyEpoch,
-  });
-  const operations = Object.freeze([...new Set<string>(listed)]);
+  const { productId, storeDir, expected, operations, clock } = config;
   const allowed = new Set<string>(operations);
-  const storeDir = options.storeDir;
-  const clock = options.clock ?? (() => new Date());
 
   const sign = async (request: DeviceProofRequest): Promise<DeviceProofEnvelopeV1> => {
-    if (typeof request?.operation !== 'string' || !allowed.has(request.operation)) {
-      throw new DeviceProofSignerError('operation_not_allowed');
-    }
-    let claims: DeviceProofProtectedClaims;
+    // One plain-data copy of the request; everything below uses the copy only,
+    // so the operation checked against the allowlist is the operation signed.
+    let snapshot: RequestSnapshot;
     try {
-      const parsed = DeviceProofProtectedClaimsSchema.safeParse(
-        proofClaimsInput(request, {
-          tenantId: expected.tenantId,
-          productId,
-          deviceId: expected.deviceId,
-          keyId: expected.proofKeyId,
-          keyEpoch: expected.proofKeyEpoch,
-          issuedAt: request.issuedAt ?? clock().toISOString(),
-        }),
-      );
-      if (!parsed.success) throw new DeviceProofSignerError('invalid_request');
-      claims = parsed.data;
+      snapshot = parseRequestSnapshot(snapshotPlainData(request, { maxDepth: 2, allowUndefined: true, allowBytes: true }));
     } catch {
       throw new DeviceProofSignerError('invalid_request');
     }
+    if (!allowed.has(snapshot.operation)) throw new DeviceProofSignerError('operation_not_allowed');
+
+    let issuedAt: string;
+    if (snapshot.issuedAt !== undefined) {
+      issuedAt = snapshot.issuedAt;
+    } else {
+      try {
+        issuedAt = DATE_TO_ISO_STRING.call(clock());
+      } catch {
+        throw new DeviceProofSignerError('invalid_options');
+      }
+    }
+    const parsed = DeviceProofProtectedClaimsSchema.safeParse(
+      proofClaimsInput(snapshot, {
+        tenantId: expected.tenantId,
+        productId,
+        deviceId: expected.deviceId,
+        keyId: expected.proofKeyId,
+        keyEpoch: expected.proofKeyEpoch,
+        issuedAt,
+      }),
+    );
+    // The validated claims are what gets signed; recheck their operation.
+    if (!parsed.success || !allowed.has(parsed.data.operation)) throw new DeviceProofSignerError('invalid_request');
+    const claims = parsed.data;
 
     let read: Awaited<ReturnType<typeof readEnrollmentAuthority>>;
     try {
@@ -270,6 +268,68 @@ export function createStoredDeviceProofSigner(options: CreateStoredDeviceProofSi
   };
 
   return Object.freeze({ operations, sign });
+}
+
+const DATE_TO_ISO_STRING = Date.prototype.toISOString as (this: unknown) => string;
+
+interface SignerConfig {
+  readonly productId: string;
+  readonly storeDir: string | undefined;
+  readonly expected: Readonly<{ tenantId: string; deviceId: string; proofKeyId: string; proofKeyEpoch: number }>;
+  readonly operations: readonly string[];
+  readonly clock: () => unknown;
+}
+
+/** Validates the plain-data copy of the options; any failure throws (mapped by the caller). */
+function parseSignerOptions(value: unknown): SignerConfig {
+  const options = value as Record<string, unknown>;
+  const identity = options.identity as Record<string, unknown> | undefined;
+  const listed = options.operations;
+  const storeDir = options.storeDir;
+  const clock = options.clock;
+  if (
+    typeof options.productId !== 'string' || options.productId.length === 0 ||
+    typeof identity !== 'object' || identity === null || Array.isArray(identity) ||
+    typeof identity.tenantId !== 'string' || !isTenantId(identity.tenantId) ||
+    typeof identity.deviceId !== 'string' || identity.deviceId.length === 0 ||
+    typeof identity.proofKeyId !== 'string' || identity.proofKeyId.length === 0 ||
+    typeof identity.proofKeyEpoch !== 'number' || !Number.isSafeInteger(identity.proofKeyEpoch) || identity.proofKeyEpoch < 0 ||
+    !Array.isArray(listed) || listed.length === 0 ||
+    listed.some((operation) => typeof operation !== 'string' || operation.length === 0) ||
+    (storeDir !== undefined && typeof storeDir !== 'string') ||
+    (clock !== undefined && typeof clock !== 'function')
+  ) {
+    throw new DeviceProofSignerError('invalid_options');
+  }
+  return {
+    productId: options.productId,
+    storeDir,
+    expected: Object.freeze({
+      tenantId: identity.tenantId,
+      deviceId: identity.deviceId,
+      proofKeyId: identity.proofKeyId,
+      proofKeyEpoch: identity.proofKeyEpoch,
+    }),
+    operations: Object.freeze([...new Set<string>(listed as string[])]),
+    clock: (clock as (() => unknown) | undefined) ?? (() => new Date()),
+  };
+}
+
+type RequestSnapshot = DeviceProofRequest;
+
+/** Types the plain-data copy of a request (field shapes only; the claims schema validates content). */
+function parseRequestSnapshot(value: unknown): RequestSnapshot {
+  const request = value as Record<string, unknown>;
+  const optional = (field: unknown): boolean => field === undefined || typeof field === 'string';
+  if (
+    typeof request.method !== 'string' || typeof request.path !== 'string' ||
+    typeof request.operation !== 'string' || typeof request.resource !== 'string' ||
+    typeof request.requestId !== 'string' || !(request.body instanceof Uint8Array) ||
+    !optional(request.issuedAt) || !optional(request.expiresAt) || !optional(request.nonce)
+  ) {
+    throw new DeviceProofSignerError('invalid_request');
+  }
+  return request as unknown as RequestSnapshot;
 }
 
 function requireNonEmpty(name: string, value: string): void {

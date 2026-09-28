@@ -1,4 +1,4 @@
-import { types as utilTypes } from 'node:util';
+import { snapshotPlainData } from '../util/plain-data';
 import {
   ProviderProvisioningReadbackSchema,
   type ProviderProvisioningAvailablePayload,
@@ -119,7 +119,7 @@ export function createProviderProvisioningNoticeProcessor(
     // the schema error would quote Host-returned keys and shapes.
     let readback: ProviderProvisioningReadback;
     try {
-      const parsed = ProviderProvisioningReadbackSchema.safeParse(plainDataSnapshot(raw, 0));
+      const parsed = ProviderProvisioningReadbackSchema.safeParse(snapshotPlainData(raw, { maxDepth: MAX_READBACK_DEPTH }));
       if (!parsed.success) throw INVALID_READBACK;
       readback = parsed.data;
     } catch {
@@ -141,58 +141,9 @@ export function createProviderProvisioningNoticeProcessor(
 /** Local sentinel; never escapes the containment in the processor. */
 const INVALID_READBACK: unique symbol = Symbol('invalid provisioning readback');
 
-/** A readback is shallow JSON; anything deeper is not one. */
-const MAX_READBACK_DEPTH = 8;
-
 /**
- * Copy a Host-returned value into inert plain data, reading each property
- * exactly once, or throw.
- *
- * Accepted: `null`, strings, finite numbers, booleans, arrays and objects
- * whose prototype is `Object.prototype` or `null`, carrying only string-keyed,
- * enumerable DATA properties. Anything else (an accessor, a symbol key, a
- * class instance, `undefined`, a function, a bigint, a non-finite number,
- * excess depth) throws, and the caller maps every throw to `readback_invalid`.
- * A Proxy at any level is refused before any of its traps runs.
+ * A readback is shallow JSON; anything deeper is not one. The snapshot
+ * (`../util/plain-data`) is JSON-shaped: `undefined`, functions, bytes,
+ * accessors, symbol keys, class instances and Proxies all throw.
  */
-function plainDataSnapshot(value: unknown, depth: number): unknown {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw INVALID_READBACK;
-    return value;
-  }
-  if (typeof value !== 'object' || depth >= MAX_READBACK_DEPTH) throw INVALID_READBACK;
-  // A Proxy is not plain data: refuse it before any trap can run.
-  if (utilTypes.isProxy(value)) throw INVALID_READBACK;
-  const isArray = Array.isArray(value);
-  const prototype = Object.getPrototypeOf(value) as unknown;
-  if (isArray ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) {
-    throw INVALID_READBACK;
-  }
-  const descriptors = Object.getOwnPropertyDescriptors(value);
-  if (isArray) {
-    const lengthDescriptor = descriptors['length'];
-    if (lengthDescriptor === undefined || !('value' in lengthDescriptor) || typeof lengthDescriptor.value !== 'number') {
-      throw INVALID_READBACK;
-    }
-    const length = lengthDescriptor.value;
-    const out: unknown[] = [];
-    for (let index = 0; index < length; index += 1) {
-      const descriptor = descriptors[String(index)];
-      if (descriptor === undefined || !('value' in descriptor) || descriptor.enumerable !== true) throw INVALID_READBACK;
-      out.push(plainDataSnapshot(descriptor.value, depth + 1));
-    }
-    if (Object.keys(descriptors).length !== length + 1 || Object.getOwnPropertySymbols(descriptors).length !== 0) {
-      throw INVALID_READBACK;
-    }
-    return out;
-  }
-  if (Object.getOwnPropertySymbols(descriptors).length !== 0) throw INVALID_READBACK;
-  const out: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
-  for (const key of Object.keys(descriptors)) {
-    const descriptor = descriptors[key]!;
-    if (!('value' in descriptor) || descriptor.enumerable !== true) throw INVALID_READBACK;
-    out[key] = plainDataSnapshot(descriptor.value, depth + 1);
-  }
-  return out;
-}
+const MAX_READBACK_DEPTH = 8;

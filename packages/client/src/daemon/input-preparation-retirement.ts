@@ -3,6 +3,7 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { atomicWriteFile } from '../util/atomic-write';
 import { ensureSecureDir } from '../util/secure-dir';
+import { pickPlainDataProperties } from '../util/plain-data';
 import { connectControlClient } from '../bin/control-client';
 import { acquireDaemonOwner, DaemonOwnerActiveError } from './daemon-owner';
 import { INPUT_PREPARATION_RECORD_VERSION } from './input-preparation-store';
@@ -487,20 +488,31 @@ export async function runInputPreparationRetirement(
   input: RetireInputPreparationInput,
   seams: RetireInputPreparationSeams = {},
 ): Promise<RetireInputPreparationResult> {
-  if (typeof target?.productId !== 'string' || target.productId.length === 0 ||
-      (target.storeDir !== undefined && typeof target.storeDir !== 'string')) {
+  // Target and input are each read once, as plain data, before anything else:
+  // an accessor, Proxy or non-plain prototype is a TypeError with no cause.
+  let productId: unknown;
+  let configuredStoreDir: unknown;
+  let mode: unknown;
+  let confirmed: unknown;
+  try {
+    ({ productId, storeDir: configuredStoreDir } = pickPlainDataProperties(target, ['productId', 'storeDir']));
+    ({ mode, confirmed } = pickPlainDataProperties(input, ['mode', 'confirmed']));
+  } catch {
+    throw new TypeError(`${INPUT_PREPARATION_RETIREMENT_COMMAND} target and input must be plain data objects`);
+  }
+  if (typeof productId !== 'string' || productId.length === 0 ||
+      (configuredStoreDir !== undefined && typeof configuredStoreDir !== 'string')) {
     throw new TypeError(`${INPUT_PREPARATION_RETIREMENT_COMMAND} requires the daemon productId and an optional storeDir string`);
   }
-  const storeDir = DeviceStore.resolveDir(target.productId, target.storeDir);
-  const mode = input?.mode;
+  const storeDir = DeviceStore.resolveDir(productId, configuredStoreDir);
   if (mode === 'preview') {
     return { status: 'inspected', inspection: await inspectInputPreparationNamespace(storeDir) };
   }
   if (mode !== 'execute') throw new TypeError(`${INPUT_PREPARATION_RETIREMENT_COMMAND} mode must be 'preview' or 'execute'`);
-  if (input.confirmed !== true) throw new InputPreparationRetirementConfirmationRequiredError();
+  if (confirmed !== true) throw new InputPreparationRetirementConfirmationRequiredError();
 
   const connectControl = seams.connectControl ?? connectControlClient;
-  const connection = await connectControl({ storeDir, productId: target.productId });
+  const connection = await connectControl({ storeDir, productId });
   // A completed authenticated handshake is itself proof a daemon owns this
   // store; the retirement refuses on it without asking anything further.
   if (connection.ok) connection.client.close();
