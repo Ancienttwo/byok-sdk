@@ -191,3 +191,10 @@ Scope: `packages/client/**`, `api-surface/client.d.ts`, spec/protocol/README/arc
 
 - `DEVICE_ENROLLMENT_PROOF_KEY_*` is a drift-checked projection, not a wire-carried value (see above).
 - Windows service composition: identity read and signer read the calling process's OS credential set, same as every other enrollment read.
+
+### S4 verification (fresh `git clone --no-local` of 25239ee6)
+
+- `bun install --frozen-lockfile` exit 0; `bun run build` exit 0; `bun run typecheck` exit 0.
+- `bun run test`: client 3244 passed / 1 failed / 11 skipped. The one failure was a 10 s timeout in `pi-mcp-launch-cwd.test.ts` ("leaves a bunfig.toml preload planted in the Agent home unexecuted"; it spawns real bun on a cold cache). It is outside this diff. Rerun singly it failed once more, then passed twice on the head. On base 050349af it passed three times, taking 7.4 s on the cold first run. That makes it a known load/cold-cache flake, not a regression. The sequential root run stops after client, so the remaining suites ran one by one, all exit 0: cloud 422, cloud-dataplane 73 (+107 skipped), conformance 161, core 356, implementation-identity 115, keys 620 (+7 skipped), protocol 441, server 373 (+19 skipped), testkit 4, ui-runtime 20, live-activity-host 21, salesko-connector-broker 25.
+- New and affected client suites: `host-enrollment-proof-surface` 8, `retire-input-preparation-api` 11, `retire-input-preparation-command` 4, `input-preparation-retirement`, `device-proof-signer`, `authenticated-enrollment-status`: 52/52 pass in the worktree.
+- `bun run test:scripts` exit 0; `check:api-surface` 9 goldens match (client golden regenerated deliberately in dad4fb75); `check:version-authority` 0.24.0 / keys 0.8.1; `check-package-graph` OK (9 packages, no aligned package reaches keys); `repo-harness run check-task-workflow --strict` OK.
