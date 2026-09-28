@@ -10,6 +10,7 @@ import { runApprovalsCommand } from './commands/approvals';
 import { runApproveCommand, runRejectCommand } from './commands/approve-reject';
 import { runPairCommand } from './commands/pair';
 import { runDoctorCommand } from './commands/doctor';
+import { runRetireInputPreparationCommand } from './commands/retire-input-preparation';
 import { runRuntimesCommand } from './commands/runtimes';
 import {
   buildServiceDefinition,
@@ -128,6 +129,7 @@ function usage(): never {
       '  byok-agent status [--config <path>]',
       '  byok-agent doctor [--json] [--fix --yes] [--config <path>]',
       '  byok-agent doctor --repair restore-enrollment-metadata --expected-device-id <id> --expected-tenant-id <id> --yes [--json] [--config <path>]',
+      '  byok-agent retire-input-preparation [--yes] [--json] [--config <path>]   (dry run unless --yes; daemon must be stopped)',
       '  byok-agent support-bundle --output <path> [--config <path>]',
       '  byok-agent runtimes [--config <path>]',
       '  byok-agent tasks [--follow] [--config <path>]',
@@ -217,6 +219,12 @@ async function main(): Promise<void> {
       expectedTenantId: hasFlag(rest, '--expected-tenant-id') ? (argValue(rest, '--expected-tenant-id') ?? '') : undefined,
       confirmed: hasFlag(rest, '--yes'),
     });
+  }
+
+  if (command === 'retire-input-preparation') {
+    const config = loadConfig(configPathFrom(rest));
+    await runRetireInputPreparationCommand(config, { confirmed: hasFlag(rest, '--yes'), json: hasFlag(rest, '--json') });
+    return;
   }
 
   if (command === 'support-bundle') {

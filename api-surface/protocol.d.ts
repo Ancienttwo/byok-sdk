@@ -1403,6 +1403,11 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             requestDigest: z.ZodString;
             artifactDigest: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>;
+        agentMemory: z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
             activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
@@ -1561,6 +1566,11 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     session_ref: z.ZodOptional<z.ZodString>;
     seq: z.ZodNumber;
     payload: z.ZodObject<{
+        agentMemory: z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>;
         requestId: z.ZodUUID;
         agentRef: z.ZodObject<{
             agentId: z.ZodString;
@@ -2920,6 +2930,11 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 requestDigest: z.ZodString;
                 artifactDigest: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>;
+            agentMemory: z.ZodEnum<{
+                none: "none";
+                read: "read";
+                "read-write": "read-write";
+            }>;
             egressPolicy: z.ZodObject<{
                 policyRevision: z.ZodString;
                 activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
@@ -3078,6 +3093,11 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
         session_ref: z.ZodOptional<z.ZodString>;
         seq: z.ZodNumber;
         payload: z.ZodObject<{
+            agentMemory: z.ZodEnum<{
+                none: "none";
+                read: "read";
+                "read-write": "read-write";
+            }>;
             requestId: z.ZodUUID;
             agentRef: z.ZodObject<{
                 agentId: z.ZodString;
@@ -4309,6 +4329,11 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 requestDigest: z.ZodString;
                 artifactDigest: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>;
+            agentMemory: z.ZodEnum<{
+                none: "none";
+                read: "read";
+                "read-write": "read-write";
+            }>;
             egressPolicy: z.ZodObject<{
                 policyRevision: z.ZodString;
                 activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
@@ -4467,6 +4492,11 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
         session_ref: z.ZodOptional<z.ZodString>;
         seq: z.ZodNumber;
         payload: z.ZodObject<{
+            agentMemory: z.ZodEnum<{
+                none: "none";
+                read: "read";
+                "read-write": "read-write";
+            }>;
             requestId: z.ZodUUID;
             agentRef: z.ZodObject<{
                 agentId: z.ZodString;
@@ -5175,6 +5205,11 @@ export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminated
             reserved: "reserved";
         }>;
         binding: z.ZodObject<{
+            agentMemory: z.ZodEnum<{
+                none: "none";
+                read: "read";
+                "read-write": "read-write";
+            }>;
             scopeId: z.ZodString;
             deviceId: z.ZodString;
             agentRef: z.ZodString;
@@ -5371,6 +5406,11 @@ export declare const InputPreparationReadbackSchema: z.ZodObject<{
             reserved: "reserved";
         }>;
         binding: z.ZodObject<{
+            agentMemory: z.ZodEnum<{
+                none: "none";
+                read: "read";
+                "read-write": "read-write";
+            }>;
             scopeId: z.ZodString;
             deviceId: z.ZodString;
             agentRef: z.ZodString;
@@ -5695,6 +5735,7 @@ export type { PairRequest, PairResponse, ChallengeRequest, ChallengeResponse, To
 export type { TaskOfferType } from './messages';
 export type { HarnessId, HarnessInfo } from './messages';
 export { CUSTOM_HARNESS_CAPABILITY } from './version';
+export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation';
 // ==== @byok-sdk/protocol dist/input-preparation.d.ts ====
 import { z } from 'zod';
 /**
@@ -5734,7 +5775,7 @@ import { z } from 'zod';
  * below. See `INPUT_PREPARATION_VERSION` in the client for what each version
  * changed.
  */
-export declare const INPUT_PREPARATION_WIRE_VERSION: 7;
+export declare const INPUT_PREPARATION_WIRE_VERSION: 8;
 /**
  * Capability required before a task-free remote input preparation — or a
  * prepared Execution — is admitted: `agent-input-preparation-v<N>`, where
@@ -5757,7 +5798,7 @@ export declare const INPUT_PREPARATION_WIRE_VERSION: 7;
  * devices as a pair is the operator precondition for the cut (`docs/spec.md`,
  * bounded admission); nothing here parses an older receipt.
  */
-export declare const AGENT_INPUT_PREPARATION_CAPABILITY: "agent-input-preparation-v7";
+export declare const AGENT_INPUT_PREPARATION_CAPABILITY: "agent-input-preparation-v8";
 /** The preparation surface uses the package-wide lowercase `sha256:<hex>` transport form. */
 export declare const InputPreparationContentHashSchema: z.ZodString;
 /**
@@ -5796,6 +5837,13 @@ export declare const InputPreparationPermissionModeSchema: z.ZodEnum<{
     readonly: "readonly";
 }>;
 export type InputPreparationPermissionMode = z.infer<typeof InputPreparationPermissionModeSchema>;
+/** Explicit prepared SDK memory selection; never defaulted. */
+export declare const PreparedAgentMemoryModeSchema: z.ZodEnum<{
+    none: "none";
+    read: "read";
+    "read-write": "read-write";
+}>;
+export type PreparedAgentMemoryMode = z.infer<typeof PreparedAgentMemoryModeSchema>;
 /**
  * The canonical Host source snapshot this input was assembled from. Both
  * values are Host authority carried verbatim so the receipt binds the exact
@@ -6339,6 +6387,11 @@ export declare const InputPreparationArtifactSummarySchema: z.ZodObject<{
 }, z.core.$strict>;
 /** The immutable binding a receipt carries and a later consumer must re-present. */
 export declare const InputPreparationBindingSchema: z.ZodObject<{
+    agentMemory: z.ZodEnum<{
+        none: "none";
+        read: "read";
+        "read-write": "read-write";
+    }>;
     scopeId: z.ZodString;
     deviceId: z.ZodString;
     agentRef: z.ZodString;
@@ -6399,6 +6452,11 @@ export declare const InputPreparationReceiptSummarySchema: z.ZodObject<{
         reserved: "reserved";
     }>;
     binding: z.ZodObject<{
+        agentMemory: z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>;
         scopeId: z.ZodString;
         deviceId: z.ZodString;
         agentRef: z.ZodString;
@@ -7328,6 +7386,11 @@ export declare const TaskOfferPreparedPayloadSchema: z.ZodObject<{
         requestDigest: z.ZodString;
         artifactDigest: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>;
+    agentMemory: z.ZodEnum<{
+        none: "none";
+        read: "read";
+        "read-write": "read-write";
+    }>;
     egressPolicy: z.ZodObject<{
         policyRevision: z.ZodString;
         activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
@@ -7629,6 +7692,11 @@ export type AgentHomeProjectionPayload = z.infer<typeof AgentHomeProjectionPaylo
  * in the artifact binding; it is not a grant, and it authorizes nothing.
  */
 export declare const AgentInputPreparationPayloadSchema: z.ZodObject<{
+    agentMemory: z.ZodEnum<{
+        none: "none";
+        read: "read";
+        "read-write": "read-write";
+    }>;
     requestId: z.ZodUUID;
     agentRef: z.ZodObject<{
         agentId: z.ZodString;
@@ -8838,6 +8906,11 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             requestDigest: z.ZodString;
             artifactDigest: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>;
+        agentMemory: z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
             activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
@@ -9365,6 +9438,11 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             requestDigest: z.ZodString;
             artifactDigest: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>;
+        agentMemory: z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
             activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
@@ -9658,6 +9736,11 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         projection: z.ZodType<import("./agent-home-projection").AgentHomeProjectionValue, unknown, z.core.$ZodTypeInternals<import("./agent-home-projection").AgentHomeProjectionValue, unknown>>;
     }, z.core.$strict>;
     readonly 'agent.input.preparation': z.ZodObject<{
+        agentMemory: z.ZodEnum<{
+            none: "none";
+            read: "read";
+            "read-write": "read-write";
+        }>;
         requestId: z.ZodUUID;
         agentRef: z.ZodObject<{
             agentId: z.ZodString;
@@ -10652,5 +10735,5 @@ export declare const STRICT_AGENT_ONLY_CAPABILITY: 'strict-agent-only';
  * cannot accidentally execute the instruction without the required tools.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v7", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v8", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];

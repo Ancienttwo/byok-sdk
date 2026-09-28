@@ -1,3 +1,5 @@
+import { preparedAgentMemoryModeWithinCeiling } from '../agent-memory/prepared-capability';
+import { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import {
   canonicalInputPreparationJson,
   inputPreparationDigest,
@@ -161,6 +163,7 @@ export interface InputPreparationCallOptions {
 export interface InputPreparationService {
   /** Replay, confirm and reconcile the durable log. Must complete before any method answers. */
   open(): Promise<void>;
+  authorizeAgentMemory(binding: InputPreparationBindingV1): Promise<void>;
   prepare(request: InputPreparationRequestV1, options?: InputPreparationCallOptions): Promise<InputPreparationReceiptV1>;
   lookup(params: InputPreparationLookupParamsV1): Promise<InputPreparationReceiptV1>;
   cancel(params: InputPreparationCancelParamsV1): Promise<InputPreparationReceiptV1>;
@@ -597,6 +600,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     if (
       typeof grant !== 'object' ||
       grant === null ||
+      !PreparedAgentMemoryModeSchema.safeParse(grant.agentMemory).success ||
       typeof grant.scopeId !== 'string' ||
       grant.scopeId.length === 0 ||
       grant.deviceId !== claim.deviceId ||
@@ -610,6 +614,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       throw new InputPreparationRequestError('scope_denied', 'the configured authority returned a grant that does not match the claimed scope');
     }
     return {
+      agentMemory: grant.agentMemory,
       scopeId: grant.scopeId,
       deviceId: grant.deviceId,
       agentRef: grant.agentRef,
@@ -656,6 +661,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     requestDigest: string,
   ): InputPreparationBindingV1 {
     return {
+      agentMemory: request.agentMemory,
       scopeId: grant.scopeId,
       deviceId: grant.deviceId,
       agentRef: grant.agentRef,
@@ -714,6 +720,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     {
       const assembled = await options.toolSurface.assemble({
         requiredToolsets: request.requiredToolsets,
+        agentMemory: request.agentMemory,
         permissionMode: request.permissionMode,
         runtimeIdentity: inputPreparationRuntimeIdentityString(options.compiler.runtime),
       });
@@ -1026,6 +1033,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     }
 
     const grant = await resolveAuthority(request.scope);
+    assertMemoryCeiling(request.agentMemory, grant.agentMemory);
     const source = await resolveSourceAuthority(request, grant);
     const verifiedRequest = { ...request, source };
     assertAvailable();
@@ -1104,6 +1112,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
         if (recorded !== undefined) {
           const rebound = await options.toolSurface.resolveBinding({
             requiredToolsets: request.requiredToolsets,
+        agentMemory: request.agentMemory,
           });
           if (!rebound.ok) {
             throw new InputPreparationRequestError(rebound.code, rebound.message);
@@ -1209,6 +1218,11 @@ export function createInputPreparationService(options: InputPreparationServiceOp
         return rethrowDurable(cause);
       }
     },
+    async authorizeAgentMemory(binding: InputPreparationBindingV1): Promise<void> {
+      const grant = await resolveAuthority(binding);
+      if (grant.scopeId !== binding.scopeId) throw new InputPreparationRequestError('scope_denied', 'scope changed');
+      assertMemoryCeiling(binding.agentMemory, grant.agentMemory);
+    },
     async stop(): Promise<void> {
       stopped = true;
       if (gcTimer !== undefined) clearTimeout(gcTimer);
@@ -1222,4 +1236,10 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       if (gcFailure) rethrowDurable(gcFailure.cause);
     },
   };
+}
+
+function assertMemoryCeiling(mode: PreparedAgentMemoryMode, ceiling: PreparedAgentMemoryMode): void {
+  if (!PreparedAgentMemoryModeSchema.safeParse(mode).success || !preparedAgentMemoryModeWithinCeiling(mode, ceiling)) {
+    throw new InputPreparationRequestError('scope_denied', 'agent_memory_denied');
+  }
 }

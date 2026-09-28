@@ -1,3 +1,4 @@
+import { PreparedAgentMemoryModeSchema } from '@byok-sdk/protocol';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import { PERMISSION_MODES, type PermissionMode, type TaskState } from '@byok-sdk/protocol';
@@ -1287,6 +1288,7 @@ export function parseInputPreparationRequestParams(value: unknown): InputPrepara
       'source',
       'selection',
       'permissionMode',
+      'agentMemory',
       'requiredToolsets',
       'snapshot',
       'accountingPolicyRef',
@@ -1320,6 +1322,8 @@ export function parseInputPreparationRequestParams(value: unknown): InputPrepara
   if (typeof value.permissionMode !== 'string' || !(PERMISSION_MODES as readonly string[]).includes(value.permissionMode)) {
     return badRequest(`permissionMode must be one of ${PERMISSION_MODES.map((mode) => JSON.stringify(mode)).join(', ')}`);
   }
+  const memory = PreparedAgentMemoryModeSchema.safeParse(value.agentMemory);
+  if (!memory.success) return badRequest('agentMemory must be none, read or read-write');
   const requiredToolsets = parseRequiredToolsets(value.requiredToolsets);
   if (!requiredToolsets) {
     return badRequest('requiredToolsets must be an array of distinct configured toolset ids');
@@ -1346,6 +1350,7 @@ export function parseInputPreparationRequestParams(value: unknown): InputPrepara
       source: { revision: value.source.revision, digest: value.source.digest },
       selection: { model, options },
       permissionMode: value.permissionMode as PermissionMode,
+      agentMemory: memory.data,
       requiredToolsets: Object.freeze(requiredToolsets),
       snapshot,
       ...(accountingPolicyRef === undefined ? {} : { accountingPolicyRef }),

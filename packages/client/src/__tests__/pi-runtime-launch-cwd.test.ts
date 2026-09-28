@@ -188,6 +188,7 @@ async function prepareArtifact(home: string, artifactPath: string, launchCwd: st
     ...compiled,
   }), { mode: 0o600 });
   return {
+    agentMemory: 'none', memory: null,
     reference: { scopeId: 'cwd-scope', agentRef: 'cwd-agent', requestId: 'cwd-preparation', recordId },
     artifactPath,
     expected: { envelopeDigest: compiled.envelopeDigest, toolManifestDigest: compiled.toolManifestDigest, model, binding },
@@ -223,6 +224,7 @@ async function launchThroughAdapter(lane: 'ordinary' | 'prepared', home: string)
   const prepared = await adapter.prepare({ offer, policy, descriptor: adapter.descriptor, requiredToolsetIds: [] });
   if (prepared.kind === 'reject') throw new Error(prepared.reason);
   const manifest = sealRuntimeOperationManifest({
+    agentMemory: 'none',
     taskId: 'cwd-marker-task', runtimeId: 'pi', descriptor: adapter.descriptor, policy,
     requiredToolsetIds: [], workspace: { workspaceDir: home }, forwardedEnvironmentNames: Object.keys(env).sort(),
   });

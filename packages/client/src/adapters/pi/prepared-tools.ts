@@ -1,4 +1,5 @@
-import type { PermissionMode, PermissionPolicy } from '@byok-sdk/protocol';
+import type { PermissionMode, PermissionPolicy, PreparedAgentMemoryMode } from '@byok-sdk/protocol';
+import type { CallToolResult } from '@modelcontextprotocol/client';
 import {
   preparedToolBindingDigest,
   preparedToolSurfaceObservationDigest,
@@ -13,6 +14,8 @@ import type { ToolImplementationIdentityV1 } from '../../daemon/tool-implementat
 import { buildToolExecutorsFromObservation, InputPreparationCompileError } from './input-preparation';
 import { createPiMcpTools, type McpToolCallHost, type PiMcpToolDefinition } from './mcp-tools';
 import { resolvePiNativeToolSelection } from './permission-mapping';
+import { preparedMemoryProjection, type PreparedAgentMemoryState } from '../../daemon/prepared-agent-memory';
+import { preparedAgentMemoryTools } from '../../agent-memory/prepared-capability';
 
 /**
  * The ONE place a prepared Pi session's authorized tool closure is assembled.
@@ -108,6 +111,10 @@ export interface PreparedPiToolSurfaceInput {
   readonly policy: PermissionPolicy;
   /** The mode `daemon/prepared-tool-surface.ts` filtered the counted manifest for. */
   readonly countedPermissionMode: PermissionMode;
+  /** Sealed SDK-owned memory selection; it is distinct from Host MCP toolsets. */
+  readonly agentMemory: PreparedAgentMemoryMode;
+  /** Descriptor observation and attested helper pair counted with the artifact. */
+  readonly memory: PreparedAgentMemoryState | null;
   /** The daemon's frozen observation, unfiltered. The policy is applied here. */
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
   /** `toolsetId` -> the registry definition revision the preparation bound. */
@@ -123,6 +130,42 @@ export interface PreparedPiToolSurfaceInput {
   readonly expectedObservationDigest: string;
   /** How a registered tool reaches its server — the shared pool, never a second client. */
   readonly host: McpToolCallHost;
+  /** Runtime-worker dispatch for the selected SDK memory helper, never the Host MCP pool. */
+  readonly memoryCall?: PreparedPiMemoryCall;
+}
+
+/** The task-bound execution helper dispatch; its names are fixed SDK vocabulary. */
+export interface PreparedPiMemoryCall {
+  call(
+    toolName: string,
+    args: Readonly<Record<string, unknown>>,
+    signal?: AbortSignal,
+  ): Promise<CallToolResult>;
+}
+
+const SDK_MEMORY_TOOLSET_ID = '@byok-sdk/agent-memory';
+const SDK_MEMORY_SERVER_NAME = 'byokagentmemory';
+
+function createPreparedMemoryTools(
+  mode: PreparedAgentMemoryMode,
+  memory: PreparedAgentMemoryState,
+  memoryCall: PreparedPiMemoryCall,
+): readonly PiMcpToolDefinition[] {
+  // This is an SDK-owned projection used only to reuse Pi's result renderer.
+  // It never enters the Host registry/fingerprint and cannot select a Host
+  // server: `memoryCall` receives only the fixed bare memory tool name.
+  const projection = preparedAgentMemoryTools(mode, memory.observation).map((tool) => Object.freeze({
+    toolsetId: SDK_MEMORY_TOOLSET_ID,
+    serverName: SDK_MEMORY_SERVER_NAME,
+    toolName: tool.name,
+    description: tool.description,
+    inputSchema: tool.parameters,
+  }));
+  return createPiMcpTools(projection, {
+    call(tool, args, signal) {
+      return memoryCall.call(tool.toolName, args, signal);
+    },
+  }, 'bare');
 }
 
 function refuse(code: PreparedPiToolSurfaceRefusalCode, message: string): PreparedPiToolSurfaceRefusal {
@@ -205,6 +248,12 @@ export async function assemblePreparedPiToolSurface(
       + ` manifest was counted for ${JSON.stringify(input.countedPermissionMode)}`,
     );
   }
+  if (input.agentMemory === 'none' ? input.memory !== null : input.memory === null) {
+    return refuse('tool_surface_unfingerprintable', 'the prepared Agent memory selection has no matching sealed descriptor state');
+  }
+  if (input.agentMemory !== 'none' && input.memoryCall === undefined) {
+    return refuse('tool_surface_unfingerprintable', 'the prepared Agent memory selection has no execution helper dispatch');
+  }
 
   const native = validatePreparedPiNativeToolPolicy(input.policy);
   if (!native.ok) return native;
@@ -215,7 +264,7 @@ export async function assemblePreparedPiToolSurface(
   // The SAME projection, in the SAME order, that the preparation counted and
   // that the ordinary extension registers.
   const projected = projectMcpTools(allowed.observation);
-  if (projected.length === 0) {
+  if (projected.length === 0 && input.agentMemory === 'none') {
     return refuse('tool_surface_unfingerprintable', 'the admitted observation projects no tools at all');
   }
 
@@ -245,6 +294,15 @@ export async function assemblePreparedPiToolSurface(
     return refuse('tool_surface_unfingerprintable', message);
   }
 
+  const memoryProjection = preparedMemoryProjection(input.agentMemory, input.memory, input.runtimeIdentity);
+  for (const tool of memoryProjection.tools) {
+    if (tools.some((existing) => existing.name === tool.name)) {
+      return refuse('tool_surface_unfingerprintable', `SDK memory tool name ${JSON.stringify(tool.name)} collides with a Host MCP tool`);
+    }
+    tools.push(tool);
+  }
+  toolExecutors = Object.freeze({ ...toolExecutors, ...memoryProjection.toolExecutors });
+
   // Every projected server must arrive with the identity the daemon resolved
   // for it. A missing one is a refusal, never a substituted "unattested": those
   // are different facts, and only one of them was ever digested.
@@ -268,6 +326,8 @@ export async function assemblePreparedPiToolSurface(
   }
 
   const toolBindingDigest = preparedToolBindingDigest({
+    agentMemory: input.agentMemory,
+    memoryImplementation: input.memory?.implementation ?? null,
     launch: input.launch,
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     servers: bindingServers,
@@ -281,6 +341,8 @@ export async function assemblePreparedPiToolSurface(
   }
 
   const observationDigest = preparedToolSurfaceObservationDigest({
+    agentMemory: input.agentMemory,
+    memory: input.memory,
     launch: input.launch,
     permissionMode: input.countedPermissionMode,
     runtimeIdentity: input.runtimeIdentity,
@@ -300,7 +362,10 @@ export async function assemblePreparedPiToolSurface(
   // Built only after both digests agree: a tool closure is an executable
   // capability, and there is no reason to construct one for a surface that has
   // already been refused.
-  const piTools = createPiMcpTools(projected, input.host, 'qualified');
+  const piTools = [
+    ...createPiMcpTools(projected, input.host, 'qualified'),
+    ...(input.agentMemory === 'none' ? [] : createPreparedMemoryTools(input.agentMemory, input.memory!, input.memoryCall!)),
+  ];
   const authorized: PreparedPiAuthorizedTool[] = [];
   for (const tool of piTools) {
     const identity = toolExecutors[tool.name];

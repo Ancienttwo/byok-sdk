@@ -1,3 +1,5 @@
+import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
+import { assertPreparedMemoryPolicy, resolvePreparedMemoryImplementation, observePreparedMemory, preparedMemoryProjection, type PreparedAgentMemoryImplementation, type PreparedAgentMemoryState } from './prepared-agent-memory';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import type { PermissionMode, PermissionPolicy } from '@byok-sdk/protocol';
 import {
@@ -113,6 +115,7 @@ export interface PreparedToolServerBinding {
 
 /** Stage 1: everything that is knowable without starting a server. */
 export interface PreparedToolBinding {
+  readonly memoryImplementation: PreparedAgentMemoryImplementation | null;
   readonly requiredToolsets: readonly string[];
   readonly launch: McpLaunchAttestation;
   /** `toolsetId` -> the registry's definition revision. Every named toolset appears. */
@@ -134,6 +137,7 @@ export interface PreparedToolBinding {
 
 /** Stage 2: the frozen tool surface one preparation is compiled and counted over. */
 export interface PreparedToolSurface {
+  readonly memory: PreparedAgentMemoryState | null;
   readonly tools: readonly InputPreparationToolV1[];
   readonly toolExecutors: Readonly<Record<string, string>>;
   /** Digest over the tools, the executors, the launch attestation and the identities. */
@@ -163,12 +167,13 @@ export type PreparedToolSurfaceResult =
  */
 export interface PreparedToolSurfaceAssembler {
   /** Stage 1 only. Starts no server. */
-  resolveBinding(input: { readonly requiredToolsets: readonly string[] }): Promise<PreparedToolBindingResult>;
+  resolveBinding(input: { readonly requiredToolsets: readonly string[]; readonly agentMemory: PreparedAgentMemoryMode }): Promise<PreparedToolBindingResult>;
   /** Stage 1 + stage 2. The only producer of a prepared `tools`/`toolExecutors` pair. */
   assemble(input: PreparedToolSurfaceInput): Promise<PreparedToolSurfaceResult>;
 }
 
 export interface PreparedToolSurfaceInput {
+  readonly agentMemory: PreparedAgentMemoryMode;
   readonly requiredToolsets: readonly string[];
   readonly permissionMode: PermissionMode;
   /** The resolved native runtime identity string every fingerprint binds. */
@@ -180,6 +185,7 @@ export interface PreparedToolSurfaceInput {
 // ---------------------------------------------------------------------------
 
 export interface PreparedToolSurfaceDeps {
+  readonly memoryAvailable?: () => boolean;
   readonly toolsetRegistry: Pick<McpToolsetRegistry, 'snapshot' | 'status'>;
   /** The operator's `DaemonConfig.mcpLaunchCwd`, already validated. */
   readonly mcpLaunchCwd?: McpLaunchCwdConfig;
@@ -250,7 +256,7 @@ async function resolveLaunch(deps: PreparedToolSurfaceDeps): Promise<McpLaunchBi
 
 export async function resolvePreparedToolBinding(
   deps: PreparedToolSurfaceDeps,
-  input: { readonly requiredToolsets: readonly string[] },
+  input: { readonly requiredToolsets: readonly string[]; readonly agentMemory: PreparedAgentMemoryMode },
 ): Promise<PreparedToolBindingResult> {
   // ONE immutable snapshot of the registry, taken here and read for the whole
   // resolution. A `toolsets.reload` landing mid-resolution must not be able to
@@ -298,7 +304,7 @@ export async function resolvePreparedToolBinding(
       });
     }
   }
-  if (servers.size === 0) {
+  if (servers.size === 0 && input.agentMemory === 'none') {
     return refuse(
       'unsupported_input',
       'required_toolsets_resolved_to_no_servers',
@@ -322,6 +328,13 @@ export async function resolvePreparedToolBinding(
   // environment this SDK hands to `spawn`, so a second `deps.runtimeEnv()`
   // call could measure one value and spawn with another.
   const launchEnv = projectPiMcpEnvironment(deps.runtimeEnv());
+  let memoryImplementation: PreparedAgentMemoryImplementation | null = null;
+  if (input.agentMemory !== 'none') {
+    if (deps.memoryAvailable?.() !== true) return refuse('unsupported_input', 'agent_memory_unavailable', 'secure Agent memory is unavailable');
+    try { memoryImplementation = await resolvePreparedMemoryImplementation(deps.toolImplementationAuthority, launchEnv, launch, deps.toolImplementationFsProbe); }
+    catch (error) { return refuse('unsupported_input', 'agent_memory_implementation_unproven', errorMessage(error)); }
+  }
+
   for (const serverName of [...servers.keys()].sort(compareServerNames)) {
     const entry = servers.get(serverName)!;
     const implementation = await resolveToolImplementationIdentity(
@@ -348,6 +361,7 @@ export async function resolvePreparedToolBinding(
   // LAUNCH entry recomputes this same digest to decide whether the device still
   // matches the artifact (`adapters/pi/prepared-tools.ts`).
   const toolBindingDigest = preparedToolBindingDigest({
+    agentMemory: input.agentMemory, memoryImplementation,
     launch,
     toolsetDefinitionRevisions,
     servers: resolved.map((entry) => ({
@@ -363,6 +377,7 @@ export async function resolvePreparedToolBinding(
     ok: true as const,
     binding: Object.freeze({
       requiredToolsets: Object.freeze([...input.requiredToolsets]),
+      memoryImplementation,
       launch,
       toolsetDefinitionRevisions: Object.freeze(toolsetDefinitionRevisions),
       servers: Object.freeze(resolved),
@@ -429,6 +444,8 @@ export async function assemblePreparedToolSurface(
     );
   }
 
+  try { assertPreparedMemoryPolicy(input.agentMemory, admitted.policy); }
+  catch (error) { return refuse('permission_mode_denied', 'agent_memory_policy_conflict', errorMessage(error)); }
   const bound = await resolvePreparedToolBinding(deps, input);
   if (!bound.ok) return bound;
   const binding = bound.binding;
@@ -485,7 +502,13 @@ export async function assemblePreparedToolSurface(
   const implementations: Record<string, ToolImplementationIdentityV1> = {};
   for (const entry of binding.servers) implementations[entry.serverName] = entry.implementation;
 
+  let memory: PreparedAgentMemoryState | null = null;
+  if (binding.memoryImplementation !== null) {
+    try { memory = await observePreparedMemory(binding.memoryImplementation, env, undefined, deps.toolImplementationFsProbe); }
+    catch (error) { return refuse('toolsets_unobservable', 'agent_memory_descriptor_unobservable', errorMessage(error)); }
+  }
   const fingerprinted = await fingerprintPreparedToolSurface({
+    agentMemory: input.agentMemory, memory,
     observation,
     permissionMode: input.permissionMode,
     runtimeIdentity: input.runtimeIdentity,
@@ -498,6 +521,7 @@ export async function assemblePreparedToolSurface(
   return Object.freeze({
     ok: true as const,
     surface: Object.freeze({
+      memory,
       tools: fingerprinted.fingerprint.tools,
       toolExecutors: fingerprinted.fingerprint.toolExecutors,
       observationDigest: fingerprinted.fingerprint.observationDigest,
@@ -515,6 +539,8 @@ export async function assemblePreparedToolSurface(
 
 /** Everything the fingerprint binds, for one already-probed observation. */
 export interface PreparedToolSurfaceFingerprintInput {
+  readonly agentMemory: PreparedAgentMemoryMode;
+  readonly memory: PreparedAgentMemoryState | null;
   /** The live, already-classified `tools/list` answer for exactly the projected servers. */
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
   readonly permissionMode: PermissionMode;
@@ -616,7 +642,15 @@ export async function fingerprintPreparedToolSurface(
       identity === undefined ? 'unavailable:implementation_identity_unattested' : implementationKind(identity);
   }
 
+  const memoryProjection = preparedMemoryProjection(input.agentMemory, input.memory, input.runtimeIdentity);
+  for (const tool of memoryProjection.tools) {
+    if (tools.some(existing => existing.name === tool.name)) return refuse('unsupported_input', 'tool_name_collision', 'memory tool name collision');
+    tools.push(tool);
+  }
+  toolExecutors = Object.freeze({...toolExecutors, ...memoryProjection.toolExecutors});
+  Object.assign(toolImplementationKinds, memoryProjection.toolImplementationKinds);
   const observationDigest = preparedToolSurfaceObservationDigest({
+    agentMemory: input.agentMemory, memory: input.memory,
     launch: input.launch,
     permissionMode: input.permissionMode,
     runtimeIdentity: input.runtimeIdentity,
@@ -644,7 +678,7 @@ export async function fingerprintPreparedToolSurface(
 /** Bind one set of dependencies into the assembler the service is constructed with. */
 export function createPreparedToolSurfaceAssembler(deps: PreparedToolSurfaceDeps): PreparedToolSurfaceAssembler {
   return Object.freeze({
-    resolveBinding: (input: { readonly requiredToolsets: readonly string[] }) =>
+    resolveBinding: (input: { readonly requiredToolsets: readonly string[]; readonly agentMemory: PreparedAgentMemoryMode }) =>
       resolvePreparedToolBinding(deps, input),
     assemble: (input: PreparedToolSurfaceInput) => assemblePreparedToolSurface(deps, input),
   });

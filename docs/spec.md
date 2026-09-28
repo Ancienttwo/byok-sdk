@@ -544,8 +544,8 @@ surface digests — which are recomputed on the LIVE observation with the same
 functions the preparation computed the recorded ones with. Every difference
 declines non-retryably, with its own reason.
 
-Prepared execution injects no reserved message or memory MCP helper and performs
-no helper-bin precheck or helper preflight. Message context remains server-only;
+Prepared execution injects no message MCP helper. Memory uses the explicit
+`agentMemory` selection described below; `none` starts no memory helper. Message context remains server-only;
 `messageEgress` enables the existing durable outbox. The daemon collects Pi text
 progress into the final reply. Overflow or missing/unreadable usage fails before
 any body can be published. At turn end it checks usage first, extracts any selected
@@ -554,10 +554,31 @@ accepted disposition before `task.complete` with `preparedObservation`. Activity
 and terminal envelopes pass through the same strict egress sanitizer as fresh
 Agent egress offers. The message tool never enters D.
 
+**Prepared Agent memory (scoped v8 cut).**
+[Prepared Agent Memory Contract](researches/2026-09-28-prepared-agent-memory-contract.md)
+requires `agentMemory: 'none' | 'read' | 'read-write'` on local/remote preparation,
+receipt bindings and prepared offers. A trusted device authority grants a ceiling;
+preparation and execution both check it. Memory-only preparation uses
+`requiredToolsets: []`, while the prepared offer omits that optional field.
+
+The credential-free SDK descriptor supplies the complete tool schemas and operation
+metadata. Selected tools, both attested helper identities and mode participate in
+the existing compiler/count/digest path. After comparison, pin and claim, the daemon
+mints a private task token. The execution helper is physically reverified and its
+full descriptor must match before a model request. `read` exposes recall only;
+`read-write` additionally exposes save. Both the helper and daemon reject writes
+outside that grant. `readonly` permits only `read`; `confirm`/`plan` cannot select
+memory. Selected bare memory names in `denyTools` reject the preparation/offer.
+
+Device-local home/CAS and live recall semantics remain authoritative. Counted memory
+tool schemas do not freeze memory file contents. This cut adds no automatic snapshot,
+Host UI or native tools. SDK source is v8; downstream paired upgrade and deployment
+remain separate actions. No v7 reader, mode default or fallback is retained.
+
 Pi policy `{mode:'auto', allowTools:[]}` explicitly selects zero native tools on
 both fresh and prepared lanes. Omitting `allowTools` retains Pi's default native
 registry on fresh execution and is inexpressible for prepared execution. Observed MCP toolset grants and reserved
-grants on fresh offers remain separately admitted; prepared offers have no reserved grants.
+grants on fresh offers remain separately admitted; prepared offers grant only their explicitly selected, counted SDK memory tools.
 The same native-selection validator runs before pin and again in the prepared
 host: nonempty native selections remain `native_tools_uncounted`. This changes
 the former fresh-lane interpretation of an explicit empty allowlist.
@@ -597,11 +618,23 @@ task; only the lane refuses, typed, as `input_preparation_record_log_unsupported
 on every remote completion, by not advertising the input-preparation capability
 (so the cloud refuses to enqueue onto it), and by carrying no prepared-offer
 lane (so a `task.offer_prepared` declines by name). Nothing is migrated, read
-forward or deleted automatically. **Operator step:** stop the daemon, move
-`<storeDir>/input-preparation/records.jsonl` together with the `artifacts/`
-directory beside it to an archive location, and start the daemon again; the
+forward or deleted automatically. **Operator step:** stop the daemon, run
+`byok-agent retire-input-preparation` to list the namespace (record counts per
+record schema version, pinned records, artifact files and unparseable lines;
+it writes nothing), then `byok-agent retire-input-preparation --yes`, and
+start the daemon again. `--yes` refuses, typed and with zero writes, while the
+daemon control socket is reachable or the store owner lease is held, and when
+any record line does not parse, sits at the current or an unknown record
+schema version, or when any record holds a live pin (its last line in the log,
+keyed by `recordId` exactly as replay folds it, carries a pin). Otherwise it moves the whole
+`<storeDir>/input-preparation/` directory, unchanged, into
+`<storeDir>/input-preparation-retired/<timestamp>-v<versions>/` beside a
+`manifest.json` (counts per version, sha256 and size of `records.jsonl` and of
+every artifact file). The log is read structurally for its `recordId`, `version`
+and `pin` fields only, never replayed; nothing is deleted or converted, and Agent home
+and Agent memory are not touched. An absent or empty namespace is a no-op. The
 lane comes back empty under the current record schema version, and the
-archived records stay available for audit.
+retired records stay available for audit.
 
 `ready` answers exactly one question: CAN THIS PREPARATION BE CONSUMED. It is
 not Host budget admission. The device performs no budget arithmetic anywhere on
@@ -639,7 +672,7 @@ carries no version field, so a device and a cloud on different contract
 versions used to find out only when a completion PUT failed its strict schema,
 and the device then redelivered that envelope forever. The device capability
 is therefore `agent-input-preparation-v<N>`, where `<N>` is
-`INPUT_PREPARATION_WIRE_VERSION` (currently `agent-input-preparation-v7`). A
+`INPUT_PREPARATION_WIRE_VERSION` (currently `agent-input-preparation-v8`). A
 daemon declares only the token of the version it speaks; the cloud's
 input-preparation and prepared-offer enqueue gates accept only the token of the
 version they speak, so a skewed device is refused at enqueue with
@@ -658,12 +691,14 @@ and its strictly seq-ordered cursor stalls — which blocks that device's WHOLE
 mailbox, not only preparation. There is no v4 parser, dual read or migration
 for this, by decision: the lane never reached production readiness on 0.19.
 
-**Operator precondition for the one-shot v7 cut.** Drain preparation requests,
+**Operator precondition for the one-shot v8 cut.** Drain preparation requests,
 prepared Executions, required message dispositions and old mailbox entries before
 upgrading cloud and device together. Recreate preparations using the Host-owned
-systemPrompt and official identity. The capability is `agent-input-preparation-v7`;
-wire and record versions both advance to 7, with no dual token/read. Older records
-are refused. The fourteen admission comparisons retain their roles; the compiler,
+systemPrompt, official identity and explicit memory selection. The capability is
+`agent-input-preparation-v8`; wire and record versions both advance to 8, with no dual token/read. Older records
+are refused; the bounded operator action that retires them is
+`byok-agent retire-input-preparation --yes`, run against the stopped daemon
+after the drain (see the operator step above). The fourteen admission comparisons retain their roles; the compiler,
 envelope and identity values being compared change. A skipped drain needs explicit
 operator handling of the old entries; upgrading alone does not repair them.
 
@@ -2252,7 +2287,7 @@ Pi custody consumes the client-decided runtime launch binding: `--pi-bin`, optio
 
 ### Official Pi migration security and installation contract (2026-09-25 consolidation)
 
-Prepared wire and durable record are version 7, one cut with no old-token or old-record reads. `prompt` contains exactly the required Host `systemPrompt` string, including an empty string if explicitly supplied. It enters D verbatim. Prepared models receive no Pi default system prompt, local cwd, skills, docs, tool snippets or coding guidelines. Tools are declared only through the observed tools parameter. Empty `requiredToolsets` is admitted on this lane.
+Prepared wire and durable record were cut to version 7 here; the prepared Agent memory cut supersedes this with version 8 (see the v8 operator precondition above). Each cut is one-shot with no old-token or old-record reads. `prompt` contains exactly the required Host `systemPrompt` string, including an empty string if explicitly supplied. It enters D verbatim. Prepared models receive no Pi default system prompt, local cwd, skills, docs, tool snippets or coding guidelines. Tools are declared only through the observed tools parameter. Empty `requiredToolsets` is admitted on this lane.
 
 The SDK-owned envelope `byok.pi.prepared-input` is version 4, request format `byok.pi.openai-completions.request`, compilerVersion 4. P(D) is the entire captured body string D, byte for byte, with residual=[]; no serializer classification table or token claim exists. The first request alone is frozen. Tool-result continuations use their current context and the same per-stream retry-off, at-most-once scoped fetch; they never replay the first D. Errata 1 E4.4's accepted continuation risk remains: post-response overflow detection, appended event and alert. Host runtime ruling and C must be reissued after M5, with ruledResidualKeys=[]; Salesko must assemble framing and product instructions into the complete systemPrompt.
 

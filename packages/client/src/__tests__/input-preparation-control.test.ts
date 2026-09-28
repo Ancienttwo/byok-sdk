@@ -100,7 +100,7 @@ const authorityResolver: InputPreparationAuthorityResolver = {
       return { authorized: false, reason: 'unknown_device' };
     }
     if (claim.profileRevision !== TRUSTED.profileRevision) return { authorized: false, reason: 'profile_revision_drift' };
-    return { authorized: true, grant: { scopeId: 'scope:device-1', ...claim } };
+    return { authorized: true, grant: { agentMemory: 'none', scopeId: 'scope:device-1', ...claim } };
   },
 };
 
@@ -161,7 +161,7 @@ function preparationRequest(overrides: Partial<InputPreparationRequestV1> = {}):
       messages: [{ role: 'user', content: 'summarise the repository', timestamp: 1_700_000_000_000 }],
     },
     permissionMode: 'auto',
-    requiredToolsets: ['team'],
+    agentMemory: 'none', requiredToolsets: ['team'],
     ...overrides,
   };
 }
@@ -490,7 +490,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     // input: the daemon will not prepare a manifest it cannot observe, and it
     // will not silently prepare a smaller one.
     expect(
-      await controlErrorCode(requestInputPreparation(client!, preparationRequest({ requiredToolsets: ['nonesuch'] }))),
+      await controlErrorCode(requestInputPreparation(client!, preparationRequest({ agentMemory: 'none', requiredToolsets: ['nonesuch'] }))),
     ).toBe('unsupported_input');
     expect(counter.calls).toEqual([]);
 

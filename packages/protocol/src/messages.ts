@@ -1,3 +1,4 @@
+import { PreparedAgentMemoryModeSchema } from './input-preparation';
 import { z } from 'zod';
 import { BlobRefSchema } from './blob';
 import { PermissionPolicySchema } from './permission';
@@ -419,6 +420,7 @@ export const TaskOfferPreparedPayloadSchema = TaskOfferForAgentPayloadSchema.omi
 })
   .extend({
     preparation: InputPreparationOfferBindingSchema,
+    agentMemory: PreparedAgentMemoryModeSchema,
     egressPolicy: AgentEgressPolicySchema,
     messageEgress: AgentMessageEgressRequirementSchema.optional(),
   })
@@ -683,6 +685,7 @@ const InputPreparationBlobContextSchema = z
  */
 export const AgentInputPreparationPayloadSchema = z
   .object({
+    agentMemory: PreparedAgentMemoryModeSchema,
     requestId: z.uuid(),
     agentRef: AgentRefSchema,
     profileId: InputPreparationProfileIdSchema,

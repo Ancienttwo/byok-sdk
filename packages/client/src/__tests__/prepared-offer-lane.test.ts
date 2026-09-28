@@ -31,6 +31,10 @@ import {
 } from '../daemon/input-preparation-store';
 import { SUPPORTED_PREPARED_COMPILER_VERSION } from '../adapters/pi/input-preparation';
 import { fingerprintPreparedToolSurface } from '../daemon/prepared-tool-surface';
+import { admitPreparedOffer } from '../daemon/prepared-offer-admission';
+import { preparedMemoryProjection, type PreparedAgentMemoryState } from '../daemon/prepared-agent-memory';
+import * as preparedAgentMemory from '../daemon/prepared-agent-memory';
+import * as agentMemory from '../daemon/agent-memory';
 import { mcpLaunchAttestation } from '../daemon/trusted-launch-cwd';
 import {
   realToolImplementationFsProbe,
@@ -39,9 +43,11 @@ import {
   type ToolImplementationFsProbe,
   type ToolImplementationIdentityV1,
 } from '../daemon/tool-implementation-identity';
+import { createInputPreparationService } from '../daemon/input-preparation-service';
 import {
   INPUT_PREPARATION_ARTIFACT_FORMAT,
   INPUT_PREPARATION_VERSION,
+  validateInputPreparationLimits,
   inputPreparationRuntimeIdentityString,
   preparedToolBindingDigest,
   type InputPreparationAccountingPolicyRefV1,
@@ -55,6 +61,9 @@ import type { McpToolsetConfig, RuntimeCapabilities, RuntimeInstallationObservat
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { observationOf } from './fixtures/mcp-observation';
 import { trustedCwd } from './fixtures/launch-cwd';
+import { validatePreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
+import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../bin/agent-memory-mcp-server';
+import { AGENT_MEMORY_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
 
 /**
  * `task.offer_prepared` end to end through the real `TaskRunner`, the real
@@ -121,6 +130,18 @@ const POLICY_REVISION = 'limits-policy-r1';
 const TOOLSET_ID = 'team';
 const SERVER_NAME = 'teamserver';
 const TOOLSET_REVISION = 'team-definition-r1';
+
+const MEMORY: PreparedAgentMemoryState = {
+  implementation: {
+    descriptor: { kind: 'attested', authority: 'host-install-record', manifestRevision: 'memory-descriptor', form: 'compiled-executable', installPath: '/memory-descriptor', closureDigest: '1'.repeat(64), closureKind: 'artifact', launchArgv: ['__byok_sdk_helper', 'agent-memory-describe'], launchCwd: '/', launchEnvNamesDigest: '2'.repeat(64), loaderEnvValuesDigest: '3'.repeat(64), installStat: { dev: 1, ino: 1, size: 1, mtimeMs: 1, mode: 0o100555, uid: 0, gid: 0 } } as never,
+    execution: { kind: 'attested', authority: 'host-install-record', manifestRevision: 'memory-execution', form: 'compiled-executable', installPath: '/memory-execution', closureDigest: '4'.repeat(64), closureKind: 'artifact', launchArgv: ['__byok_sdk_helper', 'agent-memory-mcp'], launchCwd: '/', launchEnvNamesDigest: '5'.repeat(64), loaderEnvValuesDigest: '6'.repeat(64), installStat: { dev: 1, ino: 2, size: 1, mtimeMs: 1, mode: 0o100555, uid: 0, gid: 0 } } as never,
+  },
+  observation: validatePreparedAgentMemoryObservation({
+    serverInfo: AGENT_MEMORY_MCP_SERVER_INFO,
+    protocolVersion: '2025-03-26',
+    tools: AGENT_MEMORY_TOOLS.map(({ name, description, inputSchema, _meta }) => ({ name, description, inputSchema, _meta })),
+  }),
+};
 
 /** Synthetic fixture identity: never resolved from the installed fork. */
 const RUNTIME: InputPreparationRuntimeIdentityV1 = {
@@ -239,6 +260,7 @@ interface Lane {
 
 function binding(overrides: Partial<InputPreparationBindingV1> = {}): InputPreparationBindingV1 {
   return {
+    agentMemory: 'none',
     scopeId: SCOPE_ID,
     deviceId: DEVICE_ID,
     agentRef: AGENT_REF.agentId,
@@ -335,6 +357,8 @@ async function lane(options: {
 
   const observation = observationOf({ [SERVER_NAME]: ['echo'] }, { toolsetId: TOOLSET_ID });
   const fingerprinted = await fingerprintPreparedToolSurface({
+    agentMemory: 'none',
+    memory: null,
     observation,
     permissionMode: 'auto',
     runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
@@ -345,6 +369,8 @@ async function lane(options: {
   if (!fingerprinted.ok) throw new Error(`fixture surface refused: ${fingerprinted.detail}: ${fingerprinted.message}`);
 
   const toolBindingDigest = preparedToolBindingDigest({
+    agentMemory: 'none',
+    memoryImplementation: null,
     launch: attestation,
     toolsetDefinitionRevisions: { [TOOLSET_ID]: revision },
     servers: [{
@@ -442,6 +468,7 @@ async function makeRunner(built: Lane, adapter: StubRuntimeAdapter, sent: Envelo
     mcpToolsetToolsProbe: async (serverName) => built.observation[serverName]!,
     inputPreparationLane: {
       store: built.store,
+      authorizeAgentMemory: async () => {},
       open: () => built.store.open(),
       runtime: RUNTIME,
       policyRevision: POLICY_REVISION,
@@ -457,6 +484,7 @@ function preparedOffer(
   seq = 1,
   overrides: Partial<TaskOfferPreparedPayload> = {},
 ): Envelope {
+  const { requiredToolsets: overriddenToolsets, ...rest } = overrides;
   return createEnvelope(
     'task.offer_prepared',
     {
@@ -464,9 +492,12 @@ function preparedOffer(
       policy: { mode: 'auto', allowTools: [] },
       runtime: 'pi',
       agentRef: AGENT_REF,
-      requiredToolsets: [TOOLSET_ID],
       preparation,
-      ...overrides,
+      agentMemory: 'none',
+      ...rest,
+      ...(Object.hasOwn(overrides, 'requiredToolsets')
+        ? (overriddenToolsets === undefined ? {} : { requiredToolsets: overriddenToolsets })
+        : { requiredToolsets: [TOOLSET_ID] }),
     },
     { taskId, seq },
   );
@@ -485,6 +516,48 @@ function declineReason(sent: readonly Envelope[]): string {
   const declined = sent.find((envelope) => envelope.type === 'task.decline');
   if (declined === undefined || declined.type !== 'task.decline') throw new Error('no task.decline was sent');
   return declined.payload.reason;
+}
+
+async function memoryOnlyRecord(): Promise<{
+  readonly store: InputPreparationStore;
+  readonly recordId: string;
+}> {
+  const store = new InputPreparationStore({
+    storeDir: await tempDir('byok-prepared-memory-only-runner-store-'),
+    retentionMs: 60 * 60 * 1000,
+    retryHorizonMs: 60 * 60 * 1000,
+  });
+  await store.open();
+  const launch = { cwd: await trustedCwd() } as const;
+  const attestation = mcpLaunchAttestation(launch);
+  const memoryProjection = preparedMemoryProjection('read', MEMORY, inputPreparationRuntimeIdentityString(RUNTIME));
+  const fingerprinted = await fingerprintPreparedToolSurface({
+    agentMemory: 'read', memory: MEMORY, observation: {}, permissionMode: 'auto',
+    runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME), launch: attestation,
+    toolsetDefinitionRevisions: {}, implementations: {},
+  });
+  if (!fingerprinted.ok) throw new Error(fingerprinted.message);
+  const reserved = await store.reserve({
+    key: { scopeId: SCOPE_ID, agentRef: AGENT_REF.agentId, requestId: 'memory-only-request' },
+    requestDigest: REQUEST_DIGEST, binding: binding({ agentMemory: 'read' }), model: MODEL, maxInFlight: 8,
+  });
+  if (reserved.kind !== 'created') throw new Error('memory-only record was not created');
+  const summary: InputPreparationArtifactSummaryV1 = {
+    requestDigest: REQUEST_DIGEST, envelopeDigest: ENVELOPE_DIGEST, toolManifestDigest: TOOL_MANIFEST_DIGEST,
+    requestBytes: 33, projectionBytes: 19, projection: PROJECTION, residual: [...RESIDUAL],
+    observationDigest: fingerprinted.fingerprint.observationDigest,
+    toolBindingDigest: preparedToolBindingDigest({
+      agentMemory: 'read', memoryImplementation: MEMORY.implementation, launch: attestation,
+      toolsetDefinitionRevisions: {}, servers: [],
+    }),
+    toolImplementationKinds: memoryProjection.toolImplementationKinds,
+  };
+  await store.commitCounterReservation({
+    recordId: reserved.record.recordId, artifact: artifact(reserved.record.recordId), summary,
+    requestContentTextOnly: true, bounds: { maxScopeAggregateBytes: 10_000_000, maxCounterCallsPerScope: 4 },
+  });
+  await store.update(reserved.record.recordId, { state: 'prepared', counter: COUNTER_EVIDENCE });
+  return { store, recordId: reserved.record.recordId };
 }
 
 describe('a prepared offer is admitted only by item-by-item equality with its record', () => {
@@ -540,6 +613,148 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-prepared-ok', seq: 2 }));
   });
 
+  it('admits a sealed memory-only artifact with no Host MCP server map', async () => {
+    const store = new InputPreparationStore({
+      storeDir: await tempDir('byok-prepared-memory-only-store-'),
+      retentionMs: 60 * 60 * 1000,
+      retryHorizonMs: 60 * 60 * 1000,
+    });
+    await store.open();
+    const launch = { cwd: await trustedCwd() } as const;
+    const attestation = mcpLaunchAttestation(launch);
+    const memoryProjection = preparedMemoryProjection('read', MEMORY, inputPreparationRuntimeIdentityString(RUNTIME));
+    const fingerprinted = await fingerprintPreparedToolSurface({
+      agentMemory: 'read', memory: MEMORY, observation: {}, permissionMode: 'auto',
+      runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME), launch: attestation,
+      toolsetDefinitionRevisions: {}, implementations: {},
+    });
+    if (!fingerprinted.ok) throw new Error(fingerprinted.message);
+    const reserved = await store.reserve({
+      key: { scopeId: SCOPE_ID, agentRef: AGENT_REF.agentId, requestId: 'memory-only-request' },
+      requestDigest: REQUEST_DIGEST,
+      binding: binding({ agentMemory: 'read' }),
+      model: MODEL,
+      maxInFlight: 8,
+    });
+    if (reserved.kind !== 'created') throw new Error('memory-only record was not created');
+    const summary: InputPreparationArtifactSummaryV1 = {
+      requestDigest: REQUEST_DIGEST, envelopeDigest: ENVELOPE_DIGEST, toolManifestDigest: TOOL_MANIFEST_DIGEST,
+      requestBytes: 33, projectionBytes: 19, projection: PROJECTION, residual: [...RESIDUAL],
+      observationDigest: fingerprinted.fingerprint.observationDigest,
+      toolBindingDigest: preparedToolBindingDigest({
+        agentMemory: 'read', memoryImplementation: MEMORY.implementation, launch: attestation,
+        toolsetDefinitionRevisions: {}, servers: [],
+      }),
+      toolImplementationKinds: memoryProjection.toolImplementationKinds,
+    };
+    await store.commitCounterReservation({
+      recordId: reserved.record.recordId,
+      artifact: artifact(reserved.record.recordId),
+      summary,
+      requestContentTextOnly: true,
+      bounds: { maxScopeAggregateBytes: 10_000_000, maxCounterCallsPerScope: 4 },
+    });
+    await store.update(reserved.record.recordId, { state: 'prepared', counter: COUNTER_EVIDENCE });
+    const record = store.get(reserved.record.recordId);
+    if (record === undefined) throw new Error('memory-only record disappeared');
+
+    const admitted = await admitPreparedOffer({
+      record, artifactPath: store.artifactPathOf(record), offered: {
+        reference: record.recordId, requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST,
+      },
+      agentRef: AGENT_REF, deviceId: DEVICE_ID, policyRevision: POLICY_REVISION, runtime: RUNTIME,
+      admittedMode: 'auto', offeredAgentMemory: 'read', memory: MEMORY, launch,
+      observation: {}, implementations: {}, servers: [], toolsetDefinitionRevisions: {}, nowMs: Date.now(),
+    });
+    if (!admitted.ok) throw new Error(`${admitted.reason}: ${admitted.detail}`);
+    expect(admitted.launch.agentMemory).toBe('read');
+    expect(admitted.launch.memory).toBe(MEMORY);
+    expect(Object.keys(admitted.launch.toolImplementations)).toEqual([]);
+  });
+
+  it('pins and claims a memory-only record before minting its task context, and an occupied pin mints none', async () => {
+    const memoryRecord = await memoryOnlyRecord();
+    const support = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const observedEnvs: Readonly<Record<string, string>>[] = [];
+    const resolve = vi.spyOn(preparedAgentMemory, 'resolvePreparedMemoryImplementation')
+      .mockResolvedValue(MEMORY.implementation);
+    const observe = vi.spyOn(preparedAgentMemory, 'observePreparedMemory')
+      .mockImplementation(async (_implementation, env) => {
+        observedEnvs.push(env);
+        return MEMORY;
+      });
+    let runner!: TaskRunner;
+    const preparationLane = {
+      store: memoryRecord.store,
+      authorizeAgentMemory: async () => {},
+      open: () => memoryRecord.store.open(),
+      runtime: RUNTIME,
+      policyRevision: POLICY_REVISION,
+      toolsetDefinitionRevisions: () => new Map<string, string>(),
+    };
+    try {
+      runner = await makeRunner(support, adapter, sent, {
+        agentMemoryFilesystemHelperBin: '/external/proved-agent-memory-helper',
+        inputPreparationLane: preparationLane,
+        beforeClaim: async () => {
+          expect((runner as unknown as { memoryContextByToken: Map<string, unknown> }).memoryContextByToken.size).toBe(0);
+        },
+      });
+      const offer = (taskId: string, seq: number) => preparedOffer(taskId, {
+        reference: memoryRecord.recordId, requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST,
+      }, seq, { agentMemory: 'read', requiredToolsets: undefined });
+
+      await runner.handleEnvelope(offer('task-memory-only-winner', 1));
+
+      expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(1);
+      expect(memoryRecord.store.get(memoryRecord.recordId)?.pin?.taskId).toBe('task-memory-only-winner');
+      expect(adapter.preparedStartCalls).toHaveLength(1);
+      expect(observedEnvs).toHaveLength(1);
+      for (const env of observedEnvs) {
+        expect(env.BYOK_STORE_DIR).toBeUndefined();
+        expect(env.BYOK_PRODUCT_ID).toBeUndefined();
+        expect(env.BYOK_AGENT_MEMORY_CONTEXT).toBeUndefined();
+        expect(env.BYOK_PREPARED_AGENT_MEMORY_MODE).toBeUndefined();
+      }
+      const start = adapter.preparedStartCalls[0]!.input;
+      expect(Object.keys(start.mcpServers ?? {})).toEqual([AGENT_MEMORY_MCP_SERVER_NAME]);
+      const reserved = start.mcpServers?.[AGENT_MEMORY_MCP_SERVER_NAME];
+      expect(reserved?.env?.BYOK_PREPARED_AGENT_MEMORY_MODE).toBe('read');
+      expect(reserved?.env?.BYOK_AGENT_MEMORY_CONTEXT).toMatch(/^[0-9a-f-]+\.[0-9a-f-]+$/u);
+      expect(start.mcpToolsetTools).toBeUndefined();
+
+      const loserAdapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+      const loserSent: Envelope[] = [];
+      const loser = await makeRunner(support, loserAdapter, loserSent, {
+        agentMemoryFilesystemHelperBin: '/external/proved-agent-memory-helper',
+        inputPreparationLane: preparationLane,
+      });
+      await loser.handleEnvelope(offer('task-memory-only-loser', 2));
+      expect(declineReason(loserSent)).toMatch(/^preparation_already_pinned: /u);
+      expect(loserAdapter.preparedStartCalls).toHaveLength(0);
+      expect((loser as unknown as { memoryContextByToken: Map<string, unknown> }).memoryContextByToken.size).toBe(0);
+      await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-memory-only-winner', seq: 3 }));
+    } finally {
+      resolve.mockRestore();
+      observe.mockRestore();
+    }
+  });
+
+  it('declines a memory selection that differs from the sealed binding before pin or helper launch', async () => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(built, adapter, sent);
+
+    await runner.handleEnvelope(preparedOffer('task-memory-selection-mismatch', reference(built), 1, { agentMemory: 'read' }));
+
+    expect(declineReason(sent)).toBe('agent_memory_mismatch: the offered Agent memory selection differs from the named preparation');
+    expect(built.store.get(built.recordId)?.pin).toBeUndefined();
+    expect(adapter.preparedStartCalls).toHaveLength(0);
+  });
+
   it('admits a prepared offer against a record that only exists on disk, on a daemon that has opened nothing yet', async () => {
     // PHASE 1 — one daemon lifetime writes the record, then ends. Its store
     // instance is closed, so its replayed map is gone and every read through it
@@ -576,6 +791,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     const runner = await makeRunner(built, adapter, sent, {
       inputPreparationLane: {
         store: restarted,
+        authorizeAgentMemory: async () => {},
         open: ensureOpen,
         runtime: RUNTIME,
         policyRevision: POLICY_REVISION,
@@ -1026,6 +1242,7 @@ describe('every compared item declines by its own name, with no claim and no pin
     const runner = await makeRunner(built, adapter, sent, {
       inputPreparationLane: {
         store: built.store,
+        authorizeAgentMemory: async () => {},
         open: () => Promise.reject(new Error('disk gone')),
         runtime: RUNTIME,
         policyRevision: POLICY_REVISION,
@@ -1064,6 +1281,7 @@ describe('every compared item declines by its own name, with no claim and no pin
       policy: { mode: 'auto', allowTools: [] },
         runtime: 'claude',
         agentRef: AGENT_REF,
+        agentMemory: 'none',
         requiredToolsets: [TOOLSET_ID],
         preparation: reference(built),
       },
@@ -1072,6 +1290,221 @@ describe('every compared item declines by its own name, with no claim and no pin
 
     expect(declineReason(sent)).toContain('preparation_launch_attestation_mismatch');
     expect(built.store.get(built.recordId)?.pin).toBeUndefined();
+  });
+});
+
+describe('prepared Agent memory admission declines with its exact typed reason', () => {
+  /** Every mode the policy cases need, so an earlier capability gate cannot answer for them. */
+  const ALL_MODES: RuntimeCapabilities = { ...MCP_CAPABLE, permissionModes: ['auto', 'confirm', 'readonly', 'plan'] };
+  const MEMORY_HELPER = { agentMemoryFilesystemHelperBin: '/external/proved-agent-memory-helper' } as const;
+
+  function nothingCommitted(sent: readonly Envelope[], adapter: StubRuntimeAdapter, runner: TaskRunner): void {
+    expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(0);
+    expect(adapter.preparedStartCalls).toHaveLength(0);
+    expect((runner as unknown as { memoryContextByToken: Map<string, unknown> }).memoryContextByToken.size).toBe(0);
+  }
+
+  async function memoryOnlyRunner(extra: Partial<TaskRunnerDeps> = {}) {
+    const memoryRecord = await memoryOnlyRecord();
+    const support = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(support, adapter, sent, {
+      ...MEMORY_HELPER,
+      inputPreparationLane: {
+        store: memoryRecord.store,
+        authorizeAgentMemory: async () => {},
+        open: () => memoryRecord.store.open(),
+        runtime: RUNTIME,
+        policyRevision: POLICY_REVISION,
+        toolsetDefinitionRevisions: () => new Map<string, string>(),
+      },
+      ...extra,
+    });
+    const offer = (taskId: string, seq = 1) => preparedOffer(taskId, {
+      reference: memoryRecord.recordId, requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST,
+    }, seq, { agentMemory: 'read', requiredToolsets: undefined });
+    return { memoryRecord, adapter, sent, runner, offer };
+  }
+
+  it.each<[string, 'read' | 'read-write', NonNullable<TaskOfferPreparedPayload['policy']>]>([
+    ['readonly with read-write', 'read-write', { mode: 'readonly' }],
+    ['confirm', 'read', { mode: 'confirm' }],
+    ['plan', 'read', { mode: 'plan' }],
+    ['a selected denyTools name', 'read', { mode: 'auto', allowTools: [], denyTools: ['memory_recall'] }],
+  ])('declines %s as permission_mode_denied: agent_memory_policy_conflict before pin', async (_label, agentMemory, policy) => {
+    const built = await lane({ bindingOverrides: { agentMemory, permissionMode: policy.mode } });
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(built, adapter, sent, MEMORY_HELPER);
+
+    await runner.handleEnvelope(preparedOffer('task-memory-policy', reference(built), 1, { agentMemory, policy }));
+
+    expect(declineReason(sent)).toBe('permission_mode_denied: agent_memory_policy_conflict');
+    expect(built.store.get(built.recordId)?.pin).toBeUndefined();
+    nothingCommitted(sent, adapter, runner);
+  });
+
+  it('declines a lowered local ceiling as scope_denied: agent_memory_denied through the real service authority', async () => {
+    let ceiling: 'none' | 'read' | 'read-write' = 'read';
+    const service = createInputPreparationService({
+      storeDir: await tempDir('byok-prepared-ceiling-service-'),
+      limits: validateInputPreparationLimits({
+        revision: POLICY_REVISION, maxRequestBytes: 1_000, maxArtifactBytes: 1_000, maxScopeAggregateBytes: 1_000,
+        maxInFlight: 1, maxCounterCallsPerScope: 1, counterTimeoutMs: 1_000, preparationDeadlineMs: 1_000,
+        retentionMs: 60_000, retryHorizonMs: 60_000,
+      }),
+      authorityResolver: {
+        async resolveSource({ source }) { return { authorized: true, source }; },
+        async resolveScope(claim) { return { authorized: true, grant: { ...claim, scopeId: SCOPE_ID, agentMemory: ceiling } }; },
+      },
+      compiler: { runtime: RUNTIME, compile: async () => { throw new Error('not used'); } } as never,
+      toolSurface: {
+        resolveBinding: async () => { throw new Error('not used'); },
+        assemble: async () => { throw new Error('not used'); },
+      },
+    });
+    const observe = vi.spyOn(preparedAgentMemory, 'observePreparedMemory');
+    try {
+      const fixture = await memoryOnlyRunner();
+      const runner = await makeRunner(await lane(), fixture.adapter, fixture.sent, {
+        ...MEMORY_HELPER,
+        inputPreparationLane: {
+          store: fixture.memoryRecord.store,
+          authorizeAgentMemory: (binding) => service.authorizeAgentMemory(binding),
+          open: () => fixture.memoryRecord.store.open(),
+          runtime: RUNTIME,
+          policyRevision: POLICY_REVISION,
+          toolsetDefinitionRevisions: () => new Map<string, string>(),
+        },
+      });
+      // The record was prepared under a read ceiling; the operator lowers it.
+      await expect(service.authorizeAgentMemory(fixture.memoryRecord.store.get(fixture.memoryRecord.recordId)!.binding)).resolves.toBeUndefined();
+      ceiling = 'none';
+
+      await runner.handleEnvelope(fixture.offer('task-memory-ceiling'));
+
+      expect(declineReason(fixture.sent)).toBe('scope_denied: agent_memory_denied');
+      expect(fixture.memoryRecord.store.get(fixture.memoryRecord.recordId)?.pin).toBeUndefined();
+      expect(observe).not.toHaveBeenCalled();
+      nothingCommitted(fixture.sent, fixture.adapter, runner);
+    } finally {
+      observe.mockRestore();
+    }
+  });
+
+  it('declines an unavailable secure platform as unsupported_input: agent_memory_unavailable without probing', async () => {
+    // Native Linux is available without any helper, so dropping the helper
+    // alone does not make the platform unavailable on every OS: force the
+    // single platform gate closed instead.
+    const available = vi.spyOn(agentMemory, 'isAgentMemorySecureFilesystemAvailable').mockReturnValue(false);
+    const resolve = vi.spyOn(preparedAgentMemory, 'resolvePreparedMemoryImplementation');
+    const observe = vi.spyOn(preparedAgentMemory, 'observePreparedMemory');
+    try {
+      const fixture = await memoryOnlyRunner();
+      await fixture.runner.handleEnvelope(fixture.offer('task-memory-unavailable'));
+      expect(declineReason(fixture.sent)).toBe('unsupported_input: agent_memory_unavailable');
+      expect(available).toHaveBeenCalled();
+      expect(resolve).not.toHaveBeenCalled();
+      expect(observe).not.toHaveBeenCalled();
+      nothingCommitted(fixture.sent, fixture.adapter, fixture.runner);
+    } finally {
+      available.mockRestore();
+      resolve.mockRestore();
+      observe.mockRestore();
+    }
+  });
+
+  it('declines a failed descriptor probe as toolsets_unobservable: agent_memory_descriptor_unobservable, never echoing transport text', async () => {
+    const resolve = vi.spyOn(preparedAgentMemory, 'resolvePreparedMemoryImplementation').mockResolvedValue(MEMORY.implementation);
+    const observe = vi.spyOn(preparedAgentMemory, 'observePreparedMemory')
+      .mockRejectedValue(new Error('MCP server exited before the exchange completed: /private/secret/path'));
+    try {
+      const fixture = await memoryOnlyRunner();
+      await fixture.runner.handleEnvelope(fixture.offer('task-memory-descriptor-unobservable'));
+      expect(declineReason(fixture.sent)).toBe('toolsets_unobservable: agent_memory_descriptor_unobservable');
+      expect(fixture.memoryRecord.store.get(fixture.memoryRecord.recordId)?.pin).toBeUndefined();
+      nothingCommitted(fixture.sent, fixture.adapter, fixture.runner);
+    } finally {
+      resolve.mockRestore();
+      observe.mockRestore();
+    }
+  });
+
+  it.each([
+    ['the execution helper identity', { ...MEMORY, implementation: { ...MEMORY.implementation, execution: { ...MEMORY.implementation.execution, closureDigest: '7'.repeat(64) } } }, 'preparation_tool_binding_digest_mismatch'],
+    ['the descriptor helper identity', { ...MEMORY, implementation: { ...MEMORY.implementation, descriptor: { ...MEMORY.implementation.descriptor, closureDigest: '8'.repeat(64) } } }, 'preparation_tool_binding_digest_mismatch'],
+    ['the observed descriptor', { ...MEMORY, observation: { ...MEMORY.observation, protocolVersion: '2025-06-18' } }, 'preparation_observation_digest_mismatch'],
+  ] as const)('declines drift in %s at offer admission before pin, with no claim and no token', async (_label, drifted, reason) => {
+    const resolve = vi.spyOn(preparedAgentMemory, 'resolvePreparedMemoryImplementation')
+      .mockResolvedValue(drifted.implementation as PreparedAgentMemoryState['implementation']);
+    const observe = vi.spyOn(preparedAgentMemory, 'observePreparedMemory').mockResolvedValue(drifted as PreparedAgentMemoryState);
+    try {
+      const fixture = await memoryOnlyRunner();
+      await fixture.runner.handleEnvelope(fixture.offer('task-memory-drift'));
+      expect(declineReason(fixture.sent)).toMatch(new RegExp(`^${reason}: `, 'u'));
+      expect(fixture.memoryRecord.store.get(fixture.memoryRecord.recordId)?.pin).toBeUndefined();
+      nothingCommitted(fixture.sent, fixture.adapter, fixture.runner);
+    } finally {
+      resolve.mockRestore();
+      observe.mockRestore();
+    }
+  });
+
+  it('revokes the minted memory token and emits one truthful task.fail when the post-claim launch fails', async () => {
+    const resolve = vi.spyOn(preparedAgentMemory, 'resolvePreparedMemoryImplementation').mockResolvedValue(MEMORY.implementation);
+    const observe = vi.spyOn(preparedAgentMemory, 'observePreparedMemory').mockResolvedValue(MEMORY);
+    try {
+      const fixture = await memoryOnlyRunner();
+      fixture.adapter.startError = new Error('prepared runtime refused to start');
+      await fixture.runner.handleEnvelope(fixture.offer('task-memory-launch-fails'));
+
+      expect(fixture.sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(1);
+      // The token WAS minted for the launch that failed…
+      const minted = fixture.adapter.preparedStartCalls[0]?.input.mcpServers?.[AGENT_MEMORY_MCP_SERVER_NAME]?.env?.BYOK_AGENT_MEMORY_CONTEXT;
+      expect(minted).toMatch(/^[0-9a-f-]+\.[0-9a-f-]+$/u);
+      // …and is gone once the offer settled: no memory operation can use it.
+      const tokens = (fixture.runner as unknown as { memoryContextByToken: Map<string, unknown> }).memoryContextByToken;
+      expect(tokens.has(minted!)).toBe(false);
+      expect(tokens.size).toBe(0);
+      await expect(fixture.runner.recallAgentMemory({ contextToken: minted!, path: 'MEMORY.md' })).rejects.toThrow(/invalid, expired/u);
+      const failures = fixture.sent.filter((envelope) => envelope.type === 'task.fail');
+      expect(failures).toHaveLength(1);
+      expect(failures[0]!.payload).toMatchObject({ retryable: false, agentRef: AGENT_REF });
+      expect(fixture.sent.some((envelope) => envelope.type === 'task.complete')).toBe(false);
+      await vi.waitFor(() => expect(fixture.memoryRecord.store.get(fixture.memoryRecord.recordId)?.pin).toBeUndefined());
+    } finally {
+      resolve.mockRestore();
+      observe.mockRestore();
+    }
+  });
+
+  it('turns a post-claim memory binding failure into a truthful task.fail instead of a raw throw', async () => {
+    const resolve = vi.spyOn(preparedAgentMemory, 'resolvePreparedMemoryImplementation').mockResolvedValue(MEMORY.implementation);
+    const observe = vi.spyOn(preparedAgentMemory, 'observePreparedMemory').mockResolvedValue(MEMORY);
+    const bind = vi.spyOn(preparedAgentMemory, 'memorySpawnBinding').mockImplementation(() => {
+      throw new Error('agent_memory_launch_invalid');
+    });
+    try {
+      const fixture = await memoryOnlyRunner();
+      await expect(fixture.runner.handleEnvelope(fixture.offer('task-memory-bind-fails'))).resolves.toBeUndefined();
+
+      expect(fixture.sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(1);
+      const failures = fixture.sent.filter((envelope) => envelope.type === 'task.fail');
+      expect(failures).toHaveLength(1);
+      expect(failures[0]!.payload).toMatchObject({
+        reason: 'agent_memory_unavailable: the sealed Agent memory helper could not be bound for launch',
+        retryable: false,
+        agentRef: AGENT_REF,
+      });
+      expect(fixture.adapter.preparedStartCalls).toHaveLength(0);
+      expect((fixture.runner as unknown as { memoryContextByToken: Map<string, unknown> }).memoryContextByToken.size).toBe(0);
+      await vi.waitFor(() => expect(fixture.memoryRecord.store.get(fixture.memoryRecord.recordId)?.pin).toBeUndefined());
+    } finally {
+      resolve.mockRestore();
+      observe.mockRestore();
+      bind.mockRestore();
+    }
   });
 });
 
@@ -1255,7 +1688,10 @@ it('the real daemon sanitizes prepared terminal envelopes before transport', asy
         maxScopeAggregateBytes: 400000, maxInFlight: 4, maxCounterCallsPerScope: 8,
         counterTimeoutMs: 5000, preparationDeadlineMs: 8000, retentionMs: 60000, retryHorizonMs: 30000 },
       authorityResolver: {
-        resolveScope: async () => { throw new Error('no preparation requested'); },
+        resolveScope: async (claim) => ({
+          authorized: true,
+          grant: { ...claim, scopeId: SCOPE_ID, agentMemory: 'none' as const },
+        }),
         resolveSource: async () => { throw new Error('no preparation requested'); },
       },
     },

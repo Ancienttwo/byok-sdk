@@ -1,3 +1,5 @@
+import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
+import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import type { ToolImplementationAuthority, ToolImplementationUnavailableReasonV1 } from '@byok-sdk/implementation-identity';
 import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
 import type {
@@ -384,6 +386,8 @@ export type RuntimeAdapterPrepareResult = RuntimeAdapterRejectedOperation | Runt
  * serializes environment values or credential material.
  */
 export interface RuntimeOperationManifest {
+  /** Required by prepared operations, absent on ordinary operations. */
+  readonly agentMemory?: PreparedAgentMemoryMode;
   readonly taskId: string;
   /** Selected runtime id; lane/provider/model, when present, live only in `dispatchSelection`. */
   readonly runtimeId: string;
@@ -466,6 +470,8 @@ export interface RuntimePreparedLaunchExpectationV1 {
  * under a different mode instead of discovering the divergence as tool drift.
  */
 export interface RuntimePreparedLaunchV1 {
+  readonly agentMemory: PreparedAgentMemoryMode;
+  readonly memory: PreparedAgentMemoryState | null;
   readonly reference: RuntimePreparedLaunchReferenceV1;
   /**
    * Absolute path of the retained `InputPreparationArtifact` JSON.
@@ -646,6 +652,7 @@ export function sealRuntimeOperationManifest(manifest: RuntimeOperationManifest)
         }) as TaskOfferPayload['dispatchSelection']
       : Object.freeze({ ...manifest.dispatchSelection });
   return Object.freeze({
+    ...(manifest.agentMemory === undefined ? {} : {agentMemory: manifest.agentMemory}),
     taskId: manifest.taskId,
     runtimeId: manifest.runtimeId,
     descriptor: freezeRuntimeAdapterDescriptor(manifest.descriptor),

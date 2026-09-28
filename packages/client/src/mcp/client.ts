@@ -1,3 +1,4 @@
+import { assertSdkHelperSpawnBinding, type SdkHelperSpawnBindingV1 } from '@byok-sdk/implementation-identity';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import {
   assertToolImplementationBeforeSpawn,
@@ -161,6 +162,7 @@ export interface McpStdioServerSpec {
 }
 
 export interface McpStdioClientOptions {
+  readonly sdkHelperBinding?: SdkHelperSpawnBindingV1;
   /** Prefix on every error message, so a failure names the thing that failed. */
   readonly label?: string;
   /**
@@ -213,6 +215,7 @@ class BoundedStdioTransport implements Transport {
   private stdoutBytes = 0;
   private stderrText = '';
   private closed = false;
+  private closing?: Promise<void>;
   private firstFailure?: Error;
 
   /**
@@ -349,8 +352,18 @@ class BoundedStdioTransport implements Transport {
     });
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
+  /**
+   * Every caller awaits the SAME termination. The protocol layer closes the
+   * transport without awaiting it when a handshake fails or is cancelled, so
+   * a second close that returned early would let its caller settle while the
+   * child is still alive.
+   */
+  close(): Promise<void> {
+    this.closing ??= this.terminate();
+    return this.closing;
+  }
+
+  private async terminate(): Promise<void> {
     this.closed = true;
     const child = this.child;
     this.child = undefined;
@@ -452,6 +465,15 @@ export class McpStdioClient {
   async connect(signal?: AbortSignal): Promise<void> {
     if (this.connected) throw new Error(`${this.label} is already connected`);
     try {
+      const binding = this.options.sdkHelperBinding;
+      if (binding !== undefined) {
+        const args = this.server.args ?? [];
+        await assertSdkHelperSpawnBinding(binding, {
+          command: this.server.command, ...(binding.entry === undefined ? {} : {entry: args[0]}),
+          fixedArgv: binding.entry === undefined ? args : args.slice(1),
+          cwd: this.options.cwd ?? '', env: this.transport.childEnv,
+        }, this.options.implementationFsProbe);
+      } else {
       await assertToolImplementationBeforeSpawn(
         this.label,
         this.options.implementation,
@@ -461,6 +483,7 @@ export class McpStdioClient {
         this.transport.childEnv,
         this.options.implementationFsProbe,
       );
+      }
     } catch (cause) {
       await this.close();
       if (cause instanceof ToolImplementationReverifyError) {

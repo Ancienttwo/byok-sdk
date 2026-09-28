@@ -125,6 +125,7 @@ const SERVERS: readonly ServerCase[] = [
           recall: async () => ({ path: 'MEMORY.md', revision: REVISION, content: '# index\n' }),
           save: async () => ({ path: 'MEMORY.md', revision: REVISION, deleted: false }),
         },
+        mode: 'read-write',
         stdin,
         stdout,
       }),

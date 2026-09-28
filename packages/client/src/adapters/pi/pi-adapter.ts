@@ -30,6 +30,7 @@ import {
   type RuntimePreparedLaunchV1,
   type Session,
 } from '../../types';
+import { AGENT_MEMORY_MCP_SERVER_NAME } from '../../sdk-reserved-mcp';
 import {
   inputPreparationDigest,
   INPUT_PREPARATION_ARTIFACT_FORMAT,
@@ -671,6 +672,31 @@ interface PreparedPiLaunchInput {
   readonly spawnFn?: SpawnFn;
 }
 
+/**
+ * Keep the SDK-owned memory helper outside the Host MCP projection. Its
+ * attestation and descriptor live on the sealed prepared-memory branch; it
+ * cannot acquire a synthetic Host toolset identity by entering the pool map.
+ */
+function splitPreparedMemoryServer(
+  servers: Readonly<Record<string, McpStdioServerConfig>> | undefined,
+  mode: RuntimePreparedLaunchV1['agentMemory'],
+): {
+  readonly hostServers: Readonly<Record<string, McpStdioServerConfig>>;
+  readonly memoryCall: McpStdioServerConfig | null;
+} {
+  const memoryCall = servers?.[AGENT_MEMORY_MCP_SERVER_NAME] ?? null;
+  if (mode === 'none') {
+    if (memoryCall !== null) throw authorityFailure('prepared pi operation received an Agent memory helper without a sealed memory selection');
+  } else if (memoryCall === null) {
+    throw authorityFailure('prepared pi operation received no task-bound Agent memory helper for its sealed memory selection');
+  }
+  const hostServers: Record<string, McpStdioServerConfig> = {};
+  for (const [name, server] of Object.entries(servers ?? {})) {
+    if (name !== AGENT_MEMORY_MCP_SERVER_NAME) hostServers[name] = server;
+  }
+  return Object.freeze({ hostServers: Object.freeze(hostServers), memoryCall });
+}
+
 function authorityFailure(reason: string, cause?: unknown): RuntimeExecutionFailure {
   return new RuntimeExecutionFailure(
     { phase: 'start', category: 'authority', retry: 'non-retryable', reason },
@@ -756,6 +782,10 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
       'prepared pi operation was admitted under a permission mode its counted manifest was not filtered for',
     );
   }
+  if (input.manifest.agentMemory !== preparation.agentMemory) {
+    throw authorityFailure('prepared pi operation received a manifest whose Agent memory selection differs from its sealed preparation');
+  }
+  const memoryServer = splitPreparedMemoryServer(input.mcpServers, preparation.agentMemory);
   const mcpLaunch = input.mcpLaunch;
   if (mcpLaunch === undefined) {
     throw authorityFailure('prepared pi operation received no trusted launch directory');
@@ -818,12 +848,15 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
         observationDigest: preparation.observationDigest,
         toolsetDefinitionRevisions: preparation.toolsetDefinitionRevisions,
         launch,
+        agentMemory: preparation.agentMemory,
+        memory: preparation.memory,
+        memoryCall: memoryServer.memoryCall,
         // The SAME task-scoped MCP shape the ordinary extension reads, written
         // by the same adapter from the same resources. The prepared host parses
         // it with the same parser and reaches the servers through the same pool.
         mcp: {
           mcpEnv: input.mcpEnv,
-          mcpServers: input.mcpServers ?? {},
+          mcpServers: memoryServer.hostServers,
           observation: input.mcpToolsetTools ?? {},
           permissionMode: preparation.permissionMode,
           launchCwd: mcpLaunch.cwd,

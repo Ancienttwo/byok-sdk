@@ -20,7 +20,7 @@
     "agent-content-transcript-read",
     "agent-content-artifact-read",
     "agent-home-projection",
-    "agent-input-preparation-v7",
+    "agent-input-preparation-v8",
     "terminal-projection-selection",
     "host-mcp-task-context",
     "custom-harness",
@@ -2780,6 +2780,14 @@
           ],
           "additionalProperties": false
         },
+        "agentMemory": {
+          "type": "string",
+          "enum": [
+            "none",
+            "read",
+            "read-write"
+          ]
+        },
         "egressPolicy": {
           "type": "object",
           "properties": {
@@ -3028,6 +3036,7 @@
         "policy",
         "agentRef",
         "preparation",
+        "agentMemory",
         "egressPolicy"
       ],
       "additionalProperties": false
@@ -4028,6 +4037,14 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "agentMemory": {
+          "type": "string",
+          "enum": [
+            "none",
+            "read",
+            "read-write"
+          ]
+        },
         "requestId": {
           "type": "string",
           "format": "uuid",
@@ -4537,6 +4554,7 @@
         }
       },
       "required": [
+        "agentMemory",
         "requestId",
         "agentRef",
         "profileId",
@@ -8462,6 +8480,14 @@
                 ],
                 "additionalProperties": false
               },
+              "agentMemory": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "read",
+                  "read-write"
+                ]
+              },
               "egressPolicy": {
                 "type": "object",
                 "properties": {
@@ -8710,6 +8736,7 @@
               "policy",
               "agentRef",
               "preparation",
+              "agentMemory",
               "egressPolicy"
             ],
             "additionalProperties": false
@@ -9314,6 +9341,14 @@
           "payload": {
             "type": "object",
             "properties": {
+              "agentMemory": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "read",
+                  "read-write"
+                ]
+              },
               "requestId": {
                 "type": "string",
                 "format": "uuid",
@@ -9823,6 +9858,7 @@
               }
             },
             "required": [
+              "agentMemory",
               "requestId",
               "agentRef",
               "profileId",
@@ -16144,6 +16180,14 @@
                         ],
                         "additionalProperties": false
                       },
+                      "agentMemory": {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "read",
+                          "read-write"
+                        ]
+                      },
                       "egressPolicy": {
                         "type": "object",
                         "properties": {
@@ -16392,6 +16436,7 @@
                       "policy",
                       "agentRef",
                       "preparation",
+                      "agentMemory",
                       "egressPolicy"
                     ],
                     "additionalProperties": false
@@ -16996,6 +17041,14 @@
                   "payload": {
                     "type": "object",
                     "properties": {
+                      "agentMemory": {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "read",
+                          "read-write"
+                        ]
+                      },
                       "requestId": {
                         "type": "string",
                         "format": "uuid",
@@ -17505,6 +17558,7 @@
                       }
                     },
                     "required": [
+                      "agentMemory",
                       "requestId",
                       "agentRef",
                       "profileId",
@@ -22874,6 +22928,14 @@
                         ],
                         "additionalProperties": false
                       },
+                      "agentMemory": {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "read",
+                          "read-write"
+                        ]
+                      },
                       "egressPolicy": {
                         "type": "object",
                         "properties": {
@@ -23122,6 +23184,7 @@
                       "policy",
                       "agentRef",
                       "preparation",
+                      "agentMemory",
                       "egressPolicy"
                     ],
                     "additionalProperties": false
@@ -23726,6 +23789,14 @@
                   "payload": {
                     "type": "object",
                     "properties": {
+                      "agentMemory": {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "read",
+                          "read-write"
+                        ]
+                      },
                       "requestId": {
                         "type": "string",
                         "format": "uuid",
@@ -24235,6 +24306,7 @@
                       }
                     },
                     "required": [
+                      "agentMemory",
                       "requestId",
                       "agentRef",
                       "profileId",
@@ -26974,6 +27046,14 @@
                 "binding": {
                   "type": "object",
                   "properties": {
+                    "agentMemory": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "read",
+                        "read-write"
+                      ]
+                    },
                     "scopeId": {
                       "type": "string",
                       "minLength": 1,
@@ -27191,6 +27271,7 @@
                     }
                   },
                   "required": [
+                    "agentMemory",
                     "scopeId",
                     "deviceId",
                     "agentRef",
@@ -27737,6 +27818,14 @@
             "binding": {
               "type": "object",
               "properties": {
+                "agentMemory": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "read",
+                    "read-write"
+                  ]
+                },
                 "scopeId": {
                   "type": "string",
                   "minLength": 1,
@@ -27954,6 +28043,7 @@
                 }
               },
               "required": [
+                "agentMemory",
                 "scopeId",
                 "deviceId",
                 "agentRef",

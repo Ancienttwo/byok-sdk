@@ -409,6 +409,10 @@ export type ToolImplementationSubjectV1 = {
 } | {
     readonly kind: 'runtime';
     readonly runtimeId: RuntimeIdV1;
+} | {
+    /** A finite SDK-owned helper, never a Host MCP server or a runtime. */
+    readonly kind: 'sdk-helper';
+    readonly helperId: SdkHelperIdV1;
 };
 /** What the resolver is asked about: one subject, and where it launches. */
 export type ToolImplementationLocatorV1 = {
@@ -423,6 +427,14 @@ export type ToolImplementationLocatorV1 = {
         kind: 'runtime';
     }>;
     readonly runtimeEntry: RuntimeEntryV1;
+    readonly command?: never;
+    readonly args?: never;
+    readonly launch?: never;
+} | {
+    readonly subject: Extract<ToolImplementationSubjectV1, {
+        kind: 'sdk-helper';
+    }>;
+    readonly entry: SdkHelperEntryV1;
     readonly command?: never;
     readonly args?: never;
     readonly launch?: never;
@@ -447,6 +459,13 @@ export type RuntimeEntryV1 = 'pi-prepared' | 'pi-rpc' | 'pi-subagent-print' | 'p
 export declare const RUNTIME_ENTRIES: readonly RuntimeEntryV1[];
 /** Canonical runtime prefix. Host declares it; the SDK checks exact equality. */
 export declare function runtimeEntryFixedArgv(kind: RuntimeEntryV1): readonly string[];
+/** Closed SDK helper vocabulary. A resolver cannot declare an arbitrary helper. */
+export type SdkHelperIdV1 = 'agent-memory';
+export declare const SDK_HELPER_IDS: readonly SdkHelperIdV1[];
+/** The descriptor is credential-free; the MCP entry is the task-bound execution role. */
+export type SdkHelperEntryV1 = 'agent-memory-describe' | 'agent-memory-mcp';
+export declare const SDK_HELPER_ENTRIES: readonly SdkHelperEntryV1[];
+export declare function sdkHelperEntryFixedArgv(entry: SdkHelperEntryV1): readonly string[];
 export type McpImplementationLocatorV1 = Extract<ToolImplementationLocatorV1, {
     subject: {
         kind: 'mcp-server';
@@ -455,6 +474,11 @@ export type McpImplementationLocatorV1 = Extract<ToolImplementationLocatorV1, {
 export type RuntimeImplementationLocatorV1 = Extract<ToolImplementationLocatorV1, {
     subject: {
         kind: 'runtime';
+    };
+}>;
+export type SdkHelperImplementationLocatorV1 = Extract<ToolImplementationLocatorV1, {
+    subject: {
+        kind: 'sdk-helper';
     };
 }>;
 /** Finite M0 vocabulary, from pi-subagents0.60.0 producer inventory. No wildcards. */
@@ -668,6 +692,13 @@ export type ToolImplementationMeasurementFailure = 'install_record_mismatch' | '
 type LaunchEnvironment = Readonly<Record<string, string>> | ((record: ToolImplementationInstallRecordV1) => Readonly<Record<string, string>>);
 /** MCP-only entry; runtime declarations cannot be silently reduced to identity. */
 export declare function resolveToolImplementationIdentity(authority: ToolImplementationAuthority | undefined, locator: McpImplementationLocatorV1, launchEnv: LaunchEnvironment, probe?: ToolImplementationFsProbe): Promise<ToolImplementationIdentityV1>;
+/**
+ * Resolve one finite SDK helper through the same host install record and
+ * physical measurement authority as MCP/runtime identities. The helper's
+ * logical entry is not a Host-supplied command switch: its exact argv is
+ * checked against the sealed install record before any measurement succeeds.
+ */
+export declare function resolveSdkHelperImplementation(authority: ToolImplementationAuthority | undefined, locator: SdkHelperImplementationLocatorV1, launchEnv: LaunchEnvironment, probe?: ToolImplementationFsProbe): Promise<ToolImplementationIdentityV1>;
 /** One strict policy parser shared by Host declarations and internal launch plans. */
 export declare function parseRuntimeDescendantPolicy(value: unknown): RuntimeDescendantPolicyV1 | undefined;
 /** Strict runtime wrapper cutover. No bare record, defaults or shape guessing. */
@@ -746,6 +777,13 @@ export type ToolImplementationReverifyResult = 'ok' | {
  */
 export declare function reverifyToolImplementationIdentity(identity: ToolImplementationAttestedV1, launchEnv: Readonly<Record<string, string>>, probe?: ToolImplementationFsProbe): Promise<ToolImplementationReverifyResult>;
 /**
+ * Reverify a finite SDK helper with its role-specific lifecycle projection.
+ * The descriptor accepts no task lifecycle inputs. The execution entry is the
+ * sole attested role that may receive the late-bound memory context and its
+ * sealed mode; this does not widen the generic Host-MCP gate.
+ */
+export declare function reverifySdkHelperImplementationIdentity(identity: ToolImplementationAttestedV1, entry: SdkHelperEntryV1, launchEnv: Readonly<Record<string, string>>, probe?: ToolImplementationFsProbe): Promise<ToolImplementationReverifyResult>;
+/**
  * The shared pre-spawn gate, so both spawn points refuse on the same evidence
  * with the same words.
  *
@@ -798,7 +836,7 @@ export interface McpLaunchAttestation {
     readonly launcher: ResolvedMcpLaunchCwdLauncher | null;
 }
 // ==== @byok-sdk/implementation-identity dist/spawn-binding.d.ts ====
-import { type ToolImplementationIdentityV1 } from './identity';
+import { type SdkHelperEntryV1, type ToolImplementationAttestedV1, type ToolImplementationFsProbe, type ToolImplementationIdentityV1 } from './identity';
 export { KEYS_PI_INHERITED_ENV_NAMES, KEYS_PI_WINDOWS_ENV_NAMES } from './environment';
 export declare function projectKeysPiInheritedEnvironment(ambient: Readonly<Record<string, string | undefined>>, platform?: NodeJS.Platform): Record<string, string>;
 /** Physical projection of a client-decided launch; contains no runtime selection or credential policy. */
@@ -812,7 +850,35 @@ export interface ImplementationSpawnBindingV1 {
     readonly cwd: string;
     readonly envCommitments: Readonly<Record<string, string>>;
 }
+export type PreparedAgentMemoryExecutionModeV1 = 'read' | 'read-write';
+/** Exact launch shape derived from an attested finite SDK helper identity. */
+export interface SdkHelperLaunchV1 {
+    readonly command: string;
+    readonly entry?: string;
+    readonly fixedArgv: readonly string[];
+    readonly cwd: string;
+}
+/**
+ * Derive the only command shape an SDK helper identity can launch. Callers
+ * never supply a command/argv selector for this subject; a non-attested or
+ * retargeted record has no usable launch shape.
+ */
+export declare function sdkHelperLaunch(identity: ToolImplementationAttestedV1, helperEntry: SdkHelperEntryV1): SdkHelperLaunchV1 | undefined;
+/** Private task binding for a finite SDK helper; it cannot be parsed as a Pi runtime binding. */
+export interface SdkHelperSpawnBindingV1 extends SdkHelperLaunchV1 {
+    readonly format: 'byok.sdk-helper-spawn';
+    readonly version: 1;
+    readonly subject: {
+        readonly kind: 'sdk-helper';
+        readonly helperId: 'agent-memory';
+    };
+    readonly helperEntry: SdkHelperEntryV1;
+    readonly identity: ToolImplementationIdentityV1;
+    /** Required only on the execution role; selection is sealed outside this binding. */
+    readonly agentMemoryMode?: PreparedAgentMemoryExecutionModeV1;
+}
 export declare function parseImplementationSpawnBinding(value: unknown): ImplementationSpawnBindingV1 | undefined;
+export declare function parseSdkHelperSpawnBinding(value: unknown): SdkHelperSpawnBindingV1 | undefined;
 /** Validate exact physical inputs, then remeasure immediately before the caller's spawn. */
 export declare function assertImplementationSpawnBinding(binding: ImplementationSpawnBindingV1, actual: {
     readonly command: string;
@@ -821,3 +887,11 @@ export declare function assertImplementationSpawnBinding(binding: Implementation
     readonly cwd: string;
     readonly env: Readonly<Record<string, string>>;
 }): Promise<void>;
+/** Verify role env gates and remeasure immediately before an SDK helper spawn. */
+export declare function assertSdkHelperSpawnBinding(binding: SdkHelperSpawnBindingV1, actual: {
+    readonly command: string;
+    readonly entry?: string;
+    readonly fixedArgv: readonly string[];
+    readonly cwd: string;
+    readonly env: Readonly<Record<string, string>>;
+}, probe?: ToolImplementationFsProbe): Promise<void>;

@@ -1,3 +1,4 @@
+import type { PreparedAgentMemoryImplementation, PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 /**
  * B-P2 local primitive — public types for the task-free runtime input
  * preparation surface (`docs/researches/runtime-input-preparation-contract.md`
@@ -44,7 +45,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { INPUT_PREPARATION_WIRE_VERSION, type PermissionMode } from '@byok-sdk/protocol';
+import { INPUT_PREPARATION_WIRE_VERSION, type PermissionMode, type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { McpLaunchAttestation } from './daemon/trusted-launch-cwd';
 import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 
@@ -494,6 +495,7 @@ export interface InputPreparationCompiledSnapshotV1 extends Omit<InputPreparatio
  * daemon's own configured policy, never from caller text.
  */
 export interface InputPreparationRequestV1 {
+  readonly agentMemory: PreparedAgentMemoryMode;
   readonly format: typeof INPUT_PREPARATION_REQUEST_FORMAT;
   readonly version: typeof INPUT_PREPARATION_VERSION;
   readonly requestId: string;
@@ -697,6 +699,7 @@ export type InputPreparationDenialReasonV1 =
 
 /** The trusted local record a resolver answers with. */
 export interface InputPreparationAuthorityGrantV1 {
+  readonly agentMemory: PreparedAgentMemoryMode;
   /**
    * Stable identifier for the authenticated local scope this grant belongs to.
    * It is the first component of the durable idempotency namespace, so two
@@ -983,6 +986,7 @@ export interface InputPreparationArtifactSummaryV1 {
 
 /** The immutable binding a receipt carries and a later consumer must re-present. */
 export interface InputPreparationBindingV1 {
+  readonly agentMemory: PreparedAgentMemoryMode;
   readonly scopeId: string;
   readonly deviceId: string;
   readonly agentRef: string;
@@ -1271,6 +1275,8 @@ export interface PreparedToolBindingServerDigestInputV1 {
 }
 
 export interface PreparedToolBindingDigestInputV1 {
+  readonly agentMemory: PreparedAgentMemoryMode;
+  readonly memoryImplementation: PreparedAgentMemoryImplementation | null;
   readonly launch: McpLaunchAttestation;
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
   /** Canonically ordered by server name; the canonical JSON preserves array order. */
@@ -1283,7 +1289,9 @@ export interface PreparedToolBindingDigestInputV1 {
  */
 export function preparedToolBindingDigest(input: PreparedToolBindingDigestInputV1): string {
   return inputPreparationDigest({
-    v: 1,
+    v: 2,
+    agentMemory: input.agentMemory,
+    memoryImplementation: input.memoryImplementation,
     launch: { launchCwd: input.launch.launchCwd, launcher: input.launch.launcher },
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     servers: input.servers.map((entry) => ({
@@ -1321,6 +1329,8 @@ export interface PreparedNativeToolSelectionV1 {
 }
 
 export interface PreparedToolSurfaceDigestInputV1 {
+  readonly agentMemory: PreparedAgentMemoryMode;
+  readonly memory: PreparedAgentMemoryState | null;
   readonly launch: McpLaunchAttestation;
   readonly permissionMode: PermissionMode;
   readonly runtimeIdentity: string;
@@ -1335,7 +1345,9 @@ export interface PreparedToolSurfaceDigestInputV1 {
 /** The whole observed surface: the schemas, the executors, the launch and the identities. */
 export function preparedToolSurfaceObservationDigest(input: PreparedToolSurfaceDigestInputV1): string {
   return inputPreparationDigest({
-    v: 1,
+    v: 2,
+    agentMemory: input.agentMemory,
+    memory: input.memory,
     launch: { launchCwd: input.launch.launchCwd, launcher: input.launch.launcher },
     permissionMode: input.permissionMode,
     runtimeIdentity: input.runtimeIdentity,

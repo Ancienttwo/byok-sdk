@@ -121,6 +121,8 @@ export interface McpServerToolDefinition {
   readonly description?: string;
   /** Caller-supplied, passed through verbatim. The core never authors, validates against, or rewrites it. */
   readonly inputSchema: Readonly<Record<string, unknown>>;
+  /** Caller-owned MCP metadata, passed through verbatim with the tool definition. */
+  readonly _meta?: Readonly<Record<string, unknown>>;
 }
 
 export interface McpServerToolCall {
@@ -354,8 +356,8 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
   function handleToolsList(id: McpServerRequestId): void {
     const tools = options.tools.map((tool) =>
       tool.description === undefined
-        ? { name: tool.name, inputSchema: tool.inputSchema }
-        : { name: tool.name, description: tool.description, inputSchema: tool.inputSchema },
+        ? { name: tool.name, inputSchema: tool.inputSchema, ...(tool._meta === undefined ? {} : { _meta: tool._meta }) }
+        : { name: tool.name, description: tool.description, inputSchema: tool.inputSchema, ...(tool._meta === undefined ? {} : { _meta: tool._meta }) },
     );
     send({ jsonrpc: '2.0', id, result: { tools } }, id);
   }
