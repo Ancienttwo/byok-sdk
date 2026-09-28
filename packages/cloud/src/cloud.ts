@@ -631,7 +631,7 @@ export interface ByokCloud {
    * device fails closed (`fetch_invalid`/`readback_invalid`) on a mismatched
    * `agentId`, or on a mismatched `profileRevision` once its ledger row is
    * pruned; while the row is live it replays its stored completion without
-   * comparing the notice's `profileRevision` (no write, no second CAS).
+   * comparing the notice's `profileRevision` (no memory write, no second CAS).
    * Approval, release, completion and readback are Host authority on Host
    * routes; this plane records no intent receipt of its own.
    */

@@ -800,7 +800,7 @@ terminal fetch after prune). A mismatched `agentId`, or a mismatched
 `profileRevision` once the device ledger row is pruned, fails closed
 (`fetch_invalid` or `readback_invalid`); while the row is live the device
 replays its stored completion without comparing the notice's `profileRevision`
-(no write, no second CAS). Cloud records no intent receipt: approval, release,
+(no memory write, no second CAS). Cloud records no intent receipt: approval, release,
 completion and readback are Host authority on Host routes.
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
