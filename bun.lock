@@ -75,7 +75,7 @@
     },
     "packages/client": {
       "name": "@byok-sdk/client",
-      "version": "0.22.0",
+      "version": "0.23.0",
       "bin": {
         "byok-agent": "./dist/bin/byok-agent.js",
         "byok-approval-mcp": "./dist/bin/byok-approval-mcp.js",
@@ -118,7 +118,7 @@
     },
     "packages/cloud": {
       "name": "@byok-sdk/cloud",
-      "version": "0.22.0",
+      "version": "0.23.0",
       "dependencies": {
         "@byok-sdk/core": "workspace:*",
         "@byok-sdk/protocol": "workspace:*",
@@ -128,7 +128,7 @@
     },
     "packages/cloud-dataplane": {
       "name": "@byok-sdk/cloud-dataplane",
-      "version": "0.22.0",
+      "version": "0.23.0",
       "dependencies": {
         "@byok-sdk/cloud": "workspace:*",
         "@byok-sdk/core": "workspace:*",
@@ -157,18 +157,21 @@
     },
     "packages/core": {
       "name": "@byok-sdk/core",
-      "version": "0.22.0",
+      "version": "0.23.0",
       "dependencies": {
         "zod": "^4.4.3",
+      },
+      "devDependencies": {
+        "@hpke/core": "1.9.0",
       },
     },
     "packages/implementation-identity": {
       "name": "@byok-sdk/implementation-identity",
-      "version": "0.22.0",
+      "version": "0.23.0",
     },
     "packages/keys": {
       "name": "@byok-sdk/keys",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "bin": {
         "byok-pi-provider-launcher": "./dist/bin/pi-provider-launcher.js",
       },
@@ -180,14 +183,14 @@
     },
     "packages/protocol": {
       "name": "@byok-sdk/protocol",
-      "version": "0.22.0",
+      "version": "0.23.0",
       "dependencies": {
         "zod": "^4.4.3",
       },
     },
     "packages/server": {
       "name": "@byok-sdk/server",
-      "version": "0.22.0",
+      "version": "0.23.0",
       "dependencies": {
         "@byok-sdk/cloud": "workspace:*",
         "@byok-sdk/core": "workspace:*",
@@ -209,7 +212,7 @@
     },
     "packages/ui-runtime": {
       "name": "@byok-sdk/ui-runtime",
-      "version": "0.22.0",
+      "version": "0.23.0",
       "dependencies": {
         "@byok-sdk/cloud": "workspace:*",
         "@byok-sdk/protocol": "workspace:*",
@@ -388,6 +391,10 @@
     "@google/genai": ["@google/genai@2.21.0", "", { "dependencies": { "google-auth-library": "^10.3.0", "p-retry": "^4.6.2", "protobufjs": "^7.5.4", "ws": "^8.18.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": "^1.25.2" }, "optionalPeers": ["@modelcontextprotocol/sdk"] }, "sha512-+PDtco2/Z0ONdzCGekCoCT+O1VJS9xJQNN4XzQpXG/t3El/SWWMkCWlFRO1KmivOHPa4Q0VjUYu1HBKCZ/v33Q=="],
 
     "@hono/node-server": ["@hono/node-server@2.0.10", "", { "peerDependencies": { "hono": "4.12.30" } }, "sha512-ZcnNVhKTmyDJeg0UlnZjvM73JBsTAuhrH/J4fjwGOw59PwOW51r4J+p6CsKZWXdKSme4MFqU62CZMOsdDrU4CA=="],
+
+    "@hpke/common": ["@hpke/common@1.10.1", "", {}, "sha512-moJwhmtLtuxiUzzNp1jpfBfx8yefKoO9D/RCR9dmwrnc7qjJqId1rEtQz+lSlU5cabX8daToMSx/7HayXOiaFw=="],
+
+    "@hpke/core": ["@hpke/core@1.9.0", "", { "dependencies": { "@hpke/common": "^1.10.0" } }, "sha512-pFxWl1nNJeQCSUFs7+GAblHvXBCjn9EPN65vdKlYQil2aURaRxfGMO6vBKGqm1YHTKwiAxJQNEI70PbSowMP9Q=="],
 
     "@img/colour": ["@img/colour@1.1.0", "", {}, "sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ=="],
 

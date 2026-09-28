@@ -5,6 +5,7 @@ import { MacOsKeychainSecretStore } from '../macos-keychain';
 import {
   type PiProviderLauncherOptions,
   assertPiPreparedProviderProfile,
+  assertProviderCustodyIdle,
   parsePiProviderLauncherOptions,
   startPiProvider,
 } from '../pi-provider-launcher-core';
@@ -69,9 +70,13 @@ async function run(options: PiProviderLauncherOptions): Promise<number> {
     }
     if (options.runtimeEntry === 'pi-prepared') assertPiPreparedProviderProfile(profile);
     buildPiProviderProjection(profile);
-    if (options.validateOnly) return 0;
+    if (options.validateOnly) {
+      await assertProviderCustodyIdle({ profiles, profile });
+      return 0;
+    }
     const launched = await startPiProvider(profile, options, {
       ambient: process.env,
+      profiles,
       createSecretStore: () => createSecretStore(options.secretServicePrefix, options.macosKeychainPath),
     });
     cleanup = launched.cleanup;

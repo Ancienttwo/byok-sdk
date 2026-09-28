@@ -400,6 +400,15 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     );
   });
 
+  it('provider.provisioning.available', () => {
+    const type = 'provider.provisioning.available' as const;
+    testedTypes.push(type);
+    roundTrip(
+      type,
+      createEnvelope(type, { requestId: '10000000-0000-4000-8000-000000000064' }, { seq: 10 }),
+    );
+  });
+
   it('task.approve', () => {
     const type = 'task.approve' as const;
     testedTypes.push(type);

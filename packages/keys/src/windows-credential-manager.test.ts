@@ -117,6 +117,13 @@ describe('WindowsCredentialManagerSecretStore.get', () => {
     expect(script).toContain('namespace Byok');
     expect(script).toContain('[Byok.CredentialManager]::Read');
     expect(script).not.toMatch(/aiphabee/iu);
+    // CS0104 guard: FILETIME exists in both InteropServices and its ComTypes child.
+    expect(script).toContain('public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;');
+    expect(script).not.toContain('using System.Runtime.InteropServices.ComTypes');
+    // Failures carry a bounded, secret-free classification only.
+    expect(script).toContain('stage=compile,cs=');
+    expect(script).toContain('stage=operation,win32=');
+    expect(script).not.toMatch(/Exception\.Message|Out-String|ErrorText/u);
   });
 
   it('treats exit code 44 as an absent secret', async () => {

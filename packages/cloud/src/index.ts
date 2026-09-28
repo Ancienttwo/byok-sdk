@@ -31,6 +31,7 @@ export type {
   AgentEgressFreshSessionDispatchInput,
   AgentContentReadInput,
   AgentHomeProjectionInput,
+  ProviderProvisioningNoticeInput,
   AgentHomeProjectionStatusInput,
   InputPreparationInput,
   InputPreparationStatusInput,

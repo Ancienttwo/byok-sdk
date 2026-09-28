@@ -186,6 +186,15 @@ export type {
   AgentReliableEgressInput,
 } from './daemon/create-daemon';
 export {
+  ProviderProvisioningNoticeError,
+  PROVIDER_PROVISIONING_NOTICE_FAILURE_REASONS,
+} from './daemon/provider-provisioning';
+export type {
+  ProviderProvisioningHandler,
+  ProviderProvisioningNotice,
+  ProviderProvisioningNoticeFailureReason,
+} from './daemon/provider-provisioning';
+export {
   AgentMemoryError,
   AgentMemoryRevisionConflictError,
   isAgentMemorySecureFilesystemAvailable,

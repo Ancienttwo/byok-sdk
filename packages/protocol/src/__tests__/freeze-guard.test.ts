@@ -132,6 +132,7 @@ function codecRequirednessMatrix(): CodecRequirednessMatrix {
     'agent.content.receipt': { taskId: 'optional', seq: 'optional' },
     'agent.home.projection': { taskId: 'optional', seq: 'required' },
     'agent.input.preparation': { taskId: 'optional', seq: 'required' },
+    'provider.provisioning.available': { taskId: 'optional', seq: 'required' },
     'task.approve': { taskId: 'required', seq: 'required' },
     'task.reject': { taskId: 'required', seq: 'required' },
     'task.cancel': { taskId: 'required', seq: 'required' },
@@ -224,6 +225,10 @@ type CodecRequirednessMatrix = {
   'agent.input.preparation': {
     taskId: FieldRequiredness<'agent.input.preparation', 'taskId'>;
     seq: FieldRequiredness<'agent.input.preparation', 'seq'>;
+  };
+  'provider.provisioning.available': {
+    taskId: FieldRequiredness<'provider.provisioning.available', 'taskId'>;
+    seq: FieldRequiredness<'provider.provisioning.available', 'seq'>;
   };
   'task.approve': { taskId: FieldRequiredness<'task.approve', 'taskId'>; seq: FieldRequiredness<'task.approve', 'seq'> };
   'task.reject': { taskId: FieldRequiredness<'task.reject', 'taskId'>; seq: FieldRequiredness<'task.reject', 'seq'> };
@@ -674,6 +679,8 @@ function minimalPayloadForProbe(type: MessageType): unknown {
         requiredToolsets: ['team'],
         permissionMode: 'auto',
       };
+    case 'provider.provisioning.available':
+      return { requestId: '00000000-0000-4000-8000-000000000026' };
     case 'task.approve':
       return {};
     case 'task.reject':
@@ -719,7 +726,13 @@ function fullEnvelopeFor(type: MessageType): Record<string, unknown> {
     seq: 1,
     payload: minimalPayloadForProbe(type),
   };
-  if (type !== 'agent.home.projection' && type !== 'agent.input.preparation') envelope.task_id = 'task-1';
+  if (
+    type !== 'agent.home.projection' &&
+    type !== 'agent.input.preparation' &&
+    type !== 'provider.provisioning.available'
+  ) {
+    envelope.task_id = 'task-1';
+  }
   return envelope;
 }
 

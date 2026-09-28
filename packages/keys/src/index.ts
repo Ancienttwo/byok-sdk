@@ -128,6 +128,49 @@ export {
 } from './truth-profile-store';
 export type { TruthStoreProviderProfileStoreOptions } from './truth-profile-store';
 
+export {
+  PROVIDER_CONFIGURATION_LOCK_WAIT_MS,
+  PROVIDER_CUSTODY_RECEIPT_LIMIT,
+  PROVIDER_KEY_CHECK_OUTCOMES,
+  PROVIDER_PROVISIONING_REJECTIONS,
+  withConfigurationLock,
+} from './custody';
+export type {
+  ProviderConfigurationLock,
+  ProviderCustodyCommit,
+  ProviderCustodyOperation,
+  ProviderCustodyPending,
+  ProviderCustodyReceipt,
+  ProviderKeyCheckOutcome,
+  ProviderProvisioningBinding,
+  ProviderProvisioningRejection,
+  ProviderProvisioningResult,
+} from './custody';
+
+export { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-sealing-key';
+export type {
+  DeviceSealingEnrollment,
+  DeviceSealingKey,
+  DeviceSealingSecretName,
+} from './device-sealing-key';
+
+export {
+  PROVIDER_PROVISIONING_MAX_CLOCK_SKEW_MS,
+  PROVIDER_PROVISIONING_SECRET_MAX_BYTES,
+  applySealedProviderProvisioning,
+  readSealedProvisioningResult,
+} from './sealed-provisioning';
+export type {
+  ApplySealedProviderProvisioningOptions,
+  ProviderProvisioningIdentitySnapshot,
+  SealedProvisioningReadback,
+  ProviderProvisioningCutPoint,
+  ProviderProvisioningFaultSeam,
+} from './sealed-provisioning';
+
+export { PROVIDER_KEY_CHECK_TIMEOUT_MS, checkProviderKey } from './provider-key-check';
+export type { ProviderKeyCheckOptions } from './provider-key-check';
+
 export { ProviderRegistry } from './registry';
 export type {
   ModelProviderClient,

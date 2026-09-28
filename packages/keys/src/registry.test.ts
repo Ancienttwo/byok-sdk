@@ -171,6 +171,19 @@ describe('ProviderRegistry.configure', () => {
         throw new ByokKeysError('PROVIDER_PROFILE_CONFLICT', 'stale profile revision');
       },
       setEnabled: (profileRef) => profiles.setEnabled(profileRef),
+      acquireConfigurationLock: () => profiles.acquireConfigurationLock(),
+      getPending: (profileRef) => profiles.getPending(profileRef),
+      markPending: (pending) => profiles.markPending(pending),
+      getReservation: (requestId) => profiles.getReservation(requestId),
+      getOperationWatermark: (profileRef) => profiles.getOperationWatermark(profileRef),
+      getReceipt: (requestId) => profiles.getReceipt(requestId),
+      commitCustody: async (commit) => {
+        if (commit.mutation.kind === 'save') {
+          throw new ByokKeysError('PROVIDER_PROFILE_CONFLICT', 'stale profile revision');
+        }
+        await profiles.commitCustody(commit);
+      },
+      recordKeyCheck: (requestId, generation, keyCheck) => profiles.recordKeyCheck(requestId, generation, keyCheck),
     };
     const subject = new ProviderRegistry({
       profileStore: rejectingProfiles,
@@ -181,6 +194,8 @@ describe('ProviderRegistry.configure', () => {
       code: 'PROVIDER_PROFILE_CONFLICT',
     });
     await expect(secrets.get('model-openai-api-key')).resolves.toBe(CANARY);
+    // The failed call restored the previous pair and cleared its own marker.
+    await expect(profiles.getPending('openai')).resolves.toBeUndefined();
   });
 
   it('keeps only one provider enabled across configures', async () => {

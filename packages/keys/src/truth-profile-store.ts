@@ -8,10 +8,23 @@ import {
   type TruthStore,
 } from '@byok-sdk/core';
 
+import {
+  ProcessLocalMutex,
+  type ProviderConfigurationLock,
+  type ProviderCustodyCommit,
+  type ProviderCustodyPending,
+  type ProviderCustodyReceipt,
+  type ProviderCustodyReservation,
+  type ProviderKeyCheckOutcome,
+} from './custody';
 import { ByokKeysError } from './errors';
 import {
   type ProviderProfileStore,
+  applyReceipt,
   providerNotConfigured,
+  raiseWatermark,
+  reservationOf,
+  recordReceiptKeyCheck,
 } from './profile-store';
 import {
   type ModelProviderProfile,
@@ -74,6 +87,19 @@ export interface TruthStoreProviderProfileStoreOptions {
 export class TruthStoreProviderProfileStore implements ProviderProfileStore {
   readonly #tenant: TenantId;
   readonly #truth: TruthStore;
+  /**
+   * Credential custody here is process-local by construction: the profile
+   * authority is a remote CAS snapshot while the secret is in this host's
+   * credential store, and the Pi custody launcher never reads this adapter.
+   * The lock, pending markers, request reservations, watermarks and receipts therefore serialize
+   * and guard this process's registry only; they do not survive a restart.
+   * Durable, cross-process custody requires the SQLite adapter.
+   */
+  readonly #mutex = new ProcessLocalMutex();
+  readonly #pending = new Map<ProviderProfileRef, ProviderCustodyPending>();
+  readonly #watermarks = new Map<ProviderProfileRef, number>();
+  readonly #receipts = new Map<string, ProviderCustodyReceipt>();
+  readonly #reservations = new Map<string, ProviderCustodyReservation>();
 
   constructor(options: TruthStoreProviderProfileStoreOptions) {
     this.#tenant = options.tenant;
@@ -82,6 +108,47 @@ export class TruthStoreProviderProfileStore implements ProviderProfileStore {
 
   async close(): Promise<void> {
     // The host owns the injected TruthStore lifecycle.
+  }
+
+  acquireConfigurationLock(): Promise<ProviderConfigurationLock> {
+    return this.#mutex.acquire();
+  }
+
+  async getPending(profileRef: ProviderProfileRef): Promise<ProviderCustodyPending | undefined> {
+    return this.#pending.get(profileRef);
+  }
+
+  async getReservation(requestId: string): Promise<ProviderCustodyReservation | undefined> {
+    return this.#reservations.get(requestId);
+  }
+
+  async markPending(pending: ProviderCustodyPending): Promise<void> {
+    const reservation = reservationOf(pending, this.#reservations, this.#receipts);
+    this.#pending.set(pending.profileRef, { ...pending });
+    if (reservation !== undefined) this.#reservations.set(reservation.requestId, reservation);
+    raiseWatermark(this.#watermarks, pending);
+  }
+
+  async getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined> {
+    return this.#watermarks.get(profileRef);
+  }
+
+  async getReceipt(requestId: string): Promise<ProviderCustodyReceipt | undefined> {
+    return this.#receipts.get(requestId);
+  }
+
+  async commitCustody(commit: ProviderCustodyCommit): Promise<void> {
+    if (commit.mutation.kind === 'save') await this.save(commit.mutation.profile);
+    if (commit.mutation.kind === 'delete') await this.delete(commit.profileRef);
+    if (commit.receipt !== undefined) {
+      applyReceipt(this.#receipts, this.#watermarks, commit.receipt);
+      this.#reservations.delete(commit.receipt.requestId);
+    }
+    if (commit.clearPending) this.#pending.delete(commit.profileRef);
+  }
+
+  async recordKeyCheck(requestId: string, operationGeneration: number, keyCheck: ProviderKeyCheckOutcome): Promise<boolean> {
+    return recordReceiptKeyCheck(this.#receipts, this.#watermarks, requestId, operationGeneration, keyCheck);
   }
 
   async delete(profileRef: ProviderProfileRef): Promise<boolean> {

@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.23.0 / @byok-sdk/keys 0.8.0 — 2026-09-28 (prepared; not published)
+
+- **Added** — sealed provider provisioning: core sealed provider secret v1
+  (WebCrypto-only one-shot HPKE P-256/AES-128-GCM) and
+  `providerProvisioningRequestDigest`; protocol `provider.provisioning.available`
+  notice behind `provider-provisioning.v1`; the client daemon
+  `providerProvisioning` handler seam; cloud `enqueueProviderProvisioningNotice`;
+  keys credential custody, `applySealedProviderProvisioning`,
+  `readSealedProvisioningResult`, `replaceSecret` and the device sealing key store.
+- **Changed (keys, BREAKING)** — `ProviderProfileStore` now requires the custody
+  methods (`acquireConfigurationLock`, `getPending`, `markPending`,
+  `getOperationWatermark`, `getReceipt`, `getReservation`, `commitCustody`,
+  `recordKeyCheck`), and `ProviderCustodyPending` carries `requestDigest`; a
+  custom 0.7.0 store no longer type checks. A provisioning request id is
+  reserved store-wide with its digest before any side effect, so a same-id
+  request with a different digest is `request_conflict` on every profile.
+- **Changed (keys, BREAKING)** — `applySealedProviderProvisioning` takes
+  `readIdentity(agentId)` instead of `isPlacedHere` / static `enrollment`, read
+  before decryption and again under the configuration lock; placement and
+  enrollment writers join the fence through `withConfigurationLock`.
+- **Changed (core, BREAKING)** — sealed requests carry required
+  `expectedEnrollmentRevision` and `expectedPlacementRevision`, bound into the AAD.
+- **Changed (protocol)** — the completion `operationDigest` is the core request
+  digest (= keys `result.requestDigest`); the Host device fetch returns
+  `{ requestId, requestDigest }` even for terminal requests whose ciphertext was
+  deleted, so the handler reads the durable receipt first.
+- **Fixed (keys)** — the Windows Credential Manager store bridge never compiled
+  (CS0104 on an ambiguous `FILETIME`), so every Windows store operation failed;
+  it now compiles and is exercised by a real-backend Windows CI suite.
+- **Fixed (client)** — a provisioning handler failure no longer reaches the
+  daemon console verbatim; it surfaces as a closed
+  `ProviderProvisioningNoticeError`. The handler's returned readback is copied
+  once into inert plain data inside the same containment (accessors, Proxies and
+  class instances are refused as `readback_invalid`), so no Host code runs
+  outside it.
+- **Changed (prepared lane, BREAKING, #236)** — capability
+  `agent-input-preparation-v7` → `agent-input-preparation-v8`; wire and record
+  version 8; binding/observation digest domain v2; no v7 reader, dual token,
+  default or fallback. Host preparation requests, receipt bindings and
+  `task.offer_prepared` must carry explicit `agentMemory: 'none' | 'read' |
+  'read-write'`; memory tools are counted and admitted under a device ceiling.
+- **Operational (#236)** — before upgrading, drain preparation requests, prepared
+  Executions, required message dispositions and old mailbox entries; upgrade
+  cloud and devices together; recreate preparations with the Host systemPrompt,
+  official identity and explicit memory selection. A device with leftover v7
+  records refuses the lane with `input_preparation_record_log_unsupported`: stop
+  the old daemon, stage the 0.23.0 CLI without starting the daemon (the host
+  product's installer decides how), run the new CLI's
+  `byok-agent retire-input-preparation` (read-only preview) and then `--yes`
+  against the original config/store, complete the cloud/device switch, and start
+  the daemon on 0.23.0; the command does not exist in the 0.22.0 CLI. It moves the namespace to
+  `input-preparation-retired/<stamp>-v<versions>/` with a manifest and never
+  deletes, converts or touches Agent home/memory. Skipping the drain cannot
+  repair old entries.
+- **Known limitation (#236)** — Agent memory stays fail-closed on Windows.
+- [Release notes](docs/releases/v0.23.0.md), including the Host upgrade order.
+
+
 ## 0.22.0 / @byok-sdk/keys 0.7.0 — 2026-09-25 (published; tag `v0.22.0` at `0962f14f`)
 
 - **Changed (runtime, BREAKING)** — retire the maintained Pi fork and use the

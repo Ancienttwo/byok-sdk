@@ -136,6 +136,7 @@ export const CAPABILITY_FLAGS = [
   HOST_MCP_TASK_CONTEXT_CAPABILITY,
   CUSTOM_HARNESS_CAPABILITY,
   MAILBOX_READ_AHEAD_CAPABILITY,
+  PROVIDER_PROVISIONING_CAPABILITY,
 ] as const;
 
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
@@ -153,3 +154,4 @@ import { AGENT_INPUT_PREPARATION_CAPABILITY } from './input-preparation';
 import { TERMINAL_PROJECTION_SELECTION_CAPABILITY } from './terminal-projection';
 import { HOST_MCP_TASK_CONTEXT_CAPABILITY } from './task-assertion';
 import { PROVIDER_PROFILE_BINDING_CAPABILITY } from './provider-profile-binding';
+import { PROVIDER_PROVISIONING_CAPABILITY } from './provider-provisioning';

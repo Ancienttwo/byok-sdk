@@ -2,7 +2,9 @@
  * `@byok-sdk/core` — platform contracts.
  *
  * What this package exports is deliberately narrow: contracts, schemas, errors,
- * and one in-memory reference implementation. No HTTP, no crypto, no SQL, no
+ * one in-memory reference implementation, and the sealed provider-secret byte
+ * authority (one-shot HPKE over WebCrypto only — the browser and the device
+ * must run the same code). No HTTP, no node crypto, no SQL, no
  * `@byok-sdk/protocol` (that edge would make a future `keys → core` dependency drag
  * the wire protocol along with it, §12.1), and no `node:` import (a Workers
  * composition has to be able to load this).
@@ -310,6 +312,53 @@ export type {
   TaskAssertionClaims,
   TaskAssertionEnvelopeV1,
 } from './device-assertion';
+// Sealed provider provisioning (plan web-sealed-provisioning): request
+// schema, canonical AAD/claim bytes, padding, and one-shot HPKE seal/open.
+// No reusable encryption context is exported.
+export {
+  PROVIDER_PROVISIONING_MAX_TTL_MS,
+  PROVIDER_PROVISIONING_OPERATIONS,
+  PROVIDER_PROVISIONING_REQUEST_VERSION,
+  PROVIDER_PROVISIONING_SECRET_OPERATIONS,
+  PROVIDER_SECRET_HPKE_INFO,
+  PROVIDER_SECRET_HPKE_SUITE,
+  PROVIDER_SECRET_MAX_BYTES,
+  PROVIDER_SECRET_MAX_PADDED_BYTES,
+  PROVIDER_SECRET_PAD_BLOCK_BYTES,
+  ProviderProvisioningConfigV1Schema,
+  ProviderProvisioningExpectedProfileSchema,
+  ProviderProvisioningHeaderV1Schema,
+  ProviderProvisioningIdentityRevisionSchema,
+  ProviderProvisioningRequestV1Schema,
+  SEALING_KEY_ID_LENGTH,
+  SealedProviderSecretV1Schema,
+  SealingKeyClaimV1Schema,
+  SealingKeyIdSchema,
+  SealingPublicJwkSchema,
+  assertProviderProvisioningConfigDigest,
+  deriveSealingKeyId,
+  openProviderProvisioningSecret,
+  parseProviderProvisioningRequest,
+  providerProvisioningConfigDigest,
+  providerProvisioningRequestDigest,
+  providerSecretAadBytes,
+  sealProviderProvisioningRequest,
+  sealingKeyClaimCanonicalBytes,
+} from './sealed-provider-secret';
+export type {
+  ProviderProvisioningConfigV1,
+  ProviderProvisioningExpectedProfile,
+  ProviderProvisioningHeaderV1,
+  ProviderProvisioningOperation,
+  ProviderProvisioningRequestV1,
+  ProviderSecretRecipient,
+  SealProviderProvisioningRequestInput,
+  SealedProviderSecretV1,
+  SealingKeyClaimV1,
+  SealingPublicJwk,
+  WebCryptoKey,
+} from './sealed-provider-secret';
+
 // Nonce signing domain (§6.2) — the one authority the daemon, the hosted
 // surface, and the reference server all sign/verify against.
 export { NONCE_SIGNING_DOMAIN, nonceSigningBytes } from './pairing';

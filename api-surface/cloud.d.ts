@@ -911,7 +911,7 @@ import { type RecurringExecutionInput } from './recurring';
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import { type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -1089,6 +1089,12 @@ export interface AgentContentReadInput {
 }
 /** Task-free exact-device projection desired state, intentionally unrelated to TaskAttempt. */
 export type AgentHomeProjectionInput = AgentHomeProjectionPayload;
+/**
+ * Task-free sealed provider provisioning notice: exactly `{ requestId }`. The
+ * sealed request itself stays in the Host's own store and is fetched by the
+ * device over Host routes; nothing else can be carried by this input.
+ */
+export type ProviderProvisioningNoticeInput = ProviderProvisioningAvailablePayload;
 /** Exact request identity a host must echo to read back durable projection status. */
 export type AgentHomeProjectionStatusInput = AgentHomeProjectionReceiptInput;
 /** Task-free exact-device remote preparation request, intentionally unrelated to TaskAttempt. */
@@ -1212,6 +1218,19 @@ export interface ByokCloud {
      * and NO delivery row behind.
      */
     enqueueInputPreparation(tenant: TenantId, deviceId: string, input: InputPreparationInput): Promise<EnqueuedInputPreparation>;
+    /**
+     * Durable, task-free `provider.provisioning.available` notice for precisely
+     * one device that durably advertised `provider-provisioning.v1`. The payload
+     * is validated strictly before admission, and admission happens before the
+     * mailbox append, so a refused call leaves no delivery row behind.
+     *
+     * Idempotent per (tenant, device, requestId): the mailbox message id is
+     * derived from that identity, so a retried enqueue returns the existing row
+     * and its seq instead of appending a second notice. The completion and its
+     * durable readback are Host authority on Host routes; this plane records no
+     * provisioning receipt of its own.
+     */
+    enqueueProviderProvisioningNotice(tenant: TenantId, deviceId: string, input: ProviderProvisioningNoticeInput): Promise<EnqueuedAgentControl>;
     /** Tenant/device/request-bound durable desired-state and terminal-outcome readback. */
     getInputPreparationStatus(tenant: TenantId, deviceId: string, input: InputPreparationStatusInput): Promise<InputPreparationReadback | undefined>;
     /** Direct device completion endpoint authority; first exact terminal receipt wins. */
@@ -1945,7 +1964,7 @@ export { isTenantId, tenantId } from '@byok-sdk/core';
 export type { TenantId } from '@byok-sdk/core';
 export { createByokCloud } from './cloud';
 export type { TaskAgentMessage } from './task-agent-message';
-export type { ByokCloud, ByokCloudOptions, AgentDispatchInput, AgentEgressDispatchInput, AgentEgressFreshSessionDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, AgentHomeProjectionStatusInput, InputPreparationInput, InputPreparationStatusInput, ApproveTaskOptions, EnqueueOfferInput, EnqueueToolsetOfferInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedInputPreparation, EnqueuedOffer, TaskOfferReadback, } from './cloud';
+export type { ByokCloud, ByokCloudOptions, AgentDispatchInput, AgentEgressDispatchInput, AgentEgressFreshSessionDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, ProviderProvisioningNoticeInput, AgentHomeProjectionStatusInput, InputPreparationInput, InputPreparationStatusInput, ApproveTaskOptions, EnqueueOfferInput, EnqueueToolsetOfferInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedInputPreparation, EnqueuedOffer, TaskOfferReadback, } from './cloud';
 export { agentHomeProjectionCompletionKey, agentHomeProjectionRequestKey, readAgentHomeProjectionStatus, recordAgentHomeProjectionCompletion, } from './agent-home-projections';
 export type { AgentHomeProjectionReceiptInput } from './agent-home-projections';
 export { inputPreparationCompletionKey, inputPreparationRequestKey, readInputPreparationStatus, recordInputPreparationCompletion, sameInputPreparationRequest, } from './input-preparations';

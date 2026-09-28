@@ -23,6 +23,7 @@ import {
   AgentHomeProjectionProfileRevisionSchema,
   AgentHomeProjectionValueSchema,
 } from './agent-home-projection';
+import { ProviderProvisioningAvailablePayloadSchema } from './provider-provisioning';
 import {
   InputPreparationAccountingPolicyRefSchema,
   InputPreparationArtifactSummarySchema,
@@ -1350,6 +1351,7 @@ export const MESSAGE_PAYLOAD_SCHEMAS = {
   'agent.content.receipt': AgentContentReceiptPayloadSchema,
   'agent.home.projection': AgentHomeProjectionPayloadSchema,
   'agent.input.preparation': AgentInputPreparationPayloadSchema,
+  'provider.provisioning.available': ProviderProvisioningAvailablePayloadSchema,
   'task.approve': TaskApprovePayloadSchema,
   'task.reject': TaskRejectPayloadSchema,
   'task.cancel': TaskCancelPayloadSchema,
@@ -1388,6 +1390,7 @@ export const SERVER_TO_DAEMON_TYPES = [
   'agent.content.read',
   'agent.home.projection',
   'agent.input.preparation',
+  'provider.provisioning.available',
   'task.approve',
   'task.reject',
   'task.cancel',

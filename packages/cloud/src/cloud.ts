@@ -68,6 +68,7 @@ import {
   AGENT_CONTENT_WORKSPACE_READ_CAPABILITY,
   AGENT_HOME_PROJECTION_CAPABILITY,
   AGENT_INPUT_PREPARATION_CAPABILITY,
+  PROVIDER_PROVISIONING_CAPABILITY,
   AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
@@ -86,6 +87,7 @@ import {
   AgentHomeProjectionCompletionRequestSchema,
   AgentHomeProjectionPayloadSchema,
   AgentInputPreparationPayloadSchema,
+  ProviderProvisioningAvailablePayloadSchema,
   InputPreparationCompletionRequestSchema,
   AgentMemoryProjectionCommitRequestSchema,
   AgentEgressAckPayloadSchema,
@@ -107,6 +109,7 @@ import {
   type AgentHomeProjectionPayload,
   type AgentHomeProjectionReadback,
   type AgentInputPreparationPayload,
+  type ProviderProvisioningAvailablePayload,
   type InputPreparationCompletionRequest,
   type InputPreparationReadback,
   type AgentMemoryProjectionCommitRequest,
@@ -420,6 +423,13 @@ export interface AgentContentReadInput {
 /** Task-free exact-device projection desired state, intentionally unrelated to TaskAttempt. */
 export type AgentHomeProjectionInput = AgentHomeProjectionPayload;
 
+/**
+ * Task-free sealed provider provisioning notice: exactly `{ requestId }`. The
+ * sealed request itself stays in the Host's own store and is fetched by the
+ * device over Host routes; nothing else can be carried by this input.
+ */
+export type ProviderProvisioningNoticeInput = ProviderProvisioningAvailablePayload;
+
 /** Exact request identity a host must echo to read back durable projection status. */
 export type AgentHomeProjectionStatusInput = AgentHomeProjectionReceiptInput;
 
@@ -577,6 +587,23 @@ export interface ByokCloud {
     deviceId: string,
     input: InputPreparationInput,
   ): Promise<EnqueuedInputPreparation>;
+  /**
+   * Durable, task-free `provider.provisioning.available` notice for precisely
+   * one device that durably advertised `provider-provisioning.v1`. The payload
+   * is validated strictly before admission, and admission happens before the
+   * mailbox append, so a refused call leaves no delivery row behind.
+   *
+   * Idempotent per (tenant, device, requestId): the mailbox message id is
+   * derived from that identity, so a retried enqueue returns the existing row
+   * and its seq instead of appending a second notice. The completion and its
+   * durable readback are Host authority on Host routes; this plane records no
+   * provisioning receipt of its own.
+   */
+  enqueueProviderProvisioningNotice(
+    tenant: TenantId,
+    deviceId: string,
+    input: ProviderProvisioningNoticeInput,
+  ): Promise<EnqueuedAgentControl>;
   /** Tenant/device/request-bound durable desired-state and terminal-outcome readback. */
   getInputPreparationStatus(
     tenant: TenantId,
@@ -2103,6 +2130,39 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     },
 
     getInputPreparationStatus,
+
+    async enqueueProviderProvisioningNotice(tenant, deviceId, input) {
+      // Strict one-field body first: an extra field (ciphertext, config,
+      // identity) is a validation failure here, before any admission read or
+      // mailbox allocation, never a stripped-and-sent notice.
+      const payload = ProviderProvisioningAvailablePayloadSchema.parse(input);
+      await assertAgentCapabilities(tenant, deviceId, [PROVIDER_PROVISIONING_CAPABILITY]);
+      const messageId = uuidFromSha256(
+        await options.crypto.sha256(
+          new TextEncoder().encode(
+            JSON.stringify({
+              domain: 'byok:provider-provisioning-notice',
+              tenant,
+              deviceId,
+              requestId: payload.requestId,
+            }),
+          ),
+        ),
+      );
+      const control = await enqueueAgentControlEnvelope(tenant, deviceId, messageId, (seq) =>
+        createEnvelope('provider.provisioning.available', payload, { id: messageId, seq }),
+      );
+      if (
+        control.envelope.type !== 'provider.provisioning.available' ||
+        control.envelope.payload.requestId !== payload.requestId
+      ) {
+        throw new ByokCloudError(
+          'mailbox_receipt_mismatch',
+          `Mailbox message ${messageId} does not carry provider provisioning notice ${payload.requestId}.`,
+        );
+      }
+      return control;
+    },
 
     completeInputPreparation,
     eraseAgentMemoryProjection,

@@ -42,9 +42,91 @@ Provider secrets remain exclusively in the host's local `SecretStore`; they
 never enter TruthStore, protocol, cloud provider clients, or status output. A
 failed profile write restores a secret changed by that same configure call or
 surfaces an explicit rollback failure. The standalone Pi custody launcher
-continues to use an explicitly selected, read-only SQLite profile database; P5
-does not add a network listener, remote secret provisioning, or a dispatch-to-
-keys dependency.
+continues to use an explicitly selected, read-only SQLite profile database.
+Keys adds no network listener, and dispatch does not depend on keys. Remote
+secret provisioning exists only in the sealed, device-pulled form below; there
+is no other remote path that writes a provider secret.
+
+## Sealed remote provider provisioning
+
+A provider API key may be entered in a host's web UI. The browser seals it
+end-to-end to the target device's sealing public key; the host's API, control
+plane, database and logs handle only ciphertext, which is deleted when the
+device confirms or its TTL (at most 15 minutes) expires, and no server path
+persists or logs plaintext. The device fetches the request itself with a
+device assertion (the cloud notice carries only a request id), opens it in
+memory, and stores the key only in its operating-system credential store.
+Residual trust: the host's web code itself and its first device public-key
+directory. A tampered web front end can capture the key as it is typed; a
+party able to rewrite that directory can replace both the device identity and
+the sealing key. The design defends server-side storage, logging, relay and
+configuration tampering, not a malicious front end. HPKE base mode does not
+authenticate the sender; authorization of an operation rests on the host's
+authenticated session and device assertion.
+
+- **One byte authority.** `@byok-sdk/core` owns the request schema, canonical
+  AAD and sealing-key claim bytes, 256-byte plaintext padding with a 2-byte
+  length prefix, and one-shot RFC 9180 base-mode seal/open for the single suite
+  `DHKEM(P-256, HKDF-SHA256) / HKDF-SHA256 / AES-128-GCM`, built only on
+  WebCrypto primitives, with no negotiation and no reusable context. The AAD
+  binds tenant, device, sealing key id, request id, agent, operation, the
+  non-secret monotonic operation generation, the expected provider triple, the
+  expected enrollment and placement revisions, the config digest and the time
+  window. RFC 9180 test vectors and an independent
+  implementation pass in the test suite; that is not an audit, and the
+  self-implemented HPKE requires a dedicated security review before release.
+- **Sealing key.** The device's long-lived P-256 sealing key lives in its
+  credential store, bound to the current enrollment; a new enrollment always
+  generates a new key at the next epoch and rotation deletes the old private
+  key. There is no forward secrecy for past ciphertexts if that private key
+  leaks: TTL only shortens online retention and rotation only limits exposure
+  across epochs. Keys never reads the client's enrollment identity key; the
+  host signs the sealing-key claim with it.
+- **Device validation.** Before any write the device checks enrollment and key
+  id, that the agent is placed on it, the config digest, the HPKE open, request
+  replay (same id and digest returns the stored result; a different digest is a
+  conflict), the per-profile generation high-watermark (which survives delete,
+  so an older request stays rejected regardless of count or clock), a window of
+  `0 < expiresAt - issuedAt <= 15 min` with bounded clock skew, that the
+  provider kind is in the SDK vendor catalog (never `custom`; the endpoint is
+  derived from the catalog, never supplied by the cloud), the `pi_model`
+  schema, and the expected provider triple. `update_model` keeps the stored key
+  only when kind, endpoint, auth mode and adapter are exactly unchanged;
+  `replace_secret` must match the current credential scope and changes neither
+  the provider revision nor its hash. Results and errors are closed-set codes
+  that never carry plaintext or operating-system error detail. An optional key
+  check after a change is a bounded, closed-set hint, never a readiness
+  decision.
+- **Order, identity and generations.** For a request addressed to this
+  tenant and device, the durable local result for its request id and
+  immutable request digest is returned before the current sealing key,
+  placement or ciphertext is consulted; a readback-only path needs only the
+  request id and the digest the Host stored at submission, so key rotation,
+  a placement change or a deleted ciphertext never rewrites a historical
+  result. The canonical device handler reads that durable result first and
+  fetches/applies/completes only undecided operations. Requests bind the
+  expected enrollment and placement revisions; the device re-reads an exact
+  identity snapshot inside the configuration lock right before any
+  credential-store write and rejects any difference. That fence covers only
+  placement/enrollment writers that update the local record under the same
+  configuration lock. A generation is consumed when its pending marker is
+  written, so an older request never overtakes an interrupted newer one; the
+  interrupted request is reported, not redone, and recovery needs a higher
+  generation that re-supplies the key, or a delete. The request id and its
+  digest are reserved store-wide in that same transaction, sharing one lookup
+  scope with completed receipts: a reused id with a different digest is a
+  conflict with no write on any profile and never displaces the original
+  request's pending or completed facts.
+- **Custody.** Every credential writer and reader holds the profile store's
+  configuration lock — cross-process for the SQLite store and released by the
+  operating system if the holder dies. A writer records a secret-free pending
+  marker in the profile database before the credential-store write and clears
+  it in the same SQLite transaction that commits the profile, the operation
+  receipt and the generation watermark. The launcher, its admission check, the
+  registry client and the key check read profile, pending state and key as one
+  locked snapshot and refuse while a marker exists, so an "old profile + new
+  key" pair is never readable. A marker left by a crash is never resolved by
+  guessing: only a new operation that supplies a key, or a delete, clears it.
 
 Pi execution requires an explicit `pi_model` configuration in that local
 profile: context window, maximum output tokens, reasoning support, selected
@@ -73,11 +155,20 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.22.0`; publication requires separate release
+aligned dispatch release is `0.23.0`; publication requires separate release
 authorization and registry readback. The current independent keys candidate is
-`0.7.0`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.22.0`, proven from an isolated standard npm install rather
+`0.8.0`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.23.0`, proven from an isolated standard npm install rather
 than the workspace graph.
+
+The 0.23.0 train is prepared, not yet published. It adds sealed remote provider
+provisioning (see "Sealed remote provider provisioning" below). keys 0.8.0 is a
+MINOR: it adds credential custody and sealed provisioning authority and makes a
+pre-1.0 breaking change to `ProviderProfileStore`, which now requires the
+custody methods. Sealed requests now require `expectedEnrollmentRevision` and
+`expectedPlacementRevision`. Both packed workspace edges (core and
+implementation-identity) must resolve to 0.23.0. Notes:
+`docs/releases/v0.23.0.md`.
 
 The 0.22.0 train is published (see below). It carries official Pi 0.87.1,
 wire/record 7, envelope v4 and the complete Host-owned systemPrompt contract.

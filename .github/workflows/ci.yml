@@ -214,6 +214,17 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: bun run --filter @byok-sdk/client smoke:adapters
 
+      # SDK Windows v1 gate for sealed provider provisioning (plan A11): the
+      # device sealing key, configure/replace/delete custody, and the
+      # launcher's custody snapshot against the REAL Windows Credential
+      # Manager, as the runner's own user (the daemon and the launcher share
+      # one user). The flag makes the suite hard-fail rather than skip.
+      - name: Sealed provisioning on the real Windows Credential Manager
+        if: matrix.os == 'windows-latest'
+        env:
+          BYOK_TEST_WINDOWS_CREDENTIAL_MANAGER: '1'
+        run: bun run --filter @byok-sdk/keys test -- src/windows-credential-custody.integration.test.ts
+
       # The Pi positive case launches against the platform-default cwd, whose
       # admission requires that THIS token must not be able to write it
       # (`platform_default_is_writable` otherwise). The hosted windows-latest
@@ -1033,13 +1044,18 @@ jobs:
             if ($LASTEXITCODE -ne 0) { Fail $LASTEXITCODE 'trusted-launch-cwd.test.ts failed under the standard-user token' }
 
             # The clean checkout has no built workspace artifacts, and the keys
-            # suite resolves `@byok-sdk/implementation-identity` through its
-            # dist-only package entry, so build it before that suite loads it.
+            # suite resolves `@byok-sdk/implementation-identity` and
+            # `@byok-sdk/core` through their dist-only package entries, so build
+            # both before that suite loads them.
             # The other two legs get the equivalent build from pack-and-smoke.mjs,
             # which runs later in this child and rebuilds the full workspace for
             # packing.
             bun run --filter @byok-sdk/implementation-identity build
             if ($LASTEXITCODE -ne 0) { Fail $LASTEXITCODE 'implementation-identity build failed under the standard-user token' }
+            # keys also resolves `@byok-sdk/core` (custody, sealed provisioning)
+            # through its dist-only package entry.
+            bun run --filter @byok-sdk/core build
+            if ($LASTEXITCODE -ne 0) { Fail $LASTEXITCODE 'core build failed under the standard-user token' }
 
             # Real credential-projection directory validation under this same token.
             bun run --filter @byok-sdk/keys test -- src/pi-projection-windows.test.ts

@@ -1,3 +1,13 @@
+import {
+  type ProviderConfigurationLock,
+  type ProviderCustodyCommit,
+  type ProviderCustodyPending,
+  type ProviderCustodyReceipt,
+  type ProviderCustodyReservation,
+  type ProviderKeyCheckOutcome,
+  PROVIDER_CUSTODY_RECEIPT_LIMIT,
+  ProcessLocalMutex,
+} from './custody';
 import { ByokKeysError } from './errors';
 import {
   type ModelProviderProfile,
@@ -24,8 +34,48 @@ import {
  * 2. **Validate on write.** `save` runs {@link parseModelProviderProfile}, so an
  *    invalid profile is refused at the boundary rather than discovered later by
  *    a reader.
+ *
+ * Every store also owns the credential-custody state described in
+ * `custody.ts`: the configuration lock, pending markers, operation
+ * watermarks, and receipts. The custody methods other than
+ * `acquireConfigurationLock` must be called while holding that lock; the
+ * registry, the provisioning applier, and the launcher are the only callers.
  */
 export interface ProviderProfileStore {
+  /**
+   * Take the exclusive configuration lock. Cross-process for a file-backed
+   * SQLite store; process-local otherwise. Fails closed with
+   * `PROVIDER_CONFIGURATION_BUSY` when it cannot be acquired in time.
+   */
+  acquireConfigurationLock(): Promise<ProviderConfigurationLock>;
+  /** The pending marker for `profileRef`, if a credential change is unfinished. */
+  getPending(profileRef: ProviderProfileRef): Promise<ProviderCustodyPending | undefined>;
+  /**
+   * Durably record a pending marker (replacing any existing one for the same
+   * ref). A marker that carries an operation generation raises the ref's
+   * watermark to it in the same atomic step (the generation is consumed from
+   * the moment it starts).
+   */
+  markPending(pending: ProviderCustodyPending): Promise<void>;
+  /**
+   * The store-wide reservation for a started provisioning request id, if it
+   * has not yet been replaced by a receipt. Written by `markPending` (a marker
+   * with a `requestId` reserves it with its digest in the same atomic step)
+   * and removed by the commit that writes the request's receipt.
+   */
+  getReservation(requestId: string): Promise<ProviderCustodyReservation | undefined>;
+  /** Highest operation generation `profileRef` has consumed; survives delete. */
+  getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined>;
+  /** Stored receipt for a provisioning request id, if still retained. */
+  getReceipt(requestId: string): Promise<ProviderCustodyReceipt | undefined>;
+  /** Apply a custody commit atomically (see {@link ProviderCustodyCommit}). */
+  commitCustody(commit: ProviderCustodyCommit): Promise<void>;
+  /**
+   * Record a key-check outcome on a receipt, only if that receipt's
+   * generation is still the profile's watermark. Returns whether it was
+   * recorded; a stale check never overwrites newer state.
+   */
+  recordKeyCheck(requestId: string, operationGeneration: number, keyCheck: ProviderKeyCheckOutcome): Promise<boolean>;
   /** Release the underlying resource. Safe to call more than once. */
   close(): Promise<void>;
   /** Remove `profileRef`; `false` when it was not configured. */
@@ -65,9 +115,55 @@ export function providerNotConfigured(
  */
 export class InMemoryProviderProfileStore implements ProviderProfileStore {
   readonly #profiles = new Map<ProviderProfileRef, ModelProviderProfile>();
+  readonly #mutex = new ProcessLocalMutex();
+  readonly #pending = new Map<ProviderProfileRef, ProviderCustodyPending>();
+  readonly #watermarks = new Map<ProviderProfileRef, number>();
+  readonly #receipts = new Map<string, ProviderCustodyReceipt>();
+  readonly #reservations = new Map<string, ProviderCustodyReservation>();
 
   async close(): Promise<void> {
     this.#profiles.clear();
+  }
+
+  async getReservation(requestId: string): Promise<ProviderCustodyReservation | undefined> {
+    return this.#reservations.get(requestId);
+  }
+
+  acquireConfigurationLock(): Promise<ProviderConfigurationLock> {
+    return this.#mutex.acquire();
+  }
+
+  async getPending(profileRef: ProviderProfileRef): Promise<ProviderCustodyPending | undefined> {
+    return this.#pending.get(profileRef);
+  }
+
+  async markPending(pending: ProviderCustodyPending): Promise<void> {
+    const reservation = reservationOf(pending, this.#reservations, this.#receipts);
+    this.#pending.set(pending.profileRef, { ...pending });
+    if (reservation !== undefined) this.#reservations.set(reservation.requestId, reservation);
+    raiseWatermark(this.#watermarks, pending);
+  }
+
+  async getOperationWatermark(profileRef: ProviderProfileRef): Promise<number | undefined> {
+    return this.#watermarks.get(profileRef);
+  }
+
+  async getReceipt(requestId: string): Promise<ProviderCustodyReceipt | undefined> {
+    return this.#receipts.get(requestId);
+  }
+
+  async commitCustody(commit: ProviderCustodyCommit): Promise<void> {
+    if (commit.mutation.kind === 'save') await this.save(commit.mutation.profile);
+    if (commit.mutation.kind === 'delete') this.#profiles.delete(commit.profileRef);
+    if (commit.receipt !== undefined) {
+      applyReceipt(this.#receipts, this.#watermarks, commit.receipt);
+      this.#reservations.delete(commit.receipt.requestId);
+    }
+    if (commit.clearPending) this.#pending.delete(commit.profileRef);
+  }
+
+  async recordKeyCheck(requestId: string, operationGeneration: number, keyCheck: ProviderKeyCheckOutcome): Promise<boolean> {
+    return recordReceiptKeyCheck(this.#receipts, this.#watermarks, requestId, operationGeneration, keyCheck);
   }
 
   async delete(profileRef: ProviderProfileRef): Promise<boolean> {
@@ -111,4 +207,78 @@ export class InMemoryProviderProfileStore implements ProviderProfileStore {
     if (existing === undefined) throw providerNotConfigured(profileRef);
     return this.save({ ...existing, enabled: true });
   }
+}
+
+/**
+ * Shared by the process-local stores: insert a receipt, advance the ref's
+ * watermark (never backwards), and evict receipts beyond the retention limit
+ * in insertion order. Replay protection is the watermark's, so eviction never
+ * revives a request.
+ */
+export function applyReceipt(
+  receipts: Map<string, ProviderCustodyReceipt>,
+  watermarks: Map<ProviderProfileRef, number>,
+  receipt: ProviderCustodyReceipt,
+): void {
+  receipts.set(receipt.requestId, receipt);
+  const current = watermarks.get(receipt.profileRef);
+  if (current === undefined || receipt.operationGeneration > current) {
+    watermarks.set(receipt.profileRef, receipt.operationGeneration);
+  }
+  while (receipts.size > PROVIDER_CUSTODY_RECEIPT_LIMIT) {
+    const oldest = receipts.keys().next().value as string;
+    receipts.delete(oldest);
+  }
+}
+
+export function recordReceiptKeyCheck(
+  receipts: Map<string, ProviderCustodyReceipt>,
+  watermarks: Map<ProviderProfileRef, number>,
+  requestId: string,
+  operationGeneration: number,
+  keyCheck: ProviderKeyCheckOutcome,
+): boolean {
+  const receipt = receipts.get(requestId);
+  if (receipt === undefined || receipt.operationGeneration !== operationGeneration) return false;
+  if (watermarks.get(receipt.profileRef) !== operationGeneration) return false;
+  receipts.set(requestId, { ...receipt, result: { ...receipt.result, keyCheck } });
+  return true;
+}
+
+/** Consume a started operation's generation (never lowers the watermark). */
+export function raiseWatermark(watermarks: Map<ProviderProfileRef, number>, pending: ProviderCustodyPending): void {
+  if (pending.operationGeneration === null) return;
+  const current = watermarks.get(pending.profileRef);
+  if (current === undefined || pending.operationGeneration > current) {
+    watermarks.set(pending.profileRef, pending.operationGeneration);
+  }
+}
+
+/**
+ * Validate a pending marker's request identity and return the reservation it
+ * must write. A request id may be reserved once, with one digest, and never
+ * over an existing receipt; anything else is a caller bug the store refuses.
+ */
+export function reservationOf(
+  pending: ProviderCustodyPending,
+  reservations: ReadonlyMap<string, ProviderCustodyReservation>,
+  receipts: ReadonlyMap<string, ProviderCustodyReceipt>,
+): ProviderCustodyReservation | undefined {
+  if ((pending.requestId === null) !== (pending.requestDigest === null)) {
+    throw new ByokKeysError('PROVIDER_CUSTODY_STATE_INVALID', 'A pending marker carries a request id exactly when it carries a request digest');
+  }
+  if (pending.requestId === null || pending.requestDigest === null) return undefined;
+  if (pending.operationGeneration === null) {
+    throw new ByokKeysError('PROVIDER_CUSTODY_STATE_INVALID', 'A provisioning pending marker requires an operation generation');
+  }
+  const existing = reservations.get(pending.requestId);
+  if (receipts.has(pending.requestId) || (existing !== undefined && existing.requestDigest !== pending.requestDigest)) {
+    throw new ByokKeysError('PROVIDER_CUSTODY_STATE_INVALID', 'Provisioning request id is already reserved');
+  }
+  return {
+    requestId: pending.requestId,
+    requestDigest: pending.requestDigest,
+    profileRef: pending.profileRef,
+    operationGeneration: pending.operationGeneration,
+  };
 }
