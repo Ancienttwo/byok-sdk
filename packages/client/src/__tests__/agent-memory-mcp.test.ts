@@ -110,13 +110,29 @@ describe('Agent memory MCP local authority', () => {
       handleAgentMemoryToolCall(
         { name: 'memory_save', arguments: { op: 'delete', path: 'notes/a.md', expectedRevision: sha256(''), content: 'forbidden' }, signal: new AbortController().signal },
         deps,
+        'read-write',
       ),
     ).rejects.toMatchObject({ code: -32602 });
     await handleAgentMemoryToolCall(
       { name: 'memory_recall', arguments: { path: 'MEMORY.md' }, signal: new AbortController().signal },
       deps,
+      'read-write',
     );
     expect(calls).toEqual(['recall:MEMORY.md']);
+  });
+
+  it('rejects memory_save before calling dependencies under a read grant', async () => {
+    let saves = 0;
+    const deps = {
+      recall: async () => ({ path: 'MEMORY.md', revision: sha256(''), content: '' }),
+      save: async () => { saves += 1; return { path: 'MEMORY.md', deleted: false }; },
+    };
+    await expect(handleAgentMemoryToolCall(
+      { name: 'memory_save', arguments: { op: 'replace', path: 'MEMORY.md', expectedRevision: sha256(''), content: 'blocked' }, signal: new AbortController().signal },
+      deps,
+      'read',
+    )).rejects.toMatchObject({ code: -32000, message: 'agent_memory_operation_denied' });
+    expect(saves).toBe(0);
   });
 
   itWithSecureDescriptors('isolates each Agent home even when their task identity fields otherwise match', async () => {

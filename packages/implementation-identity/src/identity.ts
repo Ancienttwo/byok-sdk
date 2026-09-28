@@ -368,6 +368,11 @@ export type ToolImplementationSubjectV1 =
   | {
     readonly kind: 'runtime';
     readonly runtimeId: RuntimeIdV1;
+  }
+  | {
+    /** A finite SDK-owned helper, never a Host MCP server or a runtime. */
+    readonly kind: 'sdk-helper';
+    readonly helperId: SdkHelperIdV1;
   };
 
 /** What the resolver is asked about: one subject, and where it launches. */
@@ -379,6 +384,12 @@ export type ToolImplementationLocatorV1 = {
 } | {
   readonly subject: Extract<ToolImplementationSubjectV1, { kind: 'runtime' }>;
   readonly runtimeEntry: RuntimeEntryV1;
+  readonly command?: never;
+  readonly args?: never;
+  readonly launch?: never;
+} | {
+  readonly subject: Extract<ToolImplementationSubjectV1, { kind: 'sdk-helper' }>;
+  readonly entry: SdkHelperEntryV1;
   readonly command?: never;
   readonly args?: never;
   readonly launch?: never;
@@ -412,8 +423,20 @@ export const RUNTIME_ENTRIES: readonly RuntimeEntryV1[] = Object.freeze([
 export function runtimeEntryFixedArgv(kind: RuntimeEntryV1): readonly string[] {
   return Object.freeze(['__byok_sdk_helper', kind]);
 }
+/** Closed SDK helper vocabulary. A resolver cannot declare an arbitrary helper. */
+export type SdkHelperIdV1 = 'agent-memory';
+export const SDK_HELPER_IDS: readonly SdkHelperIdV1[] = Object.freeze(['agent-memory']);
+/** The descriptor is credential-free; the MCP entry is the task-bound execution role. */
+export type SdkHelperEntryV1 = 'agent-memory-describe' | 'agent-memory-mcp';
+export const SDK_HELPER_ENTRIES: readonly SdkHelperEntryV1[] = Object.freeze([
+  'agent-memory-describe', 'agent-memory-mcp',
+]);
+export function sdkHelperEntryFixedArgv(entry: SdkHelperEntryV1): readonly string[] {
+  return Object.freeze(['__byok_sdk_helper', entry]);
+}
 export type McpImplementationLocatorV1 = Extract<ToolImplementationLocatorV1, { subject: { kind: 'mcp-server' } }>;
 export type RuntimeImplementationLocatorV1 = Extract<ToolImplementationLocatorV1, { subject: { kind: 'runtime' } }>;
+export type SdkHelperImplementationLocatorV1 = Extract<ToolImplementationLocatorV1, { subject: { kind: 'sdk-helper' } }>;
 
 /** Finite M0 vocabulary, from pi-subagents0.60.0 producer inventory. No wildcards. */
 export const DESCENDANT_PER_LAUNCH_ENV_NAMES: readonly string[] = Object.freeze([
@@ -682,6 +705,14 @@ export const TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES: readonly string[] =
 
 const LIFECYCLE_ENV_NAMES = new Set<string>(TOOL_IMPLEMENTATION_LAUNCH_ENV_LIFECYCLE_NAMES);
 const CREDENTIAL_ENV_NAMES = new Set<string>(PROVIDER_CREDENTIAL_ENV_DENY_NAMES as readonly string[]);
+const AGENT_MEMORY_EXECUTION_ENV_NAMES = Object.freeze([
+  'BYOK_STORE_DIR',
+  'BYOK_PRODUCT_ID',
+  'BYOK_AGENT_MEMORY_CONTEXT',
+  'BYOK_PREPARED_AGENT_MEMORY_MODE',
+] as const);
+const AGENT_MEMORY_EXECUTION_LIFECYCLE_ENV_NAMES = new Set<string>(AGENT_MEMORY_EXECUTION_ENV_NAMES);
+const AGENT_MEMORY_DESCRIPTOR_LIFECYCLE_ENV_NAMES = new Set<string>();
 
 /**
  * The environment an MCP toolset child is spawned with, as an identity is
@@ -720,6 +751,21 @@ function launchEnvUnderIdentity(env: Readonly<Record<string, string>>): Record<s
   return bound;
 }
 
+function sdkHelperLaunchEnvUnderIdentity(
+  entry: SdkHelperEntryV1,
+  env: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const lifecycleNames = entry === 'agent-memory-mcp'
+    ? AGENT_MEMORY_EXECUTION_LIFECYCLE_ENV_NAMES
+    : AGENT_MEMORY_DESCRIPTOR_LIFECYCLE_ENV_NAMES;
+  const bound: Record<string, string> = {};
+  for (const name of Object.keys(env).sort()) {
+    if (lifecycleNames.has(name) || CREDENTIAL_ENV_NAMES.has(name)) continue;
+    bound[name] = env[name]!;
+  }
+  return bound;
+}
+
 /**
  * Every `BYOK_*` name on a child environment that this SDK cannot account for.
  *
@@ -736,6 +782,21 @@ export function unexpectedLaunchEnvControlNames(
   return Object.keys(env)
     .filter((name) => name.startsWith(BYOK_CONTROL_ENV_PREFIX) && !LIFECYCLE_ENV_NAMES.has(name))
     .sort();
+}
+
+function unexpectedSdkHelperEnvNames(
+  entry: SdkHelperEntryV1,
+  env: Readonly<Record<string, string>>,
+): readonly string[] {
+  const allowed = entry === 'agent-memory-mcp'
+    ? AGENT_MEMORY_EXECUTION_LIFECYCLE_ENV_NAMES
+    : AGENT_MEMORY_DESCRIPTOR_LIFECYCLE_ENV_NAMES;
+  const unexpected = Object.keys(env)
+    .filter((name) => CREDENTIAL_ENV_NAMES.has(name) || (name.startsWith(BYOK_CONTROL_ENV_PREFIX) && !allowed.has(name)));
+  if (entry === 'agent-memory-describe') {
+    unexpected.push(...AGENT_MEMORY_EXECUTION_ENV_NAMES.filter((name) => Object.hasOwn(env, name)));
+  }
+  return [...new Set(unexpected)].sort();
 }
 
 /**
@@ -758,6 +819,10 @@ function canonicalDigest(value: unknown): string {
  */
 export function toolImplementationLaunchEnvNamesDigest(env: Readonly<Record<string, string>>): string {
   return canonicalDigest(Object.keys(launchEnvUnderIdentity(env)));
+}
+
+function sdkHelperLaunchEnvNamesDigest(entry: SdkHelperEntryV1, env: Readonly<Record<string, string>>): string {
+  return canonicalDigest(Object.keys(sdkHelperLaunchEnvUnderIdentity(entry, env)));
 }
 
 /**
@@ -1397,6 +1462,34 @@ export async function resolveToolImplementationIdentity(
   return measureInstallRecord(record, launchEnv, probe);
 }
 
+/**
+ * Resolve one finite SDK helper through the same host install record and
+ * physical measurement authority as MCP/runtime identities. The helper's
+ * logical entry is not a Host-supplied command switch: its exact argv is
+ * checked against the sealed install record before any measurement succeeds.
+ */
+export async function resolveSdkHelperImplementation(
+  authority: ToolImplementationAuthority | undefined,
+  locator: SdkHelperImplementationLocatorV1,
+  launchEnv: LaunchEnvironment,
+  probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
+): Promise<ToolImplementationIdentityV1> {
+  if (locator.subject.kind !== 'sdk-helper' || locator.subject.helperId !== 'agent-memory'
+    || !SDK_HELPER_ENTRIES.includes(locator.entry)) {
+    return toolImplementationUnavailable('implementation_identity_unattested');
+  }
+  const answer = await readResolution(authority, locator);
+  if (plainRecord(answer) && answer.kind === 'unavailable') return answer as unknown as ToolImplementationUnavailableV1;
+  const record = validateInstallRecord(answer);
+  if (record === 'interpreter_form_unsupported') return toolImplementationUnavailable('interpreter_form_unsupported');
+  if (record === 'not_a_record') return toolImplementationUnavailable('implementation_identity_unattested');
+  const fixedArgv = sdkHelperEntryFixedArgv(locator.entry);
+  if (record.launchArgv.length !== fixedArgv.length || record.launchArgv.some((arg, index) => arg !== fixedArgv[index])) {
+    return toolImplementationUnavailable('install_record_mismatch');
+  }
+  return measureInstallRecord(record, launchEnv, probe);
+}
+
 /** One strict policy parser shared by Host declarations and internal launch plans. */
 export function parseRuntimeDescendantPolicy(value: unknown): RuntimeDescendantPolicyV1 | undefined {
   const policy = value;
@@ -1649,6 +1742,36 @@ export async function reverifyToolImplementationIdentity(
     return { reason: 'launch_env_unexpected_control_name', subject: 'launch-env' };
   }
   if (toolImplementationLaunchEnvNamesDigest(launchEnv) !== identity.launchEnvNamesDigest
+    || toolImplementationLoaderEnvValuesDigest(launchEnv) !== identity.loaderEnvValuesDigest) {
+    return { reason: 'launch_env_drift', subject: 'launch-env' };
+  }
+  return 'ok';
+}
+
+/**
+ * Reverify a finite SDK helper with its role-specific lifecycle projection.
+ * The descriptor accepts no task lifecycle inputs. The execution entry is the
+ * sole attested role that may receive the late-bound memory context and its
+ * sealed mode; this does not widen the generic Host-MCP gate.
+ */
+export async function reverifySdkHelperImplementationIdentity(
+  identity: ToolImplementationAttestedV1,
+  entry: SdkHelperEntryV1,
+  launchEnv: Readonly<Record<string, string>>,
+  probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
+): Promise<ToolImplementationReverifyResult> {
+  const physical = await reverifyPhysicalImplementation(identity, probe);
+  if (physical !== 'ok') return physical;
+  if (unexpectedSdkHelperEnvNames(entry, launchEnv).length > 0) {
+    return { reason: 'launch_env_unexpected_control_name', subject: 'launch-env' };
+  }
+  if (entry === 'agent-memory-mcp') {
+    if (AGENT_MEMORY_EXECUTION_ENV_NAMES.some((name) => !nonEmptyString(launchEnv[name]))
+      || (launchEnv.BYOK_PREPARED_AGENT_MEMORY_MODE !== 'read' && launchEnv.BYOK_PREPARED_AGENT_MEMORY_MODE !== 'read-write')) {
+      return { reason: 'launch_env_unexpected_control_name', subject: 'launch-env' };
+    }
+  }
+  if (sdkHelperLaunchEnvNamesDigest(entry, launchEnv) !== identity.launchEnvNamesDigest
     || toolImplementationLoaderEnvValuesDigest(launchEnv) !== identity.loaderEnvValuesDigest) {
     return { reason: 'launch_env_drift', subject: 'launch-env' };
   }

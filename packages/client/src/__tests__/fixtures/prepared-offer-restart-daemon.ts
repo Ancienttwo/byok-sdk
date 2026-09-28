@@ -284,6 +284,7 @@ const runner = new TaskRunner({
   mcpToolsetToolsProbe: async (serverName) => observation[serverName]!,
   inputPreparationLane: {
     store,
+    authorizeAgentMemory: async () => {},
     open: ensureOpen,
     runtime: RUNTIME,
     policyRevision: POLICY_REVISION,
@@ -340,7 +341,7 @@ function binding(agentId: string): InputPreparationBindingV1 {
     source: { revision: 'source-r1', digest: 'source-digest-1' },
     target: { endpoint: MODEL.baseUrl, modelId: MODEL.id },
     policyRevision: POLICY_REVISION,
-    permissionMode: 'auto',
+    agentMemory: 'none', permissionMode: 'auto',
     runtime: RUNTIME,
     requestDigest: REQUEST_DIGEST,
     accountingPolicyRef: ACCOUNTING_POLICY_REF,
@@ -366,8 +367,9 @@ function artifact(recordId: string): InputPreparationArtifact {
 /** Write the counted record, with every digest produced by the production functions. */
 async function seed(requestId: string, agentId: string): Promise<Record<string, unknown>> {
   const fingerprinted = await fingerprintPreparedToolSurface({
+    memory: null,
     observation,
-    permissionMode: 'auto',
+    agentMemory: 'none', permissionMode: 'auto',
     runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
     launch: attestation,
     toolsetDefinitionRevisions: { [TOOLSET_ID]: TOOLSET_REVISION },
@@ -375,6 +377,7 @@ async function seed(requestId: string, agentId: string): Promise<Record<string, 
   });
   if (!fingerprinted.ok) throw new Error(`fixture surface refused: ${fingerprinted.detail}`);
   const toolBindingDigest = preparedToolBindingDigest({
+    agentMemory: 'none', memoryImplementation: null,
     launch: attestation,
     toolsetDefinitionRevisions: { [TOOLSET_ID]: TOOLSET_REVISION },
     servers: [{
@@ -439,7 +442,8 @@ function preparedOffer(
       runtime: 'pi',
       agentRef: agentRefOf(agentId),
       requiredToolsets: [TOOLSET_ID],
-      preparation: { reference, requestDigest, artifactDigest },
+      agentMemory: 'none',
+    preparation: { reference, requestDigest, artifactDigest },
     },
     { taskId, seq },
   );

@@ -139,7 +139,7 @@ function requestParams(candidate: unknown): unknown {
       prompt: { systemPrompt: 'Host framing' },
       messages: [{ role: 'user', content: 'summarise the repository', timestamp: 1_700_000_000_000 }],
     },
-    permissionMode: 'auto',
+    agentMemory: 'none', permissionMode: 'auto',
     requiredToolsets: ['team'],
   };
 }
@@ -184,7 +184,7 @@ const BINDING: InputPreparationBindingV1 = {
   source: { revision: 'src-rev-1', digest: 'src-digest-1' },
   target: { endpoint: 'https://api.z.ai/api/coding/paas/v4', modelId: 'glm-4.6' },
   policyRevision: 'policy-1',
-  permissionMode: 'auto',
+  agentMemory: 'none', permissionMode: 'auto',
   runtime: {
     packageName: '@byok-sdk/pi-coding-agent',
     packageVersion: '0.85.1001',

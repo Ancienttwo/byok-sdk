@@ -255,6 +255,7 @@ async function prepareOnThisDevice(
     toolsetRegistry: toolsets,
     runtimeEnv: () => ({ PATH: process.env.PATH ?? '' }),
   }).assemble({
+    agentMemory: 'none',
     requiredToolsets: [RUNTIME_IDENTITY_TOOLSET],
     permissionMode: POLICY.mode,
     runtimeIdentity,
@@ -332,6 +333,8 @@ async function prepareOnThisDevice(
       PI_CODING_AGENT_DIR: path.join(homeDir, '.pi', 'agent'),
     },
     preparation: {
+      agentMemory: 'none',
+      memory: null,
       reference: { scopeId: 'scope-1', agentRef: 'agent-1', requestId: 'prep-1', recordId },
       artifactPath,
       expected: {
@@ -390,6 +393,7 @@ async function startPrepared(
   });
   if (result.kind === 'reject') throw new Error(`the pi adapter refused the prepared operation: ${result.reason}`);
   const manifest = sealRuntimeOperationManifest({
+    agentMemory: prepared.preparation.agentMemory,
     taskId: 'prepared-launch-test',
     runtimeId: 'pi',
     descriptor: adapter.descriptor,

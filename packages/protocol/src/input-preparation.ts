@@ -40,7 +40,7 @@ import { PERMISSION_MODES } from './permission';
  * below. See `INPUT_PREPARATION_VERSION` in the client for what each version
  * changed.
  */
-export const INPUT_PREPARATION_WIRE_VERSION = 7 as const;
+export const INPUT_PREPARATION_WIRE_VERSION = 8 as const;
 
 /**
  * Capability required before a task-free remote input preparation — or a
@@ -122,6 +122,11 @@ export const InputPreparationProfileIdSchema = OPAQUE_ID;
  */
 export const InputPreparationPermissionModeSchema = z.enum(PERMISSION_MODES);
 export type InputPreparationPermissionMode = z.infer<typeof InputPreparationPermissionModeSchema>;
+
+/** Explicit prepared SDK memory selection; never defaulted. */
+export const PreparedAgentMemoryModeSchema = z.enum(['none', 'read', 'read-write']);
+export type PreparedAgentMemoryMode = z.infer<typeof PreparedAgentMemoryModeSchema>;
+
 
 // ---------------------------------------------------------------------------
 // Source / selection
@@ -631,6 +636,7 @@ export const InputPreparationArtifactSummarySchema = z
 /** The immutable binding a receipt carries and a later consumer must re-present. */
 export const InputPreparationBindingSchema = z
   .object({
+    agentMemory: PreparedAgentMemoryModeSchema,
     scopeId: OPAQUE_ID,
     deviceId: OPAQUE_ID,
     agentRef: OPAQUE_ID,

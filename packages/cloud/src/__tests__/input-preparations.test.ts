@@ -49,7 +49,7 @@ function desired(
     deadlineAt: '2026-01-01T00:01:00.000Z',
     context: { inline: '{"prompt":{},"messages":[]}' },
     requiredToolsets: ['team'],
-    permissionMode: 'auto' as const,
+    agentMemory: 'none' as const, permissionMode: 'auto' as const,
     ...overrides,
   };
 }
@@ -66,7 +66,7 @@ const RECEIPT: InputPreparationReceiptSummary = {
     source: { revision: 'source-r42', digest: `sha256:${'c'.repeat(64)}` },
     target: { endpoint: 'https://provider.example/v1', modelId: 'model-1' },
     policyRevision: POLICY,
-    permissionMode: 'auto',
+    agentMemory: 'none', permissionMode: 'auto',
     runtime: {
       packageName: '@byok-sdk/pi-coding-agent',
       packageVersion: '0.85.1001',
@@ -153,7 +153,7 @@ describe('remote input preparation', () => {
 
   it('refuses a device that declares only the retired unversioned token — version skew never reaches the mailbox', async () => {
     // A 0.19 device declares `agent-input-preparation`; this cloud speaks
-    // `agent-input-preparation-v7`. Relaying would earn a strict-schema 422 on
+    // `agent-input-preparation-v8`. Relaying would earn a strict-schema 422 on
     // the completion PUT and a permanently frozen redelivery cursor, so the
     // refusal lands at enqueue, typed, with nothing durable behind it.
     const harness = createHarness();
@@ -175,7 +175,7 @@ describe('remote input preparation', () => {
   });
 
   it('refuses a device that declares only the retired v6 token — version skew never reaches the mailbox', async () => {
-    // A 0.21 device speaks v6; v7 admission must refuse before allocating state.
+    // A 0.21 device speaks v6; v8 admission must refuse before allocating state.
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {

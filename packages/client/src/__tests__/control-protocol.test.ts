@@ -280,6 +280,7 @@ describe('control-protocol: input_preparation param gates', () => {
         prompt: { systemPrompt: 'Host fixture instructions' },
         messages: [{ role: 'user', content: 'hello', timestamp: 1 }],
       },
+      agentMemory: 'none',
       permissionMode: 'auto',
       requiredToolsets: ['team'],
     };
@@ -360,6 +361,8 @@ describe('control-protocol: input_preparation param gates', () => {
     ['no messages at all', (r: Record<string, unknown>) => ({ ...r, snapshot: { ...(r.snapshot as object), messages: [] } })],
     ['an unknown snapshot field', (r: Record<string, unknown>) => ({ ...r, snapshot: { ...(r.snapshot as object), toolExecutors: {} } })],
     ['a permission mode outside the closed set', (r: Record<string, unknown>) => ({ ...r, permissionMode: 'yolo' })],
+    ['a missing memory selection', (r: Record<string, unknown>) => { const { agentMemory: _mode, ...rest } = r; return rest; }],
+    ['an unknown memory selection', (r: Record<string, unknown>) => ({ ...r, agentMemory: 'all' })],
     ['a missing permission mode', (r: Record<string, unknown>) => { const { permissionMode: _mode, ...rest } = r; return rest; }],
     ['a duplicate toolset id', (r: Record<string, unknown>) => ({ ...r, requiredToolsets: ['team', 'team'] })],
     ['a non-string toolset id', (r: Record<string, unknown>) => ({ ...r, requiredToolsets: [7] })],

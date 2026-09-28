@@ -62,7 +62,7 @@ function params(messages: readonly unknown[]): unknown {
       prompt: { systemPrompt: 'Host framing' },
       messages,
     },
-    permissionMode: 'auto',
+    agentMemory: 'none', permissionMode: 'auto',
     requiredToolsets: ['team'],
   };
 }

@@ -1,8 +1,9 @@
 import { promises as fs } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { PermissionMode, PermissionPolicy } from '@byok-sdk/protocol';
 import {
+  preparedToolBindingDigest,
   preparedToolSurfaceObservationDigest,
   type InputPreparationToolV1,
 } from '../input-preparation';
@@ -26,6 +27,9 @@ import {
   type PreparedPiToolSurfaceInput,
 } from '../adapters/pi/prepared-tools';
 import type { McpToolCallHost } from '../adapters/pi/mcp-tools';
+import { preparedMemoryProjection, type PreparedAgentMemoryState } from '../daemon/prepared-agent-memory';
+import { validatePreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
+import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../bin/agent-memory-mcp-server';
 
 /**
  * The launch half of a prepared tool surface
@@ -91,6 +95,7 @@ async function deviceFacts(permissionMode: PermissionMode): Promise<DeviceFacts>
     runtimeEnv: () => ({ PATH: process.env.PATH ?? '' }),
   });
   const assembled = await assembler.assemble({
+    agentMemory: 'none',
     requiredToolsets: ['team'],
     permissionMode,
     runtimeIdentity: RUNTIME_IDENTITY,
@@ -129,6 +134,8 @@ function launchInput(
   return {
     policy,
     countedPermissionMode: policy.mode,
+    agentMemory: 'none',
+    memory: null,
     observation: facts.observation,
     toolsetDefinitionRevisions: facts.toolsetDefinitionRevisions,
     servers: facts.servers,
@@ -143,6 +150,18 @@ function launchInput(
 }
 
 const READONLY_NO_NATIVE: PermissionPolicy = { mode: 'readonly', allowTools: [] };
+
+const MEMORY = {
+  implementation: {
+    descriptor: { kind: 'attested', authority: 'host-install-record', manifestRevision: 'descriptor', form: 'compiled-executable', installPath: '/descriptor', closureDigest: 'a'.repeat(64), closureKind: 'artifact', launchArgv: ['__byok_sdk_helper', 'agent-memory-describe'], launchCwd: '/', launchEnvNamesDigest: 'b'.repeat(64), loaderEnvValuesDigest: 'c'.repeat(64), installStat: { dev: 1, ino: 1, size: 1, mtimeMs: 1, mode: 0o100555, uid: 0, gid: 0 } },
+    execution: { kind: 'attested', authority: 'host-install-record', manifestRevision: 'execution', form: 'compiled-executable', installPath: '/execution', closureDigest: 'd'.repeat(64), closureKind: 'artifact', launchArgv: ['__byok_sdk_helper', 'agent-memory-mcp'], launchCwd: '/', launchEnvNamesDigest: 'e'.repeat(64), loaderEnvValuesDigest: 'f'.repeat(64), installStat: { dev: 1, ino: 2, size: 1, mtimeMs: 1, mode: 0o100555, uid: 0, gid: 0 } },
+  },
+  observation: validatePreparedAgentMemoryObservation({
+    serverInfo: AGENT_MEMORY_MCP_SERVER_INFO,
+    protocolVersion: '2025-03-26',
+    tools: AGENT_MEMORY_TOOLS.map(({ name, description, inputSchema, _meta }) => ({ name, description, inputSchema, _meta })),
+  }),
+} as unknown as PreparedAgentMemoryState;
 
 describe('the prepared pi tool surface', () => {
   it('reproduces the digests the preparation counted, from the same device facts', async () => {
@@ -262,6 +281,60 @@ describe('the prepared pi tool surface', () => {
     if (surface.ok) return;
     expect(surface.code).toBe('policy_inexpressible');
   }, 30_000);
+
+  it('assembles memory-only read with a runtime-worker call, without a Host MCP identity', async () => {
+    const launch = { launchCwd: '/', launcher: null } as McpLaunchAttestation;
+    const memoryProjection = preparedMemoryProjection('read', MEMORY, RUNTIME_IDENTITY);
+    const expectedToolBindingDigest = preparedToolBindingDigest({
+      agentMemory: 'read', memoryImplementation: MEMORY.implementation, launch,
+      toolsetDefinitionRevisions: {}, servers: [],
+    });
+    const expectedObservationDigest = preparedToolSurfaceObservationDigest({
+      agentMemory: 'read', memory: MEMORY, launch, permissionMode: 'readonly', runtimeIdentity: RUNTIME_IDENTITY,
+      toolsetDefinitionRevisions: {}, tools: memoryProjection.tools, toolExecutors: memoryProjection.toolExecutors, implementations: {},
+    });
+    const memoryCall = { call: vi.fn(async () => ({ content: [{ type: 'text' as const, text: '{"path":"MEMORY.md"}' }] })) };
+    const surface = await assemblePreparedPiToolSurface({
+      policy: READONLY_NO_NATIVE, countedPermissionMode: 'readonly', agentMemory: 'read', memory: MEMORY,
+      observation: {}, toolsetDefinitionRevisions: {}, servers: [], launch, toolImplementations: {}, runtimeIdentity: RUNTIME_IDENTITY,
+      expectedToolBindingDigest, expectedObservationDigest, host: UNUSED_HOST, memoryCall,
+    });
+    if (!surface.ok) throw new Error(`${surface.code}: ${surface.message}`);
+    expect(surface.toolNames).toEqual(['memory_recall']);
+    const result = await surface.tools[0]!.tool.execute('call-1', { path: 'MEMORY.md' }, undefined);
+    expect(memoryCall.call).toHaveBeenCalledExactlyOnceWith('memory_recall', { path: 'MEMORY.md' }, undefined);
+    expect(result.details).toMatchObject({ toolsetId: '@byok-sdk/agent-memory', serverName: 'byokagentmemory', toolName: 'memory_recall' });
+  });
+
+  it('refuses a sealed memory descriptor that drifted after preparation', async () => {
+    const launch = { launchCwd: '/', launcher: null } as McpLaunchAttestation;
+    const original = preparedMemoryProjection('read', MEMORY, RUNTIME_IDENTITY);
+    const expectedToolBindingDigest = preparedToolBindingDigest({
+      agentMemory: 'read', memoryImplementation: MEMORY.implementation, launch,
+      toolsetDefinitionRevisions: {}, servers: [],
+    });
+    const expectedObservationDigest = preparedToolSurfaceObservationDigest({
+      agentMemory: 'read', memory: MEMORY, launch, permissionMode: 'readonly', runtimeIdentity: RUNTIME_IDENTITY,
+      toolsetDefinitionRevisions: {}, tools: original.tools, toolExecutors: original.toolExecutors, implementations: {},
+    });
+    const drifted = {
+      ...MEMORY,
+      observation: {
+        ...MEMORY.observation,
+        tools: MEMORY.observation.tools.map((tool, index) => index === 0 ? { ...tool, description: `${tool.description} changed` } : tool),
+      },
+    } as unknown as PreparedAgentMemoryState;
+    const memoryCall = { call: vi.fn(async () => ({ content: [] })) };
+    const surface = await assemblePreparedPiToolSurface({
+      policy: READONLY_NO_NATIVE, countedPermissionMode: 'readonly', agentMemory: 'read', memory: drifted,
+      observation: {}, toolsetDefinitionRevisions: {}, servers: [], launch, toolImplementations: {}, runtimeIdentity: RUNTIME_IDENTITY,
+      expectedToolBindingDigest, expectedObservationDigest, host: UNUSED_HOST, memoryCall,
+    });
+    expect(surface.ok).toBe(false);
+    if (surface.ok) return;
+    expect(surface.code).toBe('tool_observation_drift');
+    expect(memoryCall.call).not.toHaveBeenCalled();
+  });
 });
 
 describe('the shared prepared surface observation digest', () => {
@@ -269,6 +342,8 @@ describe('the shared prepared surface observation digest', () => {
     { name: 'mcp__teamserver__echo', description: 'echo', parameters: { type: 'object', properties: {} } },
   ];
   const BASE = {
+    agentMemory: 'none' as const,
+    memory: null,
     launch: { launchCwd: '/', launcher: null } as McpLaunchAttestation,
     permissionMode: 'readonly' as PermissionMode,
     runtimeIdentity: RUNTIME_IDENTITY,

@@ -104,7 +104,7 @@ function request(overrides: Partial<InputPreparationRequestV1> = {}): InputPrepa
       messages: [{ role: 'user', content: 'hello', timestamp: 1_700_000_000_000 }],
     },
     permissionMode: 'auto',
-    requiredToolsets: ['team'],
+    agentMemory: 'none', requiredToolsets: ['team'],
     ...overrides,
   };
 }
@@ -272,7 +272,7 @@ function fixtureCounter(
 const ALWAYS_AUTHORIZED: InputPreparationAuthorityResolver = {
   async resolveSource({ source }) { return { authorized: true, source }; },
   async resolveScope(claim) {
-    return { authorized: true, grant: { scopeId: `scope:${claim.deviceId}`, ...claim } };
+    return { authorized: true, grant: { agentMemory: 'none', scopeId: `scope:${claim.deviceId}`, ...claim } };
   },
 };
 
@@ -333,6 +333,27 @@ describe('B-P2 policy: required limits with no defaults', () => {
 });
 
 describe('B-P2 service: auth and isolation', () => {
+  it('rejects requested memory above the local authority ceiling before reserve or compile', async () => {
+    const compiler = stubCompiler();
+    const service = await makeService({ compiler });
+    expect(await codeOf(service.prepare(request({ agentMemory: 'read' })))).toBe('scope_denied');
+    expect(compiler.calls).toEqual([]);
+    expect(service.store.list()).toEqual([]);
+  });
+
+  it('binds selected memory rather than its ceiling and reauthorizes on execution', async () => {
+    let ceiling: 'read' | 'read-write' | 'none' = 'read-write';
+    const service = await makeService({ authorityResolver: {
+      ...ALWAYS_AUTHORIZED,
+      async resolveScope(claim) { return { authorized: true, grant: { ...claim, scopeId: `scope:${claim.deviceId}`, agentMemory: ceiling } }; },
+    } });
+    const receipt = await service.prepare(request({ agentMemory: 'read' }));
+    expect(receipt.binding.agentMemory).toBe('read');
+    await expect(service.authorizeAgentMemory(receipt.binding)).resolves.toBeUndefined();
+    ceiling = 'none';
+    expect(await codeOf(service.authorizeAgentMemory(receipt.binding))).toBe('scope_denied');
+  });
+
   it('never compiles, stores or counts when the authority refuses', async () => {
     const compiler = stubCompiler();
     const counter = fixtureCounter();
@@ -365,7 +386,7 @@ describe('B-P2 service: auth and isolation', () => {
         ...ALWAYS_AUTHORIZED,
         async resolveScope(claim) {
           // A forged/misbehaving resolver substituting another device.
-          return { authorized: true, grant: { scopeId: 'scope:other', ...claim, deviceId: 'device-other' } };
+          return { authorized: true, grant: { agentMemory: 'none', scopeId: 'scope:other', ...claim, deviceId: 'device-other' } };
         },
       },
     });
@@ -1314,7 +1335,7 @@ describe('PR187 review regressions', () => {
       async resolveSource(input) {
         sourceCalls += 1;
         const original = structuredClone(input.source);
-        const mutable = input as unknown as { grant: { scopeId: string }; source: { digest: string }; snapshot: { messages: { content: string }[] } };
+        const mutable = input as unknown as { grant: { agentMemory: 'none', scopeId: string }; source: { digest: string }; snapshot: { messages: { content: string }[] } };
         mutable.grant.scopeId = 'evil';
         mutable.source.digest = 'evil';
         mutable.snapshot.messages[0]!.content = 'evil';

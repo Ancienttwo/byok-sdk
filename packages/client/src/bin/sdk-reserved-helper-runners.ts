@@ -2,7 +2,8 @@ import { runMcpEnvLauncher } from './mcp-env-launcher';
 import type { Readable } from 'node:stream';
 import { connectControlClient, type ControlClient } from './control-client';
 import { serveAgentMessageMcpOverStdio, type AgentMessageMcpDeps } from './agent-message-mcp-server';
-import { serveAgentMemoryMcpOverStdio, type AgentMemoryMcpDeps } from './agent-memory-mcp-server';
+import { serveAgentMemoryDescriptorOverStdio, serveAgentMemoryMcpOverStdio, type AgentMemoryMcpDeps } from './agent-memory-mcp-server';
+import { parsePreparedAgentMemoryMode } from '../agent-memory/prepared-capability';
 import { serveTeamMcpOverStdio, type TeamMcpDeps } from './team-mcp-server';
 import { serveApprovalMcpOverStdio, type ApprovalMcpDeps } from './approval-mcp-server';
 import type { SdkReservedHelperKind } from '../sdk-reserved-helper-host';
@@ -51,6 +52,8 @@ async function runAgentMemoryMcp(): Promise<void> {
   const storeDir = required('BYOK_STORE_DIR');
   const productId = required('BYOK_PRODUCT_ID');
   const contextToken = required('BYOK_AGENT_MEMORY_CONTEXT');
+  const mode = parsePreparedAgentMemoryMode(required('BYOK_PREPARED_AGENT_MEMORY_MODE'));
+  if (mode === 'none') throw new Error('BYOK_PREPARED_AGENT_MEMORY_MODE must grant read or read-write');
   let clientPromise: Promise<ControlClient> | undefined;
   const client = async (): Promise<ControlClient> => {
     if (!clientPromise) clientPromise = connectControlClient({ storeDir, productId }).then((result) => {
@@ -63,7 +66,15 @@ async function runAgentMemoryMcp(): Promise<void> {
     recall: async (input) => (await client()).request('agent_memory.recall', { contextToken, ...input }),
     save: async (input) => (await client()).request('agent_memory.save', { contextToken, ...input }),
   };
-  serveAgentMemoryMcpOverStdio({ deps });
+  serveAgentMemoryMcpOverStdio({ deps, mode });
+  await waitForInputClose();
+}
+
+async function runAgentMemoryDescribe(): Promise<void> {
+  for (const name of ['BYOK_STORE_DIR', 'BYOK_PRODUCT_ID', 'BYOK_AGENT_MEMORY_CONTEXT', 'BYOK_PREPARED_AGENT_MEMORY_MODE']) {
+    if (process.env[name] !== undefined) throw new Error(`agent-memory-describe rejects ${name}`);
+  }
+  serveAgentMemoryDescriptorOverStdio({});
   await waitForInputClose();
 }
 
@@ -141,6 +152,9 @@ export async function runSdkReservedHelper(kind: SdkReservedHelperKind, argv: re
       return;
     case 'agent-memory-mcp':
       await runAgentMemoryMcp();
+      return;
+    case 'agent-memory-describe':
+      await runAgentMemoryDescribe();
       return;
     case 'approval-mcp':
       await runApprovalMcp();

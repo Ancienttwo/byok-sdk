@@ -126,7 +126,7 @@ function payload(overrides: Record<string, unknown> = {}): AgentInputPreparation
     },
     deadlineAt: new Date(Date.now() + 60_000).toISOString(),
     context: { inline: CONTEXT_JSON },
-    requiredToolsets: ['team'],
+    agentMemory: 'none', requiredToolsets: ['team'],
     permissionMode: 'auto',
     ...overrides,
   });
@@ -199,7 +199,7 @@ function fixtureCounter() {
 const ALWAYS_AUTHORIZED: InputPreparationAuthorityResolver = {
   async resolveSource({ source }) { return { authorized: true, source }; },
   async resolveScope(claim) {
-    return { authorized: true, grant: { scopeId: `scope:${claim.deviceId}`, ...claim } };
+    return { authorized: true, grant: { agentMemory: 'none', scopeId: `scope:${claim.deviceId}`, ...claim } };
   },
 };
 
@@ -309,7 +309,7 @@ describe('remote input preparation: in-process, never the control socket', () =>
     // `requiredToolsets` and `permissionMode` through, and the tools that reach
     // the compiler are exactly what the one assembly entry answered with.
     expect(harness.toolSurface.assembleCalls).toEqual([
-      { requiredToolsets: ['team'], permissionMode: 'auto', runtimeIdentity: expect.any(String) },
+      { agentMemory: 'none', requiredToolsets: ['team'], permissionMode: 'auto', runtimeIdentity: expect.any(String) },
     ]);
     const compiled = harness.compiler.calls[0]!;
     expect(compiled.snapshot.tools.map((tool) => tool.name)).toEqual([

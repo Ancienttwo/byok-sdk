@@ -1,3 +1,4 @@
+import { PreparedAgentMemoryModeSchema } from '@byok-sdk/protocol';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -99,7 +100,7 @@ import {
  * {@link InputPreparationUnsupportedRecordVersionError}. There is no
  * compatibility read.
  */
-export const INPUT_PREPARATION_RECORD_VERSION = 7;
+export const INPUT_PREPARATION_RECORD_VERSION = 8;
 
 /** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
 export interface InputPreparationRecordKey {
@@ -425,6 +426,9 @@ export class InputPreparationStore {
       // have the field the probe knows to look for.
       if (record.version !== INPUT_PREPARATION_RECORD_VERSION) {
         throw new InputPreparationUnsupportedRecordVersionError(record.recordId, record.version, path.join(this.root, RECORD_LOG));
+      }
+      if (!PreparedAgentMemoryModeSchema.safeParse(record.binding?.agentMemory).success) {
+        throw new InputPreparationIntegrityError('the input-preparation record has no valid agentMemory selection');
       }
       // Last write wins per record id: the log is an append-only history of
       // one record's transitions, replayed in order.

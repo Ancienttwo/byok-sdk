@@ -51,13 +51,16 @@ state/transition. There is no in-place "tighten it a little" allowance
 post-freeze the way pre-freeze M0→M1 had (§10) — a change of this shape is a
 new major version, full stop.
 
-**Scoped input-preparation cut:** the Owner-approved v7 official Pi work-package retains
-`task.offer_prepared` to require `egressPolicy` and optionally carry `messageEgress`.
-Its version authority is `INPUT_PREPARATION_WIRE_VERSION`, admitted only through
-`agent-input-preparation-v7`; the outer envelope remains v1. This is a deliberate
-paired-upgrade cut, not an additive rolling-upgrade claim. No v6 token or reader is
-retained. Drain pre-cut preparation requests and prepared Executions first, as
-specified below.
+**Scoped input-preparation cut:** the Owner-approved
+[prepared memory contract](researches/2026-09-28-prepared-agent-memory-contract.md)
+extends the earlier official-Pi exception to input-preparation v8. The strict
+preparation request, receipt binding and `task.offer_prepared` require explicit
+`agentMemory: 'none' | 'read' | 'read-write'`. `INPUT_PREPARATION_WIRE_VERSION` and
+record schema are 8; admission requires `agent-input-preparation-v8`. The outer
+envelope remains v1. Binding and observation digests use domain v2. This is a paired
+upgrade, with no old reader, mode default or dual token. Drain pre-cut preparation
+requests and prepared Executions first. The exception does not change unrelated
+strict messages; downstream deployment is separate from this source cut.
 
 **Unknown observability remains ignorable; unknown executable work is not acknowledged.**
 An unrecognized executable message has no durable disposition, so the daemon
@@ -310,32 +313,36 @@ append/send; receipt and ack are delivery facts, not session authority.
 
 `task.offer_prepared` is strict control data. In long-poll, unknown executable
 message types and unknown strict payload keys both freeze the cursor. Enqueue
-requires `agent-home-contract`, `agent-input-preparation-v7`, `agent-egress-policy`,
+requires `agent-home-contract`, `agent-input-preparation-v8`, `agent-egress-policy`,
 `agent-egress-reliable-ack` and `agent-egress-fresh-session`; when `messageEgress` is
 present it also requires `agent-message-egress`. These gates run before allocating
 any task or mailbox row. The host-only `agentMessageContext` is recorded with the
 immutable message requirement and is never sent to the daemon.
 
-The v7 cut requires Host-owned `prompt.systemPrompt`, official closure identity,
-envelope v4 and record v7. Preparation accepts empty requiredToolsets. Required
+The v8 cut retains Host-owned `prompt.systemPrompt`, official closure identity and
+envelope v4, and requires record v8 plus explicit `agentMemory`. Memory-only
+preparation accepts empty requiredToolsets; the corresponding offer omits that field. Required
 `egressPolicy` and optional `messageEgress` remain, with no dual token/read. **Precondition:** drain preparation requests,
 prepared Executions and required message dispositions, ensure device cursors have
-passed all old entries, then upgrade cloud and device together. Existing v6
+passed all old entries, then upgrade cloud and device together. Existing pre-v8
 preparations are not read forward; recreate them. The capability gate protects new
 admission only: an already-enqueued old offer without `egressPolicy` fails strict
 parsing and stalls its mailbox. Paired upgrade alone does not repair that old
 payload; operator handling is required if the drain was skipped.
 
-Prepared offers inject no reserved message or memory tool. Their message body is
+Prepared offers inject no message tool. Selected SDK memory tools are counted and
+sealed using their own descriptor and attested implementation identities; they are
+not Host MCP toolsets. After pin and claim, a private task token carries the sealed
+read/read-write ACL, checked again by the daemon. Their message body is
 daemon-authored from final Pi text at turn end, after usage validation and selected
 result-document extraction. Missing/unreadable usage or context overflow fails
 before publish. The outbox waits for exact `accepted` before emitting `task.complete`
 with `preparedObservation`; outbound activity/terminal envelopes are sanitized.
-D and its fourteen admission comparisons are unchanged, and the message tool is
-outside D. Pi `{mode:'auto',allowTools:[]}` means zero native tools on both lanes;
+Selected memory schemas and executors enter D and its existing admission comparisons;
+the memory selection is compared explicitly as well. The message tool stays outside D. Pi `{mode:'auto',allowTools:[]}` means zero native tools on both lanes;
 fresh offers retain their observed MCP and reserved grants. Prepared native policy failures
-are refused before pin. Nonempty MCP toolsets remain required; empty toolsets are
-outside this P0 cut.
+are refused before pin. Host MCP toolsets may be empty only when selected memory
+tools make the combined surface nonempty; with `agentMemory:'none'` they remain required.
 
 It carries no `instruction`: the user request is already inside the frozen
 envelope the referenced record retained. It carries no `sessionRef` either — a
