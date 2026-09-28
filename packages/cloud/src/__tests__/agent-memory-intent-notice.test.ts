@@ -199,6 +199,46 @@ describe('enqueueAgentMemoryIntentNotice', () => {
     expect(decodeEnvelope(stored[0]!.body)).toEqual(first.envelope);
   });
 
+  it('after acked-row retention cleanup, a re-enqueue appends a new row and compares agentRef only against that new row', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await admit(harness, TENANT_A, device.deviceId);
+    const first = await harness.cloud.enqueueAgentMemoryIntentNotice(TENANT_A, device.deviceId, {
+      intentId: INTENT_A,
+      agentRef: AGENT_REF,
+    });
+    await harness.core.mailbox.recordDelivery(TENANT_A, { deviceId: device.deviceId, deliveredSeq: first.seq });
+    await harness.core.mailbox.advanceCursor(TENANT_A, { deviceId: device.deviceId, ackedSeq: first.seq });
+    const swept = await harness.core.mailbox.collectRetired(TENANT_A, {
+      deviceId: device.deviceId,
+      ackedBefore: '2999-01-01T00:00:00.000Z',
+      expireUnackedBefore: '2999-01-01T00:00:00.000Z',
+    });
+    expect(swept.deletedCount).toBe(1);
+    expect(await rows(harness, TENANT_A, device.deviceId)).toEqual([]);
+
+    // The original row is gone, so the derived message id no longer pins an
+    // agentRef: a different Agent is accepted and gets a new seq.
+    const reEnqueued = await harness.cloud.enqueueAgentMemoryIntentNotice(TENANT_A, device.deviceId, {
+      intentId: INTENT_A,
+      agentRef: OTHER_AGENT_REF,
+    });
+    expect(reEnqueued.seq).toBeGreaterThan(first.seq);
+    expect(reEnqueued.envelope).toMatchObject({ payload: { intentId: INTENT_A, agentRef: OTHER_AGENT_REF } });
+    const stored = await rows(harness, TENANT_A, device.deviceId);
+    expect(stored).toHaveLength(1);
+    expect(decodeEnvelope(stored[0]!.body)).toEqual(reEnqueued.envelope);
+
+    // The retained-row rule applies again, against the new row.
+    await expect(
+      harness.cloud.enqueueAgentMemoryIntentNotice(TENANT_A, device.deviceId, {
+        intentId: INTENT_A,
+        agentRef: { agentId: AGENT_REF.agentId, profileRevision: '8' },
+      }),
+    ).rejects.toMatchObject({ code: 'mailbox_receipt_mismatch' });
+    expect(await rows(harness, TENANT_A, device.deviceId)).toHaveLength(1);
+  });
+
   it('isolates tenants and devices: the same intent id is a distinct row per device', async () => {
     const harness = createHarness();
     const deviceA = await harness.pairDevice(TENANT_A);
