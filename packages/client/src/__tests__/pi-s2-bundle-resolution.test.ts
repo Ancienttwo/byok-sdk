@@ -75,7 +75,7 @@ if (process.argv[2] !== 'capture' && process.argv[2] !== 'capture-untrusted') {
     runtime=await prepared.operation.resolveRuntimeLaunch({kind:input.kind,cwd:input.cwd,env:input.env,
       projectionRoot:input.projectionRoot,authority:{resolve:async locator=>{resolveCalls.push(locator);return input.record;}}});
     stage='start';
-    const manifest=sdk.sealRuntimeOperationManifest({taskId:'s2-'+input.kind,runtimeId:'pi',descriptor:adapter.descriptor,
+    const manifest=sdk.sealRuntimeOperationManifest({...(input.kind==='prepared'?{agentMemory:'none'}:{}),taskId:'s2-'+input.kind,runtimeId:'pi',descriptor:adapter.descriptor,
       policy:input.policy,requiredToolsetIds:[],workspace:{workspaceDir:input.cwd},forwardedEnvironmentNames:Object.keys(runtime.env).sort()});
     await prepared.operation.start({kind:input.kind,...(input.kind==='prepared'?{preparation:input.preparation}:{instruction:'Never sent'}),
       manifest,runtimeLaunch:runtime,env:runtime.env,mcpEnv:input.mcpEnv,mcpServers:input.mcpServers,
@@ -185,12 +185,12 @@ async function preparedFixture(root: string, cwd: string, env: Record<string, st
   const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
   const runtimeIdentity = `${compiler.runtime.packageName}@${compiler.runtime.packageVersion}+${compiler.runtime.closureDigest}.compiler-${compiler.runtime.compilerVersion}`;
   const assembled = await createPreparedToolSurfaceAssembler({ toolsetRegistry: registry, runtimeEnv: () => env })
-    .assemble({ requiredToolsets: ['s2.echo.v1'], permissionMode: POLICY.mode, runtimeIdentity });
+    .assemble({ agentMemory: 'none', requiredToolsets: ['s2.echo.v1'], permissionMode: POLICY.mode, runtimeIdentity });
   if (!assembled.ok) throw new Error(`fixture assembly failed: ${assembled.detail}`);
   const surface = assembled.surface;
   const observed = await observeMcpServer('fixture', server, { env, cwd: surface.launch.launchCwd, timeoutMs: 15_000 });
   const observation = { fixture: classifyMcpToolsetServerObservation(observed, { toolsetId: 's2.echo.v1', readOnlyTools: ['echo'] }) };
-  const validation = await assemblePreparedPiToolSurface({ policy: POLICY, countedPermissionMode: POLICY.mode,
+  const validation = await assemblePreparedPiToolSurface({ agentMemory: 'none', memory: null, policy: POLICY, countedPermissionMode: POLICY.mode,
     observation, toolsetDefinitionRevisions: surface.toolsetDefinitionRevisions,
     servers: [{ serverName: 'fixture', toolsetId: 's2.echo.v1', command: server.command, args: server.args }],
     launch: surface.launch, toolImplementations: { fixture: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED }, runtimeIdentity,
@@ -214,7 +214,7 @@ async function preparedFixture(root: string, cwd: string, env: Record<string, st
     projection: compiled.projection, residual: [...compiled.residual], envelope: compiled.envelope }));
   return { model, runtime: compiler.runtime, mcpServers: { fixture: server }, observation,
     implementations: { fixture: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED }, launch: { cwd: surface.launch.launchCwd },
-    preparation: { reference: { scopeId: 's2', agentRef: 's2', requestId: 's2', recordId: 's2-record' }, artifactPath,
+    preparation: { agentMemory: 'none', memory: null, reference: { scopeId: 's2', agentRef: 's2', requestId: 's2', recordId: 's2-record' }, artifactPath,
       expected: { envelopeDigest: compiled.envelopeDigest, toolManifestDigest: compiled.toolManifestDigest, model, binding },
       permissionMode: POLICY.mode, toolBindingDigest: surface.toolBindingDigest, observationDigest: surface.observationDigest,
       launch: { cwd: surface.launch.launchCwd }, toolImplementations: { fixture: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },

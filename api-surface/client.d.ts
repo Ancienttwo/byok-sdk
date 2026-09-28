@@ -1396,6 +1396,51 @@ export { AGENT_MEMORY_GUIDANCE } from '../daemon/memory-guidance';
 export { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
 /** The validated Agent identity carried by `AgentMemoryTaskContext`. */
 export type { AgentRef } from '../agent-home';
+// ==== @byok-sdk/client dist/agent-memory/prepared-capability.d.ts ====
+import { type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
+import { PREPARED_AGENT_MEMORY_OPERATION_META_KEY, type AgentMemoryOperation } from '../bin/agent-memory-mcp-server';
+export { PREPARED_AGENT_MEMORY_OPERATION_META_KEY } from '../bin/agent-memory-mcp-server';
+export interface PreparedAgentMemoryObservationTool {
+    readonly name: string;
+    readonly description: string;
+    readonly inputSchema: Readonly<Record<string, unknown>>;
+    readonly _meta: Readonly<Record<typeof PREPARED_AGENT_MEMORY_OPERATION_META_KEY, AgentMemoryOperation>>;
+}
+/** SDK-specific tools/list observation. Generic Host MCP metadata is never accepted here. */
+export interface PreparedAgentMemoryObservation {
+    readonly serverInfo: {
+        readonly name: string;
+        readonly version: string;
+    };
+    readonly protocolVersion: string;
+    readonly tools: readonly PreparedAgentMemoryObservationTool[];
+}
+/** Model-visible selection contains schemas only. Executor identities are intentionally computed separately. */
+export interface PreparedAgentMemorySelectedTool {
+    readonly name: string;
+    readonly description: string;
+    readonly parameters: Readonly<Record<string, unknown>>;
+}
+export interface PreparedAgentMemoryImplementationDigests {
+    /** Attested descriptor-helper identity; never supplied by a Host request. */
+    readonly descriptor: string;
+    /** Attested execution-helper identity; never supplied by a Host request. */
+    readonly execution: string;
+}
+export declare function parsePreparedAgentMemoryMode(value: unknown): PreparedAgentMemoryMode;
+export declare function preparedAgentMemoryModeAllowsOperation(mode: PreparedAgentMemoryMode, operation: AgentMemoryOperation): boolean;
+export declare function preparedAgentMemoryModeWithinCeiling(requested: PreparedAgentMemoryMode, ceiling: PreparedAgentMemoryMode): boolean;
+/** `none` adds no memory restriction. Selected memory modes are only expressible under the approved policy matrix. */
+export declare function preparedAgentMemoryModeAllowedByPolicy(mode: PreparedAgentMemoryMode, policy: unknown, denyTools?: readonly string[]): boolean;
+export declare function preparedAgentMemoryToolNames(mode: PreparedAgentMemoryMode): readonly string[];
+/** Strict parser for the task-free SDK descriptor. Missing/unknown operation metadata fails closed. */
+export declare function validatePreparedAgentMemoryObservation(value: unknown): PreparedAgentMemoryObservation;
+export declare function preparedAgentMemoryTools(mode: PreparedAgentMemoryMode, observation: PreparedAgentMemoryObservation): readonly PreparedAgentMemorySelectedTool[];
+export declare function preparedAgentMemoryDescriptorDigest(observation: PreparedAgentMemoryObservation): string;
+/** Per-tool executor fingerprints bind the complete descriptor, selected mode, both attested helper identities, and runtime identity. */
+export declare function preparedAgentMemoryExecutorFingerprints(observation: PreparedAgentMemoryObservation, mode: PreparedAgentMemoryMode, implementation: PreparedAgentMemoryImplementationDigests, runtimeIdentity: string): readonly string[];
+/** The sole canonical serialization used by descriptor validation and both memory digests. */
+export declare function canonicalPreparedAgentMemoryJson(value: unknown): string;
 // ==== @byok-sdk/client dist/assertion-client/index.d.ts ====
 /**
  * `@byok-sdk/client/assertion-client` — the assertion request surface for a
@@ -1462,6 +1507,12 @@ export type { RequestDeviceAssertionResult } from '../daemon/assertion-client';
 import { type McpServerToolCall, type McpServerToolDefinition } from '../mcp-server';
 export declare const AGENT_MEMORY_RECALL_TOOL_NAME = "memory_recall";
 export declare const AGENT_MEMORY_SAVE_TOOL_NAME = "memory_save";
+export declare const PREPARED_AGENT_MEMORY_OPERATION_META_KEY = "byok.agent-memory.operation";
+export type AgentMemoryOperation = 'read' | 'write';
+export interface AgentMemoryToolDefinition extends McpServerToolDefinition {
+    readonly operation: AgentMemoryOperation;
+    readonly _meta: Readonly<Record<typeof PREPARED_AGENT_MEMORY_OPERATION_META_KEY, AgentMemoryOperation>>;
+}
 export interface AgentMemoryMcpDeps {
     recall(input: {
         path: string;
@@ -1485,16 +1536,26 @@ export interface AgentMemoryMcpDeps {
         deleted: boolean;
     }>;
 }
-/** The exact tools this server advertises. The JSON Schema literals are product authority and reach the peer verbatim. */
-export declare const AGENT_MEMORY_TOOLS: readonly McpServerToolDefinition[];
+/** The exact tools this server advertises. This table is the sole schema and operation-classification authority. */
+export declare const AGENT_MEMORY_TOOLS: readonly AgentMemoryToolDefinition[];
+export declare const AGENT_MEMORY_MCP_SERVER_INFO: Readonly<{
+    name: "byok-agent-memory-mcp";
+    version: "0.0.1";
+}>;
 /**
  * One `tools/call`, returning the JSON-RPC `result` payload. The path policy,
  * the compare-and-swap contract and the exact accepted argument set stay here;
  * envelope, framing and protocol faults belong to `../mcp-server`.
  */
-export declare function handleAgentMemoryToolCall(call: McpServerToolCall, deps: AgentMemoryMcpDeps): Promise<Record<string, unknown>>;
+export declare function handleAgentMemoryToolCall(call: McpServerToolCall, deps: AgentMemoryMcpDeps, mode: 'read' | 'read-write'): Promise<Record<string, unknown>>;
 export declare function serveAgentMemoryMcpOverStdio(input: {
     deps: AgentMemoryMcpDeps;
+    mode: 'read' | 'read-write';
+    stdin?: NodeJS.ReadableStream;
+    stdout?: NodeJS.WritableStream;
+}): void;
+/** A task-free descriptor has the same tools/list identity, but never an execution handler. */
+export declare function serveAgentMemoryDescriptorOverStdio(input: {
     stdin?: NodeJS.ReadableStream;
     stdout?: NodeJS.WritableStream;
 }): void;
@@ -4841,7 +4902,7 @@ import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INP
  * {@link InputPreparationUnsupportedRecordVersionError}. There is no
  * compatibility read.
  */
-export declare const INPUT_PREPARATION_RECORD_VERSION = 7;
+export declare const INPUT_PREPARATION_RECORD_VERSION = 8;
 /** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
 export interface InputPreparationRecordKey {
     readonly scopeId: string;
@@ -6870,6 +6931,37 @@ declare function inspectOperationalHealthHandle(handle: Awaited<ReturnType<typeo
  */
 export declare function inspectOperationalHealthFile(storeDir: string): Promise<OperationalHealthFileInspection>;
 export { inspectOperationalHealthHandle };
+// ==== @byok-sdk/client dist/daemon/prepared-agent-memory.d.ts ====
+import { type PreparedAgentMemoryMode, type PermissionPolicy } from '@byok-sdk/protocol';
+import { type ToolImplementationAuthority, type ToolImplementationAttestedV1, type ToolImplementationFsProbe, type SdkHelperSpawnBindingV1 } from '@byok-sdk/implementation-identity';
+import { type PreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
+import type { McpLaunchAttestation } from './trusted-launch-cwd';
+export interface PreparedAgentMemoryImplementation {
+    readonly descriptor: ToolImplementationAttestedV1;
+    readonly execution: ToolImplementationAttestedV1;
+}
+export interface PreparedAgentMemoryState {
+    readonly implementation: PreparedAgentMemoryImplementation;
+    readonly observation: PreparedAgentMemoryObservation;
+}
+export declare function assertPreparedMemoryPolicy(mode: PreparedAgentMemoryMode, policy: PermissionPolicy): void;
+export declare function resolvePreparedMemoryImplementation(authority: ToolImplementationAuthority | undefined, env: Readonly<Record<string, string>>, launch: McpLaunchAttestation, probe?: ToolImplementationFsProbe): Promise<PreparedAgentMemoryImplementation>;
+export declare function memorySpawnBinding(identity: ToolImplementationAttestedV1, entry: 'agent-memory-describe' | 'agent-memory-mcp', mode: PreparedAgentMemoryMode): SdkHelperSpawnBindingV1;
+export declare function memoryServer(binding: SdkHelperSpawnBindingV1): {
+    command: string;
+    args: string[];
+};
+export declare function observePreparedMemory(implementation: PreparedAgentMemoryImplementation, env: Readonly<Record<string, string>>, signal?: AbortSignal, probe?: ToolImplementationFsProbe): Promise<PreparedAgentMemoryState>;
+export declare function preparedMemoryProjection(mode: PreparedAgentMemoryMode, memory: PreparedAgentMemoryState | null, runtimeIdentity: string): {
+    tools: readonly import("../agent-memory/prepared-capability").PreparedAgentMemorySelectedTool[];
+    toolExecutors: {
+        [k: string]: string;
+    };
+    toolImplementationKinds: {
+        [k: string]: string;
+    };
+};
+export declare function parsePreparedMemoryState(raw: unknown): PreparedAgentMemoryState | null;
 // ==== @byok-sdk/client dist/daemon/progress-batcher.d.ts ====
 import type { AgentEvent } from '@byok-sdk/protocol';
 export type ProgressEmitter = (seq: number, events: AgentEvent[]) => void;
@@ -7225,7 +7317,7 @@ export declare function readDeviceEnrollmentStatus(options: DeviceEnrollmentStat
 import { type AgentMessageContentType, type AgentEgressPolicy, type Envelope, type PermissionPolicy, type RuntimeId, type TerminalProjectionSelection, type TaskOfferPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferPreparedPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import { type McpStdioServerConfig, type McpToolsetConfig, type RuntimeAdapter } from '../types';
 import type { InputPreparationStore } from './input-preparation-store';
-import { type InputPreparationRuntimeIdentityV1 } from '../input-preparation';
+import { type InputPreparationRuntimeIdentityV1, type InputPreparationBindingV1 } from '../input-preparation';
 import { AgentHomeManager, type AgentRef } from '../agent-home';
 import { AgentSessionHandoffStore, type AgentTerminalCause } from './agent-session-handoff-store';
 import { type RuntimeDisposalStage } from '../runtime-failure';
@@ -7476,6 +7568,7 @@ export interface TaskRunnerDeps {
      */
     inputPreparationLane?: {
         readonly store: InputPreparationStore;
+        readonly authorizeAgentMemory: (binding: InputPreparationBindingV1) => Promise<void>;
         /**
          * Await the store's open before the first record read.
          *
@@ -9825,51 +9918,8 @@ export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, Diagn
 export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions';
 export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, ExportDeviceSupportBundleInput, DeviceSupportBundleExportResult, ArchiveAgentTerminalMessagesInput, AgentTerminalMessagesArchiveResult, DeviceOperatorErrorCode } from './diagnostics/operator-actions';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
-/**
- * B-P2 local primitive — public types for the task-free runtime input
- * preparation surface (`docs/researches/runtime-input-preparation-contract.md`
- * §10.3).
- *
- * This module is the ONE authority for the wire/receipt shapes the daemon's
- * `input_preparation.*` control methods speak. It deliberately imports nothing
- * from the native coding-agent package: the native envelope
- * (`PreparedSessionInputV3`) is an implementation fact owned by
- * `adapters/pi/input-preparation.ts`, and the only native-derived values that
- * ever cross this boundary are opaque digests, byte counts and the native
- * compiler's own structural projection contract, copied verbatim. A host
- * integrating against this surface therefore never has to resolve, or pin, the
- * native runtime's own type closure.
- *
- * What this surface is NOT, and must never quietly become:
- *
- * - It creates no task, claim, Execution, nonce or tool grant. Preparation is
- *   evidence about an input, not permission to run one (§10.3.1).
- * - A receipt reference and a digest prove CONTENT IDENTITY only. Neither is a
- *   bearer token: lookup and cancel are authorized by the same authenticated
- *   local scope that created the record, re-resolved on every call (§10.3.4).
- * - Pinning an artifact to a committed Execution is G3b. {@link
- *   InputPreparationPinV1} exists here only so that later binding is a field
- *   that was always reserved rather than a schema break; nothing in this
- *   package ever writes it.
- * - It states nothing of its own about token semantics. What P(D) covers is the
- *   native compiler's structural projection contract v3 — a {@link
- *   InputPreparationProjectionV1} and a classified {@link
- *   InputPreparationResidualKeyV1} list — copied verbatim off the envelope.
- *   Whether the residual keys are RULED is a Host accounting fact carried as
- *   {@link InputPreparationAccountingPolicyRefV1}; this package only checks
- *   applicability, never budget arithmetic.
- * - `ready` means "the preparation can be consumed": the artifact is intact and
- *   unexpired, its projection is content-complete, its residual keys are ruled
- *   by an applicable Host accounting policy, D is text only, and every
- *   executor identity is attested. A counter is OPTIONAL: when one is
- *   configured its evidence must be provider-authoritative and covered, and
- *   when none is configured no count is required at all — the size evidence is
- *   {@link InputPreparationArtifactSummaryV1.requestBytes}, the exact byte
- *   length of the frozen D. It is NOT Host budget admission: the window, the
- *   template constant and the fit ruling stay on the Host side of the
- *   accounting policy this surface only names.
- */
-import { type PermissionMode } from '@byok-sdk/protocol';
+import type { PreparedAgentMemoryImplementation, PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
+import { type PermissionMode, type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { McpLaunchAttestation } from './daemon/trusted-launch-cwd';
 import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 /** Wire format tag for a preparation request. One strict shape, one version. */
@@ -9924,7 +9974,7 @@ export declare const INPUT_PREPARATION_ARTIFACT_FORMAT = "byok.input-preparation
  * frozen under a claim this version cannot re-derive, and there is no honest
  * value to translate a prompt rendered by another renderer into.
  */
-export declare const INPUT_PREPARATION_VERSION: 7;
+export declare const INPUT_PREPARATION_VERSION: 8;
 /**
  * Key-sorted JSON, so two structurally equal values always produce the same
  * bytes and therefore the same digest. Field ORDER must never be able to turn
@@ -10236,6 +10286,7 @@ export interface InputPreparationCompiledSnapshotV1 extends Omit<InputPreparatio
  * daemon's own configured policy, never from caller text.
  */
 export interface InputPreparationRequestV1 {
+    readonly agentMemory: PreparedAgentMemoryMode;
     readonly format: typeof INPUT_PREPARATION_REQUEST_FORMAT;
     readonly version: typeof INPUT_PREPARATION_VERSION;
     readonly requestId: string;
@@ -10347,6 +10398,7 @@ export declare function validateInputPreparationLimits(value: unknown): InputPre
 export type InputPreparationDenialReasonV1 = 'unknown_device' | 'unknown_agent' | 'unknown_profile' | 'profile_revision_drift' | 'disclosure_denied';
 /** The trusted local record a resolver answers with. */
 export interface InputPreparationAuthorityGrantV1 {
+    readonly agentMemory: PreparedAgentMemoryMode;
     /**
      * Stable identifier for the authenticated local scope this grant belongs to.
      * It is the first component of the durable idempotency namespace, so two
@@ -10613,6 +10665,7 @@ export interface InputPreparationArtifactSummaryV1 {
 }
 /** The immutable binding a receipt carries and a later consumer must re-present. */
 export interface InputPreparationBindingV1 {
+    readonly agentMemory: PreparedAgentMemoryMode;
     readonly scopeId: string;
     readonly deviceId: string;
     readonly agentRef: string;
@@ -10855,6 +10908,8 @@ export interface PreparedToolBindingServerDigestInputV1 {
     readonly implementation: ToolImplementationIdentityV1;
 }
 export interface PreparedToolBindingDigestInputV1 {
+    readonly agentMemory: PreparedAgentMemoryMode;
+    readonly memoryImplementation: PreparedAgentMemoryImplementation | null;
     readonly launch: McpLaunchAttestation;
     readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
     /** Canonically ordered by server name; the canonical JSON preserves array order. */
@@ -10889,6 +10944,8 @@ export interface PreparedNativeToolSelectionV1 {
     };
 }
 export interface PreparedToolSurfaceDigestInputV1 {
+    readonly agentMemory: PreparedAgentMemoryMode;
+    readonly memory: PreparedAgentMemoryState | null;
     readonly launch: McpLaunchAttestation;
     readonly permissionMode: PermissionMode;
     readonly runtimeIdentity: string;
@@ -11559,6 +11616,8 @@ export interface McpServerToolDefinition {
     readonly description?: string;
     /** Caller-supplied, passed through verbatim. The core never authors, validates against, or rewrites it. */
     readonly inputSchema: Readonly<Record<string, unknown>>;
+    /** Caller-owned MCP metadata, passed through verbatim with the tool definition. */
+    readonly _meta?: Readonly<Record<string, unknown>>;
 }
 export interface McpServerToolCall {
     readonly name: string;
@@ -11676,6 +11735,7 @@ export declare class McpAuthorityError extends Error {
     });
 }
 // ==== @byok-sdk/client dist/mcp/client.d.ts ====
+import { type SdkHelperSpawnBindingV1 } from '@byok-sdk/implementation-identity';
 import { type ToolImplementationFsProbe, type ToolImplementationIdentityV1 } from '../daemon/tool-implementation-identity';
 import { type CallToolResult, type Tool } from '@modelcontextprotocol/client';
 import { McpAuthorityError } from './authority-error';
@@ -11745,6 +11805,7 @@ export interface McpStdioServerSpec {
     readonly env?: Readonly<Record<string, string>>;
 }
 export interface McpStdioClientOptions {
+    readonly sdkHelperBinding?: SdkHelperSpawnBindingV1;
     /** Prefix on every error message, so a failure names the thing that failed. */
     readonly label?: string;
     /**
@@ -12098,7 +12159,7 @@ export declare class RuntimeStartupDisposalFailure extends Error {
 export declare function isRuntimeStartupDisposalFailure(value: unknown): value is RuntimeStartupDisposalFailure;
 // ==== @byok-sdk/client dist/sdk-reserved-helper-host.d.ts ====
 export declare const BYOK_SDK_HELPER_SUBCOMMAND = "__byok_sdk_helper";
-export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'approval-mcp' | 'agent-team-mcp' | 'mcp-env' | 'pi-rpc' | 'pi-prepared';
+export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'approval-mcp' | 'agent-team-mcp' | 'mcp-env' | 'pi-rpc' | 'pi-prepared';
 export interface SdkHelperHostConfig {
     /**
      * Run SDK-reserved helpers by re-entering the product's single-file/SEA
@@ -12149,6 +12210,8 @@ export declare const RESERVED_MCP_SERVER_NAMES: readonly ["byokagentmessage", "b
 /** Whether `name` is one of the SDK-owned MCP server names above. */
 export declare function isReservedMcpServerName(name: string): boolean;
 // ==== @byok-sdk/client dist/types.d.ts ====
+import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
+import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import type { ToolImplementationAuthority, ToolImplementationUnavailableReasonV1 } from '@byok-sdk/implementation-identity';
 import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
 import type { AgentEvent, PermissionMode, PermissionPolicy, TaskOfferPayload } from '@byok-sdk/protocol';
@@ -12497,6 +12560,8 @@ export type RuntimeAdapterPrepareResult = RuntimeAdapterRejectedOperation | Runt
  * serializes environment values or credential material.
  */
 export interface RuntimeOperationManifest {
+    /** Required by prepared operations, absent on ordinary operations. */
+    readonly agentMemory?: PreparedAgentMemoryMode;
     readonly taskId: string;
     /** Selected runtime id; lane/provider/model, when present, live only in `dispatchSelection`. */
     readonly runtimeId: string;
@@ -12576,6 +12641,8 @@ export interface RuntimePreparedLaunchExpectationV1 {
  * under a different mode instead of discovering the divergence as tool drift.
  */
 export interface RuntimePreparedLaunchV1 {
+    readonly agentMemory: PreparedAgentMemoryMode;
+    readonly memory: PreparedAgentMemoryState | null;
     readonly reference: RuntimePreparedLaunchReferenceV1;
     /**
      * Absolute path of the retained `InputPreparationArtifact` JSON.

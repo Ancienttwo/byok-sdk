@@ -4,7 +4,14 @@ import type { ImplementationSpawnBindingV1 } from '@byok-sdk/implementation-iden
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import process from 'node:process';
-import { PERMISSION_MODES, PermissionPolicySchema, type PermissionMode, type PermissionPolicy } from '@byok-sdk/protocol';
+import {
+  PERMISSION_MODES,
+  PermissionPolicySchema,
+  PreparedAgentMemoryModeSchema,
+  type PermissionMode,
+  type PermissionPolicy,
+  type PreparedAgentMemoryMode,
+} from '@byok-sdk/protocol';
 import {
   AgentSessionRuntime,
   getAgentDir,
@@ -38,6 +45,7 @@ import { loaderEnvInjections } from '../daemon/environment';
 import type { McpLaunchAttestation } from '../daemon/trusted-launch-cwd';
 import {
   McpServerPool,
+  parseMcpServerSpec,
   parseTaskScopedMcpConfig,
   type TaskScopedMcpConfig,
 } from '../adapters/pi/mcp-server-pool';
@@ -45,6 +53,17 @@ import {
   assemblePreparedPiToolSurface,
   type PreparedPiServerBinding,
 } from '../adapters/pi/prepared-tools';
+import { McpStdioClient, MCP_OBSERVATION_MAX_STDOUT_BYTES, type McpStdioServerSpec } from '../mcp/client';
+import {
+  canonicalPreparedAgentMemoryJson,
+  validatePreparedAgentMemoryObservation,
+} from '../agent-memory/prepared-capability';
+import {
+  memoryServer,
+  memorySpawnBinding,
+  parsePreparedMemoryState,
+  type PreparedAgentMemoryState,
+} from '../daemon/prepared-agent-memory';
 
 /**
  * The SDK-owned prepared launch entry for the pi runtime, on official Pi.
@@ -498,6 +517,10 @@ interface PreparedLaunchConfig {
   readonly observationDigest: string;
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
   readonly launch: McpLaunchAttestation;
+  readonly agentMemory: PreparedAgentMemoryMode;
+  readonly memory: PreparedAgentMemoryState | null;
+  /** Private execution helper configuration, kept outside the Host MCP map. */
+  readonly memoryCall: McpStdioServerSpec | null;
   readonly mcp: TaskScopedMcpConfig;
 }
 
@@ -509,7 +532,7 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
     fail(`${configPath} could not be read as JSON: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
   if (!isPlainObject(parsed)) fail('the prepared launch configuration must be an object');
-  const keys = ['format','version','binding','descendantPlan','credentialSource','cwd','policy','countedPermissionMode','expected','toolBindingDigest','observationDigest','toolsetDefinitionRevisions','launch','mcp'];
+  const keys = ['format','version','binding','descendantPlan','credentialSource','cwd','policy','countedPermissionMode','expected','toolBindingDigest','observationDigest','toolsetDefinitionRevisions','launch','agentMemory','memory','memoryCall','mcp'];
   if (Object.keys(parsed).length !== keys.length || !keys.every(key => Object.hasOwn(parsed, key))) fail('prepared config has missing or unknown keys');
   if (parsed.format !== CONFIG_FORMAT) fail(`the prepared launch configuration must declare format ${CONFIG_FORMAT}`);
   if (parsed.version !== CONFIG_VERSION) fail(`the prepared launch configuration must declare version ${CONFIG_VERSION}`);
@@ -544,6 +567,27 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
   if (mcp.permissionMode !== countedPermissionMode) {
     fail('mcp.permissionMode disagrees with countedPermissionMode');
   }
+  const memoryMode = PreparedAgentMemoryModeSchema.safeParse(parsed.agentMemory);
+  if (!memoryMode.success) fail('agentMemory is invalid: ' + memoryMode.error.message);
+  let memory: PreparedAgentMemoryState | null;
+  try {
+    memory = parsePreparedMemoryState(parsed.memory);
+  } catch (error) {
+    fail('memory is invalid: ' + (error instanceof Error ? error.message : String(error)));
+  }
+  let memoryCall: McpStdioServerSpec | null;
+  if (parsed.memoryCall === null) {
+    memoryCall = null;
+  } else {
+    if (!isPlainObject(parsed.memoryCall)
+      || Object.keys(parsed.memoryCall).some((key) => key !== 'command' && key !== 'args' && key !== 'env')) {
+      fail('memoryCall must be null or an exact MCP server specification');
+    }
+    memoryCall = parseMcpServerSpec('memoryCall', parsed.memoryCall, fail);
+  }
+  if (memoryMode.data === 'none' ? memory !== null || memoryCall !== null : memory === null || memoryCall === null) {
+    fail('agentMemory does not agree with its sealed memory state and private execution helper');
+  }
 
   const binding = requirePiHostBinding(parsed.binding);
   let descendantPlan: RuntimeDescendantPlanV1 | null;
@@ -563,8 +607,73 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
     observationDigest: requireString(parsed.observationDigest, 'observationDigest'),
     toolsetDefinitionRevisions: requireStringRecord(parsed.toolsetDefinitionRevisions, 'toolsetDefinitionRevisions'),
     launch: parseLaunch(parsed.launch),
+    agentMemory: memoryMode.data,
+    memory,
+    memoryCall,
     mcp,
   });
+}
+
+interface PreparedMemoryCall {
+  call(
+    toolName: string,
+    args: Readonly<Record<string, unknown>>,
+    signal?: AbortSignal,
+  ): ReturnType<McpStdioClient['callTool']>;
+  close(): Promise<void>;
+}
+
+/**
+ * Re-measure and handshake the task-bound execution helper before model setup.
+ * The helper descriptor must equal the sealed task-free descriptor exactly;
+ * it is not added to the Host MCP pool or its observation map.
+ */
+export async function openPreparedMemoryCall(config: PreparedLaunchConfig): Promise<PreparedMemoryCall | undefined> {
+  if (config.agentMemory === 'none') return undefined;
+  const memory = config.memory;
+  const server = config.memoryCall;
+  if (memory === null || server === null) fail('selected Agent memory has no sealed execution helper');
+  const binding = memorySpawnBinding(memory.implementation.execution, 'agent-memory-mcp', config.agentMemory);
+  const expected = memoryServer(binding);
+  if (server.command !== expected.command
+    || (server.args ?? []).length !== (expected.args ?? []).length
+    || (server.args ?? []).some((arg, index) => arg !== expected.args?.[index])) {
+    fail('private Agent memory helper launch differs from its attested execution identity');
+  }
+  const client = new McpStdioClient(server, {
+    label: 'prepared Agent memory helper',
+    env: config.mcp.mcpEnv,
+    cwd: binding.cwd,
+    sdkHelperBinding: binding,
+    maxStdoutBytes: MCP_OBSERVATION_MAX_STDOUT_BYTES,
+    timeoutMs: 10_000,
+  });
+  try {
+    await client.connect();
+    const observed = validatePreparedAgentMemoryObservation({
+      serverInfo: client.serverInfo(),
+      protocolVersion: client.protocolVersion(),
+      tools: await client.listTools(),
+    });
+    if (canonicalPreparedAgentMemoryJson(observed) !== canonicalPreparedAgentMemoryJson(memory.observation)) {
+      throw new Error('prepared Agent memory execution helper descriptor differs from the sealed descriptor');
+    }
+  } catch (error) {
+    await client.close();
+    throw error;
+  }
+  return Object.freeze({
+    call: (
+      toolName: string,
+      args: Readonly<Record<string, unknown>>,
+      signal?: AbortSignal,
+    ) => client.callTool(toolName, args, signal === undefined ? undefined : { signal }),
+    close: () => client.close(),
+  });
+}
+
+async function closePreparedMcpResources(pool: McpServerPool, memoryCall: PreparedMemoryCall | undefined): Promise<void> {
+  await Promise.all([pool.close(), memoryCall?.close()]);
 }
 
 /**
@@ -624,9 +733,21 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
   }
 
   const pool = new McpServerPool(config.mcp, fail);
+  let memoryCall: PreparedMemoryCall | undefined;
+  try {
+    // This opens the attested execution helper and proves its raw
+    // initialize/tools/list answer before a provider or model is constructed.
+    memoryCall = await openPreparedMemoryCall(config);
+  } catch (cause) {
+    await pool.close();
+    fail('prepared Agent memory helper could not be verified: ' + (cause instanceof Error ? cause.message : String(cause)));
+  }
+  try {
   const surface = await assemblePreparedPiToolSurface({
     policy: config.policy,
     countedPermissionMode: config.countedPermissionMode,
+    agentMemory: config.agentMemory,
+    memory: config.memory,
     observation: config.mcp.observation,
     toolsetDefinitionRevisions: config.toolsetDefinitionRevisions,
     servers: projectedServerBindings(config.mcp),
@@ -636,9 +757,10 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
     expectedToolBindingDigest: config.toolBindingDigest,
     expectedObservationDigest: config.observationDigest,
     host: pool,
+    ...(memoryCall === undefined ? {} : { memoryCall }),
   });
   if (!surface.ok) {
-    await pool.close();
+    await closePreparedMcpResources(pool, memoryCall);
     fail(`${surface.code}: ${surface.message}`);
   }
 
@@ -730,12 +852,12 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
   try {
     line = await readFirstJsonlFrame(process.stdin, RPC_MAX_FRAME_BYTES);
   } catch (cause) {
-    await pool.close();
+    await closePreparedMcpResources(pool, memoryCall);
     fail(`prepared_input_invalid: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
   const command = parsePreparedPromptCommand(line);
   if ('error' in command) {
-    await pool.close();
+    await closePreparedMcpResources(pool, memoryCall);
     return refuseCommand(command.id, 'prepared_input_invalid', command.error);
   }
   let envelope: PreparedPiInputV1;
@@ -748,7 +870,7 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
     }
     envelope = await verifyPreparedPiInput(command.input, command.expected);
   } catch (cause) {
-    await pool.close();
+    await closePreparedMcpResources(pool, memoryCall);
     return refuseCommand(command.id, preparedSessionErrorCode(cause), cause instanceof Error ? cause.message : String(cause));
   }
 
@@ -784,7 +906,7 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
       },
     });
   } catch (cause) {
-    await pool.close();
+    await closePreparedMcpResources(pool, memoryCall);
     return refuseCommand(command.id, preparedSessionErrorCode(cause), cause instanceof Error ? cause.message : String(cause));
   }
   const { session } = handle;
@@ -834,4 +956,10 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
   );
 
   await runRpcMode(runtime);
+  } finally {
+    // The process normally owns this tree for its lifetime, but every
+    // pre-model refusal and any unexpected runRpcMode return/rejection must
+    // still release both independently opened MCP resources.
+    await closePreparedMcpResources(pool, memoryCall);
+  }
 }

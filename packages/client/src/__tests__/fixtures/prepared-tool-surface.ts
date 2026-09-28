@@ -49,6 +49,7 @@ export function recordingToolSurface(
       return {
         ok: true,
         binding: {
+          memoryImplementation: null,
           requiredToolsets: [...input.requiredToolsets],
           launch: { launchCwd: '/', launcher: null },
           toolsetDefinitionRevisions: Object.fromEntries(
@@ -66,6 +67,7 @@ export function recordingToolSurface(
       return {
         ok: true,
         surface: {
+          memory: null,
           tools: toolNames.map((name) => ({
             name,
             description: `${name} description`,

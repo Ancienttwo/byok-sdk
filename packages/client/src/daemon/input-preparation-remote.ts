@@ -279,6 +279,7 @@ async function buildRequest(
     source: payload.source,
     selection: payload.selection,
     permissionMode: payload.permissionMode,
+    agentMemory: payload.agentMemory,
     requiredToolsets: Object.freeze([...payload.requiredToolsets]),
     snapshot: { prompt: context.prompt, messages: context.messages },
     // Host authority, carried verbatim. Absent stays absent: this lane never

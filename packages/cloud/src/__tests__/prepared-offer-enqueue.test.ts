@@ -27,6 +27,7 @@ function preparedPayload() {
     policy: { mode: 'auto' as const, allowTools: [] },
     egressPolicy: EGRESS_POLICY,
     agentRef: AGENT_REF,
+    agentMemory: 'none' as const,
     requiredToolsets: ['team'],
     preparation: {
       reference: 'prep-record-1',

@@ -407,3 +407,5 @@ export type { TaskOfferType } from './messages';
 export type { HarnessId, HarnessInfo } from './messages';
 
 export { CUSTOM_HARNESS_CAPABILITY } from './version';
+
+export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation';

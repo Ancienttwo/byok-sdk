@@ -100,6 +100,7 @@ async function prepareArtifact(cwd: string, artifactPath: string, launchCwd: str
     { mode: 0o600 },
   );
   return {
+    agentMemory: 'none', memory: null,
     reference: { scopeId: 'timing-scope', agentRef: 'timing-agent', requestId: 'timing-preparation', recordId },
     artifactPath,
     expected: {
@@ -152,6 +153,7 @@ async function startPrepared(refuse: boolean): Promise<{ close: () => Promise<vo
   });
   if (prepared.kind === 'reject') throw new Error(prepared.reason);
   const manifest = sealRuntimeOperationManifest({
+    agentMemory: 'none',
     taskId: 'prepared-timing-task',
     runtimeId: 'pi',
     descriptor: adapter.descriptor,

@@ -96,6 +96,7 @@ async function setup(type: string) {
     ? {
       policy: { mode: 'auto', allowTools: [] }, runtime: 'pi', agentRef,
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      agentMemory: 'none',
       preparation: { reference: 'journal-family-record', requestDigest: 'journal-family-request-digest' },
     }
     : {

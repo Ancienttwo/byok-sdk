@@ -1,5 +1,10 @@
 import path from 'node:path';
-import { assertToolImplementationBeforeSpawn, parseToolImplementationIdentity, type ToolImplementationIdentityV1 } from './identity';
+import {
+  assertToolImplementationBeforeSpawn, parseToolImplementationIdentity,
+  reverifySdkHelperImplementationIdentity, sdkHelperEntryFixedArgv,
+  type SdkHelperEntryV1, type ToolImplementationAttestedV1,
+  type ToolImplementationFsProbe, type ToolImplementationIdentityV1,
+} from './identity';
 
 import { KEYS_PI_INHERITED_ENV_NAMES, KEYS_PI_WINDOWS_ENV_NAMES } from './environment';
 export { KEYS_PI_INHERITED_ENV_NAMES, KEYS_PI_WINDOWS_ENV_NAMES } from './environment';
@@ -30,6 +35,48 @@ export interface ImplementationSpawnBindingV1 {
   readonly fixedArgv: readonly string[];
   readonly cwd: string;
   readonly envCommitments: Readonly<Record<string, string>>;
+}
+
+export type PreparedAgentMemoryExecutionModeV1 = 'read' | 'read-write';
+
+/** Exact launch shape derived from an attested finite SDK helper identity. */
+export interface SdkHelperLaunchV1 {
+  readonly command: string;
+  readonly entry?: string;
+  readonly fixedArgv: readonly string[];
+  readonly cwd: string;
+}
+
+/**
+ * Derive the only command shape an SDK helper identity can launch. Callers
+ * never supply a command/argv selector for this subject; a non-attested or
+ * retargeted record has no usable launch shape.
+ */
+export function sdkHelperLaunch(
+  identity: ToolImplementationAttestedV1,
+  helperEntry: SdkHelperEntryV1,
+): SdkHelperLaunchV1 | undefined {
+  const fixedArgv = sdkHelperEntryFixedArgv(helperEntry);
+  if (identity.launchArgv.length !== fixedArgv.length || identity.launchArgv.some((arg, index) => arg !== fixedArgv[index])) {
+    return undefined;
+  }
+  return Object.freeze({
+    command: identity.form === 'interpreter+bundle' ? identity.interpreter!.path : identity.installPath,
+    ...(identity.form === 'interpreter+bundle' ? { entry: identity.installPath } : {}),
+    fixedArgv,
+    cwd: identity.launchCwd,
+  });
+}
+
+/** Private task binding for a finite SDK helper; it cannot be parsed as a Pi runtime binding. */
+export interface SdkHelperSpawnBindingV1 extends SdkHelperLaunchV1 {
+  readonly format: 'byok.sdk-helper-spawn';
+  readonly version: 1;
+  readonly subject: { readonly kind: 'sdk-helper'; readonly helperId: 'agent-memory' };
+  readonly helperEntry: SdkHelperEntryV1;
+  readonly identity: ToolImplementationIdentityV1;
+  /** Required only on the execution role; selection is sealed outside this binding. */
+  readonly agentMemoryMode?: PreparedAgentMemoryExecutionModeV1;
 }
 
 function absolute(value: unknown): value is string {
@@ -63,6 +110,37 @@ export function parseImplementationSpawnBinding(value: unknown): ImplementationS
   return binding;
 }
 
+export function parseSdkHelperSpawnBinding(value: unknown): SdkHelperSpawnBindingV1 | undefined {
+  if (!object(value) || Object.keys(value).some((key) => ![
+    'format', 'version', 'subject', 'helperEntry', 'identity', 'command', 'entry', 'fixedArgv', 'cwd', 'agentMemoryMode',
+  ].includes(key))) return undefined;
+  if (value.format !== 'byok.sdk-helper-spawn' || value.version !== 1 || !absolute(value.command) || !absolute(value.cwd)
+    || !object(value.subject) || Object.keys(value.subject).length !== 2 || value.subject.kind !== 'sdk-helper' || value.subject.helperId !== 'agent-memory') return undefined;
+  if (value.entry !== undefined && !absolute(value.entry)) return undefined;
+  if (value.helperEntry !== 'agent-memory-describe' && value.helperEntry !== 'agent-memory-mcp') return undefined;
+  if (!Array.isArray(value.fixedArgv) || value.fixedArgv.some((arg) => typeof arg !== 'string' || arg.length === 0 || /[\u0000\r\n]/u.test(arg))) return undefined;
+  const fixedArgv = sdkHelperEntryFixedArgv(value.helperEntry);
+  if (value.fixedArgv.length !== fixedArgv.length || value.fixedArgv.some((arg, index) => arg !== fixedArgv[index])) return undefined;
+  const identity = parseToolImplementationIdentity(value.identity);
+  if (identity === undefined || identity.kind !== 'attested') return undefined;
+  const expected = sdkHelperLaunch(identity, value.helperEntry);
+  if (expected === undefined || expected.command !== value.command || expected.entry !== value.entry || expected.cwd !== value.cwd) return undefined;
+  if (value.helperEntry === 'agent-memory-mcp') {
+    if (value.agentMemoryMode !== 'read' && value.agentMemoryMode !== 'read-write') return undefined;
+  } else if (value.agentMemoryMode !== undefined) return undefined;
+  return Object.freeze({
+    format: 'byok.sdk-helper-spawn' as const, version: 1,
+    subject: Object.freeze({ kind: 'sdk-helper' as const, helperId: 'agent-memory' as const }),
+    helperEntry: value.helperEntry,
+    identity,
+    command: value.command,
+    ...(value.entry === undefined ? {} : { entry: value.entry }),
+    fixedArgv: Object.freeze([...value.fixedArgv] as string[]),
+    cwd: value.cwd,
+    ...(value.agentMemoryMode === undefined ? {} : { agentMemoryMode: value.agentMemoryMode as PreparedAgentMemoryExecutionModeV1 }),
+  });
+}
+
 /** Validate exact physical inputs, then remeasure immediately before the caller's spawn. */
 export async function assertImplementationSpawnBinding(
   binding: ImplementationSpawnBindingV1,
@@ -83,4 +161,33 @@ export async function assertImplementationSpawnBinding(
     }
   }
   await assertToolImplementationBeforeSpawn('Pi runtime', binding.identity, actual.env);
+}
+
+/** Verify role env gates and remeasure immediately before an SDK helper spawn. */
+export async function assertSdkHelperSpawnBinding(
+  binding: SdkHelperSpawnBindingV1,
+  actual: {
+    readonly command: string; readonly entry?: string; readonly fixedArgv: readonly string[];
+    readonly cwd: string; readonly env: Readonly<Record<string, string>>;
+  },
+  probe?: ToolImplementationFsProbe,
+): Promise<void> {
+  if (parseSdkHelperSpawnBinding(binding) === undefined) throw new Error('invalid SDK helper spawn binding');
+  if (binding.identity.kind !== 'attested') throw new Error('invalid SDK helper spawn binding');
+  if (binding.command !== actual.command || binding.entry !== actual.entry || binding.cwd !== actual.cwd
+    || binding.fixedArgv.length !== actual.fixedArgv.length || binding.fixedArgv.some((arg, index) => actual.fixedArgv[index] !== arg)) {
+    throw new Error('SDK helper launch description drift');
+  }
+  const protectedNames = ['BYOK_STORE_DIR', 'BYOK_PRODUCT_ID', 'BYOK_AGENT_MEMORY_CONTEXT', 'BYOK_PREPARED_AGENT_MEMORY_MODE'] as const;
+  if (binding.helperEntry === 'agent-memory-describe') {
+    if (protectedNames.some((name) => Object.hasOwn(actual.env, name))) throw new Error('SDK helper descriptor lifecycle environment forbidden');
+  } else {
+    if (protectedNames.some((name) => typeof actual.env[name] !== 'string' || actual.env[name]!.length === 0)
+      || actual.env.BYOK_PREPARED_AGENT_MEMORY_MODE !== binding.agentMemoryMode) {
+      throw new Error('SDK helper execution lifecycle environment drift');
+    }
+  }
+  const result = await reverifySdkHelperImplementationIdentity(binding.identity, binding.helperEntry, actual.env, probe);
+  if (result === 'ok') return;
+  throw new Error(`SDK helper failed implementation reverification before launch: ${result.reason} (${result.subject})`);
 }

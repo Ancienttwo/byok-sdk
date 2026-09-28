@@ -1,3 +1,5 @@
+import { assertPreparedMemoryPolicy, resolvePreparedMemoryImplementation, observePreparedMemory, memorySpawnBinding, memoryServer, type PreparedAgentMemoryImplementation, type PreparedAgentMemoryState } from './prepared-agent-memory';
+import { InputPreparationRequestError } from './input-preparation-service';
 import { validatePreparedPiNativeToolPolicy } from '../adapters/pi/prepared-tools';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import type { PiRuntimeLaunchResources } from '../adapters/pi/runtime-launch';
@@ -15,6 +17,7 @@ import {
   createEnvelope,
   RESULT_DOCUMENT_MAX_BYTES,
   RuntimeIdSchema,
+  PreparedAgentMemoryModeSchema,
   TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS,
   TERMINAL_INFERENCE_USAGE_MAX_TOKENS,
   type AgentEvent,
@@ -24,6 +27,7 @@ import {
   type AgentEgressPolicy,
   type BlobRef,
   type Envelope,
+  type PreparedAgentMemoryMode,
   type PermissionMode,
   type PermissionPolicy,
   type ResultDocumentCheck,
@@ -59,6 +63,7 @@ import type { InputPreparationStore } from './input-preparation-store';
 import {
   inputPreparationDigest,
   type InputPreparationRuntimeIdentityV1,
+  type InputPreparationBindingV1,
 } from '../input-preparation';
 import {
   AgentHomeBusyError,
@@ -128,6 +133,7 @@ import { prependAgentMemoryGuidance } from './memory-guidance';
 import type { ResolvedAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
 import {
   AgentMemoryService,
+  AgentMemoryError,
   isAgentMemorySecureFilesystemAvailable,
   snapshotAndProjectAgentMemory,
   type AgentMemoryAuditWarning,
@@ -461,6 +467,7 @@ export interface TaskRunnerDeps {
    */
   inputPreparationLane?: {
     readonly store: InputPreparationStore;
+    readonly authorizeAgentMemory: (binding: InputPreparationBindingV1) => Promise<void>;
     /**
      * Await the store's open before the first record read.
      *
@@ -1285,7 +1292,7 @@ export class TaskRunner {
   private readonly messageOutboxesByHome = new Map<string, Promise<AgentMessageOutbox>>();
   private readonly messageContextByToken = new Map<string, string>();
   private readonly messageContextByTask = new Map<string, string>();
-  private readonly memoryContextByToken = new Map<string, { readonly taskId: string; readonly agentRef: AgentRef }>();
+  private readonly memoryContextByToken = new Map<string, { readonly taskId: string; readonly agentRef: AgentRef; readonly mode: 'read' | 'read-write' }>();
   private readonly memoryContextByTask = new Map<string, string>();
   private readonly memoryInFlightByTask = new Map<string, Set<Promise<unknown>>>();
   private readonly memoryClosingTasks = new Set<string>();
@@ -1537,12 +1544,12 @@ export class TaskRunner {
 
   /** Authenticated control-socket entry used only by the SDK-owned memory MCP helper. */
   async recallAgentMemory(input: { readonly contextToken: string; readonly path: string; readonly ifRevision?: string }): Promise<{ path: string; revision: string; content: string; auditWarning?: AgentMemoryAuditWarning }> {
-    return this.runMemoryOperation(input.contextToken, (context) => new AgentMemoryService(context).recall(input));
+    return this.runMemoryOperation(input.contextToken, 'read', (context) => new AgentMemoryService(context).recall(input));
   }
 
   /** Authenticated control-socket entry used only by the SDK-owned memory MCP helper. */
   async saveAgentMemory(input: { readonly contextToken: string; readonly op: 'replace' | 'delete'; readonly path: string; readonly expectedRevision: string; readonly content?: string }): Promise<{ path: string; revision?: string; deleted: boolean }> {
-    return this.runMemoryOperation(input.contextToken, (context) => new AgentMemoryService(context).save(input));
+    return this.runMemoryOperation(input.contextToken, 'write', (context) => new AgentMemoryService(context).save(input));
   }
 
   /** Restore activated, unaccepted message drafts before transport admission on daemon restart. */
@@ -2004,6 +2011,12 @@ export class TaskRunner {
     // else. Absent for every ordinary offer, so every branch below that does
     // not mention it behaves exactly as it did before this lane existed.
     const preparation = offeredPreparation(payload);
+    const agentMemory = 'agentMemory' in payload ? payload.agentMemory : undefined;
+    if (preparation !== undefined && !PreparedAgentMemoryModeSchema.safeParse(agentMemory).success) {
+      decline('agent_memory_selection_invalid: prepared offers require an explicit memory selection', false);
+      return;
+    }
+    const preparedMemorySelected = preparation !== undefined && agentMemory !== 'none';
     const preparationLane = this.deps.inputPreparationLane;
     if (preparation !== undefined) {
       if (preparationLane === undefined) {
@@ -2259,7 +2272,7 @@ export class TaskRunner {
         pick = await this.pickAdapter(
           requestedRuntime,
           payload.policy.mode,
-          requiredToolsets !== undefined || (preparation === undefined && messageRequirement !== undefined) || requiresAgentMemoryMcp,
+          requiredToolsets !== undefined || (preparation === undefined && messageRequirement !== undefined) || requiresAgentMemoryMcp || preparedMemorySelected,
           blobAbort.signal,
         );
       } catch (error) {
@@ -2343,6 +2356,7 @@ export class TaskRunner {
       // the binding it needs has been resolved.
       const generatesAnMcpServer = Object.keys(taskMcpServers ?? {}).length > 0
         || requiresAgentMemoryMcp
+        || preparedMemorySelected
         || generatesApprovalMcp;
       const probesAnMcpServer = needsToolsetObservation
         || (preparation === undefined && messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined);
@@ -2432,7 +2446,7 @@ export class TaskRunner {
       }
       if (requiresAgentMemoryMcp && agentRef !== undefined) {
         try {
-          taskMcpServers = this.withAgentMemoryMcp(taskMcpServers, taskId, agentRef);
+          taskMcpServers = this.withAgentMemoryMcp(taskMcpServers, taskId, agentRef, 'read-write', this.deps.agentMemoryMcpBin!);
         } catch (error) {
           decline(`Agent memory MCP configuration failed: ${errorMessage(error)}`, false);
           return;
@@ -2652,6 +2666,7 @@ export class TaskRunner {
       // MCP probes and the runtime child are guaranteed to share one
       // allowlist decision rather than two computations that could drift.
       const manifest = sealRuntimeOperationManifest({
+        ...(preparation === undefined ? {} : {agentMemory}),
         taskId,
         runtimeId: pick.descriptor.id,
         descriptor: pick.descriptor,
@@ -2694,6 +2709,56 @@ export class TaskRunner {
           decline('preparation_not_found: no preparation record under this reference on this device', false);
           return;
         }
+        // Each memory admission stage declines with its own C5 `reason: detail`
+        // pair, decided by the stage (or the typed error it raised), never by
+        // reading an error message. Every one is before pin and claim, and no
+        // raw helper/transport text reaches the wire.
+        const declineMemory = (reason: string): void => {
+          gitLease?.release();
+          decline(reason, false);
+        };
+        if (agentMemory === undefined) {
+          declineMemory('agent_memory_selection_invalid: prepared offers require an explicit memory selection');
+          return;
+        }
+        if (record.binding.agentMemory !== agentMemory) {
+          declineMemory('agent_memory_mismatch: the offered Agent memory selection differs from the named preparation');
+          return;
+        }
+        try {
+          assertPreparedMemoryPolicy(agentMemory, decision.policy);
+        } catch {
+          declineMemory('permission_mode_denied: agent_memory_policy_conflict');
+          return;
+        }
+        try {
+          await lane.authorizeAgentMemory(record.binding);
+        } catch (error) {
+          declineMemory(error instanceof InputPreparationRequestError
+            ? `${error.code}: ${error.message}`
+            : 'authority_unavailable: the local Agent memory authority could not be consulted');
+          return;
+        }
+        let memory: PreparedAgentMemoryState | null = null;
+        if (agentMemory !== 'none') {
+          if (mcpLaunch === undefined || !isAgentMemorySecureFilesystemAvailable(this.deps.agentMemoryFilesystemHelperBin !== undefined)) {
+            declineMemory('unsupported_input: agent_memory_unavailable');
+            return;
+          }
+          let implementation: PreparedAgentMemoryImplementation;
+          try {
+            implementation = await resolvePreparedMemoryImplementation(this.deps.toolImplementationAuthority, mcpEnv, mcpLaunchAttestation(mcpLaunch), this.deps.toolImplementationFsProbe);
+          } catch {
+            declineMemory('unsupported_input: agent_memory_implementation_unproven');
+            return;
+          }
+          try {
+            memory = await observePreparedMemory(implementation, mcpEnv, blobAbort.signal, this.deps.toolImplementationFsProbe);
+          } catch {
+            declineMemory('toolsets_unobservable: agent_memory_descriptor_unobservable');
+            return;
+          }
+        }
         const revisions: Record<string, string> = {};
         for (const [toolsetId, revision] of lane.toolsetDefinitionRevisions()) revisions[toolsetId] = revision;
         const servers: PreparedOfferServerProjection[] = [];
@@ -2708,6 +2773,7 @@ export class TaskRunner {
           });
         }
         const admitted = await admitPreparedOffer({
+          offeredAgentMemory: agentMemory, memory,
           record,
           artifactPath: lane.store.artifactPathOf(record),
           offered: preparation,
@@ -2720,8 +2786,8 @@ export class TaskRunner {
           // merged the offer down to is the mode it will actually run.
           admittedMode: decision.policy.mode,
           launch: mcpLaunch,
-          observation: mcpToolsetTools,
-          implementations: mcpToolImplementations,
+          observation: mcpToolsetTools ?? (preparedMemorySelected ? {} : undefined),
+          implementations: mcpToolImplementations ?? (preparedMemorySelected ? {} : undefined),
           servers,
           toolsetDefinitionRevisions: Object.freeze(revisions),
           nowMs: Date.now(),
@@ -2902,6 +2968,30 @@ export class TaskRunner {
         }
       }
 
+      if (preparedLaunch !== undefined && preparedLaunch.agentMemory !== 'none') {
+        // Post-claim: a failure here is a truthful task failure, never a raw
+        // throw that strands the claimed task. The finally below revokes any
+        // context token minted for it and releases the pin.
+        try {
+          const memory = preparedLaunch.memory;
+          if (memory === null || agentRef === undefined) throw new Error('sealed Agent memory execution state missing');
+          const binding = memorySpawnBinding(memory.implementation.execution, 'agent-memory-mcp', preparedLaunch.agentMemory);
+          taskMcpServers = this.withAgentMemoryMcp(taskMcpServers, taskId, agentRef, preparedLaunch.agentMemory, memoryServer(binding));
+        } catch {
+          const reason = 'agent_memory_unavailable: the sealed Agent memory helper could not be bound for launch';
+          await this.updateGitPhaseBestEffort(gitWorkspaceId, 'failed');
+          gitLease?.release();
+          if (agentBinding === undefined) {
+            await this.fail(taskId, reason, false);
+          } else {
+            await this.failClaimedAgent(taskId, reason, false, {
+              binding: agentBinding,
+              runtimeId: pick.descriptor.id,
+            });
+          }
+          return;
+        }
+      }
       const startInput: RuntimeOperationStartInput = {
         mcpEnv,
         ...(runtimeLaunch === undefined ? {} : { runtimeLaunch }),
@@ -3274,14 +3364,15 @@ export class TaskRunner {
     existing: Readonly<Record<string, McpStdioServerConfig>> | undefined,
     taskId: string,
     agentRef: AgentRef,
+    mode: 'read' | 'read-write',
+    bin: {command: string; args: readonly string[]},
   ): Readonly<Record<string, McpStdioServerConfig>> {
     if (existing !== undefined && Object.prototype.hasOwnProperty.call(existing, AGENT_MEMORY_MCP_SERVER_NAME)) {
       throw new Error(`MCP server name "${AGENT_MEMORY_MCP_SERVER_NAME}" is reserved by the daemon`);
     }
-    const bin = this.deps.agentMemoryMcpBin!;
     const contextToken = `${randomUUID()}.${randomUUID()}`;
     this.revokeAgentMemoryContext(taskId);
-    this.memoryContextByToken.set(contextToken, Object.freeze({ taskId, agentRef: Object.freeze({ ...agentRef }) }));
+    this.memoryContextByToken.set(contextToken, Object.freeze({ taskId, agentRef: Object.freeze({ ...agentRef }), mode }));
     this.memoryContextByTask.set(taskId, contextToken);
     return Object.freeze({
       ...(existing ?? {}),
@@ -3292,6 +3383,7 @@ export class TaskRunner {
           BYOK_STORE_DIR: this.deps.storeDir,
           BYOK_PRODUCT_ID: this.deps.productId,
           BYOK_AGENT_MEMORY_CONTEXT: contextToken,
+          BYOK_PREPARED_AGENT_MEMORY_MODE: mode,
         }),
       }),
     });
@@ -3335,8 +3427,9 @@ export class TaskRunner {
     });
   }
 
-  private async runMemoryOperation<T>(contextToken: string, operation: (context: AgentMemoryTaskContext) => Promise<T>): Promise<T> {
+  private async runMemoryOperation<T>(contextToken: string, required: 'read'|'write', operation: (context: AgentMemoryTaskContext) => Promise<T>): Promise<T> {
     let context = this.activeMemoryContext(contextToken);
+    if (required === 'write' && this.memoryContextByToken.get(contextToken)?.mode !== 'read-write') throw new AgentMemoryError('agent_memory_operation_denied: write denied by sealed capability');
     context = await this.bindAgentMemoryFilesystem(context);
     // The helper handshake is asynchronous. Reconstruct the authority again so
     // a task that began closing during it cannot retain a stale context.

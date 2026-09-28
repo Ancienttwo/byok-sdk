@@ -110,7 +110,7 @@ async function mcpRoundTrip(
 ): Promise<Record<string, unknown>[]> {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
-  serveAgentMemoryMcpOverStdio({ deps, stdin, stdout });
+  serveAgentMemoryMcpOverStdio({ deps, mode: 'read-write', stdin, stdout });
 
   const responses: Record<string, unknown>[] = [];
   const collected = new Promise<void>((resolve) => {

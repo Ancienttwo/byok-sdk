@@ -553,6 +553,7 @@ function minimalPayloadForProbe(type: MessageType): unknown {
       };
     case 'task.offer_prepared':
       return {
+        agentMemory: 'none',
         policy: { mode: 'auto', allowTools: [] },
         egressPolicy: { policyRevision: 'metadata-status-v1', activity: { mode: 'metadata-status', delivery: 'latest-value' }, reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4194304, maxPendingBytesPerTenant: 16777216 }, transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
@@ -647,6 +648,7 @@ function minimalPayloadForProbe(type: MessageType): unknown {
       };
     case 'agent.input.preparation':
       return {
+        agentMemory: 'none',
         requestId: '00000000-0000-4000-8000-000000000025',
         agentRef: { agentId: 'agent-1', profileRevision: '1' },
         profileId: 'profile-1',

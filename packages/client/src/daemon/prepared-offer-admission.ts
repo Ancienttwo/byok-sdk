@@ -1,4 +1,4 @@
-import type { AgentRef, InputPreparationOfferBinding, PermissionMode } from '@byok-sdk/protocol';
+import type { AgentRef, InputPreparationOfferBinding, PermissionMode, PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import {
   inputPreparationDigest,
   inputPreparationRuntimeIdentityString,
@@ -12,6 +12,7 @@ import { mcpLaunchAttestation } from './trusted-launch-cwd';
 import type { ToolImplementationIdentityV1 } from './tool-implementation-identity';
 import type { InputPreparationRecord } from './input-preparation-store';
 import { inputPreparationReadinessReasons } from './input-preparation-service';
+import type { PreparedAgentMemoryState } from './prepared-agent-memory';
 
 /**
  * The item-by-item comparison one `task.offer_prepared` must survive before a
@@ -85,6 +86,8 @@ export type PreparedOfferDeclineReason =
   | 'preparation_artifact_digest_mismatch'
   /** This offer was ADMITTED under a mode the manifest was not filtered for. */
   | 'preparation_permission_mode_mismatch'
+  /** The Host re-presented a memory mode that differs from the durable binding. */
+  | 'agent_memory_mismatch'
   /** The installed native closure is not the one that compiled the artifact. */
   | 'preparation_runtime_identity_mismatch'
   /** No trusted launch boundary, or one a preparation can never have attested. */
@@ -145,6 +148,10 @@ export interface PreparedOfferAdmissionInput {
   readonly runtime: InputPreparationRuntimeIdentityV1;
   /** The mode this offer was ADMITTED under — the merged policy's, not the offer's request. */
   readonly admittedMode: PermissionMode;
+  /** The exact SDK memory selection re-presented by this prepared offer. */
+  readonly offeredAgentMemory: PreparedAgentMemoryMode;
+  /** Current descriptor observation and attested helper pair; null only for `none`. */
+  readonly memory: PreparedAgentMemoryState | null;
   /** The one launch boundary this task resolved for every MCP child it will start. */
   readonly launch: McpLaunchBinding | undefined;
   /** The live `tools/list` answer this task's own admission probe took. */
@@ -253,6 +260,13 @@ export async function admitPreparedOffer(
       + ` and this offer was admitted under ${JSON.stringify(input.admittedMode)}`,
     );
   }
+  if (binding.agentMemory !== input.offeredAgentMemory
+    || (binding.agentMemory === 'none' ? input.memory !== null : input.memory === null)) {
+    return decline(
+      'agent_memory_mismatch',
+      'the prepared Agent memory selection or its sealed descriptor state differs from the named preparation',
+    );
+  }
   const runtimeIdentity = inputPreparationRuntimeIdentityString(input.runtime);
   if (inputPreparationDigest(binding.runtime) !== inputPreparationDigest(input.runtime)) {
     return decline(
@@ -285,7 +299,8 @@ export async function admitPreparedOffer(
   }
   const launch = mcpLaunchAttestation(input.launch);
 
-  if (input.observation === undefined || input.implementations === undefined || input.servers.length === 0) {
+  if (input.observation === undefined || input.implementations === undefined
+    || (input.servers.length === 0 && binding.agentMemory === 'none')) {
     return decline(
       'preparation_tool_set_mismatch',
       'this task projected no observed MCP toolset servers, and the named preparation counted a manifest of them',
@@ -294,6 +309,8 @@ export async function admitPreparedOffer(
 
   // --- the concrete tool set --------------------------------------------
   const fingerprinted = await fingerprintPreparedToolSurface({
+    agentMemory: binding.agentMemory,
+    memory: input.memory,
     observation: input.observation,
     permissionMode: input.admittedMode,
     runtimeIdentity,
@@ -343,6 +360,8 @@ export async function admitPreparedOffer(
   // per-server identities — the facts that need no spawn, in the digest that
   // was frozen over them.
   const liveToolBindingDigest = preparedToolBindingDigest({
+    agentMemory: binding.agentMemory,
+    memoryImplementation: input.memory?.implementation ?? null,
     launch,
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     servers: [...input.servers]
@@ -397,6 +416,8 @@ export async function admitPreparedOffer(
         }),
       }),
       permissionMode: binding.permissionMode,
+      agentMemory: binding.agentMemory,
+      memory: input.memory,
       toolBindingDigest: summary.toolBindingDigest,
       observationDigest: summary.observationDigest,
       launch: input.launch,
