@@ -35,7 +35,24 @@
   once into inert plain data inside the same containment (accessors, Proxies and
   class instances are refused as `readback_invalid`), so no Host code runs
   outside it.
-- [Release notes](docs/releases/v0.23.0.md).
+- **Changed (prepared lane, BREAKING, #236)** — capability
+  `agent-input-preparation-v7` → `agent-input-preparation-v8`; wire and record
+  version 8; binding/observation digest domain v2; no v7 reader, dual token,
+  default or fallback. Host preparation requests, receipt bindings and
+  `task.offer_prepared` must carry explicit `agentMemory: 'none' | 'read' |
+  'read-write'`; memory tools are counted and admitted under a device ceiling.
+- **Operational (#236)** — before upgrading, drain preparation requests, prepared
+  Executions, required message dispositions and old mailbox entries; upgrade
+  cloud and devices together; recreate preparations with the Host systemPrompt,
+  official identity and explicit memory selection. A device with leftover v7
+  records refuses the lane with `input_preparation_record_log_unsupported`: stop
+  the daemon, run `byok-agent retire-input-preparation` (read-only preview), then
+  `--yes`, and restart. It moves the namespace to
+  `input-preparation-retired/<stamp>-v<versions>/` with a manifest and never
+  deletes, converts or touches Agent home/memory. Skipping the drain cannot
+  repair old entries.
+- **Known limitation (#236)** — Agent memory stays fail-closed on Windows.
+- [Release notes](docs/releases/v0.23.0.md), including the Host upgrade order.
 
 
 ## 0.22.0 / @byok-sdk/keys 0.7.0 — 2026-09-25 (published; tag `v0.22.0` at `0962f14f`)
