@@ -73,8 +73,14 @@ authenticated session and device assertion.
   non-secret monotonic operation generation, the expected provider triple, the
   expected enrollment and placement revisions, the config digest and the time
   window. RFC 9180 test vectors and an independent
-  implementation pass in the test suite; that is not an audit, and the
-  self-implemented HPKE requires a dedicated security review before release.
+  implementation pass in the test suite; that is not an audit. The dedicated
+  review of the self-implemented HPKE ran during acceptance (Codex acceptance
+  report sdk-1, 2026-09-28): RFC 9180 §4/§5/§7 and A.3.1 — labeled KDF, KEM
+  context, nonce/sequence, SEC1 point validation, the one-shot API and negative
+  coverage — with Node/Bun conformance and `@hpke/core` interop, PASS for that
+  scope. It is an internal code review, not an external audit, and it does not
+  cover the browser matrix (Chromium/WebKit/Gecko, Ed25519 end to end), which
+  Salesko H2 integration will cover.
 - **Sealing key.** The device's long-lived P-256 sealing key lives in its
   credential store, bound to the current enrollment; a new enrollment always
   generates a new key at the next epoch and rotation deletes the old private
