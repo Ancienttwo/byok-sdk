@@ -203,6 +203,8 @@ describe.skipIf(!isSqliteAvailable())('applySealedProviderProvisioning', () => {
       await expect(secrets.get(SECRET_NAME)).resolves.toBe(KEY_A);
     });
 
+    // 257 real seal/open + custody commits (~0.6 s locally): an explicit budget so
+    // a slow hosted runner cannot trip vitest's 5 s default. Count and assertions unchanged.
     it('rejects any generation at or below the watermark, even after 257 operations evicted its receipt', async () => {
       const first = await configureRequest(sealingKey, KEY_A, { requestId: 'op-1', generation: 1 });
       await apply(first);
@@ -215,7 +217,7 @@ describe.skipIf(!isSqliteAvailable())('applySealedProviderProvisioning', () => {
       const lower = await replaceSecretRequest(sealingKey, KEY_B, { requestId: 'op-new', generation: 5, expected: await expectedOf() });
       expect(await apply(lower)).toMatchObject({ code: 'operation_generation_stale' });
       await expect(secrets.get(SECRET_NAME)).resolves.toBe(KEY_A);
-    });
+    }, 60_000);
 
     it('enforces 0 < ttl <= 15 min, bounded skew, and expiry; a rolled-back clock cannot revive an expired request', async () => {
       const tooLong = await configureRequest(sealingKey, KEY_A, { requestId: 'w1', generation: 1, expiresAt: '2026-09-28T05:15:00.001Z' });

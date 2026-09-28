@@ -137,6 +137,7 @@ describe.skipIf(!isSqliteAvailable())('registry custody (A4, A8)', () => {
     await expect(profiles.getOperationWatermark('openai')).resolves.toBe(7);
   });
 
+  // 259 real SQLite custody commits (~50 ms locally): an explicit budget for slow hosted runners.
   it('retains at most the receipt limit, evicting oldest first, while the watermark only rises', async () => {
     for (let generation = 1; generation <= PROVIDER_CUSTODY_RECEIPT_LIMIT + 3; generation += 1) {
       await profiles.commitCustody({
@@ -155,7 +156,7 @@ describe.skipIf(!isSqliteAvailable())('registry custody (A4, A8)', () => {
     await expect(profiles.getReceipt('req-3')).resolves.toBeUndefined();
     await expect(profiles.getReceipt('req-4')).resolves.toBeDefined();
     await expect(profiles.getOperationWatermark('openai')).resolves.toBe(PROVIDER_CUSTODY_RECEIPT_LIMIT + 3);
-  });
+  }, 60_000);
 
   it('creates an owner-only lock file and a read-only store refuses a database without custody tables', async () => {
     expect(statSync(providerConfigurationLockPath(dbPath)).mode & 0o777).toBe(0o600);

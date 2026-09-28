@@ -215,3 +215,10 @@ Report `codex-acceptance-s4.md` (sha256 762e9570…) on 2000106f. The epoch-cons
   - Every other suite exits 0, with the same counts as the first gate.
   - `test:scripts` 51/51; api-surface 9 match; version-authority 0.24.0 / keys 0.8.1; package graph OK; workflow strict OK.
 - **Why the bunfig timeout is load, not this change.** Machine load average was 10–15, from unrelated fuzz and vitest jobs. Alternating single runs: the fix clone failed, and base 050349af also failed once and passed once. With `--testTimeout=60000` both pass: fix clone 6.2 s, base 2.4 s. The test imports none of the files this change touches.
+
+## S4-fix-2 — keys O(hundreds) custody tests get an explicit timeout (scope extension)
+
+- **Trigger.** CI run 36399184134 attempt 1, `build, typecheck, test (fixed Node)`: `packages/keys/src/sealed-provisioning.test.ts` "rejects any generation at or below the watermark, even after 257 operations evicted its receipt" hit vitest's 5 s default. It does 257 real seal/open + custody applies. The test has existed since 0.23.0; keys source is untouched on this branch.
+- **Survey.** Only two keys tests run O(hundreds) of real custody operations: that one (~0.6 s locally) and `registry.custody.test.ts` "retains at most the receipt limit…" (259 SQLite commits, ~50 ms locally). Every case in `custody-crash` (≤0.42 s), `request-reservation` (≤43 ms) and `readback-snapshot` (≤23 ms) is a single operation or spawn; `custody-crash` already bounds its `spawnSync` children at 60 s.
+- **Change.** Each of the two tests gets an explicit `60_000` ms per-test timeout, with a comment giving the measured duration. The operation counts and assertions are unchanged. Test files are excluded from the keys build (`tsconfig.build.json`) and from its `files`, so the keys 0.8.1 artifact is unchanged and the PATCH decision stands.
+- **Verification.** keys typecheck exit 0; keys test 620 passed / 7 skipped.
