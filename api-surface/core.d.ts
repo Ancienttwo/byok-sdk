@@ -1,3 +1,29 @@
+// ==== @byok-sdk/core dist/agent-memory-intent.d.ts ====
+/** Domain tag inside every agent memory intent operation digest. */
+export declare const AGENT_MEMORY_INTENT_DIGEST_VERSION: 'byok-agent-memory-intent-v1';
+/** Every field the operation digest covers. `targetRevision` is `null` exactly for `delete`. */
+export interface AgentMemoryIntentDigestInput {
+    readonly tenantId: string;
+    readonly deviceId: string;
+    readonly intentId: string;
+    readonly agentRef: {
+        readonly agentId: string;
+        readonly profileRevision: string;
+    };
+    readonly path: string;
+    readonly operation: 'replace' | 'delete';
+    readonly baseRevision: string;
+    readonly targetRevision: string | null;
+    readonly approvalRef: string;
+}
+/**
+ * `sha256:<hex>` over
+ * `canonicalizeJson({v, tenantId, deviceId, intentId, agentRef, path, operation, baseRevision, targetRevision, approvalRef})`.
+ *
+ * Only the listed fields are read (an extra property on `input` never changes
+ * the digest); a missing field is `undefined`, which the canonicalizer refuses.
+ */
+export declare function agentMemoryIntentOperationDigest(input: AgentMemoryIntentDigestInput): Promise<string>;
 // ==== @byok-sdk/core dist/attestation.d.ts ====
 /**
  * Device proof envelope and canonical signing bytes (§12.6.3, sprint §S6.2).
@@ -1319,6 +1345,8 @@ export { authenticateTaskAssertion, TASK_ASSERTION_AGENT_REF_MAX_BYTES, TASK_ASS
 export type { AuthenticateDeviceAssertionDeps, AuthenticatedAssertion, AuthenticatedDeviceAssertion, AuthenticatedTaskAssertion, DeviceAssertionAlgorithm, DeviceAssertionAuthorityRow, DeviceAssertionClaims, DeviceAssertionDeviceRow, DeviceAssertionEnvelopeV1, DeviceAssertionExpectedBinding, DeviceAssertionReplayConsumeInput, DeviceAssertionReplayAuthority, DeviceAssertionReplaySchemaId, DeviceAssertionVerifier, DeviceAssertionVerifyDeps, DeviceAssertionVerifyInput, TaskAssertionAgentRef, TaskAssertionClaims, TaskAssertionEnvelopeV1, } from './device-assertion';
 export { PROVIDER_PROVISIONING_MAX_TTL_MS, PROVIDER_PROVISIONING_OPERATIONS, PROVIDER_PROVISIONING_REQUEST_VERSION, PROVIDER_PROVISIONING_SECRET_OPERATIONS, PROVIDER_SECRET_HPKE_INFO, PROVIDER_SECRET_HPKE_SUITE, PROVIDER_SECRET_MAX_BYTES, PROVIDER_SECRET_MAX_PADDED_BYTES, PROVIDER_SECRET_PAD_BLOCK_BYTES, ProviderProvisioningConfigV1Schema, ProviderProvisioningExpectedProfileSchema, ProviderProvisioningHeaderV1Schema, ProviderProvisioningIdentityRevisionSchema, ProviderProvisioningRequestV1Schema, SEALING_KEY_ID_LENGTH, SealedProviderSecretV1Schema, SealingKeyClaimV1Schema, SealingKeyIdSchema, SealingPublicJwkSchema, assertProviderProvisioningConfigDigest, deriveSealingKeyId, openProviderProvisioningSecret, parseProviderProvisioningRequest, providerProvisioningConfigDigest, providerProvisioningRequestDigest, providerSecretAadBytes, sealProviderProvisioningRequest, sealingKeyClaimCanonicalBytes, } from './sealed-provider-secret';
 export type { ProviderProvisioningConfigV1, ProviderProvisioningExpectedProfile, ProviderProvisioningHeaderV1, ProviderProvisioningOperation, ProviderProvisioningRequestV1, ProviderSecretRecipient, SealProviderProvisioningRequestInput, SealedProviderSecretV1, SealingKeyClaimV1, SealingPublicJwk, WebCryptoKey, } from './sealed-provider-secret';
+export { AGENT_MEMORY_INTENT_DIGEST_VERSION, agentMemoryIntentOperationDigest } from './agent-memory-intent';
+export type { AgentMemoryIntentDigestInput } from './agent-memory-intent';
 export { NONCE_SIGNING_DOMAIN, nonceSigningBytes } from './pairing';
 export { IN_MEMORY_CLOCK_EPOCH, InMemoryBoardStore, InMemoryMailboxStore, InMemoryDeviceAssertionReplayAuthority, InMemoryObjectStore, InMemoryPresenceStore, InMemoryQuotaStore, InMemorySkillPackStore, InMemoryTruthStore, createInMemoryCoreStores, createInMemoryCoreCompositionWithClock, createMutableClock, } from './in-memory/index';
 export type { InMemoryCoreComposition, InMemoryCoreOptions } from './in-memory/index';

@@ -25,7 +25,8 @@
     "host-mcp-task-context",
     "custom-harness",
     "mailbox-read-ahead",
-    "provider-provisioning.v1"
+    "provider-provisioning.v1",
+    "agent-memory-intent.v1"
   ],
   "permissionModes": [
     "auto",
@@ -86,6 +87,7 @@
     "agent.home.projection",
     "agent.input.preparation",
     "provider.provisioning.available",
+    "agent.memory.intent.available",
     "task.approve",
     "task.reject",
     "task.cancel",
@@ -115,6 +117,7 @@
     "agent.home.projection",
     "agent.input.preparation",
     "provider.provisioning.available",
+    "agent.memory.intent.available",
     "task.approve",
     "task.reject",
     "task.cancel",
@@ -211,6 +214,10 @@
       "seq": "required"
     },
     "provider.provisioning.available": {
+      "taskId": "optional",
+      "seq": "required"
+    },
+    "agent.memory.intent.available": {
       "taskId": "optional",
       "seq": "required"
     },
@@ -4580,6 +4587,49 @@
       },
       "required": [
         "requestId"
+      ],
+      "additionalProperties": false
+    },
+    "agent.memory.intent.available": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "intentId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "agentRef": {
+          "type": "object",
+          "properties": {
+            "agentId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "allOf": [
+                {
+                  "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
+                },
+                {
+                  "pattern": "^[^\\\\/:<>\"|?*]+$"
+                }
+              ]
+            },
+            "profileRevision": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            }
+          },
+          "required": [
+            "agentId",
+            "profileRevision"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "intentId",
+        "agentRef"
       ],
       "additionalProperties": false
     },
@@ -9927,6 +9977,92 @@
             },
             "required": [
               "requestId"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "v",
+          "id",
+          "ts",
+          "type",
+          "seq",
+          "payload"
+        ],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "v": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "type": {
+            "type": "string",
+            "const": "agent.memory.intent.available"
+          },
+          "task_id": {
+            "not": {}
+          },
+          "session_ref": {
+            "type": "string"
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "payload": {
+            "type": "object",
+            "properties": {
+              "intentId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "agentRef": {
+                "type": "object",
+                "properties": {
+                  "agentId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160,
+                    "allOf": [
+                      {
+                        "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
+                      },
+                      {
+                        "pattern": "^[^\\\\/:<>\"|?*]+$"
+                      }
+                    ]
+                  },
+                  "profileRevision": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]{0,18}$"
+                  }
+                },
+                "required": [
+                  "agentId",
+                  "profileRevision"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "intentId",
+              "agentRef"
             ],
             "additionalProperties": false
           }
@@ -17661,6 +17797,92 @@
                   },
                   "type": {
                     "type": "string",
+                    "const": "agent.memory.intent.available"
+                  },
+                  "task_id": {
+                    "not": {}
+                  },
+                  "session_ref": {
+                    "type": "string"
+                  },
+                  "seq": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "payload": {
+                    "type": "object",
+                    "properties": {
+                      "intentId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "agentRef": {
+                        "type": "object",
+                        "properties": {
+                          "agentId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160,
+                            "allOf": [
+                              {
+                                "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
+                              },
+                              {
+                                "pattern": "^[^\\\\/:<>\"|?*]+$"
+                              }
+                            ]
+                          },
+                          "profileRevision": {
+                            "type": "string",
+                            "pattern": "^[1-9][0-9]{0,18}$"
+                          }
+                        },
+                        "required": [
+                          "agentId",
+                          "profileRevision"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "intentId",
+                      "agentRef"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "v",
+                  "id",
+                  "ts",
+                  "type",
+                  "seq",
+                  "payload"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "v": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "ts": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  "type": {
+                    "type": "string",
                     "const": "task.approve"
                   },
                   "task_id": {
@@ -24375,6 +24597,92 @@
                     },
                     "required": [
                       "requestId"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "v",
+                  "id",
+                  "ts",
+                  "type",
+                  "seq",
+                  "payload"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "v": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  },
+                  "ts": {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "agent.memory.intent.available"
+                  },
+                  "task_id": {
+                    "not": {}
+                  },
+                  "session_ref": {
+                    "type": "string"
+                  },
+                  "seq": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "payload": {
+                    "type": "object",
+                    "properties": {
+                      "intentId": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "agentRef": {
+                        "type": "object",
+                        "properties": {
+                          "agentId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160,
+                            "allOf": [
+                              {
+                                "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
+                              },
+                              {
+                                "pattern": "^[^\\\\/:<>\"|?*]+$"
+                              }
+                            ]
+                          },
+                          "profileRevision": {
+                            "type": "string",
+                            "pattern": "^[1-9][0-9]{0,18}$"
+                          }
+                        },
+                        "required": [
+                          "agentId",
+                          "profileRevision"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "intentId",
+                      "agentRef"
                     ],
                     "additionalProperties": false
                   }

@@ -409,6 +409,19 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     );
   });
 
+  it('agent.memory.intent.available', () => {
+    const type = 'agent.memory.intent.available' as const;
+    testedTypes.push(type);
+    roundTrip(
+      type,
+      createEnvelope(
+        type,
+        { intentId: '10000000-0000-4000-8000-000000000065', agentRef: { agentId: 'agent-1', profileRevision: '7' } },
+        { seq: 11 },
+      ),
+    );
+  });
+
   it('task.approve', () => {
     const type = 'task.approve' as const;
     testedTypes.push(type);

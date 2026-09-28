@@ -97,6 +97,7 @@ interface EnvelopeShapeOptions {
   'agent.home.projection': { taskId?: never; seq: number };
   'agent.input.preparation': { taskId?: never; seq: number };
   'provider.provisioning.available': { taskId?: never; seq: number };
+  'agent.memory.intent.available': { taskId?: never; seq: number };
   'agent.content.receipt': { taskId?: string; seq?: number };
   'task.approve': { taskId: string; seq: number };
   'task.reject': { taskId: string; seq: number };

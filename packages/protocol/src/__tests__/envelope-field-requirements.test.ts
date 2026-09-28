@@ -196,6 +196,8 @@ function minimalPayload(type: MessageType): unknown {
       };
     case 'provider.provisioning.available':
       return { requestId: '00000000-0000-4000-8000-000000000026' };
+    case 'agent.memory.intent.available':
+      return { intentId: '00000000-0000-4000-8000-000000000027', agentRef: { agentId: 'agent-1', profileRevision: '7' } };
     case 'task.approve':
       return {};
     case 'task.reject':

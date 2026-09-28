@@ -490,6 +490,724 @@ export type AgentHomeProjectionValue = string | number | boolean | null | AgentH
     [key: string]: AgentHomeProjectionValue;
 };
 export declare const AgentHomeProjectionValueSchema: z.ZodType<AgentHomeProjectionValue>;
+// ==== @byok-sdk/protocol dist/agent-memory-intent.d.ts ====
+import { z } from 'zod';
+/**
+ * Host-approved Agent memory intents — the wire half.
+ *
+ * A Host (the only approval authority) approves one exact memory operation on
+ * one device-local Agent home. The device (the only memory content authority)
+ * applies it with its existing sha256 CAS at most once and reports a terminal,
+ * content-free completion. This package defines only:
+ *
+ * - the device capability that gates the task-free server -> daemon notice
+ *   `agent.memory.intent.available`, whose strict payload is exactly
+ *   `{ intentId, agentRef }` (see `messages.ts`);
+ * - the immutable intent a Host releases over its own device routes;
+ * - the fetch request/response a device exchanges with those routes;
+ * - the terminal completion a device reports and the durable readback a Host
+ *   returns for it.
+ *
+ * Notice-and-fetch is the point: memory content never rides the mailbox or the
+ * device journal. The only field that carries content is `content` on a
+ * `release` of a `replace` intent.
+ *
+ * Path authority stays with the device. This schema applies only the syntactic
+ * bounds the device ledger relies on (at most 1024 ASCII bytes that need no
+ * JSON escaping); the exact memory path rule (`MEMORY.md` or
+ * `notes/<safe>/…md`) and the `MEMORY.md` delete ban are evaluated by the
+ * device and reported as `path_invalid` / `memory_md_not_deletable`. Host-only
+ * path policy is Host vocabulary and stays out of this package, as do
+ * audiences, route paths and product names.
+ *
+ * `operationDigest` is pinned to `@byok-sdk/core`
+ * `agentMemoryIntentOperationDigest(...)`, which a device recomputes with its
+ * own enrolled tenant and device ids.
+ */
+/** Device capability required before a Host may enqueue `agent.memory.intent.available`. */
+export declare const AGENT_MEMORY_INTENT_CAPABILITY: 'agent-memory-intent.v1';
+/** Maximum UTF-8 byte length of a released `replace` body (one memory file): 256 KiB. */
+export declare const AGENT_MEMORY_INTENT_CONTENT_MAX_BYTES = 262144;
+/** Maximum byte length of an intent `path` (ASCII, so bytes = characters). */
+export declare const AGENT_MEMORY_INTENT_PATH_MAX_BYTES = 1024;
+/** Maximum byte length of an opaque `approvalRef` (ASCII, so bytes = characters). */
+export declare const AGENT_MEMORY_INTENT_APPROVAL_REF_MAX_BYTES = 128;
+/** A memory file revision: `sha256:` over the file bytes (a missing file is the empty-bytes digest). */
+export declare const AgentMemoryIntentRevisionSchema: z.ZodString;
+export type AgentMemoryIntentRevision = z.infer<typeof AgentMemoryIntentRevisionSchema>;
+/** The identity-and-operation binding; see `@byok-sdk/core` `agentMemoryIntentOperationDigest`. */
+export declare const AgentMemoryIntentOperationDigestSchema: z.ZodString;
+export type AgentMemoryIntentOperationDigest = z.infer<typeof AgentMemoryIntentOperationDigestSchema>;
+/**
+ * Syntactic bound only: 1..1024 printable ASCII characters that need no JSON
+ * escaping (no `"`, no `\`, no control characters). The device applies the
+ * exact memory path rule.
+ */
+export declare const AgentMemoryIntentPathSchema: z.ZodString;
+export type AgentMemoryIntentPath = z.infer<typeof AgentMemoryIntentPathSchema>;
+/** Opaque audit correlation. The device records it and never evaluates it. */
+export declare const AgentMemoryIntentApprovalRefSchema: z.ZodString;
+export type AgentMemoryIntentApprovalRef = z.infer<typeof AgentMemoryIntentApprovalRefSchema>;
+/** A `replace` body: well-formed Unicode whose UTF-8 encoding is at most 256 KiB. */
+export declare const AgentMemoryIntentContentSchema: z.ZodString;
+export type AgentMemoryIntentContent = z.infer<typeof AgentMemoryIntentContentSchema>;
+export declare const AGENT_MEMORY_INTENT_OPERATIONS: readonly ['replace', 'delete'];
+export declare const AgentMemoryIntentOperationSchema: z.ZodEnum<{
+    delete: "delete";
+    replace: "replace";
+}>;
+export type AgentMemoryIntentOperation = z.infer<typeof AgentMemoryIntentOperationSchema>;
+/**
+ * The immutable Host-approved intent.
+ *
+ * - `replace`: `targetRevision` is the digest of the approved body and must
+ *   differ from `baseRevision`; `content` appears only inside a `release`.
+ * - `delete`: `targetRevision` is `null` and there is never `content`.
+ */
+export declare const AgentMemoryIntentV1Schema: z.ZodObject<{
+    intentId: z.ZodUUID;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    path: z.ZodString;
+    operation: z.ZodEnum<{
+        delete: "delete";
+        replace: "replace";
+    }>;
+    baseRevision: z.ZodString;
+    targetRevision: z.ZodNullable<z.ZodString>;
+    content: z.ZodOptional<z.ZodString>;
+    approvalRef: z.ZodString;
+    operationDigest: z.ZodString;
+}, z.core.$strict>;
+export type AgentMemoryIntentV1 = z.infer<typeof AgentMemoryIntentV1Schema>;
+/**
+ * Codes a Host decides on its own authority. They are the only `withheld`
+ * codes and the only codes a `host_terminal` readback may carry.
+ */
+export declare const AGENT_MEMORY_INTENT_HOST_TERMINAL_CODES: readonly ['intent_revoked', 'intent_expired', 'placement_changed', 'profile_revision_changed'];
+export declare const AgentMemoryIntentHostTerminalCodeSchema: z.ZodEnum<{
+    intent_expired: "intent_expired";
+    intent_revoked: "intent_revoked";
+    placement_changed: "placement_changed";
+    profile_revision_changed: "profile_revision_changed";
+}>;
+export type AgentMemoryIntentHostTerminalCode = z.infer<typeof AgentMemoryIntentHostTerminalCodeSchema>;
+/**
+ * Closed rejection set. A code names the failed check, never a value. Every
+ * `rejected` completion means the device wrote no `applying` record and made
+ * zero memory writes.
+ */
+export declare const AGENT_MEMORY_INTENT_REJECTION_CODES: readonly ["intent_invalid", "path_invalid", "memory_md_not_deletable", "content_invalid", "intent_digest_mismatch", "agent_ref_mismatch", "agent_home_unavailable", "intent_revoked", "intent_expired", "placement_changed", "profile_revision_changed"];
+export declare const AgentMemoryIntentRejectionCodeSchema: z.ZodEnum<{
+    agent_home_unavailable: "agent_home_unavailable";
+    agent_ref_mismatch: "agent_ref_mismatch";
+    content_invalid: "content_invalid";
+    intent_digest_mismatch: "intent_digest_mismatch";
+    intent_expired: "intent_expired";
+    intent_invalid: "intent_invalid";
+    intent_revoked: "intent_revoked";
+    memory_md_not_deletable: "memory_md_not_deletable";
+    path_invalid: "path_invalid";
+    placement_changed: "placement_changed";
+    profile_revision_changed: "profile_revision_changed";
+}>;
+export type AgentMemoryIntentRejectionCode = z.infer<typeof AgentMemoryIntentRejectionCodeSchema>;
+/** One device observation of the target file. The observation instant is not on the wire. */
+export declare const AgentMemoryIntentFileObservationSchema: z.ZodObject<{
+    exists: z.ZodBoolean;
+    revision: z.ZodString;
+}, z.core.$strict>;
+export type AgentMemoryIntentFileObservation = z.infer<typeof AgentMemoryIntentFileObservationSchema>;
+/**
+ * The terminal, content-free result of one intent, reported by the device.
+ *
+ * - `applied`: the live-path CAS returned success; `result` is the file after it.
+ * - `conflict`: the live-path CAS refused on revision; this attempt wrote nothing.
+ * - `rejected`: no `applying` record was written; zero writes.
+ * - `uncertain`: whether this intent wrote is unknown; `observed` is only the
+ *   current file, never provenance.
+ *
+ * There is no non-terminal outcome.
+ */
+export declare const AgentMemoryIntentCompletionSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+    intentId: z.ZodUUID;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    path: z.ZodString;
+    operation: z.ZodEnum<{
+        delete: "delete";
+        replace: "replace";
+    }>;
+    operationDigest: z.ZodString;
+    outcome: z.ZodLiteral<"applied">;
+    result: z.ZodObject<{
+        exists: z.ZodBoolean;
+        revision: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    intentId: z.ZodUUID;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    path: z.ZodString;
+    operation: z.ZodEnum<{
+        delete: "delete";
+        replace: "replace";
+    }>;
+    operationDigest: z.ZodString;
+    outcome: z.ZodLiteral<"conflict">;
+    observed: z.ZodObject<{
+        exists: z.ZodBoolean;
+        revision: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    intentId: z.ZodUUID;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    path: z.ZodString;
+    operation: z.ZodEnum<{
+        delete: "delete";
+        replace: "replace";
+    }>;
+    operationDigest: z.ZodString;
+    outcome: z.ZodLiteral<"rejected">;
+    code: z.ZodEnum<{
+        agent_home_unavailable: "agent_home_unavailable";
+        agent_ref_mismatch: "agent_ref_mismatch";
+        content_invalid: "content_invalid";
+        intent_digest_mismatch: "intent_digest_mismatch";
+        intent_expired: "intent_expired";
+        intent_invalid: "intent_invalid";
+        intent_revoked: "intent_revoked";
+        memory_md_not_deletable: "memory_md_not_deletable";
+        path_invalid: "path_invalid";
+        placement_changed: "placement_changed";
+        profile_revision_changed: "profile_revision_changed";
+    }>;
+}, z.core.$strict>, z.ZodObject<{
+    intentId: z.ZodUUID;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+    path: z.ZodString;
+    operation: z.ZodEnum<{
+        delete: "delete";
+        replace: "replace";
+    }>;
+    operationDigest: z.ZodString;
+    outcome: z.ZodLiteral<"uncertain">;
+    observed: z.ZodObject<{
+        exists: z.ZodBoolean;
+        revision: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>], "outcome">;
+export type AgentMemoryIntentCompletion = z.infer<typeof AgentMemoryIntentCompletionSchema>;
+/**
+ * How the Host's durable record relates to the completion it was handed:
+ *
+ * - `recorded`: this completion became the intent's first terminal fact.
+ * - `idempotent`: an identical completion was already recorded.
+ * - `conflict`: a different completion is already recorded; it is returned.
+ * - `host_terminal`: the Host had already terminated the intent on its own
+ *   authority ({@link AGENT_MEMORY_INTENT_HOST_TERMINAL_CODES}).
+ */
+export declare const AGENT_MEMORY_INTENT_READBACK_DISPOSITIONS: readonly ['recorded', 'idempotent', 'conflict', 'host_terminal'];
+export declare const AgentMemoryIntentReadbackDispositionSchema: z.ZodEnum<{
+    conflict: "conflict";
+    host_terminal: "host_terminal";
+    idempotent: "idempotent";
+    recorded: "recorded";
+}>;
+export type AgentMemoryIntentReadbackDisposition = z.infer<typeof AgentMemoryIntentReadbackDispositionSchema>;
+/**
+ * The Host's durable terminal readback for one intent. `completion` is the
+ * terminal fact the Host has STORED; on `host_terminal` it is always a
+ * `rejected` completion carrying a Host code. `recordedAt` is the Host record
+ * time, never a device observation time.
+ */
+export declare const AgentMemoryIntentReadbackSchema: z.ZodObject<{
+    tenantId: z.ZodString;
+    deviceId: z.ZodString;
+    intentId: z.ZodUUID;
+    disposition: z.ZodEnum<{
+        conflict: "conflict";
+        host_terminal: "host_terminal";
+        idempotent: "idempotent";
+        recorded: "recorded";
+    }>;
+    completion: z.ZodDiscriminatedUnion<[z.ZodObject<{
+        intentId: z.ZodUUID;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        path: z.ZodString;
+        operation: z.ZodEnum<{
+            delete: "delete";
+            replace: "replace";
+        }>;
+        operationDigest: z.ZodString;
+        outcome: z.ZodLiteral<"applied">;
+        result: z.ZodObject<{
+            exists: z.ZodBoolean;
+            revision: z.ZodString;
+        }, z.core.$strict>;
+    }, z.core.$strict>, z.ZodObject<{
+        intentId: z.ZodUUID;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        path: z.ZodString;
+        operation: z.ZodEnum<{
+            delete: "delete";
+            replace: "replace";
+        }>;
+        operationDigest: z.ZodString;
+        outcome: z.ZodLiteral<"conflict">;
+        observed: z.ZodObject<{
+            exists: z.ZodBoolean;
+            revision: z.ZodString;
+        }, z.core.$strict>;
+    }, z.core.$strict>, z.ZodObject<{
+        intentId: z.ZodUUID;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        path: z.ZodString;
+        operation: z.ZodEnum<{
+            delete: "delete";
+            replace: "replace";
+        }>;
+        operationDigest: z.ZodString;
+        outcome: z.ZodLiteral<"rejected">;
+        code: z.ZodEnum<{
+            agent_home_unavailable: "agent_home_unavailable";
+            agent_ref_mismatch: "agent_ref_mismatch";
+            content_invalid: "content_invalid";
+            intent_digest_mismatch: "intent_digest_mismatch";
+            intent_expired: "intent_expired";
+            intent_invalid: "intent_invalid";
+            intent_revoked: "intent_revoked";
+            memory_md_not_deletable: "memory_md_not_deletable";
+            path_invalid: "path_invalid";
+            placement_changed: "placement_changed";
+            profile_revision_changed: "profile_revision_changed";
+        }>;
+    }, z.core.$strict>, z.ZodObject<{
+        intentId: z.ZodUUID;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        path: z.ZodString;
+        operation: z.ZodEnum<{
+            delete: "delete";
+            replace: "replace";
+        }>;
+        operationDigest: z.ZodString;
+        outcome: z.ZodLiteral<"uncertain">;
+        observed: z.ZodObject<{
+            exists: z.ZodBoolean;
+            revision: z.ZodString;
+        }, z.core.$strict>;
+    }, z.core.$strict>], "outcome">;
+    recordedAt: z.ZodISODateTime;
+}, z.core.$strict>;
+export type AgentMemoryIntentReadback = z.infer<typeof AgentMemoryIntentReadbackSchema>;
+/**
+ * `held`: the device reserved a ledger slot and may receive a release.
+ * `none`: the device could not reserve; the Host must not change intent state
+ * or release content.
+ */
+export declare const AGENT_MEMORY_INTENT_RESERVATIONS: readonly ['held', 'none'];
+export declare const AgentMemoryIntentReservationSchema: z.ZodEnum<{
+    held: "held";
+    none: "none";
+}>;
+export type AgentMemoryIntentReservation = z.infer<typeof AgentMemoryIntentReservationSchema>;
+/**
+ * The SDK half of a fetch. Device authentication (the tenant and device a Host
+ * trusts) is Host transport vocabulary and is not part of this schema.
+ */
+export declare const AgentMemoryIntentFetchRequestSchema: z.ZodObject<{
+    intentId: z.ZodUUID;
+    reservation: z.ZodEnum<{
+        held: "held";
+        none: "none";
+    }>;
+}, z.core.$strict>;
+export type AgentMemoryIntentFetchRequest = z.infer<typeof AgentMemoryIntentFetchRequestSchema>;
+export declare const AGENT_MEMORY_INTENT_FETCH_DISPOSITIONS: readonly ['release', 'withheld', 'terminal', 'deferred'];
+export type AgentMemoryIntentFetchDisposition = (typeof AGENT_MEMORY_INTENT_FETCH_DISPOSITIONS)[number];
+/** Which fetch dispositions a Host may answer for each request reservation. */
+export declare const AGENT_MEMORY_INTENT_FETCH_DISPOSITIONS_BY_RESERVATION: {
+    readonly held: readonly ["release", "withheld", "terminal"];
+    readonly none: readonly ["terminal", "deferred"];
+};
+/**
+ * A Host fetch answer, independent of the request reservation. A device must
+ * parse with {@link agentMemoryIntentFetchResponseSchemaFor} so a `release` or
+ * `withheld` answer to a `none` request (or a `deferred` answer to a `held`
+ * request) is refused.
+ */
+export declare const AgentMemoryIntentFetchResponseSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+    disposition: z.ZodLiteral<"release">;
+    intent: z.ZodObject<{
+        intentId: z.ZodUUID;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        path: z.ZodString;
+        operation: z.ZodEnum<{
+            delete: "delete";
+            replace: "replace";
+        }>;
+        baseRevision: z.ZodString;
+        targetRevision: z.ZodNullable<z.ZodString>;
+        content: z.ZodOptional<z.ZodString>;
+        approvalRef: z.ZodString;
+        operationDigest: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    disposition: z.ZodLiteral<"withheld">;
+    intent: z.ZodObject<{
+        intentId: z.ZodUUID;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        path: z.ZodString;
+        operation: z.ZodEnum<{
+            delete: "delete";
+            replace: "replace";
+        }>;
+        baseRevision: z.ZodString;
+        targetRevision: z.ZodNullable<z.ZodString>;
+        content: z.ZodOptional<z.ZodString>;
+        approvalRef: z.ZodString;
+        operationDigest: z.ZodString;
+    }, z.core.$strict>;
+    code: z.ZodEnum<{
+        intent_expired: "intent_expired";
+        intent_revoked: "intent_revoked";
+        placement_changed: "placement_changed";
+        profile_revision_changed: "profile_revision_changed";
+    }>;
+}, z.core.$strict>, z.ZodObject<{
+    disposition: z.ZodLiteral<"terminal">;
+    intent: z.ZodObject<{
+        intentId: z.ZodUUID;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        path: z.ZodString;
+        operation: z.ZodEnum<{
+            delete: "delete";
+            replace: "replace";
+        }>;
+        baseRevision: z.ZodString;
+        targetRevision: z.ZodNullable<z.ZodString>;
+        content: z.ZodOptional<z.ZodString>;
+        approvalRef: z.ZodString;
+        operationDigest: z.ZodString;
+    }, z.core.$strict>;
+    readback: z.ZodObject<{
+        tenantId: z.ZodString;
+        deviceId: z.ZodString;
+        intentId: z.ZodUUID;
+        disposition: z.ZodEnum<{
+            conflict: "conflict";
+            host_terminal: "host_terminal";
+            idempotent: "idempotent";
+            recorded: "recorded";
+        }>;
+        completion: z.ZodDiscriminatedUnion<[z.ZodObject<{
+            intentId: z.ZodUUID;
+            agentRef: z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>;
+            path: z.ZodString;
+            operation: z.ZodEnum<{
+                delete: "delete";
+                replace: "replace";
+            }>;
+            operationDigest: z.ZodString;
+            outcome: z.ZodLiteral<"applied">;
+            result: z.ZodObject<{
+                exists: z.ZodBoolean;
+                revision: z.ZodString;
+            }, z.core.$strict>;
+        }, z.core.$strict>, z.ZodObject<{
+            intentId: z.ZodUUID;
+            agentRef: z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>;
+            path: z.ZodString;
+            operation: z.ZodEnum<{
+                delete: "delete";
+                replace: "replace";
+            }>;
+            operationDigest: z.ZodString;
+            outcome: z.ZodLiteral<"conflict">;
+            observed: z.ZodObject<{
+                exists: z.ZodBoolean;
+                revision: z.ZodString;
+            }, z.core.$strict>;
+        }, z.core.$strict>, z.ZodObject<{
+            intentId: z.ZodUUID;
+            agentRef: z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>;
+            path: z.ZodString;
+            operation: z.ZodEnum<{
+                delete: "delete";
+                replace: "replace";
+            }>;
+            operationDigest: z.ZodString;
+            outcome: z.ZodLiteral<"rejected">;
+            code: z.ZodEnum<{
+                agent_home_unavailable: "agent_home_unavailable";
+                agent_ref_mismatch: "agent_ref_mismatch";
+                content_invalid: "content_invalid";
+                intent_digest_mismatch: "intent_digest_mismatch";
+                intent_expired: "intent_expired";
+                intent_invalid: "intent_invalid";
+                intent_revoked: "intent_revoked";
+                memory_md_not_deletable: "memory_md_not_deletable";
+                path_invalid: "path_invalid";
+                placement_changed: "placement_changed";
+                profile_revision_changed: "profile_revision_changed";
+            }>;
+        }, z.core.$strict>, z.ZodObject<{
+            intentId: z.ZodUUID;
+            agentRef: z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>;
+            path: z.ZodString;
+            operation: z.ZodEnum<{
+                delete: "delete";
+                replace: "replace";
+            }>;
+            operationDigest: z.ZodString;
+            outcome: z.ZodLiteral<"uncertain">;
+            observed: z.ZodObject<{
+                exists: z.ZodBoolean;
+                revision: z.ZodString;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "outcome">;
+        recordedAt: z.ZodISODateTime;
+    }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    disposition: z.ZodLiteral<"deferred">;
+    intent: z.ZodObject<{
+        intentId: z.ZodUUID;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        path: z.ZodString;
+        operation: z.ZodEnum<{
+            delete: "delete";
+            replace: "replace";
+        }>;
+        baseRevision: z.ZodString;
+        targetRevision: z.ZodNullable<z.ZodString>;
+        content: z.ZodOptional<z.ZodString>;
+        approvalRef: z.ZodString;
+        operationDigest: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>], "disposition">;
+export type AgentMemoryIntentFetchResponse = z.infer<typeof AgentMemoryIntentFetchResponseSchema>;
+/** The fetch answer schema bound to the reservation the device sent. */
+export declare function agentMemoryIntentFetchResponseSchemaFor(reservation: AgentMemoryIntentReservation): z.ZodDiscriminatedUnion<[z.ZodObject<{
+    disposition: z.ZodLiteral<"release">;
+    intent: z.ZodObject<{
+        intentId: z.ZodUUID;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        path: z.ZodString;
+        operation: z.ZodEnum<{
+            delete: "delete";
+            replace: "replace";
+        }>;
+        baseRevision: z.ZodString;
+        targetRevision: z.ZodNullable<z.ZodString>;
+        content: z.ZodOptional<z.ZodString>;
+        approvalRef: z.ZodString;
+        operationDigest: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    disposition: z.ZodLiteral<"withheld">;
+    intent: z.ZodObject<{
+        intentId: z.ZodUUID;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        path: z.ZodString;
+        operation: z.ZodEnum<{
+            delete: "delete";
+            replace: "replace";
+        }>;
+        baseRevision: z.ZodString;
+        targetRevision: z.ZodNullable<z.ZodString>;
+        content: z.ZodOptional<z.ZodString>;
+        approvalRef: z.ZodString;
+        operationDigest: z.ZodString;
+    }, z.core.$strict>;
+    code: z.ZodEnum<{
+        intent_expired: "intent_expired";
+        intent_revoked: "intent_revoked";
+        placement_changed: "placement_changed";
+        profile_revision_changed: "profile_revision_changed";
+    }>;
+}, z.core.$strict>, z.ZodObject<{
+    disposition: z.ZodLiteral<"terminal">;
+    intent: z.ZodObject<{
+        intentId: z.ZodUUID;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        path: z.ZodString;
+        operation: z.ZodEnum<{
+            delete: "delete";
+            replace: "replace";
+        }>;
+        baseRevision: z.ZodString;
+        targetRevision: z.ZodNullable<z.ZodString>;
+        content: z.ZodOptional<z.ZodString>;
+        approvalRef: z.ZodString;
+        operationDigest: z.ZodString;
+    }, z.core.$strict>;
+    readback: z.ZodObject<{
+        tenantId: z.ZodString;
+        deviceId: z.ZodString;
+        intentId: z.ZodUUID;
+        disposition: z.ZodEnum<{
+            conflict: "conflict";
+            host_terminal: "host_terminal";
+            idempotent: "idempotent";
+            recorded: "recorded";
+        }>;
+        completion: z.ZodDiscriminatedUnion<[z.ZodObject<{
+            intentId: z.ZodUUID;
+            agentRef: z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>;
+            path: z.ZodString;
+            operation: z.ZodEnum<{
+                delete: "delete";
+                replace: "replace";
+            }>;
+            operationDigest: z.ZodString;
+            outcome: z.ZodLiteral<"applied">;
+            result: z.ZodObject<{
+                exists: z.ZodBoolean;
+                revision: z.ZodString;
+            }, z.core.$strict>;
+        }, z.core.$strict>, z.ZodObject<{
+            intentId: z.ZodUUID;
+            agentRef: z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>;
+            path: z.ZodString;
+            operation: z.ZodEnum<{
+                delete: "delete";
+                replace: "replace";
+            }>;
+            operationDigest: z.ZodString;
+            outcome: z.ZodLiteral<"conflict">;
+            observed: z.ZodObject<{
+                exists: z.ZodBoolean;
+                revision: z.ZodString;
+            }, z.core.$strict>;
+        }, z.core.$strict>, z.ZodObject<{
+            intentId: z.ZodUUID;
+            agentRef: z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>;
+            path: z.ZodString;
+            operation: z.ZodEnum<{
+                delete: "delete";
+                replace: "replace";
+            }>;
+            operationDigest: z.ZodString;
+            outcome: z.ZodLiteral<"rejected">;
+            code: z.ZodEnum<{
+                agent_home_unavailable: "agent_home_unavailable";
+                agent_ref_mismatch: "agent_ref_mismatch";
+                content_invalid: "content_invalid";
+                intent_digest_mismatch: "intent_digest_mismatch";
+                intent_expired: "intent_expired";
+                intent_invalid: "intent_invalid";
+                intent_revoked: "intent_revoked";
+                memory_md_not_deletable: "memory_md_not_deletable";
+                path_invalid: "path_invalid";
+                placement_changed: "placement_changed";
+                profile_revision_changed: "profile_revision_changed";
+            }>;
+        }, z.core.$strict>, z.ZodObject<{
+            intentId: z.ZodUUID;
+            agentRef: z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>;
+            path: z.ZodString;
+            operation: z.ZodEnum<{
+                delete: "delete";
+                replace: "replace";
+            }>;
+            operationDigest: z.ZodString;
+            outcome: z.ZodLiteral<"uncertain">;
+            observed: z.ZodObject<{
+                exists: z.ZodBoolean;
+                revision: z.ZodString;
+            }, z.core.$strict>;
+        }, z.core.$strict>], "outcome">;
+        recordedAt: z.ZodISODateTime;
+    }, z.core.$strict>;
+}, z.core.$strict>, z.ZodObject<{
+    disposition: z.ZodLiteral<"deferred">;
+    intent: z.ZodObject<{
+        intentId: z.ZodUUID;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+        path: z.ZodString;
+        operation: z.ZodEnum<{
+            delete: "delete";
+            replace: "replace";
+        }>;
+        baseRevision: z.ZodString;
+        targetRevision: z.ZodNullable<z.ZodString>;
+        content: z.ZodOptional<z.ZodString>;
+        approvalRef: z.ZodString;
+        operationDigest: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>], "disposition">;
 // ==== @byok-sdk/protocol dist/agent-memory-projection.d.ts ====
 import { z } from 'zod';
 /** Capability required before the optional hosted Agent-memory projection can be used. */
@@ -708,6 +1426,10 @@ interface EnvelopeShapeOptions {
         seq: number;
     };
     'provider.provisioning.available': {
+        taskId?: never;
+        seq: number;
+    };
+    'agent.memory.intent.available': {
         taskId?: never;
         seq: number;
     };
@@ -1698,6 +2420,21 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     seq: z.ZodNumber;
     payload: z.ZodObject<{
         requestId: z.ZodUUID;
+    }, z.core.$strict>;
+}, z.core.$strip>, z.ZodObject<{
+    v: z.ZodNumber;
+    id: z.ZodUUID;
+    ts: z.ZodISODateTime;
+    type: z.ZodLiteral<"agent.memory.intent.available">;
+    task_id: z.ZodOptional<z.ZodNever>;
+    session_ref: z.ZodOptional<z.ZodString>;
+    seq: z.ZodNumber;
+    payload: z.ZodObject<{
+        intentId: z.ZodUUID;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
     }, z.core.$strict>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -3230,6 +3967,21 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
         v: z.ZodNumber;
         id: z.ZodUUID;
         ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"agent.memory.intent.available">;
+        task_id: z.ZodOptional<z.ZodNever>;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodNumber;
+        payload: z.ZodObject<{
+            intentId: z.ZodUUID;
+            agentRef: z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
         type: z.ZodLiteral<"task.approve">;
         task_id: z.ZodString;
         session_ref: z.ZodOptional<z.ZodString>;
@@ -4629,6 +5381,21 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
         v: z.ZodNumber;
         id: z.ZodUUID;
         ts: z.ZodISODateTime;
+        type: z.ZodLiteral<"agent.memory.intent.available">;
+        task_id: z.ZodOptional<z.ZodNever>;
+        session_ref: z.ZodOptional<z.ZodString>;
+        seq: z.ZodNumber;
+        payload: z.ZodObject<{
+            intentId: z.ZodUUID;
+            agentRef: z.ZodObject<{
+                agentId: z.ZodString;
+                profileRevision: z.ZodString;
+            }, z.core.$strict>;
+        }, z.core.$strict>;
+    }, z.core.$strip>, z.ZodObject<{
+        v: z.ZodNumber;
+        id: z.ZodUUID;
+        ts: z.ZodISODateTime;
         type: z.ZodLiteral<"task.approve">;
         task_id: z.ZodString;
         session_ref: z.ZodOptional<z.ZodString>;
@@ -5708,6 +6475,8 @@ export { PROVIDER_PROFILE_BINDING_CAPABILITY, PROVIDER_MODEL_CAPABILITIES, Provi
 export type { ProviderProfileRef, ProviderProfileRevision, ProviderProfileHash, ProviderModelCapability, ProviderProfileBinding, } from './provider-profile-binding';
 export { PROVIDER_PROVISIONING_CAPABILITY, PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION, PROVIDER_PROVISIONING_OPERATIONS, PROVIDER_PROVISIONING_OPERATION_GENERATION_MAXIMUM, PROVIDER_PROVISIONING_REJECTION_CODES, PROVIDER_PROVISIONING_HOST_TERMINAL_CODES, PROVIDER_PROVISIONING_DISPOSITIONS, PROVIDER_PROVISIONING_KEY_CHECK_RESULTS, ProviderProvisioningAvailablePayloadSchema, ProviderProvisioningKeyCheckResultSchema, ProviderProvisioningKeyCheckSchema, ProviderProvisioningOperationSchema, ProviderProvisioningOperationGenerationSchema, ProviderProvisioningOperationDigestSchema, ProviderProvisioningRejectionCodeSchema, ProviderProvisioningProviderStatusSchema, ProviderProvisioningCompletionSchema, ProviderProvisioningDispositionSchema, ProviderProvisioningReadbackSchema, } from './provider-provisioning';
 export type { ProviderProvisioningAvailablePayload, ProviderProvisioningOperation, ProviderProvisioningOperationGeneration, ProviderProvisioningOperationDigest, ProviderProvisioningRejectionCode, ProviderProvisioningProviderStatus, ProviderProvisioningCompletion, ProviderProvisioningDisposition, ProviderProvisioningReadback, ProviderProvisioningKeyCheckResult, ProviderProvisioningKeyCheck, } from './provider-provisioning';
+export { AGENT_MEMORY_INTENT_CAPABILITY, AGENT_MEMORY_INTENT_CONTENT_MAX_BYTES, AGENT_MEMORY_INTENT_PATH_MAX_BYTES, AGENT_MEMORY_INTENT_APPROVAL_REF_MAX_BYTES, AGENT_MEMORY_INTENT_OPERATIONS, AGENT_MEMORY_INTENT_HOST_TERMINAL_CODES, AGENT_MEMORY_INTENT_REJECTION_CODES, AGENT_MEMORY_INTENT_READBACK_DISPOSITIONS, AGENT_MEMORY_INTENT_RESERVATIONS, AGENT_MEMORY_INTENT_FETCH_DISPOSITIONS, AGENT_MEMORY_INTENT_FETCH_DISPOSITIONS_BY_RESERVATION, AgentMemoryIntentRevisionSchema, AgentMemoryIntentOperationDigestSchema, AgentMemoryIntentPathSchema, AgentMemoryIntentApprovalRefSchema, AgentMemoryIntentContentSchema, AgentMemoryIntentOperationSchema, AgentMemoryIntentV1Schema, AgentMemoryIntentHostTerminalCodeSchema, AgentMemoryIntentRejectionCodeSchema, AgentMemoryIntentFileObservationSchema, AgentMemoryIntentCompletionSchema, AgentMemoryIntentReadbackDispositionSchema, AgentMemoryIntentReadbackSchema, AgentMemoryIntentReservationSchema, AgentMemoryIntentFetchRequestSchema, AgentMemoryIntentFetchResponseSchema, agentMemoryIntentFetchResponseSchemaFor, } from './agent-memory-intent';
+export type { AgentMemoryIntentRevision, AgentMemoryIntentOperationDigest, AgentMemoryIntentPath, AgentMemoryIntentApprovalRef, AgentMemoryIntentContent, AgentMemoryIntentOperation, AgentMemoryIntentV1, AgentMemoryIntentHostTerminalCode, AgentMemoryIntentRejectionCode, AgentMemoryIntentFileObservation, AgentMemoryIntentCompletion, AgentMemoryIntentReadbackDisposition, AgentMemoryIntentReadback, AgentMemoryIntentReservation, AgentMemoryIntentFetchRequest, AgentMemoryIntentFetchDisposition, AgentMemoryIntentFetchResponse, } from './agent-memory-intent';
 export { AgentEventSchema, AgentEventSpillSchema, AGENT_EVENT_SPILL_UNSTORED_REASON_MAX_LENGTH, UnknownAgentEventSchema, AgentEventOrUnknownSchema, KNOWN_AGENT_EVENT_TYPES, isKnownAgentEvent, partitionAgentEvents, } from './agent-event';
 export type { AgentEvent, AgentEventSpill, UnknownAgentEvent, AgentEventOrUnknown } from './agent-event';
 export { AgentEgressPolicySchema, AgentEgressActivityPolicySchema, AgentReliableQuotaPolicySchema, ContentReadPolicySchema, AgentEgressLaneSchema, AgentEgressDropReasonSchema, AgentContentReadSurfaceSchema, AgentContentActorKindSchema, AgentContentActorSchema, AgentContentDecodeAsSchema, AgentContentMimeTypeSchema, AgentContentReadDecisionSchema, AgentContentReadDenialReasonSchema, AgentEgressContentHashSchema, AgentEgressPolicyRevisionSchema, AgentMessageContractSchema, AgentMessageContentTypeSchema, AgentMessageDestinationBindingSchema, AgentMessageFreshnessCursorSchema, AgentMessageServerContextSchema, AgentMessageEgressRequirementSchema, AGENT_MESSAGE_MAX_BYTES, AGENT_MESSAGE_EGRESS_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_CONTENT_WORKSPACE_READ_CAPABILITY, AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY, AGENT_CONTENT_ARTIFACT_READ_CAPABILITY, } from './agent-egress';
@@ -5723,8 +6492,8 @@ export { TERMINAL_PROJECTION_SELECTION_CAPABILITY, TerminalProjectionContractSch
 export type { TerminalProjectionSelection } from './terminal-projection';
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
-export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, TaskOfferPreparedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
-export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, TaskOfferPreparedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, } from './messages';
+export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, TaskOfferPreparedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
+export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, TaskOfferPreparedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, } from './messages';
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';
 export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
@@ -7662,6 +8431,24 @@ export declare const AgentHomeProjectionPayloadSchema: z.ZodObject<{
     projection: z.ZodType<import("./agent-home-projection").AgentHomeProjectionValue, unknown, z.core.$ZodTypeInternals<import("./agent-home-projection").AgentHomeProjectionValue, unknown>>;
 }, z.core.$strict>;
 export type AgentHomeProjectionPayload = z.infer<typeof AgentHomeProjectionPayloadSchema>;
+/**
+ * Server -> daemon: a Host-approved Agent memory intent is waiting for this
+ * device (capability `agent-memory-intent.v1`, see `agent-memory-intent.ts`).
+ *
+ * `.strict()` and exactly two fields. There is deliberately no path, operation,
+ * revision or content: the device fetches the immutable intent from the Host
+ * under its own device authentication, so a mailbox row or journal line never
+ * holds memory content. `agentRef` routes the home lease and the local ledger
+ * and must equal the fetched intent's `agentRef`.
+ */
+export declare const AgentMemoryIntentAvailablePayloadSchema: z.ZodObject<{
+    intentId: z.ZodUUID;
+    agentRef: z.ZodObject<{
+        agentId: z.ZodString;
+        profileRevision: z.ZodString;
+    }, z.core.$strict>;
+}, z.core.$strict>;
+export type AgentMemoryIntentAvailablePayload = z.infer<typeof AgentMemoryIntentAvailablePayloadSchema>;
 /**
  * Server -> daemon: one task-free, exact-device remote input preparation.
  *
@@ -9861,6 +10648,13 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
     readonly 'provider.provisioning.available': z.ZodObject<{
         requestId: z.ZodUUID;
     }, z.core.$strict>;
+    readonly 'agent.memory.intent.available': z.ZodObject<{
+        intentId: z.ZodUUID;
+        agentRef: z.ZodObject<{
+            agentId: z.ZodString;
+            profileRevision: z.ZodString;
+        }, z.core.$strict>;
+    }, z.core.$strict>;
     readonly 'task.approve': z.ZodObject<{
         approvalId: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;
@@ -10102,7 +10896,7 @@ export declare const MESSAGE_TYPES: MessageType[];
  * (`envelope.ts`) to decide which branches require envelope `seq` (M1
  * redelivery cursor).
  */
-export declare const SERVER_TO_DAEMON_TYPES: readonly ["conn.ack", "task.offer", "task.offer_with_toolsets", "task.offer_for_agent", "task.offer_for_agent_with_egress", "task.offer_for_agent_with_egress_fresh", "task.offer_prepared", "agent.egress.ack", "agent.message.disposition", "agent.content.read", "agent.home.projection", "agent.input.preparation", "provider.provisioning.available", "task.approve", "task.reject", "task.cancel", "task.steer"];
+export declare const SERVER_TO_DAEMON_TYPES: readonly ["conn.ack", "task.offer", "task.offer_with_toolsets", "task.offer_for_agent", "task.offer_for_agent_with_egress", "task.offer_for_agent_with_egress_fresh", "task.offer_prepared", "agent.egress.ack", "agent.message.disposition", "agent.content.read", "agent.home.projection", "agent.input.preparation", "provider.provisioning.available", "agent.memory.intent.available", "task.approve", "task.reject", "task.cancel", "task.steer"];
 /**
  * Message types the daemon sends to the server — the flip side of
  * {@link SERVER_TO_DAEMON_TYPES}. `conn.hello` is deliberately excluded: it's
@@ -10735,5 +11529,5 @@ export declare const STRICT_AGENT_ONLY_CAPABILITY: 'strict-agent-only';
  * cannot accidentally execute the instruction without the required tools.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v8", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v8", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];

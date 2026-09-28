@@ -359,6 +359,10 @@ export type {
   WebCryptoKey,
 } from './sealed-provider-secret';
 
+// Host-approved Agent memory intent identity digest
+export { AGENT_MEMORY_INTENT_DIGEST_VERSION, agentMemoryIntentOperationDigest } from './agent-memory-intent';
+export type { AgentMemoryIntentDigestInput } from './agent-memory-intent';
+
 // Nonce signing domain (§6.2) — the one authority the daemon, the hosted
 // surface, and the reference server all sign/verify against.
 export { NONCE_SIGNING_DOMAIN, nonceSigningBytes } from './pairing';

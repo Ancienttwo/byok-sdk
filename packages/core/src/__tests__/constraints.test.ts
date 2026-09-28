@@ -123,6 +123,7 @@ describe('public API surface', () => {
     './stores',
     './ports-contract',
     './sealed-provider-secret',
+    './agent-memory-intent',
     './in-memory/index',
   ];
 
@@ -141,6 +142,7 @@ describe('public API surface', () => {
 
   it('freezes the runtime export list', () => {
     expect(Object.keys(publicApi).sort()).toEqual([
+      'AGENT_MEMORY_INTENT_DIGEST_VERSION',
       'BOARD_STATUSES',
       'BOARD_TRANSITIONS',
       'ByokCoreError',
@@ -238,6 +240,7 @@ describe('public API surface', () => {
       'TaskAssertionAgentRefSchema',
       'TaskAssertionClaimsSchema',
       'TaskAssertionEnvelopeV1Schema',
+      'agentMemoryIntentOperationDigest',
       'assertCanonicalTimestamp',
       'assertCapability',
       'assertProviderProvisioningConfigDigest',
