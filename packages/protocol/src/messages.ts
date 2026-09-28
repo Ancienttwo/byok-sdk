@@ -620,6 +620,24 @@ export const AgentHomeProjectionPayloadSchema = z
 export type AgentHomeProjectionPayload = z.infer<typeof AgentHomeProjectionPayloadSchema>;
 
 /**
+ * Server -> daemon: a Host-approved Agent memory intent is waiting for this
+ * device (capability `agent-memory-intent.v1`, see `agent-memory-intent.ts`).
+ *
+ * `.strict()` and exactly two fields. There is deliberately no path, operation,
+ * revision or content: the device fetches the immutable intent from the Host
+ * under its own device authentication, so a mailbox row or journal line never
+ * holds memory content. `agentRef` routes the home lease and the local ledger
+ * and must equal the fetched intent's `agentRef`.
+ */
+export const AgentMemoryIntentAvailablePayloadSchema = z
+  .object({
+    intentId: z.uuid(),
+    agentRef: AgentHomeProjectionAgentRefSchema,
+  })
+  .strict();
+export type AgentMemoryIntentAvailablePayload = z.infer<typeof AgentMemoryIntentAvailablePayloadSchema>;
+
+/**
  * The inlined form of `agent.input.preparation`'s authorized context document.
  *
  * Bounded by the SAME `MAX_INLINE_BYTES` (64 KiB) every other inlined artifact
@@ -1352,6 +1370,7 @@ export const MESSAGE_PAYLOAD_SCHEMAS = {
   'agent.home.projection': AgentHomeProjectionPayloadSchema,
   'agent.input.preparation': AgentInputPreparationPayloadSchema,
   'provider.provisioning.available': ProviderProvisioningAvailablePayloadSchema,
+  'agent.memory.intent.available': AgentMemoryIntentAvailablePayloadSchema,
   'task.approve': TaskApprovePayloadSchema,
   'task.reject': TaskRejectPayloadSchema,
   'task.cancel': TaskCancelPayloadSchema,
@@ -1391,6 +1410,7 @@ export const SERVER_TO_DAEMON_TYPES = [
   'agent.home.projection',
   'agent.input.preparation',
   'provider.provisioning.available',
+  'agent.memory.intent.available',
   'task.approve',
   'task.reject',
   'task.cancel',

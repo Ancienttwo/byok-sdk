@@ -320,6 +320,9 @@ function redactForAudit(event: DaemonEvent): Record<string, unknown> {
       return { ...base, taskId: event.taskId, decision: event.decision, reasonSize: byteSize(event.reason) };
     case 'runtime-disposal-failed':
       return { ...base, taskId: event.taskId, runtimeId: event.runtimeId, stage: event.stage, reason: event.reason };
+    case 'agent-memory-intent-integrity':
+      // WP2I-S2: metadata only by construction (the event has no other field).
+      return { ...base, intentId: event.intentId, disposition: event.disposition };
     case 'device-assertion':
       // Plan `device-assertion-broker`. There is no signature or envelope to
       // drop here — the event type cannot carry either (see `observer.ts`'s
@@ -515,6 +518,13 @@ function reconstructDaemonEvent(raw: Record<string, unknown>): DaemonEvent | und
         reason: reasonSize === undefined ? undefined : placeholderFor(reasonSize),
       };
     }
+    case 'agent-memory-intent-integrity':
+      return {
+        kind: 'agent-memory-intent-integrity',
+        ts,
+        intentId: str(raw.intentId),
+        disposition: str(raw.disposition) as 'conflict' | 'host_terminal',
+      };
     case 'runtime-disposal-failed':
       return {
         kind: 'runtime-disposal-failed',

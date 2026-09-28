@@ -195,6 +195,15 @@ export type {
   ProviderProvisioningNoticeFailureReason,
 } from './daemon/provider-provisioning';
 export {
+  AgentMemoryIntentNoticeError,
+  AGENT_MEMORY_INTENT_NOTICE_FAILURE_REASONS,
+} from './daemon/agent-memory-intent';
+export type {
+  AgentMemoryIntentTransport,
+  AgentMemoryIntentFetchInput,
+  AgentMemoryIntentNoticeFailureReason,
+} from './daemon/agent-memory-intent';
+export {
   AgentMemoryError,
   AgentMemoryRevisionConflictError,
   isAgentMemorySecureFilesystemAvailable,

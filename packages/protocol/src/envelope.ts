@@ -77,6 +77,7 @@ export const EnvelopeSchema = z.discriminatedUnion('type', [
   envelopeShape('agent.home.projection', FORBIDDEN_TASK_ID, REQUIRED_SEQ),
   envelopeShape('agent.input.preparation', FORBIDDEN_TASK_ID, REQUIRED_SEQ),
   envelopeShape('provider.provisioning.available', FORBIDDEN_TASK_ID, REQUIRED_SEQ),
+  envelopeShape('agent.memory.intent.available', FORBIDDEN_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.approve', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.reject', REQUIRED_TASK_ID, REQUIRED_SEQ),
   envelopeShape('task.cancel', REQUIRED_TASK_ID, REQUIRED_SEQ),

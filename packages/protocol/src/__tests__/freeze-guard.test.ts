@@ -133,6 +133,7 @@ function codecRequirednessMatrix(): CodecRequirednessMatrix {
     'agent.home.projection': { taskId: 'optional', seq: 'required' },
     'agent.input.preparation': { taskId: 'optional', seq: 'required' },
     'provider.provisioning.available': { taskId: 'optional', seq: 'required' },
+    'agent.memory.intent.available': { taskId: 'optional', seq: 'required' },
     'task.approve': { taskId: 'required', seq: 'required' },
     'task.reject': { taskId: 'required', seq: 'required' },
     'task.cancel': { taskId: 'required', seq: 'required' },
@@ -229,6 +230,10 @@ type CodecRequirednessMatrix = {
   'provider.provisioning.available': {
     taskId: FieldRequiredness<'provider.provisioning.available', 'taskId'>;
     seq: FieldRequiredness<'provider.provisioning.available', 'seq'>;
+  };
+  'agent.memory.intent.available': {
+    taskId: FieldRequiredness<'agent.memory.intent.available', 'taskId'>;
+    seq: FieldRequiredness<'agent.memory.intent.available', 'seq'>;
   };
   'task.approve': { taskId: FieldRequiredness<'task.approve', 'taskId'>; seq: FieldRequiredness<'task.approve', 'seq'> };
   'task.reject': { taskId: FieldRequiredness<'task.reject', 'taskId'>; seq: FieldRequiredness<'task.reject', 'seq'> };
@@ -681,6 +686,8 @@ function minimalPayloadForProbe(type: MessageType): unknown {
       };
     case 'provider.provisioning.available':
       return { requestId: '00000000-0000-4000-8000-000000000026' };
+    case 'agent.memory.intent.available':
+      return { intentId: '00000000-0000-4000-8000-000000000027', agentRef: { agentId: 'agent-1', profileRevision: '7' } };
     case 'task.approve':
       return {};
     case 'task.reject':
@@ -729,7 +736,8 @@ function fullEnvelopeFor(type: MessageType): Record<string, unknown> {
   if (
     type !== 'agent.home.projection' &&
     type !== 'agent.input.preparation' &&
-    type !== 'provider.provisioning.available'
+    type !== 'provider.provisioning.available' &&
+    type !== 'agent.memory.intent.available'
   ) {
     envelope.task_id = 'task-1';
   }

@@ -9,6 +9,9 @@ import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../types';
 import { TestServer } from './fixtures/test-server';
+import { AGENT_MEMORY_INTENT_CAPABILITY } from '@byok-sdk/protocol';
+import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
+import type { AgentMemoryIntentTransport } from '../daemon/agent-memory-intent';
 
 const PI_FIXTURE = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 const CLAUDE_FIXTURE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
@@ -311,5 +314,109 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
       },
       [],
     )).toThrow(/mutually exclusive/);
+  });
+});
+
+/**
+ * WP2I-S2: `agent-memory-intent.v1` is advertised only when a Host transport,
+ * an Agent home, the secure memory filesystem and a backend whose ledger write
+ * is a proven durable barrier are ALL present. Today that is the native Linux
+ * descriptor backend on a filesystem that honors directory fsync. Windows,
+ * macOS without a helper, and the (unproven) macOS helper backend never
+ * advertise.
+ */
+describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
+  let server: TestServer;
+  let daemon: Daemon | undefined;
+  const transport: AgentMemoryIntentTransport = {
+    fetch: async () => { throw new Error('not reached by a capability test'); },
+    complete: async () => { throw new Error('not reached by a capability test'); },
+  };
+
+  beforeEach(async () => {
+    server = await TestServer.start();
+  });
+
+  afterEach(async () => {
+    await daemon?.stop();
+    daemon = undefined;
+    await server.close();
+  });
+
+  async function helloCapabilities(overrides: { transport?: AgentMemoryIntentTransport; agentHome?: boolean; helperBin?: string }): Promise<readonly string[]> {
+    const workspaceRoot = await tmpDir('byok-conn-hello-intent-workspace-');
+    const storeDir = await tmpDir('byok-conn-hello-intent-store-');
+    const hostStorageRoot = await tmpDir('byok-conn-hello-intent-root-');
+    daemon = createDaemonWithAdapters(
+      {
+        localAgentRelease: { version: '0.0.0-test' },
+        productName: 'Test Product',
+        productId: 'test-product',
+        serverUrl: server.url,
+        workspaceRoot,
+        storeDir,
+        ...(overrides.agentHome === false ? {} : { agentHome: { hostStorageRoot } }),
+        ...(overrides.transport === undefined ? {} : { agentMemoryIntents: overrides.transport }),
+        ...(overrides.helperBin === undefined ? {} : { agentMemoryFilesystem: { helperBin: overrides.helperBin } }),
+      },
+      [],
+    );
+    await daemon.pair('pairing-code');
+    await daemon.start();
+    const hello = await server.waitFor((event) => event.type === 'conn.hello');
+    if (hello.type !== 'conn.hello') throw new Error('unreachable');
+    return hello.payload.capabilities ?? [];
+  }
+
+  it('advertises with a transport and an Agent home only where the native backend is proven (Linux)', async () => {
+    const capabilities = await helloCapabilities({ transport });
+    if (isAgentMemorySecureFilesystemAvailable(false)) {
+      expect(capabilities).toContain(AGENT_MEMORY_INTENT_CAPABILITY);
+    } else {
+      // Windows, and macOS without a helper: no secure backend, no capability.
+      expect(capabilities).not.toContain(AGENT_MEMORY_INTENT_CAPABILITY);
+    }
+  });
+
+  it('does not advertise without a Host transport', async () => {
+    expect(await helloCapabilities({})).not.toContain(AGENT_MEMORY_INTENT_CAPABILITY);
+  });
+
+  it('does not advertise without an Agent home', async () => {
+    expect(await helloCapabilities({ transport, agentHome: false })).not.toContain(AGENT_MEMORY_INTENT_CAPABILITY);
+  });
+
+  (process.platform === 'darwin' ? it : it.skip)('does not advertise on macOS even with the external helper configured (its barrier is unproven)', async () => {
+    const capabilities = await helloCapabilities({ transport, helperBin: '/opt/byok-agent-memory-fs' });
+    expect(capabilities).not.toContain(AGENT_MEMORY_INTENT_CAPABILITY);
+  });
+
+  it('Windows has no secure memory backend, with or without a helper', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+    if (descriptor === undefined) throw new Error('process.platform descriptor is unavailable');
+    Object.defineProperty(process, 'platform', { ...descriptor, value: 'win32' });
+    try {
+      expect(isAgentMemorySecureFilesystemAvailable(false)).toBe(false);
+      expect(isAgentMemorySecureFilesystemAvailable(true)).toBe(false);
+    } finally {
+      Object.defineProperty(process, 'platform', descriptor);
+    }
+  });
+
+  it('rejects a malformed transport at construction', async () => {
+    const workspaceRoot = await tmpDir('byok-conn-hello-intent-bad-workspace-');
+    const storeDir = await tmpDir('byok-conn-hello-intent-bad-store-');
+    expect(() => createDaemonWithAdapters(
+      {
+        localAgentRelease: { version: '0.0.0-test' },
+        productName: 'Test Product',
+        productId: 'test-product',
+        serverUrl: server.url,
+        workspaceRoot,
+        storeDir,
+        agentMemoryIntents: { fetch: async () => undefined } as unknown as AgentMemoryIntentTransport,
+      },
+      [],
+    )).toThrow(/agentMemoryIntents must be a transport/u);
   });
 });

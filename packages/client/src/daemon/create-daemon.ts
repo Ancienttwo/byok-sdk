@@ -27,6 +27,7 @@ import {
   TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   PROVIDER_PROFILE_BINDING_CAPABILITY,
   PROVIDER_PROVISIONING_CAPABILITY,
+  AGENT_MEMORY_INTENT_CAPABILITY,
   AgentContentReceiptPayloadSchema,
 } from '@byok-sdk/protocol';
 import type {
@@ -192,7 +193,18 @@ import type { McpLaunchCwdConfig } from './trusted-launch-cwd';
 import { preflightAgentMessageMcp } from './agent-message-mcp-preflight';
 import { resolveAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
 import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
-import { isAgentMemorySecureFilesystemAvailable, type AgentMemoryHostedProjection } from './agent-memory';
+import {
+  isAgentMemorySecureFilesystemAvailable,
+  probeAgentMemoryStrictDirectorySync,
+  type AgentMemoryHostedProjection,
+} from './agent-memory';
+import {
+  NATIVE_AGENT_MEMORY_INTENT_BACKEND,
+  createAgentMemoryIntentProcessor,
+  helperAgentMemoryIntentBackend,
+  type AgentMemoryIntentBackend,
+  type AgentMemoryIntentTransport,
+} from './agent-memory-intent';
 import { isAgentMemoryFilesystemHelperSupported } from './agent-memory-fs-helper';
 import type { AgentMemoryFilesystemHelperConfig } from './agent-memory-filesystem';
 import {
@@ -669,6 +681,22 @@ export interface DaemonConfig {
    */
   providerProvisioning?: ProviderProvisioningHandler;
   /**
+   * Host transport for the task-free `agent.memory.intent.available` notice
+   * (Host-approved Agent memory intents). See {@link AgentMemoryIntentTransport}.
+   *
+   * OFF by default. The `agent-memory-intent.v1` capability is advertised only
+   * while this transport is present AND `agentHome` is configured AND the
+   * secure memory filesystem is available AND that backend's ledger write is
+   * a proven durable barrier (temp fsync, rename, directory fsync). Today that
+   * is the native Linux backend on a filesystem that honors directory fsync;
+   * Windows, macOS without a helper, and the external macOS helper backend do
+   * not advertise. A notice that arrives without the capability is NOT
+   * acknowledged: it fails `transport_unconfigured` or
+   * `filesystem_unavailable` before any fetch. There is no control-socket
+   * method for intents; the only entry is the mailbox notice.
+   */
+  agentMemoryIntents?: AgentMemoryIntentTransport;
+  /**
    * Operator input to the MCP toolset launch boundary
    * (`./trusted-launch-cwd.ts`), forwarded verbatim to
    * `TaskRunnerDeps.mcpLaunchCwd`.
@@ -1090,6 +1118,7 @@ function computeCapabilities(
   providerProfileBindingConfigured = false,
   inputPreparationConfigured = false,
   providerProvisioningConfigured = false,
+  agentMemoryIntentsProven = false,
 ): CapabilityFlag[] {
   const flags: CapabilityFlag[] = [];
   if (adapters.some((adapter) => adapter.descriptor.capabilities.steer)) flags.push('steer');
@@ -1126,6 +1155,9 @@ function computeCapabilities(
   // Advertised only while the Host injected a handler: the Host's enqueue
   // gate reads this flag, so an unconfigured device is never sent a notice.
   if (providerProvisioningConfigured) flags.push(PROVIDER_PROVISIONING_CAPABILITY);
+  // Advertised only with a Host transport, an Agent home, a secure memory
+  // filesystem, and a backend whose ledger write is a proven durable barrier.
+  if (agentMemoryIntentsProven) flags.push(AGENT_MEMORY_INTENT_CAPABILITY);
   if (agentEgressConfigured) {
     flags.push(
       AGENT_EGRESS_POLICY_CAPABILITY,
@@ -1371,6 +1403,15 @@ export function buildDaemonWithAdapters(
 ): Daemon {
   if (config.providerProvisioning !== undefined && typeof config.providerProvisioning !== 'function') {
     throw new Error('DaemonConfig.providerProvisioning must be a handler function when present');
+  }
+  if (
+    config.agentMemoryIntents !== undefined &&
+    (config.agentMemoryIntents === null ||
+      typeof config.agentMemoryIntents !== 'object' ||
+      typeof config.agentMemoryIntents.fetch !== 'function' ||
+      typeof config.agentMemoryIntents.complete !== 'function')
+  ) {
+    throw new Error('DaemonConfig.agentMemoryIntents must be a transport with fetch and complete functions when present');
   }
   if (config.agentHome !== undefined && config.gitWorkspace !== undefined) {
     throw new Error(
@@ -2188,6 +2229,7 @@ export function buildDaemonWithAdapters(
     // own doc comment on why this isn't re-probed on every reconnect).
     observer.noteRuntimesDetected(runtimes);
     detectedRuntimeFacts = runtimes;
+    const agentMemoryIntentBackend = await provenAgentMemoryIntentBackend();
     const capabilities = computeCapabilities(
       adapters,
       config.agentHome !== undefined,
@@ -2198,6 +2240,7 @@ export function buildDaemonWithAdapters(
       config.piByokLauncher !== undefined,
       inputPreparationService !== undefined,
       config.providerProvisioning !== undefined,
+      agentMemoryIntentBackend !== undefined,
     );
     const agentHomeProjectionCompletion = agentHomeManager?.supportsTaskFreeProjection() === true
       ? new AgentHomeProjectionCompletionClient({
@@ -2212,6 +2255,18 @@ export function buildDaemonWithAdapters(
       tenantId: record.tenantId,
       deviceId: record.deviceId,
       handler: config.providerProvisioning,
+    });
+    // Constructed unconditionally so a stale notice is answered with a closed
+    // reason before any fetch: no transport → `transport_unconfigured`; no
+    // proven backend (the capability was not advertised) →
+    // `filesystem_unavailable`. Either keeps the mailbox row and the cursor.
+    const processAgentMemoryIntentNotice = createAgentMemoryIntentProcessor({
+      tenantId: record.tenantId,
+      deviceId: record.deviceId,
+      transport: config.agentMemoryIntents,
+      homes: agentHomeManager,
+      backend: agentMemoryIntentBackend,
+      onIntegrity: (event) => observer.noteAgentMemoryIntentIntegrity(event),
     });
 
     /**
@@ -2541,6 +2596,14 @@ export function buildDaemonWithAdapters(
       await handleRemoteInputPreparation(envelope.payload);
       return true;
     };
+    const handleAgentMemoryIntentEnvelope = async (envelope: Envelope): Promise<boolean> => {
+      if (envelope.type !== 'agent.memory.intent.available') return false;
+      // Task-free and never journaled, like provisioning: resolves only after
+      // the Host readback matched a durable terminal and the `ackedAt`
+      // barrier succeeded. Any throw keeps the row and the cursor.
+      await processAgentMemoryIntentNotice(envelope.payload);
+      return true;
+    };
     const handleProviderProvisioningEnvelope = async (envelope: Envelope): Promise<boolean> => {
       if (envelope.type !== 'provider.provisioning.available') return false;
       // Task-free and never journaled: it is consumed here, ahead of the
@@ -2731,6 +2794,7 @@ export function buildDaemonWithAdapters(
               if (await handleAgentHomeProjectionEnvelope(envelope)) return;
               if (await handleAgentInputPreparationEnvelope(envelope)) return;
               if (await handleProviderProvisioningEnvelope(envelope)) return;
+              if (await handleAgentMemoryIntentEnvelope(envelope)) return;
               if (await handleAgentEgressEnvelope(envelope)) return;
               if (await handleAgentContentReadEnvelope(envelope)) return;
               // S3b (L-003): §12.7.2.1's `emergency` row — "fail-closed，不 ack
@@ -2773,6 +2837,7 @@ export function buildDaemonWithAdapters(
               if (envelope.type === 'agent.home.projection') return handleAgentHomeProjectionEnvelope(envelope).then(() => undefined);
               if (envelope.type === 'agent.input.preparation') return handleAgentInputPreparationEnvelope(envelope).then(() => undefined);
               if (envelope.type === 'provider.provisioning.available') return handleProviderProvisioningEnvelope(envelope).then(() => undefined);
+              if (envelope.type === 'agent.memory.intent.available') return handleAgentMemoryIntentEnvelope(envelope).then(() => undefined);
               if (envelope.type === 'agent.egress.ack') return handleAgentEgressEnvelope(envelope).then(() => undefined);
               if (envelope.type === 'agent.message.disposition') return runner?.handleEnvelope(envelope) ?? Promise.resolve();
               if (envelope.type === 'agent.content.read') return handleAgentContentReadEnvelope(envelope).then(() => undefined);
@@ -4141,6 +4206,29 @@ export function buildDaemonWithAdapters(
     } finally {
       await binding.lease.release();
     }
+  }
+
+  /**
+   * The one memory backend Host-approved Agent memory intents may use, or
+   * `undefined` (the capability stays unadvertised and every notice fails
+   * closed). All of: a Host transport, an Agent home, the secure memory
+   * filesystem on this platform, a backend whose ledger write is a proven
+   * durable barrier, and — for the native backend — runtime evidence that the
+   * Agent-home filesystem honors directory fsync (the strict barrier would
+   * otherwise fail every write).
+   */
+  async function provenAgentMemoryIntentBackend(): Promise<AgentMemoryIntentBackend | undefined> {
+    if (config.agentMemoryIntents === undefined || config.agentHome === undefined || agentHomeManager === undefined) return undefined;
+    const helper = config.agentMemoryFilesystem;
+    if (!isAgentMemorySecureFilesystemAvailable(helper !== undefined)) return undefined;
+    const backend = helper === undefined
+      ? NATIVE_AGENT_MEMORY_INTENT_BACKEND
+      : helperAgentMemoryIntentBackend(path.resolve(helper.helperBin));
+    if (!backend.strictLedgerBarrier) return undefined;
+    if (backend.openFilesystem === undefined && !(await probeAgentMemoryStrictDirectorySync(config.agentHome.hostStorageRoot))) {
+      return undefined;
+    }
+    return backend;
   }
 
   /**
