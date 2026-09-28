@@ -911,7 +911,7 @@ import { type RecurringExecutionInput } from './recurring';
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import { type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -1095,6 +1095,13 @@ export type AgentHomeProjectionInput = AgentHomeProjectionPayload;
  * device over Host routes; nothing else can be carried by this input.
  */
 export type ProviderProvisioningNoticeInput = ProviderProvisioningAvailablePayload;
+/**
+ * Task-free Host-approved Agent memory intent notice: exactly
+ * `{ intentId, agentRef }`. The immutable intent, and any memory content it
+ * carries, stays in the Host's own store and is fetched by the device over
+ * Host routes; nothing else can be carried by this input.
+ */
+export type AgentMemoryIntentNoticeInput = AgentMemoryIntentAvailablePayload;
 /** Exact request identity a host must echo to read back durable projection status. */
 export type AgentHomeProjectionStatusInput = AgentHomeProjectionReceiptInput;
 /** Task-free exact-device remote preparation request, intentionally unrelated to TaskAttempt. */
@@ -1231,6 +1238,20 @@ export interface ByokCloud {
      * provisioning receipt of its own.
      */
     enqueueProviderProvisioningNotice(tenant: TenantId, deviceId: string, input: ProviderProvisioningNoticeInput): Promise<EnqueuedAgentControl>;
+    /**
+     * Durable, task-free `agent.memory.intent.available` notice for precisely
+     * one device that durably advertised `agent-memory-intent.v1`. The payload
+     * is validated strictly before admission, and admission happens before the
+     * mailbox append, so a refused call leaves no delivery row behind.
+     *
+     * Idempotent per (tenant, device, intentId): the mailbox message id is
+     * derived from that identity, so a retried enqueue returns the existing row
+     * and its seq instead of appending a second notice; a retry naming a
+     * different `agentRef` for the same intent fails `mailbox_receipt_mismatch`.
+     * Approval, release, completion and readback are Host authority on Host
+     * routes; this plane records no intent receipt of its own.
+     */
+    enqueueAgentMemoryIntentNotice(tenant: TenantId, deviceId: string, input: AgentMemoryIntentNoticeInput): Promise<EnqueuedAgentControl>;
     /** Tenant/device/request-bound durable desired-state and terminal-outcome readback. */
     getInputPreparationStatus(tenant: TenantId, deviceId: string, input: InputPreparationStatusInput): Promise<InputPreparationReadback | undefined>;
     /** Direct device completion endpoint authority; first exact terminal receipt wins. */
@@ -1964,7 +1985,7 @@ export { isTenantId, tenantId } from '@byok-sdk/core';
 export type { TenantId } from '@byok-sdk/core';
 export { createByokCloud } from './cloud';
 export type { TaskAgentMessage } from './task-agent-message';
-export type { ByokCloud, ByokCloudOptions, AgentDispatchInput, AgentEgressDispatchInput, AgentEgressFreshSessionDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, ProviderProvisioningNoticeInput, AgentHomeProjectionStatusInput, InputPreparationInput, InputPreparationStatusInput, ApproveTaskOptions, EnqueueOfferInput, EnqueueToolsetOfferInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedInputPreparation, EnqueuedOffer, TaskOfferReadback, } from './cloud';
+export type { ByokCloud, ByokCloudOptions, AgentDispatchInput, AgentEgressDispatchInput, AgentEgressFreshSessionDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, ProviderProvisioningNoticeInput, AgentMemoryIntentNoticeInput, AgentHomeProjectionStatusInput, InputPreparationInput, InputPreparationStatusInput, ApproveTaskOptions, EnqueueOfferInput, EnqueueToolsetOfferInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedInputPreparation, EnqueuedOffer, TaskOfferReadback, } from './cloud';
 export { agentHomeProjectionCompletionKey, agentHomeProjectionRequestKey, readAgentHomeProjectionStatus, recordAgentHomeProjectionCompletion, } from './agent-home-projections';
 export type { AgentHomeProjectionReceiptInput } from './agent-home-projections';
 export { inputPreparationCompletionKey, inputPreparationRequestKey, readInputPreparationStatus, recordInputPreparationCompletion, sameInputPreparationRequest, } from './input-preparations';

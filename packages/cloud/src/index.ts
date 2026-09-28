@@ -32,6 +32,7 @@ export type {
   AgentContentReadInput,
   AgentHomeProjectionInput,
   ProviderProvisioningNoticeInput,
+  AgentMemoryIntentNoticeInput,
   AgentHomeProjectionStatusInput,
   InputPreparationInput,
   InputPreparationStatusInput,
