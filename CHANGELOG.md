@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.23.0 / @byok-sdk/keys 0.8.0 — 2026-09-28 (prepared; not published)
+## 0.23.0 / @byok-sdk/keys 0.8.0 — 2026-09-28 (published; tag `v0.23.0` at `bcf65a3f`)
 
 - **Added** — sealed provider provisioning: core sealed provider secret v1
   (WebCrypto-only one-shot HPKE P-256/AES-128-GCM) and

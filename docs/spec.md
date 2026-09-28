@@ -161,7 +161,7 @@ authorization and registry readback. The current independent keys candidate is
 dispatch release, `0.23.0`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-The 0.23.0 train is prepared, not yet published. It adds sealed remote provider
+The 0.23.0 train is published (see below). It adds sealed remote provider
 provisioning (see "Sealed remote provider provisioning" below). keys 0.8.0 is a
 MINOR: it adds credential custody and sealed provisioning authority and makes a
 pre-1.0 breaking change to `ProviderProfileStore`, which now requires the
@@ -170,7 +170,7 @@ custody methods. Sealed requests now require `expectedEnrollmentRevision` and
 implementation-identity) must resolve to 0.23.0. Notes:
 `docs/releases/v0.23.0.md`.
 
-The 0.22.0 train is published (see below). It carries official Pi 0.87.1,
+The 0.22.0 train is published. It carries official Pi 0.87.1,
 wire/record 7, envelope v4 and the complete Host-owned systemPrompt contract.
 keys 0.7.0 is a MINOR even though its own source is unchanged since v0.21.0:
 its credential launcher consumes implementation-identity's changed strict
@@ -180,10 +180,10 @@ edges (core and implementation-identity) must resolve to 0.22.0.
 The identity/core topology merge remains deferred as a separate public package
 and dependency-graph cutover; it is not part of version preparation.
 
-The last train the registry has confirmed is `0.22.0` with keys `0.7.0`,
-published on 2026-09-25 from the `v0.22.0` tag (`0962f14f`); both read back as
-`latest` on 2026-09-25. The previous train, `0.21.0` / keys `0.6.2`, was
-published on 2026-09-24/25 from the `v0.21.0` tag (`8b7a2121`). The registry, not this document, is the
+The last train the registry has confirmed is `0.23.0` with keys `0.8.0`,
+published on 2026-09-28 from the `v0.23.0` tag (`bcf65a3f`); both read back as
+`latest` on 2026-09-28. The previous train, `0.22.0` / keys `0.7.0`, was
+published on 2026-09-25 from the `v0.22.0` tag (`0962f14f`). The registry, not this document, is the
 authority on what has shipped — read it back with `npm view @byok-sdk/core version`
 and `npm view @byok-sdk/keys version`.
 
