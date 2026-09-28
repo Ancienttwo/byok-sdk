@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.24.0 / @byok-sdk/keys 0.8.1 — 2026-09-28 (prepared; not published)
+
+- **Added (client)** — `readDeviceEnrollmentIdentity` (non-secret
+  `{ tenantId, deviceId, proofKeyId, proofKeyEpoch, enrollmentRevision }`,
+  `enrollmentRevision = String(proofKeyEpoch)`), `createStoredDeviceProofSigner`
+  (device proofs with the stored enrollment key, scoped to one enrollment
+  identity and an explicit operation allowlist; closed `DeviceProofSignerError`)
+  and `retireInputPreparation` (preview/execute library form of
+  `byok-agent retire-input-preparation`, which now renders it).
+- **Changed (client)** — the retirement's owner-lease refusal is
+  `InputPreparationRetirementStoreBusyError` (cause: the internal owner error).
+- **keys 0.8.1** — no source change; packed core and implementation-identity
+  edges move to 0.24.0.
+- [Release notes](docs/releases/v0.24.0.md).
+
 ## 0.23.0 / @byok-sdk/keys 0.8.0 — 2026-09-28 (published; tag `v0.23.0` at `bcf65a3f`)
 
 - **Added** — sealed provider provisioning: core sealed provider secret v1

@@ -7,6 +7,13 @@ composition over Postgres and R2.
 
 ## Release status
 
+The current source candidate is **0.24.0**, with independent keys **0.8.1**;
+publication is pending. The [release notes](docs/releases/v0.24.0.md) describe
+the new host surfaces in `@byok-sdk/client`: the non-secret enrollment identity
+read, a scoped device-proof signer backed by the stored enrollment key, and the
+programmatic input-preparation retirement. Versioned install examples below
+target this candidate and become usable after registry publication.
+
 The current published release is **0.23.0**, with independent keys **0.8.0**,
 published to npm on 2026-09-28 from the `v0.23.0` tag target (`bcf65a3f`, the
 PR #237 merge) and now `latest` on the registry; readback is
@@ -62,7 +69,7 @@ Install the scoped packages your composition uses and import each one under
 its own name. For example, a self-hosted composition:
 
 ```sh
-npm install @byok-sdk/server@0.23.0 @byok-sdk/client@0.23.0
+npm install @byok-sdk/server@0.24.0 @byok-sdk/client@0.24.0
 ```
 
 ```ts
@@ -202,7 +209,7 @@ It is intentionally outside the dispatch packages and their entire dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.8.0
+npm install @byok-sdk/keys@0.8.1
 ```
 
 ## Host connector composition
@@ -218,5 +225,5 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.8.0`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.8.1`
 require Node.js 22.22.0 or newer. MIT licensed.
