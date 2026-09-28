@@ -129,7 +129,10 @@ and calls `applySealedProviderProvisioning`.
   write, and any difference rejects with zero credential-store writes. The
   fence covers exactly the placement/enrollment writers that update the local
   record while holding `withConfigurationLock(profileStore, …)`; a writer that
-  changes placement outside that lock is not fenced by this check.
+  changes placement outside that lock is not fenced by this check. A
+  `@byok-sdk/client` host takes tenant, device and `enrollmentRevision` from
+  `readDeviceEnrollmentIdentity` (`enrollmentRevision = String(proofKeyEpoch)`,
+  which the Host issues from its device row's `proof_key_epoch`).
 - **Request identity.** Before any side effect, a request's id and immutable
   digest are reserved store-wide (not per profile) in the same transaction
   that writes its pending marker and raises its watermark; its receipt later

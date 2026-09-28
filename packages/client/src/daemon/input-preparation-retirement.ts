@@ -3,8 +3,11 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { atomicWriteFile } from '../util/atomic-write';
 import { ensureSecureDir } from '../util/secure-dir';
-import { acquireDaemonOwner } from './daemon-owner';
+import { pickPlainDataProperties } from '../util/plain-data';
+import { connectControlClient } from '../bin/control-client';
+import { acquireDaemonOwner, DaemonOwnerActiveError } from './daemon-owner';
 import { INPUT_PREPARATION_RECORD_VERSION } from './input-preparation-store';
+import { DeviceStore } from './store';
 
 /**
  * The bounded, operator-invoked retirement of an input-preparation namespace
@@ -23,6 +26,11 @@ import { INPUT_PREPARATION_RECORD_VERSION } from './input-preparation-store';
  *
  * Every path is derived from the resolved storeDir; Agent home and Agent
  * memory are never touched.
+ *
+ * {@link retireInputPreparation} is the one public entry point (preview and
+ * execute); the `byok-agent retire-input-preparation` CLI is a thin renderer
+ * over the same function, so a branded host CLI can own this step without
+ * shipping the SDK CLI.
  */
 
 export const INPUT_PREPARATION_RETIREMENT_COMMAND = 'retire-input-preparation';
@@ -94,7 +102,7 @@ export type InputPreparationRetirementResult =
 
 export class InputPreparationRetirementConfirmationRequiredError extends Error {
   constructor() {
-    super(`${INPUT_PREPARATION_RETIREMENT_COMMAND} executes only with explicit --yes confirmation`);
+    super(`${INPUT_PREPARATION_RETIREMENT_COMMAND} executes only with explicit confirmation (CLI: --yes)`);
     this.name = 'InputPreparationRetirementConfirmationRequiredError';
   }
 }
@@ -103,6 +111,14 @@ export class InputPreparationRetirementDaemonRunningError extends Error {
   constructor() {
     super(`${INPUT_PREPARATION_RETIREMENT_COMMAND} refuses while the daemon control socket is reachable; stop the daemon first`);
     this.name = 'InputPreparationRetirementDaemonRunningError';
+  }
+}
+
+/** Another process (a daemon, pair, doctor or retirement) holds the store's owner lease. Nothing was written. */
+export class InputPreparationRetirementStoreBusyError extends Error {
+  constructor(options: { cause: unknown }) {
+    super(`${INPUT_PREPARATION_RETIREMENT_COMMAND} refuses while another process holds the store owner lease; nothing was written`, options);
+    this.name = 'InputPreparationRetirementStoreBusyError';
   }
 }
 
@@ -341,7 +357,8 @@ export interface ExecuteInputPreparationRetirementOptions {
 }
 
 /**
- * Retire the namespace. Refuses (typed, zero writes) unless confirmed, the
+ * Retire the namespace (package-internal core; hosts call
+ * {@link retireInputPreparation}). Refuses (typed, zero writes) unless confirmed, the
  * control socket is offline, the `doctor` owner lease is acquired, and every
  * record line parses, sits at an integer record version below
  * {@link INPUT_PREPARATION_RECORD_VERSION} and carries no pin. An absent or
@@ -355,7 +372,13 @@ export async function executeInputPreparationRetirement(
   if (options.controlOnline) throw new InputPreparationRetirementDaemonRunningError();
   const clock = options.clock ?? (() => new Date());
   const root = path.resolve(storeDir);
-  const owner = await acquireDaemonOwner(root, 'doctor', clock);
+  let owner: Awaited<ReturnType<typeof acquireDaemonOwner>>;
+  try {
+    owner = await acquireDaemonOwner(root, 'doctor', clock);
+  } catch (err) {
+    if (err instanceof DaemonOwnerActiveError) throw new InputPreparationRetirementStoreBusyError({ cause: err });
+    throw err;
+  }
   try {
     const inspection = await inspectInputPreparationNamespace(root);
     if (inspection.status !== 'present') return { status: 'nothing-to-retire', inspection };
@@ -426,4 +449,102 @@ export async function executeInputPreparationRetirement(
   } finally {
     await owner.release();
   }
+}
+
+/** The store {@link retireInputPreparation} acts on: the daemon's `productId` and `storeDir`. */
+export interface RetireInputPreparationTarget {
+  readonly productId: string;
+  /** Same value as `DaemonConfig.storeDir`; omitted resolves the product default. */
+  readonly storeDir?: string;
+}
+
+/**
+ * `preview`: read-only structural inspection, no socket probe, no lease, no
+ * write. `execute`: requires `confirmed: true` (the CLI's `--yes`).
+ */
+export type RetireInputPreparationInput =
+  | { readonly mode: 'preview' }
+  | { readonly mode: 'execute'; readonly confirmed: true };
+
+export type RetireInputPreparationResult =
+  | { readonly status: 'inspected'; readonly inspection: InputPreparationNamespaceInspection }
+  | InputPreparationRetirementResult;
+
+/**
+ * Package-internal test seams (the CLI tests substitute the control probe and
+ * clock). The probe is structural so this module's declarations do not pull
+ * the CLI control client into the public type surface.
+ */
+export interface RetireInputPreparationSeams {
+  readonly clock?: () => Date;
+  readonly connectControl?: (options: { storeDir: string; productId: string }) => Promise<
+    { ok: true; client: { close(): void } } | { ok: false; reason: string }
+  >;
+}
+
+/** Package-internal: {@link retireInputPreparation} with its test seams. */
+export async function runInputPreparationRetirement(
+  target: RetireInputPreparationTarget,
+  input: RetireInputPreparationInput,
+  seams: RetireInputPreparationSeams = {},
+): Promise<RetireInputPreparationResult> {
+  // Target and input are each read once, as plain data, before anything else:
+  // an accessor, Proxy or non-plain prototype is a TypeError with no cause.
+  let productId: unknown;
+  let configuredStoreDir: unknown;
+  let mode: unknown;
+  let confirmed: unknown;
+  try {
+    ({ productId, storeDir: configuredStoreDir } = pickPlainDataProperties(target, ['productId', 'storeDir']));
+    ({ mode, confirmed } = pickPlainDataProperties(input, ['mode', 'confirmed']));
+  } catch {
+    throw new TypeError(`${INPUT_PREPARATION_RETIREMENT_COMMAND} target and input must be plain data objects`);
+  }
+  if (typeof productId !== 'string' || productId.length === 0 ||
+      (configuredStoreDir !== undefined && typeof configuredStoreDir !== 'string')) {
+    throw new TypeError(`${INPUT_PREPARATION_RETIREMENT_COMMAND} requires the daemon productId and an optional storeDir string`);
+  }
+  const storeDir = DeviceStore.resolveDir(productId, configuredStoreDir);
+  if (mode === 'preview') {
+    return { status: 'inspected', inspection: await inspectInputPreparationNamespace(storeDir) };
+  }
+  if (mode !== 'execute') throw new TypeError(`${INPUT_PREPARATION_RETIREMENT_COMMAND} mode must be 'preview' or 'execute'`);
+  if (confirmed !== true) throw new InputPreparationRetirementConfirmationRequiredError();
+
+  const connectControl = seams.connectControl ?? connectControlClient;
+  const connection = await connectControl({ storeDir, productId });
+  // A completed authenticated handshake is itself proof a daemon owns this
+  // store; the retirement refuses on it without asking anything further.
+  if (connection.ok) connection.client.close();
+  return executeInputPreparationRetirement(storeDir, {
+    confirmed: true,
+    controlOnline: connection.ok,
+    ...(seams.clock === undefined ? {} : { clock: seams.clock }),
+  });
+}
+
+/**
+ * Programmatic form of `byok-agent retire-input-preparation` for the v8
+ * input-preparation record cut (`docs/spec.md`).
+ *
+ * `preview` inspects `<storeDir>/input-preparation/` and writes nothing.
+ * `execute` refuses, typed and with zero writes, while the daemon control
+ * socket answers ({@link InputPreparationRetirementDaemonRunningError}), while
+ * another process holds the store owner lease
+ * ({@link InputPreparationRetirementStoreBusyError}), and for a live pin, a
+ * current-version, mixed, unknown or missing record version, an unparseable
+ * line, orphan artifacts, an unexpected entry or any symbolic link
+ * ({@link InputPreparationRetirementRefusedError} with its `reason`). Otherwise
+ * it moves the whole namespace byte-for-byte under
+ * `<storeDir>/input-preparation-retired/` beside a manifest of per-file
+ * digests; nothing is ever deleted or converted. An absent or empty namespace
+ * is `nothing-to-retire`. A failure after the move is
+ * {@link InputPreparationRetirementIncompleteError}, naming where the bytes are.
+ * Run it before the daemon starts (for example from the host installer).
+ */
+export function retireInputPreparation(
+  target: RetireInputPreparationTarget,
+  input: RetireInputPreparationInput,
+): Promise<RetireInputPreparationResult> {
+  return runInputPreparationRetirement(target, input);
 }

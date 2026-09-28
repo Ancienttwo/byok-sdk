@@ -1,13 +1,11 @@
 import type { DaemonConfig } from '../../daemon/create-daemon';
 import {
-  executeInputPreparationRetirement,
-  inspectInputPreparationNamespace,
+  runInputPreparationRetirement,
   INPUT_PREPARATION_RETIREMENT_COMMAND,
   type InputPreparationNamespaceInspection,
-  type InputPreparationRetirementResult,
+  type RetireInputPreparationResult,
 } from '../../daemon/input-preparation-retirement';
-import { connectControlClient } from '../control-client';
-import { resolveStoreDir } from '../config';
+import type { connectControlClient } from '../control-client';
 
 export interface RetireInputPreparationOptions {
   /** `--yes`: execute. Without it the command only inspects and writes nothing. */
@@ -31,43 +29,34 @@ function inspectionLines(inspection: InputPreparationNamespaceInspection): strin
 
 /**
  * `byok-agent retire-input-preparation [--yes] [--json]` — the bounded
- * operator action for the input-preparation record-version cut. Default is a
- * read-only inspection; `--yes` moves an older-version namespace into
- * `<storeDir>/input-preparation-retired/` with a manifest, and refuses
- * (typed, zero writes) whenever the daemon control socket is reachable.
+ * operator action for the input-preparation record-version cut. It only
+ * renders the result of the library `retireInputPreparation` (one
+ * implementation): default is the read-only `preview`; `--yes` is `execute`,
+ * which moves an older-version namespace into
+ * `<storeDir>/input-preparation-retired/` with a manifest and refuses (typed,
+ * zero writes) whenever the daemon control socket is reachable or the owner
+ * lease is held.
  */
 export async function runRetireInputPreparationCommand(
   config: DaemonConfig,
   options: RetireInputPreparationOptions = {},
-): Promise<InputPreparationRetirementResult | { status: 'inspected'; inspection: InputPreparationNamespaceInspection }> {
+): Promise<RetireInputPreparationResult> {
   const log = options.log ?? ((line: string) => console.log(line));
-  const storeDir = resolveStoreDir(config);
-  if (!options.confirmed) {
-    const inspection = await inspectInputPreparationNamespace(storeDir);
-    if (options.json) log(JSON.stringify({ status: 'inspected', inspection }, null, 2));
-    else {
-      for (const line of inspectionLines(inspection)) log(line);
-      log('dry run: nothing was written (pass --yes to retire)');
-    }
-    return { status: 'inspected', inspection };
-  }
-
-  const connectControl = options.connectControl ?? connectControlClient;
-  const connection = await connectControl({ storeDir, productId: config.productId });
-  // A completed authenticated handshake is itself proof a daemon owns this
-  // store; the retirement refuses on it without asking anything further.
-  if (connection.ok) connection.client.close();
-  const result = await executeInputPreparationRetirement(storeDir, {
-    confirmed: true,
-    controlOnline: connection.ok,
-    clock: options.clock,
-  });
+  const result = await runInputPreparationRetirement(
+    { productId: config.productId, ...(config.storeDir === undefined ? {} : { storeDir: config.storeDir }) },
+    options.confirmed ? { mode: 'execute', confirmed: true } : { mode: 'preview' },
+    {
+      ...(options.clock === undefined ? {} : { clock: options.clock }),
+      ...(options.connectControl === undefined ? {} : { connectControl: options.connectControl }),
+    },
+  );
   if (options.json) {
     log(JSON.stringify(result, null, 2));
     return result;
   }
   for (const line of inspectionLines(result.inspection)) log(line);
-  if (result.status === 'nothing-to-retire') log('retire: nothing to retire; nothing was written');
+  if (result.status === 'inspected') log('dry run: nothing was written (pass --yes to retire)');
+  else if (result.status === 'nothing-to-retire') log('retire: nothing to retire; nothing was written');
   else {
     log(`retire: moved namespace to ${result.retiredDir}; manifest=${result.manifestPath}`);
     log(`retire: records.jsonl sha256=${result.manifest.recordLog.sha256} bytes=${result.manifest.recordLog.sizeBytes}; artifacts=${result.manifest.artifacts.length}`);

@@ -87,7 +87,9 @@ authenticated session and device assertion.
   key. There is no forward secrecy for past ciphertexts if that private key
   leaks: TTL only shortens online retention and rotation only limits exposure
   across epochs. Keys never reads the client's enrollment identity key; the
-  host signs the sealing-key claim with it.
+  host signs the sealing-key claim with it through `@byok-sdk/client`
+  `createStoredDeviceProofSigner`, allowlisting the device-proof operation
+  `provider-secret-sealing-key.register`.
 - **Device validation.** Before any write the device checks enrollment and key
   id, that the agent is placed on it, the config digest, the HPKE open, request
   replay (same id and digest returns the stored result; a different digest is a
@@ -113,7 +115,13 @@ authenticated session and device assertion.
   fetches/applies/completes only undecided operations. Requests bind the
   expected enrollment and placement revisions; the device re-reads an exact
   identity snapshot inside the configuration lock right before any
-  credential-store write and rejects any difference. That fence covers only
+  credential-store write and rejects any difference. A client-based device
+  reads the snapshot's tenant, device and enrollment revision with
+  `readDeviceEnrollmentIdentity`; the enrollment revision is the decimal
+  string of the enrollment's device-proof key epoch, which a Host issues from
+  its device row as `String(proof_key_epoch)`. It is monotonic across
+  proof-key rotation for one device id, and re-pair mints a new device id.
+  That fence covers only
   placement/enrollment writers that update the local record under the same
   configuration lock. A generation is consumed when its pending marker is
   written, so an older request never overtakes an interrupted newer one; the
@@ -161,11 +169,23 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.23.0`; publication requires separate release
+aligned dispatch release is `0.24.0`; publication requires separate release
 authorization and registry readback. The current independent keys candidate is
-`0.8.0`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.23.0`, proven from an isolated standard npm install rather
+`0.8.1`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.24.0`, proven from an isolated standard npm install rather
 than the workspace graph.
+
+The 0.24.0 train is prepared, not yet published. It is a MINOR: `@byok-sdk/client`
+adds public host API — `readDeviceEnrollmentIdentity`,
+`createStoredDeviceProofSigner` and `retireInputPreparation` (see "Gate A"
+below and the input-preparation operator step). No other package changes
+source. keys 0.8.1 is a PATCH: its own source is unchanged and it gains no new
+public behavior, API, persistence or security authority; it moves only because
+its packed core and implementation-identity edges must equal the current
+dispatch release, and both resolve to 0.24.0, whose core and
+implementation-identity sources are unchanged from 0.23.0 (the same reasoning
+as keys 0.6.1 and 0.6.2 for 0.20.0 and 0.21.0). Notes:
+`docs/releases/v0.24.0.md`.
 
 The 0.23.0 train is published (see below). It adds sealed remote provider
 provisioning (see "Sealed remote provider provisioning" below). keys 0.8.0 is a
@@ -625,9 +645,12 @@ on every remote completion, by not advertising the input-preparation capability
 (so the cloud refuses to enqueue onto it), and by carrying no prepared-offer
 lane (so a `task.offer_prepared` declines by name). Nothing is migrated, read
 forward or deleted automatically. **Operator step:** stop the daemon, run
-`byok-agent retire-input-preparation` to list the namespace (record counts per
+`byok-agent retire-input-preparation` (or, from a host installer or branded
+host CLI, the library `retireInputPreparation({ productId, storeDir }, { mode:
+'preview' })`; the CLI only renders that one implementation) to list the namespace (record counts per
 record schema version, pinned records, artifact files and unparseable lines;
-it writes nothing), then `byok-agent retire-input-preparation --yes`, and
+it writes nothing), then `byok-agent retire-input-preparation --yes` (`{
+mode: 'execute', confirmed: true }`), and
 start the daemon again. `--yes` refuses, typed and with zero writes, while the
 daemon control socket is reachable or the store owner lease is held, and when
 any record line does not parse, sits at the current or an unknown record
@@ -703,7 +726,8 @@ upgrading cloud and device together. Recreate preparations using the Host-owned
 systemPrompt, official identity and explicit memory selection. The capability is
 `agent-input-preparation-v8`; wire and record versions both advance to 8, with no dual token/read. Older records
 are refused; the bounded operator action that retires them is
-`byok-agent retire-input-preparation --yes`, run against the stopped daemon
+`byok-agent retire-input-preparation --yes` (library `retireInputPreparation`),
+run against the stopped daemon
 after the drain (see the operator step above). The fourteen admission comparisons retain their roles; the compiler,
 envelope and identity values being compared change. A skipped drain needs explicit
 operator handling of the old entries; upgrading alone does not repair them.
@@ -1989,8 +2013,25 @@ never imported, parsed as a JWT, or dual-read: normal load/start/status reports
 
 The public enrollment boundary is credential-blind: `Daemon.pair()` returns
 `{deviceId}`, while the cold read model is exactly `unpaired | paired{deviceId}
-| re_pair_required`. Auth, store, record, and signer internals are not
-package-root exports. Pair writes the deterministic metadata projection before
+| re_pair_required`. `readDeviceEnrollmentIdentity` uses the same
+classification and, when paired, returns only the non-secret identity
+`{tenantId, deviceId, proofKeyId, proofKeyEpoch, enrollmentRevision}`: the
+authenticated pair-time tenant, the device id, the device-proof key the
+enrollment key is registered under (the pairing contract registers it as
+`identity`/`0`, the cloud device row's `proof_key_id`/`proof_key_epoch`; the
+pair response carries neither, so the client projects that contract, held
+equal to cloud by a drift test, and a future rotation must carry the epoch
+into the local record in the same cut), and `enrollmentRevision =
+String(proofKeyEpoch)`. Both reads write nothing. Host device proofs go
+through `createStoredDeviceProofSigner({ productId, storeDir, identity,
+operations })`: it holds no key material, refuses an operation outside the
+host's explicit allowlist before reading the enrollment, re-reads the OS
+authority for each signature and refuses (`enrollment_changed`) unless it
+still equals `identity`, and signs core's canonical device-proof bytes; errors
+are closed codes with no cause. The allowlist scopes one signer instance and is
+not a sandbox against code already running as the device account. Auth, store,
+record, and the stored-signer internals remain non-exports, and no public API
+returns the access token or a key. Pair writes the deterministic metadata projection before
 atomically replacing the complete OS authority; if the authoritative replace
 fails, restart repairs the projection from the previous OS record. Renewal
 replaces the whole OS entry before changing cache, and a signer reads the

@@ -444,12 +444,46 @@ export type {
   CleanupExecution,
   TimerLike,
 } from './daemon/journal/storage-policy';
-export { readDeviceEnrollmentStatus } from './daemon/store';
+export { readDeviceEnrollmentStatus, readDeviceEnrollmentIdentity } from './daemon/store';
 export type {
   DeviceEnrollment,
+  DeviceEnrollmentIdentity,
+  DeviceEnrollmentIdentityStatus,
   DeviceEnrollmentStatus,
   DeviceEnrollmentStatusOptions,
 } from './daemon/store';
+/**
+ * Host device proofs signed with the stored enrollment key, scoped to one
+ * enrollment identity and an explicit operation allowlist. The key never
+ * leaves the signer; `DeviceProofSigner` is also what `TruthMemoryClient` takes.
+ */
+export { createStoredDeviceProofSigner, DeviceProofSignerError } from './daemon/device-proof-signer';
+export type {
+  CreateStoredDeviceProofSignerOptions,
+  DeviceProofRequest,
+  DeviceProofSigner,
+  DeviceProofSignerErrorCode,
+  HostDeviceProofSigner,
+} from './daemon/device-proof-signer';
+/** Programmatic `byok-agent retire-input-preparation` (preview/execute) for the v8 input-preparation cut. */
+export {
+  retireInputPreparation,
+  InputPreparationRetirementConfirmationRequiredError,
+  InputPreparationRetirementDaemonRunningError,
+  InputPreparationRetirementIncompleteError,
+  InputPreparationRetirementRefusedError,
+  InputPreparationRetirementStoreBusyError,
+} from './daemon/input-preparation-retirement';
+export type {
+  InputPreparationNamespaceInspection,
+  InputPreparationRetirementManifest,
+  InputPreparationRetirementRefusalReason,
+  InputPreparationRetirementResult,
+  RetireInputPreparationInput,
+  RetireInputPreparationResult,
+  RetireInputPreparationTarget,
+  RetirementFileDigest,
+} from './daemon/input-preparation-retirement';
 /**
  * Plan `skill-pack-delivery-channel`: the device half of the `skills.pack`
  * channel. The install pipeline and the two read APIs are public because the

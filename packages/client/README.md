@@ -389,6 +389,55 @@ complete SDK-owned record but returns only `unpaired`, `paired` with
 never projected. Only explicit pairing may replace `re_pair_required` state,
 while filesystem-safety failures remain errors.
 
+A host that must address this device itself (for example to register the
+sealed-provisioning sealing key) reads the non-secret enrollment identity with
+`readDeviceEnrollmentIdentity({ productId, storeDir })`: the same three states,
+and when paired `{ tenantId, deviceId, proofKeyId, proofKeyEpoch,
+enrollmentRevision }`. `enrollmentRevision` is `String(proofKeyEpoch)`, the
+value a Host issues from its device row (`proof_key_epoch`) as the sealed
+request's `expectedEnrollmentRevision`. It then signs host-defined device
+proofs with the stored enrollment key through a scoped signer; the key never
+leaves the SDK:
+
+```ts
+import { PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION } from '@byok-sdk/protocol';
+import { createStoredDeviceProofSigner, readDeviceEnrollmentIdentity } from '@byok-sdk/client';
+
+const enrollment = await readDeviceEnrollmentIdentity({ productId, storeDir });
+if (enrollment.state !== 'paired') throw new Error(`device ${enrollment.state}`);
+const { state: _paired, ...identity } = enrollment;
+const signer = createStoredDeviceProofSigner({
+  productId,
+  storeDir,
+  identity,
+  operations: [PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION],
+});
+const proof = await signer.sign({ method: 'PUT', path, operation: PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION,
+  resource, requestId, body: sealingKeyClaimBytes });
+```
+
+The options and every request are copied once into inert plain data (own
+enumerable data properties only; accessors, Proxies, symbol keys and non-plain
+prototypes are refused as `invalid_options` / `invalid_request`, and `body`
+must be an exact `Uint8Array`), and only that copy is checked and signed, so the
+operation checked against the allowlist is the operation signed. `readDeviceEnrollment*`
+and `retireInputPreparation` read their `productId`/`storeDir` and `mode`/`confirmed`
+the same way and reject anything else with a `TypeError` that has no cause.
+An operation outside `operations` is refused before the key is read; each
+signature re-reads the enrollment and refuses (`enrollment_changed`) if tenant,
+device or proof key no longer equal `identity`. Failures are
+`DeviceProofSignerError` closed codes. The signer also satisfies
+`TruthMemoryClient`'s `signer` option.
+
+The v8 input-preparation retirement is also a library call, so a branded host
+CLI or installer can own it: `retireInputPreparation({ productId, storeDir },
+{ mode: 'preview' })` inspects and writes nothing; `{ mode: 'execute',
+confirmed: true }` moves the old namespace aside with a manifest and refuses,
+typed and with zero writes, while the daemon answers, the owner lease is held,
+or any row is pinned, current/mixed/unknown-version or unparseable, or a path
+is a symlink. `byok-agent retire-input-preparation [--yes]` renders the same
+function.
+
 ```ts
 createDaemon({
   // ...normal device, transport and agentHome configuration
