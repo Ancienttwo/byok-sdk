@@ -121,6 +121,20 @@ export async function readSealedProvisioningResult(input: {
   if (reservation !== undefined) {
     return reservation.requestDigest === input.requestDigest ? { status: 'interrupted' } : { status: 'conflict' };
   }
+  // F7: the two reads are separate, and a commit may hand the reservation over
+  // to the receipt (one atomic store write) between them. Writers only ever
+  // move a request from reserved to receipted, never back, so a reservation
+  // miss after a receipt miss means that handoff (if any) has already
+  // happened: re-reading the receipt observes it. Only a second receipt miss —
+  // a moment when neither record existed — is a genuine `absent`. This keeps
+  // the store contract unchanged (no combined-snapshot method) and needs no
+  // configuration lock, which callers may already hold.
+  const handedOver = await input.profileStore.getReceipt(input.requestId);
+  if (handedOver !== undefined) {
+    return handedOver.requestDigest === input.requestDigest
+      ? { status: 'completed', result: handedOver.result }
+      : { status: 'conflict' };
+  }
   return { status: 'absent' };
 }
 
