@@ -31,11 +31,39 @@ const AGENT_MEMORY_PROJECTION_PUBLISH_TIMEOUT_MS = 10_000;
 export class AgentMemoryError extends Error {
   constructor(message: string) { super(message); this.name = 'AgentMemoryError'; }
 }
+/**
+ * Deterministic refusal: the same input against the same home state fails the
+ * same way on every retry (an invalid path, a forbidden delete, an oversized or
+ * non-UTF-8 file, a non-regular leaf, a platform without a secure backend).
+ */
+export class AgentMemoryValidationError extends AgentMemoryError {
+  constructor(message: string) { super(message); this.name = 'AgentMemoryValidationError'; }
+}
+/**
+ * Filesystem I/O failure: an open, read, write, fsync, rename or unlink did not
+ * complete, or a file changed under a read. A retry may succeed, and a failure
+ * after a rename says nothing about whether that rename became durable.
+ */
+export class AgentMemoryIoError extends AgentMemoryError {
+  constructor(message: string) { super(message); this.name = 'AgentMemoryIoError'; }
+}
 export class AgentMemoryRevisionConflictError extends AgentMemoryError {
   constructor(readonly expectedRevision: string, readonly actualRevision: string) {
     super(`Agent memory revision conflict: expected ${expectedRevision}, current ${actualRevision}`);
     this.name = 'AgentMemoryRevisionConflictError';
   }
+}
+
+/**
+ * The exact leased Agent home the memory primitives act on, and nothing else.
+ * A task context is one (it carries these fields); a task-free Host intent
+ * builds one from its own home lease with {@link agentMemoryHomeBinding}.
+ */
+export interface AgentMemoryHomeBinding {
+  readonly canonicalHome: string;
+  readonly homeIdentity: AgentHomeLease['homeIdentity'];
+  /** Optional external root handle; omission selects the native Linux backend. */
+  readonly filesystem?: AgentMemoryFilesystem;
 }
 
 export interface AgentMemoryTaskContext {
@@ -113,19 +141,19 @@ function nonEmpty(value: unknown): value is string { return typeof value === 'st
 function revision(value: unknown): value is string { return typeof value === 'string' && REVISION.test(value); }
 function taskContext(value: AgentMemoryTaskContext): AgentMemoryTaskContext {
   if (!value || !nonEmpty(value.taskId) || !nonEmpty(value.tenantId) || !nonEmpty(value.deviceId) || !nonEmpty(value.sessionRef) || !nonEmpty(value.runtimeId) || !nonEmpty(value.leaseId) || !value.agentRef || !nonEmpty(value.agentRef.agentId) || !nonEmpty(value.agentRef.profileRevision) || !path.isAbsolute(value.canonicalHome) || typeof value.homeIdentity?.dev !== 'bigint' || typeof value.homeIdentity.ino !== 'bigint') {
-    throw new AgentMemoryError('Agent memory requires an exact active Agent task context');
+    throw new AgentMemoryValidationError('Agent memory requires an exact active Agent task context');
   }
   return Object.freeze({ ...value, agentRef: Object.freeze({ ...value.agentRef }), homeIdentity: Object.freeze({ ...value.homeIdentity }), canonicalHome: path.resolve(value.canonicalHome) });
 }
 
 /** Model input can name one allowed file, never a root, directory, glob, or internal SDK state. */
 export function validateAgentMemoryPath(value: unknown): string {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 1024 || /[\u0000\\]/u.test(value)) throw new AgentMemoryError('memory path is invalid');
+  if (typeof value !== 'string' || value.length === 0 || value.length > 1024 || /[\u0000\\]/u.test(value)) throw new AgentMemoryValidationError('memory path is invalid');
   if (value === 'MEMORY.md') return value;
-  if (path.posix.isAbsolute(value) || /[*?\[{]/u.test(value)) throw new AgentMemoryError('memory path must name exactly one file');
+  if (path.posix.isAbsolute(value) || /[*?\[{]/u.test(value)) throw new AgentMemoryValidationError('memory path must name exactly one file');
   const parts = value.split('/');
   if (parts.length < 2 || parts[0] !== 'notes' || !value.endsWith('.md') || parts.some((part) => part === '' || part === '.' || part === '..' || part === '.byok' || !SAFE_SEGMENT.test(part) || SECRET_LIKE.test(part))) {
-    throw new AgentMemoryError('memory path must be MEMORY.md or notes/<safe-relative>.md');
+    throw new AgentMemoryValidationError('memory path must be MEMORY.md or notes/<safe-relative>.md');
   }
   return value;
 }
@@ -157,7 +185,7 @@ export function isAgentMemorySecureFilesystemAvailable(externalHelperConfigured 
 
 function requireSecureDirectoryDescriptors(): string {
   if (!isAgentMemorySecureFilesystemAvailable(false) || process.platform !== 'linux') {
-    throw new AgentMemoryError('Agent memory is unavailable because this Node platform lacks safe descriptor-relative filesystem operations');
+    throw new AgentMemoryValidationError('Agent memory is unavailable because this Node platform lacks safe descriptor-relative filesystem operations');
   }
   return SECURE_DIRECTORY_DESCRIPTOR_ROOT;
 }
@@ -171,22 +199,22 @@ function descriptorPath(handle: Awaited<ReturnType<typeof fs.open>>): string {
   return `${requireSecureDirectoryDescriptors()}/${handle.fd}`;
 }
 
-async function openPinnedDirectory(target: string, expectedIdentity?: AgentMemoryTaskContext['homeIdentity']): Promise<Awaited<ReturnType<typeof fs.open>>> {
+async function openPinnedDirectory(target: string, expectedIdentity?: AgentMemoryHomeBinding['homeIdentity']): Promise<Awaited<ReturnType<typeof fs.open>>> {
   requireSecureDirectoryDescriptors();
   let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
   try {
     handle = await fs.open(target, noFollowFlags(fsConstants.O_RDONLY | fsConstants.O_DIRECTORY));
     const stat = await handle.stat({ bigint: true });
-    if (!stat.isDirectory() || stat.isSymbolicLink() || (expectedIdentity !== undefined && (stat.dev !== expectedIdentity.dev || stat.ino !== expectedIdentity.ino))) throw new AgentMemoryError('memory directory is not a real directory');
+    if (!stat.isDirectory() || stat.isSymbolicLink() || (expectedIdentity !== undefined && (stat.dev !== expectedIdentity.dev || stat.ino !== expectedIdentity.ino))) throw new AgentMemoryValidationError('memory directory is not a real directory');
     return handle;
   } catch (error) {
     await handle?.close().catch(() => {});
     if (error instanceof AgentMemoryError) throw error;
-    throw new AgentMemoryError('memory directory is unavailable or unsafe');
+    throw new AgentMemoryIoError('memory directory is unavailable or unsafe');
   }
 }
 
-async function withPinnedDirectory<T>(home: string, parts: readonly string[], operation: (directory: Awaited<ReturnType<typeof fs.open>>) => Promise<T>, expectedHomeIdentity?: AgentMemoryTaskContext['homeIdentity']): Promise<T> {
+async function withPinnedDirectory<T>(home: string, parts: readonly string[], operation: (directory: Awaited<ReturnType<typeof fs.open>>) => Promise<T>, expectedHomeIdentity?: AgentMemoryHomeBinding['homeIdentity']): Promise<T> {
   const handles: Array<Awaited<ReturnType<typeof fs.open>>> = [];
   try {
     let directory = await openPinnedDirectory(home, expectedHomeIdentity);
@@ -201,10 +229,10 @@ async function withPinnedDirectory<T>(home: string, parts: readonly string[], op
   }
 }
 
-async function withMemoryParent<T>(context: AgentMemoryTaskContext, relativePath: string, operation: (directory: Awaited<ReturnType<typeof fs.open>>, fileName: string) => Promise<T>): Promise<T> {
+async function withMemoryParent<T>(context: AgentMemoryHomeBinding, relativePath: string, operation: (directory: Awaited<ReturnType<typeof fs.open>>, fileName: string) => Promise<T>): Promise<T> {
   const parts = relativePath.split('/');
   const fileName = parts.pop();
-  if (fileName === undefined || parts.some((part) => !SAFE_SEGMENT.test(part) && part !== '.byok')) throw new AgentMemoryError('memory path is invalid');
+  if (fileName === undefined || parts.some((part) => !SAFE_SEGMENT.test(part) && part !== '.byok')) throw new AgentMemoryValidationError('memory path is invalid');
   return withPinnedDirectory(context.canonicalHome, parts, (directory) => operation(directory, fileName), context.homeIdentity);
 }
 
@@ -220,24 +248,24 @@ async function readPinnedFile(directory: Awaited<ReturnType<typeof fs.open>>, fi
     );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Object.freeze({ exists: false, content: '', revision: digest(''), byteCount: 0 });
-    throw new AgentMemoryError('could not open memory file');
+    throw new AgentMemoryIoError('could not open memory file');
   }
   try {
     const before = await handle.stat({ bigint: true });
-    if (!before.isFile() || before.isSymbolicLink() || before.size > BigInt(maxBytes)) throw new AgentMemoryError('memory file is not a bounded regular file');
+    if (!before.isFile() || before.isSymbolicLink() || before.size > BigInt(maxBytes)) throw new AgentMemoryValidationError('memory file is not a bounded regular file');
     const bytes = Buffer.alloc(Number(before.size));
     let offset = 0;
     while (offset < bytes.length) { const read = await handle.read(bytes, offset, bytes.length - offset, offset); if (read.bytesRead === 0) break; offset += read.bytesRead; }
     const after = await handle.stat({ bigint: true });
-    if (offset !== bytes.length || after.size !== before.size || after.mtimeNs !== before.mtimeNs || after.ino !== before.ino) throw new AgentMemoryError('memory file changed during read');
+    if (offset !== bytes.length || after.size !== before.size || after.mtimeNs !== before.mtimeNs || after.ino !== before.ino) throw new AgentMemoryIoError('memory file changed during read');
     const content = bytes.toString('utf8');
     // A content revision is defined over bytes, while MCP is UTF-8 text. Do
     // not silently hash a replacement-character projection of arbitrary bytes.
-    if (!Buffer.from(content, 'utf8').equals(bytes)) throw new AgentMemoryError('memory file is not valid UTF-8');
+    if (!Buffer.from(content, 'utf8').equals(bytes)) throw new AgentMemoryValidationError('memory file is not valid UTF-8');
     return Object.freeze({ exists: true, content, revision: digestBytes(bytes), byteCount: bytes.length });
   } finally { await handle.close().catch(() => {}); }
 }
-async function readFile(context: AgentMemoryTaskContext, relativePath: string, maxBytes = AGENT_MEMORY_MAX_FILE_BYTES): Promise<FileState> {
+async function readFile(context: AgentMemoryHomeBinding, relativePath: string, maxBytes = AGENT_MEMORY_MAX_FILE_BYTES): Promise<FileState> {
   if (context.filesystem !== undefined) return context.filesystem.read(relativePath, maxBytes);
   return withMemoryParent(context, relativePath, (directory, fileName) => readPinnedFile(directory, fileName, maxBytes));
 }
@@ -245,9 +273,17 @@ async function syncDirectory(directory: Awaited<ReturnType<typeof fs.open>>): Pr
   try { await directory.sync(); }
   catch (error) { if (!['EINVAL', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; }
 }
-async function replaceNative(context: AgentMemoryTaskContext, relativePath: string, expected: string, content: string): Promise<FileState> {
+/**
+ * The durable-barrier form: ANY directory fsync error, including the
+ * `EINVAL`/`EPERM` a filesystem uses to refuse directory fsync, is a failure,
+ * so a successful return proves the rename reached the directory on disk.
+ */
+async function syncDirectoryStrict(directory: Awaited<ReturnType<typeof fs.open>>): Promise<void> {
+  await directory.sync();
+}
+async function replaceNative(context: AgentMemoryHomeBinding, relativePath: string, expected: string, content: string): Promise<FileState> {
   const byteCount = encoder.encode(content).byteLength;
-  if (byteCount > AGENT_MEMORY_MAX_FILE_BYTES) throw new AgentMemoryError('memory content exceeds its bounded file size');
+  if (byteCount > AGENT_MEMORY_MAX_FILE_BYTES) throw new AgentMemoryValidationError('memory content exceeds its bounded file size');
   return withMemoryParent(context, relativePath, async (directory, fileName) => {
     const before = await readPinnedFile(directory, fileName);
     if (before.revision !== expected) throw new AgentMemoryRevisionConflictError(expected, before.revision);
@@ -266,16 +302,16 @@ async function replaceNative(context: AgentMemoryTaskContext, relativePath: stri
     } catch (error) {
       await handle?.close().catch(() => {}); await fs.rm(temporary, { force: true }).catch(() => {});
       if (error instanceof AgentMemoryError) throw error;
-      throw new AgentMemoryError('could not atomically replace memory file');
+      throw new AgentMemoryIoError('could not atomically replace memory file');
     }
   });
 }
-async function replace(context: AgentMemoryTaskContext, relativePath: string, expected: string, content: string): Promise<FileState> {
+async function replace(context: AgentMemoryHomeBinding, relativePath: string, expected: string, content: string): Promise<FileState> {
   if (context.filesystem !== undefined) return context.filesystem.replace(relativePath, expected, content, AGENT_MEMORY_MAX_FILE_BYTES);
   return replaceNative(context, relativePath, expected, content);
 }
-async function removeNative(context: AgentMemoryTaskContext, relativePath: string, expected: string): Promise<void> {
-  if (relativePath === 'MEMORY.md') throw new AgentMemoryError('MEMORY.md may not be deleted');
+async function removeNative(context: AgentMemoryHomeBinding, relativePath: string, expected: string): Promise<void> {
+  if (relativePath === 'MEMORY.md') throw new AgentMemoryValidationError('MEMORY.md may not be deleted');
   await withMemoryParent(context, relativePath, async (directory, fileName) => {
     const before = await readPinnedFile(directory, fileName);
     if (!before.exists || before.revision !== expected) throw new AgentMemoryRevisionConflictError(expected, before.revision);
@@ -287,18 +323,18 @@ async function removeNative(context: AgentMemoryTaskContext, relativePath: strin
       await fs.rename(`${parent}/${fileName}`, tombstone); await syncDirectory(directory); await fs.rm(tombstone); await syncDirectory(directory);
     } catch (error) {
       if (error instanceof AgentMemoryError) throw error;
-      throw new AgentMemoryError('could not atomically delete memory file');
+      throw new AgentMemoryIoError('could not atomically delete memory file');
     }
   });
 }
-async function remove(context: AgentMemoryTaskContext, relativePath: string, expected: string): Promise<void> {
-  if (relativePath === 'MEMORY.md') throw new AgentMemoryError('MEMORY.md may not be deleted');
+async function remove(context: AgentMemoryHomeBinding, relativePath: string, expected: string): Promise<void> {
+  if (relativePath === 'MEMORY.md') throw new AgentMemoryValidationError('MEMORY.md may not be deleted');
   if (context.filesystem !== undefined) return context.filesystem.delete(relativePath, expected);
   return removeNative(context, relativePath, expected);
 }
 
 /** Read one SDK-internal bounded state file through the same pinned home authority. */
-async function readInternalFile(context: AgentMemoryTaskContext, fileName: string): Promise<FileState> {
+async function readInternalFile(context: AgentMemoryHomeBinding, fileName: string): Promise<FileState> {
   const relativePath = `${AGENT_HOME_INTERNAL_DIRECTORY}/${fileName}`;
   if (context.filesystem !== undefined) return context.filesystem.read(relativePath, AGENT_MEMORY_MAX_LOCAL_LOG_BYTES);
   return withPinnedDirectory(
@@ -314,9 +350,9 @@ async function readInternalFile(context: AgentMemoryTaskContext, fileName: strin
  * uses append as an authority: a successful rename contains the whole next
  * state, and an interrupted write leaves the old state readable.
  */
-async function replaceInternalFile(context: AgentMemoryTaskContext, fileName: string, expectedRevision: string, content: string): Promise<FileState> {
+async function replaceInternalFile(context: AgentMemoryHomeBinding, fileName: string, expectedRevision: string, content: string, directorySync: 'tolerant' | 'strict' = 'tolerant'): Promise<FileState> {
   const byteCount = encoder.encode(content).byteLength;
-  if (byteCount > AGENT_MEMORY_MAX_LOCAL_LOG_BYTES) throw new AgentMemoryError('Agent memory internal state exceeds its bounded size');
+  if (byteCount > AGENT_MEMORY_MAX_LOCAL_LOG_BYTES) throw new AgentMemoryValidationError('Agent memory internal state exceeds its bounded size');
   const relativePath = `${AGENT_HOME_INTERNAL_DIRECTORY}/${fileName}`;
   if (context.filesystem !== undefined) return context.filesystem.replace(relativePath, expectedRevision, content, AGENT_MEMORY_MAX_LOCAL_LOG_BYTES);
   return withPinnedDirectory(context.canonicalHome, [AGENT_HOME_INTERNAL_DIRECTORY], async (directory) => {
@@ -330,18 +366,19 @@ async function replaceInternalFile(context: AgentMemoryTaskContext, fileName: st
       await handle.writeFile(content, 'utf8'); await handle.sync(); await handle.close(); handle = undefined;
       const check = await readPinnedFile(directory, fileName, AGENT_MEMORY_MAX_LOCAL_LOG_BYTES);
       if (check.revision !== expectedRevision || check.exists !== before.exists) throw new AgentMemoryRevisionConflictError(expectedRevision, check.revision);
-      await fs.rename(temporary, `${parent}/${fileName}`); await syncDirectory(directory);
+      await fs.rename(temporary, `${parent}/${fileName}`);
+      await (directorySync === 'strict' ? syncDirectoryStrict(directory) : syncDirectory(directory));
       return Object.freeze({ exists: true, content, revision: digest(content), byteCount });
     } catch (error) {
       await handle?.close().catch(() => {}); await fs.rm(temporary, { force: true }).catch(() => {});
       if (error instanceof AgentMemoryError) throw error;
-      throw new AgentMemoryError('could not atomically replace Agent memory internal state');
+      throw new AgentMemoryIoError('could not atomically replace Agent memory internal state');
     }
   }, context.homeIdentity);
 }
 
 function boundedAuditTail(previous: string, entry: string): string {
-  if (encoder.encode(entry).byteLength > AGENT_MEMORY_MAX_LOCAL_LOG_BYTES) throw new AgentMemoryError('Agent memory audit entry exceeds its bounded size');
+  if (encoder.encode(entry).byteLength > AGENT_MEMORY_MAX_LOCAL_LOG_BYTES) throw new AgentMemoryValidationError('Agent memory audit entry exceeds its bounded size');
   // Audit is intentionally metadata-only and is not a replay authority. Keep
   // complete newest lines only; a malformed old tail cannot wedge a local save.
   const lines = previous.split('\n').filter((line) => line.length > 0);
@@ -415,13 +452,226 @@ async function exclusiveAgentMemoryProjectionTransaction<T>(home: string, fn: ()
   return exclusiveAgentMemoryHomeQueue(agentMemoryProjectionTransactionQueues, home, fn);
 }
 
+// ---------------------------------------------------------------------------
+// Task-free home-binding entry (Host-approved Agent memory intents)
+//
+// A Host intent has no task, session or runtime; the caller holds the SAME
+// task-free Agent-home writer lease `agent.home.projection` uses. These entry
+// points take only the leased home binding and reuse the exact pinned
+// primitives the task path uses. `AgentMemoryTaskContext` is not loosened: the
+// task path still builds from it and still requires every task field.
+// ---------------------------------------------------------------------------
+
+const EMPTY_FILE_STATE: FileState = Object.freeze({ exists: false, content: '', revision: digest(''), byteCount: 0 });
+
+/** Validate and freeze a task-free home binding built from a live writer lease. */
+export function agentMemoryHomeBinding(input: AgentMemoryHomeBinding): AgentMemoryHomeBinding {
+  if (!input || typeof input.canonicalHome !== 'string' || !path.isAbsolute(input.canonicalHome) || typeof input.homeIdentity?.dev !== 'bigint' || typeof input.homeIdentity.ino !== 'bigint') {
+    throw new AgentMemoryValidationError('Agent memory requires an exact leased Agent home');
+  }
+  return Object.freeze({
+    canonicalHome: path.resolve(input.canonicalHome),
+    homeIdentity: Object.freeze({ dev: input.homeIdentity.dev, ino: input.homeIdentity.ino }),
+    ...(input.filesystem === undefined ? {} : { filesystem: input.filesystem }),
+  });
+}
+
+function internalFileName(fileName: string): string {
+  if (!SAFE_SEGMENT.test(fileName)) throw new AgentMemoryValidationError('Agent memory internal state name is invalid');
+  return fileName;
+}
+
+/** One observation of a memory file: existence and the sha256 of its exact bytes. */
+export interface AgentMemoryFileObservation {
+  readonly exists: boolean;
+  readonly revision: string;
+}
+
+const OBSERVATION_CHUNK_BYTES = 64 * 1024;
+
+/**
+ * Observe one allowed memory path (`MEMORY.md` or `notes/**.md`) through the
+ * pinned home, for evidence only (never for recall or save).
+ *
+ * The revision is the same definition every other memory read uses — sha256
+ * over the file's exact bytes, the empty-bytes digest when missing — but the
+ * bytes are streamed into the hash with no size bound and no UTF-8 decoding, so
+ * an oversized or non-UTF-8 file is still observable. A missing leaf or a
+ * missing parent directory is an observed absence.
+ *
+ * Still unobservable (thrown): a home whose pinned identity no longer matches
+ * or that is gone; a symlink, non-directory or unopenable parent component; a
+ * symlink or non-regular leaf; any other open/read/stat I/O error; and a file
+ * that changed while it was hashed (transient). With an external `filesystem`
+ * backend the observation is that backend's bounded UTF-8 `read`.
+ */
+export async function observeAgentMemoryHomeFile(binding: AgentMemoryHomeBinding, relativePath: string): Promise<AgentMemoryFileObservation> {
+  const home = agentMemoryHomeBinding(binding);
+  const memoryPath = validateAgentMemoryPath(relativePath);
+  if (home.filesystem !== undefined) {
+    const current = await home.filesystem.read(memoryPath, AGENT_MEMORY_MAX_FILE_BYTES);
+    return Object.freeze({ exists: current.exists, revision: current.revision });
+  }
+  const parts = memoryPath.split('/');
+  const fileName = parts.pop()!;
+  const handles: Array<Awaited<ReturnType<typeof fs.open>>> = [];
+  try {
+    let directory = await openPinnedDirectory(home.canonicalHome, home.homeIdentity);
+    handles.push(directory);
+    for (const part of parts) {
+      let next: Awaited<ReturnType<typeof fs.open>>;
+      try {
+        next = await fs.open(`${descriptorPath(directory)}/${part}`, noFollowFlags(fsConstants.O_RDONLY | fsConstants.O_DIRECTORY));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Object.freeze({ exists: false, revision: digest('') });
+        throw new AgentMemoryIoError('memory directory is unavailable or unsafe');
+      }
+      handles.push(next);
+      const stat = await next.stat({ bigint: true });
+      if (!stat.isDirectory()) throw new AgentMemoryValidationError('memory directory is not a real directory');
+      directory = next;
+    }
+    return await observePinnedFileBytes(directory, fileName);
+  } finally {
+    await Promise.all(handles.reverse().map((handle) => handle.close().catch(() => {})));
+  }
+}
+
+async function observePinnedFileBytes(directory: Awaited<ReturnType<typeof fs.open>>, fileName: string): Promise<AgentMemoryFileObservation> {
+  let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+  try {
+    handle = await fs.open(`${descriptorPath(directory)}/${fileName}`, noFollowFlags(fsConstants.O_RDONLY | fsConstants.O_NONBLOCK));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Object.freeze({ exists: false, revision: digest('') });
+    throw new AgentMemoryIoError('could not open memory file');
+  }
+  try {
+    const before = await handle.stat({ bigint: true });
+    if (!before.isFile()) throw new AgentMemoryValidationError('memory file is not a regular file');
+    const hash = createHash('sha256');
+    const chunk = Buffer.alloc(OBSERVATION_CHUNK_BYTES);
+    let total = 0n;
+    for (;;) {
+      const read = await handle.read(chunk, 0, chunk.length, Number(total));
+      if (read.bytesRead === 0) break;
+      hash.update(chunk.subarray(0, read.bytesRead));
+      total += BigInt(read.bytesRead);
+    }
+    const after = await handle.stat({ bigint: true });
+    if (total !== before.size || after.size !== before.size || after.mtimeNs !== before.mtimeNs || after.ino !== before.ino) {
+      throw new AgentMemoryIoError('memory file changed during read');
+    }
+    return Object.freeze({ exists: true, revision: `sha256:${hash.digest('hex')}` });
+  } catch (error) {
+    if (error instanceof AgentMemoryError) throw error;
+    throw new AgentMemoryIoError('could not read memory file');
+  } finally {
+    await handle.close().catch(() => {});
+  }
+}
+
+export interface AgentMemoryHomeCompareAndSwap {
+  readonly operation: 'replace' | 'delete';
+  readonly path: string;
+  /** The sha256 revision the live file must have; a missing file is the empty-bytes digest. */
+  readonly expectedRevision: string;
+  /** Exactly for `replace`. */
+  readonly content?: string;
+}
+
+/**
+ * Exactly one sha256 compare-and-swap on one memory file, the same primitive
+ * `memory_save` uses. Resolves with the file state after success (a delete
+ * resolves with the missing-file state). Throws
+ * {@link AgentMemoryRevisionConflictError} when the live revision differs,
+ * {@link AgentMemoryValidationError} for a refused input, and
+ * {@link AgentMemoryIoError} (or a backend error) otherwise.
+ *
+ * Native backend: every conflict is thrown before the rename that would
+ * install new bytes (replace compares before the temp file, before its write
+ * and after it; delete compares twice before its tombstone rename), so a
+ * conflict means this call renamed nothing.
+ */
+export async function compareAndSwapAgentMemoryHomeFile(binding: AgentMemoryHomeBinding, input: AgentMemoryHomeCompareAndSwap): Promise<AgentMemoryFilesystemFileState> {
+  const home = agentMemoryHomeBinding(binding);
+  const relativePath = validateAgentMemoryPath(input.path);
+  if (!revision(input.expectedRevision)) throw new AgentMemoryValidationError('memory compare-and-swap requires a sha256 expectedRevision');
+  const expectedRevision = input.expectedRevision;
+  if (input.operation === 'delete') {
+    if (input.content !== undefined) throw new AgentMemoryValidationError('delete does not accept content');
+    return exclusiveAgentMemoryHome(home.canonicalHome, async () => {
+      await remove(home, relativePath, expectedRevision);
+      return EMPTY_FILE_STATE;
+    });
+  }
+  if (input.operation !== 'replace' || typeof input.content !== 'string') throw new AgentMemoryValidationError('replace requires string content');
+  const content = input.content;
+  return exclusiveAgentMemoryHome(home.canonicalHome, () => replace(home, relativePath, expectedRevision, content));
+}
+
+/** Read one SDK-internal state file under `.byok` through the pinned home. */
+export async function readAgentMemoryHomeInternalFile(binding: AgentMemoryHomeBinding, fileName: string): Promise<AgentMemoryFilesystemFileState> {
+  return readInternalFile(agentMemoryHomeBinding(binding), internalFileName(fileName));
+}
+
+/**
+ * The durable-barrier write for SDK-internal state under `.byok`.
+ *
+ * A successful return covers the temp write, the temp file fsync, the rename
+ * and the directory fsync. Unlike every other internal write, a directory
+ * fsync error of ANY code — including the `EINVAL`/`EPERM` a filesystem uses to
+ * refuse directory fsync — is a failure. A failure after the rename throws
+ * too: the new bytes may be visible, but nothing proves they are durable.
+ *
+ * With an external `filesystem` the write is that backend's `replace`; its
+ * durability is exactly that backend's guarantee.
+ */
+export async function replaceAgentMemoryHomeInternalFileStrict(binding: AgentMemoryHomeBinding, fileName: string, expectedRevision: string, content: string): Promise<AgentMemoryFilesystemFileState> {
+  const home = agentMemoryHomeBinding(binding);
+  const name = internalFileName(fileName);
+  return exclusiveAgentMemoryHome(home.canonicalHome, () => replaceInternalFile(home, name, expectedRevision, content, 'strict'));
+}
+
+/**
+ * Append one metadata-only line to the Agent memory audit tail. Audit is
+ * observation, never replay authority; the entry must carry no memory content.
+ */
+export async function appendAgentMemoryHomeAudit(binding: AgentMemoryHomeBinding, values: Readonly<Record<string, unknown>>): Promise<void> {
+  const home = agentMemoryHomeBinding(binding);
+  const entry = `${JSON.stringify({ version: 1, ...values, recordedAt: new Date().toISOString() })}\n`;
+  await exclusiveAgentMemoryHome(home.canonicalHome, async () => {
+    const current = await readInternalFile(home, AGENT_MEMORY_AUDIT_FILENAME);
+    await replaceInternalFile(home, AGENT_MEMORY_AUDIT_FILENAME, current.revision, boundedAuditTail(current.content, entry));
+  });
+}
+
+/**
+ * Runtime evidence that the filesystem holding `directory` honors directory
+ * fsync. `false` for any refusal (including `EINVAL`/`EPERM`), so a caller can
+ * decline to promise a durable barrier the filesystem cannot give.
+ */
+export async function probeAgentMemoryStrictDirectorySync(directory: string): Promise<boolean> {
+  let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
+  try {
+    handle = await fs.open(directory, fsConstants.O_RDONLY | (typeof fsConstants.O_DIRECTORY === 'number' ? fsConstants.O_DIRECTORY : 0));
+    const stat = await handle.stat();
+    if (!stat.isDirectory()) return false;
+    await handle.sync();
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
 export class AgentMemoryService {
   constructor(private readonly input: AgentMemoryTaskContext) {}
   async recall(input: { readonly path: unknown; readonly ifRevision?: unknown }): Promise<Readonly<AgentMemoryRecallResult>> {
     const context = taskContext(this.input); const relativePath = validateAgentMemoryPath(input.path);
-    if (input.ifRevision !== undefined && !revision(input.ifRevision)) throw new AgentMemoryError('ifRevision must be a sha256 content revision');
+    if (input.ifRevision !== undefined && !revision(input.ifRevision)) throw new AgentMemoryValidationError('ifRevision must be a sha256 content revision');
     const current = await readFile(context, relativePath);
-    if (!current.exists) throw new AgentMemoryError('memory file does not exist');
+    if (!current.exists) throw new AgentMemoryValidationError('memory file does not exist');
     if (input.ifRevision !== undefined && current.revision !== input.ifRevision) throw new AgentMemoryRevisionConflictError(input.ifRevision, current.revision);
     const auditWarning = await exclusiveAgentMemoryHome(context.canonicalHome, () => recordAuditWarning(context, 'recall', {
       path: relativePath,
@@ -437,9 +687,9 @@ export class AgentMemoryService {
   }
   async save(input: { readonly op: unknown; readonly path: unknown; readonly expectedRevision: unknown; readonly content?: unknown }): Promise<Readonly<AgentMemorySaveResult>> {
     const context = taskContext(this.input); const relativePath = validateAgentMemoryPath(input.path);
-    if ((input.op !== 'replace' && input.op !== 'delete') || !revision(input.expectedRevision)) throw new AgentMemoryError('memory save requires op and sha256 expectedRevision');
-    if (input.op === 'replace' && typeof input.content !== 'string') throw new AgentMemoryError('replace requires string content');
-    if (input.op === 'delete' && input.content !== undefined) throw new AgentMemoryError('delete does not accept content');
+    if ((input.op !== 'replace' && input.op !== 'delete') || !revision(input.expectedRevision)) throw new AgentMemoryValidationError('memory save requires op and sha256 expectedRevision');
+    if (input.op === 'replace' && typeof input.content !== 'string') throw new AgentMemoryValidationError('replace requires string content');
+    if (input.op === 'delete' && input.content !== undefined) throw new AgentMemoryValidationError('delete does not accept content');
     const expectedRevision = input.expectedRevision;
     const content = input.content;
     return exclusiveAgentMemoryHome(context.canonicalHome, async () => {
@@ -448,7 +698,7 @@ export class AgentMemoryService {
         const auditWarning = await recordAuditWarning(context, 'save', { path: relativePath, operation: 'delete' });
         return Object.freeze({ path: relativePath, deleted: true, ...(auditWarning === undefined ? {} : { auditWarning }) });
       }
-      if (typeof content !== 'string') throw new AgentMemoryError('replace requires string content');
+      if (typeof content !== 'string') throw new AgentMemoryValidationError('replace requires string content');
       const current = await replace(context, relativePath, expectedRevision, content);
       const auditWarning = await recordAuditWarning(context, 'save', { path: relativePath, operation: 'replace', revision: current.revision, byteCount: current.byteCount });
       return Object.freeze({ path: relativePath, revision: current.revision, deleted: false, ...(auditWarning === undefined ? {} : { auditWarning }) });

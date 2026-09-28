@@ -117,6 +117,15 @@ export type DaemonEvent =
   | { kind: 'git-workspace'; ts: string; taskId: string; workspaceId: string; phase: string; headChanged?: boolean; commitsSinceBaseline?: number; dirty?: { staged: number; unstaged: number; untracked: number; conflicted: number }; errorCategory?: string }
   | { kind: 'runtime-disposal-failed'; ts: string; taskId: string; runtimeId: string; stage: 'signal' | 'quiescence' | 'cleanup'; reason: string }
   /**
+   * WP2I-S2: the Host's durable readback for a Host-approved Agent memory
+   * intent contradicted the device's durable terminal (`disposition`
+   * `conflict`, or `host_terminal` against a local terminal). The integrity
+   * audit is already in the Agent home's memory audit tail and the notice was
+   * acknowledged after the `ackedAt` barrier. Metadata only: the intent id and
+   * the Host disposition — never a path, revision, outcome or Host text.
+   */
+  | { kind: 'agent-memory-intent-integrity'; ts: string; intentId: string; disposition: 'conflict' | 'host_terminal' }
+  /**
    * Plan `device-assertion-broker`: one `assertion.issue` control call
    * resolved — either an assertion was minted (`issued`) or one of the six
    * fail-closed gates refused (`denied`, with `reason` naming which one; see
@@ -483,6 +492,11 @@ export class DaemonObserver {
     errorCategory?: string;
   }): void {
     this.emit({ kind: 'git-workspace', ts: nowIso(), ...event });
+  }
+
+  /** WP2I-S2: see the `agent-memory-intent-integrity` `DaemonEvent` variant's own doc comment. */
+  noteAgentMemoryIntentIntegrity(event: { intentId: string; disposition: 'conflict' | 'host_terminal' }): void {
+    this.emit({ kind: 'agent-memory-intent-integrity', ts: nowIso(), intentId: event.intentId, disposition: event.disposition });
   }
 
   noteRuntimeDisposalFailure(event: {

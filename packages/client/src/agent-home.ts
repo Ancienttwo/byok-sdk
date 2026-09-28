@@ -954,6 +954,16 @@ export class AgentHomeManager {
     await this.initializeResolved(binding.resolution, binding.lease.cwd);
   }
 
+  /**
+   * Task-free initialization for a caller already holding `binding.lease`:
+   * only the SDK-owned home skeleton (`notes/`, `MEMORY.md`), exactly as
+   * `project()` ensures it, and never the downstream `projection.prepare`
+   * lifecycle, which belongs to task/creation time.
+   */
+  async initializeTaskFree(binding: AgentHomeBinding): Promise<void> {
+    await initializeAgentHome(binding.resolution);
+  }
+
   async initializeExecution(binding: AgentHomeExecutionBinding): Promise<void> {
     await this.mutateExecution(binding, () =>
       this.initializeResolved(binding.resolution, binding.lease.cwd));

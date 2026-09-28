@@ -1279,6 +1279,13 @@ export declare class AgentHomeManager {
     }): Promise<AgentHomeExecutionBinding>;
     /** Initialize only after any requested session exact-match has succeeded. */
     initialize(binding: AgentHomeBinding): Promise<void>;
+    /**
+     * Task-free initialization for a caller already holding `binding.lease`:
+     * only the SDK-owned home skeleton (`notes/`, `MEMORY.md`), exactly as
+     * `project()` ensures it, and never the downstream `projection.prepare`
+     * lifecycle, which belongs to task/creation time.
+     */
+    initializeTaskFree(binding: AgentHomeBinding): Promise<void>;
     initializeExecution(binding: AgentHomeExecutionBinding): Promise<void>;
     mutateExecution<T>(binding: AgentHomeExecutionBinding, operation: () => Promise<T>): Promise<T>;
     private initializeResolved;
@@ -2108,10 +2115,186 @@ export declare function openAgentMemoryFilesystemHelper(input: Readonly<{
     canonicalHome: string;
     homeIdentity: AgentHomeLease['homeIdentity'];
 }>): Promise<AgentMemoryFilesystem>;
+// ==== @byok-sdk/client dist/daemon/agent-memory-intent.d.ts ====
+import { type AgentMemoryIntentAvailablePayload, type AgentMemoryIntentCompletion, type AgentMemoryIntentFileObservation, type AgentMemoryIntentOperation, type AgentMemoryIntentReadback, type AgentMemoryIntentRejectionCode, type AgentMemoryIntentReservation, type AgentRef } from '@byok-sdk/protocol';
+import { type AgentHomeLease, type AgentHomeManager } from '../agent-home';
+import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
+/**
+ * Host-approved Agent memory intents — the daemon half.
+ *
+ * `agent.memory.intent.available` names one intent (`{ intentId, agentRef }`).
+ * The daemon fetches the immutable intent from the Host through the injected
+ * {@link AgentMemoryIntentTransport}, applies it with the existing sha256 CAS
+ * AT MOST ONCE, and reports a content-free terminal completion. The device
+ * ledger `.byok/agent-memory-intents-v1.json` is the at-most-once authority:
+ *
+ * - window 1 (home lease): look the intent up; a terminal is re-made durable
+ *   (barrier) and re-completed; a leftover `applying` becomes `uncertain` and is
+ *   never re-executed; no row reserves a slot (`held`) or cannot (`none`).
+ * - fetch (no lease): the Host releases, withholds, terminates or defers.
+ * - window 2 (home lease): durable `applying`, then ONE CAS, then a durable
+ *   terminal. A release is consumed by exactly this window.
+ * - complete (no lease): the completion goes to the Host; the readback must
+ *   match it.
+ * - window 3 (home lease): the `ackedAt` barrier. Only then does the notice
+ *   resolve and the mailbox cursor move.
+ *
+ * Network I/O never runs while the home lease is held, and every intent of one
+ * Agent is processed serially in this process.
+ */
+/** SDK-internal ledger file under the Agent home's `.byok` directory. */
+export declare const AGENT_MEMORY_INTENT_LEDGER_FILENAME = "agent-memory-intents-v1.json";
+/** Upper bound of one serialized ledger record plus its separating comma (R_MAX). */
+export declare const AGENT_MEMORY_INTENT_LEDGER_RECORD_MAX_BYTES = 2048;
+/** Bytes of the empty ledger `{"version":1,"records":[]}` (E). */
+export declare const AGENT_MEMORY_INTENT_LEDGER_ENVELOPE_BYTES = 26;
+/** Ledger capacity N = floor((1 MiB − E) / R_MAX) = 511. */
+export declare const AGENT_MEMORY_INTENT_LEDGER_CAPACITY: number;
+/** Closed reasons an intent notice is left un-acknowledged (the mailbox row and cursor stay). */
+export declare const AGENT_MEMORY_INTENT_NOTICE_FAILURE_REASONS: readonly ['transport_unconfigured', 'filesystem_unavailable', 'home_busy', 'fetch_failed', 'fetch_invalid', 'complete_failed', 'readback_invalid', 'readback_mismatch', 'local_io_failed', 'ledger_full', 'ledger_invalid'];
+export type AgentMemoryIntentNoticeFailureReason = (typeof AGENT_MEMORY_INTENT_NOTICE_FAILURE_REASONS)[number];
+/**
+ * The only error the intent processor throws. A fixed message built from a
+ * closed reason and the intent id, no `cause`, no own enumerable properties:
+ * nothing a Host transport threw or returned, and no memory path or content,
+ * reaches the connection manager's log line.
+ */
+export declare class AgentMemoryIntentNoticeError extends Error {
+    #private;
+    constructor(reason: AgentMemoryIntentNoticeFailureReason, intentId: string);
+    get reason(): AgentMemoryIntentNoticeFailureReason;
+    get intentId(): string;
+}
+/** Exactly what the daemon hands the Host transport for one fetch. */
+export interface AgentMemoryIntentFetchInput {
+    readonly intentId: string;
+    readonly agentRef: AgentRef;
+    /** `held`: a ledger slot is reserved; `none`: the Host must not release or change state. */
+    readonly reservation: AgentMemoryIntentReservation;
+}
+/**
+ * Host-injected transport for Host-approved Agent memory intents. The Host
+ * authenticates the device on its own routes; the SDK never sees an assertion.
+ *
+ * - `fetch` resolves with the Host's fetch answer (release / withheld /
+ *   terminal / deferred) for exactly this intent and reservation.
+ * - `complete` delivers one terminal completion and resolves with the Host's
+ *   DURABLE readback for it.
+ *
+ * Both answers are copied into inert plain data and strictly parsed. A throw
+ * from either is a transport failure: the notice is not acknowledged and a
+ * redelivery retries. Neither is ever called while the Agent home is leased.
+ */
+export interface AgentMemoryIntentTransport {
+    fetch(request: AgentMemoryIntentFetchInput): Promise<unknown>;
+    complete(completion: AgentMemoryIntentCompletion): Promise<unknown>;
+}
+/**
+ * What one memory filesystem backend has PROVEN. A backend whose proof is
+ * missing fails closed: without `strictLedgerBarrier` the processor refuses to
+ * run (and the capability is not advertised); without `conflictProvesNoRename`
+ * a CAS revision conflict is reported as `uncertain`, never `conflict`.
+ */
+export interface AgentMemoryIntentBackend {
+    /** Omitted for the native Linux descriptor backend. */
+    readonly openFilesystem?: (lease: AgentHomeLease) => Promise<AgentMemoryFilesystem>;
+    /** A thrown `AgentMemoryRevisionConflictError` proves this attempt renamed nothing. */
+    readonly conflictProvesNoRename: boolean;
+    /** A successful internal-state write proves temp fsync, rename and directory fsync. */
+    readonly strictLedgerBarrier: boolean;
+}
+/**
+ * Native Linux descriptor backend: every CAS conflict is thrown before its
+ * rename (`agent-memory.ts` replace/delete), and ledger writes use the strict
+ * directory-fsync variant.
+ */
+export declare const NATIVE_AGENT_MEMORY_INTENT_BACKEND: AgentMemoryIntentBackend;
+/**
+ * External macOS helper backend. The helper binary is product-deployed and the
+ * SDK cannot prove, in this repository and at runtime, that the configured
+ * binary orders its revision conflict before the rename or that its successful
+ * `replace` includes a strict directory fsync. Both proofs are therefore
+ * absent: this backend never advertises intents, and a conflict on it would be
+ * reported as `uncertain`.
+ */
+export declare function helperAgentMemoryIntentBackend(helperBin: string): AgentMemoryIntentBackend;
+export interface AgentMemoryIntentProcessorOptions {
+    readonly tenantId: string;
+    readonly deviceId: string;
+    readonly transport: AgentMemoryIntentTransport | undefined;
+    readonly homes: AgentHomeManager | undefined;
+    /** `undefined` means no proven backend: every notice fails `filesystem_unavailable`. */
+    readonly backend: AgentMemoryIntentBackend | undefined;
+    /**
+     * Called exactly once per acknowledged notice whose Host readback
+     * contradicted the device terminal (`conflict`, or `host_terminal` against a
+     * local terminal), after the integrity audit and the `ackedAt` barrier.
+     * Metadata only.
+     */
+    readonly onIntegrity?: (event: Readonly<{
+        intentId: string;
+        disposition: 'conflict' | 'host_terminal';
+    }>) => void;
+}
+/** What a processed notice resolved with (metadata only). */
+export type AgentMemoryIntentProcessResult = Readonly<{
+    kind: 'acknowledged';
+    completion: AgentMemoryIntentCompletion;
+    readback: AgentMemoryIntentReadback;
+    /** The Host fact contradicted the device fact; an integrity audit was recorded. */
+    integrity: boolean;
+}> | Readonly<{
+    kind: 'host_terminal';
+    readback: AgentMemoryIntentReadback;
+}>;
+export type AgentMemoryIntentLedgerState = 'applying' | 'applied' | 'conflict' | 'rejected' | 'uncertain';
+export interface AgentMemoryIntentLedgerRecord {
+    readonly intentId: string;
+    /** The notice `agentRef.profileRevision`; the agentId is the ledger's home. */
+    readonly profileRevision: string;
+    readonly path: string;
+    readonly operation: AgentMemoryIntentOperation;
+    readonly operationDigest: string;
+    readonly baseRevision: string;
+    readonly targetRevision: string | null;
+    readonly approvalRef: string;
+    readonly state: AgentMemoryIntentLedgerState;
+    readonly detail: null | AgentMemoryIntentFileObservation | Readonly<{
+        code: AgentMemoryIntentRejectionCode;
+    }>;
+    readonly createdAt: string;
+    readonly updatedAt: string;
+    readonly ackedAt: string | null;
+}
+/** Serialized byte length of one record (without its separating comma). */
+export declare function agentMemoryIntentLedgerRecordBytes(record: AgentMemoryIntentLedgerRecord): number;
+/**
+ * The real ledger serializer: compact JSON `{"version":1,"records":[…]}`.
+ * Throws when the record count exceeds N or a record plus its separator would
+ * exceed R_MAX, which the field bounds make unreachable.
+ */
+export declare function serializeAgentMemoryIntentLedger(records: readonly AgentMemoryIntentLedgerRecord[]): string;
+/**
+ * `applied` is consistent with its operation, from the historical receipt
+ * alone (never a re-read of the current file, never provenance from a hash):
+ * replace → the target exists at `targetRevision`; delete → the target is
+ * missing (empty-bytes revision) and the intent had a null `targetRevision`.
+ */
+export declare function agentMemoryIntentAppliedConsistent(operation: AgentMemoryIntentOperation, targetRevision: string | null, result: AgentMemoryIntentFileObservation): boolean;
+/** Strictly parse a ledger body. Throws on anything it cannot vouch for; never resets. */
+export declare function parseAgentMemoryIntentLedger(content: string): readonly AgentMemoryIntentLedgerRecord[];
+/**
+ * Build the `agent.memory.intent.available` processor. It resolves only after
+ * the terminal completion was durable before `complete`, the Host readback
+ * matched it, and the `ackedAt` barrier succeeded (or, for an intent with no
+ * local row, after a validated Host terminal). Every other end throws one
+ * {@link AgentMemoryIntentNoticeError}, which keeps the mailbox row.
+ */
+export declare function createAgentMemoryIntentProcessor(options: AgentMemoryIntentProcessorOptions): (payload: AgentMemoryIntentAvailablePayload) => Promise<AgentMemoryIntentProcessResult>;
 // ==== @byok-sdk/client dist/daemon/agent-memory.d.ts ====
 import { AGENT_MEMORY_PROJECTION_CAPABILITY, type AgentMemoryProjectionMutation } from '@byok-sdk/protocol';
 import { type AgentHomeLease, type AgentRef } from '../agent-home';
-import type { AgentMemoryFilesystem } from './agent-memory-filesystem';
+import type { AgentMemoryFilesystem, AgentMemoryFilesystemFileState } from './agent-memory-filesystem';
 export declare const AGENT_MEMORY_AUDIT_FILENAME = "agent-memory-audit-v1.jsonl";
 /** v2 is one atomically replaced state file, never an append-only log. */
 export declare const AGENT_MEMORY_OUTBOX_FILENAME = "agent-memory-redacted-outbox-v2.json";
@@ -2124,10 +2307,37 @@ export declare const AGENT_MEMORY_MAX_LOCAL_LOG_BYTES: number;
 export declare class AgentMemoryError extends Error {
     constructor(message: string);
 }
+/**
+ * Deterministic refusal: the same input against the same home state fails the
+ * same way on every retry (an invalid path, a forbidden delete, an oversized or
+ * non-UTF-8 file, a non-regular leaf, a platform without a secure backend).
+ */
+export declare class AgentMemoryValidationError extends AgentMemoryError {
+    constructor(message: string);
+}
+/**
+ * Filesystem I/O failure: an open, read, write, fsync, rename or unlink did not
+ * complete, or a file changed under a read. A retry may succeed, and a failure
+ * after a rename says nothing about whether that rename became durable.
+ */
+export declare class AgentMemoryIoError extends AgentMemoryError {
+    constructor(message: string);
+}
 export declare class AgentMemoryRevisionConflictError extends AgentMemoryError {
     readonly expectedRevision: string;
     readonly actualRevision: string;
     constructor(expectedRevision: string, actualRevision: string);
+}
+/**
+ * The exact leased Agent home the memory primitives act on, and nothing else.
+ * A task context is one (it carries these fields); a task-free Host intent
+ * builds one from its own home lease with {@link agentMemoryHomeBinding}.
+ */
+export interface AgentMemoryHomeBinding {
+    readonly canonicalHome: string;
+    readonly homeIdentity: AgentHomeLease['homeIdentity'];
+    /** Optional external root handle; omission selects the native Linux backend. */
+    readonly filesystem?: AgentMemoryFilesystem;
 }
 export interface AgentMemoryTaskContext {
     readonly taskId: string;
@@ -2233,6 +2443,78 @@ export interface AgentMemorySaveResult {
     readonly deleted: boolean;
     readonly auditWarning?: AgentMemoryAuditWarning;
 }
+/** Validate and freeze a task-free home binding built from a live writer lease. */
+export declare function agentMemoryHomeBinding(input: AgentMemoryHomeBinding): AgentMemoryHomeBinding;
+/** One observation of a memory file: existence and the sha256 of its exact bytes. */
+export interface AgentMemoryFileObservation {
+    readonly exists: boolean;
+    readonly revision: string;
+}
+/**
+ * Observe one allowed memory path (`MEMORY.md` or `notes/**.md`) through the
+ * pinned home, for evidence only (never for recall or save).
+ *
+ * The revision is the same definition every other memory read uses — sha256
+ * over the file's exact bytes, the empty-bytes digest when missing — but the
+ * bytes are streamed into the hash with no size bound and no UTF-8 decoding, so
+ * an oversized or non-UTF-8 file is still observable. A missing leaf or a
+ * missing parent directory is an observed absence.
+ *
+ * Still unobservable (thrown): a home whose pinned identity no longer matches
+ * or that is gone; a symlink, non-directory or unopenable parent component; a
+ * symlink or non-regular leaf; any other open/read/stat I/O error; and a file
+ * that changed while it was hashed (transient). With an external `filesystem`
+ * backend the observation is that backend's bounded UTF-8 `read`.
+ */
+export declare function observeAgentMemoryHomeFile(binding: AgentMemoryHomeBinding, relativePath: string): Promise<AgentMemoryFileObservation>;
+export interface AgentMemoryHomeCompareAndSwap {
+    readonly operation: 'replace' | 'delete';
+    readonly path: string;
+    /** The sha256 revision the live file must have; a missing file is the empty-bytes digest. */
+    readonly expectedRevision: string;
+    /** Exactly for `replace`. */
+    readonly content?: string;
+}
+/**
+ * Exactly one sha256 compare-and-swap on one memory file, the same primitive
+ * `memory_save` uses. Resolves with the file state after success (a delete
+ * resolves with the missing-file state). Throws
+ * {@link AgentMemoryRevisionConflictError} when the live revision differs,
+ * {@link AgentMemoryValidationError} for a refused input, and
+ * {@link AgentMemoryIoError} (or a backend error) otherwise.
+ *
+ * Native backend: every conflict is thrown before the rename that would
+ * install new bytes (replace compares before the temp file, before its write
+ * and after it; delete compares twice before its tombstone rename), so a
+ * conflict means this call renamed nothing.
+ */
+export declare function compareAndSwapAgentMemoryHomeFile(binding: AgentMemoryHomeBinding, input: AgentMemoryHomeCompareAndSwap): Promise<AgentMemoryFilesystemFileState>;
+/** Read one SDK-internal state file under `.byok` through the pinned home. */
+export declare function readAgentMemoryHomeInternalFile(binding: AgentMemoryHomeBinding, fileName: string): Promise<AgentMemoryFilesystemFileState>;
+/**
+ * The durable-barrier write for SDK-internal state under `.byok`.
+ *
+ * A successful return covers the temp write, the temp file fsync, the rename
+ * and the directory fsync. Unlike every other internal write, a directory
+ * fsync error of ANY code — including the `EINVAL`/`EPERM` a filesystem uses to
+ * refuse directory fsync — is a failure. A failure after the rename throws
+ * too: the new bytes may be visible, but nothing proves they are durable.
+ *
+ * With an external `filesystem` the write is that backend's `replace`; its
+ * durability is exactly that backend's guarantee.
+ */
+export declare function replaceAgentMemoryHomeInternalFileStrict(binding: AgentMemoryHomeBinding, fileName: string, expectedRevision: string, content: string): Promise<AgentMemoryFilesystemFileState>;
+/**
+ * Append one metadata-only line to the Agent memory audit tail. Audit is
+ * observation, never replay authority; the entry must carry no memory content.
+ */
+export declare function appendAgentMemoryHomeAudit(binding: AgentMemoryHomeBinding, values: Readonly<Record<string, unknown>>): Promise<void>;
+/**
+ * Runtime evidence that the filesystem holding `directory` honors directory
+ * fsync. `false` for any refusal (including `EINVAL`/`EPERM`), so a caller can
+ * decline to promise a durable barrier the filesystem cannot give.
+ */
+export declare function probeAgentMemoryStrictDirectorySync(directory: string): Promise<boolean>;
 export declare class AgentMemoryService {
     private readonly input;
     constructor(input: AgentMemoryTaskContext);
@@ -3636,6 +3918,7 @@ import { type ProviderProvisioningHandler } from './provider-provisioning';
 import type { McpLaunchCwdConfig } from './trusted-launch-cwd';
 import { type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 import { type AgentMemoryHostedProjection } from './agent-memory';
+import { type AgentMemoryIntentTransport } from './agent-memory-intent';
 import type { AgentMemoryFilesystemHelperConfig } from './agent-memory-filesystem';
 import { type AgentContentReadRoot } from './agent-content-read';
 /**
@@ -4085,6 +4368,22 @@ export interface DaemonConfig {
      * validates against this tenant, device and request.
      */
     providerProvisioning?: ProviderProvisioningHandler;
+    /**
+     * Host transport for the task-free `agent.memory.intent.available` notice
+     * (Host-approved Agent memory intents). See {@link AgentMemoryIntentTransport}.
+     *
+     * OFF by default. The `agent-memory-intent.v1` capability is advertised only
+     * while this transport is present AND `agentHome` is configured AND the
+     * secure memory filesystem is available AND that backend's ledger write is
+     * a proven durable barrier (temp fsync, rename, directory fsync). Today that
+     * is the native Linux backend on a filesystem that honors directory fsync;
+     * Windows, macOS without a helper, and the external macOS helper backend do
+     * not advertise. A notice that arrives without the capability is NOT
+     * acknowledged: it fails `transport_unconfigured` or
+     * `filesystem_unavailable` before any fetch. There is no control-socket
+     * method for intents; the only entry is the mailbox notice.
+     */
+    agentMemoryIntents?: AgentMemoryIntentTransport;
     /**
      * Operator input to the MCP toolset launch boundary
      * (`./trusted-launch-cwd.ts`), forwarded verbatim to
@@ -6866,6 +7165,20 @@ export type DaemonEvent = {
     reason: string;
 }
 /**
+ * WP2I-S2: the Host's durable readback for a Host-approved Agent memory
+ * intent contradicted the device's durable terminal (`disposition`
+ * `conflict`, or `host_terminal` against a local terminal). The integrity
+ * audit is already in the Agent home's memory audit tail and the notice was
+ * acknowledged after the `ackedAt` barrier. Metadata only: the intent id and
+ * the Host disposition — never a path, revision, outcome or Host text.
+ */
+ | {
+    kind: 'agent-memory-intent-integrity';
+    ts: string;
+    intentId: string;
+    disposition: 'conflict' | 'host_terminal';
+}
+/**
  * Plan `device-assertion-broker`: one `assertion.issue` control call
  * resolved — either an assertion was minted (`issued`) or one of the six
  * fail-closed gates refused (`denied`, with `reason` naming which one; see
@@ -7052,6 +7365,11 @@ export declare class DaemonObserver {
             conflicted: number;
         };
         errorCategory?: string;
+    }): void;
+    /** WP2I-S2: see the `agent-memory-intent-integrity` `DaemonEvent` variant's own doc comment. */
+    noteAgentMemoryIntentIntegrity(event: {
+        intentId: string;
+        disposition: 'conflict' | 'host_terminal';
     }): void;
     noteRuntimeDisposalFailure(event: {
         taskId: string;
@@ -10229,6 +10547,8 @@ export { openTeamTmuxView, TeamTmuxViewError, type OpenTeamTmuxViewInput } from 
 export type { Daemon, DaemonConfig, DaemonStatus, DaemonOverrides, DaemonBranding, HostedJournalConfig, DeviceAssertionConfig, InputPreparationDaemonConfig, AgentEgressConfig, AgentContentReadConfig, AgentContentReadSurfaceConfig, AgentReliableEgressInput, } from './daemon/create-daemon';
 export { ProviderProvisioningNoticeError, PROVIDER_PROVISIONING_NOTICE_FAILURE_REASONS, } from './daemon/provider-provisioning';
 export type { ProviderProvisioningHandler, ProviderProvisioningNotice, ProviderProvisioningNoticeFailureReason, } from './daemon/provider-provisioning';
+export { AgentMemoryIntentNoticeError, AGENT_MEMORY_INTENT_NOTICE_FAILURE_REASONS, } from './daemon/agent-memory-intent';
+export type { AgentMemoryIntentTransport, AgentMemoryIntentFetchInput, AgentMemoryIntentNoticeFailureReason, } from './daemon/agent-memory-intent';
 export { AgentMemoryError, AgentMemoryRevisionConflictError, isAgentMemorySecureFilesystemAvailable, AGENT_MEMORY_AUDIT_FILENAME, AGENT_MEMORY_OUTBOX_FILENAME, } from './daemon/agent-memory';
 export type { AgentMemoryFilesystemHelperConfig } from './daemon/agent-memory-filesystem';
 export type { AgentMemoryFile, AgentMemorySnapshot, AgentMemoryRedactor, AgentMemoryProjectionGrant, AgentMemoryProjectionPort, AgentMemoryHostedProjection, } from './daemon/agent-memory';
