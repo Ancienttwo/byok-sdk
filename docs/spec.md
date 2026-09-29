@@ -169,23 +169,28 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.24.0`; publication requires separate release
+aligned dispatch release is `0.24.0-rc.1`; publication requires separate release
 authorization and registry readback. The current independent keys candidate is
-`0.8.1`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.24.0`, proven from an isolated standard npm install rather
+`0.8.1-rc.1`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.24.0-rc.1`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-The 0.24.0 train is prepared, not yet published. It is a MINOR: `@byok-sdk/client`
-adds public host API — `readDeviceEnrollmentIdentity`,
+The 0.24.0-rc.1 train is a prepared prerelease, not yet published; it is
+published only under the npm dist-tag `rc`, and `latest` stays 0.23.0 / keys
+0.8.0. A prerelease train publishes every public package as a prerelease on one
+dist-tag, which is why keys is `0.8.1-rc.1`. The 0.24.0 line is a MINOR:
+`@byok-sdk/client` adds public host API — `readDeviceEnrollmentIdentity`,
 `createStoredDeviceProofSigner` and `retireInputPreparation` (see "Gate A"
-below and the input-preparation operator step). No other package changes
-source. keys 0.8.1 is a PATCH: its own source is unchanged and it gains no new
-public behavior, API, persistence or security authority; it moves only because
-its packed core and implementation-identity edges must equal the current
-dispatch release, and both resolve to 0.24.0, whose core and
-implementation-identity sources are unchanged from 0.23.0 (the same reasoning
-as keys 0.6.1 and 0.6.2 for 0.20.0 and 0.21.0). Notes:
-`docs/releases/v0.24.0.md`.
+below and the input-preparation operator step) — and protocol, core, client
+and cloud add the Agent memory intent notice, device processor and cloud
+producer (see "Durable Agent homes"), all additive. The stable 0.24.0 freezes
+that wire. keys 0.8.1 is a PATCH: its own source is unchanged and it gains no
+new public behavior, API, persistence or security authority; it moves only
+because its packed core and implementation-identity edges must equal the
+current dispatch release. implementation-identity source is unchanged from
+0.23.0, and core only adds the Agent memory intent digest export, which keys
+does not import (the same reasoning as keys 0.6.1 and 0.6.2 for 0.20.0 and
+0.21.0). Notes: `docs/releases/v0.24.0.md`.
 
 The 0.23.0 train is published (see below). It adds sealed remote provider
 provisioning (see "Sealed remote provider provisioning" below). keys 0.8.0 is a

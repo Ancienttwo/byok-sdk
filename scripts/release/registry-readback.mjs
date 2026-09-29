@@ -40,12 +40,11 @@ const packages = [
 ];
 // These are the stable sentinels for the prerelease channel: a prerelease must
 // not advance npm's default channel even if every artifact is otherwise exact.
+// Frozen at the last published stable train, 0.23.0 / keys 0.8.0; every public
+// package, implementation-identity included, now has a stable latest.
 const expectedLatestVersions = new Map(
-  packages.map((packageName) => [packageName, packageName === '@byok-sdk/keys' ? '0.3.2' : '0.8.1']),
+  packages.map((packageName) => [packageName, packageName === '@byok-sdk/keys' ? '0.8.0' : '0.23.0']),
 );
-// New support package has no historical stable tag. Its first prerelease must
-// not create latest; later publication contracts must freeze their own baseline.
-expectedLatestVersions.set('@byok-sdk/implementation-identity', undefined);
 const expectedPackageVersions = Object.fromEntries(
   packages.map((packageName) => [packageName, packageName === '@byok-sdk/keys' ? keysVersion : expectedVersion]),
 );
@@ -144,10 +143,7 @@ for (const packageName of packages) {
       throw new Error(`${packageName}: registry dist-tag ${distTag} is ${JSON.stringify(distTags?.[distTag])}, expected ${packageVersion}`);
     }
     const expectedLatestVersion = expectedLatestVersions.get(packageName);
-    if (packageName === '@byok-sdk/implementation-identity' && distTags.latest !== undefined) {
-      throw new Error(`${packageName}: first prerelease must not create latest`);
-    }
-    if (expectedLatestVersion && distTags.latest !== expectedLatestVersion) {
+    if (distTags.latest !== expectedLatestVersion) {
       throw new Error(`${packageName}: registry latest is ${JSON.stringify(distTags.latest)}, expected stable ${expectedLatestVersion}`);
     }
   }
