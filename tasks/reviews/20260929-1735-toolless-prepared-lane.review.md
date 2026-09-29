@@ -16,18 +16,18 @@
 
 - Verdict: pending
 - Change type: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | frontend
-- Intended files changed:
-- Actual files changed:
-- Check IDs and evidence disposition:
-- Residual risks:
+- Intended files changed: the five client sources named in the contract, their tests, the docs listed in the contract, the plan/contract/review/notes.
+- Actual files changed: see `git diff --stat ede2db31..HEAD`; nothing outside `allowed_paths`.
+- Check IDs and evidence disposition: build, typecheck, test, api-surface, version-authority, test-scripts, package-graph, workflow-strict all executed this turn; see the notes file for outputs.
+- Residual risks: the `test` check needs `BYOK_TEST_BUN_BIN` on machines whose Bun is not at a candidate path; a device that cannot prove a non-writable launch directory still declines every prepared offer, tool-less included.
 - Reviewer action required: inspect diff and card
-- Rollback:
+- Rollback: revert the code commit; the docs commit is text only.
 
 ## Mode Evidence
 
-- Selected route:
-- P1/P2/P3 evidence:
-- Root cause or plan evidence:
+- Selected route: code-change, regression-first for G6.
+- P1/P2/P3 evidence: see the plan's Agentic Routing.
+- Root cause or plan evidence: pre-fix failures recorded in the notes file.
 
 ## Verification Evidence
 

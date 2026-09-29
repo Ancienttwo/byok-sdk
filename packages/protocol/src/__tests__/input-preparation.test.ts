@@ -194,7 +194,7 @@ describe('agent.input.preparation envelope', () => {
     expect(AgentInputPreparationPayloadSchema.safeParse(payload({ selection })).success).toBe(false);
   });
 
-  it('requires at least one toolset and rejects duplicates', () => {
+  it('accepts an empty toolset list and rejects duplicates', () => {
     expect(AgentInputPreparationPayloadSchema.safeParse(payload({ requiredToolsets: [] })).success).toBe(true);
     expect(AgentInputPreparationPayloadSchema.safeParse(payload({ requiredToolsets: ['team', 'team'] })).success).toBe(false);
   });

@@ -2357,6 +2357,12 @@ export class TaskRunner {
       const generatesAnMcpServer = Object.keys(taskMcpServers ?? {}).length > 0
         || requiresAgentMemoryMcp
         || preparedMemorySelected
+        // A prepared digest always binds a launch attestation, even when the
+        // record counts no server at all (a tool-less record), so a prepared
+        // offer always needs the trusted launch directory proven here. The
+        // value still comes only from `resolveTrustedLaunchCwd`, never from the
+        // offer, the record or the Host.
+        || preparation !== undefined
         || generatesApprovalMcp;
       const probesAnMcpServer = needsToolsetObservation
         || (preparation === undefined && messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined);
@@ -2759,8 +2765,16 @@ export class TaskRunner {
             return;
           }
         }
+        // Only the toolsets this offer names: the preparation bound exactly the
+        // revisions of the toolsets its record named, so binding every toolset
+        // configured on the device would make an unrelated one a digest
+        // mismatch. An unconfigured name was already declined above.
+        const registryRevisions = lane.toolsetDefinitionRevisions();
         const revisions: Record<string, string> = {};
-        for (const [toolsetId, revision] of lane.toolsetDefinitionRevisions()) revisions[toolsetId] = revision;
+        for (const toolsetId of requiredToolsets ?? []) {
+          const revision = registryRevisions.get(toolsetId);
+          if (revision !== undefined) revisions[toolsetId] = revision;
+        }
         const servers: PreparedOfferServerProjection[] = [];
         for (const [serverName, server] of Object.entries(resolvedMcp?.ok ? resolvedMcp.servers : {})) {
           const toolsetId = resolvedMcp!.toolsetIdByServer.get(serverName);
@@ -2786,8 +2800,11 @@ export class TaskRunner {
           // merged the offer down to is the mode it will actually run.
           admittedMode: decision.policy.mode,
           launch: mcpLaunch,
-          observation: mcpToolsetTools ?? (preparedMemorySelected ? {} : undefined),
-          implementations: mcpToolImplementations ?? (preparedMemorySelected ? {} : undefined),
+          // No projected server (memory-only or tool-less) means an empty
+          // observation, not a missing one; a missing one with servers still
+          // present stays a fail-closed decline in admission.
+          observation: mcpToolsetTools ?? (preparedMemorySelected || servers.length === 0 ? {} : undefined),
+          implementations: mcpToolImplementations ?? (preparedMemorySelected || servers.length === 0 ? {} : undefined),
           servers,
           toolsetDefinitionRevisions: Object.freeze(revisions),
           nowMs: Date.now(),

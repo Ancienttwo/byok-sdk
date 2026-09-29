@@ -22,9 +22,27 @@ Command (in `packages/client`): `npx vitest run src/__tests__/prepared-offer-lan
 - G6 regression (`binds only the toolsets the record names ...`, registry {team, unrelated}, record names team): 1 failed | 58 skipped.
   `preparation_tool_binding_digest_mismatch: the launch directory, toolset definition revisions, server argv or implementation identities this task resolved are not the ones the named preparation bound`. G6 reproduces and is a bug, not intended behavior.
 
+## Post-fix evidence
+
+- Registry probe on official Pi 0.87.1 (temporary write in `prepared-session.ts`, run through the real host child process, removed afterwards): tool-bearing path `getActiveToolNames()` = `getAllTools()` names = `["mcp__teamserver__echo","mcp__teamserver__find_leads"]`; tool-less path both `[]`. `createAgentSession({ tools: [] })` therefore means no tools (`allowedToolNames` is an empty set, not `undefined`), and `getAllTools()` does not list non-active built-ins here, so the set-equality hardening does not false-positive.
+- Mutation check: with the five source files reverted to base and every new test kept, 25 tests fail (G1, G2, G4, G5, G6 and the hardening); with the fix all pass. Negative controls (N1, N2, N3, N6, N8, N11) pass on both, by design.
+- `getActiveToolNames()` on the tool-less real-host path is `[]` and the first provider body equals D with no `tools` key (`pi-prepared-launcher.test.ts`, "launches a tool-less record with zero tools").
+- Gates beyond the six: none found. The real host, `PiAdapter.prepare`, the producer and replay (`resolvePreparedToolBinding`, `input-preparation-service`), `buildToolExecutorsFromObservation` and `createPreparedPiSession` all accepted the empty surface unchanged. One pre-existing behavior is now visible and kept: an offer naming a toolset that the lane registry has no revision for declines `preparation_tool_surface_unfingerprintable`.
+
+## Verification (this turn, worktree, base ede2db31 plus the change)
+
+- `bun run build`: exit 0.
+- `bun run typecheck`: exit 0 (one type error in the new launcher test helper found and fixed on the first run).
+- `bun run test`: first run failed one test, `official-pi-workflow.test.ts`, "Bun is required for the vendored TS workflow probe": `resolveBunBin` scans `BYOK_TEST_BUN_BIN` and four fixed paths and does not include `~/.bun/bin/bun`, which is where Bun lives on this machine. That is an environment precondition raised before any repo code runs. With `BYOK_TEST_BUN_BIN=$(which bun)` the whole suite passes: client 266 files / 3411 tests passed (27 skipped), cloud 452, cloud-dataplane 73, conformance 161, core 373, keys 620, protocol 497, server 373, implementation-identity 115, others green.
+- `bun run check:api-surface`: 9 package goldens match; `git diff -- api-surface` empty.
+- `bun run check:version-authority`: OK (0.24.0-rc.1 / keys 0.8.1-rc.1).
+- `bun run test:scripts`: 51 pass, 0 fail.
+- `node scripts/release/check-package-graph.mjs`: OK.
+- `repo-harness run check-task-workflow --strict`: OK.
+
 ## Deviations From Plan Or Spec
 
-- None recorded.
+- None recorded. The protocol test title fix at `packages/protocol/src/__tests__/input-preparation.test.ts:197` (pre-existing in the worktree) ships in the code commit.
 
 ## Tradeoffs Considered
 

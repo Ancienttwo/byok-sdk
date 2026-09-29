@@ -210,6 +210,8 @@ interface Prepared {
   readonly launchCwd: string;
   readonly childEnv: Record<string, string>;
   readonly recordPath: string;
+  /** The toolset ids this preparation named; empty for a tool-less record. */
+  readonly requiredToolsets: readonly string[];
 }
 
 /**
@@ -227,7 +229,10 @@ async function prepareOnThisDevice(
     tools: readonly InputPreparationToolV1[];
     model: InputPreparationModelV1;
   }) => void = () => {},
+  options: { readonly toolless?: boolean } = {},
 ): Promise<Prepared> {
+  const toolless = options.toolless === true;
+  const requiredToolsets = toolless ? [] : [RUNTIME_IDENTITY_TOOLSET];
   const workspaceDir = await tempDir('byok-pi-prepared-cwd-');
   const homeDir = await tempDir('byok-pi-prepared-home-');
   const recordPath = path.join(await tempDir('byok-pi-prepared-record-'), 'calls.jsonl');
@@ -256,25 +261,29 @@ async function prepareOnThisDevice(
     runtimeEnv: () => ({ PATH: process.env.PATH ?? '' }),
   }).assemble({
     agentMemory: 'none',
-    requiredToolsets: [RUNTIME_IDENTITY_TOOLSET],
+    requiredToolsets,
     permissionMode: POLICY.mode,
     runtimeIdentity,
   });
   if (!assembled.ok) throw new Error(`the device refused to count this preparation: ${assembled.detail}`);
   const surface = assembled.surface;
 
-  const observed = await probeMcpServer('teamserver', server, {
+  const observed = toolless ? undefined : await probeMcpServer('teamserver', server, {
     label: 'MCP toolset server "teamserver"',
     env: { PATH: process.env.PATH ?? '' },
     cwd: surface.launch.launchCwd,
     timeoutMs: 10_000,
   });
-  const observation = Object.freeze({
-    teamserver: classifyMcpToolsetServerObservation(observed, {
-      toolsetId: RUNTIME_IDENTITY_TOOLSET,
-      readOnlyTools: ['echo'],
-    }),
-  });
+  const observation: Readonly<Record<string, McpToolsetServerObservation>> = Object.freeze(
+    observed === undefined
+      ? {}
+      : {
+        teamserver: classifyMcpToolsetServerObservation(observed, {
+          toolsetId: RUNTIME_IDENTITY_TOOLSET,
+          readOnlyTools: ['echo'],
+        }),
+      } as Record<string, McpToolsetServerObservation>,
+  );
 
   // The Host owns the WHOLE system message on official Pi: `customPrompt` is
   // the system message verbatim, and every renderer input stays empty (a
@@ -323,8 +332,9 @@ async function prepareOnThisDevice(
     requestBody: compiled.requestBody,
     recordPath,
     launchCwd: launchBinding.cwd,
-    mcpServers: { teamserver: server },
+    mcpServers: toolless ? {} : { teamserver: server },
     observation,
+    requiredToolsets,
     childEnv: {
       PATH: process.env.PATH ?? '',
       HOME: homeDir,
@@ -347,7 +357,7 @@ async function prepareOnThisDevice(
       toolBindingDigest: surface.toolBindingDigest,
       observationDigest: surface.observationDigest,
       launch: { cwd: surface.launch.launchCwd },
-      toolImplementations: { teamserver: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
+      toolImplementations: toolless ? {} : { teamserver: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
       toolsetDefinitionRevisions: surface.toolsetDefinitionRevisions,
     },
   };
@@ -387,7 +397,7 @@ async function startPrepared(
     offer,
     policy: POLICY,
     descriptor: adapter.descriptor,
-    requiredToolsetIds: [RUNTIME_IDENTITY_TOOLSET],
+    requiredToolsetIds: [...prepared.requiredToolsets],
     mcpServers: prepared.mcpServers,
     mcpToolsetTools: prepared.observation,
   });
@@ -398,7 +408,7 @@ async function startPrepared(
     runtimeId: 'pi',
     descriptor: adapter.descriptor,
     policy: POLICY,
-    requiredToolsetIds: [RUNTIME_IDENTITY_TOOLSET],
+    requiredToolsetIds: [...prepared.requiredToolsets],
     ...(byok === undefined ? {} : { dispatchSelection: byok.selection }),
     ...(overrides.sessionRef === undefined ? {} : { sessionRef: overrides.sessionRef }),
     workspace: { workspaceDir: prepared.workspaceDir },
@@ -419,7 +429,7 @@ async function startPrepared(
       mcpServers: prepared.mcpServers,
       mcpToolsetTools: prepared.observation,
       mcpLaunch: { cwd: prepared.launchCwd },
-      mcpToolImplementations: { teamserver: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
+      mcpToolImplementations: prepared.requiredToolsets.length === 0 ? {} : { teamserver: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
       preparation: overrides.preparation ?? prepared.preparation,
     });
     sessions.push(session);
@@ -452,6 +462,23 @@ describe('the prepared pi launch entry', () => {
     expect(endpoint.bodies[0]).toBe(prepared.requestBody);
     const wire = JSON.parse(endpoint.bodies[0]!);
     expect(wire.tools.map((tool: { function: { name: string } }) => tool.function.name)).toEqual(['mcp__teamserver__echo', 'mcp__teamserver__find_leads']);
+  }, 60_000);
+
+  it('launches a tool-less record with zero tools and sends D verbatim with no tools key', async () => {
+    const endpoint = await providerEndpoint();
+    const prepared = await prepareOnThisDevice(endpoint, () => {}, { toolless: true });
+    expect(prepared.requiredToolsets).toEqual([]);
+    expect(prepared.preparation.toolsetDefinitionRevisions).toEqual({});
+    expect(prepared.preparation.toolImplementations).toEqual({});
+    const session = await startPrepared(prepared);
+
+    for await (const event of session.events) {
+      if (event.type === 'turn_end') break;
+    }
+    expect(endpoint.bodies).toHaveLength(1);
+    expect(endpoint.bodies[0]).toBe(prepared.requestBody);
+    // No `tools` key: the official serializer sends none when the active set is empty.
+    expect(JSON.parse(endpoint.bodies[0]!)).not.toHaveProperty('tools');
   }, 60_000);
 
   // Official `runRpcMode` has no prepared reservation (WP2 deviation 2): there

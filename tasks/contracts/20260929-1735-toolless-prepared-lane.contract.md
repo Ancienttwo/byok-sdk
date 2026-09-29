@@ -84,6 +84,7 @@ allowed_paths:
   - packages/client/src/adapters/pi/prepared-tools.ts
   - packages/client/src/adapters/pi/prepared-session.ts
   - packages/client/src/__tests__/
+  - packages/client/src/adapters/pi/__tests__/prepared-lane-official.test.ts
   - packages/protocol/src/__tests__/input-preparation.test.ts
   - plans/plan-20260929-1735-toolless-prepared-lane.md
   - tasks/contracts/20260929-1735-toolless-prepared-lane.contract.md
