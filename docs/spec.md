@@ -522,16 +522,16 @@ mode.
 
 Prepared native-tool selection must be empty. A policy selecting native tools
 is refused before pinning; a preparation observes and counts MCP tools only.
-`requiredToolsets: []` is valid on preparation, and `auto` with `allowTools: []`
-launches zero native tools. With `agentMemory: 'none'` that pair counts zero tools at
+`requiredToolsets: []` is valid on preparation, and a policy that selects no native
+tool (`auto` or `readonly` with `allowTools: []`) launches zero native tools. With `agentMemory: 'none'` that pair counts zero tools at
 all, and the record is admitted and launched with zero tools from 0.24.0; earlier
 releases refused it at three points (preparation, admission and the Pi launch) even
 though the protocol accepted it. The prepared offer for such a record omits
 `requiredToolsets`, because an offer's own `requiredToolsets` stays non-empty
 (`RequiredToolsetsSchema` is `.min(1)`); an offer that names `[]` is a schema failure,
 not a tool-less request. A tool-less record still needs a permission policy that
-selects no native tool: `auto` with `allowTools: []`. `auto` without `allowTools`
-(`policy_inexpressible`) and `readonly` or an `allowTools` that names a native tool
+selects no native tool (`auto` or `readonly` with `allowTools: []`). `auto` without
+`allowTools` (`policy_inexpressible`) and an `allowTools` that names a native tool
 (`native_tools_uncounted`) are refused before pinning. General ordinary-offer toolset
 requirements are unchanged, including the ordinary lane's refusal to run a required
 toolset that resolves to no server.
@@ -2384,7 +2384,7 @@ Pi custody consumes the client-decided runtime launch binding: `--pi-bin`, optio
 
 ### Official Pi migration security and installation contract (2026-09-25 consolidation)
 
-Prepared wire and durable record were cut to version 7 here; the prepared Agent memory cut supersedes this with version 8 (see the v8 operator precondition above). Each cut is one-shot with no old-token or old-record reads. `prompt` contains exactly the required Host `systemPrompt` string, including an empty string if explicitly supplied. It enters D verbatim. Prepared models receive no Pi default system prompt, local cwd, skills, docs, tool snippets or coding guidelines. Tools are declared only through the observed tools parameter. A record whose `requiredToolsets` is empty is admitted on this lane only when it also counts no Agent memory (`agentMemory: 'none'`), in which case it is a tool-less record (the offer omits `requiredToolsets`; the launch attestation is still bound and the policy must be `auto` with `allowTools: []`). Before 0.24.0 that combination was refused at preparation, admission and launch; only the memory-only shape (`agentMemory` other than `none`) was admitted.
+Prepared wire and durable record were cut to version 7 here; the prepared Agent memory cut supersedes this with version 8 (see the v8 operator precondition above). Each cut is one-shot with no old-token or old-record reads. `prompt` contains exactly the required Host `systemPrompt` string, including an empty string if explicitly supplied. It enters D verbatim. Prepared models receive no Pi default system prompt, local cwd, skills, docs, tool snippets or coding guidelines. Tools are declared only through the observed tools parameter. A record whose `requiredToolsets` is empty is admitted on this lane only when it also counts no Agent memory (`agentMemory: 'none'`), in which case it is a tool-less record (the offer omits `requiredToolsets`; the launch attestation is still bound and the policy must select no native tool: `auto` or `readonly` with `allowTools: []`). Before 0.24.0 that combination was refused at preparation, admission and launch; only the memory-only shape (`agentMemory` other than `none`) was admitted.
 
 The SDK-owned envelope `byok.pi.prepared-input` is version 4, request format `byok.pi.openai-completions.request`, compilerVersion 4. P(D) is the entire captured body string D, byte for byte, with residual=[]; no serializer classification table or token claim exists. The first request alone is frozen. Tool-result continuations use their current context and the same per-stream retry-off, at-most-once scoped fetch; they never replay the first D. Errata 1 E4.4's accepted continuation risk remains: post-response overflow detection, appended event and alert. Host runtime ruling and C must be reissued after M5, with ruledResidualKeys=[]; Salesko must assemble framing and product instructions into the complete systemPrompt.
 

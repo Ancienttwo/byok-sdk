@@ -279,6 +279,7 @@ baseline and named current delta checks; never infer it from paths or command te
 - Full/expensive check justification and expected cost, if applicable:
 - Execution/baseline references, subject, current delta and disposition:
 - Residual risks and incomplete observations:
+- Second review disposition: the Owner waived the Codex second review on 2026-09-30 because the Codex quota is exhausted (user_waiver, permitted by the Acceptance Policy above). No Codex receipt exists and none is claimed. The independent gatekeeper review returned PASS at HEAD bb999e7b with the eight Verification Plan checks green.
 
 ## Rollback Point
 
