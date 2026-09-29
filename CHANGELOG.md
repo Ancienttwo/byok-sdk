@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed (client)** — the prepared lane now supports a truly tool-less record
+  (`requiredToolsets: []`, `agentMemory: 'none'`; the offer omits
+  `requiredToolsets`). It was accepted by the protocol but refused by the device at
+  preparation, admission and the Pi launch. The launch attestation is still bound,
+  and a device that cannot prove a non-writable launch directory still declines.
+  Admission also binds only the toolsets the record names, not every configured
+  toolset, so an unrelated configured toolset no longer produces
+  `preparation_tool_binding_digest_mismatch`. The Pi prepared session now proves its
+  registered tool set equals the manifest and fails `prepared_registry_drift`
+  otherwise. No wire, record, digest, capability or version change.
+
 ## 0.24.0-rc.1 / @byok-sdk/keys 0.8.1-rc.1 — 2026-09-29 (prepared; not published)
 
 Release candidate for 0.24.0, to be published under the npm dist-tag `rc`;
@@ -127,6 +140,10 @@ published SDK before the stable 0.24.0 freezes the Agent memory intent wire.
   replaces Pi renderer inputs/default prompt. Envelope v4 uses P(D)=D and
   residual=[]; Host must reissue its official-identity ruling. Empty
   requiredToolsets is supported; native and reserved message tools remain absent.
+  [Erratum, 0.24.0: for `agentMemory: 'none'` this was accepted on the wire but
+  refused at preparation, admission and launch; only the memory-only shape was
+  admitted. The tool-less record is supported from 0.24.0. The text above is
+  unchanged as published.]
 - **Fixed** — continuation request refusals propagate to daemon task.fail with
   typed codes. Both retry layers are disabled; the first URL/body remains
   frozen and tool continuations retain the accepted post-response overflow rule.

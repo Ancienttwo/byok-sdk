@@ -299,8 +299,7 @@ export async function admitPreparedOffer(
   }
   const launch = mcpLaunchAttestation(input.launch);
 
-  if (input.observation === undefined || input.implementations === undefined
-    || (input.servers.length === 0 && binding.agentMemory === 'none')) {
+  if (input.observation === undefined || input.implementations === undefined) {
     return decline(
       'preparation_tool_set_mismatch',
       'this task projected no observed MCP toolset servers, and the named preparation counted a manifest of them',

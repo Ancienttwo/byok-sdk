@@ -304,14 +304,9 @@ export async function resolvePreparedToolBinding(
       });
     }
   }
-  if (servers.size === 0 && input.agentMemory === 'none') {
-    return refuse(
-      'unsupported_input',
-      'required_toolsets_resolved_to_no_servers',
-      'the required MCP toolsets resolved to no servers',
-    );
-  }
-
+  // No servers AND no memory is a valid counted manifest: a tool-less record.
+  // It still binds the launch attestation resolved below, so a device that
+  // cannot prove a non-writable launch directory refuses it there.
   const launchBinding = await resolveLaunch(deps);
   if ('ok' in launchBinding) return launchBinding;
   const launch = mcpLaunchAttestation(launchBinding);
