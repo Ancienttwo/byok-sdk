@@ -69,6 +69,7 @@ import {
   AGENT_HOME_PROJECTION_CAPABILITY,
   AGENT_INPUT_PREPARATION_CAPABILITY,
   PROVIDER_PROVISIONING_CAPABILITY,
+  AGENT_MEMORY_INTENT_CAPABILITY,
   AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
@@ -88,6 +89,7 @@ import {
   AgentHomeProjectionPayloadSchema,
   AgentInputPreparationPayloadSchema,
   ProviderProvisioningAvailablePayloadSchema,
+  AgentMemoryIntentAvailablePayloadSchema,
   InputPreparationCompletionRequestSchema,
   AgentMemoryProjectionCommitRequestSchema,
   AgentEgressAckPayloadSchema,
@@ -110,6 +112,7 @@ import {
   type AgentHomeProjectionReadback,
   type AgentInputPreparationPayload,
   type ProviderProvisioningAvailablePayload,
+  type AgentMemoryIntentAvailablePayload,
   type InputPreparationCompletionRequest,
   type InputPreparationReadback,
   type AgentMemoryProjectionCommitRequest,
@@ -430,6 +433,14 @@ export type AgentHomeProjectionInput = AgentHomeProjectionPayload;
  */
 export type ProviderProvisioningNoticeInput = ProviderProvisioningAvailablePayload;
 
+/**
+ * Task-free Host-approved Agent memory intent notice: exactly
+ * `{ intentId, agentRef }`. The immutable intent, and any memory content it
+ * carries, stays in the Host's own store and is fetched by the device over
+ * Host routes; nothing else can be carried by this input.
+ */
+export type AgentMemoryIntentNoticeInput = AgentMemoryIntentAvailablePayload;
+
 /** Exact request identity a host must echo to read back durable projection status. */
 export type AgentHomeProjectionStatusInput = AgentHomeProjectionReceiptInput;
 
@@ -603,6 +614,31 @@ export interface ByokCloud {
     tenant: TenantId,
     deviceId: string,
     input: ProviderProvisioningNoticeInput,
+  ): Promise<EnqueuedAgentControl>;
+  /**
+   * Durable, task-free `agent.memory.intent.available` notice for precisely
+   * one device that durably advertised `agent-memory-intent.v1`. The payload
+   * is validated strictly before admission, and admission happens before the
+   * mailbox append, so a refused call leaves no delivery row behind.
+   *
+   * Idempotent per (tenant, device, intentId) while the original mailbox row
+   * is retained: the mailbox message id is derived from that identity, so a
+   * retried enqueue returns the existing row and its seq instead of appending
+   * a second notice, and a retry naming a different `agentRef` for the same
+   * intent fails `mailbox_receipt_mismatch`. After acked-row retention cleanup
+   * a retry appends a new row with a new seq and `agentRef` is no longer
+   * compared, so the Host must keep `agentRef` fixed per `intentId`. The
+   * device fails closed (`fetch_invalid`/`readback_invalid`) on a mismatched
+   * `agentId`, or on a mismatched `profileRevision` once its ledger row is
+   * pruned; while the row is live it replays its stored completion without
+   * comparing the notice's `profileRevision` (no memory write, no second CAS).
+   * Approval, release, completion and readback are Host authority on Host
+   * routes; this plane records no intent receipt of its own.
+   */
+  enqueueAgentMemoryIntentNotice(
+    tenant: TenantId,
+    deviceId: string,
+    input: AgentMemoryIntentNoticeInput,
   ): Promise<EnqueuedAgentControl>;
   /** Tenant/device/request-bound durable desired-state and terminal-outcome readback. */
   getInputPreparationStatus(
@@ -2159,6 +2195,41 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         throw new ByokCloudError(
           'mailbox_receipt_mismatch',
           `Mailbox message ${messageId} does not carry provider provisioning notice ${payload.requestId}.`,
+        );
+      }
+      return control;
+    },
+
+    async enqueueAgentMemoryIntentNotice(tenant, deviceId, input) {
+      // Strict two-field body first: an extra field (path, operation,
+      // revision, content) is a validation failure here, before any admission
+      // read or mailbox allocation, never a stripped-and-sent notice.
+      const payload = AgentMemoryIntentAvailablePayloadSchema.parse(input);
+      await assertAgentCapabilities(tenant, deviceId, [AGENT_MEMORY_INTENT_CAPABILITY]);
+      const messageId = uuidFromSha256(
+        await options.crypto.sha256(
+          new TextEncoder().encode(
+            JSON.stringify({
+              domain: 'byok:agent-memory-intent-notice',
+              tenant,
+              deviceId,
+              intentId: payload.intentId,
+            }),
+          ),
+        ),
+      );
+      const control = await enqueueAgentControlEnvelope(tenant, deviceId, messageId, (seq) =>
+        createEnvelope('agent.memory.intent.available', payload, { id: messageId, seq }),
+      );
+      if (
+        control.envelope.type !== 'agent.memory.intent.available' ||
+        control.envelope.payload.intentId !== payload.intentId ||
+        control.envelope.payload.agentRef.agentId !== payload.agentRef.agentId ||
+        control.envelope.payload.agentRef.profileRevision !== payload.agentRef.profileRevision
+      ) {
+        throw new ByokCloudError(
+          'mailbox_receipt_mismatch',
+          `Mailbox message ${messageId} does not carry Agent memory intent notice ${payload.intentId} for this Agent.`,
         );
       }
       return control;

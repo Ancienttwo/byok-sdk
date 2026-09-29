@@ -293,6 +293,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `agent.content.read` | S→D | optional | **required** | `requestId`, surface, actor, exact Agent/session/runtime/cwd, policy revision, relative target, MIME, decode mode, bounded policy | An independently authorized explicit content read is requested |
 | `agent.home.projection` | S→D | forbidden | **required** | exact `requestId`, AgentRef/profile revision, SHA-256 projection identity, bounded opaque JSON | A durable task-free projection targets one exact capable device |
 | `provider.provisioning.available` | S→D | forbidden | **required** | exactly `{ requestId }` (strict; nothing else) | A Host holds a sealed provider provisioning request for one exact device advertising `provider-provisioning.v1` (§2.3) |
+| `agent.memory.intent.available` | S→D | forbidden | **required** | exactly `{ intentId, agentRef }` (strict; nothing else) | A Host holds an approved Agent memory intent for one exact device advertising `agent-memory-intent.v1` (§2.4) |
 | `task.approve` | S→D | **required** | **required** | `{}`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.approve()` while `AwaitApproval` |
 | `task.reject` | S→D | **required** | **required** | `reason?`, `approvalId?` (M5, additive — §5.3) | `TaskHandle.reject()` while `AwaitApproval` |
 | `task.cancel` | S→D | **required** | **required** | `reason?` | `TaskHandle.cancel()` from any non-terminal state |
@@ -641,6 +642,166 @@ no mailbox row) a device whose durable capabilities lack
 tenant, device and `requestId`, so a retried enqueue returns the existing row
 and seq. Cloud records no provisioning receipt: completion and readback are Host
 authority.
+
+### 2.4 Task-free Agent memory intent notice
+
+`agent.memory.intent.available` is an additive message type gated by the
+additive device capability `agent-memory-intent.v1`
+(`AGENT_MEMORY_INTENT_CAPABILITY`). Both fall under the Freeze rule's additive
+bullets: `PROTOCOL_VERSION` stays `1` and input-preparation v8 is unchanged.
+It forbids `task_id`, requires `seq`, and
+its payload (`AgentMemoryIntentAvailablePayloadSchema`) is `.strict()` with
+exactly two fields:
+
+```text
+{ intentId,   // UUID the Host minted when the owner approved the intent
+  agentRef }  // strict { agentId, profileRevision }; profileRevision is a
+              // canonical positive decimal; any other field is a validation
+              // failure, never stripped
+```
+
+The Host is the only approval authority for a memory intent; the device-local
+Agent home (`MEMORY.md`, `notes/**`) remains the only memory content
+authority. The notice is notice-and-fetch for the same reason as §2.3: path,
+operation, revisions and content never ride the mailbox or the device journal.
+The daemon consumes the notice ahead of the journal append and never records
+it there. `agentRef` only routes the Agent-home lease and the local ledger; it
+must equal the fetched intent's `agentRef`. Design record:
+[device memory CAS contract](researches/2026-09-28-hermes-device-memory-cas-contract.md).
+
+**Intent and digest.** The immutable intent (`AgentMemoryIntentV1Schema`) is
+`{ intentId, agentRef, path, operation: replace | delete, baseRevision,
+targetRevision, content?, approvalRef, operationDigest }`. Revisions are
+lowercase `sha256:` over the file bytes, and a missing file has the
+empty-bytes digest. `replace` requires `targetRevision` different from
+`baseRevision`. `delete` requires `targetRevision: null` and never has
+`content`. `content` (well-formed Unicode, at most 256 KiB as UTF-8) appears only
+on a `release` of a `replace`. `path` is only syntactically bounded on the wire
+(1–1024 printable ASCII characters without quote or backslash); the device
+applies its own memory path rule. `approvalRef` (1–128 characters of
+`[A-Za-z0-9._:-]`) is recorded and never evaluated. `operationDigest` is
+`@byok-sdk/core` `agentMemoryIntentOperationDigest(...)`: `sha256:` over
+`canonicalizeJson({ v: 'byok-agent-memory-intent-v1', tenantId, deviceId,
+intentId, agentRef, path, operation, baseRevision, targetRevision,
+approvalRef })`, where `tenantId` and `deviceId` are the SDK tenant and device.
+
+**Fetch.** A Host injects `DaemonConfig.agentMemoryIntents`, a transport with
+`fetch` and `complete`. It authenticates the device on its own routes, and
+audiences and route paths are Host vocabulary. The daemon calls
+`fetch({ intentId, agentRef, reservation })`. `reservation` is `held` when the
+device reserved a ledger slot and `none` when it could not. The answer is copied
+into inert plain data and parsed with
+`agentMemoryIntentFetchResponseSchemaFor(reservation)`:
+
+| `disposition` | Allowed for | Carries |
+|---|---|---|
+| `release` | `held` | `intent`; `content` only for `replace` |
+| `withheld` | `held` | `intent` without content and one Host code: `intent_revoked`, `intent_expired`, `placement_changed` or `profile_revision_changed` |
+| `terminal` | `held`, `none` | `intent` without content and the Host's stored `readback` |
+| `deferred` | `none` | `intent` without content; the Host changed nothing and released nothing |
+
+**Device processing.** Every intent of one Agent is processed serially in the
+daemon process. Network I/O never runs while the Agent-home writer lease is
+held. The lease is the same task-free lease `agent.home.projection` uses, so an
+active execution in that home makes the device report `home_busy`. The device
+ledger `.byok/agent-memory-intents-v1.json` is the at-most-once authority. A
+serialized record is at most 2048 bytes and the ledger holds at most 511
+records. An append prunes only records whose `ackedAt` is durable, oldest
+first, so an unacknowledged record is never evicted.
+
+1. With the lease held, the daemon looks up `intentId`. A stored terminal is
+   rewritten as a durable barrier and completed again. A leftover `applying`
+   record is never re-executed: it becomes `uncertain` with the current file
+   observation. Without a record, the daemon fetches with `held`, or with
+   `none` when the ledger is full.
+2. Identity gate: this check runs first for every `release` and `withheld`
+   answer, before any body check. The intent's `agentRef` must equal the
+   notice, and `operationDigest` recomputed with this device's enrolled tenant
+   and device must equal the intent's value. Any mismatch is `fetch_invalid`:
+   zero ledger writes, zero CAS, no completion, and the notice is not
+   acknowledged.
+3. After the gate, a path outside the memory path rule, a `delete` of
+   `MEMORY.md`, or a body that is missing, oversized, not well-formed or whose
+   `sha256(utf8(content))` differs from `targetRevision` becomes a durable
+   `rejected` record with `path_invalid`, `memory_md_not_deletable` or
+   `content_invalid`. A `withheld` Host code becomes a `rejected` record with
+   that code. A rejected intent has zero memory writes.
+4. Otherwise, with the lease held, the daemon makes `applying` durable, runs
+   the existing sha256 CAS once with `baseRevision` as the expected revision,
+   and makes the terminal durable: `applied`, `conflict` or `uncertain`.
+   `applied` requires the result to match the operation. For `replace` that is
+   `exists: true` and revision `targetRevision`; for `delete` it is
+   `exists: false` and the empty-bytes digest. Any other CAS result, or any
+   failure other than a revision conflict, is `uncertain` with the current
+   observation. A revision conflict is `conflict` only on a backend that proves
+   a conflict renamed nothing.
+5. The completion (`AgentMemoryIntentCompletionSchema`, content-free) goes to
+   the Host only after its terminal record was durably written.
+6. The Host answers with its durable readback (`AgentMemoryIntentReadbackSchema`):
+   `{ tenantId, deviceId, intentId, disposition: recorded | idempotent |
+   conflict | host_terminal, completion, recordedAt }`. It must name this
+   tenant, device, intent and completion identity. For `recorded` and
+   `idempotent`, `completion` must equal what was sent; otherwise the reason is
+   `readback_mismatch`. A `conflict` readback, or `host_terminal` against a
+   local terminal, contradicts the device fact. The daemon writes a
+   metadata-only integrity audit and reports the
+   `agent-memory-intent-integrity` daemon event.
+7. With the lease held again, the daemon rewrites the record with `ackedAt` as
+   a durable barrier. Only then does the handler resolve and the mailbox cursor
+   advance.
+
+A `terminal` fetch answer is used only when the device has no record. It is
+accepted only for this tenant, device, intent, Agent and recomputed digest.
+The only accepted dispositions are `host_terminal`, `recorded` and
+`idempotent`; a `conflict` readback is `readback_invalid`. An `applied` result
+must also match the operation. An accepted `terminal` resolves the notice with
+zero ledger writes. A `deferred` answer is `ledger_full`.
+
+`rejected` codes form a closed set (`AGENT_MEMORY_INTENT_REJECTION_CODES`). This
+device produces only `path_invalid`, `memory_md_not_deletable`,
+`content_invalid` and the four Host codes. `intent_invalid`,
+`intent_digest_mismatch`, `agent_ref_mismatch` and `agent_home_unavailable`
+remain in the wire enum, but this device does not produce them. An identity or
+digest mismatch is handled by the identity gate as `fetch_invalid`, with no
+completion. A notice is left unacknowledged, with the row and cursor kept for
+redelivery, with exactly one of these reasons: `transport_unconfigured`,
+`filesystem_unavailable`, `home_busy`, `fetch_failed`, `fetch_invalid`,
+`complete_failed`, `readback_invalid`, `readback_mismatch`, `local_io_failed`,
+`ledger_full` or `ledger_invalid`. The error carries only the reason and
+`intentId`.
+
+**Advertisement.** A daemon advertises `agent-memory-intent.v1` only when all
+of these hold: the Host configured `agentMemoryIntents`, `agentHome` is
+configured, the platform's secure memory filesystem is available, and the
+backend's ledger write is a proven durable barrier (temp-file fsync, rename,
+directory fsync). For the native Linux descriptor backend, the last condition
+also needs a startup probe showing that the Agent-home storage root honors a
+directory fsync. The external macOS filesystem helper cannot prove either the
+barrier or conflict-before-rename ordering, so a helper-backed daemon does not
+advertise. Windows does not advertise. A notice that reaches a daemon without
+the capability fails `transport_unconfigured` or `filesystem_unavailable`
+before any fetch. There is no control-socket method for intents.
+
+A Host built on `@byok-sdk/cloud` appends the notice with
+`enqueueAgentMemoryIntentNotice(tenant, deviceId, { intentId, agentRef })`.
+It validates the strict payload first, so an extra or missing field is a
+validation failure before any admission read. It then refuses, with
+`agent_capability_missing` and no mailbox row, a device whose durable
+capability snapshot lacks `agent-memory-intent.v1` or whose device row is
+missing or revoked. The mailbox message id is derived from
+`sha256({ domain: 'byok:agent-memory-intent-notice', tenant, deviceId,
+intentId })`, so while the original mailbox row is retained a retried enqueue
+returns the existing row and seq, and a retry that names a different `agentRef`
+for the same intent fails `mailbox_receipt_mismatch`. After acked-row retention
+cleanup (`mailboxAckedRetentionMs`) a retry appends a new row with a new seq
+and `agentRef` is no longer compared, so the Host must keep `agentRef` fixed
+per `intentId`. The device replays safely (ledger idempotent readback, or the
+terminal fetch after prune). A mismatched `agentId`, or a mismatched
+`profileRevision` once the device ledger row is pruned, fails closed
+(`fetch_invalid` or `readback_invalid`); while the row is live the device
+replays its stored completion without comparing the notice's `profileRevision`
+(no memory write, no second CAS). Cloud records no intent receipt: approval, release,
+completion and readback are Host authority on Host routes.
 
 ## 3. Task state machine (M1 gap #2, #5, #6)
 

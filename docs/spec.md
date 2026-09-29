@@ -1847,6 +1847,25 @@ Busy, containment, hook, fsync, transport, or readback mismatch leaves the
 cursor at its prior value and redelivers after reconnect/restart. No fake task,
 runtime, session, terminal event, or task journal record is created.
 
+Host-approved memory intents are another task-free control. The Host approves
+one exact `replace` or `delete` of one memory file and remains the only approval
+authority; the device-local `MEMORY.md` and `notes/**` remain the only memory
+content authority. Cloud admits the strict `{ intentId, agentRef }` notice only
+for a device whose durable capability snapshot carries `agent-memory-intent.v1`
+and that is not revoked, and it keeps no intent receipt. The daemon fetches the
+immutable intent over the Host's own device-authenticated transport. It binds
+the intent to the notice Agent and to its own enrolled tenant and device
+through the recomputed `operationDigest`, and it applies the existing sha256
+CAS at most once under the task-free Agent-home lease. The ledger
+`.byok/agent-memory-intents-v1.json` makes `applying` durable before the CAS.
+It makes the terminal durable before the content-free completion, and makes
+`ackedAt` durable after the Host readback matches. Only then does the cursor
+advance. A leftover `applying` record is reported `uncertain` and never
+re-executed. Busy, fetch, readback, identity or I/O failures leave the cursor
+in place. The capability is advertised only on a backend whose ledger write
+provably includes a directory fsync; today that means native Linux and excludes
+the macOS helper and Windows. Wire and failure detail: `docs/protocol.md` §2.4.
+
 The daemon publishes the authenticated `conn.hello` capability snapshot as the
 first long-poll message; the hosted composition persists that snapshot before
 an Agent offer can be enqueued. Runtime-session terminal evidence is normally
