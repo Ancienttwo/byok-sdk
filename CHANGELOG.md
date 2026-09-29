@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.24.0 / @byok-sdk/keys 0.8.1 — 2026-09-28 (prepared; not published)
+## 0.24.0-rc.1 / @byok-sdk/keys 0.8.1-rc.1 — 2026-09-29 (prepared; not published)
+
+Release candidate for 0.24.0, to be published under the npm dist-tag `rc`;
+`latest` stays 0.23.0 / keys 0.8.0. It lets Host packages build against a
+published SDK before the stable 0.24.0 freezes the Agent memory intent wire.
 
 - **Added (client)** — `readDeviceEnrollmentIdentity` (non-secret
   `{ tenantId, deviceId, proofKeyId, proofKeyEpoch, enrollmentRevision }`,
@@ -8,11 +12,51 @@
   (device proofs with the stored enrollment key, scoped to one enrollment
   identity and an explicit operation allowlist; closed `DeviceProofSignerError`)
   and `retireInputPreparation` (preview/execute library form of
-  `byok-agent retire-input-preparation`, which now renders it).
+  `byok-agent retire-input-preparation`, which now renders it). Their options
+  and requests are copied once into inert plain data; accessors, Proxies and
+  non-plain objects are refused.
 - **Changed (client)** — the retirement's owner-lease refusal is
   `InputPreparationRetirementStoreBusyError` (cause: the internal owner error).
-- **keys 0.8.1** — no source change; packed core and implementation-identity
-  edges move to 0.24.0.
+- **Added (protocol/core, #240)** — Host-approved Agent memory intents: the
+  task-free `agent.memory.intent.available` notice behind the device capability
+  `agent-memory-intent.v1`, `AgentMemoryIntentV1` with fetch, completion and
+  readback schemas, and core `agentMemoryIntentOperationDigest` (`operationDigest`
+  binds tenant, device, intent, Agent and operation; never content). Additive
+  under the Freeze rule: `PROTOCOL_VERSION` stays `1`, input-preparation v8 is
+  unchanged.
+- **Added (client, #240)** — the daemon intent processor behind a Host-injected
+  `DaemonConfig.agentMemoryIntents` transport: an at-most-once apply ledger
+  with durable barriers before every completion and acknowledgement, one CAS
+  against the Agent-home content authority, and an identity gate
+  (`requireBoundIntent`) that turns any `agentRef` or recomputed-digest mismatch
+  into `fetch_invalid` with zero writes and no ack. Closed
+  `AgentMemoryIntentNoticeError` reasons.
+- **Added (cloud, #241)** — `ByokCloud.enqueueAgentMemoryIntentNotice`: strict
+  payload, then `agent_capability_missing` with no mailbox row for a device
+  without the capability or with a missing or revoked row. A retry returns the
+  same row only while the original mailbox row is retained. See
+  [protocol §2.4](docs/protocol.md#24-task-free-agent-memory-intent-notice).
+- **Advertisement** — a daemon advertises `agent-memory-intent.v1` only when
+  the Host configured `agentMemoryIntents` and `agentHome` and the ledger write
+  is a proven strict barrier (temp fsync, rename, directory fsync). Native Linux advertises after a startup directory-fsync probe; a
+  daemon on the macOS filesystem helper does not advertise; Windows does not
+  advertise and fails closed.
+- **Known limits** — an `applying` residue whose target became unobservable
+  (symlink, FIFO or directory leaf, lost home identity, persistent I/O error)
+  stays `local_io_failed` and blocks that mailbox's progress; there is no
+  operator recovery path. The startup fsync probe covers only
+  `hostStorageRoot`, so a home on another mount fails closed per write.
+- **Host obligations (WP2I-H1)** — send `intentId` as a canonical lowercase
+  UUID (the device compares it as an exact string); keep `agentRef` fixed per
+  `intentId`; check each receipt against the approved intent, which the S1
+  schema does not do (an `applied` replace needs `exists: true` and
+  `revision === targetRevision`; an `applied` delete needs `exists: false` and
+  the empty-bytes digest while `targetRevision` stays `null`, and must not be
+  rejected as a revision mismatch). Never re-read the current file to overturn a
+  historical receipt or infer `applied` from hash equality.
+- **keys 0.8.1-rc.1** — no source change; packed core and
+  implementation-identity edges move to 0.24.0-rc.1. Its version is a
+  prerelease because a prerelease train may only publish prerelease packages.
 - [Release notes](docs/releases/v0.24.0.md).
 
 ## 0.23.0 / @byok-sdk/keys 0.8.0 — 2026-09-28 (published; tag `v0.23.0` at `bcf65a3f`)
