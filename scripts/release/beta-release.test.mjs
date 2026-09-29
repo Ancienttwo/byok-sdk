@@ -125,6 +125,6 @@ test('graph and readback use the same prerelease gate and readback checks a requ
   assert.match(readbackSource, /const distTag = resolveReleaseDistTag\(expectedVersion, requestedTag\)/);
   assert.match(readbackSource, /'dist-tags', '--json'/);
   assert.match(readbackSource, /distTags\[distTag\] !== packageVersion/);
-  assert.match(readbackSource, /packages\.map\(\(packageName\) => \[packageName, packageName === '@byok-sdk\/keys' \? '0\.3\.2' : '0\.8\.1'\]\)/);
+  assert.match(readbackSource, /packages\.map\(\(packageName\) => \[packageName, packageName === '@byok-sdk\/keys' \? '0\.8\.0' : '0\.23\.0'\]\)/);
   assert.match(readbackSource, /distTags\.latest !== expectedLatestVersion/);
 });
