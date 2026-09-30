@@ -17,6 +17,7 @@
       "name": "@byok-sdk/example-basic",
       "version": "0.0.1",
       "dependencies": {
+        "@byok-sdk/client": "workspace:*",
         "@byok-sdk/server": "workspace:*",
         "@hono/node-server": "^2.0.10",
         "hono": "^4.12.30",
@@ -25,6 +26,7 @@
         "@types/node": "^22.20.1",
         "tsx": "^4.19.2",
         "typescript": "^7.0.2",
+        "vitest": "^4.1.10",
       },
     },
     "examples/live-activity-host": {
