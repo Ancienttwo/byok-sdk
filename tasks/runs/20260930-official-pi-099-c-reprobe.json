@@ -1,0 +1,91 @@
+{
+  "schemaVersion": "official-pi-099-probe.v1",
+  "model": "glm-5.3-flash",
+  "endpoint": "https://api.z.ai/api/coding/paas/v4",
+  "inferenceAttemptsPlaced": 3,
+  "tokenizerCallsPlaced": 0,
+  "attempts": [
+    {
+      "index": 1,
+      "label": "bare_hi",
+      "startedAt": "2026-09-30T09:36:05.798Z",
+      "requestSha256": "1561e96f0170a7357df10d22dd6d0d858fd4fc7163e717761293cb160d2738f1",
+      "requestBytes": 252,
+      "httpStatus": 200,
+      "contentType": "text/event-stream;charset=UTF-8",
+      "usage": {
+        "prompt_tokens": 20,
+        "completion_tokens": 128,
+        "total_tokens": 148,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 128
+        }
+      },
+      "sseEvents": 129,
+      "finishReasons": [
+        "length"
+      ]
+    },
+    {
+      "index": 2,
+      "label": "salesko_toolset",
+      "startedAt": "2026-09-30T09:36:10.304Z",
+      "requestSha256": "badaf6c984aa4394502f45e55441bc5d00dadf69d4726aab9ebba88d6ef96d34",
+      "requestBytes": 6555,
+      "httpStatus": 200,
+      "contentType": "text/event-stream;charset=UTF-8",
+      "usage": {
+        "prompt_tokens": 1825,
+        "completion_tokens": 110,
+        "total_tokens": 1935,
+        "prompt_tokens_details": {
+          "cached_tokens": 1792
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 19
+        }
+      },
+      "sseEvents": 108,
+      "finishReasons": [
+        "stop"
+      ]
+    },
+    {
+      "index": 3,
+      "label": "salesko_toolset_repeat",
+      "startedAt": "2026-09-30T09:36:17.878Z",
+      "requestSha256": "badaf6c984aa4394502f45e55441bc5d00dadf69d4726aab9ebba88d6ef96d34",
+      "requestBytes": 6555,
+      "httpStatus": 200,
+      "contentType": "text/event-stream;charset=UTF-8",
+      "usage": {
+        "prompt_tokens": 1825,
+        "completion_tokens": 115,
+        "total_tokens": 1940,
+        "prompt_tokens_details": {
+          "cached_tokens": 1792
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 30
+        }
+      },
+      "sseEvents": 110,
+      "finishReasons": [
+        "stop"
+      ]
+    }
+  ],
+  "runtime": {
+    "packageName": "@earendil-works/pi-coding-agent",
+    "packageVersion": "0.99.1",
+    "upstreamCommit": "d86654abb8862e201933517d6f1fce9f88dd117f",
+    "closureDigest": "4a6a72a3dfb82a18dbab345dc527645d9764f14ae5b7bc89e92808a2329bd449",
+    "compilerVersion": 4
+  },
+  "fixtureBoundary": "Salesko main 4b1944c9 system prompt (1825 bytes) and 7 read tools exported from the catalog; synthetic one-user-turn snapshot; probe-only executor bindings; not a production Salesko receipt.",
+  "toolsetSchemaDigestReadPlusProposal": "sha256:1f689f5c90c0e87f4bbfb7408560e43c6632fef83fe2b0f6722556a222c686c9",
+  "caveat": "An earlier timed-out run and its rerun may each have placed one bare_hi request; total real requests may exceed 3. C=1024 was not re-derived here."
+}
