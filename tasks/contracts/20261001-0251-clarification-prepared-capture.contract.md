@@ -54,7 +54,7 @@ Required when Task Profile is `bugfix`; leave as-is otherwise.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[{"id":"focused","kind":"deterministic_test","paths":["packages/client/src/__tests__/clarification-prepared-capture.test.ts"]},{"id":"native-loopback-readback","kind":"runtime_readback","paths":["packages/client/src/__tests__/fixtures/clarification-prepared-capture.ts"]}]}
+{"protocol":1,"oracles":[{"id":"focused","kind":"deterministic_test","paths":["packages/client/src/__tests__/clarification-prepared-capture.test.ts","packages/client/src/__tests__/fixtures/clarification-prepared-capture.ts"]},{"id":"native-loopback-readback","kind":"runtime_readback","paths":["packages/client/src/__tests__/fixtures/clarification-prepared-capture.ts"]}]}
 ```
 
 focused 与 native-loopback-readback 均映射已有 focused check：two persisted receipts/Ds and own D；mixed old artifact zero transport。readback仅durable artifacts与真实native loopback request bytes，不是production计数/admission oracle。
