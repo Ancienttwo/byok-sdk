@@ -2264,7 +2264,7 @@ through an at-most-once fetch with first-request byte equality. Both retry layer
 off. Subsequent tool rounds use their actual context; usage and overflow validation
 precede message egress. Sentinel history never enters SessionManager or the artifact.
 
-A single checked official six-package closure inventory supplies build, native
+A single checked official eight-package closure inventory supplies build, native
 identity and release/registry guards. Tarball integrity, signed provenance, exact
 versions and installed-file digests replace fork markers. Encapsulated launch uses
 the measured sealed artifact plus declared assets, without external package lookup.

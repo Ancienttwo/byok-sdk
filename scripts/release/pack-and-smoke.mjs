@@ -535,7 +535,7 @@ try {
     const clientManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'package.json'), 'utf8'));
     if (clientManifest.dependencies['@juicesharp/rpiv-todo'] !== undefined) throw new Error('packed client retained a second npm todo authority');
     console.log('[release-pack] client dependencies=' + Object.keys(clientManifest.dependencies).length +
-      '; delta from M1a: -rpiv-todo +rpiv-i18n +rpiv-config +typebox +official Pi closure (pi-ai, pi-agent-core, chord, pi-telemetry, pi-tui)');
+      '; delta from M1a: -rpiv-todo +rpiv-i18n +rpiv-config +typebox +official Pi closure (pi-ai, pi-agent-core, chord, pi-codemode, pi-mcp, pi-telemetry, pi-tui)');
 
     const installedAgentBin = path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'dist', 'bin', 'byok-agent.js');
     const emptyAgentHome = path.join(smokeDir, 'empty-agent-home');
