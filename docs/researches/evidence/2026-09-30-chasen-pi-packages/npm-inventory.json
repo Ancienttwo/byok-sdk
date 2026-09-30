@@ -1,0 +1,356 @@
+{
+  "checkedAt": "2026-09-30",
+  "localCommit": "ede2db31ad33072965434b04743cfd7e52b93e85",
+  "method": "Registry latest metadata + published tarball static inspection; no install scripts or extensions executed",
+  "packages": [
+    {
+      "name": "pi-subagents",
+      "version": "0.73.1",
+      "license": "MIT",
+      "repository": {
+        "url": "git+https://github.com/nicobailon/pi-subagents.git",
+        "type": "git"
+      },
+      "homepage": "https://github.com/nicobailon/pi-subagents#readme",
+      "published": "2026-09-27T19:08:09.350Z",
+      "dependencies": {
+        "jiti": "2.7.0",
+        "yaml": "2.8.3",
+        "acorn": "8.18.0",
+        "undici": "8.10.0"
+      },
+      "peerDependencies": {
+        "typebox": "*",
+        "@earendil-works/pi-ai": ">=0.86.1",
+        "@earendil-works/pi-tui": "*",
+        "@earendil-works/pi-agent-core": "*",
+        "@earendil-works/pi-coding-agent": "*"
+      },
+      "pi": {
+        "skills": [
+          "./skills"
+        ],
+        "prompts": [
+          "./prompts"
+        ],
+        "extensions": [
+          "./index.js"
+        ]
+      },
+      "scripts": null,
+      "integrity": "sha512-IklOqw67DtvIWQFKxFJpDFXsOGcq8RGYZEbokykD5Kvfs9aa/du1cW2NEJ5xx4GUgN2LVt3vAq5IdzEMo7YwJw==",
+      "tarball": "https://registry.npmjs.org/pi-subagents/-/pi-subagents-0.73.1.tgz",
+      "sha256": "a9db0457bc18398490733a1d6a6735e8cccbf702716a56474e4a0b33e000b8f0",
+      "integrityVerified": true
+    },
+    {
+      "name": "pi-skillful",
+      "version": "0.4.0",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/jvm/pi-mono.git",
+        "directory": "packages/pi-skillful"
+      },
+      "homepage": "https://github.com/jvm/pi-mono/tree/main/packages/pi-skillful#readme",
+      "published": "2026-07-28T20:54:46.154Z",
+      "dependencies": null,
+      "peerDependencies": {
+        "@earendil-works/pi-coding-agent": "*",
+        "@earendil-works/pi-tui": "*"
+      },
+      "pi": {
+        "extensions": [
+          "./index.ts"
+        ]
+      },
+      "scripts": {
+        "check": "tsc --noEmit",
+        "typecheck": "tsc --noEmit",
+        "test": "rm -rf .test-dist && tsc --noEmit false --outDir .test-dist && node --test tests/*.test.mjs",
+        "pack:dry-run": "npm pack --dry-run"
+      },
+      "integrity": "sha512-LScDQt+MtweSw9hF7EypgUVbftSnaEj1O/ZmJWchtTKgq3bSkmNcG7+kIG3Nb1Omds1agsTuKHeeMsX0h3lx4Q==",
+      "tarball": "https://registry.npmjs.org/pi-skillful/-/pi-skillful-0.4.0.tgz",
+      "sha256": "298d66e672c924f8e9711f85e71de5587fe46c7e87491993942e8439a43d507c",
+      "integrityVerified": true
+    },
+    {
+      "name": "@eko24ive/pi-ask",
+      "version": "1.2.0",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/eko24ive/pi-ask.git"
+      },
+      "homepage": "https://github.com/eko24ive/pi-ask#readme",
+      "published": "2026-08-16T11:49:14.786Z",
+      "dependencies": null,
+      "peerDependencies": {
+        "@earendil-works/pi-coding-agent": "*",
+        "@earendil-works/pi-tui": "*",
+        "typebox": "*",
+        "@earendil-works/pi-ai": "*"
+      },
+      "pi": {
+        "extensions": [
+          "./src/index.ts"
+        ],
+        "skills": [
+          "./skills"
+        ]
+      },
+      "scripts": {
+        "dev": "sh -c 'ROOT=\"$PWD\"; TARGET=\"${1:-.}\"; if [ \"$TARGET\" = \"--\" ]; then TARGET=\"${2:-.}\"; fi; cd \"$TARGET\" && pi --no-extensions --no-skills --no-prompt-templates --no-themes --no-context-files -e \"$ROOT/src/index.ts\" --skill \"$ROOT/skills/ask-user\"' --",
+        "test": "node --test tests/*.test.ts",
+        "typecheck": "tsc -p tsconfig.json",
+        "format": "biome format --write .",
+        "lint": "biome lint --write .",
+        "check": "ultracite check",
+        "check:ci": "biome ci .",
+        "fix": "ultracite fix",
+        "commit": "cz",
+        "commitlint": "commitlint",
+        "release": "semantic-release"
+      },
+      "integrity": "sha512-LibyqENQ9nNtJ+gz3/9rRtNH/ja9a8HlzLJUzPEhhmWJLvDfn+fOaHVVznsDFQ9xxchUrmRKinxQOhsR2VrQ1Q==",
+      "tarball": "https://registry.npmjs.org/@eko24ive/pi-ask/-/pi-ask-1.2.0.tgz",
+      "sha256": "983fd8034fa35828f24f3fb54cef7ad01e88d3aaf0d45286bbff05d966f3a527",
+      "integrityVerified": true
+    },
+    {
+      "name": "pi-simplify",
+      "version": "0.2.3",
+      "license": "MIT",
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/MattDevy/pi-extensions.git",
+        "directory": "packages/pi-simplify"
+      },
+      "homepage": "https://github.com/MattDevy/pi-extensions/tree/main/packages/pi-simplify#readme",
+      "published": "2026-07-17T14:16:19.704Z",
+      "dependencies": null,
+      "peerDependencies": {
+        "@earendil-works/pi-coding-agent": ">=0.74.0",
+        "@earendil-works/pi-ai": ">=0.74.0",
+        "@earendil-works/pi-tui": ">=0.74.0",
+        "@sinclair/typebox": "^0.34.0"
+      },
+      "pi": {
+        "extensions": [
+          "dist/index.js"
+        ]
+      },
+      "scripts": {
+        "clean": "rm -rf dist tsconfig.build.tsbuildinfo",
+        "build": "npm run clean && tsc -p tsconfig.build.json",
+        "typecheck": "tsc --noEmit",
+        "test": "vitest run",
+        "lint": "eslint src/",
+        "check": "vitest run && eslint src/ && tsc --noEmit",
+        "prepublishOnly": "npm run build && npm run check",
+        "prepack": "test -d dist || { echo 'Error: dist/ missing. Run npm run build first.' && exit 1; }"
+      },
+      "integrity": "sha512-9dxsXiGmO7DmjguC4Bk/lu7IYlYt0x1m2VneUpIGSQspx4BtshBgt+Vb8xvoxXc/Ugif7/sdwcbf7TgULqiSHg==",
+      "tarball": "https://registry.npmjs.org/pi-simplify/-/pi-simplify-0.2.3.tgz",
+      "sha256": "9af0d258ed4a6955aa9bb796630bb791ca697a972a830dade307dfa765a45198",
+      "integrityVerified": true
+    },
+    {
+      "name": "@zigai/pi-mention-skill",
+      "version": "0.10.4",
+      "license": "MIT",
+      "repository": {
+        "url": "git+https://github.com/zigai/pi-tweaks.git",
+        "type": "git",
+        "directory": "packages/pi-mention-skill"
+      },
+      "homepage": "https://github.com/zigai/pi-tweaks/tree/main/packages/pi-mention-skill#readme",
+      "published": "2026-09-22T23:58:30.841Z",
+      "dependencies": {
+        "@zigai/pi-mention-anything": "0.1.4",
+        "@zigai/pi-extension-settings": "0.5.3"
+      },
+      "peerDependencies": {
+        "typebox": "*",
+        "@earendil-works/pi-coding-agent": "*"
+      },
+      "pi": {
+        "extensions": [
+          "./src/index.ts"
+        ]
+      },
+      "scripts": null,
+      "integrity": "sha512-FDOftXOTI/UW3ywtDsa+7EB7H9BKKGAGyFgj63LvVat8PN/0Zwq88MKWDTrJscJjgHE3WNl5YAaNbQs0JmOdWA==",
+      "tarball": "https://registry.npmjs.org/@zigai/pi-mention-skill/-/pi-mention-skill-0.10.4.tgz",
+      "sha256": "d90e35b665c288d5b064d947e2a839a6e689648750fb53c212a442dfff476d68",
+      "integrityVerified": true
+    },
+    {
+      "name": "@tavily/pi-extension",
+      "version": "0.1.2",
+      "license": null,
+      "repository": null,
+      "homepage": null,
+      "published": "2026-05-19T19:59:35.148Z",
+      "dependencies": {
+        "@tavily/core": "^0.7.3"
+      },
+      "peerDependencies": {
+        "@earendil-works/pi-ai": "*",
+        "@earendil-works/pi-coding-agent": "*"
+      },
+      "pi": {
+        "extensions": [
+          "./index.ts"
+        ]
+      },
+      "scripts": {
+        "check": "tsc --noEmit --module nodenext --moduleResolution nodenext --target es2022 --types node --skipLibCheck index.ts",
+        "pack:check": "npm pack --dry-run",
+        "prepublishOnly": "npm run check && npm run pack:check"
+      },
+      "integrity": "sha512-12RFWh1ni7rvr+jIHOu1uKpidWeBIVgAMeOvWayUxejab5CQIRchz+83o0f1Fw0wIOH55cziCynO1nOSX2s95Q==",
+      "tarball": "https://registry.npmjs.org/@tavily/pi-extension/-/pi-extension-0.1.2.tgz",
+      "sha256": "34b7349542670b6f1a192ac9282d401fd5f3e391f1341a8b104252a9cf047466",
+      "integrityVerified": true
+    },
+    {
+      "name": "@narumitw/pi-goal",
+      "version": "0.54.8",
+      "license": "MIT",
+      "repository": {
+        "url": "git+https://github.com/narumiruna/pi-extensions.git",
+        "type": "git",
+        "directory": "packages/pi-goal"
+      },
+      "homepage": "https://github.com/narumiruna/pi-extensions#readme",
+      "published": "2026-09-20T08:08:03.909Z",
+      "dependencies": {
+        "@narumitw/pi-tui-kit": "^0.59.0"
+      },
+      "peerDependencies": {
+        "typebox": "*",
+        "@earendil-works/pi-ai": "*",
+        "@earendil-works/pi-tui": "*",
+        "@earendil-works/pi-coding-agent": "*"
+      },
+      "pi": {
+        "extensions": [
+          "./dist/index.ts"
+        ]
+      },
+      "scripts": {
+        "build": "node scripts/build-runtime.mjs",
+        "check": "npm run build && biome check . && npm run typecheck",
+        "format": "biome check --write .",
+        "prepack": "npm run build",
+        "typecheck": "tsc --noEmit",
+        "test:runtime": "node ./test/goal-runtime-smoke.mjs"
+      },
+      "integrity": "sha512-ba165WkOdBEQNYgjTa2MHgRtOh/hTLveObPzdoE29FOrfktymcBlayEHoXd9Jjw44VQ8bX7cq6V57zp0rJLVgQ==",
+      "tarball": "https://registry.npmjs.org/@narumitw/pi-goal/-/pi-goal-0.54.8.tgz",
+      "sha256": "ee05de999dc4a0be36165e6f8f7f72de14caca6c1844965b8f5682f45929046f",
+      "integrityVerified": true
+    },
+    {
+      "name": "pi-context-usage",
+      "version": "2.1.0",
+      "license": "ISC",
+      "repository": {
+        "url": "git+https://github.com/championswimmer/pi-context-usage.git",
+        "type": "git"
+      },
+      "homepage": "https://github.com/championswimmer/pi-context-usage#readme",
+      "published": "2026-09-29T12:47:29.714Z",
+      "dependencies": null,
+      "peerDependencies": {
+        "@earendil-works/pi-tui": "*",
+        "@earendil-works/pi-coding-agent": "*"
+      },
+      "pi": {
+        "extensions": [
+          "./src/index.ts"
+        ]
+      },
+      "scripts": {
+        "test:mock": "bun run ./tests/mock-context.ts",
+        "test:mock-details": "bun run ./tests/mock-context.ts details"
+      },
+      "integrity": "sha512-D0xmL41Ry5uGAE/mcNZfFiq9KWk4OX3PdrCrEH/6CHMXxuW9cCPlLqIWTYCKM2qry45nvNvxJJlPv9g7SPxVRQ==",
+      "tarball": "https://registry.npmjs.org/pi-context-usage/-/pi-context-usage-2.1.0.tgz",
+      "sha256": "8a5740b12210d36144bc7fedb1728713cb0280c5f4954105ef70bf1ff521715a",
+      "integrityVerified": true
+    },
+    {
+      "name": "@narumitw/pi-btw",
+      "version": "0.61.1",
+      "license": "MIT",
+      "repository": {
+        "url": "git+https://github.com/narumiruna/pi-extensions.git",
+        "type": "git",
+        "directory": "packages/pi-btw"
+      },
+      "homepage": "https://github.com/narumiruna/pi-extensions#readme",
+      "published": "2026-09-25T15:49:10.993Z",
+      "dependencies": {
+        "@narumitw/pi-tui-kit": "^0.64.0"
+      },
+      "peerDependencies": {
+        "@earendil-works/pi-ai": "*",
+        "@earendil-works/pi-tui": "*",
+        "@earendil-works/pi-coding-agent": "*"
+      },
+      "pi": {
+        "extensions": [
+          "./dist/index.ts"
+        ]
+      },
+      "scripts": {
+        "build": "node scripts/build-runtime.mjs",
+        "check": "npm run build && biome check . && npm run typecheck",
+        "format": "biome check --write .",
+        "prepack": "npm run build",
+        "typecheck": "tsc --noEmit"
+      },
+      "integrity": "sha512-s1AsDNnF4eEeQGByoI+m0Y7gewTkR3KlsnhToLvVJTQqlZWHtIBUlkrODtSan2rBKcYH2GdxlNx9G7WC6N0LvA==",
+      "tarball": "https://registry.npmjs.org/@narumitw/pi-btw/-/pi-btw-0.61.1.tgz",
+      "sha256": "ba47558043c02f6bfad76818ae7fb549c4b77fc4d254892a3fec7200c2d54cab",
+      "integrityVerified": true
+    },
+    {
+      "name": "@ff-labs/pi-fff",
+      "version": "0.11.0",
+      "license": "MIT",
+      "repository": {
+        "url": "git+https://github.com/dmtrKovalenko/fff.git",
+        "type": "git",
+        "directory": "packages/pi-fff"
+      },
+      "homepage": "https://github.com/dmtrKovalenko/fff/tree/main/packages/pi-fff",
+      "published": "2026-09-21T05:10:57.587Z",
+      "dependencies": {
+        "@ff-labs/fff-bun": "0.11.0",
+        "@ff-labs/fff-node": "0.11.0"
+      },
+      "peerDependencies": {
+        "@sinclair/typebox": "*",
+        "@earendil-works/pi-tui": "*",
+        "@earendil-works/pi-coding-agent": "*"
+      },
+      "pi": {
+        "extensions": [
+          "./src/index.ts"
+        ]
+      },
+      "scripts": {
+        "test": "bun test test/",
+        "typecheck": "tsc --noEmit"
+      },
+      "integrity": "sha512-RNYBSnmRaGxYF9/R5KO4Uq0q1Prtbe6CmltK7i3efD0+JEwR2h69sL+p6UIXNDrVANSXEWM8ehagQefbskoGwg==",
+      "tarball": "https://registry.npmjs.org/@ff-labs/pi-fff/-/pi-fff-0.11.0.tgz",
+      "sha256": "d25cacb52974a8c99be1ecf88a0ba554459402a8850798cc722e08b088d21de3",
+      "integrityVerified": true
+    }
+  ]
+}
