@@ -6,10 +6,12 @@ import { verifyOfficialPiPackage, OFFICIAL_PI_PROVENANCE } from '../../packages/
 // closure package the SDK imports directly to that same exact version.
 // Transitive siblings are fixed by the lockfile and verified installed closure.
 // `pi-tui` ships prebuilt `.node` addons and may not be a direct dependency
-// (release-graph purity gate); the other siblings (`chord`, `pi-telemetry`,
-// `pi-codemode`, `pi-mcp`) are never imported by the SDK. All of them reach the
-// install only through the coding agent, and the lockfile and installed
-// integrity checks below still hold each to the exact version. The integrity of each
+// (release-graph purity gate); `pi-codemode` and `pi-mcp` are never imported by
+// the SDK and are pinned only by the coding agent. `chord` and `pi-telemetry`
+// are also pinned directly: `pi-ai` and `pi-agent-core` range-depend on them,
+// so npm would otherwise hoist a newer sibling to the top level, where the
+// host resolves them. The lockfile and installed integrity checks below hold
+// every closure package to the exact version. The integrity of each
 // `name@version` is recorded once, in `bun.lock`. Every release gate derives the
 // expected identity here instead of hardcoding any half of it:
 //
@@ -49,13 +51,11 @@ export const PI_RUNTIME_CLOSURE = Object.freeze([
 /**
  * Closure packages that may not be direct client dependencies. `pi-tui` ships
  * native addons, which the release-graph purity gate forbids on direct edges;
- * the others are pure-JavaScript siblings of the coding agent that the SDK
- * never imports, so a direct edge would only widen the published manifest.
+ * `pi-codemode` and `pi-mcp` are pure-JavaScript siblings that only the coding
+ * agent depends on, so a direct edge would only widen the published manifest.
  */
 const PI_INDIRECT_CLOSURE = Object.freeze([
   '@earendil-works/pi-tui',
-  '@earendil-works/chord',
-  '@earendil-works/pi-telemetry',
   '@earendil-works/pi-codemode',
   '@earendil-works/pi-mcp',
 ]);

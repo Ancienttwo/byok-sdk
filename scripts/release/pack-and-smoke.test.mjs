@@ -50,7 +50,7 @@ test('release pack accepts exact prerelease versions while Pi remains a stable p
   );
 });
 
-const PI_INDIRECT = ['@earendil-works/pi-tui', '@earendil-works/chord', '@earendil-works/pi-telemetry', '@earendil-works/pi-codemode', '@earendil-works/pi-mcp'];
+const PI_INDIRECT = ['@earendil-works/pi-tui', '@earendil-works/pi-codemode', '@earendil-works/pi-mcp'];
 const PI_DIRECT = PI_RUNTIME_CLOSURE.filter((name) => !PI_INDIRECT.includes(name));
 const exactClosure = (version) => Object.fromEntries(PI_DIRECT.map((name) => [name, version]));
 
