@@ -2,6 +2,7 @@
   "extends": "../../tsconfig.json",
   "include": [
     "server.ts",
-    "goal-btw*.ts"
+    "goal-btw*.ts",
+    "clarification*.ts"
   ]
 }
