@@ -272,3 +272,10 @@ records by exact taskId before reconciling their terminal results. Drive
 `acceptGoalResult` must be idempotent and verify product evidence. This is a
 copy-and-own SQLite reference for one Host scheduling worker, with independent
 Host storage; it is not a production multi-worker scheduler or SDK storage API.
+
+### Host clarification (copy-and-own)
+
+For asynchronous SaaS Bot questions, see [clarification-usage.md](clarification-usage.md)
+and the `clarification.ts` / `clarification-store.ts` reference. It persists
+single-choice/text tickets and answers, retries notifications, and dispatches a
+new fresh Execution after an answer. It is not an SDK API or native Pi ask tool.
