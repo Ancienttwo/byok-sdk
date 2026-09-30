@@ -10,12 +10,13 @@ import { createTaskMutationArbiter } from '../../../vendor/pi-subagents/0.60.0/s
 import { runWorkflowScript } from '../../../vendor/pi-subagents/0.60.0/src/workflows/scripted-workflow.ts';
 import { createWorkflowChildPermit, claimWorkflowChildPermit, consumeWorkflowChildPermit, validateWorkflowChildPermitRoot } from '../../../vendor/pi-subagents/0.60.0/src/shared/workflow-child-permit.ts';
 
+const pinnedVersion = JSON.parse(readFileSync(new URL('../../adapters/pi/official-pi-closure.json', import.meta.url), 'utf8')).packages.find(entry => entry.name === '@earendil-works/pi-coding-agent').version;
 const codingRoot = path.dirname(path.dirname(fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'))));
 const codingParent = pathToFileURL(path.join(codingRoot, 'package.json')).href;
 const instances = Object.fromEntries(['pi-ai', 'pi-agent-core'].map(name => {
   const spec = `@earendil-works/${name}`;
   const roots = [...new Set([import.meta.url, codingParent].map(parent => realpathSync(path.dirname(path.dirname(fileURLToPath(import.meta.resolve(spec, parent)))))))];
-  for (const root of roots) assert.equal(JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).version, '0.87.1');
+  for (const root of roots) assert.equal(JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).version, pinnedVersion);
   if (process.argv.includes('--expect-nested')) assert.equal(roots.length, 2, `${name} must exercise both npm instances`);
   return [name, roots];
 }));

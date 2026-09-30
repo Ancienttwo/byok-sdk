@@ -2,7 +2,7 @@
   "format": "byok.pi-export-asset-source",
   "version": 1,
   "packageName": "@earendil-works/pi-coding-agent",
-  "packageVersion": "0.87.1",
+  "packageVersion": "0.99.1",
   "sourceBasePath": "dist/core/export-html",
   "files": [
     {
@@ -12,13 +12,13 @@
     },
     {
       "path": "template.css",
-      "bytes": 22724,
-      "sha256": "28c16e3827c23a62eef8283cac316b478f946e023093adad25ff9c9b891d41af"
+      "bytes": 22952,
+      "sha256": "8ee19851f8e583277ed396cbb76496687aa556707fdfc1f78d1118bff87c740a"
     },
     {
       "path": "template.js",
-      "bytes": 77102,
-      "sha256": "56270347d35faac17e3b79b16ac5d8dbab664e9c83cfbc05437a3f5976074d76"
+      "bytes": 80260,
+      "sha256": "b5bbffdf5d9ec8bb519df45c7ff953ac1969af80e8aba33331b9f87983f91fa5"
     },
     {
       "path": "vendor/marked.min.js",

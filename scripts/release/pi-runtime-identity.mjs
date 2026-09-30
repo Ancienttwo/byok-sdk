@@ -3,11 +3,13 @@ import { verifyOfficialPiPackage, OFFICIAL_PI_PROVENANCE } from '../../packages/
 //
 // `packages/client/package.json` pins the official
 // `@earendil-works/pi-coding-agent` to one exact version, and pins every
-// direct pure-JavaScript dependency to that same exact version. Transitive
-// siblings are fixed by the lockfile and verified installed closure. `pi-tui` ships prebuilt `.node` addons
-// and may not be a direct dependency (release-graph purity gate); it reaches
-// the install only through the coding agent, and the lockfile and installed
-// integrity checks below still hold it to the exact version. The integrity of each
+// closure package the SDK imports directly to that same exact version.
+// Transitive siblings are fixed by the lockfile and verified installed closure.
+// `pi-tui` ships prebuilt `.node` addons and may not be a direct dependency
+// (release-graph purity gate); the other siblings (`chord`, `pi-telemetry`,
+// `pi-codemode`, `pi-mcp`) are never imported by the SDK. All of them reach the
+// install only through the coding agent, and the lockfile and installed
+// integrity checks below still hold each to the exact version. The integrity of each
 // `name@version` is recorded once, in `bun.lock`. Every release gate derives the
 // expected identity here instead of hardcoding any half of it:
 //
@@ -40,13 +42,23 @@ export const PI_RUNTIME_CLOSURE = Object.freeze([
   '@earendil-works/chord',
   '@earendil-works/pi-telemetry',
   '@earendil-works/pi-tui',
+  '@earendil-works/pi-codemode',
+  '@earendil-works/pi-mcp',
 ]);
 
 /**
- * Closure packages that may not be direct client dependencies: they ship
- * native addons, which the release-graph purity gate forbids on direct edges.
+ * Closure packages that may not be direct client dependencies. `pi-tui` ships
+ * native addons, which the release-graph purity gate forbids on direct edges;
+ * the others are pure-JavaScript siblings of the coding agent that the SDK
+ * never imports, so a direct edge would only widen the published manifest.
  */
-const PI_INDIRECT_CLOSURE = Object.freeze(['@earendil-works/pi-tui', '@earendil-works/chord', '@earendil-works/pi-telemetry']);
+const PI_INDIRECT_CLOSURE = Object.freeze([
+  '@earendil-works/pi-tui',
+  '@earendil-works/chord',
+  '@earendil-works/pi-telemetry',
+  '@earendil-works/pi-codemode',
+  '@earendil-works/pi-mcp',
+]);
 
 /** The retired fork's package scope; nothing from it may be locked or installed. */
 const PI_FORK_PREFIX = '@byok-sdk/pi-';
@@ -75,7 +87,7 @@ export function parsePiRuntimeIdentity(clientManifest, label = 'packages/client/
   for (const name of PI_RUNTIME_CLOSURE) {
     const pinned = clientManifest.dependencies[name];
     if (PI_INDIRECT_CLOSURE.includes(name)) {
-      if (pinned !== undefined) throw new Error(`${label}: ${name} ships native addons and must reach the install only through ${PI_DEPENDENCY_SPECIFIER}, got a direct ${pinned}`);
+      if (pinned !== undefined) throw new Error(`${label}: ${name} is not a direct client dependency; it must reach the install only through ${PI_DEPENDENCY_SPECIFIER}, got a direct ${pinned}`);
       continue;
     }
     if (pinned !== spec) {

@@ -50,34 +50,38 @@ test('release pack accepts exact prerelease versions while Pi remains a stable p
   );
 });
 
-const PI_DIRECT = PI_RUNTIME_CLOSURE.filter((name) => !['@earendil-works/pi-tui', '@earendil-works/chord', '@earendil-works/pi-telemetry'].includes(name));
+const PI_INDIRECT = ['@earendil-works/pi-tui', '@earendil-works/chord', '@earendil-works/pi-telemetry', '@earendil-works/pi-codemode', '@earendil-works/pi-mcp'];
+const PI_DIRECT = PI_RUNTIME_CLOSURE.filter((name) => !PI_INDIRECT.includes(name));
 const exactClosure = (version) => Object.fromEntries(PI_DIRECT.map((name) => [name, version]));
 
 test('the Pi runtime identity authority admits only an exact official closure', () => {
-  assert.deepEqual(parsePiRuntimeIdentity({ dependencies: exactClosure('0.87.1') }), {
+  assert.deepEqual(parsePiRuntimeIdentity({ dependencies: exactClosure('0.99.1') }), {
     specifier: PI_DEPENDENCY_SPECIFIER,
-    spec: '0.87.1',
+    spec: '0.99.1',
     packageName: PI_DEPENDENCY_SPECIFIER,
-    version: '0.87.1',
+    version: '0.99.1',
     closure: PI_RUNTIME_CLOSURE,
   });
-  for (const rejected of ['npm:@byok-sdk/pi-coding-agent@0.86.1001', 'npm:@earendil-works/pi-coding-agent@0.87.1', '^0.87.1', '0.87', 'latest', '']) {
+  for (const rejected of ['npm:@byok-sdk/pi-coding-agent@0.86.1001', 'npm:@earendil-works/pi-coding-agent@0.99.1', '^0.99.1', '0.99', 'latest', '']) {
     assert.throws(
-      () => parsePiRuntimeIdentity({ dependencies: { ...exactClosure('0.87.1'), [PI_DEPENDENCY_SPECIFIER]: rejected } }),
+      () => parsePiRuntimeIdentity({ dependencies: { ...exactClosure('0.99.1'), [PI_DEPENDENCY_SPECIFIER]: rejected } }),
       /must be pinned to one exact official x\.y\.z version/,
       `${rejected} must be rejected`,
     );
   }
   assert.throws(() => parsePiRuntimeIdentity({ dependencies: {} }), /must be a required dependency/);
-  assert.throws(
-    () => parsePiRuntimeIdentity({ dependencies: { ...exactClosure('0.87.1'), '@earendil-works/pi-tui': '0.87.1' } }),
-    /pi-tui ships native addons and must reach the install only through/,
-  );
+  for (const name of PI_INDIRECT) {
+    assert.throws(
+      () => parsePiRuntimeIdentity({ dependencies: { ...exactClosure('0.99.1'), [name]: '0.99.1' } }),
+      new RegExp(`${name.replace('/', '\\/')} is not a direct client dependency; it must reach the install only through`),
+      `${name} must not be a direct dependency`,
+    );
+  }
   for (const name of PI_DIRECT.slice(1)) {
-    for (const drift of [undefined, '^0.87.1', '0.87.2']) {
+    for (const drift of [undefined, '^0.99.1', '0.99.2']) {
       assert.throws(
-        () => parsePiRuntimeIdentity({ dependencies: { ...exactClosure('0.87.1'), [name]: drift } }),
-        new RegExp(`${name.replace('/', '\\/')} must be a required dependency pinned exactly to 0\\.87\\.1`),
+        () => parsePiRuntimeIdentity({ dependencies: { ...exactClosure('0.99.1'), [name]: drift } }),
+        new RegExp(`${name.replace('/', '\\/')} must be a required dependency pinned exactly to 0\\.99\\.1`),
       );
     }
   }
@@ -86,16 +90,18 @@ test('the Pi runtime identity authority admits only an exact official closure', 
 test('the locked closure is exact, integrity-bearing and fork-free', () => {
   const entry = (name, version, integrity = `sha512-${'A'.repeat(86)}==`) => `    "${name}": ["${name}@${version}", "", {}, "${integrity}"],\n`;
   const lock = (body) => `{\n  "lockfileVersion": 1,\n  "packages": {\n${body}  },\n}\n`;
-  const identity = { version: '0.87.1' };
-  const good = PI_RUNTIME_CLOSURE.map((name) => entry(name, '0.87.1')).join('');
+  const identity = { version: '0.99.1' };
+  const good = PI_RUNTIME_CLOSURE.map((name) => entry(name, '0.99.1')).join('');
   assert.equal(readLockedPiClosure(lock(good), identity).size, PI_RUNTIME_CLOSURE.length);
   assert.throws(() => readLockedPiClosure(lock(good + entry('pi-subagents/@earendil-works/pi-tui', '0.85.1').replace('"pi-subagents/@earendil-works/pi-tui@0.85.1"', '"@earendil-works/pi-tui@0.85.1"')), identity),
-    /resolves to @earendil-works\/pi-tui@0\.85\.1, but the Pi closure is pinned to 0\.87\.1/);
+    /resolves to @earendil-works\/pi-tui@0\.85\.1, but the Pi closure is pinned to 0\.99\.1/);
   assert.throws(() => readLockedPiClosure(lock(good + `    "@earendil-works/pi-agent-core": ["@byok-sdk/pi-agent-core@0.86.1001", "", {}, "sha512-${'B'.repeat(86)}=="],\n`), identity),
     /retired fork/);
   assert.throws(() => readLockedPiClosure(lock(good.replace(`sha512-${'A'.repeat(86)}==`, '')), identity), /carries no sha512 integrity/);
-  assert.throws(() => readLockedPiClosure(lock(good.replace(entry('@earendil-works/chord', '0.87.1'), '')), identity),
-    /@earendil-works\/chord@0\.87\.1 is not locked/);
+  for (const name of ['@earendil-works/chord', '@earendil-works/pi-codemode', '@earendil-works/pi-mcp']) {
+    assert.throws(() => readLockedPiClosure(lock(good.replace(entry(name, '0.99.1'), '')), identity),
+      new RegExp(`${name.replace('/', '\\/')}@0\\.99\\.1 is not locked`));
+  }
 });
 
 test('the repo pins the official Pi closure the release gates verify', () => {
@@ -104,8 +110,12 @@ test('the repo pins the official Pi closure the release gates verify', () => {
   );
   const identity = parsePiRuntimeIdentity(clientManifest);
   assert.equal(identity.packageName, '@earendil-works/pi-coding-agent');
-  assert.equal(identity.version, '0.87.1');
+  assert.equal(identity.version, '0.99.1');
+  assert.deepEqual(
+    [...identity.closure].sort(),
+    ['chord', 'pi-agent-core', 'pi-ai', 'pi-codemode', 'pi-coding-agent', 'pi-mcp', 'pi-telemetry', 'pi-tui'].map((name) => `@earendil-works/${name}`),
+  );
   const locked = readLockedPiClosure(readFileSync(fileURLToPath(new URL('../../bun.lock', import.meta.url)), 'utf8'), identity);
-  assert.equal(locked.get(PI_DEPENDENCY_SPECIFIER), 'sha512-m8ArJUtVcQMSe1lLE/Ei7vX/JV7O39sWmWBsXV2NOU70F0qCp8GubA24pT3LnwTmM6LL2xV80/h6sQg85n69ew==');
+  assert.equal(locked.get(PI_DEPENDENCY_SPECIFIER), 'sha512-cWUrTOqA5M73cOYMgsh9PlhDrsBhavd+n5kVY6F7BGbGl1RjqCteVCoeVMVqhngoGACVDyw1tbLjajL8l9jrHg==');
   assert.equal(clientManifest.optionalDependencies?.[PI_DEPENDENCY_SPECIFIER], undefined);
 });

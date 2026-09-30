@@ -347,7 +347,7 @@ const nonRuntimeEvents = (phase: ProbePhase): ProbeEvent[] => phase.events.filte
 function purityViolations(phase: ProbePhase): unknown[] {
   return [
     ...phase.events.map((event) => ({ api: event.api, detail: event.detail, origin: event.origin })),
-    ...phase.envReads.filter(event => !(event.origin === 'dep:openai/internal/utils/env.mjs:11:40' && ['OPENAI_ADMIN_KEY','OPENAI_ORG_ID','OPENAI_PROJECT_ID','OPENAI_WEBHOOK_SECRET','OPENAI_LOG','OPENAI_CUSTOM_HEADERS'].includes(event.key))).map((event) => ({ api: 'process.env', detail: event.key, origin: event.origin })),
+    ...phase.envReads.filter(event => !(event.origin === 'dep:openai/internal/utils/env.mjs:11:44' && ['OPENAI_ADMIN_KEY','OPENAI_ORG_ID','OPENAI_PROJECT_ID','OPENAI_WEBHOOK_SECRET','OPENAI_LOG','OPENAI_CUSTOM_HEADERS'].includes(event.key))).map((event) => ({ api: 'process.env', detail: event.key, origin: event.origin })),
     ...phase.envWrites.map((event) => ({ api: 'process.env=', detail: event.key, origin: event.origin })),
   ];
 }
@@ -372,7 +372,7 @@ const originFile = (origin: string): string => origin.replace(/:\d+:\d+$/u, '');
  *    `AssistantMessage.timestamp` of the output message the stream would
  *    fill; never serialized into the request.
  *  - `Math.random` at `openai/client.mjs` — `requestLogID`, "just for
- *    correlating local log entries" (openai 6.40.0); never on the wire body.
+ *    correlating local log entries" (openai 7.19.0); never on the wire body.
  *  - `Date.now` twice at `openai/client.mjs` — request start / headers
  *    timing for the log line and retry bookkeeping.
  *

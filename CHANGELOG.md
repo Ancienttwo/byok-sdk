@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **Changed (client)** — official Pi runtime 0.87.1 -> 0.99.1. The attested
+  closure is now eight packages (chord, pi-agent-core, pi-ai, pi-codemode,
+  pi-coding-agent, pi-mcp, pi-telemetry, pi-tui), upstream commit `d86654ab`,
+  closureDigest `4a6a72a3dfb82a18dbab345dc527645d9764f14ae5b7bc89e92808a2329bd449`.
+- **Changed (client)** — the OpenAI SDK under Pi moves 6.40 -> 7.19. Request
+  wire bytes were verified identical (2499-cell matrix), but the SSE decoder was
+  rewritten: `[DONE]` is matched exactly, `event: error` frames throw `APIError`,
+  and the malformed-JSON message changed. BYOK users on
+  non-standard OpenAI-compatible servers may see different response handling.
+- **Changed (client)** — Pi now writes the session file at the first user
+  message, so a killed first turn is resumable.
+
 ## 0.24.0-rc.1 / @byok-sdk/keys 0.8.1-rc.1 — 2026-09-29 (prepared; not published)
 
 Release candidate for 0.24.0, to be published under the npm dist-tag `rc`;
