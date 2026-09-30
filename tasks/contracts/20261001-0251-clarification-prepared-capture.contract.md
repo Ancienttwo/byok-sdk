@@ -62,7 +62,7 @@ focused 与 native-loopback-readback 均映射已有 focused check：two persist
 ## Acceptance Policy
 
 ```json
-{"protocol":1,"reviewer":"Claude","source":"claude-review","user_waiver":"forbidden"}
+{"protocol":1,"reviewer":"Claude","user_waiver":"forbidden"}
 ```
 
 ## Allowed Paths
