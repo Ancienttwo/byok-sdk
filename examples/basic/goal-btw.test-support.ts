@@ -31,7 +31,8 @@ export class BotStubSession implements Session {
 export class BotStubAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
     id: 'pi', supportsDispatchSelection: true, requiresMcpToolsetToolObservation: true,
-    capabilities: { steer: false, resume: false, mcpToolsets: false, approvalInteractive: false, permissionModes: ['auto', 'readonly'] },
+    // Linux hosts require the Agent-memory MCP projection for Agent-bound offers.
+    capabilities: { steer: false, resume: false, mcpToolsets: true, approvalInteractive: false, permissionModes: ['auto', 'readonly'] },
     environmentRequirements: { credentialNames: [] },
   });
   readonly sessions = new Map<string, BotStubSession>();
