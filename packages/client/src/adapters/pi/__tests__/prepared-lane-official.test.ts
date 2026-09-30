@@ -1,5 +1,5 @@
 /**
- * The SDK prepared lane on official Pi 0.99.1: A1' compile through the SDK
+ * The SDK prepared lane on official Pi 0.99.2: A1' compile through the SDK
  * compiler, consume-side verification, and the registered byte gate in a real
  * official `AgentSession`. Synthetic SSE only; a `globalThis.fetch` spy fails
  * the test if anything reaches the global transport.
@@ -156,7 +156,7 @@ async function runPrepared(envelope: PreparedPiInputV1, respond: (sequence: numb
   return run;
 }
 
-describe('SDK prepared compile on official Pi 0.99.1', () => {
+describe('SDK prepared compile on official Pi 0.99.2', () => {
   test('compiles a Host-authored system message, no sentinel on the wire, and verifies on the consume side', async () => {
     const compiled = await compile();
     const d = JSON.parse(compiled.requestBody) as { messages: { role: string; content: unknown }[]; tools: { function: Record<string, unknown> }[] };
@@ -217,7 +217,7 @@ describe('SDK prepared compile on official Pi 0.99.1', () => {
   });
 });
 
-describe('SDK prepared session on official Pi 0.99.1: byte gate', () => {
+describe('SDK prepared session on official Pi 0.99.2: byte gate', () => {
   test('request 1 is D byte-for-byte, the tool-result request passes under its own sequence', async () => {
     const { envelope, requestBody } = await compile();
     const run = await runPrepared(envelope, (sequence) => (sequence === 1 ? toolCallResponse() : textResponse('done', true)));
