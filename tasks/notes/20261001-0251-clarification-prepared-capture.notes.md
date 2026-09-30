@@ -52,3 +52,8 @@ BYOK_TEST_BUN_BIN=/usr/local/bin/bun BYOK_REQUIRE_BUN=1 bun run --cwd packages/c
 ## Risks / acceptance
 
 只证明新source/receipt/D关联、direct native首请求一致性和混合record拒绝。未证明生产ready/pin/claim、真实provider计数/计费、真实Host answer endpoint、same Agent home全链/retention/restart。fixture source authority不提供生产认证。外部Claude /tmp独立验收pending；不自签receipt，不push/PR。若architecture/daemon gate，按brief停报，不处理。
+
+## Architecture authorization
+
+预存 architecture gate，用户授权本切片处理；缺本地 CodeGraph 索引导致 verified-flow-proof-changed / proof 退化，恢复索引后 flowProofDigest=c105ee1286780504c1041f4587ff6c06a1d292ff18d33aa3359e656950ce1214。架构元数据变更与 prepared-capture 测试无关，可独立 revert。manifest provenance 是本地索引证据：branch codex/clarification-prepared-capture，base commit c146d18a；plan/apply 时尚未提交本轮元数据，不代表已提交完整状态。仅更新 manifest，不改 sdk-root/model/flow/P3。
+监工只读审过预览并明确 OK apply，仅该 manifest。

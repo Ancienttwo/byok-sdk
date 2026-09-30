@@ -69,6 +69,7 @@ focused 与 native-loopback-readback 均映射已有 focused check：two persist
 
 ```yaml
 allowed_paths:
+  - docs/architecture/.projection-manifest.json
   - packages/client/src/__tests__/clarification-prepared-capture.test.ts
   - packages/client/src/__tests__/fixtures/clarification-prepared-capture.ts
   - docs/researches/2026-10-01-clarification-prepared-offline-capture.md
@@ -241,6 +242,8 @@ exit_criteria:
 ```
 
 ## Acceptance Notes (Human Review)
+
+预存 architecture gate，用户授权本切片处理；缺本地 CodeGraph 索引导致 verified-flow-proof-changed / proof 退化，恢复索引后 flowProofDigest=c105ee1286780504c1041f4587ff6c06a1d292ff18d33aa3359e656950ce1214。架构元数据变更与 prepared-capture 测试无关，可独立 revert。manifest provenance 是本地索引证据：branch codex/clarification-prepared-capture，base commit c146d18a；plan/apply 时尚未提交本轮元数据，不代表已提交完整状态。仅更新 manifest，不改 sdk-root/model/flow/P3。
 
 监工明确两个packages测试资产例外。counter=test_fixture→receipt.ready=false，provider计数/真实production admission未证；native launcher直接消费持久化artifact只证明离线首请求bytes，不等于task.offer_prepared全链准入。clientvitest已设置BYOK_TEST_DEVICE_CREDENTIAL_STORE=1，真实Pi adapter支持mcpToolsets，无新stub改变能力；非rootLinux复跑。Bun测试本机env BYOK_TEST_BUN_BIN=/Users/chris/.bun/bin/bun BYOK_REQUIRE_BUN=1。
 

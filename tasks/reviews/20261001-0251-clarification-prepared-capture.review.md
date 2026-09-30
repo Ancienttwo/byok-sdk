@@ -73,6 +73,8 @@ screenshot/artifact path, or reviewer observation.
 
 ## Residual Risks / Follow-ups
 
+- 预存 architecture gate，用户授权本切片处理；缺本地 CodeGraph 索引导致 verified-flow-proof-changed / proof 退化，恢复索引后 flowProofDigest=c105ee1286780504c1041f4587ff6c06a1d292ff18d33aa3359e656950ce1214。架构元数据变更与 prepared-capture 测试无关，可独立 revert。manifest provenance 是本地索引证据：branch codex/clarification-prepared-capture，base commit c146d18a；plan/apply 时尚未提交本轮元数据，不代表已提交完整状态。仅更新 manifest，不改 sdk-root/model/flow/P3。
+
 - counter=test_fixture / receipt.ready=false；production admission/provider counting 未证。native capture直接调用adapter，不含cloud/task pin/claim，也不含Host HTTP answer lifecycle。
 - 完整本机与非rootLinux命令退出码在notes；外部Claude验收pending，未签receipt。
 
