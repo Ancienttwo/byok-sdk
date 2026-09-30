@@ -5,23 +5,23 @@
   "sourceDigest": "sha256:2cd62242ce412b870563ddf9b283ff287abf32f92a3b1aa065a78c4a289da691",
   "provenance": {
     "schemaVersion": "archcontext.architecture-docs-projection-provenance/v1",
-    "baseHeadSha": "e0b50ede2433f9c239ad0044b77fa10f5fc11ad5",
-    "worktreeDigest": "sha256:de8320c31fbf48c2b0fd3fa6e3f2361d93ffbf2ac56d9bb22d444f7730275f27",
-    "sourceTreeDigest": "sha256:a4d0a232de116f27703a04872a3b2f81a382eac7a456d7723e04a1130b440647",
+    "baseHeadSha": "ede2db31ad33072965434b04743cfd7e52b93e85",
+    "worktreeDigest": "sha256:1c60826ab17f67e1f4be4b3ad462ab1fc0a6b181f71da5a6c878bbfa3dcaee77",
+    "sourceTreeDigest": "sha256:8e40b2fbd00906af839f43a069be1bb46961f1ca1cbb2acc25b8936535e1c4b5",
     "modelDigest": "sha256:3967fb09bdbb43f62528bdd71dae409497edd9e7102a542b398b434f7c0b9cfb",
-    "codeGraphDigest": "sha256:fc73cab3858ec7a6aa61401983d0b90b2f5cedba435aa203cab1ab9529f1d1f3",
-    "indexedWorktreeDigest": "sha256:46a0f8766cd221f43c649b5e2db9ad434ae03b86b62a79b7411049dd95ab2c2c",
+    "codeGraphDigest": "sha256:3c318f98965d1e1bd1ccdbbf494abbd940897ec62c9baa65d981d1c6a5c57406",
+    "indexedWorktreeDigest": "sha256:5c587adc957c4591b5a195e235ea2ed6df567468fed639f78a265264eb3fab91",
     "rendererVersion": "archcontext.docs-renderer/v4",
     "layoutVersion": "archcontext.docs-layout/v1",
     "generatedFrom": {
       "codeGraphPackage": "@colbymchenry/codegraph",
-      "codeGraphVersion": "1.5.0",
-      "codeGraphBinaryDigest": "sha256:e4be48573fdf16196ca0d2867be2790aa161534e9973dcb89bc70465100ea537",
+      "codeGraphVersion": "1.6.1",
+      "codeGraphBinaryDigest": "sha256:aaf60671de2533409c0ac11aa5db94ec1ac4d758cce92b4b78219ce21edf61d7",
       "codeGraphStatus": "ready"
     },
-    "projectionInputDigest": "sha256:32efc219105a00545e71bb19c45c12595dd1aefad2e448159c54ddcb51b13df5"
+    "projectionInputDigest": "sha256:09ca190a7834f41c08e2cdb87062aff009a8adfffd9dbe05b097d340c5014faf"
   },
-  "projectionDigest": "sha256:d0bbf557eeb51eee8a4242eff37634202fb055b53b7f96930f6286805ffc0827",
+  "projectionDigest": "sha256:372741c3bf8a038a248824ce0f661b697784ef8cdf893be94b5d9c18c3d3d3b1",
   "semanticBaseline": {
     "semanticState": {
       "schemaVersion": "archcontext.architecture-semantic-state/v1",
@@ -59,13 +59,17 @@
     },
     "digests": {
       "modelDigest": "sha256:3967fb09bdbb43f62528bdd71dae409497edd9e7102a542b398b434f7c0b9cfb",
-      "sourceTreeDigest": "sha256:a4d0a232de116f27703a04872a3b2f81a382eac7a456d7723e04a1130b440647",
+      "sourceTreeDigest": "sha256:8e40b2fbd00906af839f43a069be1bb46961f1ca1cbb2acc25b8936535e1c4b5",
       "flowProofDigest": "sha256:c105ee1286780504c1041f4587ff6c06a1d292ff18d33aa3359e656950ce1214",
-      "projectionDigest": "sha256:d0bbf557eeb51eee8a4242eff37634202fb055b53b7f96930f6286805ffc0827"
+      "projectionDigest": "sha256:372741c3bf8a038a248824ce0f661b697784ef8cdf893be94b5d9c18c3d3d3b1"
+    },
+    "evidence": {
+      "sourceTreeDigest": "sha256:8e40b2fbd00906af839f43a069be1bb46961f1ca1cbb2acc25b8936535e1c4b5",
+      "selectorEvidenceDigest": "sha256:2c152166abffaca7bb7951befe3a590953471e24aa39217c1fde3bfdb48ec4ea",
+      "rendererVersion": "archcontext.docs-renderer/v4"
     }
   },
-  "receiptDigest": "sha256:7cee9aaecc26a00582287c14047794e7698c2a6495624c6adf0f22d4dab1e1a7",
-  "refreshSignalIds": [],
+  "receiptDigest": "sha256:250dff5e5e9af16854158dc6a878c4dfd91d20c3935abdf0f109c69cea62689f",
   "targetCount": 7,
   "fileCount": 7,
   "targets": [
@@ -94,12 +98,12 @@
       "ownership": "mixed",
       "rendererVersion": "archcontext.docs-renderer/v4",
       "format": "markdown",
-      "sourceDigest": "sha256:b529778eefbc69b17bb089e832735ad1e7f2df5d56b635619f6d4b074941f00b",
-      "outputDigest": "sha256:8222fcd9af4f9c98f517da7bef7d2e7d4598d5b86469f723f04a6d54ce6f0f53",
+      "sourceDigest": "sha256:86be45aa663af721726fde2fae68d1acd8d6ff5020385cfebf3a23e44585f911",
+      "outputDigest": "sha256:ca6c81d7fd07d171ce9fb5cda21ba1f3a405bca298f48cfe12d6ddf1ffc8f05b",
       "verifiedAgainst": {
-        "branch": "claude/release-0-22-0",
-        "commit": "e0b50ede2433f9c239ad0044b77fa10f5fc11ad5",
-        "committedAt": "2026-09-25T10:49:20+08:00"
+        "branch": "codex/conversation-goal-btw",
+        "commit": "ede2db31ad33072965434b04743cfd7e52b93e85",
+        "committedAt": "2026-09-29T14:59:37+08:00"
       }
     },
     {

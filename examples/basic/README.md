@@ -260,3 +260,15 @@ If a dispatched task never claims, check the daemon's stdout for a
 `task.fail` reason — most likely a corrupt/missing required pi install, an
 explicit sidecar path that cannot execute, or an unsupported policy.
 `byok-agent start` logs daemon status every 5s.
+
+## Goal and btw Host integration
+
+See the private [goal/btw Host reference](./goal-btw-usage.md) for bounded goals and independent side questions using [goal-btw.ts](./goal-btw.ts). It uses explicit Host state and public SDK APIs; the existing quickstart is unchanged.
+
+The daemon needs Agent-home support, the matching `agentEgress.policy` and
+`resultDocument.extract: extractBotResult`. On Host restart, recover pending
+records by exact taskId before reconciling their terminal results. Drive
+`tickGoal` from your Host scheduler; no timer or per-step limit is supplied.
+`acceptGoalResult` must be idempotent and verify product evidence. This is a
+copy-and-own SQLite reference for one Host scheduling worker, with independent
+Host storage; it is not a production multi-worker scheduler or SDK storage API.
