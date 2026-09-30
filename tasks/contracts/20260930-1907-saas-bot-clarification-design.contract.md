@@ -67,6 +67,7 @@ example-tests 对应 Verification Plan 的 example-tests。runtime_readback 只�
 
 ```yaml
 allowed_paths:
+  - docs/architecture/.projection-manifest.json
   - docs/researches/2026-09-30-saas-bot-clarification-design.md
   - plans/plan-20260930-1907-saas-bot-clarification-design.md
   - tasks/contracts/20260930-1907-saas-bot-clarification-design.contract.md
@@ -247,6 +248,8 @@ exit_criteria:
 ```
 
 ## Acceptance Notes (Human Review)
+
+预存 architecture gate，用户授权处理；缺本地 CodeGraph 索引导致 verified-flow-proof-changed/proof 退化，恢复索引后 flowProofDigest=c105ee1286780504c1041f4587ff6c06a1d292ff18d33aa3359e656950ce1214。与 clarification 代码无关，可独立 revert。manifest provenance 是本地索引证据：branch codex/clarification-design，base commit 402a5f5a；本次元数据在 plan/apply 时尚未提交，不代表一个已提交的完整状态。仅更新 manifest，不改 sdk-root/model/flow/P3。
 
 用户已授权实施与 commit。Claude 文档验收认可 A/B，未来参考实施覆盖设计 §9 的 1-5；§9.6 prepared capture 不做，明确未证。测试真实 HTTP/stub daemon 与两 SQLite connection，fake clock。CI credential flag 与 mcpToolsets:true 沿用 main；非 root Linux Docker 独立测试。本机 BYOK_TEST_BUN_BIN=/Users/chris/.bun/bin/bun、BYOK_REQUIRE_BUN=1（CI 同名 env）用于 root 与 example。运行结果逐项记 notes，不将未执行写 PASS。Formal receipt 仍需 Claude，不手写 projection。
 

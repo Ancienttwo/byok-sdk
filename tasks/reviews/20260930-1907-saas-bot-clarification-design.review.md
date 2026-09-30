@@ -73,6 +73,8 @@ screenshot/artifact path, or reviewer observation.
 
 ## Residual Risks / Follow-ups
 
+- 预存 architecture gate，用户授权处理；缺本地 CodeGraph 索引导致 verified-flow-proof-changed/proof 退化，恢复索引后 flowProofDigest=c105ee1286780504c1041f4587ff6c06a1d292ff18d33aa3359e656950ce1214。与 clarification 代码无关，可独立 revert。manifest provenance 是本地索引证据：branch codex/clarification-design，base commit 402a5f5a；本次元数据在 plan/apply 时尚未提交，不代表一个已提交的完整状态。仅更新 manifest，不改 sdk-root/model/flow/P3。
+
 - Host reference 已实施并通过本机/非root Linux 检查；prepared MCP 长等待/身份/重启与 §9.6 capture 未证。
 - PR #245 已合并到 main 186e210c；本 worktree trace 基线不变，未来可借鉴其 copy-and-own example。
 - 验收状态 pending，不手写 AcceptanceReceipt，不 commit。

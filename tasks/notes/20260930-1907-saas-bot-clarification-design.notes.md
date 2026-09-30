@@ -59,3 +59,8 @@ bun run --cwd examples/basic test
 ## Acceptance
 
 Claude 已验收设计；实施独立 /tmp 复跑及正式 receipt 尚待。不要手写 projection，不 push/PR。若 architecture gate / contract_not_committed，按用户指示停报。
+
+## Architecture gate remediation authorization
+
+预存 architecture gate，用户授权处理；缺本地 CodeGraph 索引导致 verified-flow-proof-changed/proof 退化，恢复索引后 flowProofDigest=c105ee1286780504c1041f4587ff6c06a1d292ff18d33aa3359e656950ce1214。与 clarification 代码无关，可独立 revert。manifest provenance 是本地索引证据：branch codex/clarification-design，base commit 402a5f5a；本次元数据在 plan/apply 时尚未提交，不代表一个已提交的完整状态。仅更新 manifest，不改 sdk-root/model/flow/P3。
+监工审过仅 manifest 的67行预览，明确 OK apply；无其他架构发现处理授权。
