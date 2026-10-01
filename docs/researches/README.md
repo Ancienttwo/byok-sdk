@@ -13,6 +13,7 @@ Architecture decisions:
 
 Reference reports:
 
+- [OAR（botiverse/oar）对 byok-sdk 的集成与萃取评估 (2026-10-01)](./2026-10-01_oar-extraction-assessment.md)
 - [Chasen Pi Harness：10 个 Packages 与 byok-sdk 集成评估 (2026-09-30)](./2026-09-30_chasen-pi-packages-integration-assessment.md)
 - [RAFT 存储与计费参考 (2026-09-10)](./2026-09-10_raft-storage-billing-reference.md)
 - [Hermes context 对 Fresh MVP PRD / Sprint 的萃取评估 (2026-09-10)](./2026-09-10_hermes-context-prd-sprint-assessment.md)
