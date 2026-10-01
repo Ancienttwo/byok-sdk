@@ -208,12 +208,8 @@ export const MAX_PENDING_APPROVALS_PER_TASK = 16;
  * expected race, audit-worthy but never task-state-affecting — apart from
  * "the session's own resolveApproval() failed for some other, genuine
  * reason" (an adapter-level problem, which still fails the task exactly as
- * before). Only ever thrown for an adapter that actually wires up a real
- * approval channel (claude, under `confirm` mode) — pi/codex's own
- * `resolveApproval()` still throw their own unrelated, adapter-specific
- * "not supported at all" errors, which are NOT instances of this class and
- * therefore still fall through to the pre-existing fail-the-task behavior,
- * unchanged.
+ * before). Only thrown for a custom adapter wiring an approval channel.
+ * Bundled adapters reject confirm and throw their own unsupported errors.
  */
 export class NoPendingApprovalError extends Error {
   constructor(public readonly taskId: string) {
@@ -2341,8 +2337,8 @@ export class TaskRunner {
       //
       // The binding covers EVERY MCP server this task will generate, whatever
       // its origin — not only the host toolsets the device projects. The
-      // reserved SDK helpers (agent message, agent memory) and the reserved
-      // approval server the picked adapter generates itself under
+      // reserved SDK helpers (agent message, agent memory) and any reserved
+      // approval server a custom adapter declares under
       // `policy.mode: 'confirm'` are the same kind of child process, launched
       // by the same CLI, from the same inherited cwd; a task whose only MCP
       // server is one of those used to reach `start()` with no binding at all
@@ -3034,8 +3030,7 @@ export class TaskRunner {
               throw new NoPendingApprovalError(taskId);
             }
             // 'wire': this closure is invoked ONLY by an adapter's own
-            // `session.resolveApproval()` (e.g. `ClaudeSession.resolveApproval`
-            // under `confirm` mode), which in turn is called ONLY from
+            // `session.resolveApproval()` on a custom adapter, which is called from
             // `handleApprove`/`handleReject` below — i.e. a server-sent wire
             // `task.approve`/`task.reject`. The server already knows this
             // decision (it sent it); `task.approval_resolved` must never be
@@ -3854,7 +3849,7 @@ export class TaskRunner {
           // the promise's own resolved value — that shape (`{approved,
           // reason}`) is `requestApproval`'s public contract, asserted
           // exactly by this file's own tests and relied on by
-          // `byok-approval-mcp.ts`/`create-daemon.ts`'s control socket —
+          // `create-daemon.ts`'s shared control socket —
           // instead it's threaded through via the optional `onOrigin`
           // callback parameter (additive, invisible to every other caller).
           // See `task-runner-approval.test.ts`'s "C1" describe block for the
@@ -4290,25 +4285,10 @@ export class TaskRunner {
   }
 
   /**
-   * M4 Phase 3: the daemon-side half of the out-of-band approval channel
-   * (`types.ts`'s `ApprovalChannel`) — called from `create-daemon.ts`'s
-   * `approvals.request` control method, itself called by `byok-approval-mcp`
-   * (a claude-spawned MCP-server child process, NOT the adapter/session
-   * in-process — see `ApprovalChannel`'s own doc comment for the full why
-   * this seam exists at all rather than an `AgentEvent`).
-   *
-   * Deliberately independent of the dormant `needs_approval` `AgentEvent`
-   * path in `pump()` below (~line 611): empirically confirmed (M4 Phase 3
-   * STEP 0), claude's own stream-json output emits NOTHING while a
-   * permission-prompt-tool call is outstanding — the gap between a `tool_use`
-   * frame and its `tool_result` is invisible on the wire, indistinguishable
-   * from ordinary model "thinking" latency. `pump()`'s for-await loop over
-   * `active.session.events` therefore has no event to ever branch on for
-   * this case; the ONLY signal that a task is paused arrives out-of-band,
-   * over the control socket, which is exactly what this method is for. The
-   * `needs_approval` path stays dormant, untouched, for a hypothetical
-   * future adapter whose runtime DOES expose the pause on its own event
-   * stream.
+   * Daemon-side shared out-of-band ApprovalChannel, exposed through the
+   * control socket's approvals.request method for custom adapters. Bundled
+   * Claude no longer uses it. The separate needs_approval event path remains
+   * available to adapters that expose a pause through their event stream.
    *
    * Sends `task.await_approval` (protocol §5), registers a fresh entry in
    * `deps.approvalRegistry`, and races it against `deps.approvalTimeoutMs`
@@ -4325,13 +4305,8 @@ export class TaskRunner {
    * that isn't currently active on this device — a stale/unknown/
    * already-finished task has nothing to pause.
    *
-   * M4 Phase 4 (fold-in from the P3 gate — concurrent-approval-overwrite
-   * fix): claude's parallel tool use can call this MORE THAN ONCE for the
-   * SAME task before the first call's approval is resolved — each parallel
-   * tool call is its own independent `byok-approval-mcp` `tools/call`
-   * request, and the MCP protocol lets several be in flight on one
-   * connection at once (see `byok-approval-mcp.ts`'s own doc comment on
-   * sharing one control-socket connection across them). Before this fix,
+   * Custom adapters can request more than one approval for the same task
+   * before the first request resolves. Before the queue was introduced,
    * `active.pendingApprovalId = approvalId` above was unconditional — a
    * second concurrent call for the same task silently overwrote the first
    * call's id, so only the LATEST request was ever wire-resolvable
@@ -4361,7 +4336,7 @@ export class TaskRunner {
    * resolves — with the `ApprovalOrigin` (`'wire' | 'local'`) the eventual
    * decision actually resolved through (see `ApprovalRegistry.resolve`'s own
    * `origin` parameter). Purely additive/internal: every existing caller
-   * (`byok-approval-mcp.ts`, `create-daemon.ts`'s control socket, this file's
+   * (`create-daemon.ts`'s control socket and this file's
    * own tests) omits it and observes exactly the same `{approved, reason}`
    * resolution as before. `pump()`'s dormant `needs_approval` branch is the
    * one caller that supplies it, to decide whether it still needs to
@@ -4488,8 +4463,8 @@ export class TaskRunner {
    * called, and therefore `deps.send` pushes this envelope onto the outbox,
    * SYNCHRONOUSLY from the `onResolve` callback above — strictly BEFORE the
    * `resolve(...)` call on the very next line that unblocks whatever was
-   * awaiting `requestApproval()`'s promise (`byok-approval-mcp`, ultimately
-   * the paused runtime turn). Any further progress from the resumed session
+   * awaiting `requestApproval()`'s promise (ultimately the custom adapter's
+   * paused runtime turn). Any further progress from the resumed session
    * can only be produced AFTER that unblock, which needs at least one more
    * microtask/event-loop turn — so `task.approval_resolved` is always queued
    * ahead of it with no extra bookkeeping needed here.

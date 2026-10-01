@@ -290,8 +290,8 @@ export interface RuntimeAdapterDescriptor {
   readonly mcpServerLaunch?: 'direct-cwd' | 'launcher-wrapped';
   /**
    * Whether this adapter GENERATES a reserved approval MCP server of its own
-   * when it is started under `policy.mode: 'confirm'` (claude's
-   * `--permission-prompt-tool` server, `adapters/claude/claude-adapter.ts`).
+   * when it is started under `policy.mode: 'confirm'`. This is an extension
+   * seam for custom adapters; none of the bundled adapters declares it.
    *
    * Such a server exists nowhere in the daemon's projected `mcpServers` map,
    * so the daemon cannot see it by counting that map — but it is an MCP

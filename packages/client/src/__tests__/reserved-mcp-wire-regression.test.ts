@@ -1,5 +1,5 @@
 /**
- * T1: the four SDK-reserved MCP helpers' EMITTED WIRE BYTES, frozen.
+ * T1: the three retained SDK-reserved MCP helpers' EMITTED WIRE BYTES, frozen.
  *
  * `byok-agent-message-mcp`, `byok-agent-memory-mcp` and
  * `byok-agent-team-mcp` are spawned as child processes by runtimes this SDK

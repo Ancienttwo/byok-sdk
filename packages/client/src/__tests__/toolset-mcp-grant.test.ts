@@ -18,9 +18,9 @@ import { observationOf } from './fixtures/mcp-observation';
  * `--allowedTools`; fake-codex enforces the exact `enabled_tools` list), so a regression that stops emitting the grant
  * fails here rather than passing against a permissive double.
  *
- * `scripts/claude-toolset-permission-smoke.mjs` and
- * `scripts/codex-toolset-permission-smoke.mjs` are the same assertions
- * against the real installed CLIs.
+ * Claude has a separate real permission smoke. Codex app-server observations
+ * are recorded by `scripts/codex-app-server-real.mjs`; its real YOLO probe did
+ * not establish denial merely from an absent per-tool preapproval.
  */
 const CLAUDE_FIXTURE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 const CODEX_FIXTURE = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.meta.url));

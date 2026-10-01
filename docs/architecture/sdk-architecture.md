@@ -103,7 +103,6 @@ flowchart LR
 | SaaS embed | `createByokServer(options)` | 生成 Hono app、long-poll/device HTTP surface、dispatch/task/device/event/stats façade API |
 | 本机 library | `createDaemon()` / `createDaemonWithAdapters()` | 配对、连接、任务执行、observer、service lifecycle |
 | 本机 CLI | `byok-agent` | pair/start/status/runtimes/tasks/workspaces/unpair/approval/service commands |
-| Approval helper | `byok-approval-mcp` | Claude confirm 模式的 stdio MCP 子进程，经 control socket 回调 daemon |
 | Wire contract | `@byok-sdk/protocol` public index | envelope、typed messages、HTTP schema、状态机、capability flags |
 | Key custody | `ProviderRegistry` | profile 与 secret 分库存储，构造 OpenAI-compatible / Anthropic client |
 
@@ -442,7 +441,6 @@ flowchart TB
     direction LR
     API(["index.ts<br/>library surface"]):::cli
     AgentCLI(["byok-agent CLI"]):::cli
-    ApprovalCLI(["byok-approval-mcp"]):::cli
   end
 
   subgraph Core["Daemon orchestration"]
@@ -460,8 +458,8 @@ flowchart TB
   subgraph Runtime["Runtime adapters"]
     direction LR
     Pi(["PiAdapter<br/>RPC session"]):::adapter
-    Claude(["ClaudeAdapter<br/>stream-json + MCP approval"]):::adapter
-    Codex(["CodexAdapter<br/>codex exec per turn"]):::adapter
+    Claude(["ClaudeAdapter<br/>stream-json + control_request"]):::adapter
+    Codex(["CodexAdapter<br/>app-server + OAR kernel"]):::adapter
   end
 
   subgraph Local["Local state and OS integration"]
@@ -476,7 +474,6 @@ flowchart TB
   API --> Create
   AgentCLI --> Create
   AgentCLI --> Service
-  ApprovalCLI --> Control
   Create --> Auth
   Create --> Conn
   Create --> Runner
@@ -587,19 +584,19 @@ adapter-only build/import surface。
 
 | 能力 | Pi | Claude | Codex |
 | --- | --- | --- | --- |
-| session model | 长驻 RPC | 长驻 stream-json process | 每 turn 一次 `codex exec`，resume 开新进程 |
+| session model | 长驻 RPC | 长驻 stream-json process | 长驻 app-server，thread/start 或 thread/resume |
 | resume | yes | yes | yes |
-| mid-turn steer | **yes** | no，写 stdin 只会排成 follow-up | no |
-| permission modes | `auto`,`readonly` | `auto`,`readonly`,`plan`,`confirm` | `auto`,`readonly` |
-| confirm/approval | no，fail-closed | **已接线**：permission-prompt-tool → MCP → control socket | no，fail-closed |
-| task-scoped host MCP toolsets | no | **已接线**：本机逻辑 id 解析 → strict MCP config | no |
+| mid-turn steer | yes | no，未实现 | yes，turn/steer；真实消费未验证 |
+| permission modes | `auto`,`readonly` | `auto`,`readonly`,`plan` | `auto` |
+| confirm/approval | no，fail-closed | no，私有审批路径已删除 | no，fail-closed |
+| task-scoped host MCP toolsets | yes | yes，strict MCP config | yes，exact enabled_tools；ambient MCP 排除未验证 |
 | allow/deny tools | 支持 | 条件支持 | 不支持，相关 policy fail-closed |
-| network control | `network:false` 不可保证 | `network:false` 不可保证 | `network:true` 不可保证 |
-| usage event | 无 | input/cache/output | input/cache/output/reasoning |
+| network control | `network:false` 拒绝 | `network:false` 拒绝 | `network:false` 拒绝，danger-full-access |
+| usage event | provider counters + estimate context | provider counters + modelUsage window | cumulative cost deltas + last context |
 
 Runtime policy 不做跨 runtime 的语义翻译：tool name 是 runtime-local vocabulary。adapter 无法精确表达 policy 时必须 decline，不能选择“接近的”参数继续执行。
 
-原先已确认的 capability honesty gap（`approvalInteractive` 对所有 adapter 硬编码 `false`）**已收口**：client `RuntimeCapabilities` 的 `approvalInteractive` 是 required 字段，由各 adapter frozen descriptor 自己声明（Claude `true`——confirm 路径真实已接线；Pi、Codex `false`），wire `RuntimeInfo.capabilities` 从 descriptor 纯 passthrough，`create-daemon.ts` 里那张硬编码表已删除。`approvalInteractive` 与 `permissionModes` 来自同一 descriptor snapshot，因而结构上一致；connection flag `interactive-approval` 仍是 reserved，无人 advertise、无人消费，不作为路由信号。
+原先已确认的 capability honesty gap（`approvalInteractive` 对所有 adapter 硬编码 `false`）**已收口**：client `RuntimeCapabilities` 的 `approvalInteractive` 是 required 字段，由各 adapter frozen descriptor 自己声明（当前三家均为 `false`，Claude confirm 已删除），wire `RuntimeInfo.capabilities` 从 descriptor 纯 passthrough，`create-daemon.ts` 里那张硬编码表已删除。`approvalInteractive` 与 `permissionModes` 来自同一 descriptor snapshot，因而结构上一致；connection flag `interactive-approval` 仍是 reserved，无人 advertise、无人消费，不作为路由信号。
 
 #### 三层 capability 模型
 
@@ -650,36 +647,17 @@ RPC 面据实是 6 个方法（`packages/client/src/daemon/create-daemon.ts:979-
 
 没有 `workspaces` 方法——`bin/commands/workspaces.ts` 直接读本机 ledger，不经 control client；也没有独立的 `unpair` 方法，`bin/commands/unpair.ts` 复用 `shutdown` RPC 再清理本地身份。POSIX 依赖 0700/0600；Windows 通过 `icacls` 设置 restrictive DACL，失败抛 `SecureDirHardeningError`，不会继续写入未保护的 device/control secrets。
 
-### 5.2 Claude confirm 真实路径
+### 5.2 共享审批 seam 与 Claude interrupt
 
-```mermaid
-sequenceDiagram
-  autonumber
-  participant S as SaaS / server façade
-  participant TR as TaskRunner
-  participant C as Claude CLI
-  participant MCP as byok-approval-mcp
-  participant IPC as daemon control socket
-  participant H as Human operator
+Claude 的 confirm/approval MCP 路径已删除，三家 bundled adapter 均拒绝
+confirm。`ApprovalChannel`、`needs_approval`、daemon 审批队列与 control 协议
+继续服务 custom adapter；它们不意味着 Claude 仍可交互审批。registry 保留
+approvalId 匹配、超时拒绝与 first-resolution-wins。
 
-  TR->>C: spawn with permission-prompt-tool and strict MCP config
-  C->>MCP: tool permission request over stdio MCP
-  MCP->>IPC: approvals.request taskId plus summary
-  IPC->>TR: register pending approvalId
-  TR-->>S: task.await_approval through long-poll
-  alt SaaS-side decision
-    S-->>TR: task.approve or task.reject through long-poll
-  else Local decision
-    H->>IPC: byok-agent approve or reject
-    IPC->>TR: approvals.resolve
-    TR-->>S: task.approval_resolved through long-poll
-  end
-  TR->>MCP: allow or deny
-  MCP->>C: permission result
-  C-->>TR: stream continues or terminates
-```
-
-server `approve/reject` 会先改变自己的 task record，再 best-effort 通知 daemon；`approvalId` 防止迟到 decision 误命中下一笔 pending approval。Pi/Codex 的 `resolveApproval()` 直接 throw，这个 failure 不能被 fallback 隐藏。
+Claude interrupt 通过 stream-json `control_request` 发出；transport 按
+request_id 匹配 ACK，不依赖事件消费者。成功 ACK 保留会话，1 秒内未确认则
+走既有 owned-process disposal。实际 result 仍是回合事实，TaskRunner 继续
+拥有取消后的 product terminal 权威。
 
 ## 6. Local Git checkpoint workspace
 
@@ -1046,7 +1024,7 @@ CI 验证层次：
 
 | ID | 缺口 | 架构影响 | 证据 | 当前正确表述 / 修复原则 | 优先级 | 落点 |
 | --- | --- | --- | --- | --- | --- | --- |
-| GAP-001 | `approvalInteractive=false` 硬编码 | wire capability 与 Claude confirm 实际能力不一致 | §4.4 | **已修复（S0）**：修复形状是 adapter-generated `RuntimeInfo`——`approvalInteractive` 成为 client `RuntimeCapabilities` 的 required 字段并由各 adapter 声明（Claude `true`），`create-daemon.ts` 的硬编码表删除；connection flag `interactive-approval` 仍 reserved | 已收口 | S0（已交付） |
+| GAP-001 | `approvalInteractive=false` 硬编码 | wire capability 与 Claude confirm 实际能力不一致 | §4.4 | **已修复（S0）**：修复形状是 adapter-generated `RuntimeInfo`——`approvalInteractive` 成为 client `RuntimeCapabilities` 的 required 字段并由各 adapter 声明（当前三家均 `false`），`create-daemon.ts` 的硬编码表删除；connection flag `interactive-approval` 仍 reserved | 已收口 | S0（已交付） |
 | GAP-002 | task-level steer 未按 claimed runtime gate | Claude/Codex 收到 steer 会 throw，并可能 stall cursor | §3.3 | **已修复（S0）**：修复形状是 claimed-runtime snapshot gate——claim 时把所选 runtime 的 capabilities 快照写入 task record，`steerTask()` 在构造 envelope 前按快照拒绝并抛 typed `SteerRejectedError` / `steer_unsupported_runtime`（快照缺失 fail-closed）；client 侧把 unsupported inbound steer 记为非重试性错误并 ack，cursor 不冻结 | 已收口 | S0（已交付） |
 | GAP-003 | `workspaceHint` 无消费者 | schema 与 public functionality 不一致 | §2.2 | **已决策（S0）**：维持 reserved 并已文档化（§2.2、`docs/protocol.md` §2、ADR-023）；wire 保留、禁止声称工作区选择能力，接线需另立 ADR 先定 resolver 设计 | 已收口 | S0（已交付） |
 | GAP-004 | nonce 签名无 domain separation | 同一把 device 私钥未来要签第二种消息时，缺域分隔就打开跨协议签名重用的口子 | 原证据：`auth.ts` 发裸 `randomBytes(24)`，`http.ts` 直接 `verifyEd25519Signature(pubkey, nonce, sig)`，无前缀 | **已修复（S1）**：修复形状是单一域常数 `NONCE_SIGNING_DOMAIN = 'byok-nonce-v1\n'`（`auth.ts`），server 侧只有 `verifyNonceSignature` 一个 nonce 签名检查点、前缀在函数内部施加，client `device-keys.ts` 的 `signNonce` 签同一字面量；裸签名 401，无双模、无 flag、无过渡窗口，两端同批交付 | 已收口 | S1（已交付） |

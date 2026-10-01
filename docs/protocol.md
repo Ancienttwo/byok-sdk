@@ -2060,9 +2060,9 @@ runtimes. A tool name is meaningful only in the context of a specific target
 - **claude**: Capitalized built-in names (`Read`, `Write`, `Edit`, `Bash`,
   `Glob`, `Grep`, ...) — a completely different naming convention from pi's,
   not a coincidence of casing.
-- **codex**: has no per-tool allow/deny surface at all — only the coarse
-  `sandbox_mode` dial (`read-only` / `workspace-write`). Any `allowTools`/
-  `denyTools` at all is meaningless against codex.
+- **codex**: the app-server adapter supports YOLO `auto` only. Nonempty
+  built-in `allowTools`/`denyTools` are rejected; exact task MCP `enabled_tools`
+  is a separate grant surface.
 
 A server/embedder constructing a `PermissionPolicy` must already know which
 `runtime` it's targeting before choosing tool names — `'read'` is pi's Read
@@ -2086,11 +2086,8 @@ names:
   reliably known ahead of time — see `claude/permission-mapping.ts`). pi
   resolves `denyTools` to an equivalent allowlist in-process instead, since
   pi's default active tool set is fixed and known from its installed source.
-- `network: false` is rejected by pi and claude (neither has a verified
-  network sandbox for its shell tool); `network: true` is rejected by codex
-  (empirically, the one config key that should re-enable network under
-  `workspace-write` did not restore real access on the installed build — see
-  `codex/permission-mapping.ts`).
+- `network: false` is rejected by all bundled adapters. Codex app-server
+  uses `danger-full-access`; `network: true` requires no additional restriction.
 
 None of these are bugs to "fix" post-freeze — they are the accurate, honest
 capability boundary of each real CLI as empirically found, and the
@@ -2101,24 +2098,24 @@ abilities a loud rejection instead of a silent, unenforced policy.
 
 Source of truth: each adapter's own `capabilities()` (`packages/client/src/
 adapters/*/`) plus the empirical findings in each adapter's and its sibling
-`permission-mapping.ts`'s doc comments — every row below was reproduced
-against a real installed binary, not inferred from `--help` text (which was
-actively misleading in more than one case).
+`permission-mapping.ts`'s doc comments. Capability tests establish the
+implementation contract; the OAR assessment's implementation section separates
+real binary observations from fixture proofs and still-unverified behavior.
 
 | Capability | pi | claude | codex |
 |---|---|---|---|
 | `resume` | yes | yes | yes |
-| `steer` (mid-turn injection) | **yes** — the only bundled runtime that can | no — a write mid-turn queues as a follow-up turn instead of redirecting the running one | no — no in-band channel at all; SIGINT is ignored, resume only starts a new turn after the current one ends |
-| `permissionModes` | `auto`, `readonly` | `auto`, `readonly`, `plan` | `auto`, `readonly` |
-| `confirm` mode | rejected, fail-closed (no approval gate) | rejected, fail-closed (private approval MCP path removed) | rejected, fail-closed (no wire-visible pause under any `approval_policy`; pending codex's app-server migration) |
+| `steer` (mid-turn injection) | yes | no — stdin injection is not implemented as steering | yes — app-server turn/steer; actual text consumption remains unverified |
+| `permissionModes` | `auto`, `readonly` | `auto`, `readonly`, `plan` | `auto` |
+| `confirm` mode | rejected, fail-closed (no approval gate) | rejected, fail-closed (private approval MCP path removed) | rejected, fail-closed (YOLO-only adapter) |
 | `plan` mode | rejected (no plan-only mode without a custom extension) | **supported** — see the residual below | rejected (no plan-only mode) |
 | `allowTools` | supported | supported (via the replacive `--tools`) | rejected always (no per-tool surface) |
 | `denyTools` | supported (resolved to an equivalent allowlist in-process) | supported only within `readonly`'s own allowlist-intersection; rejected fail-closed otherwise | rejected always |
-| task-scoped host MCP toolsets | no | **supported** — logical ids resolve through device-local config and run under `--strict-mcp-config` | no |
-| `network: false` | rejected, fail-closed (no sandbox) | rejected, fail-closed (no sandbox for the Bash tool) | supported (both sandbox modes this adapter ever selects default to no network) |
-| `network: true` | supported (nothing to enforce) | supported (nothing to enforce) | rejected, fail-closed (empirically doesn't restore real network access on the installed build) |
+| task-scoped host MCP toolsets | supported | supported — strict MCP config | supported — exact enabled_tools grants; ambient MCP exclusion unverified |
+| `network: false` | rejected, fail-closed (no sandbox) | rejected, fail-closed (no sandbox for the Bash tool) | rejected, fail-closed (danger-full-access) |
+| `network: true` | supported (nothing to enforce) | supported (nothing to enforce) | supported (nothing to enforce) |
 | `interactive-approval` | no (RESERVED, §5.1) | no¹ | no |
-| `usage` fields filled | none | `inputTokens`, `cachedInputTokens`, `outputTokens` | `inputTokens`, `cachedInputTokens`, `outputTokens`, `reasoningTokens` |
+| `usage` fields filled | provider cost counters plus estimated context occupancy/window | provider input/cache/output and modelUsage window | cumulative cost deltas plus last occupancy/window |
 
 **Claude `plan` mode residual (accepted for v1):** claude's `--permission-mode
 plan` never executes the requested mutating tool call against its real
@@ -2148,11 +2145,9 @@ advertise its own real support without changing the shared wire.
 adapter's own `capabilities().steer`.** `conn.hello.capabilities` (the
 connection-wide flag list — distinct from any one runtime's own
 `RuntimeInfo.capabilities.steer`, §11.4) includes `'steer'` if AT LEAST ONE
-configured adapter reports `steer: true`. Concretely, today: `true` only when
-pi is one of the daemon's configured adapters (pi: `steer: true`; claude and
-codex: `steer: false`) — a daemon running only claude and/or codex, with no
-pi adapter configured, does not advertise the connection-level `steer` flag
-at all.
+configured adapter reports `steer: true`. Today Pi and Codex report true;
+Claude reports false. A daemon configured only with Claude does not advertise
+the connection-level steer flag.
 
 **The connection-level `steer` flag is discovery-only; steer authority is
 decided per task, from the claim.** At claim time the server snapshots

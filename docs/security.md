@@ -718,15 +718,12 @@ explicitly.
   `policy.mode: 'plan'` tasks to a claude-capable device.
   `adapters/claude/events.ts` at least confirms a write outside
   `workspaceDir` is never reported back as a task artifact.
-- **Codex's sandbox mode does not survive `resume` unless re-pinned on
-  every call — mitigated, but worth naming.** A `codex exec resume`
-  empirically does NOT inherit the sandbox mode a session was originally
-  started with; left unpinned, it silently falls back to the local
-  machine's own ambient `~/.codex/config.toml` default. `codex/
-  permission-mapping.ts` re-pins `-c sandbox_mode=...` (and
-  `approval_policy=never`) on every single invocation — start and every
-  `followUp` — specifically because of this finding, not out of general
-  caution.
+- **Codex app-server runs with full filesystem and network access.**
+  The 0.159.2 adapter supports `auto` only, rejects `readonly` and
+  `network:false`, and resumes through `thread/resume` on the owned app-server
+  process. This migration removes the old sandbox-based confinement claim.
+  Exact task MCP tool grants do not establish exclusion of ambient user MCP
+  configuration; that exclusion remains unverified.
 - **Automated test coverage of the control socket's own file-mode bits is
   thinner than the tmpdir-fallback case.** `control-server.test.ts` has an
   explicit numeric-mode assertion (`0o700`) only for the tmpdir long-path
@@ -759,13 +756,11 @@ sandbox to rely on as a hard boundary:
   (`claude/permission-mapping.ts`'s central finding). The plan-mode residual
   above is the concrete, confirmed instance of this: even claude's most
   restrictive mode still writes one specific file outside the workspace.
-- **codex** is the partial exception: its `sandbox_mode` is a real
-  configuration dial with an actual behavioral default (both sandbox modes
-  this adapter ever selects default to *no network*), which is why
-  `network: false` is the one capability codex can actually *support*
-  rather than reject fail-closed. That said, this SDK has not independently
-  re-verified codex's sandbox as a filesystem-confinement guarantee beyond
-  what `docs/protocol.md` §11.2 already states.
+- **codex** uses app-server with `danger-full-access`. The adapter provides
+  no filesystem or network sandbox, and rejects `readonly`, `network:false`,
+  and nonempty built-in tool restrictions before runtime side effects.
+  Filtering its environment remains useful, but does not limit files the
+  same OS user can read.
 
 Practically: `ctx.workspaceDir` is a strong, working default — every
 adapter passes it as the task's cwd and, where the runtime supports it,
