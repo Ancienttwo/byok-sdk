@@ -389,6 +389,16 @@ function runProbeOrTurnFlow() {
     } catch {
       return;
     }
+    if (msg.type === 'control_request' && msg.request?.subtype === 'interrupt') {
+      if (process.env.FAKE_CLAUDE_CONTROL_RECEIPT) writeFileSync(process.env.FAKE_CLAUDE_CONTROL_RECEIPT, JSON.stringify(msg));
+      if (process.env.FAKE_CLAUDE_INTERRUPT_NO_ACK === '1') return;
+      send({ type:'control_response',response:{subtype:'success',request_id:msg.request_id,response:{still_queued:[]}} });
+      const result = process.env.FAKE_CLAUDE_INTERRUPT_LATE_SUCCESS === '1'
+        ? {type:'result',subtype:'success',is_error:false,session_id:reportedSessionId,usage:{},result:'late completion'}
+        : {type:'result',subtype:'error_during_execution',terminal_reason:'aborted_streaming',is_error:true,session_id:reportedSessionId,usage:{}};
+      setTimeout(()=>send(result), Number(process.env.FAKE_CLAUDE_INTERRUPT_RESULT_DELAY_MS ?? '0'));
+      return;
+    }
     if (msg.type !== 'user') return; // only real input shape this fixture accepts, per --input-format stream-json
     const text = msg.message?.content?.[0]?.text ?? '';
     void runTurn(text).catch((error) => {

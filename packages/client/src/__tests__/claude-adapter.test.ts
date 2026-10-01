@@ -28,6 +28,12 @@ async function takeEvents(session: Session, count: number): Promise<AgentEvent[]
   return results;
 }
 
+async function takeTurn(session: Session): Promise<AgentEvent[]> {
+  const events: AgentEvent[]=[];
+  for await (const event of session.events) { events.push(event); if(event.type==='turn_end')break; }
+  return events;
+}
+
 async function makeCtx(env: NodeJS.ProcessEnv = process.env): Promise<PreparedOperationResources> {
   const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-adapter-test-'));
   return { workspaceDir, policy: { mode: 'auto' }, env };
@@ -342,7 +348,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     })).resolves.toMatchObject({ kind: 'prepared' });
   });
 
-  it('FAKE_CLAUDE_HANG_AFTER_TOOL keeps the session running past the tool call; interrupt()+close() still tear it down cleanly via SIGTERM', async () => {
+  it('FAKE_CLAUDE_HANG_AFTER_TOOL keeps the session running past the tool call; interrupt ACK + close tear it down cleanly', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_HANG_AFTER_TOOL: '1' });
     const session = await startAdapter(adapter, baseTask, ctx);
@@ -356,9 +362,33 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
 
     // No turn_end ever arrives on its own — mirrors the daemon's real cancel
     // path (task-runner.ts's handleCancel), which never waits on drained
-    // events: interrupt() (SIGTERM) + close() must still resolve cleanly.
+    // events: bounded native interrupt ACK + close must still resolve cleanly.
     await expect(session.interrupt()).resolves.toBeUndefined();
     await expect(session.close()).resolves.toBeUndefined();
+  });
+
+  it('native interrupt sends a correlated control request and keeps the process alive until close', async () => {
+    let pid=0;
+    const adapter=new ClaudeAdapter({resolveBin:()=>({command:FIXTURE_PATH,source:'path'}),spawnFn:((...args:Parameters<typeof realSpawn>)=>{const child=realSpawn(...args);pid=child.pid??0;return child;}) as typeof realSpawn});
+    const ctx=await makeCtx();ctx.env={...ctx.env,FAKE_CLAUDE_HANG_AFTER_TOOL:'1'};
+    const receipt=path.join(ctx.workspaceDir,'interrupt.json');ctx.env.FAKE_CLAUDE_CONTROL_RECEIPT=receipt;
+    const session=await startAdapter(adapter,baseTask,ctx);openSessions.push(session);
+    await session.interrupt();
+    const frame=JSON.parse(await fs.readFile(receipt,'utf8'));
+    expect(frame).toMatchObject({type:'control_request',request:{subtype:'interrupt'}});expect(typeof frame.request_id).toBe('string');
+    expect(()=>process.kill(pid,0)).not.toThrow();
+    const events=await takeTurn(session);expect(events.some(e=>e.type==='error')).toBe(false);expect(events.at(-1)?.type).toBe('turn_end');
+  });
+  it('missing interrupt ACK reaches owned termination fallback within the configured deadline', async () => {
+    let pid=0;const adapter=new ClaudeAdapter({resolveBin:()=>({command:FIXTURE_PATH,source:'path'}),interruptTimeoutMs:40,spawnFn:((...args:Parameters<typeof realSpawn>)=>{const child=realSpawn(...args);pid=child.pid??0;return child;}) as typeof realSpawn});
+    const ctx=await makeCtx();ctx.env={...ctx.env,FAKE_CLAUDE_HANG_AFTER_TOOL:'1',FAKE_CLAUDE_INTERRUPT_NO_ACK:'1'};
+    const session=await startAdapter(adapter,baseTask,ctx);openSessions.push(session);
+    await session.interrupt();expect(()=>process.kill(pid,0)).toThrow();await session.close();
+  });
+  it('ACK does not synthesize terminal completion; a late real result remains a runtime fact', async () => {
+    const ctx=await makeCtx();ctx.env={...ctx.env,FAKE_CLAUDE_HANG_AFTER_TOOL:'1',FAKE_CLAUDE_INTERRUPT_LATE_SUCCESS:'1',FAKE_CLAUDE_INTERRUPT_RESULT_DELAY_MS:'40'};
+    const session=await startAdapter(fakeClaudeAdapter(),baseTask,ctx);openSessions.push(session);
+    await session.interrupt();const events=await takeTurn(session);expect(events.at(-1)?.type).toBe('turn_end');expect(events.some(e=>e.type==='error')).toBe(false);
   });
 
   it('a denied (headless auto-deny) tool call surfaces tool_result with isError:true, and the run still completes to turn_end — never a hang, never a paused needs_approval-style event', async () => {

@@ -21,6 +21,7 @@ import { wrapMcpServerWithLaunchCwd } from '../../daemon/trusted-launch-cwd';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
 import { withoutProviderCredentials } from '../provider-credential-environment';
+import { createClaudeControlChannel } from './control-channel';
 import { mapPermissionPolicyToClaudeArgs } from './permission-mapping';
 import { createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ToolUseCorrelation } from './events';
 import { ClaudeProcessClient, type SpawnFn } from './process-client';
@@ -59,6 +60,8 @@ export interface ClaudeAdapterOptions {
   resolveBin?: () => ResolvedBin;
   /** Override process spawning — tests substitute a fake spawn. */
   spawnFn?: SpawnFn;
+  /** Deadline for native interrupt ACK before owned-process termination fallback. */
+  interruptTimeoutMs?: number;
 }
 
 /**
@@ -145,7 +148,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
     environmentRequirements: { credentialNames: [] },
   });
 
-  constructor(private readonly options: ClaudeAdapterOptions = {}) {}
+  constructor(private readonly options: ClaudeAdapterOptions = {}) {
+    const timeout = options.interruptTimeoutMs ?? 1000;
+    if (!Number.isFinite(timeout) || timeout <= 0 || timeout > 2_147_483_647) throw new TypeError('invalid Claude interrupt timeout');
+  }
 
   async detect(): Promise<RuntimeDetectResult> {
     try {
@@ -361,6 +367,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       ...mapping.args,
     ];
 
+    const control = createClaudeControlChannel(this.options.interruptTimeoutMs ?? 1000);
     let client: ClaudeProcessClient;
     try {
       client = new ClaudeProcessClient({
@@ -369,6 +376,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         cwd: manifestCwd,
         env: withoutProviderCredentials(startInput.env),
         spawnFn: this.options.spawnFn,
+        control,
       });
     } catch (cause) {
       await cleanupMcpConfigDir(mcpConfigDir);
@@ -447,6 +455,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       sessionRef,
       client,
       manifestCwd,
+      control,
       mcpConfigDir,
       manifestModelId,
     );
@@ -507,6 +516,7 @@ class ClaudeSession implements Session {
     public readonly sessionRef: string,
     private readonly client: ClaudeProcessClient,
     private readonly workspaceDir: string,
+    private readonly control: ReturnType<typeof createClaudeControlChannel>,
     /** Task-scoped temp `--mcp-config` directory, if any — removed in `close()`. */
     private readonly mcpConfigDir?: string,
     private readonly modelId?: string,
@@ -639,20 +649,9 @@ class ClaudeSession implements Session {
     this.client.writeUserMessage(task.instruction);
   }
 
-  /**
-   * Real claude has no distinct "abort but stay alive" primitive the way
-   * pi's RPC mode does (`{type:'abort'}`, after which pi keeps running and
-   * stays queryable) — nothing in `claude --help` exposes one, and this
-   * task's probes found none. SIGTERM (via `ClaudeProcessClient.kill()`)
-   * is the only verified way to stop an in-flight turn, so `interrupt()`
-   * and `close()` both resolve to the same underlying action here. This is
-   * consistent with how they are actually used together: `task-runner.ts`'s
-   * `handleCancel` always calls `interrupt()` immediately followed by
-   * `close()` on the same task, never `interrupt()` alone expecting the
-   * session to remain usable afterward.
-   */
+  /** Native interrupt ACK is bounded; TaskRunner still closes after cancellation acknowledgment. */
   async interrupt(): Promise<void> {
-    this.client.kill();
+    if (!await this.control.interrupt()) { this.client.kill(); await this.client.dispose(); }
   }
 
   async close(): Promise<void> {

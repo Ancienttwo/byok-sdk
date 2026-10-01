@@ -372,7 +372,9 @@ function mapResult(msg: ClaudeStreamMessage): MapClaudeMessageResult {
   // too, which would have reported task.complete for a turn that never
   // actually said it succeeded. `result` is the wire's own terminal signal
   // (see this function's own doc comment above) — never inferred.
-  if (msg.is_error === false) {
+  const aborted = msg.is_error === true && msg.subtype === 'error_during_execution' && msg.terminal_reason === 'aborted_streaming';
+  // This is a runtime turn boundary, not a product success decision; TaskRunner retains cancellation authority.
+  if (msg.is_error === false || aborted) {
     const events: AgentEvent[] = usageEvent ? [usageEvent, { type: 'turn_end' }] : [{ type: 'turn_end' }];
     return { events };
   }

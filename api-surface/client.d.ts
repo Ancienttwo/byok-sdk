@@ -7,6 +7,8 @@ export interface ClaudeAdapterOptions {
     resolveBin?: () => ResolvedBin;
     /** Override process spawning — tests substitute a fake spawn. */
     spawnFn?: SpawnFn;
+    /** Deadline for native interrupt ACK before owned-process termination fallback. */
+    interruptTimeoutMs?: number;
 }
 /**
  * Claude Code runtime adapter (`claude -p --input-format stream-json
@@ -207,6 +209,12 @@ export interface ClaudeProcessClientOptions {
     cwd: string;
     env: NodeJS.ProcessEnv;
     spawnFn?: SpawnFn;
+    /** Internal control-plane binding; control frames never enter the user/result event queue. */
+    control?: {
+        bind(write: (frame: Record<string, unknown>) => Promise<void>): void;
+        receive(message: ClaudeStreamMessage): void;
+        closed(): void;
+    };
     /**
      * DI seam scoped to ADOPTION only (`../process-tree.ts`'s
      * `adoptOwnedProcessTree`), so the win32 job-object branch is exercisable
