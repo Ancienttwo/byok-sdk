@@ -34,8 +34,8 @@ CodeGraphproof and typedAcceptanceReceipt are not completed; formalship readines
 > **Reviewed Subject SHA256**: sha256:756c2314a254be9232b768cb9b0d106078313e595cf94831d03d8b53e40ee9eb
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: 708ed45b275d7d0cceeb6b61eb392c7d7b4efed9
-> **Verification Evidence SHA256**: sha256:a925a058700b347847f3fb520981eed16a1d45e56401636e58980564aabc520e
-> **Issued At**: 2026-10-01T06:53:47.593Z
+> **Verification Evidence SHA256**: sha256:62a2437da816c0d722660711b09ef0d633afaa8c49c61e64da3cf307fc565f10
+> **Issued At**: 2026-10-01T07:00:11.928Z
 
 - Summary: Independent Codex review PASS for normalized final subject sha256:756c2314a254be9232b768cb9b0d106078313e595cf94831d03d8b53e40ee9eb against origin/main/708ed45b275d7d0cceeb6b61eb392c7d7b4efed9. The Pi 0.99.2 plus FFF production tree is byte-equal to the immutable tested baseline except five approved closeout artifacts. Eight immutable executions and four current source/workflow/diff/architecture deltas pass. Runtime-readback oracle is satisfied by clean installed release-pack execution vx-f5c60a1bbc0f47ed9087, which validated the Node 22 FFF native smoke and unchanged official Pi closure.
 - Findings: none
