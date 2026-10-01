@@ -204,6 +204,10 @@ OAR 自己的评审与我方静态阅读都指出这些弱点，port 时不要�
    - 权限准入 (a)；Codex `auto` 旧任务的迁移策略与 Claude `confirm`（ADR-015）是否保留，未明确。
    - Codex 商用授权（官方 app-server authentication 声明）适用性：仍需 owner 按实际 auth mode 核对。
 
+8. **Codex 授权判断**（owner，2026-10-01）：用户用官方 harness 执行自己的任务，BYOK 不做 redirect，不存在授权问题。按 owner 判断记录，没有独立的法务或官方书面确认；「发布前核对」第一条据此降为已由 owner 判断。
+9. **没有正式用户，迁移可以干净删除**（owner，2026-10-01）：不做 Codex `auto` 旧任务迁移，`readonly` 与 `network:false` 直接从 Codex 能力里删除，旧 `exec` 解析路径随迁移删除，CHANGELOG 只记 breaking。
+10. **进程环境：保留 allowlist（Claude 推荐，待 owner 确认）。** 理由：YOLO 下 tool 输出会回传 provider，完整继承会把 daemon 部署用的秘密暴露给模型；无 sandbox 时过滤是仅剩的一层；原生登录由现有基线（`HOME`、`USER`、`XDG_*`）覆盖（代码注释所述，未实跑验证）；`BYOK_*` 与 loader injection 的硬 deny 与 YOLO 无关。fork 要改 `app-server-client.ts:71`，过滤后的 env 原样传给子进程。Claude 的 `confirm`（ADR-015）建议一并删除，待 owner 确认。
+
 下一步候选：Pi `get_session_stats` 切片并入 `plans/plan-20261001-0132-context-usage-gap.md`；Pi closure/manifest 升 0.99.2。
 
 ## 归档状态（2026-10-01）

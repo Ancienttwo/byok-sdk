@@ -9,7 +9,7 @@
 - X 直接读取返回 403；通过 [FxTwitter 的该帖 JSON](https://api.fxtwitter.com/status/2092963119337476137) 读取 article 的 title、content blocks、链接与发布时间。它是第三方转发入口，不等于直接从 X 验证；二级转载只用于定位，不作为技术裁定依据。
 - [npm 发布快照](./evidence/2026-09-30-chasen-pi-packages/npm-inventory.json)：全部 10 包的 exact version、发布时间、repository、license、dependencies、peerDependencies、tarball URL、integrity、SHA-256；重新下载并验证全部 tarball 的 SHA-512 integrity。
 - [发布源码定位](./evidence/2026-09-30-chasen-pi-packages/source-locations.md)。深入读取 README、manifest、extension entry 和对应调用路径；源码解包到 `/tmp/byok-chasen-packages`，未执行第三方安装脚本或 extension。
-- 以下评估针对本次查到的发布版本，不冒充作者写作当天版本。npm `latest` 与宽泛 peer range 不是对本地 Pi 0.87.1 的兼容性证明；近期发版也不代表维护质量或安全审计。
+- 以下评估针对本次查到的发布版本，不冒充作者写作当天版本。npm `latest` 与宽泛 peer range 不是对本地 Pi 的兼容性证明（调研时 pin 为 0.87.1；2026-10-01 复核，工作区已改为 `@earendil-works/pi-coding-agent` 0.99.2，见 `packages/client/package.json:86`）；近期发版也不代表维护质量或安全审计。
 
 ## 2. 文章整理：可借鉴的是控制纪律
 
@@ -35,7 +35,7 @@
 | Host-owned context | `docs/researches/runtime-input-preparation-contract.md`、`2026-09-28-prepared-agent-memory-contract.md` | Host 组装 context，设备负责 capability 准入；不能在计量后再次隐式发现/展开 skill |
 | Cloud / protocol / keys | 各自独立 authority，见 `docs/architecture/sdk-architecture.md` | UI 插件不应因此扩入 cloud、wire 或 provider-secret plane |
 
-**核实的重要差异：** 本地 client 是 `0.24.0-rc.1`，official Pi pin 为 **0.87.1**；`pi-subagents@0.60.0` 是 dev-only upstream oracle，实际 shipped factory 指向 vendor，不能读 manifest 后误判为未集成。`pi-web-access@0.24.1` 是已有运行时依赖。本地没有 `.codegraph/`，所以本次按源码调用路径定位。
+**核实的重要差异：** 本地 client 是 `0.24.0-rc.1`，official Pi pin 为 **0.87.1**（2026-10-01 复核：工作区迁移到 Pi **0.99.2**，本文其余 0.87.1 的兼容性表述按调研当日理解）；`pi-subagents@0.60.0` 是 dev-only upstream oracle，实际 shipped factory 指向 vendor，不能读 manifest 后误判为未集成。`pi-web-access@0.24.1` 是已有运行时依赖。本地没有 `.codegraph/`，所以本次按源码调用路径定位。
 
 ## 4. P2：一条具体路径说明为什么不能批量安装
 
@@ -68,6 +68,8 @@
 
 ### 6.1 pi-subagents：维护已有边界，不重复建设
 
+版本号说明：`pi-subagents` 是独立扩展，版本线与 Pi 本体（0.87.x / 0.99.x）无关。本地 vendor 为 0.60.0；本文调研时上游为 0.73.1，2026-10-01 复核 npm latest 为 0.74.0。是否兼容 Pi 0.99.2 需看 `source-manifest.json` 的 peer anchors，本文未验证。
+
 当前上游 entry 为 `index.js`，提供 foreground child sessions、background runners、workflow orchestration、artifacts 和 fleet。0.73.1 README 描述 lazy `subagents_enable`，新 session 初始不暴露完整 schema，授权 delegation 后再启用。它的文档还提供 per-run fanout 限制，说明“并行 agent”不仅是 Promise.all，而是进程/Session/预算和产物协议。
 
 BYOK 的 `pi-extension-factories.js:4` 静态导入 `vendor/pi-subagents/0.60.0/index.ts`，`pi-rpc-host.ts:159` 同时注入 policy extension。vendor 的 `PROVENANCE.md` 和 source manifest 记录上游来源、SDK delta、sealed backend 的 refusal；部分早期 provenance 叙述具有历史性，递归现状必须以 `custody-five-edge-dispatch.test.ts`、runner/print entry 与当前实现判断，不能照抄旧注释当现状。
@@ -79,6 +81,8 @@ BYOK 的 `pi-extension-factories.js:4` 静态导入 `vendor/pi-subagents/0.60.0/
 `src/extensions/progressive-skills.ts` 在 `resources_discover` 从 git parent 一直向根目录发现 `.agents/skills`，以 first-wins 处理冲突；`inline-skill-invocation.ts` 在 `input` 读取 Skill 文件并 transform prompt；visibility/toggle 扩展在 `before_agent_start` 改 system prompt。全局与可信 project settings 共同决定隐藏与 slot，package-bundled skills 不受隐藏规则影响。因此“hide skill”是 advertisement 控制，不是 capability 禁用或权限撤销。
 
 还有实际附带行为：`extensions/index.ts` 调用 `reportInstallTelemetry`；`src/install-telemetry.ts:61–98` 在非 CI/offline 且未显式禁用时向 `mocito.dev/api/report-install` 报 package/version 与 runtime/platform User-Agent，并写 agent-dir 状态。不能在 SDK 中悄然继承它。
+
+2026-10-01 对 0.4.0 tarball 的源码复核：遥测可由 CI 环境变量、`PI_OFFLINE`、`PI_TELEMETRY` 或 settings 的 `enableInstallTelemetry: false` 关闭，默认开启且失败静默；`progressive-skills.ts` 只从 git 根的**父目录**向上补扫 `.agents/skills`；`inline-skill-invocation.ts` 在 `input` 事件按 `pi.getCommands()` 的路径读文件并展开，没有 hash 或来源校验；`config.ts` 读写全局与 `<cwd>/.pi/settings.json`。结论不变。
 
 建议只参考其显式 selection UX：Host 在 preparation **之前**解析唯一 skill ID、读入受控来源、形成 deterministic context；如需本机 skill resolver，另裁信任目录、hash、同名冲突、symlink 和 bounded bytes。不能先 counted 再从父目录装入指令；也不建议为普通 SDK task 继承 `~/.pi` 配置。
 
@@ -171,3 +175,9 @@ pi-goal、pi-btw 不宜成为核心依赖；确有产品需求时，分别转为
 **下一刀**
 
 建议切 `context usage 只读观测差距核对`。理由是当前候选中它不需要增加模型调用、修改上下文或新增执行权威，而静态分析已证明上游估值不能直接充当 SDK 精确计量。入口是 `packages/client/src/adapters/pi/events.ts`、`packages/client/src/adapters/pi/prepared-session.ts` 与宿主现有 usage 展示；范围仅核对现有公开字段是否足够，并输出一份 provider-reported / estimated / unknown 的映射。字段足够就交由 Host 消费，不改 SDK；不足才提出一个最小观测增量，因此这一刀有明确停止条件。
+
+## 9. 补充：context-mode（2026-10-01，非文章清单）
+
+[context-mode](https://www.npmjs.com/package/context-mode) 1.0.169，Elastic-2.0，同时是 MCP 插件和 Pi package（`pi.extensions` → `build/adapters/pi/extension.js`）。依赖含 `better-sqlite3`（native）、`@modelcontextprotocol/sdk`、`zod@3`。通过 `tool_call`、`tool_result`、`session_start`、`session_before_compact` hook 沙箱化 tool 输出并强制路由，用 FTS5 索引 session 事件。
+
+**Verdict：reject 直接集成；reference「tool 输出截断/摘要」思路。** 依据：license 非 MIT，vendor 分发需法务确认；native 依赖与 sealed host、跨平台分发冲突；hook 改写 tool 路由与注入 prompt 会破坏 counted 输入和 charge-once/custody 边界。SDK host 设置 `noExtensions: true`，`pi-extension-factories.js` 为静态导出、无运行时 resolver，用户 `pi install` 的扩展不会被加载。本节只做了 npm 元数据与网页检索，未读其源码；「98% 节省」是厂商自述，未验证。

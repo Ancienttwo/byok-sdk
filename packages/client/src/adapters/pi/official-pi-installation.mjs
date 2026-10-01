@@ -60,7 +60,7 @@ export function verifyOfficialPiPackage(root, name) {
 
 /** Verify every resolved sibling instance, including npm shrinkwrap's nested copies. */
 export function verifyOfficialPiClosure(from) {
-  const queue = ['@earendil-works/pi-coding-agent', '@earendil-works/pi-ai', '@earendil-works/pi-agent-core'].map(name => ({ name, root: locateOfficialPiPackage(name, from) }));
+  const queue = ['@earendil-works/pi-coding-agent', '@earendil-works/pi-ai', '@earendil-works/pi-agent-core', '@earendil-works/pi-durable', '@earendil-works/chord'].map(name => ({ name, root: locateOfficialPiPackage(name, from) }));
   const roots = new Map();
   while (queue.length) {
     const { name, root } = queue.shift();

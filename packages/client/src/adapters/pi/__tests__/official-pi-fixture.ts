@@ -1,5 +1,5 @@
 /**
- * Shared fixture for the official Pi 0.99.1 conformance suite.
+ * Shared fixture for the official Pi 1.0.0 conformance suite.
  *
  * Public entrypoints only: the `@earendil-works/pi-coding-agent` root, the
  * `@earendil-works/pi-ai` root and the public `./api/*` export of pi-ai. Every
