@@ -185,6 +185,7 @@ describe('Codex persistent app-server adapter', () => {
         cachedInputTokens: 20,
         outputTokens: 10,
         reasoningTokens: 2,
+        contextTokens: 110, contextWindow: 10000, contextSource: 'provider',
       },
       { type: 'turn_end' },
     ]);

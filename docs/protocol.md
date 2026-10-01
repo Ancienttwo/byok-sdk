@@ -2545,3 +2545,22 @@ Pending has no disposition; unknown identity returns no message. Invalid stored
 identity/receipt fails closed. Sender body/hash/byte claims remain untrusted;
 only the Host acceptance transaction authors transcript content. In particular,
 consumer-unavailable held can be observed before the Host ever sees a body.
+
+### Runtime context observation
+
+`usage` may include `contextTokens` (nonnegative integer), `contextWindow`
+(positive integer), and `contextSource` (`provider` or `estimate`). Unknown
+values are absent; an observed zero occupancy is valid. These context fields
+are independent of the provider cost counters. Context-only events carry a
+source and no cost counters; they neither count as provider calls nor affect
+prepared admission or `usage_unavailable`. Unreadable provider-call events
+retain the existing fail-closed behavior.
+
+Codex reports `tokenUsage.last.totalTokens` against `modelContextWindow`;
+its cumulative `total` remains the provider cost authority. Claude reports
+`result.modelUsage`'s window using the init model identity. Official Pi 0.99.2
+reports `get_session_stats.contextUsage` as an estimate before task settlement;
+null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
+configuration is the context window authority even if runtime stats differ.
+Historical v1 envelopes remain readable and unchanged; older consumers ignore
+these optional fields.

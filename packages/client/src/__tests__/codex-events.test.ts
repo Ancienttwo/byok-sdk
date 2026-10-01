@@ -149,7 +149,7 @@ describe('required Codex native projection', () => {
     s.projection.consume(other, row, (e) => first.push(e));
     expect(first).toHaveLength(4);
   });
-  it('usage precedes turn_end and forwards only the existing reported counters', () => {
+  it('usage separates last context occupancy from cumulative provider cost', () => {
     const s = setup();
     s.feed('turn/started', { turn: { id: 't' } });
     s.feed('thread/tokenUsage/updated', {
@@ -178,9 +178,23 @@ describe('required Codex native projection', () => {
         cachedInputTokens: 0,
         outputTokens: 2,
         reasoningTokens: 1,
+        contextTokens: 12, contextWindow: 1000, contextSource: 'provider',
       },
       { type: 'turn_end' },
     ]);
+  });
+  it('context is last-observed; missing window and null occupancy never reuse prior values', () => {
+    const s = setup();
+    s.feed('turn/started', { turn: { id: 'one' } });
+    s.feed('thread/tokenUsage/updated', { tokenUsage: { last: { totalTokens: 55 }, modelContextWindow: 1000 } });
+    s.feed('thread/tokenUsage/updated', { tokenUsage: { last: { totalTokens: 0 } } });
+    s.feed('turn/completed', { turn: { status: 'completed' } });
+    expect(s.output).toEqual([{ type: 'usage', contextTokens: 0, contextSource: 'provider' }, { type: 'turn_end' }]);
+    s.feed('turn/started', { turn: { id: 'two' } });
+    s.feed('thread/tokenUsage/updated', { tokenUsage: { last: { totalTokens: null }, modelContextWindow: 2000 } });
+    s.feed('thread/tokenUsage/updated', { tokenUsage: { last: { totalTokens: null } } });
+    s.feed('turn/completed', { turn: { status: 'completed' } });
+    expect(s.output.slice(2)).toEqual([{ type: 'usage', contextSource: 'provider' }, { type: 'turn_end' }]);
   });
   it('accounts for every model call in a turn and resets the boundary for the next turn', () => {
     const s = setup();

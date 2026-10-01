@@ -951,10 +951,10 @@ implied by this source change.
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. The SDK pins the official unmodified
-`@earendil-works/pi-coding-agent@0.99.1` plus chord, pi-agent-core, pi-ai,
-pi-codemode, pi-mcp, pi-telemetry and pi-tui to exactly 0.99.1 (upstream commit
-`d86654abb8862e201933517d6f1fce9f88dd117f`, closureDigest
-`4a6a72a3dfb82a18dbab345dc527645d9764f14ae5b7bc89e92808a2329bd449`). Fork aliases and dual runtimes are
+`@earendil-works/pi-coding-agent@0.99.2` plus chord, pi-agent-core, pi-ai,
+pi-codemode, pi-mcp, pi-telemetry and pi-tui to exactly 0.99.2 (upstream commit
+`005af57d88ee23b33778f343a9595b32e67ff788`, closureDigest
+`8d614f74c775cab980f72bfce88de75583ad43e69d870df0134f3dbd7b622124`). Fork aliases and dual runtimes are
 retired. `resolvePiRuntimeIdentity()` reads the static dependency projection;
 resolved name/version mismatch fails closed. There is no implicit global Pi fallback.
 Only public Pi APIs are used; private imports, patches, copied provider serializers
@@ -2368,7 +2368,7 @@ Prepared child environment is rebuilt through an explicit EnvironmentBuilder all
 
 A1'' compile uses only a placeholder key and injected capture-and-throw fetch against the actual baseUrl. The official OpenAI client reads exactly OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET, OPENAI_LOG and OPENAI_CUSTOM_HEADERS. The approved purity contract is D independence plus this exact read set, not zero reads; an upgrade changing the set requires a fresh ruling. Poisoning these variables must leave D unchanged. OPENAI_LOG may cause a local request log during compile: the device owner deliberately enabled this debug setting; the accepted side effect remains local, does not change D and is not sent externally. No global env or transport monkey-patch is permitted.
 
-Client direct Pi dependencies are exactly coding-agent, pi-ai and pi-agent-core at 0.99.1 and retain the existing direct-dependency purity guard. chord, pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their measured JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
+Client direct Pi dependencies are exactly coding-agent, pi-ai and pi-agent-core at 0.99.2 and retain the existing direct-dependency purity guard. chord, pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their measured JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
 
 Exactness has three independent checks: bun.lock exact versions and sha512 integrity under frozen install; runtime verification of all eight official package instances' manifests and file inventories against tarball/provenance evidence; release-pack and registry-readback isolated-install convergence. Encapsulated runtime records bind the measured artifact and approved closure provenance without looking up external packages. Renamed provenance fields are packageName, packageVersion, tarballIntegrity, upstreamCommit, provenanceDigest, closureDigest and compilerVersion; upstreamBase/forkBuild are retired, not filled with dummy values. The official tarball signatures and provenance are collected reproducibly by `scripts/release/collect-official-pi-closure.mjs`.
 
@@ -2393,3 +2393,22 @@ new capability and ruling. No dual token/read, replay of old work, or automatic
 conversion of frozen audit records is supplied. Subsequent-request byte/header
 refusals (including prepared_context_drift) reach the daemon as typed task.fail;
 tool continuations retain the existing post-response overflow risk boundary.
+
+### Runtime context observation
+
+`usage` may include `contextTokens` (nonnegative integer), `contextWindow`
+(positive integer), and `contextSource` (`provider` or `estimate`). Unknown
+values are absent; an observed zero occupancy is valid. These context fields
+are independent of the provider cost counters. Context-only events carry a
+source and no cost counters; they neither count as provider calls nor affect
+prepared admission or `usage_unavailable`. Unreadable provider-call events
+retain the existing fail-closed behavior.
+
+Codex reports `tokenUsage.last.totalTokens` against `modelContextWindow`;
+its cumulative `total` remains the provider cost authority. Claude reports
+`result.modelUsage`'s window using the init model identity. Official Pi 0.99.2
+reports `get_session_stats.contextUsage` as an estimate before task settlement;
+null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
+configuration is the context window authority even if runtime stats differ.
+Historical v1 envelopes remain readable and unchanged; older consumers ignore
+these optional fields.

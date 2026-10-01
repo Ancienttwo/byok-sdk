@@ -123,7 +123,7 @@ describe('Claude context window reserved for S4', () => {
     ])
       expect(parseClaudeContextWindow(value)).toBeNull();
   });
-  it('does not add contextWindow to the existing usage wire', () => {
+  it('adds the authorized provider context window without changing cost counters', () => {
     const mapped = mapClaudeMessageToAgentEvents(
       {
         type: 'result',
@@ -136,7 +136,7 @@ describe('Claude context window reserved for S4', () => {
       { workspaceDir: '/workspace' },
     );
     expect(mapped.events).toEqual([
-      { type: 'usage', inputTokens: 10, outputTokens: 2 },
+      { type: 'usage', inputTokens: 10, outputTokens: 2, contextWindow: 1000000, contextSource: 'provider' },
       { type: 'turn_end' },
     ]);
   });

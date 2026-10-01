@@ -14,7 +14,7 @@ interface StreamState {
   readonly seen: Map<number, readonly AgentEvent[]>;
   readonly active: Map<string, { tool: string; toolCallId: string }>;
   readonly delivered: Set<string>;
-  lastUsage?: AgentEvent;
+  lastUsage?: Extract<AgentEvent, { type: 'usage' }>;
   activeTurnId?: string;
   baseline: Record<string, unknown> | null;
   zeroBaseline: boolean;
@@ -125,15 +125,28 @@ export class CodexProjection {
     if (method === 'thread/tokenUsage/updated') {
       // total is thread-cumulative; a boundary delta includes every model call in this turn.
       // Fresh threads have a known zero baseline; resume needs an observed baseline, never a fabricated zero.
-      const usage = record(record(params.tokenUsage)?.total);
-      if (!usage) return [];
+      const tokenUsage = record(params.tokenUsage);
+      const contextTokens = record(tokenUsage?.last)?.totalTokens;
+      const contextWindow = tokenUsage?.modelContextWindow;
+      const context: Extract<AgentEvent, { type: 'usage' }> = { type: 'usage' };
+      if (typeof contextTokens === 'number' && Number.isSafeInteger(contextTokens) && contextTokens >= 0) context.contextTokens = contextTokens;
+      if (typeof contextWindow === 'number' && Number.isSafeInteger(contextWindow) && contextWindow > 0) context.contextWindow = contextWindow;
+      if (context.contextTokens !== undefined || context.contextWindow !== undefined || state.lastUsage?.contextSource !== undefined) context.contextSource = 'provider';
+      const usage = record(tokenUsage?.total);
+      if (!usage) {
+        if (state.activeTurnId !== undefined && context.contextSource !== undefined) {
+          const { contextTokens: _tokens, contextWindow: _window, contextSource: _source, ...cost } = state.lastUsage ?? { type: 'usage' as const };
+          state.lastUsage = { ...cost, ...context };
+        }
+        return [];
+      }
       state.latestTotals = usage;
       if (state.activeTurnId === undefined) {
         state.baseline = usage;
         state.zeroBaseline = false;
         return [];
       }
-      const out: Extract<AgentEvent, { type: 'usage' }> = { type: 'usage' };
+      const out: Extract<AgentEvent, { type: 'usage' }> = { ...context };
       for (const [native, key] of [
         ['inputTokens', 'inputTokens'],
         ['cachedInputTokens', 'cachedInputTokens'],
@@ -153,8 +166,7 @@ export class CodexProjection {
         )
           out[key] = value - prior;
       }
-      if (Object.keys(out).length === 1) return [];
-      state.lastUsage = out;
+      if (Object.keys(out).length > 1) state.lastUsage = out;
       return []; // the consumer stops at turn_end, so flush the latest usage immediately before it.
     }
     if (method === 'error') {

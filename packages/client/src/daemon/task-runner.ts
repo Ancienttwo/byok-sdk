@@ -339,6 +339,12 @@ function observePreparedCall(
   observation: PreparedExecutionObservation,
   event: Extract<AgentEvent, { type: 'usage' }>,
 ): string | undefined {
+  // Context-only observations are telemetry, not an unreadable provider call.
+  // A bare usage event still represents an unreadable call and fails closed.
+  if (event.contextSource !== undefined &&
+      event.inputTokens === undefined && event.cachedInputTokens === undefined &&
+      event.outputTokens === undefined && event.reasoningTokens === undefined &&
+      event.totalTokens === undefined) return undefined;
   observation.calls += 1;
   const prompt = event.inputTokens;
   if (prompt === undefined || !Number.isSafeInteger(prompt) || prompt <= 0 || prompt > TERMINAL_INFERENCE_USAGE_MAX_TOKENS) {
@@ -3764,7 +3770,12 @@ export class TaskRunner {
           // Codex/Claude adapters emit their runtime terminal observation
           // before turn_end/error; a custom adapter that emits several keeps
           // only the latest actual observation rather than inventing a sum.
-          active.lastUsage = event;
+          // Keep terminal provider cost observation when a separate context snapshot arrives.
+          if (event.contextSource === undefined || event.inputTokens !== undefined ||
+              event.cachedInputTokens !== undefined || event.outputTokens !== undefined ||
+              event.reasoningTokens !== undefined || event.totalTokens !== undefined) {
+            active.lastUsage = event;
+          }
           if (active.prepared !== undefined) {
             const verdict = observePreparedCall(active.prepared, event);
             if (verdict !== undefined) {

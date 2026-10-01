@@ -526,6 +526,7 @@ class ClaudeSession implements Session {
     const client = this.client;
     const correlation = this.correlation;
     const workspaceDir = this.workspaceDir;
+    const control = this.control;
     return {
       [Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
         const inner = client.events[Symbol.asyncIterator]();
@@ -599,6 +600,15 @@ class ClaudeSession implements Session {
               if (value.type === 'result') turnSettled = true;
 
               const mapped = mapClaudeMessageToAgentEvents(value, correlation, { workspaceDir });
+              if (value.type === 'result' && control.contextWindow !== null) {
+                const usage = mapped.events.find(event => event.type === 'usage');
+                if (usage?.type === 'usage') {
+                  usage.contextWindow = control.contextWindow;
+                  usage.contextSource = 'provider';
+                } else {
+                  mapped.events.unshift({ type: 'usage', contextWindow: control.contextWindow, contextSource: 'provider' });
+                }
+              }
               terminalFailure = mapped.terminalFailure ?? terminalFailure;
               if (mapped.unmappedLabel) {
                 client.recordUnmappedFrame(mapped.unmappedLabel);
