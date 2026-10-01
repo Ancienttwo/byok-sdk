@@ -101,9 +101,9 @@
       "sourceDigest": "sha256:86be45aa663af721726fde2fae68d1acd8d6ff5020385cfebf3a23e44585f911",
       "outputDigest": "sha256:ca6c81d7fd07d171ce9fb5cda21ba1f3a405bca298f48cfe12d6ddf1ffc8f05b",
       "verifiedAgainst": {
-        "branch": "codex/clarification-design",
-        "commit": "402a5f5a126fac108216c76e8dc37784ebad2ea1",
-        "committedAt": "2026-09-30T22:53:26+08:00"
+        "branch": "codex/pi-fff-local-search",
+        "commit": "217bf0c8ded0409647dda3603052caf6f82fa0d8",
+        "committedAt": "2026-10-01T14:44:40+08:00"
       }
     },
     {

@@ -53,7 +53,7 @@ Not applicable: feature integration, not a bugfix claim.
 ## Change Assessment
 
 ```json
-{"protocol":1,"oracles":[{"id":"immutable-0992-repository-and-install-tests","kind":"deterministic_test","paths":["*"]},{"id":"closeout-equivalence-and-architecture-proof","kind":"deterministic_test","paths":["*"]}]}
+{"protocol":1,"oracles":[{"id":"immutable-0992-repository-and-install-tests","kind":"deterministic_test","paths":["*"]},{"id":"closeout-equivalence-and-architecture-proof","kind":"deterministic_test","paths":["*"]},{"id":"immutable-0992-clean-npm-native-and-official-closure","kind":"runtime_readback","paths":["*"]}]}
 ```
 
 ## Acceptance Policy
