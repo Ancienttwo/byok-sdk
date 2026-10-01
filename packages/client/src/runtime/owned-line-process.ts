@@ -31,6 +31,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     let adopted = false;
     let exitCode: number | null = null;
     let failure: Error | undefined;
+    let stderrTail = Buffer.alloc(0);
     let disposal: Promise<void> | undefined;
     let resolveClosed!: () => void;
     const closeReceipt = new Promise<void>(resolve => { resolveClosed = resolve; });
@@ -46,7 +47,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
 
     const cleanup = (): Promise<void> => {
       if (disposal === undefined) {
-        disposal = disposeOwnedProcessTree({ child, waitClosed: () => closeReceipt, isClosed: () => closed, label: 'codex app-server' });
+        disposal = disposeOwnedProcessTree({ child, waitClosed: () => closeReceipt, isClosed: () => closed, label: 'codex app-server' }).catch(error => { disposal = undefined; throw error; });
       }
       return disposal;
     };
@@ -94,7 +95,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
       }
     });
     // Drain stderr without retaining unbounded output or inheriting daemon stdio.
-    child.stderr.resume();
+    child.stderr.on('data', (chunk: Buffer) => { stderrTail = Buffer.concat([stderrTail,chunk]).subarray(-64*1024); });
     child.stdin.on('error', fail);
     child.stdout.on('error', fail);
     child.stderr.on('error', fail);
@@ -121,7 +122,8 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
       });
     });
     return {
-      spawned, exited, kill,
+      spawned, exited, kill, dispose: cleanup,
+      exitError: () => failure ?? new Error(`app-server exited (code=${exitCode})${stderrTail.length ? `; stderr: ${stderrTail.toString('utf8').trim()}` : ''}`),
       write(text: string) {
         if (!adopted || closed || failure !== undefined) throw failure ?? new Error('owned line process is not writable');
         child.stdin.write(text);

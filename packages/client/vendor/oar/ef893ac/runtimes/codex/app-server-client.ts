@@ -7,6 +7,7 @@ export interface LineProcess {
   onExit(handler: (code: number | null) => void): void;
   write(text: string): void;
   kill(): void;
+  exitError?(): Error; // BYOK change: bounded transport diagnostic, never used as a semantic classifier.
 }
 export type SpawnLineProcess = (
   command: string,
@@ -176,17 +177,21 @@ export function startAppServerClient(
       const error = asRecord(message.error);
       if (error !== null) {
         const failure = new Error(typeof error.message === "string" ? error.message : "app-server error");
-        waiter?.settled({ kind: "error", error: failure });
+        // BYOK change: Required settlement failure must reject the promise even after removal from pending.
+        try { waiter?.settled({ kind: "error", error: failure }); }
+        catch (error) { waiter?.reject(error instanceof Error ? error : new Error(String(error))); throw error; }
         waiter?.reject(failure);
       } else {
         const result = asRecord(message.result) ?? {};
-        waiter?.settled({ kind: "result", result });
+        // BYOK change: A throwing required consumer cannot strand an already dequeued waiter.
+        try { waiter?.settled({ kind: "result", result }); }
+        catch (error) { waiter?.reject(error instanceof Error ? error : new Error(String(error))); throw error; }
         waiter?.resolve(result);
       }
     }
   });
   child.onExit(() => {
-    fail(new Error("app-server exited"), false); // BYOK change: release timers, waiters and held frames on exit.
+    fail(child.exitError?.() ?? new Error("app-server exited"), false); // BYOK change: release timers, waiters and held frames on exit.
   });
 
   return {
@@ -213,8 +218,10 @@ export function startAppServerClient(
         waiter.timer = setTimeout(() => {
           if (!pending.delete(id)) return;
           const error = new RpcTimeoutError(method, timeoutMs);
+          // BYOK change: Reject required-consumer failure without an uncaught timer exception.
           try { settled({ kind: "error", error }); }
-          finally { reject(error); }
+          catch (consumerError) { reject(consumerError instanceof Error ? consumerError : new Error(String(consumerError))); return; }
+          reject(error);
         }, timeoutMs);
         pending.set(id, waiter);
         // BYOK change: A failed write must not leak a pending entry or timer.

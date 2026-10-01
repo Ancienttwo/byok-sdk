@@ -42,15 +42,10 @@ export async function rpcControl(
   if (refused !== null) {
     return { request, response: kernel.respond(request.id, refused) };
   }
-  // BYOK change: Preserve deferred settlement using the SDK's ES2022 library contract.
-  let resolve!: (response: ResponseRecord) => void;
-  const promise = new Promise<ResponseRecord>((complete) => { resolve = complete; });
-  let recorded = false;
+  // BYOK change: The client promise already owns waiting; record failure propagates without a stranded second promise.
+  let response: ResponseRecord | undefined;
   const record = (decided: ResponseBody): void => {
-    if (!recorded) {
-      recorded = true;
-      resolve(kernel.respond(request.id, decided));
-    }
+    if (response === undefined) response = kernel.respond(request.id, decided);
   };
   // BYOK change: Timeout is always a rejected control response, independent of runtime error mapping.
   const onError = (error: unknown): ResponseBody => error instanceof RpcTimeoutError
@@ -63,7 +58,8 @@ export async function rpcControl(
   } catch (error) {
     record(onError(error));
   }
-  return { request, response: await promise };
+  if (response === undefined) throw new Error("app-server control settled without a response record"); // BYOK change
+  return { request, response };
 }
 
 /**

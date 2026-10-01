@@ -53,8 +53,8 @@
       "path": "runtimes/codex/app-server-client.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/app-server-client.ts",
       "upstreamSha256": "60058b3e0069d6c8797f133709a52e1a102eb46b1c5b3a0d4ea99f8e4a3c457e",
-      "vendoredSha256": "d2fa0295a9630458e97b4dec6c79e7b3d671d635f850cd3eff01c47056ba7771",
-      "delta": "Inject caller-owned line-process spawn; pass explicit env unchanged; preserve server ids and support replies; default/per-request timeouts; bounded held and pending state with fatal overflow; release timers on settlement, failed write, exit and kill."
+      "vendoredSha256": "5b27b16ffff8d7c71876768e76a7ca2a80d02ed0e37643713d6636fda5ef54cc",
+      "delta": "Inject caller-owned line-process spawn; pass explicit env unchanged; preserve server ids and support replies; default/per-request timeouts; bounded held and pending state with fatal overflow; release timers on settlement, failed write, exit and kill. S2b: settlement consumer errors reject already-dequeued waiters; no uncaught timer failure."
     },
     {
       "path": "runtimes/codex/item-detail.ts",
@@ -85,15 +85,15 @@
       "path": "runtimes/codex/rpc-control.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/rpc-control.ts",
       "upstreamSha256": "16e1c120f2ac97f19dd6dac6f7342ecd03fbd3c38f16cbfe55833083afcd8127",
-      "vendoredSha256": "850b9b84c90c5db4085d1c765c8f0585c05c14d588f4e72bc25eb603332ed797",
-      "delta": "Pass configurable control deadline (default 30000ms) and record typed RPC timeouts as rejected responses. Use an equivalent deferred Promise compatible with the SDK ES2022 lib."
+      "vendoredSha256": "ad64c8b386622061f6ce16d65a7260bde1f9e3c51ff683d9881c7630018db543",
+      "delta": "Pass configurable control deadline (default 30000ms) and record typed RPC timeouts as rejected responses. Use an equivalent deferred Promise compatible with the SDK ES2022 lib. S2b: replace the redundant deferred response waiter with synchronous response capture to avoid hanging on required-consumer/budget failure."
     },
     {
       "path": "runtimes/codex/session.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/session.ts",
       "upstreamSha256": "c7ff370185db27c2a20cd775fb1df3394c7ded3d0f3afe00a5309bb7fcef2e05",
-      "vendoredSha256": "f72b3e7891e192b4e7d68263c87fcd21275ba16480e4a6e35cf49e588686abc5",
-      "delta": "BYOK S2a: injected spawn and explicit filtered env; fixed YOLO sandbox; raw AdapterSession without sealSession/input-images; native-first frame capture with visible fold failure/kill; bounded server request decline/reject using 0.159.2 response schemas; ES2022 deferred Promise."
+      "vendoredSha256": "d37601be130ae88bf6a4ac7aed05680dab8ae577993f51ecc5fc488880f1b749",
+      "delta": "BYOK S2a: injected spawn and explicit filtered env; fixed YOLO sandbox; raw AdapterSession without sealSession/input-images; native-first frame capture with visible fold failure/kill; bounded server request decline/reject using 0.159.2 response schemas; ES2022 deferred Promise. S2b: explicit body.origin=byok-native; inject required consumer/budget before registration."
     },
     {
       "path": "shared/instant.ts",
@@ -111,7 +111,8 @@
       "path": "shared/session-kernel.ts",
       "sourcePath": "packages/oar/src/shared/session-kernel.ts",
       "upstreamSha256": "b7a13c3a72bfed00d665a2a50ad9cd3f866315b6cc42e7badf81a7c787276f2a",
-      "vendoredSha256": "b7a13c3a72bfed00d665a2a50ad9cd3f866315b6cc42e7badf81a7c787276f2a"
+      "vendoredSha256": "0f46c74f8e154999926a1c3c6032a8a425f029dec96124b753f23fba348a7c61",
+      "delta": "BYOK S2b: fatal serialized retained-record byte budget; required consumer runs after append outside best-effort observers."
     }
   ]
 }

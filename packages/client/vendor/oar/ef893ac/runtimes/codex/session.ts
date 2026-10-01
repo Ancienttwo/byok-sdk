@@ -65,6 +65,12 @@ export async function codexSession(
   installation: AvailableInstallation,
   options: SessionOptions,
   serverRequestTimeoutMs = 1_000,
+  hooks: { // BYOK change: required record delivery and retention are injected before registration/replay.
+    readonly onReady?: (threadId: string) => void;
+    readonly onRecord?: (record: import("../../contracts/session.js").RawEvent) => void;
+    readonly maxBytes?: number;
+    readonly onLimit?: () => never;
+  } = {},
 ): Promise<AdapterSession> {
   if (installation.via !== "executable") {
     throw new Error("The codex session adapter needs an executable installation");
@@ -120,7 +126,8 @@ export async function codexSession(
     throw new Error(readback.refusal);
   }
 
-  const kernel = createSessionKernel(threadId);
+  const kernel = createSessionKernel(threadId, hooks); // BYOK change: budget/required projection before any frame.
+  hooks.onReady?.(threadId);
   const state: CodexSessionState = {
     active: null,
     spontaneous: false,
@@ -142,7 +149,9 @@ export async function codexSession(
     // BYOK change: Retain the exact native notification before any potentially throwing fold.
     const notificationSession = typeof params.threadId === "string" ? params.threadId : threadId;
     if (notificationSession !== threadId) kernel.node(notificationSession);
-    kernel.frame({ type: method, native: params, events: [] }, {
+    // BYOK change: Structural extra metadata distinguishes native frames even when derived events are empty.
+    const nativeBody = { type: method, native: params, events: [], origin: "byok-native" } as const;
+    kernel.frame(nativeBody, {
       sessionId: notificationSession,
       ...(typeof params.turnId === "string" ? { spanId: params.turnId } : {}),
     });

@@ -113,14 +113,13 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       permissionModes: ['auto', 'readonly', 'plan'],
     });
 
-    // codex: no mid-turn steer (codex exec has no in-band channel — see
-    // codex-adapter.ts), and only auto/readonly permission modes.
+    // codex: persistent app-server steering with YOLO-only auto permission mode.
     expect(byId.get('codex')).toEqual({
-      steer: false,
+      steer: true,
       resume: true,
       approvalInteractive: false,
       mcpToolsets: true,
-      permissionModes: ['auto', 'readonly'],
+      permissionModes: ['auto'],
     });
 
     // The wire value remains adapter-generated. The shipped adapters all

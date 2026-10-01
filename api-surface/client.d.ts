@@ -368,233 +368,25 @@ export interface ResolvedBin {
  */
 export declare function resolveClaudeBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/codex/codex-adapter.d.ts ====
-import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
+import { type spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
+import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
 import { type ResolvedBin } from './resolve-bin';
-import { type SpawnFn } from './process-runner';
 export interface CodexAdapterOptions {
     sdkHelperHost?: SdkHelperHostConfig;
-    /** Override bin resolution — tests substitute the fake-codex fixture script. */
     resolveBin?: () => ResolvedBin;
-    /** Override process spawning — tests substitute a fake spawn. */
-    spawnFn?: SpawnFn;
+    spawnFn?: typeof nodeSpawn;
+    maxRetainedBytes?: number;
+    interruptTimeoutMs?: number;
 }
-/**
- * `RuntimeAdapter` for the OpenAI Codex CLI (`codex exec --json`), the M2-b
- * counterpart to `../pi/pi-adapter.ts`. Every empirical claim in this file
- * and its sibling modules (`events.ts`, `permission-mapping.ts`,
- * `process-runner.ts`) was driven live against the real installed `codex-cli
- * 0.144.5` in a scratch directory before being encoded — repeating the pi
- * adapter's own M0-3 discipline ("docs lied and shipped a nonexistent flag")
- * independently found the exact same bug class on codex:
- *
- *   - `codex exec --help` documents `-a`/`--ask-for-approval`; the real
- *     parser rejects it outright on `codex exec` ("unexpected argument").
- *   - `-s`/`--sandbox` works on a fresh `codex exec` but is rejected outright
- *     on `codex exec resume` (whose own --help correctly omits it).
- *   - `codex exec resume` does NOT auto-inherit the sandbox mode a session
- *     was originally started with — a read-only-started session's write
- *     SUCCEEDED on a bare resume with no sandbox override re-passed,
- *     silently falling back to this machine's own ambient config default.
- *   - This task's own brief assumed SIGINT for `interrupt()`; empirically,
- *     `codex exec` ignores SIGINT entirely (a 60s `sleep` ran to completion
- *     despite SIGINT at t=4s) — SIGTERM is used instead (confirmed to work:
- *     immediate exit, no orphaned children, thread stays resumable after).
- *
- * See `./permission-mapping.ts` and `./process-runner.ts` for the full
- * per-finding writeups (sandbox scope, network, approval model, resume
- * mechanics, stdin handling).
- *
- * Architecture, and how it differs from pi: pi is one long-lived `pi --mode
- * rpc` process for a whole session's lifetime, driven by a bidirectional
- * JSONL request/response protocol (`../pi/rpc-client.ts`). `codex exec` has
- * no such thing — it's a one-shot batch process per turn, prompt in via
- * argv, JSONL out via stdout, process exits. `CodexSession` here instead
- * spawns a fresh `CodexProcessRunner` for every turn (the initial `start()`
- * and every later `followUp()`), and forwards each one's mapped events into
- * one shared, session-lifetime `AsyncQueue` — the thing `Session.events`
- * actually exposes. `sessionRef` is codex's own `thread_id`, learned from
- * `thread.started`, which is reliably the first JSONL line codex ever prints
- * (confirmed across every empirical capture, fresh starts and resumes
- * alike) — `runCodexTurn` below awaits specifically for that line before
- * resolving, mirroring pi's own "resolve a real session id before
- * constructing the Session, fail closed if you can't" discipline
- * (`../pi/pi-adapter.ts`'s `resolveFreshSessionId`, finding F8).
- */
+/** Codex app-server is experimental. Only the qualified 0.159.2 binary is admitted; no exec compatibility path. */
 export declare class CodexAdapter implements RuntimeAdapter {
     private readonly options;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     constructor(options?: CodexAdapterOptions);
     detect(): Promise<RuntimeDetectResult>;
-    /**
-     * `authPresent` without ever reading `~/.codex/auth.json` (credential-
-     * isolation rule, `../../types.ts`): spawns codex's OWN `login status`
-     * subcommand and interprets its human-readable report — the exact
-     * "non-secret signal" this adapter is required to use, and cleaner than
-     * pi's env-var-name check since codex's real credential model (on the
-     * reference machine) is a ChatGPT OAuth session, not an env var.
-     *
-     * Two independently-verified channel gotchas apply here, the "pi lesson"
-     * yet again:
-     *   - `codex login status`'s human-readable "Logged in using ChatGPT"
-     *     message prints on STDERR, not stdout — both streams are checked
-     *     here for exactly that reason. pi's `--version` is the same class of
-     *     hazard from the other direction: its channel has moved between pi
-     *     releases (see ../pi/pi-adapter.ts), so neither stream is assumed.
-     *   - The NOT-logged-in message/exit-code shape was deliberately never
-     *     empirically tested: this machine has a real, live ChatGPT login, and
-     *     running `codex logout` to observe the negative case would have
-     *     broken that login for the rest of this session/machine. The match
-     *     below is intentionally conservative (`/logged in (using|with)/i`,
-     *     not a bare `"logged in"` substring) specifically because a bare
-     *     substring check would false-positive on a plausible negative message
-     *     like "Not logged in" (itself containing the substring "logged in").
-     *     This is a documented, known gap — flagged for M2-c / a follow-up
-     *     empirical pass on a logged-out machine, not asserted as verified.
-     */
-    private probeAuthPresent;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
-    private startPrepared;
-    private resolveBin;
-}
-// ==== @byok-sdk/client dist/adapters/codex/process-runner.d.ts ====
-import { RuntimeExecutionFailure } from '../../runtime-failure';
-import { spawn } from 'node:child_process';
-export type SpawnFn = typeof spawn;
-/**
- * One parsed line of `codex exec --json` / `codex exec resume --json`
- * output. Field shapes vary by `type` (see `./events.ts`'s module doc
- * comment for the empirically-captured catalog), so this stays a loose bag
- * rather than a full discriminated union, mirroring `PiRpcMessage` in
- * `../pi/rpc-client.ts`.
- */
-export interface CodexRawEvent {
-    type: string;
-    [key: string]: unknown;
-}
-export interface CodexProcessOptions {
-    command: string;
-    args: string[];
-    instruction?: string;
-    cwd: string;
-    env: NodeJS.ProcessEnv;
-    spawnFn?: SpawnFn;
-    /** Called once per parsed JSONL line, in arrival order. */
-    onEvent: (evt: CodexRawEvent) => void;
-    onFailure?: (error: RuntimeExecutionFailure) => void;
-    /**
-     * DI seam scoped to ADOPTION only (`../process-tree.ts`'s
-     * `adoptOwnedProcessTree`), so the win32 job-object branch is exercisable
-     * from POSIX. Disposal keeps `process.platform` as its own authority — this
-     * must never silently reroute the taskkill sweep on a real host.
-     */
-    platform?: NodeJS.Platform;
-    /** DI seam for the win32 job-object backstop; see `../win32-job-object.ts`. */
-    jobObject?: {
-        assign(pid: number): Promise<void>;
-    };
-}
-export declare const CODEX_MAX_FRAME_BYTES: number;
-export declare const CODEX_MAX_DEFERRED_BYTES: number;
-export declare const CODEX_MAX_STDERR_BYTES: number;
-/**
- * Spawns and streams ONE `codex exec` / `codex exec resume` invocation — i.e.
- * exactly one turn.
- *
- * Unlike pi (a single long-lived RPC server process for a whole session's
- * lifetime — see `../pi/rpc-client.ts`), `codex exec` is a one-shot batch
- * process per turn with no persistent request/response channel: it takes its
- * prompt from stdin with the documented `-` positional, streams JSONL to stdout for the one turn
- * it's running, and exits. `../codex-adapter.ts`'s `CodexSession` constructs
- * a fresh `CodexProcessRunner` for every turn (the initial `start()` and
- * every later `followUp()`), forwarding each one's lines into the same
- * long-lived event queue.
- *
- * Prompt stdin is closed with EOF immediately after writing. This is a one-shot
- * input channel; steer and approvals are not multiplexed over it.
- */
-export declare class CodexProcessRunner {
-    private readonly child;
-    private readonly onEvent;
-    private readonly frameChunks;
-    private frameBytes;
-    private deferredBytes;
-    private stderrBytes;
-    private transportFailure;
-    private readonly onFailure;
-    private readonly stderrRing;
-    private closed;
-    private exitCode;
-    private exitSignal;
-    private readonly closedPromise;
-    private resolveClosed;
-    private disposalAttempt;
-    /** Resolves once this tree is backstopped (see `adoptOwnedProcessTree`); rejects with the adoption failure, having already terminated the tree. */
-    private readonly adopted;
-    /** Set before the fail-closed termination starts; `buildExitError` reports it instead of the exit status of the kill we ourselves requested. */
-    private adoptionFailure;
-    private adoption;
-    /**
-     * Lines parsed before adoption settled. Unlike pi and claude, this runner has
-     * no first awaited operation of its own to gate on — its caller reads the
-     * FIRST event as the authoritative thread id. Holding events until the tree
-     * is backstopped is what keeps that caller from publishing a session for a
-     * tree the job object never took.
-     */
-    private readonly deferredEvents;
-    constructor(options: CodexProcessOptions);
-    private finishClosing;
-    /** Resolves once the child process has fully exited (both exit and stdio-flush guaranteed — see the `close` listener above). Never rejects. */
-    waitClosed(): Promise<void>;
-    get isClosed(): boolean;
-    /**
-     * Immediate tree termination request. SIGTERM on POSIX: SIGINT was empirically confirmed
-     * to be silently ignored by `codex exec` (a real, direct test — a 60s
-     * shell `sleep` ran to full, unaffected completion despite SIGINT sent at
-     * t=4s) — a genuine, evidence-based correction to this task's own initial
-     * assumption ("interrupt: SIGINT — POSIX here"). SIGTERM was separately
-     * confirmed to terminate the process immediately (exit code 143) with no
-     * orphaned child processes left behind (the shell command it was running
-     * died with it), and — critically — the underlying codex thread remained
-     * cleanly resumable afterward via `codex exec resume` (no corruption from
-     * killing mid-turn). `taskkill /T /F` on Windows, mirroring
-     * `../pi/rpc-client.ts`'s own cross-platform convention.
-     *
-     * Fire-and-forget by design: an interrupt must not block on a terminator,
-     * and `dispose()` is the settlement receipt. A request that could not be
-     * spawned is left unrecorded, so `dispose()` re-issues it and raises the
-     * typed `stage:'signal'` failure — swallowing it here loses nothing.
-     */
-    kill(): void;
-    dispose(): Promise<void>;
-    private processTreeOptions;
-    /**
-     * Backstop this tree, or tear it down. Adoption failure is a start-time
-     * precondition, not a degraded mode: the child is terminated through the one
-     * disposal authority, every parsed line is dropped instead of delivered, and
-     * the resulting close makes the caller's own `waitClosed()` race reject with
-     * the adoption failure (`buildExitError`) before a thread id is published.
-     * Both cleanup attempts are best-effort because the adoption failure, not a
-     * terminator's own complaint, is the reason to report.
-     */
-    private adoptOwnedTree;
-    /** Arrival-order delivery, held back until the tree is backstopped (see `deferredEvents`). */
-    private deliver;
-    /**
-     * Builds a descriptive error folding in the exit code/signal and the stderr
-     * tail — mirrors `PiRpcClient.buildExitError`'s reasoning: a post-mortem on a
-     * failed start/resume should never need separately re-running codex by hand
-     * with a raw JSONL logger to learn why.
-     *
-     * A tree this runner could not backstop is the one exception: that process
-     * exited because THIS runner killed it, so `exit code=null, signal=SIGKILL`
-     * plus an empty stderr tail would bury the only reason anyone can act on.
-     */
-    buildExitError(context: string): Error;
-    private failTransport;
-    private onData;
-    private parseLine;
-    private onStderr;
+    private start;
 }
 // ==== @byok-sdk/client dist/adapters/codex/resolve-bin.d.ts ====
 export interface ResolvedBin {
@@ -12872,7 +12664,7 @@ export type RuntimeDetectResult = {
     readonly kind: 'refused';
     readonly reason: RuntimeDetectionRefusalReason;
 };
-export type RuntimeDetectionRefusalReason = ToolImplementationUnavailableReasonV1 | 'installation_observation_unsupported' | 'native_identity_mismatch' | 'launch_cwd_unavailable';
+export type RuntimeDetectionRefusalReason = ToolImplementationUnavailableReasonV1 | 'installation_observation_unsupported' | 'native_identity_mismatch' | 'launch_cwd_unavailable' | 'app_server_unavailable' | 'runtime_version_unsupported';
 /** Explicit scope, never a launch environment or task/lane-selection authority. */
 export type RuntimeInstallationObservationContext = {
     readonly authority: ToolImplementationAuthority;

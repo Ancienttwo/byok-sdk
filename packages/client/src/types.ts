@@ -53,7 +53,8 @@ export type RuntimeDetectResult =
   | { readonly kind: 'refused'; readonly reason: RuntimeDetectionRefusalReason };
 
 export type RuntimeDetectionRefusalReason = ToolImplementationUnavailableReasonV1
-  | 'installation_observation_unsupported' | 'native_identity_mismatch' | 'launch_cwd_unavailable';
+  | 'installation_observation_unsupported' | 'native_identity_mismatch' | 'launch_cwd_unavailable'
+  | 'app_server_unavailable' | 'runtime_version_unsupported';
 
 /** Explicit scope, never a launch environment or task/lane-selection authority. */
 export type RuntimeInstallationObservationContext = { readonly authority: ToolImplementationAuthority } & (

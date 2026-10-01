@@ -1,3 +1,4 @@
+// BYOK change: Modified from OAR ef893ac for a required consumer and fatal retained-record byte budget (Apache-2.0).
 import { randomUUID } from "node:crypto";
 import type {
   ControlResult,
@@ -104,11 +105,17 @@ function deliver(observer: RawEventObserver, record: RawEvent): void {
   }
 }
 
-export function createSessionKernel(sessionId: string = randomUUID()): SessionKernel {
+// BYOK change: The required consumer runs outside best-effort observer swallowing; facts are appended before delivery.
+export function createSessionKernel(sessionId: string = randomUUID(), hooks: {
+  readonly maxBytes?: number;
+  readonly onRecord?: (record: RawEvent) => void;
+  readonly onLimit?: () => never;
+} = {}): SessionKernel {
   const observers = new Set<RawEventObserver>();
   const log: RawEvent[] = [];
   const nodes = new Map<string, { readonly id: string }>([[sessionId, { id: sessionId }]]);
   const edges: SessionEdge[] = [];
+  let retainedBytes = 0; // BYOK change: conservative serialized envelope+payload accounting.
   let seq = 0;
   let exited = false;
   let disposing = false;
@@ -128,6 +135,13 @@ export function createSessionKernel(sessionId: string = randomUUID()): SessionKe
       seq,
       receivedAt: Date.now(),
     });
+    // BYOK change: Fail before retaining any bytes beyond the caller's budget; never silently trim.
+    const bytes = Buffer.byteLength(JSON.stringify(record), "utf8");
+    if (retainedBytes + bytes > (hooks.maxBytes ?? Infinity)) {
+      hooks.onLimit?.();
+      throw new Error("session record byte budget exceeded");
+    }
+    retainedBytes += bytes;
     seq += 1;
     log.push(record);
     if (record.kind === "response" && record.body.kind === "exited") {
@@ -136,6 +150,7 @@ export function createSessionKernel(sessionId: string = randomUUID()): SessionKe
     if (record.kind === "request" && record.direction === "toRuntime" && record.body.kind === "dispose") {
       disposing = true;
     }
+    hooks.onRecord?.(record); // BYOK change: required projection failure is not swallowed.
     for (const observer of observers) {
       deliver(observer, record);
     }
