@@ -15,6 +15,7 @@ export default defineConfig({
     'src/adapters/pi/mcp-extension.ts',
     'src/adapters/pi/team-interaction-extension.ts',
     'src/adapters/pi/subagents-policy-extension.ts',
+    'src/adapters/pi/fff-extension.ts',
     'src/bin/byok-agent.ts',
     'src/bin/byok-pi-prepared.ts',
     'src/bin/byok-pi-rpc.ts',
@@ -34,7 +35,7 @@ export default defineConfig({
   clean: true,
   splitting: false,
   treeshake: true,
-  noExternal: ['pi-web-access'],
+  noExternal: ['pi-web-access', '@ff-labs/pi-fff'],
   esbuildPlugins: [subagentsBuild(false)],
   // koffi is the win32 job-object backstop's native binding layer and an
   // `optionalDependencies` entry: it must stay a runtime resolution so a
@@ -43,6 +44,7 @@ export default defineConfig({
   external: [
     'koffi', '#byok-pi-runtime-host', '#byok-pi-runtime-host-sealed', '#byok-pi-todo-runtime',
     'typebox', 'typebox/compile',
+    '@ff-labs/fff-node', '@ff-labs/fff-bun',
     '@mozilla/readability', 'linkedom', 'p-limit', 'promise.try',
     'turndown', 'unpdf', 'undici', 'jiti', 'yaml',
   ],

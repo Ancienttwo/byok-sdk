@@ -9,6 +9,7 @@ export { openPiRpcSession } from './pi-session-runtime';
 import { webExtension, subagentsExtension } from './pi-extension-factories.js';
 import { verifyTodoLocaleAssets } from '../adapters/pi/todo-locale-assets';
 import { createByokMcpExtension } from '../adapters/pi/mcp-extension';
+import { createByokFffExtension, piFffToolsSelected } from '../adapters/pi/fff-extension';
 import { createByokSubagentsPolicyExtension } from '../adapters/pi/subagents-policy-extension';
 import { parseTaskScopedMcpConfig, type TaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
 import { mapPermissionPolicyToPiArgs } from '../adapters/pi/permission-mapping';
@@ -157,7 +158,8 @@ export async function runPiRpcHost(argv: readonly string[]): Promise<void> {
     resourceLoaderOptions: {
       noExtensions: true, noSkills: true,
       extensionFactories: [webExtension, createByokMcpExtension(config.mcp),
-        createByokSubagentsPolicyExtension(mode), subagentsExtension, todoExtension],
+        createByokSubagentsPolicyExtension(mode), subagentsExtension, todoExtension,
+        ...(piFffToolsSelected(args) ? [createByokFffExtension()] : [])],
     },
     initialModel: 'required', label: 'byok-pi-rpc', reject: fail,
   });

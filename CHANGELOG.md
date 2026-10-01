@@ -2,10 +2,10 @@
 
 ## Unreleased
 
-- **Changed (client)** — official Pi runtime 0.87.1 -> 0.99.1. The attested
+- **Changed (client)** — official Pi runtime 0.87.1 -> 0.99.2. The attested
   closure is now eight packages (chord, pi-agent-core, pi-ai, pi-codemode,
-  pi-coding-agent, pi-mcp, pi-telemetry, pi-tui), upstream commit `d86654ab`,
-  closureDigest `4a6a72a3dfb82a18dbab345dc527645d9764f14ae5b7bc89e92808a2329bd449`.
+  pi-coding-agent, pi-mcp, pi-telemetry, pi-tui), upstream commit `005af57d`,
+  closureDigest `8d614f74c775cab980f72bfce88de75583ad43e69d870df0134f3dbd7b622124`.
 - **Changed (client)** — the OpenAI SDK under Pi moves 6.40 -> 7.19. Request
   wire bytes were verified identical (2499-cell matrix), but the SSE decoder was
   rewritten: `[DONE]` is matched exactly, `event: error` frames throw `APIError`,

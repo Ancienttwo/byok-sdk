@@ -2269,3 +2269,26 @@ identity and release/registry guards. Tarball integrity, signed provenance, exac
 versions and installed-file digests replace fork markers. Encapsulated launch uses
 the measured sealed artifact plus declared assets, without external package lookup.
 M4 recursion/custody acceptance and M5 provider C measurements remain separate gates.
+
+## Ordinary Pi RPC FFF local search
+
+`packages/client/src/bin/pi-rpc-host.ts` selects the SDK-owned FFF factory only
+when the verified tool selection can admit `fffind` or `ffgrep`. The ordinary
+Pi session runtime supplies task cwd and applies its native registry allow/deny
+filter to extension tools. Existing readonly and Prepared tool authority remain
+unchanged; no shared provider registry or new capability is introduced.
+
+`packages/client/src/adapters/pi/fff-extension.ts` composes the pinned upstream
+factory through public ExtensionAPI/context views. A synchronous documented
+config-directory environment override is restored in `finally` before yielding;
+fixed flags and an FFF-only filtered history view prevent user configuration or
+restored mode from replacing builtin search semantics. Per-instance temporary
+databases belong to that factory lifecycle and are removed after pending work
+and upstream teardown settle. Ten times more sessions first multiply index and
+ephemeral database consumption; this slice creates no shared indexing service.
+
+The TS extension is bundled while native FFF packages resolve through installed
+runtime dependencies. Clean packed-client search and package readback validate
+that boundary without claiming native dependency graph attestation. The source,
+policy, installed search and shutdown evidence is owned by the FFF work-package
+`plans/plan-20261001-1237-pi-fff-local-search.md`.

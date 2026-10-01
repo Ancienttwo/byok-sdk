@@ -270,6 +270,167 @@ function assertNpmCoreClosure(installDirectory) {
   console.log(`[release-pack] npm ls @byok-sdk/core --all --json resolves only ${releaseVersion}`);
 }
 
+// Exercise the SDK-owned factory from its installed private dist artifact.
+// Native readback is distribution evidence, not implementation-identity attestation.
+function runInstalledFffSmoke(installDirectory) {
+  const probePath = path.join(installDirectory, 'fff-packed-smoke.mjs');
+  const tempDirectory = path.join(installDirectory, 'fff-temp');
+  mkdirSync(tempDirectory);
+  writeFileSync(probePath, String.raw`
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const installRoot = realpathSync(path.dirname(fileURLToPath(import.meta.url)));
+const require = createRequire(import.meta.url);
+const installedPath = (file) => {
+  const resolved = realpathSync(file);
+  assert.ok(resolved.startsWith(installRoot + path.sep), 'resolved outside isolated install: ' + resolved);
+  return resolved;
+};
+const manifest = (resolver, name) => {
+  // Some peers hide package.json in exports. Read the first physical package
+  // on this importer's Node resolution path instead of importing a hidden subpath.
+  const candidate = resolver.resolve.paths(name).map((base) => path.join(base, name, 'package.json')).find(existsSync);
+  assert.ok(candidate, 'missing installed package ' + name);
+  const file = installedPath(candidate);
+  const value = JSON.parse(readFileSync(file, 'utf8'));
+  assert.equal(value.name, name);
+  return { file, value };
+};
+const client = manifest(require, '@byok-sdk/client');
+const clientRequire = createRequire(client.file);
+const expectedVersion = client.value.dependencies['@ff-labs/pi-fff'];
+assert.match(expectedVersion, /^\d+\.\d+\.\d+$/, 'client must pin FFF exactly');
+const extension = manifest(clientRequire, '@ff-labs/pi-fff');
+assert.equal(extension.value.version, expectedVersion);
+const extensionRequire = createRequire(extension.file);
+// These satisfy the unexecuted npm TS source package's peer declarations.
+// The SDK factory is bundled: its actual TUI binding is checked below instead.
+const sourcePeers = Object.fromEntries(['@earendil-works/pi-coding-agent', '@earendil-works/pi-tui']
+  .map((name) => [name, manifest(extensionRequire, name).value.version]));
+const nativeManifests = {};
+for (const name of ['@ff-labs/fff-node', '@ff-labs/fff-bun']) {
+  const installed = manifest(extensionRequire, name);
+  assert.equal(installed.value.version, extension.value.dependencies[name], name);
+  nativeManifests[name] = installed;
+}
+const nativeRequire = createRequire(nativeManifests['@ff-labs/fff-node'].file);
+const nativeManifest = nativeManifests['@ff-labs/fff-node'];
+const nativeEntry = installedPath(path.join(path.dirname(nativeManifest.file), nativeManifest.value.exports['.'].import));
+const native = await import(pathToFileURL(nativeEntry).href);
+const binaryPackage = manifest(nativeRequire, native.getNpmPackageName());
+assert.equal(binaryPackage.value.version, nativeManifests['@ff-labs/fff-node'].value.optionalDependencies[binaryPackage.value.name]);
+const binaryPath = installedPath(native.findBinary());
+assert.equal(binaryPath, installedPath(path.join(path.dirname(binaryPackage.file), native.getLibFilename())), 'native must load the npm platform binary');
+native.FileFinder.ensureLoaded();
+const ffi = manifest(nativeRequire, 'ffi-rs');
+const ffiRequire = createRequire(ffi.file);
+const addons = Object.keys(require.cache).filter((file) => file.endsWith('.node') && path.basename(file).startsWith('ffi-rs.'));
+assert.equal(addons.length, 1, 'expected one actually loaded ffi-rs platform addon');
+const addonPath = installedPath(addons[0]);
+const addonManifestPath = installedPath(path.join(path.dirname(addonPath), 'package.json'));
+const addon = JSON.parse(readFileSync(addonManifestPath, 'utf8'));
+assert.equal(addon.version, ffi.value.optionalDependencies[addon.name]);
+assert.equal(installedPath(ffiRequire.resolve(addon.name)), addonPath);
+const lock = JSON.parse(readFileSync(path.join(installRoot, 'package-lock.json'), 'utf8'));
+for (const entry of [client, extension, ...Object.values(nativeManifests), binaryPackage, ffi, {file: addonManifestPath, value: addon}]) {
+  const key = path.relative(installRoot, path.dirname(entry.file)).split(path.sep).join('/');
+  assert.equal(lock.packages[key].version, entry.value.version, key);
+  assert.ok(lock.packages[key].resolved, key + ' has no npm resolution readback');
+  assert.match(lock.packages[key].integrity, /^sha512-/, key + ' has no npm integrity readback');
+}
+const digest = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
+console.log('[release-pack] installed FFF native readback ' + JSON.stringify({
+  extension: extension.value.version, node: nativeManifests['@ff-labs/fff-node'].value.version,
+  bun: nativeManifests['@ff-labs/fff-bun'].value.version, platform: process.platform, arch: process.arch,
+  runtime: process.version, binary: binaryPackage.value.name, binarySha256: digest(binaryPath),
+  ffi: ffi.value.version, addon: addon.name, addonSha256: digest(addonPath), attested: false,
+}));
+
+const factoryEntry = installedPath(path.join(path.dirname(client.file), 'dist/adapters/pi/fff-extension.js'));
+const factorySource = readFileSync(factoryEntry, 'utf8');
+const factoryMap = JSON.parse(readFileSync(installedPath(factoryEntry + '.map'), 'utf8'));
+const tuiSources = factoryMap.sources.filter((source) => source.includes('/@earendil-works/pi-tui/'));
+assert.ok(tuiSources.length > 0, 'FFF factory lacks bundled TUI provenance');
+for (const source of tuiSources) {
+  assert.ok(source.includes('/@earendil-works+pi-tui@' + client.value.byok.piRuntimePin + '/node_modules/'),
+    'FFF factory bundled TUI provenance differs from the client pin: ' + source);
+}
+assert.doesNotMatch(factorySource, /\b(?:from|import)\s*['"]@earendil-works\/pi-tui(?:\/[^'"]*)?['"]|\b(?:import|require)\s*\(\s*['"]@earendil-works\/pi-tui(?:\/[^'"]*)?['"]/, 'FFF factory must inline its TUI binding');
+console.log('[release-pack] installed FFF factory TUI bundle provenance ' + JSON.stringify({
+  version: client.value.byok.piRuntimePin, sources: tuiSources.length, sourcePeers, unbundledExtensionExecuted: false, attested: false,
+}));
+const { createByokFffExtension } = await import(pathToFileURL(factoryEntry).href);
+assert.equal(typeof createByokFffExtension, 'function');
+const { createAgentSession, createAgentSessionRuntime, createAgentSessionServices, SessionManager } = await import('@earendil-works/pi-coding-agent');
+const { validateToolArguments } = await import('@earendil-works/pi-ai');
+const cwd = path.join(installRoot, 'fff-workspace');
+const agentDir = path.join(installRoot, 'fff-agent');
+mkdirSync(path.join(cwd, 'src'), { recursive: true });
+mkdirSync(agentDir);
+writeFileSync(path.join(cwd, 'src/alpha-search.ts'), 'export const token = "FFF_PACKED_SEARCH_TOKEN";\n');
+mkdirSync(path.join(cwd, 'ignored'));
+writeFileSync(path.join(cwd, '.gitignore'), 'ignored/\n');
+writeFileSync(path.join(cwd, 'ignored/secret.ts'), 'FFF_PACKED_IGNORED_TOKEN\n');
+execFileSync('git', ['init', '--quiet'], { cwd });
+execFileSync('git', ['add', '.'], { cwd });
+const errors = [];
+let session;
+let runtimeHost;
+try {
+  runtimeHost = await createAgentSessionRuntime(async ({ cwd, agentDir, sessionManager }) => {
+    const services = await createAgentSessionServices({ cwd, agentDir,
+    modelRuntimeSignal: AbortSignal.timeout(15000),
+    resourceLoaderOptions: { noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true,
+      extensionFactories: [createByokFffExtension()] },
+    });
+    assert.deepEqual(services.resourceLoader.getExtensions().errors, []);
+    const result = await createAgentSession({ cwd, agentDir, sessionManager,
+    modelRuntime: services.modelRuntime, settingsManager: services.settingsManager, resourceLoader: services.resourceLoader,
+    tools: ['fffind', 'ffgrep'],
+    });
+    return { ...result, services, diagnostics: [] };
+  }, { cwd, agentDir, sessionManager: SessionManager.inMemory(cwd) });
+  session = runtimeHost.session;
+  await session.bindExtensions({ mode: 'rpc', onError: (error) => errors.push(error) });
+  assert.deepEqual(session.getActiveToolNames().sort(), ['fffind', 'ffgrep']);
+  const execute = async (name, args) => {
+    const tool = session.agent.state.tools.find((entry) => entry.name === name);
+    assert.ok(tool, name + ' missing from installed Pi registry');
+    const call = { type: 'toolCall', id: 'packed-' + name, name, arguments: args };
+    const result = await tool.execute(call.id, validateToolArguments(tool, call), AbortSignal.timeout(15000));
+    assert.notEqual(result.isError, true, JSON.stringify(result));
+    return result.content.filter((entry) => entry.type === 'text').map((entry) => entry.text).join('\n');
+  };
+  assert.match(await execute('fffind', { pattern: 'alpha search' }), /src\/alpha-search\.ts/);
+  const grep = await execute('ffgrep', { pattern: 'FFF_PACKED_SEARCH_TOKEN' });
+  assert.match(grep, /src\/alpha-search\.ts/);
+  assert.match(grep, /FFF_PACKED_SEARCH_TOKEN/);
+  assert.match(await execute('ffgrep', { pattern: 'FFF_PACKED_IGNORED_TOKEN', mode: 'plain' }), /No matches found/);
+  assert.deepEqual(errors, []);
+} finally {
+  await runtimeHost?.dispose();
+}
+assert.deepEqual(readdirSync(process.env.TMPDIR), [], 'owned native directories remain after shutdown');
+console.log('[release-pack] installed SDK-owned FFF factory real find/grep, ignored-file negative control and shutdown cleanup passed; prompts=0; attested=false');
+`);
+  const result = spawnSync(nodeBin, [probePath], {
+    cwd: installDirectory, encoding: 'utf8', timeout: 60_000,
+    env: { ...process.env, NODE_PATH: '', TMPDIR: tempDirectory, TMP: tempDirectory, TEMP: tempDirectory,
+      PI_CODING_AGENT_DIR: path.join(installDirectory, 'fff-agent'),
+      XDG_CACHE_HOME: path.join(installDirectory, 'fff-cache'), XDG_DATA_HOME: path.join(installDirectory, 'fff-data') },
+  });
+  if (result.status !== 0) {
+    throw new Error(`installed FFF smoke failed (${result.status})\n${result.stdout}\n${result.stderr}\n${result.error ?? ''}`);
+  }
+  console.log(result.stdout.trim());
+}
+
 function runStaleKeysEdgeNegativeControl() {
   const fixturePath = path.join(repoRoot, 'scripts', 'release', 'fixtures', 'keys-0.2.0-stale-core-edge.json');
   const fixture = JSON.parse(readFileSync(fixturePath, 'utf8'));
@@ -412,6 +573,7 @@ try {
       `${JSON.stringify({ name: 'byok-release-smoke', private: true, type: 'module', dependencies }, null, 2)}\n`,
     );
     run(npmInvocation.command, [...npmInvocation.prefix, 'install', '--ignore-scripts', '--no-audit', '--no-fund'], smokeDir);
+    runInstalledFffSmoke(smokeDir);
     writeFileSync(
       path.join(smokeDir, 'smoke.mjs'),
       `import assert from 'node:assert/strict';\n` +
