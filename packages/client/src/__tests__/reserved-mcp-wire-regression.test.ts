@@ -1,9 +1,9 @@
 /**
  * T1: the four SDK-reserved MCP helpers' EMITTED WIRE BYTES, frozen.
  *
- * `byok-approval-mcp`, `byok-agent-message-mcp`, `byok-agent-memory-mcp` and
+ * `byok-agent-message-mcp`, `byok-agent-memory-mcp` and
  * `byok-agent-team-mcp` are spawned as child processes by runtimes this SDK
- * does not own (claude's `--permission-prompt-tool`, pi's and codex's MCP
+ * does not own (pi's and codex's MCP
  * config). Their contract with those runtimes is bytes on a pipe, not a
  * TypeScript signature, so the only regression that matters is a byte one.
  *
@@ -25,7 +25,6 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { serveApprovalMcpOverStdio, APPROVAL_TOOL_NAME } from '../bin/approval-mcp-server';
 import { serveAgentMessageMcpOverStdio } from '../bin/agent-message-mcp-server';
 import {
   serveAgentMemoryMcpOverStdio,
@@ -57,7 +56,7 @@ interface WireBaseline {
 const REVISION = `sha256:${'a'.repeat(64)}`;
 
 /**
- * One script, four servers. `initialize` deliberately offers `2025-03-26`: a
+ * One script, three servers. `initialize` deliberately offers `2025-03-26`: a
  * real MCP revision this core does not implement, so the row is the one that
  * separates "echo whatever the peer said" from "answer with a version we
  * actually implement".
@@ -90,20 +89,6 @@ interface ServerCase {
 }
 
 const SERVERS: readonly ServerCase[] = [
-  {
-    name: 'byok-approval-mcp',
-    serve: (stdin, stdout) =>
-      serveApprovalMcpOverStdio({
-        taskId: 'task-wire-1',
-        deps: { requestApproval: async () => ({ approved: true }) },
-        input: stdin,
-        output: stdout,
-      }),
-    steps: scriptFor(
-      { name: APPROVAL_TOOL_NAME, arguments: { tool_name: 'Bash', input: { command: 'echo hi' }, tool_use_id: 'toolu_1' } },
-      { name: 'some_other_tool', arguments: {} },
-    ),
-  },
   {
     name: 'byok-agent-message-mcp',
     serve: (stdin, stdout) =>

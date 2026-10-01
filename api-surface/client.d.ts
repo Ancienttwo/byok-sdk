@@ -1,18 +1,12 @@
 // ==== @byok-sdk/client dist/adapters/claude/claude-adapter.d.ts ====
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type ResolvedBin } from './resolve-bin';
-import { type ResolvedApprovalMcpBin } from './resolve-approval-mcp-bin';
 import { type SpawnFn } from './process-client';
-import { APPROVAL_MCP_SERVER_NAME } from '../../sdk-reserved-mcp';
-/** The MCP server NAME this adapter registers `byok-approval-mcp` under in the generated `--mcp-config` — combined with {@link APPROVAL_TOOL_NAME} (single-sourced from `bin/approval-mcp-server.ts` so the two can never independently drift) to form the `mcp__<server>__<tool>` identifier `--permission-prompt-tool` expects. Defined in `sdk-reserved-mcp.ts` beside the other SDK-owned server names, and re-exported from here, its original home, so the host-config rejection and the toolset-grant rule read one list. */
-export { APPROVAL_MCP_SERVER_NAME };
 export interface ClaudeAdapterOptions {
     /** Override bin resolution — tests substitute the fake-claude fixture script. */
     resolveBin?: () => ResolvedBin;
     /** Override process spawning — tests substitute a fake spawn. */
     spawnFn?: SpawnFn;
-    /** M4 Phase 3: override `byok-approval-mcp` bin resolution — tests substitute a fixture script instead of computing a real dist path. Mirrors `resolveBin` above. */
-    resolveApprovalMcpBin?: () => ResolvedApprovalMcpBin;
 }
 /**
  * Claude Code runtime adapter (`claude -p --input-format stream-json
@@ -62,43 +56,9 @@ export interface ClaudeAdapterOptions {
  * something upstream expected approval support this adapter genuinely does
  * not have.
  *
- * `PermissionPolicy.mode: 'confirm'` — the policy mode whose whole point is
- * "ask a human, then proceed" — was therefore rejected outright at
- * `start()` through M2/M3 (fail-closed, see `permission-mapping.ts`), never
- * silently downgraded to auto-accept or auto-deny.
- *
- * ## M4 Phase 3 update: a genuine out-of-band pause DOES exist — it is
- * just invisible to everything written above
- *
- * `--permission-prompt-tool` (a DIFFERENT flag from `--permission-mode`,
- * undocumented in `claude --help`'s own output on the installed 2.1.216
- * binary but empirically confirmed accepted — an unrecognized flag is
- * rejected outright with `error: unknown option`, this one is not) makes
- * claude block a turn on a real MCP round-trip to a server it spawns
- * itself, waiting for that server to answer allow/deny before continuing —
- * genuinely pausing, for real wall-clock time (live-verified: an instant
- * allow/deny, AND a deliberate multi-second delayed answer, both worked
- * identically; only a permission-prompt-tool call that never answers AT
- * ALL was found to make claude abandon the turn on its own, after roughly
- * 1.5s — never actually reachable by this design, since the bundled
- * `bin/byok-approval-mcp.ts` always eventually answers within its own
- * configured ceiling).
- *
- * Everything above this section remains true and is NOT superseded by
- * this: claude's own stream-json output still emits nothing while this
- * pause is in progress — the gap between a `tool_use` frame and its
- * `tool_result` is indistinguishable from ordinary model latency on the
- * wire, and there is still no `needs_approval`-shaped frame this adapter's
- * event mapper could ever produce. The pause is real, but it is invisible
- * to `ClaudeSession.events` and to `task-runner.ts`'s `pump()` entirely —
- * it is only ever observable from OUTSIDE this adapter's own process, by
- * the separate MCP-server child process claude itself spawns. This is why
- * `confirm` mode's daemon-side wiring (`task-runner.ts`'s `requestApproval`,
- * `types.ts`'s `ApprovalChannel`) is driven from the control socket, not
- * from any `AgentEvent` — see those files' own doc comments for the full
- * design this finding drove. `confirm` is now SUPPORTED (see
- * `permission-mapping.ts` and `resolveApproval()` below), still fail-closed
- * whenever no approval channel was actually wired up for this session.
+ * `PermissionPolicy.mode: 'confirm'` is rejected before runtime side effects.
+ * The private approval MCP helper and permission-prompt-tool integration have
+ * been removed. The shared needs_approval contract remains for other adapters.
  *
  * ## Steering was also found unsupported (a second, related finding)
  *
@@ -379,53 +339,6 @@ export declare class ClaudeProcessClient {
     private buildExitError;
     private onClosed;
 }
-// ==== @byok-sdk/client dist/adapters/claude/resolve-approval-mcp-bin.d.ts ====
-import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
-export interface ResolvedApprovalMcpBin {
-    command: string;
-    args: string[];
-    source: 'env' | 'dist' | 'host';
-}
-/**
- * Resolve `byok-approval-mcp` — the small stdio MCP server
- * (`bin/byok-approval-mcp.ts`) `claude`'s own `--permission-prompt-tool`
- * spawns as ITS child process (see that file's doc comment, and
- * `permission-mapping.ts`'s `confirm`-mode doc comment, for the full design).
- *
- * Unlike `resolveClaudeBin` (the end user's own separately-installed,
- * separately-authenticated CLI, resolved via bare-name PATH lookup),
- * `byok-approval-mcp` is a script THIS SAME `@byok-sdk/client` package ships —
- * bare-name PATH lookup is NOT safe for it: `@byok-sdk/client` is typically a
- * project-local dependency, so its `node_modules/.bin/byok-approval-mcp`
- * symlink is only on PATH for processes that inherit THAT project's own
- * shell/PATH, not reliably for a background OS service (launchd/systemd
- * often run with a stripped-down PATH that omits project-local
- * `node_modules/.bin` entirely — see `templates/service/**`). Resolving an
- * ABSOLUTE path to this package's own compiled bin avoids depending on PATH
- * at all.
- *
- * `BYOK_APPROVAL_MCP_BIN` overrides everything when set — the injectable
- * seam for tests (mirrors `BYOK_CLAUDE_BIN`/`BYOK_PI_BIN`), letting a test
- * substitute a fixture script instead of computing any real path. The
- * override is a single command string with no separate args (tests don't
- * need to invoke it any differently than `node <script>`); the real default
- * below is `node <absolute-path-to-the-built-bin>`.
- *
- * The default computation is deliberately anchored to THIS module's own
- * `import.meta.url`, resolved once at the real production entry point: when
- * `@byok-sdk/client` is built (`tsup.config.ts`), this file's code ends up
- * bundled into `dist/index.js` at the package root, with `dist/bin/
- * byok-approval-mcp.js` as its direct sibling (same layout `byok-agent.js`
- * already uses) — `path.join(path.dirname(fileURLToPath(import.meta.url)),
- * 'bin', 'byok-approval-mcp.js')` is therefore correct for that one real
- * shape. It is NOT correct for this file's own unbundled TypeScript source
- * location (`src/adapters/claude/` is two directories deeper than `src/`),
- * but nothing in this codebase ever reaches this fallback unbundled — every
- * test that exercises `confirm` mode sets `BYOK_APPROVAL_MCP_BIN` explicitly
- * (see `claude-adapter.test.ts`), exactly like `BYOK_CLAUDE_BIN` already
- * does for the real `claude` binary.
- */
-export declare function resolveApprovalMcpBin(host?: SdkHelperHostConfig): ResolvedApprovalMcpBin;
 // ==== @byok-sdk/client dist/adapters/claude/resolve-bin.d.ts ====
 export interface ResolvedBin {
     command: string;
@@ -3600,20 +3513,16 @@ export interface ApprovalsResolveParams {
 }
 export declare function parseApprovalsResolveParams(value: unknown): ApprovalsResolveParams | undefined;
 /**
- * M4 Phase 3: the control method `byok-approval-mcp` (`bin/byok-approval-mcp.ts`)
- * calls FROM a claude-spawned MCP-server child process — a genuinely
- * different OS process from the daemon, reachable only over this same
- * control socket (see `../types.ts`'s `ApprovalChannel` doc comment for the
- * full why). `taskId` correlates the request to an active task;
- * `summary` is a short, human-readable description of the gated action
- * (carried verbatim into the wire `task.await_approval.summary`).
+ * Shared control method for an adapter's out-of-process approval channel.
+ * taskId correlates the request to an active task; summary is carried into
+ * task.await_approval. Claude no longer consumes this method.
  */
 export interface ApprovalsRequestParams {
     taskId: string;
     summary: string;
 }
 export declare function parseApprovalsRequestParams(value: unknown): ApprovalsRequestParams | undefined;
-/** Result of `approvals.request` — the outcome `byok-approval-mcp` translates into its own MCP `allow`/`deny` answer. */
+/** Result of the retained shared approvals.request control method. */
 export interface ApprovalsRequestResult {
     approved: boolean;
     reason?: string;
@@ -12898,7 +12807,7 @@ export declare class RuntimeStartupDisposalFailure extends Error {
 export declare function isRuntimeStartupDisposalFailure(value: unknown): value is RuntimeStartupDisposalFailure;
 // ==== @byok-sdk/client dist/sdk-reserved-helper-host.d.ts ====
 export declare const BYOK_SDK_HELPER_SUBCOMMAND = "__byok_sdk_helper";
-export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'approval-mcp' | 'agent-team-mcp' | 'mcp-env' | 'pi-rpc' | 'pi-prepared';
+export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'agent-team-mcp' | 'mcp-env' | 'pi-rpc' | 'pi-prepared';
 export interface SdkHelperHostConfig {
     /**
      * Run SDK-reserved helpers by re-entering the product's single-file/SEA
@@ -12924,30 +12833,6 @@ export declare function resolveSdkReservedHelperBin(kind: SdkReservedHelperKind,
  * stdio EOF before this resolves `true`.
  */
 export declare function runSdkReservedHelperCommand(argv?: readonly string[]): Promise<boolean>;
-// ==== @byok-sdk/client dist/sdk-reserved-mcp.d.ts ====
-/** SDK-owned names shared by daemon injection, adapter policy, and MCP helpers. */
-export declare const AGENT_MESSAGE_MCP_SERVER_NAME = "byokagentmessage";
-export declare const AGENT_MESSAGE_TOOL_NAME = "send_agent_message";
-export declare const AGENT_MEMORY_MCP_SERVER_NAME = "byokagentmemory";
-export declare const AGENT_TEAM_MCP_SERVER_NAME = "byokagentteam";
-/** The MCP server NAME the claude adapter registers `byok-approval-mcp` under in its generated `--mcp-config` — combined with `APPROVAL_TOOL_NAME` (single-sourced from `bin/approval-mcp-server.ts`) to form the `mcp__<server>__<tool>` identifier `--permission-prompt-tool` expects. Lives here, beside the other reserved names, so `toolset-registry.ts`'s host-config rejection and the adapters' own "never treat a reserved server as a projected toolset server" rule read from one list. */
-export declare const APPROVAL_MCP_SERVER_NAME = "byokapproval";
-/**
- * Every MCP server name the SDK owns. A server under one of these names is
- * never a projected host toolset server: `toolset-registry.ts` refuses to
- * configure one, and the adapters grant each reserved server exactly the
- * fixed tool its own protocol needs rather than anything observed.
- *
- * A frozen tuple rather than a `Set`: `Object.freeze` on a `Set` freezes the
- * object's own properties and leaves `add`/`delete` fully functional, so the
- * previous shape advertised an immutability it did not have. Three entries
- * make `includes` the same cost as a hash lookup, and the array really is
- * immutable. Use {@link isReservedMcpServerName} rather than reaching for
- * membership directly.
- */
-export declare const RESERVED_MCP_SERVER_NAMES: readonly ["byokagentmessage", "byokagentmemory", "byokapproval", "byokagentteam"];
-/** Whether `name` is one of the SDK-owned MCP server names above. */
-export declare function isReservedMcpServerName(name: string): boolean;
 // ==== @byok-sdk/client dist/types.d.ts ====
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
@@ -13096,29 +12981,10 @@ export interface McpToolsetReloadReceipt {
     toolsets: readonly Readonly<McpToolsetStatus>[];
 }
 /**
- * M4 Phase 3: the out-of-band approval channel `TaskRunner` (`daemon/
- * task-runner.ts`) hands to a prepared operation's `start()` via
- * `RuntimeOperationStartInput.approvalChannel`, for a runtime whose approval mechanism genuinely needs
- * to reach back into the daemon from OUTSIDE the adapter's own process — the
- * claude adapter's concrete case: `claude`'s `--permission-prompt-tool`
- * resolves a pending permission entirely inside a SEPARATE MCP-server child
- * process claude itself spawns (see `bin/byok-approval-mcp.ts`), which has
- * no in-process handle to this task's `Session` at all and must instead call
- * back into the SAME daemon over its control socket. `storeDir`/`productId`
- * are exactly what that out-of-process helper needs to find and authenticate
- * against this daemon's control socket (`daemon/control-protocol.ts`
- * `controlEndpointPath`/`controlTokenPath`); `taskId` is how its request gets
- * correlated back to THIS task once it arrives. `resolve()` is the
- * daemon-side counterpart: it resolves the single most-recently-registered
- * pending approval for this task (via `TaskRunner.requestApproval`'s own
- * `ApprovalRegistry` entry — see `daemon/approvals.ts`), and rejects if none
- * is currently pending, mirroring `Session.resolveApproval`'s own
- * no-notion-of-approval-pending fail-closed contract one level up.
- *
- * Optional and adapter-agnostic on purpose: only an adapter whose runtime
- * genuinely supports an out-of-band pause (claude, today) ever reads this;
- * every other adapter (pi, codex) ignores it exactly as before this field
- * existed.
+ * Adapter-agnostic out-of-band channel handed to prepared operations by TaskRunner.
+ * The shared registry resolves one pending approval for this task and rejects
+ * when none is pending. Claude no longer consumes this channel; third-party
+ * adapters and the daemon's generic needs_approval/control path may use it.
  */
 export interface ApprovalChannel {
     taskId: string;

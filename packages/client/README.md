@@ -32,7 +32,7 @@ The local BYOK daemon. It pairs a device, durably journals tasks, connects over
 WebSocket or long poll, dispatches to local Claude Code, Codex, or pi adapters,
 and exposes authenticated local diagnostics/control commands.
 
-The package installs `byok-agent`, `byok-approval-mcp`, and the SDK-reserved
+The package installs `byok-agent` and the SDK-reserved
 `byok-agent-message-mcp` task helper. The message helper exposes only bounded
 plain text/Markdown; authenticated task, Agent, session, device, tenant, and
 destination facts remain daemon/server authority and are never model input.
@@ -322,7 +322,7 @@ report hits.
 `@byok-sdk/client/mcp-server` is the server counterpart to this package's MCP
 client authority: a tools-only stdio MCP server, transport and baseline only,
 with no product semantics in it. The four SDK-reserved helpers
-(`byok-approval-mcp`, `byok-agent-message-mcp`, `byok-agent-memory-mcp`,
+(`byok-agent-message-mcp`, `byok-agent-memory-mcp`,
 `byok-agent-team-mcp`) are served through it, and a host that spawns its own
 toolset server can use the same entry.
 

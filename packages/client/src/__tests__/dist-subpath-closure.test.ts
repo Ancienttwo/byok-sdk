@@ -96,7 +96,6 @@ const GUARDED: readonly { readonly file: string; readonly allowedSubstrings: rea
   { file: 'mcp-server/index.js', allowedSubstrings: [] },
   { file: 'adapters/index.js', allowedSubstrings: ['pi-coding-agent', '@earendil-works'] },
   { file: 'agent-memory/index.js', allowedSubstrings: [] },
-  { file: 'bin/byok-approval-mcp.js', allowedSubstrings: [] },
   { file: 'bin/byok-agent-message-mcp.js', allowedSubstrings: [] },
   { file: 'bin/byok-agent-memory-mcp.js', allowedSubstrings: [] },
   { file: 'bin/byok-agent-team-mcp.js', allowedSubstrings: [] },

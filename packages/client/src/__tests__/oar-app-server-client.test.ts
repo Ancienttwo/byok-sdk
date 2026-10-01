@@ -199,7 +199,7 @@ describe('OAR injected app-server client', () => {
   });
 });
 
-it('accounts for every vendored file and limits source modifications to the two dispatched files', () => {
+it('accounts for every vendored file and the four maintained runtime source deltas', () => {
   const root = path.resolve(import.meta.dirname, '../../vendor/oar/ef893ac');
   const manifest = JSON.parse(readFileSync(path.join(root, 'source-manifest.json'), 'utf8')) as {
     files: Array<{ path: string; sourcePath: string; upstreamSha256: string; vendoredSha256: string; delta?: string }>;
@@ -212,6 +212,6 @@ it('accounts for every vendored file and limits source modifications to the two 
     if (!row.delta) expect(row.vendoredSha256).toBe(row.upstreamSha256);
     if (row.path.endsWith('.ts')) expect(row.sourcePath).toBe(`packages/oar/src/${row.path}`);
   }
-  expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual(['runtimes/codex/app-server-client.ts', 'runtimes/codex/rpc-control.ts']);
+  expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual(['runtimes/codex/app-server-client.ts', 'runtimes/codex/projection.ts', 'runtimes/codex/rpc-control.ts', 'runtimes/codex/session.ts']);
   expect(readFileSync(path.join(root, 'LICENSE'), 'utf8')).toContain('Apache License');
 });

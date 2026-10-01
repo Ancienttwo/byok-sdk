@@ -1360,9 +1360,9 @@ and not fingerprinted into a prepared manifest — a tool the model can see is a
 tool it will spend tokens attempting, so there is no "register it and refuse
 the call" state. `plan` narrows because plan mode produces no side effects at
 all, so it may not be wider than `readonly`. Under `auto` a task gets every
-observed tool. `confirm` is unaffected: a human answers each call, so the gate
-is per call rather than per tool set, and no classification is required to run
-under it. The two fail-closed refusals therefore apply only under a narrowing
+observed tool. `confirm` remains in the protocol for adapters with interactive
+approval; Claude rejects it before runtime side effects. The two fail-closed
+refusals therefore apply only under a narrowing
 mode: a toolset with no declaration at all cannot run under `readonly` or
 `plan` and is declined by name, and a projected server the mode leaves with no
 callable tool declines the whole admission rather than half-satisfying it.
@@ -1378,9 +1378,9 @@ session resume and relative-path resolution depend on it.
 The boundary is scoped by ORIGIN-INDEPENDENCE: it covers every MCP server the
 task will generate, not only the host toolsets the device projects. The
 reserved SDK helpers the daemon injects (agent messaging, agent memory) and the
-reserved approval server a runtime adapter generates for itself under
-`policy.mode: 'confirm'` are the same kind of child, launched by the same CLI
-from the same inherited cwd. `TaskRunner` therefore resolves the binding
+servers a third-party runtime adapter generates for itself are the same kind
+of child, launched from the same inherited cwd. Claude no longer generates
+an approval MCP server. `TaskRunner` therefore resolves the binding
 whenever a task will generate at least one server of any origin — the projected
 toolsets, the reserved helpers it adds, or a server the picked adapter declares
 it generates itself (`RuntimeAdapterDescriptor.generatesApprovalMcpServer`
@@ -1751,8 +1751,8 @@ executable presence.
 
 Claude is the sole bundled runtime supported in this slice. Its selected local
 servers are projected into one task-scoped `--mcp-config` under
-`--strict-mcp-config`; confirm mode's internal approval server is merged into
-the same closed file. Claude, not the daemon, owns the resulting task-scoped MCP
+`--strict-mcp-config`. Claude rejects `confirm` and does not inject an
+approval MCP server. Claude, not the daemon, owns the resulting task-scoped MCP
 subprocess lifetime. Therefore these registry status primitives are not a
 long-lived connector supervisor and do not independently observe a crash or
 recovery. Pi and Codex decline toolset-aware offers. The

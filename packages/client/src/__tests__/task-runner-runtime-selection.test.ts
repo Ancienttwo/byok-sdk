@@ -35,7 +35,7 @@ const PI_FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.m
 
 /** pi/codex-like: cannot express `confirm`/`plan` — mirrors their real declared `permissionModes` (`pi-adapter.ts`/`codex-adapter.ts`). */
 const NO_CONFIRM: RuntimeCapabilities = { steer: true, resume: true, approvalInteractive: false, permissionModes: ['auto', 'readonly'] };
-/** claude-like: the one bundled adapter that declares `confirm` support (`claude-adapter.ts`). */
+/** Test-local custom adapter that declares real confirm support; bundled Claude rejects it. */
 const CONFIRM_CAPABLE: RuntimeCapabilities = { steer: false, resume: true, approvalInteractive: true, permissionModes: ['auto', 'readonly', 'plan', 'confirm'] };
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -131,7 +131,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
   });
 
   describe('capability matching at admission (pre-claim)', () => {
-    it('confirm-mode offer: claude is picked over pi, since pi cannot express confirm', async () => {
+    it('confirm-mode offer: custom confirm-capable adapter is picked over a non-supporting adapter', async () => {
       const pi = new StubRuntimeAdapter('pi', { kind: 'available', version: '0.0.0' }, NO_CONFIRM);
       const claude = new StubRuntimeAdapter('claude', { kind: 'available', version: '0.0.0' }, CONFIRM_CAPABLE);
       await setup([pi, claude]);
