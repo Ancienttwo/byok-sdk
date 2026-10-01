@@ -139,7 +139,7 @@ Pressure points: upstream registers tool names early and calls setActiveTools at
 - [x] WP1 — runtime proof owner: fff_probe_worker (custom deep-worker). Disposable /tmp package only; no repo implementation edits. Load real pi-fff 0.11.0 with Pi 0.99.1; exercise real file/content search, session disposal, peer compatibility, two-session database behavior and supported native load; Node minimum-version acceptance remains required. Return commands, exit codes, fixture results and exact limitations.
 - [x] WP2 — policy/identity trace owner: fff_policy_explorer (custom explorer). Read-only repo and exact npm artifacts. Trace allow/deny/readonly/zero-tool enforcement and native dependency identity, inspect shared sealed/Prepared build exposure. Produce concrete file ownership and acceptance matrix.
 - [x] WP3 — implementation/feasibility owner: fff_integration_worker, dispatched after preliminary WP1/WP2 readback; no production edits until config-authority proof resolves the falsifier. Own packages/client/package.json, bun.lock, packages/client/tsup*.config.ts, pi-extension-factories.js/.d.ts, new owned factory, pi-rpc-host.ts and necessary permission mapping; implementation-identity source is excluded. Use the contract worktree; do not edit sibling adapters or Prepared tool surface. Produce real integration and policy/lifecycle tests.
-- [ ] WP4 — acceptance owner: independent custom gatekeeper after WP3. Review final diff and run/review required commands plus clean packed install with actual native search; no editing or shipping. Parent owns fixes, plan status and final acceptance.
+- [x] WP4 — acceptance owner: independent custom gatekeeper after WP3. Review final diff and run/review required commands plus clean packed install with actual native search; no editing or shipping. Parent owns fixes, plan status and final acceptance.
 
 - [x] WP5 — Pi 0.99.2 composition acceptance: inherited 23-file upgrade baseline + FFF, client scoped Node 22 probes, root required checks and isolated packed consumer readback; parent owns baseline/workflow, worker owns FFF tests, independent gatekeeper owns final review. No inherited upgrade source is rewritten by workers.
 
@@ -217,3 +217,7 @@ Formal workflow state remains Review: architecture acceptance still has one unre
 ## Approved architecture/typed closeout
 
 User approved on2026-10-01. CodeGraph init indexed1155files/33607nodes/106349edges, projection applied and proof-only signal407cba56... reconciled. The current contract uses eight immutable0992 baselines and exact currentcloseout-only delta checks. Complete metadata before final receipt and do not mutateproduction or baseline executables.
+
+## Formal closeout result
+
+CodeGraph proof is ready; architecture pending/running/dead-letter/human-action/blocking counts are zero and old candidate is reconciled. Prepared canonical evidence accepts eight immutable0992 executions plus four currentcloseout deltas. Independent Codex review passes the exact normalizedsubject756c2314...; authority-issued external_pass receipt is verified and verify-sprint finalizes without rerunning fullverification. This supersedes all historical CodeGraph/typedreceipt pendingnotes above. Local commits only; publication and merge remain separate useractions.

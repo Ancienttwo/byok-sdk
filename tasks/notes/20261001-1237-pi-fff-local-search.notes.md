@@ -80,3 +80,7 @@ WP5 source/note freeze: client build/typecheck, targeted29/29, actualNode22 nati
 ## CodeGraph/typed closeout approval
 
 User approved the remainingcloseout. codegraphinit exited0 (1155files,33607nodes,106349edges). Publicarchitectureapply exited0; proof-only signal407cba56... reconciledafter its staleprojectionmanifest was refreshed. Current architecture unresolvedCandidates=0. Baseline-with-delta explicitly keeps old0992 actualexecutions distinctfrom current metadata checks. Reports: /tmp/fff-codegraph-init.log, /tmp/fff-codegraph-proof.txt, /tmp/fff-architecture-apply.json, /tmp/fff-architecture-reconcile.json.
+
+## Formal closeout completed
+
+Local feature217bf0c8 and workflow03ce5712 commit the approvedauthority on the isolatedbranch; originalprimary WIP untouched. CodeGraph/index/projection/reconciliation pass, unresolved candidates0. Eight historical0992 executions and four currentdelta checks pass; no fullsuite rerun. ChangeAssessment requires runtime_readback and binds cleaninstalledexecution vx-f5c60a1bbc0f47ed9087. Independent exactsubject sha256:756c2314a254be9232b768cb9b0d106078313e595cf94831d03d8b53e40ee9eb passes against708ed45. Authority helper records external_pass, verifies it, and finalverify-sprint exits0 without rerunningverification. Receipt authority path is discoverable with repo-harness run acceptance-receipt path. These finaldelivery metadata edits are part of the five approvedcloseout paths and are frozen before finalreceipt refresh.
