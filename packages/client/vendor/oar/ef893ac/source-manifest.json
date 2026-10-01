@@ -1,0 +1,118 @@
+{
+  "format": "byok.vendor-source",
+  "version": 1,
+  "package": "@botiverse/oar",
+  "packageVersion": "0.10.2",
+  "repository": "https://github.com/botiverse/oar",
+  "commit": "ef893acc0d341b4fa7a1ce41d2be7cafed3c63a2",
+  "license": "Apache-2.0",
+  "files": [
+    {
+      "path": "LICENSE",
+      "sourcePath": "LICENSE",
+      "upstreamSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "vendoredSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "contracts/account-usage.ts",
+      "sourcePath": "packages/oar/src/contracts/account-usage.ts",
+      "upstreamSha256": "4c20f9cac13f83936b0094d705f24a8ca8bfe3f3f1789f12f354345be3290760",
+      "vendoredSha256": "4c20f9cac13f83936b0094d705f24a8ca8bfe3f3f1789f12f354345be3290760"
+    },
+    {
+      "path": "contracts/input.ts",
+      "sourcePath": "packages/oar/src/contracts/input.ts",
+      "upstreamSha256": "0f4a37ab317ec88608352ae77613926ad54ec479a506a4fde3208e1c8751e292",
+      "vendoredSha256": "0f4a37ab317ec88608352ae77613926ad54ec479a506a4fde3208e1c8751e292"
+    },
+    {
+      "path": "contracts/installation.ts",
+      "sourcePath": "packages/oar/src/contracts/installation.ts",
+      "upstreamSha256": "539ee4eb0884af2e5a3b5704ef810a6b51cab1e61de82c49c82fc167b4324bcf",
+      "vendoredSha256": "539ee4eb0884af2e5a3b5704ef810a6b51cab1e61de82c49c82fc167b4324bcf"
+    },
+    {
+      "path": "contracts/records.ts",
+      "sourcePath": "packages/oar/src/contracts/records.ts",
+      "upstreamSha256": "45433cef6de08d47609356a009acaa162f1c1ea7e25fc98b0e7c07744cc09028",
+      "vendoredSha256": "45433cef6de08d47609356a009acaa162f1c1ea7e25fc98b0e7c07744cc09028"
+    },
+    {
+      "path": "contracts/session.ts",
+      "sourcePath": "packages/oar/src/contracts/session.ts",
+      "upstreamSha256": "8d308c194891b97de77524a60e6b7402ccfccf707e7a7ab5c4e6ed33d552ebc7",
+      "vendoredSha256": "8d308c194891b97de77524a60e6b7402ccfccf707e7a7ab5c4e6ed33d552ebc7"
+    },
+    {
+      "path": "contracts/status.ts",
+      "sourcePath": "packages/oar/src/contracts/status.ts",
+      "upstreamSha256": "c1a5d0b53c7f7bba606c1acf306446e53e9be4cacf96cc982589c51ac8a59d03",
+      "vendoredSha256": "c1a5d0b53c7f7bba606c1acf306446e53e9be4cacf96cc982589c51ac8a59d03"
+    },
+    {
+      "path": "runtimes/codex/app-server-client.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/app-server-client.ts",
+      "upstreamSha256": "60058b3e0069d6c8797f133709a52e1a102eb46b1c5b3a0d4ea99f8e4a3c457e",
+      "vendoredSha256": "5b27b16ffff8d7c71876768e76a7ca2a80d02ed0e37643713d6636fda5ef54cc",
+      "delta": "Inject caller-owned line-process spawn; pass explicit env unchanged; preserve server ids and support replies; default/per-request timeouts; bounded held and pending state with fatal overflow; release timers on settlement, failed write, exit and kill. S2b: settlement consumer errors reject already-dequeued waiters; no uncaught timer failure."
+    },
+    {
+      "path": "runtimes/codex/item-detail.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/item-detail.ts",
+      "upstreamSha256": "fb82902a7cb84d919dc47012726bb263ed9fb72069fb8a083bbbb772314d6b92",
+      "vendoredSha256": "fb82902a7cb84d919dc47012726bb263ed9fb72069fb8a083bbbb772314d6b92"
+    },
+    {
+      "path": "runtimes/codex/open.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/open.ts",
+      "upstreamSha256": "9e5400d417a90e27451405a679fc6dea87cb8508d0e4aea26fc4bec184127a8a",
+      "vendoredSha256": "9e5400d417a90e27451405a679fc6dea87cb8508d0e4aea26fc4bec184127a8a"
+    },
+    {
+      "path": "runtimes/codex/projection.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/projection.ts",
+      "upstreamSha256": "301778ad5b26aab5d544996b05ffe05edfb9f1377f1747d6fa51c06ea639854c",
+      "vendoredSha256": "b8c9f2a39caa31e1d4af21f1fb072a43ea5a709c9bf90069401ca0fd820b4e18",
+      "delta": "BYOK S2a: remove regex failure classification, retain raw reason and required failure unknown sentinel."
+    },
+    {
+      "path": "runtimes/codex/reasoning.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/reasoning.ts",
+      "upstreamSha256": "d00f408f6b4627e2620d37f56a1e943631fd5911b536df4080e6f45ebd36b23e",
+      "vendoredSha256": "d00f408f6b4627e2620d37f56a1e943631fd5911b536df4080e6f45ebd36b23e"
+    },
+    {
+      "path": "runtimes/codex/rpc-control.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/rpc-control.ts",
+      "upstreamSha256": "16e1c120f2ac97f19dd6dac6f7342ecd03fbd3c38f16cbfe55833083afcd8127",
+      "vendoredSha256": "ad64c8b386622061f6ce16d65a7260bde1f9e3c51ff683d9881c7630018db543",
+      "delta": "Pass configurable control deadline (default 30000ms) and record typed RPC timeouts as rejected responses. Use an equivalent deferred Promise compatible with the SDK ES2022 lib. S2b: replace the redundant deferred response waiter with synchronous response capture to avoid hanging on required-consumer/budget failure."
+    },
+    {
+      "path": "runtimes/codex/session.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/session.ts",
+      "upstreamSha256": "c7ff370185db27c2a20cd775fb1df3394c7ded3d0f3afe00a5309bb7fcef2e05",
+      "vendoredSha256": "d37601be130ae88bf6a4ac7aed05680dab8ae577993f51ecc5fc488880f1b749",
+      "delta": "BYOK S2a: injected spawn and explicit filtered env; fixed YOLO sandbox; raw AdapterSession without sealSession/input-images; native-first frame capture with visible fold failure/kill; bounded server request decline/reject using 0.159.2 response schemas; ES2022 deferred Promise. S2b: explicit body.origin=byok-native; inject required consumer/budget before registration."
+    },
+    {
+      "path": "shared/instant.ts",
+      "sourcePath": "packages/oar/src/shared/instant.ts",
+      "upstreamSha256": "4cdacb86431183fc408c16eb243e54e6e8bf75812d8706202707c9c254e006dd",
+      "vendoredSha256": "4cdacb86431183fc408c16eb243e54e6e8bf75812d8706202707c9c254e006dd"
+    },
+    {
+      "path": "shared/json.ts",
+      "sourcePath": "packages/oar/src/shared/json.ts",
+      "upstreamSha256": "14c655b29c9df8355fd8a396ff2e15420de6e9dce183e55f8ee7cf336e6626cb",
+      "vendoredSha256": "14c655b29c9df8355fd8a396ff2e15420de6e9dce183e55f8ee7cf336e6626cb"
+    },
+    {
+      "path": "shared/session-kernel.ts",
+      "sourcePath": "packages/oar/src/shared/session-kernel.ts",
+      "upstreamSha256": "b7a13c3a72bfed00d665a2a50ad9cd3f866315b6cc42e7badf81a7c787276f2a",
+      "vendoredSha256": "0f46c74f8e154999926a1c3c6032a8a425f029dec96124b753f23fba348a7c61",
+      "delta": "BYOK S2b: fatal serialized retained-record byte budget; required consumer runs after append outside best-effort observers."
+    }
+  ]
+}

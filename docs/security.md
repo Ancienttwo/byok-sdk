@@ -2,7 +2,7 @@
 
 Scope: the BYOK SDK as built through WP3B Step 4b (device auth, long-poll-only
 transport,
-local control socket, claude realtime approval, rate limiting, service
+local control socket, shared approval controls, rate limiting, service
 lifecycle, runtime environment allowlists, plaintext transport gating, runtime
 selection, resource limits, and unified graceful shutdown). This is a threat
 model, not a compliance document — it states what each surface defends against,
@@ -438,19 +438,13 @@ the wire (`packages/client/src/daemon/control-protocol.ts`,
 | Same-user local process | Read `control.token`, complete the handshake, and call any control method (`status`, `approvals.*`, `tasks.subscribe`, `shutdown`, and — when explicitly enabled — `assertion.issue`, see section 5) — **this is by design**: same-user is the trust boundary, equivalent to the device owner running the CLI themselves | — |
 | Other local user | — | Read `control.token` (0600) or traverse into `storeDir`/the tmpdir fallback subdirectory (0700 + ownership/symlink checks) — cannot complete the handshake without the token even if a connection were somehow reachable |
 
-### 3. Approval path (claude realtime confirm mode)
+### 3. Shared approval path
 
-`claude`'s own `--permission-prompt-tool` spawns `byok-approval-mcp`
-(`packages/client/src/bin/byok-approval-mcp.ts`) as **claude's child
-process**, a stdio MCP server that relays each gated tool call to this
-device's daemon over the control socket (`approvals.request`) and answers
-`allow`/`deny` once a decision lands.
+Claude rejects `confirm` before runtime side effects. The ADR-015 approval MCP
+helper and `--permission-prompt-tool` integration have been removed. The
+adapter-agnostic daemon approval registry and control methods remain for
+runtimes that emit `needs_approval` or otherwise use the shared approval channel.
 
-- **Fail-closed on every failure mode**: an unreachable daemon, a broken
-  control connection, or a timeout all resolve to `deny` — never leave the
-  MCP call unanswered (claude itself abandons an unanswered
-  permission-prompt-tool call in ~1.5s, which would otherwise abort the
-  whole turn) — `approval-mcp-server.ts`'s `handleMcpRequest` catch branch.
 - **Fail-closed timeout on the daemon side**: `TaskRunner.requestApproval`
   force-resolves as a rejection once `approvalTimeoutMs` elapses with no
   decision (default 10 minutes) — `task-runner.ts`'s `dispatchApproval`.
@@ -470,14 +464,14 @@ device's daemon over the control socket (`approvals.request`) and answers
 
 | Attacker position | Can | Cannot |
 |---|---|---|
-| Remote network | — | Reach the stdio MCP transport between claude and its own child, or the control socket |
+| Remote network | — | Reach the local control socket |
 | Malicious/compromised SaaS | Send `task.approve`/`task.reject` for a task it offered — a legitimate use of the wire's own approve channel, racing any local decision, in a window now narrowed to network latency (see below) | Bypass the fail-closed timeout; force an approval to resolve any faster than a real decision arriving; read or resolve an approval for a task it didn't offer |
 | Same-user local process | Call `approvals.resolve` directly over the control socket, independent of claude/MCP entirely — the device owner's own override path, by design | — |
-| Other local user | — | Reach either the MCP stdio (parented by a specific claude child process) or the control socket (blocked by perms) |
+| Other local user | — | Reach the control socket (blocked by perms) |
 
 A compromised SaaS approving its own offered task is not a privilege
 escalation beyond what it already had as the offering party — the actual
-safety property `confirm` mode adds is that the device owner's own local
+safety property the shared approval channel adds is that the device owner's own local
 `approve`/`reject` can independently race and win, and that an unreachable
 or silent SaaS denies by default (via the timeout) instead of hanging a
 task forever.
@@ -724,15 +718,12 @@ explicitly.
   `policy.mode: 'plan'` tasks to a claude-capable device.
   `adapters/claude/events.ts` at least confirms a write outside
   `workspaceDir` is never reported back as a task artifact.
-- **Codex's sandbox mode does not survive `resume` unless re-pinned on
-  every call — mitigated, but worth naming.** A `codex exec resume`
-  empirically does NOT inherit the sandbox mode a session was originally
-  started with; left unpinned, it silently falls back to the local
-  machine's own ambient `~/.codex/config.toml` default. `codex/
-  permission-mapping.ts` re-pins `-c sandbox_mode=...` (and
-  `approval_policy=never`) on every single invocation — start and every
-  `followUp` — specifically because of this finding, not out of general
-  caution.
+- **Codex app-server runs with full filesystem and network access.**
+  The 0.159.2 adapter supports `auto` only, rejects `readonly` and
+  `network:false`, and resumes through `thread/resume` on the owned app-server
+  process. This migration removes the old sandbox-based confinement claim.
+  Exact task MCP tool grants do not establish exclusion of ambient user MCP
+  configuration; that exclusion remains unverified.
 - **Automated test coverage of the control socket's own file-mode bits is
   thinner than the tmpdir-fallback case.** `control-server.test.ts` has an
   explicit numeric-mode assertion (`0o700`) only for the tmpdir long-path
@@ -765,13 +756,11 @@ sandbox to rely on as a hard boundary:
   (`claude/permission-mapping.ts`'s central finding). The plan-mode residual
   above is the concrete, confirmed instance of this: even claude's most
   restrictive mode still writes one specific file outside the workspace.
-- **codex** is the partial exception: its `sandbox_mode` is a real
-  configuration dial with an actual behavioral default (both sandbox modes
-  this adapter ever selects default to *no network*), which is why
-  `network: false` is the one capability codex can actually *support*
-  rather than reject fail-closed. That said, this SDK has not independently
-  re-verified codex's sandbox as a filesystem-confinement guarantee beyond
-  what `docs/protocol.md` §11.2 already states.
+- **codex** uses app-server with `danger-full-access`. The adapter provides
+  no filesystem or network sandbox, and rejects `readonly`, `network:false`,
+  and nonempty built-in tool restrictions before runtime side effects.
+  Filtering its environment remains useful, but does not limit files the
+  same OS user can read.
 
 Practically: `ctx.workspaceDir` is a strong, working default — every
 adapter passes it as the task's cwd and, where the runtime supports it,
@@ -823,7 +812,7 @@ path. Two related fixes:
   checks whether the candidate adapter can even express the offer's
   `PermissionPolicy.mode` (via that adapter's own declared
   `descriptor.capabilities.permissionModes`) — pi and codex cannot express
-  `confirm`/`plan`; claude can. Auto-select skips a non-supporting candidate
+  `confirm`/`plan`; claude supports `plan` and rejects `confirm`. Auto-select skips a non-supporting candidate
   and keeps walking the preference order; if nothing eligible supports the
   mode, or an explicitly-requested runtime can't express it, the offer is
   declined fail-closed, pre-claim. Previously this mismatch surfaced only

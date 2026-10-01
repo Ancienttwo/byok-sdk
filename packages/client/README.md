@@ -32,7 +32,7 @@ The local BYOK daemon. It pairs a device, durably journals tasks, connects over
 WebSocket or long poll, dispatches to local Claude Code, Codex, or pi adapters,
 and exposes authenticated local diagnostics/control commands.
 
-The package installs `byok-agent`, `byok-approval-mcp`, and the SDK-reserved
+The package installs `byok-agent` and the SDK-reserved
 `byok-agent-message-mcp` task helper. The message helper exposes only bounded
 plain text/Markdown; authenticated task, Agent, session, device, tenant, and
 destination facts remain daemon/server authority and are never model input.
@@ -119,23 +119,24 @@ createDaemon({
 The map accepts only `command` and `args`; put OAuth tokens, cookies, and other
 secrets behind the local MCP process's own credential broker.
 
-A projected toolset must also be *callable*, and neither runtime grants an MCP
-tool implicitly: Claude auto-denies an ungranted `mcp__<server>__<tool>` call
-under `--permission-mode default` and under `acceptEdits`, and Codex refuses
-every MCP tool call under its pinned `approval_policy=never`. So before an
+A projected toolset must also be *callable*. Claude auto-denies an ungranted
+`mcp__<server>__<tool>` call under `--permission-mode default` and `acceptEdits`.
+Codex app-server uses exact `enabled_tools`; under YOLO, lack of per-tool
+preapproval alone is not a verified denial boundary. Before an
 adapter is asked to admit a toolset offer, the daemon starts each projected
 server and reads that server's own `tools/list` answer. Those observed names —
 never a configured value, never a wildcard — are what each adapter grants:
 
 - Claude: `--allowedTools mcp__<server>__<tool>,…` under `readonly` and
   `auto`, alongside the unchanged `--tools` (so `readonly` with
-  `allowTools: []` still runs with every built-in disabled). `confirm` and
-  `plan` never pre-grant: `confirm`'s approval channel must see each call, and
-  `plan` promises not to execute one.
+  `allowTools: []` still runs with every built-in disabled). Claude rejects
+  `confirm`; `plan` never pre-grants because it promises not to execute a call.
 - Codex: `mcp_servers.<server>.enabled_tools` plus
   `mcp_servers.<server>.tools.<tool>.approval_mode="approve"` for exactly
-  those tools. Global `approval_policy=never` and the mode's `sandbox_mode`
-  stay untouched, and Codex older than 0.149 is rejected before spawn.
+  those tools. Codex requires exactly 0.159.2 with app-server support and uses
+  `danger-full-access`/YOLO with `approval_policy=never`. Only `auto` is supported;
+  `readonly`, `network:false`, and nonempty built-in allow/deny lists are rejected.
+  Detection refuses unavailable app-server or unsupported runtime versions.
 
 A projected server that cannot start, or that lists no tools, is declined
 pre-claim and retryably, rather than claimed and handed a toolset the model can
@@ -322,7 +323,7 @@ report hits.
 `@byok-sdk/client/mcp-server` is the server counterpart to this package's MCP
 client authority: a tools-only stdio MCP server, transport and baseline only,
 with no product semantics in it. The four SDK-reserved helpers
-(`byok-approval-mcp`, `byok-agent-message-mcp`, `byok-agent-memory-mcp`,
+(`byok-agent-message-mcp`, `byok-agent-memory-mcp`,
 `byok-agent-team-mcp`) are served through it, and a host that spawns its own
 toolset server can use the same entry.
 
@@ -527,7 +528,7 @@ Write an absolute-path JSON file with mode `0600` (its contexts are bearer secre
 byok-agent team relay dev --bindings /absolute/private-bindings.json --codex-bin /absolute/codex --max-notifications 2 --config /absolute/agent.json
 ```
 
-POSIX only; the executable must report `codex-cli 0.153.4`, the qualified native
+POSIX only; the executable must report `codex-cli 0.159.2`, the qualified native
 queue version. Endpoints must be explicit loopback `ws://127.0.0.1:<port>` /
 `ws://[::1]:<port>` or `unix:///absolute/socket`. No remote server discovery. Loopback app-server queue endpoints trust local
 processes; the relay does not add authentication to the native Codex endpoint.

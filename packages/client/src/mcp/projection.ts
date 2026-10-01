@@ -138,10 +138,9 @@ export type McpObservationPolicyResolution =
  *   NO side effects, so it may not be wider than `readonly`.
  * - `auto`: does not narrow. Every observed tool, no classification needed.
  * - `confirm`: does not narrow. A human answers each call, so the gate is per
- *   call rather than per tool set — and claude deliberately emits no MCP
- *   pre-grant at all under confirm (`adapters/claude/permission-mapping.ts`),
- *   so narrowing here would only refuse an unclassified toolset a human was
- *   going to adjudicate anyway.
+ *   call rather than per tool set for a custom adapter supporting confirm.
+ *   Bundled adapters reject confirm before runtime side effects; this shared
+ *   policy projection does not grant them an interactive approval capability.
  */
 function narrowsToReadOnlyTools(permissionMode: PermissionMode): boolean {
   switch (permissionMode) {

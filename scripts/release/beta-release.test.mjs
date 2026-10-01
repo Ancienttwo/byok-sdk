@@ -74,7 +74,7 @@ test('publish and readback reject a missing or latest prerelease tag before regi
       const manifest = { name: `@byok-sdk/${name}`, version };
       if (name === 'client') {
         manifest.dependencies = Object.fromEntries(
-          ['pi-coding-agent', 'pi-ai', 'pi-agent-core'].map((pkg) => [`@earendil-works/${pkg}`, '0.99.1']),
+          ['pi-coding-agent', 'pi-ai', 'pi-agent-core'].map((pkg) => [`@earendil-works/${pkg}`, '0.99.2']),
         );
       }
       writeFileSync(path.join(fixturePackage, 'package.json'), `${JSON.stringify(manifest)}\n`);

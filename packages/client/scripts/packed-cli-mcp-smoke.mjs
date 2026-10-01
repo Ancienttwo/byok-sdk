@@ -76,6 +76,8 @@ try {
       }, `${entry} actual MCP completion`);
       const calls = readFileSync(audit, 'utf8').trim().split('\n').map(line => JSON.parse(line)).filter(row => row.kind === 'tools/call');
       assert.equal(calls.length, 1, `${entry}: expected exactly one real tools/call`);
+      assert.equal(calls[0].name, 'echo');
+      assert.deepEqual(calls[0].arguments, { text: 'CLI_MCP_OK' });
       console.log(`[packed-cli-mcp] ${entry}: actual MCP tools/call passed`);
     } finally {
       await daemon?.stop();

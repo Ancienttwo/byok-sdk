@@ -29,7 +29,7 @@
  * argument is, whether a domain failure is an error response or a successful
  * result carrying a refusal — belongs to the server that supplied `callTool`.
  * The approval helper's fail-closed `{behavior:'deny'}` RESULT is the sharpest
- * case: a permission-prompt-tool call that never cleanly answers makes claude
+ * case: an MCP call that never cleanly answers can leave its runtime
  * abandon the turn, so that failure must stay a `result`, and a transport core
  * must not be able to turn it into an `error`.
  *

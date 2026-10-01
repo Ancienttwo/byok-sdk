@@ -9,7 +9,6 @@ import {
   PolicyUnsupportedError,
   SteerUnsupportedError,
   freezeRuntimeAdapterDescriptor,
-  type ApprovalChannel,
   type RuntimeAdapter,
   type RuntimeDetectResult,
   type RuntimeAdapterPrepareInput,
@@ -22,21 +21,17 @@ import { wrapMcpServerWithLaunchCwd } from '../../daemon/trusted-launch-cwd';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
 import { withoutProviderCredentials } from '../provider-credential-environment';
-import { resolveApprovalMcpBin, type ResolvedApprovalMcpBin } from './resolve-approval-mcp-bin';
+import { createClaudeControlChannel } from './control-channel';
 import { mapPermissionPolicyToClaudeArgs } from './permission-mapping';
 import { createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ToolUseCorrelation } from './events';
 import { ClaudeProcessClient, type SpawnFn } from './process-client';
-import { APPROVAL_TOOL_NAME } from '../../bin/approval-mcp-server';
 import {
   grantFingerprint,
   resolveMcpToolsetGrants,
   resolveReservedMcpToolGrants,
   type McpToolsetGrant,
 } from '../mcp-tool-grants';
-import { APPROVAL_MCP_SERVER_NAME } from '../../sdk-reserved-mcp';
 
-/** The MCP server NAME this adapter registers `byok-approval-mcp` under in the generated `--mcp-config` — combined with {@link APPROVAL_TOOL_NAME} (single-sourced from `bin/approval-mcp-server.ts` so the two can never independently drift) to form the `mcp__<server>__<tool>` identifier `--permission-prompt-tool` expects. Defined in `sdk-reserved-mcp.ts` beside the other SDK-owned server names, and re-exported from here, its original home, so the host-config rejection and the toolset-grant rule read one list. */
-export { APPROVAL_MCP_SERVER_NAME };
 
 const execFileAsync = promisify(execFile);
 
@@ -65,8 +60,8 @@ export interface ClaudeAdapterOptions {
   resolveBin?: () => ResolvedBin;
   /** Override process spawning — tests substitute a fake spawn. */
   spawnFn?: SpawnFn;
-  /** M4 Phase 3: override `byok-approval-mcp` bin resolution — tests substitute a fixture script instead of computing a real dist path. Mirrors `resolveBin` above. */
-  resolveApprovalMcpBin?: () => ResolvedApprovalMcpBin;
+  /** Deadline for native interrupt ACK before owned-process termination fallback. */
+  interruptTimeoutMs?: number;
 }
 
 /**
@@ -117,43 +112,9 @@ export interface ClaudeAdapterOptions {
  * something upstream expected approval support this adapter genuinely does
  * not have.
  *
- * `PermissionPolicy.mode: 'confirm'` — the policy mode whose whole point is
- * "ask a human, then proceed" — was therefore rejected outright at
- * `start()` through M2/M3 (fail-closed, see `permission-mapping.ts`), never
- * silently downgraded to auto-accept or auto-deny.
- *
- * ## M4 Phase 3 update: a genuine out-of-band pause DOES exist — it is
- * just invisible to everything written above
- *
- * `--permission-prompt-tool` (a DIFFERENT flag from `--permission-mode`,
- * undocumented in `claude --help`'s own output on the installed 2.1.216
- * binary but empirically confirmed accepted — an unrecognized flag is
- * rejected outright with `error: unknown option`, this one is not) makes
- * claude block a turn on a real MCP round-trip to a server it spawns
- * itself, waiting for that server to answer allow/deny before continuing —
- * genuinely pausing, for real wall-clock time (live-verified: an instant
- * allow/deny, AND a deliberate multi-second delayed answer, both worked
- * identically; only a permission-prompt-tool call that never answers AT
- * ALL was found to make claude abandon the turn on its own, after roughly
- * 1.5s — never actually reachable by this design, since the bundled
- * `bin/byok-approval-mcp.ts` always eventually answers within its own
- * configured ceiling).
- *
- * Everything above this section remains true and is NOT superseded by
- * this: claude's own stream-json output still emits nothing while this
- * pause is in progress — the gap between a `tool_use` frame and its
- * `tool_result` is indistinguishable from ordinary model latency on the
- * wire, and there is still no `needs_approval`-shaped frame this adapter's
- * event mapper could ever produce. The pause is real, but it is invisible
- * to `ClaudeSession.events` and to `task-runner.ts`'s `pump()` entirely —
- * it is only ever observable from OUTSIDE this adapter's own process, by
- * the separate MCP-server child process claude itself spawns. This is why
- * `confirm` mode's daemon-side wiring (`task-runner.ts`'s `requestApproval`,
- * `types.ts`'s `ApprovalChannel`) is driven from the control socket, not
- * from any `AgentEvent` — see those files' own doc comments for the full
- * design this finding drove. `confirm` is now SUPPORTED (see
- * `permission-mapping.ts` and `resolveApproval()` below), still fail-closed
- * whenever no approval channel was actually wired up for this session.
+ * `PermissionPolicy.mode: 'confirm'` is rejected before runtime side effects.
+ * The private approval MCP helper and permission-prompt-tool integration have
+ * been removed. The shared needs_approval contract remains for other adapters.
  *
  * ## Steering was also found unsupported (a second, related finding)
  *
@@ -177,22 +138,20 @@ export class ClaudeAdapter implements RuntimeAdapter {
     // without the daemon's own `tools/list` observation of it.
     requiresMcpToolsetToolObservation: true,
     mcpServerLaunch: 'launcher-wrapped',
-    // `permission-mapping.ts`'s `needsApprovalMcp`: mode 'confirm' makes
-    // `start()` below generate the approval server, so the daemon must
-    // resolve the launch binding for such a task even when it projects no
-    // toolset of its own.
-    generatesApprovalMcpServer: true,
     capabilities: {
       steer: false,
       resume: true,
-      approvalInteractive: true,
+      approvalInteractive: false,
       mcpToolsets: true,
-      permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
+      permissionModes: ['auto', 'readonly', 'plan'],
     },
     environmentRequirements: { credentialNames: [] },
   });
 
-  constructor(private readonly options: ClaudeAdapterOptions = {}) {}
+  constructor(private readonly options: ClaudeAdapterOptions = {}) {
+    const timeout = options.interruptTimeoutMs ?? 1000;
+    if (!Number.isFinite(timeout) || timeout <= 0 || timeout > 2_147_483_647) throw new TypeError('invalid Claude interrupt timeout');
+  }
 
   async detect(): Promise<RuntimeDetectResult> {
     try {
@@ -238,27 +197,16 @@ export class ClaudeAdapter implements RuntimeAdapter {
     } catch (error) {
       return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: false };
     }
-    if (mapping.needsApprovalMcp && Object.prototype.hasOwnProperty.call(input.mcpServers ?? {}, APPROVAL_MCP_SERVER_NAME)) {
-      return { kind: 'reject', reason: `MCP server name "${APPROVAL_MCP_SERVER_NAME}" is reserved by the claude approval channel`, retryable: false };
-    }
     let bin: ResolvedBin;
     try {
       bin = this.resolveBin();
     } catch (error) {
       return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: true };
     }
-    let approvalMcpBin: ResolvedApprovalMcpBin | undefined;
-    if (mapping.needsApprovalMcp) {
-      try {
-        approvalMcpBin = (this.options.resolveApprovalMcpBin ?? resolveApprovalMcpBin)();
-      } catch (error) {
-        return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: true };
-      }
-    }
     return {
       kind: 'prepared',
       operation: {
-        start: (startInput) => this.startPrepared(startInput, mapping, modelId, bin, approvalMcpBin, toolsetGrants.grants, input.policy.mode),
+        start: (startInput) => this.startPrepared(startInput, mapping, modelId, bin, toolsetGrants.grants, input.policy.mode),
       },
     };
   }
@@ -268,7 +216,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
     initialMapping: ReturnType<typeof mapPermissionPolicyToClaudeArgs>,
     modelId: string | undefined,
     bin: ResolvedBin,
-    approvalMcpBin: ResolvedApprovalMcpBin | undefined,
     preparedGrants: readonly McpToolsetGrant[],
     /** The mode the grants were resolved under; re-filtering with any other would compare two different policies. */
     permissionMode: PermissionMode,
@@ -317,64 +264,16 @@ export class ClaudeAdapter implements RuntimeAdapter {
     }
     const mapping = { ...initialMapping, args: [...initialMapping.args] };
 
-    // M4 Phase 3: `confirm` mode's approval channel. Generating the
-    // temp --mcp-config file is a real filesystem side effect (see
-    // permission-mapping.ts's `needsApprovalMcp` doc comment for why this
-    // lives here, in start(), rather than in the pure mapping function) —
-    // deliberately OUTSIDE the operation workspace (a fresh, 0700 os.tmpdir()
-    // subdirectory instead) so it never shows up to the agent's own
-    // workspace-scoped Read/Glob/Grep, even though its contents (a storeDir
-    // path, productId, and this taskId — no secret/token material at all;
-    // the actual control-socket auth token stays under storeDir, unrelated
-    // to this file) would be low-value to an agent that found it anyway.
+    // Generate only task-scoped host/reserved MCP config outside the operation workspace.
     let mcpConfigDir: string | undefined;
     const taskMcpServers = startInput.mcpServers ?? {};
-    const needsMcpConfig = mapping.needsApprovalMcp || Object.keys(taskMcpServers).length > 0;
-    if (mapping.needsApprovalMcp) {
-      if (!startInput.approvalChannel) {
-        // Internal-consistency fail-closed: TaskRunner always populates this
-        // (see task-runner.ts's handleOffer) — a missing one here means
-        // something upstream is badly wired, not a normal policy rejection.
-        throw new RuntimeExecutionFailure({
-          phase: 'start',
-          category: 'authority',
-          retry: 'non-retryable',
-          reason: 'claude adapter requires policy.mode "confirm" to be started with an approval channel',
-        });
-      }
-      if (!approvalMcpBin) throw new RuntimeExecutionFailure({
-        phase: 'start', category: 'authority', retry: 'non-retryable',
-        reason: 'prepared claude approval MCP binary was not resolved',
-      });
-    }
+    const needsMcpConfig = Object.keys(taskMcpServers).length > 0;
 
     if (needsMcpConfig) {
       mcpConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-mcp-'));
       await fs.chmod(mcpConfigDir, 0o700).catch(() => {});
       const mcpConfigPath = path.join(mcpConfigDir, 'mcp-config.json');
       const mcpServers: Record<string, unknown> = { ...taskMcpServers };
-      if (mapping.needsApprovalMcp) {
-        const approvalChannel = startInput.approvalChannel;
-        if (!approvalChannel) throw new RuntimeExecutionFailure({
-          phase: 'start', category: 'authority', retry: 'non-retryable',
-          reason: 'prepared claude approval channel was not available',
-        });
-        const preparedApprovalMcpBin = approvalMcpBin;
-        if (!preparedApprovalMcpBin) throw new RuntimeExecutionFailure({
-          phase: 'start', category: 'authority', retry: 'non-retryable',
-          reason: 'prepared claude approval MCP binary was not resolved',
-        });
-        mcpServers[APPROVAL_MCP_SERVER_NAME] = {
-          command: preparedApprovalMcpBin.command,
-          args: preparedApprovalMcpBin.args,
-          env: {
-            BYOK_STORE_DIR: approvalChannel.storeDir,
-            BYOK_PRODUCT_ID: approvalChannel.productId,
-            BYOK_TASK_ID: approvalChannel.taskId,
-            BYOK_APPROVAL_TIMEOUT_MS: String(approvalChannel.timeoutMs),
-          },
-        };
-      }
       // The claude CLI spawns every server in this file itself, and
       // `mcpServers` has no per-server cwd field — the child would inherit the
       // CLI's cwd, which is the manifest cwd, which for an Agent task is the
@@ -387,11 +286,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
       // The CLI's OWN cwd is deliberately unchanged: session resume and
       // relative path resolution depend on it (`agent-home-contract.test.ts`).
       //
-      // The guard below counts the GENERATED map, not the daemon's projected
-      // one: the approval server this adapter adds itself is an MCP server
-      // child like any other, and a `confirm`-mode task with no host toolset
-      // at all used to slip past a host-toolset-only guard and be written
-      // unwrapped.
       const launchBinding = startInput.mcpLaunch;
       if (Object.keys(mcpServers).length > 0
         && (launchBinding === undefined || launchBinding.launcher === undefined)) {
@@ -422,9 +316,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
       await fs.writeFile(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });
       mapping.args = [
         ...mapping.args,
-        ...(mapping.needsApprovalMcp
-          ? ['--permission-prompt-tool', `mcp__${APPROVAL_MCP_SERVER_NAME}__${APPROVAL_TOOL_NAME}`]
-          : []),
         '--mcp-config',
         mcpConfigPath,
         // The generated file is the complete task-scoped MCP authority.
@@ -476,6 +367,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       ...mapping.args,
     ];
 
+    const control = createClaudeControlChannel(this.options.interruptTimeoutMs ?? 1000);
     let client: ClaudeProcessClient;
     try {
       client = new ClaudeProcessClient({
@@ -484,6 +376,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         cwd: manifestCwd,
         env: withoutProviderCredentials(startInput.env),
         spawnFn: this.options.spawnFn,
+        control,
       });
     } catch (cause) {
       await cleanupMcpConfigDir(mcpConfigDir);
@@ -562,7 +455,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       sessionRef,
       client,
       manifestCwd,
-      startInput.approvalChannel,
+      control,
       mcpConfigDir,
       manifestModelId,
     );
@@ -623,8 +516,7 @@ class ClaudeSession implements Session {
     public readonly sessionRef: string,
     private readonly client: ClaudeProcessClient,
     private readonly workspaceDir: string,
-    /** M4 Phase 3: set only when this session was started under `policy.mode: 'confirm'` — see `resolveApproval()`. */
-    private readonly approvalChannel?: ApprovalChannel,
+    private readonly control: ReturnType<typeof createClaudeControlChannel>,
     /** Task-scoped temp `--mcp-config` directory, if any — removed in `close()`. */
     private readonly mcpConfigDir?: string,
     private readonly modelId?: string,
@@ -634,6 +526,7 @@ class ClaudeSession implements Session {
     const client = this.client;
     const correlation = this.correlation;
     const workspaceDir = this.workspaceDir;
+    const control = this.control;
     return {
       [Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
         const inner = client.events[Symbol.asyncIterator]();
@@ -707,6 +600,15 @@ class ClaudeSession implements Session {
               if (value.type === 'result') turnSettled = true;
 
               const mapped = mapClaudeMessageToAgentEvents(value, correlation, { workspaceDir });
+              if (value.type === 'result' && control.contextWindow !== null) {
+                const usage = mapped.events.find(event => event.type === 'usage');
+                if (usage?.type === 'usage') {
+                  usage.contextWindow = control.contextWindow;
+                  usage.contextSource = 'provider';
+                } else {
+                  mapped.events.unshift({ type: 'usage', contextWindow: control.contextWindow, contextSource: 'provider' });
+                }
+              }
               terminalFailure = mapped.terminalFailure ?? terminalFailure;
               if (mapped.unmappedLabel) {
                 client.recordUnmappedFrame(mapped.unmappedLabel);
@@ -757,20 +659,9 @@ class ClaudeSession implements Session {
     this.client.writeUserMessage(task.instruction);
   }
 
-  /**
-   * Real claude has no distinct "abort but stay alive" primitive the way
-   * pi's RPC mode does (`{type:'abort'}`, after which pi keeps running and
-   * stays queryable) — nothing in `claude --help` exposes one, and this
-   * task's probes found none. SIGTERM (via `ClaudeProcessClient.kill()`)
-   * is the only verified way to stop an in-flight turn, so `interrupt()`
-   * and `close()` both resolve to the same underlying action here. This is
-   * consistent with how they are actually used together: `task-runner.ts`'s
-   * `handleCancel` always calls `interrupt()` immediately followed by
-   * `close()` on the same task, never `interrupt()` alone expecting the
-   * session to remain usable afterward.
-   */
+  /** Native interrupt ACK is bounded; TaskRunner still closes after cancellation acknowledgment. */
   async interrupt(): Promise<void> {
-    this.client.kill();
+    if (!await this.control.interrupt()) { this.client.kill(); await this.client.dispose(); }
   }
 
   async close(): Promise<void> {
@@ -787,33 +678,8 @@ class ClaudeSession implements Session {
     await this.closeAttempt;
   }
 
-  /**
-   * M4 Phase 3: routes into the out-of-band approval channel `start()`
-   * threaded through from `TaskContext.approvalChannel` — see that type's
-   * own doc comment (`../../types.ts`) for the full design, and
-   * `permission-mapping.ts`'s `confirm`-mode doc comment for the empirical
-   * basis. `approved`/`reason` map directly onto `ApprovalChannel.resolve`'s
-   * own parameters, which in turn resolve the SAME `ApprovalRegistry` entry
-   * `bin/byok-approval-mcp.ts`'s pending `approvals.request` control call is
-   * awaiting — answering that call is what lets claude's own blocked
-   * `tools/call` (and therefore the paused turn) proceed.
-   *
-   * Still throws when no channel is present — every adapter/session that
-   * ISN'T running under `confirm` mode (the overwhelming majority) has
-   * nothing to resolve, and a caller receiving `task.approve`/`task.reject`
-   * for one of those implies something upstream expected approval support
-   * that isn't there, exactly as this method's doc comment always said.
-   * `ApprovalChannel.resolve` itself throws the equally-descriptive "no
-   * pending approval" error for the narrower case (confirm mode, but nothing
-   * currently pending) — this method doesn't need its own separate check for
-   * that.
-   */
-  async resolveApproval(approved: boolean, reason?: string): Promise<void> {
-    if (!this.approvalChannel) {
-      throw new Error(
-        'claude adapter has no approval channel for this session (not running under policy.mode "confirm") — under every other mode, claude resolves every permission decision synchronously (auto-denied under a restrictive --permission-mode, auto-granted under a permissive one) before this adapter ever sees the corresponding frame, so there is nothing to resume later',
-      );
-    }
-    await this.approvalChannel.resolve(approved, reason);
+  /** Claude has no interactive approval lane; shared Session contracts remain fail-closed. */
+  async resolveApproval(_approved: boolean, _reason?: string): Promise<void> {
+    throw new PolicyUnsupportedError('claude adapter does not support interactive approval');
   }
 }

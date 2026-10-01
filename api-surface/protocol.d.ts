@@ -304,6 +304,12 @@ export declare const AgentEventSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     outputTokens: z.ZodOptional<z.ZodNumber>;
     reasoningTokens: z.ZodOptional<z.ZodNumber>;
     totalTokens: z.ZodOptional<z.ZodNumber>;
+    contextTokens: z.ZodOptional<z.ZodNumber>;
+    contextWindow: z.ZodOptional<z.ZodNumber>;
+    contextSource: z.ZodOptional<z.ZodEnum<{
+        estimate: "estimate";
+        provider: "provider";
+    }>>;
 }, z.core.$strip>], "type">;
 export type AgentEvent = z.infer<typeof AgentEventSchema>;
 /**
@@ -432,6 +438,12 @@ export declare const AgentEventOrUnknownSchema: z.ZodUnion<readonly [z.ZodDiscri
     outputTokens: z.ZodOptional<z.ZodNumber>;
     reasoningTokens: z.ZodOptional<z.ZodNumber>;
     totalTokens: z.ZodOptional<z.ZodNumber>;
+    contextTokens: z.ZodOptional<z.ZodNumber>;
+    contextWindow: z.ZodOptional<z.ZodNumber>;
+    contextSource: z.ZodOptional<z.ZodEnum<{
+        estimate: "estimate";
+        provider: "provider";
+    }>>;
 }, z.core.$strip>], "type">, z.ZodObject<{
     type: z.ZodString;
 }, z.core.$loose>]>;
@@ -2612,6 +2624,12 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             outputTokens: z.ZodOptional<z.ZodNumber>;
             reasoningTokens: z.ZodOptional<z.ZodNumber>;
             totalTokens: z.ZodOptional<z.ZodNumber>;
+            contextTokens: z.ZodOptional<z.ZodNumber>;
+            contextWindow: z.ZodOptional<z.ZodNumber>;
+            contextSource: z.ZodOptional<z.ZodEnum<{
+                estimate: "estimate";
+                provider: "provider";
+            }>>;
         }, z.core.$strip>], "type">, z.ZodObject<{
             type: z.ZodString;
         }, z.core.$loose>]>>;
@@ -4154,6 +4172,12 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 outputTokens: z.ZodOptional<z.ZodNumber>;
                 reasoningTokens: z.ZodOptional<z.ZodNumber>;
                 totalTokens: z.ZodOptional<z.ZodNumber>;
+                contextTokens: z.ZodOptional<z.ZodNumber>;
+                contextWindow: z.ZodOptional<z.ZodNumber>;
+                contextSource: z.ZodOptional<z.ZodEnum<{
+                    estimate: "estimate";
+                    provider: "provider";
+                }>>;
             }, z.core.$strip>], "type">, z.ZodObject<{
                 type: z.ZodString;
             }, z.core.$loose>]>>;
@@ -5568,6 +5592,12 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 outputTokens: z.ZodOptional<z.ZodNumber>;
                 reasoningTokens: z.ZodOptional<z.ZodNumber>;
                 totalTokens: z.ZodOptional<z.ZodNumber>;
+                contextTokens: z.ZodOptional<z.ZodNumber>;
+                contextWindow: z.ZodOptional<z.ZodNumber>;
+                contextSource: z.ZodOptional<z.ZodEnum<{
+                    estimate: "estimate";
+                    provider: "provider";
+                }>>;
             }, z.core.$strip>], "type">, z.ZodObject<{
                 type: z.ZodString;
             }, z.core.$loose>]>>;
@@ -8834,6 +8864,12 @@ export declare const TaskProgressPayloadSchema: z.ZodObject<{
         outputTokens: z.ZodOptional<z.ZodNumber>;
         reasoningTokens: z.ZodOptional<z.ZodNumber>;
         totalTokens: z.ZodOptional<z.ZodNumber>;
+        contextTokens: z.ZodOptional<z.ZodNumber>;
+        contextWindow: z.ZodOptional<z.ZodNumber>;
+        contextSource: z.ZodOptional<z.ZodEnum<{
+            estimate: "estimate";
+            provider: "provider";
+        }>>;
     }, z.core.$strip>], "type">, z.ZodObject<{
         type: z.ZodString;
     }, z.core.$loose>]>>;
@@ -10767,6 +10803,12 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             outputTokens: z.ZodOptional<z.ZodNumber>;
             reasoningTokens: z.ZodOptional<z.ZodNumber>;
             totalTokens: z.ZodOptional<z.ZodNumber>;
+            contextTokens: z.ZodOptional<z.ZodNumber>;
+            contextWindow: z.ZodOptional<z.ZodNumber>;
+            contextSource: z.ZodOptional<z.ZodEnum<{
+                estimate: "estimate";
+                provider: "provider";
+            }>>;
         }, z.core.$strip>], "type">, z.ZodObject<{
             type: z.ZodString;
         }, z.core.$loose>]>>;

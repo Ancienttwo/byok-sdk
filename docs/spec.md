@@ -951,10 +951,10 @@ implied by this source change.
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. The SDK pins the official unmodified
-`@earendil-works/pi-coding-agent@0.99.1` plus chord, pi-agent-core, pi-ai,
-pi-codemode, pi-mcp, pi-telemetry and pi-tui to exactly 0.99.1 (upstream commit
-`d86654abb8862e201933517d6f1fce9f88dd117f`, closureDigest
-`4a6a72a3dfb82a18dbab345dc527645d9764f14ae5b7bc89e92808a2329bd449`). Fork aliases and dual runtimes are
+`@earendil-works/pi-coding-agent@0.99.2` plus chord, pi-agent-core, pi-ai,
+pi-codemode, pi-mcp, pi-telemetry and pi-tui to exactly 0.99.2 (upstream commit
+`005af57d88ee23b33778f343a9595b32e67ff788`, closureDigest
+`8d614f74c775cab980f72bfce88de75583ad43e69d870df0134f3dbd7b622124`). Fork aliases and dual runtimes are
 retired. `resolvePiRuntimeIdentity()` reads the static dependency projection;
 resolved name/version mismatch fails closed. There is no implicit global Pi fallback.
 Only public Pi APIs are used; private imports, patches, copied provider serializers
@@ -1262,7 +1262,7 @@ names its member context, native thread UUID, explicit loopback WebSocket or
 Unix endpoint, and starting notification sequence. The operator must configure
 each native session with that same member's Team MCP grant; the relay does not
 infer or establish that mapping. The absolute Codex executable must pass the
-qualified `codex-cli 0.153.4` version preflight. This is a client CLI binding,
+qualified `codex-cli 0.159.2` version preflight. This is a client CLI binding,
 not a TaskRunner, native-session lifecycle owner, or new package boundary.
 
 Authenticated `team_notifications.snapshot` accepts the existing member-context
@@ -1360,9 +1360,9 @@ and not fingerprinted into a prepared manifest — a tool the model can see is a
 tool it will spend tokens attempting, so there is no "register it and refuse
 the call" state. `plan` narrows because plan mode produces no side effects at
 all, so it may not be wider than `readonly`. Under `auto` a task gets every
-observed tool. `confirm` is unaffected: a human answers each call, so the gate
-is per call rather than per tool set, and no classification is required to run
-under it. The two fail-closed refusals therefore apply only under a narrowing
+observed tool. `confirm` remains in the protocol for adapters with interactive
+approval; Claude rejects it before runtime side effects. The two fail-closed
+refusals therefore apply only under a narrowing
 mode: a toolset with no declaration at all cannot run under `readonly` or
 `plan` and is declined by name, and a projected server the mode leaves with no
 callable tool declines the whole admission rather than half-satisfying it.
@@ -1378,9 +1378,9 @@ session resume and relative-path resolution depend on it.
 The boundary is scoped by ORIGIN-INDEPENDENCE: it covers every MCP server the
 task will generate, not only the host toolsets the device projects. The
 reserved SDK helpers the daemon injects (agent messaging, agent memory) and the
-reserved approval server a runtime adapter generates for itself under
-`policy.mode: 'confirm'` are the same kind of child, launched by the same CLI
-from the same inherited cwd. `TaskRunner` therefore resolves the binding
+servers a third-party runtime adapter generates for itself are the same kind
+of child, launched from the same inherited cwd. Claude no longer generates
+an approval MCP server. `TaskRunner` therefore resolves the binding
 whenever a task will generate at least one server of any origin — the projected
 toolsets, the reserved helpers it adds, or a server the picked adapter declares
 it generates itself (`RuntimeAdapterDescriptor.generatesApprovalMcpServer`
@@ -1751,8 +1751,8 @@ executable presence.
 
 Claude is the sole bundled runtime supported in this slice. Its selected local
 servers are projected into one task-scoped `--mcp-config` under
-`--strict-mcp-config`; confirm mode's internal approval server is merged into
-the same closed file. Claude, not the daemon, owns the resulting task-scoped MCP
+`--strict-mcp-config`. Claude rejects `confirm` and does not inject an
+approval MCP server. Claude, not the daemon, owns the resulting task-scoped MCP
 subprocess lifetime. Therefore these registry status primitives are not a
 long-lived connector supervisor and do not independently observe a crash or
 recovery. Pi and Codex decline toolset-aware offers. The
@@ -2368,7 +2368,7 @@ Prepared child environment is rebuilt through an explicit EnvironmentBuilder all
 
 A1'' compile uses only a placeholder key and injected capture-and-throw fetch against the actual baseUrl. The official OpenAI client reads exactly OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET, OPENAI_LOG and OPENAI_CUSTOM_HEADERS. The approved purity contract is D independence plus this exact read set, not zero reads; an upgrade changing the set requires a fresh ruling. Poisoning these variables must leave D unchanged. OPENAI_LOG may cause a local request log during compile: the device owner deliberately enabled this debug setting; the accepted side effect remains local, does not change D and is not sent externally. No global env or transport monkey-patch is permitted.
 
-Client direct Pi dependencies are exactly coding-agent, pi-ai and pi-agent-core at 0.99.1 and retain the existing direct-dependency purity guard. chord, pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their measured JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
+Client direct Pi dependencies are exactly coding-agent, pi-ai and pi-agent-core at 0.99.2 and retain the existing direct-dependency purity guard. chord, pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their measured JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
 
 Exactness has three independent checks: bun.lock exact versions and sha512 integrity under frozen install; runtime verification of all eight official package instances' manifests and file inventories against tarball/provenance evidence; release-pack and registry-readback isolated-install convergence. Encapsulated runtime records bind the measured artifact and approved closure provenance without looking up external packages. Renamed provenance fields are packageName, packageVersion, tarballIntegrity, upstreamCommit, provenanceDigest, closureDigest and compilerVersion; upstreamBase/forkBuild are retired, not filled with dummy values. The official tarball signatures and provenance are collected reproducibly by `scripts/release/collect-official-pi-closure.mjs`.
 
@@ -2393,3 +2393,22 @@ new capability and ruling. No dual token/read, replay of old work, or automatic
 conversion of frozen audit records is supplied. Subsequent-request byte/header
 refusals (including prepared_context_drift) reach the daemon as typed task.fail;
 tool continuations retain the existing post-response overflow risk boundary.
+
+### Runtime context observation
+
+`usage` may include `contextTokens` (nonnegative integer), `contextWindow`
+(positive integer), and `contextSource` (`provider` or `estimate`). Unknown
+values are absent; an observed zero occupancy is valid. These context fields
+are independent of the provider cost counters. Context-only events carry a
+source and no cost counters; they neither count as provider calls nor affect
+prepared admission or `usage_unavailable`. Unreadable provider-call events
+retain the existing fail-closed behavior.
+
+Codex reports `tokenUsage.last.totalTokens` against `modelContextWindow`;
+its cumulative `total` remains the provider cost authority. Claude reports
+`result.modelUsage`'s window using the init model identity. Official Pi 0.99.2
+reports `get_session_stats.contextUsage` as an estimate before task settlement;
+null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
+configuration is the context window authority even if runtime stats differ.
+Historical v1 envelopes remain readable and unchanged; older consumers ignore
+these optional fields.

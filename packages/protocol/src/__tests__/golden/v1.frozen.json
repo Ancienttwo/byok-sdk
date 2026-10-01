@@ -5127,6 +5127,23 @@
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 9007199254740991
+                      },
+                      "contextTokens": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "contextWindow": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "contextSource": {
+                        "type": "string",
+                        "enum": [
+                          "provider",
+                          "estimate"
+                        ]
                       }
                     },
                     "required": [
@@ -10916,6 +10933,23 @@
                               "type": "integer",
                               "minimum": 0,
                               "maximum": 9007199254740991
+                            },
+                            "contextTokens": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "contextWindow": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "contextSource": {
+                              "type": "string",
+                              "enum": [
+                                "provider",
+                                "estimate"
+                              ]
                             }
                           },
                           "required": [
@@ -12787,6 +12821,23 @@
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
+          },
+          "contextTokens": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "contextWindow": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "contextSource": {
+            "type": "string",
+            "enum": [
+              "provider",
+              "estimate"
+            ]
           }
         },
         "required": [
@@ -13100,6 +13151,23 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "contextTokens": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "contextWindow": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "contextSource": {
+                "type": "string",
+                "enum": [
+                  "provider",
+                  "estimate"
+                ]
               }
             },
             "required": [
@@ -18702,6 +18770,23 @@
                                       "type": "integer",
                                       "minimum": 0,
                                       "maximum": 9007199254740991
+                                    },
+                                    "contextTokens": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "contextWindow": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "contextSource": {
+                                      "type": "string",
+                                      "enum": [
+                                        "provider",
+                                        "estimate"
+                                      ]
                                     }
                                   },
                                   "required": [
@@ -25536,6 +25621,23 @@
                                       "type": "integer",
                                       "minimum": 0,
                                       "maximum": 9007199254740991
+                                    },
+                                    "contextTokens": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "contextWindow": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "contextSource": {
+                                      "type": "string",
+                                      "enum": [
+                                        "provider",
+                                        "estimate"
+                                      ]
                                     }
                                   },
                                   "required": [

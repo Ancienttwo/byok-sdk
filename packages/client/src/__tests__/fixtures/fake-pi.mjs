@@ -206,6 +206,9 @@ rl.on('line', (line) => {
 
 async function handleCommand(msg) {
   switch (msg.type) {
+    case 'get_session_stats':
+      send({ type: 'response', command: 'get_session_stats', id: msg.id, success: true, data: { contextUsage: JSON.parse(process.env.FAKE_PI_CONTEXT_USAGE ?? '{"tokens":0,"contextWindow":1000000,"percent":0}') } });
+      break;
     case 'get_state':
       if (process.env.FAKE_PI_GET_STATE_FAIL === '1') {
         // Simulates get_state failing/omitting sessionId (finding F8) —
