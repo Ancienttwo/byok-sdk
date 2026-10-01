@@ -1,5 +1,5 @@
 /**
- * Official Pi 0.99.1 conformance — A1' amended (compile with the real
+ * Official Pi 0.99.2 conformance — A1' amended (compile with the real
  * projected model): transport scoping on a real endpoint (d') and the sink-URL
  * compat hazard (g). The injected fetch is the only transport; a
  * `globalThis.fetch` spy fails the test if anything reaches the global one.
@@ -95,7 +95,7 @@ afterEach(() => {
   globalFetch.restore();
 });
 
-describe('official Pi 0.99.1: A1\' amended transport scoping', () => {
+describe('official Pi 0.99.2: A1\' amended transport scoping', () => {
   test('(d\') compile against a real non-loopback endpoint: capture fetch called exactly once, global fetch never', async () => {
     const real = projectPreparedModel(model('zai-byok', REAL_BASE_URL));
     // The exact construction the SDK compile uses, with a counting capture.
@@ -124,7 +124,7 @@ describe('official Pi 0.99.1: A1\' amended transport scoping', () => {
   });
 });
 
-describe('official Pi 0.99.1: compat is endpoint-detected (g)', () => {
+describe('official Pi 0.99.2: compat is endpoint-detected (g)', () => {
   test('(g) sink-URL vs real-URL compile differ under the wire compat subset; real vs gated real is identical', async () => {
     const messages = buildPreparedTranscriptMessages(TRANSCRIPT);
     // Same provider id on both sides, so only the endpoint differs.
