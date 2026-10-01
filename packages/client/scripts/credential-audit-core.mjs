@@ -45,8 +45,10 @@ function roleHints(line) {
   }
   if (line.includes('fake-codex.mjs')) {
     roles.push('fixture:codex');
-    if (line.includes('--version') || (line.includes('login') && line.includes('status'))) roles.push('detect:codex');
-    if (/"exec"/.test(line)) roles.push('task:codex');
+    const appServer = /"app-server"/.test(line);
+    const help = /"--help"/.test(line);
+    if (line.includes('--version') || (line.includes('login') && line.includes('status')) || (appServer && help)) roles.push('detect:codex');
+    if (appServer && !help) roles.push('task:codex');
   }
   if (line.includes('fake-pi.mjs')) {
     roles.push('fixture:pi');
