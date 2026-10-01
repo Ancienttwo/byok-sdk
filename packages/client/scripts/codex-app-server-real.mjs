@@ -1,3 +1,8 @@
+// S8 has a separate capped verification mode; the original three-turn probe stays available.
+if (process.env.BYOK_REAL_CODEX_S8 === '1') {
+  await import('./codex-app-server-s8-real.mjs');
+  process.exit(process.exitCode ?? 0);
+}
 // Opt-in only. At most three small native turns; no login mutation or credential reads.
 if (process.env.BYOK_REAL_CODEX !== '1') {
   console.log(
