@@ -55,7 +55,7 @@ describe('sixth edge: official login and secret-free final child', () => {
     expect(k.tasks()[0]!.home).toBe(k.dir);
     expect(k.tasks()[0]!.config).toBe(k.configDir);
     expect(output.output).not.toContain(SECRET);
-    expect(claims(k)).toBe(5);
+    expect(claims(k)).toBe(family==='claude'?6:5); // Claude includes the final charged mode proof.
     const record = ledgers(k).find(v => v.kind === 'task').record;
     expect(parseExternalCliDescendantLaunch(record)).toBeDefined();
     expect(record.edge.inheritsCredential).toBe(false);
@@ -176,7 +176,7 @@ describe('sixth edge: one shared derivation table and single-use permits', () =>
 });
 
 it('all readonly/writer adapters consume one shared writer table rather than adapter pools',async()=>{
- const a=await kit(), b=await kit({family:'claude'});
+ const a=await kit({native:true}), b=await kit({family:'claude',native:true});
  const installations=[...a.installations,...b.installations];configureCustodyExternalInstallations(installations);
  vi.stubEnv('BYOK_SDK_CUSTODY_LAUNCH_RECORD',undefined);vi.stubEnv('PI_SUBAGENT_RUN_FANOUT_BUDGET',encodeRunFanoutBudgetDescriptor(a.budget));
  vi.stubEnv('PI_CODING_AGENT_SESSION_DIR',a.dir);vi.stubEnv('PI_SUBAGENT_MAX_DEPTH','8');vi.stubEnv('PI_SUBAGENT_MAX_SPAWNS_PER_SESSION','128');
@@ -187,7 +187,7 @@ it('all readonly/writer adapters consume one shared writer table rather than ada
  for(let i=0;i<4;i++) {const request={...(i%2===0?a:b).request(true),cwd:a.dir,stepIndex:i,operation:`mixed-${i}`};const run=await spawnTask(merged,request);await run.close;}
  const request={...b.request(true),cwd:a.dir,stepIndex:4,operation:'mixed-overflow'}, auth=await authority.prepare(request),before=claims(a);
  await expect(spawnTask(merged,request,auth)).rejects.toThrow('external_cli_W_exhausted');
- expect(claims(a)).toBe(before);expect(a.tasks()).toHaveLength(4);expect(ledgers(a).filter(v=>v.kind==='task').map(v=>v.record.installation.adapter).sort()).toEqual(['claude-code-writer','claude-code-writer','codex-exec-writer','codex-exec-writer']);noLeaks(a);
+ expect(claims(a)).toBe(before+1);expect(a.tasks()).toHaveLength(4); // Charged final Claude proof, no fifth task.expect(ledgers(a).filter(v=>v.kind==='task').map(v=>v.record.installation.adapter).sort()).toEqual(['claude-code-writer','claude-code-writer','codex-exec-writer','codex-exec-writer']);noLeaks(a);
 });
 it.each(['claude-code','claude-code-writer','codex-exec','codex-exec-writer','cursor-agent','cursor-agent-writer'])('shared input authority refuses %s key/config injection before any external child',async adapter=>{
  const k=await kit();const steps=[{agent:'fixture',task:'task',runner:{type:'external-cli',adapter,command:k.command,args:['--api-key',SECRET]}}];

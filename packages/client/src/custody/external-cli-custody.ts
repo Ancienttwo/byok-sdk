@@ -318,11 +318,7 @@ export class ExternalCliCustodyAuthority {
       ? ['--ignore-user-config','--ignore-rules','--sandbox','--config','--ephemeral']
       : ['--tools','--strict-mcp-config','--mcp-config','--setting-sources','--settings','--disable-slash-commands'];
     if (required.some(flag => !help.includes(flag))) refuse('external_cli_restriction_unavailable');
-    const auth = await this.runProbe(install,install.adapter.startsWith('codex-')
-      ? ['login','status'] // exec-only flags do not belong to the login command.
-      : ['--setting-sources','','auth','status'],env,request.cwd,control);
-    if (!officialExternalCliLoginProven(install.adapter,auth)) refuse('external_cli_auth_mode_unavailable');
-    if (install.adapter.startsWith('claude-') && JSON.parse(auth).configDirectory !== install.configDir) refuse('external_cli_config_scope_unavailable');
+    await this.verifyLoginMode(install,env,request.cwd,control);
     const record: ExternalCliDescendantLaunchV2 = {
       format:'byok.descendant-launch',version:2,target:'official-external-cli',
       edge:{parent:'pi-subagent-runner',child:'official-external-cli',inheritsCredential:false},
@@ -338,6 +334,14 @@ export class ExternalCliCustodyAuthority {
     authorizationStates.set(authorization,{authority:this,request,control,consumed:false});
     return authorization;
   }
+  /** CLI-produced mode evidence; bounded/charged like every other native probe. */
+  private async verifyLoginMode(install: AttestedOfficialExternalCliV2, env: Record<string,string>, cwd: string, control: ExternalCliAdmissionControl): Promise<void> {
+    const auth = await this.runProbe(install,install.adapter.startsWith('codex-')
+      ? ['login','status'] // exec-only flags do not belong to the login command.
+      : ['--setting-sources','','auth','status'],env,cwd,control);
+    if (!officialExternalCliLoginProven(install.adapter,auth)) refuse('external_cli_auth_mode_unavailable');
+    if (install.adapter.startsWith('claude-') && JSON.parse(auth).configDirectory !== install.configDir) refuse('external_cli_config_scope_unavailable');
+  }
   /** Final remeasurement, binding, atomic claim and permit consume immediately precede spawn. */
   async spawn(authorization: ExternalCliAuthorization, actual: ExternalCliInvocation & { readonly env: Readonly<Record<string,string>> }): Promise<ChildProcessWithoutNullStreams> {
     const state = authorizationStates.get(authorization);
@@ -349,6 +353,12 @@ export class ExternalCliCustodyAuthority {
     if (externalCliCommitment(actual) !== record.invocationDigest) refuse('external_cli_invocation_changed');
     if (toolImplementationLaunchEnvNamesDigest(actual.env) !== record.launchEnvNamesDigest
       || toolImplementationLoaderEnvValuesDigest(actual.env) !== record.loaderEnvValuesDigest) refuse('external_cli_env_changed');
+    // No general install-version capability is attested for a mode-lock setting.
+    // Re-prove Claude's own-login state at every final admission instead; then
+    // remeasure bytes/parent/env again. A same-UID final check/spawn race remains.
+    if (record.installation.adapter.startsWith('claude-')) {
+      await this.verifyLoginMode(record.installation,{...actual.env},actual.cwd,state.control);
+    }
     await this.reverify(record.installation,actual.env);
     if (state.consumed) refuse('external_cli_permit_reused');
     this.checkControl(state.control);

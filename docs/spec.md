@@ -2467,3 +2467,7 @@ requires an approved pinned installation/config scope and platform smoke;
 fixture evidence is not login-service acceptance. Cursor authentication mode and
 Windows external process-tree supervision remain unsupported/fail-closed in
 this cohort. Top-level Codex environment stripping is a separate change.
+
+
+### T6 Claude final-mode proof
+Every Claude terminal task rechecks CLI-produced own-login mode/config scope immediately before final physical reverify and task admission. Unknown, changed or mismatching status refuses without a task reservation; the real status child consumes a physical root claim. The SDK does not add an unproved universal forceLoginMethod setting: Host declarations have no enforced version capability field. Same-UID change after the final check or during lock wait remains a documented check-time risk. No account-store contents or new credentials are read by the SDK.
