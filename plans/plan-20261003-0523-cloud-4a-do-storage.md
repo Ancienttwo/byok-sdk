@@ -1,6 +1,6 @@
 # Plan: Cloud slice 4a DO SQLite storage and minimal AgentDO
 
-> **Status**: Verified
+> **Status**: Review
 > **Created**: 20261003-0523
 > **Slug**: cloud-4a-do-storage
 > **Planning Source**: codex-plan
@@ -110,6 +110,7 @@ Allowed implementation: packages/client/src/adapters/pi-durable/engine.ts and st
 Out: 4b credentials, 4c tools/jobs, 4d wake/events, 4e consumption, Postgres, Node client cloud runtime imports, main checkout, pushing, assertion changes/skips/timeout increases.
 
 ## Task Breakdown
+- [x] Fix round 1: route DO close through the shared queue, tighten FIFO/idempotency assertions, run requested checks, commit locally and write /tmp/byok-cloud-4a-fix1-report.md.
 - [x] Extract native Storage factory seam while preserving local authority behavior.
 - [x] Implement DO SQLite adapter, minimal fresh-conversation AgentDO, identity helper and SQLite migration config in private workspace.
 - [x] Run one shared native conformance/BYOK contract suite for local and workerd backends; verify restart, isolation, prefixes, SQL boundaries and transaction queue.

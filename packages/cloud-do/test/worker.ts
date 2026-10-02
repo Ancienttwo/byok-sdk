@@ -47,12 +47,37 @@ export class ContractDO extends DurableObject {
     await a.rejects(db.exec('INVALID SQL'), 'syntax error');
     await db.transaction(async tx => { await tx.run('INSERT INTO isolation VALUES (?)', 'committed'); });
     a.deepEqual(await db.all('SELECT * FROM isolation'), [{ value: 'committed' }]);
+    a.deepEqual(await db.get('SELECT * FROM isolation'), { value: 'committed' });
+    let enter!: () => void, release!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const released = new Promise<void>(resolve => { release = resolve; });
+    const transaction = db.transaction(async tx => {
+      enter();
+      await released;
+      a.deepEqual(await tx.get('SELECT * FROM isolation'), { value: 'committed' });
+    });
+    await entered;
+    let pendingReadSettled = false;
     const beforeClose = db.get('SELECT * FROM isolation');
+    void beforeClose.then(() => { pendingReadSettled = true; }, () => { pendingReadSettled = true; });
     const closing = db.close();
-    const afterClose = db.get('SELECT * FROM isolation');
+    const duplicateClosing = db.close();
+    const afterCloseRejected = Promise.all([
+      a.rejects(db.get('SELECT * FROM isolation'), 'closed'),
+      a.rejects(db.all('SELECT * FROM isolation'), 'closed'),
+      a.rejects(db.exec('SELECT 1'), 'closed'),
+      a.rejects(db.run('SELECT ?', 1), 'closed'),
+      a.rejects(db.transaction(async tx => { await tx.run('SELECT 1'); }), 'closed'),
+    ]);
+    try {
+      await Promise.resolve();
+      a.strictEqual(pendingReadSettled, false);
+    } finally { release(); }
+    await transaction;
+    // FIFO, as in pi's Node database: this read was queued before close.
     a.deepEqual(await beforeClose, { value: 'committed' });
-    await closing;
-    await a.rejects(afterClose, 'closed');
+    await Promise.all([closing, duplicateClosing, afterCloseRejected]);
+    await a.rejects(db.get('SELECT * FROM isolation'), 'closed');
     await db.close();
   }
 

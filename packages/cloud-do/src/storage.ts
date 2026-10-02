@@ -30,9 +30,9 @@ export class DurableObjectSqliteDatabase implements SqliteDatabase {
   private closed = false;
   constructor(private readonly storage: DurableObjectStorage) {}
 
-  private queued<T>(operation: () => T | Promise<T>): Promise<T> {
+  private queued<T>(operation: () => T | Promise<T>, allowClosed = false): Promise<T> {
     const result = this.tail.then(() => {
-      if (this.closed) throw new Error('SQLite database is closed');
+      if (this.closed && !allowClosed) throw new Error('SQLite database is closed');
       return operation();
     });
     this.tail = result.then(() => {}, () => {});
@@ -68,11 +68,12 @@ export class DurableObjectSqliteDatabase implements SqliteDatabase {
     }));
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
     // The DO owns the physical connection; closing only invalidates this adapter.
-    const result = this.tail.then(() => { this.closed = true; });
-    this.tail = result;
-    await result;
+    return this.queued(() => {
+      if (this.closed) return;
+      this.closed = true;
+    }, true); // Only idempotent close may pass the closed-operation gate.
   }
 }
 
