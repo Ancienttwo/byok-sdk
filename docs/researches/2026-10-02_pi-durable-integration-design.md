@@ -43,7 +43,7 @@ Host ──(protocol)── daemon (credential-blind)
                        │  spawn via launcher（与 byok-pi-prepared 同一 custody 路径）
                        ▼
               byok-pi-durable 子进程
-                 ├─ launcher 注入的 provider 凭据（仅此进程可见；见下「工具 env」）
+                 ├─ launcher 经一次性私有 IPC 传入模型内存的凭据（不进入初始 environ）
                  ├─ 启动时对副本文件取 OS 排它锁（flock / sidecar lockfile，绑定 leaseId）；取不到则 fail-closed
                  ├─ Harness.open(<storeDir>/durable/<agent-binding>/durable-<taskId>.sqlite)  （workspace 外）
                  ├─ registry：byok-approval / byok-result / (切片2) byok-subagent, byok-memory
@@ -51,8 +51,8 @@ Host ──(protocol)── daemon (credential-blind)
 ```
 
 - 新 bin：`byok-pi-durable`，形态照 `byok-pi-prepared`（`packages/client/package.json:32`、`tsup.config.ts:19`）。daemon 只经 stdio RPC 与之通信，不 import `@byok-sdk/keys`，不读 env 里的 provider 凭据。
-- 子进程 env 继续走现有 allowlist + `BYOK_*` deny + strace gate；凭据只由 launcher 注入。
-- **工具 ExecutionEnv（B2/M2，必须）**：`NodeExecutionEnv` 必须以 `inheritEnv: false` + 显式 allowlist 构造。Provider 凭据只供 Harness 模型层（`models`/provider 配置）在进程内读取，**不得**进入工具 shell 的继承环境。可测断言：YOLO 下 `bash env`（或等价）输出不含任何 launcher 注入的凭据名/值。若 pi-ai 1.0 provider 只能从 `process.env` 读 key，则 launcher 经 fd 传入、进程内读完后立刻从 `process.env` 删除，且在构造 `ExecutionEnv` 之前完成（与 `byok-pi-prepared` 对齐核对）。
+- 子进程 env 继续走现有 allowlist + `BYOK_*` deny + strace gate；凭据只由 launcher 通过私有 IPC 传入，不写 durable worker env。
+- **工具 ExecutionEnv（B2/M2，必须）**：exec 强制 `inheritEnv:false` 与显式 allowlist。17:12 Owner 选择 F2(a)：launcher 与 worker 使用一次性私有 JSON IPC，按 config digest 绑定，key 从不进入 worker 初始 env、argv、stdio RPC 或副本；worker 取到后关闭 IPC，再构造 tools/MCP。`delete process.env` 不是隔离机制。测试必须包含实际 bash 的继承 env 与 `ps eww` / `/proc/<pid>/environ` 自省。
 - **副本锁（M7）**：pi-durable 本身无跨进程锁。子进程启动时必须自行对 sqlite（或 sidecar）加 OS 排它锁并写入当前 `leaseId`；取不到锁则拒绝启动。租约在收到关闭回执或确认进程树已死（KILL 后 waitpid）之前不得释放。可测：回执超时 → KILL → 新子进程才能拿到同一文件锁。
 - 生命周期：子进程只在持有该 home 租约时存在；租约释放前必须收到子进程关闭回执（沿用 bundled runtime disposal 的 TERM→KILL 与回执语义）。
 - 与 OAR 的关系：OAR 评估文档 Owner 决策第 7 条已作废第 2 条"Pi 进程内处理 credential"，改为"Pi 外部进程 + launcher custody"。本设计与第 7 条一致；建议在 OAR 文档里把第 2 条正式标为 superseded，并引用 D3。注：Pi 1.0 升级步（commit `2b0a5c1`）checkout 仍无 `packages/client/vendor/oar/`，亦无 OAR package 依赖——正式 OAR 接线仍是后续单独步骤（m8 备注：引用前先在 OAR 文档标注 superseded）。
@@ -178,3 +178,5 @@ child_running
 ### Owner 补充裁决：模型 checkpoint 恢复
 
 允许同执行、同租约、没有在途工具的 checkpoint 模型重发，按 ordinary usage 如实计量。`retry.maxRetries:0` 只关闭普通 auto-retry，不关闭进程崩溃恢复重发；中断尝试没有上报的usage保持未知，不伪造计量。最多2次respawn与daemon重启daemon_interrupted规则不变。
+
+F5 驻留策略：normal close 清理当前 transcript sqlite 与 launch config；daemon SIGKILL 可遗留包含完整 Host input/tool output 的 replica、launch config 和 lease sidecar。切片 1 不自动 sweep，不在 startup 打开/恢复它们；保持 owner-only，仅允许在 execution terminal 且无 lease/worker 后做显式离线维护。GC 留后续。

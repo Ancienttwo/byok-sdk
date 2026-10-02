@@ -875,7 +875,7 @@ reads, proxies, or forwards any credential — the M5 pilot audit
 rule at `packages/client/src/types.ts:120-124`) is the evidence ledger for
 exactly that claim.
 
-The durable Pi lane (`byok-pi-durable`) is a custody-launched child under the same rule; it does not move credentials into the daemon. Its model/provider layer alone receives provider credentials. Tool shells use `inheritEnv: false` and an explicit allowlist. Replica storage is under SDK-private storeDir, disjoint from canonicalHome, and bound to AgentRef/taskId/leaseId; overlapping paths fail before spawn. The replica remains untrusted input. Structured-path tools cannot read or write its root; YOLO bash is not a filesystem sandbox. An exclusive replica lock and confirmed child-tree disposal are required before lease release.
+The durable Pi lane (`byok-pi-durable`) is a custody-launched child under the same rule; it does not move credentials into the daemon. The launcher transfers the key to worker model memory over private one-shot JSON IPC bound to the config digest. It never puts the key in the durable child initial environment, argv, stdio RPC or replica. The worker closes IPC before tools/MCP construction; deleting process.env is not protection. Tool exec forces `inheritEnv: false` and an explicit allowlist. Both inherited env and OS env introspection are regression-tested. Replica storage is under SDK-private storeDir, disjoint from canonicalHome, and bound to AgentRef/taskId/leaseId; overlapping paths fail before spawn. The replica remains untrusted input. Structured-path tools cannot read or write its root; YOLO bash is not a filesystem sandbox. An exclusive replica lock and confirmed child-tree disposal are required before lease release.
 
 `@byok-sdk/keys` sits on the **other** side of that line. Its whole job *is* to
 hold a provider API key: it stores the user's own key in the OS credential
@@ -949,3 +949,5 @@ with bounded stderr retention (64 KiB and 20 lines). Legacy artifact uploads rea
 an existing validated fd in cancellable 64 KiB chunks under separate per-file and
 per-task byte budgets; file growth is counted rather than trusting stat alone.
 These limits do not change strict Agent egress permissions.
+
+Durable crash retention: daemon SIGKILL may leave owner-only transcript replicas, `launch-*/config.json` (Host input and mcpEnv), and lock sidecars under the private durable store. These are untrusted residuals, not continuation authority. Slice 1 has no automatic orphan sweep; offline deletion requires a terminal execution and absence of a home lease/worker. Normal terminal disposal cleans its transcript and launch config.
