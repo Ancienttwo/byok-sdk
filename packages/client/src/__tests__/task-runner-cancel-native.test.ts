@@ -15,7 +15,8 @@ import type { RuntimeAdapter, Session } from '../types';
 import { TestServer } from './fixtures/test-server';
 
 const fixture = fileURLToPath(new URL('./fixtures/task-runner-cancel-runtime.mjs', import.meta.url));
-const cases: Array<{ dir: string; gate: string; runner: TaskRunner; sessions: Session[] }> = [];
+const cases: Array<{ dir: string; gate: string; runner: TaskRunner; sessions: Session[];
+  startSettled: ReturnType<typeof deferred>; hasStarted: () => boolean }> = [];
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>(r => { resolve = r; });
@@ -37,14 +38,24 @@ async function setup(runtime: RuntimeId, scenario: string, overrides: Partial<Pi
   const adapter: RuntimeAdapter = runtime === 'claude' ? new ClaudeAdapter({ resolveBin, interruptTimeoutMs: 60 })
     : runtime === 'codex' ? new CodexAdapter({ resolveBin, interruptTimeoutMs: 60 })
     : new PiAdapter({ resolveBin: () => ({ command: fixture, source: 'env' }) });
+  if (scenario === 'startup') {
+    // Freeze a REAL installation observation before timing the owned-start
+    // window. Version/auth probe scheduling is a different cancellation phase
+    // (covered below), and must not consume this startup fixture's deadline.
+    const observation = await adapter.detect();
+    expect(observation.kind).toBe('available');
+    vi.spyOn(adapter, 'detect').mockResolvedValue(observation);
+  }
   const sessions: Session[] = [];
   const startSettled = deferred();
+  let started = false;
   const prepare = adapter.prepare.bind(adapter);
   vi.spyOn(adapter, 'prepare').mockImplementation(async input => {
     const result = await prepare(input);
     if (result.kind !== 'prepared') return result;
     const start = result.operation.start.bind(result.operation);
     return { ...result, operation: { ...result.operation, start: async input => {
+      started = true;
       try { const session = await start(input); sessions.push(session); return session; }
       finally { startSettled.resolve(); }
     } } };
@@ -76,19 +87,23 @@ async function setup(runtime: RuntimeId, scenario: string, overrides: Partial<Pi
     for (const pid of Object.values(pids)) expect(alive(pid), `PID ${pid} still live`).toBe(false);
     expect(runner.activeTaskCount).toBe(0);
   };
-  const c = { runtime, dir, tree, gate, adapter, runner, sent, sessions, startSettled, offer, cancel, terminals, events, trace, assertReaped };
+  const c = { runtime, dir, tree, gate, adapter, runner, sent, sessions, startSettled, hasStarted: () => started,
+    offer, cancel, terminals, events, trace, assertReaped };
   cases.push(c);
   return c;
 }
 afterEach(async () => {
-  for (const c of cases.splice(0)) {
-    await fs.writeFile(c.gate, 'release');
-    c.runner.stopAcceptingOffers();
-    await c.runner.shutdownActiveTasks('test cleanup');
-    await Promise.all(c.sessions.map(session => session.close()));
-    await fs.rm(c.dir, { recursive: true, force: true });
-  }
-  vi.restoreAllMocks(); vi.unstubAllEnvs();
+  try {
+    for (const c of cases.splice(0)) {
+      await fs.writeFile(c.gate, 'release');
+      c.runner.stopAcceptingOffers();
+      if (c.hasStarted()) await c.startSettled.promise;
+      await new Promise<void>(resolve => setImmediate(resolve));
+      await c.runner.shutdownActiveTasks('test cleanup');
+      await Promise.all(c.sessions.map(session => session.close()));
+      await fs.rm(c.dir, { recursive: true, force: true });
+    }
+  } finally { vi.restoreAllMocks(); vi.unstubAllEnvs(); }
 });
 function expectNoErrors(c: Awaited<ReturnType<typeof setup>>) { expect(c.events().filter(event => event.type === 'error')).toEqual([]); }
 function expectUsage(c: Awaited<ReturnType<typeof setup>>, promptTokens: number, completionTokens: number) {

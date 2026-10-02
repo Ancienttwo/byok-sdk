@@ -1275,6 +1275,24 @@ export type HostToolsetContextLookup =
   | { readonly status: 'revoked' }
   | { readonly status: 'unknown' };
 
+// Keep internal lifecycle bookkeeping out of the exported class declaration.
+const offerSettlements = new WeakMap<TaskRunner, Set<Promise<void>>>();
+async function trackOffer(runner: TaskRunner, operation: Promise<void>): Promise<void> {
+  let offers = offerSettlements.get(runner);
+  if (!offers) { offers = new Set(); offerSettlements.set(runner, offers); }
+  offers.add(operation);
+  try { await operation; }
+  finally { offers.delete(operation); }
+}
+
+function observeTerminalUsage(active: ActiveTask, event: Extract<AgentEvent, { type: 'usage' }>): void {
+  if (event.contextSource === undefined || event.inputTokens !== undefined ||
+      event.cachedInputTokens !== undefined || event.outputTokens !== undefined ||
+      event.reasoningTokens !== undefined || event.totalTokens !== undefined) {
+    active.lastUsage = event;
+  }
+}
+
 /**
  * Per-connection task orchestration: offer -> (decline | prepare -> seal ->
  * claim -> prepared operation -> started) -> seq-ordered progress batches -> complete/fail/
@@ -1387,8 +1405,6 @@ export class TaskRunner {
    */
   private readonly preparationPinsByTask = new Map<string, string>();
   private readonly inFlightOffers = new Set<string>();
-  /** Shutdown must see startup owners created by offers aborted on the same tick. */
-  private readonly offerSettlements = new Set<Promise<void>>();
   /** Blob I/O before an offer becomes an active task still belongs to that offer's cancellation authority. */
   private readonly inFlightBlobAborts = new Map<string, AbortController>();
   /**
@@ -1806,7 +1822,8 @@ export class TaskRunner {
   }
 
   async shutdownActiveTasks(reason: string): Promise<void> {
-    if (this.offerSettlements.size > 0) await Promise.all(this.offerSettlements.values());
+    const offers = offerSettlements.get(this);
+    if (offers?.size) await Promise.all(offers);
     const active = [...this.tasks.values()];
     await Promise.all(active.map((task) => this.shutdownTask(task, reason)));
     for (const taskId of this.startupOwners.keys()) {
@@ -1955,19 +1972,19 @@ export class TaskRunner {
   async handleEnvelope(envelope: Envelope): Promise<void> {
     switch (envelope.type) {
       case 'task.offer':
-        await this.trackOffer(this.handleOffer(envelope.task_id, envelope.payload, false));
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, false));
         return;
       case 'task.offer_with_toolsets':
-        await this.trackOffer(this.handleOffer(envelope.task_id, envelope.payload, false));
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, false));
         return;
       case 'task.offer_for_agent':
-        await this.trackOffer(this.handleOffer(envelope.task_id, envelope.payload, true));
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, true));
         return;
       case 'task.offer_for_agent_with_egress':
-        await this.trackOffer(this.handleOffer(envelope.task_id, envelope.payload, true));
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, true));
         return;
       case 'task.offer_for_agent_with_egress_fresh':
-        await this.trackOffer(this.handleOffer(envelope.task_id, envelope.payload, true));
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, true));
         return;
       case 'task.offer_prepared':
         await this.handleOffer(envelope.task_id, envelope.payload, true);
@@ -1990,12 +2007,6 @@ export class TaskRunner {
       default:
         return; // conn.* and daemon->server-only types are handled elsewhere / not applicable
     }
-  }
-
-  private async trackOffer(operation: Promise<void>): Promise<void> {
-    this.offerSettlements.add(operation);
-    try { await operation; }
-    finally { this.offerSettlements.delete(operation); }
   }
 
   private async handleOffer(
@@ -3744,7 +3755,7 @@ export class TaskRunner {
           // Cancellation owns the result, but the native interrupt may still
           // deliver metering after a tool result/diagnostic. Consume only that
           // observation, never progress, artifacts, approvals or a new terminal.
-          if (event.type === 'usage') this.observeTerminalUsage(active, event);
+          if (event.type === 'usage') observeTerminalUsage(active, event);
           if (event.type === 'turn_end') return;
           continue;
         }
@@ -3810,7 +3821,7 @@ export class TaskRunner {
           // before turn_end/error; a custom adapter that emits several keeps
           // only the latest actual observation rather than inventing a sum.
           // Keep terminal provider cost observation when a separate context snapshot arrives.
-          this.observeTerminalUsage(active, event);
+          observeTerminalUsage(active, event);
           if (active.prepared !== undefined) {
             const verdict = observePreparedCall(active.prepared, event);
             if (verdict !== undefined) {
@@ -4877,14 +4888,6 @@ export class TaskRunner {
    * unreadable (so the prepared lane can count the call), and a terminal block
    * built from it would be a usage observation with no usage in it.
    */
-  private observeTerminalUsage(active: ActiveTask, event: Extract<AgentEvent, { type: 'usage' }>): void {
-    if (event.contextSource === undefined || event.inputTokens !== undefined ||
-        event.cachedInputTokens !== undefined || event.outputTokens !== undefined ||
-        event.reasoningTokens !== undefined || event.totalTokens !== undefined) {
-      active.lastUsage = event;
-    }
-  }
-
   private terminalInferenceUsagePayload(active: ActiveTask): { usage?: TerminalInferenceUsage } {
     const release = this.deps.localAgentRelease;
     const runtimeId = active.adapter.descriptor.id;
