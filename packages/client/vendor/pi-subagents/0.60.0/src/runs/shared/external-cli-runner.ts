@@ -6,6 +6,8 @@ import { finished } from "node:stream/promises";
 import type { ExternalProcessStatus } from "../../shared/types.ts";
 import { createOwnedProcessTreeController, type OwnedProcessTreeController } from "../background/owned-process-tree.ts";
 import { omitExtensionBindingsEnv } from "./extension-bindings.ts";
+import { buildRuntimeEnv } from "../../../../../../src/daemon/environment.ts";
+import { CONTROLLED_PI_DIRECTORY_ENV_NAMES, DESCENDANT_PER_LAUNCH_ENV_NAMES } from "@byok-sdk/implementation-identity";
 import {
 	invalidateExternalCliPreflight,
 	preflightExternalCli,
@@ -85,16 +87,31 @@ function narrowLimit(value: number | undefined, ceiling: number, label: string):
 	return value;
 }
 
+const CUSTODY_ENV_DENY_NAMES = new Set<string>([
+	...CONTROLLED_PI_DIRECTORY_ENV_NAMES,
+	...DESCENDANT_PER_LAUNCH_ENV_NAMES,
+	"PI_PROVIDER_API_KEY",
+]);
+
+function isCustodyEnvironmentName(name: string): boolean {
+	// A differently cased spelling cannot bypass the deny on Windows.
+	const canonical = name.toUpperCase();
+	return canonical.startsWith("BYOK_") || CUSTODY_ENV_DENY_NAMES.has(canonical);
+}
+
 function externalEnvironment(allowlist: readonly string[] | undefined, values: Readonly<Record<string, string>> | undefined): NodeJS.ProcessEnv {
-	if (!allowlist) return omitExtensionBindingsEnv(process.env);
-	const allowed = new Set(allowlist);
+	// Bare and unknown adapters receive only the SDK's platform/proxy baseline,
+	// never the full credential-bearing parent environment.
+	const allowed = new Set(allowlist ?? Object.keys(buildRuntimeEnv({ ambient: process.env })));
 	const env: NodeJS.ProcessEnv = {};
 	for (const key of allowed) {
 		if (!key || key.includes("=") || key.includes("\0")) throw new Error(`Invalid external CLI environment key: ${JSON.stringify(key)}.`);
+		if (isCustodyEnvironmentName(key)) continue;
 		if (process.env[key] !== undefined) env[key] = process.env[key];
 	}
 	for (const [key, value] of Object.entries(values ?? {})) {
 		if (!allowed.has(key)) throw new Error(`External CLI environment value '${key}' is not in the adapter allowlist.`);
+		if (isCustodyEnvironmentName(key)) continue;
 		env[key] = value;
 	}
 	return omitExtensionBindingsEnv(env);

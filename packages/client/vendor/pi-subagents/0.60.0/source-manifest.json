@@ -370,8 +370,10 @@
     {
       "path": "src/runs/background/chain-append.ts",
       "upstreamSha256": "842ddeaf9eacdb06781283b154dec31639bb7037702f96a0dc5b41277c3fdc86",
-      "vendoredSha256": "842ddeaf9eacdb06781283b154dec31639bb7037702f96a0dc5b41277c3fdc86",
-      "delta": []
+      "vendoredSha256": "c5978c2bbcdbf5d7427b9e8d0be9d9982d74f4073059bd4ec36107c4251f8eb0",
+      "delta": [
+        "SDK external-cli append admission: reuse the initial kind scanner and typed refusal; validate the whole pending batch before consuming request files."
+      ]
     },
     {
       "path": "src/runs/background/chain-root-attachment.ts",
@@ -753,8 +755,10 @@
     {
       "path": "src/runs/shared/external-cli-runner.ts",
       "upstreamSha256": "51f41fc6ee753ca3d96cfb93a083e64c62acc5d359ac4169e0f9e357967ca0e0",
-      "vendoredSha256": "51f41fc6ee753ca3d96cfb93a083e64c62acc5d359ac4169e0f9e357967ca0e0",
-      "delta": []
+      "vendoredSha256": "603ef6374567f29158178884f08f8ed286708fcc7adc27e83031dc5b621af97d",
+      "delta": [
+        "SDK external-cli environment isolation: bare/unknown launches use the runtime platform/proxy allowlist; BYOK and custody names are denied even in explicit allowlists and value overrides."
+      ]
     },
     {
       "path": "src/runs/shared/external-job-bridge.ts",
