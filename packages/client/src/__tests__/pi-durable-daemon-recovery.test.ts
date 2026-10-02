@@ -12,8 +12,11 @@ import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { sealRuntimeOperationManifest, type Session } from '../types';
 import { buildRuntimeEnv } from '../daemon/environment';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
+import { resolveBunBin } from './support/test-bun-bin';
 import { TestServer } from './fixtures/test-server';
 import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
+const BUN_BIN = resolveBunBin();
+const PROCESS_WAIT = { timeout: 5_000, interval: 50 };
 const SENTINEL = 'BYOK_KNIFE3_PROVIDER_SECRET_SENTINEL';
 const clientRoot = path.resolve(import.meta.dirname,'../..');
 const sessions: Session[] = [];
@@ -78,7 +81,7 @@ function reply(res: ServerResponse, content: string, command?: string) {
   res.writeHead(200,{'content-type':'text/event-stream'});
   res.end([{...base,choices:[{index:0,delta,finish_reason:null}]},{...base,choices:[{index:0,delta:{},finish_reason:command?'tool_calls':'stop'}],usage:{prompt_tokens:2,completion_tokens:1,total_tokens:3}}].map(value=>`data: ${JSON.stringify(value)}\n\n`).join('')+'data: [DONE]\n\n');
 }
-it('SIGKILL real durable execution never reopens old replica, restarts from Host only, and leaves no provider key', async () => {
+it.skipIf(BUN_BIN === undefined)('SIGKILL real durable execution never reopens old replica, restarts from Host only, and leaves no provider key', async () => {
   const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'byok-durable-restart-'))); roots.push(root);
   // Isolated package copy: no shared dist mutation. Product modules are byte-identical; only entry audit and test-authority export are added.
   const isolated=await fs.mkdtemp(path.join(clientRoot,'node_modules/.cache/byok-durable-recovery-')); roots.push(isolated);
@@ -97,7 +100,7 @@ it('SIGKILL real durable execution never reopens old replica, restarts from Host
   }
   const launcherRoot=await fs.mkdtemp(path.resolve(clientRoot,'../keys/node_modules/.cache/byok-durable-recovery-')); roots.push(launcherRoot);
   const launcher=path.join(launcherRoot,'launcher.mjs');
-  await run(process.env.BYOK_TEST_BUN_BIN!,['build',path.resolve(import.meta.dirname,'fixtures/pi-durable-recovery-launcher.ts'),'--target=node','--packages=external','--outfile',launcher]);
+  await run(BUN_BIN!,['build',path.resolve(import.meta.dirname,'fixtures/pi-durable-recovery-launcher.ts'),'--target=node','--packages=external','--outfile',launcher]);
   const requests:Array<{body:string;authorization:unknown}>=[];
   const command=`${JSON.stringify(process.execPath)} -e 'require("fs").appendFileSync("old-effect.log","once\\n");console.log(JSON.stringify(process.env));setInterval(()=>{},1000)'`;
   provider=createServer((req,res)=>{ let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{requests.push({body,authorization:req.headers.authorization}); const old=body.includes('OLD_HOST_CONTEXT');reply(res,old?'':'fresh result',old?command:undefined);});});
@@ -111,18 +114,18 @@ it('SIGKILL real durable execution never reopens old replica, restarts from Host
     const child=spawn(process.execPath,[path.resolve(import.meta.dirname,'fixtures/pi-durable-recovery-daemon.mjs'),configPath],{env:{...process.env,BYOK_TEST_DEVICE_CREDENTIAL_STORE:'1'},stdio:['pipe','pipe','pipe','ipc']});children.push(child);
     let stdout='';child.stdout!.on('data',chunk=>{stdout+=chunk;logs.push(String(chunk));});child.stderr!.on('data',chunk=>logs.push(String(chunk)));
     child.on('message',value=>{enrollment=(value as {record:unknown}).record;});child.send({record:enrollment});
-    await vi.waitFor(()=>{if(child.exitCode!==null) throw new Error(logs.join(''));expect(stdout).toContain('"ready":true');});return child;
+    await vi.waitFor(()=>{if(child.exitCode!==null) throw new Error(logs.join(''));expect(stdout).toContain('"ready":true');},PROCESS_WAIT);return child;
   };
   const first=await start();
   const offer=(taskId:string,instruction:string)=>createEnvelope('task.offer_for_agent',{instruction,policy:{mode:'auto'},runtime:'pi',agentRef:{agentId:'recovery-agent',profileRevision:'1'},dispatchSelection:{lane:'byok',runtimeId:'pi',providerId:'probe',modelId:'probe'}},{taskId,seq:server!.nextSeq()});
   server.send(offer('old-task','OLD_HOST_CONTEXT'));
   await waitEnvelope(event=>event.type==='task.started'&&event.task_id==='old-task',first);
   let oldLaunch:Record<string,any> | undefined;
-  await vi.waitFor(async()=>{oldLaunch=(await rows(path.join(control,'launches.jsonl')))[0];expect(oldLaunch).toBeDefined();});
+  await vi.waitFor(async()=>{oldLaunch=(await rows(path.join(control,'launches.jsonl')))[0];expect(oldLaunch).toBeDefined();},PROCESS_WAIT);
   launcherPids.push(oldLaunch!.launcherPid);
   const launchConfig=JSON.parse(await fs.readFile(oldLaunch!.configPath,'utf8'));
   const home=launchConfig.replica.canonicalHome;
-  await vi.waitFor(async()=>expect(await fs.readFile(path.join(home,'old-effect.log'),'utf8')).toBe('once\n'));
+  await vi.waitFor(async()=>expect(await fs.readFile(path.join(home,'old-effect.log'),'utf8')).toBe('once\n'),PROCESS_WAIT);
   const opened=await rows(audit); const oldReplica=String(opened.find(row=>row.actor==='worker'&&String(row.file).endsWith('durable-old-task.sqlite'))?.file);expect(oldReplica).not.toBe('undefined');
   expect(requests).toHaveLength(1);expect(requests[0]!.authorization).toBe(`Bearer ${SENTINEL}`);
   const launchesBefore=await rows(path.join(control,'launches.jsonl'));expect(JSON.stringify(launchesBefore)).not.toContain(SENTINEL);
@@ -131,7 +134,7 @@ it('SIGKILL real durable execution never reopens old replica, restarts from Host
   const interruptedTree=processTree([first.pid!,oldLaunch!.launcherPid]);for(const pid of interruptedTree)ownedPids.add(pid);
   first.kill('SIGKILL'); await new Promise(resolve=>first.once('exit',resolve));expect(first.signalCode).toBe('SIGKILL');
   kill(oldLaunch!.launcherPid,true); for(const pid of interruptedTree)if(pid!==first.pid)kill(pid);
-  await vi.waitFor(()=>expect(interruptedTree.filter(live)).toEqual([]));
+  await vi.waitFor(()=>expect(interruptedTree.filter(live)).toEqual([]),PROCESS_WAIT);
   for(const pid of interruptedTree)ownedPids.delete(pid);launcherPids=launcherPids.filter(pid=>!interruptedTree.includes(pid));
   const oldBytes=await fs.readFile(oldReplica);const oldHash=createHash('sha256').update(oldBytes).digest('hex');const auditCut=(await rows(audit)).length;
   // Kill was not graceful: residue really exists and includes old execution input, but never the provider key.
@@ -157,11 +160,11 @@ it('SIGKILL real durable execution never reopens old replica, restarts from Host
   expect(logs.join('')).not.toContain(SENTINEL);
 },30_000);
 
-it('N1 real custody startPiProvider and unmodified built worker agree on private IPC and keep key out of env', async () => {
+it.skipIf(BUN_BIN === undefined)('N1 real custody startPiProvider and unmodified built worker agree on private IPC and keep key out of env', async () => {
   const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'byok-durable-ipc-real-'))); roots.push(root);
   const launcherRoot=await fs.mkdtemp(path.resolve(clientRoot,'../keys/node_modules/.cache/byok-durable-recovery-'));roots.push(launcherRoot);
   const launcher=path.join(launcherRoot,'launcher.mjs');
-  await run(process.env.BYOK_TEST_BUN_BIN!,['build',path.resolve(import.meta.dirname,'fixtures/pi-durable-recovery-launcher.ts'),'--target=node','--packages=external','--outfile',launcher]);
+  await run(BUN_BIN!,['build',path.resolve(import.meta.dirname,'fixtures/pi-durable-recovery-launcher.ts'),'--target=node','--packages=external','--outfile',launcher]);
   const control=path.join(root,'control'),home=path.join(root,'home'),store=path.join(root,'store');await Promise.all([control,home,store].map(dir=>fs.mkdir(dir)));
   const received:Array<{authorization:unknown;body:string}>=[];
   provider=createServer((req,res)=>{let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{received.push({authorization:req.headers.authorization,body});reply(res,'real IPC result');});});
