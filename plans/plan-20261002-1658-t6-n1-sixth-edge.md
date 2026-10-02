@@ -1,6 +1,6 @@
 # Plan: T6 N1 official external CLI custody edge
 
-> **Status**: Complete
+> **Status**: Review
 > **Created**: 20261002-1658
 > **Slug**: t6-n1-sixth-edge
 > **Planning Source**: codex-plan-or-waza-think
@@ -135,3 +135,9 @@ Touched implementation-identity/client tests; bun run build; bun run typecheck; 
 T3b prerequisites: current HEAD b5364f44; 29 focused tests passed. T6 touched suite: 9 files / 149 tests passed; implementation-identity: 115 tests passed; actual built Host-helper-to-external fixture path: 3 tests passed. Final canonical contract verification: 12/12 PASS, status Fulfilled, /tmp/byok-t6-canonical-contract.log and /tmp/byok-t6-canonical-evaluation.json (all check exit codes 0). Earlier failures remain in /tmp/byok-t6-check-results.json and are not final passing evidence.
 
 The exact public API goldens were reviewed/updated. Independent code review found no remaining defect. The original architecture freeze block was closed under PM22:31 authority by CodeGraph 1.6.1 readiness, manifest-only apply and empty-noop proof reconciliation. Canonical prepare on committed bf340ebb passed 12/12 criteria and all six executed current_exact checks (/tmp/byok-t6-pm-final-prepare.log; /tmp/byok-t6-pm-final-evaluation.json). Independent Codex reviewed frozen subject sha256:f3fa892f9cdbef7a3e375b9bc4901620b32ac603903ff999e32f75cfcf523f2b against origin/main@f2098ecbf84570054600bad0680ba72e59654ea9 and returned external_pass. Supported Receipt recording/finalization completed without retesting (/tmp/byok-t6-pm-finalize.log). Completion changes only bookkeeping; no product or semantic model change and no remote action.
+
+## Fix 1 — PM 22:58 HKT
+
+- [x] Prove F1 with permit claim/consume, synchronous native spawn failure and genuine uncertainty regression fixtures.
+- [x] Release provably not-spawned reservations/live slots without replay or cumulative-claim laundering; fix trivial F5/F7 and cover T1–T3; disposition F2–F7 explicitly.
+- [ ] Run touched tests, renew exact-subject acceptance and strict workflow, local commits only. After the last commit execute touched tests, typecheck, build and full test on final HEAD; update report.

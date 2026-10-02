@@ -90,7 +90,7 @@ interface AuthorizationState {
 }
 interface ExternalLedger {
   version: 2; launchId: string; kind: 'probe' | 'task'; parent: string; operation: string; attempt: number;
-  writer: boolean; depth: number; state: 'spawned' | 'terminated' | 'uncertain'; pid?: number;
+  writer: boolean; depth: number; state: 'not-spawned' | 'spawned' | 'terminated' | 'uncertain'; pid?: number;
   slots: string[]; record?: ExternalCliDescendantLaunchV2;
 }
 function alive(pid: number): boolean {
@@ -177,12 +177,13 @@ export class ExternalCliCustodyAuthority {
     const created: string[] = [];
     let result!: T;
     let launchError: unknown;
+    let launchFailed = false;
     try {
       claimRunFanoutBatchWithCommit(this.budget,[`external/${ledger.launchId}`],() => {
         const previous = this.ledgers();
         // Confirmed dead PID only; no timeout-based release of live/uncertain children.
         for (const old of previous) {
-          if (old.state === 'spawned' && old.pid !== undefined && !alive(old.pid) && groupAbsent(old.pid)) {
+          if ((old.state === 'spawned' || old.state === 'uncertain') && old.pid !== undefined && !alive(old.pid) && groupAbsent(old.pid)) {
             for (const slot of old.slots) {
               try { if (JSON.parse(readFileSync(slot,'utf8')).launchId === old.launchId) rmSync(slot,{force:true}); }
               catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
@@ -208,7 +209,7 @@ export class ExternalCliCustodyAuthority {
           ?? this.parent.perLaunch.envValues.PI_SUBAGENT_PARENT_SESSION ?? this.parent.perLaunch.session.root);
         const slots: [string,number,string][] = [
           [path.join(this.budget.directory,'custody-caps','session',sessionKey),limits.sessionCap,'session'],
-          [path.join(this.budget.directory,'custody-caps','parallel',rootKey),limits.parallel,'parallel'],
+          [path.join(this.budget.directory,'custody-caps','parallel',rootKey),Math.min(limits.parallel,4),'parallel'],
           [path.join(this.budget.directory,'custody-caps','external',rootKey),Math.min(limits.parallel,2),'Q'],
           ...(ledger.writer ? [[path.join(this.budget.directory,'custody-caps','writer',rootKey),1,'J'] as [string,number,string]] : []),
         ];
@@ -225,10 +226,14 @@ export class ExternalCliCustodyAuthority {
         beforeLaunch?.(); // Proven pre-spawn failures roll back every reservation.
         // Once launch is attempted, cumulative claims stay even if spawn throws.
         // Catch inside the lock callback so the fanout helper cannot refund them.
-        try { result = launch(); } catch (e) { launchError = e; }
+        try { result = launch(); } catch (e) { launchFailed = true; launchError = e; }
       });
     } catch (e) { for (const file of created.reverse()) rmSync(file,{force:true}); throw e; }
-    if (launchError) { this.finish(ledger, true); throw launchError; }
+    // Native spawn throws synchronously before returning a child, or returns
+    // one with a PID. Capture that PID before any fallible post-spawn setup.
+    // Keep cumulative claims once native launch is attempted, but retain live
+    // slots only when a child may exist.
+    if (launchFailed) { this.finish(ledger, ledger.pid !== undefined); throw launchError; }
     return result;
   }
   private finish(ledger: ExternalLedger, uncertain = false): void {
@@ -237,7 +242,7 @@ export class ExternalCliCustodyAuthority {
         try { if (JSON.parse(readFileSync(slot,'utf8')).launchId === ledger.launchId) rmSync(slot,{force:true}); }
         catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
       }
-      ledger.state = uncertain ? 'uncertain' : 'terminated';
+      ledger.state = uncertain ? 'uncertain' : ledger.pid === undefined ? 'not-spawned' : 'terminated';
       writeFileSync(this.ledgerPath(ledger.launchId),JSON.stringify(ledger),{mode:0o600});
     });
   }
@@ -256,8 +261,8 @@ export class ExternalCliCustodyAuthority {
       const child = nodeSpawn(installation.identity.interpreter?.path ?? installation.identity.installPath,
         [...(installation.identity.interpreter ? [installation.identity.installPath] : []),...args],
         {cwd,env,stdio:['ignore','pipe','pipe'],shell:false,windowsHide:true,detached:process.platform !== 'win32'});
-      child.on('error',()=>{});
       if (child.pid !== undefined) { ledger.pid=child.pid;ledger.state='spawned'; }
+      child.on('error',()=>{});
       try { writeFileSync(this.ledgerPath(ledger.launchId),JSON.stringify(ledger),{mode:0o600}); }
       catch (error) { child.kill('SIGKILL'); throw error; }
       return child;
@@ -351,18 +356,9 @@ export class ExternalCliCustodyAuthority {
       operation:record.operation,attempt:record.attempt,writer:record.installation.adapter.endsWith('-writer'),
       depth:record.depth,state:'uncertain',slots:[],record};
     return this.commit(ledger,() => {
-      // Consume failure cannot create a child. Mark the handle monotonic before native spawn.
-      state.consumed = true;
-      const finalRecord = ledger.record!;
-      const permit = createWorkflowChildPermit({issuerPackage:'@byok-sdk/client',workflowRunId:record.rootTaskId,
-        childKey:record.launchId,agent:record.installation.adapter,launchContractDigest:externalCliCommitment(finalRecord),context:'fresh',runner:'official-external-cli'});
-      const claimError = claimWorkflowChildPermit(permit,record.rootTaskId,record.launchId);
-      if (claimError) refuse('external_cli_permit_invalid');
-      const error = consumeWorkflowChildPermit(permit,{workflowRunId:record.rootTaskId,childKey:record.launchId,
-        agent:record.installation.adapter,launchContractDigest:externalCliCommitment(finalRecord),context:'fresh',runner:'official-external-cli'});
-      if (error) refuse('external_cli_permit_reused');
       const child = nodeSpawn(actual.command,[...actual.args],{cwd:actual.cwd,env:{...actual.env},
         stdio:['pipe','pipe','pipe'],shell:false,windowsHide:true,detached:process.platform !== 'win32'}) as ChildProcessWithoutNullStreams;
+      if (child.pid !== undefined) { ledger.pid = child.pid; ledger.state = 'spawned'; }
       child.on('error',() => {});
       const tree = child.pid === undefined ? undefined : createOwnedProcessTreeController(child.pid,{observation:'kernel-presence',termGraceMs:2000});
       if (tree) processTrees.set(child,tree);
@@ -376,11 +372,22 @@ export class ExternalCliCustodyAuthority {
           if (terminal?.state === 'unknown') refuse('external_cli_process_tree_unconfirmed');
         })().then(resolve,reject);
       })));
-      if (child.pid !== undefined) { ledger.pid = child.pid; ledger.state = 'spawned'; }
       try { writeFileSync(this.ledgerPath(ledger.launchId),JSON.stringify(ledger),{mode:0o600}); }
       catch (error) { child.kill('SIGTERM'); throw error; }
       return child;
-    },() => this.checkControl(state.control));
+    },() => {
+      this.checkControl(state.control);
+      // Consume failure cannot create a child. Mark the handle monotonic before native spawn.
+      state.consumed = true;
+      const finalRecord = ledger.record!;
+      const permit = createWorkflowChildPermit({issuerPackage:'@byok-sdk/client',workflowRunId:record.rootTaskId,
+        childKey:record.launchId,agent:record.installation.adapter,launchContractDigest:externalCliCommitment(finalRecord),context:'fresh',runner:'official-external-cli'});
+      const claimError = claimWorkflowChildPermit(permit,record.rootTaskId,record.launchId);
+      if (claimError) refuse('external_cli_permit_invalid');
+      const error = consumeWorkflowChildPermit(permit,{workflowRunId:record.rootTaskId,childKey:record.launchId,
+        agent:record.installation.adapter,launchContractDigest:externalCliCommitment(finalRecord),context:'fresh',runner:'official-external-cli'});
+      if (error) refuse('external_cli_permit_reused');
+    });
   }
   processTreeFor(child: ChildProcessWithoutNullStreams): CustodyProcessTreeController | undefined { return processTrees.get(child); }
   settled(child: ChildProcessWithoutNullStreams): Promise<void> { return settlements.get(child) ?? Promise.resolve(); }

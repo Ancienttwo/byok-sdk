@@ -129,7 +129,7 @@ int main(int argc,char **argv){
       const built = family === 'codex' ? launch.resolveCodexExecLaunch({adapter,command:actualCommand,asyncDir:dir,stepIndex,commandPrefixArgs:options.native ? [] : [entry]}) : claudeLaunch.resolveClaudeCodeLaunch({adapter:claudeAdapter,command,commandPrefixArgs:[entry]});
       return {...built,adapter:family === 'codex' ? adapter : claudeAdapter,cwd:dir,prompt:options.hold ? 'hold' : '',stepIndex,operation:operation ?? `step-${stepIndex}`,attempt};
     };
-    return {dir,entry,command,config,configDir,statePath,budget,parent,installations,authority,request,recordPath:dispatch.recordPath,
+    return {dir,entry,command,config,configDir,statePath,budget,parent,installations,authority,request,declaration,recordPath:dispatch.recordPath,
       tasks: (): Record<string,unknown>[] => {try { return readFileSync(path.join(dir,'task-spawned.jsonl'),'utf8').trim().split('\n').filter(Boolean).map(v => JSON.parse(v)); }catch {return [];}},
       dispose: () => {rmSync(dir,{recursive:true,force:true});rmSync(budget.directory,{recursive:true,force:true});},
     };
