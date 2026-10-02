@@ -479,7 +479,7 @@ describe('the required runtime entry', () => {
     },
   );
 
-  it.each(['pi-rpc', 'pi-prepared'] as const)('carries the declared entry %s', (entry) => {
+  it.each(['pi-rpc', 'pi-prepared', 'pi-durable'] as const)('carries the declared entry %s', (entry) => {
     expect(parsePiProviderLauncherOptions([...base, '--runtime-entry', entry]).runtimeEntry).toBe(entry);
   });
 

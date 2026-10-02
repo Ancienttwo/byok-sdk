@@ -1,7 +1,6 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { Harness, createRegistry, defineExtension, defineDoc, hook, ToolTask, ROOT_CONVERSATION_ID, watchEvents, type AgentEvent, type ToolRegistration } from '@earendil-works/pi-durable';
 import { CodingTools } from '@earendil-works/pi-durable/tools';
-import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
 import type { ToolCall } from '@earendil-works/pi-ai';
 import type { Models } from '@earendil-works/pi-ai/models';
 import { durableToolEnvironment } from './environment';
@@ -44,6 +43,7 @@ export async function openDurableEngine(input: DurableEngineInput) {
       },
     })] });
     const registry = createRegistry(); registry.install(extension);
+    const { openNodeSqliteStorage } = await import('@earendil-works/pi-durable/storage/sqlite/node');
     harness = await Harness.open(await openNodeSqliteStorage(input.file), {
       models: input.models, registry, env: () => env,
       settings: { retry: { enabled: false, maxRetries: 0 }, compaction: { enabled: false }, stream: { maxRetries: 0 } },

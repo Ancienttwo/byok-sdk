@@ -185,11 +185,11 @@ describe('buildPiProviderProjection', () => {
   });
 });
 
-describe('the pi-prepared delegated argv grammar', () => {
+describe('the pi-prepared and pi-durable delegated argv grammar', () => {
   const config = path.resolve('prepared-launch.json');
 
-  it('declares exactly the two runtime entries this launcher may parent', () => {
-    expect([...PI_LAUNCHER_RUNTIME_ENTRIES]).toEqual(['pi-rpc', 'pi-prepared']);
+  it('declares exactly the three runtime entries this launcher may parent', () => {
+    expect([...PI_LAUNCHER_RUNTIME_ENTRIES]).toEqual(['pi-rpc', 'pi-prepared', 'pi-durable']);
   });
 
   it('accepts exactly --config <absolute path> and appends nothing', () => {

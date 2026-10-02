@@ -52,6 +52,8 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
   const authority: DurableReplicaBinding = { agentRef: { tenantId: string(agent.tenantId), agentId: string(agent.agentId), profileRevision: string(agent.profileRevision) }, taskId: string(replica.taskId), leaseId: string(replica.leaseId), canonicalHome: string(replica.canonicalHome) };
   const root = string(config.replicaRoot);
   const file = await admitReplica(root, authority);
+  if (typeof config.instruction !== 'string' || config.instruction.length === 0) throw new Error('durable instruction missing');
+  const instruction = config.instruction;
   const expectedProvider = string(config.provider), expectedModel = string(config.model);
   const { provider, entry, key, digest: projectionDigest } = projection(expectedProvider, expectedModel);
   const api = provider.api as 'openai-completions' | 'anthropic-messages';
@@ -99,7 +101,7 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
       if (type !== 'start' || started || (command.resume !== false && command.resume !== true)) throw new Error('invalid durable start');
       if (command.resume === true && command.projectionDigest !== projectionDigest) throw new Error('durable provider projection drift on recovery');
       started = true;
-      engine = await openDurableEngine({ file, replicaRoot: root, binding: authority, models, model: { provider: expectedProvider, modelId: expectedModel }, instruction: string(config.instruction), resume: command.resume, ambient: process.env, tools,
+      engine = await openDurableEngine({ file, replicaRoot: root, binding: authority, models, model: { provider: expectedProvider, modelId: expectedModel }, instruction, resume: command.resume, ambient: process.env, tools,
         beforeTool: (nativeId, toolCallId, call) => new Promise<void>((resolve, reject) => {
           toolIds.set(nativeId, toolCallId);
           pending.set(toolCallId, { resolve, reject }); write({ type: 'tool_intent', toolCallId });
