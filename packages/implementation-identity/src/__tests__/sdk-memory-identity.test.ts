@@ -133,7 +133,11 @@ describe('agent-memory SDK helper identity', () => {
     for (const entry of ['agent-memory-describe', 'agent-memory-mcp'] as const) {
       const value = await attested(entry);
       const sealed = binding(value.identity, entry);
-      for (const extra of [{ OPENAI_API_KEY: 'fixture-only' }, { BYOK_HOST_TOOLSET_CONTEXT: 'host-task' }] as Record<string, string>[]) {
+      for (const extra of [
+        { OPENAI_API_KEY: 'fixture-only' }, { CODEX_API_KEY: 'fixture-only' },
+        { CODEX_ACCESS_TOKEN: 'fixture-only' }, { Codex_Access_Token: 'fixture-only' },
+        { BYOK_HOST_TOOLSET_CONTEXT: 'host-task' },
+      ] as Record<string, string>[]) {
         await expect(assertSdkHelperSpawnBinding(sealed, {
           command: sealed.command, fixedArgv: sealed.fixedArgv, cwd: sealed.cwd,
           env: { ...(entry === 'agent-memory-mcp' ? executionEnv() : baseEnv), ...extra },
