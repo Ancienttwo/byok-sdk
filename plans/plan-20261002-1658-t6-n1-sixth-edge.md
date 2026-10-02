@@ -1,6 +1,6 @@
 # Plan: T6 N1 official external CLI custody edge
 
-> **Status**: Review
+> **Status**: Complete
 > **Created**: 20261002-1658
 > **Slug**: t6-n1-sixth-edge
 > **Planning Source**: codex-plan-or-waza-think
@@ -148,4 +148,6 @@ Fix1 canonical prepare passed 12/12 on 0ea3e7f9 with all six current_exact check
 
 - [x] Prove replacement after full reverify while waiting for the real admission lock; target/config, interpreter/assets and parent bindings must refuse before native spawn.
 - [x] Add identity-owned synchronous tuple/directory proof without replacing full hash reverify; wire locked beforeLaunch and preserve F1 rollback/permit/counter semantics.
-- [ ] Run focused tests and required checks, deliberate API goldens, independent exact-subject acceptance, strict workflow, local commits only; execute final checks after last commit and update local report.
+- [x] Run focused tests and required checks, deliberate API goldens, independent exact-subject acceptance, strict workflow, local commits only; execute final checks after last commit and update local report.
+
+F2 current-target canonical freeze14/14 PASS at2a5037b7; independent Codex accepted subject sha256:c74fda987c1881d9530c191b5dd95f823f4bf8b88473c8e8e432f706c549d7bd against origin/main@1ff6cc06. Receipt/finalize supported and successful. Final after-last-bookkeeping-commit commands and actual SHA/exits are published to /tmp/byok-t6-f2-final-head-contract.json and /tmp/byok-t6-sixth-edge-report.md; report remains BLOCKED until those chronological checks pass. No further product change planned.
