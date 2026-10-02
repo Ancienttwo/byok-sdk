@@ -57,12 +57,14 @@ export type RuntimeDetectionRefusalReason = ToolImplementationUnavailableReasonV
 
 /** Explicit scope, never a launch environment or task/lane-selection authority. */
 export type RuntimeInstallationObservationContext = { readonly authority: ToolImplementationAuthority } & (
-  | { readonly scope: 'entry'; readonly runtimeEntry: 'pi-rpc' | 'pi-prepared' }
+  | { readonly scope: 'entry'; readonly runtimeEntry: 'pi-rpc' | 'pi-prepared' | 'pi-durable' }
   | { readonly scope: 'enabled-top-level' }
 );
 
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
+  /** Local adapter advertisement; no new protocol field or capability vocabulary. */
+  readonly durablePi?: boolean;
   readonly steer: boolean;
   readonly resume: boolean;
   /**
@@ -214,6 +216,8 @@ export interface ApprovalChannel {
  * one underlying runtime process/session for the lifetime of a task.
  */
 export interface Session {
+  /** Current execution artifact, available only after terminal success. */
+  resultDocument?(): unknown;
   /** Opaque runtime session id, reported back to the server via `task.complete.sessionRef`. */
   sessionRef: string;
   /** Normalized events for this session; the daemon batches these into `task.progress`. */
@@ -495,8 +499,17 @@ export interface RuntimePreparedLaunchV1 {
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
 }
 
+/** Trusted daemon barriers for the opt-in durable worker; never serialized. */
+export interface DurableLifecycle {
+  record(kind: 'tool-intent' | 'tool-committed' | 'respawn-intent', ordinal: number): Promise<void>;
+  ownsLease(): boolean;
+}
+
 /** Runtime resources shared by every start variant. */
 interface RuntimeOperationStartBase {
+  /** Trusted parent-only recovery authority; never serialized into the worker. */
+  readonly durableContext?: { readonly tenantId: string; readonly lifecycle: DurableLifecycle };
+
   readonly runtimeLaunch?: PiRuntimeLaunchResources;
   /** Exact daemon MCP admission environment; Pi requires it and never inherits runtime credentials. */
   readonly mcpEnv?: Readonly<Record<string, string>>;
@@ -619,6 +632,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
       ? {}
       : { generatesApprovalMcpServer: descriptor.generatesApprovalMcpServer === true }),
     capabilities: Object.freeze({
+      ...(descriptor.capabilities.durablePi === undefined ? {} : { durablePi: descriptor.capabilities.durablePi === true }),
       steer: descriptor.capabilities.steer === true,
       resume: descriptor.capabilities.resume === true,
       approvalInteractive: descriptor.capabilities.approvalInteractive === true,

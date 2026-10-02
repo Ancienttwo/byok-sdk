@@ -29,6 +29,7 @@
     "byok-agent-message-mcp": "./dist/bin/byok-agent-message-mcp.js",
     "byok-agent-memory-mcp": "./dist/bin/byok-agent-memory-mcp.js",
     "byok-agent-team-mcp": "./dist/bin/byok-agent-team-mcp.js",
+    "byok-pi-durable": "./dist/bin/byok-pi-durable.js",
     "byok-pi-prepared": "./dist/bin/byok-pi-prepared.js",
     "byok-pi-rpc": "./dist/bin/byok-pi-rpc.js"
   },

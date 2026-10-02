@@ -19,7 +19,7 @@ export const PI_PROJECTED_KEY_ENV = 'PI_PROVIDER_API_KEY';
  * never parents, so restating the pair here is a narrowing, not a second
  * vocabulary.
  */
-export const PI_LAUNCHER_RUNTIME_ENTRIES = ['pi-rpc', 'pi-prepared'] as const;
+export const PI_LAUNCHER_RUNTIME_ENTRIES = ['pi-rpc', 'pi-prepared', 'pi-durable'] as const;
 export type PiLauncherRuntimeEntry = (typeof PI_LAUNCHER_RUNTIME_ENTRIES)[number];
 
 /** Keep projected providers disjoint from Pi built-ins so composition can never fall back to one. */

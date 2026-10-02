@@ -17,6 +17,7 @@ export default defineConfig({
     'src/adapters/pi/subagents-policy-extension.ts',
     'src/bin/byok-agent.ts',
     'src/bin/byok-pi-prepared.ts',
+    'src/bin/byok-pi-durable.ts',
     'src/bin/byok-pi-rpc.ts',
     'src/bin/pi-runtime-host.ts',
     'src/bin/byok-mcp-env.ts',

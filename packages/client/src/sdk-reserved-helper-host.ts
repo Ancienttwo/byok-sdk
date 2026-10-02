@@ -6,7 +6,7 @@ import { runAttestedPiSubagentRunnerFromEnvironment } from './custody/pi-subagen
 
 export const BYOK_SDK_HELPER_SUBCOMMAND = '__byok_sdk_helper';
 
-export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'approval-mcp' | 'agent-team-mcp' | 'mcp-env' | 'pi-rpc' | 'pi-prepared';
+export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'approval-mcp' | 'agent-team-mcp' | 'mcp-env' | 'pi-rpc' | 'pi-prepared' | 'pi-durable';
 
 export interface SdkHelperHostConfig {
   /**
@@ -36,6 +36,7 @@ const DIST_SCRIPT_BY_KIND: Readonly<Record<SdkReservedHelperKind, string>> = Obj
   'mcp-env': 'byok-mcp-env.js',
   'pi-rpc': 'byok-pi-rpc.js',
   'pi-prepared': 'byok-pi-prepared.js',
+  'pi-durable': 'byok-pi-durable.js',
 });
 
 function assertExecutable(executable: string): void {
@@ -79,7 +80,7 @@ export function resolveSdkReservedHelperBin(
 }
 
 function isHelperKind(value: string | undefined): value is SdkReservedHelperKind {
-  return value === 'agent-message-mcp' || value === 'agent-memory-mcp' || value === 'agent-memory-describe' || value === 'approval-mcp' || value === 'agent-team-mcp' || value === 'mcp-env' || value === 'pi-rpc' || value === 'pi-prepared';
+  return value === 'agent-message-mcp' || value === 'agent-memory-mcp' || value === 'agent-memory-describe' || value === 'approval-mcp' || value === 'agent-team-mcp' || value === 'mcp-env' || value === 'pi-rpc' || value === 'pi-prepared' || value === 'pi-durable';
 }
 
 /**
@@ -112,7 +113,7 @@ export async function runSdkReservedHelperCommand(
     if (exitCode !== 0) throw new Error(`attested pi-subagent-print exec exited ${exitCode}`);
     return true;
   }
-  if (!isHelperKind(argv[1]) || (argv[1] !== 'pi-rpc' && argv[1] !== 'pi-prepared' && argv.length !== 2)) {
+  if (!isHelperKind(argv[1]) || (argv[1] !== 'pi-rpc' && argv[1] !== 'pi-prepared' && argv[1] !== 'pi-durable' && argv.length !== 2)) {
     throw new Error('invalid SDK-reserved helper command');
   }
   await runSdkReservedHelper(argv[1], argv.slice(2));

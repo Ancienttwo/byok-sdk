@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
+import { loadSqliteModule } from '../../daemon/journal/sqlite-support';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -50,6 +50,7 @@ export async function acquireReplicaLock(file: string, leaseId: string): Promise
     const stat = await fs.lstat(lockPath);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('invalid durable replica lock file');
   } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  const { DatabaseSync } = loadSqliteModule();
   const db = new DatabaseSync(lockPath);
   try {
     db.exec('PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; PRAGMA locking_mode=EXCLUSIVE; CREATE TABLE IF NOT EXISTS owner (slot INTEGER PRIMARY KEY CHECK(slot=1), lease_id TEXT NOT NULL); BEGIN EXCLUSIVE;');

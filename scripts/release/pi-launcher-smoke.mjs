@@ -417,7 +417,7 @@ await runtime.dispose();
   assert.equal(withoutNodeWarnings(missingEntry.stderr), 'pi provider launcher: --runtime-entry requires a value\n');
   const bogusEntry = admit('bogus', binding);
   assert.equal(bogusEntry.status, 1, bogusEntry.stderr || String(bogusEntry.error));
-  assert.equal(withoutNodeWarnings(bogusEntry.stderr), 'pi provider launcher: --runtime-entry must be one of [pi-rpc, pi-prepared]\n');
+  assert.equal(withoutNodeWarnings(bogusEntry.stderr), 'pi provider launcher: --runtime-entry must be one of [pi-rpc, pi-prepared, pi-durable]\n');
   // The prepared entry's own support set, and its parity with the rpc entry.
   // A credential-bearing openai-compatible profile is admitted by BOTH entries;
   // the auth-free profile stays admissible under `pi-rpc` and is refused under

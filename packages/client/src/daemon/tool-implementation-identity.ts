@@ -21,7 +21,7 @@ function canonicalDigest(value: unknown): string {
  * `<interpreter> <entry> __byok_sdk_helper <kind> …`, so the kind is the only
  * thing that differs between them and it is bound, not passed as text.
  */
-export type RuntimeLaunchKindV1 = 'pi-rpc' | 'pi-prepared';
+export type RuntimeLaunchKindV1 = 'pi-rpc' | 'pi-prepared' | 'pi-durable';
 
 export const RUNTIME_LAUNCH_KINDS: readonly RuntimeLaunchKindV1[] = Object.freeze([
   'pi-rpc',
@@ -161,7 +161,7 @@ export function deriveRuntimeLaunchDescription(
   input: RuntimeLaunchInputV1,
 ): RuntimeLaunchDescriptionV1 | 'install_record_mismatch' {
   // Four locator kinds are declared, but descendant dispatch stays disabled until custody gates pass.
-  if (!RUNTIME_LAUNCH_KINDS.includes(input.kind)) return 'install_record_mismatch';
+  if (!RUNTIME_LAUNCH_KINDS.includes(input.kind) && input.kind !== 'pi-durable') return 'install_record_mismatch';
   if (!path.isAbsolute(input.sessionCwd)) return 'install_record_mismatch';
   if (path.normalize(input.sessionCwd) !== input.sessionCwd) return 'install_record_mismatch';
   // The defect this whole contract exists to close: a process cwd that IS the

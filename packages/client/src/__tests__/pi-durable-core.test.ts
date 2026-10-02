@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtemp, mkdir, rm, symlink, writeFile, readFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import path from 'node:path';
 import os from 'node:os';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
@@ -36,6 +38,17 @@ describe('durable replica and tool boundaries', () => {
     const first = await acquireReplicaLock(file, 'lease-a');
     await expect(acquireReplicaLock(file, 'lease-b')).rejects.toThrow('locked');
     first.release(); const second = await acquireReplicaLock(file, 'lease-b'); second.release();
+  });
+  it('real cross-process OS lock refuses overlap and becomes available only after KILL close receipt', async () => {
+    const { root, binding } = await setup(); const file = await admitReplica(path.join(root, 'durable'), binding);
+    const code = "const {DatabaseSync}=require('node:sqlite'); const db=new DatabaseSync(process.argv[1]); db.exec('PRAGMA busy_timeout=0; PRAGMA journal_mode=DELETE; PRAGMA locking_mode=EXCLUSIVE; CREATE TABLE owner(slot INTEGER PRIMARY KEY,lease_id TEXT); BEGIN EXCLUSIVE;'); db.prepare('INSERT INTO owner VALUES(1,?)').run('old-lease'); db.exec('COMMIT'); console.log('locked'); setInterval(()=>{},1000);";
+    const child = spawn(process.execPath, ['-e', code, `${file}.lock.sqlite`], { stdio: ['ignore','pipe','pipe'] });
+    try {
+      await new Promise<void>((resolve,reject) => { child.stdout.once('data', () => resolve()); child.once('error', reject); child.once('exit', () => reject(new Error('lock fixture exited'))); });
+      await expect(acquireReplicaLock(file, 'current-lease')).rejects.toThrow('locked');
+      child.kill('SIGKILL'); await once(child, 'close');
+      const current = await acquireReplicaLock(file, 'current-lease'); current.release();
+    } finally { if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await once(child,'close'); } }
   });
   it('provider credentials are absent even when a tool requests inherited env', async () => {
     const { home } = await setup();

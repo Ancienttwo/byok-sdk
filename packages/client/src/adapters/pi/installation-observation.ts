@@ -18,17 +18,17 @@ function commonMeasurement(value: RuntimeInstallationMeasurementV1): unknown {
 
 /** No process, child env, credentials, task state or write probe; not an execution admission. */
 export async function observePiInstallation(
-  context: RuntimeInstallationObservationContext, signal?: AbortSignal,
+  context: RuntimeInstallationObservationContext, signal?: AbortSignal, durablePi = false,
 ): Promise<RuntimeDetectResult> {
   if (!context || typeof context !== 'object' || !context.authority || typeof context.authority.resolve !== 'function'
     || (context.scope !== 'entry' && context.scope !== 'enabled-top-level')
     || !Object.hasOwn(context, 'authority') || !Object.hasOwn(context, 'scope')
     || (context.scope === 'entry' && !Object.hasOwn(context, 'runtimeEntry'))
     || Object.keys(context).length !== (context.scope === 'entry' ? 3 : 2)
-    || (context.scope === 'entry' && !RUNTIME_LAUNCH_KINDS.includes(context.runtimeEntry))) {
+    || (context.scope === 'entry' && (!RUNTIME_LAUNCH_KINDS.includes(context.runtimeEntry) && context.runtimeEntry !== 'pi-durable'))) {
     return refused('installation_observation_unsupported');
   }
-  const kinds = context.scope === 'entry' ? [context.runtimeEntry] : RUNTIME_LAUNCH_KINDS;
+  const kinds = context.scope === 'entry' ? [context.runtimeEntry] : (durablePi ? ['pi-durable'] as const : RUNTIME_LAUNCH_KINDS.filter(kind => kind !== 'pi-durable'));
   const measured: RuntimeInstallationMeasurementV1[] = [];
   let version: string | undefined;
   for (const kind of kinds) {

@@ -1,0 +1,114 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { mkdtemp, mkdir, realpath, rm, readFile } from 'node:fs/promises';
+import { writeFileSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
+import { spawn as nativeSpawn, type ChildProcess } from 'node:child_process';
+import path from 'node:path';
+import os from 'node:os';
+import { PiAdapter } from '../adapters/pi/pi-adapter';
+import { sealRuntimeOperationManifest, type Session } from '../types';
+import { parseModelProviderProfile } from '../../../keys/src/provider-profile';
+import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
+import { buildPiPreparedArgs, buildPiProviderProjection } from '../../../keys/src/pi-provider-projection';
+import { parsePiProviderLauncherOptions, buildPiProviderChildEnvironment } from '../../../keys/src/pi-provider-launcher-core';
+import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
+import { buildRuntimeEnv } from '../daemon/environment';
+const roots: string[] = [], servers: Server[] = [], sessions: Session[] = [];
+afterEach(async () => {
+  for (const session of sessions.splice(0)) await session.close();
+  for (const server of servers.splice(0)) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
+});
+function finish(res: import('node:http').ServerResponse, content: string) {
+  const base = { id: 'cmpl-test', object: 'chat.completion.chunk', created: 0, model: 'test' };
+  res.writeHead(200, { 'content-type': 'text/event-stream' });
+  res.end([ { ...base, choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }] },
+    { ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } } ].map(value => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n');
+}
+function tool(res: import('node:http').ServerResponse, command: string) {
+  const base = { id: 'cmpl-tool', object: 'chat.completion.chunk', created: 0, model: 'test' };
+  res.writeHead(200, { 'content-type': 'text/event-stream' });
+  res.end([
+    { ...base, choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call-test', type: 'function', function: { name: 'bash', arguments: JSON.stringify({ command }) } }] }, finish_reason: null }] },
+    { ...base, choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } },
+  ].map(value => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n');
+}
+async function fixture(respond: (res: import('node:http').ServerResponse, ordinal: number, body: string) => void) {
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'byok-durable-launch-'))); roots.push(root);
+  const home = path.join(root, 'home'), store = path.join(root, 'store'); await mkdir(home); await mkdir(store);
+  let calls = 0; const bodies: string[] = [], authorizations: unknown[] = [];
+  const server = createServer((req,res) => { let body = ''; req.on('data', chunk => { body += chunk; }); req.on('end', () => { bodies.push(body); authorizations.push(req.headers.authorization); respond(res, ++calls, body); }); });
+  servers.push(server); await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address(); if (!address || typeof address === 'string') throw new Error('no provider port');
+  const profile = parseModelProviderProfile({ adapter: 'openai_compatible', auth_mode: 'bearer', base_url: `http://127.0.0.1:${address.port}/v1`, capabilities: [], created_at: '2026-09-10T00:00:00.000Z', updated_at: '2026-09-10T00:00:00.000Z', display_name: 'Synthetic', enabled: true, kind: 'model', model: 'test', profile_ref: 'probe', provider_kind: 'custom', pi_model: { ...PI_MODEL_FIXTURE, contextWindow: 4096, maxTokens: 64, reasoning: false, thinkingLevel: 'off' } });
+  const children: ChildProcess[] = [];
+  const adapter = new PiAdapter({ durablePi: { replicaRoot: path.join(store, 'durable') }, byokLauncher: { command: 'synthetic-custody-launcher', profileDbPath: path.join(root,'profiles'), sessionDir: path.join(root,'sessions') },
+    spawnFn: ((_cmd, args, options) => {
+      const parsed = parsePiProviderLauncherOptions(args as string[]); expect(parsed.runtimeEntry).toBe('pi-durable');
+      const delegated = buildPiPreparedArgs(parsed.piArgs);
+      const env = buildPiProviderChildEnvironment({ ambient: options!.env!, binding: parsed.launchBinding!, sessionDir: parsed.sessionDir, secret: 'DURABLE_PROVIDER_SENTINEL' });
+      writeFileSync(path.join(env.PI_CODING_AGENT_DIR!, 'models.json'), JSON.stringify(buildPiProviderProjection(profile)), { mode: 0o600 });
+      const child = nativeSpawn(parsed.piBin, [...(parsed.piEntry ? [parsed.piEntry] : []), ...parsed.piFixedArgs!, `--config-digest=${parsed.piConfigDigest}`, ...delegated], { ...options, env, cwd: parsed.piCwd! } as never);
+      children.push(child); return child;
+    }) as typeof nativeSpawn,
+  });
+  const selection = { lane: 'byok' as const, runtimeId: 'pi' as const, providerId: 'probe', modelId: 'test' };
+  const offer = { instruction: 'Host authority input', dispatchSelection: selection };
+  const prepared = await adapter.prepare({ offer, policy: { mode: 'auto' } } as never);
+  if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
+  const env = buildRuntimeEnv({ ambient: process.env, requirements: { credentialNames: [] } });
+  const launch = await prepared.operation.resolveRuntimeLaunch!({ kind: 'instruction', cwd: home, env, projectionRoot: path.join(store,'projections') });
+  const manifest = sealRuntimeOperationManifest({ taskId: 'task', runtimeId: 'pi', descriptor: adapter.descriptor, policy: { mode: 'auto' }, dispatchSelection: selection, requiredToolsetIds: [], cwd: home, workspace: { workspaceDir: home }, agentRef: { agentId: 'agent', profileRevision: 'revision' }, lease: { leaseId: 'lease', canonicalHome: home }, forwardedEnvironmentNames: Object.keys(env) });
+  const journal: string[] = [];
+  const session = await prepared.operation.start({ kind: 'instruction', instruction: 'Host authority input', manifest, env, runtimeLaunch: launch, mcpEnv: projectPiMcpEnvironment(env), durableContext: { tenantId: 'tenant', lifecycle: { ownsLease: () => true, record: async (kind,n) => { journal.push(`${kind}:${n}`); } } } }); sessions.push(session);
+  return { session, children, calls: () => calls, bodies, authorizations, home, journal };
+}
+describe('durable ordinary worker through custody argv', () => {
+  it('real worker sends Host input and reports selected result and ordinary usage', async () => {
+    const f = await fixture(res => finish(res, 'complete'));
+    const events = []; for await (const event of f.session.events) events.push(event);
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    expect(events.at(-1)).toEqual({ type: 'turn_end' });
+    expect(events.filter(event => event.type === 'usage')).toEqual([{ type: 'usage', inputTokens: 3, cachedInputTokens: 0, outputTokens: 2, totalTokens: 5 }]);
+    expect(f.session.resultDocument!()).toEqual({ text: 'complete' });
+    expect(f.bodies[0]).toContain('Host authority input'); expect(f.authorizations).toEqual(['Bearer DURABLE_PROVIDER_SENTINEL']);
+    expect(f.bodies.join('')).not.toContain('DURABLE_PROVIDER_SENTINEL'); expect(f.calls()).toBe(1);
+  });
+  it('real bash cannot inherit launcher credentials; durable tool ids and committed receipts agree', async () => {
+    const command = `${JSON.stringify(process.execPath)} -e 'console.log(JSON.stringify({key:process.env.PI_PROVIDER_API_KEY,control:process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE}))'`;
+    const f = await fixture((res,n) => { if (n === 1) tool(res, command); else finish(res, 'isolated'); });
+    const events = []; for await (const event of f.session.events) events.push(event);
+    expect(events.some(event => event.type === 'error')).toBe(false); expect(f.calls()).toBe(2);
+    const use = events.find(event => event.type === 'tool_use'), result = events.find(event => event.type === 'tool_result');
+    expect(use?.type).toBe('tool_use'); expect(result?.type).toBe('tool_result');
+    if (use?.type !== 'tool_use' || result?.type !== 'tool_result') throw new Error('tool events missing');
+    expect(use.toolCallId).not.toBe('call-test'); expect(result.toolCallId).toBe(use.toolCallId);
+    expect(JSON.stringify(result.output)).toContain('{}');
+    expect(f.bodies.join('')).not.toContain('DURABLE_PROVIDER_SENTINEL');
+    expect(f.journal).toEqual(['tool-intent:0', 'tool-committed:0']);
+  });
+  it('crash during unsafe tool ends the execution without replay or model resume', async () => {
+    const f = await fixture((res,n) => { if (n === 1) tool(res, 'printf once >> marker; sleep 60'); else finish(res, 'should never happen'); });
+    const until = Date.now() + 4000;
+    while (Date.now() < until) {
+      try { if ((await readFile(path.join(f.home, 'marker'), 'utf8')) === 'once') break; } catch {}
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    expect(await readFile(path.join(f.home, 'marker'), 'utf8')).toBe('once');
+    f.children[0]!.kill('SIGKILL');
+    const events = []; for await (const event of f.session.events) events.push(event);
+    expect(events.at(-1)?.type).toBe('error'); expect(events.some(event => event.type === 'turn_end')).toBe(false);
+    expect(f.calls()).toBe(1); expect(f.journal).toEqual(['tool-intent:0']);
+    expect(await readFile(path.join(f.home, 'marker'), 'utf8')).toBe('once');
+  });
+  it('checkpoint recovery resends the model even with maxRetries zero and preserves M9', async () => {
+    let kill: (() => void) | undefined;
+    const f = await fixture((res,n) => { if (n === 1) { setTimeout(() => kill?.(), 20); return; } finish(res, 'resumed'); });
+    kill = () => { f.children[0]!.kill('SIGKILL'); };
+    const events = []; for await (const event of f.session.events) events.push(event);
+    expect(f.calls()).toBe(2); expect(f.journal).toEqual(['respawn-intent:1']);
+    expect(events.some(event => event.type === 'error')).toBe(false); expect(events.at(-1)).toEqual({ type: 'turn_end' });
+    expect(f.session.resultDocument!()).toEqual({ text: 'resumed' });
+    expect(events.filter(event => event.type === 'usage')).toHaveLength(1); // interrupted attempt supplied no usage
+  });
+});

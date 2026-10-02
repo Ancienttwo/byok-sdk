@@ -415,9 +415,9 @@ export type ToolImplementationInstallRecordV1 = Omit<
 >;
 
 /** Frozen M0 runtime vocabulary; declaration does not enable a dispatcher. */
-export type RuntimeEntryV1 = 'pi-prepared' | 'pi-rpc' | 'pi-subagent-print' | 'pi-subagent-runner';
+export type RuntimeEntryV1 = 'pi-prepared' | 'pi-rpc' | 'pi-durable' | 'pi-subagent-print' | 'pi-subagent-runner';
 export const RUNTIME_ENTRIES: readonly RuntimeEntryV1[] = Object.freeze([
-  'pi-prepared', 'pi-rpc', 'pi-subagent-print', 'pi-subagent-runner',
+  'pi-prepared', 'pi-rpc', 'pi-durable', 'pi-subagent-print', 'pi-subagent-runner',
 ]);
 /** Canonical runtime prefix. Host declares it; the SDK checks exact equality. */
 export function runtimeEntryFixedArgv(kind: RuntimeEntryV1): readonly string[] {

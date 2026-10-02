@@ -459,7 +459,7 @@ export async function startPiProvider(
   // projection write, layout assertion, secret resolution, both spawn-binding
   // assertions and the spawn itself — is shared, because custody does not
   // depend on which entry consumes the projected provider.
-  const delegated = options.runtimeEntry === 'pi-prepared'
+  const delegated = (options.runtimeEntry === 'pi-prepared' || options.runtimeEntry === 'pi-durable')
     ? buildPiPreparedArgs(options.piArgs)
     : buildPiProviderArgs(profile, options.piArgs);
   const env = buildPiProviderChildEnvironment({
