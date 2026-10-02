@@ -233,7 +233,14 @@ export class ExternalCliCustodyAuthority {
     // one with a PID. Capture that PID before any fallible post-spawn setup.
     // Keep cumulative claims once native launch is attempted, but retain live
     // slots only when a child may exist.
-    if (launchFailed) { this.finish(ledger, ledger.pid !== undefined); throw launchError; }
+    if (launchFailed) {
+      // Setup may fail before a tree/listener exists. The PID was already
+      // captured, and every POSIX child is detached into its own group.
+      // Stop the entire group, but do not release slots on a signal attempt.
+      if (ledger.pid !== undefined) { try { process.kill(-ledger.pid,'SIGTERM'); } catch {} }
+      this.finish(ledger, ledger.pid !== undefined);
+      throw launchError;
+    }
     return result;
   }
   private finish(ledger: ExternalLedger, uncertain = false): void {

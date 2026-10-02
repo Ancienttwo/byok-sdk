@@ -27,7 +27,7 @@ const clientRoot = path.resolve(import.meta.dirname,'../../..');
 export async function importVendor<T>(relative: string): Promise<T> {
   return await import(pathToFileURL(path.join(clientRoot,'vendor/pi-subagents/0.60.0/src',relative)).href) as T;
 }
-export async function sixthEdgeKit(options: { auth?: string; limit?: number; maxDepth?: number; hold?: boolean; family?: 'codex' | 'claude'; copyInterpreter?: boolean; native?: boolean } = {}) {
+export async function sixthEdgeKit(options: { auth?: string; limit?: number; maxDepth?: number; hold?: boolean; family?: 'codex' | 'claude'; copyInterpreter?: boolean; native?: boolean; ignoreTerm?: boolean } = {}) {
   const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(),'byok-sixth-')));
   const entry = path.join(dir,'official-fixture.mjs');
   const family = options.family ?? 'codex';
@@ -60,6 +60,7 @@ process.stdin.on('end', () => {
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <signal.h>
 int main(int argc,char **argv){
  for(int i=1;i<argc;i++){
   if(!strcmp(argv[i],"--version")){puts("${family === 'codex' ? 'codex-cli 9.0.0' : '9.0.0 (Claude Code)'}");return 0;}
@@ -69,6 +70,8 @@ int main(int argc,char **argv){
   else puts("Logged in using ChatGPT");return 0;
  }
  }
+ if(${options.ignoreTerm ? '1' : '0'})signal(SIGTERM,SIG_IGN);
+ FILE *ready=fopen("native-ready","w");if(ready){fputs("ready",ready);fclose(ready);}
  char c;while(read(0,&c,1)>0){}
  FILE *f=fopen("task-spawned.jsonl","a");if(!f)return 2;fputs("{}\\n",f);fclose(f);
  for(int i=1;i+1<argc;i++)if(!strcmp(argv[i],"--output-last-message")){f=fopen(argv[i+1],"w");if(!f)return 3;fputs("{}",f);fclose(f);}

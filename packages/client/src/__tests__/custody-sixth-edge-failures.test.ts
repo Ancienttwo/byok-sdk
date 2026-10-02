@@ -16,7 +16,7 @@ vi.mock('../custody/custody-vendor-bridge.js', async original => {
   return {...actual,claimWorkflowChildPermit:vi.fn(actual.claimWorkflowChildPermit),consumeWorkflowChildPermit:vi.fn(actual.consumeWorkflowChildPermit)};
 });
 const kits: Awaited<ReturnType<typeof sixthEdgeKit>>[]=[];
-async function kit() {const k=await sixthEdgeKit({native:true});kits.push(k);return k;}
+async function kit(options?:{ignoreTerm?:boolean}) {const k=await sixthEdgeKit({native:true,...options});kits.push(k);return k;}
 afterEach(()=>{vi.restoreAllMocks();vi.clearAllMocks();for(const k of kits.splice(0))k.dispose();});
 function ledgers(k:Awaited<ReturnType<typeof kit>>) {return readdirSync(path.join(k.budget.directory,'custody-external')).map(name=>JSON.parse(readFileSync(path.join(k.budget.directory,'custody-external',name),'utf8')));}
 function slotFiles(directory:string):string[] {
@@ -53,9 +53,9 @@ describe('sixth edge: definite failure rollback and uncertain child retention',(
     expect(ledgers(k).filter(v=>v.kind==='task')).toHaveLength(failure==='spawn'?2:1);
   });
   it('retains genuinely uncertain live child slots, then recovers only after PID and group are absent',async()=>{
-    const k=await kit(),first=k.request(true),next=k.request(true),control=new AbortController();
+    const k=await kit({ignoreTerm:true}),first=k.request(true),next=k.request(true),control=new AbortController();
     const auth=await k.authority.prepare(first,{signal:control.signal}),nextAuth=await k.authority.prepare(next);
-    const spy=vi.spyOn(control.signal,'addEventListener').mockImplementationOnce(()=>{throw new Error('injected post-spawn setup failure');});
+    const spy=vi.spyOn(control.signal,'addEventListener').mockImplementationOnce(()=>{const limit=Date.now()+3000;while(!existsSync(path.join(k.dir,'native-ready'))){if(Date.now()>limit)throw Error('native fixture did not become ready');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,1);}throw new Error('injected post-spawn setup failure');});
     await expect(run(k,first,auth)).rejects.toThrow('injected post-spawn setup failure');spy.mockRestore();
     const child=vi.mocked(spawn).mock.results.at(-1)!.value,uncertain=ledgers(k).find(v=>v.kind==='task');
     try{
