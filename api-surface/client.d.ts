@@ -524,7 +524,7 @@ export declare function resolvePiRuntimeIdentity(): PiRuntimeIdentity;
  * only ever constructs `new PiAdapter()` with no options (see `createDaemon`),
  * so an out-of-process substitution (e.g. examples/basic's e2e run swapping
  * in the fake-pi fixture, or a single-file product injecting its required
- * Node 22.22+ pi sidecar) has no other seam to use.
+ * Node 24.15+ pi sidecar) has no other seam to use.
  *
  * Deliberately does NOT use `createRequire(...).resolve()`: this package is
  * pure ESM with no `require` export condition (`exports["."]` only offers

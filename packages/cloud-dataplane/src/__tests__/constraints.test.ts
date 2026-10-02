@@ -112,13 +112,16 @@ describe('the CI dataplane job', () => {
     expect(workflow).toContain('BYOK_TEST_WORKER_DATAPLANE');
   });
 
-  it('uses the repository Node pin in every job', () => {
+  it('uses the repository Node pin except for the explicit forward-compatible leg', () => {
     const setups = workflow.match(/actions\/setup-node@v7/g) ?? [];
     const versionFiles = workflow.match(/node-version-file: \.node-version/g) ?? [];
-    expect(repoFile('.node-version').trim()).toBe('22.22.3');
+    expect(repoFile('.node-version').trim()).toBe('24.21.0');
     expect(setups.length).toBeGreaterThan(0);
-    expect(versionFiles).toHaveLength(setups.length);
-    expect(workflow).not.toContain('node-version:');
+    expect(versionFiles).toHaveLength(setups.length - 1);
+    expect(workflow.match(/node-version: '26'/g)).toHaveLength(1);
+    expect(workflow).toContain("node: [baseline, '26']");
+    expect(workflow).toContain("if: matrix.node == 'baseline'");
+    expect(workflow).toContain("if: matrix.node == '26'");
   });
 });
 

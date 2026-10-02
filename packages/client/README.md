@@ -590,4 +590,4 @@ retry. Budget exhaustion drains accepted Pi work for up to 120 seconds; explicit
 stop or stdin EOF terminates it. Neither pause nor a new dialog recalls already
 admitted work. Runtime/grants remain separate from the native Codex session.
 
-MIT licensed. Node.js 22.22.0 or newer.
+MIT licensed. Node.js 24.15.0 or newer.

@@ -757,7 +757,7 @@ function launchEnvUnderIdentity(env: Readonly<Record<string, string>>): Record<s
   const bound: Record<string, string> = {};
   for (const name of Object.keys(env).sort()) {
     if (LIFECYCLE_ENV_NAMES.has(name)) continue;
-    if (CREDENTIAL_ENV_NAMES.has(name)) continue;
+    if (CREDENTIAL_ENV_NAMES.has(name.toUpperCase())) continue;
     bound[name] = env[name]!;
   }
   return bound;
@@ -772,7 +772,7 @@ function sdkHelperLaunchEnvUnderIdentity(
     : AGENT_MEMORY_DESCRIPTOR_LIFECYCLE_ENV_NAMES;
   const bound: Record<string, string> = {};
   for (const name of Object.keys(env).sort()) {
-    if (lifecycleNames.has(name) || CREDENTIAL_ENV_NAMES.has(name)) continue;
+    if (lifecycleNames.has(name) || CREDENTIAL_ENV_NAMES.has(name.toUpperCase())) continue;
     bound[name] = env[name]!;
   }
   return bound;
@@ -804,7 +804,7 @@ function unexpectedSdkHelperEnvNames(
     ? AGENT_MEMORY_EXECUTION_LIFECYCLE_ENV_NAMES
     : AGENT_MEMORY_DESCRIPTOR_LIFECYCLE_ENV_NAMES;
   const unexpected = Object.keys(env)
-    .filter((name) => CREDENTIAL_ENV_NAMES.has(name) || (name.startsWith(BYOK_CONTROL_ENV_PREFIX) && !allowed.has(name)));
+    .filter((name) => CREDENTIAL_ENV_NAMES.has(name.toUpperCase()) || (name.startsWith(BYOK_CONTROL_ENV_PREFIX) && !allowed.has(name)));
   if (entry === 'agent-memory-describe') {
     unexpected.push(...AGENT_MEMORY_EXECUTION_ENV_NAMES.filter((name) => Object.hasOwn(env, name)));
   }
