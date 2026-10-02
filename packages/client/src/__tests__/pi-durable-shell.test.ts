@@ -36,4 +36,16 @@ describe.skipIf(process.platform==='win32')('durable shell ownership and public 
     const f=await fixture();const result=await f.env.exec('while true; do printf tick; sleep 0.05; done',{onOutput:()=>{throw new Error('consumer closed');}},BACKGROUND_CONTEXT);
     expect(result.ok).toBe(false);if(!result.ok)expect(result.error.code).toBe('callback_error');expect(f.released).toHaveLength(1);
   });
+  it('spills original binary bytes while separately decoding tool text output',async()=>{
+    const f=await fixture();const expected=Buffer.from(Array.from({length:8192},(_,i)=>i%256));
+    const command=`${JSON.stringify(process.execPath)} -e 'process.stdout.write(Buffer.from(Array.from({length:8192},(_,i)=>i%256)))'`;
+    const result=await f.env.exec(command,{spill:{afterBytes:4096,afterLines:100}},BACKGROUND_CONTEXT);expect(result.ok).toBe(true);if(!result.ok)throw result.error;
+    expect(result.value.spillPath).toBeDefined();roots.push(path.dirname(result.value.spillPath!));expect(await fs.readFile(result.value.spillPath!)).toEqual(expected);expect(f.released).toHaveLength(1);
+  });
+  it('real spill I/O failure returns after group disposal rather than hanging on finish',async()=>{
+    const f=await fixture();const create=f.env.createTempFile.bind(f.env);
+    f.env.createTempFile=async(options,context)=>{const file=await create(options,context);if(file.ok){roots.push(path.dirname(file.value));await fs.unlink(file.value);await fs.mkdir(file.value);}return file;};
+    const result=await f.env.exec(`${JSON.stringify(process.execPath)} -e 'process.stdout.write("x".repeat(8192))'`,{spill:{afterBytes:4096,afterLines:100}},BACKGROUND_CONTEXT);
+    expect(result.ok).toBe(false);if(!result.ok)expect(result.error.code).toBe('unknown');expect(f.released).toHaveLength(1);
+  });
 });

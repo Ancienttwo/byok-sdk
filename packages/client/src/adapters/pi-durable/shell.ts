@@ -1,6 +1,8 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createWriteStream, promises as fs } from 'node:fs';
 import { once } from 'node:events';
+import { finished } from 'node:stream/promises';
+import { StringDecoder } from 'node:string_decoder';
 import type { Context } from '@earendil-works/chord';
 import { ExecutionError, ok, err, type ShellExecOptions, type ShellExecResult, type Result } from '@earendil-works/pi-durable/env';
 import type { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
@@ -28,31 +30,32 @@ export function durableShell(env: NodeExecutionEnv, shellEnv: NodeJS.ProcessEnv,
     let timeout: ReturnType<typeof setTimeout> | undefined;
     let output: import('node:fs').WriteStream | undefined, spillPath: string | undefined;
     let bytes = 0, lines = 0, spilled = false, code: number | null = null;
+    let outputDone=Promise.resolve();
     // Bound memory; keep raw output on disk only when the public spill option asks for it.
     let prefix: Buffer[] = [];
     let outputWork = Promise.resolve();
-    child.stdout!.setEncoding('utf8'); child.stderr!.setEncoding('utf8');
-    const consume = (text: string) => {
-      const chunk=Buffer.from(text);
+    const stdoutDecoder=new StringDecoder('utf8'),stderrDecoder=new StringDecoder('utf8');
+    const consume = (chunk: Buffer,decoder:StringDecoder) => {
       child.stdout!.pause(); child.stderr!.pause();
       outputWork = outputWork.then(async () => {
-        options?.onOutput?.(chunk.toString('utf8'), context);
+        options?.onOutput?.(decoder.write(chunk), context);
         bytes += chunk.length; lines += chunk.toString('utf8').split('\n').length - 1;
         if (options?.spill) {
           if (!spilled && (bytes > options.spill.afterBytes || lines + (bytes ? 1 : 0) > options.spill.afterLines)) {
             const created = await env.createTempFile({ prefix: 'pi-output-', suffix: '.log' }, context);
             if (!created.ok) throw created.error;
             spillPath = created.value; output = createWriteStream(spillPath, { flags: 'a' });
-            output.on('error', abort);
-            for (const part of prefix) if (!output.write(part)) await once(output, 'drain');
+            output.on('error',()=>{state.failure??=new ExecutionError('unknown','Unable to preserve durable shell output');abort();});
+            outputDone=finished(output,{cleanup:true}).catch(()=>{});
+            for (const part of prefix) {if(output.destroyed)throw new Error('durable spill closed');if (!output.write(part)) await once(output, 'drain');}
             prefix = []; spilled = true;
           }
-          if (spilled) { if (!output!.write(chunk)) await once(output!, 'drain'); }
+          if (spilled) {if(output!.destroyed)throw new Error('durable spill closed');if (!output!.write(chunk)) await once(output!, 'drain'); }
           else prefix.push(chunk);
         }
       }).catch(() => { state.failure ??= new ExecutionError('callback_error', 'Durable shell output failed'); abort(); }).finally(() => { child.stdout!.resume(); child.stderr!.resume(); });
     };
-    child.stdout!.on('data', consume); child.stderr!.on('data', consume);
+    child.stdout!.on('data',chunk=>consume(chunk,stdoutDecoder)); child.stderr!.on('data',chunk=>consume(chunk,stderrDecoder));
     child.stdin!.on('error', () => { state.failure ??= new ExecutionError('spawn_error', 'Durable shell command pipe closed'); });
     child.once('error', () => { state.failure ??= new ExecutionError('spawn_error', 'Unable to spawn durable shell'); });
     child.once('exit', value => { code = value; });
@@ -64,7 +67,8 @@ export function durableShell(env: NodeExecutionEnv, shellEnv: NodeJS.ProcessEnv,
       if (options?.timeout !== undefined) timeout = setTimeout(() => { state.failure ??= new ExecutionError('timeout', 'Command timed out'); void dispose().catch(() => {}); }, options.timeout * 1_000);
       child.stdin!.end(command + '\n');
       await receipt; await outputWork;
-      if (output) { output.end(); await once(output, 'finish'); }
+      try{for(const decoder of [stdoutDecoder,stderrDecoder]){const tail=decoder.end();if(tail)options?.onOutput?.(tail,context);}}catch{state.failure??=new ExecutionError('callback_error','Durable shell output failed');}
+      if (output) { if(!output.destroyed)output.end();await outputDone; }
       await dispose(); quiesced = true; // includes background descendants, even after bash exits
       if (state.failure) { state.failure.spillPath = spillPath; return err(state.failure); }
       return ok({ exitCode: code ?? 1, ...(spillPath ? { spillPath } : {}) });
