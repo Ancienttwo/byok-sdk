@@ -1,6 +1,6 @@
 # Plan: T6 Claude mode, uncertain group and output/preflight followups
 
-> **Status**: Review
+> **Status**: Complete
 > **Created**: 20261003-0305
 > **Slug**: t6-followups
 > **Planning Source**: codex-plan
@@ -112,7 +112,7 @@ Four sequential independent slices, preserve F1 charge-once and all caps. Use su
 - [x] Info-2: SIGTERM post-PID uncertain group, retain slots/counters and test actual group signal/liveness; local commit.
 - [x] F6: bind adapter output path and legitimate async root, substitute/refuse fixtures and provenance; local commit.
 - [x] F4: shared authoritative policy preflight, no probes when exhausted, race-safe final admission; local commit.
-- [ ] Regenerate projection only through tooling and execute exact seven-check chain after last commit; publish /tmp/byok-t6-followups-report.md.
+- [x] Regenerate projection only through tooling and execute exact seven-check chain after last commit; publish /tmp/byok-t6-followups-report.md.
 
 ## Annotations
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
@@ -122,4 +122,6 @@ Four sequential independent slices, preserve F1 charge-once and all caps. Use su
 - [x] Info-2: SIGTERM post-PID uncertain group, retain slots/counters and test actual group signal/liveness; local commit.
 - [x] F6: bind adapter output path and legitimate async root, substitute/refuse fixtures and provenance; local commit.
 - [x] F4: shared authoritative policy preflight, no probes when exhausted, race-safe final admission; local commit.
-- [ ] Regenerate projection only through tooling and execute exact seven-check chain after last commit; publish /tmp/byok-t6-followups-report.md.
+- [x] Regenerate projection only through tooling and execute exact seven-check chain after last commit; publish /tmp/byok-t6-followups-report.md.
+
+Canonical prepare15/15 and independent Codex exact-source acceptance completed at adc2da4c, target0b44f76c. Final chronological after-last-bookkeeping-commit evidence is owned by /tmp/byok-t6-followups-final-check-results.json and /tmp/byok-t6-followups-report.md; report remains BLOCKED until actual final chain passes.
