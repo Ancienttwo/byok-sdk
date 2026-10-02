@@ -1,3 +1,4 @@
+import { assertDurableShellOwner, disposeDurableShellGroups } from './process-groups';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
@@ -6,6 +7,7 @@ import type { PiRuntimeLaunchResources } from '../pi/runtime-launch';
 import type { PiByokLauncherConfig } from '../pi/pi-adapter';
 import { serializePiHostConfig } from '../pi/runtime-host-binding';
 import { PiRpcClient, type SpawnFn } from '../pi/rpc-client';
+import { RuntimeExecutionFailure } from '../../runtime-failure';
 import { AsyncQueue } from '../../util/async-queue';
 import { admitReplica, resetReplica } from './replica';
 import { DurableRecovery } from './recovery';
@@ -42,11 +44,14 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
   });
   try { await fs.writeFile(configPath, serialized.bytes, { mode: 0o600 }); }
   catch (error) { await fs.rm(configDir, { recursive: true, force: true }); throw error; }
+  const shellGroups = new Set<number>();
+  let workerPid: number | undefined;
   const queue = new AsyncQueue<AgentEvent>();
   const recovery = new DurableRecovery(context.lifecycle);
   let rpc: PiRpcClient | undefined;
   let closing = false, completed = false;
   let document: unknown;
+  let failure: RuntimeExecutionFailure | undefined;
   let projectionDigest: string | undefined;
   const seenUsage = new Set<string>();
   let disposal: Promise<void> | undefined;
@@ -63,6 +68,8 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
     rpc = child;
     const receipt = await child.send({ type: 'start', resume, ...(resume ? { projectionDigest } : {}) });
     if (receipt.success !== true || typeof receipt.projectionDigest !== 'string' || !/^[0-9a-f]{64}$/u.test(receipt.projectionDigest) || (resume && receipt.projectionDigest !== projectionDigest)) throw new Error('durable worker refused start or changed provider projection');
+    if(typeof receipt.workerPid !== 'number'||!Number.isSafeInteger(receipt.workerPid)||receipt.workerPid<=1)throw new Error('durable worker identity missing');
+    workerPid=receipt.workerPid;
     projectionDigest = receipt.projectionDigest;
     return child;
   };
@@ -70,7 +77,7 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
     if (disposal) return disposal;
     closing = true; recovery.stop();
     const attempt = (async () => {
-      if (rpc) await rpc.dispose();
+      try { if (rpc) await rpc.dispose(); } finally { await disposeDurableShellGroups(shellGroups); }
       if (pump) await pump; // owned tree receipt before replica cleanup or lease release
       await resetReplica(file);
       await fs.rm(configDir, { recursive: true, force: true });
@@ -88,7 +95,14 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
           let fatal = false;
           for await (const frame of child.events) {
             if (closing) return;
-            if (frame.type === 'tool_intent') {
+            if(frame.type==='tool_process'){
+              if(typeof frame.pid!=='number'||workerPid===undefined||closing||!context.lifecycle.ownsLease())throw new Error('durable shell ownership refused');
+              assertDurableShellOwner(frame.pid,workerPid);shellGroups.add(frame.pid);
+              if(closing||!context.lifecycle.ownsLease())throw new Error('durable shell lease ended');
+              await child.send({type:'shell_ack',pid:frame.pid});
+            } else if(frame.type==='tool_process_closed'){
+              if(typeof frame.pid!=='number'||!shellGroups.delete(frame.pid))throw new Error('invalid durable shell disposal receipt');
+            } else if (frame.type === 'tool_intent') {
               if (typeof frame.toolCallId !== 'string') throw new Error('invalid durable tool intent');
               await recovery.beforeTool(frame.toolCallId);
               await child.send({ type: 'tool_ack', toolCallId: frame.toolCallId });
@@ -115,22 +129,22 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
             } else if (frame.type === 'durable_failed') { fatal = true; break; }
             else throw new Error('unknown durable frame');
           }
-          await child.dispose(); // native lock may be reused only after confirmed tree death
+          try { await child.dispose(); } finally { await disposeDurableShellGroups(shellGroups); } // native lock may be reused only after confirmed tree death
           if (closing || completed) return;
           if (fatal) throw new Error('durable worker failed');
           await recovery.crash();
           child = await spawn(true);
         }
       } catch {
-        if (!closing) { recovery.stop(); queue.push({ type: 'error', message: 'durable runtime failed or recovery was refused' }); queue.end(); }
+        if (!closing) { recovery.stop(); failure=new RuntimeExecutionFailure({phase:'run',category:'authority',retry:'non-retryable',reason:'durable runtime failed or recovery was refused'}); queue.push({ type: 'error', message: failure.message }); queue.end(); }
       }
     })();
   } catch (error) { await close(); throw error; }
-  return { sessionRef: manifest.taskId, events: queue,
+  return { sessionRef: manifest.taskId, events: (async function*(){for await(const event of queue)yield event;if(failure)throw failure;})(),
     resolveApproval: async () => { throw new Error('durable Pi is YOLO-only'); },
     steer: async () => { throw new Error('durable steering is outside slice 1'); },
     followUp: async () => { throw new Error('durable continuation requires a new Host execution'); },
-    interrupt: async () => { closing = true; recovery.stop(); rpc?.kill(); }, close,
+    interrupt: async () => { closing = true; recovery.stop(); rpc?.kill(); try { if(rpc)await rpc.dispose(); } finally { await disposeDurableShellGroups(shellGroups); } queue.end(); }, close,
     resultDocument: () => { if (!completed) throw new Error('durable result is not terminal'); return document; },
   };
 }

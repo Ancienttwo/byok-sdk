@@ -86,12 +86,14 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
   let started = false;
   const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
   const rejectPending = () => { for (const promise of pending.values()) promise.reject(new Error('durable transport closed')); pending.clear(); };
-  const cleanup = async () => { rejectPending(); if (engine) await engine.close(); await pool.close(); };
+  const pendingShells=new Map<number,{resolve():void;reject(error:Error):void}>();
+  const cleanup = async () => { for(const waiter of pendingShells.values())waiter.reject(new Error('durable shell custody ended'));pendingShells.clear();rejectPending(); if (engine) await engine.close(); await pool.close(); };
   lines.on('line', raw => {
     void (async () => {
       if (Buffer.byteLength(raw) > RPC_MAX_FRAME_BYTES) throw new Error('durable RPC frame exceeds limit');
       const command = object(JSON.parse(raw));
       const id = string(command.id), type = string(command.type);
+      if(type==='shell_ack'){const pid=command.pid;if(typeof pid!=='number'||!pendingShells.has(pid))throw new Error('unknown shell acknowledgement');pendingShells.get(pid)!.resolve();pendingShells.delete(pid);write({type:'response',id,success:true});return;}
       if (type === 'tool_ack') {
         const callId = string(command.toolCallId); const waiter = pending.get(callId);
         if (!waiter) throw new Error('unknown durable tool acknowledgement');
@@ -103,6 +105,7 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
       if (command.resume === true && command.projectionDigest !== projectionDigest) throw new Error('durable provider projection drift on recovery');
       started = true;
       engine = await openDurableEngine({ file, replicaRoot: root, binding: authority, models, model: { provider: expectedProvider, modelId: expectedModel }, instruction, resume: command.resume, ambient: process.env, tools,
+        shellOwnership:{own:pid=>new Promise<void>((resolve,reject)=>{pendingShells.set(pid,{resolve,reject});write({type:'tool_process',pid});}),released:pid=>write({type:'tool_process_closed',pid})},
         beforeTool: (nativeId, toolCallId, call) => new Promise<void>((resolve, reject) => {
           toolIds.set(nativeId, toolCallId);
           pending.set(toolCallId, { resolve, reject }); write({ type: 'tool_intent', toolCallId });
@@ -119,7 +122,7 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
         } },
         result: async document => { write({ type: 'durable_result', document }); write({ type: 'durable_complete' }); },
       });
-      write({ type: 'response', id, success: true, projectionDigest });
+      write({ type: 'response', id, success: true, projectionDigest, workerPid:process.pid });
       void engine.run().catch(() => { write({ type: 'durable_failed' }); });
     })().catch(() => { write({ type: 'durable_failed' }); process.exitCode = 1; lines.close(); void cleanup(); });
   });
