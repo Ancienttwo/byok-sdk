@@ -1,6 +1,6 @@
 # Plan: T6 N1 official external CLI custody edge
 
-> **Status**: Review
+> **Status**: Complete
 > **Created**: 20261002-1658
 > **Slug**: t6-n1-sixth-edge
 > **Planning Source**: codex-plan-or-waza-think
@@ -140,4 +140,6 @@ The exact public API goldens were reviewed/updated. Independent code review foun
 
 - [x] Prove F1 with permit claim/consume, synchronous native spawn failure and genuine uncertainty regression fixtures.
 - [x] Release provably not-spawned reservations/live slots without replay or cumulative-claim laundering; fix trivial F5/F7 and cover T1–T3; disposition F2–F7 explicitly.
-- [ ] Run touched tests, renew exact-subject acceptance and strict workflow, local commits only. After the last commit execute touched tests, typecheck, build and full test on final HEAD; update report.
+- [x] Run touched tests, renew exact-subject acceptance and strict workflow, local commits only. After the last commit execute touched tests, typecheck, build and full test on final HEAD; update report.
+
+Fix1 canonical prepare passed 12/12 on 0ea3e7f9 with all six current_exact checks actually executed; independent Codex external_pass accepted subject sha256:99f6aec693fc84bf4f94408a87c39fc2b739e7bd87ab5172a3b8b565f17a05df at origin/main@f2098ecb. Supported Receipt/finalize succeeded without re-execution. Required after-last-bookkeeping-commit evidence is published to /tmp/byok-t6-fix1-final-head-evaluation.json and /tmp/byok-t6-fix1-final-head-touched.log, with the actual final HEAD and exits in /tmp/byok-t6-sixth-edge-report.md. Report remains BLOCKED until that chronological sequence passes.
