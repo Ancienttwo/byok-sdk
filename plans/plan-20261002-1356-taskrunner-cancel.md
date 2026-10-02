@@ -117,10 +117,11 @@ Preserve single semantic terminal and authoritative close receipts. Drain only u
 At 10x concurrency native process trees/startup ownership are the limiting resource.
 
 ## Task Breakdown
-- [ ] Cover queued/pre-claim/startup/stream/tool/repeated terminal cancellation for bundled runtimes using native protocol process fixtures.
-- [ ] Fix reproduced cancellation bugs minimally; one local commit per fix.
-- [ ] Run related tests, workspace build/typecheck/test, API/version checks and strict workflow check.
-- [ ] Write `/tmp/byok-t1-taskrunner-cancel-report.md` with state machine, evidence, checks and final RESULT line.
+- [x] Cover queued/pre-claim/startup/stream/tool/repeated terminal cancellation with 55 new cases.
+- [x] Commit proven cancellation fixes locally with strict assertions and unchanged deadlines.
+- [ ] Close the remaining full-suite Codex tool-stage usage mismatch (456/29 expected, 123/17 observed).
+- [x] Run Required Checks; final workspace test fails one case, acceptance remains blocked.
+- [x] Write `/tmp/byok-t1-taskrunner-cancel-report.md` with state machine, evidence and `RESULT: BLOCKED`.
 
 ## Verification Plan
 Run focused Vitest cancellation suites first, then root Required Checks. Do not relax assertions, skip tests or increase existing timeouts. Report baseline/tooling failures separately; BLOCKED if owner decision or forbidden-file changes become necessary.
@@ -129,7 +130,18 @@ Run focused Vitest cancellation suites first, then root Required Checks. Do not 
 <!-- [NOTE]: prefixed inline. Claude processes all and revises. -->
 
 ## Task Breakdown
-- [ ] Cover queued/pre-claim/startup/stream/tool/repeated terminal cancellation for bundled runtimes using native protocol process fixtures.
-- [ ] Fix reproduced cancellation bugs minimally; one local commit per fix.
-- [ ] Run related tests, workspace build/typecheck/test, API/version checks and strict workflow check.
-- [ ] Write `/tmp/byok-t1-taskrunner-cancel-report.md` with state machine, evidence, checks and final RESULT line.
+- [x] Cover queued/pre-claim/startup/stream/tool/repeated terminal cancellation with 55 new cases.
+- [x] Commit proven cancellation fixes locally with strict assertions and unchanged deadlines.
+- [ ] Close the remaining full-suite Codex tool-stage usage mismatch (456/29 expected, 123/17 observed).
+- [x] Run Required Checks; final workspace test fails one case, acceptance remains blocked.
+- [x] Write `/tmp/byok-t1-taskrunner-cancel-report.md` with state machine, evidence and `RESULT: BLOCKED`.
+
+## Execution Outcome
+
+Acceptance is BLOCKED. Final source head: `f58e951f`; all changes remain local.
+Added cancellation suites pass 55/55 independently. Build, workspace typecheck, API golden, version authority and strict workflow checks pass. Final root workspace test fails one Codex tool-stage usage case; it returns 123/17 rather than 456/29. The distinction between deadline fallback and dropped native observation is not yet proven. Keep the guard and deadlines unchanged.
+
+Evidence/state machine: `/tmp/byok-t1-taskrunner-cancel-report.md`.
+Failing command: `BYOK_REQUIRE_BUN=1 BYOK_TEST_BUN_BIN=/Users/chris/.bun/bin/bun bun run test`.
+Failing log: `/tmp/byok-t1-workspace-test-final-current.log`.
+No push, PR, merge, Draft-to-ready transition, branch/worktree deletion was performed.
