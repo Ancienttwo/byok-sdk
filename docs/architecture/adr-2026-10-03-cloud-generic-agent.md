@@ -8,6 +8,8 @@
 
 #258 已在本地 daemon 内以 pi-durable 1.0 原生 `Harness.open(storage)` + SQLite schema 实现 durable slice 1（Task 模式），并保持保守边界：daemon restart → `daemon_interrupted`、不续跑旧工具、launcher 一次性 IPC credential custody。Cloudflare 已把 agents 仓库的 pi harness 迁到 pi-durable 1.0（Durable Object 宿主、wake/heartbeat、`operationId` 幂等、每工具显式 `replay`）。
 
+Aiphabee 并非首次引入 byok-sdk：其本地通路已经通过 `packages/byok-host` 依赖 `@byok-sdk/client` / `@byok-sdk/server` 0.17.0 与 `@byok-sdk/keys` 0.4.3（Ancienttwo/aiphabee @ 3defa6e1），云端 cloud-chat 尚未依赖；切片 4e 须把这些版本与云端 backend 统一对齐。
+
 产品上需要「Generic Agent」：同一套 API 同时覆盖本地（BYOK、官方 CLI、本地文件）与云端（Aiphabee 现有 serverless agent 形态）两种部署，并支持 Task 与 Bot 两种模式。需要裁定：Bot 模式的执行语义、云端凭据归属、BYOK 能否上云、云端可用能力集合、云端工具/作业调用的承载方式，以及 SDK 与 Aiphabee 的所有权边界。
 
 ## Decision
