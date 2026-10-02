@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import fs, { readFileSync, writeFileSync, readdirSync, statSync, realpathSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import childProcess, { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import path from 'node:path';
 import { syncBuiltinESMExports } from 'node:module';
@@ -75,4 +75,17 @@ it('checks cancellation again after locked tuple I/O before consuming a permit o
  expect(checked).toBe(true);expect(k.tasks()).toEqual([]);expect(claims(k)).toBe(before);
  const tasks=readdirSync(path.join(k.budget.directory,'custody-external')).map(n=>JSON.parse(readFileSync(path.join(k.budget.directory,'custody-external',n),'utf8'))).filter(row=>row.kind==='task');
  expect(tasks).toEqual([]);
+});
+
+
+it('refuses prepare-time abort during locked tuple I/O before creating any probe child or claim',async()=>{
+ const k=await sixthEdgeKit({native:true});kits.push(k);const control=new AbortController();let checked=false;
+ const probe={...ownershipProbe,lstatSync(target:string){const stat=ownershipProbe.lstatSync!(target);checked=true;control.abort();return stat;}};
+ const authority=new ExternalCliCustodyAuthority(k.parent,k.budget,k.installations,{},probe,k.recordPath),before=claims(k);
+ const native=vi.spyOn(childProcess,'spawn');syncBuiltinESMExports();
+ try{
+  await expect(authority.prepare(k.request(true),{signal:control.signal})).rejects.toThrow('external_cli_cancelled');
+  expect(checked).toBe(true);expect(native).not.toHaveBeenCalled();expect(claims(k)).toBe(before);expect(k.tasks()).toEqual([]);
+  expect(readdirSync(path.join(k.budget.directory,'custody-external'))).toEqual([]);
+ }finally{native.mockRestore();syncBuiltinESMExports();}
 });
