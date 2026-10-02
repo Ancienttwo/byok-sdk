@@ -5,12 +5,12 @@
   "sourceDigest": "sha256:2cd62242ce412b870563ddf9b283ff287abf32f92a3b1aa065a78c4a289da691",
   "provenance": {
     "schemaVersion": "archcontext.architecture-docs-projection-provenance/v1",
-    "baseHeadSha": "58ad344f7ca82be19e9468b888502e36af009e33",
-    "worktreeDigest": "sha256:74cb7c7e202414958f7788ad9a2b3d77ede5f0370992f35a8a245e802634107b",
-    "sourceTreeDigest": "sha256:bbda52561c8687a01052ce0477e74bda5dbf6c0cb9cf22b6e14ebbd6db589861",
+    "baseHeadSha": "a7ea71ecfb3d07a97c37dea3906e85663b7b8fa7",
+    "worktreeDigest": "sha256:4055d63f9d3301d0bdc7e3f3b04dcb1a1fb9d0b4711178602f9f708088cbfdb7",
+    "sourceTreeDigest": "sha256:f21fc4044bd903d18576e05598ba416557d4cf170f8cabc1d8883cde2b031fb1",
     "modelDigest": "sha256:3967fb09bdbb43f62528bdd71dae409497edd9e7102a542b398b434f7c0b9cfb",
-    "codeGraphDigest": "sha256:89b03a30fdbf93ebe5ff09a1c728688b69ac57255897b2de8712de9828127ca4",
-    "indexedWorktreeDigest": "sha256:fa4330f6a8928055bc660ef2fbc3aa4ae200fc5b2d7e425afc8e34fb4aa8d0c1",
+    "codeGraphDigest": "sha256:aee537da9cc67b24e60b460da9f251f5cf352f14cead9efed0be6dee34ee32b9",
+    "indexedWorktreeDigest": "sha256:d7640a671fa3a1d04b9cf0aedd26c84ca94042e78ea852aef23dc3192ca7f024",
     "rendererVersion": "archcontext.docs-renderer/v4",
     "layoutVersion": "archcontext.docs-layout/v1",
     "generatedFrom": {
@@ -19,9 +19,9 @@
       "codeGraphBinaryDigest": "sha256:aaf60671de2533409c0ac11aa5db94ec1ac4d758cce92b4b78219ce21edf61d7",
       "codeGraphStatus": "ready"
     },
-    "projectionInputDigest": "sha256:8373e0aad7fc8b783ef3b98220ba8ff666c7a979a4919bfe99aedd6b4ec941de"
+    "projectionInputDigest": "sha256:cba2808018efbaee118a2814b433f15a1b929e2d3d72b64b2306cec596b85531"
   },
-  "projectionDigest": "sha256:8bb1a175d70c367412613738961e7f22839210f769ec01e9949cc7ccc4280622",
+  "projectionDigest": "sha256:57cd43da57f56a126564b6934c56f57d8a430686e6bd854ab3aa8910768a773c",
   "semanticBaseline": {
     "semanticState": {
       "schemaVersion": "archcontext.architecture-semantic-state/v1",
@@ -59,17 +59,17 @@
     },
     "digests": {
       "modelDigest": "sha256:3967fb09bdbb43f62528bdd71dae409497edd9e7102a542b398b434f7c0b9cfb",
-      "sourceTreeDigest": "sha256:bbda52561c8687a01052ce0477e74bda5dbf6c0cb9cf22b6e14ebbd6db589861",
+      "sourceTreeDigest": "sha256:f21fc4044bd903d18576e05598ba416557d4cf170f8cabc1d8883cde2b031fb1",
       "flowProofDigest": "sha256:c105ee1286780504c1041f4587ff6c06a1d292ff18d33aa3359e656950ce1214",
-      "projectionDigest": "sha256:8bb1a175d70c367412613738961e7f22839210f769ec01e9949cc7ccc4280622"
+      "projectionDigest": "sha256:57cd43da57f56a126564b6934c56f57d8a430686e6bd854ab3aa8910768a773c"
     },
     "evidence": {
-      "sourceTreeDigest": "sha256:bbda52561c8687a01052ce0477e74bda5dbf6c0cb9cf22b6e14ebbd6db589861",
+      "sourceTreeDigest": "sha256:f21fc4044bd903d18576e05598ba416557d4cf170f8cabc1d8883cde2b031fb1",
       "selectorEvidenceDigest": "sha256:2c152166abffaca7bb7951befe3a590953471e24aa39217c1fde3bfdb48ec4ea",
       "rendererVersion": "archcontext.docs-renderer/v4"
     }
   },
-  "receiptDigest": "sha256:c50e0d205e10b6f4813066c3d81bb46e42e72e06f477b80da070067c8e1b0f48",
+  "receiptDigest": "sha256:b5fe1d2cdaadd901ccf19d6a2f2a2c7234bca03a1b01264c058d6e171f86f3f8",
   "targetCount": 7,
   "fileCount": 7,
   "targets": [
@@ -102,8 +102,8 @@
       "outputDigest": "sha256:ca6c81d7fd07d171ce9fb5cda21ba1f3a405bca298f48cfe12d6ddf1ffc8f05b",
       "verifiedAgainst": {
         "branch": "detached",
-        "commit": "fbc19f539dfbbf0ee2ada02baa3346cbff79397d",
-        "committedAt": "2026-10-03T01:07:34+08:00"
+        "commit": "a7ea71ecfb3d07a97c37dea3906e85663b7b8fa7",
+        "committedAt": "2026-10-03T03:03:16+08:00"
       }
     },
     {
