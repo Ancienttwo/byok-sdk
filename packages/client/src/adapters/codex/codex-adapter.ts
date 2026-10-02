@@ -324,6 +324,7 @@ class CodexSession implements Session {
   private readonly queue = new AsyncQueue<AgentEvent>();
   private failure?: RuntimeExecutionFailure;
   private active = false;
+  private readonly interruptWaiters = new Set<() => void>();
   private stopping = false;
   private closeAttempt?: Promise<void>;
   constructor(
@@ -363,6 +364,7 @@ class CodexSession implements Session {
           body.native.threadId === this.sessionRef)
       ) {
         this.active = false;
+        for (const resolve of this.interruptWaiters) resolve();
         if (body.native?.turn?.status === 'failed')
           this.fail(
             new RuntimeExecutionFailure({
@@ -384,6 +386,7 @@ class CodexSession implements Session {
       : infrastructure(
           error instanceof Error ? error.message : 'codex runtime failed',
         );
+    this.flushPendingUsage();
     this.queue.end();
     void this.close().catch(() => {});
   }
@@ -435,9 +438,16 @@ class CodexSession implements Session {
   async interrupt(): Promise<void> {
     if (!this.raw || !this.active) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let resolveTurn!: () => void;
+    const turnSettled = new Promise<void>(resolve => { resolveTurn = resolve; });
+    this.interruptWaiters.add(resolveTurn);
     try {
       await Promise.race([
-        this.raw.abort(),
+        this.raw.abort().then(async result => {
+          // turn/interrupt ACK accepts the command; turn/completed carries
+          // final usage/outcome. Closing at ACK discards those native frames.
+          if (result.response.body.kind === 'accepted') await turnSettled;
+        }),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
             () => reject(infrastructure('codex late interrupt timed out')),
@@ -450,19 +460,26 @@ class CodexSession implements Session {
       throw error;
     } finally {
       clearTimeout(timer);
+      this.interruptWaiters.delete(resolveTurn);
     }
   }
   async close(): Promise<void> {
     this.stopping = true;
-    this.queue.end();
     if (!this.closeAttempt) {
       const promise = Promise.resolve().then(async () => {
         try {
-          await this.raw?.dispose();
-        } catch (error) {
-          if (!this.failure) throw error;
+          try {
+            await this.raw?.dispose();
+          } catch (error) {
+            if (!this.failure) throw error;
+          } finally {
+            await this.child?.dispose();
+          }
         } finally {
-          await this.child?.dispose();
+          // Stdout may contain final native frames after the interrupt ACK.
+          // End the consumer only after disposal has drained that transport.
+          this.flushPendingUsage();
+          this.queue.end();
         }
         this.raw = undefined;
         this.projection = undefined;
@@ -474,6 +491,10 @@ class CodexSession implements Session {
       });
     }
     await this.closeAttempt;
+  }
+  private flushPendingUsage(): void {
+    const usage = this.projection?.takePendingUsage(this.stream);
+    if (usage) this.queue.push(usage);
   }
   async resolveApproval(): Promise<void> {
     throw new PolicyUnsupportedError(

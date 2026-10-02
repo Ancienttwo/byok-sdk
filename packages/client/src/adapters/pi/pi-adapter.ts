@@ -45,6 +45,7 @@ import { resolvePiBin, type ResolvedBin } from './resolve-bin';
 import { mapPermissionPolicyToPiArgs } from './permission-mapping';
 import { mapPiContextUsage, mapPiMessageToAgentEvent, ROUTINE_PI_EVENT_TYPES } from './events';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client';
+import { abortPiRpcAndSettle } from './interrupt-settlement';
 import { buildPreparedPromptCommand, PREPARED_PROMPT_COMMAND_ID } from './prepared-prompt-frame';
 import {
   PROVIDER_CREDENTIAL_ENV_NAMES,
@@ -1221,7 +1222,7 @@ class PiSession implements Session {
   }
 
   async interrupt(): Promise<void> {
-    await this.rpc.send({ type: 'abort' });
+    await abortPiRpcAndSettle(this.rpc);
   }
 
   async close(): Promise<void> {

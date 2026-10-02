@@ -760,6 +760,8 @@ interface ActiveTask {
   egressEnabled: boolean;
   adapter: RuntimeAdapter;
   session: Session;
+  /** One consumer; teardown drains its final usage within the existing interrupt deadline. */
+  eventPump?: Promise<void>;
   workspaceDir: string;
   agentBinding?: AgentHomeExecutionBinding;
   agentRef?: AgentRef;
@@ -1272,6 +1274,24 @@ export type HostToolsetContextLookup =
   | { readonly status: 'active'; readonly taskId: string; readonly agentRef: AgentRef; readonly toolsetId: string }
   | { readonly status: 'revoked' }
   | { readonly status: 'unknown' };
+
+// Keep internal lifecycle bookkeeping out of the exported class declaration.
+const offerSettlements = new WeakMap<TaskRunner, Set<Promise<void>>>();
+async function trackOffer(runner: TaskRunner, operation: Promise<void>): Promise<void> {
+  let offers = offerSettlements.get(runner);
+  if (!offers) { offers = new Set(); offerSettlements.set(runner, offers); }
+  offers.add(operation);
+  try { await operation; }
+  finally { offers.delete(operation); }
+}
+
+function observeTerminalUsage(active: ActiveTask, event: Extract<AgentEvent, { type: 'usage' }>): void {
+  if (event.contextSource === undefined || event.inputTokens !== undefined ||
+      event.cachedInputTokens !== undefined || event.outputTokens !== undefined ||
+      event.reasoningTokens !== undefined || event.totalTokens !== undefined) {
+    active.lastUsage = event;
+  }
+}
 
 /**
  * Per-connection task orchestration: offer -> (decline | prepare -> seal ->
@@ -1802,6 +1822,8 @@ export class TaskRunner {
   }
 
   async shutdownActiveTasks(reason: string): Promise<void> {
+    const offers = offerSettlements.get(this);
+    if (offers?.size) await Promise.all(offers);
     const active = [...this.tasks.values()];
     await Promise.all(active.map((task) => this.shutdownTask(task, reason)));
     for (const taskId of this.startupOwners.keys()) {
@@ -1841,12 +1863,30 @@ export class TaskRunner {
    * a genuine protocol bug, not a benign race — mirrors `pump()`'s own
    * identity-check guard for the same class of race.
    */
-  private async interruptBounded(session: Session): Promise<void> {
-    await raceSettleFirst(() => session.interrupt(),
-      this.deps.shutdownInterruptTimeoutMs ?? DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS);
+  private async interruptBounded(active: ActiveTask, drainEvents = true): Promise<void> {
+    const timeoutMs = this.deps.shutdownInterruptTimeoutMs ?? DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS;
+    const deadline = Date.now() + timeoutMs;
+    await raceSettleFirst(() => active.session.interrupt(), timeoutMs);
+    // Close drains native stdio even if an ACK arrived before final usage, or
+    // the adapter never supplies turn_end. Retain this SAME receipt for finish
+    // to await/retry; a deadline is never proof of disposal.
+    const disposal = active.disposalAttempt ??= Promise.resolve().then(() => active.session.close());
+    // Observe a rejected receipt without turning it into an unhandled rejection;
+    // finish() remains responsible for reporting it and retaining ownership.
+    void disposal.catch(() => undefined);
+    if (drainEvents) {
+      // Drain events already delivered by interrupt before publishing usage.
+      // A pending close/next() is not metering authority and cannot hold the
+      // cancellation ACK hostage. One scheduler turn drains queued microtasks;
+      // a close receipt (including a hung one) is still awaited by finish().
+      if (Date.now() < deadline) {
+        await Promise.race([active.eventPump ?? Promise.resolve(),
+          new Promise<void>(resolve => setImmediate(resolve))]);
+      }
+    }
   }
 
-  private async teardownActiveTask(active: ActiveTask, reason: string, retryable: boolean): Promise<boolean> {
+  private async teardownActiveTask(active: ActiveTask, reason: string, retryable: boolean, drainEvents = true): Promise<boolean> {
     if (active.finalizationStarted) return this.finish(active.taskId);
     if (!this.reserveSemanticTerminal(active)) return active.semanticTerminalSettled ?? false;
     // A soft interrupt may end the event stream; mark it as runner-initiated
@@ -1854,7 +1894,7 @@ export class TaskRunner {
     active.beingTornDown = true;
     active.blobAbort.abort();
     await this.observeGit(active, 'salvage');
-    await this.interruptBounded(active.session);
+    await this.interruptBounded(active, drainEvents);
     if (this.tasks.get(active.taskId) !== active) return true;
     await this.persistAgentTerminalEvidence(active, 'failed', reason);
     this.deps.send(
@@ -1895,10 +1935,10 @@ export class TaskRunner {
    * transient/environmental failure a retry could fix — the same task under
    * the same limits would just hit it again.
    */
-  private async failActiveTaskForResourceLimit(taskId: string, reason: string): Promise<void> {
+  private async failActiveTaskForResourceLimit(taskId: string, reason: string, drainEvents = true): Promise<void> {
     const active = this.tasks.get(taskId);
     if (!active) return;
-    await this.teardownActiveTask(active, reason, false);
+    await this.teardownActiveTask(active, reason, false, drainEvents);
   }
 
   /**
@@ -1932,19 +1972,19 @@ export class TaskRunner {
   async handleEnvelope(envelope: Envelope): Promise<void> {
     switch (envelope.type) {
       case 'task.offer':
-        await this.handleOffer(envelope.task_id, envelope.payload, false);
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, false));
         return;
       case 'task.offer_with_toolsets':
-        await this.handleOffer(envelope.task_id, envelope.payload, false);
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, false));
         return;
       case 'task.offer_for_agent':
-        await this.handleOffer(envelope.task_id, envelope.payload, true);
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, true));
         return;
       case 'task.offer_for_agent_with_egress':
-        await this.handleOffer(envelope.task_id, envelope.payload, true);
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, true));
         return;
       case 'task.offer_for_agent_with_egress_fresh':
-        await this.handleOffer(envelope.task_id, envelope.payload, true);
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, true));
         return;
       case 'task.offer_prepared':
         await this.handleOffer(envelope.task_id, envelope.payload, true);
@@ -3075,8 +3115,10 @@ export class TaskRunner {
           if (disposalFailure) this.deps.onRuntimeDisposalFailure?.({ taskId, runtimeId: pick.descriptor.id,
             stage: 'quiescence', reason: err.message });
           if (!cancelled) {
-            if (agentBinding === undefined) await this.fail(taskId, errorMessage(err), false);
-            else await this.failClaimedAgent(taskId, errorMessage(err), false, {
+            const reason = this.stoppingOffers ? 'daemon shutting down during runtime startup' : errorMessage(err);
+            const retryable = this.stoppingOffers;
+            if (agentBinding === undefined) await this.fail(taskId, reason, retryable);
+            else await this.failClaimedAgent(taskId, reason, retryable, {
               binding: agentBinding, runtimeId: pick.descriptor.id,
             });
           }
@@ -3224,7 +3266,8 @@ export class TaskRunner {
         this.startupOwners.delete(taskId);
         this.tasks.set(taskId, active);
         this.reserveSemanticTerminal(active);
-        await this.interruptBounded(session);
+        active.eventPump = this.pump(active);
+        await this.interruptBounded(active);
         await this.updateGitPhaseBestEffort(gitWorkspaceId, 'cancelled');
         await this.persistAgentTerminalEvidence(active, 'cancelled', reason);
         this.deps.send(
@@ -3266,7 +3309,7 @@ export class TaskRunner {
       if (payload.limits?.maxDurationMs !== undefined) {
         this.armMaxDurationTimer(active, payload.limits.maxDurationMs);
       }
-      void this.pump(active);
+      active.eventPump = this.pump(active);
 
       // Record (or refresh) this session's resumable workspace for any future
       // task.offer that carries the same sessionRef, fire-and-forget:
@@ -3707,7 +3750,15 @@ export class TaskRunner {
   private async pump(active: ActiveTask): Promise<void> {
     try {
       for await (let event of active.session.events) {
-        if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
+        if (this.tasks.get(active.taskId) !== active || active.finalizationStarted) return;
+        if (active.beingTornDown) {
+          // Cancellation owns the result, but the native interrupt may still
+          // deliver metering after a tool result/diagnostic. Consume only that
+          // observation, never progress, artifacts, approvals or a new terminal.
+          if (event.type === 'usage') observeTerminalUsage(active, event);
+          if (event.type === 'turn_end') return;
+          continue;
+        }
         // A concurrent task.cancel/task.reject may already have finished
         // (and deleted) this task while this loop was awaiting the next
         // event — e.g. the runtime's own interrupt handling settles with a
@@ -3735,12 +3786,15 @@ export class TaskRunner {
           blobClient: this.deps.blobClient,
           taskId: active.taskId,
           signal: active.blobAbort.signal,
-          log: (message) => console.error(`[byok/client] ${message}`),
+          log: (message) => {
+            if (!active.beingTornDown) console.error(`[byok/client] ${message}`);
+          },
         });
         // The upload above is a real await: a concurrent cancel/reject may
         // have finished this task while it was in flight. Same guard, same
         // reason as the two above — see this loop's own top-of-body checks.
-        if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
+        if (this.tasks.get(active.taskId) !== active || active.finalizationStarted) return;
+        if (active.beingTornDown) continue; // skip the aborted spill, then drain queued interrupt usage
 
         // M5 batch-3 (workstream 2): DaemonConfig.maxTaskOutputBytes
         // enforcement — see `estimateEventBytes`'s own doc comment for
@@ -3756,6 +3810,7 @@ export class TaskRunner {
           await this.failActiveTaskForResourceLimit(
             active.taskId,
             `${MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX}: task emitted approximately ${active.outputBytesSoFar} bytes of output (serialized-event-length approximation), exceeding the configured limit of ${this.maxTaskOutputBytes} bytes`,
+            false, // Called by this pump: it cannot await its own settlement.
           );
           return;
         }
@@ -3766,11 +3821,7 @@ export class TaskRunner {
           // before turn_end/error; a custom adapter that emits several keeps
           // only the latest actual observation rather than inventing a sum.
           // Keep terminal provider cost observation when a separate context snapshot arrives.
-          if (event.contextSource === undefined || event.inputTokens !== undefined ||
-              event.cachedInputTokens !== undefined || event.outputTokens !== undefined ||
-              event.reasoningTokens !== undefined || event.totalTokens !== undefined) {
-            active.lastUsage = event;
-          }
+          observeTerminalUsage(active, event);
           if (active.prepared !== undefined) {
             const verdict = observePreparedCall(active.prepared, event);
             if (verdict !== undefined) {
@@ -3778,7 +3829,7 @@ export class TaskRunner {
               // wire, ahead of the typed failure it caused.
               active.batcher.push(event);
               active.batcher.flush();
-              await this.teardownActiveTask(active, verdict, false);
+              await this.teardownActiveTask(active, verdict, false, false);
               return;
             }
           }
@@ -4033,6 +4084,7 @@ export class TaskRunner {
         await this.failActiveTaskForResourceLimit(
           active.taskId,
           `${MAX_PROGRESS_BATCH_BYTES_EXCEEDED_REASON_PREFIX}: event requires ${err.actualBytes} UTF-8 bytes, exceeding the configured limit of ${err.maxBatchBytes} bytes`,
+          false,
         );
         return;
       }
@@ -4174,7 +4226,7 @@ export class TaskRunner {
       return;
     }
     active.blobAbort.abort();
-    await this.interruptBounded(active.session);
+    await this.interruptBounded(active);
     await this.observeGit(active, 'salvage');
     // Deliberately NOT active.batcher.flush()-ed here (M1-4 e2e finding):
     // §4's "server state is authoritative on its own action" rule means the
@@ -4717,7 +4769,7 @@ export class TaskRunner {
       await active.semanticTerminalSettled;
       return;
     }
-    await this.interruptBounded(active.session);
+    await this.interruptBounded(active);
     await this.observeGit(active, 'salvage');
     // Same reasoning as handleCancel() above: the server already moved this
     // task to `Failed` and closed its event queue before this notification
