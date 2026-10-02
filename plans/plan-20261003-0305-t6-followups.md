@@ -1,6 +1,6 @@
 # Plan: T6 Claude mode, uncertain group and output/preflight followups
 
-> **Status**: Executing
+> **Status**: Review
 > **Created**: 20261003-0305
 > **Slug**: t6-followups
 > **Planning Source**: codex-plan
@@ -111,7 +111,7 @@ Four sequential independent slices, preserve F1 charge-once and all caps. Use su
 - [x] F3: final Claude auth-mode recheck, red-on-old fixture and residual pin/check-time evidence; local commit.
 - [x] Info-2: SIGTERM post-PID uncertain group, retain slots/counters and test actual group signal/liveness; local commit.
 - [x] F6: bind adapter output path and legitimate async root, substitute/refuse fixtures and provenance; local commit.
-- [ ] F4: shared authoritative policy preflight, no probes when exhausted, race-safe final admission; local commit.
+- [x] F4: shared authoritative policy preflight, no probes when exhausted, race-safe final admission; local commit.
 - [ ] Regenerate projection only through tooling and execute exact seven-check chain after last commit; publish /tmp/byok-t6-followups-report.md.
 
 ## Annotations
@@ -121,5 +121,5 @@ Four sequential independent slices, preserve F1 charge-once and all caps. Use su
 - [x] F3: final Claude auth-mode recheck, red-on-old fixture and residual pin/check-time evidence; local commit.
 - [x] Info-2: SIGTERM post-PID uncertain group, retain slots/counters and test actual group signal/liveness; local commit.
 - [x] F6: bind adapter output path and legitimate async root, substitute/refuse fixtures and provenance; local commit.
-- [ ] F4: shared authoritative policy preflight, no probes when exhausted, race-safe final admission; local commit.
+- [x] F4: shared authoritative policy preflight, no probes when exhausted, race-safe final admission; local commit.
 - [ ] Regenerate projection only through tooling and execute exact seven-check chain after last commit; publish /tmp/byok-t6-followups-report.md.

@@ -138,8 +138,8 @@ describe('sixth edge: one shared derivation table and single-use permits', () =>
   it.each([['E',16,false],['W',4,true]] as const)('exhausts cumulative %s after %s actual task spawns, with no refund at close', async (cap,count,writer) => {
     const k = await kit({native:true});
     for (let i=0;i<count;i++) { const running=await spawnTask(k,k.request(writer));await running.close; }
-    const request=k.request(writer), auth=await k.authority.prepare(request), before=claims(k);
-    await expect(spawnTask(k,request,auth)).rejects.toThrow(`external_cli_${cap}_exhausted`);
+    const request=k.request(writer), before=claims(k);
+    await expect(k.authority.prepare(request)).rejects.toThrow(`external_cli_${cap}_exhausted`);
     expect(k.tasks()).toHaveLength(count); expect(claims(k)).toBe(before);
     expect(ledgers(k).filter(v=>v.kind==='task')).toHaveLength(count);
     expect(ledgers(k).filter(v=>v.kind==='task').every(v=>v.state==='terminated')).toBe(true); noLeaks(k);
@@ -169,8 +169,8 @@ describe('sixth edge: one shared derivation table and single-use permits', () =>
   });
   it('first handoff is legal at depth cap; a second operation cannot reuse it', async () => {
     const k=await kit({maxDepth:1}); const first=await spawnTask(k,k.request());await first.close;
-    const r=k.request(), a=await k.authority.prepare(r), before=claims(k);
-    await expect(spawnTask(k,r,a)).rejects.toThrow('external_cli_depth_exhausted');
+    const r=k.request(), before=claims(k);
+    await expect(k.authority.prepare(r)).rejects.toThrow('external_cli_depth_exhausted');
     expect(claims(k)).toBe(before);expect(k.tasks()).toHaveLength(1);noLeaks(k);
   });
 });
@@ -185,9 +185,9 @@ it('all readonly/writer adapters consume one shared writer table rather than ada
  const authority=new ExternalCliCustodyAuthority(parent,a.budget,installations,{},ownershipProbe,dispatch.recordPath);
  const merged={...a,authority};
  for(let i=0;i<4;i++) {const request={...(i%2===0?a:b).request(true,`mixed-${i}`,0,i),cwd:a.dir};const run=await spawnTask(merged,request);await run.close;}
- const request={...b.request(true,'mixed-overflow',0,4),cwd:a.dir}, auth=await authority.prepare(request),before=claims(a);
- await expect(spawnTask(merged,request,auth)).rejects.toThrow('external_cli_W_exhausted');
- expect(claims(a)).toBe(before+1);expect(a.tasks()).toHaveLength(4); // Charged final Claude proof, no fifth task.
+ const request={...b.request(true,'mixed-overflow',0,4),cwd:a.dir},before=claims(a);
+ await expect(authority.prepare(request)).rejects.toThrow('external_cli_W_exhausted');
+ expect(claims(a)).toBe(before);expect(a.tasks()).toHaveLength(4); // Early refusal creates no additional physical proof.
  expect(ledgers(a).filter(v=>v.kind==='task').map(v=>v.record.installation.adapter).sort()).toEqual(['claude-code-writer','claude-code-writer','codex-exec-writer','codex-exec-writer']);noLeaks(a);
 });
 it.each(['claude-code','claude-code-writer','codex-exec','codex-exec-writer','cursor-agent','cursor-agent-writer'])('shared input authority refuses %s key/config injection before any external child',async adapter=>{
@@ -225,8 +225,8 @@ describe('sixth edge: closure/config and independent parent instances', () => {
   it('a later first external step and a retry cannot reclaim the initial logical charge at depth cap', async () => {
     const k=await kit({maxDepth:1});
     for (const change of [{stepIndex:1,attempt:0},{stepIndex:0,attempt:1}]) {
-      const request=k.request(false,undefined,change.attempt,change.stepIndex);const auth=await k.authority.prepare(request), before=claims(k);
-      await expect(spawnTask(k,request,auth)).rejects.toThrow('external_cli_depth_exhausted');expect(claims(k)).toBe(before);
+      const request=k.request(false,undefined,change.attempt,change.stepIndex), before=claims(k);
+      await expect(k.authority.prepare(request)).rejects.toThrow('external_cli_depth_exhausted');expect(claims(k)).toBe(before);
     }
     expect(k.tasks()).toEqual([]);expect(ledgers(k).filter(v=>v.kind==='task')).toEqual([]);noLeaks(k);
   });

@@ -152,17 +152,20 @@ export class ExternalCliCustodyAuthority {
   }
   private async reverify(installation: AttestedOfficialExternalCliV2, env: Readonly<Record<string,string>>): Promise<void> {
     if (!await reverifyOfficialExternalCliDirectories(installation)) refuse('external_cli_config_directory_changed');
-    if (this.parentRecordPath) {
-      let actual: unknown;
-      try { actual = JSON.parse(readFileSync(this.parentRecordPath,'utf8')); } catch { refuse('external_cli_parent_record_changed'); }
-      if (externalCliCommitment(actual) !== this.parentDigest) refuse('external_cli_parent_record_changed');
-    }
+    this.reverifyParentRecord();
     // Identity measurement belongs to the installation; env projection is freshly sealed per launch.
     const identity = { ...installation.identity,
       launchEnvNamesDigest: toolImplementationLaunchEnvNamesDigest(env),
       loaderEnvValuesDigest: toolImplementationLoaderEnvValuesDigest(env) };
     const verdict = await reverifyToolImplementationIdentity(identity,env,this.probe);
     if (verdict !== 'ok') refuse(`external_cli_identity_${verdict.reason}`);
+  }
+  private reverifyParentRecord(): void {
+    if (this.parentRecordPath) {
+      let actual: unknown;
+      try { actual = JSON.parse(readFileSync(this.parentRecordPath,'utf8')); } catch { refuse('external_cli_parent_record_changed'); }
+      if (externalCliCommitment(actual) !== this.parentDigest) refuse('external_cli_parent_record_changed');
+    }
   }
   private ledgers(): ExternalLedger[] {
     const dir = path.join(this.budget.directory,'custody-external');
@@ -175,6 +178,24 @@ export class ExternalCliCustodyAuthority {
     });
   }
   private ledgerPath(id: string): string { return path.join(this.budget.directory,'custody-external',`${id}.json`); }
+  /** One policy for advisory preflight and authoritative final locked admission. */
+  private taskAdmissionDepth(tasks: readonly ExternalLedger[], task: { parent: string; operation: string; attempt: number; writer: boolean; stepIndex: number }): number {
+    if (tasks.some(v => v.parent === task.parent && v.operation === task.operation && v.attempt === task.attempt)) refuse('external_cli_attempt_already_launched');
+    const E = Math.min(this.parent.perLaunch.effectiveLimits.fanout,16), W = Math.min(E,4);
+    if (tasks.length >= E) refuse('external_cli_E_exhausted');
+    if (task.writer && tasks.filter(v => v.writer).length >= W) refuse('external_cli_W_exhausted');
+    const handedOff = task.stepIndex !== 0 || task.attempt !== 0 || tasks.some(v => v.parent === this.parentDigest);
+    const depth = this.parent.perLaunch.depth + (handedOff ? 1 : 0);
+    if (depth > this.parent.perLaunch.effectiveLimits.maxDepth) refuse('external_cli_depth_exhausted');
+    return depth;
+  }
+  private preflight(request: ExternalCliLaunchRequest, installation: AttestedOfficialExternalCliV2): void {
+    claimRunFanoutBatchWithCommit(this.budget,[],() => {
+      this.reverifyParentRecord();
+      this.taskAdmissionDepth(this.ledgers().filter(v=>v.kind==='task'),{parent:this.parentDigest,operation:request.operation,attempt:request.attempt,
+        writer:installation.adapter.endsWith('-writer'),stepIndex:request.stepIndex});
+    });
+  }
   private captureOutputScope(install: AttestedOfficialExternalCliV2, request: ExternalCliLaunchRequest): OutputScope {
     const root = request.asyncDir;
     if (!root || !path.isAbsolute(root) || path.normalize(root) !== root) refuse('external_cli_output_scope_required');
@@ -224,14 +245,7 @@ export class ExternalCliCustodyAuthority {
         }
         const tasks = previous.filter(v => v.kind === 'task');
         if (ledger.kind === 'task') {
-          if (tasks.some(v => v.parent === ledger.parent && v.operation === ledger.operation && v.attempt === ledger.attempt)) refuse('external_cli_attempt_already_launched');
-          const E = Math.min(this.parent.perLaunch.effectiveLimits.fanout,16);
-          const W = Math.min(E,4);
-          if (tasks.length >= E) refuse('external_cli_E_exhausted');
-          if (ledger.writer && tasks.filter(v => v.writer).length >= W) refuse('external_cli_W_exhausted');
-          const handedOff = ledger.record!.stepIndex !== 0 || ledger.attempt !== 0 || tasks.some(v => v.parent === this.parentDigest);
-          ledger.depth = this.parent.perLaunch.depth + (handedOff ? 1 : 0);
-          if (ledger.depth > this.parent.perLaunch.effectiveLimits.maxDepth) refuse('external_cli_depth_exhausted');
+          ledger.depth = this.taskAdmissionDepth(tasks,{parent:ledger.parent,operation:ledger.operation,attempt:ledger.attempt,writer:ledger.writer,stepIndex:ledger.record!.stepIndex});
         }
         const limits = this.parent.perLaunch.effectiveLimits;
         const rootKey = safeKeySegment(this.budget.rootRunId);
@@ -340,6 +354,7 @@ export class ExternalCliCustodyAuthority {
     const args = install.identity.interpreter ? request.args.slice(1) : request.args;
     validateOfficialExternalCliArgv(install,args);
     const outputScope = this.captureOutputScope(install,request);
+    this.preflight(request,install);
     const probeHome = mkdtempSync(path.join(os.tmpdir(),'byok-cli-probe-'));
     const probeEnv = buildOfficialExternalCliEnvironment(this.ambient);
     probeEnv.HOME = probeHome;
@@ -391,6 +406,7 @@ export class ExternalCliCustodyAuthority {
     if (externalCliCommitment(actual) !== record.invocationDigest) refuse('external_cli_invocation_changed');
     if (toolImplementationLaunchEnvNamesDigest(actual.env) !== record.launchEnvNamesDigest
       || toolImplementationLoaderEnvValuesDigest(actual.env) !== record.loaderEnvValuesDigest) refuse('external_cli_env_changed');
+    this.preflight(state.request,record.installation);
     // No general install-version capability is attested for a mode-lock setting.
     // Re-prove Claude's own-login state at every final admission instead; then
     // remeasure bytes/parent/env again. A same-UID final check/spawn race remains.
