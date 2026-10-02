@@ -145,3 +145,19 @@ Evidence/state machine: `/tmp/byok-t1-taskrunner-cancel-report.md`.
 Failing command: `BYOK_REQUIRE_BUN=1 BYOK_TEST_BUN_BIN=/Users/chris/.bun/bin/bun bun run test`.
 Failing log: `/tmp/byok-t1-workspace-test-final-current.log`.
 No push, PR, merge, Draft-to-ready transition, branch/worktree deletion was performed.
+
+## PM-authorized continuation
+
+PM authorized the next slice: distinguish product loss from fixture scheduling
+by recording interrupt ACK, native usage/result, deadline and disposal order.
+Fix production minimally if proven; otherwise determinize the fixture using
+fake timers or explicit synchronization. Preserve assertions, skip policy and
+all timeout values. Only local commits are authorized.
+
+### Task Breakdown
+- [ ] Capture a counterexample with native-frame/deadline/disposal timing evidence.
+- [ ] Classify the cause and apply the smallest proven fix.
+- [ ] Pass the full workspace test twice consecutively, then workspace typecheck.
+- [ ] Update `/tmp/byok-t1-taskrunner-cancel-report.md` and its RESULT line.
+
+Acceptance command: `BYOK_REQUIRE_BUN=1 BYOK_TEST_BUN_BIN=/Users/chris/.bun/bin/bun bun run test`, twice consecutively. Recheck root build/API/version/workflow gates if affected. No push, PR, merge, ready transition or deletion.

@@ -15,7 +15,16 @@ if (argv[0] === 'login') { console.log('Logged in using ChatGPT'); process.exit(
 const runtime = argv.includes('app-server') ? 'codex' : argv.includes('--mode') ? 'pi' : 'claude';
 const scenario = process.env.T1_SCENARIO ?? 'stream';
 const trace = label => appendFileSync(process.env.T1_TRACE, `${label}\n`);
-const send = frame => process.stdout.write(`${JSON.stringify(frame)}\n`);
+const timing = (event, detail) => {
+  if (process.env.T1_TIMING_TRACE) appendFileSync(process.env.T1_TIMING_TRACE,
+    `${JSON.stringify({ ns: process.hrtime.bigint().toString(), wallMs: Date.now(), event, detail })}\n`);
+};
+const send = frame => {
+  const detail = { id: frame.id, method: frame.method, type: frame.type, command: frame.command,
+    params: frame.params, usage: frame.usage };
+  timing('frame.write', detail);
+  return process.stdout.write(`${JSON.stringify(frame)}\n`, () => timing('frame.flushed', detail));
+};
 const notify = (method, params) => send({ method, params });
 const sessionId = 't1-session';
 const turnId = 't1-turn';
@@ -54,8 +63,14 @@ function terminal(interrupted) {
   }
   trace('terminal');
 }
-function interruptedResult() {
+async function interruptedResult() {
   if (scenario === 'ack-only') return;
+  if (scenario === 'gated-result') {
+    trace('result_waiting');
+    timing('result.waiting');
+    while (!existsSync(process.env.T1_RESULT_GATE)) await new Promise(resolve => setTimeout(resolve, 5));
+    timing('result.released');
+  }
   const settle = () => { usage(456, 29); terminal(true); };
   if (scenario === 'delayed-result') setTimeout(settle, 5);
   else settle();
@@ -83,6 +98,7 @@ function run() {
   }
 }
 async function receive(msg) {
+  if (msg.method === 'turn/interrupt' || msg.type === 'abort' || msg.request?.subtype === 'interrupt') timing('interrupt.receive', { id: msg.id });
   if (runtime === 'codex') {
     if (msg.method === 'initialize') send({ id: msg.id, result: { userAgent: 'task-runner-fixture' } });
     if (msg.method === 'thread/start') { await gate(); send({ id: msg.id, result: { thread: { id: sessionId }, model: 'fixture-model' } }); }
@@ -91,7 +107,7 @@ async function receive(msg) {
       trace('interrupt');
       if (scenario === 'no-ack') return;
       send({ id: msg.id, result: {} });
-      interruptedResult();
+      await interruptedResult();
     }
   } else if (runtime === 'pi') {
     const respond = data => send({ type: 'response', command: msg.type, id: msg.id, success: true, data });
@@ -101,7 +117,7 @@ async function receive(msg) {
     if (msg.type === 'abort') {
       trace('interrupt');
       if (scenario === 'no-ack') return;
-      respond(); interruptedResult();
+      respond(); await interruptedResult();
     }
   } else {
     if (msg.type === 'user') { await gate(); send({ type: 'system', subtype: 'init', session_id: sessionId, tools: ['Bash'] }); run(); }
@@ -109,7 +125,7 @@ async function receive(msg) {
       trace('interrupt');
       if (scenario === 'no-ack') return;
       send({ type: 'control_response', response: { subtype: 'success', request_id: msg.request_id, response: { still_queued: [] } } });
-      interruptedResult();
+      await interruptedResult();
     }
   }
 }

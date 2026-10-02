@@ -13,10 +13,12 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import type { RuntimeAdapter, Session } from '../types';
 import { TestServer } from './fixtures/test-server';
+import { cancellationTiming } from './fixtures/task-runner-cancel-timing';
 
 const fixture = fileURLToPath(new URL('./fixtures/task-runner-cancel-runtime.mjs', import.meta.url));
 const cases: Array<{ dir: string; gate: string; runner: TaskRunner; sessions: Session[];
-  startSettled: ReturnType<typeof deferred>; hasStarted: () => boolean }> = [];
+  resultGate: string; startSettled: ReturnType<typeof deferred>; hasStarted: () => boolean;
+  restoreClock: () => void; stopTimers: () => void; saveEvidence: () => Promise<void> }> = [];
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>(r => { resolve = r; });
@@ -33,11 +35,15 @@ async function setup(runtime: RuntimeId, scenario: string, overrides: Partial<Pi
   const tree = path.join(dir, 'tree.json');
   const traceFile = path.join(dir, 'trace');
   const gate = path.join(dir, 'gate');
-  for (const [name, value] of Object.entries({ T1_SCENARIO: scenario, T1_TREE: tree, T1_TRACE: traceFile, T1_GATE: gate })) vi.stubEnv(name, value);
+  const resultGate = path.join(dir, 'result-gate');
+  const childTiming = process.env.T1_TIMING_EVIDENCE_DIR ? path.join(dir, 'native-timing.jsonl') : undefined;
+  vi.stubEnv('T1_TIMING_TRACE', childTiming);
+  const timing = cancellationTiming(runtime, scenario);
+  for (const [name, value] of Object.entries({ T1_SCENARIO: scenario, T1_TREE: tree, T1_TRACE: traceFile, T1_GATE: gate, T1_RESULT_GATE: resultGate })) vi.stubEnv(name, value);
   const resolveBin = () => ({ command: fixture, source: 'path' as const });
-  const adapter: RuntimeAdapter = runtime === 'claude' ? new ClaudeAdapter({ resolveBin, interruptTimeoutMs: 60 })
-    : runtime === 'codex' ? new CodexAdapter({ resolveBin, interruptTimeoutMs: 60 })
-    : new PiAdapter({ resolveBin: () => ({ command: fixture, source: 'env' }) });
+  const adapter: RuntimeAdapter = runtime === 'claude' ? new ClaudeAdapter({ resolveBin, interruptTimeoutMs: 60, spawnFn: timing.spawnFn })
+    : runtime === 'codex' ? new CodexAdapter({ resolveBin, interruptTimeoutMs: 60, spawnFn: timing.spawnFn })
+    : new PiAdapter({ resolveBin: () => ({ command: fixture, source: 'env' }), spawnFn: timing.spawnFn });
   if (scenario === 'startup') {
     // Freeze a REAL installation observation before timing the owned-start
     // window. Version/auth probe scheduling is a different cancellation phase
@@ -46,6 +52,26 @@ async function setup(runtime: RuntimeId, scenario: string, overrides: Partial<Pi
     expect(observation.kind).toBe('available');
     vi.spyOn(adapter, 'detect').mockResolvedValue(observation);
   }
+  timing.observeTimers();
+  let clockFrozen = false;
+  const restoreClock = () => {
+    if (!clockFrozen) return;
+    timing.stopTimers();
+    vi.useRealTimers();
+    clockFrozen = false;
+    timing.record('clock.real');
+    timing.observeTimers();
+  };
+  const synchronizeInterruptClock = () => {
+    // Native IPC remains real. Only the adapter/runner budget is controlled:
+    // normal settlement arrives before time advances; negative controls below
+    // explicitly advance the SAME 60/100ms deadlines while the result is held.
+    timing.stopTimers();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    clockFrozen = true;
+    timing.observeTimers();
+    timing.record('clock.frozen');
+  };
   const sessions: Session[] = [];
   const startSettled = deferred();
   let started = false;
@@ -56,14 +82,18 @@ async function setup(runtime: RuntimeId, scenario: string, overrides: Partial<Pi
     const start = result.operation.start.bind(result.operation);
     return { ...result, operation: { ...result.operation, start: async input => {
       started = true;
-      try { const session = await start(input); sessions.push(session); return session; }
+      try { const session = await start(input); timing.observeSession(session, restoreClock); sessions.push(session); return session; }
       finally { startSettled.resolve(); }
     } } };
   });
   const sent: Envelope[] = [];
+  const terminalPublished = deferred();
   const runner = new TaskRunner({
     adapters: [adapter], deviceId: 't1-native-device', workspaceRoot: path.join(dir, 'workspace'), storeDir: dir, productId: 't1-cancel',
-    send: event => { sent.push(event); },
+    send: event => {
+      timing.observeTerminal(event); sent.push(event);
+      if (['task.cancelled', 'task.fail', 'task.complete'].includes(event.type)) terminalPublished.resolve();
+    },
     blobClient: {
       resolveInstruction: async () => { throw new Error('unexpected blob resolution'); },
       uploadArtifact: async () => { throw new Error('unexpected artifact upload'); },
@@ -77,7 +107,10 @@ async function setup(runtime: RuntimeId, scenario: string, overrides: Partial<Pi
   const offer = (limits?: { maxDurationMs: number }) => runner.handleEnvelope(createEnvelope('task.offer', {
     instruction: 'observe native cancellation', runtime, policy: { mode: 'auto' }, limits,
   }, { taskId, seq: 1 }));
-  const cancel = () => runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'operator' }, { taskId, seq: 2 }));
+  const cancel = () => {
+    timing.record('cancel.request');
+    return runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'operator' }, { taskId, seq: 2 }));
+  };
   const terminals = () => sent.filter(event => ['task.complete', 'task.fail', 'task.cancelled'].includes(event.type));
   const events = () => sent.flatMap(event => event.type === 'task.progress' ? event.payload.events : []);
   const trace = async () => (await fs.readFile(traceFile, 'utf8')).trim().split('\n');
@@ -87,20 +120,26 @@ async function setup(runtime: RuntimeId, scenario: string, overrides: Partial<Pi
     for (const pid of Object.values(pids)) expect(alive(pid), `PID ${pid} still live`).toBe(false);
     expect(runner.activeTaskCount).toBe(0);
   };
-  const c = { runtime, dir, tree, gate, adapter, runner, sent, sessions, startSettled, hasStarted: () => started,
-    offer, cancel, terminals, events, trace, assertReaped };
+  const c = { runtime, dir, tree, gate, resultGate, adapter, runner, sent, sessions, startSettled, hasStarted: () => started,
+    offer, cancel, terminals, events, trace, assertReaped, timing, synchronizeInterruptClock, restoreClock,
+    stopTimers: timing.stopTimers, waitForTerminal: () => terminalPublished.promise,
+    saveEvidence: () => timing.save(dir, childTiming, expect.getState().currentTestName) };
   cases.push(c);
   return c;
 }
 afterEach(async () => {
   try {
     for (const c of cases.splice(0)) {
-      await fs.writeFile(c.gate, 'release');
-      c.runner.stopAcceptingOffers();
-      if (c.hasStarted()) await c.startSettled.promise;
-      await new Promise<void>(resolve => setImmediate(resolve));
-      await c.runner.shutdownActiveTasks('test cleanup');
-      await Promise.all(c.sessions.map(session => session.close()));
+      try {
+        c.restoreClock();
+        await fs.writeFile(c.gate, 'release');
+        await fs.writeFile(c.resultGate, 'release');
+        c.runner.stopAcceptingOffers();
+        if (c.hasStarted()) await c.startSettled.promise;
+        await new Promise<void>(resolve => setImmediate(resolve));
+        await c.runner.shutdownActiveTasks('test cleanup');
+        await Promise.all(c.sessions.map(session => session.close()));
+      } finally { c.stopTimers(); await c.saveEvidence(); }
       await fs.rm(c.dir, { recursive: true, force: true });
     }
   } finally { vi.restoreAllMocks(); vi.unstubAllEnvs(); }
@@ -183,6 +222,7 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
         { taskId: 'host-task', seq: server.nextSeq() }));
       await server.waitFor(event => event.type === 'task.progress' && event.task_id === 'host-task'
         && event.payload.events.some(event => event.type === 'tool_use'));
+      c.synchronizeInterruptClock();
       server.send(createEnvelope('task.cancel', { reason: 'Host stop' }, { taskId: 'host-task', seq: server.nextSeq() }));
       const terminal = await server.waitFor(event => event.type === 'task.cancelled' && event.task_id === 'host-task');
       expect(terminal).toMatchObject({ type: 'task.cancelled', payload: { usage: { runtime, promptTokens: 456, completionTokens: 29 } } });
@@ -195,6 +235,7 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
   it.each(['stream', 'tool'])('cancels during %s, retains interrupt usage and deduplicates terminal work', async scenario => {
     const c = await setup(runtime, scenario); await c.offer();
     await vi.waitFor(() => expect(c.events().some(event => event.type === (scenario === 'tool' ? 'tool_use' : 'progress'))).toBe(true));
+    c.synchronizeInterruptClock();
     const progressCount = c.sent.filter(event => event.type === 'task.progress').length;
     await Promise.all([c.cancel(), c.cancel()]); await c.cancel(); await c.offer();
     expect(c.terminals().map(event => event.type)).toEqual(['task.cancelled']); expectUsage(c, 456, 29); expectNoErrors(c);
@@ -207,6 +248,7 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
   it('shutdown races cancel with one retryable terminal and preserved usage', async () => {
     const c = await setup(runtime, 'tool'); await c.offer();
     await vi.waitFor(() => expect(c.events().some(event => event.type === 'tool_use')).toBe(true));
+    c.synchronizeInterruptClock();
     c.runner.stopAcceptingOffers(); await Promise.all([c.runner.shutdownActiveTasks('operator'), c.cancel()]);
     expect(c.terminals()[0], JSON.stringify(c.terminals())).toMatchObject({ type: 'task.fail', payload: { retryable: true } });
     expectUsage(c, 456, 29); expectNoErrors(c);
@@ -214,8 +256,13 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
   });
 
   it('wall-clock timeout reaps with one non-retryable failure and final usage', async () => {
-    const c = await setup(runtime, 'tool'); await c.offer({ maxDurationMs: 100 });
-    await vi.waitFor(() => expect(c.terminals()).toHaveLength(1)); await vi.waitFor(() => expect(c.runner.activeTaskCount).toBe(0));
+    const c = await setup(runtime, 'tool');
+    c.synchronizeInterruptClock();
+    await c.offer({ maxDurationMs: 100 });
+    await c.timing.waitFor(event => event.event === 'agent.yield'
+      && (event.detail as { type: string }).type === 'tool_use');
+    await vi.advanceTimersByTimeAsync(100);
+    await c.waitForTerminal(); await vi.waitFor(() => expect(c.runner.activeTaskCount).toBe(0));
     expect(c.terminals()[0]).toMatchObject({ type: 'task.fail', payload: { retryable: false, reason: expect.stringContaining('maxDurationMs') } });
     expectUsage(c, 456, 29); expectNoErrors(c); await c.cancel(); expect(c.terminals()).toHaveLength(1); await c.assertReaped();
   });
@@ -231,6 +278,7 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
   it('waits for usage arriving in a later native frame after the interrupt ACK', async () => {
     const c = await setup(runtime, 'delayed-result'); await c.offer();
     await vi.waitFor(() => expect(c.events().some(event => event.type === 'progress')).toBe(true));
+    c.synchronizeInterruptClock();
     await c.cancel(); expect(c.terminals().map(event => event.type)).toEqual(['task.cancelled']);
     expectUsage(c, 456, 29); expectNoErrors(c); await c.assertReaped();
   });
@@ -262,5 +310,64 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
     expect(c.terminals().map(event => event.type)).toEqual(['task.complete']);
     expectUsage(c, runtime === 'claude' ? 456 : 123, runtime === 'claude' ? 29 : 17);
     await c.cancel(); expect(c.terminals()).toHaveLength(1); expectNoErrors(c); await c.assertReaped();
+  });
+});
+
+describe('Codex interrupt result/deadline ordering', () => {
+  it('preserves final usage when the gated native result arrives before the unchanged deadline', async () => {
+    const c = await setup('codex', 'gated-result'); await c.offer();
+    await vi.waitFor(() => expect(c.events().some(event => event.type === 'progress')).toBe(true));
+    c.synchronizeInterruptClock();
+    const cancelled = c.cancel();
+    const ack = await c.timing.waitFor(event => event.event === 'ack.receive');
+    expect(c.terminals()).toHaveLength(0);
+    await fs.writeFile(c.resultGate, 'release');
+    await cancelled;
+    expectUsage(c, 456, 29); expectNoErrors(c); await c.assertReaped();
+    const result = c.timing.events.find(event => event.event === 'native.receive'
+      && (event.detail as { method?: string }).method === 'turn/completed')!;
+    const settled = c.timing.events.find(event => event.event === 'interrupt.settled')!;
+    const disposal = c.timing.events.find(event => event.event === 'disposal.enter')!;
+    expect(ack.seq).toBeLessThan(result.seq);
+    expect(result.seq).toBeLessThan(settled.seq);
+    expect(settled.seq).toBeLessThan(disposal.seq);
+    expect(c.timing.events.filter(event => event.event === 'deadline.fire')).toEqual([]);
+  });
+
+  it('preserves observed usage when the same deadline wins before the gated final result', async () => {
+    const c = await setup('codex', 'gated-result'); await c.offer();
+    await vi.waitFor(() => expect(c.events().some(event => event.type === 'progress')).toBe(true));
+    c.synchronizeInterruptClock();
+    const cancelled = c.cancel();
+    const ack = await c.timing.waitFor(event => event.event === 'ack.receive');
+    expect(c.terminals()).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(60);
+    await cancelled;
+    expectUsage(c, 123, 17); expectNoErrors(c); await c.assertReaped();
+    const deadline = c.timing.events.find(event => event.event === 'deadline.fire'
+      && (event.detail as { ms: number }).ms === 60)!;
+    const disposal = c.timing.events.find(event => event.event === 'disposal.enter')!;
+    expect(ack.seq).toBeLessThan(deadline.seq);
+    expect(deadline.seq).toBeLessThan(disposal.seq);
+    expect(c.timing.events.find(event => event.event === 'native.receive'
+      && (event.detail as { method?: string }).method === 'turn/completed')).toBeUndefined();
+    expect(c.timing.events.find(event => event.event === 'interrupt.rejected')?.detail).toContain('late interrupt timed out');
+  });
+
+  it('retains an already received final observation when the wall clock reaches the runner deadline before publication', async () => {
+    const c = await setup('codex', 'gated-result'); await c.offer();
+    await vi.waitFor(() => expect(c.events().some(event => event.type === 'progress')).toBe(true));
+    c.synchronizeInterruptClock();
+    const cancelled = c.cancel();
+    await c.timing.waitFor(event => event.event === 'ack.receive');
+    await fs.writeFile(c.resultGate, 'release');
+    await c.timing.waitFor(event => event.event === 'native.receive'
+      && (event.detail as { method?: string }).method === 'turn/completed');
+    // This models a scheduling/wall-clock jump after the bytes are received;
+    // it does not fire the timer before the native result or alter its budget.
+    vi.setSystemTime(Date.now() + 100);
+    c.timing.record('clock.at-runner-deadline');
+    await cancelled;
+    expectUsage(c, 456, 29); expectNoErrors(c); await c.assertReaped();
   });
 });
