@@ -4,6 +4,7 @@
 // A filesystem gate holds native startup; the receipt proves a real 3-level
 // process tree. Each interrupted turn sends its final usage AFTER the ACK.
 import { existsSync, appendFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { spawnProcessTreeDescendant } from './process-tree-receipt.mjs';
 
@@ -131,4 +132,13 @@ async function receive(msg) {
 }
 createInterface({ input: process.stdin }).on('line', line => {
   void receive(JSON.parse(line)).catch(error => { console.error(error); process.exit(1); });
+}).on('close', () => {
+  // The fixture root is an owned group leader. A killed test worker cannot
+  // run afterEach/host-exit cleanup, but closing its pipes is observable here.
+  timing('transport.eof');
+  try {
+    if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(process.pid), '/T', '/F'], { stdio: 'ignore' });
+    else process.kill(-process.pid, 'SIGKILL');
+  }
+  catch { process.exit(0); }
 });
