@@ -231,4 +231,4 @@ included.
 ## Runtime and license
 
 The dispatch SDK and the independently installable `@byok-sdk/keys@0.8.1-rc.1`
-require Node.js 22.22.0 or newer. MIT licensed.
+require Node.js 24.15.0 or newer. MIT licensed.

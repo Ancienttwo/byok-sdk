@@ -12,7 +12,7 @@ repo and adapt it to your own entry point, signing, and release pipeline.
 
 ## Prerequisites
 
-- Node.js >= 22.22.0 (this repo and the required pi runtime share this floor).
+- Node.js >= 24.15.0 (this repo and the required pi runtime share this floor).
   The executable must support the recipe's SEA fuse injection. A local
   Homebrew Node24.18.0 shared-library build placed the fuse in `libnode`, not
   its executable: bundling, parsing and blob generation passed, but postject
@@ -110,9 +110,9 @@ and still parsed the script as CommonJS, producing a hard
 crashes before any application code — including our own try/catch —
 ever runs). That's a Node-version/tooling gap in the ESM path specifically,
 not a defect in pi's resolve-bin.ts. This recipe keeps the CJS main and the
-existing Node floor (`engines.node >= 22.22.0`). The two-stage repair must be
+Node 24 baseline (`engines.node >= 24.15.0`). The two-stage repair must be
 verified on each supported Node/OS target; a Node24 Darwin run does not prove
-Node22, Linux or Windows support. Revisit `mainFormat: "module"` only with
+Linux or Windows support. Revisit `mainFormat: "module"` only with
 separate evidence on the product's floor.
 
 ### A Windows note: `BYOK_PI_BIN` and `.cmd`/`.bat` don't mix with `execFile`
@@ -150,7 +150,7 @@ assertions):
   treats this as a missing core deployment dependency, not as a supported steady state.
 - **pi picked up via override**: `BYOK_PI_BIN=/path/to/pi` short-circuits
   resolve-bin.ts straight past `import.meta.resolve` entirely, so a stub or
-  version-matched Node 22.22+ pi binary at that path is detected correctly
+  version-matched Node 24.15+ pi binary at that path is detected correctly
   (`kind: 'available'`) even inside the SEA binary.
 
 **claude and codex are never a hazard here.** Both adapters'

@@ -1,7 +1,7 @@
 // Lets a plain `node` subprocess import this package's TypeScript SOURCE.
 //
 // Two Node features do the work and neither is a new dependency: type
-// stripping (on by default since 22.18; `.node-version` pins 22.22) erases the
+// stripping (on by default since 22.18; `.node-version` pins 24.21.0) erases the
 // annotations, and `module.registerHooks` (22.15+) supplies the one thing
 // stripping does not — Node's ESM resolver never guesses extensions, and this
 // package's own imports are extensionless (`'../runtime-failure'`).
