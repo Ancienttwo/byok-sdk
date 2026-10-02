@@ -48,4 +48,8 @@ describe.skipIf(process.platform==='win32')('durable shell ownership and public 
     const result=await f.env.exec(`${JSON.stringify(process.execPath)} -e 'process.stdout.write("x".repeat(8192))'`,{spill:{afterBytes:4096,afterLines:100}},BACKGROUND_CONTEXT);
     expect(result.ok).toBe(false);if(!result.ok)expect(result.error.code).toBe('unknown');expect(f.released).toHaveLength(1);
   });
+  it('retains upstream bash -c stdin EOF semantics for multiline commands',async()=>{
+    const f=await fixture();let output='';const result=await f.env.exec('cat\nprintf aftercat',{onOutput:text=>{output+=text;}},BACKGROUND_CONTEXT);
+    expect(result).toEqual({ok:true,value:{exitCode:0}});expect(output).toBe('aftercat');expect(f.released).toHaveLength(1);
+  });
 });

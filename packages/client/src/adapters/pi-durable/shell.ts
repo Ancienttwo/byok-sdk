@@ -8,7 +8,7 @@ import { ExecutionError, ok, err, type ShellExecOptions, type ShellExecResult, t
 import type { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { disposeOwnedProcessTree } from '../process-tree';
 
-/** Public ExecutionEnv override: bash waits on stdin until the parent owns its actual POSIX group. */
+/** Public ExecutionEnv override: a fixed gate waits for parent group ownership before exec of the tool command. */
 export function durableShell(env: NodeExecutionEnv, shellEnv: NodeJS.ProcessEnv, own: (pid: number) => Promise<void>, released: (pid: number) => void) {
   const active = new Set<() => Promise<void>>();
   const exec = async (command: string, options: ShellExecOptions | undefined, context: Context): Promise<Result<ShellExecResult, ExecutionError>> => {
@@ -16,7 +16,8 @@ export function durableShell(env: NodeExecutionEnv, shellEnv: NodeJS.ProcessEnv,
     const shell=await fs.access('/bin/bash').then(()=>'/bin/bash',()=>'/bin/sh');
     if(context.abortSignal?.aborted)return err(new ExecutionError('aborted','Command aborted'));
     let child: ChildProcess;
-    try { child = spawn(shell, ['-s'], { cwd: options?.cwd ?? env.cwd, env: shellEnv, detached: true, stdio: ['pipe','pipe','pipe'] }); }
+    const gate='IFS= read -r permit || exit 78; [ "$permit" = byok-durable-shell ] || exit 78; exec "$1" -c "$2" </dev/null';
+    try { child = spawn(shell, ['-c',gate,'byok-durable-shell',shell,command], { cwd: options?.cwd ?? env.cwd, env: shellEnv, detached: true, stdio: ['pipe','pipe','pipe'] }); }
     catch (cause) { return err(new ExecutionError('spawn_error', 'Unable to spawn durable shell', cause as Error)); }
     let closed = false, quiesced = false;
     const state: {failure?:ExecutionError}={};
@@ -61,11 +62,11 @@ export function durableShell(env: NodeExecutionEnv, shellEnv: NodeJS.ProcessEnv,
     child.once('exit', value => { code = value; });
     try {
       if (!child.pid) throw new Error('durable shell missing pid');
-      // This journal/ownership ACK happens BEFORE any tool command enters bash.
+      // The journal/ownership ACK happens BEFORE the fixed gate executes any tool code.
       await own(child.pid);
       if (context.abortSignal?.aborted || hasFailure()) throw new Error('durable shell admission ended');
       if (options?.timeout !== undefined) timeout = setTimeout(() => { state.failure ??= new ExecutionError('timeout', 'Command timed out'); void dispose().catch(() => {}); }, options.timeout * 1_000);
-      child.stdin!.end(command + '\n');
+      child.stdin!.end('byok-durable-shell\n');
       await receipt; await outputWork;
       try{for(const decoder of [stdoutDecoder,stderrDecoder]){const tail=decoder.end();if(tail)options?.onOutput?.(tail,context);}}catch{state.failure??=new ExecutionError('callback_error','Durable shell output failed');}
       if (output) { if(!output.destroyed)output.end();await outputDone; }
