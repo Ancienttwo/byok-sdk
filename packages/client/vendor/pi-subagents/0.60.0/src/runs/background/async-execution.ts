@@ -549,7 +549,7 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
 			stderrFd = fs.openSync(logPaths.stderrPath, "a");
 		}
 		const proc = spawn(dispatched.command, dispatched.args, {
-			cwd,
+			cwd: dispatched.cwd,
 			...backgroundProcessOptions(),
 			stdio: ["ignore", stdoutFd ?? "ignore", stderrFd ?? "ignore"],
 			env: dispatched.env,

@@ -1,5 +1,6 @@
-import { parseRuntimeDescendantPlan, type RuntimeDescendantPlanV1 } from '../adapters/pi/runtime-descendant-plan';
+import { parseRuntimeDescendantPlan, type RuntimeDescendantPlanV2 } from '../adapters/pi/runtime-descendant-plan';
 import { extractPiConfigDigest, readPiHostConfig, requirePiHostBinding, verifyPiHostBinding } from '../adapters/pi/runtime-host-binding';
+import { configureCustodyRuntimePlan } from '../custody/external-cli-authority';
 import type { ImplementationSpawnBindingV1 } from '@byok-sdk/implementation-identity';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
@@ -507,7 +508,7 @@ function parseLaunch(value: unknown): McpLaunchAttestation {
 /** What the pi adapter writes for exactly one prepared operation. */
 interface PreparedLaunchConfig {
   readonly binding: ImplementationSpawnBindingV1;
-  readonly descendantPlan: RuntimeDescendantPlanV1 | null;
+  readonly descendantPlan: RuntimeDescendantPlanV2 | null;
   readonly credentialSource: CredentialSource;
   readonly cwd: string;
   readonly policy: PermissionPolicy;
@@ -590,7 +591,7 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
   }
 
   const binding = requirePiHostBinding(parsed.binding);
-  let descendantPlan: RuntimeDescendantPlanV1 | null;
+  let descendantPlan: RuntimeDescendantPlanV2 | null;
   try {
     descendantPlan = parseRuntimeDescendantPlan(parsed.descendantPlan, 'pi-prepared', parsed.binding as ImplementationSpawnBindingV1);
   } catch (error) {
@@ -728,6 +729,7 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
   let runtimeIdentity: string;
   try {
     runtimeIdentity = inputPreparationRuntimeIdentityString(await verifyPiHostBinding(config.binding, 'pi-prepared', fail));
+    configureCustodyRuntimePlan(config.descendantPlan);
   } catch (cause) {
     fail(`the installed pi closure could not be verified: ${cause instanceof Error ? cause.message : String(cause)}`);
   }

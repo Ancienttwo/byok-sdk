@@ -1,4 +1,4 @@
-import { parseRuntimeDescendantPlan, type RuntimeDescendantPlanV1 } from '../adapters/pi/runtime-descendant-plan';
+import { parseRuntimeDescendantPlan, type RuntimeDescendantPlanV2 } from '../adapters/pi/runtime-descendant-plan';
 import { extractPiConfigDigest, readPiHostConfig, requirePiHostBinding, verifyPiHostBinding } from '../adapters/pi/runtime-host-binding';
 import type { ImplementationSpawnBindingV1 } from '@byok-sdk/implementation-identity';
 import { isAbsolute, resolve } from 'node:path';
@@ -14,12 +14,13 @@ import { parseTaskScopedMcpConfig, type TaskScopedMcpConfig } from '../adapters/
 import { mapPermissionPolicyToPiArgs } from '../adapters/pi/permission-mapping';
 import { resolveMcpToolsetGrants, resolveReservedMcpToolGrants } from '../adapters/mcp-tool-grants';
 import { loaderEnvInjections } from '../daemon/tool-implementation-identity';
+import { configureCustodyRuntimePlan } from '../custody/external-cli-authority';
 
 export interface PiRpcHostConfig {
   readonly format: 'byok.pi.rpc-launch';
   readonly version: 2;
   readonly binding: ImplementationSpawnBindingV1;
-  readonly descendantPlan: RuntimeDescendantPlanV1 | null;
+  readonly descendantPlan: RuntimeDescendantPlanV2 | null;
   /** Authorized session cwd, independent of the sealed process cwd. */
   readonly cwd: string;
   readonly mcp: TaskScopedMcpConfig;
@@ -67,7 +68,7 @@ export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   const mcp = parseTaskScopedMcpConfig(raw.mcp, fail);
   if (mcp.permissionMode !== policy.data.mode) fail('MCP permissionMode differs from policy.mode');
   const binding = requirePiHostBinding(raw.binding);
-  let descendantPlan: RuntimeDescendantPlanV1 | null;
+  let descendantPlan: RuntimeDescendantPlanV2 | null;
   try {
     descendantPlan = parseRuntimeDescendantPlan(raw.descendantPlan, 'pi-rpc', raw.binding as ImplementationSpawnBindingV1);
   } catch (error) {
@@ -125,6 +126,7 @@ export async function runPiRpcHost(argv: readonly string[]): Promise<void> {
   const args = parsePiRpcHostArgs(argv, failUsage);
   const config = parsePiRpcHostConfig(readPiHostConfig(args.configPath, args.configDigest));
   await verifyPiHostBinding(config.binding, 'pi-rpc', failUsage);
+  configureCustodyRuntimePlan(config.descendantPlan);
   // The config is the single authority. Delegated tool flags must be its exact
   // projection, including absence; a stale or widened projection is refused.
   // Policy alone no longer reproduces that projection: since #180 the adapter

@@ -6,6 +6,7 @@ import { ensureSecureDir } from '../../util/secure-dir';
 import {
   CONTROLLED_PI_DIRECTORY_ENV_NAMES, projectKeysPiInheritedEnvironment,
   parseImplementationSpawnBinding, type RuntimeEntryV1,
+  OFFICIAL_EXTERNAL_CLI_ADAPTERS, resolveOfficialExternalCliInstall,
   type ImplementationSpawnBindingV1, type ToolImplementationAuthority, type ResolvedRuntimeImplementationV1,
 } from '@byok-sdk/implementation-identity';
 import {
@@ -14,14 +15,14 @@ import {
 import { resolveTrustedLaunchCwd } from '../../daemon/trusted-launch-cwd';
 import { RuntimeExecutionFailure } from '../../runtime-failure';
 import { resolvePiRuntimeIdentity } from './resolve-bin';
-import { createRuntimeDescendantPlan, requiredRuntimePlanKinds, type RuntimeDescendantPlanV1 } from './runtime-descendant-plan';
+import { createRuntimeDescendantPlan, requiredRuntimePlanKinds, type RuntimeDescendantPlanV2 } from './runtime-descendant-plan';
 
 export interface PiRuntimeLaunchResources {
   readonly kind: RuntimeLaunchKindV1;
   readonly declaration: ResolvedRuntimeImplementationV1;
   readonly decision: RuntimeLaunchDecisionV1;
   readonly binding: ImplementationSpawnBindingV1;
-  readonly descendantPlan: RuntimeDescendantPlanV1 | null;
+  readonly descendantPlan: RuntimeDescendantPlanV2 | null;
   readonly env: Readonly<Record<string, string>>;
   readonly sessionCwd: string;
   readonly credentialSource: 'pi-auth-store' | 'keys-profile';
@@ -108,7 +109,7 @@ export async function resolvePiRuntimeLaunch(options: {
         command: dev.command, ...(dev.entry === undefined ? {} : { entry: dev.entry }),
         fixedArgv: Object.freeze([]), cwd: cwd.dir, envCommitments: Object.freeze(directoryValues) });
     }
-    let descendantPlan: RuntimeDescendantPlanV1 | null = null;
+    let descendantPlan: RuntimeDescendantPlanV2 | null = null;
     if (declaration.kind === 'attested') {
       const rows: {kind: RuntimeEntryV1; template: ImplementationSpawnBindingV1}[] = [{kind:options.kind,template:binding}];
       const required = requiredRuntimePlanKinds(options.kind, declaration.descendantPolicy, declaration.edges);
@@ -130,7 +131,10 @@ export async function resolvePiRuntimeLaunch(options: {
         rows.push({kind,template});
       }
       try {
-        descendantPlan = createRuntimeDescendantPlan(options.kind,binding,declaration,rows);
+        const externalCliInstallations = (await Promise.all(OFFICIAL_EXTERNAL_CLI_ADAPTERS.map(
+          adapter => resolveOfficialExternalCliInstall(options.authority, adapter),
+        ))).filter(value => value !== undefined);
+        descendantPlan = createRuntimeDescendantPlan(options.kind,binding,declaration,rows,externalCliInstallations);
       } catch (error) {
         throw failure(error instanceof Error ? error.message : String(error));
       }

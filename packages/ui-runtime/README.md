@@ -10,4 +10,4 @@ import { replayTimeline } from '@byok-sdk/ui-runtime';
 const snapshot = replayTimeline(activityTail);
 ```
 
-MIT licensed. Node.js 22.22.0 or newer.
+MIT licensed. Node.js 24.15.0 or newer.

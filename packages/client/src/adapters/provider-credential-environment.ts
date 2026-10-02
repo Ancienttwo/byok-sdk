@@ -23,11 +23,14 @@ export const PROVIDER_CREDENTIAL_ENV_NAMES = [
   'ZAI_API_KEY',
 ] as const;
 
+const credentialNames = new Set<string>(PROVIDER_CREDENTIAL_ENV_DENY_NAMES);
+
 /** Return a copy that cannot pass ambient provider credentials to a child. */
 export function withoutProviderCredentials(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const sanitized = { ...env };
-  for (const name of PROVIDER_CREDENTIAL_ENV_DENY_NAMES) {
-    delete sanitized[name];
+  // Match the measurement projection, including Windows case aliases.
+  for (const name of Object.keys(sanitized)) {
+    if (credentialNames.has(name.toUpperCase())) delete sanitized[name];
   }
   return sanitized;
 }

@@ -16,8 +16,10 @@ import {
 	createRunFanoutBudget,
 	decodeRunFanoutBudgetDescriptor,
 	encodeRunFanoutBudgetDescriptor,
+	validateRunFanoutBudgetDescriptor,
 } from '../../vendor/pi-subagents/0.60.0/src/runs/shared/run-fanout-budget.ts';
-import { claimWorkflowChildPermit, createWorkflowChildPermit } from '../../vendor/pi-subagents/0.60.0/src/shared/workflow-child-permit.ts';
+import { claimWorkflowChildPermit, createWorkflowChildPermit, consumeWorkflowChildPermit } from '../../vendor/pi-subagents/0.60.0/src/shared/workflow-child-permit.ts';
+import { createOwnedProcessTreeController } from '../../vendor/pi-subagents/0.60.0/src/runs/background/owned-process-tree.ts';
 
 export {
 	RUN_FANOUT_BUDGET_ENV,
@@ -25,6 +27,9 @@ export {
 	createRunFanoutBudget,
 	decodeRunFanoutBudgetDescriptor,
 	encodeRunFanoutBudgetDescriptor,
+	validateRunFanoutBudgetDescriptor,
 	claimWorkflowChildPermit,
 	createWorkflowChildPermit,
+	consumeWorkflowChildPermit,
+	createOwnedProcessTreeController,
 };

@@ -46,6 +46,7 @@ import { CodexProjection, type CodexRecord } from './projection';
 import { AsyncQueue } from '../../util/async-queue';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
 import { mapPermissionPolicyToCodexArgs } from './permission-mapping';
+import { withoutProviderCredentials } from '../provider-credential-environment';
 
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5000;
@@ -218,8 +219,9 @@ export class CodexAdapter implements RuntimeAdapter {
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('codex manifest has no sealed cwd');
     const workspace = await fs.realpath(cwd);
-    // The caller already ran buildRuntimeEnv. Selected MCP payloads are task-owned launch resources, never ambient env.
-    const env = { ...input.env };
+    // Operator allow cannot opt this subscription runtime into env credentials.
+    // Strip before adding the task-owned MCP transport payloads, never ambient env.
+    const env = withoutProviderCredentials(input.env);
     const configArgs = codexMcpConfigArgs(
       input.mcpServers,
       env,

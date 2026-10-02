@@ -24,8 +24,8 @@ export interface DescendantContextV1 {
   readonly exactNames: readonly string[]; readonly envValues: Readonly<Record<string, string | null>>;
   readonly controlledDirValues: Readonly<Record<string, string>>;
 }
-export interface DescendantLaunchV1 {
-  readonly format: 'byok.descendant-launch'; readonly version: 1;
+export interface PiDescendantLaunchV2 {
+  readonly format: 'byok.descendant-launch'; readonly version: 2;
   readonly template: ImplementationSpawnBindingV1; readonly templateDigest: string;
   readonly policy: RuntimeDescendantPolicyV1; readonly perLaunch: DescendantContextV1;
 }
@@ -82,8 +82,8 @@ function frozenJson<T>(value: T): T {
   return value;
 }
 /** Strict owned shape only. Independent parent and final-env comparisons are mandatory in assertDescendantSpawn. */
-export function parseDescendantLaunch(value: unknown): DescendantLaunchV1 {
-  if (!exact(value, ['format','version','template','templateDigest','policy','perLaunch']) || value.format !== 'byok.descendant-launch' || value.version !== 1) fail('descendant_invalid_shape');
+export function parseDescendantLaunch(value: unknown): PiDescendantLaunchV2 {
+  if (!exact(value, ['format','version','template','templateDigest','policy','perLaunch']) || value.format !== 'byok.descendant-launch' || value.version !== 2) fail('descendant_invalid_shape');
   const template = parseImplementationSpawnBinding(value.template);
   if (!template || template.identity.kind !== 'attested') fail('descendant_invalid_template');
   if (typeof value.templateDigest !== 'string' || !/^[0-9a-f]{64}$/u.test(value.templateDigest)
@@ -115,13 +115,13 @@ export function parseDescendantLaunch(value: unknown): DescendantLaunchV1 {
   if (Object.keys(c.mcp.env).some(n => (PROVIDER_CREDENTIAL_ENV_DENY_NAMES as readonly string[]).includes(n.toUpperCase()))) fail('mcp_credential_env_forbidden');
   if (Object.keys(c.mcp.env).some(n => (CONTROLLED_PI_DIRECTORY_ENV_NAMES as readonly string[]).includes(n.toUpperCase())) || loaderEnvInjections(c.mcp.env).length > 0) fail('descendant_mcp_env_forbidden');
   // Keep original template key order: parsing must not silently change its checksum preimage.
-  return frozenJson(JSON.parse(JSON.stringify(value)) as DescendantLaunchV1);
+  return frozenJson(JSON.parse(JSON.stringify(value)) as PiDescendantLaunchV2);
 }
 
 /** Necessary launch consistency, not an atomic budget claim or permission to enable recursive execution. */
 export function validateDescendantSpawn(
   input: unknown, expected: DescendantSpawnExpectationV1, actual: DescendantSpawnActualV1,
-): DescendantLaunchV1 {
+): PiDescendantLaunchV2 {
   if (loaderEnvInjections(actual.env).length > 0 || unexpectedLaunchEnvControlNames(actual.env).length > 0) fail('descendant_loader_env_forbidden');
   const launch = parseDescendantLaunch(input), c = launch.perLaunch, t = launch.template;
   if (!equal(launch.policy, expected.policy)) fail('descendant_policy_changed');

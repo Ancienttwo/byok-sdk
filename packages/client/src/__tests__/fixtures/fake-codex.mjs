@@ -44,6 +44,18 @@ if (argv.includes('--help')) {
   console.log('app-server --listen stdio://');
   process.exit(0);
 }
+if (process.env.FAKE_CODEX_ENV_RECEIPT) {
+  const { toolImplementationLaunchEnvNamesDigest, toolImplementationLoaderEnvValuesDigest } =
+    await import('@byok-sdk/implementation-identity');
+  // Presence and comparisons only: never persist credential or ambient values.
+  writeFileSync(process.env.FAKE_CODEX_ENV_RECEIPT, JSON.stringify({
+    present: Object.fromEntries(Object.keys(process.env).map((name) => [name, true])),
+    configMatches: process.env.MY_ALLOWED_CONFIG === 'synthetic-config',
+    authDiscoveryMatches: process.env.HOME === process.env.CODEX_HOME && process.env.USER === 'synthetic-user',
+    namesDigestMatches: toolImplementationLaunchEnvNamesDigest(process.env) === process.env.FAKE_CODEX_ENV_NAMES_DIGEST,
+    loaderDigestMatches: toolImplementationLoaderEnvValuesDigest(process.env) === process.env.FAKE_CODEX_ENV_LOADER_DIGEST,
+  }));
+}
 if (process.env.FAKE_CODEX_PROCESS_TREE_FILE)
   await spawnProcessTreeDescendant({
     receiptFile: process.env.FAKE_CODEX_PROCESS_TREE_FILE,

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.0
+
+- **Breaking (runtime)** — raise the minimum Node.js version to 24.15.0 across
+  all workspace packages. Development/CI baseline is pinned to Node 24.21.0,
+  with a Node 26 forward-compatibility CI leg.
+
 ## Unreleased
 
 - **Breaking (client)** — Codex now uses app-server 0.159.2 with the vendored
