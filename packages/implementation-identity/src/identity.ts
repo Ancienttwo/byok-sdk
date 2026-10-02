@@ -1,7 +1,7 @@
 import { validateDescendantSpawn, type DescendantSpawnExpectationV1, type DescendantSpawnActualV1 } from './descendant-launch';
 import { CONTROLLED_PI_DIRECTORY_ENV_NAMES, KEYS_PI_INHERITED_ENV_NAMES, KEYS_PI_WINDOWS_ENV_NAMES } from './environment';
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createReadStream, lstatSync, realpathSync, type Stats } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES, loaderEnvInjections } from './environment';
@@ -605,6 +605,9 @@ export interface ToolImplementationFsProbe {
   realpath(target: string): Promise<string>;
   /** sha256 hex of the file's bytes, streamed. */
   digest(target: string): Promise<string>;
+  /** Synchronous tuple-only supplement; required when this probe is used inside an admission lock. */
+  lstatSync?(target: string): ToolImplementationStatEntry;
+  realpathSync?(target: string): string;
 }
 
 async function streamDigest(target: string): Promise<string> {
@@ -614,23 +617,26 @@ async function streamDigest(target: string): Promise<string> {
   return hash.digest('hex');
 }
 
+function statEntryOf(stats: Stats): ToolImplementationStatEntry {
+  return Object.freeze({
+    dev: stats.dev,
+    ino: stats.ino,
+    size: stats.size,
+    mtimeMs: stats.mtimeMs,
+    mode: stats.mode,
+    uid: stats.uid,
+    gid: stats.gid,
+    isFile: stats.isFile(),
+    isSymbolicLink: stats.isSymbolicLink(),
+  });
+}
+
 export const realToolImplementationFsProbe: ToolImplementationFsProbe = Object.freeze({
-  async lstat(target: string): Promise<ToolImplementationStatEntry> {
-    const stats = await fs.lstat(target);
-    return Object.freeze({
-      dev: stats.dev,
-      ino: stats.ino,
-      size: stats.size,
-      mtimeMs: stats.mtimeMs,
-      mode: stats.mode,
-      uid: stats.uid,
-      gid: stats.gid,
-      isFile: stats.isFile(),
-      isSymbolicLink: stats.isSymbolicLink(),
-    });
-  },
+  async lstat(target: string): Promise<ToolImplementationStatEntry> { return statEntryOf(await fs.lstat(target)); },
   realpath: (target: string) => fs.realpath(target),
   digest: streamDigest,
+  lstatSync: (target: string) => statEntryOf(lstatSync(target)),
+  realpathSync,
 });
 
 // ---------------------------------------------------------------------------
@@ -1767,6 +1773,43 @@ export async function reverifyToolImplementationIdentity(
   if (toolImplementationLaunchEnvNamesDigest(launchEnv) !== identity.launchEnvNamesDigest
     || toolImplementationLoaderEnvValuesDigest(launchEnv) !== identity.loaderEnvValuesDigest) {
     return { reason: 'launch_env_drift', subject: 'launch-env' };
+  }
+  return 'ok';
+}
+
+/**
+ * Tuple-only supplement AFTER admission-lock acquisition. It preserves the
+ * physical gate's canonical parent / non-symlink leaf / exact tuple rules,
+ * including hardlink aliases. It never replaces full byte/environment reverify
+ * and does not claim atomicity against a same-UID edit after this check.
+ * A custom test probe without synchronous capabilities fails closed.
+ */
+export function reverifyToolImplementationTuples(
+  identity: ToolImplementationAttestedV1,
+  probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
+): ToolImplementationReverifyResult {
+  const lstat = probe.lstatSync?.bind(probe), realpath = probe.realpathSync?.bind(probe);
+  if (!lstat || !realpath) return { reason: 'reverify_failed', subject: 'artifact' };
+  const matches = (target: string, tuple: ToolImplementationStatTupleV1): boolean => {
+    try {
+      const parent = path.dirname(target);
+      if (realpath(parent) !== parent) return false;
+      const measured = lstat(target);
+      return measured.isFile && !measured.isSymbolicLink && sameStatTuple(measured, tuple);
+    } catch { return false; }
+  };
+  if (!matches(identity.installPath, identity.installStat)) return { reason: 'install_record_mismatch', subject: 'artifact' };
+  if (identity.interpreter && (!identity.interpreterStat || !matches(identity.interpreter.path, identity.interpreterStat))) {
+    return { reason: 'install_record_mismatch', subject: 'interpreter' };
+  }
+  if (identity.assetRoot !== undefined && identity.assets !== undefined) {
+    try { if (realpath(identity.assetRoot) !== identity.assetRoot) return { reason: 'install_record_mismatch', subject: 'asset' }; }
+    catch { return { reason: 'install_record_mismatch', subject: 'asset' }; }
+    if (!identity.assetStats || identity.assetStats.length !== identity.assets.length) return { reason: 'install_record_mismatch', subject: 'asset' };
+    for (const [index, asset] of identity.assets.entries()) {
+      const target = assetAbsolutePath(identity.assetRoot, asset.path);
+      if (target === undefined || !matches(target, identity.assetStats[index]!)) return { reason: 'install_record_mismatch', subject: 'asset' };
+    }
   }
   return 'ok';
 }

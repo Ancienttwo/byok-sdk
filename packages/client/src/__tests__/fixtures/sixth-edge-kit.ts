@@ -22,6 +22,7 @@ export const ownershipProbe: ToolImplementationFsProbe = {
   ...realToolImplementationFsProbe,
   // Only ownership/mode are simulated. Inodes, paths, timestamps and bytes stay real.
   async lstat(target) { const stat = await realToolImplementationFsProbe.lstat(target); return {...stat,uid:0,mode:stat.mode & ~0o222}; },
+  lstatSync(target) { const stat = realToolImplementationFsProbe.lstatSync!(target); return {...stat,uid:0,mode:stat.mode & ~0o222}; },
 };
 const clientRoot = path.resolve(import.meta.dirname,'../../..');
 export async function importVendor<T>(relative: string): Promise<T> {
@@ -34,6 +35,7 @@ export async function sixthEdgeKit(options: { auth?: string; limit?: number; max
   const configDir = path.join(dir,'config'); mkdirSync(configDir,{mode:0o700});
   const statePath = path.join(dir,'auth-mode.json');
   writeFileSync(path.join(dir,'fixture-resource.txt'),'sealed-resource',{mode:0o444});
+  utimesSync(path.join(dir,'fixture-resource.txt'),1700000000,1700000000);
   writeFileSync(statePath,JSON.stringify({auth:options.auth ?? 'login'}));
   writeFileSync(entry,`
 import fs from 'node:fs'; import path from 'node:path';
@@ -86,7 +88,7 @@ int main(int argc,char **argv){
       const relative=`node/lib/${name}`, target=path.join(dir,relative);mkdirSync(path.dirname(target),{recursive:true});
       copyFileSync(path.join(libraryDir,name),target);chmodSync(target,0o444);copiedAssets.push(relative);
     }
-    copyFileSync(command,copied);chmodSync(copied,0o555);command=copied;
+    copyFileSync(command,copied);chmodSync(copied,0o555);utimesSync(copied,1700000000,1700000000);command=copied;
   }
   const hash = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
   const declaration = (adapter: OfficialExternalCliAdapter): OfficialExternalCliInstallV2 => ({

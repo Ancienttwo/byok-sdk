@@ -2467,3 +2467,7 @@ requires an approved pinned installation/config scope and platform smoke;
 fixture evidence is not login-service acceptance. Cursor authentication mode and
 Windows external process-tree supervision remain unsupported/fail-closed in
 this cohort. Top-level Codex environment stripping is a separate change.
+
+
+### T6 locked physical tuple supplement (F2)
+Official external CLI probes and terminal task admission retain the full asynchronous byte/environment reverify. After acquiring the shared root admission lock, before permit consumption/native spawn, the SDK additionally checks identity-owned artifact/interpreter/declared asset tuples and canonical parent paths, external home/config directory tuples, and the committed parent record. A known pre-spawn mismatch rolls back the uncommitted reservation under the existing F1 rule. This is a synchronous tuple-only supplement, preserving same-inode hardlink layouts, not an atomic OS execution guarantee or login-store content proof. Same-UID in-place edits preserving every tuple and the residual final check-to-spawn interval remain check-time limits. No credential/billing authority or new per-adapter budget is introduced.

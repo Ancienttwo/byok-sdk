@@ -123,6 +123,8 @@ export interface ExternalCliDirectoryStat {
     readonly gid: number;
 }
 export declare function reverifyOfficialExternalCliDirectories(install: AttestedOfficialExternalCliV2): Promise<boolean>;
+/** Directory tuple check inside the final admission lock; reads no login-store contents. */
+export declare function reverifyOfficialExternalCliDirectoriesSync(install: AttestedOfficialExternalCliV2): boolean;
 export declare function externalCliCommitment(value: unknown): string;
 export declare function parseAttestedOfficialExternalCli(value: unknown): AttestedOfficialExternalCliV2 | undefined;
 export declare function resolveOfficialExternalCliInstall(authority: ToolImplementationAuthority | undefined, adapter: OfficialExternalCliAdapter, probe?: ToolImplementationFsProbe): Promise<AttestedOfficialExternalCliV2 | undefined>;
@@ -634,6 +636,9 @@ export interface ToolImplementationFsProbe {
     realpath(target: string): Promise<string>;
     /** sha256 hex of the file's bytes, streamed. */
     digest(target: string): Promise<string>;
+    /** Synchronous tuple-only supplement; required when this probe is used inside an admission lock. */
+    lstatSync?(target: string): ToolImplementationStatEntry;
+    realpathSync?(target: string): string;
 }
 export declare const realToolImplementationFsProbe: ToolImplementationFsProbe;
 /**
@@ -850,6 +855,14 @@ export type ToolImplementationReverifyResult = 'ok' | {
  * facts about the second one.
  */
 export declare function reverifyToolImplementationIdentity(identity: ToolImplementationAttestedV1, launchEnv: Readonly<Record<string, string>>, probe?: ToolImplementationFsProbe): Promise<ToolImplementationReverifyResult>;
+/**
+ * Tuple-only supplement AFTER admission-lock acquisition. It preserves the
+ * physical gate's canonical parent / non-symlink leaf / exact tuple rules,
+ * including hardlink aliases. It never replaces full byte/environment reverify
+ * and does not claim atomicity against a same-UID edit after this check.
+ * A custom test probe without synchronous capabilities fails closed.
+ */
+export declare function reverifyToolImplementationTuples(identity: ToolImplementationAttestedV1, probe?: ToolImplementationFsProbe): ToolImplementationReverifyResult;
 /**
  * Reverify a finite SDK helper with its role-specific lifecycle projection.
  * The descriptor accepts no task lifecycle inputs. The execution entry is the

@@ -1,6 +1,6 @@
 # Plan: T6 N1 official external CLI custody edge
 
-> **Status**: Complete
+> **Status**: Review
 > **Created**: 20261002-1658
 > **Slug**: t6-n1-sixth-edge
 > **Planning Source**: codex-plan-or-waza-think
@@ -143,3 +143,9 @@ The exact public API goldens were reviewed/updated. Independent code review foun
 - [x] Run touched tests, renew exact-subject acceptance and strict workflow, local commits only. After the last commit execute touched tests, typecheck, build and full test on final HEAD; update report.
 
 Fix1 canonical prepare passed 12/12 on 0ea3e7f9 with all six current_exact checks actually executed; independent Codex external_pass accepted subject sha256:99f6aec693fc84bf4f94408a87c39fc2b739e7bd87ab5172a3b8b565f17a05df at origin/main@f2098ecb. Supported Receipt/finalize succeeded without re-execution. Required after-last-bookkeeping-commit evidence is published to /tmp/byok-t6-fix1-final-head-evaluation.json and /tmp/byok-t6-fix1-final-head-touched.log, with the actual final HEAD and exits in /tmp/byok-t6-sixth-edge-report.md. Report remains BLOCKED until that chronological sequence passes.
+
+## F2 — user-approved locked tuple recheck (2026-10-03)
+
+- [x] Prove replacement after full reverify while waiting for the real admission lock; target/config, interpreter/assets and parent bindings must refuse before native spawn.
+- [x] Add identity-owned synchronous tuple/directory proof without replacing full hash reverify; wire locked beforeLaunch and preserve F1 rollback/permit/counter semantics.
+- [ ] Run focused tests and required checks, deliberate API goldens, independent exact-subject acceptance, strict workflow, local commits only; execute final checks after last commit and update local report.
