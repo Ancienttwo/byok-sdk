@@ -9,7 +9,7 @@ import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
-import { TaskRunner } from '../daemon/task-runner';
+import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import type { RuntimeAdapter, Session } from '../types';
 import { TestServer } from './fixtures/test-server';
@@ -27,7 +27,7 @@ function alive(pid: number): boolean {
     throw error;
   }
 }
-async function setup(runtime: RuntimeId, scenario: string) {
+async function setup(runtime: RuntimeId, scenario: string, overrides: Partial<Pick<TaskRunnerDeps, 'startupTimeoutMs'>> = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-t1-native-'));
   const tree = path.join(dir, 'tree.json');
   const traceFile = path.join(dir, 'trace');
@@ -60,6 +60,7 @@ async function setup(runtime: RuntimeId, scenario: string) {
     sessionWorkspaces: new SessionWorkspaceStore(path.join(dir, 'sessions')), approvalRegistry: new ApprovalRegistry(),
     localAgentRelease: Object.freeze({ version: '0.24.0-rc.1' }),
     runtimeEnvironment: { [runtime]: { allow: ['T1_*'] } }, shutdownInterruptTimeoutMs: 100,
+    ...overrides,
   });
   const taskId = 'native-task';
   const offer = (limits?: { maxDurationMs: number }) => runner.handleEnvelope(createEnvelope('task.offer', {
@@ -137,6 +138,19 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
     await fs.writeFile(c.gate, 'release'); await c.startSettled.promise;
     await new Promise<void>(resolve => setImmediate(resolve));
     await c.runner.shutdownActiveTasks('retry'); await c.cancel();
+    expect(c.terminals()).toHaveLength(1); expectNoErrors(c); await c.assertReaped();
+  });
+
+  it('startup deadline publishes one failure and retains the late owner until its disposal receipt', async () => {
+    const c = await setup(runtime, 'startup', { startupTimeoutMs: 1000 }); const offered = c.offer();
+    await vi.waitFor(async () => expect(await c.trace()).toContain('startup'));
+    await vi.waitFor(() => expect(c.terminals()).toHaveLength(1)); await offered;
+    expect(c.terminals()[0]).toMatchObject({ type: 'task.fail', payload: { retryable: false } });
+    expect(c.sent.some(event => event.type === 'task.started')).toBe(false);
+    expect(c.runner.activeTaskCount).toBe(1);
+    await fs.writeFile(c.gate, 'release'); await c.startSettled.promise;
+    await new Promise<void>(resolve => setImmediate(resolve));
+    await c.runner.shutdownActiveTasks('deadline owner disposal'); await c.cancel();
     expect(c.terminals()).toHaveLength(1); expectNoErrors(c); await c.assertReaped();
   });
 
@@ -223,5 +237,15 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
     expect(c.terminals()[0], JSON.stringify(c.terminals())).toMatchObject({ type: 'task.fail', payload: { retryable: runtime !== 'codex' } });
     if (runtime !== 'claude') expectUsage(c, 123, 17);
     await c.cancel(); expect(c.terminals()).toHaveLength(1); await c.assertReaped();
+  });
+
+  it('native interruption alone retains the existing turn_end contract without inventing Host cancellation', async () => {
+    const c = await setup(runtime, 'native-abort'); await c.offer();
+    await vi.waitFor(() => expect(c.runner.activeTaskCount).toBe(0));
+    // The frozen AgentEvent turn_end has no cancellation cause. Only a Host
+    // task.cancel reserves task.cancelled; preserve the bundled contract here.
+    expect(c.terminals().map(event => event.type)).toEqual(['task.complete']);
+    expectUsage(c, runtime === 'claude' ? 456 : 123, runtime === 'claude' ? 29 : 17);
+    await c.cancel(); expect(c.terminals()).toHaveLength(1); expectNoErrors(c); await c.assertReaped();
   });
 });
