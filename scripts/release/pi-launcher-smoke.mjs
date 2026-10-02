@@ -272,6 +272,13 @@ await runtime.dispose();
   assert.match(startup.stderr, /^byok-pi-rpc: exactly one --config-digest=<sha256> is required\n$/);
   assert.doesNotMatch(startup.stderr, /ERR_MODULE_NOT_FOUND|ERR_PACKAGE_PATH_NOT_EXPORTED|Cannot find (?:module|package)|Unknown file extension/);
   console.log('[release-pack] installed Node byok-pi-rpc imports reached the exact missing-config-digest refusal; sessions=0');
+  const durableStartup = spawnSync(process.execPath, [path.join(clientRoot, 'dist/bin/byok-pi-durable.js')],
+    {cwd:dir,env:startupEnv,encoding:'utf8',timeout:15_000});
+  assert.equal(durableStartup.status, 78, durableStartup.stderr || String(durableStartup.error));
+  assert.equal(durableStartup.stderr, 'byok-pi-durable: exactly one --config-digest=<sha256> is required\n');
+  assert.equal(requests, 0);
+  console.log('[release-pack] installed Node byok-pi-durable loaded its worker graph and refused missing digest; sessions=0; requests=0');
+
   const sealedEntry = pathToFileURL(path.join(clientRoot, 'dist/bin/pi-runtime-host-sealed.js')).href;
   const sealedProbe = path.join(dir, 'sealed-host-startup.mjs');
   await writeFile(sealedProbe, `import {runPiRpcHost} from ${JSON.stringify(sealedEntry)}; await runPiRpcHost([]);`, { flag: 'wx' });

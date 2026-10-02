@@ -41,7 +41,7 @@ function projection(expectedProvider: string, expectedModel: string) {
 }
 
 export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
-  const { args, digest } = extractPiConfigDigest(argv);
+  const { args, digest } = extractPiConfigDigest(argv, message => { process.stderr.write(`byok-pi-durable: ${message}\n`); process.exit(78); });
   if (args.length !== 2 || args[0] !== '--config' || !path.isAbsolute(args[1]!)) throw new Error('durable accepts only --config <absolute path>');
   const config = object(readPiHostConfig(args[1]!, digest));
   if (config.format !== 'byok.pi.durable-launch' || config.version !== 1) throw new Error('unsupported durable launch config');
