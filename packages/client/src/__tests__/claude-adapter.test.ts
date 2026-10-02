@@ -391,6 +391,12 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     await session.interrupt();const events=await takeTurn(session);expect(events.at(-1)?.type).toBe('turn_end');expect(events.some(e=>e.type==='error')).toBe(false);
   });
 
+  it('interrupt during the tool phase (terminal_reason aborted_tools) ends the turn at turn_end with no error', async () => {
+    const ctx=await makeCtx();ctx.env={...ctx.env,FAKE_CLAUDE_HANG_AFTER_TOOL:'1',FAKE_CLAUDE_INTERRUPT_TERMINAL_REASON:'aborted_tools'};
+    const session=await startAdapter(fakeClaudeAdapter(),baseTask,ctx);openSessions.push(session);
+    await session.interrupt();const events=await takeTurn(session);expect(events.at(-1)?.type).toBe('turn_end');expect(events.some(e=>e.type==='error')).toBe(false);
+  });
+
   it('a denied (headless auto-deny) tool call surfaces tool_result with isError:true, and the run still completes to turn_end — never a hang, never a paused needs_approval-style event', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_DENY: '1' });

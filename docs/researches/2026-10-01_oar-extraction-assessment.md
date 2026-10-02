@@ -157,7 +157,7 @@ OAR 自己的评审与我方静态阅读都指出这些弱点，port 时不要�
 | 探测 | 结果 | 对 OAR claim 的判定 |
 | --- | --- | --- |
 | C1 基线 | `result` 带 usage 与 `modelUsage[model].contextWindow`（1000000）。`modelUsage` 的 key 是 init 模型串，不是 assistant 帧里的 API model id，须遍历取值。assistant 帧 `message.usage.output_tokens` 只是流式起点快照（8，最终 601） | 窗口来源成立；逐次调用 usage 不能当最终值 |
-| C2 interrupt | `control_request{subtype:"interrupt"}` 约 12 ms 收到 `control_response success`（`{still_queued:[]}`）；随后 `result` 为 `error_during_execution`、`terminal_reason:"aborted_streaming"`；进程存活，下一条 user 消息正常回复 | 确认。interrupt 可保留会话，可替代 SIGTERM；`aborted_streaming` 不能按失败处理 |
+| C2 interrupt | `control_request{subtype:"interrupt"}` 约 12 ms 收到 `control_response success`（`{still_queued:[]}`）；随后 `result` 为 `error_during_execution`、`terminal_reason:"aborted_streaming"`；进程存活，下一条 user 消息正常回复 | 确认。interrupt 可保留会话，可替代 SIGTERM；`aborted_streaming` 不能按失败处理。工具阶段（Bash 执行中）中断时 `terminal_reason` 为 `aborted_tools`（S8 真实回合观察，ACK 约 10 ms），同样按中断边界处理，不能按失败处理 |
 | C3 steer | 无 tool 边界时，生成中途写入的消息成为下一回合，当前回合不受影响；`queued_turn_count` 仍为 0，不可作排队信号 | 部分确认。「下一个 model step 边界注入」未验证，需带工具调用的多步回合 |
 | C4 `get_context_usage` | 约 170 ms 成功；`totalTokens` 66852、`maxTokens` 500000、`percentage` 13，另有 `apiUsage`、`autoCompactThreshold`、`messageBreakdown` | 确认可用。`maxTokens`（500000）与 `contextWindow`（1000000）不一致，推测前者是有效 auto-compact 窗口 [inferred]，context 切片要选哪个作「窗口」需决策 |
 

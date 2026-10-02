@@ -155,6 +155,33 @@ describe('Claude context window reserved for S4', () => {
     expect(mapped.events).toEqual([{ type: 'turn_end' }]);
     expect(mapped.terminalFailure).toBeUndefined();
   });
+  it('aborted_tools (interrupt during tool phase) is a turn boundary and keeps contextWindow usage', () => {
+    const mapped = mapClaudeMessageToAgentEvents(
+      {
+        type: 'result',
+        subtype: 'error_during_execution',
+        terminal_reason: 'aborted_tools',
+        is_error: true,
+        modelUsage: { 'group/claude[1m]': { contextWindow: 1000000 } },
+        usage: { input_tokens: 2, output_tokens: 88, cache_creation_input_tokens: 71603, cache_read_input_tokens: 0 },
+        errors: ['[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use'],
+      },
+      createToolUseCorrelation(),
+      { workspaceDir: '/workspace' },
+    );
+    expect(mapped.events.map((e) => e.type)).toEqual(['usage', 'turn_end']);
+    expect(mapped.events[0]).toMatchObject({ type: 'usage', contextWindow: 1000000, contextSource: 'provider' });
+    expect(mapped.terminalFailure).toBeUndefined();
+  });
+  it('unknown terminal_reason on error_during_execution stays a failure', () => {
+    const mapped = mapClaudeMessageToAgentEvents(
+      { type: 'result', subtype: 'error_during_execution', terminal_reason: 'aborted_something_else', is_error: true },
+      createToolUseCorrelation(),
+      { workspaceDir: '/workspace' },
+    );
+    expect(mapped.terminalFailure).toBeDefined();
+    expect(mapped.events.some((e) => e.type === 'error')).toBe(true);
+  });
   it('other execution errors retain failure and malformed abort frames remain fail-closed', () => {
     for (const message of [
       { type: 'result', subtype: 'error_during_execution', is_error: true },
