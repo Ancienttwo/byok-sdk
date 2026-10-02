@@ -1,6 +1,6 @@
 # Plan: T6 N1 official external CLI custody edge
 
-> **Status**: Review
+> **Status**: Complete
 > **Created**: 20261002-1658
 > **Slug**: t6-n1-sixth-edge
 > **Planning Source**: codex-plan-or-waza-think
@@ -115,7 +115,7 @@ Reuse strict Host install record physical measurement/reverify, shared cross-pro
 - [x] Wire unified initial/payload/append admission, config commitment and batch failure ack, final identity/auth/permit gate with no ambient fallback.
 - [x] Add one shared E/W/Q/J ledger under existing fanout lock, depth handoff/operation-attempt charge-once, lifecycle/live-slot settlement.
 - [x] Add real executable fixture coverage for auth/env/argv/config refusal, identity substitution/replay, permit reuse, caps/retry and append batch. Update changed vendor provenance and closure/API snapshots when required.
-- [ ] Run touched tests and all required checks without assertion/timeout/skip loosening; record results and residual limits, local review and local commit only; write /tmp/byok-t6-sixth-edge-report.md.
+- [x] Run touched tests and all required checks without assertion/timeout/skip loosening; record results and residual limits, local review and local commit only; write /tmp/byok-t6-sixth-edge-report.md.
 
 ## Verification
 Touched implementation-identity/client tests; bun run build; bun run typecheck; full bun run test with existing strict Bun config; bun run check:api-surface; bun run check:version-authority; repo-harness run check-task-workflow --strict. No GitHub CI. Official CLI installation/login smoke is distinct from causal fixture evidence; unsupported platform/version remains fail-closed. Top-level Codex env-strip mismatch is T7 and excluded.
@@ -128,10 +128,10 @@ Touched implementation-identity/client tests; bun run build; bun run typecheck; 
 - [x] Wire unified initial/payload/append admission, config commitment and batch failure ack, final identity/auth/permit gate with no ambient fallback.
 - [x] Add one shared E/W/Q/J ledger under existing fanout lock, depth handoff/operation-attempt charge-once, lifecycle/live-slot settlement.
 - [x] Add real executable fixture coverage for auth/env/argv/config refusal, identity substitution/replay, permit reuse, caps/retry and append batch. Update changed vendor provenance and closure/API snapshots when required.
-- [ ] Run touched tests and all required checks without assertion/timeout/skip loosening; record results and residual limits, local review and local commit only; write /tmp/byok-t6-sixth-edge-report.md.
+- [x] Run touched tests and all required checks without assertion/timeout/skip loosening; record results and residual limits, local review and local commit only; write /tmp/byok-t6-sixth-edge-report.md.
 
 ## Execution Evidence
 
 T3b prerequisites: current HEAD b5364f44; 29 focused tests passed. T6 touched suite: 9 files / 149 tests passed; implementation-identity: 115 tests passed; actual built Host-helper-to-external fixture path: 3 tests passed. Final canonical contract verification: 12/12 PASS, status Fulfilled, /tmp/byok-t6-canonical-contract.log and /tmp/byok-t6-canonical-evaluation.json (all check exit codes 0). Earlier failures remain in /tmp/byok-t6-check-results.json and are not final passing evidence.
 
-The exact public API goldens were reviewed/updated. Independent code review found no remaining defect. Acceptance freeze remains blocked by architecture projection's proof-only verified-flow-proof-changed signal requiring ready CodeGraph proof (absent index) or explicit external approval. No model boundary, CodeGraph index, approval event, receipt or remote action is invented. Implementation delivery is a local checkpoint while the active plan remains Review.
+The exact public API goldens were reviewed/updated. Independent code review found no remaining defect. The original architecture freeze block was closed under PM22:31 authority by CodeGraph 1.6.1 readiness, manifest-only apply and empty-noop proof reconciliation. Canonical prepare on committed bf340ebb passed 12/12 criteria and all six executed current_exact checks (/tmp/byok-t6-pm-final-prepare.log; /tmp/byok-t6-pm-final-evaluation.json). Independent Codex reviewed frozen subject sha256:f3fa892f9cdbef7a3e375b9bc4901620b32ac603903ff999e32f75cfcf523f2b against origin/main@f2098ecbf84570054600bad0680ba72e59654ea9 and returned external_pass. Supported Receipt recording/finalization completed without retesting (/tmp/byok-t6-pm-finalize.log). Completion changes only bookkeeping; no product or semantic model change and no remote action.
