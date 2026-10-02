@@ -15,4 +15,4 @@ row, and consumes the JTI through an injected `DeviceAssertionReplayAuthority`.
 hosted production composition must inject durable atomic storage. The assertion
 authorizes one exchange only and is not a connector session or refresh token.
 
-MIT licensed. Node.js 22.22.0 or newer.
+MIT licensed. Node.js 24.15.0 or newer.

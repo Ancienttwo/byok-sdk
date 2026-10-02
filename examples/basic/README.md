@@ -12,7 +12,7 @@ Not published — this package is `private` and lives under `examples/`.
 
 ## Prerequisites
 
-Node.js 22.22.0 or newer is required.
+Node.js 24.15.0 or newer is required.
 
 From the repo root:
 
