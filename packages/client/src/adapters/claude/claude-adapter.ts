@@ -661,7 +661,7 @@ class ClaudeSession implements Session {
 
   /** Native interrupt ACK is bounded; TaskRunner still closes after cancellation acknowledgment. */
   async interrupt(): Promise<void> {
-    if (!await this.control.interrupt()) { this.client.kill(); await this.client.dispose(); }
+    if (!await this.control.interruptAndSettle()) { this.client.kill(); await this.client.dispose(); }
   }
 
   async close(): Promise<void> {

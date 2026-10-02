@@ -90,6 +90,14 @@ export class CodexProjection {
     }
   }
 
+  /** A transport close cannot invent a turn outcome, but must retain observed metering. */
+  takePendingUsage(stream: object): Extract<AgentEvent, { type: 'usage' }> | undefined {
+    const state = this.streams.get(stream);
+    const usage = state?.lastUsage;
+    if (state) delete state.lastUsage;
+    return usage;
+  }
+
   private project(
     state: StreamState,
     input: CodexRecord,
