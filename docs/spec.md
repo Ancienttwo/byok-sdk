@@ -1567,7 +1567,12 @@ The authority split is deliberate and total:
   (`BYOK_HOST_TOOLSET_CONTEXT`, `BYOK_STORE_DIR`, `BYOK_PRODUCT_ID`), and the
   provider-credential names stripped at
   subscription and BYOK-custody boundaries by the existing credential-custody
-  authority. So one identity survives both spawn points without binding a
+  authority. The shared finite inventory includes Codex's `CODEX_API_KEY` and
+  `CODEX_ACCESS_TOKEN`, matches credential case aliases, and is applied before
+  top-level Codex spawn even when the operator explicitly allows those names.
+  Platform discovery and locally allowed non-credential config (including
+  `CODEX_HOME`) remain; the SDK does not inspect or change CLI-owned auth stores.
+  So one identity survives both spawn points without binding a
   difference the SDK made on purpose. It is NOT a `BYOK_*` prefix exemption:
   the prefix is not intrinsically inert, so any other name wearing this SDK's
   control prefix on the environment of a child about to start under an

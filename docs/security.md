@@ -229,10 +229,18 @@ adapter declares it actually needs (`RuntimeAdapter.descriptor.environmentRequir
 — e.g. a non-BYOK Pi offer's provider credential names, since Pi can
 authenticate via provider env vars; an authoritative BYOK selection strips
 those ambient names before invoking the credential launcher. Claude and Codex
-declare none and also strip those names at their spawn boundary, since both authenticate via their
-own CLI-managed OAuth session, not an env var — env-based API-key
+declare none and also strip those names at their spawn boundary, since these
+lanes rely on the CLI-managed login rather than inherited env credentials — env-based API-key
 passthrough for those two remains a separate, pending product decision),
 plus an optional per-device local override (`DaemonConfig.runtimeEnvironment`).
+For Claude and top-level Codex, that override cannot enable inheritance of the
+shared bounded credential inventory (`PROVIDER_CREDENTIAL_ENV_DENY_NAMES`),
+including `OPENAI_API_KEY`, `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, and the
+custody-only `PI_PROVIDER_API_KEY`. Credential names and their case aliases are
+excluded by the same policy in spawn stripping and identity measurement.
+`HOME`/`USER` and platform discovery variables remain available; a locally
+allowed `CODEX_HOME` or other non-credential configuration name is preserved.
+The SDK does not read or modify the CLI's login store or verify its auth mode.
 This SDK's own control-plane variables (`BYOK_*`) are hard-denied
 unconditionally, even against that local override — a spawned agent must
 never be able to observe the daemon's own internal wiring.
@@ -929,7 +937,8 @@ which removes all sealed channel variables before starting the selected server.
 This removes secret values from Codex argv and SDK launcher diagnostics. It does
 not claim process environment secrecy against the same OS principal, or conceal
 arguments authored by an MCP server configuration from that server's own process.
-Codex auth state and CODEX_HOME are unchanged.
+Codex's CLI-owned auth state is unchanged; explicitly allowed CODEX_HOME is
+preserved, while ambient env credentials are excluded as described above.
 
 Raw Codex JSONL is limited before parsing (1 MiB/frame, 4 MiB deferred frames),
 with bounded stderr retention (64 KiB and 20 lines). Legacy artifact uploads read

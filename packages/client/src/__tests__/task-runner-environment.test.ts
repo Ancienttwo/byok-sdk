@@ -4,7 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { createEnvelope, type Envelope, type RuntimeId } from '@byok-sdk/protocol';
+import { createEnvelope, type Envelope, type RuntimeId, type TaskOfferPayload } from '@byok-sdk/protocol';
+import {
+  PROVIDER_CREDENTIAL_ENV_DENY_NAMES,
+  toolImplementationLaunchEnvNamesDigest,
+  toolImplementationLoaderEnvValuesDigest,
+} from '@byok-sdk/implementation-identity';
+import { buildRuntimeEnv } from '../daemon/environment';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import type { SpawnFn as PiSpawnFn } from '../adapters/pi/rpc-client';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
@@ -64,7 +70,7 @@ function makeCapturingSpawn<T>(sink: { env?: NodeJS.ProcessEnv }): T {
 interface Harness {
   sent: Envelope[];
   captured: Record<RuntimeId, { env?: NodeJS.ProcessEnv }>;
-  offer(runtime: RuntimeId, taskId: string): Promise<void>;
+  offer(runtime: RuntimeId, taskId: string, dispatchSelection?: TaskOfferPayload['dispatchSelection']): Promise<void>;
   /** Best-effort teardown of every task this harness offered — interrupts + closes each real fixture-backed session so no child process is left running past the test. */
   cancelAll(): Promise<void>;
 }
@@ -105,14 +111,14 @@ async function makeHarness(runtimeEnvironment?: Record<string, { allow?: string[
   let seq = 1;
   const taskIds: string[] = [];
 
-  async function offer(runtime: RuntimeId, taskId: string): Promise<void> {
+  async function offer(runtime: RuntimeId, taskId: string, dispatchSelection?: TaskOfferPayload['dispatchSelection']): Promise<void> {
     taskIds.push(taskId);
     // `adapter.start()` (and therefore the spawn call this test captures)
     // is awaited by `handleOffer` before `handleEnvelope` resolves, so the
     // capture below is always populated by the time this call returns —
     // no polling/`vi.waitFor` needed, unlike the full daemon-level tests.
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'say hi', policy: { mode: 'auto' }, runtime }, { taskId, seq: seq++ }),
+      createEnvelope('task.offer', { instruction: 'say hi', policy: { mode: 'auto' }, runtime, ...(dispatchSelection === undefined ? {} : { dispatchSelection }) }, { taskId, seq: seq++ }),
     );
   }
 
@@ -145,6 +151,77 @@ async function withEnv<T>(vars: Record<string, string>, fn: () => Promise<T>): P
 }
 
 describe('TaskRunner environment allowlist (M5): real pi/claude/codex adapters via a spying spawnFn', () => {
+  it.each(['runtime', 'subscription'] as const)('strips explicitly allowed Codex credentials in the real %s child while preserving measured config', async (lane) => {
+    const home = await tmpDir('byok-codex-env-home-');
+    const receiptPath = path.join(home, 'env-receipt.json');
+    // Explicit literals ensure the guard also fails when the shared inventory is incomplete.
+    const credentialNames = [...new Set(['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_ACCESS_TOKEN', ...PROVIDER_CREDENTIAL_ENV_DENY_NAMES])];
+    const refusedNames = [
+      ...credentialNames, 'BYOK_UNKNOWN', 'BYOK_SDK_CUSTODY_LAUNCH_RECORD',
+      'BYOK_SDK_CUSTODY_PARENT_DEPTH', 'BYOK_SDK_CUSTODY_RUNNER_CONFIG',
+      'NODE_OPTIONS', 'BUN_ENV_SENTINEL', 'DYLD_ENV_SENTINEL', 'LD_ENV_SENTINEL',
+    ];
+    const vars = {
+      ...Object.fromEntries(refusedNames.map((name) => [name, 'synthetic-sentinel'])),
+      // Detection probes still inherit parent env; this option is inert there.
+      NODE_OPTIONS: '--no-warnings',
+      // macOS can synthesize this name inside Node after spawn. Supply the
+      // platform config explicitly so the child's names remain measurable.
+      ...(process.platform === 'darwin' ? { __CF_USER_TEXT_ENCODING: '0x0:0x0:0x0' } : {}),
+      HOME: home, CODEX_HOME: home, USER: 'synthetic-user',
+      MY_ALLOWED_CONFIG: 'synthetic-config',
+      FAKE_CODEX_ENV_RECEIPT: receiptPath,
+      FAKE_CODEX_ENV_NAMES_DIGEST: '', FAKE_CODEX_ENV_LOADER_DIGEST: '',
+    };
+    try {
+      await withEnv(vars, async () => {
+        const allow = [...Object.keys(vars), 'PATH'];
+        const measured = buildRuntimeEnv({
+          ambient: process.env,
+          requirements: new CodexAdapter().descriptor.environmentRequirements,
+          locallyAllowedNames: allow,
+        });
+        // These are the same shared projections used by admission measurement.
+        // Digest values do not affect the names digest, and are not loader inputs.
+        process.env.FAKE_CODEX_ENV_NAMES_DIGEST = toolImplementationLaunchEnvNamesDigest(measured);
+        process.env.FAKE_CODEX_ENV_LOADER_DIGEST = toolImplementationLoaderEnvValuesDigest(measured);
+        const harness = await makeHarness({ codex: { allow } });
+        try {
+          await harness.offer('codex', `task-codex-env-${lane}`, lane === 'subscription'
+            ? { lane: 'subscription', runtimeId: 'codex', providerId: null, modelId: 'gpt-5' }
+            : undefined);
+          expect(harness.sent.some((e) => e.type === 'task.fail' || e.type === 'task.decline')).toBe(false);
+          // Written by the fixture from its own process.env before initialize returns.
+          const receipt = JSON.parse(await fs.readFile(receiptPath, 'utf8')) as {
+            present: Record<string, boolean>;
+            configMatches: boolean;
+            authDiscoveryMatches: boolean;
+            namesDigestMatches: boolean;
+            loaderDigestMatches: boolean;
+          };
+          const spawnEnv = harness.captured.codex.env ?? {};
+          expect(toolImplementationLaunchEnvNamesDigest(spawnEnv as Record<string, string>) === process.env.FAKE_CODEX_ENV_NAMES_DIGEST).toBe(true);
+          for (const name of refusedNames) {
+            expect(receipt.present[name] === true, name).toBe(false);
+            expect(Object.hasOwn(harness.captured.codex.env ?? {}, name), name).toBe(false);
+          }
+          for (const name of ['PATH', 'HOME', 'USER', 'CODEX_HOME', 'MY_ALLOWED_CONFIG']) {
+            expect(receipt.present[name], name).toBe(true);
+            expect(harness.captured.codex.env?.[name] === process.env[name], name).toBe(true);
+          }
+          expect(receipt.configMatches).toBe(true);
+          expect(receipt.authDiscoveryMatches).toBe(true);
+          expect(receipt.namesDigestMatches).toBe(true);
+          expect(receipt.loaderDigestMatches).toBe(true);
+        } finally {
+          await harness.cancelAll();
+        }
+      });
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
   it('hides unrelated secrets (AWS/DB/GitHub) from all three runtimes, while pi still sees its own known provider credential and claude/codex do not', async () => {
     await withEnv(
       {

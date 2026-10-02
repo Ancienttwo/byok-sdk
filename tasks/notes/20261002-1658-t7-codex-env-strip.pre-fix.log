@@ -1,0 +1,70 @@
+$ vitest run src/__tests__/task-runner-environment.test.ts src/__tests__/implementation-identity-extraction.test.ts
+
+ RUN  v4.1.10 /Users/chris/Projects/byok-sdk-wt-codex-env-strip/packages/client
+
+ ❯ src/__tests__/implementation-identity-extraction.test.ts (3 tests | 1 failed) 5ms
+   × strips Codex auth aliases and mixed-case credential names with the same measurement projection 3ms
+ ❯ src/__tests__/task-runner-environment.test.ts (5 tests | 2 failed) 4378ms
+     × strips explicitly allowed Codex credentials in the real runtime child while preserving measured config 574ms
+     × strips explicitly allowed Codex credentials in the real subscription child while preserving measured config 555ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/__tests__/implementation-identity-extraction.test.ts > strips Codex auth aliases and mixed-case credential names with the same measurement projection
+AssertionError: expected { PATH: '/usr/bin', …(6) } to deeply equal { PATH: '/usr/bin', …(2) }
+
+- Expected
++ Received
+
+  {
++   "CODEX_ACCESS_TOKEN": "synthetic",
++   "CODEX_API_KEY": "synthetic",
+    "CODEX_HOME": "/synthetic-home",
++   "Codex_Access_Token": "synthetic",
+    "MY_CONFIG": "synthetic",
++   "OpenAI_Api_Key": "synthetic",
+    "PATH": "/usr/bin",
+  }
+
+ ❯ src/__tests__/implementation-identity-extraction.test.ts:30:47
+     28|   const config = { PATH: '/usr/bin', CODEX_HOME: '/synthetic-home', MY…
+     29|   const ambient = { ...config, CODEX_API_KEY: 'synthetic', CODEX_ACCES…
+     30|   expect(withoutProviderCredentials(ambient)).toEqual(config);
+       |                                               ^
+     31|   expect(shared.toolImplementationLaunchEnvNamesDigest(ambient)).toBe(…
+     32|   expect(shared.toolImplementationLoaderEnvValuesDigest(ambient)).toBe…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/__tests__/task-runner-environment.test.ts > TaskRunner environment allowlist (M5): real pi/claude/codex adapters via a spying spawnFn > strips explicitly allowed Codex credentials in the real runtime child while preserving measured config
+ FAIL  src/__tests__/task-runner-environment.test.ts > TaskRunner environment allowlist (M5): real pi/claude/codex adapters via a spying spawnFn > strips explicitly allowed Codex credentials in the real subscription child while preserving measured config
+AssertionError: OPENAI_API_KEY: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/__tests__/task-runner-environment.test.ts:200:58
+    198|           };
+    199|           for (const name of refusedNames) {
+    200|             expect(receipt.present[name] === true, name).toBe(false);
+       |                                                          ^
+    201|             expect(Object.hasOwn(harness.captured.codex.env ?? {}, nam…
+    202|           }
+ ❯ withEnv src/__tests__/task-runner-environment.test.ts:144:12
+ ❯ src/__tests__/task-runner-environment.test.ts:174:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  3 failed | 5 passed (8)
+   Start at  17:01:10
+   Duration  5.26s (transform 587ms, setup 0ms, import 820ms, tests 4.38s, environment 0ms)
+
+error: script "test" exited with code 1
+
+regression_guard: packages/client/src/__tests__/task-runner-environment.test.ts
+PRE_FIX_EXIT=1

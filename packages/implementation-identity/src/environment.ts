@@ -3,6 +3,10 @@ export const PROVIDER_CREDENTIAL_ENV_DENY_NAMES = Object.freeze([
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_OAUTH_TOKEN',
   'OPENAI_API_KEY',
+  // Codex 0.159.2 auth inputs; CLI-owned login discovery (e.g. CODEX_HOME)
+  // is configuration and deliberately not part of this bounded credential set.
+  'CODEX_API_KEY',
+  'CODEX_ACCESS_TOKEN',
   'GEMINI_API_KEY',
   'AZURE_OPENAI_API_KEY',
   'DEEPSEEK_API_KEY',
