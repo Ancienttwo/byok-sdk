@@ -85,7 +85,8 @@ import {
   parseCustodyParentDepthCommitment,
 } from './custody-commitments';
 import { parsePiPrintArgv } from './pi-print-argv';
-import { externalCliAdmissionRefusal } from './external-cli-admission';
+import { CustodyDispatchRefusalError, externalCliAdmissionRefusal } from './external-cli-admission';
+export { CustodyDispatchRefusalError } from './external-cli-admission';
 // The vendored budget-lock and child-permit primitives come through the JS
 // bridge (`custody-vendor-bridge.js`): the vendored tree publishes TS with no
 // consumable declarations and is type-checked by no tsc pass, so client .ts
@@ -101,14 +102,6 @@ import {
 
 /** The vendored lanes a child can take; identical to the runtime entry names. */
 export type CustodyChildLane = Extract<RuntimeEntryV1, 'pi-subagent-print' | 'pi-subagent-runner'>;
-
-/** A custody dispatch refusal: fail-closed, no state, no fallback. */
-export class CustodyDispatchRefusalError extends Error {
-  constructor(readonly reason: string) {
-    super(`custody dispatch refused: ${reason}`);
-    this.name = 'CustodyDispatchRefusalError';
-  }
-}
 
 function refuse(reason: string): never {
   throw new CustodyDispatchRefusalError(reason);

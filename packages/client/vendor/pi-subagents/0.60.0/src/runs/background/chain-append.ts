@@ -8,6 +8,11 @@ import { PROMPT_REDACTED, readStatus } from "../../shared/utils.ts";
 import { deriveChildSessionName } from "../../shared/child-session-name.ts";
 import type { DynamicRunnerGroup, ParallelStepGroup, RunnerStep, RunnerSubagentStep } from "../shared/parallel-utils.ts";
 import { isDynamicRunnerGroup, isParallelGroup } from "../shared/parallel-utils.ts";
+import {
+	CustodyDispatchRefusalError,
+	externalCliCustodyRefusalReason,
+	findExternalCliRunnerStep,
+} from "../../../../../../src/custody/external-cli-admission.ts";
 
 const APPEND_REQUESTS_DIR = "append-requests";
 
@@ -136,14 +141,22 @@ export function readPendingChainAppendRequests(asyncDir: string): ChainAppendReq
 
 export function consumeChainAppendRequests(asyncDir: string): ChainAppendRequest[] {
 	const requests: ChainAppendRequest[] = [];
-	for (const filePath of listAppendRequestFiles(asyncDir)) {
+	const files = listAppendRequestFiles(asyncDir);
+	// Validate the entire batch before consuming files or handing steps to the
+	// runner. Appends must cross the same kind-based gate as initial admission.
+	for (const filePath of files) {
 		const request = readAppendRequest(filePath);
+		if (!request) continue;
+		const finding = findExternalCliRunnerStep(request);
+		if (finding) throw new CustodyDispatchRefusalError(externalCliCustodyRefusalReason(filePath, finding));
+		requests.push(request);
+	}
+	for (const filePath of files) {
 		try {
 			fs.unlinkSync(filePath);
 		} catch {
 			// The runner should not execute a consumed request twice.
 		}
-		if (request) requests.push(request);
 	}
 	return requests.sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id));
 }

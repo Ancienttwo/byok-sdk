@@ -15,10 +15,11 @@
  * exactly once, at the boundary the SDK owns — this module scans that shape
  * (sequential steps, `parallel` arrays, dynamic `parallel` objects — the same
  * three `RunnerStep` variants the vendored runner executes) and both custody
- * surfaces consult it:
+ * surfaces consult it, as does the running chain's append consumer:
  *
  *   dispatcher admission   custody-dispatcher.ts dispatchCustodyPiSubagentSpawn
  *   runner payload handoff pi-subagent-runner-payload.ts runPiSubagentRunnerPayload
+ *   running-chain append   vendored chain-append.ts consumeChainAppendRequests
  *
  * The scan is kind-based, never name-based: no agent registry is consulted,
  * so a renamed or hand-constructed definition cannot dodge it, and no second
@@ -26,6 +27,14 @@
  * refuse — the admission is fail-closed with no fallback lane.
  */
 import { readFileSync } from 'node:fs';
+
+/** Shared typed refusal at initial dispatch and running-chain admission. */
+export class CustodyDispatchRefusalError extends Error {
+  constructor(readonly reason: string) {
+    super(`custody dispatch refused: ${reason}`);
+    this.name = 'CustodyDispatchRefusalError';
+  }
+}
 
 /**
  * Stable refusal prefix. The dispatcher and the payload both embed it; tests
