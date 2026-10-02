@@ -34,9 +34,9 @@ TaskRunner owns allowlisting; Codex owns final spawn; implementation-identity ow
 > **Reviewed Subject Scope**: normalized-final-content
 > **Reviewed Target Revision**: f2098ecbf84570054600bad0680ba72e59654ea9
 > **Verification Evidence SHA256**: sha256:7b5384a391d10702e7e949bd0ad64ae29b047070279353c15b85d4bc32c94281
-> **Issued At**: 2026-10-02T10:01:09.911Z
+> **Issued At**: 2026-10-02T10:12:09.336Z
 
-- Summary: Independent Codex gatekeeper PASS for subject sha256:70df24927526022e373c45160a66510d3b0016b392ad1490e8b79fa0bb7cf67e at clean HEAD238a7183: scope and shared Codex credential policy agree; ready CodeGraph proof and all8 current_exact checks/20 criteria pass; native auth and Windows smoke remain unverified.
+- Summary: Independent Codex gatekeeper PASS for frozen subject sha256:70df24927526022e373c45160a66510d3b0016b392ad1490e8b79fa0bb7cf67e and completed-goal projection: same target/frozen evidence, only achieved lifecycle progress changed; all20 criteria and8 current_exact checks pass; native auth and Windows smoke remain unverified.
 - Findings: none
 
 ## Local Checkpoint
