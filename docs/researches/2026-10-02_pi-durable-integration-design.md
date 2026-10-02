@@ -70,14 +70,14 @@ Flag：`durablePi`（daemon 配置，默认关；Host 侧以 adapter capability 
 ### 5.1a 计量与准入（M3）
 - 切片 1 的 durable lane 是 **unprepared ordinary 路径**（不走 input preparation / counted artifact / prepared 首请求字节合同）。
 - 默认配置必须显式写出：`compaction.enabled: false`、`retry.maxRetries: 0`。除非日后 owner 另行打开，切片 1 不开 pi-durable 自带的自动压缩与 auto-retry。
-- 因此 prepared 合同中的下列保证**不适用**于本 lane（写入 REV R5）：retry-off/at-most-once scoped fetch 的「首请求即 D」字节一致、compaction 关闭后的 counted-bytes 对齐、charge-once 与 prepared capture 的绑定。usage 仍按 ordinary 路径上报；被中断模型请求若日后打开重发，计费归属另议——切片 1 因 `maxRetries:0` 且崩溃时对在途非 replay-safe 工具走 `task.fail`（见 §5.2），避免重复计量争议。
+- 因此 prepared 合同中的下列保证**不适用**于本 lane（写入 REV R5）：retry-off/at-most-once scoped fetch 的「首请求即 D」字节一致、compaction 关闭后的 counted-bytes 对齐、charge-once 与 prepared capture 的绑定。usage 按 ordinary 路径如实上报。Owner 14:15 HKT 裁决允许同执行、当前租约、无在途工具时 checkpoint 恢复重发模型请求；已报告的中断尝试用量同样计入，未报告用量保持未知。`maxRetries:0` 关闭 auto-retry，不能保证 checkpoint 不重发。
 - PM 建议（m7，不推翻 owner 计划）：Pi 1.0 升级 + 26 文件并入 + attestation 已在 step1 单独完成（本地 tip `2b0a5c1`）。切片 1 实现可收缩为：先 memory storage（子进程崩溃即终结）或 per-execution sqlite + B1 遗留状态裁决；`replay:"safe"` 白名单可推到下一刀（先全部不重放）。顺序建议：只读探针（env/事件/锁）→ 副本与 B1 → launcher custody / guard / result 文档 / flag。
 
 ### 5.2 重放策略（D4）与遗留状态（B1）
 - 默认：所有工具不设 `replay`。崩溃后 pi-durable 把"被中断"连同已存输出告诉模型；**harness 层不自动重跑**（可测）。模型是否再发同一副作用命令属于模型行为，**不受** spec 2135「daemon restart never reruns committed runtime side effects」覆盖（M8 两层澄清；见 REV R2）。
 - 切片 1 偏好（M8）：子进程崩溃且存在**在途非 replay-safe 工具**时，直接 `task.fail`（不 `resume` 续跑）；仅当崩溃时没有任何在途工具调用时才允许 `resume`。这样 2135 承诺在切片 1 更易测，不依赖模型层克制。
 - `replay:"safe"` 白名单（可推后）：只读工具（read、ls/glob、grep、只读 MCP 工具且声明 readOnly）。白名单在代码里冻结，每项要有测试证明无写副作用。bash 永不列入。切片 1 选择全部不重放（m7）；safe 白名单留到后续独立审查。
-- 被中断的模型请求：pi-durable 默认可重发；切片 1 因 §5.1a 将 `retry.maxRetries:0`，且对在途工具走 fail，避免「visible as additional usage」无字段争议（m6：不承诺 additive `retried` 字段，除非日后定义计费归属）。
+- 被中断的模型请求：同执行 checkpoint 恢复允许重发，按 ordinary usage 如实计量；`retry.maxRetries:0` 不阻止该重发。是否准许恢复由当前租约与 parent 在途工具状态决定，保留 M9。不得用无重发假设替代实际用量，也不新增 `retried` 字段。
 - 与 spec 的现有恢复语义对齐（Q1 / D4）：daemon 重启时，已 ack/已提交但未完成的执行仍按现规则发 `task.fail{reason:'daemon_interrupted', retryable:false}`。durable 续跑**只用于同一执行在子进程崩溃、daemon 仍持有租约时的恢复**；跨 daemon 重启是新执行（Host 显式 retry，新 taskId）。
 - **B1 遗留状态裁决（必须）**：`daemon_interrupted`（或 journal 中任何 terminal）之后，下一次执行**不得**从同一 home sqlite 自动续跑先前 pending/queued 工作。实现二选一（优先 1）：
   1. **per-execution 存储文件** `durable-<taskId>.sqlite`：执行终结后删除；仅同一 taskId + 同一租约下的子进程崩溃恢复复用该文件。
@@ -164,7 +164,7 @@ child_running
 
 - 上游 API 变动：只依赖博客/README 有文档的 API；所有 pi-durable 调用收敛在 `adapters/pi-durable/` 一层，便于换版本。
 - 存储双写：durable 副本与 Host transcript 分歧，按 D2 Host 胜出，代价是本地 reset；每执行重置规则见 §5.3 已定 M1。
-- 重复 token：切片 1 关 auto-retry；若日后打开，被中断模型请求重发的计费归属需单独定义。
+- 重复 token：切片 1 关闭 auto-retry，但允许同执行 checkpoint 模型请求重发。每个已观察到的 provider 用量按 ordinary usage 上报；未上报的中断请求用量保持未知。
 - **node:sqlite（m2）**：`DatabaseSync` 在 Node 22+ 会打 `ExperimentalWarning` 到 stderr——需确认不会触发 launcher/strace gate 或 Host 异常输出误报；子进程可加 `--disable-warning=ExperimentalWarning` 或 launcher 白名单。SEA/sealed 打包与 tsup 需把 `node:sqlite` 标 external；Bun 跑测试时对 `node:sqlite` 的支持需确认（vitest-on-node 则无碍）。Windows CI 行为仍需验证（WP1 薄弱点）。
 - 副本篡改（M4）：YOLO agent 可写 home；靠路径外置 + guard deny + 未知 submission 丢弃 + journal 绑定缓解，不能假设 sqlite 可信。
 - bash 边界（M5）：guard 无法在字符串层约束路径；依赖 env 隔离与进程模型，而非「workspace 沙箱」措辞。
