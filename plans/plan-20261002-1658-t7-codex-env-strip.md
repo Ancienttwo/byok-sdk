@@ -1,6 +1,6 @@
 # Plan: T7 top-level Codex env-strip
 
-> **Status**: Executing
+> **Status**: Complete
 > **Created**: 20261002-1658
 > **Slug**: t7-codex-env-strip
 > **Planning Source**: codex-plan
@@ -115,7 +115,7 @@ Reuse subscription exclusion before Codex hands env to the owned process; add CO
 - [x] T3 Align security/spec docs; review sibling consumers; run touched-package tests and root checks.
 - [x] T4 Record evidence and local commit SHA in /tmp/byok-t7-codex-env-strip-report.md; commit locally only.
 - [x] T5 Reverify/remove only dead PID1271 lock and establish ready CodeGraph proof through deterministic projection.
-- [ ] T6 Bind the committed authority, record acceptance and finish local harness closeout without runtime/test-policy changes.
+- [x] T6 Bind the committed authority, record acceptance and finish local harness closeout without runtime/test-policy changes.
 
 ## Verification Plan
 Red: real fixture credential-presence test fails before fix. Green: explicit credentials absent; unknown BYOK/custody/loader variables refused; platform/allowed config preserved; child digests match admission projection. Run client and implementation-identity tests, bun run typecheck, bun run build, bun run test, bun run check:api-surface, bun run check:version-authority, repo-harness run check-task-workflow --strict; capability validation and architecture sync.
@@ -132,7 +132,7 @@ Revert the single local T7 commit after review. No deployment or credential muta
 - [x] T3 Align security/spec docs; review sibling consumers; run touched-package tests and root checks.
 - [x] T4 Record evidence and local commit SHA in /tmp/byok-t7-codex-env-strip-report.md; commit locally only.
 - [x] T5 Reverify/remove only dead PID1271 lock and establish ready CodeGraph proof through deterministic projection.
-- [ ] T6 Bind the committed authority, record acceptance and finish local harness closeout without runtime/test-policy changes.
+- [x] T6 Bind the committed authority, record acceptance and finish local harness closeout without runtime/test-policy changes.
 
 ## Local Closeout Gate
 

@@ -1,6 +1,6 @@
 # Implementation Notes: T7 Codex env-strip
 
-> **Status**: Active
+> **Status**: Complete
 > **Plan**: plans/plan-20261002-1658-t7-codex-env-strip.md
 > **Contract**: tasks/contracts/20261002-1658-t7-codex-env-strip.contract.md
 
@@ -68,3 +68,11 @@ for a separate architecture review, not an implementation prerequisite.
 PM authorized the stale-lock cleanup and formal harness completion. Fresh ps checks showed no PID/PPID/PGID1271; only its exact lock token and empty lock directory were removed. The failed index command correctly required init; CodeGraph 1.6.1 init created only ignored local index state. Its status is complete, pendingRefs=0, pendingChanges all zero, worktreeMismatch=null. The owned projection provider reports codeGraphStatus=ready and only updates its manifest; no model node or runtime source changed. The old candidate d10b5b8d... is retired by a ready empty-noop reconciliation receipt.
 
 Canonical verify-sprint prepare now ran the original eight checks, including the full suite, and passed all 20 criteria (bugfix root-cause evidence included). `/tmp/byok-t7-pm-prepare-acceptance.log` and `.ai/harness/runs/run-20261002T174326-22297-20261002-1658-t7-codex-env-strip.json` retain actual results. Evidence emission correctly refused to bind a dirty expanded contract; commit that authority before preparing the receipt. No assertion, timeout or skip was changed.
+
+## Completed Formal Closeout
+
+The expanded authority was committed as 238a7183544ccd229a37fefce5a04e2f27686cb5 before evidence binding. Final canonical prepare passed 20/20 criteria and all eight current_exact checks executed with exit0, including the expensive full suite. Run: `.ai/harness/runs/run-20261002T175405-56166-20261002-1658-t7-codex-env-strip.json`; evidence event evt-01M3Y0SCPSRS6624RZ8GDHY1N3.
+
+The independent Codex gatekeeper accepted exact source subject sha256:70df24927526022e373c45160a66510d3b0016b392ad1490e8b79fa0bb7cf67e against origin/main f2098ecb. An external_pass Codex/codex-review receipt was recorded by the supported helper and verified; finalize consumed frozen evidence without rerunning verification and emitted evt-01M3Y0Z1T9VV03BHS5TKZ3JVT2. The lifecycle header/T6 checkbox now records that achieved outcome; goal-fingerprint rebinding is required for the updated progress projection. No runtime assertion, timeout or skip changed in this closeout.
+
+CodeGraph proof and stale-lock blockers are resolved. Model validation is valid=true; its existing ignored manifest review.failOn warning remains advisory and was not modified. Native auth/network and Windows smoke remain the explicitly unverified coverage limits, not claims of T7 verification.

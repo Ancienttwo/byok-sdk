@@ -1,6 +1,6 @@
 # Task Contract: t7-codex-env-strip
 
-> **Status**: Active
+> **Status**: Fulfilled
 > **Plan**: plans/plan-20261002-1658-t7-codex-env-strip.md
 > **Task Profile**: bugfix
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
