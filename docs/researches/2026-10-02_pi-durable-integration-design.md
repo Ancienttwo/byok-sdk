@@ -173,3 +173,8 @@ child_running
 
 后端（Codex）：`byok-pi-durable` bin、launcher 接线、存储与租约、事件映射、guard hook、result 文档、closure/attestation。
 前端（Claude）：ui-runtime timeline 对新事件/字段的展示（切片 1 预计很少）；切片 2 起子 agent 与唤醒的展示。
+
+
+### Owner 补充裁决：模型 checkpoint 恢复
+
+允许同执行、同租约、没有在途工具的 checkpoint 模型重发，按 ordinary usage 如实计量。`retry.maxRetries:0` 只关闭普通 auto-retry，不关闭进程崩溃恢复重发；中断尝试没有上报的usage保持未知，不伪造计量。最多2次respawn与daemon重启daemon_interrupted规则不变。
