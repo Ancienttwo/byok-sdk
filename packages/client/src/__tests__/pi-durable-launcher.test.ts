@@ -70,7 +70,8 @@ async function fixture(respond: (res: import('node:http').ServerResponse, ordina
   const session = await prepared.operation.start({ kind: 'instruction', instruction: 'Host authority input\nHost context second line', manifest, env, runtimeLaunch: launch, mcpEnv: projectPiMcpEnvironment(env), durableContext: { tenantId: 'tenant', lifecycle: { ownsLease: () => true, record: async (kind,n) => { journal.push(`${kind}:${n}`); } } } }); sessions.push(session);
   return { session, children, calls: () => calls, bodies, authorizations, home, journal };
 }
-describe('durable ordinary worker through custody argv', () => {
+// Windows durable execution is fail-closed pending a validated parent-death Job Object design.
+describe.skipIf(process.platform === 'win32')('durable ordinary worker through custody argv', () => {
   it('real worker sends Host input and reports selected result and ordinary usage', async () => {
     const f = await fixture(res => finish(res, 'complete'));
     const events = []; for await (const event of f.session.events) events.push(event);

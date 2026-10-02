@@ -371,7 +371,8 @@ describe('committed Pi spawn boundary', () => {
     await expect(assertPiProjectionDirectory('/projection', '/other')).rejects.toThrow(/committed path/);
   });
 
-  it('durable uses one private IPC receipt and never constructs a credential-bearing child environment', async () => {
+  // Production refuses the Windows durable entry before custody; POSIX IPC evidence runs elsewhere.
+  it.skipIf(process.platform === 'win32')('durable uses one private IPC receipt and never constructs a credential-bearing child environment', async () => {
     const f = await fixture();
     try {
       const child = new ChildProcess(); const send = vi.fn((_frame: unknown) => true); const kill = vi.spyOn(child,'kill').mockReturnValue(true);

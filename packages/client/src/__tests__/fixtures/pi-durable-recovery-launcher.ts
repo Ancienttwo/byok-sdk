@@ -20,9 +20,11 @@ const launched = await startPiProvider(profile,options,{ambient:process.env,prof
     const config = JSON.parse(readFileSync(configPath,'utf8'));
     const child = spawn(command,args,{...spawnOptions,stdio:['inherit','pipe','pipe','ipc']});
     child.on('message', value => appendFileSync(path.join(fixture.controlDir,'ipc-events.jsonl'),JSON.stringify({phase:'request',type:(value as {type?:unknown}).type})+'\n'));
-    child.on('disconnect',()=>appendFileSync(path.join(fixture.controlDir,'ipc-events.jsonl'),JSON.stringify({phase:'disconnect'})+'\n'));
+    let ipcClosed=false;
+    child.on('disconnect',()=>{ipcClosed=true;appendFileSync(path.join(fixture.controlDir,'ipc-events.jsonl'),JSON.stringify({phase:'disconnect'})+'\n');});
     appendFileSync(path.join(fixture.controlDir,'launches.jsonl'),JSON.stringify({launcherPid:process.pid,workerPid:child.pid,taskId:config.replica.taskId,args,env:spawnOptions.env,configPath})+'\n');
-    child.stdout!.on('data',chunk => { appendFileSync(path.join(fixture.controlDir,'worker-rpc.log'),chunk); process.stdout.write(chunk); });
+    let frames='';
+    child.stdout!.on('data',chunk => { frames+=String(chunk);for(;;){const split=frames.indexOf('\n');if(split<0)break;const frame=JSON.parse(frames.slice(0,split));frames=frames.slice(split+1);if(frame.type==='tool_intent')appendFileSync(path.join(fixture.controlDir,'ipc-events.jsonl'),JSON.stringify({phase:'before-tool',ipcClosed})+'\n');} appendFileSync(path.join(fixture.controlDir,'worker-rpc.log'),chunk); process.stdout.write(chunk); });
     child.stderr!.on('data',chunk => { appendFileSync(path.join(fixture.controlDir,'worker-stderr.log'),chunk); process.stderr.write(chunk); });
     return child;
   },

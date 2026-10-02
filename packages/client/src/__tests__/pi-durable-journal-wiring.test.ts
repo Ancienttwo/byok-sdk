@@ -14,7 +14,8 @@ const roots: string[] = [];
 let daemon: Daemon | undefined, journal: SqliteLocalTaskJournal | undefined, server: TestServer | undefined;
 let release: (() => void) | undefined;
 afterEach(async () => { release?.(); await daemon?.stop(); await journal?.close(); await server?.close(); vi.restoreAllMocks(); for (const root of roots.splice(0)) await rm(root,{recursive:true,force:true}); });
-it('TaskRunner waits for the real durable journal commit before ACK and leaves recoverable interrupted work', async () => {
+// Windows durable config is intentionally refused pending Job Object parent-death verification.
+it.skipIf(process.platform === 'win32')('TaskRunner waits for the real durable journal commit before ACK and leaves recoverable interrupted work', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(),'byok-durable-journal-')); roots.push(root);
   const storeDir = path.join(root,'store'); journal = new SqliteLocalTaskJournal({storeDir});
   const write = journal.recordTransition.bind(journal);

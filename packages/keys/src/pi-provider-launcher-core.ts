@@ -454,6 +454,7 @@ export async function startPiProvider(
   if (options.validateOnly || binding === undefined || options.piCwd === undefined || options.piFixedArgs === undefined || !/^[0-9a-f]{64}$/u.test(options.piConfigDigest ?? '')) {
     throw new Error('Pi launch requires an explicit spawn binding, cwd and fixed args');
   }
+  if (options.runtimeEntry === 'pi-durable' && process.platform === 'win32') throw new Error('durable Pi is unavailable on Windows until parent-death Job Object recovery is validated');
   const runtimeEntry = options.runtimeEntry;
   const durable = runtimeEntry === 'pi-durable';
   const configDigest = options.piConfigDigest!;

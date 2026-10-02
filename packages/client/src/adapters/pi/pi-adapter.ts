@@ -236,6 +236,7 @@ export class PiAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    if (this.options.durablePi !== undefined && process.platform === 'win32') return { kind: 'reject', reason: 'durable Pi is unavailable on Windows until parent-death Job Object recovery is validated', retryable: false };
     if (this.options.durablePi !== undefined && (input.policy.mode !== 'auto' || input.policy.network === false || input.policy.allowTools !== undefined || input.policy.denyTools !== undefined || input.offer.dispatchSelection === undefined)) {
       return { kind: 'reject', reason: 'durable Pi requires YOLO ordinary BYOK selection', retryable: false };
     }

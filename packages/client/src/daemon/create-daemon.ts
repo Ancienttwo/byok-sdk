@@ -1448,6 +1448,7 @@ export function buildDaemonWithAdapters(
   validatePiByokLauncherConfig(config.piByokLauncher);
   if (config.durablePi !== undefined && typeof config.durablePi !== 'boolean') throw new Error('durablePi must be boolean');
   if (config.durablePi === true && (!config.agentHome || !config.hostedJournal || !config.piByokLauncher)) throw new Error('durablePi requires Agent home, hosted journal and Pi custody launcher');
+  if (config.durablePi === true && process.platform === 'win32') throw new Error('durablePi is unavailable on Windows until parent-death Job Object recovery is validated');
   // M5 batch-3 (workstream 2): validated synchronously, up front — see
   // `DaemonConfig.maxTaskOutputBytes`'s own doc comment for the full
   // zero/negative-is-an-error / `Number.POSITIVE_INFINITY`-is-the-real-

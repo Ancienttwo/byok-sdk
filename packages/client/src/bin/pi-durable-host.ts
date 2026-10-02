@@ -39,6 +39,7 @@ function projection(expectedProvider: string, expectedModel: string) {
 export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
   const { args, digest } = extractPiConfigDigest(argv, message => { process.stderr.write(`byok-pi-durable: ${message}\n`); process.exit(78); });
   if (args.length !== 2 || args[0] !== '--config' || !path.isAbsolute(args[1]!)) throw new Error('durable accepts only --config <absolute path>');
+  if (process.platform === 'win32') throw new Error('durable Pi requires validated parent-death process-tree recovery; Windows is unavailable');
   const config = object(readPiHostConfig(args[1]!, digest));
   if (config.format !== 'byok.pi.durable-launch' || config.version !== 1) throw new Error('unsupported durable launch config');
   const binding = requirePiHostBinding(config.binding);
@@ -54,6 +55,7 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
   const { provider, entry, digest: projectionDigest } = projection(expectedProvider, expectedModel);
   if (PROVIDER_CREDENTIAL_ENV_DENY_NAMES.some(name => Object.hasOwn(process.env, name)) || Object.hasOwn(process.env, 'PI_PROVIDER_API_KEY')) throw new Error('durable credential environment refused');
   const key = await receiveDurableCredential(digest);
+  if (process.connected) throw new Error('durable custody IPC still connected before tool construction');
   if (provider.apiKey !== undefined && !key) throw new Error('durable launcher credential missing');
   const api = provider.api as 'openai-completions' | 'anthropic-messages';
   const streams: ProviderStreams = api === 'openai-completions'

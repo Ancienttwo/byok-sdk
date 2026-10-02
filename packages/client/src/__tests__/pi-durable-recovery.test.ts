@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from 'vitest';
+import { describe, expect, it, afterEach, vi } from 'vitest';
 import { mkdtemp, mkdir, symlink, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -7,8 +7,14 @@ import { DurableRecovery } from '../adapters/pi-durable/recovery';
 import { pathToFileURL } from 'node:url';
 import { durableToolDenial } from '../adapters/pi-durable/guard';
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 describe('durable parent recovery authority', () => {
+  it('Windows admission is refused before durable resources or custody can be opened', async () => {
+    vi.spyOn(process,'platform','get').mockReturnValue('win32');
+    const adapter=new PiAdapter({durablePi:{replicaRoot:'C:\\store\\durable'}});
+    const result=await adapter.prepare({policy:{mode:'auto'},offer:{}} as never);
+    expect(result).toMatchObject({kind:'reject',retryable:false});if(result.kind==='reject')expect(result.reason).toContain('Windows');
+  });
   it('feature defaults off and enabled adapter advertises only the capabilities it provides', async () => {
     expect(new PiAdapter().descriptor.capabilities.durablePi).toBeUndefined();
     const adapter = new PiAdapter({ durablePi: { replicaRoot: '/private/store/durable' } });
