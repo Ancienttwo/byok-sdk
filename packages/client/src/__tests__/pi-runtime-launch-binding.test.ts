@@ -195,7 +195,7 @@ describe('client runtime launch admission and resource binding', () => {
     // A valid physical record with a different immutable policy is not a grant.
     await expect(resolvePiRuntimeLaunch({...f.options,authority:{resolve:async locator => {
       const value=await delegatedAuthority.resolve(locator);
-      return 'runtimeEntry' in locator && locator.runtimeEntry==='pi-subagent-print' && 'record' in value
+      return 'runtimeEntry' in locator && locator.runtimeEntry==='pi-subagent-print' && 'descendantPolicy' in value
         ? {...value,descendantPolicy:{...value.descendantPolicy,fanout:value.descendantPolicy.fanout+1}}
         : value;
     }}})).rejects.toThrow(/descendant declaration differs from self/);

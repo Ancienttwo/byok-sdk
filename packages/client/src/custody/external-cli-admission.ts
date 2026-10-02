@@ -1,32 +1,13 @@
-/**
- * N1 external-CLI admission gate (`custody/external-cli-admission.ts`, plan
- * 20260918-2052). Owner ruling 2026-09-18: the external-CLI lane's terminal
- * state is B — the last delegation hop becomes the sixth custody edge. Until
- * that edge is minted, the lane must not be reachable: `runs/shared/
- * external-cli-runner.ts` spawns an external CLI process tree with no
- * DescendantLaunchV1, no cap slot and no launch record, which makes it the
- * one vendored delegation edge that leaves SDK custody entirely.
- *
- * Every external-cli execution is async-only (the vendored foreground
- * executor refuses `runner.type='external-cli'` outside the background lane),
- * and every background runner child is minted by the custody dispatcher with
- * the parent-written runner config traveling as the runner config path
- * commitment. The runner config's serialized steps therefore carry the kind
- * exactly once, at the boundary the SDK owns — this module scans that shape
- * (sequential steps, `parallel` arrays, dynamic `parallel` objects — the same
- * three `RunnerStep` variants the vendored runner executes) and both custody
- * surfaces consult it, as does the running chain's append consumer:
- *
- *   dispatcher admission   custody-dispatcher.ts dispatchCustodyPiSubagentSpawn
- *   runner payload handoff pi-subagent-runner-payload.ts runPiSubagentRunnerPayload
- *   running-chain append   vendored chain-append.ts consumeChainAppendRequests
- *
- * The scan is kind-based, never name-based: no agent registry is consulted,
- * so a renamed or hand-constructed definition cannot dodge it, and no second
- * name→kind authority is introduced. Unreadable or unparseable configs also
- * refuse — the admission is fail-closed with no fallback lane.
- */
+/** Sixth-edge input authority. Initial config, helper payload and append share
+ * a finite request grammar; installation/policy come from the verified SDK parent.
+ * An input verdict is never a spawn permit. Physical execution is gated by
+ * external-cli-custody.ts after independent target and auth verification. */
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { isOfficialExternalCliAdapter, type AttestedOfficialExternalCliV2, parseDescendantLaunch } from '@byok-sdk/implementation-identity';
+import { custodyExternalInstallations, verifiedCustodyRunner } from './external-cli-authority';
+import { externalCliCommitment } from '@byok-sdk/implementation-identity';
+import { loadCustodyLaunchRecord, BYOK_SDK_CUSTODY_LAUNCH_RECORD_ENV } from './custody-commitments';
 
 /** Shared typed refusal at initial dispatch and running-chain admission. */
 export class CustodyDispatchRefusalError extends Error {
@@ -41,7 +22,7 @@ export class CustodyDispatchRefusalError extends Error {
  * and consumers assert on this string, not on prose around it.
  */
 export const EXTERNAL_CLI_CUSTODY_REFUSAL_PREFIX =
-  'external-cli delegation edge is not under custody (owner ruling 2026-09-18: external-cli terminal state B, sixth custody edge not yet minted)';
+  'official external-cli admission refused';
 
 /** Where an external-cli runner step was found inside a runner config. */
 export interface ExternalCliRunnerStepFinding {
@@ -54,6 +35,29 @@ export interface ExternalCliRunnerStepFinding {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
+
+// Serialized runner/append envelopes. The SDK owns this finite grammar;
+// extending vendor config does not silently extend the custody input authority.
+const CONFIG_KEYS = new Set([
+  'id','createdAt','steps','resultPath','cwd','placeholder','taskIndex','totalTasks','maxOutput','artifactsDir','artifactConfig',
+  'share','sessionDir','asyncDir','sessionId','completionOwnerId','piPackageRoot','piArgv1','worktreeSetupHook',
+  'worktreeSetupHookTimeoutMs','worktreeBaseDir','controlConfig','controlIntercomTarget','childIntercomTargets',
+  'resultMode','mode','dynamicFanoutMaxItems','workflowGraph','nestedRoute','nestedSelf','timeoutMs','deadlineAt',
+  'toolTimeoutMs','toolBudget','usageBudget','revivalLease','revivalLeaseToken','globalConcurrencyLimit',
+  'capabilityCeiling','runFanoutBudget','launchContractDigest','launchResolvedExtensions','runtimeAcknowledgedExtensions',
+  'runnerProcessInstanceId','launchBarrierToken','parentWorkflowRunId','workflowKey','lane',
+]);
+const EXTERNAL_STEP_KEYS = new Set([
+  'parentSessionId','permissionRules','externalJobFollowUp','agent','task','runner','agentSource','sessionName','context','forkContext','importAsyncRoot','phase','label','outputName',
+  'structured','cwd','requestedCwd','model','contextLimit','fast','thinking','thinkingCeiling','modelCandidates',
+  'skipPrimaryModelVerification','modelVerificationRegistry','tools','allowNestedSubagents','extensions','subagentOnlyExtensions',
+  'mcpDirectTools','mcpConfig','runtimeServerNames','mutationTools','completionGuard','systemPrompt','systemPromptMode',
+  'inheritProjectContext','inheritGlobalContext','inheritSkills','skills','outputPath','outputClaimPath','namespaceOutputPath',
+  'outputMode','sessionFile','maxSubagentDepth','timeoutMs','toolTimeoutMs','waitToolEnabled','waitToolDefaultTimeoutMs',
+  'structuredOutput','structuredOutputSchema','agentContract','definitionDigest','launchBindingTask','launchContractDigest',
+  'extensionBindings','launchResolvedExtensions','runtimeAcknowledgedExtensions','effectiveAcceptance','acceptanceInput',
+  'acceptanceRole','gateOn','toolBudget','capabilityCeiling','capabilityAudit','runFanoutPath','worktree','lane',
+]);
 
 /**
  * Scan one serialized step (and, recursively, its parallel members) for an
@@ -103,7 +107,7 @@ export function findExternalCliRunnerStep(config: unknown): ExternalCliRunnerSte
 
 /** The typed refusal reason for a located external-cli runner step. */
 export function externalCliCustodyRefusalReason(configPath: string, finding: ExternalCliRunnerStepFinding): string {
-  return `${EXTERNAL_CLI_CUSTODY_REFUSAL_PREFIX}: runner config ${configPath} declares runner.type 'external-cli' at ${finding.location}${finding.adapter !== undefined ? ` with adapter '${finding.adapter}'` : ''}`;
+  return `${EXTERNAL_CLI_CUSTODY_REFUSAL_PREFIX}: runner config ${configPath} declares runner.type 'external-cli' at ${finding.location}${isOfficialExternalCliAdapter(finding.adapter) ? ` with adapter '${finding.adapter}'` : ''}`;
 }
 
 /**
@@ -113,19 +117,100 @@ export function externalCliCustodyRefusalReason(configPath: string, finding: Ext
  * non-undefined verdict before any state exists.
  */
 export function externalCliAdmissionRefusal(configPath: string): string | undefined {
+  try { admittedRunnerConfigSnapshot(configPath); return undefined; }
+  catch (error) { if (error instanceof CustodyDispatchRefusalError) return error.reason; throw error; }
+}
+export function admittedRunnerConfigSnapshot(configPath: string): { config: unknown; digest: string } {
   let text: string;
   try {
     text = readFileSync(configPath, 'utf8');
   } catch (error) {
-    return `runner config ${configPath} is unreadable at external-cli admission: ${(error as Error).message}`;
+    throw new CustodyDispatchRefusalError(`runner config ${configPath} is unreadable at external-cli admission`);
   }
+  if (Buffer.byteLength(text) > 1024 * 1024) throw new CustodyDispatchRefusalError('external_cli_input_too_large');
   let config: unknown;
   try {
     config = JSON.parse(text) as unknown;
   } catch (error) {
-    return `runner config ${configPath} is not valid JSON at external-cli admission: ${(error as Error).message}`;
+    throw new CustodyDispatchRefusalError(`runner config ${configPath} is not valid JSON at external-cli admission`);
   }
-  const finding = findExternalCliRunnerStep(config);
-  if (finding !== undefined) return externalCliCustodyRefusalReason(configPath, finding);
+  const reason = externalCliConfigRefusal(config, configPath);
+  if (reason) throw new CustodyDispatchRefusalError(reason);
+  return {config,digest:runnerConfigDigest(text)};
+}
+
+/** One input authority for initial, payload and append. Never issues a spawn permit. */
+export function externalCliConfigRefusal(
+  config: unknown, label: string, installations: readonly AttestedOfficialExternalCliV2[] = custodyExternalInstallations(),
+): string | undefined {
+  if (!isRecord(config) || !Array.isArray(config.steps)) return 'external_cli_input_invalid';
+  if (Object.keys(config).some(k => !CONFIG_KEYS.has(k))) return 'external_cli_input_unknown_key';
+  let count = 0;
+  const walk = (steps: unknown[], location: string, depth = 0): string | undefined => {
+    if (depth > 32) return 'external_cli_input_too_deep';
+    for (const [index, step] of steps.entries()) {
+      if (++count > 4096) return 'external_cli_input_too_large';
+      if (!isRecord(step)) return 'external_cli_input_invalid';
+      const at = `${location}[${index}]`;
+      if (step.runner !== undefined) {
+        if (!isRecord(step.runner)) return 'external_cli_input_invalid';
+        const runner = step.runner;
+        if (runner.type !== 'pi' && runner.type !== 'external-cli') return 'external_cli_runner_unknown';
+        if (runner.type === 'external-cli') {
+          const finding = { location: at, ...(typeof runner.adapter === 'string' ? { adapter: runner.adapter } : {}) };
+          if (!isOfficialExternalCliAdapter(runner.adapter)) return externalCliCustodyRefusalReason(label, finding);
+          // No caller argv, config, key helper, env, endpoint or auth override surface.
+          if (Object.keys(runner).some(k => !['type','adapter','command','args','promptDelivery','capabilities'].includes(k))
+            || (runner.args !== undefined && (!Array.isArray(runner.args) || runner.args.length !== 0))
+            || (runner.promptDelivery !== undefined && runner.promptDelivery !== 'stdin')
+            || (runner.capabilities !== undefined && (!isRecord(runner.capabilities) || Object.values(runner.capabilities).some(v => v !== false)))) {
+            return 'external_cli_override_forbidden';
+          }
+          const install = installations.find(v => v.adapter === runner.adapter);
+          if (!install) return externalCliCustodyRefusalReason(label, finding);
+          const expectedCommand = install.identity.interpreter?.path ?? install.identity.installPath;
+          const alias = install.adapter.startsWith('codex-') ? 'codex' : 'claude';
+          if (runner.command !== expectedCommand && runner.command !== alias) return 'external_cli_command_mismatch';
+          // Known request keys only. Secrets/config flags cannot hide in extra step fields.
+          if (Object.keys(step).some(k => !EXTERNAL_STEP_KEYS.has(k)
+            || /auth|credential|api.?key|endpoint|config|env/iu.test(k))) return 'external_cli_override_forbidden';
+        }
+      }
+      if (step.parallel !== undefined) {
+        const members = Array.isArray(step.parallel) ? step.parallel : isRecord(step.parallel) ? [step.parallel] : undefined;
+        if (!members) return 'external_cli_input_invalid';
+        const refused = walk(members, `${at}.parallel`,depth+1);
+        if (refused) return refused;
+      }
+    }
+    return undefined;
+  };
+  return walk(config.steps, 'steps');
+}
+
+export function runnerConfigDigest(bytes: string): string {
+  return createHash('sha256').update(bytes).digest('hex');
+}
+export function externalCliAppendRefusal(config: unknown, label: string): string | undefined {
+  const reason = externalCliConfigRefusal(config,label);
+  if (reason) return reason;
+  if (findExternalCliRunnerStep(config)) {
+    const verified = verifiedCustodyRunner();
+    if (!verified) return 'external_cli_verified_runner_required';
+    try {
+      if (externalCliCommitment(loadCustodyLaunchRecord(process.env)) !== externalCliCommitment(verified)) return 'external_cli_parent_record_changed';
+    } catch { return 'external_cli_parent_record_changed'; }
+  }
   return undefined;
+}
+export function readAdmittedRunnerConfig(configPath: string): unknown {
+  const {config,digest} = admittedRunnerConfigSnapshot(configPath);
+  if (process.env[BYOK_SDK_CUSTODY_LAUNCH_RECORD_ENV]) {
+    const parent = parseDescendantLaunch(loadCustodyLaunchRecord(process.env));
+    const committed = parent.perLaunch.mcp.metadata['byok.custody.runnerConfigDigest'];
+    if (parent.perLaunch.templateKind !== 'pi-subagent-runner' || committed !== digest) {
+      throw new CustodyDispatchRefusalError('external_cli_config_commitment_mismatch');
+    }
+  }
+  return config;
 }

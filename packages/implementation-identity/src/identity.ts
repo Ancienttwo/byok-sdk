@@ -6,6 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES, loaderEnvInjections } from './environment';
 import type { McpLaunchAttestation } from './launch-attestation';
+import type { OfficialExternalCliAdapter, OfficialExternalCliInstallV2 } from './external-cli';
 
 /**
  * The ONE authority for "which implementation backs this tool", and the only
@@ -373,6 +374,11 @@ export type ToolImplementationSubjectV1 =
     /** A finite SDK-owned helper, never a Host MCP server or a runtime. */
     readonly kind: 'sdk-helper';
     readonly helperId: SdkHelperIdV1;
+  }
+  | {
+    /** Independent official installation, never a Pi helper identity. */
+    readonly kind: 'official-external-cli';
+    readonly adapter: OfficialExternalCliAdapter;
   };
 
 /** What the resolver is asked about: one subject, and where it launches. */
@@ -390,6 +396,11 @@ export type ToolImplementationLocatorV1 = {
 } | {
   readonly subject: Extract<ToolImplementationSubjectV1, { kind: 'sdk-helper' }>;
   readonly entry: SdkHelperEntryV1;
+  readonly command?: never;
+  readonly args?: never;
+  readonly launch?: never;
+} | {
+  readonly subject: Extract<ToolImplementationSubjectV1, { kind: 'official-external-cli' }>;
   readonly command?: never;
   readonly args?: never;
   readonly launch?: never;
@@ -549,7 +560,8 @@ export type RuntimeInstallationReverifyResult = 'ok' | {
 export type ToolImplementationResolutionV1 =
   | ToolImplementationUnavailableV1
   | ToolImplementationInstallRecordV1
-  | RuntimeImplementationRecordV1;
+  | RuntimeImplementationRecordV1
+  | OfficialExternalCliInstallV2;
 
 /**
  * The host's install-record authority.
@@ -1600,6 +1612,17 @@ async function measureInstallRecord(
     };
   });
   return 'kind' in physical ? physical : seal(record, { ...physical, ...environment });
+}
+
+/** Same install parser/measurement as other subjects; no second physical resolver. */
+export async function measureOfficialExternalCliRecord(
+  value: unknown, launchEnv: LaunchEnvironment,
+  probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
+): Promise<ToolImplementationIdentityV1> {
+  const record = validateInstallRecord(value);
+  if (typeof record === 'string') return toolImplementationUnavailable(
+    record === 'interpreter_form_unsupported' ? record : 'implementation_identity_unattested');
+  return measureInstallRecord(record, launchEnv, probe);
 }
 
 async function measurePhysicalRecord(

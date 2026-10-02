@@ -3,6 +3,9 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { buildOfficialExternalCliEnvironment } from '../custody/external-cli-custody';
+import { sixthEdgeKit, SECRET_NAMES } from './fixtures/sixth-edge-kit';
+import { once } from 'node:events';
 import { CustodyDispatchRefusalError } from '../custody/custody-dispatcher';
 import {
   EXTERNAL_CLI_CUSTODY_REFUSAL_PREFIX,
@@ -70,19 +73,23 @@ describe('running-chain append shares the initial external-cli typed refusal', (
     expect(caught).toBeInstanceOf(CustodyDispatchRefusalError);
     expect((caught as CustodyDispatchRefusalError).reason).toBe(externalCliCustodyRefusalReason(requestPath, finding!));
     expect((caught as Error).message).toContain(EXTERNAL_CLI_CUSTODY_REFUSAL_PREFIX);
-    // A refused batch neither hands steps to the runner nor loses request files.
-    expect(readdirSync(path.join(chain.asyncDir, 'append-requests'))).toHaveLength(1);
+    // A refused batch returns no steps and writes a terminal failure ack.
+    expect(readdirSync(path.join(chain.asyncDir, 'append-requests'))).toHaveLength(0);
+    expect(readdirSync(path.join(chain.asyncDir, 'append-acks'))).toHaveLength(1);
+    expect(append.consumeChainAppendRequests(chain.asyncDir)).toEqual([]);
   });
 
   it.each([
     { parallel: [externalStep('claude-code')] },
     { parallel: externalStep('cursor-agent'), expand: { maxItems: 2 }, collect: { as: 'out' } },
-  ])('refuses nested external-cli steps without consuming an earlier clean request', (group) => {
+  ])('refuses and acks the entire nested batch without accepting an earlier clean request', (group) => {
     const chain = runningChain();
     append.enqueueChainAppendRequest({ ...chain, steps: [{ agent: 'general', task: 'clean' }], now: 1 });
     append.enqueueChainAppendRequest({ ...chain, steps: [group], now: 2 });
     expect(() => append.consumeChainAppendRequests(chain.asyncDir)).toThrow(CustodyDispatchRefusalError);
-    expect(readdirSync(path.join(chain.asyncDir, 'append-requests'))).toHaveLength(2);
+    expect(readdirSync(path.join(chain.asyncDir, 'append-requests'))).toHaveLength(0);
+    expect(readdirSync(path.join(chain.asyncDir, 'append-acks'))).toHaveLength(2);
+    expect(append.consumeChainAppendRequests(chain.asyncDir)).toEqual([]);
   });
 
   it('continues to consume clean Pi steps once, in order', () => {
@@ -104,40 +111,41 @@ function markPrivateEnvironment(): void {
   for (const name of privateNames) vi.stubEnv(name, 'synthetic-n1-sentinel');
 }
 async function childEnvironment(names: readonly string[], environment?: { allowlist: readonly string[]; values?: Record<string, string> }) {
-  const asyncDir = temporaryDirectory();
-  const result = await runExternalCli({
-    command: process.execPath,
-    args: ['-e', `process.stdout.write(JSON.stringify(Object.fromEntries(${JSON.stringify(names)}.map(name => [name, Object.hasOwn(process.env, name)]))))`],
-    cwd: asyncDir, prompt: '', asyncDir, stepIndex: 0, ...(environment === undefined ? {} : { environment }),
-  });
-  expect(result.exitCode).toBe(0);
-  return JSON.parse(result.output) as Record<string, boolean>;
+  const k = await sixthEdgeKit();
+  try {
+    const request = { ...k.request(), ...(environment === undefined ? {} : { environment }) };
+    const auth = await k.authority.prepare(request);
+    const child = await k.authority.spawn(auth,{command:request.command,args:request.args,cwd:request.cwd,prompt:request.prompt,env:auth.env});
+    const close = once(child,'close');child.stdin.end(request.prompt);await close; await k.authority.settled(child);
+    expect(k.tasks()).toHaveLength(1);
+    const observed = k.tasks()[0]!.observed as Record<string,boolean>;
+    return Object.fromEntries(names.map(name => [name,name === 'HOME' ? typeof k.tasks()[0]!.home === 'string' : observed[name]]));
+  } finally { k.dispose(); }
 }
 
 describe('external-cli environment isolation at the real child boundary', () => {
-  it('bare/unrecognized launch does not inherit parent secrets or custody transport', async () => {
+  it('bare/unrecognized launch is now refused before the child boundary', async () => {
     markPrivateEnvironment();
     vi.stubEnv('OPENAI_API_KEY', 'synthetic-provider-key');
-    vi.stubEnv('N1_UNRELATED_SECRET', 'synthetic-unrelated-secret');
-    vi.stubEnv('HOME', temporaryDirectory());
-    const denied = [...privateNames, 'OPENAI_API_KEY', 'N1_UNRELATED_SECRET'];
-    const observed = await childEnvironment([...denied, 'HOME']);
-    expect(observed).toEqual({ ...Object.fromEntries(denied.map(name => [name, false])), HOME: true });
+    const asyncDir = temporaryDirectory();
+    await expect(runExternalCli({command:process.execPath,args:['-e',"throw Error('must not spawn')"],cwd:asyncDir,prompt:'',asyncDir,stepIndex:0}))
+      .rejects.toThrow('custody');
+    expect(readdirSync(asyncDir)).toEqual([]);
+    const env = buildOfficialExternalCliEnvironment(process.env);
+    expect([...privateNames,'OPENAI_API_KEY'].every(name => env[name] === undefined)).toBe(true);
   });
 
-  it('hard-denies custody names even in explicit allowlists and value overrides', async () => {
+  it('refuses explicit custody value overrides instead of transmitting their values', async () => {
     markPrivateEnvironment();
-    const values = Object.fromEntries([...privateNames, 'N1_ALLOWED_CONFIG'].map(name => [name, 'synthetic-override']));
-    expect(await childEnvironment([...privateNames, 'N1_ALLOWED_CONFIG'], {
-      allowlist: [...privateNames, 'N1_ALLOWED_CONFIG'], values,
-    })).toEqual({ ...Object.fromEntries(privateNames.map(name => [name, false])), N1_ALLOWED_CONFIG: true });
+    const values = Object.fromEntries(privateNames.map(name => [name,'synthetic-override']));
+    expect(() => buildOfficialExternalCliEnvironment(process.env,{allowlist:privateNames,values})).toThrow('external_cli_env_override_forbidden');
   });
 
-  it('preserves the named Codex adapter credential allowlist', async () => {
+  it('strips credentials from the named Codex adapter at the real child boundary', async () => {
     const { CODEX_EXEC_ENV_ALLOWLIST } = await vendorImport<{ CODEX_EXEC_ENV_ALLOWLIST: readonly string[] }>('runs/shared/codex-exec-adapter.ts');
     vi.stubEnv('OPENAI_API_KEY', 'synthetic-provider-key');
     markPrivateEnvironment();
     expect(await childEnvironment(['OPENAI_API_KEY', ...privateNames], { allowlist: CODEX_EXEC_ENV_ALLOWLIST }))
-      .toEqual({ OPENAI_API_KEY: true, ...Object.fromEntries(privateNames.map(name => [name, false])) });
+      .toEqual({ OPENAI_API_KEY: false, ...Object.fromEntries(privateNames.map(name => [name, false])) });
   });
 });

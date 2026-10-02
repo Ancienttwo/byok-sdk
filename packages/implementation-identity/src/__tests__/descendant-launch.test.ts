@@ -2,19 +2,21 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { assertDescendantSpawn, reverifyToolImplementationIdentity, toolImplementationLaunchEnvNamesDigest, RUNTIME_DESCENDANT_EDGES, type ToolImplementationFsProbe } from '../identity';
-import { descendantTemplateDigest, parseDescendantLaunch, type DescendantLaunchV1, type DescendantSpawnExpectationV1, DescendantLaunchError, validateDescendantSpawn } from '../descendant-launch';
+import { descendantTemplateDigest, parseDescendantLaunch, type PiDescendantLaunchV2, type DescendantSpawnExpectationV1, DescendantLaunchError, validateDescendantSpawn } from '../descendant-launch';
 const root = path.resolve(import.meta.dirname,'../../../../tests/fixtures/c07-runtime-record');
 const positive = JSON.parse(readFileSync(path.join(root,'official-pi-087.v1.json'),'utf8'));
 const negative = JSON.parse(readFileSync(path.join(root,'official-pi-087-rejections.v1.json'),'utf8'));
-const vectors = positive.descendantLaunchVectors as {id:string;launch:DescendantLaunchV1;actualEnv:Record<string,string>}[];
-function expectation(launch: DescendantLaunchV1): DescendantSpawnExpectationV1 {
+for (const vector of positive.descendantLaunchVectors) vector.launch.version = 2;
+for (const vector of negative.compositionCases) if (vector.launch) vector.launch.version = 2;
+const vectors = positive.descendantLaunchVectors as {id:string;launch:PiDescendantLaunchV2;actualEnv:Record<string,string>}[];
+function expectation(launch: PiDescendantLaunchV2): DescendantSpawnExpectationV1 {
  const c=launch.perLaunch;
  return { template:launch.template,policy:launch.policy,edges:RUNTIME_DESCENDANT_EDGES,inheritedCredentialNames:[],
   parent:{kind:c.edge.parent,rootTaskId:c.rootTaskId,instancePath:c.parentInstancePath,
     depth:c.depth-(c.edge.parent==='pi-subagent-runner'?0:1),effectiveLimits:c.effectiveLimits}};
 }
 function actual(v: typeof vectors[number]) { const t=v.launch.template;return {command:t.command,entry:t.entry,fixedArgv:t.fixedArgv,cwd:t.cwd,env:v.actualEnv}; }
-function probe(launch: DescendantLaunchV1): ToolImplementationFsProbe {
+function probe(launch: PiDescendantLaunchV2): ToolImplementationFsProbe {
  const i=launch.template.identity;if(i.kind!=='attested')throw Error('fixture');
  const files=new Map<string,{digest:string;stat:typeof i.installStat}>([[i.installPath,{digest:i.closureDigest,stat:i.installStat}]]);
  if(i.interpreter)files.set(i.interpreter.path,{digest:i.interpreter.digest,stat:i.interpreterStat!});
@@ -44,7 +46,7 @@ describe('M0 descendant composition becomes real consistency validation',()=>{
  });
  it.each([
   ['unknown top key',(v:any)=>{v.extra=true;}],['unknown context key',(v:any)=>{v.perLaunch.extra=true;}],
-  ['old version',(v:any)=>{v.version=0;}],['unavailable template',(v:any)=>{v.template.identity={kind:'unavailable',reason:'resolver_unconfigured'};}],
+  ['old version',(v:any)=>{v.version=1;}],['unavailable template',(v:any)=>{v.template.identity={kind:'unavailable',reason:'resolver_unconfigured'};}],
   ['sparse exact names',(v:any)=>{v.perLaunch.exactNames=Array(1);}],['sparse candidate',(v:any)=>{v.perLaunch.modelCandidates=Array(1);}],
   ['MCP credential',(v:any)=>{v.perLaunch.mcp.env.PI_PROVIDER_API_KEY='fake';}],
  ] as const)('strictly rejects %s',(_name,mutate)=>{
@@ -58,7 +60,7 @@ describe('M0 descendant composition becomes real consistency validation',()=>{
 
 
 describe('all frozen M0 context and transition vectors',()=>{
- it.each(negative.contextCases as {id:string;context:DescendantLaunchV1['perLaunch'];expectedReason:string;actualProjectedEnvNames?:string[]}[])('rejects context $id with frozen reason',async v=>{
+ it.each(negative.contextCases as {id:string;context:PiDescendantLaunchV2['perLaunch'];expectedReason:string;actualProjectedEnvNames?:string[]}[])('rejects context $id with frozen reason',async v=>{
   const reference=vectors[0]!, launch={...reference.launch,perLaunch:v.context};
   // Deliberately let forged envValues agree with the actual environment: the
   // independent typed context, not pairwise env equality, must catch the drift.
@@ -84,7 +86,7 @@ describe('all frozen M0 context and transition vectors',()=>{
   const edge=v.edge??v.proposedEdge??vectors[0]!.id;
   const reference=vectors.find(item=>item.id===edge)!;
   expect(reference).toBeDefined();
-  const launch: { -readonly [K in keyof DescendantLaunchV1]: DescendantLaunchV1[K] }=structuredClone(reference.launch);
+  const launch: { -readonly [K in keyof PiDescendantLaunchV2]: PiDescendantLaunchV2[K] }=structuredClone(reference.launch);
   const expected: { -readonly [K in keyof DescendantSpawnExpectationV1]: DescendantSpawnExpectationV1[K] }=structuredClone(expectation(reference.launch));
   if(v.configured!==undefined) {
    // Frozen arithmetic scenario only: no grant issuance is invented by this test.
