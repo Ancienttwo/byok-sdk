@@ -192,7 +192,7 @@ OAR 自己的评审与我方静态阅读都指出这些弱点，port 时不要�
 ## Owner 决策记录（2026-10-01）
 
 1. **Claude context 窗口取 `modelUsage[model].contextWindow`**，不取 `get_context_usage.maxTokens`（后者推测为有效 auto-compact 窗口，不作为窗口）。
-2. **Pi credential 照 OAR 处理**（进程内处理 auth 与 trust，见 P3-C）。这取代此前「Pi 沿用 launcher custody」的倾向；Pi 的 launcher custody 与相关 env allowlist/`BYOK_*` deny 需在迁移 plan 中明确退役或改写，不与新路径并存。Pi 的 pin 仍为 0.99.2。外部评审与源码核对后，这条的后果比记录时更大：它让 daemon 进程读取并持有 provider credential，与 `docs/security.md:868-876` 把 credential-isolation 定义为 dispatch 侧安全属性（daemon 不读、不转发任何 credential，`client` 不得依赖 `keys`）直接冲突。状态：待 owner 重新确认，见「方向修订」。
+2. **Pi credential 照 OAR 处理**（历史决定，已由第 7 条及 pi-durable D3 正式 superseded；当前是独立进程 + launcher custody。以下保留当时的进程内 auth/trust 论证，见 P3-C）。这取代此前「Pi 沿用 launcher custody」的倾向；Pi 的 launcher custody 与相关 env allowlist/`BYOK_*` deny 需在迁移 plan 中明确退役或改写，不与新路径并存。Pi 的 pin 仍为 0.99.2。外部评审与源码核对后，这条的后果比记录时更大：它让 daemon 进程读取并持有 provider credential，与 `docs/security.md:868-876` 把 credential-isolation 定义为 dispatch 侧安全属性（daemon 不读、不转发任何 credential，`client` 不得依赖 `keys`）直接冲突。状态：待 owner 重新确认，见「方向修订」。
 3. **RAFT 用户规模**：按 owner 陈述记录，不再核实。
 4. **runtime 层使用 OAR，成熟度不构成阻碍**（owner，2026-10-01）。
 5. **权限与 credential 走 YOLO**（owner，2026-10-01，「credential 我们也走 Yolo」）：权限 YOLO 已明确，取代 workspace-write 方案。「credential 也走 YOLO」没有说明是否包含继承完整 env，或放弃 credential-isolation；原记录按 OAR 默认做法做了推导，现撤回该推导，三个决定待 owner 逐项确认，见「方向修订」。

@@ -875,6 +875,8 @@ reads, proxies, or forwards any credential — the M5 pilot audit
 rule at `packages/client/src/types.ts:120-124`) is the evidence ledger for
 exactly that claim.
 
+The durable Pi lane (`byok-pi-durable`) is a custody-launched child under the same rule; it does not move credentials into the daemon. Its model/provider layer alone receives provider credentials. Tool shells use `inheritEnv: false` and an explicit allowlist. Replica storage is under SDK-private storeDir, disjoint from canonicalHome, and bound to AgentRef/taskId/leaseId; overlapping paths fail before spawn. The replica remains untrusted input. Structured-path tools cannot read or write its root; YOLO bash is not a filesystem sandbox. An exclusive replica lock and confirmed child-tree disposal are required before lease release.
+
 `@byok-sdk/keys` sits on the **other** side of that line. Its whole job *is* to
 hold a provider API key: it stores the user's own key in the OS credential
 store and either calls the provider through its explicit client APIs or launches
