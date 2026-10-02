@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { DurableRecovery } from '../adapters/pi-durable/recovery';
+import { pathToFileURL } from 'node:url';
 import { durableToolDenial } from '../adapters/pi-durable/guard';
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -36,6 +37,20 @@ describe('durable parent recovery authority', () => {
     let owned = true;
     const recovery = new DurableRecovery({ ownsLease: () => owned, record: async () => { owned = false; } });
     await expect(recovery.crash()).rejects.toThrow('lease ended');
+  });
+  it('normalizes @, Unicode spaces, tilde and file URLs before checking all path tools', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'byok-durable-spelling-')); roots.push(root);
+    const home = path.join(root, 'home'), store = path.join(root, 'private store'); await mkdir(home); await mkdir(store);
+    await symlink(store, path.join(home, 'alias'), 'junction');
+    for (const name of ['read','write','edit']) for (const spelling of [
+      `@${store}/file`, '@../private store/file', '@alias/file', `@${store.replace(/ /gu, '\u00A0')}/file`,
+      pathToFileURL(path.join(store,'file')).href, `@${pathToFileURL(path.join(store,'file')).href}`, '~', '~/outside',
+    ]) expect(await durableToolDenial(name, {path:spelling}, home, store), `${name} ${spelling}`).toBeDefined();
+    expect(await durableToolDenial('write', {path:'@inside\u00A0file'},home,store)).toBeUndefined();
+    await symlink(store, path.join(home, 'quote\u2019file'), 'junction');
+    await symlink(store, path.join(home, 'time\u202FAM.txt'), 'junction');
+    expect(await durableToolDenial('read', {path: "@quote'file/secret"},home,store)).toBeDefined();
+    expect(await durableToolDenial('read', {path:'@time AM.txt/secret'},home,store)).toBeDefined();
   });
   it('denies structured path escape and symlink alias, while declaring shell path freedom', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'byok-durable-guard-')); roots.push(root);
