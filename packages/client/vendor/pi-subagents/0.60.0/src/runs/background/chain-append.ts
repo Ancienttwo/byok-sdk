@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { writeAtomicJson } from "../../shared/atomic-json.ts";
@@ -12,6 +12,7 @@ import {
 	CustodyDispatchRefusalError,
 	externalCliCustodyRefusalReason,
 	findExternalCliRunnerStep,
+	externalCliAppendRefusal,
 } from "../../../../../../src/custody/external-cli-admission.ts";
 
 const APPEND_REQUESTS_DIR = "append-requests";
@@ -123,14 +124,22 @@ export function enqueueChainAppendRequest(input: {
 	return { request, pendingCount, ...(bookkeepingErrors.length > 0 ? { bookkeepingError: bookkeepingErrors.join("; ") } : {}) };
 }
 
-function readAppendRequest(filePath: string): ChainAppendRequest | undefined {
-	const raw = JSON.parse(fs.readFileSync(filePath, "utf-8")) as Partial<ChainAppendRequest>;
-	if (!raw.id || typeof raw.id !== "string") return undefined;
+function parseAppendRequest(value: unknown): ChainAppendRequest | undefined {
+	if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(key => !["id", "createdAt", "steps"].includes(key))) return undefined;
+	const raw = value as Partial<ChainAppendRequest>;
+	if (typeof raw.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(raw.id)) return undefined;
 	const createdAt = raw.createdAt;
 	if (typeof createdAt !== "number" || !Number.isFinite(createdAt)) return undefined;
 	if (!Array.isArray(raw.steps) || raw.steps.length === 0) return undefined;
 	return { id: raw.id, createdAt, steps: raw.steps as RunnerStep[] };
 }
+
+function readAppendRequest(filePath: string): ChainAppendRequest | undefined {
+  const bytes = fs.readFileSync(filePath);
+  if (bytes.length > 1024 * 1024) throw new CustodyDispatchRefusalError("external_cli_append_too_large");
+  return parseAppendRequest(JSON.parse(bytes.toString("utf8")));
+}
+const requestKey = (id: string): string => createHash("sha256").update(id).digest("hex");
 
 export function readPendingChainAppendRequests(asyncDir: string): ChainAppendRequest[] {
 	return listAppendRequestFiles(asyncDir)
@@ -144,13 +153,35 @@ export function consumeChainAppendRequests(asyncDir: string): ChainAppendRequest
 	const files = listAppendRequestFiles(asyncDir);
 	// Validate the entire batch before consuming files or handing steps to the
 	// runner. Appends must cross the same kind-based gate as initial admission.
-	for (const filePath of files) {
-		const request = readAppendRequest(filePath);
-		if (!request) continue;
-		const finding = findExternalCliRunnerStep(request);
-		if (finding) throw new CustodyDispatchRefusalError(externalCliCustodyRefusalReason(filePath, finding));
-		requests.push(request);
+	const ackDir = path.join(asyncDir, "append-acks");
+	const seen = new Set<string>();
+	const observedKeys = new Map<string,string>();
+	try {
+		if (files.length > 64) throw new CustodyDispatchRefusalError("external_cli_append_batch_too_large");
+		for (const filePath of files) {
+			const request = readAppendRequest(filePath);
+			if (!request) throw new CustodyDispatchRefusalError("external_cli_append_invalid");
+			const key = requestKey(request.id);
+			observedKeys.set(filePath,key);
+			if (seen.has(key) || fs.existsSync(path.join(ackDir, `${key}.json`))) throw new CustodyDispatchRefusalError("external_cli_append_replay");
+			seen.add(key);
+			const refusal = externalCliAppendRefusal(request, filePath);
+			if (refusal) throw new CustodyDispatchRefusalError(refusal);
+			requests.push(request);
+		}
+	} catch (error) {
+		fs.mkdirSync(ackDir, { recursive: true, mode: 0o700 });
+		// Entire observed batch fails. Ack contains a fixed code, never raw input/errors.
+		for (const filePath of files) {
+			const key = observedKeys.get(filePath) ?? `refused-${requestKey(path.basename(filePath))}`;
+			writeAtomicJson(path.join(ackDir, `${key}.json`), { state: "refused", code: "external_cli_append_batch_refused" });
+			fs.unlinkSync(filePath);
+		}
+		if (error instanceof CustodyDispatchRefusalError) throw error;
+		throw new CustodyDispatchRefusalError("external_cli_append_invalid");
 	}
+	if (requests.length) fs.mkdirSync(ackDir, { recursive: true, mode: 0o700 });
+	for (const request of requests) writeAtomicJson(path.join(ackDir, `${requestKey(request.id)}.json`), { state: "accepted" });
 	for (const filePath of files) {
 		try {
 			fs.unlinkSync(filePath);

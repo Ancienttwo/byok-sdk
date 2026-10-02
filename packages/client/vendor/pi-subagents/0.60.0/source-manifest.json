@@ -305,9 +305,10 @@
     {
       "path": "src/profiles/profiles.ts",
       "upstreamSha256": "5219d05856b83a1fac31bf4a8abc040bea18321fd1062cb806c3484e3e75da57",
-      "vendoredSha256": "ab7e08e6fe742c31c0822e43188f870a61d4b1bfdd45b62092ad5d6ed3c7a3ae",
+      "vendoredSha256": "3d12b06c3567eba9d716847061dbb151c4066570bbd6a45014541a92f20bd4c2",
       "delta": [
-        "WP4 five-edge custody cut: the model-probe print child is minted and dispatched by the SDK custody dispatcher; dispatch refusals surface as the probe's existing skipped status."
+        "WP4 five-edge custody cut: the model-probe print child is minted and dispatched by the SDK custody dispatcher; dispatch refusals surface as the probe's existing skipped status.",
+        "T6 cohort: verified SDK Host helper template/cwd/transport and sixth-edge authority; input/permit/caps remain fail-closed."
       ]
     },
     {
@@ -325,10 +326,11 @@
     {
       "path": "src/runs/background/async-execution.ts",
       "upstreamSha256": "854ccef6d7e824a2988f3dfba8c30f511768420c1cb4be6b01b5968037c0990c",
-      "vendoredSha256": "6667d769cffa73480e927ba22fd9e32ba66c64ce9eb2da8ae0845d5ba76bce17",
+      "vendoredSha256": "5fd1b34b24776e4eb0157c4c28c7955c9712ba447b4bff85484f37f9513d661e",
       "delta": [
         "SDK build-flavor support assertion at the existing effective execution boundary; ordinary backend is a no-op, sealed backend explicitly refuses.",
-        "WP4 five-edge custody cut: the background runner child is minted and dispatched by the SDK custody dispatcher; the jiti CLI resolution and its spawn are removed and availability no longer depends on a resolvable jiti install."
+        "WP4 five-edge custody cut: the background runner child is minted and dispatched by the SDK custody dispatcher; the jiti CLI resolution and its spawn are removed and availability no longer depends on a resolvable jiti install.",
+        "T6 cohort: verified SDK Host helper template/cwd/transport and sixth-edge authority; input/permit/caps remain fail-closed."
       ]
     },
     {
@@ -370,9 +372,11 @@
     {
       "path": "src/runs/background/chain-append.ts",
       "upstreamSha256": "842ddeaf9eacdb06781283b154dec31639bb7037702f96a0dc5b41277c3fdc86",
-      "vendoredSha256": "c5978c2bbcdbf5d7427b9e8d0be9d9982d74f4073059bd4ec36107c4251f8eb0",
+      "vendoredSha256": "a22e3682d5c46c753126b8673ba2d12d1c4ea813f588ae39bbc22562e73c9f6f",
       "delta": [
-        "SDK external-cli append admission: reuse the initial kind scanner and typed refusal; validate the whole pending batch before consuming request files."
+        "SDK external-cli append admission: reuse the initial kind scanner and typed refusal; validate the whole pending batch before consuming request files.",
+        "T6 sixth-edge: SDK-owned official CLI admission, V2 identity/permit/shared derivation budget and lifecycle; no credential or ambient spawn fallback.",
+        "T6 cohort: verified SDK Host helper template/cwd/transport and sixth-edge authority; input/permit/caps remain fail-closed."
       ]
     },
     {
@@ -432,8 +436,11 @@
     {
       "path": "src/runs/background/owned-process-tree.ts",
       "upstreamSha256": "2eb4242149bafe04cf3409d0707466737300e109bd5af8dca4cbeb733a1e8ae9",
-      "vendoredSha256": "2eb4242149bafe04cf3409d0707466737300e109bd5af8dca4cbeb733a1e8ae9",
-      "delta": []
+      "vendoredSha256": "f617d08f6cfbdae45c49fae54ad17dca729785b8cac8ed9e57c133188652971a",
+      "delta": [
+        "T6 sixth-edge selects kernel process-group presence without auxiliary child spawns; existing other-lane ps observation is preserved.",
+        "T6 cohort: verified SDK Host helper template/cwd/transport and sixth-edge authority; input/permit/caps remain fail-closed."
+      ]
     },
     {
       "path": "src/runs/background/parallel-groups.ts",
@@ -516,10 +523,12 @@
     {
       "path": "src/runs/background/subagent-runner.ts",
       "upstreamSha256": "f35cb3b7062faf25a56dd83e21df6841faf87b2c900b5c9d162622384df35801",
-      "vendoredSha256": "85b8d40a843b5282766490a1db1d3d3a54c405ffe7b98c72807eb7d597da2553",
+      "vendoredSha256": "8cde33743ae8573e0a169cfe65676f12680000711708c0cf0e2a1f20434cf565",
       "delta": [
         "WP4 five-edge custody cut: every print child this runner spawns is minted and dispatched by the SDK custody dispatcher (helper direct-connect argv shape) and the vendor depth-env increment is dropped.",
-        "WP4 five-edge custody cut: adds runSubagentRunnerEntry, the in-bundle entry the runner payload invokes with the custody transport commitment's config path instead of a jiti child's process.argv[2]."
+        "WP4 five-edge custody cut: adds runSubagentRunnerEntry, the in-bundle entry the runner payload invokes with the custody transport commitment's config path instead of a jiti child's process.argv[2].",
+        "T6 sixth-edge: SDK-owned official CLI admission, V2 identity/permit/shared derivation budget and lifecycle; no credential or ambient spawn fallback.",
+        "T6 cohort: verified SDK Host helper template/cwd/transport and sixth-edge authority; input/permit/caps remain fail-closed."
       ]
     },
     {
@@ -585,9 +594,10 @@
     {
       "path": "src/runs/foreground/execution.ts",
       "upstreamSha256": "054de3b5e96b7c450d78a2d0ce188c06440f545f26b1e03ef5f625c95e906cd1",
-      "vendoredSha256": "6e035c95850b8a419c050cea5224cadc4c8983aaa43f56c848a041d2e9b98176",
+      "vendoredSha256": "7a7ac3119a279e162e8410733475bbc45a8dcb70fc32da3c8ef366b1dff2e385",
       "delta": [
-        "WP4 five-edge custody cut: the foreground print child is minted and dispatched by the SDK custody dispatcher (helper direct-connect argv shape); the vendor depth-env increment is dropped and a dispatch refusal becomes a structured lane failure."
+        "WP4 five-edge custody cut: the foreground print child is minted and dispatched by the SDK custody dispatcher (helper direct-connect argv shape); the vendor depth-env increment is dropped and a dispatch refusal becomes a structured lane failure.",
+        "T6 cohort: verified SDK Host helper template/cwd/transport and sixth-edge authority; input/permit/caps remain fail-closed."
       ]
     },
     {
@@ -693,14 +703,20 @@
     {
       "path": "src/runs/shared/claude-code-adapter.ts",
       "upstreamSha256": "d789680b5889db052e45e7bc88d7193e3bc30a0b1ce923734a49ebfe386a2a6f",
-      "vendoredSha256": "d789680b5889db052e45e7bc88d7193e3bc30a0b1ce923734a49ebfe386a2a6f",
-      "delta": []
+      "vendoredSha256": "6cadc19dac701c590f214633ef8c701031061eacac5350b24d166bc2985a1ad8",
+      "delta": [
+        "T6 sixth-edge: SDK-owned official CLI admission, V2 identity/permit/shared derivation budget and lifecycle; no credential or ambient spawn fallback.",
+        "T6 cohort: verified SDK Host helper template/cwd/transport and sixth-edge authority; input/permit/caps remain fail-closed."
+      ]
     },
     {
       "path": "src/runs/shared/codex-exec-adapter.ts",
       "upstreamSha256": "1ce2efd60aae251800196d3ad5b58a2852bcd5b65e8fb1e6b9505161788687a2",
-      "vendoredSha256": "1ce2efd60aae251800196d3ad5b58a2852bcd5b65e8fb1e6b9505161788687a2",
-      "delta": []
+      "vendoredSha256": "742c8e3b2e81c07242c744db4ea6bfaa3613c311502b276e38c7fefe61572f72",
+      "delta": [
+        "T6 sixth-edge: SDK-owned official CLI admission, V2 identity/permit/shared derivation budget and lifecycle; no credential or ambient spawn fallback.",
+        "T6 cohort: verified SDK Host helper template/cwd/transport and sixth-edge authority; input/permit/caps remain fail-closed."
+      ]
     },
     {
       "path": "src/runs/shared/completion-evidence.ts",
@@ -755,9 +771,11 @@
     {
       "path": "src/runs/shared/external-cli-runner.ts",
       "upstreamSha256": "51f41fc6ee753ca3d96cfb93a083e64c62acc5d359ac4169e0f9e357967ca0e0",
-      "vendoredSha256": "603ef6374567f29158178884f08f8ed286708fcc7adc27e83031dc5b621af97d",
+      "vendoredSha256": "934441949c99749b22e6d2f28da5383cf47fef5ac9ac295cb5ced4b322df2bf4",
       "delta": [
-        "SDK external-cli environment isolation: bare/unknown launches use the runtime platform/proxy allowlist; BYOK and custody names are denied even in explicit allowlists and value overrides."
+        "SDK external-cli environment isolation: bare/unknown launches use the runtime platform/proxy allowlist; BYOK and custody names are denied even in explicit allowlists and value overrides.",
+        "T6 sixth-edge: SDK-owned official CLI admission, V2 identity/permit/shared derivation budget and lifecycle; no credential or ambient spawn fallback.",
+        "T6 cohort: verified SDK Host helper template/cwd/transport and sixth-edge authority; input/permit/caps remain fail-closed."
       ]
     },
     {
@@ -909,8 +927,11 @@
     {
       "path": "src/runs/shared/run-fanout-budget.ts",
       "upstreamSha256": "adf1ef492e34e6390bc3952a10283046333b91562768efdfba2c93aa8a759192",
-      "vendoredSha256": "adf1ef492e34e6390bc3952a10283046333b91562768efdfba2c93aa8a759192",
-      "delta": []
+      "vendoredSha256": "b6dc2b76d878b8a150a7a5a939fdb9a3a25de2c9389b7d69021cab12f3e85c28",
+      "delta": [
+        "T6 zero-claim settlement operations also use the existing root admission lock; cumulative fanout is never refunded after spawn attempt.",
+        "T6 cohort: verified SDK Host helper template/cwd/transport and sixth-edge authority; input/permit/caps remain fail-closed."
+      ]
     },
     {
       "path": "src/runs/shared/run-history.ts",
@@ -1205,8 +1226,11 @@
     {
       "path": "src/shared/workflow-child-permit.ts",
       "upstreamSha256": "6f26cb22502a560e273d4c7c0a8437dbbef8de3999d2a6765769435082ced833",
-      "vendoredSha256": "6f26cb22502a560e273d4c7c0a8437dbbef8de3999d2a6765769435082ced833",
-      "delta": []
+      "vendoredSha256": "d1104726dcb4b2951adec5f6700c11b29a49446739a0860365effce64dc11fcb",
+      "delta": [
+        "T6 sixth-edge: SDK-owned official CLI admission, V2 identity/permit/shared derivation budget and lifecycle; no credential or ambient spawn fallback.",
+        "T6 cohort: verified SDK Host helper template/cwd/transport and sixth-edge authority; input/permit/caps remain fail-closed."
+      ]
     },
     {
       "path": "src/slash/delegation-adapters.ts",

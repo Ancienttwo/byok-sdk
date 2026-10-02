@@ -18,7 +18,7 @@ import {
   descendantTemplateDigest,
   toolImplementationLaunchEnvNamesDigest,
   toolImplementationLoaderEnvValuesDigest,
-  type DescendantLaunchV1,
+  type PiDescendantLaunchV2,
   type ImplementationSpawnBindingV1,
 } from '@byok-sdk/implementation-identity';
 import {
@@ -234,9 +234,9 @@ function mintPrintHarness(scratch: string): PrintHarness {
   } satisfies ImplementationSpawnBindingV1;
 
   const exactNames = Object.freeze(Object.keys(execEnv).sort());
-  const record: DescendantLaunchV1 = {
+  const record: PiDescendantLaunchV2 = {
     format: 'byok.descendant-launch',
-    version: 1,
+    version: 2,
     template,
     templateDigest: descendantTemplateDigest(template),
     policy: {

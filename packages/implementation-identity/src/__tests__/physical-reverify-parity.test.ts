@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { reverifyToolImplementationIdentity, assertDescendantSpawn, RUNTIME_DESCENDANT_EDGES, type ToolImplementationFsProbe } from '../identity';
-import type { DescendantLaunchV1 } from '../descendant-launch';
+import type { PiDescendantLaunchV2 } from '../descendant-launch';
 const data=JSON.parse(readFileSync(path.resolve(import.meta.dirname,'../../../../tests/fixtures/c07-runtime-record/official-pi-087.v1.json'),'utf8'));
-const vector=data.descendantLaunchVectors[0];const launch=vector.launch as DescendantLaunchV1;
+const vector=data.descendantLaunchVectors[0];vector.launch.version=2;const launch=vector.launch as PiDescendantLaunchV2;
 const id=(()=>{const value=launch.template.identity;if(value.kind!=='attested')throw Error('fixture');return value;})();
 const expected={template:launch.template,policy:launch.policy,edges:RUNTIME_DESCENDANT_EDGES,inheritedCredentialNames:[],
  parent:{kind:launch.perLaunch.edge.parent,rootTaskId:launch.perLaunch.rootTaskId,instancePath:[],depth:0,effectiveLimits:launch.perLaunch.effectiveLimits}};

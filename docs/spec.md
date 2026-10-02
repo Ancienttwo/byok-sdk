@@ -2412,3 +2412,50 @@ null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
 configuration is the context window authority even if runtime stats differ.
 Historical v1 envelopes remain readable and unchanged; older consumers ignore
 these optional fields.
+
+## N1 official external CLI custody edge (T6, 2026-10-02)
+
+The terminal edge is `pi-subagent-runner -> official-external-cli`, with
+`inheritsCredential: false`. The six adapter identifiers are a closed vocabulary;
+readonly and writer modes bind different code-owned argv. A bare command, an
+unknown adapter, an unproven installation or an undetermined authentication mode
+refuses before an external model task child is created.
+
+`ToolImplementationAuthority` resolves the independent `official-external-cli`
+subject to `OfficialExternalCliInstallV2`: the ordinary install record plus
+non-secret official-source/config-restriction proof references and explicit
+HOME/config directories. The Host verifies those release/config proofs; the SDK
+measures and reverifies artifact/interpreter/resources and directory identity.
+The approved scope is the CLI's own account login. No provider key, OAuth/cloud
+credential, Pi transport, BYOK control, loader injection, caller argv or auth/
+backend/config override reaches the external child. CLI-owned auth stores are
+never read or copied by SDK code.
+
+SDK runtime plans and descendant launches use cohort V2. Old launch/plan records
+are refused rather than upgraded. The verified Host plan supplies helper policy,
+full closure and sealed process cwd; session/config cwd remains the task
+workspace. Its fanout grant must cover the inherited root budget manifest.
+Initial config, actual helper read and append consumption share SDK input
+validation. Config bytes are committed before helper admission. Append rejects
+and acknowledges the whole observed batch, and accepted/rejected request IDs
+cannot be replayed. A validated input is not a spawn permit.
+
+Every custody-managed helper/probe/task requires a physical root claim. External
+and writer tasks share `E=min(R,16)` and `W=min(E,4)` across all adapters and
+parents in the root; live caps are `Q=2`, `J=1`, further bounded by root/session
+limits. Only the initial step/attempt may redeem the runner's existing logical
+depth charge. Later steps/retry attempts require another charge; consumed permits
+and the same operation/attempt cannot launch twice. Final identity/argv/env/
+parent/permit checks and cumulative/live claims precede native spawn under the
+root admission lock. Cancellation and absolute deadlines are checked before
+probes and final admission. Cumulative claims are never refunded after a spawn
+attempt; only confirmed termination releases live slots. POSIX external cleanup
+uses kernel process-group presence, without ps/taskkill child processes. Unknown
+quiescence keeps slots occupied.
+
+These are internal derivation/launch limits, with no money/token metering or
+spend cap and no projection to subscription balances. Official CLI availability
+requires an approved pinned installation/config scope and platform smoke;
+fixture evidence is not login-service acceptance. Cursor authentication mode and
+Windows external process-tree supervision remain unsupported/fail-closed in
+this cohort. Top-level Codex environment stripping is a separate change.

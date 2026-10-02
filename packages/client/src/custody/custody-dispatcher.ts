@@ -70,12 +70,13 @@ import {
   parseDescendantLaunch,
   toolImplementationLaunchEnvNamesDigest,
   toolImplementationLoaderEnvValuesDigest,
-  type DescendantLaunchV1,
+  type PiDescendantLaunchV2,
   type DescendantLimitsV1,
   type ImplementationSpawnBindingV1,
   type RuntimeDescendantPolicyV1,
   type RuntimeEntryV1,
   type ToolImplementationStatTupleV1,
+  externalCliCommitment,
 } from '@byok-sdk/implementation-identity';
 import {
   BYOK_SDK_CUSTODY_LAUNCH_RECORD_ENV,
@@ -85,7 +86,8 @@ import {
   parseCustodyParentDepthCommitment,
 } from './custody-commitments';
 import { parsePiPrintArgv } from './pi-print-argv';
-import { CustodyDispatchRefusalError, externalCliAdmissionRefusal } from './external-cli-admission';
+import { CustodyDispatchRefusalError, admittedRunnerConfigSnapshot } from './external-cli-admission';
+import { custodyExternalInstallations, EXTERNAL_INSTALLATIONS_METADATA_KEY, verifiedCustodyParent, custodyRuntimePlan, CUSTODY_ROOT_PLAN_METADATA_KEY } from './external-cli-authority';
 export { CustodyDispatchRefusalError } from './external-cli-admission';
 // The vendored budget-lock and child-permit primitives come through the JS
 // bridge (`custody-vendor-bridge.js`): the vendored tree publishes TS with no
@@ -175,14 +177,21 @@ export function resolveCustodyParentContext(env: Readonly<Record<string, string 
     refuse(`the inherited run fan-out budget is invalid: ${(error as Error).message}`);
   }
   const recordEnv = env[BYOK_SDK_CUSTODY_LAUNCH_RECORD_ENV];
+  const runtimePlan = custodyRuntimePlan(env as NodeJS.ProcessEnv);
+  if (runtimePlan && budget.limit > runtimePlan.policy.fanout) refuse('custody root budget exceeds verified Host fanout policy');
   if (recordEnv !== undefined && recordEnv !== '') {
-    let record: DescendantLaunchV1;
+    let record: PiDescendantLaunchV2;
     try {
       record = parseDescendantLaunch(loadCustodyLaunchRecord(env));
     } catch (error) {
       refuse(`the parent's own launch record is not a valid descendant record: ${(error as Error).message}`);
     }
-    const parentDepth = parseCustodyParentDepthCommitment(env);
+    // A self-reentrant helper's incoming transport depth names its parent.
+    // After its entry proves the record, subordinate dispatch uses that helper's
+    // own immutable depth, rather than mistaking the incoming value for its own.
+    const verified = env === process.env ? verifiedCustodyParent() : undefined;
+    const parentDepth = verified && externalCliCommitment(verified) === externalCliCommitment(record)
+      ? verified.perLaunch.depth : parseCustodyParentDepthCommitment(env);
     if (parentDepth !== record.perLaunch.depth) {
       refuse(`verified-parent binding failed: depth commitment ${parentDepth} differs from the parent record's contract depth ${record.perLaunch.depth}`);
     }
@@ -199,6 +208,12 @@ export function resolveCustodyParentContext(env: Readonly<Record<string, string 
   // Top-level runtime parent: the daemon-launched pi-rpc/prepared session.
   const maxDepth = uintEnv(env.PI_SUBAGENT_MAX_DEPTH) ?? 2; // vendor DEFAULT_SUBAGENT_MAX_DEPTH
   const sessionCap = uintEnv(env.PI_SUBAGENT_MAX_SPAWNS_PER_SESSION) || CUSTODY_DEFAULT_SESSION_CAP;
+  if (runtimePlan) return {
+    parentKind: runtimePlan.selfKind, parentDepth:0, rootTaskId:budget.rootRunId, parentInstancePath:[],
+    effectiveLimits:{ maxDepth:Math.min(maxDepth,runtimePlan.policy.maxDepth), fanout:budget.limit,
+      parallel:Math.min(CUSTODY_DEFAULT_PARALLEL,runtimePlan.policy.parallel),sessionCap:Math.min(sessionCap,runtimePlan.policy.sessionCap) },
+    policy:runtimePlan.policy,budget,
+  };
   return {
     parentKind: 'pi-rpc',
     parentDepth: 0,
@@ -256,6 +271,7 @@ export interface CustodyPermitLaunch {
 export interface CustodyDispatch {
   /** Helper direct-connect argv shape: [entry?, '__byok_sdk_helper', <kind>]. */
   readonly command: string;
+  readonly cwd: string;
   readonly args: readonly string[];
   /** Transport environment: the attested exec env plus the custody commitments. */
   readonly env: Record<string, string>;
@@ -289,7 +305,7 @@ function pidIsAlive(pid: number): boolean {
   }
 }
 
-function safeKeySegment(value: string): string {
+export function safeKeySegment(value: string): string {
   return value.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120) || 'unknown';
 }
 
@@ -429,7 +445,7 @@ function sweepStaleLaunchState(budgetDirectory: string, now: number): void {
   }
 }
 
-function countSlotFiles(directory: string): number {
+export function countSlotFiles(directory: string): number {
   try {
     return readdirSync(directory).filter((entry) => /^\d{6}\.json$/.test(entry)).length;
   } catch (error) {
@@ -438,7 +454,7 @@ function countSlotFiles(directory: string): number {
   }
 }
 
-function claimCapSlot(directory: string, limit: number, created: string[]): string {
+export function claimCapSlot(directory: string, limit: number, created: string[]): string {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   for (let slot = 0; slot < limit; slot++) {
     const slotPath = path.join(directory, `${String(slot).padStart(6, '0')}.json`);
@@ -474,20 +490,14 @@ export function dispatchCustodyPiSubagentSpawn(input: CustodyDispatchInput): Cus
     refuse('the runner lane requires the absolute runner config path the dispatcher hands to the payload');
   }
   const ctx = resolveCustodyParentContext(process.env);
+  const runtimePlan = custodyRuntimePlan();
   const edge = RUNTIME_DESCENDANT_EDGES.find((candidate) => candidate.parent === ctx.parentKind && candidate.child === input.child);
   if (edge === undefined) {
     refuse(`edge ${ctx.parentKind} -> ${input.child} is not in the frozen runtime edge vocabulary`);
   }
-  // N1 external-CLI admission gate (plan 20260918-2052): the external-cli lane
-  // is async-only and every background runner child is minted here, so the
-  // parent-written runner config is the one place the kind crosses an
-  // SDK-owned boundary. Until the sixth custody edge lands (terminal state B),
-  // a config whose steps carry an external-cli runner refuses typed, before
-  // any state exists — no fallback lane, no name-based exception.
-  if (input.child === 'pi-subagent-runner') {
-    const externalCliRefusal = externalCliAdmissionRefusal(input.runnerConfigPath!);
-    if (externalCliRefusal !== undefined) refuse(externalCliRefusal);
-  }
+  // Initial sixth-edge admission uses only SDK/Host-selected installations.
+  // It grants no external spawn; the terminal gate owns identity/auth/permit/claims.
+  const configSnapshot = input.child === 'pi-subagent-runner' ? admittedRunnerConfigSnapshot(input.runnerConfigPath!) : undefined;
   const bootstrap = ctx.parentKind === 'pi-subagent-runner' && input.child === 'pi-subagent-print';
   const charge = bootstrap ? RUNNER_PRINT_BOOTSTRAP_CHARGE : DEFAULT_EDGE_CHARGE;
   const childDepth = ctx.parentDepth + charge;
@@ -539,7 +549,7 @@ export function dispatchCustodyPiSubagentSpawn(input: CustodyDispatchInput): Cus
     ...(form === 'interpreter+bundle' ? { interpreterStat: statTuple(target.command) } : {}),
   } satisfies ImplementationSpawnBindingV1['identity'];
 
-  const template = {
+  const selfTemplate = {
     format: 'byok.implementation-spawn',
     version: 1,
     identity,
@@ -549,11 +559,14 @@ export function dispatchCustodyPiSubagentSpawn(input: CustodyDispatchInput): Cus
     cwd,
     envCommitments: controlledDirValues,
   } satisfies ImplementationSpawnBindingV1;
+  const template = runtimePlan?.templates.find(row => row.kind === input.child)?.template ?? selfTemplate;
+  if (runtimePlan && !runtimePlan.templates.some(row => row.kind === input.child)) refuse('custody child template absent from verified Host plan');
+  if (runtimePlan && externalCliCommitment(template.envCommitments) !== externalCliCommitment(controlledDirValues)) refuse('custody controlled directories differ from verified Host template');
 
   const print = input.child === 'pi-subagent-print' ? projectPrintVendorArgv(input.vendorArgv) : undefined;
-  const record: DescendantLaunchV1 = {
+  const record: PiDescendantLaunchV2 = {
     format: 'byok.descendant-launch',
-    version: 1,
+    version: 2,
     template,
     templateDigest: descendantTemplateDigest(template),
     policy: ctx.policy,
@@ -574,14 +587,22 @@ export function dispatchCustodyPiSubagentSpawn(input: CustodyDispatchInput): Cus
       session: { cwd, root: controlledDirValues.PI_CODING_AGENT_SESSION_DIR!, file: print?.sessionFile ?? null },
       mcp: {
         env: {},
-        metadata: input.vendorArgv === undefined ? {} : { 'byok.custody.printArgv': [...input.vendorArgv] },
+        metadata: {
+          'byok.custody.launchId': launchId,
+          ...(runtimePlan ? {[CUSTODY_ROOT_PLAN_METADATA_KEY]:runtimePlan} : {}),
+          ...(input.vendorArgv === undefined ? {} : { 'byok.custody.printArgv': [...input.vendorArgv] }),
+          [EXTERNAL_INSTALLATIONS_METADATA_KEY]: custodyExternalInstallations(),
+          ...(input.child !== 'pi-subagent-runner' ? {} : {
+            'byok.custody.runnerConfigDigest': configSnapshot!.digest,
+          }),
+        },
       },
       envValues,
       exactNames,
       controlledDirValues,
     },
   };
-  let parsedRecord: DescendantLaunchV1;
+  let parsedRecord: PiDescendantLaunchV2;
   try {
     parsedRecord = parseDescendantLaunch(record);
   } catch (error) {
@@ -688,8 +709,9 @@ export function dispatchCustodyPiSubagentSpawn(input: CustodyDispatchInput): Cus
   }
 
   return {
-    command: target.command,
-    args: Object.freeze([...(target.entry === undefined ? [] : [target.entry]), ...fixedArgv]),
+    command: template.command,
+    cwd: template.cwd,
+    args: Object.freeze([...(template.entry === undefined ? [] : [template.entry]), ...template.fixedArgv]),
     env: transportEnv,
     launchId,
     recordPath,

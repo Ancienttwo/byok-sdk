@@ -458,10 +458,10 @@ async function main(): Promise<void> {
         adoptChildParentContext(runnerRecord, mintEvidence.env[BYOK_SDK_CUSTODY_LAUNCH_RECORD_ENV]!, mintedConfigPath);
         // The runner config spawnRunner wrote (the real child never saw it)
         // runs one step here: its print dispatch is the bootstrap edge.
-        const config = JSON.parse(readFileSync(mintedConfigPath, 'utf8')) as Record<string, unknown>;
-        config.sessionDir = harness.sessionsDir;
+        const configBytes = readFileSync(mintedConfigPath, 'utf8');
+        const config = JSON.parse(configBytes) as Record<string, unknown>;
         const runnerConfigPath = path.join(harness.workspace, 'runner-config.json');
-        writeFileSync(runnerConfigPath, JSON.stringify(config), { mode: 0o600 });
+        writeFileSync(runnerConfigPath, configBytes, { mode: 0o600 });
         process.env.BYOK_SDK_CUSTODY_RUNNER_CONFIG = runnerConfigPath;
         // The runner child waits at the startup barrier for its parent's
         // proceed control; release it up front so the entry reaches its step.

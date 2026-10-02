@@ -344,7 +344,7 @@ async function probeModel(
 	if (typeof pi.exec !== "function") {
 		return { status: "skipped", message: "pi.exec is unavailable in this runtime." };
 	}
-	let spawnSpec: { command: string; args: string[] };
+	let spawnSpec: { command: string; args: string[]; cwd: string; env: Record<string,string> };
 	try {
 		const dispatched = dispatchCustodyPiSubagentSpawn({
 			child: "pi-subagent-print",
@@ -362,7 +362,7 @@ async function probeModel(
 			runner: "pi",
 		});
 		if (permitError) return { status: "error", message: `Model probe permit refused: ${permitError}` };
-		spawnSpec = { command: dispatched.command, args: [...dispatched.args] };
+		spawnSpec = { command: dispatched.command, args: [...dispatched.args], cwd: dispatched.cwd, env: dispatched.env };
 	} catch (dispatchError) {
 		if (dispatchError instanceof CustodyDispatchRefusalError) {
 			return { status: "skipped", message: `Model probe unavailable outside an SDK dispatch context: ${dispatchError.reason}` };
@@ -370,7 +370,8 @@ async function probeModel(
 		throw dispatchError;
 	}
 	const result = await pi.exec(spawnSpec.command, spawnSpec.args, {
-		cwd: os.tmpdir(),
+		cwd: spawnSpec.cwd,
+		env: spawnSpec.env,
 		timeout: 45_000,
 	} as Record<string, unknown>);
 	const stdout = typeof result.stdout === "string" ? result.stdout.trim() : "";
