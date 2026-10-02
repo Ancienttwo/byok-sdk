@@ -1221,7 +1221,7 @@ class PiSession implements Session {
   }
 
   async interrupt(): Promise<void> {
-    await this.rpc.send({ type: 'abort' });
+    await this.rpc.abortAndSettle();
   }
 
   async close(): Promise<void> {

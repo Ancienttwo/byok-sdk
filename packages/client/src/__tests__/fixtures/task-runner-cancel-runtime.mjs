@@ -54,6 +54,12 @@ function terminal(interrupted) {
   }
   trace('terminal');
 }
+function interruptedResult() {
+  if (scenario === 'ack-only') return;
+  const settle = () => { usage(456, 29); terminal(true); };
+  if (scenario === 'delayed-result') setTimeout(settle, 5);
+  else settle();
+}
 function run() {
   if (runtime === 'codex') notify('turn/started', { threadId: sessionId, turn: { id: turnId } });
   if (runtime === 'pi') send({ type: 'agent_start' });
@@ -85,7 +91,7 @@ async function receive(msg) {
       trace('interrupt');
       if (scenario === 'no-ack') return;
       send({ id: msg.id, result: {} });
-      usage(456, 29); terminal(true);
+      interruptedResult();
     }
   } else if (runtime === 'pi') {
     const respond = data => send({ type: 'response', command: msg.type, id: msg.id, success: true, data });
@@ -95,7 +101,7 @@ async function receive(msg) {
     if (msg.type === 'abort') {
       trace('interrupt');
       if (scenario === 'no-ack') return;
-      respond(); usage(456, 29); terminal(true);
+      respond(); interruptedResult();
     }
   } else {
     if (msg.type === 'user') { await gate(); send({ type: 'system', subtype: 'init', session_id: sessionId, tools: ['Bash'] }); run(); }
@@ -103,7 +109,7 @@ async function receive(msg) {
       trace('interrupt');
       if (scenario === 'no-ack') return;
       send({ type: 'control_response', response: { subtype: 'success', request_id: msg.request_id, response: { still_queued: [] } } });
-      terminal(true);
+      interruptedResult();
     }
   }
 }

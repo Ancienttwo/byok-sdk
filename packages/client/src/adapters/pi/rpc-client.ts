@@ -147,6 +147,23 @@ export class PiRpcClient {
     });
   }
 
+  private readonly settlementWaiters = new Set<{ resolve: () => void; reject: (error: Error) => void }>();
+
+  /** The runner bounds soft interruption; the native settlement carries final usage. */
+  async abortAndSettle(): Promise<void> {
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    const settled = new Promise<void>((done, fail) => { resolve = done; reject = fail; });
+    void settled.catch(() => undefined);
+    const waiter = { resolve, reject };
+    this.settlementWaiters.add(waiter);
+    try {
+      const response = await this.send({ type: 'abort' });
+      if (response.success === false) throw new Error('pi refused abort');
+      await settled;
+    } finally { this.settlementWaiters.delete(waiter); }
+  }
+
   /** Every non-response, non-`extension_ui_request` line — the latter is answered directly by this client (see `respondToExtensionUiRequest`) and never enqueued. */
   get events(): AsyncIterable<PiRpcMessage> {
     return this.eventQueue;
@@ -271,6 +288,9 @@ export class PiRpcClient {
       return;
     }
     this.eventQueue.push(msg);
+    if (msg.type === 'agent_settled') {
+      for (const waiter of this.settlementWaiters) waiter.resolve();
+    }
   }
 
   /** Write an explicit host-owned response; completion is a transport receipt only. */
@@ -344,6 +364,7 @@ export class PiRpcClient {
     this.resolveClosed();
     for (const [, waiter] of this.pending) waiter.reject(terminal);
     this.pending.clear();
+    for (const waiter of this.settlementWaiters) waiter.reject(terminal);
     this.eventQueue.end();
   }
 }

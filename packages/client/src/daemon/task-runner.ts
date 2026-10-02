@@ -1854,9 +1854,18 @@ export class TaskRunner {
     // the adapter never supplies turn_end. Retain this SAME receipt for finish
     // to await/retry; a deadline is never proof of disposal.
     const disposal = active.disposalAttempt ??= Promise.resolve().then(() => active.session.close());
-    const settled = Promise.allSettled([disposal, ...(drainEvents && active.eventPump ? [active.eventPump] : [])]);
+    // Observe a rejected receipt without turning it into an unhandled rejection;
+    // finish() remains responsible for reporting it and retaining ownership.
+    void disposal.catch(() => undefined);
     if (drainEvents) {
-      await raceSettleFirst(async () => { await settled; }, Math.max(0, deadline - Date.now()));
+      // Drain events already delivered by interrupt before publishing usage.
+      // A pending close/next() is not metering authority and cannot hold the
+      // cancellation ACK hostage. One scheduler turn drains queued microtasks;
+      // a close receipt (including a hung one) is still awaited by finish().
+      if (Date.now() < deadline) {
+        await Promise.race([active.eventPump ?? Promise.resolve(),
+          new Promise<void>(resolve => setImmediate(resolve))]);
+      }
     }
   }
 

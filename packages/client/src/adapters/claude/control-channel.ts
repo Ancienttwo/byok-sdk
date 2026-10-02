@@ -33,6 +33,8 @@ export function createClaudeControlChannel(timeoutMs: number) {
   let ended = false;
   let initModel: string | undefined;
   let contextWindow: number | null = null;
+  let resultRevision = 0;
+  const resultWaiters = new Set<(received: boolean) => void>();
   let pending:
     | {
         id: string;
@@ -54,8 +56,11 @@ export function createClaudeControlChannel(timeoutMs: number) {
         typeof message.model === 'string'
       )
         initModel = message.model;
-      if (message.type === 'result')
+      if (message.type === 'result') {
         contextWindow = parseClaudeContextWindow(message.modelUsage, initModel);
+        resultRevision += 1;
+        for (const resolve of resultWaiters) resolve(true);
+      }
       if (
         message.type !== 'control_response' ||
         !message.response ||
@@ -72,6 +77,7 @@ export function createClaudeControlChannel(timeoutMs: number) {
     closed() {
       ended = true;
       pending?.settle(false);
+      for (const resolve of resultWaiters) resolve(false);
     },
     interrupt(): Promise<boolean> {
       if (ended || !write) return Promise.resolve(false);
@@ -95,6 +101,23 @@ export function createClaudeControlChannel(timeoutMs: number) {
         request: { subtype: 'interrupt' },
       }).catch(() => settle(false));
       return promise;
+    },
+    /** ACK and final result share the existing interrupt deadline. */
+    async interruptAndSettle(): Promise<boolean> {
+      const revision = resultRevision;
+      let resolveResult!: (received: boolean) => void;
+      const result = new Promise<boolean>(resolve => { resolveResult = resolve; });
+      resultWaiters.add(resolveResult);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          this.interrupt().then(async accepted => accepted && (resultRevision > revision || await result)),
+          new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), timeoutMs); }),
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+        resultWaiters.delete(resolveResult);
+      }
     },
   };
 }

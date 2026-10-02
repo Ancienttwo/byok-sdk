@@ -191,12 +191,19 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
     expectUsage(c, 456, 29); expectNoErrors(c); await c.cancel(); expect(c.terminals()).toHaveLength(1); await c.assertReaped();
   });
 
-  it('unacknowledged interrupt reaps without a competing failure or fabricated usage', async () => {
-    const c = await setup(runtime, 'no-ack'); await c.offer();
+  it.each(['no-ack', 'ack-only'])('%s interrupt reaps without a competing failure or fabricated usage', async scenario => {
+    const c = await setup(runtime, scenario); await c.offer();
     await vi.waitFor(() => expect(c.events().some(event => event.type === 'progress')).toBe(true)); await c.cancel();
     expect(c.terminals().map(event => event.type)).toEqual(['task.cancelled']);
     if (runtime === 'claude') expect(c.terminals()[0]?.payload).not.toHaveProperty('usage'); else expectUsage(c, 123, 17);
     expectNoErrors(c); await c.assertReaped();
+  });
+
+  it('waits for usage arriving in a later native frame after the interrupt ACK', async () => {
+    const c = await setup(runtime, 'delayed-result'); await c.offer();
+    await vi.waitFor(() => expect(c.events().some(event => event.type === 'progress')).toBe(true));
+    await c.cancel(); expect(c.terminals().map(event => event.type)).toEqual(['task.cancelled']);
+    expectUsage(c, 456, 29); expectNoErrors(c); await c.assertReaped();
   });
 
   it('repeated cancel after completion cannot change its result or charge twice', async () => {
