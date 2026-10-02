@@ -1,6 +1,6 @@
 # Plan: T1 TaskRunner 取消路径测试与修复
 
-> **Status**: Approved
+> **Status**: Completed
 > **Created**: 20261002-1356
 > **Slug**: taskrunner-cancel
 > **Planning Source**: codex-plan-or-waza-think
@@ -119,9 +119,9 @@ At 10x concurrency native process trees/startup ownership are the limiting resou
 ## Task Breakdown
 - [x] Cover queued/pre-claim/startup/stream/tool/repeated terminal cancellation with 55 new cases.
 - [x] Commit proven cancellation fixes locally with strict assertions and unchanged deadlines.
-- [ ] Close the remaining full-suite Codex tool-stage usage mismatch (456/29 expected, 123/17 observed).
-- [x] Run Required Checks; final workspace test fails one case, acceptance remains blocked.
-- [x] Write `/tmp/byok-t1-taskrunner-cancel-report.md` with state machine, evidence and `RESULT: BLOCKED`.
+- [x] Close the remaining full-suite Codex tool-stage mismatch with controlled result/deadline ordering.
+- [x] Run Required Checks; PM continuation passes full workspace tests twice consecutively and typecheck.
+- [x] Update `/tmp/byok-t1-taskrunner-cancel-report.md` with state machine, timing proof and `RESULT DONE`.
 
 ## Verification Plan
 Run focused Vitest cancellation suites first, then root Required Checks. Do not relax assertions, skip tests or increase existing timeouts. Report baseline/tooling failures separately; BLOCKED if owner decision or forbidden-file changes become necessary.
@@ -132,13 +132,13 @@ Run focused Vitest cancellation suites first, then root Required Checks. Do not 
 ## Task Breakdown
 - [x] Cover queued/pre-claim/startup/stream/tool/repeated terminal cancellation with 55 new cases.
 - [x] Commit proven cancellation fixes locally with strict assertions and unchanged deadlines.
-- [ ] Close the remaining full-suite Codex tool-stage usage mismatch (456/29 expected, 123/17 observed).
-- [x] Run Required Checks; final workspace test fails one case, acceptance remains blocked.
-- [x] Write `/tmp/byok-t1-taskrunner-cancel-report.md` with state machine, evidence and `RESULT: BLOCKED`.
+- [x] Close the remaining full-suite Codex tool-stage mismatch with controlled result/deadline ordering.
+- [x] Run Required Checks; PM continuation passes full workspace tests twice consecutively and typecheck.
+- [x] Update `/tmp/byok-t1-taskrunner-cancel-report.md` with state machine, timing proof and `RESULT DONE`.
 
-## Execution Outcome
+## Historical execution outcome before PM continuation
 
-Acceptance is BLOCKED. Final source head: `f58e951f`; all changes remain local.
+Acceptance was BLOCKED. Final source head: `f58e951f`; all changes remain local.
 Added cancellation suites pass 55/55 independently. Build, workspace typecheck, API golden, version authority and strict workflow checks pass. Final root workspace test fails one Codex tool-stage usage case; it returns 123/17 rather than 456/29. The distinction between deadline fallback and dropped native observation is not yet proven. Keep the guard and deadlines unchanged.
 
 Evidence/state machine: `/tmp/byok-t1-taskrunner-cancel-report.md`.
@@ -155,9 +155,20 @@ fake timers or explicit synchronization. Preserve assertions, skip policy and
 all timeout values. Only local commits are authorized.
 
 ### Task Breakdown
-- [ ] Capture a counterexample with native-frame/deadline/disposal timing evidence.
-- [ ] Classify the cause and apply the smallest proven fix.
-- [ ] Pass the full workspace test twice consecutively, then workspace typecheck.
-- [ ] Update `/tmp/byok-t1-taskrunner-cancel-report.md` and its RESULT line.
+- [x] Capture native-frame/deadline/disposal timing and controlled Codex before/after-deadline cases.
+- [x] Classify fixture race; preserve exact usage assertions/budgets, determinize ordering and guard worker-exit cleanup.
+- [x] Pass full workspace tests twice consecutively (6281 passed each, existing 160 conditional skips), then all-workspace typecheck.
+- [x] Update `/tmp/byok-t1-taskrunner-cancel-report.md` and its RESULT line.
 
 Acceptance command: `BYOK_REQUIRE_BUN=1 BYOK_TEST_BUN_BIN=/Users/chris/.bun/bin/bun bun run test`, twice consecutively. Recheck root build/API/version/workflow gates if affected. No push, PR, merge, ready transition or deletion.
+
+
+## Final acceptance
+
+RESULT DONE. Runtime/source candidate: `6f305cc1` (fixture ordering `a1d16931`, orphan guard `6f305cc1`). No production/billing/API/timeout changes in the continuation.
+
+Targeted: 125/125; Codex tool-stage case passed 10 independent consecutive invocations. The EOF regression fails without the fixture backstop and passes with it. Full unfiltered workspace commands ran consecutively without retry, both exit 0; receipts are `/tmp/byok-t1-restart-workspace-results.json`, logs `/tmp/byok-t1-restart-workspace-1.log` and `-2.log`. Typecheck after both runs exits 0 in `/tmp/byok-t1-restart-typecheck.log`. Build/API/version/architecture checks pass.
+
+Root cause: the success fixture did not synchronize result arrival with real 60/100ms deadlines. Controlled native gates prove 456/29 before deadline, 123/17 when deadline wins, with one terminal and reaped processes in both cases. Keep real native IPC, use a logical interruption clock, and restore real time before disposal.
+
+Only local commits; no push, PR, merge, ready transition, branch/worktree deletion.
