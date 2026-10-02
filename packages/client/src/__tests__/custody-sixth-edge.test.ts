@@ -184,10 +184,11 @@ it('all readonly/writer adapters consume one shared writer table rather than ada
  const parent=parseDescendantLaunch(JSON.parse(readFileSync(dispatch.recordPath,'utf8')));
  const authority=new ExternalCliCustodyAuthority(parent,a.budget,installations,{},ownershipProbe,dispatch.recordPath);
  const merged={...a,authority};
- for(let i=0;i<4;i++) {const request={...(i%2===0?a:b).request(true),cwd:a.dir,stepIndex:i,operation:`mixed-${i}`};const run=await spawnTask(merged,request);await run.close;}
- const request={...b.request(true),cwd:a.dir,stepIndex:4,operation:'mixed-overflow'}, auth=await authority.prepare(request),before=claims(a);
+ for(let i=0;i<4;i++) {const request={...(i%2===0?a:b).request(true,`mixed-${i}`,0,i),cwd:a.dir};const run=await spawnTask(merged,request);await run.close;}
+ const request={...b.request(true,'mixed-overflow',0,4),cwd:a.dir}, auth=await authority.prepare(request),before=claims(a);
  await expect(spawnTask(merged,request,auth)).rejects.toThrow('external_cli_W_exhausted');
- expect(claims(a)).toBe(before+1);expect(a.tasks()).toHaveLength(4); // Charged final Claude proof, no fifth task.expect(ledgers(a).filter(v=>v.kind==='task').map(v=>v.record.installation.adapter).sort()).toEqual(['claude-code-writer','claude-code-writer','codex-exec-writer','codex-exec-writer']);noLeaks(a);
+ expect(claims(a)).toBe(before+1);expect(a.tasks()).toHaveLength(4); // Charged final Claude proof, no fifth task.
+ expect(ledgers(a).filter(v=>v.kind==='task').map(v=>v.record.installation.adapter).sort()).toEqual(['claude-code-writer','claude-code-writer','codex-exec-writer','codex-exec-writer']);noLeaks(a);
 });
 it.each(['claude-code','claude-code-writer','codex-exec','codex-exec-writer','cursor-agent','cursor-agent-writer'])('shared input authority refuses %s key/config injection before any external child',async adapter=>{
  const k=await kit();const steps=[{agent:'fixture',task:'task',runner:{type:'external-cli',adapter,command:k.command,args:['--api-key',SECRET]}}];
@@ -216,7 +217,7 @@ describe('sixth edge: closure/config and independent parent instances', () => {
     expect(externalCliCommitment(parent)).not.toBe(externalCliCommitment(k.parent));
     const second=new ExternalCliCustodyAuthority(parent,k.budget,k.installations,{},ownershipProbe,dispatch.recordPath);
     const first=await spawnTask(k,k.request(false,'same-operation'));await first.close;
-    const request={...k.request(false,'same-operation'),stepIndex:0};const auth=await second.prepare(request);
+    const request=k.request(false,'same-operation',0,0);const auth=await second.prepare(request);
     const child=await second.spawn(auth,{command:request.command,args:request.args,cwd:request.cwd,prompt:request.prompt,env:auth.env});
     const close=once(child,'close');child.stdin.end('');await close;await second.settled(child);
     expect(ledgers(k).filter(v=>v.kind==='task').map(v=>v.depth)).toEqual([1,1]);expect(k.tasks()).toHaveLength(2);noLeaks(k);
@@ -224,7 +225,7 @@ describe('sixth edge: closure/config and independent parent instances', () => {
   it('a later first external step and a retry cannot reclaim the initial logical charge at depth cap', async () => {
     const k=await kit({maxDepth:1});
     for (const change of [{stepIndex:1,attempt:0},{stepIndex:0,attempt:1}]) {
-      const request={...k.request(),...change};const auth=await k.authority.prepare(request), before=claims(k);
+      const request=k.request(false,undefined,change.attempt,change.stepIndex);const auth=await k.authority.prepare(request), before=claims(k);
       await expect(spawnTask(k,request,auth)).rejects.toThrow('external_cli_depth_exhausted');expect(claims(k)).toBe(before);
     }
     expect(k.tasks()).toEqual([]);expect(ledgers(k).filter(v=>v.kind==='task')).toEqual([]);noLeaks(k);

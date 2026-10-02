@@ -128,12 +128,12 @@ int main(int argc,char **argv){
     const launch = await importVendor<{resolveCodexExecLaunch(input: {adapter:'codex-exec'|'codex-exec-writer';command:string;asyncDir:string;stepIndex:number;commandPrefixArgs:readonly string[]}): {command:string;args:string[];environment:{allowlist:readonly string[]}}}>('runs/shared/codex-exec-adapter.ts');
     const claudeLaunch = await importVendor<{resolveClaudeCodeLaunch(input: {adapter:'claude-code'|'claude-code-writer';command:string;commandPrefixArgs:readonly string[]}): {command:string;args:string[];environment:{allowlist:readonly string[]}}}>('runs/shared/claude-code-adapter.ts');
     let serial = 0;
-    const request = (writer = false, operation?: string, attempt = 0): ExternalCliLaunchRequest => {
-      const stepIndex = serial++;
+    const request = (writer = false, operation?: string, attempt = 0, index?: number): ExternalCliLaunchRequest => {
+      const stepIndex = index ?? serial++;
       const adapter = writer ? 'codex-exec-writer' : 'codex-exec';
       const claudeAdapter = writer ? 'claude-code-writer' : 'claude-code';
       const built = family === 'codex' ? launch.resolveCodexExecLaunch({adapter,command:actualCommand,asyncDir:dir,stepIndex,commandPrefixArgs:options.native ? [] : [entry]}) : claudeLaunch.resolveClaudeCodeLaunch({adapter:claudeAdapter,command:actualCommand,commandPrefixArgs:options.native?[]:[entry]});
-      return {...built,adapter:family === 'codex' ? adapter : claudeAdapter,cwd:dir,prompt:options.hold ? 'hold' : '',stepIndex,operation:operation ?? `step-${stepIndex}`,attempt};
+      return {...built,adapter:family === 'codex' ? adapter : claudeAdapter,asyncDir:dir,cwd:dir,prompt:options.hold ? 'hold' : '',stepIndex,operation:operation ?? `step-${stepIndex}`,attempt};
     };
     return {dir,entry,command,config,configDir,statePath,budget,parent,installations,authority,request,declaration,recordPath:dispatch.recordPath,
       tasks: (): Record<string,unknown>[] => {try { return readFileSync(path.join(dir,'task-spawned.jsonl'),'utf8').trim().split('\n').filter(Boolean).map(v => JSON.parse(v)); }catch {return [];}},

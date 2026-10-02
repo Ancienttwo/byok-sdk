@@ -110,7 +110,7 @@ Four sequential independent slices, preserve F1 charge-once and all caps. Use su
 ## Task Breakdown
 - [x] F3: final Claude auth-mode recheck, red-on-old fixture and residual pin/check-time evidence; local commit.
 - [x] Info-2: SIGTERM post-PID uncertain group, retain slots/counters and test actual group signal/liveness; local commit.
-- [ ] F6: bind adapter output path and legitimate async root, substitute/refuse fixtures and provenance; local commit.
+- [x] F6: bind adapter output path and legitimate async root, substitute/refuse fixtures and provenance; local commit.
 - [ ] F4: shared authoritative policy preflight, no probes when exhausted, race-safe final admission; local commit.
 - [ ] Regenerate projection only through tooling and execute exact seven-check chain after last commit; publish /tmp/byok-t6-followups-report.md.
 
@@ -120,6 +120,6 @@ Four sequential independent slices, preserve F1 charge-once and all caps. Use su
 ## Task Breakdown
 - [x] F3: final Claude auth-mode recheck, red-on-old fixture and residual pin/check-time evidence; local commit.
 - [x] Info-2: SIGTERM post-PID uncertain group, retain slots/counters and test actual group signal/liveness; local commit.
-- [ ] F6: bind adapter output path and legitimate async root, substitute/refuse fixtures and provenance; local commit.
+- [x] F6: bind adapter output path and legitimate async root, substitute/refuse fixtures and provenance; local commit.
 - [ ] F4: shared authoritative policy preflight, no probes when exhausted, race-safe final admission; local commit.
 - [ ] Regenerate projection only through tooling and execute exact seven-check chain after last commit; publish /tmp/byok-t6-followups-report.md.

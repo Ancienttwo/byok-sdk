@@ -1,5 +1,5 @@
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdtempSync, realpathSync, lstatSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -76,6 +76,7 @@ export interface ExternalCliInvocation {
 export interface ExternalCliLaunchRequest extends ExternalCliInvocation {
   readonly adapter?: string; readonly operation: string; readonly attempt: number; readonly stepIndex: number;
   readonly environment?: { readonly allowlist: readonly string[]; readonly values?: Readonly<Record<string,string>> };
+  readonly asyncDir?: string;
 }
 export interface ExternalCliAdmissionControl { readonly signal?: AbortSignal; readonly deadlineAt?: number }
 export interface ExternalCliAuthorization {
@@ -86,8 +87,10 @@ interface AuthorizationState {
   readonly authority: ExternalCliCustodyAuthority;
   readonly request: ExternalCliLaunchRequest;
   readonly control: ExternalCliAdmissionControl;
+  readonly outputScope: OutputScope;
   consumed: boolean;
 }
+interface OutputScope { readonly root: string; readonly resolvedRoot: string; readonly directoryDigest: string; readonly file?: string }
 interface ExternalLedger {
   version: 2; launchId: string; kind: 'probe' | 'task'; parent: string; operation: string; attempt: number;
   writer: boolean; depth: number; state: 'not-spawned' | 'spawned' | 'terminated' | 'uncertain'; pid?: number;
@@ -172,6 +175,33 @@ export class ExternalCliCustodyAuthority {
     });
   }
   private ledgerPath(id: string): string { return path.join(this.budget.directory,'custody-external',`${id}.json`); }
+  private captureOutputScope(install: AttestedOfficialExternalCliV2, request: ExternalCliLaunchRequest): OutputScope {
+    const root = request.asyncDir;
+    if (!root || !path.isAbsolute(root) || path.normalize(root) !== root) refuse('external_cli_output_scope_required');
+    let file: string | undefined;
+    if (install.adapter.startsWith('codex-')) {
+      file = path.join(root,`external-${request.stepIndex}.final-message.txt`);
+      if (request.args[request.args.indexOf('--output-last-message')+1] !== file) refuse('external_cli_output_scope_mismatch');
+    }
+    try {
+      const resolvedRoot = realpathSync(root), stat = lstatSync(resolvedRoot);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) refuse('external_cli_output_scope_changed');
+      const scope = Object.freeze({root,resolvedRoot,file,directoryDigest:externalCliCommitment([stat.dev,stat.ino,stat.mode,stat.uid,stat.gid])});
+      this.reverifyOutputScope(scope); return scope;
+    } catch { refuse('external_cli_output_scope_changed'); }
+  }
+  private reverifyOutputScope(scope: OutputScope): void {
+    try {
+      const resolved = realpathSync(scope.root), stat = lstatSync(resolved);
+      if (resolved !== scope.resolvedRoot || !stat.isDirectory() || stat.isSymbolicLink()
+        || externalCliCommitment([stat.dev,stat.ino,stat.mode,stat.uid,stat.gid]) !== scope.directoryDigest) refuse('external_cli_output_scope_changed');
+      if (scope.file) {
+        if (realpathSync(path.dirname(scope.file)) !== scope.resolvedRoot) refuse('external_cli_output_scope_changed');
+        try { const leaf = lstatSync(scope.file); if (!leaf.isFile() || leaf.isSymbolicLink() || leaf.nlink !== 1) refuse('external_cli_output_scope_changed'); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      }
+    } catch { refuse('external_cli_output_scope_changed'); }
+  }
   /** Every managed physical process takes a root claim. All adapters share this table and these slots. */
   private commit<T>(ledger: ExternalLedger, launch: () => T, beforeLaunch?: () => void): T {
     const created: string[] = [];
@@ -309,6 +339,7 @@ export class ExternalCliCustodyAuthority {
     if (install.identity.interpreter && request.args[0] !== install.identity.installPath) refuse('external_cli_entry_mismatch');
     const args = install.identity.interpreter ? request.args.slice(1) : request.args;
     validateOfficialExternalCliArgv(install,args);
+    const outputScope = this.captureOutputScope(install,request);
     const probeHome = mkdtempSync(path.join(os.tmpdir(),'byok-cli-probe-'));
     const probeEnv = buildOfficialExternalCliEnvironment(this.ambient);
     probeEnv.HOME = probeHome;
@@ -338,7 +369,7 @@ export class ExternalCliCustodyAuthority {
     const parsed = parseExternalCliDescendantLaunch(record);
     if (!parsed) refuse('external_cli_record_invalid');
     const authorization = Object.freeze({record:parsed,env:Object.freeze(env)});
-    authorizationStates.set(authorization,{authority:this,request,control,consumed:false});
+    authorizationStates.set(authorization,{authority:this,request,control,outputScope,consumed:false});
     return authorization;
   }
   /** CLI-produced mode evidence; bounded/charged like every other native probe. */
@@ -394,6 +425,8 @@ export class ExternalCliCustodyAuthority {
       return child;
     },() => {
       this.checkControl(state.control);
+      this.reverifyOutputScope(state.outputScope);
+      if (state.outputScope.file) rmSync(state.outputScope.file,{force:true});
       // Consume failure cannot create a child. Mark the handle monotonic before native spawn.
       state.consumed = true;
       const finalRecord = ledger.record!;

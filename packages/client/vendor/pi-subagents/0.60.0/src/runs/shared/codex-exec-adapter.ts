@@ -91,7 +91,6 @@ export function resolveCodexExecLaunch(input: {
 } {
 	const writer = input.adapter === CODEX_EXEC_WRITER_ADAPTER_ID;
 	const finalMessagePath = path.join(input.asyncDir, `external-${input.stepIndex}.final-message.txt`);
-	fs.rmSync(finalMessagePath, { force: true });
 	const prefix = [...(input.commandPrefixArgs ?? [])];
 	const args = [
 		...prefix,
