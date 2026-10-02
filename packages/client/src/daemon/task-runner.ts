@@ -3775,12 +3775,15 @@ export class TaskRunner {
           blobClient: this.deps.blobClient,
           taskId: active.taskId,
           signal: active.blobAbort.signal,
-          log: (message) => console.error(`[byok/client] ${message}`),
+          log: (message) => {
+            if (!active.beingTornDown) console.error(`[byok/client] ${message}`);
+          },
         });
         // The upload above is a real await: a concurrent cancel/reject may
         // have finished this task while it was in flight. Same guard, same
         // reason as the two above — see this loop's own top-of-body checks.
-        if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
+        if (this.tasks.get(active.taskId) !== active || active.finalizationStarted) return;
+        if (active.beingTornDown) continue; // skip the aborted spill, then drain queued interrupt usage
 
         // M5 batch-3 (workstream 2): DaemonConfig.maxTaskOutputBytes
         // enforcement — see `estimateEventBytes`'s own doc comment for
