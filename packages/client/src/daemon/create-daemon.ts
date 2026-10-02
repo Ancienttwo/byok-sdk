@@ -2459,7 +2459,7 @@ export function buildDaemonWithAdapters(
       send: sendEnvelope,
       ...(config.durablePi !== true ? {} : { durablePi: true, recordDurableTransition: async (taskId: string, leaseId: string, kind: string, ordinal: number) => {
         if (!activeJournal) throw new Error('durable journal unavailable');
-        await activeJournal.recordTransition({ transitionId: randomUUID(), taskId, from: 'running', to: 'running', occurredAt: new Date().toISOString(), detail: JSON.stringify({ kind, leaseId, ordinal }) });
+        await activeJournal.recordTransition({ transitionId: randomUUID(), taskId, to: 'running', occurredAt: new Date().toISOString(), detail: JSON.stringify({ kind, leaseId, ordinal }) });
       } }),
       ...(activeJournal === undefined ? {} : {
         beforeClaim: async (taskId: string, runtime: string) => {
