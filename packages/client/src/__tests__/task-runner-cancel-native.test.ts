@@ -10,7 +10,9 @@ import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
+import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import type { RuntimeAdapter, Session } from '../types';
+import { TestServer } from './fixtures/test-server';
 
 const fixture = fileURLToPath(new URL('./fixtures/task-runner-cancel-runtime.mjs', import.meta.url));
 const cases: Array<{ dir: string; gate: string; runner: TaskRunner; sessions: Session[] }> = [];
@@ -122,6 +124,43 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
     expect(c.terminals().map(event => event.type)).toEqual(['task.cancelled']);
     expect(c.sent.some(event => event.type === 'task.started')).toBe(false);
     expectNoErrors(c); await c.assertReaped();
+  });
+
+  it('shutdown exposes a gated startup owner and reaps it on retry without a second terminal', async () => {
+    const c = await setup(runtime, 'startup'); const offered = c.offer();
+    await vi.waitFor(async () => expect(await c.trace()).toContain('startup'));
+    c.runner.stopAcceptingOffers();
+    await expect(c.runner.shutdownActiveTasks('operator')).rejects.toMatchObject({ name: 'RuntimeDisposalFailure' });
+    await offered;
+    expect(c.terminals()).toHaveLength(1);
+    expect(c.terminals()[0]).toMatchObject({ type: 'task.fail', payload: { retryable: true } });
+    await fs.writeFile(c.gate, 'release'); await c.startSettled.promise;
+    await new Promise<void>(resolve => setImmediate(resolve));
+    await c.runner.shutdownActiveTasks('retry'); await c.cancel();
+    expect(c.terminals()).toHaveLength(1); expectNoErrors(c); await c.assertReaped();
+  });
+
+  it('delivers Host cancellation across the daemon transport to the native tree and returns metering once', async () => {
+    const c = await setup(runtime, 'tool');
+    const server = await TestServer.start();
+    const daemon = createDaemonWithAdapters({
+      productName: 'T1 cancellation integration', productId: 't1-native-host', serverUrl: server.url,
+      workspaceRoot: path.join(c.dir, 'host-workspace'), storeDir: path.join(c.dir, 'host-store'),
+      localAgentRelease: { version: '0.24.0-rc.1' }, runtimeEnvironment: { [runtime]: { allow: ['T1_*'] } },
+    }, [c.adapter]);
+    try {
+      await daemon.pair('pairing-code'); await daemon.start();
+      server.send(createEnvelope('task.offer', { instruction: 'Host cancellation', runtime, policy: { mode: 'auto' } },
+        { taskId: 'host-task', seq: server.nextSeq() }));
+      await server.waitFor(event => event.type === 'task.progress' && event.task_id === 'host-task'
+        && event.payload.events.some(event => event.type === 'tool_use'));
+      server.send(createEnvelope('task.cancel', { reason: 'Host stop' }, { taskId: 'host-task', seq: server.nextSeq() }));
+      const terminal = await server.waitFor(event => event.type === 'task.cancelled' && event.task_id === 'host-task');
+      expect(terminal).toMatchObject({ type: 'task.cancelled', payload: { usage: { runtime, promptTokens: 456, completionTokens: 29 } } });
+      await daemon.stop();
+      expect(server.received.filter(event => event.task_id === 'host-task' && ['task.complete', 'task.fail', 'task.cancelled'].includes(event.type))).toHaveLength(1);
+      await c.assertReaped();
+    } finally { await daemon.stop(); await server.close(); }
   });
 
   it.each(['stream', 'tool'])('cancels during %s, retains interrupt usage and deduplicates terminal work', async scenario => {

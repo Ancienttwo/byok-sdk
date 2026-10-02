@@ -1387,6 +1387,8 @@ export class TaskRunner {
    */
   private readonly preparationPinsByTask = new Map<string, string>();
   private readonly inFlightOffers = new Set<string>();
+  /** Shutdown must see startup owners created by offers aborted on the same tick. */
+  private readonly offerSettlements = new Set<Promise<void>>();
   /** Blob I/O before an offer becomes an active task still belongs to that offer's cancellation authority. */
   private readonly inFlightBlobAborts = new Map<string, AbortController>();
   /**
@@ -1804,6 +1806,7 @@ export class TaskRunner {
   }
 
   async shutdownActiveTasks(reason: string): Promise<void> {
+    if (this.offerSettlements.size > 0) await Promise.all(this.offerSettlements.values());
     const active = [...this.tasks.values()];
     await Promise.all(active.map((task) => this.shutdownTask(task, reason)));
     for (const taskId of this.startupOwners.keys()) {
@@ -1943,19 +1946,19 @@ export class TaskRunner {
   async handleEnvelope(envelope: Envelope): Promise<void> {
     switch (envelope.type) {
       case 'task.offer':
-        await this.handleOffer(envelope.task_id, envelope.payload, false);
+        await this.trackOffer(this.handleOffer(envelope.task_id, envelope.payload, false));
         return;
       case 'task.offer_with_toolsets':
-        await this.handleOffer(envelope.task_id, envelope.payload, false);
+        await this.trackOffer(this.handleOffer(envelope.task_id, envelope.payload, false));
         return;
       case 'task.offer_for_agent':
-        await this.handleOffer(envelope.task_id, envelope.payload, true);
+        await this.trackOffer(this.handleOffer(envelope.task_id, envelope.payload, true));
         return;
       case 'task.offer_for_agent_with_egress':
-        await this.handleOffer(envelope.task_id, envelope.payload, true);
+        await this.trackOffer(this.handleOffer(envelope.task_id, envelope.payload, true));
         return;
       case 'task.offer_for_agent_with_egress_fresh':
-        await this.handleOffer(envelope.task_id, envelope.payload, true);
+        await this.trackOffer(this.handleOffer(envelope.task_id, envelope.payload, true));
         return;
       case 'task.offer_prepared':
         await this.handleOffer(envelope.task_id, envelope.payload, true);
@@ -1978,6 +1981,12 @@ export class TaskRunner {
       default:
         return; // conn.* and daemon->server-only types are handled elsewhere / not applicable
     }
+  }
+
+  private async trackOffer(operation: Promise<void>): Promise<void> {
+    this.offerSettlements.add(operation);
+    try { await operation; }
+    finally { this.offerSettlements.delete(operation); }
   }
 
   private async handleOffer(
@@ -3086,8 +3095,10 @@ export class TaskRunner {
           if (disposalFailure) this.deps.onRuntimeDisposalFailure?.({ taskId, runtimeId: pick.descriptor.id,
             stage: 'quiescence', reason: err.message });
           if (!cancelled) {
-            if (agentBinding === undefined) await this.fail(taskId, errorMessage(err), false);
-            else await this.failClaimedAgent(taskId, errorMessage(err), false, {
+            const reason = this.stoppingOffers ? 'daemon shutting down during runtime startup' : errorMessage(err);
+            const retryable = this.stoppingOffers;
+            if (agentBinding === undefined) await this.fail(taskId, reason, retryable);
+            else await this.failClaimedAgent(taskId, reason, retryable, {
               binding: agentBinding, runtimeId: pick.descriptor.id,
             });
           }

@@ -8,15 +8,19 @@ import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
-const dirs: string[] = [];
+const dirs: Array<{ dir: string; store: SessionWorkspaceStore }> = [];
 afterEach(async () => {
-  for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
+  for (const { dir, store } of dirs.splice(0)) {
+    await store.get('cleanup-barrier'); // queued record() writes must finish before deleting their directory
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });
 
 describe('TaskRunner metering at the cancellation boundary', () => {
   it.each(['claude', 'codex', 'pi'] as const)('%s retains usage delivered by interrupt without leaking trailing output or errors', async (runtime: RuntimeId) => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-cancel-usage-'));
-    dirs.push(dir);
+    const store = new SessionWorkspaceStore(path.join(dir, 'sessions'));
+    dirs.push({ dir, store });
     const adapter = new StubRuntimeAdapter(runtime);
     const sent: Envelope[] = [];
     const runner = new TaskRunner({
@@ -26,7 +30,7 @@ describe('TaskRunner metering at the cancellation boundary', () => {
         resolveInstruction: async () => { throw new Error('unexpected blob resolution'); },
         uploadArtifact: async () => { throw new Error('unexpected upload'); },
       },
-      sessionWorkspaces: new SessionWorkspaceStore(path.join(dir, 'sessions')),
+      sessionWorkspaces: store,
       approvalRegistry: new ApprovalRegistry(), storeDir: dir, productId: 'cancel-usage',
       localAgentRelease: Object.freeze({ version: '0.24.0-rc.1' }),
       shutdownInterruptTimeoutMs: 20,
