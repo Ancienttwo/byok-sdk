@@ -1,6 +1,6 @@
 # Plan: T7 top-level Codex env-strip
 
-> **Status**: Blocked
+> **Status**: Executing
 > **Created**: 20261002-1658
 > **Slug**: t7-codex-env-strip
 > **Planning Source**: codex-plan
@@ -114,6 +114,8 @@ Reuse subscription exclusion before Codex hands env to the owned process; add CO
 - [x] T2 Wire subscription exclusion and shared finite auth policy; preserve measurement/spawn projection and add regression guards.
 - [x] T3 Align security/spec docs; review sibling consumers; run touched-package tests and root checks.
 - [x] T4 Record evidence and local commit SHA in /tmp/byok-t7-codex-env-strip-report.md; commit locally only.
+- [x] T5 Reverify/remove only dead PID1271 lock and establish ready CodeGraph proof through deterministic projection.
+- [ ] T6 Bind the committed authority, record acceptance and finish local harness closeout without runtime/test-policy changes.
 
 ## Verification Plan
 Red: real fixture credential-presence test fails before fix. Green: explicit credentials absent; unknown BYOK/custody/loader variables refused; platform/allowed config preserved; child digests match admission projection. Run client and implementation-identity tests, bun run typecheck, bun run build, bun run test, bun run check:api-surface, bun run check:version-authority, repo-harness run check-task-workflow --strict; capability validation and architecture sync.
@@ -129,7 +131,9 @@ Revert the single local T7 commit after review. No deployment or credential muta
 - [x] T2 Wire subscription exclusion and shared finite auth policy; preserve measurement/spawn projection and add regression guards.
 - [x] T3 Align security/spec docs; review sibling consumers; run touched-package tests and root checks.
 - [x] T4 Record evidence and local commit SHA in /tmp/byok-t7-codex-env-strip-report.md; commit locally only.
+- [x] T5 Reverify/remove only dead PID1271 lock and establish ready CodeGraph proof through deterministic projection.
+- [ ] T6 Bind the committed authority, record acceptance and finish local harness closeout without runtime/test-policy changes.
 
 ## Local Closeout Gate
 
-Implementation and all owner-required commands passed. T4 delivers the local checkpoint and requested report; actual commit SHA is recorded in that external report. Formal harness acceptance remains blocked: architecture-projection reconciliation requires ready CodeGraph proof (no index was created), and the aborted 120-second helper wrapper left an expensive-run reservation/lock. The full suite was rerun directly with the existing formal Bun gate and exited 0. No lock in the shared Git directory was removed, and no AcceptanceReceipt is claimed.
+Implementation and all owner-required commands passed. T4 delivers the local checkpoint and requested report; actual commit SHA is recorded in that external report. Initial harness blockers were recovered under PM authorization: the dead PID1271 lock was removed after fresh PID/PPID/PGID checks; CodeGraph 1.6.1 has a complete, clean index; provider projection is noop and the prior candidate is reconciled. The canonical expensive validation now passed all 20 criteria and 8 checks. The expanded contract must be committed before the formal receipt can bind to it; T6 owns this final step.

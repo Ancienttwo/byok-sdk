@@ -1,6 +1,6 @@
 # Task Contract: t7-codex-env-strip
 
-> **Status**: Blocked
+> **Status**: Active
 > **Plan**: plans/plan-20261002-1658-t7-codex-env-strip.md
 > **Task Profile**: bugfix
 > <!-- legal values: code-change | docs-only | ledger-closeout | migration | eval-only | delegated-run | bugfix (omit for legacy passthrough); see docs/reference-configs/sprint-contracts.md -->
@@ -86,6 +86,8 @@ allowed_paths:
   - tasks/notes/20261002-1658-t7-codex-env-strip.notes.md
   - tasks/notes/20261002-1658-t7-codex-env-strip.pre-fix.log
   - tasks/todos.md
+  - .codegraph/
+  - docs/architecture/
 ```
 
 ## Evidence Requirements
@@ -265,3 +267,7 @@ exit_criteria:
 
 - Commit / checkpoint: base f2098ecb; single local T7 commit recorded in requested report.
 - Revert strategy: revert reviewed T7 diff; no external mutations.
+
+## PM Harness Closeout Authorization
+
+PM authorized at 17:40 to reverify and remove only the stale PID1271 expensive-run lock, obtain CodeGraph proof and execute the formal expensive run. CodeGraph indexing and provider-owned architecture projections are in scope. Runtime assertions, timeouts and skips remain unchanged. Local commits only; no push.
