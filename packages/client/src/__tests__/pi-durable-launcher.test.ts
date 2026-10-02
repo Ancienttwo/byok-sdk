@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, realpath, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm, readFile, writeFile } from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
-import { spawn as nativeSpawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn as nativeSpawn, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
@@ -25,11 +25,12 @@ function finish(res: import('node:http').ServerResponse, content: string) {
   res.end([ { ...base, choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }] },
     { ...base, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } } ].map(value => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n');
 }
-function tool(res: import('node:http').ServerResponse, command: string) {
+function tool(res: import('node:http').ServerResponse, command: string, name = 'bash') {
+  const args = name === 'bash' ? {command} : name === 'edit' ? {path:command,edits:[{oldText:'ORIGINAL_DENIED_DATA',newText:'CHANGED'}]} : name === 'write' ? {path:command,content:'CHANGED'} : {path:command};
   const base = { id: 'cmpl-tool', object: 'chat.completion.chunk', created: 0, model: 'test' };
   res.writeHead(200, { 'content-type': 'text/event-stream' });
   res.end([
-    { ...base, choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call-test', type: 'function', function: { name: 'bash', arguments: JSON.stringify({ command }) } }] }, finish_reason: null }] },
+    { ...base, choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'call-test', type: 'function', function: { name, arguments: JSON.stringify(args) } }] }, finish_reason: null }] },
     { ...base, choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } },
   ].map(value => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n');
 }
@@ -46,9 +47,15 @@ async function fixture(respond: (res: import('node:http').ServerResponse, ordina
     spawnFn: ((_cmd, args, options) => {
       const parsed = parsePiProviderLauncherOptions(args as string[]); expect(parsed.runtimeEntry).toBe('pi-durable');
       const delegated = buildPiPreparedArgs(parsed.piArgs);
-      const env = buildPiProviderChildEnvironment({ ambient: options!.env!, binding: parsed.launchBinding!, sessionDir: parsed.sessionDir, secret: 'DURABLE_PROVIDER_SENTINEL' });
-      writeFileSync(path.join(env.PI_CODING_AGENT_DIR!, 'models.json'), JSON.stringify(buildPiProviderProjection(profile)), { mode: 0o600 });
-      const child = nativeSpawn(parsed.piBin, [...(parsed.piEntry ? [parsed.piEntry] : []), ...parsed.piFixedArgs!, `--config-digest=${parsed.piConfigDigest}`, ...delegated], { ...options, env, cwd: parsed.piCwd! } as never);
+      const env = buildPiProviderChildEnvironment({ ambient: options!.env!, binding: parsed.launchBinding!, sessionDir: parsed.sessionDir, secret: undefined });
+      writeFileSync(path.join(env.PI_CODING_AGENT_DIR!, 'models.json'), JSON.stringify(buildPiProviderProjection(profile, parsed.runtimeEntry)), { mode: 0o600 });
+      const child = nativeSpawn(parsed.piBin, [...(parsed.piEntry ? [parsed.piEntry] : []), ...parsed.piFixedArgs!, `--config-digest=${parsed.piConfigDigest}`, ...delegated], { ...options, env, cwd: parsed.piCwd!, stdio: ['pipe','pipe','pipe','ipc'], serialization: 'json' } as never);
+      expect(env.PI_PROVIDER_API_KEY).toBeUndefined();
+      expect(JSON.stringify(env)).not.toContain('DURABLE_PROVIDER_SENTINEL');
+      child.once('message', value => {
+        expect(value).toEqual({ type: 'byok.pi.durable.credential-request', configDigest: parsed.piConfigDigest });
+        child.send({ type: 'byok.pi.durable.credential', configDigest: parsed.piConfigDigest, secret: 'DURABLE_PROVIDER_SENTINEL' });
+      });
       children.push(child); return child;
     }) as typeof nativeSpawn,
   });
@@ -83,9 +90,37 @@ describe('durable ordinary worker through custody argv', () => {
     expect(use?.type).toBe('tool_use'); expect(result?.type).toBe('tool_result');
     if (use?.type !== 'tool_use' || result?.type !== 'tool_result') throw new Error('tool events missing');
     expect(use.toolCallId).not.toBe('call-test'); expect(result.toolCallId).toBe(use.toolCallId);
-    expect(JSON.stringify(result.output)).toContain('{}');
+    const output = result.output as { content: Array<{ type: string; text?: string }> };
+    expect(output.content.filter(block => block.type === 'text').map(block => block.text).join('').trim()).toBe('{}');
     expect(f.bodies.join('')).not.toContain('DURABLE_PROVIDER_SENTINEL');
     expect(f.journal).toEqual(['tool-intent:0', 'tool-committed:0']);
+  });
+  it.each(['read','write','edit'])('real %s rejects an @ outside path before file access', async name => {
+    const dir = await mkdtemp(path.join(os.tmpdir(),'byok-path-outside-')); roots.push(dir);
+    const outside = path.join(dir,'outside.txt'); await writeFile(outside,'ORIGINAL_DENIED_DATA\nPRIVATE_FILE_ONLY_MARKER');
+    const f = await fixture((res,n) => { if (n === 1) tool(res,`@${outside}`,name); else finish(res,'denied'); });
+    const events = []; for await (const event of f.session.events) events.push(event);
+    const result = events.find(event => event.type === 'tool_result');
+    expect(result?.type).toBe('tool_result'); if (result?.type !== 'tool_result') throw new Error('result missing');
+    expect(result.isError).toBe(true); expect(JSON.stringify(result.output)).toContain('structured tool path');
+    expect(await readFile(outside,'utf8')).toBe('ORIGINAL_DENIED_DATA\nPRIVATE_FILE_ONLY_MARKER');
+    expect(f.bodies.join('')).not.toContain('PRIVATE_FILE_ONLY_MARKER');
+  });
+  it('credential never enters the real worker initial environment, including OS process introspection from bash', async () => {
+    const command = process.platform === 'darwin' ? 'ps eww -p "$PPID"' : process.platform === 'linux' ? 'cat /proc/$PPID/environ' : 'env';
+    const f = await fixture((res,n) => { if (n === 1) tool(res, command); else finish(res, 'introspection complete'); });
+    const events = []; for await (const event of f.session.events) events.push(event);
+    expect(events.some(event => event.type === 'error')).toBe(false);
+    const result = events.find(event => event.type === 'tool_result');
+    expect(result?.type).toBe('tool_result');
+    if (result?.type !== 'tool_result') throw new Error('introspection tool result missing');
+    expect(result.isError).toBe(false);
+    expect(JSON.stringify(result.output)).not.toContain('DURABLE_PROVIDER_SENTINEL');
+    expect(f.bodies.join('')).not.toContain('DURABLE_PROVIDER_SENTINEL');
+    expect(f.authorizations).toEqual(['Bearer DURABLE_PROVIDER_SENTINEL','Bearer DURABLE_PROVIDER_SENTINEL']);
+    if (process.platform === 'darwin') expect(execFileSync('ps', ['eww','-p',String(f.children[0]!.pid)], {encoding:'utf8'})).not.toContain('DURABLE_PROVIDER_SENTINEL');
+    else if (process.platform === 'linux') expect(await readFile(`/proc/${f.children[0]!.pid}/environ`, 'utf8')).not.toContain('DURABLE_PROVIDER_SENTINEL');
+    expect(f.children[0]!.connected).toBe(false);
   });
   it('crash during unsafe tool ends the execution without replay or model resume', async () => {
     const f = await fixture((res,n) => { if (n === 1) tool(res, 'printf once >> marker; sleep 60'); else finish(res, 'should never happen'); });

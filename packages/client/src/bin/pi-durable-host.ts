@@ -6,6 +6,7 @@ import { createModels, createProvider } from '@earendil-works/pi-ai/models';
 import type { Model, ProviderStreams, TSchema } from '@earendil-works/pi-ai';
 import { type ToolRegistration } from '@earendil-works/pi-durable';
 import { extractPiConfigDigest, readPiHostConfig, requirePiHostBinding, verifyPiHostBinding } from '../adapters/pi/runtime-host-binding';
+import { receiveDurableCredential } from '../adapters/pi-durable/credential';
 import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment';
 import { admitReplica, type DurableReplicaBinding } from '../adapters/pi-durable/replica';
 import { openDurableEngine } from '../adapters/pi-durable/engine';
@@ -28,16 +29,11 @@ function projection(expectedProvider: string, expectedModel: string) {
   const providers = object(parsed.providers);
   if (Object.keys(parsed).length !== 1 || Object.keys(providers).length !== 1 || !Object.hasOwn(providers, expectedProvider)) throw new Error('durable provider projection differs from sealed selection');
   const provider = object(providers[expectedProvider]);
-  if (Object.keys(provider).some(key => !['baseUrl','api','apiKey','authHeader','models'].includes(key)) || (provider.apiKey !== undefined && provider.apiKey !== '$PI_PROVIDER_API_KEY') || (provider.authHeader !== undefined && provider.authHeader !== true)) throw new Error('invalid durable provider projection');
+  if (Object.keys(provider).some(key => !['baseUrl','api','apiKey','authHeader','models'].includes(key)) || (provider.apiKey !== undefined && provider.apiKey !== 'byok:durable-ipc') || (provider.authHeader !== undefined && provider.authHeader !== true)) throw new Error('invalid durable provider projection');
   if (!Array.isArray(provider.models) || provider.models.length !== 1) throw new Error('durable requires one projected model');
   const entry = object(provider.models[0]);
   if (entry.id !== expectedModel || (provider.api !== 'openai-completions' && provider.api !== 'anthropic-messages')) throw new Error('durable projected model or API differs');
-  const key = process.env.PI_PROVIDER_API_KEY;
-  if (provider.apiKey !== undefined && !key) throw new Error('durable launcher credential missing');
-  // Key lives in this model closure only. Neither shell, MCP nor replica receives it.
-  for (const name of PROVIDER_CREDENTIAL_ENV_DENY_NAMES) delete process.env[name];
-  delete process.env.PI_PROVIDER_API_KEY;
-  return { provider, entry, key, digest };
+  return { provider, entry, digest };
 }
 
 export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
@@ -55,7 +51,10 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
   if (typeof config.instruction !== 'string' || config.instruction.length === 0) throw new Error('durable instruction missing');
   const instruction = config.instruction;
   const expectedProvider = string(config.provider), expectedModel = string(config.model);
-  const { provider, entry, key, digest: projectionDigest } = projection(expectedProvider, expectedModel);
+  const { provider, entry, digest: projectionDigest } = projection(expectedProvider, expectedModel);
+  if (PROVIDER_CREDENTIAL_ENV_DENY_NAMES.some(name => Object.hasOwn(process.env, name)) || Object.hasOwn(process.env, 'PI_PROVIDER_API_KEY')) throw new Error('durable credential environment refused');
+  const key = await receiveDurableCredential(digest);
+  if (provider.apiKey !== undefined && !key) throw new Error('durable launcher credential missing');
   const api = provider.api as 'openai-completions' | 'anthropic-messages';
   const streams: ProviderStreams = api === 'openai-completions'
     ? await import('@earendil-works/pi-ai/api/openai-completions')

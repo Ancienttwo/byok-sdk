@@ -730,7 +730,7 @@ export declare function piProjectionProviderId(profileRef: string): string;
  * declared local configuration is the only authority; nothing is inferred from
  * the model name or base URL.
  */
-export declare function buildPiProviderProjection(profile: ModelProviderProfile): object;
+export declare function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry?: PiLauncherRuntimeEntry): object;
 /**
  * Validate the credential-blind RPC argv the client may delegate, then bind
  * the Pi child to the namespaced projection and exact configured model.

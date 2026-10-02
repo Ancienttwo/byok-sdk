@@ -37,7 +37,7 @@ export function piProjectionProviderId(profileRef: string): string {
  * declared local configuration is the only authority; nothing is inferred from
  * the model name or base URL.
  */
-export function buildPiProviderProjection(profile: ModelProviderProfile): object {
+export function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry = 'pi-rpc'): object {
   const { thinkingLevel: _, ...modelSettings } = requirePiModelConfig(profile);
   const projectedProviderId = piProjectionProviderId(profile.profile_ref);
   return {
@@ -50,7 +50,7 @@ export function buildPiProviderProjection(profile: ModelProviderProfile): object
             : 'openai-completions',
         ...(profile.auth_mode === 'none'
           ? {}
-          : { apiKey: `$${PI_PROJECTED_KEY_ENV}` }),
+          : { apiKey: runtimeEntry === 'pi-durable' ? 'byok:durable-ipc' : `$${PI_PROJECTED_KEY_ENV}` }),
         ...(profile.auth_mode === 'bearer' ? { authHeader: true } : {}),
         models: [
           {

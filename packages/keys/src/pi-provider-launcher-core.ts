@@ -440,7 +440,7 @@ export interface PiProviderLaunchDependencies {
   /** The profile store the profile was read from; its custody lock guards the key read. */
   profiles: ProviderProfileStore;
   spawn?: (command: string, args: string[], options: {
-    cwd: string; env: Record<string, string>; stdio: 'inherit';
+    cwd: string; env: Record<string, string>; stdio: 'inherit' | ['inherit', 'inherit', 'inherit', 'ipc']; serialization?: 'json';
   }) => ChildProcess;
 }
 
@@ -454,12 +454,15 @@ export async function startPiProvider(
   if (options.validateOnly || binding === undefined || options.piCwd === undefined || options.piFixedArgs === undefined || !/^[0-9a-f]{64}$/u.test(options.piConfigDigest ?? '')) {
     throw new Error('Pi launch requires an explicit spawn binding, cwd and fixed args');
   }
-  const projection = buildPiProviderProjection(profile);
+  const runtimeEntry = options.runtimeEntry;
+  const durable = runtimeEntry === 'pi-durable';
+  const configDigest = options.piConfigDigest!;
+  const projection = buildPiProviderProjection(profile, runtimeEntry);
   // The ONE place the two child grammars diverge. Everything after it —
   // projection write, layout assertion, secret resolution, both spawn-binding
   // assertions and the spawn itself — is shared, because custody does not
   // depend on which entry consumes the projected provider.
-  const delegated = (options.runtimeEntry === 'pi-prepared' || options.runtimeEntry === 'pi-durable')
+  const delegated = (runtimeEntry === 'pi-prepared' || durable)
     ? buildPiPreparedArgs(options.piArgs)
     : buildPiProviderArgs(profile, options.piArgs);
   const env = buildPiProviderChildEnvironment({
@@ -490,11 +493,25 @@ export async function startPiProvider(
       profile,
       createSecretStore: dependencies.createSecretStore,
     });
-    if (secret !== undefined) env[PI_PROJECTED_KEY_ENV] = secret;
-    const childArgs = [...(actual.entry === undefined ? [] : [actual.entry]), ...actual.fixedArgv, `--config-digest=${options.piConfigDigest}`, ...delegated];
+    if (!durable && secret !== undefined) env[PI_PROJECTED_KEY_ENV] = secret;
+    const childArgs = [...(actual.entry === undefined ? [] : [actual.entry]), ...actual.fixedArgv, `--config-digest=${configDigest}`, ...delegated];
     const spawnChild = dependencies.spawn ?? spawn;
     await assertImplementationSpawnBinding(binding, actual);
-    const child = spawnChild(actual.command, childArgs, { env, cwd: actual.cwd, stdio: 'inherit' });
+    const child = spawnChild(actual.command, childArgs, { env, cwd: actual.cwd,
+      stdio: durable ? ['inherit', 'inherit', 'inherit', 'ipc'] : 'inherit',
+      ...(durable ? { serialization: 'json' as const } : {}),
+    });
+    if (durable) {
+      // Private launcher->worker channel. stdio belongs exclusively to the blind daemon.
+      child.once('message', message => {
+        if (!message || typeof message !== 'object' || Array.isArray(message)
+          || Object.keys(message).length !== 2
+          || (message as {type?: unknown}).type !== 'byok.pi.durable.credential-request'
+          || (message as {configDigest?: unknown}).configDigest !== configDigest
+          || !child.send || !child.connected) { child.kill(); return; }
+        child.send({ type: 'byok.pi.durable.credential', configDigest, secret: secret ?? null }, error => { if (error) child.kill(); });
+      });
+    }
     return { child, cleanup };
   } catch (error) {
     await cleanup();
