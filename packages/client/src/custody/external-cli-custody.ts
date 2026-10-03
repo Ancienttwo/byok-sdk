@@ -7,7 +7,7 @@ import {
   CONTROLLED_PI_DIRECTORY_ENV_NAMES, DESCENDANT_PER_LAUNCH_ENV_NAMES, PROVIDER_CREDENTIAL_ENV_DENY_NAMES,
   KEYS_PI_INHERITED_ENV_NAMES, KEYS_PI_WINDOWS_ENV_NAMES, loaderEnvInjections,
   reverifyToolImplementationIdentity, toolImplementationLaunchEnvNamesDigest, toolImplementationLoaderEnvValuesDigest,
-  reverifyOfficialExternalCliDirectories,
+  reverifyOfficialExternalCliDirectories, reverifyOfficialExternalCliDirectoriesSync, reverifyToolImplementationTuples,
   externalCliCommitment, parseDescendantLaunch, parseExternalCliDescendantLaunch,
   type AttestedOfficialExternalCliV2, type ExternalCliDescendantLaunchV2, type PiDescendantLaunchV2,
   type ToolImplementationFsProbe,
@@ -167,6 +167,12 @@ export class ExternalCliCustodyAuthority {
       if (externalCliCommitment(actual) !== this.parentDigest) refuse('external_cli_parent_record_changed');
     }
   }
+  private reverifyLocked(installation: AttestedOfficialExternalCliV2): void {
+    if (!reverifyOfficialExternalCliDirectoriesSync(installation)) refuse('external_cli_config_directory_changed');
+    this.reverifyParentRecord();
+    const verdict = reverifyToolImplementationTuples(installation.identity,this.probe);
+    if (verdict !== 'ok') refuse(`external_cli_identity_${verdict.reason}`);
+  }
   private ledgers(): ExternalLedger[] {
     const dir = path.join(this.budget.directory,'custody-external');
     let names: string[];
@@ -317,7 +323,7 @@ export class ExternalCliCustodyAuthority {
       try { writeFileSync(this.ledgerPath(ledger.launchId),JSON.stringify(ledger),{mode:0o600}); }
       catch (error) { child.kill('SIGKILL'); throw error; }
       return child;
-    },() => this.checkControl(control));
+    },() => { this.checkControl(control); this.reverifyLocked(installation); this.checkControl(control); });
     // The admission lock covers claim/spawn/receipt only. Waiting and bounded output
     // collection happen outside it, so another process can use the second Q slot.
     const result = await new Promise<{status:number|null;output:string;failed:boolean}>(resolve => {
@@ -440,6 +446,8 @@ export class ExternalCliCustodyAuthority {
       catch (error) { child.kill('SIGTERM'); throw error; }
       return child;
     },() => {
+      this.checkControl(state.control);
+      this.reverifyLocked(record.installation);
       this.checkControl(state.control);
       this.reverifyOutputScope(state.outputScope);
       if (state.outputScope.file) rmSync(state.outputScope.file,{force:true});

@@ -143,3 +143,11 @@ The exact public API goldens were reviewed/updated. Independent code review foun
 - [x] Run touched tests, renew exact-subject acceptance and strict workflow, local commits only. After the last commit execute touched tests, typecheck, build and full test on final HEAD; update report.
 
 Fix1 canonical prepare passed 12/12 on 0ea3e7f9 with all six current_exact checks actually executed; independent Codex external_pass accepted subject sha256:99f6aec693fc84bf4f94408a87c39fc2b739e7bd87ab5172a3b8b565f17a05df at origin/main@f2098ecb. Supported Receipt/finalize succeeded without re-execution. Required after-last-bookkeeping-commit evidence is published to /tmp/byok-t6-fix1-final-head-evaluation.json and /tmp/byok-t6-fix1-final-head-touched.log, with the actual final HEAD and exits in /tmp/byok-t6-sixth-edge-report.md. Report remains BLOCKED until that chronological sequence passes.
+
+## F2 — user-approved locked tuple recheck (2026-10-03)
+
+- [x] Prove replacement after full reverify while waiting for the real admission lock; target/config, interpreter/assets and parent bindings must refuse before native spawn.
+- [x] Add identity-owned synchronous tuple/directory proof without replacing full hash reverify; wire locked beforeLaunch and preserve F1 rollback/permit/counter semantics.
+- [x] Run focused tests and required checks, deliberate API goldens, independent exact-subject acceptance, strict workflow, local commits only; execute final checks after last commit and update local report.
+
+F2 current-target canonical freeze14/14 PASS at2a5037b7; independent Codex accepted subject sha256:c74fda987c1881d9530c191b5dd95f823f4bf8b88473c8e8e432f706c549d7bd against origin/main@1ff6cc06. Receipt/finalize supported and successful. Final after-last-bookkeeping-commit commands and actual SHA/exits are published to /tmp/byok-t6-f2-final-head-contract.json and /tmp/byok-t6-sixth-edge-report.md; report remains BLOCKED until those chronological checks pass. No further product change planned.

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import { lstatSync, realpathSync, type Stats } from 'node:fs';
 import {
   measureOfficialExternalCliRecord, parseToolImplementationIdentity,
   type ToolImplementationAuthority, type ToolImplementationAttestedV1,
@@ -31,16 +32,27 @@ export interface AttestedOfficialExternalCliV2 extends Omit<OfficialExternalCliI
   readonly directoryStats: { readonly home: ExternalCliDirectoryStat; readonly config: ExternalCliDirectoryStat };
 }
 export interface ExternalCliDirectoryStat { readonly dev: number; readonly ino: number; readonly mode: number; readonly uid: number; readonly gid: number }
+function directoryStatOf(stat: Stats): ExternalCliDirectoryStat | undefined {
+  if (!stat.isDirectory() || stat.isSymbolicLink()) return undefined;
+  return {dev:stat.dev,ino:stat.ino,mode:stat.mode,uid:stat.uid,gid:stat.gid};
+}
 async function directoryStat(dir: string): Promise<ExternalCliDirectoryStat | undefined> {
   try {
     if (await fs.realpath(dir) !== dir) return undefined;
-    const stat = await fs.lstat(dir);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) return undefined;
-    return {dev:stat.dev,ino:stat.ino,mode:stat.mode,uid:stat.uid,gid:stat.gid};
+    return directoryStatOf(await fs.lstat(dir));
   } catch { return undefined; }
 }
 export async function reverifyOfficialExternalCliDirectories(install: AttestedOfficialExternalCliV2): Promise<boolean> {
   const home = await directoryStat(install.homeDir), config = await directoryStat(install.configDir);
+  return !!home && !!config && externalCliCommitment({home,config}) === externalCliCommitment(install.directoryStats);
+}
+/** Directory tuple check inside the final admission lock; reads no login-store contents. */
+export function reverifyOfficialExternalCliDirectoriesSync(install: AttestedOfficialExternalCliV2): boolean {
+  const measure = (dir: string): ExternalCliDirectoryStat | undefined => {
+    try { return realpathSync(dir) === dir ? directoryStatOf(lstatSync(dir)) : undefined; }
+    catch { return undefined; }
+  };
+  const home = measure(install.homeDir), config = measure(install.configDir);
   return !!home && !!config && externalCliCommitment({home,config}) === externalCliCommitment(install.directoryStats);
 }
 const object = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);

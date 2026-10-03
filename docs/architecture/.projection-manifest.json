@@ -5,12 +5,12 @@
   "sourceDigest": "sha256:2cd62242ce412b870563ddf9b283ff287abf32f92a3b1aa065a78c4a289da691",
   "provenance": {
     "schemaVersion": "archcontext.architecture-docs-projection-provenance/v1",
-    "baseHeadSha": "adc2da4cc85ad59d3e930b53848c512fb6c764f5",
-    "worktreeDigest": "sha256:da086eda2e7e11f4a4a617ae3cf65e982ecc922be010e5ea33c49bf50c78cd91",
-    "sourceTreeDigest": "sha256:8c07c65c0fb7b29bc054435f2c024b0053b6c4baf9a4d656052c73b36b842b52",
+    "baseHeadSha": "0b44f76c05da4530f21c0a27aca60c7f6727660a",
+    "worktreeDigest": "sha256:b984605b9354e4bda07438ed81fc98cab8e9ad962535d1cad8815f1e37e039db",
+    "sourceTreeDigest": "sha256:dac3653deb77097018c7fbcc6b921108a7ecd04ae1ff2d867919cea3cad152f0",
     "modelDigest": "sha256:3967fb09bdbb43f62528bdd71dae409497edd9e7102a542b398b434f7c0b9cfb",
-    "codeGraphDigest": "sha256:00991040bab8889125090b958c296824902eaa2e003e4110354ee5bd480408b1",
-    "indexedWorktreeDigest": "sha256:8b36404d3e1ecaa69a0422c05c318aacbc50b97331e8e0f94095fb68fc633c3d",
+    "codeGraphDigest": "sha256:75a4e393b16224db2da9f74cac60bb3318313d5120c514bad087c65090c1396e",
+    "indexedWorktreeDigest": "sha256:77ae19244f35cd665a5299b756e2839e9f4aa19d0c8bd83c530d279efc3430d7",
     "rendererVersion": "archcontext.docs-renderer/v4",
     "layoutVersion": "archcontext.docs-layout/v1",
     "generatedFrom": {
@@ -19,9 +19,9 @@
       "codeGraphBinaryDigest": "sha256:aaf60671de2533409c0ac11aa5db94ec1ac4d758cce92b4b78219ce21edf61d7",
       "codeGraphStatus": "ready"
     },
-    "projectionInputDigest": "sha256:bf18ed9b1cb4f794fd55abcf6230fedf445de9219d7efb14ab9e2d6d41b42d46"
+    "projectionInputDigest": "sha256:50f591d9bd23150b482ba5dfa9b8945e6c5a0d66dbf04330e521237f763f9c4e"
   },
-  "projectionDigest": "sha256:8f52ec231de6aeb8336471674d9b06e67282ca838a93d60c170f78a63291b40d",
+  "projectionDigest": "sha256:259cb964c53f524fc973073e3d4e65c981cf290588e48b04be898691c0e98b17",
   "semanticBaseline": {
     "semanticState": {
       "schemaVersion": "archcontext.architecture-semantic-state/v1",
@@ -59,17 +59,17 @@
     },
     "digests": {
       "modelDigest": "sha256:3967fb09bdbb43f62528bdd71dae409497edd9e7102a542b398b434f7c0b9cfb",
-      "sourceTreeDigest": "sha256:8c07c65c0fb7b29bc054435f2c024b0053b6c4baf9a4d656052c73b36b842b52",
+      "sourceTreeDigest": "sha256:dac3653deb77097018c7fbcc6b921108a7ecd04ae1ff2d867919cea3cad152f0",
       "flowProofDigest": "sha256:c105ee1286780504c1041f4587ff6c06a1d292ff18d33aa3359e656950ce1214",
-      "projectionDigest": "sha256:8f52ec231de6aeb8336471674d9b06e67282ca838a93d60c170f78a63291b40d"
+      "projectionDigest": "sha256:259cb964c53f524fc973073e3d4e65c981cf290588e48b04be898691c0e98b17"
     },
     "evidence": {
-      "sourceTreeDigest": "sha256:8c07c65c0fb7b29bc054435f2c024b0053b6c4baf9a4d656052c73b36b842b52",
+      "sourceTreeDigest": "sha256:dac3653deb77097018c7fbcc6b921108a7ecd04ae1ff2d867919cea3cad152f0",
       "selectorEvidenceDigest": "sha256:2c152166abffaca7bb7951befe3a590953471e24aa39217c1fde3bfdb48ec4ea",
       "rendererVersion": "archcontext.docs-renderer/v4"
     }
   },
-  "receiptDigest": "sha256:aab6df6d64160ec97bdc0d3c59e0f35e5f6f4ab3e0cd7d1d089933de8e653ac6",
+  "receiptDigest": "sha256:d78148db53a4a6078617fb14986428abf36c78f0c8ee11d1880be2df0cd6eaa2",
   "targetCount": 7,
   "fileCount": 7,
   "targets": [
@@ -98,12 +98,12 @@
       "ownership": "mixed",
       "rendererVersion": "archcontext.docs-renderer/v4",
       "format": "markdown",
-      "sourceDigest": "sha256:86be45aa663af721726fde2fae68d1acd8d6ff5020385cfebf3a23e44585f911",
-      "outputDigest": "sha256:ca6c81d7fd07d171ce9fb5cda21ba1f3a405bca298f48cfe12d6ddf1ffc8f05b",
+      "sourceDigest": "sha256:b529778eefbc69b17bb089e832735ad1e7f2df5d56b635619f6d4b074941f00b",
+      "outputDigest": "sha256:8222fcd9af4f9c98f517da7bef7d2e7d4598d5b86469f723f04a6d54ce6f0f53",
       "verifiedAgainst": {
-        "branch": "codex/n1-t6-followups",
-        "commit": "adc2da4cc85ad59d3e930b53848c512fb6c764f5",
-        "committedAt": "2026-10-03T03:48:23+08:00"
+        "branch": "docs/cloud-generic-agent-adr",
+        "commit": "0b44f76c05da4530f21c0a27aca60c7f6727660a",
+        "committedAt": "2026-10-03T03:16:33+08:00"
       }
     },
     {
