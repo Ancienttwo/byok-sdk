@@ -109,9 +109,9 @@ A DO has one alarm, and `setAlarm` overwrites it (4c §5; [Cloudflare Alarms](ht
 - **Target.** `min(next queued availableAt, next queued expiresAt, next retention deadline)` (§10). With no inbox rows and no retained rows past the window, no alarm is set. This keeps test/invocation-ledger.test.ts:55 true without change.
 - **Atomic arming.** `enqueue` writes the row and calls `setAlarm(target)` in one `storage.transaction`. 4c §5 forbids a window between the row write and the alarm.
 - **Drain on release.** When `release()` frees the slot, the runtime re-arms the alarm to `now` if runnable rows remain. This replaces any busy retry loop.
-- **Recompute.** One function `rearmAlarm()` is the only place that calls `setAlarm` or `deleteAlarm`. It reads the earliest future `availableAt`, the earliest queued `expiresAt`, the next retention deadline, and whether a due item or an unsettled run row exists. `enqueue`, claim, settlement, recovery, cancellation, trim completion and `release()` all call it. While the slot is busy it excludes due execution triggers, and `release()` restores them. It keeps future availability, expiry and retention alarms in every case.
+- **Recompute.** One function `rearmAlarm()` is the only place that calls `setAlarm` or `deleteAlarm`. It reads the earliest future `availableAt`, the earliest queued `expiresAt`, the next retention deadline, and whether a due item or an unsettled run row exists. `enqueue`, claim, settlement, recovery, cancellation, trim completion and `release()` all call it. While the slot is busy it excludes due execution triggers, and `release()` restores them. It keeps future availability, expiry and retention alarms in every case. One exception: the `finally` of an alarm handler that is itself repairing a failed settlement does not call it (§9).
 - **Boot.** Inside the existing `blockConcurrencyWhile` gate, `open()` creates the 4d tables and calls `rearmAlarm()`. This covers future work and recovery-created requeues, not only rows that are already runnable. These are bounded storage operations, which the 4c §6 gate allows.
-- **Handler contract.** `alarm()` throws for infrastructure failure, before or after a claim, for example a storage exception. Platform retry then applies (at-least-once, at most 6 retries). Business outcomes are written to rows and the handler returns normally. On re-entry, the handler adjudicates any unsettled run row before it selects new work (§9). The design does not depend on whether a new alarm can fire while a handler runs: a second handler sees a busy slot and returns.
+- **Handler contract.** `alarm()` throws for infrastructure failure, before or after a claim, for example a storage exception. Platform retry then applies (at-least-once, at most 6 retries). Business outcomes are written to rows and the handler returns normally. The design does not depend on whether a new alarm can fire while a handler runs: a second handler sees a busy slot and returns.
 - **Retry exhaustion.** After 6 failed retries the platform stops the alarm and the instance survives. The run stays unsettled and the slot stays held, so nothing else starts. `rearmAlarm()` runs again at the next `enqueue`, `release` or boot, and the handler repairs the run first. An idle session has no other guaranteed trigger. This is an explicit durable policy, not a silent retry. See Q13.
 
 ## 6. A wake run
@@ -119,20 +119,20 @@ A DO has one alarm, and `setAlarm` overwrites it (4c §5; [Cloudflare Alarms](ht
 Each step names the 4c object it reuses.
 
 1. `alarm()` awaits `runtime.ready()`. This is the 4c recovery gate. No wake starts while `#recovered` is false (src/session-runtime.ts:164).
-2. Repair any unsettled run row first (§9). This happens before any new selection.
+2. Repair only a repair-pending run row (§9). A run with a live owner is left alone. A busy slot returns here, after bounded maintenance, with no adjudication.
 3. `reserve(profile)` takes the single slot (src/session-runtime.ts:163-171). The profile is the oldest runnable item's profile. On `CLOUD_TOOL_BUSY` the handler returns and the items stay queued. `release()` re-arms the alarm. The slot is acquired before any hook with effects, so a busy trigger never reserves billing and never fails items.
-4. One sync transaction selects the batch (§7): `state='queued'`, `availableAt<=now`, `expiresAt>now`, matching profile, within the caps. An empty selection releases the slot and returns, with no model call.
-5. Optional consumer admission: `admitWake(items)` is a protected method, for example billing reservation (Q12). It receives a stable key `wake:<conversationId>`. A denial fails those items with its fixed code and releases the slot.
-6. Credential preflight, as `submit` does (src/agent-do.ts:126). A failure fails the selected items with `CLOUD_MODEL_CREDENTIAL_UNAVAILABLE` and releases the slot. 4b makes this code non-retryable (4b §3), so the wake does not retry it.
-7. `createConversation({ownership:'ownerless', agent:{model}})`, like `submit` (src/agent-do.ts:132-133). Never `fork()` (pi `dist/harness/harness.js:60-62`) and never reuse an old conversation (D1).
-8. `attach(lease, conversationId)` writes the `cloud_executions` row and arms the 240 s timer (src/session-runtime.ts:173-181).
-9. One sync transaction revalidates and claims. It rechecks `state='queued'`, `availableAt<=now`, `expiresAt>now`, profile and caps, because cancellation or expiry can happen during steps 5–8. It writes `state='running'`, `runId`, `attempts+1`, the run outcome columns (§6.1), and the `run.started` event. An empty revalidation releases the slot and returns, with no model call. A crash between steps 7 and 9 leaves an empty orphan conversation with no tasks. It is not stale, and the items stay queued.
+4. One sync transaction selects the batch (§7): `state='queued'`, `availableAt<=now`, `expiresAt>now`, matching profile, within the serialized budget (§8). An empty selection releases the slot and returns, with no model call.
+5. `createConversation({ownership:'ownerless', agent:{model}})`, like `submit` (src/agent-do.ts:132-133). Never `fork()` (pi `dist/harness/harness.js:60-62`) and never reuse an old conversation (D1). This creates the admission identity `wake:<conversationId>` before any hook runs.
+6. `attach(lease, conversationId)` writes the `cloud_executions` row with `state='starting'` and `trigger='wake'`, and arms the 240 s timer (src/session-runtime.ts:173-181). The deadline covers the hook and the setup below, not only the model run.
+7. Optional consumer admission: `admitWake(items)` is a protected method, for example billing reservation (Q12). It receives the stable key `wake:<conversationId>`. The consumer treats that key as idempotent: a retry of the same key returns the earlier reservation and does not reserve again. A denial fails the items that are still `queued` and leaves items already `cancelled` or `expired` untouched.
+8. Credential preflight, as `submit` does (src/agent-do.ts:126). A failure fails the selected items that are still `queued`, with `CLOUD_MODEL_CREDENTIAL_UNAVAILABLE`. 4b makes this code non-retryable (4b §3), so the wake does not retry it.
+9. One sync transaction revalidates and claims. It rechecks `state='queued'`, `availableAt<=now`, `expiresAt>now`, profile and caps, because cancellation or expiry can happen during steps 7–8. It writes `state='running'`, `runId`, `attempts+1`, moves the run row from `starting` to `running`, and writes the `run.started` event. An empty revalidation closes the run row as `interrupted` with `CLOUD_WAKE_EMPTY` and releases the slot, with no model call.
 10. The run commits one data-only `byok.run-input` entry with the claimed item texts and seqs. This uses the `byok.execution` pattern (src/agent-do.ts:103-108). It has no `model` field, so the model does not see it. It is the history source of truth for this run's inputs.
-11. The run submits one `input` whose content is the composed context (§6.2), with `whenBusy:'reject'` and a deterministic `requestId` of `wake:<conversationId>` (§6.3). It writes `submissionId` on the run row at once, in its own sync transaction.
+11. The run submits one `input` whose content is the composed context (§6.2), with `whenBusy:'reject'` and the `requestId` persisted in step 6 (§6.3). It writes `submissionId` on the run row at once, in its own sync transaction.
 12. Wait and finalize as `submit` does: `wait`, `waitForIdle`, final text from committed context, failure code from `runtime.fatal()` (src/agent-do.ts:193-205).
 13. One sync transaction settles the run and its items, writes the events, and nulls `payloadJson`.
 
-Every exit path runs `release()` in `finally`, including hook denial, credential failure, empty claim and storage failure. `release()` calls `rearmAlarm()`. If the run row is still `running`, the slot stays held instead of being released, and the next handler entry repairs it (§9).
+Every exit path runs `release()` in `finally`, including hook denial, credential failure, empty claim and storage failure. `release()` closes a `starting` run row as `interrupted` before it frees the slot, and then calls `rearmAlarm()`. A `running` row is repair-pending: the slot stays held and the handler rethrows (§9).
 
 The lease of a wake run stays `connected:true` for the whole run. No client stream exists. A disconnecting event-stream reader never cancels a run. Only `cancelActiveRun()` (RPC, calls `runtime.cancel(lease)`, src/session-runtime.ts:183-191) and the deadline stop it.
 
@@ -143,12 +143,14 @@ The lease of a wake run stays `connected:true` for the whole run. No client stre
 `cloud_executions` is already one row per execution (src/invocation-ledger.ts:75-79). 4d adds these columns:
 
 - `trigger` (`submit` | `wake`)
+- `requestId` (`submit:<conversationId>` | `wake:<conversationId>`)
 - `submissionId`
-- `state` (`running` | `completed` | `failed` | `interrupted`)
+- `state` (`starting` | `running` | `completed` | `failed` | `interrupted`)
 - `errorCode`
 - `startedAt`, `settledAt`
+- `eligibilityJson` (a snapshot taken before recovery writes any mark; null until recovery starts)
 
-Existing DOs need `ALTER TABLE ... ADD COLUMN`, guarded by `PRAGMA table_info`. `CREATE TABLE IF NOT EXISTS` does not add columns. `submit` runs write the same outcome columns in their `finally` path (src/agent-do.ts:209-213). Both paths then share one run record. Because of the single slot, at most one row is `running` at any time.
+Existing DOs need `ALTER TABLE ... ADD COLUMN`, guarded by `PRAGMA table_info`. `CREATE TABLE IF NOT EXISTS` does not add columns. `submit` writes the same outcome columns. It persists `requestId='submit:<conversationId>'` on the run row before it calls `conversation.submit`, and it passes that `requestId` to pi. Both paths then share one run record. Because of the single slot, at most one row is `starting` or `running` at any time. A `starting` row has no claimed items and no provider request. Recovery closes it as `interrupted` with `CLOUD_WAKE_EMPTY`, and its items stay `queued`.
 
 ### 6.2 Context rebuild
 
@@ -165,10 +167,11 @@ Existing DOs need `ALTER TABLE ... ADD COLUMN`, guarded by `PRAGMA table_info`. 
 
 - **Send gate.** A wake run is an ordinary execution. The gate requires `#active.conversationId` (src/session-runtime.ts:228). It counts steps, enforces the fatal disposition and stops step 9. Nothing bypasses it.
 - **Ledger.** Invocations of a wake run use the same `invocationId` digest (src/tools.ts:95-97) and the same `begin`/`finish` rules.
-- **Recovery gate.** A run interrupted by a restart is in the stale set when it has live pi tasks or submissions (src/session-runtime.ts:140-143). Its old conversation ends with `CLOUD_EXECUTION_INTERRUPTED` (src/session-runtime.ts:241-249). Inbox adjudication runs inside the recovery promise, after the stale aborts and before `#recovered=true`. It reads the pi submission by a deterministic `requestId` of `wake:<conversationId>`, through the read-only `storage.submissionByRequest` (`dist/types.d.ts:826`). `Harness.inspect` lists only queued and placed submissions (`dist/harness/harness.js:150-155`), so it cannot see a finished one. The host never calls `submit` to look a submission up. The send gate stays closed during inspection, because `#recovered` is still false (src/session-runtime.ts:164). The host `submissionId` can be null after a crash, because pi commits the submission before `submit()` returns (`dist/harness/submissions.js:32-35`, `:168-173`).
-  - Run row `running`, conversation not stale, pi submission `done` or `unanswered`, no fatal code and not aborted: finalize from committed state. A `done` submission completes the run. An `unanswered` one fails it with the fixed code. No model call.
-  - Run row `running` with `steps == 0`, not aborted and no fatal code: no provider request was sent, because `steps` increments before the fetch (src/invocation-ledger.ts:197-209; src/platform-provider.ts:85-90). One transaction closes the old run row as `interrupted`, clears the item claim, counts the retry and writes the events. The items return to `queued` (Q2).
-  - Run row `running` with `aborted=1` or a fatal code: the run becomes `interrupted` and the items become `interrupted` with that code. They are not requeued. `cancel()` sets both fields durably (src/session-runtime.ts:183-190; src/invocation-ledger.ts:181-185). `steps == 0` does not override them.
+- **Recovery gate.** A run interrupted by a restart is in the stale set when it has live pi tasks or submissions (src/session-runtime.ts:140-143). Its old conversation ends with `CLOUD_EXECUTION_INTERRUPTED` (src/session-runtime.ts:241-249). Inbox adjudication runs inside the recovery promise, after the stale aborts and before `#recovered=true`. It reads the pi submission through the read-only `storage.submissionByRequest(conversationId, requestId)` (`dist/types.d.ts:826`), using the `requestId` persisted on the run row before native admission. Both triggers have one: `wake:<conversationId>` and `submit:<conversationId>`. `Harness.inspect` lists only queued and placed submissions (`dist/harness/harness.js:150-155`), so it cannot see a finished one. The host never calls `submit` to look a submission up, and the lookup does not resume scheduling. The send gate stays closed during inspection, because `#recovered` is still false (src/session-runtime.ts:164). The host `submissionId` can be null after a crash, because pi commits the submission before `submit()` returns (`dist/harness/submissions.js:32-35`, `:168-173`).
+  - **Eligibility first.** Before any stale abort, one transaction snapshots the run row into `eligibilityJson`: `steps`, `aborted`, `fatalCode`. Today's recovery writes `CLOUD_EXECUTION_INTERRUPTED` onto the execution before adjudication (src/session-runtime.ts:241-247, :321-332). The snapshot is what the requeue test reads, so that write cannot change the decision. A second crash reads the same snapshot.
+  - Run row `running`, conversation not stale, pi submission `done` or `unanswered`, and the snapshot shows no fatal code and not aborted: finalize from committed state. A `done` submission completes the run. An `unanswered` one fails it. Its `reason` and `detail` pass `safeCloudError` (src/errors.ts:36-49), and anything that is not a fixed code becomes `CLOUD_MODEL_REQUEST_FAILED`. No model call.
+  - Snapshot shows `steps == 0`, not aborted and no fatal code: no provider request was sent, because `steps` increments before the fetch (src/invocation-ledger.ts:197-209; src/platform-provider.ts:85-90). One transaction closes the old run row as `interrupted`, clears the item claim, counts the retry and writes the events. The items return to `queued` (Q2). A `starting` row takes the empty-claim path of §6.1 instead.
+  - Snapshot shows `aborted=1` or a fatal code: the run becomes `interrupted` and the items become `interrupted` with that code. They are not requeued. `cancel()` sets both fields durably (src/session-runtime.ts:183-190; src/invocation-ledger.ts:181-185). `steps == 0` does not override them.
   - Otherwise: the run becomes `interrupted` and the items become `interrupted` with `CLOUD_EXECUTION_INTERRUPTED`. No automatic retry.
   - After adjudication, `rearmAlarm()` runs, so requeued items get an alarm even when boot already passed.
 - **Conversation model.** One run is one new conversation is one execution row. Mid-run arrivals do not enter the live conversation (Q1).
@@ -176,7 +179,7 @@ Existing DOs need `ALTER TABLE ... ADD COLUMN`, guarded by `PRAGMA table_info`. 
 ## 7. Concurrency
 
 - **Single submission slot.** `submit` and wake runs share `#active`. Either one gets `CLOUD_TOOL_BUSY` while the other runs (src/session-runtime.ts:166).
-- **Wakes during a run.** `enqueue` succeeds and arms the alarm. The alarm handler sees the busy slot and returns. `release()` re-arms the alarm. The next run coalesces everything that arrived. No item is lost, because the row is durable before the alarm.
+- **Wakes during a run.** `enqueue` succeeds and arms the alarm. The alarm handler sees the live owner, does bounded maintenance and returns. `release()` re-arms the alarm. The next run coalesces everything that arrived, within one profile and the caps. No item is lost, because the row is durable before the alarm.
 - **Coalescing.** One run takes the oldest runnable item and the contiguous prefix that shares its `profile`, up to the per-run caps (§8). Items with another profile stay queued and run in a later wake. A run never executes an item on a profile the item did not select. `submit` binds its admitted profile to the conversation (src/agent-do.ts:124-133), and a wake run does the same. Leftover items of the same profile stay queued for the next drain.
 - **DO interleaving.** Claim, settle and adjudication are `transactionSync` blocks with no `await` inside. Interleaved RPCs cannot observe half-claimed state.
 
@@ -186,18 +189,22 @@ Existing DOs need `ALTER TABLE ... ADD COLUMN`, guarded by `PRAGMA table_info`. 
 |---|---|---|
 | Queued items per session | 100 | `CLOUD_INBOX_FULL` (429). Nothing written. |
 | Item text | 16,000 chars (same as `submit`) | `CLOUD_REQUEST_INVALID` |
-| Items per run | 16, total item text ≤ 16,000 chars | Rest stay queued |
+| Items per run | 16, and the claimed batch must fit the serialized budget | Rest stay queued |
 | `availableAt` horizon | ≤ now + 30 days | `CLOUD_REQUEST_INVALID` |
 | `expiresAt` | Default `availableAt` + 24 h; must be > `availableAt` | Item `expired`, `CLOUD_INBOX_EXPIRED` |
 | Not-started requeues per item | 3 | Item `failed`, `CLOUD_WAKE_EXHAUSTED` |
 | History | Last 20 completed runs, inside the serialized budget | Older runs dropped |
-| Serialized context | ≤ 48,000 bytes UTF-8 of the composed JSON | History trimmed newest-first, emitted oldest-first |
+| Serialized context | ≤ 48,000 bytes UTF-8 of the composed input JSON | See below |
 | Dedup window | 7 days after settle | Row purged |
 | Run budgets | 4c values (8 steps, 12 tools, 240 s) | 4c codes |
 
-The 48,000-byte bound covers the fully serialized context, not the raw item text. One control character can encode as six JSON characters, so 16,000 admitted characters can expand well past 16,000 bytes. The composed request is measured in tests with control characters, multibyte text and the largest registered tool schemas. The metadata `contextWindow: 65,536` and `max_tokens: 4096` (src/platform-provider.ts:91, :155) are request fields, not a proof of the provider's real limit. The host does not claim the request always fits the model window.
+The 48,000-byte bound is the composed input JSON only: `{history, inbox}`. It is not the whole provider request. Tool schemas and the current run's tool results sit outside it, and the host does not claim a token budget for them. The metadata `contextWindow: 65,536` and `max_tokens: 4096` (src/platform-provider.ts:91, :155) are request fields, not a proof of the provider's real limit.
 
-New codes must be added to the `errors.ts` status table. Otherwise `safeCloudError` folds them into `CLOUD_MODEL_REQUEST_FAILED` (src/errors.ts:1-21, :36-49). This is the same lesson as 4c §4. The new codes are `CLOUD_INBOX_FULL`, `CLOUD_INBOX_CONFLICT`, `CLOUD_INBOX_EXPIRED`, `CLOUD_WAKE_EXHAUSTED`, `CLOUD_EVENT_CURSOR_EXPIRED` and `CLOUD_EVENTS_BUSY`.
+Selection fits the claimed inbox first and trims history only after that. A batch takes the longest prefix of the profile group whose serialized inbox JSON is within 48,000 bytes. One item that cannot fit by itself fails terminally with `CLOUD_INBOX_TOO_LARGE`, with 0 provider calls and no retry. The other queued items stay queued. History is then added newest-first within the bytes the inbox left, and emitted oldest-first.
+
+One control character encodes as six JSON characters, so 16,000 admitted characters can expand well past 48,000 bytes. Tests measure the composed input with control characters, multibyte text and the largest registered tool schemas. The schema case is reported, not asserted against this budget.
+
+New codes must be added to the `errors.ts` status table. Otherwise `safeCloudError` folds them into `CLOUD_MODEL_REQUEST_FAILED` (src/errors.ts:1-21, :36-49). This is the same lesson as 4c §4. The new codes are `CLOUD_INBOX_FULL`, `CLOUD_INBOX_CONFLICT`, `CLOUD_INBOX_EXPIRED`, `CLOUD_INBOX_TOO_LARGE`, `CLOUD_WAKE_EXHAUSTED`, `CLOUD_WAKE_EMPTY`, `CLOUD_EVENT_CURSOR_EXPIRED`, `CLOUD_EVENTS_BUSY` and `CLOUD_PROJECTION_FAILED`. `CLOUD_PROJECTION_FAILED` is an event-only code. It appears in projection marker rows and `projection.failed` events, and it is not thrown as a `CloudDoError`. The other eight go in the status table. `CLOUD_INBOX_TOO_LARGE` is 400. `CLOUD_WAKE_EMPTY` is 409.
 
 ## 9. Failure, retry, poison items
 
@@ -210,13 +217,19 @@ New codes must be added to the `errors.ts` status table. Otherwise `safeCloudErr
 | Restart, `steps == 0`, not aborted, no fatal code | `queued`, `attempts` counted | Next wake; the 4th claim fails the item with `CLOUD_WAKE_EXHAUSTED` |
 | Restart, `steps == 0`, aborted or fatal code set | `interrupted`, that code | None |
 | Restart, `steps ≥ 1` | `interrupted`, `CLOUD_EXECUTION_INTERRUPTED` | None |
-| Alarm handler infra failure, before or after claim | Rows unchanged | Platform alarm retry (≤ 6). After exhaustion the next enqueue, release or boot re-arms, and the handler repairs the unsettled run first (§5, Q13) |
-| Settlement transaction fails after a provider call | Run stays `running`, slot stays held | Repair on the next handler entry. No second model request (§9) |
+| Alarm handler infra failure, before or after claim | Rows unchanged | Platform alarm retry (≤ 6). The repair `finally` does not call `setAlarm` (§9). After exhaustion the next enqueue, release or boot re-arms (Q13) |
+| Settlement transaction fails after a provider call | Run stays `running`, repair-pending, slot held | Repair on the next handler entry. No second model request (§9) |
 | Recovery promise rejected | Stays `queued` | Restart only. `#opened` is cached for the instance (src/session-runtime.ts:148-155). The handler returns without re-arming, so it does not spin. |
 
 A poison item cannot loop. It is rejected before storage, or it fails terminally in one run, or it hits the requeue cap.
 
-**Post-claim repair.** The claim transaction and the settlement transaction can fail independently. If settlement throws, the handler rethrows so the platform retries the alarm. The slot stays held, because `release()` refuses to free a lease whose run row is still `running`. On the next entry, before any new selection, the handler reads that row and adjudicates it with the §6.3 rules: a pi submission that finished is settled from committed state, and a paid run (`steps ≥ 1`) is closed as `interrupted` without another model request. Only a zero-step, non-aborted claim returns its items to `queued`. The repair writes the terminal rows and events in one transaction, then releases the slot. The existing runtime already swallows some persistence failures (src/session-runtime.ts:331-332, :423-424). The wake path does not swallow the settlement failure.
+**Post-claim repair.** The claim transaction and the settlement transaction can fail independently. A run row is repair-pending only after its live owner has exited with a failed settlement. An alarm that finds a live owner does bounded maintenance and returns. It does not adjudicate that run and it does not release its slot. This covers a `submit` that is waiting on a provider when an inbox or retention alarm fires.
+
+If settlement throws, the handler rethrows so the platform retries the alarm. The slot stays held. The handler's `finally` does not call `rearmAlarm()` while the failure is the settlement itself, because a new `setAlarm` would replace the platform's retry schedule and the stated 6 retries would never be reached. The platform retry count is the bound. The design does not add its own counter.
+
+On the next entry, with no live owner, the handler closes the send gate, aborts and joins any remaining native work, then adjudicates the row with the §6.3 rules. A pi submission that finished is settled from committed state. A paid run (`steps ≥ 1`) is closed as `interrupted` without another model request. Only a zero-step, non-aborted claim returns its items to `queued`. The repair writes the terminal rows and events in one transaction, then releases the slot. The existing runtime already swallows some persistence failures (src/session-runtime.ts:331-332, :423-424). The wake path does not swallow the settlement failure.
+
+After the 6th failed retry the platform stops the alarm (Q13). The run stays repair-pending and the slot stays held. The next `enqueue`, `release` or boot calls `rearmAlarm()`, and that handler repairs the run before it selects new work. On boot no live owner exists, so recovery adjudicates the old claim directly.
 
 ## 10. Durable event log and SSE resume
 
@@ -236,7 +249,7 @@ CREATE TABLE IF NOT EXISTS cloud_events (
 | Event | Transaction |
 |---|---|
 | `inbox.accepted` | `enqueue` |
-| `run.started` | Claim (§6 step 9), or `attach` for `submit` |
+| `run.started` | Claim (§6 step 9), or the submit attach |
 | `tool.started` | Ledger `begin` (src/invocation-ledger.ts:95-111) |
 | `tool.settled` | Ledger `finish` and `claimRecovery` (src/invocation-ledger.ts:113-165) |
 | `run.completed` (with final text) / `run.failed` (code) / `run.interrupted` | Run settle, or recovery adjudication |
@@ -266,23 +279,27 @@ Text deltas are not persisted. They stay live-only on the `submit` stream. Aipha
 
 The 4c keepalive probe pattern detects disconnects (src/agent-do.ts:163-168). The caps are 110 s per connection (the Aiphabee value, research §9.0) and 8 concurrent streams per session (`CLOUD_EVENTS_BUSY`).
 
-**Snapshot.** `readSnapshot()` is binding/RPC only. It returns, from one sync read transaction, the `cloud_executions` rows, the inbox rows with `payloadJson` nulled, the invocation rows as `{invocationId, toolName, state, errorCode}`, and the committed `highWater`. The client resumes `events({after: highWater})`. `readExecution` returns only `byok.execution` data (src/agent-do.ts:110-116) and `readInvocation` needs a known id (src/agent-do.ts:68-72), so neither can rebuild a lost cursor. `readSnapshot` is the resync path. Product rendering of the snapshot stays in 4e.
+**Snapshot.** `readSnapshot({runsAfter?, inboxAfter?, invocationsAfter?})` is binding/RPC only and returns one bounded page. Each page holds at most 100 run rows, 100 inbox rows and 100 invocation refs, taken in `conversationId` or `seq` order after the given cursors. Inbox rows have `payloadJson` nulled. Invocation refs are `{invocationId, toolName, state, errorCode}`. One sync read of `cloud_event_meta` fixes `highWater` before the page is read, and every page of one resync reports that same `highWater`. The client resumes `events({after: highWater})` after the last page. `readExecution` returns only `byok.execution` data (src/agent-do.ts:110-116) and `readInvocation` needs a known id (src/agent-do.ts:68-72), so neither can rebuild a lost cursor. Product rendering of the snapshot stays in 4e.
 
-**Retention.** Events are kept 7 days and at most 10,000 rows. The 10,000 bound is a hard limit, not a target. A writer that would pass it trims the oldest rows in the same transaction, down to 9,500, before it inserts. The alarm trims by age in bounded batches of at most 500 rows, and re-arms itself while rows remain past the window. Trimming deletes only the oldest prefix and advances `trimmedThrough` in the same transaction, so the boundary only grows.
+**Final text.** `readRunOutput(conversationId, {afterEntry?})` reads the committed pi assistant entries of one run, outside `transactionSync`, in pages of at most 64 KiB. This is how a client rebuilds a completion whose event stored only a preview. It does not start or resume scheduling.
+
+**Retention.** Events are kept 7 days and at most 10,000 rows. The 10,000 bound is a hard limit, not a target. A writer counts every event the transaction will insert, and trims the oldest rows in the same transaction, down to 9,500, before it inserts. The byte caps below are UTF-8 byte lengths of the encoded JSON, measured after encoding. Preview cuts happen on a code-point boundary, never inside a multibyte character. The alarm trims by age in bounded batches of at most 500 rows, and re-arms itself while rows remain past the window. Trimming deletes only the oldest prefix and advances `trimmedThrough` in the same transaction, so the boundary only grows.
 
 `cloud_event_meta` is one row: `trimmedThrough INTEGER NOT NULL DEFAULT 0` and `highWater INTEGER NOT NULL DEFAULT 0`. `highWater` is the `seq` of the newest committed event, updated in the inserting transaction. When every row is trimmed, `trimmedThrough` stays and `minSeq` is absent. `lastSeq` in any response means `highWater`.
 
-**Oversized final text.** The provider has a per-frame bound of 65,536 bytes, not a total output bound (src/provider-fetch.ts:7, :223-249). `max_tokens: 4096` is a request field, not an enforced output size (src/platform-provider.ts:90-93). If the final assistant text would push `run.completed` past 64 KiB, the event stores a bounded preview of 1,024 bytes plus `truncated:true`. The full text stays in the pi entry, which `readSnapshot` can read. The run still completes. An event-size breach never triggers a paid rerun.
+**Oversized final text.** The provider has a per-frame bound of 65,536 UTF-16 code units (`frame.length`, src/provider-fetch.ts:128), not a total output bound and not a byte bound. `max_tokens: 4096` is a request field, not an enforced output size (src/platform-provider.ts:90-93). If the encoded `run.completed` event would pass 64 KiB UTF-8, the event stores a preview of at most 1,024 UTF-8 bytes, cut on a code-point boundary, plus `truncated:true`. The full text stays in the pi entry. The client reads it back with `readRunOutput`. The run still completes. An event-size breach never triggers a paid rerun.
 
 **Pi storage growth.** 4d does not delete old `pi_` conversations (§12). Event and inbox retention do not bound the total stored text. That deletion stays a later decision.
 
 ## 11. Security and leak boundaries
 
-- Platform keys appear only in `platformCredentialReader` output, the provider auth header, and the in-memory guard cache below (4c §8). No inbox, run, event, projection or alarm field holds a key. An alarm stores only a timestamp.
-- **Synchronous guard.** `admitCloudPayload` is async. It awaits credential reads (src/input-guard.ts:7-24, :29-62). A `transactionSync` callback cannot await ([Cloudflare transactionSync](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#transactionsync)). So the terminal transactions never call it. Instead, `open()` reads every configured platform key once, after the credential preflight, and keeps the values in runtime memory only. A synchronous `guardText(value)` runs `hasUserKeyShape` and one `RollingLeakGuard` per cached key. It guards every consumer-produced string before it enters a transaction: inbox text, dedup keys, projection keys, projection data and event data. A key read that throws fails the operation with `CLOUD_MODEL_CREDENTIAL_UNAVAILABLE` before any write. A rotation is a new deployment, which restarts the DO and rebuilds the cache (4b §2). The cache is never written to SQL, logs or events.
+- Platform keys appear only in `platformCredentialReader` output, the provider auth header, and one operation-scoped guard (4c §8). No inbox, run, event, projection or alarm field holds a key. An alarm stores only a timestamp.
+- **Synchronous guard.** `admitCloudPayload` is async. It awaits credential reads (src/input-guard.ts:7-24, :29-62). A `transactionSync` callback cannot await ([Cloudflare transactionSync](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#transactionsync)). So the terminal transactions never call it. Each bounded phase reads the keys it needs before it starts: one wake run, one `submit`, or one recovery pass. The read happens outside every sync transaction and outside the `blockConcurrencyWhile` gate, which 4c §6 keeps to bounded storage. The phase holds the keys in memory and discards them when it ends. There is no session-lifetime cache. 4b keeps a key private to the current provider request and does not cache it across turns (4b §3), and this phase scope preserves that rule.
+- A synchronous `guardText(value)` runs `hasUserKeyShape` and one `RollingLeakGuard` per held key. `guardPayload(value)` parses JSON, walks the decoded value with the existing caps (depth 32, 10,000 nodes, plain objects and arrays only, src/input-guard.ts:29-62), checks every decoded key and string, and returns the re-serialized admitted value. `RollingLeakGuard` does not decode `\uXXXX` (src/leak-guard.ts:87-91), so the check runs on the decoded strings, never on the raw JSON text. Invalid JSON takes the projection failure path (§A). The projection `key` is checked as text, separately from `dataJson`.
+- The guard covers every consumer-produced string before it enters a transaction: inbox text, dedup keys, projection keys, projection data and event data. A key read that throws fails the operation with `CLOUD_MODEL_CREDENTIAL_UNAVAILABLE` before any write. The held keys are never written to SQL, logs or events.
 - All inbox text is checked before storage (§4). Event `dataJson` contains only ids, states, fixed codes, `late`, counts and the final assistant text. That text already passed the provider stream guard (src/provider-fetch.ts:165-264). `guardText` checks it again before the insert. On a hit, the event is written with no text and the fixed code `CLOUD_MODEL_RESPONSE_REJECTED`.
 - Events carry no tool arguments and no tool result bodies. Clients read results through the authorized `readInvocation` (src/agent-do.ts:68-72).
-- `enqueue`, `events`, `readSnapshot`, `cancelActiveRun` and `cancelInboxItem` are binding/RPC only. The consumer authorizes all four identity fields before it gets the stub (src/identity.ts:33-36). The object name only routes; it does not authorize (4c §3).
+- `enqueue`, `events`, `readSnapshot`, `readRunOutput`, `cancelActiveRun` and `cancelInboxItem` are binding/RPC only. The consumer authorizes all four identity fields before it gets the stub (src/identity.ts:33-36). The object name only routes; it does not authorize (4c §3).
 - Errors return fixed codes only (src/errors.ts:51-54).
 - Tests extend the 4c whole-SQLite-row audit to `cloud_inbox`, `cloud_events` and the new `cloud_executions` columns.
 
@@ -326,28 +343,38 @@ All tests use real workerd through Miniflare with a persisted directory. A resta
    - Each wake creates a new conversation id.
    - The `byok.run-input` entry has no `model` field.
    - The provider request body contains the history window and the items, and no tool results from earlier runs.
-   - The composed request is measured with control characters, multibyte text and the largest registered tool schemas, and it stays within the serialized budget.
+   - The composed input JSON is measured with control characters and multibyte text, and it stays within 48,000 bytes.
+   - One 16,000-character item of U+0001 fails with `CLOUD_INBOX_TOO_LARGE`, with 0 provider calls, and the other queued items stay queued.
+   - A large registered tool schema is measured and reported. It is not part of the 48,000-byte budget.
    - The 9th step and the 13th tool call are stopped by the 4c gate in a wake run, and provider calls do not increase.
-   - Mixed profiles: items for two profiles produce two runs, and each provider request targets the profile its items selected.
+   - Mixed profiles: items for profiles A, B, A produce three runs in that order. Each provider request targets the profile its items selected. The selector never skips B to merge the two A groups.
 4. **Concurrency.**
    - `submit` during a wake run returns `CLOUD_TOOL_BUSY`.
-   - Items enqueued during a run, within the caps, are coalesced into exactly one next run. A batch past the caps leaves the overflow queued for a further run.
-   - A second alarm during a run makes no provider call.
+   - Items of one profile enqueued during a run, within the caps and the serialized budget, are coalesced into exactly one next run. A batch past either cap leaves the overflow queued. Mixed profiles need one run per contiguous group, tested separately.
+   - A second alarm during a run makes no provider call and does not adjudicate the live run.
    - Enqueue during an active `submit`, with both an admission denial and a failing credential reader: no extra billing reservation, and no item fails only because the trigger was busy.
+   - An alarm during an active `submit` leaves that run `running` and its slot held.
 5. **Restart adjudication.** Every point is a deterministic pause with the SQL row and the pi submission state observed before the restart. `dispose()` plus a new Miniflare proves persistence (test/session-runtime.test.ts:110). It does not by itself prove the crash point. The pause is what pins the point.
    - Before claim → the items run once later.
-   - After claim with `steps == 0` → requeued with `attempts` counted, and the old run row is `interrupted`.
+   - After attach and before claim, with the items cancelled during setup → the run row is `interrupted` with `CLOUD_WAKE_EMPTY`, the slot is free, and no model call happens.
+   - After claim with `steps == 0` and a placed pi submission → requeued from the eligibility snapshot, even though recovery wrote `CLOUD_EXECUTION_INTERRUPTED` on the execution.
+   - A second restart during recovery, after the snapshot and before adjudication → the same requeue decision.
    - After claim with `steps == 0` and `aborted=1` → `interrupted`, not requeued.
-   - After the pi admission commit and before the host `submissionId` write, with the pi submission already `done` → settled from committed state, with 0 provider calls.
+   - After the pi admission commit and before the host `submissionId` write, with the pi submission already `done` → settled from committed state, with 0 provider calls. The same case for a `submit` run, whose handle is gone.
+   - A `submit` whose pi submission is `unanswered` before the host settle → `failed` with the fixed code, or `CLOUD_MODEL_REQUEST_FAILED` when the reason is not a fixed code.
    - After the first provider request → `interrupted`, with 0 further provider calls.
    - After pi `done` but before run settle → `completed` from committed state, with 0 provider calls.
    - Settlement transaction failure after a real provider call → the same instance repairs the outcome with 0 additional provider calls.
+   - An alarm during that live run, before the owner exits → the run is not adjudicated.
+   - `admitWake` succeeds, then the credential preflight fails, the conversation setup fails, and the revalidation finds the items cancelled: each releases the reservation once, fails only items still `queued`, and writes no second reservation.
    - Four claims with `steps == 0` give `CLOUD_WAKE_EXHAUSTED` on the fourth.
 6. **Events.**
    - Each write point produces exactly one row in the same transaction. Fault-inject a storage failure after the state write and before commit, and check that neither row exists.
    - `claimRecovery` terminal states produce `tool.settled`.
    - A throwing `onInvocationSettled` does not change the tool outcome and fires once (regression for §10).
-   - The synchronous guard rejects a key in a projection key and in decoded projection data. The test uses a credential reader that actually awaits, and it never substitutes an always-pass guard.
+   - The synchronous guard rejects a key in a projection key and in decoded projection data, including a value whose whole key is written as `\uXXXX`. The test uses a credential reader that actually awaits, the production `guardPayload`, and never an always-pass guard.
+   - Two invocations that return the same consumer key both get a projection row. A consumer key equal to a failure-marker key does not collide with it. A repeated settlement with the same digest writes nothing new, and one with a different digest writes the failure marker without suppressing `tool.settled`.
+   - Delivery: two model steps that both use `call_1` link each invocation to its own assistant entry and result. A ledger `succeeded` row whose native tool result is `interrupted` is `undelivered`.
 7. **SSE resume.**
    - Disconnect after N events, reconnect with `Last-Event-ID`, and check the replay. Delivery across reconnects is at-least-once, so the consumer dedups by seq.
    - `after = minSeq - 1` replays from the retained head. `after=0` does the same. A future cursor returns `CLOUD_EVENT_CURSOR_EXPIRED`.
@@ -356,8 +383,9 @@ All tests use real workerd through Miniflare with a persisted directory. A resta
    - After a restart, the client resumes from its cursor and sees `run.interrupted`.
    - Closing a reader never cancels the run.
    - The 9th concurrent stream returns `CLOUD_EVENTS_BUSY`.
-   - An expired cursor during `readSnapshot`, with new events committed mid-read, resumes after the snapshot's `highWater` with no gap and no overlap.
-8. **Retention.** Trimming removes only the oldest prefix, `trimmedThrough` only grows, and the dedup window is honored. More than 500 rows past the window are fully trimmed across re-armed alarms. A writer that would pass 10,000 rows trims before it inserts.
+   - An expired cursor during `readSnapshot`, with new events committed mid-read, resumes after the snapshot's `highWater` with no gap and no overlap. Every page of one resync reports the same `highWater`.
+   - `readRunOutput` rebuilds a completion whose event stored only a preview.
+8. **Retention.** Trimming removes only the oldest prefix, `trimmedThrough` only grows, and the dedup window is honored. More than 500 rows past the window are fully trimmed across re-armed alarms. A writer that would pass 10,000 rows trims before it inserts, counting every event of that transaction. A multibyte preview is cut on a code-point boundary.
 9. **Root gate.** Run the root required checks from CLAUDE.md.
 
 No 4c assertion may change. The ledger-only no-alarm assertion stays true by design (§5).
@@ -371,8 +399,9 @@ These hooks are separate from the core 4d design above. Each subsection gives th
 ### A. Synchronous projection inside the ledger terminal transaction
 
 - **Need.** A consumer projection row must exist when the invocation is terminal and the consumer asked for one. It must cover every terminal state: `succeeded`, `failed`, `aborted`, `timed_out` and `interrupted`. Today terminal states are written in two places: `finish` (src/invocation-ledger.ts:113-137) and `claimRecovery` (`:140-165`). `interrupted` is written only by `claimRecovery` (`:158-160`). The post-commit hook misses `claimRecovery` and is unsafe to throw (§10).
-- **Shape.** A protected pure function `projectInvocation(row): {key, dataJson} | undefined`. The SDK calls it inside both transactions, only when the terminal `UPDATE` applied (state was non-terminal and the attempt matched, `:117`). The SDK itself performs one `INSERT ... ON CONFLICT(key) DO NOTHING` into `cloud_projections(key PK, invocationId, state, dataJson, seq)`. Consumer code returns data. It never runs SQL. The SDK's own `tool.settled` event is written in the same transaction and is not part of this projection. It is mandatory and atomic with the terminal state.
-- **Failure policy.** The projection is optional. `undefined` means the consumer wants no row, and that is not an error. A throw, an invalid or oversized payload, or a guard rejection writes one SDK-owned marker row under the key `invocation:<invocationId>:projection-failed`, with the fixed code `CLOUD_PROJECTION_FAILED` and no exception text. The marker emits one `projection.failed` event in the same transaction. The failure never rolls back the terminal state and never suppresses `tool.settled`.
+- **Shape.** A protected pure function `projectInvocation(row): {key, dataJson} | undefined`. The SDK calls it inside both transactions, only when the terminal `UPDATE` applied (state was non-terminal and the attempt matched, `:117`). The stored primary key is `projection:<invocationId>:<consumer key>`. The consumer key is checked by `guardText` and limited to 128 characters. `dataJson` passes `guardPayload` (§11) and is stored as the admitted re-serialization. Consumer code returns data. It never runs SQL. The SDK's own `tool.settled` event is written in the same transaction and is not part of this projection. It is mandatory and atomic with the terminal state.
+- **Idempotency.** `INSERT ... ON CONFLICT DO NOTHING` applies only when the existing row has the same `invocationId`, the same terminal state and the same payload digest. A row with the same stored key but a different invocation, state or digest is a conflict. The conflict writes the failure marker and does not suppress `tool.settled`.
+- **Failure policy.** The projection is optional. `undefined` means the consumer wants no row, and that is not an error. A throw, invalid JSON, an oversized payload, a guard rejection or a key conflict writes one SDK-owned marker row under the key `sdk:<invocationId>:projection-failed`, with the fixed code `CLOUD_PROJECTION_FAILED` and no exception text. The marker emits one `projection.failed` event in the same transaction. The `sdk:` namespace is reserved. A consumer key is stored under `projection:`, so it cannot equal a marker key. The failure never rolls back the terminal state and never suppresses `tool.settled`. `CLOUD_PROJECTION_FAILED` is event-only (§8). It is not thrown.
 - **Risks.** Consumer code runs inside `transactionSync`. It must be sync and total, and it must not read credentials: the synchronous guard (§11) checks `key` and `dataJson` afterwards. Because the SDK owns the single write, no partial consumer write can remain. `dataJson` has a size cap of 16 KiB. Projection must not read pi tables. `begin` and `finish` run before pi commits, so reads would see inconsistent state.
 - **Recommended slice: 4d, contingent on the owner selecting it (Q10).** The 4d event log does not need the consumer projection. `tool.settled` is written directly. The seam exists so the owner can opt in without a second terminal-write path.
 
@@ -409,7 +438,11 @@ These hooks are separate from the core 4d design above. Each subsection gives th
 ### F. Durable "delivered to a completed conversation" flag
 
 - **Need.** A `succeeded` invocation does not prove that its result appears in a completed run's context. The ledger is written before pi commits the native tool-result entry (src/session-runtime.ts:407-414, then `:299-308`). A later fatal code (for example `CLOUD_STEP_LIMIT`) can also fail the run after the tool succeeded. `finish` checks the fatal code only at settle time (src/invocation-ledger.ts:127-129). The run outcome of `submit` is computed in memory and never persisted (src/agent-do.ts:193-207).
-- **Shape.** One predicate applies to normal settlement and to recovery. An invocation is `delivered` only when its run row is `completed` and the committed pi context of that conversation contains a `pi.tool-result` entry for its `toolCallId`. The link is the committed entry id, not the ledger state. The run-settle transaction (§6 step 13) and the recovery adjudication write `deliveredState` on each invocation of that conversation: `delivered` or `undelivered`. A recovery replay that completes a pi-done run uses the same predicate, so it can be `delivered`. When the value changes after the earlier event, the SDK writes a new `tool.delivered` event. It never edits the earlier `tool.settled` event.
+- **Shape.** One predicate applies to normal settlement and to recovery. The host reads the immutable pi evidence before the sync settle transaction. `conversation.context()` is async (`dist/harness/context.js:25-27`), so the read stays outside `transactionSync`. The invocation tuple is `(conversationId, assistantEntryId, toolCallId)`. Provider call ids repeat across model steps (src/provider-fetch.ts:102), which is why the ledger digest also includes the assistant entry (src/tools.ts:95-96, src/session-runtime.ts:284-289). The native tool task stores `input.assistant` and `input.callId` (`dist/harness/tool.js:95-101`). Delivery requires all of these:
+  - the run row is `completed`;
+  - the native task for that tuple reached `terminal` with a succeeded outcome, not `failed` or `aborted` (`dist/harness/tool.js:68-92`);
+  - the committed `pi.tool-result` entry has `byTaskId` equal to that task and contributes its result to the active model context (`dist/harness/context.js:46-51`).
+  The link stored on the invocation is that task id and that entry id, not the ledger state. The run-settle transaction (§6 step 13) and the recovery adjudication write `deliveredState`: `delivered` or `undelivered`. A recovery replay that completes a pi-done run uses the same predicate, so it can be `delivered`. When the value changes after the earlier event, the SDK writes a new `tool.delivered` event. It never edits the earlier `tool.settled` event.
 - **Risks.** "Delivered" means "present in the committed context of a completed run". It does not mean the model used the result. A late recovery replay of a tool whose run was interrupted is `undelivered`.
 - **Recommended slice: 4d.** It falls out of the run outcome columns that 4d adds (§6.1).
 
