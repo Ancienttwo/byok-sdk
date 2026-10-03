@@ -101,9 +101,9 @@
       "sourceDigest": "sha256:8a356f1f8cde7afe326b5033ae8d6ea5bba3db826b1db3e1223405ed3e6361e2",
       "outputDigest": "sha256:2bf05588105f46b1329f21cb42bdb87f212de8fd4a636783b09e7a9de9f2bea3",
       "verifiedAgainst": {
-        "branch": "cloud-4c-tools-jobs",
-        "commit": "49e6dd8617b9fb40f391e12682288ac8e0edddbb",
-        "committedAt": "2026-10-04T01:08:08+08:00"
+        "branch": "pi-1.0.1-upgrade",
+        "commit": "05f75719c132ae9af4a4a6c87e99963e8e70f203",
+        "committedAt": "2026-10-04T04:18:57+08:00"
       }
     },
     {
