@@ -11,6 +11,7 @@ Architecture decisions:
 
 Reference reports:
 
+- [Cloud slice 4c：session DO 上的工具与长作业设计稿 (2026-10-03)](./2026-10-03_cloud-4c-tools-jobs.md)（设计稿，未获实现授权）
 - [Cloud slice 4b：platform-key credentials 设计稿 (2026-10-03)](./2026-10-03_cloud-4b-platform-key.md)（Aimpact 已批准实现，使用 streaming guard）
 - [#258 durable slice 1 vs Cloudflare PiHarness：差距分析、Generic Agent 双模式与云端 backend (2026-10-03)](./2026-10-03_pi-harness-cf-gap-and-cloud-generic-agent.md)（已定决策见 [ADR-036](../architecture/adr-2026-10-03-cloud-generic-agent.md)）
 - [OAR（botiverse/oar）对 byok-sdk 的集成与萃取评估 (2026-10-01)](./2026-10-01_oar-extraction-assessment.md)

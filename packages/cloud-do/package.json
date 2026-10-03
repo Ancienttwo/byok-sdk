@@ -8,7 +8,7 @@
   "scripts": {
     "build": "wrangler deploy --dry-run --outdir dist",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run && node --test test/recovery-walltime.node.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-durable": "1.0.0",
