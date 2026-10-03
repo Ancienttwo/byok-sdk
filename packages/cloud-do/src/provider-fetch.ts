@@ -29,18 +29,21 @@ async function* frames(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGe
       if (frame.length + line.length > FRAME_LIMIT) throw new CloudDoError('CLOUD_MODEL_RESPONSE_REJECTED');
     }
     if (next.done) {
-      if (line) frame += line;
-      if (frame) yield frame;
+      if (line || frame) throw new CloudDoError('CLOUD_MODEL_RESPONSE_REJECTED');
       return;
     }
   }
+}
+
+function eventData(frame: string): string {
+  return frame.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).replace(/^ /, '')).join('\n');
 }
 
 export async function* readSseData(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   const reader = body.getReader();
   try {
     for await (const frame of frames(reader)) {
-      const data = frame.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).replace(/^ /, '')).join('\n');
+      const data = eventData(frame);
       if (data) yield data;
     }
   } finally { try { await reader.cancel(); } catch { /* Never retain an upstream error. */ } }
@@ -54,7 +57,7 @@ function numericUsage(value: unknown): Record<string, number> | undefined {
     const n = usage[field];
     if (typeof n === 'number' && Number.isSafeInteger(n) && n >= 0) result[field] = n;
   }
-  return result;
+  return Object.keys(result).length ? result : undefined;
 }
 
 /** The SDK receives only re-encoded, checked text and bounded numeric usage. IDs,
@@ -101,12 +104,13 @@ function guardedBody(body: ReadableStream<Uint8Array>, key: string, profile: Pla
     let done = false;
     try {
       for await (const frame of frames(reader)) {
-        const data = frame.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).replace(/^ /, '')).join('\n');
+        const data = eventData(frame);
         if (!data) continue;
         if (data === '[DONE]') { done = true; break; }
         const payload = object(JSON.parse(data));
         if (!payload || payload.error) throw new CloudDoError('CLOUD_MODEL_RESPONSE_REJECTED');
-        usage = numericUsage(payload.usage) ?? usage;
+        const currentUsage = numericUsage(payload.usage);
+        if (currentUsage) usage = { ...usage, ...currentUsage };
         if (!Array.isArray(payload.choices)) throw new CloudDoError('CLOUD_MODEL_RESPONSE_REJECTED');
         const choice = payload.choices.find(item => object(item)?.index === 0);
         if (!choice) continue; // e.g. the terminal numeric-usage frame
@@ -157,7 +161,9 @@ export function createProviderFetch(profile: PlatformProfile, secret: string, fe
   const key = requirePlatformKey(secret);
   const endpoint = `${profile.baseUrl.replace(/\/$/, '')}/chat/completions`;
   return async (input, init) => {
-    const request = new Request(input, init);
+    let request: Request;
+    try { request = new Request(input, init); }
+    catch { throw new CloudDoError('CLOUD_REQUEST_INVALID'); }
     if (request.url !== endpoint || request.method !== 'POST') throw new CloudDoError('CLOUD_REQUEST_INVALID');
     const abort = new AbortController();
     const onAbort = () => abort.abort();

@@ -2,7 +2,7 @@ import { CloudDoError } from './errors';
 import { platformProfile, type PlatformProfileId } from './platform-credentials';
 
 export interface CloudSubmission { readonly instruction: string; readonly profile: PlatformProfileId }
-const credentialFields = new Set(['credential', 'credentials', 'apikey', 'api_key', 'secret', 'authorization', 'x-api-key', 'headers']);
+const credentialFields = new Set(['credential', 'credentials', 'apikey', 'api_key', 'secret', 'authorization', 'x-api-key', 'api-key', 'x-goog-api-key', 'proxy-authorization', 'cf-aig-authorization', 'headers']);
 
 function rejectCredentialFields(value: unknown, depth = 0, seen = new Set<object>()): void {
   if (value === null || typeof value !== 'object') return;

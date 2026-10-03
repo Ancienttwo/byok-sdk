@@ -92,6 +92,20 @@ describe('frozen credentialed provider transport', () => {
     expect(error.stack).not.toContain(KEY);
     expect(error.cause).toBeUndefined();
   });
+  it('sanitizes malformed credential-bearing URL construction before any transport call', async () => {
+    let calls = 0;
+    const fetch = createProviderFetch(profile, KEY, async () => { calls++; return new Response(null); });
+    let caught: unknown;
+    try { await fetch(`https://[${KEY}`, { method: 'POST', body: '{}' }); } catch (error) { caught = error; }
+    expect(caught).toBeInstanceOf(CloudDoError);
+    const error = caught as CloudDoError;
+    expect(error.message).toBe('CLOUD_REQUEST_INVALID');
+    expect(error.retryable).toBe(false);
+    expect(error.stack?.includes(KEY)).toBe(false);
+    expect(error.cause).toBeUndefined();
+    expect(calls).toBe(0);
+    expect((await cloudErrorResponse(error).text()).includes(KEY)).toBe(false);
+  });
   it('decodes JSON-escaped key content when every upstream read has exactly one byte', async () => {
     const escaped = Array.from(KEY, char => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`).join('');
     const payload = new TextEncoder().encode(`data: {"choices":[{"index":0,"delta":{"content":"${escaped}"},"finish_reason":null}]}\n\ndata: [DONE]\n\n`);

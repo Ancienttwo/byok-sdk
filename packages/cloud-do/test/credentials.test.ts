@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { build } from 'esbuild';
-import { Log, LogLevel, Miniflare, type MiniflareOptions } from 'miniflare';
+import { Log, LogLevel, Miniflare, type MiniflareOptions, type WorkerdStructuredLog } from 'miniflare';
 
 const KEY = 'sk-proj-~~~Platform~0123456789+Tail/Z9';
 const SECONDARY = 'sk-proj-~~~Secondary~0123456789+Tail/Z8';
@@ -12,9 +12,11 @@ const USER_KEY = 'sk-proj-UserSecret0123456789abcdef';
 const SAFE = 'The completed paragraph has no credentials. ';
 const LONG_SAFE = SAFE.repeat(20);
 const logs: string[] = [];
+const allLogs: string[] = [];
+const structuredLogs: WorkerdStructuredLog[] = [];
 class AuditLog extends Log {
   constructor() { super(LogLevel.VERBOSE); }
-  protected override log(message: string) { logs.push(message); }
+  protected override log(message: string) { logs.push(message); allLogs.push(message); }
 }
 interface ProviderCall { url: string; headers: Record<string, string>; body: string }
 const calls: ProviderCall[] = [];
@@ -68,13 +70,20 @@ beforeAll(async () => {
       } } },
     };
   });
-  mf = new Miniflare({ workers, log: new AuditLog() });
+  mf = new Miniflare({ workers, log: new AuditLog(),
+    handleStructuredLogs: log => { structuredLogs.push(log); const message = JSON.stringify(log); logs.push(message); allLogs.push(message); },
+    handleUncaughtError: error => {
+      const message = JSON.stringify(error, (_name, value: unknown) => value instanceof Error
+        ? { ...value, message: value.message, stack: value.stack, cause: value.cause } : value);
+      logs.push(message); allLogs.push(message);
+    },
+  });
   await mf.ready;
 });
-afterAll(async () => { await mf?.dispose(); });
-beforeEach(() => { calls.length = 0; logs.length = 0; scenario = {}; finishProvider = undefined; cancelled = false; providerClosed = false; });
+afterAll(async () => { await mf?.dispose(); safeArtifacts(allLogs); });
+beforeEach(() => { calls.length = 0; logs.length = 0; structuredLogs.length = 0; scenario = {}; finishProvider = undefined; cancelled = false; providerClosed = false; });
 
-async function rpc(name: string, operation: 'dump' | 'submit' | 'append', input?: unknown, kind = 'normal') {
+async function rpc(name: string, operation: 'dump' | 'submit' | 'append' | 'console' | 'cancel-inside' | 'cancel-local', input?: unknown, kind = 'normal') {
   const fetcher = await mf.getWorker(`credentials-${kind}`);
   return fetcher.fetch('http://test/', { method: 'POST', body: JSON.stringify({ name, operation, input }) });
 }
@@ -85,6 +94,14 @@ async function dump(name: string, kind = 'normal') {
 }
 function events(text: string): Record<string, unknown>[] {
   return text.split('\n').filter(line => line.startsWith('data: ')).map(line => JSON.parse(line.slice(6)) as Record<string, unknown>);
+}
+function assistantUsage(persisted: Record<string, unknown[]>): Record<string, unknown> {
+  const assistants = (persisted.pi_entries as { record: string }[]).flatMap(row => {
+    const record = JSON.parse(row.record) as { kind: string; model?: { role: string; usage: Record<string, unknown> }[] };
+    return record.kind === 'pi.assistant' ? record.model ?? [] : [];
+  }).filter(message => message.role === 'assistant');
+  expect(assistants).toHaveLength(1);
+  return assistants[0]!.usage;
 }
 function safeArtifacts(...artifacts: unknown[]) {
   const text = JSON.stringify(artifacts);
@@ -99,6 +116,17 @@ function safeArtifacts(...artifacts: unknown[]) {
 }
 
 describe('platform credentials through real native Harness in workerd', () => {
+  it('positively observes actual Worker console log, warn and error through structured logs', async () => {
+    const response = await rpc('console-positive', 'console');
+    expect(response.status).toBe(200);
+    await response.text();
+    await vi.waitFor(() => {
+      const actual = JSON.stringify(structuredLogs);
+      for (const level of ['log', 'warn', 'error']) expect(actual).toContain(`cloud-4b-console-positive-${level}`);
+    });
+    safeArtifacts(logs, structuredLogs);
+    expect(calls).toHaveLength(0);
+  });
   for (const profile of ['zai_openai', 'deepseek_direct']) it(`uses frozen ${profile} mapping, header-only key and native persisted output`, async () => {
     const name = `good-${++serial}`;
     const response = await rpc(name, 'submit', { instruction: 'Write a paragraph.', ...(profile === 'zai_openai' ? {} : { profile }) });
@@ -119,6 +147,25 @@ describe('platform credentials through real native Harness in workerd', () => {
     expect(Object.keys(persisted)).toContain('pi_entries');
     expect(JSON.stringify(persisted)).toContain('11');
     expect(JSON.stringify(persisted)).toContain('7');
+    expect(assistantUsage(persisted)).toMatchObject({ input: 11, output: 7, totalTokens: 18 });
+  });
+
+  for (const { label, usage } of [
+    { label: 'empty', usage: {} },
+    { label: 'nonnumeric', usage: { prompt_tokens: '11', completion_tokens: '7', total_tokens: '18', vendor_data: KEY } },
+  ]) it(`preserves validated native usage when a later ${label} usage frame arrives`, async () => {
+    const usageFrame = (value: unknown) => `data: ${JSON.stringify({ choices: [], usage: value })}\n\n`;
+    scenario = { chunks: [sse(LONG_SAFE), usageFrame({ prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 }), usageFrame(usage)],
+      ending: 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n' };
+    const name = `usage-${label}-${++serial}`;
+    const response = await rpc(name, 'submit', { instruction: 'Write a paragraph.' });
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(events(text).at(-1)).toMatchObject({ type: 'done' });
+    const persisted = await dump(name);
+    expect(assistantUsage(persisted)).toMatchObject({ input: 11, output: 7, totalTokens: 18 });
+    expect(calls).toHaveLength(1);
+    safeArtifacts(text, logs, persisted);
   });
 
   it('releases safe text before provider EOF and finishes the tail in order', async () => {
@@ -136,6 +183,42 @@ describe('platform credentials through real native Harness in workerd', () => {
       expect(events(text).filter(event => event.type === 'text_delta').map(event => event.delta).join('')).toBe(LONG_SAFE);
       safeArtifacts(text, logs);
     } finally { if (!providerClosed && !cancelled) finishProvider?.(); await reader.cancel(); }
+  });
+
+  it('cancels the live upstream HTTP response when the client cancels its SSE reader', async () => {
+    scenario = { hold: true, chunks: [sse(LONG_SAFE)] };
+    const name = `client-cancel-${++serial}`;
+    // Exercise an HTTP client stream, including disconnect propagation, rather
+    // than Miniflare's magic getWorker() proxy stream bridge.
+    const response = await mf.dispatchFetch('http://test/', { method: 'POST', body: JSON.stringify({ name, operation: 'submit', input: { instruction: 'Write a paragraph.' } }) });
+    const reader = response.body!.getReader();
+    try {
+      const first = await reader.read();
+      expect(first.done).toBe(false);
+      expect(new TextDecoder().decode(first.value)).toContain('text_delta');
+      expect(providerClosed).toBe(false);
+      await reader.cancel();
+      await vi.waitFor(() => expect(cancelled).toBe(true));
+      expect(providerClosed).toBe(false);
+      expect(calls).toHaveLength(1);
+      safeArtifacts(new TextDecoder().decode(first.value), logs, await dump(name));
+    } finally { if (!providerClosed && !cancelled) finishProvider?.(); }
+  });
+
+  for (const operation of ['cancel-inside', 'cancel-local'] as const) it(`propagates ${operation} workerd reader cancellation to the upstream HTTP response`, async () => {
+    scenario = { hold: true, chunks: [sse(LONG_SAFE)] };
+    const name = `diagnostic-${operation}-${++serial}`;
+    try {
+      const response = await rpc(name, operation, { instruction: 'Write a paragraph.' });
+      expect(response.status).toBe(200);
+      const result = await response.json() as { first: string; cancelled: boolean };
+      expect(result.first).toContain('text_delta');
+      expect(result.cancelled).toBe(true);
+      await vi.waitFor(() => expect(cancelled).toBe(true));
+      expect(providerClosed).toBe(false);
+      expect(calls).toHaveLength(1);
+      safeArtifacts(result, logs, await dump(name));
+    } finally { if (!providerClosed && !cancelled) finishProvider?.(); }
   });
 
   it('drops credential-bearing vendor metadata, headers and nonnumeric usage before pi intake', async () => {
@@ -225,6 +308,7 @@ describe('platform credentials through real native Harness in workerd', () => {
     { name: 'missing terminal frame', chunks: [sse(SAFE)], ending: '', code: 'CLOUD_MODEL_RESPONSE_REJECTED' },
     { name: 'oversized SSE frame', chunks: ['data: ' + 'x'.repeat(65_537) + '\n\n'], ending: '', code: 'CLOUD_MODEL_RESPONSE_REJECTED' },
     { name: 'invalid JSON frame', chunks: ['data: {unclosed\n\n'], ending: '', code: 'CLOUD_MODEL_REQUEST_FAILED' },
+    { name: 'unterminated DONE at EOF', chunks: [sse(SAFE)], ending: 'data: [DONE]', code: 'CLOUD_MODEL_RESPONSE_REJECTED' },
   ]) it(`fails ${corrupt.name} safely without releasing a held tail`, async () => {
     scenario = corrupt;
     const name = `corrupt-${++serial}`;
@@ -269,6 +353,24 @@ describe('platform credentials through real native Harness in workerd', () => {
     safeArtifacts(text, logs, before);
     expect(JSON.stringify(logs)).not.toContain(USER_KEY);
   });
+
+  for (const field of ['api-key', 'x-goog-api-key', 'proxy-authorization', 'cf-aig-authorization']) {
+    for (const nested of [false, true]) it(`rejects ${nested ? 'nested' : 'top-level'} provider credential header ${field} before writes and fetch`, async () => {
+      const name = `header-reject-${++serial}`;
+      const before = await dump(name);
+      expect(before).toEqual({});
+      const input = { instruction: 'Write a paragraph.', ...(nested ? { metadata: { provider: { [field]: USER_KEY } } } : { [field]: USER_KEY }) };
+      const response = await rpc(name, 'submit', input);
+      expect(response.status).toBe(400);
+      const text = await response.text();
+      expect(JSON.parse(text)).toEqual({ error: { code: 'CLOUD_USER_CREDENTIAL_REJECTED', retryable: false } });
+      expect(text.includes(USER_KEY)).toBe(false);
+      expect(JSON.stringify(logs).includes(USER_KEY)).toBe(false);
+      expect(await dump(name)).toEqual(before);
+      expect(calls).toHaveLength(0);
+      safeArtifacts(text, logs, before);
+    });
+  }
 
   for (const { label, key, kind } of [
     { label: 'recognized user key', key: USER_KEY, kind: 'normal' },
@@ -320,6 +422,19 @@ describe('platform credentials through real native Harness in workerd', () => {
     expect(calls).toHaveLength(0);
     expect(await dump(name, kind)).toEqual(before);
     safeArtifacts(before, logs);
+  });
+
+  for (const kind of ['missing', 'empty', 'malformed']) it(`runs valid secondary profile independently of ${kind} unselected primary binding`, async () => {
+    const name = `independent-${++serial}`;
+    const response = await rpc(name, 'submit', { instruction: 'Write a paragraph.', profile: 'deepseek_direct' }, kind);
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(events(text).filter(event => event.type === 'text_delta').map(event => event.delta).join('')).toBe(LONG_SAFE);
+    expect(events(text).at(-1)).toMatchObject({ type: 'done' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toBe('https://api.deepseek.com/chat/completions');
+    expect(calls[0]!.headers.authorization).toBe(`Bearer ${SECONDARY}`);
+    safeArtifacts(text, logs, await dump(name, kind));
   });
 
   for (const status of [300, 301, 302, 303, 304, 305, 306, 307, 308, 399]) it(`rejects HTTP ${status} without following even a same-origin redirect`, async () => {

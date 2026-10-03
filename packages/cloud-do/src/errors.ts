@@ -21,7 +21,7 @@ export class CloudDoError extends Error {
 
 export function safeCloudError(error: unknown): CloudDoError {
   if (error instanceof CloudDoError) return new CloudDoError(error.code);
-  // DO RPC preserves the fixed message, but not custom Error subclasses/fields.
+  // DO RPC does not preserve the local Error subclass. Use only the fixed message.
   // Accept exact codes only. Never copy the remote exception's stack or cause.
   if (error instanceof Error && Object.hasOwn(status, error.message)) return new CloudDoError(error.message as CloudDoErrorCode);
   return new CloudDoError('CLOUD_MODEL_REQUEST_FAILED');

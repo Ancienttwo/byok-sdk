@@ -1,5 +1,4 @@
-import type { ModelProviderSecretName, SecretStore } from '../../keys/src/secret-store';
-import type { ModelProviderVendorId } from '../../keys/src/provider-catalog';
+import type { ModelProviderSecretName, SecretStore, ModelProviderVendorId } from '@byok-sdk/keys';
 import { CloudDoError } from './errors';
 
 // Aiphabee 3defa6e1; vendor ids/base URLs agree with keys' catalog. No runtime keys import.

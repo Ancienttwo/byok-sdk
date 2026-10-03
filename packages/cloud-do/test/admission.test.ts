@@ -7,7 +7,7 @@ describe('frozen cloud submission admission', () => {
     expect(admitCloudSubmission({ instruction: 'Write a paragraph.' })).toEqual({ instruction: 'Write a paragraph.', profile: 'zai_openai' });
     expect(admitCloudSubmission({ instruction: 'Write a paragraph.', profile: 'deepseek_direct' })).toEqual({ instruction: 'Write a paragraph.', profile: 'deepseek_direct' });
   });
-  for (const name of ['credential', 'credentials', 'apiKey', 'APIKEY', 'api_key', 'secret', 'authorization', 'Authorization', 'x-api-key', 'headers']) {
+  for (const name of ['credential', 'credentials', 'apiKey', 'APIKEY', 'api_key', 'secret', 'authorization', 'Authorization', 'x-api-key', 'api-key', 'x-goog-api-key', 'proxy-authorization', 'cf-aig-authorization', 'headers']) {
     for (const nested of [false, true]) it(`rejects ${nested ? 'nested' : 'top-level'} ${name} without echo`, () => {
       const input = { instruction: 'Write a paragraph.', ...(nested ? { metadata: { nested: [{ [name]: KEY }] } } : { [name]: KEY }) };
       expect(() => admitCloudSubmission(input)).toThrow('CLOUD_USER_CREDENTIAL_REJECTED');

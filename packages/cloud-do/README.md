@@ -25,6 +25,9 @@ secret uses HTTP 503. The error body has a fixed code and `retryable: false`.
 Preflight failure causes no model request or storage write. An accepted response
 uses SSE. It sends `text_delta`, then `done` or a fixed `error` code.
 Each submission uses a new native pi conversation.
+The response uses a native byte stream. A request-only keepalive probe runs at
+most once per 250 ms. It detects a lost reader after RPC transfer. It sends an
+SSE comment. A disconnect aborts the provider. This probe does not use a DO alarm.
 
 The Web transport uses pi's existing `ProviderStreams` interface. It does not
 import the Node OpenAI transport. A bounded SSE parser decodes JSON before the
@@ -32,6 +35,8 @@ guard checks text. Each guard holds at most `3K-1` characters for an ASCII key
 of length `K` (16–512). Two lane guards and one merged guard stop interleaving
 from hiding a key. They check raw, base64 and percent-encoded forms. They check
 sensitive fragments of at least 16 characters. It covers three base64 alignments.
+Each lane can hold up to `2(3K-1)` characters before client release. Total guard
+tails hold at most `3(3K-1)` characters. They do not grow with the reply.
 A match cancels the provider and drops the pending tail. Text already released
 remains. Unchecked text does not enter pi events or SQLite. EOF triggers a final
 tail check. The transport drops vendor metadata and response headers.
