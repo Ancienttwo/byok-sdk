@@ -38,9 +38,11 @@ Agent 级共享状态以后用今天的三元键，单独一个小对象。4c �
 **推荐：扩展已有的 `platform-provider.ts` 和 `provider-fetch.ts`，不新增工具传输。循环仍由 pi 原生 generation 拥有。**
 
 1. conversation 创建时带上已注册工具的 schema。`platform-provider.ts` 的请求体增加 `tools`。`messages()` 增加两类映射：assistant 的 `toolCall` 块序列化为 `tool_calls`；工具结果序列化为 `role:'tool'`。未知字段仍拒绝。
-2. `provider-fetch.ts` 按 `index` 组装 `tool_calls` 增量。后续片段通常不带 `id` 和 `name`（[OpenAI streaming](https://developers.openai.com/api/docs/guides/function-calling#streaming)）。只在一次调用组装完成后放行 `index`、`id`、`name`、`arguments`。其余 vendor 字段丢弃。未完成的调用在 EOF 拒绝。
+2. `provider-fetch.ts` 按 `index` 组装 `tool_calls` 增量。后续片段通常不带 `id` 和 `name`（[OpenAI streaming](https://developers.openai.com/api/docs/guides/function-calling#streaming)）。只在一次调用组装完成后放行。其余 vendor 字段丢弃。未完成的调用在 EOF 拒绝。模型给的 `id` 不交给 pi：SDK 按 assistant 内顺序改写为固定的 `call_<n>`，序列化回 provider 时也用它。`name` 必须与本轮提供的工具名完全相等，否则在释放前拒绝整个响应，不交给 pi 的 `tool_unavailable` 路径（那条路径会先把 name 写进 assistant entry，`generation.js:437-445`）。
 3. 组装好的 arguments 先解析，再按 §8 检查解析后的值，然后才释放给 pi。`platform-provider.ts` 把组装好的调用转成 pi 的 tool-call 事件，并把 `finish_reason:'tool_calls'` 映射为原生工具轮。今天 `:128` 只接受 `stop`、`length`、`content_filter`。
 4. pi 的 `startToolRound` 派发工具。SDK 的 `execute` 在同一次调用里 `await` inline 工具。结果回到下一轮模型输入，再次走 leak guard。`submit()` 只等 pi 的本轮 submission 结束再关流，不自己写第二套循环。
+
+**本轮致命处置。** 工具返回错误 envelope 不会让 pi 停下。工具 throw 也只让该工具失败，`finishToolRound` 仍会创建下一个 generation；只有本轮每个 slot 都要求 terminate 时才停（`generation.js:478-480`）。所以 4c 在 ledger 为每个 conversation 记一条致命处置：`CLOUD_TOOL_RESULT_LIMIT`、调用或本轮超时、`CLOUD_STEP_LIMIT`、`CLOUD_TOOL_LIMIT` 都在出错的同一事务里写入。SDK 注册一个 `beforeRequest` hook，它在 `streamResponse` 之前运行（`generation.js:108`）。处置已存在时 hook 抛固定码，本次 generation 失败，不发 provider 请求。随后 abort 该 conversation。`submit()` 的终态错误码取自处置，不取自 pi 的错误文本。模型步数也在这个 hook 里计数；工具次数在 `beforeTool` hook 里计数，第 13 次写处置并 block。
 
 **inline 判据：一次 DO 调用内能等完，且单次墙钟 ≤ 60 秒。** Aiphabee 现有工具都符合。`mode:'job'` 的语义在 §5。4c 注册即拒绝。
 
@@ -48,7 +50,7 @@ Agent 级共享状态以后用今天的三元键，单独一个小对象。4c �
 
 **准入和重放是两件事。** D5 能力（CLI、Keychain、本地文件、stdio MCP、bash、编码工具）和非 live 工具在准入时无条件拒绝，不能靠 `replay:'unsafe'` 放行。**7 个 live IPO 工具准入，但 `replay:'unsafe'`。** 它们有 resolver，chat 今天会选中；排除出 D10 只表示重启后不重放。
 
-**派发上下文不来自模型参数。** 消费方在授权后注入 `{accountId, workspaceId, channel}`、scopes 和 `executeTool`。session DO 把这份上下文和 session 身份一起存入 DO storage，不放进工具参数或 pi 条目。重启后 `recover()` 只从这里重建派发上下文。Aiphabee 在 `executeTool` 内保留 readiness 和 resolver binding。远程 MCP 不在 4c。`provider-fetch.ts` 继续只服务模型 endpoint。
+**派发上下文不来自模型参数。** 函数不能存进 DO storage：structured clone 会抛 `DataCloneError`，JSON 会丢掉它。所以只持久化数据：session 身份、`{accountId, workspaceId, channel}`、scopes 和一个 `dispatcherId`。可信的 `executeTool` 由消费方的 Worker 代码在 DO 内按 `dispatcherId` 构造，用 DO 自己的 `this.env` bindings。每次 DO 启动（含重启）都重新构造，不依赖已结束 RPC 留下的回调。未知 `dispatcherId` 一律拒绝。数据不放进工具参数或 pi 条目。Aiphabee 在 `executeTool` 内保留执行时的 readiness 和 resolver binding。远程 MCP 不在 4c。`provider-fetch.ts` 继续只服务模型 endpoint。
 
 ## 5. 长作业生命周期（设计，4c 不实现）
 
@@ -80,11 +82,17 @@ DO 会因部署、空闲和运行时更新重启。`#harness()`（`agent-do.ts:5
 
 **门外用一个共享的 recovery promise。** 新 `submit` 在 promise 完成前拒绝或等待。promise 失败则本次恢复失败，不重复派发。
 
+**旧原生执行由 hook 门挡住，不靠 abort 的时序。** 只注册 `unsafe` 不够。持久化的 ToolTask 若还在 `call` 阶段，会直接校验并执行工具，不看 replay（`tool.js:20-66`）。旧 GenerationTask 若在 `request` 阶段，会直接发模型请求（`generation.js:94-120`）。pi 1.0 的公开 API 没有「不 resume 只写 abort mark」的入口：`Conversation.abort()` 先 resume（`harness.js:63-65`）。所以 4c 不依赖「暂停时写 mark」，改为在 dispatch 点设门：
+
+- 门内用只读的 `harness.inspect()`（不开启调度）列出所有非终态原生任务所属的 conversation。没有 ledger 行、或只有终态 ledger 行的 conversation 也算。把这个集合作为本次恢复的 stale 集写入 DO storage。
+- `Harness.open` 时已安装两个 hook，早于任何 resume：`beforeRequest` 对 stale conversation 抛 `CLOUD_EXECUTION_INTERRUPTED`，不发请求；`beforeTool` 对 stale conversation 返回 `block`，不调用 `executeTool`。
+- 门外再 abort 和等待。即使 resume 先于 mark 让旧任务跑起来，它们也只会碰到门。
+
 **ledger 是唯一的重放路径。** pi 的 `abort()` 先调用 `tasks.resume()`（`harness.js:63-65`），然后 `abortConversation` 才写 `abortRequested`（`scheduler.js:178-190`）。在这段间隙里，若存储的策略和当前策略都是 `safe`，`ToolTask.execute` 会自己重跑（`tool.js:68-81`）。所以云端向 pi 注册的每个工具都是 `replay:'unsafe'`。D10 的 safe 清单只存在于 ledger。pi 遇到中断的工具时只会把它标为 interrupted，不会重跑。恢复顺序：
 
-1. 门内认领 ledger 行。门内只做这一步。
+1. 门内：写入 stale 集，认领 ledger 行。门内只做这两件有界的存储操作。
 2. 门外：对旧 conversation 调用 `abort()`，再调用 `waitForIdle()`。`waitForIdle` 没有时间上限，所以第 2–4 步都不能放进 `blockConcurrencyWhile`。
-3. 门外：从 DO storage 重建 §4 的派发上下文。缺上下文则该行 `failed`，不重放。
+3. 门外：从 DO storage 读出 `dispatcherId` 和身份数据，用消费方代码重新构造派发器。缺数据或 `dispatcherId` 未知则该行 `failed`，不重放。
 4. 门外：只按 ledger 认领重放工具函数。重放结果写 ledger。旧 conversation 标 `CLOUD_EXECUTION_INTERRUPTED`。
 5. recovery promise 完成后，`submit` 才开新 conversation。新模型执行不恢复旧 submission。
 
@@ -114,6 +122,7 @@ D1 要求重启后的模型执行是新 conversation。重放只重跑工具函�
 
 - 每个工具一份 strict schema，未知字段拒绝，不剥离。`admitCloudSubmission` 仍只收 `instruction` / `profile`，不拿它校验工具参数。
 - arguments 的释放点在 `provider-fetch.ts`，不在 SDK 包装器。pi 的 `streamResponse` 至多每 100ms 把 partial 写入 `pi.live`（`generation.js:271`）。`startToolRound` 在派发前就把 assistant entry 写入 SQLite（`generation.js:437`）。所以包装器看到参数时，参数已经落库。检查对象是解析后的值，不是原始文本。pi 存的是解析后的对象，而 `RollingLeakGuard` 不解码 `\uXXXX`。模型可以用 `\u` 转义写出 key，原始文本能通过检查，解析后却会以明文落入 `pi_entries`。因此一个调用组装完整后，先 `JSON.parse` 它的 arguments。解析失败就拒绝这个调用。然后对解析结果里的每个字符串（对象的键和值都算）跑 `hasUserKeyShape`，再对每个已配置平台 key 跑 `RollingLeakGuard`。只把这个解析后的对象交给 pi，或者交一份不含转义的重新序列化文本。命中则丢弃未释放内容，抛 `CLOUD_MODEL_RESPONSE_REJECTED`，与 4b 相同。
+- 同样的检查覆盖调用里每个保留下来的字符串：`name`、解码后参数的键和值。模型原始 `id` 也先检查再丢弃，命中同样拒绝整个响应。检查都在第一个原生事件之前完成。
 - 结果检查整份 envelope，含 `usage`、`error`、metadata 和 progress 文本。命中则丢弃未释放内容，固定 `CLOUD_MODEL_RESPONSE_REJECTED`。
 - 错误只返回固定码，不带 `cause`、stack、上游 body。key 不进 URL。工具函数拿不到 `this.env`。
 
@@ -127,11 +136,11 @@ D1 要求重启后的模型执行是新 conversation。重放只重跑工具函�
 
 1. **命名。** 增加 `sessionObjectName` / `getSessionObject`。测：四元组和三元组 digest 不同；嵌入分隔符不碰撞；未授权不能拿 stub。
 2. **清单与准入。** 测两件独立的事：D5 能力名、scaffold 名、无 resolver 的名字在准入时被拒绝，即使标成 `unsafe` 也不执行。7 个 IPO 名字准入通过，但重放成员测试断言它们是 `unsafe`。15 个初值名字在 ledger 里是 `safe`。注册给 pi 的每个 `ToolRegistration` 都是 `replay:'unsafe'`。`mode:'job'` 注册被拒绝。本地 `engine.ts` 仍全 `unsafe`。
-3. **传输与循环。** 扩展 `platform-provider.ts`、`provider-fetch.ts` 和 `submit()`。测：交错的两个工具调用按 `index` 组装；拆开的 JSON escape 在组装后检查；EOF 时未完成调用被拒绝；`tool_calls` 以外的 vendor 字段不进 pi；`finish_reason:'tool_calls'` 进入原生工具轮；结果回到下一轮模型。
-4. **ledger 与 inline。** 测：同 id 并发只派发一次；两条 assistant entry 用同一个 call id 和相同参数，派发两次；同一 entry 改 toolName 得到 `CLOUD_TOOL_INVOCATION_CONFLICT`；`usage.credits` 缺失则失败；超过 48,000 字节不继续模型。另测：调用超过 60 秒、本轮超过 240 秒、客户端断线，这三种迟到结果都不进模型。
-5. **重启。** 测：`old count == 0` 认领后门外重放一次；连续两次重启后不再调用函数；一次重放超过 30 秒时 DO 不被重置，且新 `submit` 在 promise 完成前不开始；清单外调用次数不增加；旧 conversation 先 abort 再得到 `CLOUD_EXECUTION_INTERRUPTED`。另一个确定性测试：在 `resume()` 和写 abort mark 之间注入停顿。断言 pi 的原生 ToolTask 把中断的清单内工具标为 interrupted，且工具函数总共只被调用一次，这一次来自 ledger 重放。再测：`waitForIdle` 一直挂起时，`blockConcurrencyWhile` 仍能在 30 秒内返回。
-6. **上限。** 测：第 2 个模型请求和第 5 个 fetch 得到 `CLOUD_TOOL_BUSY` 且未发出；第 9 个模型步和第 13 次工具调用停止循环。
-7. **泄漏与授权。** 测：arguments 在释放前被精确 key 和编码形式命中；arguments 里有 `\uXXXX` 转义的 key，并且被拆到多个片段中，解析后仍被命中；arguments 不是合法 JSON 时整个调用被拒绝；命中后扫描全部 SQLite 行，包括 `pi_entries` 和 `pi.live`，key 不存在；envelope 的 metadata、progress 里的 key 同样不在任何行里；缺 readiness 或 principal 不匹配时不调用 resolver。
+3. **传输与循环。** 扩展 `platform-provider.ts`、`provider-fetch.ts` 和 `submit()`。测：交错的两个工具调用按 `index` 组装；pi 收到的 id 是 `call_<n>`；未提供的工具名在释放前被拒绝，pi 里没有对应条目；拆开的 JSON escape 在组装后检查；EOF 时未完成调用被拒绝；`tool_calls` 以外的 vendor 字段不进 pi；`finish_reason:'tool_calls'` 进入原生工具轮；结果回到下一轮模型。
+4. **ledger 与 inline。** 测：同 id 并发只派发一次；两条 assistant entry 用同一个 call id 和相同参数，派发两次；同一 entry 改 toolName 得到 `CLOUD_TOOL_INVOCATION_CONFLICT`；`usage.credits` 缺失则失败；超过 48,000 字节不继续模型。另测：调用超过 60 秒、本轮超过 240 秒、客户端断线，这三种迟到结果都不进模型。致命处置：一轮里一个工具超限或超时、另一个成功，断言之后 provider 请求数为 0，`submit()` 的错误码是该处置的固定码。
+5. **重启。** 测：`old count == 0` 认领后门外重放一次；连续两次重启后不再调用函数；一次重放超过 30 秒时 DO 不被重置，且新 `submit` 在 promise 完成前不开始；清单外调用次数不增加；旧 conversation 先 abort 再得到 `CLOUD_EXECUTION_INTERRUPTED`。另一个确定性测试：在 `resume()` 和写 abort mark 之间注入停顿。断言 pi 的原生 ToolTask 把中断的清单内工具标为 interrupted，且工具函数总共只被调用一次，这一次来自 ledger 重放。再测：`waitForIdle` 一直挂起时，`blockConcurrencyWhile` 仍能在 30 秒内返回。门测试三种状态，都在 resume 和 abort mark 之间注入停顿：ToolTask 在 `call` 阶段；GenerationTask 在 `request` 阶段；某 conversation 没有任何非终态 ledger 行但有非终态原生任务。三种都断言旧模型请求数为 0、旧原生工具派发数为 0。另测重启后 `dispatcherId` 重新构造派发器，存储里没有函数。
+6. **上限。** 测：第 2 个模型请求和第 5 个 fetch 得到 `CLOUD_TOOL_BUSY` 且未发出；第 9 个模型步被 `beforeRequest` 拦下、第 13 次工具调用被 `beforeTool` 拦下，两者之后 provider 请求数都不增加。
+7. **泄漏与授权。** 测：arguments 在释放前被精确 key 和编码形式命中；arguments 里有 `\uXXXX` 转义的 key，并且被拆到多个片段中，解析后仍被命中；arguments 不是合法 JSON 时整个调用被拒绝；key 出现在模型原始 `id` 或 `name` 里，raw 和 `\u` 转义两种形式都测；命中后扫描全部 SQLite 行，包括 `pi_entries`、task input 和 `pi.live`，key 不存在；envelope 的 metadata、progress 里的 key 同样不在任何行里；缺 readiness 或 principal 不匹配时不调用 resolver。
 
 负向测试：未知工具、清单外重放、digest 冲突、并发双派发、超限结果、第 5 路 fetch、key 形状参数、编码后的 key、D5 能力注册、`mode:'job'` 注册、3xx、非 SSE 工具响应被误送进 `provider-fetch`。
 
