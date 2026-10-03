@@ -26,6 +26,7 @@ const alignedPackages = [...dispatchPackages, implementationIdentity];
 // suite; the check below rejects either one coming back as a public package.
 const publicPackages = [...alignedPackages, keys];
 const privatePackages = [
+  ['packages/cloud-do', '@byok-sdk/cloud-do'],
   ['packages/conformance', '@byok-sdk/conformance'],
   ['packages/testkit', '@byok-sdk/testkit'],
 ];

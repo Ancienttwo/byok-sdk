@@ -84,4 +84,23 @@ C07's proposed pre-Execution full-request preparation API remains a separate uni
 
 ## 4. 歷史決策記錄(append-only)
 
+### Cloud slice 4a (2026-10-03)
+
+`packages/cloud-do` is a private Cloudflare deployment boundary under the existing
+SDK root capability. ADR-035 preserves runtime boundaries and the nine published
+artifacts: this host adds no published package or public client export. The client
+retains its local replica admission/lock/reset/inspect path; only native pi Storage
+construction is injectable. The DO adapter consumes portable pi SQLite and Harness
+exports, with a type-only reference to the factory declaration; it does not import
+the local client engine or environment. One named DO owns one Harness and creates
+a new ownerless conversation for each execution. Its async SQL transaction queue
+and pi-prefixed schema preserve native storage semantics. Configuration, tests,
+runtime constraints and deferred 4b–4d responsibilities are documented in
+[`packages/cloud-do/README.md`](../../../../packages/cloud-do/README.md).
+
+The broader unmatched examples and ancestor capability coverage are intentional
+repository ownership observations for separate architecture work; 4a does not
+repartition them. Verification is the complete native pi conformance suite on
+local SQLite and real workerd, execution isolation/restart and the root gates.
+
 ## Optimization Backlog
