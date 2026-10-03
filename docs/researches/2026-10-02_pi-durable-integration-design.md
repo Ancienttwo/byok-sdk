@@ -180,3 +180,9 @@ child_running
 允许同执行、同租约、没有在途工具的 checkpoint 模型重发，按 ordinary usage 如实计量。`retry.maxRetries:0` 只关闭普通 auto-retry，不关闭进程崩溃恢复重发；中断尝试没有上报的usage保持未知，不伪造计量。最多2次respawn与daemon重启daemon_interrupted规则不变。
 
 F5 驻留策略：normal close 清理当前 transcript sqlite 与 launch config；daemon SIGKILL 可遗留包含完整 Host input/tool output 的 replica、launch config 和 lease sidecar。切片 1 不自动 sweep，不在 startup 打开/恢复它们；保持 owner-only，仅允许在 execution terminal 且无 lease/worker 后做显式离线维护。GC 留后续。
+
+
+
+Structured tool scheduling (slice 1): read/write/edit use the public sequential executionMode, making their entire tool round sequential. This closes the same-turn bash-symlink versus structured I/O race across the journal ACK. It is not a filesystem sandbox against independently running processes or YOLO shell code.
+
+Automatic orphan GC remains blocked after the knife-6 namespace-swap probe: pathname lstat/realpath checks followed by asynchronous unlink can follow a concurrently substituted parent symlink. Home-lease/journal/lock proof alone does not pin filesystem namespace identity. No best-effort sweep is enabled; a follow-up must supply a validated fd-relative no-follow mutation primitive on each supported platform, or obtain an explicit narrower namespace-trust contract. No new continuation or deletion authority is inferred from replica metadata.

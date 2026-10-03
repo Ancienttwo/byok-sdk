@@ -615,7 +615,7 @@ async function runSingleAttempt(
 	let afterCompactionSettlement = false;
 	const exitCode = await new Promise<number>((resolve) => {
 		const proc = spawn(dispatched.command, dispatched.args, {
-			cwd: options.cwd ?? runtimeCwd,
+			cwd: dispatched.cwd,
 			env: spawnEnv,
 			stdio: ["ignore", "pipe", "pipe"],
 			windowsHide: true,

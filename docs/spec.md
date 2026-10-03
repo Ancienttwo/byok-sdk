@@ -983,16 +983,19 @@ so a future extension calling registerApiProvider on one copy cannot make that
 registration visible to another copy. This boundary is deferred in tasks/todos.md
 and must be addressed before such an extension is admitted.
 
-Dispatch and private conformance execution require Node.js >=22.22.0. Keys remains
+Dispatch and private conformance execution require Node.js >=24.15.0. Keys remains
 outside the dispatch dependency graph and delivers credentials through its existing
 separately installed launcher boundary.
 
 The package manager is not the runtime authority. This repository uses Bun
 1.4.0 with its isolated workspace linker and one committed `bun.lock`.
 Downstreams install the standard npm registry artifacts with their chosen npm
-client; supported production execution remains Node.js 22.22 or newer. Bun
-runtime compatibility is not claimed. A Bun-compiled or Node SEA
-single-file launcher cannot embed pi's external CLI package; that deployment
+client; published library/CLI execution requires Node.js 24.15.0 or newer.
+The device daemon may also be shipped as a Bun-compiled single-file launcher;
+this repository verifies that optional recipe and Bun custody/crash paths.
+Those focused guarantees do not claim general Bun runtime compatibility for
+all SDK library/composition APIs. A Bun-compiled or Node SEA single-file
+launcher cannot embed pi's external CLI package; that deployment
 must provide the version-matched, Node-executed pi sidecar explicitly through
 `BYOK_PI_BIN`.
 
@@ -1262,7 +1265,7 @@ names its member context, native thread UUID, explicit loopback WebSocket or
 Unix endpoint, and starting notification sequence. The operator must configure
 each native session with that same member's Team MCP grant; the relay does not
 infer or establish that mapping. The absolute Codex executable must pass the
-qualified `codex-cli 0.153.4` version preflight. This is a client CLI binding,
+qualified `codex-cli 0.159.2` version preflight. This is a client CLI binding,
 not a TaskRunner, native-session lifecycle owner, or new package boundary.
 
 Authenticated `team_notifications.snapshot` accepts the existing member-context
@@ -1360,9 +1363,9 @@ and not fingerprinted into a prepared manifest — a tool the model can see is a
 tool it will spend tokens attempting, so there is no "register it and refuse
 the call" state. `plan` narrows because plan mode produces no side effects at
 all, so it may not be wider than `readonly`. Under `auto` a task gets every
-observed tool. `confirm` is unaffected: a human answers each call, so the gate
-is per call rather than per tool set, and no classification is required to run
-under it. The two fail-closed refusals therefore apply only under a narrowing
+observed tool. `confirm` remains in the protocol for adapters with interactive
+approval; Claude rejects it before runtime side effects. The two fail-closed
+refusals therefore apply only under a narrowing
 mode: a toolset with no declaration at all cannot run under `readonly` or
 `plan` and is declined by name, and a projected server the mode leaves with no
 callable tool declines the whole admission rather than half-satisfying it.
@@ -1378,9 +1381,9 @@ session resume and relative-path resolution depend on it.
 The boundary is scoped by ORIGIN-INDEPENDENCE: it covers every MCP server the
 task will generate, not only the host toolsets the device projects. The
 reserved SDK helpers the daemon injects (agent messaging, agent memory) and the
-reserved approval server a runtime adapter generates for itself under
-`policy.mode: 'confirm'` are the same kind of child, launched by the same CLI
-from the same inherited cwd. `TaskRunner` therefore resolves the binding
+servers a third-party runtime adapter generates for itself are the same kind
+of child, launched from the same inherited cwd. Claude no longer generates
+an approval MCP server. `TaskRunner` therefore resolves the binding
 whenever a task will generate at least one server of any origin — the projected
 toolsets, the reserved helpers it adds, or a server the picked adapter declares
 it generates itself (`RuntimeAdapterDescriptor.generatesApprovalMcpServer`
@@ -1567,7 +1570,12 @@ The authority split is deliberate and total:
   (`BYOK_HOST_TOOLSET_CONTEXT`, `BYOK_STORE_DIR`, `BYOK_PRODUCT_ID`), and the
   provider-credential names stripped at
   subscription and BYOK-custody boundaries by the existing credential-custody
-  authority. So one identity survives both spawn points without binding a
+  authority. The shared finite inventory includes Codex's `CODEX_API_KEY` and
+  `CODEX_ACCESS_TOKEN`, matches credential case aliases, and is applied before
+  top-level Codex spawn even when the operator explicitly allows those names.
+  Platform discovery and locally allowed non-credential config (including
+  `CODEX_HOME`) remain; the SDK does not inspect or change CLI-owned auth stores.
+  So one identity survives both spawn points without binding a
   difference the SDK made on purpose. It is NOT a `BYOK_*` prefix exemption:
   the prefix is not intrinsically inert, so any other name wearing this SDK's
   control prefix on the environment of a child about to start under an
@@ -1751,8 +1759,8 @@ executable presence.
 
 Claude is the sole bundled runtime supported in this slice. Its selected local
 servers are projected into one task-scoped `--mcp-config` under
-`--strict-mcp-config`; confirm mode's internal approval server is merged into
-the same closed file. Claude, not the daemon, owns the resulting task-scoped MCP
+`--strict-mcp-config`. Claude rejects `confirm` and does not inject an
+approval MCP server. Claude, not the daemon, owns the resulting task-scoped MCP
 subprocess lifetime. Therefore these registry status primitives are not a
 long-lived connector supervisor and do not independently observe a crash or
 recovery. Pi and Codex decline toolset-aware offers. The
@@ -2403,4 +2411,85 @@ tool continuations retain the existing post-response overflow risk boundary.
 
 Durable replica retention: normal terminal disposal removes the current transcript sqlite and task launch config. A daemon SIGKILL can leave transcript replicas, launch configs (Host input/mcpEnv) and lock sidecars in the SDK-private store. They remain owner-only, never resume at daemon startup, and are not automatically swept in slice 1. Explicit offline maintenance may remove them only after the associated execution is terminal and no home lease or worker owns them; retention/GC is a follow-up, not an implicit deletion of active or unknown work.
 
-Durable parent-death/platform boundary (slice 1): on supported POSIX runtimes, stdin EOF terminates the worker Harness, cancels in-flight model/tool invocations and cleans the NodeExecutionEnv-owned detached tool groups; no continuation crosses daemon death. Tests SIGKILL only the daemon, wait for actual launcher/worker/tool exits, and verify stable effects and request counts. IPC must already be disconnected before constructing tools. Windows durablePi is fail-closed before launch/custody until a validated Job Object parent-death design is delivered; other runtime lanes are unchanged. A worker itself being forcibly killed cannot execute cleanup, and arbitrary tools that escape owned process groups are outside this lifecycle guarantee.
+Durable parent-death/platform boundary (slice 1): stdin EOF terminates the worker Harness on supported POSIX runtimes. Every shell starts in an inert stdin-gated process group; before executing the tool command, the daemon validates its actual worker parent/group and records that group in parent memory, then ACKs. Worker crash/cancel/close confirms worker/root disposal before killing and measuring these owned groups, so tool termination cannot cause a surviving worker to make another model request. Daemon-only SIGKILL tests retain both ppid-tree and tool-group exit assertions. IPC credential custody is disconnected before tools/MCP construction. Windows durablePi stays fail-closed pending a validated Job Object design. Simultaneous loss of parent and worker, and arbitrary tools escaping owned groups, remain outside this lifecycle guarantee.
+
+Structured tool scheduling (slice 1): read/write/edit use the public sequential executionMode, making their entire tool round sequential. This closes the same-turn bash-symlink versus structured I/O race across the journal ACK. It is not a filesystem sandbox against independently running processes or YOLO shell code.
+
+Automatic orphan GC remains blocked after the knife-6 namespace-swap probe: pathname lstat/realpath checks followed by asynchronous unlink can follow a concurrently substituted parent symlink. Home-lease/journal/lock proof alone does not pin filesystem namespace identity. No best-effort sweep is enabled; a follow-up must supply a validated fd-relative no-follow mutation primitive on each supported platform, or obtain an explicit narrower namespace-trust contract. No new continuation or deletion authority is inferred from replica metadata.
+
+### Runtime context observation
+
+`usage` may include `contextTokens` (nonnegative integer), `contextWindow`
+(positive integer), and `contextSource` (`provider` or `estimate`). Unknown
+values are absent; an observed zero occupancy is valid. These context fields
+are independent of the provider cost counters. Context-only events carry a
+source and no cost counters; they neither count as provider calls nor affect
+prepared admission or `usage_unavailable`. Unreadable provider-call events
+retain the existing fail-closed behavior.
+
+Codex reports `tokenUsage.last.totalTokens` against `modelContextWindow`;
+its cumulative `total` remains the provider cost authority. Claude reports
+`result.modelUsage`'s window using the init model identity. Official Pi 1.0.0
+reports `get_session_stats.contextUsage` as an estimate before task settlement;
+null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
+configuration is the context window authority even if runtime stats differ.
+Historical v1 envelopes remain readable and unchanged; older consumers ignore
+these optional fields.
+
+## N1 official external CLI custody edge (T6, 2026-10-02)
+
+The terminal edge is `pi-subagent-runner -> official-external-cli`, with
+`inheritsCredential: false`. The six adapter identifiers are a closed vocabulary;
+readonly and writer modes bind different code-owned argv. A bare command, an
+unknown adapter, an unproven installation or an undetermined authentication mode
+refuses before an external model task child is created.
+
+`ToolImplementationAuthority` resolves the independent `official-external-cli`
+subject to `OfficialExternalCliInstallV2`: the ordinary install record plus
+non-secret official-source/config-restriction proof references and explicit
+HOME/config directories. The Host verifies those release/config proofs; the SDK
+measures and reverifies artifact/interpreter/resources and directory identity.
+The approved scope is the CLI's own account login. No provider key, OAuth/cloud
+credential, Pi transport, BYOK control, loader injection, caller argv or auth/
+backend/config override reaches the external child. CLI-owned auth stores are
+never read or copied by SDK code.
+
+SDK runtime plans and descendant launches use cohort V2. Old launch/plan records
+are refused rather than upgraded. The verified Host plan supplies helper policy,
+full closure and sealed process cwd; session/config cwd remains the task
+workspace. Its fanout grant must cover the inherited root budget manifest.
+Initial config, actual helper read and append consumption share SDK input
+validation. Config bytes are committed before helper admission. Append rejects
+and acknowledges the whole observed batch, and accepted/rejected request IDs
+cannot be replayed. A validated input is not a spawn permit.
+
+Every custody-managed helper/probe/task requires a physical root claim. External
+and writer tasks share `E=min(R,16)` and `W=min(E,4)` across all adapters and
+parents in the root; live caps are `Q=2`, `J=1`, further bounded by root/session
+limits. Only the initial step/attempt may redeem the runner's existing logical
+depth charge. Later steps/retry attempts require another charge; consumed permits
+and the same operation/attempt cannot launch twice. Final identity/argv/env/
+parent/permit checks and cumulative/live claims precede native spawn under the
+root admission lock. Cancellation and absolute deadlines are checked before
+probes and final admission. Cumulative claims are never refunded after a spawn
+attempt; only confirmed termination releases live slots. POSIX external cleanup
+uses kernel process-group presence, without ps/taskkill child processes. Unknown
+quiescence keeps slots occupied.
+
+These are internal derivation/launch limits, with no money/token metering or
+spend cap and no projection to subscription balances. Official CLI availability
+requires an approved pinned installation/config scope and platform smoke;
+fixture evidence is not login-service acceptance. Cursor authentication mode and
+Windows external process-tree supervision remain unsupported/fail-closed in
+this cohort. Top-level Codex environment stripping is a separate change.
+
+
+### T6 Claude final-mode proof
+Every Claude terminal task rechecks CLI-produced own-login mode/config scope immediately before final physical reverify and task admission. Unknown, changed or mismatching status refuses without a task reservation; the real status child consumes a physical root claim. The SDK does not add an unproved universal forceLoginMethod setting: Host declarations have no enforced version capability field. Same-UID change after the final check or during lock wait remains a documented check-time risk. No account-store contents or new credentials are read by the SDK.
+
+
+### T6 uncertain groups, declared output scope and preflight
+A post-PID setup failure requests SIGTERM for the detached child group while retaining uncertain live slots and all cumulative claims; only explicit PID/group absence permits F5 reclamation. Async output roots are independent of task cwd, tied to the SDK request/directory snapshot and step filename, and rechecked before native launch; symlink/hardlink escapes refuse. Adapter eager output deletion is replaced by cleanup only after final scope verification. Advisory prepare preflight for every adapter and spawn preflight before Claude's final status probe use the same replay/E/W/depth policy as authoritative final locked admission, create no reservation/physical probe, and never replace final atomic policy checks.
+
+### T6 locked physical tuple supplement (F2)
+Official external CLI probes and terminal task admission retain the full asynchronous byte/environment reverify. After acquiring the shared root admission lock, before permit consumption/native spawn, the SDK additionally checks identity-owned artifact/interpreter/declared asset tuples and canonical parent paths, external home/config directory tuples, and the committed parent record. A known pre-spawn mismatch rolls back the uncommitted reservation under the existing F1 rule. This is a synchronous tuple-only supplement, preserving same-inode hardlink layouts, not an atomic OS execution guarantee or login-store content proof. Same-UID in-place edits preserving every tuple and the residual final check-to-spawn interval remain check-time limits. No credential/billing authority or new per-adapter budget is introduced.

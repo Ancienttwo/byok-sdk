@@ -7,18 +7,6 @@ export interface ClaudePermissionMapping {
   args: string[];
   /** Present when `ok` is false. */
   reason?: string;
-  /**
-   * M4 Phase 3: set only for `policy.mode === 'confirm'` — tells
-   * `claude-adapter.ts`'s `start()` to additionally spin up the out-of-band
-   * approval channel (write the temp `--mcp-config` file pointing at
-   * `bin/byok-approval-mcp.ts`, then append `--permission-prompt-tool`) on
-   * top of the base `args` returned here. Kept out of `args` itself because
-   * generating that config is a real filesystem side effect (a temp
-   * directory + file write) that has no business happening inside this
-   * otherwise-pure, I/O-free mapping function — see `claude-adapter.ts`'s
-   * `start()` for where it actually happens.
-   */
-  needsApprovalMcp?: boolean;
 }
 
 /**
@@ -117,36 +105,7 @@ const READONLY_TOOLS: readonly string[] = ['Read', 'Glob', 'Grep'];
  *   name and semantics match this protocol's own `plan` mode 1:1
  *   completely unusable over a relatively minor, fixed-path side effect,
  *   but this is a judgment call for a human to weigh in on, not a fact.
- * - `confirm`: SUPPORTED as of M4 Phase 3 — `--permission-mode default`
- *   (deny-by-default baseline, same as `readonly`'s own choice above) plus
- *   `allowTools`/`denyTools` mapped exactly like `auto` does (finding F2,
- *   fixed same session as the confirm-mode support itself first shipped —
- *   see the function body below): an explicit `--tools <allowTools>` when
- *   only `allowTools` is set, and a fail-closed refusal whenever `denyTools`
- *   is non-empty, since confirm — like `auto`/`plan` and unlike
- *   `readonly` — has no bounded, known-safe base tool list to subtract
- *   from; the only trustworthy restriction mechanism (`--tools`) is
- *   replacive, not subtractive. This composes with, rather than replaces,
- *   `--permission-prompt-tool` pointed at a small bundled MCP server
- *   (`bin/byok-approval-mcp.ts`) that forwards the pending permission
- *   decision to this device's own daemon over its control socket and blocks
- *   until a human (or the daemon's own timeout) resolves it. This directly
- *   supersedes the M2-a finding that `confirm` was inexpressible: that
- *   finding was empirically true for `--permission-mode` ALONE (every
- *   decision resolved synchronously, no pause) — `--permission-prompt-tool`
- *   is a DIFFERENT flag, undocumented in `claude --help`'s output on the
- *   installed 2.1.216 binary (confirmed accepted anyway — an unrecognized
- *   flag is rejected outright with `error: unknown option`, this one is
- *   not), that genuinely pauses the turn on a real MCP round-trip while
- *   claude waits for an answer (M4 Phase 3 STEP 0: live-verified allow,
- *   deny, and multi-second-delayed-then-allow, against the real installed
- *   binary — see `../../bin/byok-approval-mcp.ts`'s own doc comment for the
- *   full empirical writeup, including the one caveat found: a permission-
- *   prompt-tool call that NEVER answers at all triggers claude's own
- *   internal abandonment of the turn after roughly 1.5s — never actually hit
- *   by this design, since `byok-approval-mcp` always eventually answers
- *   within its own configured ceiling, but disclosed rather than silently
- *   assumed away).
+ * - `confirm`: rejected before runtime side effects; interactive approval is unsupported.
  * - `denyTools` non-empty under `auto`: FAILS CLOSED. Given the
  *   `--allowedTools`/`--disallowedTools`-under-a-permissive-mode escape
  *   hatch above, the only mechanism this mapper trusts (`--tools`) is
@@ -194,10 +153,7 @@ const READONLY_TOOLS: readonly string[] = ['Read', 'Glob', 'Grep'];
  *   name is never granted, and no server-scoped `mcp__<server>` wildcard is
  *   ever emitted (that form was never verified, and it would silently grant
  *   tools a server adds later).
- * - `confirm`: NOT granted, deliberately. Confirm's whole point is that a
- *   human answers each call through `--permission-prompt-tool`; a pre-grant
- *   would resolve those calls before the channel ever sees them, silently
- *   removing the decision the caller asked for.
+ * - `confirm`: rejected; no grants are prepared.
  * - `plan`: NOT granted, deliberately. Plan mode's contract is that the
  *   mutating call never actually runs. This SDK cannot know whether an
  *   opaque host toolset tool mutates anything, so pre-granting one would
@@ -228,44 +184,7 @@ export function mapPermissionPolicyToClaudeArgs(
   const denyTools = policy.denyTools ?? [];
 
   if (policy.mode === 'confirm') {
-    // Deny-by-default baseline (never a permissive mode — see readonly's own
-    // reasoning above): `--permission-prompt-tool` only intercepts a
-    // decision that would otherwise need ONE, so a permissive mode here
-    // would defeat confirm's whole point by auto-granting first. The actual
-    // `--permission-prompt-tool`/`--mcp-config` flags are appended by
-    // `claude-adapter.ts`'s `start()` (see `needsApprovalMcp` above), not
-    // here, since generating the mcp-config file is a real I/O side effect.
-    //
-    // Finding F2 (cross-model adversarial review): this branch used to
-    // return unconditionally right here, silently discarding
-    // `allowTools`/`denyTools` entirely — a `{mode:'confirm',
-    // denyTools:['Bash']}` policy would still let Bash through (subject
-    // only to a per-call human prompt), never actually enforcing the
-    // caller's denial; that's a silent widening of the requested policy,
-    // exactly what this mapper fails closed for everywhere else. Confirm
-    // has no bounded, known-safe base tool list the way `readonly` does
-    // (`READONLY_TOOLS`) — its whole point is to allow the FULL active
-    // tool surface, gated by a human decision per call, not a fixed small
-    // set — so its `denyTools` problem is the SAME shape as `auto`/`plan`'s
-    // below: the only mechanism this mapper trusts (`--tools`) is
-    // REPLACIVE, not subtractive, and there is no reliable "full active set
-    // minus denied" to compute. Mirrors `auto`'s handling exactly: fail
-    // closed whenever `denyTools` is non-empty (composed with `allowTools`
-    // or not — an inexpressible constraint is inexpressible either way),
-    // otherwise an explicit `--tools <allowTools>` when `allowTools` alone
-    // is set.
-    if (denyTools.length > 0) {
-      return {
-        ok: false,
-        args: [],
-        reason: `claude adapter cannot reliably enforce denyTools ([${denyTools.join(', ')}]) under confirm mode: its only trustworthy tool-restriction mechanism (--tools) replaces the whole active set rather than subtracting from it, and this adapter has no reliable way to learn a target installation's full default tool set to compute "default minus denied" (this dev machine's own installed build exposes a non-vanilla, bespoke tool list) — refusing rather than risking a denial that silently doesn't hold`,
-      };
-    }
-    const confirmArgs = ['--permission-mode', 'default'];
-    if (policy.allowTools && policy.allowTools.length > 0) {
-      confirmArgs.push('--tools', policy.allowTools.join(','));
-    }
-    return { ok: true, args: confirmArgs, needsApprovalMcp: true };
+    return { ok: false, args: [], reason: 'claude adapter does not support confirm mode or interactive approval' };
   }
 
   if (policy.mode === 'readonly') {

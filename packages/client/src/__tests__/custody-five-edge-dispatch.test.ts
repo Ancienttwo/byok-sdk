@@ -6,7 +6,7 @@ import path from 'node:path';
 import {
   descendantTemplateDigest,
   parseDescendantLaunch,
-  type DescendantLaunchV1,
+  type PiDescendantLaunchV2,
 } from '@byok-sdk/implementation-identity';
 import {
   BYOK_SDK_CUSTODY_LAUNCH_RECORD_ENV,
@@ -57,8 +57,8 @@ interface ForgeOutcome {
 
 interface CaseResult {
   evidence?: Evidence[];
-  records?: DescendantLaunchV1[];
-  transported?: DescendantLaunchV1;
+  records?: PiDescendantLaunchV2[];
+  transported?: PiDescendantLaunchV2;
   transportedPath?: string;
   parentDepth?: number;
   runnerDepth?: number;
@@ -153,7 +153,7 @@ function expectHelperDirectConnect(evidence: Evidence, kind: string): void {
 }
 
 /** (b) The minted record: format, digest binding, edge identity, charge. */
-function expectAttestedRecord(record: DescendantLaunchV1, edge: { parent: string; child: string }, depth: number): void {
+function expectAttestedRecord(record: PiDescendantLaunchV2, edge: { parent: string; child: string }, depth: number): void {
   expect(record.format).toBe('byok.descendant-launch');
   expect(record.templateDigest).toBe(descendantTemplateDigest(record.template));
   expect(record.perLaunch.edge).toEqual(edge);

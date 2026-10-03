@@ -348,4 +348,4 @@ test rather than a step someone remembers. What runs:
 
 ## License
 
-MIT. Node.js 22.22.0 or newer.
+MIT. Node.js 24.15.0 or newer.

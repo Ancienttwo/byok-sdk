@@ -64,7 +64,6 @@ import {
 } from '../release-identity';
 import { PiAdapter, validatePiByokLauncherConfig } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
-import { resolveApprovalMcpBin } from '../adapters/claude/resolve-approval-mcp-bin';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
 import { AuthManager } from './auth-manager';
@@ -1264,9 +1263,7 @@ function buildAdapter(id: RuntimeId, config: DaemonConfig): RuntimeAdapter {
     case 'pi':
       return new PiAdapter({ byokLauncher: config.piByokLauncher, ...(config.durablePi === true ? { durablePi: { replicaRoot: path.join(DeviceStore.resolveDir(config.productId, config.storeDir), 'durable') } } : {}) });
     case 'claude':
-      return new ClaudeAdapter({
-        resolveApprovalMcpBin: () => resolveApprovalMcpBin(config.sdkHelperHost),
-      });
+      return new ClaudeAdapter();
     case 'codex':
       return new CodexAdapter({ sdkHelperHost: config.sdkHelperHost });
   }
@@ -2492,7 +2489,7 @@ export function buildDaemonWithAdapters(
       // via either the server wire or the local CLI resolves the identical
       // entry. `storeDir`/`productId` let the prepared operation approval channel
       // (populated per-task by `TaskRunner`) tell an out-of-process helper
-      // (`bin/byok-approval-mcp.ts`) exactly which control socket to dial.
+      // exactly which control socket to dial.
       approvalRegistry,
       storeDir,
       productId: config.productId,
@@ -3698,15 +3695,8 @@ export function buildDaemonWithAdapters(
         }
         return { resolved: true };
       },
-      // M4 Phase 3: called by `bin/byok-approval-mcp.ts` — a claude-spawned
-      // MCP-server child process, not this daemon's own adapter/session
-      // in-process (see `types.ts`'s `ApprovalChannel` doc comment). Awaits
-      // `TaskRunner.requestApproval`'s own returned promise directly, which
-      // is exactly what lets this control call stay pending for as long as
-      // `approvalTimeoutMs` allows (`control-server.ts`'s unary dispatch has
-      // no timeout of its own — see its `dispatch()`) — the caller's own
-      // `requestTimeoutMs` (`bin/control-client.ts`) must be configured
-      // longer than that for the same reason.
+      // Shared out-of-process approval control, retained for adapters beyond Claude.
+      // The TaskRunner deadline bounds the wait; callers choose a longer control timeout.
       'approvals.request': (params) => {
         const parsed = parseApprovalsRequestParams(params);
         if (!parsed) throw new ControlError('bad_request', 'approvals.request requires {taskId, summary}');

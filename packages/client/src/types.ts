@@ -53,7 +53,8 @@ export type RuntimeDetectResult =
   | { readonly kind: 'refused'; readonly reason: RuntimeDetectionRefusalReason };
 
 export type RuntimeDetectionRefusalReason = ToolImplementationUnavailableReasonV1
-  | 'installation_observation_unsupported' | 'native_identity_mismatch' | 'launch_cwd_unavailable';
+  | 'installation_observation_unsupported' | 'native_identity_mismatch' | 'launch_cwd_unavailable'
+  | 'app_server_unavailable' | 'runtime_version_unsupported';
 
 /** Explicit scope, never a launch environment or task/lane-selection authority. */
 export type RuntimeInstallationObservationContext = { readonly authority: ToolImplementationAuthority } & (
@@ -177,29 +178,10 @@ export interface McpToolsetReloadReceipt {
 }
 
 /**
- * M4 Phase 3: the out-of-band approval channel `TaskRunner` (`daemon/
- * task-runner.ts`) hands to a prepared operation's `start()` via
- * `RuntimeOperationStartInput.approvalChannel`, for a runtime whose approval mechanism genuinely needs
- * to reach back into the daemon from OUTSIDE the adapter's own process — the
- * claude adapter's concrete case: `claude`'s `--permission-prompt-tool`
- * resolves a pending permission entirely inside a SEPARATE MCP-server child
- * process claude itself spawns (see `bin/byok-approval-mcp.ts`), which has
- * no in-process handle to this task's `Session` at all and must instead call
- * back into the SAME daemon over its control socket. `storeDir`/`productId`
- * are exactly what that out-of-process helper needs to find and authenticate
- * against this daemon's control socket (`daemon/control-protocol.ts`
- * `controlEndpointPath`/`controlTokenPath`); `taskId` is how its request gets
- * correlated back to THIS task once it arrives. `resolve()` is the
- * daemon-side counterpart: it resolves the single most-recently-registered
- * pending approval for this task (via `TaskRunner.requestApproval`'s own
- * `ApprovalRegistry` entry — see `daemon/approvals.ts`), and rejects if none
- * is currently pending, mirroring `Session.resolveApproval`'s own
- * no-notion-of-approval-pending fail-closed contract one level up.
- *
- * Optional and adapter-agnostic on purpose: only an adapter whose runtime
- * genuinely supports an out-of-band pause (claude, today) ever reads this;
- * every other adapter (pi, codex) ignores it exactly as before this field
- * existed.
+ * Adapter-agnostic out-of-band channel handed to prepared operations by TaskRunner.
+ * The shared registry resolves one pending approval for this task and rejects
+ * when none is pending. Claude no longer consumes this channel; third-party
+ * adapters and the daemon's generic needs_approval/control path may use it.
  */
 export interface ApprovalChannel {
   taskId: string;
@@ -312,8 +294,8 @@ export interface RuntimeAdapterDescriptor {
   readonly mcpServerLaunch?: 'direct-cwd' | 'launcher-wrapped';
   /**
    * Whether this adapter GENERATES a reserved approval MCP server of its own
-   * when it is started under `policy.mode: 'confirm'` (claude's
-   * `--permission-prompt-tool` server, `adapters/claude/claude-adapter.ts`).
+   * when it is started under `policy.mode: 'confirm'`. This is an extension
+   * seam for custom adapters; none of the bundled adapters declares it.
    *
    * Such a server exists nowhere in the daemon's projected `mcpServers` map,
    * so the daemon cannot see it by counting that map — but it is an MCP

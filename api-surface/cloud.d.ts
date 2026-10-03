@@ -74,6 +74,12 @@ export declare const ActivityAppendRequestSchema: z.ZodObject<{
         outputTokens: z.ZodOptional<z.ZodNumber>;
         reasoningTokens: z.ZodOptional<z.ZodNumber>;
         totalTokens: z.ZodOptional<z.ZodNumber>;
+        contextTokens: z.ZodOptional<z.ZodNumber>;
+        contextWindow: z.ZodOptional<z.ZodNumber>;
+        contextSource: z.ZodOptional<z.ZodEnum<{
+            estimate: "estimate";
+            provider: "provider";
+        }>>;
     }, z.core.$strip>], "type">, z.ZodObject<{
         type: z.ZodString;
     }, z.core.$loose>]>>;
@@ -153,6 +159,12 @@ export declare const TimelineEventSchema: z.ZodObject<{
         outputTokens: z.ZodOptional<z.ZodNumber>;
         reasoningTokens: z.ZodOptional<z.ZodNumber>;
         totalTokens: z.ZodOptional<z.ZodNumber>;
+        contextTokens: z.ZodOptional<z.ZodNumber>;
+        contextWindow: z.ZodOptional<z.ZodNumber>;
+        contextSource: z.ZodOptional<z.ZodEnum<{
+            estimate: "estimate";
+            provider: "provider";
+        }>>;
     }, z.core.$strip>], "type">, z.ZodObject<{
         type: z.ZodString;
     }, z.core.$loose>]>;

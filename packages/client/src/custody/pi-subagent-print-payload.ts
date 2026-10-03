@@ -11,9 +11,9 @@
  * external-dynamic import below stays a real lazy `import()` in every
  * bundle.
  */
-import type { DescendantLaunchV1 } from '@byok-sdk/implementation-identity';
+import type { PiDescendantLaunchV2 } from '@byok-sdk/implementation-identity';
 
-export async function runPiSubagentPrintPayload(launch: DescendantLaunchV1): Promise<number> {
+export async function runPiSubagentPrintPayload(launch: PiDescendantLaunchV2): Promise<number> {
   const host = await import('#byok-pi-runtime-host');
   return host.runCustodyPrintPayload(launch);
 }

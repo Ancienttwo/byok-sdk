@@ -987,49 +987,21 @@ step 4 (§4) and documents the flow end-to-end so the M1-3 client worker can
 wire an adapter's `needs_approval` event all the way through to a resumed
 session without re-deriving these rules.
 
-### 5.1 pi and codex: RESERVED, no seam exercised. claude: exercised as of M4 Phase 3
+### 5.1 Shared approval seam; bundled runtimes reject confirm
 
 **The entire approval round trip above — `needs_approval`,
 `task.await_approval`, `task.approve`/`task.reject`, and
-`Session.resolveApproval` — is present in the frozen v1 wire.** Through M3 it
-was exercised by ZERO bundled runtime adapter (M2-a/M2-b findings); as of M4
-Phase 3, claude genuinely exercises it (`packages/client/src/adapters/*/`):
+`Session.resolveApproval` — is present in the frozen v1 wire.** It
+is retained for third-party adapters and the shared daemon approval controls.
+None of the bundled adapters currently supports `confirm`: Claude's ADR-015
+approval MCP path has been removed, and Claude, Pi and Codex fail closed.
+`Session.resolveApproval` rejects for these adapters. The `PermissionMode`
+enum, `needs_approval` event and approval messages remain unchanged.
 
-- **pi** never emits `needs_approval` at all — it has no built-in per-call
-  approval gate (`PiSession.resolveApproval` throws unconditionally).
-- **claude**'s `--permission-mode` ALONE still resolves every permission
-  decision *synchronously* before the turn continues, exactly as before
-  (auto-denied under a restrictive mode, auto-granted under a permissive
-  one) — that finding is unchanged. But `--permission-prompt-tool` (a
-  genuinely different flag, live-verified against the real installed
-  binary) makes claude block a turn on a real out-of-process round trip
-  instead: see §11.2's own "Claude `confirm` mode" note for the full
-  mechanism. `ClaudeSession.resolveApproval` no longer unconditionally
-  throws — it routes into that channel when one is wired up (`confirm`
-  mode), and still throws exactly as before otherwise.
-- **codex**'s `codex exec --json` resolves a sandbox-denied action
-  internally with no wire-visible pause either, regardless of
-  `approval_policy` (`CodexSession.resolveApproval` throws) — pending
-  codex's own app-server migration.
-
-The schema stays because the seam is a real, intentional part of the frozen
-contract — a future runtime adapter (bundled or third-party) can implement it
-without a wire change — and a server MUST NOT assume pi or codex will ever
-pause a task in `AwaitApproval` on their own initiative; claude now can, under
-`policy.mode: 'confirm'` specifically.
-
-**The connection-level `interactive-approval` capability flag stays RESERVED
-— it is NOT the routing signal to use.** `CAPABILITY_FLAGS` (`version.ts`)
-includes `interactive-approval`, but no daemon advertises it and no server
-behavior keys off it; it was never wired to a per-adapter signal and nothing
-since has repurposed it. **The accurate per-runtime signals live on
-`RuntimeInfo.capabilities` (§11.4): `permissionModes.includes('confirm')` for
-whether a runtime can honor `policy.mode: 'confirm'`, and
-`approvalInteractive` for whether it pauses on a real interactive approval.**
-Both are generated from the adapter's own `capabilities()` and agree by
-construction (claude: `confirm` present and `approvalInteractive: true`; pi
-and codex: neither). A server dispatching `policy.mode: 'confirm'` checks
-those fields, never the connection-level flag.
+The connection-level `interactive-approval` capability flag stays RESERVED.
+Per-runtime routing uses `RuntimeInfo.capabilities.permissionModes` and
+`approvalInteractive`; all bundled adapters currently report
+`approvalInteractive: false` and omit `confirm` from permissionModes.
 
 ### 5.2 `task.approval_resolved` — explicit local-resolution report (additive minor)
 
@@ -2088,9 +2060,9 @@ runtimes. A tool name is meaningful only in the context of a specific target
 - **claude**: Capitalized built-in names (`Read`, `Write`, `Edit`, `Bash`,
   `Glob`, `Grep`, ...) — a completely different naming convention from pi's,
   not a coincidence of casing.
-- **codex**: has no per-tool allow/deny surface at all — only the coarse
-  `sandbox_mode` dial (`read-only` / `workspace-write`). Any `allowTools`/
-  `denyTools` at all is meaningless against codex.
+- **codex**: the app-server adapter supports YOLO `auto` only. Nonempty
+  built-in `allowTools`/`denyTools` are rejected; exact task MCP `enabled_tools`
+  is a separate grant surface.
 
 A server/embedder constructing a `PermissionPolicy` must already know which
 `runtime` it's targeting before choosing tool names — `'read'` is pi's Read
@@ -2103,12 +2075,8 @@ refuse to start — never silently widen or approximate it.** Every bundled
 adapter's `permission-mapping.ts` follows this uniformly, not just for tool
 names:
 
-- `confirm` mode is rejected by pi and codex (§5.1) — neither can pause for
-  an out-of-band human decision. claude supports it as of M4 Phase 3, via
-  `--permission-prompt-tool` (a genuinely different mechanism from
-  `--permission-mode`, live-verified against the real installed binary to
-  block a turn on a real MCP round-trip rather than resolve synchronously)
-  — see §11.2's own residual note.
+- `confirm` mode is rejected by all bundled adapters (§5.1). Claude no longer
+  includes the ADR-015 approval MCP path.
 - `plan` mode is rejected by pi and codex (neither has a plan-only,
   no-execute mode); claude supports it, with a documented residual (§11.2).
 - `denyTools` is rejected by codex outright (no subtractive mechanism), and
@@ -2118,11 +2086,8 @@ names:
   reliably known ahead of time — see `claude/permission-mapping.ts`). pi
   resolves `denyTools` to an equivalent allowlist in-process instead, since
   pi's default active tool set is fixed and known from its installed source.
-- `network: false` is rejected by pi and claude (neither has a verified
-  network sandbox for its shell tool); `network: true` is rejected by codex
-  (empirically, the one config key that should re-enable network under
-  `workspace-write` did not restore real access on the installed build — see
-  `codex/permission-mapping.ts`).
+- `network: false` is rejected by all bundled adapters. Codex app-server
+  uses `danger-full-access`; `network: true` requires no additional restriction.
 
 None of these are bugs to "fix" post-freeze — they are the accurate, honest
 capability boundary of each real CLI as empirically found, and the
@@ -2133,24 +2098,24 @@ abilities a loud rejection instead of a silent, unenforced policy.
 
 Source of truth: each adapter's own `capabilities()` (`packages/client/src/
 adapters/*/`) plus the empirical findings in each adapter's and its sibling
-`permission-mapping.ts`'s doc comments — every row below was reproduced
-against a real installed binary, not inferred from `--help` text (which was
-actively misleading in more than one case).
+`permission-mapping.ts`'s doc comments. Capability tests establish the
+implementation contract; the OAR assessment's implementation section separates
+real binary observations from fixture proofs and still-unverified behavior.
 
 | Capability | pi | claude | codex |
 |---|---|---|---|
 | `resume` | yes | yes | yes |
-| `steer` (mid-turn injection) | **yes** — the only bundled runtime that can | no — a write mid-turn queues as a follow-up turn instead of redirecting the running one | no — no in-band channel at all; SIGINT is ignored, resume only starts a new turn after the current one ends |
-| `permissionModes` | `auto`, `readonly` | `auto`, `readonly`, `plan`, `confirm` | `auto`, `readonly` |
-| `confirm` mode | rejected, fail-closed (no approval gate) | **supported (M4 Phase 3)** — `--permission-prompt-tool` pauses the turn on a real MCP round-trip to a bundled `byok-approval-mcp` server, which relays the decision to/from this device's own daemon over its control socket; see the residual below | rejected, fail-closed (no wire-visible pause under any `approval_policy`; pending codex's app-server migration) |
+| `steer` (mid-turn injection) | yes | no — stdin injection is not implemented as steering | yes — app-server turn/steer; actual text consumption remains unverified |
+| `permissionModes` | `auto`, `readonly` | `auto`, `readonly`, `plan` | `auto` |
+| `confirm` mode | rejected, fail-closed (no approval gate) | rejected, fail-closed (private approval MCP path removed) | rejected, fail-closed (YOLO-only adapter) |
 | `plan` mode | rejected (no plan-only mode without a custom extension) | **supported** — see the residual below | rejected (no plan-only mode) |
 | `allowTools` | supported | supported (via the replacive `--tools`) | rejected always (no per-tool surface) |
 | `denyTools` | supported (resolved to an equivalent allowlist in-process) | supported only within `readonly`'s own allowlist-intersection; rejected fail-closed otherwise | rejected always |
-| task-scoped host MCP toolsets | no | **supported** — logical ids resolve through device-local config and run under `--strict-mcp-config` | no |
-| `network: false` | rejected, fail-closed (no sandbox) | rejected, fail-closed (no sandbox for the Bash tool) | supported (both sandbox modes this adapter ever selects default to no network) |
-| `network: true` | supported (nothing to enforce) | supported (nothing to enforce) | rejected, fail-closed (empirically doesn't restore real network access on the installed build) |
+| task-scoped host MCP toolsets | supported | supported — strict MCP config | supported — exact enabled_tools grants; ambient MCP exclusion unverified |
+| `network: false` | rejected, fail-closed (no sandbox) | rejected, fail-closed (no sandbox for the Bash tool) | rejected, fail-closed (danger-full-access) |
+| `network: true` | supported (nothing to enforce) | supported (nothing to enforce) | supported (nothing to enforce) |
 | `interactive-approval` | no (RESERVED, §5.1) | no¹ | no |
-| `usage` fields filled | none | `inputTokens`, `cachedInputTokens`, `outputTokens` | `inputTokens`, `cachedInputTokens`, `outputTokens`, `reasoningTokens` |
+| `usage` fields filled | provider cost counters plus estimated context occupancy/window | provider input/cache/output and modelUsage window | cumulative cost deltas plus last occupancy/window |
 
 **Claude `plan` mode residual (accepted for v1):** claude's `--permission-mode
 plan` never executes the requested mutating tool call against its real
@@ -2168,41 +2133,21 @@ workspace confinement can simply choose not to route `policy.mode: 'plan'`
 tasks to a `claude`-capable device** — nothing in the protocol forces plan
 mode to be offered.
 
-**Claude `confirm` mode (M4 Phase 3):** `--permission-prompt-tool` makes
-claude block a turn on a real MCP round-trip to `byok-approval-mcp` (a small
-bundled stdio MCP server this adapter spawns claude with, via a generated
-`--mcp-config`), which relays the pending decision to this device's own
-daemon over its local control socket (`daemon/control-protocol.ts`'s
-`approvals.request`) and answers allow/deny once a human (server-sent
-`task.approve`/`task.reject`, or the local `byok-agent approve`/`reject`
-CLI) decides, or once a configurable timeout elapses (default 10 minutes,
-fail-closed to deny). Live-verified against the real installed binary: an
-instant decision and a several-second-delayed one both worked identically;
-a permission-prompt-tool call that never answers AT ALL was found to make
-claude abandon the turn on its own after roughly 1.5s — never actually
-reachable by this design, since `byok-approval-mcp` always eventually
-answers within its own configured ceiling. Unlike `plan` mode's residual
-above, this has no known workspace-confinement gap: the whole mechanism is
-daemon-mediated, not a claude-internal side effect.
+**Claude `confirm` mode:** rejected before runtime side effects. The private
+ADR-015 approval MCP path and helper bin have been removed. The shared daemon
+approval channel and wire remain available to other adapters.
 
-¹ This row is the CONNECTION-level `interactive-approval` capability flag
-(§5.1), which stays reserved — no daemon advertises it and no server behavior
-keys off it. The per-runtime `RuntimeInfo.capabilities.approvalInteractive`
-field (§11.4) is a different thing and is no longer hardcoded: each adapter
-declares it itself, and claude declares `true` because the confirm path above
-is genuinely wired end to end (pi and codex declare `false`). `permissionModes`
-still carries the finer signal (`'confirm'` present/absent); the two agree by
-construction, since both come from the same adapter `capabilities()` call.
+¹ The connection-level `interactive-approval` flag remains reserved. All
+bundled runtimes declare `approvalInteractive: false`; a future adapter must
+advertise its own real support without changing the shared wire.
 
 **Connection-level `steer` capability = logical OR across every configured
 adapter's own `capabilities().steer`.** `conn.hello.capabilities` (the
 connection-wide flag list — distinct from any one runtime's own
 `RuntimeInfo.capabilities.steer`, §11.4) includes `'steer'` if AT LEAST ONE
-configured adapter reports `steer: true`. Concretely, today: `true` only when
-pi is one of the daemon's configured adapters (pi: `steer: true`; claude and
-codex: `steer: false`) — a daemon running only claude and/or codex, with no
-pi adapter configured, does not advertise the connection-level `steer` flag
-at all.
+configured adapter reports `steer: true`. Today Pi and Codex report true;
+Claude reports false. A daemon configured only with Claude does not advertise
+the connection-level steer flag.
 
 **The connection-level `steer` flag is discovery-only; steer authority is
 decided per task, from the claim.** At claim time the server snapshots
@@ -2298,8 +2243,8 @@ matrix and the connection-level `steer` OR (§11.2, last paragraph) are both
 derived from — see `create-daemon.ts`'s `detectRuntimes`/
 `toRuntimeInfoCapabilities`, which is now a pure passthrough of the adapter's
 own declaration and synthesizes no value of its own. `approvalInteractive` is
-therefore per-adapter truth: `true` for claude (the `--permission-prompt-tool`
-confirm path, §11.2), `false` for pi and codex. It is unrelated to the
+therefore per-adapter truth: `false` for all bundled adapters after removal
+of Claude's private confirm path (§11.2). It is unrelated to the
 reserved connection-level `interactive-approval` flag (§5.1).
 
 `RuntimeInfo.capabilities` here is CONNECTION-level discovery data: it
@@ -2595,3 +2540,22 @@ Pending has no disposition; unknown identity returns no message. Invalid stored
 identity/receipt fails closed. Sender body/hash/byte claims remain untrusted;
 only the Host acceptance transaction authors transcript content. In particular,
 consumer-unavailable held can be observed before the Host ever sees a body.
+
+### Runtime context observation
+
+`usage` may include `contextTokens` (nonnegative integer), `contextWindow`
+(positive integer), and `contextSource` (`provider` or `estimate`). Unknown
+values are absent; an observed zero occupancy is valid. These context fields
+are independent of the provider cost counters. Context-only events carry a
+source and no cost counters; they neither count as provider calls nor affect
+prepared admission or `usage_unavailable`. Unreadable provider-call events
+retain the existing fail-closed behavior.
+
+Codex reports `tokenUsage.last.totalTokens` against `modelContextWindow`;
+its cumulative `total` remains the provider cost authority. Claude reports
+`result.modelUsage`'s window using the init model identity. Official Pi 0.99.2
+reports `get_session_stats.contextUsage` as an estimate before task settlement;
+null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
+configuration is the context window authority even if runtime stats differ.
+Historical v1 envelopes remain readable and unchanged; older consumers ignore
+these optional fields.

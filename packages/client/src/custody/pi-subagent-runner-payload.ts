@@ -17,13 +17,12 @@
  * reason, fail-closed, before the vendored runner can spawn anything.
  */
 import { loadCustodyRunnerConfigPath } from './custody-commitments';
-import { externalCliAdmissionRefusal } from './external-cli-admission';
+import { readAdmittedRunnerConfig } from './external-cli-admission';
 
 export function runPiSubagentRunnerPayload(): void {
   const configPath = loadCustodyRunnerConfigPath(process.env);
-  const externalCliRefusal = externalCliAdmissionRefusal(configPath);
-  if (externalCliRefusal !== undefined) {
-    process.stderr.write(`pi-subagent-runner payload: ${externalCliRefusal}\n`);
+  try { readAdmittedRunnerConfig(configPath); } catch (error) {
+    process.stderr.write(`pi-subagent-runner payload: ${(error as Error).message}\n`);
     process.exit(1);
   }
   void import('#byok-pi-runtime-host')

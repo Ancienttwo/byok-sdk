@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { AsyncQueue } from '../../util/async-queue';
+import { observePiRpcSettlement, closePiRpcSettlement } from './interrupt-settlement';
 import { adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../process-tree';
 
 export type SpawnFn = typeof spawn;
@@ -271,6 +272,7 @@ export class PiRpcClient {
       return;
     }
     this.eventQueue.push(msg);
+    observePiRpcSettlement(this, msg.type);
   }
 
   /** Write an explicit host-owned response; completion is a transport receipt only. */
@@ -344,6 +346,7 @@ export class PiRpcClient {
     this.resolveClosed();
     for (const [, waiter] of this.pending) waiter.reject(terminal);
     this.pending.clear();
+    closePiRpcSettlement(this, terminal);
     this.eventQueue.end();
   }
 }

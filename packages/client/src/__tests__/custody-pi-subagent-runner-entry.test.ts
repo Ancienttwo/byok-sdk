@@ -8,7 +8,7 @@ import {
   descendantTemplateDigest,
   toolImplementationLaunchEnvNamesDigest,
   toolImplementationLoaderEnvValuesDigest,
-  type DescendantLaunchV1,
+  type PiDescendantLaunchV2,
   type ImplementationSpawnBindingV1,
 } from '@byok-sdk/implementation-identity';
 import {
@@ -59,7 +59,7 @@ interface RunnerHarness {
   readonly runnerEnv: NodeJS.ProcessEnv;
   readonly execEnv: Record<string, string>;
   readonly exactNames: readonly string[];
-  readonly record: DescendantLaunchV1;
+  readonly record: PiDescendantLaunchV2;
 }
 
 /**
@@ -147,9 +147,9 @@ function mintRunnerHarness(scratch: string, declaredDepth = RUNNER_CONTRACT_DEPT
 
   const exactNames = Object.freeze(Object.keys(execEnv).sort());
   const recordDepth = Number(declaredDepth);
-  const record: DescendantLaunchV1 = {
+  const record: PiDescendantLaunchV2 = {
     format: 'byok.descendant-launch',
-    version: 1,
+    version: 2,
     template,
     templateDigest: descendantTemplateDigest(template),
     policy: {

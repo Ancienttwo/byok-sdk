@@ -841,10 +841,12 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     // Three provider calls: D, then two tool continuations. The initial call
     // is neither the largest nor the last.
     const session = adapter.sessions[0]!;
+    session.emit({ type: 'usage', contextSource: 'estimate', contextTokens: MODEL.contextWindow * 2, contextWindow: MODEL.contextWindow });
     session.emit({ type: 'usage', inputTokens: 1_200, cachedInputTokens: 0, outputTokens: 30 });
     session.emit({ type: 'tool_use', tool: 'mcp__team__list', input: {}, toolCallId: 'c1' });
     session.emit({ type: 'usage', inputTokens: 5_400, cachedInputTokens: 1_200, outputTokens: 20 });
     session.emit({ type: 'usage', inputTokens: 3_100, cachedInputTokens: 3_000, outputTokens: 40 });
+    session.emit({ type: 'usage', contextSource: 'estimate', contextWindow: MODEL.contextWindow });
     session.emit({ type: 'turn_end' });
 
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(true));
@@ -906,6 +908,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     await runner.handleEnvelope(preparedOffer('task-prepared-no-usage', reference(built)));
 
     adapter.sessions[0]!.emit({ type: 'progress', text: 'an answer nobody can check' });
+    adapter.sessions[0]!.emit({ type: 'usage', contextSource: 'estimate', contextTokens: 42, contextWindow: MODEL.contextWindow });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
 
     await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true));

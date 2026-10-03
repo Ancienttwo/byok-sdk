@@ -21,7 +21,6 @@ export default defineConfig({
     'src/bin/byok-pi-rpc.ts',
     'src/bin/pi-runtime-host.ts',
     'src/bin/byok-mcp-env.ts',
-    'src/bin/byok-approval-mcp.ts',
     'src/bin/byok-agent-message-mcp.ts',
     'src/bin/byok-agent-memory-mcp.ts',
     'src/bin/byok-agent-memory-describe.ts',

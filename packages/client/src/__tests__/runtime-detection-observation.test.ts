@@ -1,7 +1,9 @@
+import * as childProcess from 'node:child_process';
+import { once } from 'node:events';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { classifyDetectError, probeRuntimeVersion } from '../adapters/detect-outcome';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
@@ -16,7 +18,18 @@ import type { RuntimeDetectResult } from '../types';
 import type { DaemonConfig } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof childProcess>();
+  return {
+    ...actual,
+    // Observe the real child without replacing execFile's implementation or
+    // its custom promisify contract used by the adapters' authentication probes.
+    execFile: Object.assign(vi.fn(actual.execFile), actual.execFile),
+  };
+});
+
 const dirs: string[] = [];
+const children: childProcess.ChildProcess[] = [];
 const secret = 'SENTINEL_PRIVATE_PATH_AND_ERROR';
 const kinds = ['available', 'not-found', 'not-executable', 'timeout', 'probe-failed'] as const;
 async function directory(): Promise<string> {
@@ -29,7 +42,28 @@ async function executable(body: string): Promise<string> {
   await fs.writeFile(file, `#!${process.execPath}\n${body}\n`, { mode: 0o700 });
   return file;
 }
-afterEach(async () => { await Promise.all(dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true }))); });
+function controlledVersionProbe(command: string) {
+  // Freeze only the SDK deadline; execFile, streams and OS signals remain real.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const exec = vi.mocked(childProcess.execFile);
+  exec.mockClear();
+  const result = probeRuntimeVersion(command, 1_000);
+  const child: childProcess.ChildProcess = exec.mock.results[0]!.value;
+  children.push(child);
+  return { child, result };
+}
+afterEach(async () => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  await Promise.all(children.splice(0).map(async (child) => {
+    if (child.exitCode === null && child.signalCode === null) {
+      const closed = once(child, 'close');
+      child.kill('SIGKILL');
+      await closed;
+    }
+  }));
+  await Promise.all(dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
+});
 
 describe('runtime probe evidence', () => {
   it.each([
@@ -68,24 +102,61 @@ describe('runtime probe evidence', () => {
     const good = await executable("if (process.argv[2] === '--version') console.log('fixture-v1'); else process.exit(1);");
     const bad = await executable(`console.log('${secret}'); console.error('${secret}'); process.exit(17);`);
     for (const Adapter of [ClaudeAdapter, CodexAdapter, PiAdapter]) {
-      const result = await new Adapter({ resolveBin: () => ({ command: good, source: 'env' }) }).detect();
-      expect(result).toMatchObject({ kind: 'available', version: 'fixture-v1' });
+      const command=Adapter===CodexAdapter?await executable("if(process.argv[2]==='--version')console.log('codex-cli 0.159.2');else if(process.argv[2]==='app-server')process.exit(0);else process.exit(1);"):good;
+      const result = await new Adapter({ resolveBin: () => ({ command, source: 'env' }) }).detect();
+      expect(result).toMatchObject({ kind: 'available', version: Adapter===CodexAdapter?'codex-cli 0.159.2':'fixture-v1' });
       expect(await new Adapter({ resolveBin: () => ({ command: bad, source: 'env' }) }).detect()).toEqual({ kind: 'probe-failed' });
     }
   });
 
   it.skipIf(process.platform === 'win32').each([false, true])('does not relabel output overflow as timeout when ignoring TERM=%s', async (ignoreTerm) => {
-    const command = await executable(`${ignoreTerm ? "process.on('SIGTERM', () => {});" : ''} process.stdout.write('x'.repeat(2 * 1024 * 1024)); setInterval(() => {}, 1000);`);
-    expect(await probeRuntimeVersion(command, 1_000)).toEqual({ kind: 'probe-failed' });
+    const command = await executable(`${ignoreTerm ? "process.on('SIGTERM', () => {});" : ''} process.stdout.on('error', () => {}); process.stdout.write('x'.repeat(2 * 1024 * 1024)); setInterval(() => {}, 1000);`);
+    const { child, result } = controlledVersionProbe(command);
+    const kill = vi.spyOn(child, 'kill');
+    const stdout = child.stdout!;
+    let bytes = 0;
+    stdout.on('data', (chunk: string) => { bytes += Buffer.byteLength(chunk); });
+    // execFile destroys its pipes after detecting maxBuffer, before reaping.
+    // Let real I/O establish overflow before advancing the probe's clock.
+    await once(stdout, 'close');
+    expect(bytes).toBeGreaterThan(1024 * 1024);
+    if (ignoreTerm) {
+      const settled = vi.fn();
+      void result.then(settled);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(settled).not.toHaveBeenCalled();
+      expect(kill).not.toHaveBeenCalledWith('SIGKILL');
+      await vi.advanceTimersByTimeAsync(1);
+      expect(kill).toHaveBeenCalledWith('SIGKILL');
+    }
+    expect(await result).toEqual({ kind: 'probe-failed' });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.skipIf(process.platform === 'win32')('reports timeout when the deadline precedes overflow output', async () => {
+    const command = await executable("process.stdin.once('data', () => process.stdout.write('x'.repeat(2 * 1024 * 1024))); console.error('ready');");
+    const { child, result } = controlledVersionProbe(command);
+    let bytes = 0;
+    child.stdout!.on('data', (chunk: string) => { bytes += Buffer.byteLength(chunk); });
+    // The child is running but its prospective overflow is still gated on stdin.
+    await once(child.stderr!, 'data');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await result).toEqual({ kind: 'timeout' });
+    expect(bytes).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it.skipIf(process.platform === 'win32')('owns the timeout and reaps a TERM-ignoring version child', async () => {
     const receipt = path.join(await directory(), 'pid');
-    const command = await executable(`require('node:fs').writeFileSync(${JSON.stringify(receipt)}, String(process.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`);
-    expect(await probeRuntimeVersion(command, 1_000)).toEqual({ kind: 'timeout' });
+    const command = await executable(`require('node:fs').writeFileSync(${JSON.stringify(receipt)}, String(process.pid)); process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000);`);
+    const { child, result } = controlledVersionProbe(command);
+    await once(child.stdout!, 'data');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await result).toEqual({ kind: 'timeout' });
     const pid = Number(await fs.readFile(receipt, 'utf8'));
     expect(Number.isSafeInteger(pid) && pid > 0).toBe(true);
     expect(() => process.kill(pid, 0)).toThrow();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

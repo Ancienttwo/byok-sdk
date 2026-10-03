@@ -14,6 +14,7 @@ export interface DurableEngineInput {
   models: Models; model: { provider: string; modelId: string }; instruction: string;
   resume: boolean; tools?: readonly ToolRegistration[]; ambient: NodeJS.ProcessEnv;
   storageFactory?: DurableStorageFactory<string>;
+  shellOwnership?: { own(pid:number):Promise<void>; released(pid:number):void };
   beforeTool(id: string, taskId: string, call: ToolCall): Promise<void>;
   events(events: readonly AgentEvent[]): Promise<void>;
   result(value: Readonly<{ text: string }>): Promise<void>;
@@ -22,7 +23,7 @@ export interface DurableEngineInput {
 export async function openDurableEngine(input: DurableEngineInput) {
   const ctx = BACKGROUND_CONTEXT;
   const lock = await acquireReplicaLock(input.file, input.binding.leaseId);
-  const env = durableToolEnvironment(input.binding.canonicalHome, input.ambient);
+  const env = durableToolEnvironment(input.binding.canonicalHome, input.ambient, input.shellOwnership);
   let harness: Harness | undefined;
   let closed = false;
   let stream: Awaited<ReturnType<typeof watchEvents>> | undefined;
@@ -36,7 +37,7 @@ export async function openDurableEngine(input: DurableEngineInput) {
   };
   try {
     if (!input.resume) await resetReplica(input.file); // BEFORE open: no stale scheduler may run.
-    const tools = [...(CodingTools.tools ?? []), ...(input.tools ?? [])].map(tool => ({ ...tool, replay: 'unsafe' as const }));
+    const tools = [...(CodingTools.tools ?? []), ...(input.tools ?? [])].map(tool => ({ ...tool, replay: 'unsafe' as const, ...(['read','write','edit'].includes(tool.name) ? { executionMode: 'sequential' as const } : {}) }));
     const extension = defineExtension({ name: 'byok-durable', tools, hooks: [hook(ToolTask, {
       beforeTool: async (call, api) => {
         const denied = await durableToolDenial(call.name, call.arguments, input.binding.canonicalHome, input.replicaRoot);

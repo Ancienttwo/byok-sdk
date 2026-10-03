@@ -557,7 +557,7 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
         {
           ...baseConfig,
           mcpToolsets: {
-            salesko: { mcpServers: { byokapproval: { command: '/bin/true' } } },
+            salesko: { mcpServers: { byokagentmessage: { command: '/bin/true' } } },
           },
         },
         [adapter],

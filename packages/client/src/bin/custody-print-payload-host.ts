@@ -37,7 +37,7 @@ import {
   runPrintMode,
   SessionManager,
 } from '@earendil-works/pi-coding-agent';
-import type { DescendantLaunchV1 } from '@byok-sdk/implementation-identity';
+import type { PiDescendantLaunchV2 } from '@byok-sdk/implementation-identity';
 import { subagentsExtension } from './pi-extension-factories.js';
 import { refusal } from '../custody/custody-commitments';
 import { parsePiPrintArgv } from '../custody/pi-print-argv';
@@ -51,7 +51,7 @@ interface PrintPayloadPlan {
   readonly model: string | undefined;
 }
 
-function planPrintPayload(launch: DescendantLaunchV1): PrintPayloadPlan {
+function planPrintPayload(launch: PiDescendantLaunchV2): PrintPayloadPlan {
   const c = launch.perLaunch;
   const rawArgv = c.mcp.metadata['byok.custody.printArgv'];
   const printArgv = Array.isArray(rawArgv) ? rawArgv.filter((entry): entry is string => typeof entry === 'string') : [];
@@ -78,7 +78,7 @@ function planPrintPayload(launch: DescendantLaunchV1): PrintPayloadPlan {
  * refusal propagates to the helper host and exits nonzero without emitting a
  * partial result.
  */
-export async function runCustodyPrintPayload(launch: DescendantLaunchV1): Promise<number> {
+export async function runCustodyPrintPayload(launch: PiDescendantLaunchV2): Promise<number> {
   const plan = planPrintPayload(launch);
   const agentDir = getAgentDir();
   const sessionManager = plan.sessionFile

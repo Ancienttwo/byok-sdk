@@ -39,6 +39,9 @@ function live(pid: number): boolean {
   if(process.platform !== 'win32') {try{return !execFileSync('ps',['-p',String(pid),'-o','stat='],{encoding:'utf8'}).trim().startsWith('Z');}catch{return false;}}
   return true;
 }
+function liveGroup(pgid: number): number[] {
+  return execFileSync('ps',['-eo','pid=,pgid=,stat='],{encoding:'utf8'}).trim().split('\n').map(line=>line.trim().split(/\s+/u)).filter(([,group,stat])=>Number(group)===pgid&&!stat!.startsWith('Z')).map(([pid])=>Number(pid));
+}
 function kill(pid: number, group = false) { try { process.kill(group && process.platform !== 'win32' ? -pid : pid,'SIGKILL'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; } }
 afterEach(async () => {
   for(const child of children)if(child.pid && child.exitCode===null && child.signalCode===null)for(const pid of processTree([child.pid]))ownedPids.add(pid);
@@ -86,7 +89,7 @@ function reply(res: ServerResponse, content: string, command?: string) {
 async function recoveryScenario(daemonOnly: boolean, interpreter = process.execPath, waitingModel = false) {
   const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'byok-durable-restart-'))); roots.push(root);
   // Isolated package copy: no shared dist mutation. Product modules are byte-identical; only entry audit and test-authority export are added.
-  const isolated=await fs.mkdtemp(path.join(clientRoot,'node_modules/.cache/byok-durable-recovery-')); roots.push(isolated);
+  const isolated=await fs.mkdtemp(path.join(os.tmpdir(),'byok-durable-recovery-package-')); roots.push(isolated);
   await fs.cp(path.join(clientRoot,'dist'),path.join(isolated,'dist'),{recursive:true});
   await fs.copyFile(path.join(clientRoot,'package.json'),path.join(isolated,'package.json'));
   await fs.symlink(path.join(clientRoot,'node_modules'),path.join(isolated,'node_modules'),'junction');
@@ -100,11 +103,12 @@ async function recoveryScenario(daemonOnly: boolean, interpreter = process.execP
   for (const relative of ['dist/bin/pi-runtime-host.js','dist/adapters/index.js']) {
     expect(createHash('sha256').update(await fs.readFile(path.join(isolated,relative))).digest('hex')).toBe(createHash('sha256').update(await fs.readFile(path.join(clientRoot,relative))).digest('hex'));
   }
-  const launcherRoot=await fs.mkdtemp(path.resolve(clientRoot,'../keys/node_modules/.cache/byok-durable-recovery-')); roots.push(launcherRoot);
+  const launcherRoot=await fs.mkdtemp(path.join(os.tmpdir(),'byok-durable-recovery-launcher-')); roots.push(launcherRoot);
+  await fs.symlink(path.resolve(clientRoot,'../keys/node_modules'),path.join(launcherRoot,'node_modules'),'junction');
   const launcher=path.join(launcherRoot,'launcher.mjs');
   await run(BUN_BIN!,['build',path.resolve(import.meta.dirname,'fixtures/pi-durable-recovery-launcher.ts'),'--target=node','--packages=external','--outfile',launcher]);
   const requests:Array<{body:string;authorization:unknown}>=[];
-  const command=`${JSON.stringify(process.execPath)} -e 'const fs=require("fs");fs.appendFileSync("old-effect.log","once\\n");${daemonOnly ? 'setInterval(()=>{fs.appendFileSync("orphan-writes.log","tick\\n");console.log("tick");},50);' : ''}console.log(JSON.stringify(process.env));setInterval(()=>{},1000)'`;
+  const command=`${JSON.stringify(process.execPath)} -e 'const fs=require("fs");fs.writeFileSync("tool-pid",String(process.pid));fs.appendFileSync("old-effect.log","once\\n");${daemonOnly ? 'setInterval(()=>{fs.appendFileSync("orphan-writes.log","tick\\n");console.log("tick");},50);' : ''}console.log(JSON.stringify(process.env));setInterval(()=>{},1000)'`;
   provider=createServer((req,res)=>{ let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{requests.push({body,authorization:req.headers.authorization}); const old=body.includes('OLD_HOST_CONTEXT');if(old&&waitingModel)return;reply(res,old?'':'fresh result',old?command:undefined);});});
   await new Promise<void>(resolve=>provider!.listen(0,'127.0.0.1',resolve)); const address=provider.address(); if (!address || typeof address==='string') throw new Error('missing provider port');
   const profilePath=path.join(root,'profile.json');
@@ -135,10 +139,13 @@ async function recoveryScenario(daemonOnly: boolean, interpreter = process.execP
   else if(process.platform==='linux')expect(await fs.readFile(`/proc/${oldLaunch!.workerPid}/environ`,'utf8')).not.toContain(SENTINEL);
   if(daemonOnly&&!waitingModel)await vi.waitFor(async()=>expect((await fs.readFile(path.join(home,'orphan-writes.log'),'utf8')).length).toBeGreaterThan(0),PROCESS_WAIT);
   if(daemonOnly&&!waitingModel)expect((await rows(path.join(control,'ipc-events.jsonl'))).filter(row=>row.phase==='before-tool')).toEqual([{phase:'before-tool',ipcClosed:true}]);
+  const toolGroup=waitingModel?undefined:Number(execFileSync('ps',['-p',(await fs.readFile(path.join(home,'tool-pid'),'utf8')).trim(),'-o','pgid='],{encoding:'utf8'}).trim());
+  if(toolGroup!==undefined)expect(liveGroup(toolGroup).length).toBeGreaterThan(0);
   const interruptedTree=processTree([first.pid!,oldLaunch!.launcherPid]);for(const pid of interruptedTree)ownedPids.add(pid);
   first.kill('SIGKILL'); await new Promise(resolve=>first.once('exit',resolve));expect(first.signalCode).toBe('SIGKILL');
   if(!daemonOnly) { kill(oldLaunch!.launcherPid,true); for(const pid of interruptedTree)if(pid!==first.pid)kill(pid); }
   await vi.waitFor(()=>expect(interruptedTree.filter(live)).toEqual([]),PROCESS_WAIT);
+  if(toolGroup!==undefined)await vi.waitFor(()=>expect(liveGroup(toolGroup)).toEqual([]),PROCESS_WAIT);
   for(const pid of interruptedTree)ownedPids.delete(pid);launcherPids=launcherPids.filter(pid=>!interruptedTree.includes(pid));
   if(daemonOnly&&!waitingModel) {const writes=await fs.readFile(path.join(home,'orphan-writes.log'),'utf8');const count=requests.length;await new Promise(resolve=>setTimeout(resolve,250));expect(await fs.readFile(path.join(home,'orphan-writes.log'),'utf8')).toBe(writes);expect(requests.length).toBe(count);}
   const oldBytes=await fs.readFile(oldReplica);const oldHash=createHash('sha256').update(oldBytes).digest('hex');const auditCut=(await rows(audit)).length;
@@ -174,7 +181,8 @@ it.skipIf(BUN_BIN === undefined || process.platform === 'win32').each(RECOVERY_I
 
 it.skipIf(BUN_BIN === undefined || process.platform === 'win32')('N1 real custody startPiProvider and unmodified built worker agree on private IPC and keep key out of env', async () => {
   const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'byok-durable-ipc-real-'))); roots.push(root);
-  const launcherRoot=await fs.mkdtemp(path.resolve(clientRoot,'../keys/node_modules/.cache/byok-durable-recovery-'));roots.push(launcherRoot);
+  const launcherRoot=await fs.mkdtemp(path.join(os.tmpdir(),'byok-durable-recovery-launcher-'));roots.push(launcherRoot);
+  await fs.symlink(path.resolve(clientRoot,'../keys/node_modules'),path.join(launcherRoot,'node_modules'),'junction');
   const launcher=path.join(launcherRoot,'launcher.mjs');
   await run(BUN_BIN!,['build',path.resolve(import.meta.dirname,'fixtures/pi-durable-recovery-launcher.ts'),'--target=node','--packages=external','--outfile',launcher]);
   const control=path.join(root,'control'),home=path.join(root,'home'),store=path.join(root,'store');await Promise.all([control,home,store].map(dir=>fs.mkdir(dir)));

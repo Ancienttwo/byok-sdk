@@ -11,6 +11,24 @@ const paths = canonicalCanaryPaths('/synthetic-home');
 const pathDir = (file) => file.slice(0, file.lastIndexOf('/'));
 
 describe('credential audit trace parser', () => {
+  it('distinguishes qualified Codex app-server task from help/version/login probes', () => {
+    const commands = [
+      ['app-server', '--listen', 'stdio://'],
+      ['app-server', '--help'],
+      ['--version'],
+      ['login', 'status'],
+    ];
+    const evidence = normalizeTraceEvidence(commands.map((args, i) => ({
+      name: `trace.${400 + i}`,
+      text: `execve("/usr/bin/node", ${JSON.stringify(['node', '/repo/fake-codex.mjs', ...args])}, 0) = 0`,
+    })), paths);
+    expect(evidence.processes[0].roles).toEqual(['fixture:codex', 'task:codex']);
+    for (const process of evidence.processes.slice(1)) {
+      expect(process.roles).toEqual(['detect:codex', 'fixture:codex']);
+    }
+    expect(normalSmokeVerdict(evidence).pass).toBe(true);
+  });
+
   it('matches canonical opens exactly and attributes fixture roles', () => {
     const evidence = normalizeTraceEvidence(
       [
