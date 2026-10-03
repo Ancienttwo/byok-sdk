@@ -125,3 +125,10 @@ Four sequential independent slices, preserve F1 charge-once and all caps. Use su
 - [x] Regenerate projection only through tooling and execute exact seven-check chain after last commit; publish /tmp/byok-t6-followups-report.md.
 
 Canonical prepare15/15 and independent Codex exact-source acceptance completed at adc2da4c, target0b44f76c. Final chronological after-last-bookkeeping-commit evidence is owned by /tmp/byok-t6-followups-final-check-results.json and /tmp/byok-t6-followups-report.md; report remains BLOCKED until actual final chain passes.
+
+## Owner fix round 1 scope amendment
+The 2026-10-03 Owner instruction supersedes the original F2 exclusion: merge origin/main@54471676 and fix advisor blocker #1 only. Required verification for this round is F2 lock-recheck, all custody-sixth-edge test files, the four new followup test files, and root typecheck. Full suite is reserved for Owner. Local commits only; no push/PR.
+
+- [x] Merge main via a merge commit, preserving F2 locked verification and T6 output checks.
+- [x] Reproduce F2/F4 lock-wait interaction; move spawn preflight into the Claude final-probe branch while preserving every assertion and final atomic admission.
+- [ ] Regenerate projection through CodeGraph init and architecture-projection plan/apply/check; record exact-HEAD focused counts in /tmp/byok-t6-followups-fix1-report.md.

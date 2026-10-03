@@ -412,11 +412,13 @@ export class ExternalCliCustodyAuthority {
     if (externalCliCommitment(actual) !== record.invocationDigest) refuse('external_cli_invocation_changed');
     if (toolImplementationLaunchEnvNamesDigest(actual.env) !== record.launchEnvNamesDigest
       || toolImplementationLoaderEnvValuesDigest(actual.env) !== record.loaderEnvValuesDigest) refuse('external_cli_env_changed');
-    this.preflight(state.request,record.installation);
     // No general install-version capability is attested for a mode-lock setting.
     // Re-prove Claude's own-login state at every final admission instead; then
     // remeasure bytes/parent/env again. A same-UID final check/spawn race remains.
     if (record.installation.adapter.startsWith('claude-')) {
+      // Avoid an unnecessary final status probe; all adapters still use final
+      // locked admission after the complete physical reverify.
+      this.preflight(state.request,record.installation);
       await this.verifyLoginMode(record.installation,{...actual.env},actual.cwd,state.control);
     }
     await this.reverify(record.installation,actual.env);
