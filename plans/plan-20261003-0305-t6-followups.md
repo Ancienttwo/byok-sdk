@@ -131,4 +131,4 @@ The 2026-10-03 Owner instruction supersedes the original F2 exclusion: merge ori
 
 - [x] Merge main via a merge commit, preserving F2 locked verification and T6 output checks.
 - [x] Reproduce F2/F4 lock-wait interaction; move spawn preflight into the Claude final-probe branch while preserving every assertion and final atomic admission.
-- [ ] Regenerate projection through CodeGraph init and architecture-projection plan/apply/check; record exact-HEAD focused counts in /tmp/byok-t6-followups-fix1-report.md.
+- [x] Regenerate projection through CodeGraph init and architecture-projection plan/apply/check; focused regression 83/83 and typecheck passed before closeout. Final exact-HEAD evidence is external in /tmp/byok-t6-followups-fix1-report.md.
