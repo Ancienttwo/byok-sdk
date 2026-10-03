@@ -161,6 +161,9 @@ describe('official Pi 1.0.0: usage observation', () => {
       // as `usage_unavailable` (covered end-to-end by prepared-offer-lane.test.ts).
       const event = mapPiMessageToAgentEvent({ type: 'message_end', message: assistant[0] } as never);
       expect(event).toEqual({ type: 'usage', inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, totalTokens: 0 });
+      const stats = harness.session.getSessionStats();
+      expect(stats.contextUsage?.contextWindow).toBe(128000);
+      expect(stats.contextUsage?.tokens).toEqual(expect.any(Number));
       expect(globalFetch.calls).toEqual([]);
     } finally {
       harness.dispose();

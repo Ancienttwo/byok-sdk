@@ -208,12 +208,8 @@ export const MAX_PENDING_APPROVALS_PER_TASK = 16;
  * expected race, audit-worthy but never task-state-affecting — apart from
  * "the session's own resolveApproval() failed for some other, genuine
  * reason" (an adapter-level problem, which still fails the task exactly as
- * before). Only ever thrown for an adapter that actually wires up a real
- * approval channel (claude, under `confirm` mode) — pi/codex's own
- * `resolveApproval()` still throw their own unrelated, adapter-specific
- * "not supported at all" errors, which are NOT instances of this class and
- * therefore still fall through to the pre-existing fail-the-task behavior,
- * unchanged.
+ * before). Only thrown for a custom adapter wiring an approval channel.
+ * Bundled adapters reject confirm and throw their own unsupported errors.
  */
 export class NoPendingApprovalError extends Error {
   constructor(public readonly taskId: string) {
@@ -339,6 +335,12 @@ function observePreparedCall(
   observation: PreparedExecutionObservation,
   event: Extract<AgentEvent, { type: 'usage' }>,
 ): string | undefined {
+  // Context-only observations are telemetry, not an unreadable provider call.
+  // A bare usage event still represents an unreadable call and fails closed.
+  if (event.contextSource !== undefined &&
+      event.inputTokens === undefined && event.cachedInputTokens === undefined &&
+      event.outputTokens === undefined && event.reasoningTokens === undefined &&
+      event.totalTokens === undefined) return undefined;
   observation.calls += 1;
   const prompt = event.inputTokens;
   if (prompt === undefined || !Number.isSafeInteger(prompt) || prompt <= 0 || prompt > TERMINAL_INFERENCE_USAGE_MAX_TOKENS) {
@@ -760,6 +762,8 @@ interface ActiveTask {
   egressEnabled: boolean;
   adapter: RuntimeAdapter;
   session: Session;
+  /** One consumer; teardown drains its final usage within the existing interrupt deadline. */
+  eventPump?: Promise<void>;
   workspaceDir: string;
   agentBinding?: AgentHomeExecutionBinding;
   agentRef?: AgentRef;
@@ -1272,6 +1276,24 @@ export type HostToolsetContextLookup =
   | { readonly status: 'active'; readonly taskId: string; readonly agentRef: AgentRef; readonly toolsetId: string }
   | { readonly status: 'revoked' }
   | { readonly status: 'unknown' };
+
+// Keep internal lifecycle bookkeeping out of the exported class declaration.
+const offerSettlements = new WeakMap<TaskRunner, Set<Promise<void>>>();
+async function trackOffer(runner: TaskRunner, operation: Promise<void>): Promise<void> {
+  let offers = offerSettlements.get(runner);
+  if (!offers) { offers = new Set(); offerSettlements.set(runner, offers); }
+  offers.add(operation);
+  try { await operation; }
+  finally { offers.delete(operation); }
+}
+
+function observeTerminalUsage(active: ActiveTask, event: Extract<AgentEvent, { type: 'usage' }>): void {
+  if (event.contextSource === undefined || event.inputTokens !== undefined ||
+      event.cachedInputTokens !== undefined || event.outputTokens !== undefined ||
+      event.reasoningTokens !== undefined || event.totalTokens !== undefined) {
+    active.lastUsage = event;
+  }
+}
 
 /**
  * Per-connection task orchestration: offer -> (decline | prepare -> seal ->
@@ -1802,6 +1824,8 @@ export class TaskRunner {
   }
 
   async shutdownActiveTasks(reason: string): Promise<void> {
+    const offers = offerSettlements.get(this);
+    if (offers?.size) await Promise.all(offers);
     const active = [...this.tasks.values()];
     await Promise.all(active.map((task) => this.shutdownTask(task, reason)));
     for (const taskId of this.startupOwners.keys()) {
@@ -1841,12 +1865,30 @@ export class TaskRunner {
    * a genuine protocol bug, not a benign race — mirrors `pump()`'s own
    * identity-check guard for the same class of race.
    */
-  private async interruptBounded(session: Session): Promise<void> {
-    await raceSettleFirst(() => session.interrupt(),
-      this.deps.shutdownInterruptTimeoutMs ?? DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS);
+  private async interruptBounded(active: ActiveTask, drainEvents = true): Promise<void> {
+    const timeoutMs = this.deps.shutdownInterruptTimeoutMs ?? DEFAULT_SHUTDOWN_INTERRUPT_TIMEOUT_MS;
+    const deadline = Date.now() + timeoutMs;
+    await raceSettleFirst(() => active.session.interrupt(), timeoutMs);
+    // Close drains native stdio even if an ACK arrived before final usage, or
+    // the adapter never supplies turn_end. Retain this SAME receipt for finish
+    // to await/retry; a deadline is never proof of disposal.
+    const disposal = active.disposalAttempt ??= Promise.resolve().then(() => active.session.close());
+    // Observe a rejected receipt without turning it into an unhandled rejection;
+    // finish() remains responsible for reporting it and retaining ownership.
+    void disposal.catch(() => undefined);
+    if (drainEvents) {
+      // Drain events already delivered by interrupt before publishing usage.
+      // A pending close/next() is not metering authority and cannot hold the
+      // cancellation ACK hostage. One scheduler turn drains queued microtasks;
+      // a close receipt (including a hung one) is still awaited by finish().
+      if (Date.now() < deadline) {
+        await Promise.race([active.eventPump ?? Promise.resolve(),
+          new Promise<void>(resolve => setImmediate(resolve))]);
+      }
+    }
   }
 
-  private async teardownActiveTask(active: ActiveTask, reason: string, retryable: boolean): Promise<boolean> {
+  private async teardownActiveTask(active: ActiveTask, reason: string, retryable: boolean, drainEvents = true): Promise<boolean> {
     if (active.finalizationStarted) return this.finish(active.taskId);
     if (!this.reserveSemanticTerminal(active)) return active.semanticTerminalSettled ?? false;
     // A soft interrupt may end the event stream; mark it as runner-initiated
@@ -1854,7 +1896,7 @@ export class TaskRunner {
     active.beingTornDown = true;
     active.blobAbort.abort();
     await this.observeGit(active, 'salvage');
-    await this.interruptBounded(active.session);
+    await this.interruptBounded(active, drainEvents);
     if (this.tasks.get(active.taskId) !== active) return true;
     await this.persistAgentTerminalEvidence(active, 'failed', reason);
     this.deps.send(
@@ -1895,10 +1937,10 @@ export class TaskRunner {
    * transient/environmental failure a retry could fix — the same task under
    * the same limits would just hit it again.
    */
-  private async failActiveTaskForResourceLimit(taskId: string, reason: string): Promise<void> {
+  private async failActiveTaskForResourceLimit(taskId: string, reason: string, drainEvents = true): Promise<void> {
     const active = this.tasks.get(taskId);
     if (!active) return;
-    await this.teardownActiveTask(active, reason, false);
+    await this.teardownActiveTask(active, reason, false, drainEvents);
   }
 
   /**
@@ -1932,19 +1974,19 @@ export class TaskRunner {
   async handleEnvelope(envelope: Envelope): Promise<void> {
     switch (envelope.type) {
       case 'task.offer':
-        await this.handleOffer(envelope.task_id, envelope.payload, false);
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, false));
         return;
       case 'task.offer_with_toolsets':
-        await this.handleOffer(envelope.task_id, envelope.payload, false);
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, false));
         return;
       case 'task.offer_for_agent':
-        await this.handleOffer(envelope.task_id, envelope.payload, true);
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, true));
         return;
       case 'task.offer_for_agent_with_egress':
-        await this.handleOffer(envelope.task_id, envelope.payload, true);
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, true));
         return;
       case 'task.offer_for_agent_with_egress_fresh':
-        await this.handleOffer(envelope.task_id, envelope.payload, true);
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, true));
         return;
       case 'task.offer_prepared':
         await this.handleOffer(envelope.task_id, envelope.payload, true);
@@ -2338,8 +2380,8 @@ export class TaskRunner {
       //
       // The binding covers EVERY MCP server this task will generate, whatever
       // its origin — not only the host toolsets the device projects. The
-      // reserved SDK helpers (agent message, agent memory) and the reserved
-      // approval server the picked adapter generates itself under
+      // reserved SDK helpers (agent message, agent memory) and any reserved
+      // approval server a custom adapter declares under
       // `policy.mode: 'confirm'` are the same kind of child process, launched
       // by the same CLI, from the same inherited cwd; a task whose only MCP
       // server is one of those used to reach `start()` with no binding at all
@@ -3041,8 +3083,7 @@ export class TaskRunner {
               throw new NoPendingApprovalError(taskId);
             }
             // 'wire': this closure is invoked ONLY by an adapter's own
-            // `session.resolveApproval()` (e.g. `ClaudeSession.resolveApproval`
-            // under `confirm` mode), which in turn is called ONLY from
+            // `session.resolveApproval()` on a custom adapter, which is called from
             // `handleApprove`/`handleReject` below — i.e. a server-sent wire
             // `task.approve`/`task.reject`. The server already knows this
             // decision (it sent it); `task.approval_resolved` must never be
@@ -3087,8 +3128,10 @@ export class TaskRunner {
           if (disposalFailure) this.deps.onRuntimeDisposalFailure?.({ taskId, runtimeId: pick.descriptor.id,
             stage: 'quiescence', reason: err.message });
           if (!cancelled) {
-            if (agentBinding === undefined) await this.fail(taskId, errorMessage(err), false);
-            else await this.failClaimedAgent(taskId, errorMessage(err), false, {
+            const reason = this.stoppingOffers ? 'daemon shutting down during runtime startup' : errorMessage(err);
+            const retryable = this.stoppingOffers;
+            if (agentBinding === undefined) await this.fail(taskId, reason, retryable);
+            else await this.failClaimedAgent(taskId, reason, retryable, {
               binding: agentBinding, runtimeId: pick.descriptor.id,
             });
           }
@@ -3236,7 +3279,8 @@ export class TaskRunner {
         this.startupOwners.delete(taskId);
         this.tasks.set(taskId, active);
         this.reserveSemanticTerminal(active);
-        await this.interruptBounded(session);
+        active.eventPump = this.pump(active);
+        await this.interruptBounded(active);
         await this.updateGitPhaseBestEffort(gitWorkspaceId, 'cancelled');
         await this.persistAgentTerminalEvidence(active, 'cancelled', reason);
         this.deps.send(
@@ -3278,7 +3322,7 @@ export class TaskRunner {
       if (payload.limits?.maxDurationMs !== undefined) {
         this.armMaxDurationTimer(active, payload.limits.maxDurationMs);
       }
-      void this.pump(active);
+      active.eventPump = this.pump(active);
 
       // Record (or refresh) this session's resumable workspace for any future
       // task.offer that carries the same sessionRef, fire-and-forget:
@@ -3719,7 +3763,15 @@ export class TaskRunner {
   private async pump(active: ActiveTask): Promise<void> {
     try {
       for await (let event of active.session.events) {
-        if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
+        if (this.tasks.get(active.taskId) !== active || active.finalizationStarted) return;
+        if (active.beingTornDown) {
+          // Cancellation owns the result, but the native interrupt may still
+          // deliver metering after a tool result/diagnostic. Consume only that
+          // observation, never progress, artifacts, approvals or a new terminal.
+          if (event.type === 'usage') observeTerminalUsage(active, event);
+          if (event.type === 'turn_end') return;
+          continue;
+        }
         // A concurrent task.cancel/task.reject may already have finished
         // (and deleted) this task while this loop was awaiting the next
         // event — e.g. the runtime's own interrupt handling settles with a
@@ -3747,12 +3799,15 @@ export class TaskRunner {
           blobClient: this.deps.blobClient,
           taskId: active.taskId,
           signal: active.blobAbort.signal,
-          log: (message) => console.error(`[byok/client] ${message}`),
+          log: (message) => {
+            if (!active.beingTornDown) console.error(`[byok/client] ${message}`);
+          },
         });
         // The upload above is a real await: a concurrent cancel/reject may
         // have finished this task while it was in flight. Same guard, same
         // reason as the two above — see this loop's own top-of-body checks.
-        if (this.tasks.get(active.taskId) !== active || active.beingTornDown) return;
+        if (this.tasks.get(active.taskId) !== active || active.finalizationStarted) return;
+        if (active.beingTornDown) continue; // skip the aborted spill, then drain queued interrupt usage
 
         // M5 batch-3 (workstream 2): DaemonConfig.maxTaskOutputBytes
         // enforcement — see `estimateEventBytes`'s own doc comment for
@@ -3768,6 +3823,7 @@ export class TaskRunner {
           await this.failActiveTaskForResourceLimit(
             active.taskId,
             `${MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX}: task emitted approximately ${active.outputBytesSoFar} bytes of output (serialized-event-length approximation), exceeding the configured limit of ${this.maxTaskOutputBytes} bytes`,
+            false, // Called by this pump: it cannot await its own settlement.
           );
           return;
         }
@@ -3777,7 +3833,8 @@ export class TaskRunner {
           // Codex/Claude adapters emit their runtime terminal observation
           // before turn_end/error; a custom adapter that emits several keeps
           // only the latest actual observation rather than inventing a sum.
-          active.lastUsage = event;
+          // Keep terminal provider cost observation when a separate context snapshot arrives.
+          observeTerminalUsage(active, event);
           if (active.prepared !== undefined) {
             const verdict = observePreparedCall(active.prepared, event);
             if (verdict !== undefined) {
@@ -3785,7 +3842,7 @@ export class TaskRunner {
               // wire, ahead of the typed failure it caused.
               active.batcher.push(event);
               active.batcher.flush();
-              await this.teardownActiveTask(active, verdict, false);
+              await this.teardownActiveTask(active, verdict, false, false);
               return;
             }
           }
@@ -3856,7 +3913,7 @@ export class TaskRunner {
           // the promise's own resolved value — that shape (`{approved,
           // reason}`) is `requestApproval`'s public contract, asserted
           // exactly by this file's own tests and relied on by
-          // `byok-approval-mcp.ts`/`create-daemon.ts`'s control socket —
+          // `create-daemon.ts`'s shared control socket —
           // instead it's threaded through via the optional `onOrigin`
           // callback parameter (additive, invisible to every other caller).
           // See `task-runner-approval.test.ts`'s "C1" describe block for the
@@ -4040,6 +4097,7 @@ export class TaskRunner {
         await this.failActiveTaskForResourceLimit(
           active.taskId,
           `${MAX_PROGRESS_BATCH_BYTES_EXCEEDED_REASON_PREFIX}: event requires ${err.actualBytes} UTF-8 bytes, exceeding the configured limit of ${err.maxBatchBytes} bytes`,
+          false,
         );
         return;
       }
@@ -4181,7 +4239,7 @@ export class TaskRunner {
       return;
     }
     active.blobAbort.abort();
-    await this.interruptBounded(active.session);
+    await this.interruptBounded(active);
     await this.observeGit(active, 'salvage');
     // Deliberately NOT active.batcher.flush()-ed here (M1-4 e2e finding):
     // §4's "server state is authoritative on its own action" rule means the
@@ -4292,25 +4350,10 @@ export class TaskRunner {
   }
 
   /**
-   * M4 Phase 3: the daemon-side half of the out-of-band approval channel
-   * (`types.ts`'s `ApprovalChannel`) — called from `create-daemon.ts`'s
-   * `approvals.request` control method, itself called by `byok-approval-mcp`
-   * (a claude-spawned MCP-server child process, NOT the adapter/session
-   * in-process — see `ApprovalChannel`'s own doc comment for the full why
-   * this seam exists at all rather than an `AgentEvent`).
-   *
-   * Deliberately independent of the dormant `needs_approval` `AgentEvent`
-   * path in `pump()` below (~line 611): empirically confirmed (M4 Phase 3
-   * STEP 0), claude's own stream-json output emits NOTHING while a
-   * permission-prompt-tool call is outstanding — the gap between a `tool_use`
-   * frame and its `tool_result` is invisible on the wire, indistinguishable
-   * from ordinary model "thinking" latency. `pump()`'s for-await loop over
-   * `active.session.events` therefore has no event to ever branch on for
-   * this case; the ONLY signal that a task is paused arrives out-of-band,
-   * over the control socket, which is exactly what this method is for. The
-   * `needs_approval` path stays dormant, untouched, for a hypothetical
-   * future adapter whose runtime DOES expose the pause on its own event
-   * stream.
+   * Daemon-side shared out-of-band ApprovalChannel, exposed through the
+   * control socket's approvals.request method for custom adapters. Bundled
+   * Claude no longer uses it. The separate needs_approval event path remains
+   * available to adapters that expose a pause through their event stream.
    *
    * Sends `task.await_approval` (protocol §5), registers a fresh entry in
    * `deps.approvalRegistry`, and races it against `deps.approvalTimeoutMs`
@@ -4327,13 +4370,8 @@ export class TaskRunner {
    * that isn't currently active on this device — a stale/unknown/
    * already-finished task has nothing to pause.
    *
-   * M4 Phase 4 (fold-in from the P3 gate — concurrent-approval-overwrite
-   * fix): claude's parallel tool use can call this MORE THAN ONCE for the
-   * SAME task before the first call's approval is resolved — each parallel
-   * tool call is its own independent `byok-approval-mcp` `tools/call`
-   * request, and the MCP protocol lets several be in flight on one
-   * connection at once (see `byok-approval-mcp.ts`'s own doc comment on
-   * sharing one control-socket connection across them). Before this fix,
+   * Custom adapters can request more than one approval for the same task
+   * before the first request resolves. Before the queue was introduced,
    * `active.pendingApprovalId = approvalId` above was unconditional — a
    * second concurrent call for the same task silently overwrote the first
    * call's id, so only the LATEST request was ever wire-resolvable
@@ -4363,7 +4401,7 @@ export class TaskRunner {
    * resolves — with the `ApprovalOrigin` (`'wire' | 'local'`) the eventual
    * decision actually resolved through (see `ApprovalRegistry.resolve`'s own
    * `origin` parameter). Purely additive/internal: every existing caller
-   * (`byok-approval-mcp.ts`, `create-daemon.ts`'s control socket, this file's
+   * (`create-daemon.ts`'s control socket and this file's
    * own tests) omits it and observes exactly the same `{approved, reason}`
    * resolution as before. `pump()`'s dormant `needs_approval` branch is the
    * one caller that supplies it, to decide whether it still needs to
@@ -4490,8 +4528,8 @@ export class TaskRunner {
    * called, and therefore `deps.send` pushes this envelope onto the outbox,
    * SYNCHRONOUSLY from the `onResolve` callback above — strictly BEFORE the
    * `resolve(...)` call on the very next line that unblocks whatever was
-   * awaiting `requestApproval()`'s promise (`byok-approval-mcp`, ultimately
-   * the paused runtime turn). Any further progress from the resumed session
+   * awaiting `requestApproval()`'s promise (ultimately the custom adapter's
+   * paused runtime turn). Any further progress from the resumed session
    * can only be produced AFTER that unblock, which needs at least one more
    * microtask/event-loop turn — so `task.approval_resolved` is always queued
    * ahead of it with no extra bookkeeping needed here.
@@ -4744,7 +4782,7 @@ export class TaskRunner {
       await active.semanticTerminalSettled;
       return;
     }
-    await this.interruptBounded(active.session);
+    await this.interruptBounded(active);
     await this.observeGit(active, 'salvage');
     // Same reasoning as handleCancel() above: the server already moved this
     // task to `Failed` and closed its event queue before this notification

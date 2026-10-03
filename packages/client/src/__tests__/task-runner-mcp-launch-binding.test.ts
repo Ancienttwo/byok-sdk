@@ -58,7 +58,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-/** A claude-shaped adapter: an external CLI spawns its servers, and it generates its own approval server under `confirm`. */
+/** Custom external-CLI adapter that generates its own approval server; shipped Claude no longer does. */
 function claudeShaped(id = 'claude'): StubRuntimeAdapter {
   return new StubRuntimeAdapter(id, { kind: 'available' }, CONFIRM_CAPABLE, true, {
     mcpServerLaunch: 'launcher-wrapped',

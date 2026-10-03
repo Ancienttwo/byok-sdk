@@ -5,6 +5,7 @@
 ## Decision Records
 
 - 领域模型与权威边界 ADR-026 – ADR-034（2026-09-03）：[`adr-2026-09-03-domain-model-and-authority.md`](adr-2026-09-03-domain-model-and-authority.md)；帐本行见 `sdk-architecture.md` 附录 A
+- 云端 Generic Agent ADR-036（2026-10-03）：[`adr-2026-10-03-cloud-generic-agent.md`](adr-2026-10-03-cloud-generic-agent.md)；研究稿 [`../researches/2026-10-03_pi-harness-cf-gap-and-cloud-generic-agent.md`](../researches/2026-10-03_pi-harness-cf-gap-and-cloud-generic-agent.md)
 
 ## Current Snapshot
 

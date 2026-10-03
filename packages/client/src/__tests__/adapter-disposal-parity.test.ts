@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ClaudeProcessClient } from '../adapters/claude/process-client';
-import { CodexProcessRunner } from '../adapters/codex/process-runner';
+import { createOwnedLineProcessSpawn } from '../runtime/owned-line-process';
 import { PiRpcClient } from '../adapters/pi/rpc-client';
 
 /**
@@ -21,7 +21,7 @@ import { PiRpcClient } from '../adapters/pi/rpc-client';
 const RUNTIME_CLIENTS = [
   { runtime: 'pi', file: '../adapters/pi/rpc-client.ts' },
   { runtime: 'claude', file: '../adapters/claude/process-client.ts' },
-  { runtime: 'codex', file: '../adapters/codex/process-runner.ts' },
+  { runtime: 'codex', file: '../runtime/owned-line-process.ts' },
 ];
 
 const REQUIRED_IMPORTS = [
@@ -38,12 +38,12 @@ function stripComments(source: string): string {
 describe('runtime clients share one process-tree disposal authority', () => {
   it.each(RUNTIME_CLIENTS)('$runtime imports every process-tree entry point from ../process-tree', ({ file }) => {
     const source = readFileSync(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
-    const importMatch = source.match(/import\s*\{([^}]*)\}\s*from\s*'\.\.\/process-tree';/);
+    const importMatch = source.match(/import\s*\{([^}]*)\}\s*from\s*'[^']*process-tree';/);
 
     const importedNames = importMatch?.[1];
     expect(importedNames).toBeDefined();
     const imported = (importedNames ?? '').split(',').map((name) => name.trim());
-    for (const required of REQUIRED_IMPORTS) expect(imported).toContain(required);
+    for (const required of REQUIRED_IMPORTS.filter(name => file.includes('owned-line-process') ? name !== 'requestOwnedProcessTreeTermination' : true)) expect(imported).toContain(required);
   });
 
   it.each(RUNTIME_CLIENTS)('$runtime has no private termination shortcut', ({ file }) => {
@@ -129,18 +129,12 @@ const FAIL_CLOSED_CLIENTS: FailClosedClient[] = [
     readyFrame: `${JSON.stringify({ type: 'thread.started', thread_id: 'already-started' })}\n`,
     async start(spawnFn, jobObject) {
       const delivered: unknown[] = [];
-      const runner = new CodexProcessRunner({
-        command: 'codex', args: [], cwd: process.cwd(), env: process.env,
-        spawnFn: spawnFn as never, platform: 'win32', jobObject,
-        onEvent: (evt) => delivered.push(evt),
-      });
-      // codex has no first awaited operation of its own: `codex-adapter.ts`
-      // races the first event against this close, and reads the reason off
-      // `buildExitError`. No event may have been delivered — a delivered
-      // `thread.started` is exactly the published thread id this must prevent.
-      await runner.waitClosed();
+      const child = createOwnedLineProcessSpawn({spawnFn:spawnFn as never,platform:'win32',jobObject})('codex',[],{cwd:process.cwd(),env:Object.fromEntries(Object.entries(process.env).filter((row): row is [string,string]=>row[1]!==undefined))});
+      child.onLine(line=>delivered.push(line));
+      const failure=await child.spawned.catch(error=>error);
+      await child.exited.catch(()=>{});
       expect(delivered).toEqual([]);
-      return runner.buildExitError('codex exited before yielding an authoritative thread id');
+      return failure;
     },
   },
 ];

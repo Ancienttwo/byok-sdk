@@ -104,38 +104,28 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       permissionModes: ['auto', 'readonly'],
     });
 
-    // claude: no mid-turn steer (writes queue as a follow-up turn instead —
-    // see claude-adapter.ts), but does support the extra `plan` permission
-    // mode, and (M4 Phase 3) `confirm` via --permission-prompt-tool.
-    // GAP-001/H-003: `approvalInteractive` is now `true` here — it comes
-    // straight from `ClaudeAdapter.capabilities()`, whose confirm path is
-    // genuinely wired (permission-prompt-tool → approval MCP → control
-    // socket), rather than the hardcoded `false` the daemon used to stamp
-    // on every runtime.
+    // Claude still supports plan; its private confirm/approval MCP path has been removed.
     expect(byId.get('claude')).toEqual({
-      steer: false,
-      resume: true,
-      approvalInteractive: true,
-      mcpToolsets: true,
-      permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
-    });
-
-    // codex: no mid-turn steer (codex exec has no in-band channel — see
-    // codex-adapter.ts), and only auto/readonly permission modes.
-    expect(byId.get('codex')).toEqual({
       steer: false,
       resume: true,
       approvalInteractive: false,
       mcpToolsets: true,
-      permissionModes: ['auto', 'readonly'],
+      permissionModes: ['auto', 'readonly', 'plan'],
     });
 
-    // The wire value is adapter-generated, never a constant: the three
-    // bundled runtimes must NOT all report the same thing. pi and codex have
-    // no `needs_approval` notion at all (`resolveApproval()` throws), claude
-    // does.
+    // codex: persistent app-server steering with YOLO-only auto permission mode.
+    expect(byId.get('codex')).toEqual({
+      steer: true,
+      resume: true,
+      approvalInteractive: false,
+      mcpToolsets: true,
+      permissionModes: ['auto'],
+    });
+
+    // The wire value remains adapter-generated. The shipped adapters all
+    // report false after removal of Claude's private interactive approval lane.
     expect(byId.get('pi')?.approvalInteractive).toBe(false);
-    expect(byId.get('claude')?.approvalInteractive).toBe(true);
+    expect(byId.get('claude')?.approvalInteractive).toBe(false);
     expect(byId.get('codex')?.approvalInteractive).toBe(false);
 
     daemon.reloadMcpToolsets(

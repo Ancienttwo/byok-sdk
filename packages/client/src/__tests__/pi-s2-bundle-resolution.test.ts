@@ -327,7 +327,11 @@ describe('Pi launch path — S2 release containment', () => {
           const report = JSON.parse(await fs.readFile(reportPath, 'utf8')) as Report;
           if (report.stage === 'sdk-module-load') { nativeBlockers.push(`${entryKind} SDK/native graph load (Tier 1 unresolved): ${report.error}`); continue; }
           if (!report.capture || !report.binding || !report.env) { tier1.push(`${entryKind} ${report.stage}: ${report.error}`); continue; }
-          expect(report.resolveCalls).toEqual([{ subject: { kind: 'runtime', runtimeId: 'pi' }, runtimeEntry: entryKind }]);
+          expect(report.resolveCalls).toEqual([
+            { subject: { kind: 'runtime', runtimeId: 'pi' }, runtimeEntry: entryKind },
+            ...['claude-code','claude-code-writer','codex-exec','codex-exec-writer','cursor-agent','cursor-agent-writer']
+              .map(adapter => ({subject:{kind:'official-external-cli',adapter}})),
+          ]);
           expect(report.capture.command).toBe(report.binding.command);
           expect(report.capture.args.slice(0, 3)).toEqual([report.binding.entry, ...report.binding.fixedArgv]);
           expect(report.capture.options.cwd).toBe(report.binding.cwd);

@@ -5,10 +5,8 @@ import { serveAgentMessageMcpOverStdio, type AgentMessageMcpDeps } from './agent
 import { serveAgentMemoryDescriptorOverStdio, serveAgentMemoryMcpOverStdio, type AgentMemoryMcpDeps } from './agent-memory-mcp-server';
 import { parsePreparedAgentMemoryMode } from '../agent-memory/prepared-capability';
 import { serveTeamMcpOverStdio, type TeamMcpDeps } from './team-mcp-server';
-import { serveApprovalMcpOverStdio, type ApprovalMcpDeps } from './approval-mcp-server';
 import type { SdkReservedHelperKind } from '../sdk-reserved-helper-host';
 
-const APPROVAL_REQUEST_TIMEOUT_SLOP_MS = 5_000;
 
 function required(name: string): string {
   const value = process.env[name];
@@ -78,40 +76,6 @@ async function runAgentMemoryDescribe(): Promise<void> {
   await waitForInputClose();
 }
 
-async function runApprovalMcp(): Promise<void> {
-  const storeDir = required('BYOK_STORE_DIR');
-  const productId = required('BYOK_PRODUCT_ID');
-  const taskId = required('BYOK_TASK_ID');
-  const timeoutMs = Number(process.env.BYOK_APPROVAL_TIMEOUT_MS ?? '600000');
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    throw new Error('invalid BYOK_APPROVAL_TIMEOUT_MS environment variable');
-  }
-  let clientPromise: Promise<ControlClient> | undefined;
-  const client = async (): Promise<ControlClient> => {
-    if (!clientPromise) clientPromise = connectControlClient({
-      storeDir,
-      productId,
-      requestTimeoutMs: timeoutMs + APPROVAL_REQUEST_TIMEOUT_SLOP_MS,
-    }).then((result) => {
-      if (!result.ok) throw new Error(result.reason);
-      return result.client;
-    });
-    return clientPromise;
-  };
-  const deps: ApprovalMcpDeps = {
-    requestApproval: async (requestedTaskId, summary) => {
-      try {
-        return await (await client()).request('approvals.request', { taskId: requestedTaskId, summary });
-      } catch (error) {
-        clientPromise = undefined;
-        throw error;
-      }
-    },
-  };
-  serveApprovalMcpOverStdio({ taskId, deps });
-  await waitForInputClose();
-}
-
 async function runAgentTeamMcp(): Promise<void> {
   const storeDir = required('BYOK_STORE_DIR');
   const productId = required('BYOK_PRODUCT_ID');
@@ -158,9 +122,6 @@ export async function runSdkReservedHelper(kind: SdkReservedHelperKind, argv: re
       return;
     case 'agent-memory-describe':
       await runAgentMemoryDescribe();
-      return;
-    case 'approval-mcp':
-      await runApprovalMcp();
       return;
     case 'agent-team-mcp':
       await runAgentTeamMcp();

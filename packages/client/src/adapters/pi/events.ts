@@ -236,3 +236,17 @@ export const ROUTINE_PI_EVENT_TYPES: ReadonlySet<string> = new Set([
   'session_info_changed',
   'thinking_level_changed',
 ]);
+
+/** Official get_session_stats observation; no provider counters are inferred. */
+export function mapPiContextUsage(data: unknown, hostContextWindow?: number): Extract<AgentEvent, { type: 'usage' }> {
+  const stats = data !== null && typeof data === 'object' ? data as Record<string, unknown> : {};
+  const raw = stats.contextUsage;
+  const context = raw !== null && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  const contextTokens = usageCount(context.tokens);
+  const window = usageCount(hostContextWindow ?? context.contextWindow);
+  return {
+    type: 'usage', contextSource: 'estimate',
+    ...(contextTokens === undefined ? {} : { contextTokens }),
+    ...(window === undefined || window === 0 ? {} : { contextWindow: window }),
+  };
+}

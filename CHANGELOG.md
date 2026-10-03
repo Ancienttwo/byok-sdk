@@ -1,6 +1,22 @@
 # Changelog
 
+## 0.24.0
+
+- **Breaking (runtime)** — raise the minimum Node.js version to 24.15.0 across
+  all workspace packages. Development/CI baseline is pinned to Node 24.21.0,
+  with a Node 26 forward-compatibility CI leg.
+
 ## Unreleased
+
+- **Breaking (client)** — Codex now uses app-server 0.159.2 with the vendored
+  OAR `ef893ac` kernel/driver (Apache-2.0), replacing the exec path. The adapter
+  is YOLO-only: `readonly` and `network:false` are no longer supported;
+  detection adds `app_server_unavailable` and `runtime_version_unsupported`
+  refusal reasons. Claude `confirm` and the `byok-approval-mcp` bin are removed;
+  Claude interrupt now uses correlated `control_request` with bounded ACK and
+  owned-process fallback. `usage` adds optional `contextTokens`, `contextWindow`
+  and `contextSource` fields (additive, independent of provider cost counters),
+  and the official Pi runtime pin moves to 1.0.0 (see below).
 
 - **Changed (client)** — official Pi runtime 0.87.1 -> 1.0.0. The attested
   closure is now nine package names (chord, pi-agent-core, pi-ai, pi-codemode,

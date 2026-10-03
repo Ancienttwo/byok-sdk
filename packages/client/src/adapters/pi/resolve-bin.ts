@@ -66,7 +66,7 @@ export function resolvePiRuntimeIdentity(): PiRuntimeIdentity {
   const spec = readClientPiRuntimePin();
   if (spec === undefined) {
     throw new Error(
-      `@byok-sdk/client does not declare a ${PI_PACKAGE_NAME} dependency; reinstall @byok-sdk/client or set BYOK_PI_BIN to a Node 22.22+ pi sidecar`,
+      `@byok-sdk/client does not declare a ${PI_PACKAGE_NAME} dependency; reinstall @byok-sdk/client or set BYOK_PI_BIN to a Node 24.15+ pi sidecar`,
     );
   }
   if (!PI_EXACT_VERSION.test(spec)) {
@@ -101,7 +101,7 @@ function findPackageRoot(
  * only ever constructs `new PiAdapter()` with no options (see `createDaemon`),
  * so an out-of-process substitution (e.g. examples/basic's e2e run swapping
  * in the fake-pi fixture, or a single-file product injecting its required
- * Node 22.22+ pi sidecar) has no other seam to use.
+ * Node 24.15+ pi sidecar) has no other seam to use.
  *
  * Deliberately does NOT use `createRequire(...).resolve()`: this package is
  * pure ESM with no `require` export condition (`exports["."]` only offers
@@ -125,25 +125,25 @@ export function resolvePiBin(): ResolvedBin {
     mainEntry = fileURLToPath(import.meta.resolve(PI_PACKAGE_NAME));
   } catch (cause) {
     throw new Error(
-      `Required ${PI_PACKAGE_NAME} could not be resolved; install @byok-sdk/client dependencies or set BYOK_PI_BIN to a Node 22.22+ pi sidecar`,
+      `Required ${PI_PACKAGE_NAME} could not be resolved; install @byok-sdk/client dependencies or set BYOK_PI_BIN to a Node 24.15+ pi sidecar`,
       { cause },
     );
   }
   const root = findPackageRoot(path.dirname(mainEntry));
   if (root === undefined) {
     throw new Error(
-      `Required ${PI_PACKAGE_NAME} resolved to ${mainEntry}, which has no enclosing package manifest; reinstall @byok-sdk/client dependencies or set BYOK_PI_BIN to a Node 22.22+ pi sidecar`,
+      `Required ${PI_PACKAGE_NAME} resolved to ${mainEntry}, which has no enclosing package manifest; reinstall @byok-sdk/client dependencies or set BYOK_PI_BIN to a Node 24.15+ pi sidecar`,
     );
   }
   if (root.manifest.name !== expected.name || root.manifest.version !== expected.version) {
     throw new Error(
-      `${PI_PACKAGE_NAME} resolved to ${String(root.manifest.name)}@${String(root.manifest.version)}, but @byok-sdk/client pins ${expected.name}@${expected.version}; reinstall the pinned dependency or set BYOK_PI_BIN to a Node 22.22+ pi sidecar`,
+      `${PI_PACKAGE_NAME} resolved to ${String(root.manifest.name)}@${String(root.manifest.version)}, but @byok-sdk/client pins ${expected.name}@${expected.version}; reinstall the pinned dependency or set BYOK_PI_BIN to a Node 24.15+ pi sidecar`,
     );
   }
   const binRel = typeof root.manifest.bin === 'string' ? root.manifest.bin : root.manifest.bin?.pi;
   if (binRel === undefined) {
     throw new Error(
-      `Required ${expected.name}@${expected.version} does not expose the pi CLI; reinstall the pinned dependency or set BYOK_PI_BIN to a Node 22.22+ pi sidecar`,
+      `Required ${expected.name}@${expected.version} does not expose the pi CLI; reinstall the pinned dependency or set BYOK_PI_BIN to a Node 24.15+ pi sidecar`,
     );
   }
   return { command: path.join(root.dir, binRel), source: 'package' };

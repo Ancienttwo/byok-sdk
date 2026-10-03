@@ -1,14 +1,15 @@
 import { randomBytes } from 'node:crypto';
-import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
-import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
-import { execFile } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import { execFile, type spawn as nodeSpawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { AgentEvent, PermissionMode, TaskOfferPayload } from '@byok-sdk/protocol';
+import { promises as fs } from 'node:fs';
+import type {
+  AgentEvent,
+  PermissionMode,
+  TaskOfferPayload,
+} from '@byok-sdk/protocol';
 import {
-  PolicyUnsupportedError,
-  SteerUnsupportedError,
   freezeRuntimeAdapterDescriptor,
+  PolicyUnsupportedError,
   type RuntimeAdapter,
   type RuntimeDetectResult,
   type RuntimeAdapterPrepareInput,
@@ -16,423 +17,558 @@ import {
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types';
-import { wrapMcpServerWithLaunchCwd, type McpLaunchBinding } from '../../daemon/trusted-launch-cwd';
 import {
   RuntimeExecutionFailure,
   RuntimeStartupDisposalFailure,
   isRuntimeExecutionFailure,
-  type RuntimeFailurePhase,
 } from '../../runtime-failure';
-import { AsyncQueue } from '../../util/async-queue';
-import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
-import { withoutProviderCredentials } from '../provider-credential-environment';
-import { mapPermissionPolicyToCodexArgs } from './permission-mapping';
-import { isRoutineCodexEvent, mapCodexEventToAgentEvents, unmappedFrameKey } from './events';
-import { CodexProcessRunner, type CodexRawEvent, type SpawnFn } from './process-runner';
+import {
+  resolveSdkReservedHelperBin,
+  type SdkHelperHostConfig,
+} from '../../sdk-reserved-helper-host';
+import {
+  wrapMcpServerWithLaunchCwd,
+  type McpLaunchBinding,
+} from '../../daemon/trusted-launch-cwd';
 import {
   grantFingerprint,
   resolveMcpToolsetGrants,
   resolveReservedMcpToolGrants,
   type McpToolsetGrant,
 } from '../mcp-tool-grants';
+import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
+import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
+import {
+  codexSession,
+  type RawCodexSession,
+} from '../../runtime/codex-session-runtime';
+import { CodexProjection, type CodexRecord } from './projection';
+import { AsyncQueue } from '../../util/async-queue';
+import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
+import { mapPermissionPolicyToCodexArgs } from './permission-mapping';
+import { withoutProviderCredentials } from '../provider-credential-environment';
 
 const execFileAsync = promisify(execFile);
-
-/** Applied to both `detect()` probe calls — both are local-only and empirically fast (~50-80ms each), but detect() runs on every allowlist-narrowed task offer (see task-runner.ts's `pickAdapter`), so a small ceiling is cheap insurance against either ever unexpectedly hanging. */
 const DETECT_TIMEOUT_MS = 5000;
 const RESERVED_MCP_POLICY_PROBE_TIMEOUT_MS = 5000;
-const MIN_CODEX_RESERVED_MCP_APPROVAL_VERSION = [0, 149, 0] as const;
-
+const PINNED_CODEX_VERSION = '0.159.2';
 export interface CodexAdapterOptions {
   sdkHelperHost?: SdkHelperHostConfig;
-  /** Override bin resolution — tests substitute the fake-codex fixture script. */
   resolveBin?: () => ResolvedBin;
-  /** Override process spawning — tests substitute a fake spawn. */
-  spawnFn?: SpawnFn;
+  spawnFn?: typeof nodeSpawn;
+  maxRetainedBytes?: number;
+  interruptTimeoutMs?: number;
 }
 
-/**
- * `RuntimeAdapter` for the OpenAI Codex CLI (`codex exec --json`), the M2-b
- * counterpart to `../pi/pi-adapter.ts`. Every empirical claim in this file
- * and its sibling modules (`events.ts`, `permission-mapping.ts`,
- * `process-runner.ts`) was driven live against the real installed `codex-cli
- * 0.144.5` in a scratch directory before being encoded — repeating the pi
- * adapter's own M0-3 discipline ("docs lied and shipped a nonexistent flag")
- * independently found the exact same bug class on codex:
- *
- *   - `codex exec --help` documents `-a`/`--ask-for-approval`; the real
- *     parser rejects it outright on `codex exec` ("unexpected argument").
- *   - `-s`/`--sandbox` works on a fresh `codex exec` but is rejected outright
- *     on `codex exec resume` (whose own --help correctly omits it).
- *   - `codex exec resume` does NOT auto-inherit the sandbox mode a session
- *     was originally started with — a read-only-started session's write
- *     SUCCEEDED on a bare resume with no sandbox override re-passed,
- *     silently falling back to this machine's own ambient config default.
- *   - This task's own brief assumed SIGINT for `interrupt()`; empirically,
- *     `codex exec` ignores SIGINT entirely (a 60s `sleep` ran to completion
- *     despite SIGINT at t=4s) — SIGTERM is used instead (confirmed to work:
- *     immediate exit, no orphaned children, thread stays resumable after).
- *
- * See `./permission-mapping.ts` and `./process-runner.ts` for the full
- * per-finding writeups (sandbox scope, network, approval model, resume
- * mechanics, stdin handling).
- *
- * Architecture, and how it differs from pi: pi is one long-lived `pi --mode
- * rpc` process for a whole session's lifetime, driven by a bidirectional
- * JSONL request/response protocol (`../pi/rpc-client.ts`). `codex exec` has
- * no such thing — it's a one-shot batch process per turn, prompt in via
- * argv, JSONL out via stdout, process exits. `CodexSession` here instead
- * spawns a fresh `CodexProcessRunner` for every turn (the initial `start()`
- * and every later `followUp()`), and forwards each one's mapped events into
- * one shared, session-lifetime `AsyncQueue` — the thing `Session.events`
- * actually exposes. `sessionRef` is codex's own `thread_id`, learned from
- * `thread.started`, which is reliably the first JSONL line codex ever prints
- * (confirmed across every empirical capture, fresh starts and resumes
- * alike) — `runCodexTurn` below awaits specifically for that line before
- * resolving, mirroring pi's own "resolve a real session id before
- * constructing the Session, fail closed if you can't" discipline
- * (`../pi/pi-adapter.ts`'s `resolveFreshSessionId`, finding F8).
- */
+/** Codex app-server is experimental. Only the qualified 0.159.2 binary is admitted; no exec compatibility path. */
 export class CodexAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
     id: 'codex',
     supportsDispatchSelection: true,
-    // `mcp_servers.<name>.enabled_tools` plus a per-tool `approval_mode`
-    // names each projected toolset tool explicitly, so this adapter cannot
-    // admit a projected server without the daemon's own `tools/list`
-    // observation of it.
     requiresMcpToolsetToolObservation: true,
     mcpServerLaunch: 'launcher-wrapped',
     capabilities: {
-      steer: false,
+      steer: true,
       resume: true,
       approvalInteractive: false,
       mcpToolsets: true,
-      permissionModes: ['auto', 'readonly'],
+      permissionModes: ['auto'],
     },
     environmentRequirements: { credentialNames: [] },
   });
-
-  constructor(private readonly options: CodexAdapterOptions = {}) {}
-
+  constructor(private readonly options: CodexAdapterOptions = {}) {
+    if (
+      !Number.isSafeInteger(options.maxRetainedBytes ?? 16 * 1024 * 1024) ||
+      (options.maxRetainedBytes ?? 16 * 1024 * 1024) < 1
+    )
+      throw new TypeError('invalid Codex retention budget');
+    if (
+      !Number.isFinite(options.interruptTimeoutMs ?? 1000) ||
+      (options.interruptTimeoutMs ?? 1000) <= 0 ||
+      (options.interruptTimeoutMs ?? 1000) > 2_147_483_647
+    )
+      throw new TypeError('invalid Codex interrupt timeout');
+  }
   async detect(): Promise<RuntimeDetectResult> {
     try {
-      const bin = this.resolveBin();
-      const probe = await probeRuntimeVersion(bin.command, DETECT_TIMEOUT_MS);
-      if (probe.kind !== 'available') return probe;
-      const version = probe.stdout.trim() || probe.stderr.trim();
-      const authPresent = await this.probeAuthPresent(bin);
-      return { kind: 'available', version, authPresent };
+      const command = (this.options.resolveBin ?? resolveCodexBin)().command;
+      const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS);
+      if (version.kind !== 'available') return version;
+      const text = version.stdout.trim() || version.stderr.trim();
+      if (text !== `codex-cli ${PINNED_CODEX_VERSION}`)
+        return { kind: 'refused', reason: 'runtime_version_unsupported' };
+      try {
+        await execFileAsync(command, ['app-server', '--help'], {
+          timeout: DETECT_TIMEOUT_MS,
+          killSignal: 'SIGKILL',
+        });
+      } catch {
+        return { kind: 'refused', reason: 'app_server_unavailable' };
+      }
+      let authPresent = false;
+      try {
+        const auth = await execFileAsync(command, ['login', 'status'], {
+          timeout: DETECT_TIMEOUT_MS,
+          killSignal: 'SIGKILL',
+        });
+        authPresent = /logged in (using|with)/i.test(
+          auth.stdout + '\n' + auth.stderr,
+        );
+      } catch {}
+      return { kind: 'available', version: text, authPresent };
     } catch (error) {
       return classifyDetectError(error);
     }
   }
-
-  /**
-   * `authPresent` without ever reading `~/.codex/auth.json` (credential-
-   * isolation rule, `../../types.ts`): spawns codex's OWN `login status`
-   * subcommand and interprets its human-readable report — the exact
-   * "non-secret signal" this adapter is required to use, and cleaner than
-   * pi's env-var-name check since codex's real credential model (on the
-   * reference machine) is a ChatGPT OAuth session, not an env var.
-   *
-   * Two independently-verified channel gotchas apply here, the "pi lesson"
-   * yet again:
-   *   - `codex login status`'s human-readable "Logged in using ChatGPT"
-   *     message prints on STDERR, not stdout — both streams are checked
-   *     here for exactly that reason. pi's `--version` is the same class of
-   *     hazard from the other direction: its channel has moved between pi
-   *     releases (see ../pi/pi-adapter.ts), so neither stream is assumed.
-   *   - The NOT-logged-in message/exit-code shape was deliberately never
-   *     empirically tested: this machine has a real, live ChatGPT login, and
-   *     running `codex logout` to observe the negative case would have
-   *     broken that login for the rest of this session/machine. The match
-   *     below is intentionally conservative (`/logged in (using|with)/i`,
-   *     not a bare `"logged in"` substring) specifically because a bare
-   *     substring check would false-positive on a plausible negative message
-   *     like "Not logged in" (itself containing the substring "logged in").
-   *     This is a documented, known gap — flagged for M2-c / a follow-up
-   *     empirical pass on a logged-out machine, not asserted as verified.
-   */
-  private async probeAuthPresent(bin: ResolvedBin): Promise<boolean> {
+  async prepare(
+    input: RuntimeAdapterPrepareInput,
+  ): Promise<RuntimeAdapterPrepareResult> {
+    const policy = mapPermissionPolicyToCodexArgs(input.policy);
+    if (!policy.ok)
+      return {
+        kind: 'reject',
+        reason: policy.reason ?? 'unsupported Codex policy',
+        retryable: false,
+      };
+    let model: string | undefined;
     try {
-      const result = await execFileAsync(bin.command, ['login', 'status'], { timeout: DETECT_TIMEOUT_MS });
-      return /logged in (using|with)/i.test(`${result.stdout}\n${result.stderr}`);
-    } catch (err) {
-      const withStreams = err as { stdout?: string; stderr?: string };
-      return /logged in (using|with)/i.test(`${withStreams.stdout ?? ''}\n${withStreams.stderr ?? ''}`);
-    }
-  }
-
-  async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    const mapping = mapPermissionPolicyToCodexArgs(input.policy);
-    if (!mapping.ok) return { kind: 'reject', reason: mapping.reason ?? 'policy rejected by codex adapter', retryable: false };
-    let modelId: string | undefined;
-    try {
-      modelId = subscriptionModel(input.offer.dispatchSelection);
+      model = subscriptionModel(input.offer.dispatchSelection);
     } catch (error) {
-      return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: false };
+      return {
+        kind: 'reject',
+        reason:
+          error instanceof Error ? error.message : 'unsupported selection',
+        retryable: false,
+      };
     }
-    let command: string;
+    const detected = await this.detect();
+    if (detected.kind !== 'available')
+      return {
+        kind: 'reject',
+        reason: `codex installation refused: ${detected.kind === 'refused' ? detected.reason : detected.kind}`,
+        retryable: false,
+      };
+    const command = (this.options.resolveBin ?? resolveCodexBin)().command;
+    const projected = resolveMcpToolsetGrants(
+      input.mcpServers,
+      input.mcpToolsetTools,
+      input.policy.mode,
+    );
+    if (!projected.ok)
+      return { kind: 'reject', reason: projected.reason, retryable: false };
+    const grants = [
+      ...resolveReservedMcpToolGrants(input.mcpServers),
+      ...projected.grants,
+    ];
     try {
-      command = this.resolveBin().command;
+      for (const grant of grants)
+        await probeCodexMcpToolApproval(
+          command,
+          grant.server,
+          input.mcpServers![grant.server]!,
+          grant.tools,
+        );
     } catch (error) {
-      return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: true };
-    }
-    // Every pre-granted MCP server this task projects needs the same 0.149
-    // per-tool approval contract: SDK-reserved helpers use their static
-    // protocol tool list; host toolsets use exactly the daemon observation.
-    // One version gate, then one exact read-back per server.
-    const toolsetGrants = resolveMcpToolsetGrants(input.mcpServers, input.mcpToolsetTools, input.policy.mode);
-    if (!toolsetGrants.ok) {
-      return { kind: 'reject', reason: `codex adapter cannot grant projected MCP toolset tools: ${toolsetGrants.reason}`, retryable: false };
-    }
-    const reservedGrants = resolveReservedMcpToolGrants(input.mcpServers);
-    const allGrants = Object.freeze([...reservedGrants, ...toolsetGrants.grants]);
-    if (allGrants.length > 0) {
-      try {
-        await requireCodexPerToolApprovalSupport(command);
-        for (const grant of allGrants) {
-          await probeCodexMcpToolApproval(command, grant.server, input.mcpServers![grant.server]!, grant.tools);
-        }
-      } catch (error) {
-        return {
-          kind: 'reject',
-          reason: `codex MCP tool approval preflight failed: ${error instanceof Error ? error.message : String(error)}`,
-          retryable: false,
-        };
-      }
+      return {
+        kind: 'reject',
+        reason: `Codex MCP preflight failed: ${error instanceof Error ? error.message : 'invalid readback'}`,
+        retryable: false,
+      };
     }
     return {
       kind: 'prepared',
       operation: {
-        start: (startInput) => this.startPrepared(startInput, mapping.args, modelId, command, toolsetGrants.grants, allGrants, input.policy.mode),
+        start: (start) =>
+          this.start(
+            start,
+            command,
+            model,
+            projected.grants,
+            grants,
+            input.policy.mode,
+          ),
       },
     };
   }
-
-  private async startPrepared(
-    startInput: RuntimeOperationStartInput,
-    policyArgs: readonly string[],
-    modelId: string | undefined,
+  private async start(
+    input: RuntimeOperationStartInput,
     command: string,
-    preparedToolsetGrants: readonly McpToolsetGrant[],
-    preparedMcpGrants: readonly McpToolsetGrant[],
-    /** The mode the grants were resolved under; re-filtering with any other would compare two different policies. */
-    permissionMode: PermissionMode,
+    model: string | undefined,
+    prepared: readonly McpToolsetGrant[],
+    grants: readonly McpToolsetGrant[],
+    mode: PermissionMode,
   ): Promise<Session> {
-    // Same fail-closed re-check the model selection below gets: the grants
-    // were probed against the ADMISSION input, so start() may not arrive with
-    // different MCP authority or a different tool observation.
-    const startGrants = resolveMcpToolsetGrants(startInput.mcpServers, startInput.mcpToolsetTools, permissionMode);
-    if (!startGrants.ok || grantFingerprint(startGrants.grants) !== grantFingerprint(preparedToolsetGrants)) {
-      throw new RuntimeExecutionFailure({
-        phase: 'start',
-        category: 'authority',
-        retry: 'non-retryable',
-        reason: 'prepared codex operation received different MCP toolset tool authority than it was admitted with',
-      });
-    }
-    // No prepared-input lane here either: a frozen provider request is compiled
-    // against the pi runtime's own verified closure. Refused by name so a
-    // prepared Execution routed to codex fails visibly.
-    if (startInput.kind !== 'instruction') {
-      throw new RuntimeExecutionFailure({
-        phase: 'start',
-        category: 'authority',
-        retry: 'non-retryable',
-        reason: 'the codex adapter has no prepared-input lane',
-      });
-    }
-    if (typeof startInput.instruction !== 'string') {
-      throw new RuntimeExecutionFailure({
-        phase: 'start',
-        category: 'authority',
-        retry: 'non-retryable',
-        reason: 'prepared codex operation requires a resolved string instruction',
-      });
-    }
-    const queue = new AsyncQueue<AgentEvent>();
-    const terminal: RuntimeTurnTerminal = {};
-    const recordUnmapped = makeUnmappedFrameRecorder(new Map<string, number>());
-    const manifestCwd = startInput.manifest.cwd;
-    if (manifestCwd === undefined) {
-      throw new RuntimeExecutionFailure({
-        phase: 'start', category: 'authority', retry: 'non-retryable',
-        reason: 'prepared codex operation received a manifest without a sealed cwd',
-      });
-    }
-
-    // Realpath'd once, up front — see `resolveRealWorkspaceDir`'s doc
-    // comment for why this matters even on a single-machine, non-adversarial
-    // path (unlike task-runner.ts's own realpath use, which is defending
-    // against symlink swaps): `file_change` items report codex's own
-    // absolute paths, built from the CHILD PROCESS's `process.cwd()`, which
-    // Node/the OS resolve through any symlink in the manifest workspace — a
-    // stock `os.tmpdir()`-based workspace on macOS (`/var/folders/...`,
-    // itself a symlink to `/private/var/folders/...`) hits this on literally
-    // every run, not just a contrived edge case.
-    let workspaceDir: string;
-    try {
-      workspaceDir = await resolveRealWorkspaceDir(manifestCwd);
-    } catch (cause) {
-      throw new RuntimeExecutionFailure({
-        phase: 'start', category: 'infrastructure', retry: 'retryable',
-        reason: 'codex runtime workspace could not be resolved',
-      }, { cause });
-    }
-
-    const runtimeEnv = withoutProviderCredentials(startInput.env);
-    let manifestModelId: string | undefined;
-    try {
-      manifestModelId = subscriptionModel(startInput.manifest.dispatchSelection);
-    } catch (cause) {
-      throw new RuntimeExecutionFailure({
-        phase: 'start',
-        category: 'authority',
-        retry: 'non-retryable',
-        reason: 'prepared codex operation received an invalid runtime selection manifest',
-      }, { cause });
-    }
-    if (manifestModelId !== modelId) {
-      throw new RuntimeExecutionFailure({
-        phase: 'start',
-        category: 'authority',
-        retry: 'non-retryable',
-        reason: 'prepared codex operation received a manifest with different runtime selection',
-      });
-    }
-    // Computed ONCE, from this operation's frozen start input, and carried on
-    // the session for every later `codex exec resume` turn (see
-    // `CodexSession.mcpConfigArgs`). A resume spawns a brand new codex
-    // process that inherits none of the first turn's `-c` overrides, so
-    // re-passing exactly these bytes is what keeps the reserved message
-    // server and the projected toolset grants alive past turn one. Never
-    // recomputed later: `preparedMcpGrants` was probed at admission and
-    // `startInput.mcpServers` is the sealed authority for this operation, so
-    // a second computation could only widen or drift.
-    const mcpConfigArgs = codexMcpConfigArgs(
-      startInput.mcpServers,
-      runtimeEnv,
-      this.options.sdkHelperHost,
-      preparedMcpGrants,
-      startInput.mcpLaunch,
+    const actual = resolveMcpToolsetGrants(
+      input.mcpServers,
+      input.mcpToolsetTools,
+      mode,
     );
-    const { sessionRef, runner } = await runCodexTurn({
-      command,
-      resumeRef: startInput.manifest.sessionRef,
-      instruction: startInput.instruction,
-      modelId: manifestModelId,
-      policyArgs: [...policyArgs, ...mcpConfigArgs],
-      cwd: manifestCwd,
-      env: runtimeEnv,
+    if (
+      !actual.ok ||
+      grantFingerprint(actual.grants) !== grantFingerprint(prepared)
+    )
+      throw authority(
+        'prepared codex operation received different MCP toolset tool authority',
+      );
+    if (input.kind !== 'instruction' || typeof input.instruction !== 'string')
+      throw authority('codex requires a resolved instruction');
+    if (subscriptionModel(input.manifest.dispatchSelection) !== model)
+      throw authority(
+        'prepared codex operation received a manifest with different runtime selection',
+      );
+    const cwd = input.manifest.cwd;
+    if (!cwd) throw authority('codex manifest has no sealed cwd');
+    const workspace = await fs.realpath(cwd);
+    // Operator allow cannot opt this subscription runtime into env credentials.
+    // Strip before adding the task-owned MCP transport payloads, never ambient env.
+    const env = withoutProviderCredentials(input.env);
+    const configArgs = codexMcpConfigArgs(
+      input.mcpServers,
+      env,
+      this.options.sdkHelperHost,
+      grants,
+      input.mcpLaunch,
+    );
+    const spawned = createOwnedLineProcessSpawn({
       spawnFn: this.options.spawnFn,
-      workspaceDir,
-      queue,
-      recordUnmapped,
-      expectedSessionRef: startInput.manifest.sessionRef,
-      preparedGit: startInput.manifest.workspace.workspaceId !== undefined,
-      failurePhase: 'start',
-      signal: startInput.signal,
-      terminal,
     });
-
-    return new CodexSession({
-      sessionRef,
-      command,
-      workspaceDir,
-      env: startInput.env,
-      mcpEnvironment: Object.fromEntries(Object.entries(runtimeEnv).filter(([key]) => key.startsWith('BYOK_MCP_PAYLOAD_'))) as Record<string, string>,
-      spawnFn: this.options.spawnFn,
-      queue,
-      recordUnmapped,
-      initialRunner: runner,
-      preparedGit: startInput.manifest.workspace.workspaceId !== undefined,
-      modelId: manifestModelId,
-      terminal,
-      mcpConfigArgs,
-    });
-  }
-
-  private resolveBin(): ResolvedBin {
-    return (this.options.resolveBin ?? resolveCodexBin)();
-  }
-}
-
-/**
- * `approval_policy=never` (pinned on every invocation, see
- * `permission-mapping.ts`) makes codex refuse EVERY MCP tool call outright —
- * "MCP tool call requires approval, but approval policy is never" — no matter
- * which sandbox mode is in effect. Codex 0.149's per-tool
- * `mcp_servers.<name>.tools.<tool>.approval_mode="approve"`, paired with an
- * exact `enabled_tools` allowlist, is the one narrow control that lifts that
- * refusal for named tools while leaving the global policy alone
- * (`mcp_servers.<name>.default_tools_approval_mode="auto"` is read back by
- * `codex mcp get` but was empirically ineffective under
- * `approval_policy=never`, so it is never used).
- *
- * Both the version gate and read-back apply identically to SDK-reserved
- * helpers and projected host toolsets. Reserved names come from their helper
- * protocol constants; projected names come from the daemon's `tools/list`.
- */
-async function requireCodexPerToolApprovalSupport(command: string): Promise<void> {
-  const versionResult = await execFileAsync(command, ['--version'], { timeout: RESERVED_MCP_POLICY_PROBE_TIMEOUT_MS });
-  const versionText = `${versionResult.stdout}\n${versionResult.stderr}`.trim();
-  const versionMatch = /codex-cli\s+(\d+)\.(\d+)\.(\d+)/u.exec(versionText);
-  if (versionMatch === null) throw new Error(`unrecognized Codex version: ${versionText || '(empty)'}`);
-  const version = versionMatch.slice(1, 4).map(Number);
-  for (let index = 0; index < MIN_CODEX_RESERVED_MCP_APPROVAL_VERSION.length; index += 1) {
-    if (version[index]! > MIN_CODEX_RESERVED_MCP_APPROVAL_VERSION[index]!) break;
-    if (version[index]! < MIN_CODEX_RESERVED_MCP_APPROVAL_VERSION[index]!) {
-      throw new Error(`Codex ${version.slice(0, 3).join('.')} lacks the required per-MCP-tool approval contract`);
+    const session = new CodexSession(
+      workspace,
+      model,
+      this.options.interruptTimeoutMs ?? 1000,
+      input.manifest.sessionRef === undefined,
+    );
+    try {
+      const raw = await codexSession(
+        (bin, args, options) => {
+          const child = spawned(bin, [...args, ...configArgs], options);
+          session.own(child);
+          void child.exited.then(
+            () => session.exited(),
+            (error) => session.fail(error),
+          );
+          return child;
+        },
+        { kind: 'available', via: 'executable', command },
+        {
+          cwd,
+          env: env as Record<string, string>,
+          ...(model === undefined ? {} : { model }),
+          ...(input.manifest.sessionRef === undefined
+            ? {}
+            : { resume: input.manifest.sessionRef }),
+        },
+        1000,
+        {
+          maxBytes: this.options.maxRetainedBytes ?? 16 * 1024 * 1024,
+          onReady: (id) => session.ready(id),
+          onRecord: (record) => session.record(record),
+          onLimit: () => {
+            const error = infrastructure(
+              'codex retained record byte budget exceeded',
+            );
+            session.fail(error);
+            throw error;
+          },
+        },
+      );
+      session.bind(raw);
+      if (
+        input.manifest.sessionRef !== undefined &&
+        raw.id !== input.manifest.sessionRef
+      )
+        throw authority('codex resume returned a different thread id');
+      if (input.signal?.aborted)
+        throw infrastructure('codex start was aborted');
+      await session.prompt(input.instruction);
+      return session;
+    } catch (error) {
+      try {
+        await session.close();
+      } catch (disposal) {
+        throw new RuntimeStartupDisposalFailure(() => session.close(), {
+          cause: disposal,
+        });
+      }
+      throw new RuntimeExecutionFailure({
+        phase: 'start',
+        category: isRuntimeExecutionFailure(error)
+          ? error.category
+          : 'infrastructure',
+        retry: isRuntimeExecutionFailure(error) ? error.retry : 'retryable',
+        reason: error instanceof Error ? error.message : 'codex open failed',
+      });
     }
   }
 }
+const authority = (reason: string) =>
+  new RuntimeExecutionFailure({
+    phase: 'start',
+    category: 'authority',
+    retry: 'non-retryable',
+    reason,
+  });
+const infrastructure = (reason: string) =>
+  new RuntimeExecutionFailure({
+    phase: 'run',
+    category: 'infrastructure',
+    retry: 'non-retryable',
+    reason,
+  });
+class CodexSession implements Session {
+  sessionRef = '';
+  private raw?: RawCodexSession;
+  private child?: { dispose(): Promise<void>; kill(): void };
+  private projection?: CodexProjection;
+  private readonly stream = {};
+  private readonly queue = new AsyncQueue<AgentEvent>();
+  private failure?: RuntimeExecutionFailure;
+  private active = false;
+  private readonly interruptWaiters = new Set<() => void>();
+  private stopping = false;
+  private closeAttempt?: Promise<void>;
+  constructor(
+    private readonly workspace: string,
+    private readonly model: string | undefined,
+    private readonly interruptMs: number,
+    private readonly fresh: boolean,
+  ) {}
+  own(child: { dispose(): Promise<void>; kill(): void }): void {
+    this.child = child;
+  }
+  ready(id: string): void {
+    this.sessionRef = id;
+    this.projection = new CodexProjection(this.workspace, id, this.fresh);
+  }
+  bind(raw: RawCodexSession): void {
+    this.raw = raw;
+  }
+  record(record: CodexRecord): void {
+    try {
+      this.projection?.consume(this.stream, record, (event) =>
+        this.queue.push(event),
+      );
+      const body = record.body as {
+        origin?: string;
+        type?: string;
+        native?: {
+          threadId?: string;
+          turn?: { status?: string; error?: { message?: string } };
+        };
+      };
+      if (
+        record.kind === 'frame' &&
+        body.origin === 'byok-native' &&
+        body.type === 'turn/completed' &&
+        (body.native?.threadId === undefined ||
+          body.native.threadId === this.sessionRef)
+      ) {
+        this.active = false;
+        for (const resolve of this.interruptWaiters) resolve();
+        if (body.native?.turn?.status === 'failed')
+          this.fail(
+            new RuntimeExecutionFailure({
+              phase: 'run',
+              category: 'semantic',
+              retry: 'non-retryable',
+              reason: body.native.turn.error?.message ?? 'codex turn failed',
+            }),
+          );
+      }
+    } catch (error) {
+      this.fail(error);
+      throw error;
+    }
+  }
+  fail(error: unknown): void {
+    this.failure ??= isRuntimeExecutionFailure(error)
+      ? error
+      : infrastructure(
+          error instanceof Error ? error.message : 'codex runtime failed',
+        );
+    this.flushPendingUsage();
+    this.queue.end();
+    void this.close().catch(() => {});
+  }
+  exited(): void {
+    if (!this.stopping) this.fail(infrastructure('codex app-server exited'));
+  }
+  get events(): AsyncIterable<AgentEvent> {
+    const self = this;
+    return (async function* () {
+      try {
+        for await (const event of self.queue) yield event;
+      } catch (error) {
+        self.fail(error);
+        throw self.failure;
+      }
+      if (self.failure) throw self.failure;
+    })();
+  }
+  async prompt(input: string): Promise<void> {
+    if (!this.raw) throw infrastructure('codex session is not open');
+    this.active = true;
+    const result = await this.raw.prompt(input);
+    if (result.response.body.kind !== 'accepted') {
+      this.active = false;
+      throw infrastructure(
+        result.response.body.reason ?? 'codex prompt refused',
+      );
+    }
+  }
+  async followUp(task: TaskOfferPayload): Promise<void> {
+    if (typeof task.instruction !== 'string')
+      throw new PolicyUnsupportedError('codex requires a string instruction');
+    if (!mapPermissionPolicyToCodexArgs(task.policy ?? { mode: 'auto' }).ok)
+      throw new PolicyUnsupportedError('unsupported Codex policy');
+    const model = subscriptionModel(task.dispatchSelection);
+    if (model !== undefined && model !== this.model)
+      throw new PolicyUnsupportedError(
+        'codex persistent session cannot change model',
+      );
+    await this.prompt(task.instruction);
+  }
+  async steer(text: string): Promise<void> {
+    const result = await this.raw?.steer(text);
+    if (result?.response.body.kind !== 'accepted')
+      throw infrastructure(
+        result?.response.body.reason ?? 'codex steer refused',
+      );
+  }
+  async interrupt(): Promise<void> {
+    if (!this.raw || !this.active) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let resolveTurn!: () => void;
+    const turnSettled = new Promise<void>(resolve => { resolveTurn = resolve; });
+    this.interruptWaiters.add(resolveTurn);
+    try {
+      await Promise.race([
+        this.raw.abort().then(async result => {
+          // turn/interrupt ACK accepts the command; turn/completed carries
+          // final usage/outcome. Closing at ACK discards those native frames.
+          if (result.response.body.kind === 'accepted') await turnSettled;
+        }),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(infrastructure('codex late interrupt timed out')),
+            this.interruptMs,
+          );
+        }),
+      ]);
+    } catch (error) {
+      this.fail(error);
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      this.interruptWaiters.delete(resolveTurn);
+    }
+  }
+  async close(): Promise<void> {
+    this.stopping = true;
+    if (!this.closeAttempt) {
+      const promise = Promise.resolve().then(async () => {
+        try {
+          try {
+            await this.raw?.dispose();
+          } catch (error) {
+            if (!this.failure) throw error;
+          } finally {
+            await this.child?.dispose();
+          }
+        } finally {
+          // Stdout may contain final native frames after the interrupt ACK.
+          // End the consumer only after disposal has drained that transport.
+          this.flushPendingUsage();
+          this.queue.end();
+        }
+        this.raw = undefined;
+        this.projection = undefined;
+        this.child = undefined;
+      });
+      this.closeAttempt = promise.catch((error) => {
+        this.closeAttempt = undefined;
+        throw error;
+      });
+    }
+    await this.closeAttempt;
+  }
+  private flushPendingUsage(): void {
+    const usage = this.projection?.takePendingUsage(this.stream);
+    if (usage) this.queue.push(usage);
+  }
+  async resolveApproval(): Promise<void> {
+    throw new PolicyUnsupportedError(
+      'Codex has no interactive approval product lane',
+    );
+  }
+}
+function subscriptionModel(
+  selection: TaskOfferPayload['dispatchSelection'],
+): string | undefined {
+  if (!selection) return undefined;
+  if (selection.lane !== 'subscription' || selection.runtimeId !== 'codex')
+    throw new PolicyUnsupportedError(
+      'codex cannot execute this runtime selection',
+    );
+  return selection.modelId;
+}
 
-/** Prove this codex reads back the exact per-tool allowlist this adapter is about to pass for one server. */
 async function probeCodexMcpToolApproval(
   command: string,
   name: string,
   server: NonNullable<RuntimeAdapterPrepareInput['mcpServers']>[string],
   tools: readonly string[],
 ): Promise<void> {
-  // NOT `--ignore-user-config`, deliberately: the real turn is launched with
-  // that flag (`codexMcpConfigArgs`), but `codex mcp get` does not accept it —
-  // codex-cli 0.149.0 answers `error: unexpected argument '--ignore-user-config'
-  // found` whether it is placed before or after the subcommand (`codex mcp get
-  // --help` lists only `-c/--config`, `--json`, `--enable`, `--disable`). The
-  // read-back therefore resolves `~/.codex/config.toml` on top of the `-c`
-  // overrides below, so it validates a slightly wider configuration than the
-  // one that actually runs. The `-c` overrides pin every key this grant
-  // depends on (command, `enabled_tools`, per-tool `approval_mode`), so a
-  // user-level entry cannot weaken the assertion; it could only add keys the
-  // real run would drop. Closing that last gap needs an isolated `CODEX_HOME`
-  // for the probe — a filesystem side effect in `prepare()` — and is not
-  // taken here.
+  // Qualified app-server 0.159.2 does not accept the old exec ignore-user-config flag.
+  // Pin the named server's exact enabled_tools and per-tool settings and read back only that grant.
   const probeArgs = [
-    'mcp', 'get', name, '--json',
-    '-c', `mcp_servers.${name}.command=${JSON.stringify(server.command)}`,
+    'mcp',
+    'get',
+    name,
+    '--json',
+    '-c',
+    `mcp_servers.${name}.command=${JSON.stringify(server.command)}`,
     ...codexMcpToolApprovalArgs(name, tools),
   ];
-  const result = await execFileAsync(command, probeArgs, { timeout: RESERVED_MCP_POLICY_PROBE_TIMEOUT_MS });
-  const parsed = JSON.parse(result.stdout) as { name?: unknown; enabled?: unknown; enabled_tools?: unknown };
-  const readBack = Array.isArray(parsed.enabled_tools) ? parsed.enabled_tools : undefined;
+  const result = await execFileAsync(command, probeArgs, {
+    timeout: RESERVED_MCP_POLICY_PROBE_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
+  });
+  const parsed = JSON.parse(result.stdout) as {
+    name?: unknown;
+    enabled?: unknown;
+    enabled_tools?: unknown;
+  };
+  const readBack = Array.isArray(parsed.enabled_tools)
+    ? parsed.enabled_tools
+    : undefined;
   if (
-    parsed.name !== name
-    || parsed.enabled !== true
-    || readBack === undefined
-    || readBack.length !== tools.length
-    || readBack.some((tool, index) => tool !== tools[index])
+    parsed.name !== name ||
+    parsed.enabled !== true ||
+    readBack === undefined ||
+    readBack.length !== tools.length ||
+    readBack.some((tool, index) => tool !== tools[index])
   ) {
-    throw new Error(`Codex did not read back the exact tool allowlist for MCP server "${name}"`);
+    throw new Error(
+      `Codex did not read back the exact tool allowlist for MCP server "${name}"`,
+    );
   }
 }
 
 /** The one-server grant pair: an exact tool allowlist, and per-tool approval for exactly those tools. */
-function codexMcpToolApprovalArgs(name: string, tools: readonly string[]): string[] {
-  const args = ['-c', `mcp_servers.${name}.enabled_tools=${JSON.stringify([...tools])}`];
+function codexMcpToolApprovalArgs(
+  name: string,
+  tools: readonly string[],
+): string[] {
+  const args = [
+    '-c',
+    `mcp_servers.${name}.enabled_tools=${JSON.stringify([...tools])}`,
+  ];
   for (const tool of tools) {
-    args.push('-c', `mcp_servers.${name}.tools.${tool}.approval_mode="approve"`);
+    args.push(
+      '-c',
+      `mcp_servers.${name}.tools.${tool}.approval_mode="approve"`,
+    );
   }
   return args;
 }
@@ -456,703 +592,60 @@ function codexMcpConfigArgs(
   // that directory from the helper. The CLI's own cwd is unchanged.
   if (launch?.launcher === undefined) {
     throw new RuntimeExecutionFailure({
-      phase: 'start', category: 'authority', retry: 'non-retryable',
-      reason: 'prepared codex operation received MCP servers without a trusted launch directory',
+      phase: 'start',
+      category: 'authority',
+      retry: 'non-retryable',
+      reason:
+        'prepared codex operation received MCP servers without a trusted launch directory',
     });
   }
   const launchBinding = { cwd: launch.cwd, launcher: launch.launcher };
-  const grantedTools = new Map(grants.map((grant) => [grant.server, grant.tools] as const));
-  const args = ['--ignore-user-config'];
-  for (const [name, server] of Object.entries(servers).sort(([left], [right]) => left.localeCompare(right))) {
+  const grantedTools = new Map(
+    grants.map((grant) => [grant.server, grant.tools] as const),
+  );
+  const args: string[] = []; // app-server 0.159.2 has no ignore-user-config flag.
+  for (const [name, server] of Object.entries(servers).sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
     const key = `BYOK_MCP_PAYLOAD_${randomBytes(16).toString('hex').toUpperCase()}`;
     env[key] = JSON.stringify(server);
     let helper;
     try {
-      helper = wrapMcpServerWithLaunchCwd(resolveSdkReservedHelperBin('mcp-env', helperHost), launchBinding);
+      helper = wrapMcpServerWithLaunchCwd(
+        resolveSdkReservedHelperBin('mcp-env', helperHost),
+        launchBinding,
+      );
     } catch (cause) {
       // Same reason as the claude adapter: a `launch_cwd_*` refusal is this
       // adapter's own pre-spawn refusal and must arrive typed, or TaskRunner
       // projects it as a generic `runtime adapter contract violation during
       // start` and the operator never sees which rule refused.
-      throw new RuntimeExecutionFailure({
-        phase: 'start', category: 'authority', retry: 'non-retryable',
-        reason: `prepared codex operation cannot launch an MCP server in the trusted launch directory: ${cause instanceof Error ? cause.message : 'launch_cwd_target_refused'}`,
-      }, { cause });
+      throw new RuntimeExecutionFailure(
+        {
+          phase: 'start',
+          category: 'authority',
+          retry: 'non-retryable',
+          reason: `prepared codex operation cannot launch an MCP server in the trusted launch directory: ${cause instanceof Error ? cause.message : 'launch_cwd_target_refused'}`,
+        },
+        { cause },
+      );
     }
-    args.push('-c', `mcp_servers.${name}.command=${JSON.stringify(helper.command)}`);
-    args.push('-c', `mcp_servers.${name}.args=${JSON.stringify([...(helper.args ?? [])])}`);
-    args.push('-c', `mcp_servers.${name}.env.BYOK_MCP_ENV_KEY=${JSON.stringify(key)}`);
+    args.push(
+      '-c',
+      `mcp_servers.${name}.command=${JSON.stringify(helper.command)}`,
+    );
+    args.push(
+      '-c',
+      `mcp_servers.${name}.args=${JSON.stringify([...(helper.args ?? [])])}`,
+    );
+    args.push(
+      '-c',
+      `mcp_servers.${name}.env.BYOK_MCP_ENV_KEY=${JSON.stringify(key)}`,
+    );
     args.push('-c', `mcp_servers.${name}.env_vars=${JSON.stringify([key])}`);
     const granted = grantedTools.get(name);
-    if (granted !== undefined) args.push(...codexMcpToolApprovalArgs(name, granted));
+    if (granted !== undefined)
+      args.push(...codexMcpToolApprovalArgs(name, granted));
   }
   return args;
-}
-
-/**
- * Self-discovered finding while building this adapter's own test suite
- * (caught by a real timeout, not inspection): `fs.mkdtemp(path.join(os.
- * tmpdir(), ...))` on macOS returns a path through `/var/folders/...`, which
- * is itself a symlink to `/private/var/folders/...` — confirmed with a
- * direct probe (`fs.realpathSync(os.tmpdir())`). A child process spawned
- * with `cwd` set to the *symlinked* form still reports the *realpath'd* form
- * from its own `process.cwd()` (confirmed with a dedicated spawn probe) —
- * and `file_change` items build their absolute `path` from exactly that.
- * Without this, `events.ts`'s `extractArtifactEvents` would compute a
- * `path.relative(workspaceDir, absolutePath)` full of `../` segments for a
- * file genuinely inside the workspace, trip its own outside-the-workspace
- * safety check, and silently drop the artifact event — not a contrived edge
- * case, but the literal default shape of any workspace root built from
- * `os.tmpdir()` on macOS. Mirrors task-runner.ts's own `openArtifact`, which
- * realpaths its workspace root for the identical reason (there, defending
- * against a symlink swap; here, just matching what the child process's own
- * OS-resolved cwd will report) — same fallback too: a realpath failure
- * (workspace deleted out from under it, etc.) falls through to the original
- * path unchanged rather than failing the whole turn over it.
- */
-async function resolveRealWorkspaceDir(workspaceDir: string): Promise<string> {
-  return fs.realpath(workspaceDir).catch(() => workspaceDir);
-}
-
-/** Count of codex frame "keys" (see `unmappedFrameKey`) this session has told us have no `AgentEvent` mapping and aren't routine bookkeeping — i.e. genuinely unexpected traffic. Logs once per distinct key, mirroring `PiRpcClient.recordUnmappedFrame`'s exact reasoning: this is the mechanism that turns a future regression (like this task's own root-cause "read `thread.started` on every line, not just the first" class of bug would have been) into an immediate, self-diagnosing warning instead of a silent drop. */
-function makeUnmappedFrameRecorder(counts: Map<string, number>): (key: string) => void {
-  return (key: string): void => {
-    const next = (counts.get(key) ?? 0) + 1;
-    counts.set(key, next);
-    if (next === 1) {
-      console.warn(
-        `[byok/codex-adapter] codex emitted a frame with no AgentEvent mapping: "${key}" (further occurrences of this type won't be logged individually)`,
-      );
-    }
-  };
-}
-
-interface RunTurnParams {
-  signal?: AbortSignal;
-  command: string;
-  resumeRef: string | undefined;
-  instruction: string;
-  modelId: string | undefined;
-  policyArgs: string[];
-  cwd: string;
-  env: NodeJS.ProcessEnv;
-  spawnFn: SpawnFn | undefined;
-  workspaceDir: string;
-  queue: AsyncQueue<AgentEvent>;
-  recordUnmapped: (key: string) => void;
-  /**
-   * When resuming, the sessionRef this call expects codex to echo back in
-   * `thread.started` — required for BOTH `start()`'s externally-supplied
-   * `task.sessionRef` and `followUp()`'s own previously-recorded
-   * `sessionRef` (see `CodexSession.followUp`'s doc comment for why the
-   * latter also passes this now). Fail-closed on a mismatch: the
-   * already-spawned runner for this attempt is killed and the call throws
-   * rather than silently adopting whatever id codex actually reported —
-   * this is a real check, not just a diagnostic log.
-   */
-  expectedSessionRef?: string | undefined;
-  preparedGit?: boolean;
-  failurePhase: RuntimeFailurePhase;
-  terminal: RuntimeTurnTerminal;
-  onRunnerCreated?: (runner: CodexProcessRunner) => void;
-}
-
-interface RuntimeTurnTerminal {
-  failure?: RuntimeExecutionFailure;
-}
-
-interface RunTurnResult {
-  sessionRef: string;
-  runner: CodexProcessRunner;
-}
-
-/**
- * `--skip-git-repo-check` is used for plain workspaces, not derived from policy:
- * real `codex exec` (confirmed live, via this adapter's own e2e run against a
- * plain non-git scratch workspace) refuses to run at all outside a Git
- * repository — "Not inside a trusted directory and --skip-git-repo-check
- * was not specified", exit 1, no JSONL emitted — unless this flag is passed.
- * A successfully prepared Git workspace already satisfies that precondition,
- * so the flag is omitted there. `task-runner.ts`'s `resolveWorkspaceDir`
- * creates plain directories (`fs.mkdir(dir, {recursive:true})`, never a git
- * repo), so the plain-workspace path must retain the flag. It carries no
- * sandbox/approval semantics of its own (purely a "do you want the git-repo
- * safety net" gate) — confirmed via `codex exec --help`, which documents it
- * separately from every sandbox/approval flag.
- */
-function buildArgv(
-  resumeRef: string | undefined,
-  policyArgs: string[],
-  instruction: string,
-  modelId: string | undefined,
-  preparedGit = false,
-): string[] {
-  const base = resumeRef !== undefined ? ['exec', 'resume', resumeRef] : ['exec'];
-  return [
-    ...base,
-    '--json',
-    ...(modelId ? ['--model', modelId] : []),
-    ...(preparedGit ? [] : ['--skip-git-repo-check']),
-    ...policyArgs,
-    '-',
-  ];
-}
-
-/**
- * Spawn one `codex exec`/`codex exec resume` turn, await its first line
- * (must be `thread.started` — fail closed otherwise, never fabricate a
- * `sessionRef`, mirroring `../pi/pi-adapter.ts`'s finding F8), then keep
- * pumping the rest of that process's output into `params.queue` in the
- * background for as long as it runs. Shared by both `CodexAdapter.start()`
- * (a fresh turn, or a resume-via-`task.sessionRef`) and
- * `CodexSession.followUp()` (always a resume).
- */
-async function runCodexTurn(params: RunTurnParams): Promise<RunTurnResult> {
-  const argv = buildArgv(
-    params.resumeRef,
-    params.policyArgs,
-    params.instruction,
-    params.modelId,
-    params.preparedGit,
-  );
-
-  let firstLineSettled = false;
-  let resolveFirstLine!: (ref: string) => void;
-  let rejectFirstLine!: (err: Error) => void;
-  const firstLine = new Promise<string>((resolve, reject) => {
-    resolveFirstLine = resolve;
-    rejectFirstLine = reject;
-  });
-
-  // Set once THIS turn's own mapped events include an explicit `turn_end` —
-  // see the `waitClosed()` watcher below (cross-model review finding, the
-  // "pi-hang class") for why this matters: `turn_end` already told
-  // task-runner.ts's `pump()` this specific turn is done, so the shared
-  // session-lifetime queue must stay open afterward (a later `followUp()`
-  // reuses this exact same queue — see `CodexSession` below).
-  let turnEnded = false;
-
-  let runner: CodexProcessRunner;
-  try {
-    runner = new CodexProcessRunner({
-      command: params.command,
-      args: argv,
-      instruction: params.instruction,
-      cwd: params.cwd,
-      env: params.env,
-      spawnFn: params.spawnFn,
-      onFailure: (failure) => {
-        if (!firstLineSettled) {
-          firstLineSettled = true;
-          rejectFirstLine(failure);
-        }
-        params.terminal.failure = failure;
-        params.queue.end();
-      },
-      onEvent: (evt: CodexRawEvent) => {
-        if (!firstLineSettled) {
-          firstLineSettled = true;
-          if (evt.type === 'thread.started' && typeof evt.thread_id === 'string' && evt.thread_id.length > 0) {
-            resolveFirstLine(evt.thread_id);
-          } else {
-            rejectFirstLine(
-              new RuntimeExecutionFailure({
-                phase: params.failurePhase,
-                category: 'authority',
-                retry: 'non-retryable',
-                reason: `codex did not yield thread.started as its first event (got ${JSON.stringify(evt).slice(0, 200)})`,
-              }),
-            );
-          }
-          return;
-        }
-        let mapped: AgentEvent[];
-        try {
-          mapped = mapCodexEventToAgentEvents(evt, params.workspaceDir);
-        } catch (cause) {
-          if (!isRuntimeExecutionFailure(cause)) throw cause;
-          params.terminal.failure = cause;
-          params.queue.end();
-          return;
-        }
-        for (const agentEvent of mapped) {
-          if (agentEvent.type === 'turn_end') turnEnded = true;
-          params.queue.push(agentEvent);
-        }
-        if (evt.type === 'turn.failed') {
-          params.terminal.failure = new RuntimeExecutionFailure({
-            phase: 'run',
-            category: 'semantic',
-            retry: 'non-retryable',
-            reason: 'codex reported terminal task failure',
-          });
-          params.queue.end();
-        }
-        if (mapped.length === 0 && !isRoutineCodexEvent(evt)) {
-          params.recordUnmapped(unmappedFrameKey(evt));
-        }
-      },
-    });
-  } catch (cause) {
-    throw new RuntimeExecutionFailure({
-      phase: params.failurePhase,
-      category: 'infrastructure',
-      retry: 'retryable',
-      reason: 'codex runtime process could not be spawned',
-    }, { cause });
-  }
-  params.onRunnerCreated?.(runner);
-
-  /**
-   * Cross-model review finding (the "pi-hang class" — a task that never
-   * completes): `codex exec` is one-shot PER TURN (see this module's own
-   * doc comment) — a failed turn (`turn.failed`, mapped to an `error`
-   * AgentEvent, deliberately NOT a `turn_end`) or any other unexpected exit
-   * (crash, an `interrupt()`-triggered SIGTERM) ends the child process
-   * without ever producing the one signal task-runner.ts's `pump()` treats
-   * as terminal. Nothing else in this file ever called `params.queue.end()`
-   * for that case — confirmed reproducible: the events async-iterable's
-   * `next()` stays pending forever, 250ms+ after the process has already
-   * exited. pi's own `PiRpcClient.onClosed` (`../pi/rpc-client.ts`)
-   * unconditionally ends its eventQueue on process close — correct THERE
-   * because pi is one long-lived process for a WHOLE session (closing means
-   * the whole session is over). Codex is architecturally different: a fresh
-   * process per turn, sharing ONE session-lifetime queue across turns (see
-   * `CodexSession.followUp()`) — unconditionally ending it here would wrongly
-   * terminate a session a later `followUp()` is about to keep using. So:
-   * only when THIS turn never reached `turn_end` do we surface a terminal
-   * `error` AgentEvent (exit code/signal + stderr ring tail via
-   * `buildExitError` — the real reason, never fabricated) and end the queue.
-   * `waitClosed()` never rejects (see process-runner.ts), so no `.catch()`
-   * is needed; pushing/ending an already-ended queue (e.g. `close()` beat
-   * this watcher to it) is a harmless no-op (`AsyncQueue` is idempotent).
-   */
-  void runner.waitClosed().then(() => {
-    if (turnEnded || params.terminal.failure) return;
-    const cause = runner.buildExitError('codex exited without completing the turn');
-    params.terminal.failure = new RuntimeExecutionFailure({
-      phase: 'run',
-      category: 'infrastructure',
-      retry: 'retryable',
-      reason: cause.message,
-    }, { cause });
-    params.queue.push({ type: 'error', message: cause.message });
-    params.queue.end();
-  });
-
-  // Race the first line against the process closing before ever producing
-  // one (bad flag, ENOENT, an unknown resume id — "Error: thread/resume:
-  // ... no rollout found for thread id ..." — all empirically confirmed to
-  // exit fast with no JSONL at all, never a hang). Built as an explicit
-  // executor rather than `Promise.race` so the "losing" side can never
-  // become an unhandled rejection: `runner.waitClosed()` itself only ever
-  // resolves (see process-runner.ts), and `firstLine` always has its
-  // resolve/reject consumed below regardless of which settles first.
-  let sessionRef: string;
-  const abortStartup = (): void => rejectFirstLine(new RuntimeExecutionFailure({
-    phase: params.failurePhase, category: 'infrastructure', retry: 'non-retryable',
-    reason: 'codex startup cancelled or exceeded its deadline',
-  }));
-  const startupTimer = setTimeout(abortStartup, 30_000);
-  startupTimer.unref?.();
-  params.signal?.addEventListener('abort', abortStartup, { once: true });
-  if (params.signal?.aborted) abortStartup();
-  try {
-    sessionRef = await new Promise<string>((resolve, reject) => {
-      let settled = false;
-      firstLine.then(
-        (ref) => {
-          if (!settled) {
-            settled = true;
-            resolve(ref);
-          }
-        },
-        (err: unknown) => {
-          if (!settled) {
-            settled = true;
-            reject(err instanceof Error ? err : new Error(String(err)));
-          }
-        },
-      );
-      void runner.waitClosed().then(() => {
-        if (!settled) {
-          settled = true;
-          const cause = runner.buildExitError('codex exited before yielding an authoritative thread id');
-          reject(new RuntimeExecutionFailure({
-            phase: params.failurePhase,
-            category: 'infrastructure',
-            retry: 'retryable',
-            reason: cause.message,
-          }, { cause }));
-        }
-      });
-    });
-  } catch (err) {
-    await disposeFailedStartup(runner, err);
-    throw err;
-  } finally {
-    clearTimeout(startupTimer);
-    params.signal?.removeEventListener('abort', abortStartup);
-  }
-
-  // Cross-model review finding: this used to only `console.warn` and
-  // continue on a mismatch — "a runtime silently falling back to a
-  // different session runs the task in the WRONG context." `expectedSessionRef`
-  // here is always an EXTERNALLY supplied ask (`CodexAdapter.start()`'s
-  // `task.sessionRef`, from the server/daemon — never `CodexSession
-  // .followUp()`, which intentionally omits it; see that method's own doc
-  // comment for why its own internal resume is handled differently). A
-  // mismatch against an external expectation means this adapter can no
-  // longer trust that codex resumed the workspace/history the caller
-  // actually meant — fail closed rather than quietly proceeding.
-  if (params.expectedSessionRef !== undefined && sessionRef !== params.expectedSessionRef) {
-    const failure = new RuntimeExecutionFailure({
-      phase: params.failurePhase, category: 'authority', retry: 'non-retryable',
-      reason: `codex exec resume echoed a different thread id than requested (requested ${params.expectedSessionRef}, got ${sessionRef})`,
-    });
-    await disposeFailedStartup(runner, failure);
-    throw failure;
-  }
-
-  return { sessionRef, runner };
-}
-
-async function disposeFailedStartup(runner: CodexProcessRunner, cause: unknown): Promise<void> {
-  try {
-    await runner.dispose();
-  } catch (disposalFailure) {
-    throw new RuntimeStartupDisposalFailure(() => runner.dispose(), { cause: new AggregateError([cause, disposalFailure]) });
-  }
-}
-
-interface CodexSessionOptions {
-  mcpEnvironment: Record<string, string>;
-  sessionRef: string;
-  command: string;
-  workspaceDir: string;
-  env: NodeJS.ProcessEnv;
-  spawnFn: SpawnFn | undefined;
-  queue: AsyncQueue<AgentEvent>;
-  recordUnmapped: (key: string) => void;
-  initialRunner: CodexProcessRunner;
-  preparedGit: boolean;
-  modelId: string | undefined;
-  terminal: RuntimeTurnTerminal;
-  /**
-   * The exact MCP config argv the FIRST turn was launched with, computed once
-   * in `startPrepared` from that operation's frozen start input. Replayed
-   * byte-for-byte on every resume.
-   */
-  mcpConfigArgs: readonly string[];
-}
-
-class CodexSession implements Session {
-  /**
-   * NOT `readonly` (cross-model review finding): `followUp()` below
-   * re-assigns this from the runtime's own CONFIRMED reflected id on each
-   * resume — see its own doc comment. Silently keeping the value captured at
-   * construction time was the original bug (the NEW id `runCodexTurn`
-   * returns was discarded, so every later `followUp()` kept resuming the
-   * OLD, potentially stale, id); that stays fixed here. A LATER cross-model
-   * re-review found the fix above was itself incomplete: `followUp()` now
-   * also verifies the reflected id matches what it asked to resume BEFORE
-   * this field is touched — a mismatch throws (fail-closed) instead of ever
-   * reaching this assignment, so `sessionRef` only ever advances to an id
-   * codex has proven it actually resumed, never one it silently swapped in.
-   */
-  public sessionRef: string;
-  private readonly command: string;
-  private readonly workspaceDir: string;
-  private readonly env: NodeJS.ProcessEnv;
-  private readonly spawnFn: SpawnFn | undefined;
-  private readonly queue: AsyncQueue<AgentEvent>;
-  private readonly recordUnmapped: (key: string) => void;
-  private readonly preparedGit: boolean;
-  private readonly modelId: string | undefined;
-  /**
-   * A resume spawns a BRAND NEW codex process, which inherits none of the
-   * first turn's `-c` overrides — exactly the same reason `followUp()`
-   * re-maps the permission policy on every call. Without replaying these
-   * bytes, `--ignore-user-config` and every `mcp_servers.*` key (command,
-   * args, env, `enabled_tools`, per-tool `approval_mode`) would silently
-   * vanish after turn one: the reserved message server and any projected
-   * toolset would stop existing, and any surviving tool call would be
-   * refused outright under `approval_policy=never`. Frozen at start; never
-   * recomputed from anything a later turn supplies, so a follow-up can never
-   * widen this session's MCP authority.
-   */
-  private readonly mcpEnvironment: Readonly<Record<string, string>>;
-  private readonly mcpConfigArgs: readonly string[];
-  private terminal: RuntimeTurnTerminal;
-  private currentRunner: CodexProcessRunner | undefined;
-  private readonly ownedRunners = new Set<CodexProcessRunner>();
-  private readonly followUpAttempts = new Set<Promise<void>>();
-  private closed = false;
-  private closeAttempt: Promise<void> | undefined;
-
-  constructor(options: CodexSessionOptions) {
-    this.sessionRef = options.sessionRef;
-    this.command = options.command;
-    this.workspaceDir = options.workspaceDir;
-    this.env = options.env;
-    this.spawnFn = options.spawnFn;
-    this.queue = options.queue;
-    this.recordUnmapped = options.recordUnmapped;
-    this.preparedGit = options.preparedGit;
-    this.modelId = options.modelId;
-    this.terminal = options.terminal;
-    this.mcpConfigArgs = options.mcpConfigArgs;
-    this.mcpEnvironment = Object.freeze({ ...options.mcpEnvironment });
-    this.currentRunner = options.initialRunner;
-    this.ownedRunners.add(options.initialRunner);
-    void this.forgetRunnerOnceClosed(options.initialRunner);
-  }
-
-  get events(): AsyncIterable<AgentEvent> {
-    const queue = this.queue;
-    const session = this;
-    return {
-      [Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
-        const inner = queue[Symbol.asyncIterator]();
-        return {
-          async next(): Promise<IteratorResult<AgentEvent>> {
-            let result: IteratorResult<AgentEvent>;
-            try {
-              result = await inner.next();
-            } catch (cause) {
-              throw new RuntimeExecutionFailure({
-                phase: 'run',
-                category: 'infrastructure',
-                retry: 'retryable',
-                reason: 'codex runtime event transport failed',
-              }, { cause });
-            }
-            if (result.done && session.terminal.failure) throw session.terminal.failure;
-            return result;
-          },
-        };
-      },
-    };
-  }
-
-  private async forgetRunnerOnceClosed(runner: CodexProcessRunner): Promise<void> {
-    await runner.waitClosed();
-    if (this.currentRunner === runner) this.currentRunner = undefined;
-  }
-
-  /**
-   * New turn, same session, via the real resume mechanism (`codex exec
-   * resume <sessionRef> ...`). Maps `task.policy` FRESH on every call — a
-   * deliberate, evidence-based divergence from pi's own `followUp()`
-   * (`../pi/pi-adapter.ts`), which ignores `task.policy` entirely and relies
-   * on argv baked in once at `start()`. That's safe for pi only because pi
-   * reuses one already-running RPC process for its whole session lifetime,
-   * so there is nothing to re-apply. codex has no such invariant: a resume
-   * spawns a BRAND NEW process, and empirically that new process does NOT
-   * inherit the sandbox mode the session originally started with (see this
-   * file's module doc comment) — omitting a fresh, explicit mapping here
-   * would silently run the follow-up turn under this machine's ambient codex
-   * config default instead of the policy this specific follow-up was
-   * offered under, exactly the silent-widen failure mode this adapter exists
-   * to prevent.
-   *
-   * Cross-model RE-review finding (this corrects the previous wave's own
-   * reasoning, quoted below for context): `expectedSessionRef` IS now passed
-   * to `runCodexTurn`, set to the exact id this call asked to resume
-   * (`resumeRef`, captured up front before the call). The previous version
-   * of this method deliberately omitted it — "this resume targets OUR OWN
-   * previously-recorded `sessionRef`, not an externally supplied server
-   * expectation crossing a trust boundary... whatever id codex reports back
-   * for THIS resume is unambiguously the current, authoritative id for this
-   * session" — but that reasoning let a resume-A/reports-B mismatch silently
-   * MIGRATE this session's identity instead of failing closed: codex has no
-   * documented contract for re-keying a thread on resume, so a mismatch here
-   * must be treated as an error, exactly like `start()`'s own
-   * `task.sessionRef` comparison (see `runCodexTurn`'s doc comment on that
-   * check) — never silently adopted. `runCodexTurn` kills the (failed) new
-   * runner and throws on a mismatch, BEFORE `sessionRef`/`currentRunner`
-   * below are ever touched — so a thrown mismatch leaves this session in its
-   * previous, still-good state rather than partially migrated. The
-   * `sessionRef` return value is still captured and re-assigned below (the
-   * ORIGINAL bug this fixes, one wave further back: the return value used to
-   * be discarded entirely, so every later `followUp()` kept resuming a
-   * stale id even after codex had moved on) — it just can now only ever be
-   * the SAME id this call asked to resume, never a silently-different one.
-   */
-  followUp(task: TaskOfferPayload): Promise<void> {
-    const attempt = this.runFollowUp(task);
-    this.followUpAttempts.add(attempt);
-    void attempt.finally(() => this.followUpAttempts.delete(attempt)).catch(() => {});
-    return attempt;
-  }
-
-  private async runFollowUp(task: TaskOfferPayload): Promise<void> {
-    if (typeof task.instruction !== 'string') {
-      throw new PolicyUnsupportedError('codex adapter only supports string instructions in M2 (no blob-ref fetch yet)');
-    }
-    if (this.closed) {
-      throw new Error('cannot follow up on a closed codex session');
-    }
-
-    const mapping = mapPermissionPolicyToCodexArgs(task.policy);
-    if (!mapping.ok) {
-      throw new PolicyUnsupportedError(mapping.reason ?? 'policy rejected by codex adapter');
-    }
-    const requestedModel = subscriptionModel(task.dispatchSelection);
-    if (requestedModel !== undefined && requestedModel !== this.modelId) {
-      throw new PolicyUnsupportedError(
-        `codex persistent session cannot change model from ${this.modelId ?? '(legacy default)'} to ${requestedModel}`,
-      );
-    }
-    // A follow-up with no additive dispatchSelection still pins the model
-    // selected when this session object was created. Omitting --model on a
-    // new `codex exec resume` process would let ambient config choose a
-    // different target while the session silently continued.
-    const modelId = this.modelId;
-
-    const resumeRef = this.sessionRef;
-    let sessionRef: string;
-    let runner: CodexProcessRunner;
-    const terminal: RuntimeTurnTerminal = {};
-    try {
-      ({ sessionRef, runner } = await runCodexTurn({
-        command: this.command,
-        resumeRef,
-        instruction: task.instruction,
-        modelId,
-        // Freshly re-mapped policy for THIS turn, plus the start turn's
-        // frozen MCP config replayed verbatim — see `mcpConfigArgs`.
-        policyArgs: [...mapping.args, ...this.mcpConfigArgs],
-        cwd: this.workspaceDir,
-        env: { ...withoutProviderCredentials(this.env), ...this.mcpEnvironment },
-        spawnFn: this.spawnFn,
-        workspaceDir: this.workspaceDir,
-        queue: this.queue,
-        recordUnmapped: this.recordUnmapped,
-        expectedSessionRef: resumeRef,
-        preparedGit: this.preparedGit,
-        failurePhase: 'run',
-        terminal,
-        onRunnerCreated: (created) => {
-          this.ownedRunners.add(created);
-          void this.forgetRunnerOnceClosed(created);
-        },
-      }));
-    } catch (err) {
-      // Fix (queue-leak-on-failure): confirmed empirically with a diagnostic
-      // unbounded `for await` over `session.events` — the SAME shared queue
-      // this method's own `runCodexTurn` call already writes into is exposed
-      // to the caller from before this call even started (`this.queue` ===
-      // `session.events`, session-lifetime). `runCodexTurn` already kills the
-      // FAILED attempt's own runner before throwing in both its failure
-      // branches (a bad/missing first frame, and this exact session-identity
-      // mismatch — see its own doc comment), but never touches `this.queue`.
-      // The identity-mismatch case in particular routinely reaches
-      // `turn.completed` (mapped to `turn_end`) on the wire BEFORE the
-      // mismatch is even detected — this turn's own `onEvent` callback keeps
-      // draining the child's stdout independently of when `runCodexTurn`'s
-      // own promise settles, and a synchronous fixture's whole output can
-      // arrive in one 'data' chunk, processed before the "await sessionRef"
-      // continuation ever runs. That means `runCodexTurn`'s own "this turn
-      // never reached turn_end" background watcher sees `turnEnded === true`
-      // and correctly declines to end the queue itself (see that watcher's
-      // doc comment: a later `followUp()` reusing this same queue is the
-      // normal case it's protecting) — leaving NOTHING that will ever end
-      // it, so a consumer that reads past everything already buffered gets a
-      // `next()` that never resolves. Ending it here closes that gap,
-      // mirroring `close()`'s own `this.queue.end()` — deliberately NOT
-      // setting `this.closed`, since a failed followUp() must not corrode
-      // the SESSION itself (a later `followUp()` with a matching id still
-      // succeeds — see the cross-model re-review test above); only this
-      // queue's usefulness ends, since nothing can safely keep sharing it
-      // once a turn's own result has been this explicitly distrusted.
-      this.queue.end();
-      this.terminal = {
-        failure: isRuntimeExecutionFailure(err)
-          ? err
-          : new RuntimeExecutionFailure({
-              phase: 'run',
-              category: 'authority',
-              retry: 'non-retryable',
-              reason: 'codex follow-up violated the runtime adapter contract',
-            }, { cause: err }),
-      };
-      throw err;
-    }
-    if (this.closed) {
-      await runner.dispose();
-      throw new Error('codex session closed while follow-up was starting');
-    }
-    this.terminal = terminal;
-    this.sessionRef = sessionRef;
-    this.currentRunner = runner;
-  }
-
-  /** Best-effort abort of the current turn. SIGTERM's the currently-running child, if any — see `process-runner.ts`'s `kill()` doc comment for why SIGTERM (not SIGINT) and why this is safe: the underlying codex thread survives and stays resumable, confirmed empirically. A no-op when no turn is currently in flight. */
-  async interrupt(): Promise<void> {
-    this.currentRunner?.kill();
-  }
-
-  async close(): Promise<void> {
-    if (!this.closeAttempt) {
-      this.closed = true;
-      this.queue.end();
-      const attempt = (async () => {
-        const runners = [...this.ownedRunners];
-        await Promise.all(runners.map((runner) => runner.dispose()));
-        for (const runner of runners) this.ownedRunners.delete(runner);
-        await Promise.allSettled([...this.followUpAttempts]);
-      })();
-      this.closeAttempt = attempt.catch((error: unknown) => {
-        this.closeAttempt = undefined;
-        throw error;
-      });
-    }
-    await this.closeAttempt;
-  }
-
-  /**
-   * `codex exec` has no in-band channel to inject text into an already-
-   * running turn — confirmed empirically, not assumed: there is no stdin
-   * protocol (stdin is never even piped to the child — see
-   * `process-runner.ts`'s module doc comment), SIGINT (a plausible
-   * interrupt-and-redirect signal) is silently ignored outright, and `codex
-   * exec resume` only ever starts a brand NEW turn strictly after the
-   * current one has fully finished — it cannot inject into one still in
-   * flight. Throws honestly rather than silently no-op-ing, matching this
-   * task's explicit instruction and `capabilities().steer === false` above.
-   */
-  async steer(): Promise<void> {
-    throw new SteerUnsupportedError(
-      'codex',
-      'codex adapter does not support steer: codex exec has no in-band channel to inject text into a running turn (no stdin protocol, SIGINT is ignored, and resume only starts a new turn after the current one finishes)',
-    );
-  }
-
-  /**
-   * `codex exec` never emits a `needs_approval`-equivalent event on the wire
-   * — confirmed empirically (see `events.ts`'s module doc comment): a
-   * sandbox-denied action resolves the approval decision internally with no
-   * pause an external caller could ever observe or answer, regardless of
-   * `approval_policy`. Since this session can therefore never have emitted a
-   * `needs_approval` `AgentEvent` in the first place, a caller reaching this
-   * method implies something upstream expected approval support that isn't
-   * there — thrown as a descriptive error rather than a silent no-op,
-   * mirroring `../pi/pi-adapter.ts`'s identical `resolveApproval`.
-   */
-  async resolveApproval(): Promise<void> {
-    throw new Error(
-      'codex adapter does not support approval resume: codex exec never emits a needs_approval-equivalent event (sandbox-denied actions resolve internally with no wire-visible pause)',
-    );
-  }
-}
-
-function subscriptionModel(selection: TaskOfferPayload['dispatchSelection']): string | undefined {
-  if (selection === undefined) return undefined;
-  if (selection.lane !== 'subscription' || selection.runtimeId !== 'codex') {
-    throw new PolicyUnsupportedError(
-      `codex adapter cannot execute ${selection.lane} selection for runtime ${selection.runtimeId}`,
-    );
-  }
-  return selection.modelId;
 }

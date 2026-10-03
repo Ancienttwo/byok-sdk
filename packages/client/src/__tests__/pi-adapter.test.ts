@@ -118,7 +118,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     expect(typeof session.sessionRef).toBe('string');
     expect(session.sessionRef.length).toBeGreaterThan(0);
 
-    const events = await takeEvents(session, 6);
+    const events = await takeEvents(session, 7);
     expect(events).toEqual([
       { type: 'tool_use', tool: 'bash', input: { command: 'echo hi' }, toolCallId: 'call_1' },
       {
@@ -130,6 +130,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
       { type: 'progress', text: 'world' },
       // The assistant message_end's native usage: prompt = input + cacheRead + cacheWrite.
       { type: 'usage', inputTokens: 120, cachedInputTokens: 30, outputTokens: 12, totalTokens: 132 },
+      { type: 'usage', contextTokens: 0, contextWindow: 1000000, contextSource: 'estimate' },
       { type: 'turn_end' },
     ]);
   });
@@ -453,8 +454,8 @@ describe('PiAdapter against the fake-pi fixture', () => {
     await takeEvents(session, 5); // drain the initial prompt's events first
     await expect(session.interrupt()).resolves.toBeUndefined();
 
-    const postAbort = await takeEvents(session, 1);
-    expect(postAbort).toEqual([{ type: 'turn_end' }]);
+    const postAbort = await takeEvents(session, 2);
+    expect(postAbort).toEqual([{ type: 'usage', contextTokens: 0, contextWindow: 1000000, contextSource: 'estimate' }, { type: 'turn_end' }]);
   });
 
   it('surfaces a missing-API-key rejection from the initial prompt as a clean start() failure', async () => {

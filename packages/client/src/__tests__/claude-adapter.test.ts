@@ -28,6 +28,12 @@ async function takeEvents(session: Session, count: number): Promise<AgentEvent[]
   return results;
 }
 
+async function takeTurn(session: Session): Promise<AgentEvent[]> {
+  const events: AgentEvent[]=[];
+  for await (const event of session.events) { events.push(event); if(event.type==='turn_end')break; }
+  return events;
+}
+
 async function makeCtx(env: NodeJS.ProcessEnv = process.env): Promise<PreparedOperationResources> {
   const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-adapter-test-'));
   return { workspaceDir, policy: { mode: 'auto' }, env };
@@ -104,18 +110,24 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     }
   }, 8000);
 
-  it('descriptor advertises exactly what was empirically confirmed (no mid-turn steer, resume yes, confirm mode included as of M4 Phase 3)', () => {
+  it('descriptor advertises exactly what was empirically confirmed (no mid-turn steer, resume yes, confirm rejected)', () => {
     const adapter = fakeClaudeAdapter();
     expect(adapter.descriptor.capabilities).toEqual({
       steer: false,
       resume: true,
-      // S0/H-002: the confirm path is genuinely wired (permission-prompt-tool
-      // → approval MCP server → control socket), so this adapter is the one
-      // bundled runtime that honestly reports interactive approval.
-      approvalInteractive: true,
+      approvalInteractive: false,
       mcpToolsets: true,
-      permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
+      permissionModes: ['auto', 'readonly', 'plan'],
     });
+  });
+
+  it('rejects confirm in prepare before bin resolution, spawn or helper side effects', async () => {
+    const resolveBin = vi.fn(() => ({ command: FIXTURE_PATH, source: 'path' as const }));
+    const adapter = new ClaudeAdapter({ resolveBin });
+    const ctx = await makeCtx();
+    ctx.policy = { mode: 'confirm' };
+    await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/confirm/i);
+    expect(resolveBin).not.toHaveBeenCalled();
   });
 
   it('descriptor declares no credential env vars (M5 — deliberate ToS posture: env-based API key passthrough for claude is a separate, pending product decision)', () => {
@@ -232,130 +244,12 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(failure).toHaveProperty('message', expect.stringMatching(/simulated crash for stderr-capture test/));
   });
 
-  it('M4 Phase 3: confirm mode with no approval channel wired up fails closed (internal-consistency check — TaskRunner always populates one; a missing one means something upstream is badly wired)', async () => {
-    const adapter = fakeClaudeAdapter();
-    const ctx = await makeCtx();
-    ctx.policy = { mode: 'confirm' };
-    // approvalChannel deliberately left unset.
-    await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/requires policy.mode "confirm".*approval channel/);
-  });
-
-  it('M4 Phase 3: confirm mode with an approval channel appends --permission-prompt-tool/--mcp-config/--strict-mcp-config on top of the deny-by-default baseline, and writes a matching mcp-config file', async () => {
-    const spawnCalls: { command: string; args: string[] }[] = [];
-    // Cast rather than fight `SpawnFn`'s (`typeof spawn`) overloaded shape —
-    // `ClaudeProcessClient` only ever calls it the one way (command, args,
-    // options all present), which is all this spy needs to actually work.
-    const spyingSpawnFn = ((command: string, args: readonly string[] = [], options: object = {}) => {
-      const argsArray = [...args];
-      spawnCalls.push({ command, args: argsArray });
-      return realSpawn(command, argsArray, options);
-    }) as unknown as SpawnFn;
-    const resolveSpy = vi.fn(async () => {});
-    const adapter = new ClaudeAdapter({
-      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
-      spawnFn: spyingSpawnFn,
-      resolveApprovalMcpBin: () => ({ command: '/opt/fixtures/fake-approval-mcp-command', args: ['--fixture-arg'], source: 'env' }),
-    });
-    const ctx = await makeCtx();
-    ctx.policy = { mode: 'confirm' };
-    ctx.approvalChannel = {
-      taskId: 'task-confirm-1',
-      storeDir: '/fake/store-dir',
-      productId: 'fake-product',
-      timeoutMs: 123456,
-      resolve: resolveSpy,
-    };
-
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-
-    expect(spawnCalls).toHaveLength(1);
-    const args = spawnCalls[0]?.args ?? [];
-    expect(args).toContain('--permission-mode');
-    expect(args[args.indexOf('--permission-mode') + 1]).toBe('default');
-    expect(args).toContain('--permission-prompt-tool');
-    expect(args[args.indexOf('--permission-prompt-tool') + 1]).toBe('mcp__byokapproval__approval_prompt');
-    expect(args).toContain('--mcp-config');
-    expect(args).toContain('--strict-mcp-config');
-
-    const mcpConfigPath = args[args.indexOf('--mcp-config') + 1];
-    expect(typeof mcpConfigPath).toBe('string');
-    if (typeof mcpConfigPath !== 'string') throw new Error('unreachable');
-    const mcpConfigRaw = await fs.readFile(mcpConfigPath, 'utf8');
-    const mcpConfig = JSON.parse(mcpConfigRaw);
-    // The approval server is an MCP server child of this task like any other:
-    // claude spawns it from this file, `mcpServers` carries no cwd field, so
-    // it is reached through the SDK launcher that chdirs into the daemon's
-    // proven-non-writable directory first — even though this task projects no
-    // host toolset at all.
-    const approvalLaunch = await trustedLaunchBinding();
-    expect(mcpConfig).toEqual({
-      mcpServers: {
-        byokapproval: {
-          command: approvalLaunch.launcher!.interpreter,
-          args: [...launchArgvPrefix(approvalLaunch), '/opt/fixtures/fake-approval-mcp-command', '--fixture-arg'],
-          env: {
-            BYOK_STORE_DIR: '/fake/store-dir',
-            BYOK_PRODUCT_ID: 'fake-product',
-            BYOK_TASK_ID: 'task-confirm-1',
-            BYOK_APPROVAL_TIMEOUT_MS: '123456',
-          },
-        },
-      },
-    });
-
-    // resolveApproval() routes through the injected approvalChannel, not a throw.
-    await session.resolveApproval(true, 'approved by test');
-    expect(resolveSpy).toHaveBeenCalledWith(true, 'approved by test');
-
-    // close() removes the temp mcp-config directory as part of its receipt.
-    await session.close();
-    openSessions.pop();
-    await expect(fs.access(mcpConfigPath)).rejects.toThrow();
-  });
-
-  it('refuses to start a confirm-mode task with no launch binding, even when it projects no host toolset — the approval server it generates itself is an MCP server child too', async () => {
-    const spawnFn = vi.fn();
-    const adapter = new ClaudeAdapter({
-      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
-      spawnFn: spawnFn as unknown as SpawnFn,
-      resolveApprovalMcpBin: () => ({ command: '/opt/fixtures/fake-approval-mcp-command', args: [], source: 'env' }),
-    });
-    const ctx = await makeCtx();
-    ctx.policy = { mode: 'confirm' };
-    ctx.approvalChannel = {
-      taskId: 'task-confirm-no-launch',
-      storeDir: '/fake/store-dir',
-      productId: 'fake-product',
-      timeoutMs: 1000,
-      resolve: async () => {},
-    };
-    // What a daemon that failed to resolve a launcher would hand the adapter.
-    ctx.mcpLaunch = null;
-
-    const failure = await startAdapter(adapter, baseTask, ctx).catch((error: unknown) => error);
-    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ retry: 'non-retryable' });
-    expect((failure as RuntimeExecutionFailure).message)
-      .toMatch(/MCP servers without a trusted launch directory/u);
-    // Refused BEFORE the CLI is spawned, not after the config is on disk.
-    expect(spawnFn).not.toHaveBeenCalled();
-  });
-
   it('surfaces task-scoped MCP cleanup failure as typed disposal evidence and permits a clean retry', async () => {
     const adapter = new ClaudeAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
-      resolveApprovalMcpBin: () => ({ command: '/opt/fixtures/fake-approval-mcp-command', args: [], source: 'env' }),
     });
     const ctx = await makeCtx();
-    ctx.policy = { mode: 'confirm' };
-    ctx.approvalChannel = {
-      taskId: 'task-cleanup-failure',
-      storeDir: '/fake/store-dir',
-      productId: 'fake-product',
-      timeoutMs: 1000,
-      resolve: async () => {},
-    };
+    ctx.mcpServers = { byokagentmessage: { command: '/bin/true' } };
     const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
     const rm = vi.spyOn(fs, 'rm').mockRejectedValueOnce(new Error('fixture cleanup denial'));
@@ -454,7 +348,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     })).resolves.toMatchObject({ kind: 'prepared' });
   });
 
-  it('FAKE_CLAUDE_HANG_AFTER_TOOL keeps the session running past the tool call; interrupt()+close() still tear it down cleanly via SIGTERM', async () => {
+  it('FAKE_CLAUDE_HANG_AFTER_TOOL keeps the session running past the tool call; interrupt ACK + close tear it down cleanly', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_HANG_AFTER_TOOL: '1' });
     const session = await startAdapter(adapter, baseTask, ctx);
@@ -468,9 +362,39 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
 
     // No turn_end ever arrives on its own — mirrors the daemon's real cancel
     // path (task-runner.ts's handleCancel), which never waits on drained
-    // events: interrupt() (SIGTERM) + close() must still resolve cleanly.
+    // events: bounded native interrupt ACK + close must still resolve cleanly.
     await expect(session.interrupt()).resolves.toBeUndefined();
     await expect(session.close()).resolves.toBeUndefined();
+  });
+
+  it('native interrupt sends a correlated control request and keeps the process alive until close', async () => {
+    let pid=0;
+    const adapter=new ClaudeAdapter({resolveBin:()=>({command:FIXTURE_PATH,source:'path'}),spawnFn:((...args:Parameters<typeof realSpawn>)=>{const child=realSpawn(...args);pid=child.pid??0;return child;}) as typeof realSpawn});
+    const ctx=await makeCtx();ctx.env={...ctx.env,FAKE_CLAUDE_HANG_AFTER_TOOL:'1'};
+    const receipt=path.join(ctx.workspaceDir,'interrupt.json');ctx.env.FAKE_CLAUDE_CONTROL_RECEIPT=receipt;
+    const session=await startAdapter(adapter,baseTask,ctx);openSessions.push(session);
+    await session.interrupt();
+    const frame=JSON.parse(await fs.readFile(receipt,'utf8'));
+    expect(frame).toMatchObject({type:'control_request',request:{subtype:'interrupt'}});expect(typeof frame.request_id).toBe('string');
+    expect(()=>process.kill(pid,0)).not.toThrow();
+    const events=await takeTurn(session);expect(events.some(e=>e.type==='error')).toBe(false);expect(events.at(-1)?.type).toBe('turn_end');
+  });
+  it('missing interrupt ACK reaches owned termination fallback within the configured deadline', async () => {
+    let pid=0;const adapter=new ClaudeAdapter({resolveBin:()=>({command:FIXTURE_PATH,source:'path'}),interruptTimeoutMs:40,spawnFn:((...args:Parameters<typeof realSpawn>)=>{const child=realSpawn(...args);pid=child.pid??0;return child;}) as typeof realSpawn});
+    const ctx=await makeCtx();ctx.env={...ctx.env,FAKE_CLAUDE_HANG_AFTER_TOOL:'1',FAKE_CLAUDE_INTERRUPT_NO_ACK:'1'};
+    const session=await startAdapter(adapter,baseTask,ctx);openSessions.push(session);
+    await session.interrupt();expect(()=>process.kill(pid,0)).toThrow();await session.close();
+  });
+  it('ACK does not synthesize terminal completion; a late real result remains a runtime fact', async () => {
+    const ctx=await makeCtx();ctx.env={...ctx.env,FAKE_CLAUDE_HANG_AFTER_TOOL:'1',FAKE_CLAUDE_INTERRUPT_LATE_SUCCESS:'1',FAKE_CLAUDE_INTERRUPT_RESULT_DELAY_MS:'40'};
+    const session=await startAdapter(fakeClaudeAdapter(),baseTask,ctx);openSessions.push(session);
+    await session.interrupt();const events=await takeTurn(session);expect(events.at(-1)?.type).toBe('turn_end');expect(events.some(e=>e.type==='error')).toBe(false);
+  });
+
+  it('interrupt during the tool phase (terminal_reason aborted_tools) ends the turn at turn_end with no error', async () => {
+    const ctx=await makeCtx();ctx.env={...ctx.env,FAKE_CLAUDE_HANG_AFTER_TOOL:'1',FAKE_CLAUDE_INTERRUPT_TERMINAL_REASON:'aborted_tools'};
+    const session=await startAdapter(fakeClaudeAdapter(),baseTask,ctx);openSessions.push(session);
+    await session.interrupt();const events=await takeTurn(session);expect(events.at(-1)?.type).toBe('turn_end');expect(events.some(e=>e.type==='error')).toBe(false);
   });
 
   it('a denied (headless auto-deny) tool call surfaces tool_result with isError:true, and the run still completes to turn_end — never a hang, never a paused needs_approval-style event', async () => {
@@ -616,12 +540,12 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(events.some((e) => e.type === 'artifact')).toBe(false);
   });
 
-  it('resolveApproval() throws a descriptive not-supported error rather than silently no-op\'ing when no approval channel is wired up (every mode other than confirm — see the adapter\'s own doc comment)', async () => {
+  it('resolveApproval() throws a descriptive not-supported error rather than silently no-op\'ing for every Claude session', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx();
     const session = await startAdapter(adapter, baseTask, ctx);
     openSessions.push(session);
-    await expect(session.resolveApproval(true)).rejects.toThrow(/no approval channel for this session/);
+    await expect(session.resolveApproval(true)).rejects.toThrow(/does not support interactive approval/);
   });
 
   it('steer() throws a typed SteerUnsupportedError (mid-turn stdin writes were empirically found to queue, not redirect)', async () => {

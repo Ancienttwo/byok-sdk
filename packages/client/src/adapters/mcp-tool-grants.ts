@@ -26,7 +26,8 @@ export interface McpToolsetGrant {
  * The helper binary owns each tool-name constant; this table only binds those
  * names to the reserved registration name shared by daemon and adapters. The
  * approval-channel server is intentionally absent: its tool is routed through
- * Claude's interactive `--permission-prompt-tool`, never pre-granted.
+ * A custom adapter's interactive approval seam, never pre-granted; bundled
+ * Claude rejects confirm.
  */
 const PREGRANTED_RESERVED_MCP_TOOLS = Object.freeze({
   [AGENT_MESSAGE_MCP_SERVER_NAME]: Object.freeze([AGENT_MESSAGE_TOOL_NAME]),

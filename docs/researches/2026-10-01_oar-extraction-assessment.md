@@ -157,7 +157,7 @@ OAR 自己的评审与我方静态阅读都指出这些弱点，port 时不要�
 | 探测 | 结果 | 对 OAR claim 的判定 |
 | --- | --- | --- |
 | C1 基线 | `result` 带 usage 与 `modelUsage[model].contextWindow`（1000000）。`modelUsage` 的 key 是 init 模型串，不是 assistant 帧里的 API model id，须遍历取值。assistant 帧 `message.usage.output_tokens` 只是流式起点快照（8，最终 601） | 窗口来源成立；逐次调用 usage 不能当最终值 |
-| C2 interrupt | `control_request{subtype:"interrupt"}` 约 12 ms 收到 `control_response success`（`{still_queued:[]}`）；随后 `result` 为 `error_during_execution`、`terminal_reason:"aborted_streaming"`；进程存活，下一条 user 消息正常回复 | 确认。interrupt 可保留会话，可替代 SIGTERM；`aborted_streaming` 不能按失败处理 |
+| C2 interrupt | `control_request{subtype:"interrupt"}` 约 12 ms 收到 `control_response success`（`{still_queued:[]}`）；随后 `result` 为 `error_during_execution`、`terminal_reason:"aborted_streaming"`；进程存活，下一条 user 消息正常回复 | 确认。interrupt 可保留会话，可替代 SIGTERM；`aborted_streaming` 不能按失败处理。工具阶段（Bash 执行中）中断时 `terminal_reason` 为 `aborted_tools`（S8 真实回合观察，ACK 约 10 ms），同样按中断边界处理，不能按失败处理 |
 | C3 steer | 无 tool 边界时，生成中途写入的消息成为下一回合，当前回合不受影响；`queued_turn_count` 仍为 0，不可作排队信号 | 部分确认。「下一个 model step 边界注入」未验证，需带工具调用的多步回合 |
 | C4 `get_context_usage` | 约 170 ms 成功；`totalTokens` 66852、`maxTokens` 500000、`percentage` 13，另有 `apiUsage`、`autoCompactThreshold`、`messageBreakdown` | 确认可用。`maxTokens`（500000）与 `contextWindow`（1000000）不一致，推测前者是有效 auto-compact 窗口 [inferred]，context 切片要选哪个作「窗口」需决策 |
 
@@ -364,3 +364,79 @@ steer 测试要证明消息被运行中的回合消费，不能只看到 RPC ACK
 | 12 | app-server authentication 对商业或托管服务有限制 | 成立，官方原文见「发布前核对」 | 阻断项，owner 判断适用性 |
 | 13 | Node 24 不能由包声明推出 | 未验证，合理 | 按实际闭包验证 |
 | 14 | 评审没提，核对时发现 | app-server 被官方标为 experimental 且不支持 production workloads；`classifyFailure` 用正则匹配 vendor 错误文本，与 BYOK 的 typed failure 权威冲突 | 新增发布前核对与替换项 |
+
+
+## Owner 决策补录：11（2026-10-01）
+
+11. **删除 Claude confirm 与私有 approval MCP 路径。** Owner 已批准这一
+breaking：删除 `resolveApprovalMcpBin`、approval MCP bin、tsup entry、confirm
+专用 helper runner 与 Claude permission mapping 分支。协议的 PermissionMode
+枚举不动，共享的 ApprovalChannel、needs_approval、daemon 审批队列和 control
+协议保留，供仍使用这些 seam 的 custom adapter 使用。这里补齐决策 10 中
+尚待确认的 Claude confirm 项，不把它推导成继承完整 env 的授权。
+
+## 实施状态（S1–S4，2026-10-01）
+
+本节记录 `oar-vendor-s1` 上已经完成的实现，取代上文归档时的“未落地”状态。
+历史探测、当时的建议和法务判断仍保留原文，不能拿后续测试反写历史证据。
+
+| 切片 | Commit | 已落地 |
+| --- | --- | --- |
+| S1 | `23b84c5c` | 固定 OAR ef893ac 的 client/contracts/kernel 闭包；显式 spawn/env、请求 ID 原类型、有界 pending/held、请求超时与 Apache-2.0 来源记录 |
+| S2a | `7ae6d682` | Codex raw session 接入既有 owned process manager；原生帧先记录；各类 server request 按自己的 schema 拒绝；删除 Claude 私有 confirm 路径 |
+| S2b | `464615a2` | Codex app-server 0.159.2 成为唯一 task adapter 路径；YOLO-only 准入、typed detection refusal、native-only required projection、stream/seq/ordinal 去重与记录字节上限 |
+| S3 | `85479798` | Claude control_request interrupt、匹配 ACK 与超时 disposal；精确处理 aborted_streaming；modelUsage/init-model 窗口解析 |
+| S4 | `ff7e1144` | usage additive contextTokens/contextWindow/contextSource；Pi 0.99.2 get_session_stats；context-only 与 provider call 分开；prepared Pi 窗口以 Host 配置为准 |
+
+Codex 的 native records 是 adapter 事实源，required projection 的失败会向上
+传播；附加 observer 仍为 best-effort。原始 records 留在本地，product terminal
+仍由 TaskRunner 决定。Codex 的占用取 last.totalTokens，花费取 thread 累计 total
+的回合差额。Claude 的窗口取 modelUsage，Pi 的 contextUsage 标 estimate；估算
+不进入 prepared admission，也不算 provider call。未知/null 字段 absent，真实
+零占用可报0。历史 v1 envelope 字节未改，fingerprint 只含审查过的 optional
+字段增加。Pi prepared lane 与 stats 窗口不一致时，Host pi_model 配置优先。
+
+### 真实二进制证据到哪里为止
+
+这里的边界取自 `/tmp/byok-s2b-report.md`、`/tmp/byok-s3-report.md` 与
+`/tmp/byok-s4-report.md`，不是又跑了一轮远端调用。
+
+- **Codex：真实验证了三个小回合。** 0.159.2 原生登录可见，基本回合完成，
+  tokenUsage 被读到且 usage 先于 turn_end；显式 enabled_tools/per-tool approve
+  的指定 stdio MCP 工具调用完成。另一已 enabled 但没有 per-tool approve 的
+  工具也调用完成。这是“执行”的观察，不能写成拒绝或 elicitation；缺少
+  preapproval 不是 YOLO 下已经证明的 deny 边界。这三个回合没有 server
+  request，不等于请求不会出现。原 probe 因额外的 deny 假设返回 exit 1；后续
+  脚本修正为记录实际行为，受三回合预算约束，没有再跑 real mode。
+- **Codex 尚未验证：** enabled_tools 之外的工具是否被拒绝；实际 SDK
+  Agent-message 控制面端到端；排除 ambient/native user MCP 配置；steer 文本
+  是否被运行中的模型消费；Windows 实机。late interrupt 和 unsupported
+  server request 的有界收敛由 fixture 测试证明，不能冒充真实二进制观察。
+- **Claude：S3 没有新增真实回合。** request/ACK correlation、ACK 后进程存活、
+  无 ACK disposal、迟到 result/ACK、aborted_streaming 与窗口解析都有 fixture
+  和单测证据。真实 interrupt 延迟、会话续聊与 modelUsage 帧未在迁移后的
+  adapter 上重跑；上文重探是当时独立 CLI 的证据。
+- **Pi：0.99.2 的 bundled CLI/RPC 确实运行过。** 隔离 HOME/agentDir 的空会话
+  返回 tokens=0、contextWindow=1000000、percent=0；合成 compaction session
+  经真实 RPC 返回 tokens=null、percent=null。合成录制的 provider session
+  返回0，不能用它证明非零 provider 占用。另一个测试使用实际官方 AgentSession
+  和 provider parser、合成 SSE，读到 tokens=118/window=128000，真正调用
+  compact() 后变为 null；真实 prepared host 与本地 HTTP provider endpoint
+  的32项验收通过。这些没有向远端付费 provider 发新回合。
+- **Pi/Host 尚未验证：** 真实远端 provider 的计费回合；外部 Host UI/生产
+  持久化最终读回 source 与 absent/0 语义的 receipt。SDK 的公开 wire/schema
+  与 prepared 隔离已测，不能替代外部 Host 的消费证明。
+
+### 仍未做的部分
+
+Claude/Pi 还没有迁到 OAR kernel，仍各自消费 stream-json/RPC；Claude steer
+没有实现。queue 底层存在不等于已打开 BYOK 产品消费面。
+
+三家统一的单帧字节预算还没有做。Codex 的 owned-line-process 已有1 MiB
+单行和4 MiB 首次订阅前缓冲上限，records 默认累计16 MiB，不能把这些局部
+边界写成三家通用上界，更不能等同于整个 heap/RSS 的精确预算。Claude/Pi
+的统一字节预算留待单独切片，本次没有扩展它们的 transport。
+
+当前环境过滤、provider launcher custody 与既有 process ownership 保留；
+没有将“权限 YOLO”解释为暴露全部 daemon env。app-server 的 experimental
+风险仍在，exact pin 与 fail-closed 能限制漂移，不能使它成为官方生产支持承诺。

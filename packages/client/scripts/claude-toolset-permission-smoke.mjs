@@ -3,8 +3,7 @@
  * toolset MCP tool under `policy.mode = readonly` + `allowTools: []` only when
  * the adapter's `--allowedTools` grant is present.
  *
- * Same shape and gating as `codex-agent-message-permission-smoke.mjs`: a real
- * CLI, a one-tool stdio fixture, everything under `mkdtemp`, run explicitly
+ * A real CLI and one-tool stdio fixture, everything under `mkdtemp`, run explicitly
  * (it needs a logged-in CLI and spends a model call), never from `bun test`.
  *
  *   node scripts/claude-toolset-permission-smoke.mjs [--claude-bin <path>]

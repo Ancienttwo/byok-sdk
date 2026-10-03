@@ -2,7 +2,7 @@ import { TOOL_IMPLEMENTATION_UNAVAILABLE_REASONS, type ToolImplementationAuthori
 import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeAdapter, type RuntimeDetectResult, type RuntimeDetectionRefusalReason } from './types';
 
 const REFUSAL_REASONS: readonly RuntimeDetectionRefusalReason[] = Object.freeze([
-  ...TOOL_IMPLEMENTATION_UNAVAILABLE_REASONS, 'installation_observation_unsupported', 'native_identity_mismatch', 'launch_cwd_unavailable',
+  ...TOOL_IMPLEMENTATION_UNAVAILABLE_REASONS, 'installation_observation_unsupported', 'native_identity_mismatch', 'launch_cwd_unavailable', 'app_server_unavailable', 'runtime_version_unsupported',
 ]);
 
 /** Reject legacy/mixed authoring shapes; copy only validated, known facts. */

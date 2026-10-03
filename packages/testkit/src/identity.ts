@@ -3,7 +3,7 @@
  *
  * Ed25519 through WebCrypto rather than `node:crypto`, for the same reason
  * `@byok-sdk/core` holds no `node:` import: a simulator that only runs on Node
- * cannot smoke-test a Workers deployment from inside a Worker. Node ≥22.22
+ * cannot smoke-test a Workers deployment from inside a Worker. Node ≥24.15
  * (this workspace's floor) exposes Ed25519 on `globalThis.crypto.subtle`, so
  * there is no polyfill seam and no second code path.
  *
@@ -47,11 +47,11 @@ export async function createDeviceIdentity(): Promise<DeviceIdentity> {
   const subtle = globalThis.crypto?.subtle;
   if (subtle === undefined) {
     throw new Error(
-      '@byok-sdk/testkit needs WebCrypto: globalThis.crypto.subtle is unavailable in this runtime (Node >=22.22 or a Worker provides it).',
+      '@byok-sdk/testkit needs WebCrypto: globalThis.crypto.subtle is unavailable in this runtime (Node >=24.15 or a Worker provides it).',
     );
   }
 
-  const generated = await subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify']);
+  const generated = await subtle.generateKey('Ed25519', false, ['sign', 'verify']);
   // `generateKey` is typed as "a key or a key pair" because the algorithm decides
   // which; Ed25519 is asymmetric, so narrow rather than assert.
   if (!('privateKey' in generated)) {
