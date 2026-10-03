@@ -28,7 +28,7 @@ const clientRoot = path.resolve(import.meta.dirname,'../../..');
 export async function importVendor<T>(relative: string): Promise<T> {
   return await import(pathToFileURL(path.join(clientRoot,'vendor/pi-subagents/0.60.0/src',relative)).href) as T;
 }
-export async function sixthEdgeKit(options: { auth?: string; limit?: number; maxDepth?: number; hold?: boolean; family?: 'codex' | 'claude'; copyInterpreter?: boolean; native?: boolean } = {}) {
+export async function sixthEdgeKit(options: { auth?: string; limit?: number; maxDepth?: number; hold?: boolean; family?: 'codex' | 'claude'; copyInterpreter?: boolean; native?: boolean; ignoreTerm?: boolean } = {}) {
   const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(),'byok-sixth-')));
   const entry = path.join(dir,'official-fixture.mjs');
   const family = options.family ?? 'codex';
@@ -62,12 +62,18 @@ process.stdin.on('end', () => {
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <signal.h>
 int main(int argc,char **argv){
  for(int i=1;i<argc;i++){
-  if(!strcmp(argv[i],"--version")){puts("codex-cli 9.0.0");return 0;}
-  if(!strcmp(argv[i],"--help")){puts("--ignore-user-config --ignore-rules --sandbox --config --ephemeral");return 0;}
-  if(!strcmp(argv[i],"status")){puts("Logged in using ChatGPT");return 0;}
+  if(!strcmp(argv[i],"--version")){puts("${family === 'codex' ? 'codex-cli 9.0.0' : '9.0.0 (Claude Code)'}");return 0;}
+  if(!strcmp(argv[i],"--help")){puts("--ignore-user-config --ignore-rules --sandbox --config --ephemeral --tools --strict-mcp-config --mcp-config --setting-sources --settings --disable-slash-commands");return 0;}
+  if(!strcmp(argv[i],"status")){
+  if(${family === 'claude' ? '1' : '0'})puts(${JSON.stringify(JSON.stringify({loggedIn:true,authMethod:'claude.ai',apiProvider:'firstParty',apiKeySource:null,subscriptionType:'max',configDirectory:configDir}))});
+  else puts("Logged in using ChatGPT");return 0;
  }
+ }
+ if(${options.ignoreTerm ? '1' : '0'})signal(SIGTERM,SIG_IGN);
+ FILE *ready=fopen("native-ready","w");if(ready){fputs("ready",ready);fclose(ready);}
  char c;while(read(0,&c,1)>0){}
  FILE *f=fopen("task-spawned.jsonl","a");if(!f)return 2;fputs("{}\\n",f);fclose(f);
  for(int i=1;i+1<argc;i++)if(!strcmp(argv[i],"--output-last-message")){f=fopen(argv[i+1],"w");if(!f)return 3;fputs("{}",f);fclose(f);}
@@ -124,12 +130,12 @@ int main(int argc,char **argv){
     const launch = await importVendor<{resolveCodexExecLaunch(input: {adapter:'codex-exec'|'codex-exec-writer';command:string;asyncDir:string;stepIndex:number;commandPrefixArgs:readonly string[]}): {command:string;args:string[];environment:{allowlist:readonly string[]}}}>('runs/shared/codex-exec-adapter.ts');
     const claudeLaunch = await importVendor<{resolveClaudeCodeLaunch(input: {adapter:'claude-code'|'claude-code-writer';command:string;commandPrefixArgs:readonly string[]}): {command:string;args:string[];environment:{allowlist:readonly string[]}}}>('runs/shared/claude-code-adapter.ts');
     let serial = 0;
-    const request = (writer = false, operation?: string, attempt = 0): ExternalCliLaunchRequest => {
-      const stepIndex = serial++;
+    const request = (writer = false, operation?: string, attempt = 0, index?: number): ExternalCliLaunchRequest => {
+      const stepIndex = index ?? serial++;
       const adapter = writer ? 'codex-exec-writer' : 'codex-exec';
       const claudeAdapter = writer ? 'claude-code-writer' : 'claude-code';
-      const built = family === 'codex' ? launch.resolveCodexExecLaunch({adapter,command:actualCommand,asyncDir:dir,stepIndex,commandPrefixArgs:options.native ? [] : [entry]}) : claudeLaunch.resolveClaudeCodeLaunch({adapter:claudeAdapter,command,commandPrefixArgs:[entry]});
-      return {...built,adapter:family === 'codex' ? adapter : claudeAdapter,cwd:dir,prompt:options.hold ? 'hold' : '',stepIndex,operation:operation ?? `step-${stepIndex}`,attempt};
+      const built = family === 'codex' ? launch.resolveCodexExecLaunch({adapter,command:actualCommand,asyncDir:dir,stepIndex,commandPrefixArgs:options.native ? [] : [entry]}) : claudeLaunch.resolveClaudeCodeLaunch({adapter:claudeAdapter,command:actualCommand,commandPrefixArgs:options.native?[]:[entry]});
+      return {...built,adapter:family === 'codex' ? adapter : claudeAdapter,asyncDir:dir,cwd:dir,prompt:options.hold ? 'hold' : '',stepIndex,operation:operation ?? `step-${stepIndex}`,attempt};
     };
     return {dir,entry,command,config,configDir,statePath,budget,parent,installations,authority,request,declaration,recordPath:dispatch.recordPath,
       tasks: (): Record<string,unknown>[] => {try { return readFileSync(path.join(dir,'task-spawned.jsonl'),'utf8').trim().split('\n').filter(Boolean).map(v => JSON.parse(v)); }catch {return [];}},

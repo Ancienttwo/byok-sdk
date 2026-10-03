@@ -170,7 +170,8 @@ export async function runExternalCli(input: {
 	input.registerStop?.(() => cancel("stop"));
 	let authorization;
 	try {
-	authorization = await authority.prepare({ command: input.command, args: input.args ?? [], cwd: input.cwd, prompt: input.prompt, adapter: input.adapter, environment: input.environment, ...nextExternalCliAttempt(input.asyncDir, input.stepIndex) }, {signal:cancellation.signal,deadlineAt:input.deadlineAt});
+	fs.mkdirSync(input.asyncDir, { recursive: true });
+	authorization = await authority.prepare({ command: input.command, args: input.args ?? [], cwd: input.cwd, prompt: input.prompt, adapter: input.adapter, asyncDir: input.asyncDir, environment: input.environment, ...nextExternalCliAttempt(input.asyncDir, input.stepIndex) }, {signal:cancellation.signal,deadlineAt:input.deadlineAt});
 	} catch (error) { input.registerTimeout?.(undefined); input.registerStop?.(undefined); throw error; }
 
 	const env = authorization.env;

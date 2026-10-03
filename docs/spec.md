@@ -2469,5 +2469,12 @@ Windows external process-tree supervision remain unsupported/fail-closed in
 this cohort. Top-level Codex environment stripping is a separate change.
 
 
+### T6 Claude final-mode proof
+Every Claude terminal task rechecks CLI-produced own-login mode/config scope immediately before final physical reverify and task admission. Unknown, changed or mismatching status refuses without a task reservation; the real status child consumes a physical root claim. The SDK does not add an unproved universal forceLoginMethod setting: Host declarations have no enforced version capability field. Same-UID change after the final check or during lock wait remains a documented check-time risk. No account-store contents or new credentials are read by the SDK.
+
+
+### T6 uncertain groups, declared output scope and preflight
+A post-PID setup failure requests SIGTERM for the detached child group while retaining uncertain live slots and all cumulative claims; only explicit PID/group absence permits F5 reclamation. Async output roots are independent of task cwd, tied to the SDK request/directory snapshot and step filename, and rechecked before native launch; symlink/hardlink escapes refuse. Adapter eager output deletion is replaced by cleanup only after final scope verification. Advisory prepare preflight for every adapter and spawn preflight before Claude's final status probe use the same replay/E/W/depth policy as authoritative final locked admission, create no reservation/physical probe, and never replace final atomic policy checks.
+
 ### T6 locked physical tuple supplement (F2)
 Official external CLI probes and terminal task admission retain the full asynchronous byte/environment reverify. After acquiring the shared root admission lock, before permit consumption/native spawn, the SDK additionally checks identity-owned artifact/interpreter/declared asset tuples and canonical parent paths, external home/config directory tuples, and the committed parent record. A known pre-spawn mismatch rolls back the uncommitted reservation under the existing F1 rule. This is a synchronous tuple-only supplement, preserving same-inode hardlink layouts, not an atomic OS execution guarantee or login-store content proof. Same-UID in-place edits preserving every tuple and the residual final check-to-spawn interval remain check-time limits. No credential/billing authority or new per-adapter budget is introduced.

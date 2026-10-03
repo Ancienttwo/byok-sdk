@@ -712,10 +712,11 @@
     {
       "path": "src/runs/shared/codex-exec-adapter.ts",
       "upstreamSha256": "1ce2efd60aae251800196d3ad5b58a2852bcd5b65e8fb1e6b9505161788687a2",
-      "vendoredSha256": "742c8e3b2e81c07242c744db4ea6bfaa3613c311502b276e38c7fefe61572f72",
+      "vendoredSha256": "483b5a95f776dd51fbdf969a4138e0c2fddbac3945e4acd5dffe2f7702d815a7",
       "delta": [
         "T6 sixth-edge: SDK-owned official CLI admission, V2 identity/permit/shared derivation budget and lifecycle; no credential or ambient spawn fallback.",
-        "T6 cohort: verified SDK Host helper template/cwd/transport and sixth-edge authority; input/permit/caps remain fail-closed."
+        "T6 cohort: verified SDK Host helper template/cwd/transport and sixth-edge authority; input/permit/caps remain fail-closed.",
+        "SDK custody binds declared async output root; final validated cleanup replaces eager adapter deletion."
       ]
     },
     {
@@ -771,11 +772,12 @@
     {
       "path": "src/runs/shared/external-cli-runner.ts",
       "upstreamSha256": "51f41fc6ee753ca3d96cfb93a083e64c62acc5d359ac4169e0f9e357967ca0e0",
-      "vendoredSha256": "934441949c99749b22e6d2f28da5383cf47fef5ac9ac295cb5ced4b322df2bf4",
+      "vendoredSha256": "a98c7a65fecafd2cad60acc99204286d8090f44ebccfa1c547a02e50d2818bec",
       "delta": [
         "SDK external-cli environment isolation: bare/unknown launches use the runtime platform/proxy allowlist; BYOK and custody names are denied even in explicit allowlists and value overrides.",
         "T6 sixth-edge: SDK-owned official CLI admission, V2 identity/permit/shared derivation budget and lifecycle; no credential or ambient spawn fallback.",
-        "T6 cohort: verified SDK Host helper template/cwd/transport and sixth-edge authority; input/permit/caps remain fail-closed."
+        "T6 cohort: verified SDK Host helper template/cwd/transport and sixth-edge authority; input/permit/caps remain fail-closed.",
+        "SDK custody binds declared async output root; final validated cleanup replaces eager adapter deletion."
       ]
     },
     {

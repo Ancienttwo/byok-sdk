@@ -55,7 +55,7 @@ describe('sixth edge: official login and secret-free final child', () => {
     expect(k.tasks()[0]!.home).toBe(k.dir);
     expect(k.tasks()[0]!.config).toBe(k.configDir);
     expect(output.output).not.toContain(SECRET);
-    expect(claims(k)).toBe(5);
+    expect(claims(k)).toBe(family==='claude'?6:5); // Claude includes the final charged mode proof.
     const record = ledgers(k).find(v => v.kind === 'task').record;
     expect(parseExternalCliDescendantLaunch(record)).toBeDefined();
     expect(record.edge.inheritsCredential).toBe(false);
@@ -138,8 +138,8 @@ describe('sixth edge: one shared derivation table and single-use permits', () =>
   it.each([['E',16,false],['W',4,true]] as const)('exhausts cumulative %s after %s actual task spawns, with no refund at close', async (cap,count,writer) => {
     const k = await kit({native:true});
     for (let i=0;i<count;i++) { const running=await spawnTask(k,k.request(writer));await running.close; }
-    const request=k.request(writer), auth=await k.authority.prepare(request), before=claims(k);
-    await expect(spawnTask(k,request,auth)).rejects.toThrow(`external_cli_${cap}_exhausted`);
+    const request=k.request(writer), before=claims(k);
+    await expect(k.authority.prepare(request)).rejects.toThrow(`external_cli_${cap}_exhausted`);
     expect(k.tasks()).toHaveLength(count); expect(claims(k)).toBe(before);
     expect(ledgers(k).filter(v=>v.kind==='task')).toHaveLength(count);
     expect(ledgers(k).filter(v=>v.kind==='task').every(v=>v.state==='terminated')).toBe(true); noLeaks(k);
@@ -169,14 +169,14 @@ describe('sixth edge: one shared derivation table and single-use permits', () =>
   });
   it('first handoff is legal at depth cap; a second operation cannot reuse it', async () => {
     const k=await kit({maxDepth:1}); const first=await spawnTask(k,k.request());await first.close;
-    const r=k.request(), a=await k.authority.prepare(r), before=claims(k);
-    await expect(spawnTask(k,r,a)).rejects.toThrow('external_cli_depth_exhausted');
+    const r=k.request(), before=claims(k);
+    await expect(k.authority.prepare(r)).rejects.toThrow('external_cli_depth_exhausted');
     expect(claims(k)).toBe(before);expect(k.tasks()).toHaveLength(1);noLeaks(k);
   });
 });
 
 it('all readonly/writer adapters consume one shared writer table rather than adapter pools',async()=>{
- const a=await kit(), b=await kit({family:'claude'});
+ const a=await kit({native:true}), b=await kit({family:'claude',native:true});
  const installations=[...a.installations,...b.installations];configureCustodyExternalInstallations(installations);
  vi.stubEnv('BYOK_SDK_CUSTODY_LAUNCH_RECORD',undefined);vi.stubEnv('PI_SUBAGENT_RUN_FANOUT_BUDGET',encodeRunFanoutBudgetDescriptor(a.budget));
  vi.stubEnv('PI_CODING_AGENT_SESSION_DIR',a.dir);vi.stubEnv('PI_SUBAGENT_MAX_DEPTH','8');vi.stubEnv('PI_SUBAGENT_MAX_SPAWNS_PER_SESSION','128');
@@ -184,10 +184,11 @@ it('all readonly/writer adapters consume one shared writer table rather than ada
  const parent=parseDescendantLaunch(JSON.parse(readFileSync(dispatch.recordPath,'utf8')));
  const authority=new ExternalCliCustodyAuthority(parent,a.budget,installations,{},ownershipProbe,dispatch.recordPath);
  const merged={...a,authority};
- for(let i=0;i<4;i++) {const request={...(i%2===0?a:b).request(true),cwd:a.dir,stepIndex:i,operation:`mixed-${i}`};const run=await spawnTask(merged,request);await run.close;}
- const request={...b.request(true),cwd:a.dir,stepIndex:4,operation:'mixed-overflow'}, auth=await authority.prepare(request),before=claims(a);
- await expect(spawnTask(merged,request,auth)).rejects.toThrow('external_cli_W_exhausted');
- expect(claims(a)).toBe(before);expect(a.tasks()).toHaveLength(4);expect(ledgers(a).filter(v=>v.kind==='task').map(v=>v.record.installation.adapter).sort()).toEqual(['claude-code-writer','claude-code-writer','codex-exec-writer','codex-exec-writer']);noLeaks(a);
+ for(let i=0;i<4;i++) {const request={...(i%2===0?a:b).request(true,`mixed-${i}`,0,i),cwd:a.dir};const run=await spawnTask(merged,request);await run.close;}
+ const request={...b.request(true,'mixed-overflow',0,4),cwd:a.dir},before=claims(a);
+ await expect(authority.prepare(request)).rejects.toThrow('external_cli_W_exhausted');
+ expect(claims(a)).toBe(before);expect(a.tasks()).toHaveLength(4); // Early refusal creates no additional physical proof.
+ expect(ledgers(a).filter(v=>v.kind==='task').map(v=>v.record.installation.adapter).sort()).toEqual(['claude-code-writer','claude-code-writer','codex-exec-writer','codex-exec-writer']);noLeaks(a);
 });
 it.each(['claude-code','claude-code-writer','codex-exec','codex-exec-writer','cursor-agent','cursor-agent-writer'])('shared input authority refuses %s key/config injection before any external child',async adapter=>{
  const k=await kit();const steps=[{agent:'fixture',task:'task',runner:{type:'external-cli',adapter,command:k.command,args:['--api-key',SECRET]}}];
@@ -216,7 +217,7 @@ describe('sixth edge: closure/config and independent parent instances', () => {
     expect(externalCliCommitment(parent)).not.toBe(externalCliCommitment(k.parent));
     const second=new ExternalCliCustodyAuthority(parent,k.budget,k.installations,{},ownershipProbe,dispatch.recordPath);
     const first=await spawnTask(k,k.request(false,'same-operation'));await first.close;
-    const request={...k.request(false,'same-operation'),stepIndex:0};const auth=await second.prepare(request);
+    const request=k.request(false,'same-operation',0,0);const auth=await second.prepare(request);
     const child=await second.spawn(auth,{command:request.command,args:request.args,cwd:request.cwd,prompt:request.prompt,env:auth.env});
     const close=once(child,'close');child.stdin.end('');await close;await second.settled(child);
     expect(ledgers(k).filter(v=>v.kind==='task').map(v=>v.depth)).toEqual([1,1]);expect(k.tasks()).toHaveLength(2);noLeaks(k);
@@ -224,8 +225,8 @@ describe('sixth edge: closure/config and independent parent instances', () => {
   it('a later first external step and a retry cannot reclaim the initial logical charge at depth cap', async () => {
     const k=await kit({maxDepth:1});
     for (const change of [{stepIndex:1,attempt:0},{stepIndex:0,attempt:1}]) {
-      const request={...k.request(),...change};const auth=await k.authority.prepare(request), before=claims(k);
-      await expect(spawnTask(k,request,auth)).rejects.toThrow('external_cli_depth_exhausted');expect(claims(k)).toBe(before);
+      const request=k.request(false,undefined,change.attempt,change.stepIndex), before=claims(k);
+      await expect(k.authority.prepare(request)).rejects.toThrow('external_cli_depth_exhausted');expect(claims(k)).toBe(before);
     }
     expect(k.tasks()).toEqual([]);expect(ledgers(k).filter(v=>v.kind==='task')).toEqual([]);noLeaks(k);
   });

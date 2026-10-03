@@ -1,5 +1,5 @@
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, mkdtempSync, realpathSync, lstatSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -76,6 +76,7 @@ export interface ExternalCliInvocation {
 export interface ExternalCliLaunchRequest extends ExternalCliInvocation {
   readonly adapter?: string; readonly operation: string; readonly attempt: number; readonly stepIndex: number;
   readonly environment?: { readonly allowlist: readonly string[]; readonly values?: Readonly<Record<string,string>> };
+  readonly asyncDir?: string;
 }
 export interface ExternalCliAdmissionControl { readonly signal?: AbortSignal; readonly deadlineAt?: number }
 export interface ExternalCliAuthorization {
@@ -86,8 +87,10 @@ interface AuthorizationState {
   readonly authority: ExternalCliCustodyAuthority;
   readonly request: ExternalCliLaunchRequest;
   readonly control: ExternalCliAdmissionControl;
+  readonly outputScope: OutputScope;
   consumed: boolean;
 }
+interface OutputScope { readonly root: string; readonly resolvedRoot: string; readonly directoryDigest: string; readonly file?: string }
 interface ExternalLedger {
   version: 2; launchId: string; kind: 'probe' | 'task'; parent: string; operation: string; attempt: number;
   writer: boolean; depth: number; state: 'not-spawned' | 'spawned' | 'terminated' | 'uncertain'; pid?: number;
@@ -181,6 +184,51 @@ export class ExternalCliCustodyAuthority {
     });
   }
   private ledgerPath(id: string): string { return path.join(this.budget.directory,'custody-external',`${id}.json`); }
+  /** One policy for advisory preflight and authoritative final locked admission. */
+  private taskAdmissionDepth(tasks: readonly ExternalLedger[], task: { parent: string; operation: string; attempt: number; writer: boolean; stepIndex: number }): number {
+    if (tasks.some(v => v.parent === task.parent && v.operation === task.operation && v.attempt === task.attempt)) refuse('external_cli_attempt_already_launched');
+    const E = Math.min(this.parent.perLaunch.effectiveLimits.fanout,16), W = Math.min(E,4);
+    if (tasks.length >= E) refuse('external_cli_E_exhausted');
+    if (task.writer && tasks.filter(v => v.writer).length >= W) refuse('external_cli_W_exhausted');
+    const handedOff = task.stepIndex !== 0 || task.attempt !== 0 || tasks.some(v => v.parent === this.parentDigest);
+    const depth = this.parent.perLaunch.depth + (handedOff ? 1 : 0);
+    if (depth > this.parent.perLaunch.effectiveLimits.maxDepth) refuse('external_cli_depth_exhausted');
+    return depth;
+  }
+  private preflight(request: ExternalCliLaunchRequest, installation: AttestedOfficialExternalCliV2): void {
+    claimRunFanoutBatchWithCommit(this.budget,[],() => {
+      this.reverifyParentRecord();
+      this.taskAdmissionDepth(this.ledgers().filter(v=>v.kind==='task'),{parent:this.parentDigest,operation:request.operation,attempt:request.attempt,
+        writer:installation.adapter.endsWith('-writer'),stepIndex:request.stepIndex});
+    });
+  }
+  private captureOutputScope(install: AttestedOfficialExternalCliV2, request: ExternalCliLaunchRequest): OutputScope {
+    const root = request.asyncDir;
+    if (!root || !path.isAbsolute(root) || path.normalize(root) !== root) refuse('external_cli_output_scope_required');
+    let file: string | undefined;
+    if (install.adapter.startsWith('codex-')) {
+      file = path.join(root,`external-${request.stepIndex}.final-message.txt`);
+      if (request.args[request.args.indexOf('--output-last-message')+1] !== file) refuse('external_cli_output_scope_mismatch');
+    }
+    try {
+      const resolvedRoot = realpathSync(root), stat = lstatSync(resolvedRoot);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) refuse('external_cli_output_scope_changed');
+      const scope = Object.freeze({root,resolvedRoot,file,directoryDigest:externalCliCommitment([stat.dev,stat.ino,stat.mode,stat.uid,stat.gid])});
+      this.reverifyOutputScope(scope); return scope;
+    } catch { refuse('external_cli_output_scope_changed'); }
+  }
+  private reverifyOutputScope(scope: OutputScope): void {
+    try {
+      const resolved = realpathSync(scope.root), stat = lstatSync(resolved);
+      if (resolved !== scope.resolvedRoot || !stat.isDirectory() || stat.isSymbolicLink()
+        || externalCliCommitment([stat.dev,stat.ino,stat.mode,stat.uid,stat.gid]) !== scope.directoryDigest) refuse('external_cli_output_scope_changed');
+      if (scope.file) {
+        if (realpathSync(path.dirname(scope.file)) !== scope.resolvedRoot) refuse('external_cli_output_scope_changed');
+        try { const leaf = lstatSync(scope.file); if (!leaf.isFile() || leaf.isSymbolicLink() || leaf.nlink !== 1) refuse('external_cli_output_scope_changed'); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      }
+    } catch { refuse('external_cli_output_scope_changed'); }
+  }
   /** Every managed physical process takes a root claim. All adapters share this table and these slots. */
   private commit<T>(ledger: ExternalLedger, launch: () => T, beforeLaunch?: () => void): T {
     const created: string[] = [];
@@ -203,14 +251,7 @@ export class ExternalCliCustodyAuthority {
         }
         const tasks = previous.filter(v => v.kind === 'task');
         if (ledger.kind === 'task') {
-          if (tasks.some(v => v.parent === ledger.parent && v.operation === ledger.operation && v.attempt === ledger.attempt)) refuse('external_cli_attempt_already_launched');
-          const E = Math.min(this.parent.perLaunch.effectiveLimits.fanout,16);
-          const W = Math.min(E,4);
-          if (tasks.length >= E) refuse('external_cli_E_exhausted');
-          if (ledger.writer && tasks.filter(v => v.writer).length >= W) refuse('external_cli_W_exhausted');
-          const handedOff = ledger.record!.stepIndex !== 0 || ledger.attempt !== 0 || tasks.some(v => v.parent === this.parentDigest);
-          ledger.depth = this.parent.perLaunch.depth + (handedOff ? 1 : 0);
-          if (ledger.depth > this.parent.perLaunch.effectiveLimits.maxDepth) refuse('external_cli_depth_exhausted');
+          ledger.depth = this.taskAdmissionDepth(tasks,{parent:ledger.parent,operation:ledger.operation,attempt:ledger.attempt,writer:ledger.writer,stepIndex:ledger.record!.stepIndex});
         }
         const limits = this.parent.perLaunch.effectiveLimits;
         const rootKey = safeKeySegment(this.budget.rootRunId);
@@ -242,7 +283,14 @@ export class ExternalCliCustodyAuthority {
     // one with a PID. Capture that PID before any fallible post-spawn setup.
     // Keep cumulative claims once native launch is attempted, but retain live
     // slots only when a child may exist.
-    if (launchFailed) { this.finish(ledger, ledger.pid !== undefined); throw launchError; }
+    if (launchFailed) {
+      // Setup may fail before a tree/listener exists. The PID was already
+      // captured, and every POSIX child is detached into its own group.
+      // Stop the entire group, but do not release slots on a signal attempt.
+      if (ledger.pid !== undefined) { try { process.kill(-ledger.pid,'SIGTERM'); } catch {} }
+      this.finish(ledger, ledger.pid !== undefined);
+      throw launchError;
+    }
     return result;
   }
   private finish(ledger: ExternalLedger, uncertain = false): void {
@@ -311,6 +359,8 @@ export class ExternalCliCustodyAuthority {
     if (install.identity.interpreter && request.args[0] !== install.identity.installPath) refuse('external_cli_entry_mismatch');
     const args = install.identity.interpreter ? request.args.slice(1) : request.args;
     validateOfficialExternalCliArgv(install,args);
+    const outputScope = this.captureOutputScope(install,request);
+    this.preflight(request,install);
     const probeHome = mkdtempSync(path.join(os.tmpdir(),'byok-cli-probe-'));
     const probeEnv = buildOfficialExternalCliEnvironment(this.ambient);
     probeEnv.HOME = probeHome;
@@ -327,11 +377,7 @@ export class ExternalCliCustodyAuthority {
       ? ['--ignore-user-config','--ignore-rules','--sandbox','--config','--ephemeral']
       : ['--tools','--strict-mcp-config','--mcp-config','--setting-sources','--settings','--disable-slash-commands'];
     if (required.some(flag => !help.includes(flag))) refuse('external_cli_restriction_unavailable');
-    const auth = await this.runProbe(install,install.adapter.startsWith('codex-')
-      ? ['login','status'] // exec-only flags do not belong to the login command.
-      : ['--setting-sources','','auth','status'],env,request.cwd,control);
-    if (!officialExternalCliLoginProven(install.adapter,auth)) refuse('external_cli_auth_mode_unavailable');
-    if (install.adapter.startsWith('claude-') && JSON.parse(auth).configDirectory !== install.configDir) refuse('external_cli_config_scope_unavailable');
+    await this.verifyLoginMode(install,env,request.cwd,control);
     const record: ExternalCliDescendantLaunchV2 = {
       format:'byok.descendant-launch',version:2,target:'official-external-cli',
       edge:{parent:'pi-subagent-runner',child:'official-external-cli',inheritsCredential:false},
@@ -344,8 +390,16 @@ export class ExternalCliCustodyAuthority {
     const parsed = parseExternalCliDescendantLaunch(record);
     if (!parsed) refuse('external_cli_record_invalid');
     const authorization = Object.freeze({record:parsed,env:Object.freeze(env)});
-    authorizationStates.set(authorization,{authority:this,request,control,consumed:false});
+    authorizationStates.set(authorization,{authority:this,request,control,outputScope,consumed:false});
     return authorization;
+  }
+  /** CLI-produced mode evidence; bounded/charged like every other native probe. */
+  private async verifyLoginMode(install: AttestedOfficialExternalCliV2, env: Record<string,string>, cwd: string, control: ExternalCliAdmissionControl): Promise<void> {
+    const auth = await this.runProbe(install,install.adapter.startsWith('codex-')
+      ? ['login','status'] // exec-only flags do not belong to the login command.
+      : ['--setting-sources','','auth','status'],env,cwd,control);
+    if (!officialExternalCliLoginProven(install.adapter,auth)) refuse('external_cli_auth_mode_unavailable');
+    if (install.adapter.startsWith('claude-') && JSON.parse(auth).configDirectory !== install.configDir) refuse('external_cli_config_scope_unavailable');
   }
   /** Final remeasurement, binding, atomic claim and permit consume immediately precede spawn. */
   async spawn(authorization: ExternalCliAuthorization, actual: ExternalCliInvocation & { readonly env: Readonly<Record<string,string>> }): Promise<ChildProcessWithoutNullStreams> {
@@ -358,6 +412,15 @@ export class ExternalCliCustodyAuthority {
     if (externalCliCommitment(actual) !== record.invocationDigest) refuse('external_cli_invocation_changed');
     if (toolImplementationLaunchEnvNamesDigest(actual.env) !== record.launchEnvNamesDigest
       || toolImplementationLoaderEnvValuesDigest(actual.env) !== record.loaderEnvValuesDigest) refuse('external_cli_env_changed');
+    // No general install-version capability is attested for a mode-lock setting.
+    // Re-prove Claude's own-login state at every final admission instead; then
+    // remeasure bytes/parent/env again. A same-UID final check/spawn race remains.
+    if (record.installation.adapter.startsWith('claude-')) {
+      // Avoid an unnecessary final status probe; all adapters still use final
+      // locked admission after the complete physical reverify.
+      this.preflight(state.request,record.installation);
+      await this.verifyLoginMode(record.installation,{...actual.env},actual.cwd,state.control);
+    }
     await this.reverify(record.installation,actual.env);
     if (state.consumed) refuse('external_cli_permit_reused');
     this.checkControl(state.control);
@@ -388,6 +451,8 @@ export class ExternalCliCustodyAuthority {
       this.checkControl(state.control);
       this.reverifyLocked(record.installation);
       this.checkControl(state.control);
+      this.reverifyOutputScope(state.outputScope);
+      if (state.outputScope.file) rmSync(state.outputScope.file,{force:true});
       // Consume failure cannot create a child. Mark the handle monotonic before native spawn.
       state.consumed = true;
       const finalRecord = ledger.record!;
