@@ -4,7 +4,7 @@
   "packages": [
     {
       "name": "@earendil-works/pi-ai",
-      "version": "0.99.2",
+      "version": "1.0.0",
       "files": [
         {
           "path": "dist/utils/typebox-helpers.js",
@@ -12,7 +12,7 @@
         }
       ],
       "licenseText": "MIT License\n\nCopyright (c) 2025 Mario Zechner\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.",
-      "licenseSource": "upstream repository LICENSE at v0.99.2 (005af57d88ee23b33778f343a9595b32e67ff788); package declares MIT but omits license file"
+      "licenseSource": "upstream repository LICENSE at v1.0.0 (a13d35a742c6ef8462812a28fbe1d8c8b7431c32); package declares MIT but omits license file"
     },
     {
       "name": "@juicesharp/rpiv-config",

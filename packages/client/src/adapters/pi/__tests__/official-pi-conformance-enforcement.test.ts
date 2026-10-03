@@ -1,5 +1,5 @@
 /**
- * Official Pi 0.99.2 conformance — enforcement and determinism: D drift (c),
+ * Official Pi 1.0.0 conformance — enforcement and determinism: D drift (c),
  * upstream ignoring the injected fetch (d), determinism knobs (e) and a
  * usage-absent stream (f). Synthetic SSE only; the only socket ever opened is
  * the refused connection to the non-routable sink in (d).
@@ -45,7 +45,7 @@ function gateAgainst(frozenD: string, respond: () => Response) {
       };
 }
 
-describe('official Pi 0.99.2: final byte gate', () => {
+describe('official Pi 1.0.0: final byte gate', () => {
   test('(c) D drift: one injected-fetch call, zero sends, prompt resolves, run-scoped typed reason, no retry', async () => {
     globalFetch = installGlobalFetchSpy();
     const frozen = await compileA1(hostTranscript());
@@ -86,7 +86,7 @@ describe('official Pi 0.99.2: final byte gate', () => {
   }, TIMEOUT_MS);
 });
 
-describe('official Pi 0.99.2: transport scoping', () => {
+describe('official Pi 1.0.0: transport scoping', () => {
   test('(d) upstream ignoring the injected fetch reaches only the sink, is refused, and yields no D', async () => {
     globalFetch = installGlobalFetchSpy(true);
     const terminal = await compileWithoutInjectedFetch(hostTranscript());
@@ -100,7 +100,7 @@ describe('official Pi 0.99.2: transport scoping', () => {
   }, 10_000);
 });
 
-describe('official Pi 0.99.2: determinism knobs', () => {
+describe('official Pi 1.0.0: determinism knobs', () => {
   test('(e) PI_CACHE_RETENTION changes D unless cacheRetention is pinned; pinned D is identical', async () => {
     globalFetch = installGlobalFetchSpy();
     const previous = process.env.PI_CACHE_RETENTION;
@@ -130,7 +130,7 @@ describe('official Pi 0.99.2: determinism knobs', () => {
   });
 });
 
-describe('official Pi 0.99.2: usage observation', () => {
+describe('official Pi 1.0.0: usage observation', () => {
   test('(f) usage-absent SSE leaves all-zero usage, which the SDK maps to a zero prompt (usage_unavailable input)', async () => {
     globalFetch = installGlobalFetchSpy();
     const frozenD = (await compileA1(hostTranscript())).body;
@@ -171,11 +171,25 @@ describe('official Pi 0.99.2: usage observation', () => {
   }, TIMEOUT_MS);
 });
 
-// Actual installed 0.99.2 session and provider parser, with synthetic SSE (no paid calls).
-describe('official Pi context stats after provider usage and manual compaction', () => {
-  test('provider usage supplies occupancy, then compaction makes it unknown', async () => {
+// Public 1.0 AgentSession stats: provider cost and local context estimate stay separate.
+describe('official Pi 1.0 context usage', () => {
+  test('estimates occupancy even when the provider reports no usage', async () => {
     globalFetch = installGlobalFetchSpy();
-    const harness = await createOfficialSession({ transcript: () => hostTranscript(), gate: () => textResponse('synthetic answer and summary', true) });
+    const harness = await createOfficialSession({ transcript: () => hostTranscript(), gate: () => textResponse('no usage', false) });
+    try {
+      expect(harness.session.getSessionStats().contextUsage).toEqual({ tokens: 0, contextWindow: 128000, percent: 0 });
+      await harness.session.prompt(TRIGGER_TEXT);
+      const stats = harness.session.getSessionStats();
+      expect(stats.tokens.total).toBe(0);
+      expect(stats.contextUsage?.tokens).toBeGreaterThan(0);
+      expect(stats.contextUsage?.contextWindow).toBe(128000);
+      expect(globalFetch.calls).toEqual([]);
+    } finally { harness.dispose(); }
+  }, TIMEOUT_MS);
+
+  test('manual compaction makes context tokens null until post-compaction usage', async () => {
+    globalFetch = installGlobalFetchSpy();
+    const harness = await createOfficialSession({ transcript: () => hostTranscript(), gate: () => textResponse('answer and summary', true) });
     try {
       harness.session.settingsManager.applyOverrides({ compaction: { enabled: false, keepRecentTokens: 0 } });
       await harness.session.prompt(TRIGGER_TEXT);

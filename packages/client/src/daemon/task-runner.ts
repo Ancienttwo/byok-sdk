@@ -713,6 +713,8 @@ export interface TaskRunnerDeps {
    * `task.complete` carries exactly the fields it always did.
    */
   resultDocument?: { readonly extract: ResultDocumentExtractor };
+  durablePi?: boolean;
+  recordDurableTransition?(taskId: string, leaseId: string, kind: string, ordinal: number): Promise<void>;
   /** SDK-owned, task-scoped MCP helper. Required only for offers declaring messageEgress. */
   agentMessageMcpBin?: Readonly<ResolvedAgentMessageMcpBin>;
   /**
@@ -2100,7 +2102,7 @@ export class TaskRunner {
       decline('required Agent message egress is unavailable on this daemon', false);
       return;
     }
-    if (terminalProjection?.mode === 'result-document' && this.deps.resultDocument === undefined) {
+    if (terminalProjection?.mode === 'result-document' && this.deps.resultDocument === undefined && this.deps.durablePi !== true) {
       decline('offer requires a result document but this daemon has no resultDocument extractor', false);
       return;
     }
@@ -2326,6 +2328,7 @@ export class TaskRunner {
         decline(pick.reason, pick.retryable);
         return;
       }
+      if (terminalProjection?.mode === 'result-document' && !this.deps.resultDocument && pick.descriptor.capabilities.durablePi !== true) { decline('selected runtime has no result document extractor', false); return; }
       if (!isKnownRuntimeId(pick.descriptor.id) && !(this.deps.getServerCapabilities?.() ?? []).includes('custom-harness')) {
         decline('server does not support the selected custom harness identity', false);
         return;
@@ -3034,7 +3037,17 @@ export class TaskRunner {
           return;
         }
       }
+      const durableBinding = agentBinding;
       const startInput: RuntimeOperationStartInput = {
+        ...(runtimeLaunch?.kind !== 'pi-durable' ? {} : { durableContext: {
+          tenantId: this.deps.tenantId!, lifecycle: {
+            ownsLease: () => durableBinding !== undefined && !blobAbort.signal.aborted && !this.pendingCancelled.has(taskId),
+            record: async (kind: 'tool-intent' | 'tool-committed' | 'respawn-intent', ordinal: number) => {
+              if (!durableBinding || !this.deps.recordDurableTransition || !this.deps.tenantId) throw new Error('durable parent authority unavailable');
+              await this.deps.agentHome!.executionLeaseManager.mutate(durableBinding, () => this.deps.recordDurableTransition!(taskId, durableBinding.lease.leaseId, kind, ordinal));
+            },
+          },
+        } }),
         mcpEnv,
         ...(runtimeLaunch === undefined ? {} : { runtimeLaunch }),
         // The two lanes are mutually exclusive authority over the same bytes,
@@ -4992,7 +5005,8 @@ export class TaskRunner {
       active.terminalProjection?.mode === 'none' ||
       (active.messageRequirement !== undefined && active.terminalProjection === undefined)
     ) return { deliver: true };
-    const extract = this.deps.resultDocument?.extract;
+    const extract = active.terminalProjection?.mode === 'result-document' && active.session.resultDocument !== undefined
+      ? () => active.session.resultDocument!() : this.deps.resultDocument?.extract;
     if (!extract) {
       if (active.terminalProjection?.mode === 'result-document') {
         await this.fail(

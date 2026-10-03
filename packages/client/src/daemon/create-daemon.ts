@@ -8,6 +8,7 @@ import {
   DEVICE_ASSERTION_MAX_TTL_MS,
 } from '@byok-sdk/core';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import {
   createEnvelope,
@@ -403,6 +404,8 @@ export interface DaemonConfig {
    * `dispatchSelection` in the BYOK lane; subscription runtimes and legacy
    * Pi tasks do not invoke it.
    */
+  /** Disabled by default. Requires Agent homes, journal and custody launcher. */
+  durablePi?: boolean;
   piByokLauncher?: import('../adapters/pi/pi-adapter').PiByokLauncherConfig;
   /**
    * M5 batch-3 (workstream 1): explicit auto-select priority order for
@@ -1258,7 +1261,7 @@ const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['pi', 'claude', 'codex'];
 function buildAdapter(id: RuntimeId, config: DaemonConfig): RuntimeAdapter {
   switch (id) {
     case 'pi':
-      return new PiAdapter({ byokLauncher: config.piByokLauncher });
+      return new PiAdapter({ byokLauncher: config.piByokLauncher, ...(config.durablePi === true ? { durablePi: { replicaRoot: path.join(DeviceStore.resolveDir(config.productId, config.storeDir), 'durable') } } : {}) });
     case 'claude':
       return new ClaudeAdapter();
     case 'codex':
@@ -1440,6 +1443,9 @@ export function buildDaemonWithAdapters(
   const localAgentRelease = resolveLocalAgentReleaseIdentity(config.localAgentRelease);
   const toolsetRegistry = new McpToolsetRegistry(config.mcpToolsets);
   validatePiByokLauncherConfig(config.piByokLauncher);
+  if (config.durablePi !== undefined && typeof config.durablePi !== 'boolean') throw new Error('durablePi must be boolean');
+  if (config.durablePi === true && (!config.agentHome || !config.hostedJournal || !config.piByokLauncher)) throw new Error('durablePi requires Agent home, hosted journal and Pi custody launcher');
+  if (config.durablePi === true && process.platform === 'win32') throw new Error('durablePi is unavailable on Windows until parent-death Job Object recovery is validated');
   // M5 batch-3 (workstream 2): validated synchronously, up front — see
   // `DaemonConfig.maxTaskOutputBytes`'s own doc comment for the full
   // zero/negative-is-an-error / `Number.POSITIVE_INFINITY`-is-the-real-
@@ -2449,6 +2455,10 @@ export function buildDaemonWithAdapters(
       // before is the entire integration; `task-runner.ts` itself is
       // untouched. See `observer.ts`'s module doc comment.
       send: sendEnvelope,
+      ...(config.durablePi !== true ? {} : { durablePi: true, recordDurableTransition: async (taskId: string, leaseId: string, kind: string, ordinal: number) => {
+        if (!activeJournal) throw new Error('durable journal unavailable');
+        await activeJournal.recordTransition({ transitionId: randomUUID(), taskId, to: 'running', occurredAt: new Date().toISOString(), detail: JSON.stringify({ kind, leaseId, ordinal }) });
+      } }),
       ...(activeJournal === undefined ? {} : {
         beforeClaim: async (taskId: string, runtime: string) => {
           await activeJournal.recordAdmission({ taskId, admitted: true, claimedRuntime: runtime, decidedAt: new Date().toISOString() });

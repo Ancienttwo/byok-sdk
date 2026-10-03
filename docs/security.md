@@ -872,6 +872,8 @@ reads, proxies, or forwards any credential — the M5 pilot audit
 rule at `packages/client/src/types.ts:120-124`) is the evidence ledger for
 exactly that claim.
 
+The durable Pi lane (`byok-pi-durable`) is a custody-launched child under the same rule; it does not move credentials into the daemon. The launcher transfers the key to worker model memory over private one-shot JSON IPC bound to the config digest. It never puts the key in the durable child initial environment, argv, stdio RPC or replica. The worker closes IPC before tools/MCP construction; deleting process.env is not protection. Tool exec forces `inheritEnv: false` and an explicit allowlist. Both inherited env and OS env introspection are regression-tested. Replica storage is under SDK-private storeDir, disjoint from canonicalHome, and bound to AgentRef/taskId/leaseId; overlapping paths fail before spawn. The replica remains untrusted input. Structured read/write/edit paths are checked at beforeTool, and any round containing such a tool executes sequentially, including bash/MCP peers, to close the same-turn symlink/ACK race; YOLO bash is not a filesystem sandbox. An exclusive replica lock and confirmed child-tree disposal are required before lease release.
+
 `@byok-sdk/keys` sits on the **other** side of that line. Its whole job *is* to
 hold a provider API key: it stores the user's own key in the OS credential
 store and either calls the provider through its explicit client APIs or launches
@@ -945,3 +947,11 @@ with bounded stderr retention (64 KiB and 20 lines). Legacy artifact uploads rea
 an existing validated fd in cancellable 64 KiB chunks under separate per-file and
 per-task byte budgets; file growth is counted rather than trusting stat alone.
 These limits do not change strict Agent egress permissions.
+
+Durable crash retention: daemon SIGKILL may leave owner-only transcript replicas, `launch-*/config.json` (Host input and mcpEnv), and lock sidecars under the private durable store. These are untrusted residuals, not continuation authority. Slice 1 has no automatic orphan sweep; offline deletion requires a terminal execution and absence of a home lease/worker. Normal terminal disposal cleans its transcript and launch config.
+
+Durable parent-death/platform boundary (slice 1): stdin EOF terminates the worker Harness on supported POSIX runtimes. Every shell starts in an inert stdin-gated process group; before executing the tool command, the daemon validates its actual worker parent/group and records that group in parent memory, then ACKs. Worker crash/cancel/close confirms worker/root disposal before killing and measuring these owned groups, so tool termination cannot cause a surviving worker to make another model request. Daemon-only SIGKILL tests retain both ppid-tree and tool-group exit assertions. IPC credential custody is disconnected before tools/MCP construction. Windows durablePi stays fail-closed pending a validated Job Object design. Simultaneous loss of parent and worker, and arbitrary tools escaping owned groups, remain outside this lifecycle guarantee.
+
+Structured tool scheduling (slice 1): read/write/edit use the public sequential executionMode, making their entire tool round sequential. This closes the same-turn bash-symlink versus structured I/O race across the journal ACK. It is not a filesystem sandbox against independently running processes or YOLO shell code.
+
+Automatic orphan GC remains blocked after the knife-6 namespace-swap probe: pathname lstat/realpath checks followed by asynchronous unlink can follow a concurrently substituted parent symlink. Home-lease/journal/lock proof alone does not pin filesystem namespace identity. No best-effort sweep is enabled; a follow-up must supply a validated fd-relative no-follow mutation primitive on each supported platform, or obtain an explicit narrower namespace-trust contract. No new continuation or deletion authority is inferred from replica metadata.

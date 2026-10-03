@@ -2161,7 +2161,7 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-012 | key plane 与 dispatch/platform 之间保持零依赖边 | Accepted |
 | ADR-013 | credential proxy | Deferred，仅在出现 managed agent credential 需求时触发（§9.1） |
 | ADR-014 | updater 与 supervisor 归宿主产品所有 | Accepted |
-| ADR-015 | runtime permission bypass / yolo flag | Rejected（§9.2） |
+| ADR-015 | runtime permission bypass / yolo flag | durablePi lane Accepted（owner 2026-10-02，默认关、YOLO-only 准入）；既有 runtimes 沿原合同，不能默默放宽 policy |
 | ADR-016 | memory delta chain | Deferred，snapshot > 1 MiB 或 CAS 冲突率偏高时触发 |
 | ADR-017 | `TaskStore` 改 async | Deferred，self-hosted 需要远端 async SQL 时触发 |
 | ADR-018 | live / cold migration | Deferred，出现跨设备 workspace 迁移需求时触发 |

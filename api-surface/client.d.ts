@@ -447,6 +447,10 @@ import { type SpawnFn } from './rpc-client';
  * providers); covers the common ones for a useful `authPresent` signal.
  */
 export interface PiAdapterOptions {
+    /** Opt-in ordinary, lease-bound durable worker. */
+    durablePi?: {
+        readonly replicaRoot: string;
+    };
     /** Override bin resolution — tests substitute the fake-pi fixture script. */
     resolveBin?: () => ResolvedBin;
     /** Override process spawning — tests substitute a fake spawn. */
@@ -3794,6 +3798,8 @@ export interface DaemonConfig {
      * `dispatchSelection` in the BYOK lane; subscription runtimes and legacy
      * Pi tasks do not invoke it.
      */
+    /** Disabled by default. Requires Agent homes, journal and custody launcher. */
+    durablePi?: boolean;
     piByokLauncher?: import('../adapters/pi/pi-adapter').PiByokLauncherConfig;
     /**
      * M5 batch-3 (workstream 1): explicit auto-select priority order for
@@ -8252,6 +8258,8 @@ export interface TaskRunnerDeps {
     resultDocument?: {
         readonly extract: ResultDocumentExtractor;
     };
+    durablePi?: boolean;
+    recordDurableTransition?(taskId: string, leaseId: string, kind: string, ordinal: number): Promise<void>;
     /** SDK-owned, task-scoped MCP helper. Required only for offers declaring messageEgress. */
     agentMessageMcpBin?: Readonly<ResolvedAgentMessageMcpBin>;
     /**
@@ -9410,7 +9418,7 @@ export * from '@byok-sdk/implementation-identity';
  * `<interpreter> <entry> __byok_sdk_helper <kind> …`, so the kind is the only
  * thing that differs between them and it is bound, not passed as text.
  */
-export type RuntimeLaunchKindV1 = 'pi-rpc' | 'pi-prepared';
+export type RuntimeLaunchKindV1 = 'pi-rpc' | 'pi-prepared' | 'pi-durable';
 export declare const RUNTIME_LAUNCH_KINDS: readonly RuntimeLaunchKindV1[];
 /**
  * The environment NAMES a runtime launch description commits a value for.
@@ -12585,7 +12593,7 @@ export declare class RuntimeStartupDisposalFailure extends Error {
 export declare function isRuntimeStartupDisposalFailure(value: unknown): value is RuntimeStartupDisposalFailure;
 // ==== @byok-sdk/client dist/sdk-reserved-helper-host.d.ts ====
 export declare const BYOK_SDK_HELPER_SUBCOMMAND = "__byok_sdk_helper";
-export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'agent-team-mcp' | 'mcp-env' | 'pi-rpc' | 'pi-prepared';
+export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'agent-team-mcp' | 'mcp-env' | 'pi-rpc' | 'pi-prepared' | 'pi-durable';
 export interface SdkHelperHostConfig {
     /**
      * Run SDK-reserved helpers by re-entering the product's single-file/SEA
@@ -12656,12 +12664,14 @@ export type RuntimeInstallationObservationContext = {
     readonly authority: ToolImplementationAuthority;
 } & ({
     readonly scope: 'entry';
-    readonly runtimeEntry: 'pi-rpc' | 'pi-prepared';
+    readonly runtimeEntry: 'pi-rpc' | 'pi-prepared' | 'pi-durable';
 } | {
     readonly scope: 'enabled-top-level';
 });
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
+    /** Local adapter advertisement; no new protocol field or capability vocabulary. */
+    readonly durablePi?: boolean;
     readonly steer: boolean;
     readonly resume: boolean;
     /**
@@ -12778,6 +12788,8 @@ export interface ApprovalChannel {
  * one underlying runtime process/session for the lifetime of a task.
  */
 export interface Session {
+    /** Current execution artifact, available only after terminal success. */
+    resultDocument?(): unknown;
     /** Opaque runtime session id, reported back to the server via `task.complete.sessionRef`. */
     sessionRef: string;
     /** Normalized events for this session; the daemon batches these into `task.progress`. */
@@ -13048,8 +13060,18 @@ export interface RuntimePreparedLaunchV1 {
     /** `toolsetId` -> the registry definition revision the preparation bound. */
     readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
 }
+/** Trusted daemon barriers for the opt-in durable worker; never serialized. */
+export interface DurableLifecycle {
+    record(kind: 'tool-intent' | 'tool-committed' | 'respawn-intent', ordinal: number): Promise<void>;
+    ownsLease(): boolean;
+}
 /** Runtime resources shared by every start variant. */
 interface RuntimeOperationStartBase {
+    /** Trusted parent-only recovery authority; never serialized into the worker. */
+    readonly durableContext?: {
+        readonly tenantId: string;
+        readonly lifecycle: DurableLifecycle;
+    };
     readonly runtimeLaunch?: PiRuntimeLaunchResources;
     /** Exact daemon MCP admission environment; Pi requires it and never inherits runtime credentials. */
     readonly mcpEnv?: Readonly<Record<string, string>>;

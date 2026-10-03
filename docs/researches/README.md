@@ -2,8 +2,6 @@
 
 Durable research reports live in this directory as topic-scoped Markdown files. Keep task-local implementation decisions in `tasks/notes/` and correction-derived rules in `tasks/lessons.md`.
 
-- [GPT Pro 待审 handoff：Fresh MVP、服务端存储与每周计量 (2026-09-10)](./2026-09-10_fresh-mvp-gpt-pro-review-handoff.md)
-
 - [Execution receipts and custom harness identity (#158–#167)](./2026-09-07-execution-receipts-and-harness-identity.md)
 
 Architecture decisions:

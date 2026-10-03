@@ -16,12 +16,12 @@
   Claude interrupt now uses correlated `control_request` with bounded ACK and
   owned-process fallback. `usage` adds optional `contextTokens`, `contextWindow`
   and `contextSource` fields (additive, independent of provider cost counters),
-  and the official Pi runtime pin moves to 0.99.2.
+  and the official Pi runtime pin moves to 1.0.0 (see below).
 
-- **Changed (client)** — official Pi runtime 0.87.1 -> 0.99.2. The attested
-  closure is now eight packages (chord, pi-agent-core, pi-ai, pi-codemode,
-  pi-coding-agent, pi-mcp, pi-telemetry, pi-tui), upstream commit `005af57d`,
-  closureDigest `8d614f74c775cab980f72bfce88de75583ad43e69d870df0134f3dbd7b622124`.
+- **Changed (client)** — official Pi runtime 0.87.1 -> 1.0.0. The attested
+  closure is now nine package names (chord, pi-agent-core, pi-ai, pi-codemode,
+  pi-coding-agent, pi-durable, pi-mcp, pi-telemetry, pi-tui), upstream commit `a13d35a7`,
+  closureDigest `7f010b1a1bf36bb08e479d6651e0aaa556c00abc2ab02a1275d31ba4c81a1d87`.
 - **Changed (client)** — the OpenAI SDK under Pi moves 6.40 -> 7.19. Request
   wire bytes were verified identical (2499-cell matrix), but the SSE decoder was
   rewritten: `[DONE]` is matched exactly, `event: error` frames throw `APIError`,

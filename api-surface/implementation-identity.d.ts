@@ -529,7 +529,7 @@ export type ToolImplementationLocatorV1 = {
  */
 export type ToolImplementationInstallRecordV1 = Omit<ToolImplementationAttestedV1, 'installStat' | 'interpreterStat' | 'assetStats' | 'launchEnvNamesDigest' | 'loaderEnvValuesDigest'>;
 /** Frozen M0 runtime vocabulary; declaration does not enable a dispatcher. */
-export type RuntimeEntryV1 = 'pi-prepared' | 'pi-rpc' | 'pi-subagent-print' | 'pi-subagent-runner';
+export type RuntimeEntryV1 = 'pi-prepared' | 'pi-rpc' | 'pi-durable' | 'pi-subagent-print' | 'pi-subagent-runner';
 export declare const RUNTIME_ENTRIES: readonly RuntimeEntryV1[];
 /** Canonical runtime prefix. Host declares it; the SDK checks exact equality. */
 export declare function runtimeEntryFixedArgv(kind: RuntimeEntryV1): readonly string[];
