@@ -951,10 +951,10 @@ implied by this source change.
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. The SDK pins the official unmodified
-`@earendil-works/pi-coding-agent@1.0.0` plus chord, pi-agent-core, pi-ai,
-pi-codemode, pi-durable, pi-mcp, pi-telemetry and pi-tui to exactly 1.0.0 (upstream commit
-`a13d35a742c6ef8462812a28fbe1d8c8b7431c32`, closureDigest
-`7f010b1a1bf36bb08e479d6651e0aaa556c00abc2ab02a1275d31ba4c81a1d87`). Fork aliases and dual runtimes are
+`@earendil-works/pi-coding-agent@1.0.1` plus chord, pi-agent-core, pi-ai,
+pi-codemode, pi-durable, pi-mcp, pi-telemetry and pi-tui to exactly 1.0.1 (upstream commit
+`a7229ddc21810d6245105978033b7df645ecc2f7`, closureDigest
+`c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`). Fork aliases and dual runtimes are
 retired. `resolvePiRuntimeIdentity()` reads the static dependency projection;
 resolved name/version mismatch fails closed. There is no implicit global Pi fallback.
 Only public Pi APIs are used; private imports, patches, copied provider serializers
@@ -972,12 +972,12 @@ its declared assets; runtime checks compare the official provenance and manifest
 bytes without resolving a mutable external package installation. File tampering or
 provenance drift is a refusal, never a substituted runtime.
 
-The official coding-agent ships an npm shrinkwrap. The measured npm install has
-12 physical roots across eight official package names: pi-ai, pi-agent-core, chord
-and pi-telemetry each occur twice (top-level and coding-agent nested); coding-agent,
-pi-tui, pi-codemode and pi-mcp occur once. Attestation verifies all instances; no singleton guarantee
-is claimed. The scripted workflow probe covers the vendored arbiter's built-in
-Agent/compat stream path across this layout. It does not prove cross-instance
+Official coding-agent 1.0.1 no longer ships an npm shrinkwrap. The npm
+physical root count has not been re-measured for 1.0.1. The local Bun install
+has eleven resolved physical roots across nine official package names.
+Attestation verifies all instances; no singleton guarantee is claimed.
+The scripted workflow probe covers the vendored arbiter's built-in
+Agent/compat stream path. It does not prove cross-instance
 registration visibility: pi-ai/compat owns a module-local apiProviderRegistry,
 so a future extension calling registerApiProvider on one copy cannot make that
 registration visible to another copy. This boundary is deferred in tasks/todos.md
@@ -2383,7 +2383,7 @@ Prepared child environment is rebuilt through an explicit EnvironmentBuilder all
 
 A1'' compile uses only a placeholder key and injected capture-and-throw fetch against the actual baseUrl. The official OpenAI client reads exactly OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET, OPENAI_LOG and OPENAI_CUSTOM_HEADERS. The approved purity contract is D independence plus this exact read set, not zero reads; an upgrade changing the set requires a fresh ruling. Poisoning these variables must leave D unchanged. OPENAI_LOG may cause a local request log during compile: the device owner deliberately enabled this debug setting; the accepted side effect remains local, does not change D and is not sent externally. No global env or transport monkey-patch is permitted.
 
-Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.0.0 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires fresh closure attestation and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive. Measured for the local Pi 1.0 tip: upstream commit `a13d35a742c6ef8462812a28fbe1d8c8b7431c32`, closureDigest `7f010b1a1bf36bb08e479d6651e0aaa556c00abc2ab02a1275d31ba4c81a1d87`, nine official package names in attestation (was eight; added pi-durable), eleven Bun-resolved official package instances on the attesting host (was eight; duplicate peer instances remain exact 1.0.0). This step's checkout has no OAR package dependency and no `vendor/oar/`; OAR wiring remains a separate later step. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their measured JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
+Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.0.1 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires fresh closure attestation and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive. Measured for the local Pi 1.0.1 install: upstream commit `a7229ddc21810d6245105978033b7df645ecc2f7`, closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`, nine official package names in attestation (was eight; added pi-durable), eleven Bun-resolved official package instances on the attesting host (was eight; duplicate peer instances remain exact 1.0.1). This step's checkout has no OAR package dependency and no `vendor/oar/`; OAR wiring remains a separate later step. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their measured JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
 
 Exactness has three independent checks: bun.lock exact versions and sha512 integrity under frozen install; runtime verification of all resolved official package instances' manifests (nine attested package names; eleven resolved instances on the attesting Bun host) and file inventories against tarball/provenance evidence; release-pack and registry-readback isolated-install convergence. Encapsulated runtime records bind the measured artifact and approved closure provenance without looking up external packages. Renamed provenance fields are packageName, packageVersion, tarballIntegrity, upstreamCommit, provenanceDigest, closureDigest and compilerVersion; upstreamBase/forkBuild are retired, not filled with dummy values. The official tarball signatures and provenance are collected reproducibly by `scripts/release/collect-official-pi-closure.mjs`.
 
@@ -2429,7 +2429,7 @@ retain the existing fail-closed behavior.
 
 Codex reports `tokenUsage.last.totalTokens` against `modelContextWindow`;
 its cumulative `total` remains the provider cost authority. Claude reports
-`result.modelUsage`'s window using the init model identity. Official Pi 1.0.0
+`result.modelUsage`'s window using the init model identity. Official Pi 1.0.1
 reports `get_session_stats.contextUsage` as an estimate before task settlement;
 null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
 configuration is the context window authority even if runtime stats differ.

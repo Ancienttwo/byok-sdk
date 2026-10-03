@@ -8,6 +8,14 @@
 
 ## Unreleased
 
+- **Changed (client, cloud-do)** — official Pi runtime 1.0.0 -> 1.0.1.
+  The nine-package closure uses upstream commit `a7229ddc21810d6245105978033b7df645ecc2f7`,
+  closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`.
+  coding-agent pins brace-expansion 5.0.12. The Bun lock resolves
+  minimatch to the same 5.0.12 version. No 5.0.9 entry remains.
+  The official coding-agent tarball no longer ships npm-shrinkwrap.json.
+  The npm physical root count has not been re-measured.
+
 - **Breaking (client)** — Codex now uses app-server 0.159.2 with the vendored
   OAR `ef893ac` kernel/driver (Apache-2.0), replacing the exec path. The adapter
   is YOLO-only: `readonly` and `network:false` are no longer supported;
@@ -16,7 +24,7 @@
   Claude interrupt now uses correlated `control_request` with bounded ACK and
   owned-process fallback. `usage` adds optional `contextTokens`, `contextWindow`
   and `contextSource` fields (additive, independent of provider cost counters),
-  and the official Pi runtime pin moves to 1.0.0 (see below).
+  and the official Pi runtime pin moves to 1.0.1 (see below).
 
 - **Changed (client)** — official Pi runtime 0.87.1 -> 1.0.0. The attested
   closure is now nine package names (chord, pi-agent-core, pi-ai, pi-codemode,
