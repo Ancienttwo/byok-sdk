@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { promises as fs } from 'node:fs';
+import { promises as fs, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
@@ -28,6 +28,30 @@ describe.skipIf(process.platform==='win32')('durable shell ownership and public 
     const result=await f.env.exec(command,{spill:{afterBytes:4096,afterLines:100},onOutput:chunk=>{output+=chunk;}},BACKGROUND_CONTEXT);expect(result.ok).toBe(true);if(!result.ok)throw result.error;
     expect(result.value.exitCode).toBe(0);expect(result.value.spillPath).toBeDefined();roots.push(path.dirname(result.value.spillPath!));
     expect(output.replace('STDERR_MARKER','')).toBe('汉'.repeat(70000));expect(output).not.toContain('\ufffd');expect(await fs.readFile(result.value.spillPath!,'utf8')).toBe(output);expect(f.released).toHaveLength(1);
+  });
+  it.each(['¢','汉','😀'])('never splices stderr into a split stdout character %s before or after spilling starts',async character=>{
+    for(const afterBytes of [0,16]){
+      const f=await fixture();let output='';const encoded=Buffer.from(character),first=[0x61,...encoded.subarray(0,-1)],last=[encoded.at(-1)!,0x62];
+      const command=`${JSON.stringify(process.execPath)} -e 'const fs=require("node:fs");const wait=file=>new Promise(resolve=>{const check=()=>fs.existsSync(file)?resolve():setTimeout(check,5);check();});(async()=>{process.stdout.write(Buffer.from(${JSON.stringify(first)}));await wait("stdout-read");process.stderr.write("STDERR_MARKER");await wait("stderr-read");process.stdout.write(Buffer.from(${JSON.stringify(last)}));})();'`;
+      const result=await f.env.exec(command,{spill:{afterBytes,afterLines:100},onOutput:chunk=>{output+=chunk;if(chunk==='a')writeFileSync(path.join(f.root,'stdout-read'),'');if(chunk==='STDERR_MARKER')writeFileSync(path.join(f.root,'stderr-read'),'');}},BACKGROUND_CONTEXT);
+      expect(result.ok).toBe(true);if(!result.ok)throw result.error;expect(result.value.exitCode).toBe(0);expect(result.value.spillPath).toBeDefined();roots.push(path.dirname(result.value.spillPath!));
+      expect(output).toBe(`aSTDERR_MARKER${character}b`);expect(output).not.toContain('\ufffd');expect(await fs.readFile(result.value.spillPath!,'utf8')).toBe(output);expect(f.released).toHaveLength(1);
+    }
+  });
+  it('writes invalid UTF8 suffixes immediately without changing their raw bytes',async()=>{
+    for(const invalid of [[0x80],[0xc0],[0xc1],[0xf5],[0xe0,0x80],[0xed,0xa0],[0xf0,0x80],[0xf4,0x90]]){
+      const f=await fixture();const first=[0x61,...invalid];
+      const command=`${JSON.stringify(process.execPath)} -e 'const fs=require("node:fs");const wait=file=>new Promise(resolve=>{const check=()=>fs.existsSync(file)?resolve():setTimeout(check,5);check();});(async()=>{process.stdout.write(Buffer.from(${JSON.stringify(first)}));await wait("stdout-read");process.stderr.write("STDERR_MARKER");await wait("stderr-read");process.stdout.write("b");})();'`;
+      const result=await f.env.exec(command,{spill:{afterBytes:0,afterLines:100},onOutput:chunk=>{if(chunk.startsWith('a'))writeFileSync(path.join(f.root,'stdout-read'),'');if(chunk==='STDERR_MARKER')writeFileSync(path.join(f.root,'stderr-read'),'');}},BACKGROUND_CONTEXT);
+      expect(result.ok).toBe(true);if(!result.ok)throw result.error;expect(result.value.exitCode).toBe(0);expect(result.value.spillPath).toBeDefined();roots.push(path.dirname(result.value.spillPath!));expect(await fs.readFile(result.value.spillPath!)).toEqual(Buffer.concat([Buffer.from(first),Buffer.from('STDERR_MARKERb')]));expect(f.released).toHaveLength(1);
+    }
+  });
+  it('flushes both incomplete stream tails as raw bytes in decoded tail order',async()=>{
+    const f=await fixture();let output='';
+    const command=`${JSON.stringify(process.execPath)} -e 'const fs=require("node:fs");const wait=file=>new Promise(resolve=>{const check=()=>fs.existsSync(file)?resolve():setTimeout(check,5);check();});(async()=>{process.stdout.write(Buffer.from([0x61,0xe6,0xb1]));await wait("stdout-read");process.stderr.write(Buffer.from([0x62,0xf0,0x9f,0x98]));await wait("stderr-read");})();'`;
+    const result=await f.env.exec(command,{spill:{afterBytes:0,afterLines:100},onOutput:chunk=>{output+=chunk;if(chunk==='a')writeFileSync(path.join(f.root,'stdout-read'),'');if(chunk==='b')writeFileSync(path.join(f.root,'stderr-read'),'');}},BACKGROUND_CONTEXT);
+    expect(result.ok).toBe(true);if(!result.ok)throw result.error;expect(result.value.exitCode).toBe(0);expect(result.value.spillPath).toBeDefined();roots.push(path.dirname(result.value.spillPath!));
+    expect(output).toBe('ab\ufffd\ufffd');expect(await fs.readFile(result.value.spillPath!)).toEqual(Buffer.from([0x61,0x62,0xe6,0xb1,0xf0,0x9f,0x98]));expect(await fs.readFile(result.value.spillPath!,'utf8')).toBe(output);expect(f.released).toHaveLength(1);
   });
   it('timeout disposes a real TERM-ignoring shell group and retains typed timeout',async()=>{
     const f=await fixture();const result=await f.env.exec('trap "" TERM; printf ready > timeout-ready; sleep 60', {timeout:0.5}, BACKGROUND_CONTEXT);expect(result.ok).toBe(false);if(!result.ok)expect(result.error.code).toBe('timeout');expect(await fs.readFile(path.join(f.root,'timeout-ready'),'utf8')).toBe('ready');expect(f.released).toHaveLength(1);
