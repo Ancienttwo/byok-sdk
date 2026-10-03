@@ -28,6 +28,35 @@ describe('frozen cloud submission admission', () => {
     expect(hasUserKeyShape(text)).toBe(true);
     expect(() => admitCloudSubmission({ instruction: `Please use ${text}` })).toThrow('CLOUD_USER_CREDENTIAL_REJECTED');
   });
+  // Keep the current generic sk- fallback. Do not change the detector's policy.
+  const formats = [
+    { name: 'sk-', prefix: 'sk-', minimum: 16 },
+    { name: 'sk-ant-', prefix: 'sk-ant-', minimum: 12 },
+    { name: 'sk-proj-', prefix: 'sk-proj-', minimum: 11 },
+    { name: '32 lower-case hex plus dot', prefix: `${'a'.repeat(32)}.`, minimum: 16 },
+  ];
+  for (const format of formats) {
+    it(`locks the covered ${format.name} format and its current length boundary`, () => {
+      const positive = format.prefix + 'x'.repeat(16);
+      const boundary = format.prefix + 'x'.repeat(format.minimum);
+      const negative = format.prefix + 'x'.repeat(format.minimum - 1);
+      expect(hasUserKeyShape(positive)).toBe(true);
+      expect(hasUserKeyShape(boundary)).toBe(true);
+      expect(hasUserKeyShape(negative)).toBe(false);
+      expect(() => admitCloudSubmission({ instruction: positive })).toThrow('CLOUD_USER_CREDENTIAL_REJECTED');
+      expect(admitCloudSubmission({ instruction: negative }).instruction).toBe(negative);
+    });
+  }
+  for (const text of ['sk_live_0123456789abcdef', 'ghp_0123456789abcdef', 'AKIA0123456789ABCDEF', 'xoxb-0123456789abcdef']) {
+    it('keeps an unsupported format outside the best-effort detector', () => {
+      expect(hasUserKeyShape(text)).toBe(false);
+      expect(admitCloudSubmission({ instruction: text }).instruction).toBe(text);
+    });
+  }
+  it('requires exactly 32 lower-case hex digits for the dot format', () => {
+    expect(hasUserKeyShape(`${'a'.repeat(31)}.${'x'.repeat(16)}`)).toBe(false);
+    expect(hasUserKeyShape(`${'G'.repeat(32)}.${'x'.repeat(16)}`)).toBe(false);
+  });
   it('admits ordinary prose while preserving the documented best-effort limitation', () => {
     expect(hasUserKeyShape('Explain API keys without sharing one.')).toBe(false);
     expect(admitCloudSubmission({ instruction: 'Explain API keys without sharing one.' }).instruction).toBe('Explain API keys without sharing one.');

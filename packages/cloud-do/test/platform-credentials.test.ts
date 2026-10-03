@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CloudDoError, cloudErrorResponse, safeCloudError } from '../src/errors';
 import { PLATFORM_PROFILES, platformCredentialReader, requirePlatformKey } from '../src/platform-credentials';
 import { createProviderFetch } from '../src/provider-fetch';
+import { createPlatformModels } from '../src/platform-provider';
 
 const KEY = 'sk-proj-Platform_Aa0123456789+Tail/Z9';
 
@@ -46,6 +47,39 @@ describe('read-only platform credentials', () => {
     expect(safe.cause).toBeUndefined();
     expect(await cloudErrorResponse(upstream).text()).not.toContain(KEY);
   });
+});
+
+describe('pi auth error boundary', () => {
+  for (const method of ['stream', 'streamSimple'] as const) {
+    for (const fault of ['undefined', 'throw', 'object', 'number']) {
+      it(`keeps ${method} ${fault} credential failure fixed before pi events and results`, async () => {
+        const upstream = new Error(`${KEY} raw-get-cause`, { cause: new Error(KEY) });
+        const reader = { get: async () => {
+          if (fault === 'throw') throw upstream;
+          if (fault === 'object') return { toString() { throw upstream; } } as unknown as string;
+          if (fault === 'number') return 123 as unknown as string;
+          return undefined;
+        } };
+        const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected provider call'));
+        try {
+          const models = createPlatformModels({ AIPHABEE_ZAI_API_KEY: KEY }, reader);
+          const model = models.getModel('zai_openai', 'glm-5.3-flash')!;
+          const stream = models[method](model, { messages: [{ role: 'user', content: 'Safe request.', timestamp: 1 }] });
+          const events = [];
+          for await (const event of stream) events.push(event);
+          const result = await stream.result();
+          expect(result.stopReason).toBe('error');
+          expect(result.errorMessage).toBe('CLOUD_MODEL_CREDENTIAL_UNAVAILABLE');
+          expect(events).toMatchObject([{ type: 'error', error: { errorMessage: 'CLOUD_MODEL_CREDENTIAL_UNAVAILABLE' } }]);
+          const serialized = JSON.stringify({ events, result });
+          expect(serialized).not.toContain(KEY);
+          expect(serialized).not.toContain('raw-get-cause');
+          expect(serialized).not.toContain('API key auth failed');
+          expect(fetch).not.toHaveBeenCalled();
+        } finally { fetch.mockRestore(); }
+      });
+    }
+  }
 });
 
 describe('frozen credentialed provider transport', () => {

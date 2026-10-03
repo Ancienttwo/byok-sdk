@@ -9,6 +9,18 @@ import { PLATFORM_PROFILES, platformCredentialReader, type PlatformProfileId } f
 import { createPlatformModels } from './platform-provider';
 import { openDurableObjectStorage } from './storage';
 
+function modelFailureCode(message: string | undefined): string {
+  if (message === 'CLOUD_MODEL_CREDENTIAL_UNAVAILABLE' || message === 'CLOUD_MODEL_RESPONSE_REJECTED') return message;
+  return 'CLOUD_MODEL_REQUEST_FAILED';
+}
+
+// Pinned pi 1.0 gates both threshold and overflow compaction on enabled.
+export const CLOUD_HARNESS_SETTINGS = {
+  compaction: { enabled: false },
+  retry: { enabled: false, maxRetries: 0 },
+  stream: { maxRetries: 0 },
+} as const;
+
 function assistantText(message: AssistantMessage): string {
   return message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('');
 }
@@ -44,7 +56,7 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
     return this.#harnessReady ??= this.ctx.blockConcurrencyWhile(async () => Harness.open(
       await openDurableObjectStorage(this.ctx.storage),
       { models: createPlatformModels(this.env), registry: createRegistry(),
-        settings: { compaction: { enabled: false }, retry: { enabled: false, maxRetries: 0 }, stream: { maxRetries: 0 } } },
+        settings: CLOUD_HARNESS_SETTINGS },
       BACKGROUND_CONTEXT,
     ));
   }
@@ -163,7 +175,7 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
           if (event.type === 'message_end') {
             const message = event.entry.model?.[0];
             if (message?.role === 'assistant' && message.stopReason === 'error') {
-              failure = message.errorMessage?.includes('CLOUD_MODEL_RESPONSE_REJECTED') ? 'CLOUD_MODEL_RESPONSE_REJECTED' : 'CLOUD_MODEL_REQUEST_FAILED';
+              failure = modelFailureCode(message.errorMessage);
             }
           }
           if (event.type === 'task_failed') failure ??= 'CLOUD_MODEL_REQUEST_FAILED';
@@ -181,7 +193,7 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
           const last = [...context.entries].reverse().find(entry => entry.kind === 'pi.assistant')?.model?.[0];
           if (last?.role === 'assistant') {
             await publish(assistantText(last));
-            if (last.stopReason === 'error') failure = last.errorMessage?.includes('CLOUD_MODEL_RESPONSE_REJECTED') ? 'CLOUD_MODEL_RESPONSE_REJECTED' : 'CLOUD_MODEL_REQUEST_FAILED';
+            if (last.stopReason === 'error') failure = modelFailureCode(last.errorMessage);
           }
           if (settled.status !== 'done' || stopped.reason === 'listener_error') failure ??= 'CLOUD_MODEL_REQUEST_FAILED';
           if (failure) await write({ type: 'error', code: failure, retryable: false });

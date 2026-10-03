@@ -20,7 +20,10 @@ export function requirePlatformKey(value: unknown): string {
   return value;
 }
 
-export function platformCredentialReader(env: Readonly<Record<string, unknown>>): Pick<SecretStore<ModelProviderSecretName>, 'get'> {
+/** The concrete reader returns a valid key or rejects with a fixed error. */
+export function platformCredentialReader(env: Readonly<Record<string, unknown>>): {
+  get(name: ModelProviderSecretName): Promise<string>;
+} {
   return {
     async get(name) {
       const profile = Object.values(PLATFORM_PROFILES).find(profile => profile.secretName === name);
@@ -28,5 +31,5 @@ export function platformCredentialReader(env: Readonly<Record<string, unknown>>)
       try { return requirePlatformKey(env[profile.binding]); }
       catch { throw new CloudDoError('CLOUD_MODEL_CREDENTIAL_UNAVAILABLE'); }
     },
-  };
+  } satisfies Pick<SecretStore<ModelProviderSecretName>, 'get'>;
 }
