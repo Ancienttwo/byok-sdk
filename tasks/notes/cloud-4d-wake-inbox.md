@@ -511,3 +511,47 @@ All 14 open questions above are approved as recommended:
 14. Oversized final text: `run.completed` stores a 1,024-byte preview with `truncated:true`; the full text stays in the pi entry.
 
 Implementation starts after the Codex re-check of the detail-check fixes passes.
+
+
+## Implementation deviations
+
+1. Alarm metadata audit. Real workerd creates `_cf_METADATA` when an alarm is set. A SQL whole-table read then fails with `access to _cf_METADATA.key is prohibited: SQLITE_AUTH`. The test scanners exclude only this engine-owned table and read its alarm timestamp through `storage.getAlarm()`. They still scan every application, pi and consumer table. They do not exclude `_cf_KV`. The original assertions remain unchanged. Evidence: the real `SessionAuditDO.dump` and `WakeAuditDO.dump` paths, and the persisted alarm tests.
+2. Fatal admission setup. A clean restart of a `starting` run leaves the selected items queued, as specified. An admission timeout or explicit cancellation has a fatal disposition. The wake runner terminally fails selected items that remain queued, then closes the run as interrupted. Leaving them queued would re-arm an immediate wake with no counted claim and repeat billing forever. This applies approved Q2's no-retry rule to fatal setup too. Cancelled or expired items are not overwritten. Evidence: `wake-runner.ts` fixed-code failure path and the real admission deadline/cancellation tests.
+3. Recovery origin. `eligibilityJson` also stores `wasStale`, taken from the first native inspection. It records origin only. It does not gate requeue or finalization. Original counters and fatal disposition remain immutable. Native pi abort writes an `unanswered` receipt with reason `aborted`. Recovery treats that receipt as interrupted work. It uses the original eligibility triple to decide requeue. A committed `done` or other `unanswered` receipt can finalize even when native cleanup remains live. Evidence: the real zero-step, second-restart, and completing-task finalization tests. The pinned pi-durable 1.0.0 generation and scheduler code distinguish these states.
+4. Event capacity. The synchronous event writer checks actual retained row count before each insert. It trims to 9,500 before an insert would exceed 10,000. It does not precompute the total event count of a transaction whose consumer projection may add an event. This preserves the atomic hard bound. It can trim slightly more history than one upfront reservation. Evidence: the real workerd multi-event transaction test writes 10,005 events and retains 9,505; the cursor metadata is updated in the same transaction.
+5. Native test observation. The new fixture delegates to real `Harness.open`, installs genuine pi `GenerationTask` hooks, and delegates real conversation submission/abort before pausing at host receipt or recovery boundaries. These observers expose deterministic crash points that the public Harness handle does not otherwise expose. They do not replace the guard, ledger, storage, alarms, scheduler or hook runner. Tests read actual native task/submission records before restart. The six-retry and 110-second stream proofs use separate Node test files with the existing default timeout policy. No Vitest timeout was raised.
+6. Selected-profile independence. The operation guard follows the existing 4b selected-profile rule. It checks all valid configured keys. An explicitly selected valid profile can run when an unused binding is missing or malformed. The selected binding still fails closed, and no provider fallback is added. `SessionRuntime.ready(profile)` supplies this guard scope during startup. Evidence: the unchanged full credentials suite, including the three unused-primary independence assertions.
+
+## Implementation evidence
+
+P1: `AgentDO` keeps binding/RPC entrypoints. `SessionRuntime` owns the shared lease and recovery gates. `CloudState` owns visible host inbox, event and projection rows in the same DO database as pi.
+P2: enqueue admission and operation guard precede an atomic row/event/alarm write. A wake reserves the slot, persists pending admission intent, revalidates the claim, creates native input on its new conversation, and settles committed pi output with events and delivery links.
+P3: the implementation keeps the ledger as the only tool replay path. It preserves the model send gate, frozen D10 list and original public context fields. It adds A/C/F/G only. B/D/E, jobs, remote MCP and version changes remain outside this slice.
+
+The implementation remains uncommitted for the required read-only Claude review.
+
+Verification:
+
+- `bun ci`: exit 0. The frozen graph installed 445 packages.
+- `bun run --cwd packages/cloud-do typecheck`: exit 0.
+- `bun run --cwd packages/cloud-do test`: exit 0. Vitest: 15 files, 684 passed. Node: 3 passed. Total: 687 passed, 0 failed, 0 skipped.
+- The real alarm proof observed retry counts 0 through 6, then a new trigger repaired the original paid run. Provider calls stayed at 1.
+- The real event stream reached EOF at 110,005 ms. No external request was made.
+- Root `build`, `typecheck`, `test`, `check:api-surface` and `check:version-authority`: exit 0. Root tests use the existing `BYOK_TEST_BUN_BIN` and `BYOK_REQUIRE_BUN=1` strict gate to execute Bun suites. Existing platform-specific skips remain; this slice adds none.
+- The final self-review covers changed and new source, fixtures and assertions. The original test assertion files are unchanged. Existing fixture edits only supply the operation guard, finalize their test execution, and use public readback for the exact engine-owned alarm metadata table. No timeout or version changed.
+- `git diff --check`: exit 0. No B/D/E, jobs, remote MCP, public API break, plan file, commit or push is added.
+
+The local checks do not replace the required independent Claude review or a later live provider/consumer integration acceptance.
+
+
+## Pre-commit review follow-up
+
+The review found one real finalization defect. Recovery used `wasStale` to reject committed native results when a native task was still completing. Recovery now reads the committed submission status and reason. It still applies original abort and fatal conditions. A cleanup receipt with reason `aborted` still uses the interruption path.
+
+The review's zero-step claim did not match the requeue condition. That condition already used the approved triple. The strengthened real restart test observes `queued`, `attempts: 1`, and no provider call before the alarm resumes. The saved `wasStale: true` assertion remains valid and unchanged.
+
+The guard-disposal and sparse-array findings did not reproduce. Adjudication and alarm writes finish before guard disposal. `ready()` awaits the original recovery promise. A real SQL failure still rejects repeated `ready()` calls. The JSON guard accepts strings only and parses without a reviver. Sparse arrays and accessors cannot enter through JSON. Direct non-string values reject without coercion. No production code changed for these two findings.
+
+The two committed-result cases failed before the fix and passed after it. The full per-finding evidence is in the local review-fix report (not committed). No assertion was removed or weakened. No existing NEW 4d assertion required a behavior correction.
+
+Final review-follow-up checks: cloud-do typecheck exit 0; cloud-do test exit 0. Vitest: 16 files, 690 passed. Node: 3 passed. Total: 693 passed, 0 failed, 0 skipped. The native replay took 31,490 ms. The real alarm proof observed retry counts 0 through 6 and one provider call. The real event stream reached EOF at 110,010 ms with no external calls. `git diff --check` passed. The work remains uncommitted at `a45569f1`.

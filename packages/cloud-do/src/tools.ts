@@ -32,6 +32,15 @@ export interface CloudDispatchContext {
   readonly principal: { readonly accountId: string; readonly workspaceId: string; readonly channel: string };
   readonly scopes: readonly string[];
   readonly dispatcherId: string;
+  readonly call?: { readonly invocationId: string; readonly conversationId: number; readonly toolCallId: string; readonly attempt: number };
+  /** Session-local lookup can return a non-terminal invocation. */
+  readonly lookup?: (invocationId: string) => { toolName: string; state: string; errorCode: string | null; resultJson: string | null } | undefined;
+}
+
+/** Runtime calls supply these fields. Configuration remains source compatible. */
+export interface CloudToolCallContext extends CloudDispatchContext {
+  readonly call: NonNullable<CloudDispatchContext['call']>;
+  readonly lookup: NonNullable<CloudDispatchContext['lookup']>;
 }
 
 export interface CloudToolDispatcher {

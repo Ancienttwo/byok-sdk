@@ -13,12 +13,14 @@ export class AuditAgentDO extends AgentDO {
 
   async dump() {
     const tables = this.ctx.storage.sql.exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").toArray();
-    return Object.fromEntries(tables.map(({ name }) => [name,
+    const audit = Object.fromEntries(tables.filter(({ name }) => name !== '_cf_METADATA').map(({ name }) => [name,
       this.ctx.storage.sql.exec(`SELECT * FROM "${name.replaceAll('"', '""')}"`).toArray().map(row => Object.fromEntries(
         Object.entries(row).map(([column, value]) => [column, value instanceof ArrayBuffer
           ? { bytes: Array.from(new Uint8Array(value)), utf8: new TextDecoder().decode(value) } : value]),
       )),
     ]));
+    return tables.some(({ name }) => name === '_cf_METADATA')
+      ? { ...audit, _cf_ALARM_READBACK: [{ scheduledTime: await this.ctx.storage.getAlarm() }] } : audit;
   }
 }
 

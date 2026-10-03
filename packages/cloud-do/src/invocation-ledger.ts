@@ -1,4 +1,5 @@
 import { CloudDoError, type CloudDoErrorCode } from './errors';
+import type { CloudOperationGuard } from './input-guard';
 
 export type InvocationState = 'accepted' | 'running' | 'succeeded' | 'failed' | 'aborted' | 'interrupted' | 'timed_out';
 export type InvocationTerminalState = Exclude<InvocationState, 'accepted' | 'running'>;
@@ -27,6 +28,9 @@ export interface InvocationRow extends InvocationInput {
   nextSegmentAt: number | null;
   jobStateJson: string | null;
   progressJson: string | null;
+  deliveredState?: 'delivered' | 'undelivered';
+  taskId?: number | null;
+  resultEntryId?: number | null;
 }
 export interface ExecutionRow {
   conversationId: number;
@@ -44,6 +48,15 @@ export interface InvocationFinishOptions {
   recovery?: boolean;
 }
 
+export interface InvocationLedgerOptions {
+  started?(row: InvocationRow, guard?: CloudOperationGuard): void;
+  startedCommitted?(row: InvocationRow): void;
+  /** Runs inside the state transaction. Errors roll back state and events together. */
+  terminal?(row: InvocationRow, recovery: boolean): void;
+  /** Post-commit notification cannot affect the invocation outcome. */
+  committed?(row: InvocationRow): void;
+}
+
 const terminal = (state: InvocationState) => state !== 'accepted' && state !== 'running';
 const fatalCodes = new Set<CloudDoErrorCode>([
   'CLOUD_TOOL_RESULT_LIMIT', 'CLOUD_TOOL_LIMIT', 'CLOUD_STEP_LIMIT',
@@ -52,7 +65,7 @@ const fatalCodes = new Set<CloudDoErrorCode>([
 
 /** Host tables share the DO database with the pi_ tables. No function enters storage. */
 export class InvocationLedger {
-  constructor(private readonly storage: DurableObjectStorage) {}
+  constructor(private readonly storage: DurableObjectStorage, private readonly options: InvocationLedgerOptions = {}) {}
 
   /** The host calls this only after credential and identity preflight. */
   ensureSchema(): void {
@@ -92,8 +105,8 @@ export class InvocationLedger {
     return this.storage.sql.exec<InvocationRow & Record<string, SqlStorageValue>>("SELECT * FROM cloud_invocations WHERE state IN ('accepted','running') ORDER BY seq").toArray();
   }
 
-  begin(input: InvocationInput): { kind: 'started' | 'pending' | 'settled'; row: InvocationRow } {
-    return this.storage.transactionSync(() => {
+  begin(input: InvocationInput, guard?: CloudOperationGuard): { kind: 'started' | 'pending' | 'settled'; row: InvocationRow } {
+    const begun = this.storage.transactionSync<{ kind: 'started' | 'pending' | 'settled'; row: InvocationRow }>(() => {
       const previous = this.read(input.invocationId);
       if (previous) {
         if (previous.argsDigest !== input.argsDigest || previous.toolName !== input.toolName) {
@@ -106,13 +119,21 @@ export class InvocationLedger {
         VALUES (?,?,?,?,?,?,?,?,?,'running',1,?)`, input.invocationId, input.sessionId,
       input.conversationId, input.assistantEntryId, input.toolCallId, input.toolName,
       input.argsDigest, input.argsJson, input.replay, input.deadlineAt);
-      return { kind: 'started', row: this.read(input.invocationId)! };
+      const row = this.read(input.invocationId)!;
+      this.options.started?.(row, guard);
+      return { kind: 'started', row };
     });
+    if (begun.kind === 'started') {
+      try { this.options.startedCommitted?.(begun.row); }
+      catch { /* A doorbell cannot change a committed invocation. */ }
+    }
+    return begun;
   }
 
   finish(id: string, state: InvocationTerminalState, result?: Record<string, unknown>, errorCode?: CloudDoErrorCode,
     now = Date.now(), options: InvocationFinishOptions = {}): InvocationRow | undefined {
-    return this.storage.transactionSync(() => {
+    let changed: InvocationRow | undefined;
+    const resultRow = this.storage.transactionSync(() => {
       const row = this.read(id);
       if (!row || terminal(row.state) || (options.attempt !== undefined && options.attempt !== row.attempt)) return row;
       const execution = this.execution(row.conversationId);
@@ -132,13 +153,23 @@ export class InvocationLedger {
         WHERE invocationId=? AND attempt=? AND state IN ('accepted','running')`,
       settledState, settledState === 'succeeded' && result !== undefined ? JSON.stringify(result) : null, settledError, id, row.attempt);
       if (settledError && fatalCodes.has(settledError)) this.failExecution(row.conversationId, settledError);
-      return this.read(id);
+      changed = this.read(id)!;
+      this.options.terminal?.(changed, options.recovery === true);
+      return changed;
     });
+    if (changed) this.#notify(changed);
+    return resultRow;
+  }
+
+  #notify(row: InvocationRow): void {
+    try { this.options.committed?.(row); }
+    catch { /* The state and event are already committed. */ }
   }
 
   /** Claim before network replay. A second restart never dispatches a claimed row again. */
   claimRecovery(now = Date.now()): InvocationRow[] {
-    return this.storage.transactionSync(() => {
+    const settled: InvocationRow[] = [];
+    const claimed = this.storage.transactionSync(() => {
       const claimed: InvocationRow[] = [];
       for (const row of this.pending()) {
         const execution = this.execution(row.conversationId);
@@ -159,9 +190,20 @@ export class InvocationLedger {
             WHERE invocationId=? AND state IN ('accepted','running')`,
           row.replayCount >= 1 ? 'failed' : 'interrupted', row.invocationId);
         }
+        const updated = this.read(row.invocationId)!;
+        if (terminal(updated.state)) {
+          this.options.terminal?.(updated, true);
+          settled.push(updated);
+        }
       }
       return claimed;
     });
+    for (const row of settled) this.#notify(row);
+    return claimed;
+  }
+
+  forConversation(conversationId: number): InvocationRow[] {
+    return this.storage.sql.exec<InvocationRow & Record<string, SqlStorageValue>>('SELECT * FROM cloud_invocations WHERE conversationId=? ORDER BY seq', conversationId).toArray();
   }
 
   startExecution(conversationId: number, deadlineAt: number): ExecutionRow {

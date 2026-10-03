@@ -3,17 +3,21 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { Harness, watchEvents, type AgentEvent, type ConversationId } from '@earendil-works/pi-durable';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { admitCloudSubmission } from './admission';
-import { CloudDoError, cloudErrorResponse } from './errors';
+import { CloudDoError, cloudErrorResponse, type CloudDoErrorCode } from './errors';
 import { PLATFORM_PROFILES, platformCredentialReader, type PlatformProfileId } from './platform-credentials';
 import { admitCloudText } from './input-guard';
 import { SessionRuntime, type ExecutionLease } from './session-runtime';
 import type { CloudToolDispatcher } from './tools';
-import type { InvocationTerminalState } from './invocation-ledger';
+import type { InvocationTerminalState, InvocationRow } from './invocation-ledger';
+import { admitCloudInbox } from './inbox-admission';
+import { type InboxRow } from './cloud-state';
+import { CloudEventDoorbell, CloudEventStreams } from './event-stream';
+import { runCloudWake, committedRunOutcome, type CloudWakeAdmission } from './wake-runner';
 import { safeCloudError } from './errors';
 
 export { CLOUD_HARNESS_SETTINGS } from './session-runtime';
 
-function modelFailureCode(message: string | undefined): string {
+function modelFailureCode(message: string | undefined): CloudDoErrorCode {
   return safeCloudError(new Error(message)).code;
 }
 
@@ -46,16 +50,27 @@ function projectText(blocks: Map<number, string>, event: AgentEvent): string | u
 /** One named DO owns one Harness; 4b adds platform-only text model submissions. */
 export class AgentDO extends DurableObject<Record<string, unknown>> {
   #runtime?: SessionRuntime;
+  #doorbell = new CloudEventDoorbell();
+  #eventStreams = new CloudEventStreams(this.#doorbell);
 
   /** The consuming Worker supplies trusted code. No executable function is persisted. */
   protected createDispatcher(_id: string): CloudToolDispatcher | undefined { return undefined; }
 
-  /** Reserved for 4d. This slice does not emit durable events. */
-  protected onInvocationSettled(_id: string, _state: InvocationTerminalState): void {}
+  /** Post-commit notification. Consumer failures never change the invocation outcome. */
+  protected onInvocationSettled(_id: string, _state: InvocationTerminalState): void | Promise<void> {}
+
+  protected projectInvocation(_row: InvocationRow): { key: string; dataJson: string } | undefined { return undefined; }
+
+  /** The consumer owns billing truth and fences every pending admission key on release. */
+  protected admitWake(_items: readonly InboxRow[], _signal: AbortSignal, _key: string): CloudWakeAdmission | Promise<CloudWakeAdmission> {
+    return { accepted: true, reservation: 'none' };
+  }
 
   protected sessionRuntime(): SessionRuntime {
     return this.#runtime ??= new SessionRuntime(this.ctx, this.env, {
       createDispatcher: id => this.createDispatcher(id),
+      projectInvocation: row => this.projectInvocation(row),
+      onCommit: () => this.#doorbell.ring(),
       onInvocationSettled: (id, state) => this.onInvocationSettled(id, state),
     });
   }
@@ -69,6 +84,126 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
     await this.sessionRuntime().ready();
     if (typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) throw new CloudDoError('CLOUD_REQUEST_INVALID');
     return this.sessionRuntime().readInvocation(id);
+  }
+
+  async enqueue(input: unknown): Promise<Response> {
+    let guard;
+    try {
+      const admitted = admitCloudInbox(input);
+      const runtime = this.sessionRuntime();
+      guard = await runtime.prepareGuard();
+      runtime.cloud.validateEnqueue(admitted, guard);
+      await runtime.ready();
+      const result = await runtime.cloud.enqueue(admitted, guard, Date.now(), {
+        busy: runtime.hasLiveOwner, repairRetrying: runtime.repairRetrying,
+      });
+      this.#doorbell.ring();
+      return Response.json({ accepted: result.accepted, ...result.row });
+    } catch (error) { return cloudErrorResponse(error); }
+    finally { guard?.dispose(); }
+  }
+
+  /** The platform supplies retryCount. This handler never replaces a live owner. */
+  async alarm(info?: AlarmInvocationInfo): Promise<void> {
+    const runtime = this.sessionRuntime();
+    let harness: Harness;
+    try { harness = await runtime.ready(); }
+    catch (error) {
+      // A rejected recovery promise is cached. Only a restart can recover it.
+      if (runtime.recovering) return;
+      throw safeCloudError(error);
+    }
+    if (runtime.hasLiveOwner) {
+      const guard = runtime.activeLease?.guard;
+      if (guard) runtime.cloud.expireQueued(guard);
+      runtime.cloud.retention();
+      this.#doorbell.ring();
+      await runtime.cloud.rearmAlarm({ busy: true, repairRetrying: runtime.repairRetrying });
+      return;
+    }
+    try {
+      await runtime.repairPendingRuns(info?.retryCount ?? 0);
+      if (runtime.busy) return;
+      await runCloudWake(runtime, harness, this.env, (items, signal, key) => this.admitWake(items, signal, key), () => this.#doorbell.ring());
+    } catch (error) { throw safeCloudError(error); }
+  }
+
+  async events(input: { after?: number } = {}): Promise<Response> {
+    try {
+      const fields = this.#readOptions(input, ['after']);
+      const runtime = this.sessionRuntime();
+      await runtime.ready();
+      return this.#eventStreams.open(runtime.cloud, fields.after, work => this.ctx.waitUntil(work));
+    } catch (error) { return cloudErrorResponse(error); }
+  }
+
+  async readSnapshot() { await this.sessionRuntime().ready(); return this.sessionRuntime().cloud.snapshot(); }
+  async readRuns(input: { after?: number; limit?: number } = {}) {
+    await this.sessionRuntime().ready(); return this.sessionRuntime().cloud.readRuns(this.#readOptions(input, ['after', 'limit']));
+  }
+  async readInbox(input: { after?: number; limit?: number } = {}) {
+    await this.sessionRuntime().ready(); return this.sessionRuntime().cloud.readInbox(this.#readOptions(input, ['after', 'limit']));
+  }
+  async readInvocations(input: { after?: number; limit?: number } = {}) {
+    await this.sessionRuntime().ready(); return this.sessionRuntime().cloud.readInvocations(this.#readOptions(input, ['after', 'limit']));
+  }
+  #readOptions(input: unknown, allowed: readonly string[]): Record<string, number | undefined> {
+    if (!input || typeof input !== 'object' || Array.isArray(input)
+      || (Object.getPrototypeOf(input) !== Object.prototype && Object.getPrototypeOf(input) !== null)) throw new CloudDoError('CLOUD_REQUEST_INVALID');
+    const result: Record<string, number | undefined> = {};
+    for (const key of Reflect.ownKeys(input)) {
+      const field = Object.getOwnPropertyDescriptor(input, key);
+      if (typeof key !== 'string' || !allowed.includes(key) || !field?.enumerable || !('value' in field)
+        || (field.value !== undefined && typeof field.value !== 'number')) throw new CloudDoError('CLOUD_REQUEST_INVALID');
+      result[key] = field.value;
+    }
+    return result;
+  }
+
+  async readRunOutput(conversationId: number, input: { entryId?: number; offset?: number } = {}) {
+    if (!Number.isSafeInteger(conversationId) || conversationId < 2) throw new CloudDoError('CLOUD_REQUEST_INVALID');
+    const options = this.#readOptions(input, ['entryId', 'offset']);
+    const runtime = this.sessionRuntime();
+    const harness = await runtime.ready();
+    if (!runtime.cloud.readRun(conversationId)) throw new CloudDoError('CLOUD_REQUEST_INVALID');
+    const conversation = await harness.conversation(conversationId as ConversationId, BACKGROUND_CONTEXT);
+    if (!conversation) throw new CloudDoError('CLOUD_REQUEST_INVALID');
+    const context = await conversation.context(BACKGROUND_CONTEXT);
+    const entry = [...context.entries].reverse().find(entry => entry.kind === 'pi.assistant'
+      && entry.model?.some(message => message.role === 'assistant' && message.stopReason !== 'toolUse'));
+    const assistant = entry?.model?.find(message => message.role === 'assistant' && message.stopReason !== 'toolUse');
+    if (!entry || assistant?.role !== 'assistant' || (options.entryId !== undefined && options.entryId !== entry.id)) throw new CloudDoError('CLOUD_REQUEST_INVALID');
+    const bytes = new TextEncoder().encode(assistantText(assistant));
+    const offset = options.offset ?? 0;
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > bytes.length
+      || (offset < bytes.length && (bytes[offset]! & 0xc0) === 0x80)) throw new CloudDoError('CLOUD_REQUEST_INVALID');
+    let end = Math.min(bytes.length, offset + 65_536);
+    while (end < bytes.length && (bytes[end]! & 0xc0) === 0x80) end--;
+    return { entryId: entry.id, offset, nextOffset: end, done: end === bytes.length,
+      text: new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes.subarray(offset, end)) };
+  }
+
+  async cancelActiveRun(): Promise<Response> {
+    try { const runtime = this.sessionRuntime(); await runtime.ready(); return Response.json({ cancelled: runtime.cancelActive() }); }
+    catch (error) { return cloudErrorResponse(error); }
+  }
+  async cancelInboxItem(seq: number): Promise<Response> {
+    let guard;
+    try {
+      if (!Number.isSafeInteger(seq) || seq < 1) throw new CloudDoError('CLOUD_REQUEST_INVALID');
+      const runtime = this.sessionRuntime(); await runtime.ready();
+      const row = runtime.cloud.readInboxItem(seq);
+      if (!row) throw new CloudDoError('CLOUD_REQUEST_INVALID');
+      if (row.state === 'running') {
+        if (runtime.activeLease?.conversationId === row.runId) runtime.cancelActive();
+      } else if (row.state === 'queued') {
+        guard = await runtime.prepareGuard(); runtime.cloud.cancelQueued(seq, guard);
+      }
+      await runtime.cloud.rearmAlarm({ busy: runtime.hasLiveOwner, repairRetrying: runtime.repairRetrying });
+      this.#doorbell.ring();
+      return Response.json({ item: runtime.cloud.readInboxItem(seq) });
+    } catch (error) { return cloudErrorResponse(error); }
+    finally { guard?.dispose(); }
   }
 
   // Admission and credential preflight happen before even schema initialization.
@@ -120,6 +255,7 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
    * Errors are structured Responses so the same code/status survive DO RPC. */
   async submit(input: unknown): Promise<Response> {
     let lease: ExecutionLease | undefined;
+    let guard;
     try {
       const admitted = admitCloudSubmission(input);
       const profile = PLATFORM_PROFILES[admitted.profile];
@@ -127,8 +263,9 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
       // Check every configured platform key before input enters durable storage.
       await this.#admitText(admitted.instruction, admitted.profile);
       const runtime = this.sessionRuntime();
-      const harness = await runtime.ready();
-      lease = runtime.reserve(admitted.profile);
+      const harness = await runtime.ready(admitted.profile);
+      guard = await runtime.prepareGuard(admitted.profile);
+      lease = runtime.reserve(admitted.profile, guard);
       const conversation = await harness.createConversation({ ownership: { kind: 'ownerless' },
         agent: { model: { provider: admitted.profile, modelId: profile.model } } }, BACKGROUND_CONTEXT);
       const execution = lease;
@@ -188,8 +325,10 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
         }
       });
       const run = async () => {
+        let outcomeWriting = false;
         try {
-          const submission = await conversation.submit({ type: 'input', content: admitted.instruction, whenBusy: 'reject' }, BACKGROUND_CONTEXT);
+          const submission = await conversation.submit({ type: 'input', content: admitted.instruction, whenBusy: 'reject', requestId: runtime.cloud.readRun(conversation.id)!.requestId! }, BACKGROUND_CONTEXT);
+          runtime.recordSubmission(conversation.id, submission.id);
           const settled = await submission.wait(BACKGROUND_CONTEXT);
           await conversation.waitForIdle(BACKGROUND_CONTEXT);
           const stopped = await events.stop();
@@ -203,19 +342,37 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
           }
           failure = runtime.fatal(conversation.id) ?? failure;
           if (settled.status !== 'done' || stopped.reason === 'listener_error') failure ??= 'CLOUD_MODEL_REQUEST_FAILED';
+          const outcome = await committedRunOutcome(conversation, runtime, settled.status, settled.status === 'unanswered' ? settled.detail : undefined);
+          if (failure) { outcome.state = 'failed'; outcome.errorCode = modelFailureCode(failure); delete outcome.text; }
+          outcomeWriting = true;
+          await runtime.settle(execution, outcome);
+          const committed = runtime.cloud.readRun(conversation.id);
+          if (committed?.state !== 'completed') failure = committed?.errorCode ?? 'CLOUD_MODEL_REQUEST_FAILED';
           if (failure) await write({ type: 'error', code: failure, retryable: false });
           else await write({ type: 'done', conversationId: conversation.id });
-        } catch { await write({ type: 'error', code: runtime.fatal(conversation.id) ?? 'CLOUD_MODEL_REQUEST_FAILED', retryable: false }); await events.stop(); }
+        } catch (error) {
+          const code = runtime.fatal(conversation.id) ?? safeCloudError(error).code;
+          await write({ type: 'error', code, retryable: false });
+          await events.stop();
+          // A native/business failure is terminal. A failed durable settlement belongs to repair.
+          if (!outcomeWriting && error instanceof CloudDoError && runtime.cloud.readRun(conversation.id)?.state === 'running') {
+            runtime.cancel(execution, code);
+            await conversation.abort(BACKGROUND_CONTEXT, { background: true });
+            await conversation.waitForIdle(BACKGROUND_CONTEXT);
+            await runtime.settle(execution, { state: 'failed', errorCode: code });
+          }
+        }
         finally {
           clearInterval(probe);
-          runtime.release(execution);
+          await runtime.release(execution);
           if (!cancelled) { try { await writer.close(); } catch { void cancel(); } }
         }
       };
       this.ctx.waitUntil(run());
       return new Response(body.readable, { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' } });
     } catch (error) {
-      if (lease) this.sessionRuntime().release(lease);
+      if (lease) await this.sessionRuntime().release(lease);
+      else guard?.dispose();
       return cloudErrorResponse(error);
     }
   }
