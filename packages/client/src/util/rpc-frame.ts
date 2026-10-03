@@ -1,7 +1,7 @@
 /**
  * Single-frame bound for the JSONL RPC frames the SDK SENDS to a Pi host.
  *
- * The SDK owns this bound. Official `@earendil-works/pi-coding-agent@0.99.2`
+ * The SDK owns this bound. Official `@earendil-works/pi-coding-agent@1.0.0`
  * reads stdin with no upper bound (`modes/rpc/jsonl.ts`), so the host no
  * longer refuses an oversized frame; the SDK keeps refusing to send one,
  * because the limit protects the peer's memory, not the SDK's. The value is

@@ -951,10 +951,10 @@ implied by this source change.
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. The SDK pins the official unmodified
-`@earendil-works/pi-coding-agent@0.99.2` plus chord, pi-agent-core, pi-ai,
-pi-codemode, pi-mcp, pi-telemetry and pi-tui to exactly 0.99.2 (upstream commit
-`005af57d88ee23b33778f343a9595b32e67ff788`, closureDigest
-`8d614f74c775cab980f72bfce88de75583ad43e69d870df0134f3dbd7b622124`). Fork aliases and dual runtimes are
+`@earendil-works/pi-coding-agent@1.0.0` plus chord, pi-agent-core, pi-ai,
+pi-codemode, pi-durable, pi-mcp, pi-telemetry and pi-tui to exactly 1.0.0 (upstream commit
+`a13d35a742c6ef8462812a28fbe1d8c8b7431c32`, closureDigest
+`7f010b1a1bf36bb08e479d6651e0aaa556c00abc2ab02a1275d31ba4c81a1d87`). Fork aliases and dual runtimes are
 retired. `resolvePiRuntimeIdentity()` reads the static dependency projection;
 resolved name/version mismatch fails closed. There is no implicit global Pi fallback.
 Only public Pi APIs are used; private imports, patches, copied provider serializers
