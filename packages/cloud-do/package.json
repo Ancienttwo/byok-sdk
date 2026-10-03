@@ -11,9 +11,9 @@
     "test": "vitest run && node --test test/recovery-walltime.node.mjs"
   },
   "dependencies": {
-    "@earendil-works/pi-durable": "1.0.0",
-    "@earendil-works/pi-ai": "1.0.0",
-    "@earendil-works/chord": "1.0.0"
+    "@earendil-works/pi-durable": "1.0.1",
+    "@earendil-works/pi-ai": "1.0.1",
+    "@earendil-works/chord": "1.0.1"
   },
   "devDependencies": {
     "@byok-sdk/keys": "workspace:*",

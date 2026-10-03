@@ -362,13 +362,10 @@ export function assertInstalledPiRuntime(installRoot, identity, locked, label, n
   }
   const [pi] = installed.filter((entry) => entry.manifest.name === identity.packageName);
 
-  // npm verified each tarball against the registry integrity before
-  // extraction and records that integrity in its lockfile, EXCEPT for copies
-  // it placed from the coding agent's own `npm-shrinkwrap.json`, which lists
-  // the closure with no `integrity` field. A copy with a recorded integrity
-  // must carry exactly the locked one; a copy without one is proven instead by
-  // its file set being byte-identical to the official tarball whose `sha512`
-  // is the locked integrity.
+  // npm records tarball integrity in its lockfile. Pi 1.0.1 does not ship
+  // npm-shrinkwrap.json. A copy with recorded integrity must match the lock.
+  // A copy without it must have the exact file set of the official tarball
+  // whose sha512 is the locked integrity.
   const npmLock = readManifest(path.join(installRoot, 'package-lock.json'));
   if (npmLock?.packages === undefined) throw new Error(`${label}: ${installRoot} has no npm package-lock.json`);
   const copies = new Map(PI_RUNTIME_CLOSURE.map((name) => [name, []]));
@@ -406,7 +403,7 @@ export function assertInstalledPiRuntime(installRoot, identity, locked, label, n
     `[${label}] official Pi closure ${PI_RUNTIME_CLOSURE.map((name) => name.slice('@earendil-works/'.length)).join(', ')}` +
       `@${identity.version}: recorded npm integrities equal bun.lock; single ${identity.packageName} at ` +
       `${path.relative(installRoot, pi.root)} matches the official tarball (${tarballFiles.size} files); ` +
-      `${fileProven} shrinkwrap-placed cop${fileProven === 1 ? 'y' : 'ies'} without npm integrity matched their official tarballs; fork manifests=0`,
+      `${fileProven} cop${fileProven === 1 ? 'y' : 'ies'} without npm integrity matched their official tarballs; fork manifests=0`,
   );
   return pi;
 }

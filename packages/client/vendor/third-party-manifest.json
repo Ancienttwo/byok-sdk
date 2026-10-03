@@ -4,7 +4,7 @@
   "packages": [
     {
       "name": "@earendil-works/pi-ai",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "files": [
         {
           "path": "dist/utils/typebox-helpers.js",
