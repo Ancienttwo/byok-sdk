@@ -438,3 +438,24 @@ These hooks are separate from the core 4d design above. Each subsection gives th
 12. **Wake admission (billing).** (a) A protected `admitWake(items)` hook after the slot is held and before the claim, with a stable key; denial fails the items with a fixed code. (b) No hook; the consumer admits at enqueue only. **Recommended: (a).** Scheduled wakes fire without a live request, so admission must run at wake time, and running it before the slot would charge a busy session.
 13. **Alarm retry exhaustion.** (a) After 6 failed retries, leave the run unsettled and repair it on the next enqueue, release or boot. (b) Add a second durable timer that fires on its own. **Recommended: (a).** A DO has one alarm, and an idle session's next real event is an enqueue or a restart.
 14. **Oversized final text.** (a) `run.completed` stores a 1,024-byte preview plus `truncated:true`, and the full text stays in the pi entry. (b) Omit the text and force a client read. (c) Reject the run. **Recommended: (a).** The event stays useful, the full text is not lost, and no paid rerun happens.
+
+## Approved decisions (2026-10-04, Aimpact)
+
+All 14 open questions above are approved as recommended:
+
+1. Mid-run arrivals queue and run as the next wake after release.
+2. Items of an interrupted wake run requeue only when `steps == 0`, the run was not aborted and has no fatal code; otherwise `interrupted`.
+3. Late-settled invocations (recovery replay) write an event only; no wake.
+4. Schedules are one-shot `availableAt` only.
+5. History comes from pi committed contexts of the last 20 completed runs, final text only, inside a 48,000-byte serialized budget.
+6. `submit` and wake runs share the single slot; busy returns `CLOUD_TOOL_BUSY`.
+7. Live events use a DO-returned SSE stream with storage replay, doorbell and a 110 s cap.
+8. Events are kept 7 days and at most 10,000 rows; dedup keys 7 days.
+9. Event writes fail closed: state and event share one transaction.
+10. Hook split: A, C, F and G are in 4d; B, D and E move to 4e.
+11. Pure tools (hook B) stay unsafe for replay; the D10 list is unchanged.
+12. Wake admission uses a protected `admitWake(items)` hook after the slot is held and before the claim.
+13. After alarm retry exhaustion the run stays unsettled and is repaired on the next enqueue, release or boot; no second timer.
+14. Oversized final text: `run.completed` stores a 1,024-byte preview with `truncated:true`; the full text stays in the pi entry.
+
+Implementation starts after the Codex re-check of the detail-check fixes passes.
