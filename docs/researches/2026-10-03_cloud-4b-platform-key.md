@@ -1,6 +1,6 @@
 # Cloud slice 4b：platform-key credentials（DOC-ONLY）
 
-> **状态：设计稿，Owner Aimpact 必须批准本文后，才可编写任何 4b code。** 本文不构成实现或发布授权。
+> **状态：Owner Aimpact 已于 2026-10-03 15:37 HKT 批准 4b 实现，附 streaming leak guard 修订。** 仅授权本切片；不授权 push/PR/部署。
 > **核对日期：2026-10-03**；源码基线 `fa9bb89a`。Cloudflare 链接为当日官方文档；平台行为未经本次部署验证。
 
 ## 1. 已定边界与 Q-C5
@@ -25,7 +25,10 @@
 
 **最小方案**：拟 `packages/cloud-do/src/platform-credentials.ts` 只实现现有 `Pick<SecretStore<ModelProviderSecretName>, 'get'>` 读契约，冻结 profile/name → 每 provider 一个 Worker secret binding 映射；keys 仅 type-only import，无 runtime barrel、新 export 或 configure/login/key RPC。`AgentDO` 保持关闭 ambient env/file discovery，用 pi-ai 1.0 已有 `createProvider(...).auth.apiKey.resolve` 读取并返回 `AuthResult.auth.apiKey`，source 固定 `platform`。`ApiKeyAuth` / `ProviderAuth` / `ModelAuth` 定义在安装包 `dist/auth/types.d.ts`；真实范例见 [`packages/client/src/bin/pi-durable-host.ts`](../../packages/client/src/bin/pi-durable-host.ts)。复用 credential 读契约与 credential-free SDK API，不新增平行 API；研究稿 `PlatformModelCredentialBackend` 尚不存在于源码，完整本地 credential 管理 API 不能对云端开放。
 
-Key 仅在当前 provider 请求私有内存/auth headers 中，不跨 turn 缓存、不传工具 env/prompt/args、不进 SQLite、日志、errors/stack/cause、telemetry、receipts 或 client response/stream。provider transport 须在有界内存中收齐**完整响应原文与跨 SSE chunks 拼接内容**，扫描 key 的 raw、base64（标准/url-safe，有/无 padding）、URL-encoded 形式，并廉价检查 ≥16 字符连续片段（排除通用 prefix）。命中或缓冲超限：丢弃整个响应，固定 `CLOUD_MODEL_RESPONSE_REJECTED`，原始 body 不进 SQLite/logs。扫描通过前不交给 pi 持久化或发布客户端事件；因此上游可 SSE，客户端本切片不实时逐 chunk 转发。异常也扫描后映射固定错误，不保留原始 cause/headers。D9 同 Worker/env，工具必须可信；代码约束不是 sandbox。
+Key 仅在当前 provider 请求私有内存/auth headers 中，不跨 turn 缓存、不传工具 env/prompt/args、不进 SQLite、日志、errors/stack/cause、telemetry、receipts 或 client response/stream。**Streaming guard 不收齐响应**：先以有界 SSE frame parser + `JSON.parse` 解码模型文本（含 `\u`/JSON escaping），再扫描；仅白名单 decoded text 进入 pi，不转发原始 frames/vendor metadata。匹配 raw、标准/url-safe base64（有/无 padding及 key 在编码输入中的 0/1/2-byte alignment）、混合 raw/percent-encoded（hex 大小写）与敏感连续 ≥16 字符片段（排除通用 prefix）；不把不同输出 lane 的未检查字符串带入事件。
+
+设 ASCII key 长 K，完整 raw 长 K、base64 最长 ≤4⌈(K+2)/3⌉、percent form 最长 3K；L 取实际匹配形式的最大长度（含片段），**扣留 L−1 字符**。每次先扫描 pending tail + 新 decoded text，未命中才释放超出尾部的前缀：任何未来能完成的长度 ≤L 的形式，其未完成前缀必仍在 tail。≥16 片段扫描保留，候选数量线性于 K；只保证这些定义的形式/片段，不宣称识别任意混淆或更短孤立片段。EOF 必须再次扫描 tail 后才 flush。命中时 abort/cancel upstream，丢弃尚未释放内容，固定 `CLOUD_MODEL_RESPONSE_REJECTED`（无 raw body/cause）；已释放的 key-free 文本保留。有界 frame 超限同样 fail-closed，禁止把 unreleased 内容交给 pi persistence/SQLite/logs/client。D9 同 Worker/env，工具必须可信；代码约束不是 sandbox。
+
 
 **拒收尚未实现**：4a `packages/cloud-do/src/index.ts` 仅 HTTP 404 + 被动 storage RPC。拟 `src/admission.ts` 为每种 turn/submit/enqueue 冻结 strict schema（嵌套对象同样严格，无任意 metadata 字段袋）；unknown fields 一律拒绝而非 strip，固定 `CLOUD_REQUEST_INVALID`（400，同码 RPC）。显式 `credential/credentials/apiKey/api_key/secret/authorization/x-api-key` / provider auth headers 则报 `CLOUD_USER_CREDENTIAL_REJECTED`，不回显值。所有检查先于任何写入/auth resolve，Aiphabee route 复用；身份 Authorization 不转发给 provider。自由文本默认 **best-effort key-shape detector**：扫描 message/note 等允许的文本，命中已知 provider key 格式则整请求拒绝、写入前报后者；不保证识别任意改名/混淆 key。D2 约束 API 凭据字段，不意味着任何相似文本都是凭据；误报取舍待 §6 裁决。missing/empty/malformed secret 或读取失败固定 `CLOUD_MODEL_CREDENTIAL_UNAVAILABLE`（503，同码 RPC），**non-retryable**：pi/runner 不得重试 provider；无原始 cause/stack，不匿名调用或回退用户 key。
 
@@ -41,7 +44,7 @@ Key 仅在当前 provider 请求私有内存/auth headers 中，不跨 turn 缓�
 
 1. **读 adapter**：固定 profile/binding 映射；测既有类型兼容、非法 name/未知 provider/env 隔离；dry-run + workerd 保持无 Node compat，本地 Keychain/IPC 回归。
 2. **准入/fail-closed**：HTTP/RPC 同一 gate；测改名/嵌套 unknown fields、metadata 字段袋、显式 key/provider headers 及自由文本 detector 命中均拒绝、无写库/fetch；用相似普通文本验证误报边界。missing/empty/malformed/read failure 固定 503，pi/runner 重试路径中 provider 调用次数始终为 0，message/stack/cause 无 key。
-3. **auth/HTTP/持久化/出口**：真实 workerd/Miniflare DO + HTTP fixture；测 auth/SSE/abort、所有 3xx（同/异 origin）拒绝、URL 无 key；回显 raw/base64/url-safe/URL-encoded/连续片段，覆盖跨 chunks、最后 chunk 命中、成功 body/异常和超限：整响应丢弃，仅固定错误，先前 chunks 未发布/持久化。扫描 console/tail、errors/stack、**全部 SQLite rows（含 pi entries）**、telemetry/receipts、responses/streams 均无 key，正常内容仍完整。fixture 不替代 live provider 验收。
+3. **auth/HTTP/持久化/出口**：真实 workerd/Miniflare DO + HTTP fixture；测 auth/SSE/abort、所有 3xx（同/异 origin）拒绝、URL 无 key；回显 raw/base64/url-safe/URL-encoded/连续片段，覆盖每个 split 位置、1-byte chunks、各 encoded forms/alignment、final tail、≥16 partial key、JSON unicode escaping、成功 body/异常/超限；命中 abort upstream、丢弃 unreleased tail、固定错误，已发布 key-free 前缀保留；EOF 安全 flush。正常流须在 EOF 前释放文本，不能整响应缓冲。扫描 console/tail、errors/stack、**全部 SQLite rows（含 pi entries）**、telemetry/receipts、responses/streams 均无 key，正常内容仍完整。fixture 不替代 live provider 验收。
 4. **staging/4e**：Owner 另行放行后，在 Aiphabee account 实测一个 provider streaming、轮换部署/DO restart/旧 key 撤销/prod 隔离，记录 audit metadata；跑 root required checks，不宣称 4c/4d/4e 完成。
 
 Aiphabee 当前 client/server **0.17.0**、keys **0.4.3**（ADR Context）；本基线 dispatch **0.24.0-rc.1**、keys **0.8.1-rc.1**、cloud-do **0.0.0 private**。本文不 bump；4b 内部 adapter 不改 keys/client/server 公共 API，三包均无需因 4b bump，cloud-do 公开消费时另定初始版本。如以后新增 keys 安全 export，另做 keys additive minor release；4d/4e 若改 dispatch API，按 core 权威统一 bump dispatch train。4e 锁定通过验收的 client/server、keys、cloud backend，不能把新 adapter 嫁接旧版本声称兼容；保留本地 API 不等于跨版本 wire compatibility，须 Aiphabee local + cloud 集成回归。
