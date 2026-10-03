@@ -16,6 +16,7 @@
     "@earendil-works/chord": "1.0.0"
   },
   "devDependencies": {
+    "@byok-sdk/keys": "workspace:*",
     "@cloudflare/workers-types": "5.20260811.1",
     "miniflare": "5.20260811.1-alpha",
     "esbuild": "0.28.1",

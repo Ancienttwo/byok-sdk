@@ -1,4 +1,4 @@
-# Private Cloudflare pi-durable host (slice 4a)
+# Private Cloudflare pi-durable host (slices 4a–4b)
 
 This workspace owns the Cloudflare deployment boundary, separate from the Node
 client and the environment-neutral cloud domain kernel. It is private: ADR-035's
@@ -10,6 +10,46 @@ always creates a new ownerless conversation. `appendExecution(id, text)` and
 `readExecution(id)` round-trip passive entries without model or tool execution.
 The consuming platform must authorize the identity before `getAgentObject()`;
 there is no public HTTP route (the Worker returns 404).
+
+## Platform model submissions
+
+The platform sets `AIPHABEE_ZAI_API_KEY` and `AIPHABEE_DEEPSEEK_API_KEY` as Worker
+secrets. Each environment has its own secrets and DO namespace. Use
+`agent.submit({ instruction, profile? })` after platform identity authorization.
+The default profile is `zai_openai` (`glm-5.3-flash`). The other profile is
+`deepseek_direct` (`deepseek-v4-flash`). URLs and models are fixed in
+`src/platform-credentials.ts`. This slice has no Gateway fallback or tools.
+
+The RPC returns a `Response`. Admission errors use HTTP 400. A missing or invalid
+secret uses HTTP 503. The error body has a fixed code and `retryable: false`.
+Preflight failure causes no model request or storage write. An accepted response
+uses SSE. It sends `text_delta`, then `done` or a fixed `error` code.
+Each submission uses a new native pi conversation.
+The response uses a native byte stream. A request-only keepalive probe runs at
+most once per 250 ms. It detects a lost reader after RPC transfer. It sends an
+SSE comment. A disconnect aborts the provider. This probe does not use a DO alarm.
+
+The Web transport uses pi's existing `ProviderStreams` interface. It does not
+import the Node OpenAI transport. A bounded SSE parser decodes JSON before the
+guard checks text. Each guard holds at most `3K-1` characters for an ASCII key
+of length `K` (16–512). Two lane guards and one merged guard stop interleaving
+from hiding a key. They check raw, base64 and percent-encoded forms. They check
+sensitive fragments of at least 16 characters. It covers three base64 alignments.
+Each lane can hold up to `2(3K-1)` characters before client release. Total guard
+tails hold at most `3(3K-1)` characters. They do not grow with the reply.
+A match cancels the provider and drops the pending tail. Text already released
+remains. Unchecked text does not enter pi events or SQLite. EOF triggers a final
+tail check. The transport drops vendor metadata and response headers.
+The guard does not detect arbitrary obfuscation or every short fragment.
+
+Unknown request fields are rejected. Credential fields are rejected at any
+level. A best-effort detector rejects known user-key formats in instruction text.
+It can reject examples that look like keys. Before input storage, the guard also
+checks the exact platform key and its defined forms. Keys use only auth headers.
+The transport rejects every 3xx response.
+The host limits a request to 4096 output tokens and a 65,536-token context.
+These are host limits. Pi cost fields are zero and do not state provider prices.
+The consumer owns billing and provider price data.
 
 ```ts
 import { getAgentObject } from './src/identity';
@@ -55,8 +95,9 @@ the current UTC date `2026-10-02` is rejected by the server binary, and
 `2026-10-03` is rejected by Miniflare as a future UTC date. No `nodejs_compat`
 flag is required; both Node compatibility modes are explicitly disabled in the
 deploy and test configs. The application path calls no Node built-ins. Pi-ai's
-bundle contains its lazy local auth fallback; the host supplies an explicit
-empty environment/file auth context, and registers no providers in this slice.
+bundle contains its lazy local auth fallback. The host supplies an explicit
+empty environment/file auth context. Platform auth uses an explicit resolver.
+Provider retries and durable generation retries are disabled.
 
 `bun run test` uses Vitest 4 and Miniflare's matching pinned workerd. Both backends
 run every native pi storage conformance case and the same BYOK-specific contract
@@ -70,8 +111,8 @@ deployment and production crash durability have not been verified.
 
 ## Deferred slices
 
-No secrets, user credential fields, model calls, tools/jobs, alarm, inbox or event
-log are implemented. 4b supplies platform-only credentials; 4c owns invocation
-and interruption policy; 4d owns wake/inbox/event scheduling. Retention needs a
+4b adds platform-only model credentials and text streaming. Tools/jobs, alarm,
+inbox and event scheduling remain deferred. 4c owns invocation and interruption
+policy. 4d owns wake/inbox/event scheduling. Retention needs a
 bounded native-document/conversation cleanup design; deleting the DO's database
 would erase other executions and host tables, so cleanup is deferred.
