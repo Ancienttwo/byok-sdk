@@ -25,13 +25,13 @@
 
 **最小方案**：拟 `packages/cloud-do/src/platform-credentials.ts` 只实现现有 `Pick<SecretStore<ModelProviderSecretName>, 'get'>` 读契约，冻结 profile/name → 每 provider 一个 Worker secret binding 映射；keys 仅 type-only import，无 runtime barrel、新 export 或 configure/login/key RPC。`AgentDO` 保持关闭 ambient env/file discovery，用 pi-ai 1.0 已有 `createProvider(...).auth.apiKey.resolve` 读取并返回 `AuthResult.auth.apiKey`，source 固定 `platform`。`ApiKeyAuth` / `ProviderAuth` / `ModelAuth` 定义在安装包 `dist/auth/types.d.ts`；真实范例见 [`packages/client/src/bin/pi-durable-host.ts`](../../packages/client/src/bin/pi-durable-host.ts)。复用 credential 读契约与 credential-free SDK API，不新增平行 API；研究稿 `PlatformModelCredentialBackend` 尚不存在于源码，完整本地 credential 管理 API 不能对云端开放。
 
-Key 仅在当前 provider 请求私有内存/auth headers 中，不跨 turn 缓存、不传工具 env/prompt/args、不进 SQLite、日志、errors/stack/cause、telemetry、receipts 或 client response/stream。拟 provider transport 在 **pi 收事件/持久化之前** 检查成功/失败响应及跨 SSE chunk 的 key/编码回显，固定错误、白名单 output/usage，不保留原始异常或 headers；仅出口过滤不能保护 pi SQLite。D9 所有 DO 同 Worker、同 env，工具必须可信；代码约束不是 sandbox。
+Key 仅在当前 provider 请求私有内存/auth headers 中，不跨 turn 缓存、不传工具 env/prompt/args、不进 SQLite、日志、errors/stack/cause、telemetry、receipts 或 client response/stream。provider transport 须在有界内存中收齐**完整响应原文与跨 SSE chunks 拼接内容**，扫描 key 的 raw、base64（标准/url-safe，有/无 padding）、URL-encoded 形式，并廉价检查 ≥16 字符连续片段（排除通用 prefix）。命中或缓冲超限：丢弃整个响应，固定 `CLOUD_MODEL_RESPONSE_REJECTED`，原始 body 不进 SQLite/logs。扫描通过前不交给 pi 持久化或发布客户端事件；因此上游可 SSE，客户端本切片不实时逐 chunk 转发。异常也扫描后映射固定错误，不保留原始 cause/headers。D9 同 Worker/env，工具必须可信；代码约束不是 sandbox。
 
-**拒收尚未实现**：4a `packages/cloud-do/src/index.ts` 仅 HTTP 404 + 被动 storage RPC。拟 `src/admission.ts` 在所有 turn/submit/enqueue 写库/auth resolve 前执行严格白名单；顶层/嵌套 `credential/credentials/apiKey/api_key/secret/authorization/x-api-key` 与 provider auth headers 显式拒绝，`CLOUD_USER_CREDENTIAL_REJECTED`（400，同码 RPC），不先 strip unknown fields，不回显值。Aiphabee route 复用此 gate；应用身份 Authorization 不当 model key 转发。missing/empty/malformed secret 或读取失败统一固定 `CLOUD_MODEL_CREDENTIAL_UNAVAILABLE`（503，同码 RPC），无原始 cause/stack，不匿名调用、不回退用户 key。
+**拒收尚未实现**：4a `packages/cloud-do/src/index.ts` 仅 HTTP 404 + 被动 storage RPC。拟 `src/admission.ts` 为每种 turn/submit/enqueue 冻结 strict schema（嵌套对象同样严格，无任意 metadata 字段袋）；unknown fields 一律拒绝而非 strip，固定 `CLOUD_REQUEST_INVALID`（400，同码 RPC）。显式 `credential/credentials/apiKey/api_key/secret/authorization/x-api-key` / provider auth headers 则报 `CLOUD_USER_CREDENTIAL_REJECTED`，不回显值。所有检查先于任何写入/auth resolve，Aiphabee route 复用；身份 Authorization 不转发给 provider。自由文本默认 **best-effort key-shape detector**：扫描 message/note 等允许的文本，命中已知 provider key 格式则整请求拒绝、写入前报后者；不保证识别任意改名/混淆 key。D2 约束 API 凭据字段，不意味着任何相似文本都是凭据；误报取舍待 §6 裁决。missing/empty/malformed secret 或读取失败固定 `CLOUD_MODEL_CREDENTIAL_UNAVAILABLE`（503，同码 RPC），**non-retryable**：pi/runner 不得重试 provider；无原始 cause/stack，不匿名调用或回退用户 key。
 
 ## 4. Workers 可行性
 
-[`fetch`](https://developers.cloudflare.com/workers/runtime-apis/fetch/) 在 handler 内直连公网 HTTPS，不要求 Gateway 支持 vendor。[catalog](../../packages/keys/src/provider-catalog.ts) 中 OpenAI/Anthropic/DeepSeek/Z.AI/Moonshot/MiniMax/Groq 等可用平台 key；每 vendor/model 仍需实测。只允许冻结公网 origins，拒 loopback/private/user base URL/redirect（[follow 会转发敏感 headers](https://developers.cloudflare.com/workers/runtime-apis/request/)）；服务间用 binding。
+[`fetch`](https://developers.cloudflare.com/workers/runtime-apis/fetch/) 在 handler 内直连公网 HTTPS，不要求 Gateway 支持 vendor。[catalog](../../packages/keys/src/provider-catalog.ts) 中 OpenAI/Anthropic/DeepSeek/Z.AI/Moonshot/MiniMax/Groq 等可用平台 key；每 vendor/model 仍需实测。只允许冻结公网 origins，拒 loopback/private/user base URL；`redirect: 'manual'` 检查并拒绝**任何 3xx**（含相同 origin；或用 `'error'` 拒绝重定向并补查其余 3xx），不 follow（[敏感 headers 会随 follow 转发](https://developers.cloudflare.com/workers/runtime-apis/request/)）。key 永不进入 URL path/query；服务间用 binding。
 
 `provider-catalog.ts`/`headers.ts`/`http.ts`/`url.ts`/`errors.ts` 是 Web-compatible 叶子；`provider-profile.ts` 用 `node:crypto`，`secret-store.ts` base64 用 `Buffer`，direct clients runtime-import profile，keys barrel 又拉 fs/child_process/Keychain/SQLite：**整包及现 direct clients 不能称 Workers-safe**。4b 仅 type-only keys imports + pi auth seam，本地 registry/custody/launcher 不上云。[Node compat](https://developers.cloudflare.com/workers/runtime-apis/nodejs/) 自日期 ≥2026-08-04 默认开启，但 4a 明确关闭两项 compat；优先保留、仅依实际依赖再评审。compat 不使 child_process/node:sqlite stubs 或 Keychain 可用；[`fs`](https://developers.cloudflare.com/workers/runtime-apis/nodejs/fs/) 仅内存 VFS，非本地持久文件。
 
@@ -40,8 +40,8 @@ Key 仅在当前 provider 请求私有内存/auth headers 中，不跨 turn 缓�
 ## 5. 批准后的步骤、测试与版本
 
 1. **读 adapter**：固定 profile/binding 映射；测既有类型兼容、非法 name/未知 provider/env 隔离；dry-run + workerd 保持无 Node compat，本地 Keychain/IPC 回归。
-2. **准入/fail-closed**：HTTP/RPC 同一 gate；negative tests：顶层/嵌套用户 key/provider headers 拒绝且无写库/fetch；missing/empty/malformed/read failure 固定 503/同码 RPC，message/stack/cause 无 key。
-3. **auth/HTTP/持久化/出口**：真实 workerd/Miniflare DO 调受控 HTTP provider fixture，测正确 auth、SSE/abort；注入 headers、异常、成功 body/跨 chunk key 回显，扫描 console/tail、errors/stack、**全部 DO SQLite rows（含 pi entries）**、telemetry/receipts、responses/streams 均无 key，正常内容仍完整。fixture 不替代 live provider 验收。
+2. **准入/fail-closed**：HTTP/RPC 同一 gate；测改名/嵌套 unknown fields、metadata 字段袋、显式 key/provider headers 及自由文本 detector 命中均拒绝、无写库/fetch；用相似普通文本验证误报边界。missing/empty/malformed/read failure 固定 503，pi/runner 重试路径中 provider 调用次数始终为 0，message/stack/cause 无 key。
+3. **auth/HTTP/持久化/出口**：真实 workerd/Miniflare DO + HTTP fixture；测 auth/SSE/abort、所有 3xx（同/异 origin）拒绝、URL 无 key；回显 raw/base64/url-safe/URL-encoded/连续片段，覆盖跨 chunks、最后 chunk 命中、成功 body/异常和超限：整响应丢弃，仅固定错误，先前 chunks 未发布/持久化。扫描 console/tail、errors/stack、**全部 SQLite rows（含 pi entries）**、telemetry/receipts、responses/streams 均无 key，正常内容仍完整。fixture 不替代 live provider 验收。
 4. **staging/4e**：Owner 另行放行后，在 Aiphabee account 实测一个 provider streaming、轮换部署/DO restart/旧 key 撤销/prod 隔离，记录 audit metadata；跑 root required checks，不宣称 4c/4d/4e 完成。
 
 Aiphabee 当前 client/server **0.17.0**、keys **0.4.3**（ADR Context）；本基线 dispatch **0.24.0-rc.1**、keys **0.8.1-rc.1**、cloud-do **0.0.0 private**。本文不 bump；4b 内部 adapter 不改 keys/client/server 公共 API，三包均无需因 4b bump，cloud-do 公开消费时另定初始版本。如以后新增 keys 安全 export，另做 keys additive minor release；4d/4e 若改 dispatch API，按 core 权威统一 bump dispatch train。4e 锁定通过验收的 client/server、keys、cloud backend，不能把新 adapter 嫁接旧版本声称兼容；保留本地 API 不等于跨版本 wire compatibility，须 Aiphabee local + cloud 集成回归。
@@ -50,4 +50,5 @@ Aiphabee 当前 client/server **0.17.0**、keys **0.4.3**（ADR Context）；本
 
 - 批准本文与 Worker secret 推荐，包括轮换需部署、在途执行中断及旧 key 撤销窗口。
 - 冻结首批 provider/model/origin 与 staging/prod key 配置、最小权限运营负责人。
+- 自由文本默认 best-effort detector、命中整请求拒绝；Aimpact 决定格式/误报阈值，是否改为更宽的 key-shaped 文本硬拒绝（会拒绝用户粘贴的相似普通文本），不宣称可穷尽识别任意 key。
 - 4e 是否及何时将 private cloud-do 变为可发布消费包（沿 ADR-035），指定通过验收的统一版本集合。
