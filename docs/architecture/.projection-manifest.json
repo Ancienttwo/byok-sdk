@@ -102,8 +102,8 @@
       "outputDigest": "sha256:2bf05588105f46b1329f21cb42bdb87f212de8fd4a636783b09e7a9de9f2bea3",
       "verifiedAgainst": {
         "branch": "codex/258-linux-utf8",
-        "commit": "542cf75c244db82e17de2ff81ea6e9a1290f6d8d",
-        "committedAt": "2026-10-03T12:34:40+08:00"
+        "commit": "293eef4667930b51e6b3fbb45e04bf664ab4361b",
+        "committedAt": "2026-10-03T13:12:54+08:00"
       }
     },
     {
