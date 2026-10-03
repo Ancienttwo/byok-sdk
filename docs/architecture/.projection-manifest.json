@@ -102,8 +102,8 @@
       "outputDigest": "sha256:2bf05588105f46b1329f21cb42bdb87f212de8fd4a636783b09e7a9de9f2bea3",
       "verifiedAgainst": {
         "branch": "chore/pi-1.0-stale-version-text",
-        "commit": "d782f757aafd317794dded0227a965dc87095ce9",
-        "committedAt": "2026-10-03T14:19:24+08:00"
+        "commit": "ed08b2562b9cd2c8b7d7e2f89f0b739c69836540",
+        "committedAt": "2026-10-03T14:26:08+08:00"
       }
     },
     {
