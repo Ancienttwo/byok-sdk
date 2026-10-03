@@ -6,12 +6,14 @@ import type { Models } from '@earendil-works/pi-ai/models';
 import { durableToolEnvironment } from './environment';
 import { durableToolDenial } from './guard';
 import { acquireReplicaLock, resetReplica, type DurableReplicaBinding } from './replica';
+import { openLocalDurableStorage, type DurableStorageFactory } from './storage';
 
 export const DurableResult = defineDoc({ kind: 'byok.result', version: 1, scope: 'conversation', history: 'latest', fork: 'initial', initial: () => ({ text: '' }) });
 export interface DurableEngineInput {
   file: string; replicaRoot: string; binding: DurableReplicaBinding;
   models: Models; model: { provider: string; modelId: string }; instruction: string;
   resume: boolean; tools?: readonly ToolRegistration[]; ambient: NodeJS.ProcessEnv;
+  storageFactory?: DurableStorageFactory<string>;
   shellOwnership?: { own(pid:number):Promise<void>; released(pid:number):void };
   beforeTool(id: string, taskId: string, call: ToolCall): Promise<void>;
   events(events: readonly AgentEvent[]): Promise<void>;
@@ -44,8 +46,7 @@ export async function openDurableEngine(input: DurableEngineInput) {
       },
     })] });
     const registry = createRegistry(); registry.install(extension);
-    const { openNodeSqliteStorage } = await import('@earendil-works/pi-durable/storage/sqlite/node');
-    harness = await Harness.open(await openNodeSqliteStorage(input.file), {
+    harness = await Harness.open(await (input.storageFactory ?? openLocalDurableStorage)(input.file), {
       models: input.models, registry, env: () => env,
       settings: { retry: { enabled: false, maxRetries: 0 }, compaction: { enabled: false }, stream: { maxRetries: 0 } },
     }, ctx);
