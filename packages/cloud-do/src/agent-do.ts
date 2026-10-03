@@ -1,25 +1,21 @@
 import { DurableObject } from 'cloudflare:workers';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { Harness, createRegistry, watchEvents, type AgentEvent, type ConversationId } from '@earendil-works/pi-durable';
+import { Harness, watchEvents, type AgentEvent, type ConversationId } from '@earendil-works/pi-durable';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
-import { admitCloudSubmission, hasUserKeyShape } from './admission';
+import { admitCloudSubmission } from './admission';
 import { CloudDoError, cloudErrorResponse } from './errors';
-import { RollingLeakGuard } from './leak-guard';
 import { PLATFORM_PROFILES, platformCredentialReader, type PlatformProfileId } from './platform-credentials';
-import { createPlatformModels } from './platform-provider';
-import { openDurableObjectStorage } from './storage';
+import { admitCloudText } from './input-guard';
+import { SessionRuntime, type ExecutionLease } from './session-runtime';
+import type { CloudToolDispatcher } from './tools';
+import type { InvocationTerminalState } from './invocation-ledger';
+import { safeCloudError } from './errors';
+
+export { CLOUD_HARNESS_SETTINGS } from './session-runtime';
 
 function modelFailureCode(message: string | undefined): string {
-  if (message === 'CLOUD_MODEL_CREDENTIAL_UNAVAILABLE' || message === 'CLOUD_MODEL_RESPONSE_REJECTED') return message;
-  return 'CLOUD_MODEL_REQUEST_FAILED';
+  return safeCloudError(new Error(message)).code;
 }
-
-// Pinned pi 1.0 gates both threshold and overflow compaction on enabled.
-export const CLOUD_HARNESS_SETTINGS = {
-  compaction: { enabled: false },
-  retry: { enabled: false, maxRetries: 0 },
-  stream: { maxRetries: 0 },
-} as const;
 
 function assistantText(message: AssistantMessage): string {
   return message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('');
@@ -49,16 +45,35 @@ function projectText(blocks: Map<number, string>, event: AgentEvent): string | u
 
 /** One named DO owns one Harness; 4b adds platform-only text model submissions. */
 export class AgentDO extends DurableObject<Record<string, unknown>> {
-  #harnessReady?: Promise<Harness>;
+  #runtime?: SessionRuntime;
+
+  /** The consuming Worker supplies trusted code. No executable function is persisted. */
+  protected createDispatcher(_id: string): CloudToolDispatcher | undefined { return undefined; }
+
+  /** Reserved for 4d. This slice does not emit durable events. */
+  protected onInvocationSettled(_id: string, _state: InvocationTerminalState): void {}
+
+  protected sessionRuntime(): SessionRuntime {
+    return this.#runtime ??= new SessionRuntime(this.ctx, this.env, {
+      createDispatcher: id => this.createDispatcher(id),
+      onInvocationSettled: (id, state) => this.onInvocationSettled(id, state),
+    });
+  }
+
+  async configureSession(input: unknown): Promise<Response> {
+    try { await this.sessionRuntime().configure(input); return Response.json({ configured: true }); }
+    catch (error) { return cloudErrorResponse(error); }
+  }
+
+  async readInvocation(id: string) {
+    await this.sessionRuntime().ready();
+    if (typeof id !== 'string' || !/^[a-f0-9]{64}$/.test(id)) throw new CloudDoError('CLOUD_REQUEST_INVALID');
+    return this.sessionRuntime().readInvocation(id);
+  }
 
   // Admission and credential preflight happen before even schema initialization.
   #harness(): Promise<Harness> {
-    return this.#harnessReady ??= this.ctx.blockConcurrencyWhile(async () => Harness.open(
-      await openDurableObjectStorage(this.ctx.storage),
-      { models: createPlatformModels(this.env), registry: createRegistry(),
-        settings: CLOUD_HARNESS_SETTINGS },
-      BACKGROUND_CONTEXT,
-    ));
+    return this.sessionRuntime().open();
   }
 
   async open() {
@@ -81,23 +96,7 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
   }
 
   async #admitText(text: string, selected?: PlatformProfileId): Promise<void> {
-    if (hasUserKeyShape(text)) throw new CloudDoError('CLOUD_USER_CREDENTIAL_REJECTED');
-    const credentials = platformCredentialReader(this.env);
-    for (const [id, profile] of Object.entries(PLATFORM_PROFILES)) {
-      let key: string | undefined;
-      try {
-        if (this.env[profile.binding] === undefined) continue;
-        key = await credentials.get(profile.secretName);
-      } catch {
-        // A broken unused profile does not disable a valid selected provider.
-        // Every valid configured key still gets the pre-storage text check.
-        if (selected && id !== selected) continue;
-        throw new CloudDoError('CLOUD_MODEL_CREDENTIAL_UNAVAILABLE');
-      }
-      const guard = new RollingLeakGuard(key!);
-      try { guard.push(text); guard.finish(); }
-      catch { throw new CloudDoError('CLOUD_USER_CREDENTIAL_REJECTED'); }
-    }
+    await admitCloudText(this.env, text, selected);
   }
 
   /** Passive native pi entries prove storage without starting a model or tool task. */
@@ -120,15 +119,20 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
   /** Binding/RPC-only. The consumer authorizes identity before obtaining this stub.
    * Errors are structured Responses so the same code/status survive DO RPC. */
   async submit(input: unknown): Promise<Response> {
+    let lease: ExecutionLease | undefined;
     try {
       const admitted = admitCloudSubmission(input);
       const profile = PLATFORM_PROFILES[admitted.profile];
       await platformCredentialReader(this.env).get(profile.secretName);
       // Check every configured platform key before input enters durable storage.
       await this.#admitText(admitted.instruction, admitted.profile);
-      const harness = await this.#harness();
+      const runtime = this.sessionRuntime();
+      const harness = await runtime.ready();
+      lease = runtime.reserve(admitted.profile);
       const conversation = await harness.createConversation({ ownership: { kind: 'ownerless' },
-        agent: { model: { provider: admitted.profile, modelId: profile.model }, tools: [] } }, BACKGROUND_CONTEXT);
+        agent: { model: { provider: admitted.profile, modelId: profile.model } } }, BACKGROUND_CONTEXT);
+      const execution = lease;
+      runtime.attach(execution, conversation.id);
       const events = await watchEvents(harness, conversation.id, BACKGROUND_CONTEXT);
       const encoder = new TextEncoder();
       // Native byte-stream backpressure/cancellation survives DO RPC transfer.
@@ -142,6 +146,7 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
       const cancel = () => {
         if (!aborting) {
           cancelled = true;
+          runtime.cancel(execution);
           // A disconnected consumer has no error channel. Do not expose a raw exception.
           aborting = conversation.abort(BACKGROUND_CONTEXT).finally(() => events.stop()).catch(() => undefined);
         }
@@ -170,6 +175,7 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
       };
       events.start(async batch => {
         for (const event of batch) {
+          if (event.type === 'message_start' && event.message.role === 'assistant') released = '';
           const text = projectText(textBlocks, event);
           if (text !== undefined) await publish(text);
           if (event.type === 'message_end') {
@@ -178,7 +184,7 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
               failure = modelFailureCode(message.errorMessage);
             }
           }
-          if (event.type === 'task_failed') failure ??= 'CLOUD_MODEL_REQUEST_FAILED';
+          if (event.type === 'task_failed') failure ??= runtime.fatal(conversation.id) ?? 'CLOUD_MODEL_REQUEST_FAILED';
         }
       });
       const run = async () => {
@@ -195,14 +201,22 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
             await publish(assistantText(last));
             if (last.stopReason === 'error') failure = modelFailureCode(last.errorMessage);
           }
+          failure = runtime.fatal(conversation.id) ?? failure;
           if (settled.status !== 'done' || stopped.reason === 'listener_error') failure ??= 'CLOUD_MODEL_REQUEST_FAILED';
           if (failure) await write({ type: 'error', code: failure, retryable: false });
           else await write({ type: 'done', conversationId: conversation.id });
-        } catch { await write({ type: 'error', code: 'CLOUD_MODEL_REQUEST_FAILED', retryable: false }); await events.stop(); }
-        finally { clearInterval(probe); if (!cancelled) { try { await writer.close(); } catch { void cancel(); } } }
+        } catch { await write({ type: 'error', code: runtime.fatal(conversation.id) ?? 'CLOUD_MODEL_REQUEST_FAILED', retryable: false }); await events.stop(); }
+        finally {
+          clearInterval(probe);
+          runtime.release(execution);
+          if (!cancelled) { try { await writer.close(); } catch { void cancel(); } }
+        }
       };
       this.ctx.waitUntil(run());
       return new Response(body.readable, { headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' } });
-    } catch (error) { return cloudErrorResponse(error); }
+    } catch (error) {
+      if (lease) this.sessionRuntime().release(lease);
+      return cloudErrorResponse(error);
+    }
   }
 }
