@@ -39,7 +39,7 @@ Agent 级共享状态以后用今天的三元键，单独一个小对象。4c �
 
 1. conversation 创建时带上已注册工具的 schema。`platform-provider.ts` 的请求体增加 `tools`。`messages()` 增加两类映射：assistant 的 `toolCall` 块序列化为 `tool_calls`；工具结果序列化为 `role:'tool'`。未知字段仍拒绝。
 2. `provider-fetch.ts` 按 `index` 组装 `tool_calls` 增量。后续片段通常不带 `id` 和 `name`（[OpenAI streaming](https://developers.openai.com/api/docs/guides/function-calling#streaming)）。只在一次调用组装完成后放行 `index`、`id`、`name`、`arguments`。其余 vendor 字段丢弃。未完成的调用在 EOF 拒绝。
-3. arguments 文本在释放给 pi 之前过 §8。`platform-provider.ts` 把组装好的调用转成 pi 的 tool-call 事件，并把 `finish_reason:'tool_calls'` 映射为原生工具轮。今天 `:128` 只接受 `stop`、`length`、`content_filter`。
+3. 组装好的 arguments 先解析，再按 §8 检查解析后的值，然后才释放给 pi。`platform-provider.ts` 把组装好的调用转成 pi 的 tool-call 事件，并把 `finish_reason:'tool_calls'` 映射为原生工具轮。今天 `:128` 只接受 `stop`、`length`、`content_filter`。
 4. pi 的 `startToolRound` 派发工具。SDK 的 `execute` 在同一次调用里 `await` inline 工具。结果回到下一轮模型输入，再次走 leak guard。`submit()` 只等 pi 的本轮 submission 结束再关流，不自己写第二套循环。
 
 **inline 判据：一次 DO 调用内能等完，且单次墙钟 ≤ 60 秒。** Aiphabee 现有工具都符合。`mode:'job'` 的语义在 §5。4c 注册即拒绝。
@@ -80,17 +80,17 @@ DO 会因部署、空闲和运行时更新重启。`#harness()`（`agent-do.ts:5
 
 **门外用一个共享的 recovery promise。** 新 `submit` 在 promise 完成前拒绝或等待。promise 失败则本次恢复失败，不重复派发。
 
-**先终止原生任务，再重放。** pi 的 `abort()` 和 `waitForIdle()` 会调用 `tasks.resume()`（`harness.js:63`）。`ToolTask.execute` 在 checkpoint 和当前策略都是 `safe` 时会自己重跑（`tool.js:68`）。因此恢复顺序是：
+**ledger 是唯一的重放路径。** pi 的 `abort()` 先调用 `tasks.resume()`（`harness.js:63-65`），然后 `abortConversation` 才写 `abortRequested`（`scheduler.js:178-190`）。在这段间隙里，若存储的策略和当前策略都是 `safe`，`ToolTask.execute` 会自己重跑（`tool.js:68-81`）。所以云端向 pi 注册的每个工具都是 `replay:'unsafe'`。D10 的 safe 清单只存在于 ledger。pi 遇到中断的工具时只会把它标为 interrupted，不会重跑。恢复顺序：
 
-1. 门内认领 ledger 行。
-2. 对旧 conversation 调用 `abort()`，等待 idle。这一步会让 pi 把未完成的 safe 工具标成中断，不让它进入自己的重跑。
-3. 从 DO storage 重建 §4 的派发上下文。缺上下文则该行 `failed`，不重放。
-4. 门外只按 ledger 认领重放工具函数。重放结果写 ledger。旧 conversation 标 `CLOUD_EXECUTION_INTERRUPTED`。
-5. 之后的 `submit` 才开新 conversation。新模型执行不恢复旧 submission。
+1. 门内认领 ledger 行。门内只做这一步。
+2. 门外：对旧 conversation 调用 `abort()`，再调用 `waitForIdle()`。`waitForIdle` 没有时间上限，所以第 2–4 步都不能放进 `blockConcurrencyWhile`。
+3. 门外：从 DO storage 重建 §4 的派发上下文。缺上下文则该行 `failed`，不重放。
+4. 门外：只按 ledger 认领重放工具函数。重放结果写 ledger。旧 conversation 标 `CLOUD_EXECUTION_INTERRUPTED`。
+5. recovery promise 完成后，`submit` 才开新 conversation。新模型执行不恢复旧 submission。
 
 **云端 `replay:'safe'` 初值（测试锁死）：** `load_financial_analysis_skill`，加上 §2 里 chat 会选中的非 IPO live 工具：`resolve_security`、`guarded_screen`、`search_f10_datasets`、`query_f10_dataset`、`get_security_profile`、`get_quote_snapshot`、`get_corporate_actions`、`get_financial_statements`、`get_financial_facts`、`get_financial_ratios`、`get_sdi_disclosures`、`get_directorate`、`get_ownership`、`get_related_warrants`。
 
-7 个 live IPO 工具可以执行，但始终 `unsafe`。本地 `engine.ts` 继续强制全 `unsafe`，不读这张表。
+这张表只写进 ledger 的 `replay` 列，不传给 pi 的 `ToolRegistration.replay`。7 个 live IPO 工具可以执行，但在 ledger 里始终是 `unsafe`。本地 `engine.ts` 继续强制全 `unsafe`，不读这张表。
 
 | 重启时的行 | 清单内 inline | 清单外，或任何 job 段 |
 |---|---|---|
@@ -113,7 +113,7 @@ D1 要求重启后的模型执行是新 conversation。重放只重跑工具函�
 复用 4b，不写第二套检测器：
 
 - 每个工具一份 strict schema，未知字段拒绝，不剥离。`admitCloudSubmission` 仍只收 `instruction` / `profile`，不拿它校验工具参数。
-- arguments 的释放点在 `provider-fetch.ts`，不在 SDK 包装器。pi 的 `streamResponse` 至多每 100ms 把 partial 写入 `pi.live`（`generation.js:271`）。`startToolRound` 在派发前就把 assistant entry 写入 SQLite（`generation.js:437`）。所以包装器看到参数时，参数已经落库。增量 arguments 在进入 pi 事件前先过 `hasUserKeyShape`，再对每个已配置平台 key 过 `RollingLeakGuard`。命中则丢弃未释放内容，抛 `CLOUD_MODEL_RESPONSE_REJECTED`，与 4b 相同。
+- arguments 的释放点在 `provider-fetch.ts`，不在 SDK 包装器。pi 的 `streamResponse` 至多每 100ms 把 partial 写入 `pi.live`（`generation.js:271`）。`startToolRound` 在派发前就把 assistant entry 写入 SQLite（`generation.js:437`）。所以包装器看到参数时，参数已经落库。检查对象是解析后的值，不是原始文本。pi 存的是解析后的对象，而 `RollingLeakGuard` 不解码 `\uXXXX`。模型可以用 `\u` 转义写出 key，原始文本能通过检查，解析后却会以明文落入 `pi_entries`。因此一个调用组装完整后，先 `JSON.parse` 它的 arguments。解析失败就拒绝这个调用。然后对解析结果里的每个字符串（对象的键和值都算）跑 `hasUserKeyShape`，再对每个已配置平台 key 跑 `RollingLeakGuard`。只把这个解析后的对象交给 pi，或者交一份不含转义的重新序列化文本。命中则丢弃未释放内容，抛 `CLOUD_MODEL_RESPONSE_REJECTED`，与 4b 相同。
 - 结果检查整份 envelope，含 `usage`、`error`、metadata 和 progress 文本。命中则丢弃未释放内容，固定 `CLOUD_MODEL_RESPONSE_REJECTED`。
 - 错误只返回固定码，不带 `cause`、stack、上游 body。key 不进 URL。工具函数拿不到 `this.env`。
 
@@ -126,12 +126,12 @@ D1 要求重启后的模型执行是新 conversation。重放只重跑工具函�
 ## 10. 实现步骤与测试
 
 1. **命名。** 增加 `sessionObjectName` / `getSessionObject`。测：四元组和三元组 digest 不同；嵌入分隔符不碰撞；未授权不能拿 stub。
-2. **清单与准入。** 测两件独立的事：D5 能力名、scaffold 名、无 resolver 的名字在准入时被拒绝，即使标成 `unsafe` 也不执行。7 个 IPO 名字准入通过，但重放成员测试断言它们是 `unsafe`。15 个初值名字是 `safe`。`mode:'job'` 注册被拒绝。本地 `engine.ts` 仍全 `unsafe`。
+2. **清单与准入。** 测两件独立的事：D5 能力名、scaffold 名、无 resolver 的名字在准入时被拒绝，即使标成 `unsafe` 也不执行。7 个 IPO 名字准入通过，但重放成员测试断言它们是 `unsafe`。15 个初值名字在 ledger 里是 `safe`。注册给 pi 的每个 `ToolRegistration` 都是 `replay:'unsafe'`。`mode:'job'` 注册被拒绝。本地 `engine.ts` 仍全 `unsafe`。
 3. **传输与循环。** 扩展 `platform-provider.ts`、`provider-fetch.ts` 和 `submit()`。测：交错的两个工具调用按 `index` 组装；拆开的 JSON escape 在组装后检查；EOF 时未完成调用被拒绝；`tool_calls` 以外的 vendor 字段不进 pi；`finish_reason:'tool_calls'` 进入原生工具轮；结果回到下一轮模型。
 4. **ledger 与 inline。** 测：同 id 并发只派发一次；两条 assistant entry 用同一个 call id 和相同参数，派发两次；同一 entry 改 toolName 得到 `CLOUD_TOOL_INVOCATION_CONFLICT`；`usage.credits` 缺失则失败；超过 48,000 字节不继续模型。另测：调用超过 60 秒、本轮超过 240 秒、客户端断线，这三种迟到结果都不进模型。
-5. **重启。** 测：`old count == 0` 认领后门外重放一次；连续两次重启后不再调用函数；一次重放超过 30 秒时 DO 不被重置，且新 `submit` 在 promise 完成前不开始；清单外调用次数不增加；旧 conversation 先 abort 再得到 `CLOUD_EXECUTION_INTERRUPTED`；pi 自己的 safe 重跑路径没有第二次调用。
+5. **重启。** 测：`old count == 0` 认领后门外重放一次；连续两次重启后不再调用函数；一次重放超过 30 秒时 DO 不被重置，且新 `submit` 在 promise 完成前不开始；清单外调用次数不增加；旧 conversation 先 abort 再得到 `CLOUD_EXECUTION_INTERRUPTED`。另一个确定性测试：在 `resume()` 和写 abort mark 之间注入停顿。断言 pi 的原生 ToolTask 把中断的清单内工具标为 interrupted，且工具函数总共只被调用一次，这一次来自 ledger 重放。再测：`waitForIdle` 一直挂起时，`blockConcurrencyWhile` 仍能在 30 秒内返回。
 6. **上限。** 测：第 2 个模型请求和第 5 个 fetch 得到 `CLOUD_TOOL_BUSY` 且未发出；第 9 个模型步和第 13 次工具调用停止循环。
-7. **泄漏与授权。** 测：arguments 增量在释放前被精确 key 和编码形式命中；命中后扫描全部 SQLite 行，包括 `pi_entries` 和 `pi.live`，key 不存在；envelope 的 metadata、progress 里的 key 同样不在任何行里；缺 readiness 或 principal 不匹配时不调用 resolver。
+7. **泄漏与授权。** 测：arguments 在释放前被精确 key 和编码形式命中；arguments 里有 `\uXXXX` 转义的 key，并且被拆到多个片段中，解析后仍被命中；arguments 不是合法 JSON 时整个调用被拒绝；命中后扫描全部 SQLite 行，包括 `pi_entries` 和 `pi.live`，key 不存在；envelope 的 metadata、progress 里的 key 同样不在任何行里；缺 readiness 或 principal 不匹配时不调用 resolver。
 
 负向测试：未知工具、清单外重放、digest 冲突、并发双派发、超限结果、第 5 路 fetch、key 形状参数、编码后的 key、D5 能力注册、`mode:'job'` 注册、3xx、非 SSE 工具响应被误送进 `provider-fetch`。
 
