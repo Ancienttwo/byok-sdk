@@ -1,5 +1,6 @@
 import { CloudDoError, type CloudDoErrorCode } from './errors';
 import type { CloudOperationGuard } from './input-guard';
+import { PLATFORM_MAX_OUTPUT_TOKENS, REQUEST_FRAMING_BYTES } from './platform-provider';
 
 export type InvocationState = 'accepted' | 'running' | 'succeeded' | 'failed' | 'aborted' | 'interrupted' | 'timed_out';
 export type InvocationTerminalState = Exclude<InvocationState, 'accepted' | 'running'>;
@@ -39,6 +40,10 @@ export interface ExecutionRow {
   deadlineAt: number;
   steps: number;
   tools: number;
+  inputTokens: number;
+  outputTokens: number;
+  credits: number;
+  sentRequests: number;
   fatalCode: CloudDoErrorCode | null;
   aborted: number;
 }
@@ -48,6 +53,7 @@ export interface InvocationFinishOptions {
   clientConnected?: boolean;
   /** Ledger recovery may settle after the old native conversation was aborted. */
   recovery?: boolean;
+  creditCap?: number;
 }
 
 export interface InvocationLedgerOptions {
@@ -99,6 +105,10 @@ export class InvocationLedger {
       const columns = new Set(this.storage.sql.exec<{ name: string }>('PRAGMA table_info(cloud_invocations)').toArray().map(row => row.name));
       for (const name of ['settledAt', 'settledEventSeq']) {
         if (!columns.has(name)) this.storage.sql.exec(`ALTER TABLE cloud_invocations ADD COLUMN ${name} INTEGER`);
+      }
+      const executionColumns = new Set(this.storage.sql.exec<{ name: string }>('PRAGMA table_info(cloud_executions)').toArray().map(row => row.name));
+      for (const name of ['inputTokens', 'outputTokens', 'credits', 'sentRequests']) {
+        if (!executionColumns.has(name)) this.storage.sql.exec(`ALTER TABLE cloud_executions ADD COLUMN ${name} INTEGER NOT NULL DEFAULT 0`);
       }
     });
   }
@@ -158,6 +168,13 @@ export class InvocationLedger {
       this.storage.sql.exec(`UPDATE cloud_invocations SET state=?,resultJson=?,errorCode=?
         WHERE invocationId=? AND attempt=? AND state IN ('accepted','running')`,
       settledState, settledState === 'succeeded' && result !== undefined ? JSON.stringify(result) : null, settledError, id, row.attempt);
+      const credits = (result?.usage as { credits?: unknown } | undefined)?.credits;
+      if (typeof credits === 'number' && Number.isSafeInteger(credits) && credits >= 0) {
+        this.storage.sql.exec('UPDATE cloud_executions SET credits=MIN(credits+?,9007199254740991) WHERE conversationId=?', credits, row.conversationId);
+        if (options.creditCap !== undefined && (this.execution(row.conversationId)?.credits ?? 0) > options.creditCap) {
+          this.failExecution(row.conversationId, 'CLOUD_BUDGET_EXCEEDED');
+        }
+      }
       if (settledError && fatalCodes.has(settledError)) this.failExecution(row.conversationId, settledError);
       changed = this.read(id)!;
       changed = this.#terminal(changed, options.recovery === true);
@@ -249,18 +266,36 @@ export class InvocationLedger {
     return undefined;
   }
 
-  countModel(conversationId: number, maxSteps = 8, now = Date.now()): ExecutionRow {
+  countModel(conversationId: number, maxSteps = 8, now = Date.now(),
+    budget?: { inputBytes: number; inputTokens: number; outputTokens: number }): ExecutionRow {
     const outcome = this.storage.transactionSync(() => {
       const row = this.execution(conversationId);
       if (!row) return { code: 'CLOUD_EXECUTION_INTERRUPTED' as const };
       const code = this.executionRejection(row, now) ?? (row.steps >= maxSteps ? 'CLOUD_STEP_LIMIT' : undefined);
       if (code) { this.failExecution(conversationId, code); return { code }; }
+      if (budget && (row.inputTokens + budget.inputBytes + REQUEST_FRAMING_BYTES > budget.inputTokens
+        || row.outputTokens + PLATFORM_MAX_OUTPUT_TOKENS > budget.outputTokens)) {
+        this.failExecution(conversationId, 'CLOUD_BUDGET_EXCEEDED');
+        return { code: 'CLOUD_BUDGET_EXCEEDED' as const };
+      }
       this.storage.sql.exec('UPDATE cloud_executions SET steps=steps+1 WHERE conversationId=?', conversationId);
       return { row: this.execution(conversationId)! };
     });
     // Throw outside the transaction so the fatal disposition remains durable.
     if (outcome.code) throw new CloudDoError(outcome.code);
     return outcome.row!;
+  }
+
+  addModelUsage(conversationId: number, input: number, output: number): void {
+    this.storage.sql.exec(`UPDATE cloud_executions SET inputTokens=MIN(inputTokens+?,9007199254740991),
+      outputTokens=MIN(outputTokens+?,9007199254740991) WHERE conversationId=?`, input, output, conversationId);
+  }
+
+  /** This mark records durable dispatch intent. It does not prove network receipt. */
+  markModelSent(conversationId: number): void {
+    const update = this.storage.sql.exec(`UPDATE cloud_executions SET sentRequests=sentRequests+1
+      WHERE conversationId=? AND sentRequests < steps`, conversationId);
+    if (update.rowsWritten === 0) throw new CloudDoError('CLOUD_MODEL_REQUEST_FAILED');
   }
 
   countTool(conversationId: number, taskId: string, maxTools = 12, now = Date.now()): ExecutionRow {

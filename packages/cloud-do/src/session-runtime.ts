@@ -1,15 +1,15 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { Context } from '@earendil-works/chord';
 import type { JsonObject } from '@earendil-works/pi-ai';
-import { Harness, ToolTask, createRegistry, defineExtension, hook, type ConversationId, type ToolExecutionApi, type ToolExecutionResult, type Storage, type Cursor } from '@earendil-works/pi-durable';
+import { Harness, ToolTask, createRegistry, defineExtension, hook, type AgentChange, type ConversationId, type ToolExecutionApi, type ToolExecutionResult, type Storage, type Cursor } from '@earendil-works/pi-durable';
 import { validateToolArguments } from '@earendil-works/pi-ai/utils/validation';
 import { CloudDoError, safeCloudError, type CloudDoErrorCode } from './errors';
 import { admitCloudPayload, prepareCloudGuard, type CloudOperationGuard } from './input-guard';
-import { CloudState } from './cloud-state';
+import { CloudState, CLOUD_CONTEXT_BYTES, runInputSeqs, type RunRow } from './cloud-state';
 import { InvocationLedger, type ExecutionRow, type InvocationRow, type InvocationTerminalState } from './invocation-ledger';
-import { createPlatformModels } from './platform-provider';
-import { platformCredentialReader, type PlatformProfileId } from './platform-credentials';
-import { CLOUD_LIMITS, admitSessionConfig, type CloudSessionConfig } from './session-config';
+import { createPlatformModels, type CloudModelAccount } from './platform-provider';
+import { PLATFORM_PROFILES, platformCredentialReader, type PlatformProfileId } from './platform-credentials';
+import { CLOUD_BUDGET, CLOUD_LIMITS, admitSessionConfig, type CloudSessionConfig } from './session-config';
 import { openDurableObjectStorage } from './storage';
 import { admitCloudDispatcher, dispatcherDigest, CLOUD_DOMAIN_ERROR_CODES, argsDigest, canonicalArgs, invocationId, replayForTool, type CloudToolDispatcher } from './tools';
 
@@ -34,11 +34,53 @@ export interface ExecutionLease {
   settled: boolean;
 }
 
+export interface CloudRenewRequest {
+  nativeRunId: number;
+  requestId: string | null;
+  kind: 'model' | 'tool';
+  toolName?: string;
+  recovery: boolean;
+}
+export type CloudRenewResult = { ok: true } | { ok: false; code: CloudDoErrorCode };
+export interface CloudRunSettlement {
+  nativeRunId: number;
+  requestId: string | null;
+  trigger: RunRow['trigger'];
+  state: 'completed' | 'failed' | 'interrupted';
+  errorCode: CloudDoErrorCode | null;
+  reservation: RunRow['reservation'];
+  admissionDigest: string | null;
+  admittedSeqs: readonly number[];
+  claimedSeqs: readonly number[];
+  usage: Readonly<{ steps: number; sentRequests: number; inputTokens: number; outputTokens: number; credits: number }>;
+}
+
+async function raceSignal<T>(work: Promise<T>, signal: AbortSignal, code: () => CloudDoErrorCode): Promise<T> {
+  let remove = () => {};
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    const abort = () => reject(new CloudDoError(code()));
+    signal.addEventListener('abort', abort, { once: true });
+    remove = () => signal.removeEventListener('abort', abort);
+    if (signal.aborted) abort();
+  });
+  try { return await Promise.race([work, cancelled]); }
+  finally { remove(); }
+}
+
+/** Bound consumer work even when it ignores the supplied signal. */
+export function raceLease<T>(work: Promise<T>, lease: ExecutionLease): Promise<T> {
+  return raceSignal(work, lease.controller.signal,
+    () => Date.now() >= lease.deadlineAt ? 'CLOUD_EXECUTION_TIMEOUT' : 'CLOUD_EXECUTION_ABORTED');
+}
+
 export interface RuntimeOptions {
   createDispatcher(id: string): CloudToolDispatcher | undefined;
   projectInvocation?(row: InvocationRow): { key: string; dataJson: string } | undefined;
   onCommit?(): void;
   onInvocationSettled?(id: string, state: InvocationTerminalState): void | Promise<void>;
+  instructions?(profile: PlatformProfileId): string | undefined;
+  renew?(request: CloudRenewRequest, signal: AbortSignal): CloudRenewResult | Promise<CloudRenewResult>;
+  settleRun?(run: CloudRunSettlement, signal: AbortSignal): void | Promise<void>;
 }
 
 export interface RunOutcome {
@@ -57,6 +99,7 @@ export class SessionRuntime {
   #recoveryGuard?: CloudOperationGuard;
   #repairRetrying = false;
   #repairing = false;
+  #settlementFlights = new Map<number, Promise<void>>();
   #initializing = false;
   #deferredSettlements: InvocationRow[] = [];
   #opened?: Promise<Harness>;
@@ -99,8 +142,12 @@ export class SessionRuntime {
   get recovering(): boolean { return !this.#recovered; }
   get activeLease(): ExecutionLease | undefined { return this.#active; }
   get hasLiveOwner(): boolean { return this.#active?.liveOwner === true; }
-  get busy(): boolean { return this.#active !== undefined; }
+  get busy(): boolean { return this.#active !== undefined || this.#repairing; }
   get repairRetrying(): boolean { return this.#repairRetrying; }
+  #schedulingBusy(): boolean { return this.hasLiveOwner || this.#repairing; }
+  #clearSettlementRetry(): void {
+    if (!this.#repairing && (!this.#active || this.hasLiveOwner)) this.#repairRetrying = false;
+  }
   prepareGuard(profile?: PlatformProfileId): Promise<CloudOperationGuard> { return prepareCloudGuard(this.env, profile); }
   #guard(): CloudOperationGuard {
     const guard = this.#active?.guard ?? this.#recoveryGuard;
@@ -183,7 +230,7 @@ export class SessionRuntime {
           this.#piStorage = await openDurableObjectStorage(this.state.storage);
           const harness = await Harness.open(this.#piStorage, {
             models: createPlatformModels(this.env, platformCredentialReader(this.env), {
-              beforeRequest: () => this.#beforeRequest(),
+              beforeRequest: info => this.#beforeRequest(info),
               admitToolCall: async (name, id, args) => {
                 try { await admitCloudPayload(this.env, { name, id, args }, this.#active?.profile); }
                 catch (error) {
@@ -236,10 +283,24 @@ export class SessionRuntime {
     return harness;
   }
 
+  agentChange(profile: PlatformProfileId, guard: CloudOperationGuard): AgentChange {
+    const model = { provider: profile, modelId: PLATFORM_PROFILES[profile].model };
+    try {
+      const text = this.options.instructions?.(profile);
+      if (text === undefined) return { model };
+      if (typeof text !== 'string' || !text.trim() || new TextEncoder().encode(text).length > CLOUD_CONTEXT_BYTES) {
+        throw new CloudDoError('CLOUD_REQUEST_INVALID');
+      }
+      guard.guardText(text);
+      return { model, instructions: text };
+    } catch { throw new CloudDoError('CLOUD_REQUEST_INVALID'); }
+  }
+
   reserve(profile: PlatformProfileId, guard?: CloudOperationGuard): ExecutionLease {
     if (!this.#recovered) throw new CloudDoError('CLOUD_EXECUTION_INTERRUPTED');
     if (this.#bootstrapFailure) throw new CloudDoError(this.#bootstrapFailure);
     if (this.#active) throw new CloudDoError('CLOUD_TOOL_BUSY');
+    if (this.#repairing) throw new CloudDoError('CLOUD_TOOL_BUSY');
     const lease: ExecutionLease = { profile, deadlineAt: Date.now() + this.#limits().turnTimeoutMs,
       controller: new AbortController(), connected: true, liveOwner: true, settled: false, guard };
     this.#active = lease;
@@ -278,7 +339,7 @@ export class SessionRuntime {
     lease.controller.abort();
   }
 
-  async release(lease: ExecutionLease): Promise<void> {
+  async release(lease: ExecutionLease, retryCount = 0): Promise<void> {
     clearTimeout(lease.timer);
     lease.liveOwner = false;
     if (this.#active !== lease) return;
@@ -294,8 +355,21 @@ export class SessionRuntime {
         this.cloud.settleRun(run.conversationId, { state: 'interrupted', errorCode: this.fatal(run.conversationId) ?? 'CLOUD_WAKE_EMPTY' }, this.#guard());
         this.#doorbell();
       }
+      // Consumer settlement owns no execution lease. A later run may start now.
       this.#active = undefined;
-      await this.cloud.rearmAlarm({ busy: false, repairRetrying: this.#repairRetrying });
+      try {
+        await this.#deliverSettlements(lease.guard);
+        this.#clearSettlementRetry();
+      }
+      catch (error) {
+        if (lease.trigger === 'wake') {
+          this.#repairRetrying = retryCount < 6;
+          this.cloud.setSchedulingState({ busy: this.#schedulingBusy(), repairRetrying: this.#repairRetrying });
+          throw error;
+        }
+        // Keep an existing retry generation. A submit without one creates its first alarm.
+      }
+      await this.cloud.rearmAlarm({ busy: this.#schedulingBusy(), repairRetrying: this.#repairRetrying });
     } catch (error) {
       if (this.#active === lease) {
         this.#repairRetrying = lease.trigger === 'wake';
@@ -313,8 +387,8 @@ export class SessionRuntime {
   recordSubmission(conversationId: number, submissionId: number): void {
     this.cloud.recordSubmission(conversationId, submissionId);
   }
-  markReservation(conversationId: number, reservation: 'pending' | 'held' | 'none'): void {
-    this.cloud.markReservation(conversationId, reservation, this.#guard());
+  markReservation(conversationId: number, reservation: 'pending' | 'held' | 'none', admission?: { digest: string; seqs: number[] }): void {
+    this.cloud.markReservation(conversationId, reservation, this.#guard(), Date.now(), admission);
     this.#doorbell();
   }
   claimWake(lease: ExecutionLease, seqs: readonly number[], profile = lease.profile) {
@@ -349,7 +423,13 @@ export class SessionRuntime {
   async repairPendingRuns(retryCount = 0): Promise<boolean> {
     if (this.hasLiveOwner || this.#repairing) return false;
     const runs = this.cloud.unsettledRuns();
-    if (!runs.length) return false;
+    if (!runs.length) {
+      if (this.#repairRetrying && !this.cloud.unackedRuns().length) {
+        this.#repairRetrying = false;
+        await this.cloud.rearmAlarm({ busy: this.busy, repairRetrying: false });
+      }
+      return false;
+    }
     this.#repairing = true;
     this.#repairRetrying = true;
     this.cloud.setSchedulingState({ busy: true, repairRetrying: true });
@@ -374,8 +454,8 @@ export class SessionRuntime {
       await this.#adjudicateRuns(harness);
       clearTimeout(this.#active?.timer);
       this.#active = undefined;
-      this.#repairRetrying = false;
-      await this.cloud.rearmAlarm({ busy: false, repairRetrying: false });
+      this.#repairRetrying = this.cloud.unackedRuns().length > 0;
+      await this.cloud.rearmAlarm({ busy: false, repairRetrying: this.#repairRetrying });
       return true;
     } catch (error) {
       // The platform's count belongs to this alarm generation. No SDK retry counter or timer.
@@ -389,6 +469,60 @@ export class SessionRuntime {
       this.#recoveryGuard = undefined;
       if (this.#active) this.#active.guard = undefined;
     }
+  }
+
+  async deliverSettlementsForAlarm(retryCount = 0, providedGuard?: CloudOperationGuard): Promise<void> {
+    let ownGuard: CloudOperationGuard | undefined;
+    try {
+      if (this.cloud.unackedRuns().length) {
+        const guard = providedGuard ?? (ownGuard = await this.prepareGuard());
+        await this.#deliverSettlements(guard);
+      }
+      this.#clearSettlementRetry();
+      await this.cloud.rearmAlarm({ busy: this.#schedulingBusy(), repairRetrying: this.#repairRetrying });
+    } catch (error) {
+      this.#repairRetrying = retryCount < 6;
+      this.cloud.setSchedulingState({ busy: this.#schedulingBusy(), repairRetrying: this.#repairRetrying });
+      throw safeCloudError(error);
+    } finally { ownGuard?.dispose(); }
+  }
+
+  async #deliverSettlements(guard?: CloudOperationGuard): Promise<void> {
+    const rows = this.cloud.unackedRuns();
+    if (!rows.length) return;
+    if (!guard) throw new CloudDoError('CLOUD_EXECUTION_INTERRUPTED');
+    const jobs = rows.map(row => {
+      const previous = this.#settlementFlights.get(row.conversationId);
+      if (previous) return previous;
+      const job = this.#deliverSettlement(row, guard).finally(() => this.#settlementFlights.delete(row.conversationId));
+      this.#settlementFlights.set(row.conversationId, job);
+      return job;
+    });
+    // Every run is tried. All hook deadlines run together, so a batch does not wait N times 60 s.
+    const results = await Promise.allSettled(jobs);
+    const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failures.length) throw safeCloudError(failures[0]!.reason);
+  }
+
+  async #deliverSettlement(row: RunRow, guard: CloudOperationGuard): Promise<void> {
+    if (this.cloud.readRun(row.conversationId)?.settlementAck !== 0) return;
+    const input: CloudRunSettlement = Object.freeze({
+      nativeRunId: row.conversationId, requestId: row.requestId, trigger: row.trigger,
+      state: row.state as CloudRunSettlement['state'], errorCode: row.errorCode,
+      reservation: row.reservation, admissionDigest: row.admissionDigest,
+      admittedSeqs: Object.freeze(JSON.parse(row.admittedSeqs ?? '[]') as number[]),
+      claimedSeqs: Object.freeze(this.cloud.claimedSeqs(row.conversationId)),
+      usage: Object.freeze({ steps: row.steps, sentRequests: row.sentRequests,
+        inputTokens: row.inputTokens, outputTokens: row.outputTokens, credits: row.credits }),
+    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CLOUD_LIMITS.callTimeoutMs);
+    try {
+      await raceSignal(Promise.resolve().then(() => this.options.settleRun?.(input, controller.signal)),
+        controller.signal, () => 'CLOUD_EXECUTION_TIMEOUT');
+      if (this.cloud.ackSettlement(row.conversationId, guard)) this.#doorbell();
+    } catch (error) { throw safeCloudError(error); }
+    finally { clearTimeout(timer); controller.abort(); }
   }
 
   async #adjudicateRuns(harness: Harness): Promise<void> {
@@ -490,13 +624,47 @@ export class SessionRuntime {
     return row?.configJson ? JSON.parse(row.configJson) as CloudSessionConfig : undefined;
   }
 
-  #beforeRequest(): void {
+  async #renew(request: CloudRenewRequest, signal: AbortSignal): Promise<void> {
+    const result = this.options.renew ? await this.options.renew(Object.freeze(request), signal) : { ok: true };
+    if (!result || typeof result !== 'object' || typeof result.ok !== 'boolean') throw new CloudDoError('CLOUD_MODEL_REQUEST_FAILED');
+    if (!result.ok) throw safeCloudError(new Error((result as {code: string}).code));
+  }
+
+  async #beforeRequest(info: { inputBytes: number }): Promise<CloudModelAccount> {
     if (!this.#recovered || !this.#active?.liveOwner || this.#active.conversationId === undefined) {
       throw new CloudDoError('CLOUD_EXECUTION_INTERRUPTED');
     }
-    const fatal = this.fatal(this.#active.conversationId);
+    const lease = this.#active;
+    const id = lease.conversationId!;
+    const fatal = this.fatal(id);
     if (fatal) throw new CloudDoError(fatal);
-    this.ledger.countModel(this.#active.conversationId, this.#limits().modelSteps);
+    try {
+      await raceLease(Promise.resolve().then(() => this.#renew({ nativeRunId: id,
+        requestId: this.cloud.readRun(id)?.requestId ?? null, kind: 'model', recovery: false }, lease.controller.signal)), lease);
+      if (this.#active !== lease || !lease.liveOwner) throw new CloudDoError('CLOUD_EXECUTION_INTERRUPTED');
+      const stopped = this.fatal(id);
+      if (stopped) throw new CloudDoError(stopped);
+      this.ledger.countModel(id, this.#limits().modelSteps, Date.now(), {
+        inputBytes: info.inputBytes, inputTokens: CLOUD_BUDGET.inputTokens, outputTokens: CLOUD_BUDGET.outputTokens,
+      });
+    } catch (error) { throw new CloudDoError(this.#recordFatal(id, safeCloudError(error).code)); }
+    const seen = { input: 0, output: 0 };
+    const record = (work: () => void): void => {
+      try { work(); }
+      catch { throw new CloudDoError(this.#recordFatal(id, 'CLOUD_MODEL_REQUEST_FAILED')); }
+    };
+    return {
+      sent: () => record(() => this.ledger.markModelSent(id)),
+      usage: usage => record(() => {
+        const input = usage.input ?? seen.input;
+        const output = usage.output ?? seen.output;
+        if (!Number.isSafeInteger(input) || !Number.isSafeInteger(output) || input < seen.input || output < seen.output) {
+          throw new CloudDoError('CLOUD_MODEL_RESPONSE_REJECTED');
+        }
+        if (input !== seen.input || output !== seen.output) this.ledger.addModelUsage(id, input - seen.input, output - seen.output);
+        seen.input = input; seen.output = output;
+      }),
+    };
   }
 
   #requestSignal(native?: AbortSignal): AbortSignal {
@@ -521,10 +689,29 @@ export class SessionRuntime {
       await this.#runInvocation(row, undefined, true).catch(() => undefined);
     }
     await this.#adjudicateRuns(harness);
+    await this.#backfillTurns(harness);
     await this.cloud.rearmAlarm({ busy: false, repairRetrying: false });
     this.#recovered = true;
     this.#recoveryGuard?.dispose();
     this.#recoveryGuard = undefined;
+  }
+
+  async #backfillTurns(harness: Harness): Promise<void> {
+    let before = Number.MAX_SAFE_INTEGER;
+    for (;;) {
+      const runs = this.cloud.pendingBackfills(before);
+      if (!runs.length) return;
+      for (const run of runs) {
+        let seqs: number[];
+        try {
+          const conversation = await harness.conversation(run.conversationId as ConversationId, BACKGROUND_CONTEXT);
+          const view = conversation ? await conversation.context(BACKGROUND_CONTEXT) : undefined;
+          seqs = view ? runInputSeqs(view.entries) : [];
+        } catch { continue; } // Keep this run pending. A later boot retries its native read.
+        this.cloud.applyBackfill(run.conversationId, seqs);
+      }
+      before = runs[runs.length - 1]!.conversationId;
+    }
   }
 
   async #execute(name: string, args: Record<string, unknown>, api: ToolExecutionApi, context: Context): Promise<ToolExecutionResult> {
@@ -633,6 +820,23 @@ export class SessionRuntime {
       await admitCloudPayload(this.env, args, lease?.profile);
       if (Date.now() >= deadline) throw new CloudDoError(this.#timeoutCode(row.conversationId));
       signal.throwIfAborted();
+      const cancelled = new Promise<never>((_resolve, reject) => {
+        const abort = () => reject(new CloudDoError(Date.now() >= deadline
+          ? Date.now() >= (this.ledger.execution(row.conversationId)?.deadlineAt ?? Infinity)
+            ? 'CLOUD_EXECUTION_TIMEOUT' : 'CLOUD_TOOL_TIMEOUT'
+          : 'CLOUD_EXECUTION_ABORTED'));
+        signal.addEventListener('abort', abort, { once: true });
+        removeAbort = () => signal.removeEventListener('abort', abort);
+        if (signal.aborted) abort();
+      });
+      timer = setTimeout(() => controller.abort(), Math.max(0, deadline - Date.now()));
+      await Promise.race([Promise.resolve().then(() => this.#renew({ nativeRunId: row.conversationId,
+        requestId: this.cloud.readRun(row.conversationId)?.requestId ?? null, kind: 'tool',
+        toolName: row.toolName, recovery }, signal)), cancelled]);
+      if (Date.now() >= deadline) throw new CloudDoError(this.#timeoutCode(row.conversationId));
+      signal.throwIfAborted();
+      if (!recovery && this.fatal(row.conversationId)) throw new CloudDoError(this.fatal(row.conversationId)!);
+      if ((this.ledger.execution(row.conversationId)?.credits ?? 0) > CLOUD_BUDGET.credits) throw new CloudDoError('CLOUD_BUDGET_EXCEEDED');
       const usesFetchSlot = this.#dispatcher.tools.find(tool => tool.name === row.toolName)?.execution !== 'pure';
       if (usesFetchSlot && this.#inline >= this.#limits().inlineFetches) throw new CloudDoError('CLOUD_TOOL_BUSY');
       if (usesFetchSlot) this.#inline++;
@@ -656,16 +860,6 @@ export class SessionRuntime {
       });
       // A dispatcher that ignores cancellation cannot release a still-running fetch slot early.
       void work.finally(() => { if (usesFetchSlot) this.#inline--; }).catch(() => undefined);
-      const cancelled = new Promise<never>((_resolve, reject) => {
-        const abort = () => reject(new CloudDoError(Date.now() >= deadline
-          ? Date.now() >= (this.ledger.execution(row.conversationId)?.deadlineAt ?? Infinity)
-            ? 'CLOUD_EXECUTION_TIMEOUT' : 'CLOUD_TOOL_TIMEOUT'
-          : 'CLOUD_EXECUTION_ABORTED'));
-        signal.addEventListener('abort', abort, { once: true });
-        removeAbort = () => signal.removeEventListener('abort', abort);
-        if (signal.aborted) abort();
-      });
-      timer = setTimeout(() => controller.abort(), Math.max(0, deadline - Date.now()));
       let result = await Promise.race([work, cancelled]);
       try {
         await admitCloudPayload(this.env, result, lease?.profile);
@@ -707,7 +901,7 @@ export class SessionRuntime {
       }
       if (new TextEncoder().encode(JSON.stringify(result)).length > this.#limits().resultBytes) throw new CloudDoError('CLOUD_TOOL_RESULT_LIMIT');
       const settled = this.ledger.finish(row.invocationId, 'succeeded', result, undefined, Date.now(), {
-        attempt: row.attempt, clientConnected: recovery || lease?.connected === true, recovery,
+        attempt: row.attempt, clientConnected: recovery || lease?.connected === true, recovery, creditCap: CLOUD_BUDGET.credits,
       });
       if (!settled) throw new CloudDoError('CLOUD_TOOL_FAILED');
       if (settled.attempt !== row.attempt) throw new StaleInvocationAttempt();

@@ -16,6 +16,8 @@ export const CLOUD_LIMITS: Readonly<CloudLimits> = Object.freeze({
   callTimeoutMs: 60_000, turnTimeoutMs: 240_000, resultBytes: 48_000,
 });
 
+export const CLOUD_BUDGET = Object.freeze({ credits: 100, inputTokens: 128_000, outputTokens: 32_768 });
+
 export interface CloudSessionConfig extends Omit<CloudDispatchContext, 'call' | 'lookup'> {
   readonly limits: CloudLimits;
 }
