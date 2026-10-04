@@ -528,18 +528,18 @@ P1: `AgentDO` keeps binding/RPC entrypoints. `SessionRuntime` owns the shared le
 P2: enqueue admission and operation guard precede an atomic row/event/alarm write. A wake reserves the slot, persists pending admission intent, revalidates the claim, creates native input on its new conversation, and settles committed pi output with events and delivery links.
 P3: the implementation keeps the ledger as the only tool replay path. It preserves the model send gate, frozen D10 list and original public context fields. It adds A/C/F/G only. B/D/E, jobs, remote MCP and version changes remain outside this slice.
 
-The implementation remains uncommitted for the required read-only Claude review.
+The implementation was committed after the read-only Claude pre-commit review and recheck (VERDICT: APPROVE).
 
 Verification:
 
 - `bun ci`: exit 0. The frozen graph installed 445 packages.
 - `bun run --cwd packages/cloud-do typecheck`: exit 0.
-- `bun run --cwd packages/cloud-do test`: exit 0. Vitest: 15 files, 684 passed. Node: 3 passed. Total: 687 passed, 0 failed, 0 skipped.
+- `bun run --cwd packages/cloud-do test`: exit 0. Final (after the review follow-up): Vitest 16 files, 690 passed; Node 3 passed. Total: 693 passed, 0 failed, 0 skipped.
 - The real alarm proof observed retry counts 0 through 6, then a new trigger repaired the original paid run. Provider calls stayed at 1.
 - The real event stream reached EOF at 110,005 ms. No external request was made.
 - Root `build`, `typecheck`, `test`, `check:api-surface` and `check:version-authority`: exit 0. Root tests use the existing `BYOK_TEST_BUN_BIN` and `BYOK_REQUIRE_BUN=1` strict gate to execute Bun suites. Existing platform-specific skips remain; this slice adds none.
 - The final self-review covers changed and new source, fixtures and assertions. The original test assertion files are unchanged. Existing fixture edits only supply the operation guard, finalize their test execution, and use public readback for the exact engine-owned alarm metadata table. No timeout or version changed.
-- `git diff --check`: exit 0. No B/D/E, jobs, remote MCP, public API break, plan file, commit or push is added.
+- `git diff --check`: exit 0. No B/D/E, jobs, remote MCP, public API break or plan file is added.
 
 The local checks do not replace the required independent Claude review or a later live provider/consumer integration acceptance.
 
