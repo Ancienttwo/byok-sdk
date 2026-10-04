@@ -17,7 +17,7 @@
   The npm physical root count has not been re-measured.
 
 - **Breaking (client)** — Codex now uses app-server 0.159.2 with the vendored
-  OAR `ef893ac` kernel/driver (Apache-2.0), replacing the exec path. The adapter
+  OAR 0.18.0 `1775b57` kernel/driver (Apache-2.0), replacing the exec path. The adapter
   is YOLO-only: `readonly` and `network:false` are no longer supported;
   detection adds `app_server_unavailable` and `runtime_version_unsupported`
   refusal reasons. Claude `confirm` and the `byok-approval-mcp` bin are removed;

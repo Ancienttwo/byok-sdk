@@ -1,8 +1,10 @@
 import type { CodexRecord } from '../adapters/codex/projection';
 import type { spawnOwnedLineProcess } from './owned-line-process';
 export interface CodexControl {
-  response: { body: { kind: string; code?: string; reason?: string } };
+  // ControlResult also permits an exit response with a numeric or null code.
+  response: { body: { kind: string; code?: string | number | null; reason?: string } };
 }
+/** OAR 0.18.0 Codex always implements steer. The bridge retains this required member. */
 export interface RawCodexSession {
   readonly id: string;
   prompt(input: string): Promise<CodexControl>;
