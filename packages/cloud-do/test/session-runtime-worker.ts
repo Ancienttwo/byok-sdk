@@ -156,9 +156,11 @@ export class SessionAuditDO extends AgentDO {
 
   async dump(): Promise<Record<string, unknown[]>> {
     const tables = this.ctx.storage.sql.exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").toArray();
-    return Object.fromEntries(tables.map(({ name }) => [name, this.ctx.storage.sql.exec(`SELECT * FROM "${name.replaceAll('"', '""')}"`).toArray().map(row => Object.fromEntries(
+    const audit = Object.fromEntries(tables.filter(({ name }) => name !== '_cf_METADATA').map(({ name }) => [name, this.ctx.storage.sql.exec(`SELECT * FROM "${name.replaceAll('"', '""')}"`).toArray().map(row => Object.fromEntries(
       Object.entries(row).map(([column, value]) => [column, value instanceof ArrayBuffer ? { utf8: new TextDecoder().decode(value) } : value]),
     ))]));
+    return tables.some(({ name }) => name === '_cf_METADATA')
+      ? { ...audit, _cf_ALARM_READBACK: [{ scheduledTime: await this.ctx.storage.getAlarm() }] } : audit;
   }
 
   async openRecovery(withRace: boolean | 'idle' = false): Promise<Record<string, unknown>> {
@@ -215,8 +217,10 @@ export class SessionAuditDO extends AgentDO {
     let id: string | undefined;
     if (input.ledger && seeded.assistantEntryId) {
       id = await invocationId(conversation.id, seeded.assistantEntryId, callId);
+      const guard = await runtime.prepareGuard();
       runtime.ledger.begin({ invocationId: id, sessionId: 'fixture-session', conversationId: conversation.id, assistantEntryId: seeded.assistantEntryId, toolCallId: callId,
-        toolName: name, argsDigest: await argsDigest(name, args), argsJson: canonicalArgs(args), replay: replayForTool(name), deadlineAt });
+        toolName: name, argsDigest: await argsDigest(name, args), argsJson: canonicalArgs(args), replay: replayForTool(name), deadlineAt }, guard);
+      guard.dispose();
       if (input.replayCount) this.ctx.storage.sql.exec('UPDATE cloud_invocations SET replayCount=? WHERE invocationId=?', input.replayCount, id);
     }
     return { conversationId: conversation.id, taskId: seeded.taskId, invocationId: id, phase: input.phase };
@@ -253,7 +257,7 @@ export class SessionAuditDO extends AgentDO {
   async gate(code: CloudDoErrorCode): Promise<Record<string, unknown>> {
     const runtime = this.sessionRuntime();
     const harness = await runtime.ready();
-    const lease = runtime.reserve('zai_openai');
+    const lease = runtime.reserve('zai_openai', await runtime.prepareGuard('zai_openai'));
     try {
       const conversation = await harness.createConversation({ ownership: { kind: 'ownerless' }, agent: { model: { provider: 'zai_openai', modelId: PLATFORM_PROFILES.zai_openai.model } } }, context);
       runtime.attach(lease, conversation.id);
@@ -263,7 +267,7 @@ export class SessionAuditDO extends AgentDO {
       await conversation.waitForIdle(context);
       const view = await conversation.context(context);
       return { result, entries: view.entries, liveSignal: !lease.controller.signal.aborted, inspection: await harness.inspect(context), dump: await this.dump() };
-    } finally { runtime.release(lease); }
+    } finally { await runtime.settle(lease, { state: 'failed', errorCode: code }); await runtime.release(lease); }
   }
 }
 

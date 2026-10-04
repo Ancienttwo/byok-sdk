@@ -61,3 +61,62 @@ export async function admitCloudPayload(env: Readonly<Record<string, unknown>>, 
   };
   await visit(value, 0);
 }
+
+/** Keys belong to one operation. Dispose the guard when that operation ends. */
+export interface CloudOperationGuard {
+  guardText(text: string): void;
+  /** Decode first. Check every key and value before admitted re-serialization. */
+  guardPayload(dataJson: string): string;
+  dispose(): void;
+}
+export async function prepareCloudGuard(env: Readonly<Record<string, unknown>>, selected?: PlatformProfileId): Promise<CloudOperationGuard> {
+  if (selected !== undefined && (typeof selected !== 'string' || !Object.hasOwn(PLATFORM_PROFILES, selected))) throw new CloudDoError('CLOUD_REQUEST_INVALID');
+  const credentials = platformCredentialReader(env);
+  const keys: string[] = [];
+  for (const [id, profile] of Object.entries(PLATFORM_PROFILES)) {
+    try {
+      if (env[profile.binding] === undefined && id !== selected) continue;
+      keys.push(await credentials.get(profile.secretName));
+    }
+    catch {
+      // Preserve 4b isolation. Only an explicit selected profile permits this exception.
+      if (selected && id !== selected) continue;
+      keys.length = 0;
+      throw new CloudDoError('CLOUD_MODEL_CREDENTIAL_UNAVAILABLE');
+    }
+  }
+  let disposed = false;
+  const guardText = (text: string): void => {
+    if (disposed || typeof text !== 'string') throw new CloudDoError('CLOUD_REQUEST_INVALID');
+    if (hasUserKeyShape(text)) throw new CloudDoError('CLOUD_USER_CREDENTIAL_REJECTED');
+    for (const key of keys) {
+      const guard = new RollingLeakGuard(key);
+      try { guard.push(text); guard.finish(); }
+      catch { throw new CloudDoError('CLOUD_USER_CREDENTIAL_REJECTED'); }
+    }
+  };
+  return {
+    guardText,
+    guardPayload(dataJson) {
+      if (disposed || typeof dataJson !== 'string') throw new CloudDoError('CLOUD_REQUEST_INVALID');
+      let value: unknown;
+      try { value = JSON.parse(dataJson); }
+      catch { throw new CloudDoError('CLOUD_REQUEST_INVALID'); }
+      let nodes = 0;
+      const visit = (item: unknown, depth: number): void => {
+        if (++nodes > 10_000 || depth > 32) throw new CloudDoError('CLOUD_REQUEST_INVALID');
+        if (typeof item === 'string') { guardText(item); return; }
+        if (item === null || typeof item === 'boolean' || (typeof item === 'number' && Number.isFinite(item))) return;
+        if (!item || typeof item !== 'object') throw new CloudDoError('CLOUD_REQUEST_INVALID');
+        if (Array.isArray(item)) { for (const field of item) visit(field, depth + 1); }
+        else {
+          if (Object.getPrototypeOf(item) !== Object.prototype && Object.getPrototypeOf(item) !== null) throw new CloudDoError('CLOUD_REQUEST_INVALID');
+          for (const [key, field] of Object.entries(item)) { visit(key, depth + 1); visit(field, depth + 1); }
+        }
+      };
+      visit(value, 0);
+      return JSON.stringify(value);
+    },
+    dispose() { keys.length = 0; disposed = true; },
+  };
+}

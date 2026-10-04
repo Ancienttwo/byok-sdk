@@ -1,11 +1,12 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { Context } from '@earendil-works/chord';
 import type { JsonObject } from '@earendil-works/pi-ai';
-import { Harness, ToolTask, createRegistry, defineExtension, hook, type ConversationId, type ToolExecutionApi, type ToolExecutionResult } from '@earendil-works/pi-durable';
+import { Harness, ToolTask, createRegistry, defineExtension, hook, type ConversationId, type ToolExecutionApi, type ToolExecutionResult, type Storage, type Cursor } from '@earendil-works/pi-durable';
 import { validateToolArguments } from '@earendil-works/pi-ai/utils/validation';
 import { CloudDoError, safeCloudError, type CloudDoErrorCode } from './errors';
-import { admitCloudPayload } from './input-guard';
-import { InvocationLedger, type InvocationRow, type InvocationTerminalState } from './invocation-ledger';
+import { admitCloudPayload, prepareCloudGuard, type CloudOperationGuard } from './input-guard';
+import { CloudState } from './cloud-state';
+import { InvocationLedger, type ExecutionRow, type InvocationRow, type InvocationTerminalState } from './invocation-ledger';
 import { createPlatformModels } from './platform-provider';
 import { platformCredentialReader, type PlatformProfileId } from './platform-credentials';
 import { CLOUD_LIMITS, admitSessionConfig, type CloudSessionConfig } from './session-config';
@@ -31,21 +32,42 @@ class StaleInvocationAttempt extends CloudDoError {
 
 export interface ExecutionLease {
   conversationId?: number;
+  trigger?: 'submit' | 'wake';
   readonly profile: PlatformProfileId;
   readonly deadlineAt: number;
   readonly controller: AbortController;
   connected: boolean;
   timer?: ReturnType<typeof setTimeout>;
+  guard?: CloudOperationGuard;
+  liveOwner: boolean;
+  settled: boolean;
 }
 
-interface RuntimeOptions {
+export interface RuntimeOptions {
   createDispatcher(id: string): CloudToolDispatcher | undefined;
+  projectInvocation?(row: InvocationRow): { key: string; dataJson: string } | undefined;
+  onCommit?(): void;
   onInvocationSettled?(id: string, state: InvocationTerminalState): void | Promise<void>;
+}
+
+export interface RunOutcome {
+  state: 'completed' | 'failed' | 'interrupted';
+  errorCode?: CloudDoErrorCode;
+  text?: string;
+  entryId?: number;
+  requeue?: boolean;
 }
 
 /** One physical DO owns this runtime. Native pi owns all model and task scheduling. */
 export class SessionRuntime {
   readonly ledger: InvocationLedger;
+  readonly cloud: CloudState;
+  #piStorage?: Storage;
+  #recoveryGuard?: CloudOperationGuard;
+  #repairRetrying = false;
+  #repairing = false;
+  #initializing = false;
+  #deferredSettlements: InvocationRow[] = [];
   #opened?: Promise<Harness>;
   #recovery?: Promise<void>;
   #recovered = false;
@@ -60,10 +82,47 @@ export class SessionRuntime {
 
   constructor(private readonly state: DurableObjectState, private readonly env: Readonly<Record<string, unknown>>,
     private readonly options: RuntimeOptions) {
-    this.ledger = new InvocationLedger(state.storage);
+    this.cloud = new CloudState(state.storage);
+    this.ledger = new InvocationLedger(state.storage, {
+      started: (row, guard) => {
+        this.cloud.appendEvent({ eventKey: `tool:${row.invocationId}:started`, type: 'tool.started', conversationId: row.conversationId,
+          ref: row.invocationId, data: { invocationId: row.invocationId, toolName: row.toolName, state: row.state } }, guard ?? this.#guard());
+      },
+      startedCommitted: () => this.#doorbell(),
+      terminal: (row, recovery) => {
+        const guard = this.#guard();
+        this.cloud.appendEvent({ eventKey: `tool:${row.invocationId}:settled`, type: 'tool.settled', conversationId: row.conversationId,
+          ref: row.invocationId, data: { invocationId: row.invocationId, state: row.state, errorCode: row.errorCode, late: recovery } }, guard);
+        this.cloud.projectInvocation(row, this.options.projectInvocation, guard);
+      },
+      committed: row => {
+        if (this.#initializing) this.#deferredSettlements.push(row);
+        else this.#notifyCommitted(row);
+      },
+    });
   }
 
   get recovering(): boolean { return !this.#recovered; }
+  get activeLease(): ExecutionLease | undefined { return this.#active; }
+  get hasLiveOwner(): boolean { return this.#active?.liveOwner === true; }
+  get busy(): boolean { return this.#active !== undefined; }
+  get repairRetrying(): boolean { return this.#repairRetrying; }
+  prepareGuard(profile?: PlatformProfileId): Promise<CloudOperationGuard> { return prepareCloudGuard(this.env, profile); }
+  #guard(): CloudOperationGuard {
+    const guard = this.#active?.guard ?? this.#recoveryGuard;
+    if (!guard) throw new CloudDoError('CLOUD_EXECUTION_INTERRUPTED');
+    return guard;
+  }
+  #doorbell(): void { try { this.options.onCommit?.(); } catch { /* Doorbells are advisory. */ } }
+  #notifyCommitted(row: InvocationRow): void {
+    this.#doorbell();
+    // A post-commit hook never enters an execution's catch path.
+    void Promise.resolve().then(() => this.options.onInvocationSettled?.(row.invocationId, row.state as InvocationTerminalState)).catch(() => undefined);
+  }
+  #flushSettlements(): void {
+    this.#initializing = false;
+    for (const row of this.#deferredSettlements.splice(0)) this.#notifyCommitted(row);
+  }
 
   /** Binding/RPC callers authorize the session before calling this immutable configuration operation. */
   async configure(input: unknown): Promise<void> {
@@ -85,102 +144,134 @@ export class SessionRuntime {
     });
   }
 
-  open(): Promise<Harness> {
+  open(selected?: PlatformProfileId): Promise<Harness> {
     if (!this.#opened) {
-      const initialized = this.state.blockConcurrencyWhile(async () => {
-        this.ledger.ensureSchema();
-        this.#sessionSchema();
-        this.#config = this.#storedConfig();
-        if (!this.#config && this.ledger.pending().length) this.#bootstrapFailure = 'CLOUD_TOOL_NOT_AVAILABLE';
-        if (this.#config) {
-          this.#config = admitSessionConfig(this.#config);
-          this.#dispatcher = this.options.createDispatcher(this.#config.dispatcherId);
-          if (!this.#dispatcher) this.#bootstrapFailure = 'CLOUD_TOOL_NOT_AVAILABLE';
-          else {
-            admitCloudTools(this.#dispatcher.tools);
-            await this.#guardToolMetadata(this.#dispatcher);
-          }
-        }
-        const registry = createRegistry();
-        const tools = this.#dispatcher?.tools.map(tool => ({ name: tool.name, description: tool.description,
-          parameters: tool.parameters, replay: 'unsafe' as const,
-          outputLimits: { maxBytes: CLOUD_LIMITS.resultBytes, maxLines: CLOUD_LIMITS.resultBytes },
-          execute: (args: Record<string, unknown>, api: ToolExecutionApi, context: Context) => this.#execute(tool.name, args, api, context),
-        })) ?? [];
-        registry.install(defineExtension({ name: 'cloud-session-tools', tools,
-          hooks: [hook(ToolTask, { beforeTool: async (_call, api) => {
-            if (this.#stale.has(api.conversationId)) return { block: 'CLOUD_EXECUTION_INTERRUPTED' };
-            try { this.ledger.countTool(api.conversationId, String(api.taskId), this.#limits().toolCalls); }
-            catch (error) {
-              const code = safeCloudError(error).code;
-              this.#recordFatal(api.conversationId, code);
-              return { block: code };
+      // Credential reads must finish before entering the bounded initialization gate.
+      const initialized = prepareCloudGuard(this.env, selected).then(guard => {
+        this.#recoveryGuard = guard;
+        this.#initializing = true;
+        return this.state.blockConcurrencyWhile(async () => {
+          this.ledger.ensureSchema();
+          this.cloud.ensureSchema();
+          this.#sessionSchema();
+          this.#config = this.#storedConfig();
+          if (!this.#config && this.ledger.pending().length) this.#bootstrapFailure = 'CLOUD_TOOL_NOT_AVAILABLE';
+          if (this.#config) {
+            this.#config = admitSessionConfig(this.#config);
+            this.#dispatcher = this.options.createDispatcher(this.#config.dispatcherId);
+            if (!this.#dispatcher) this.#bootstrapFailure = 'CLOUD_TOOL_NOT_AVAILABLE';
+            else {
+              admitCloudTools(this.#dispatcher.tools);
+              const metadata = this.#dispatcher.tools.map(({ name, description, parameters }) => ({ name, description, parameters }));
+              guard.guardPayload(JSON.stringify(metadata));
             }
-          } })],
-        }));
-        const harness = await Harness.open(await openDurableObjectStorage(this.state.storage), {
-          models: createPlatformModels(this.env, platformCredentialReader(this.env), {
-            beforeRequest: () => this.#beforeRequest(),
-            admitToolCall: async (name, id, args) => {
-              try { await admitCloudPayload(this.env, { name, id, args }, this.#active?.profile); }
+          }
+          const registry = createRegistry();
+          const tools = this.#dispatcher?.tools.map(tool => ({ name: tool.name, description: tool.description,
+            parameters: tool.parameters, replay: 'unsafe' as const,
+            outputLimits: { maxBytes: CLOUD_LIMITS.resultBytes, maxLines: CLOUD_LIMITS.resultBytes },
+            execute: (args: Record<string, unknown>, api: ToolExecutionApi, context: Context) => this.#execute(tool.name, args, api, context),
+          })) ?? [];
+          registry.install(defineExtension({ name: 'cloud-session-tools', tools,
+            hooks: [hook(ToolTask, { beforeTool: async (_call, api) => {
+              if (this.#stale.has(api.conversationId)) return { block: 'CLOUD_EXECUTION_INTERRUPTED' };
+              try { this.ledger.countTool(api.conversationId, String(api.taskId), this.#limits().toolCalls); }
               catch (error) {
-                if (error instanceof CloudDoError && error.code === 'CLOUD_USER_CREDENTIAL_REJECTED') {
-                  throw new CloudDoError('CLOUD_MODEL_RESPONSE_REJECTED');
-                }
-                throw error;
+                const code = safeCloudError(error).code;
+                this.#recordFatal(api.conversationId, code);
+                return { block: code };
               }
-              const tool = this.#dispatcher?.tools.find(tool => tool.name === name);
-              if (!tool) throw new CloudDoError('CLOUD_TOOL_NOT_AVAILABLE');
-              try { validateToolArguments(tool, { type: 'toolCall', id, name, arguments: args as JsonObject }); }
-              catch { throw new CloudDoError('CLOUD_TOOL_ARGUMENT_INVALID'); }
-            },
-            requestSignal: signal => this.#requestSignal(signal),
-          }), registry, settings: CLOUD_HARNESS_SETTINGS,
-        }, BACKGROUND_CONTEXT);
-        const inspection = await harness.inspect(BACKGROUND_CONTEXT);
-        this.#stale = new Set([...inspection.tasks.map(task => task.record.conversationId),
-          ...inspection.submissions.map(submission => submission.conversationId)]);
-        this.state.storage.sql.exec('UPDATE cloud_session SET staleJson=? WHERE id=1', JSON.stringify([...this.#stale]));
-        const replay = this.ledger.claimRecovery();
-        return { harness, replay };
+            } })],
+          }));
+          this.#piStorage = await openDurableObjectStorage(this.state.storage);
+          const harness = await Harness.open(this.#piStorage, {
+            models: createPlatformModels(this.env, platformCredentialReader(this.env), {
+              beforeRequest: () => this.#beforeRequest(),
+              admitToolCall: async (name, id, args) => {
+                try { await admitCloudPayload(this.env, { name, id, args }, this.#active?.profile); }
+                catch (error) {
+                  if (error instanceof CloudDoError && error.code === 'CLOUD_USER_CREDENTIAL_REJECTED') {
+                    throw new CloudDoError('CLOUD_MODEL_RESPONSE_REJECTED');
+                  }
+                  throw error;
+                }
+                const tool = this.#dispatcher?.tools.find(tool => tool.name === name);
+                if (!tool) throw new CloudDoError('CLOUD_TOOL_NOT_AVAILABLE');
+                try { validateToolArguments(tool, { type: 'toolCall', id, name, arguments: args as JsonObject }); }
+                catch { throw new CloudDoError('CLOUD_TOOL_ARGUMENT_INVALID'); }
+              },
+              requestSignal: signal => this.#requestSignal(signal),
+            }), registry, settings: CLOUD_HARNESS_SETTINGS,
+          }, BACKGROUND_CONTEXT);
+          const inspection = await harness.inspect(BACKGROUND_CONTEXT);
+          this.#stale = new Set([...inspection.tasks.map(task => task.record.conversationId),
+            ...inspection.submissions.map(submission => submission.conversationId)]);
+          this.state.storage.sql.exec('UPDATE cloud_session SET staleJson=? WHERE id=1', JSON.stringify([...this.#stale]));
+          this.cloud.captureEligibility(this.#stale);
+          const replay = this.ledger.claimRecovery();
+          await this.cloud.rearmAlarm({ busy: false, repairRetrying: false });
+          return { harness, replay };
+
+        });
       });
       // This continuation runs after the initialization input gate was released.
       this.#opened = initialized.then(({ harness, replay }) => {
-        this.#recovery = this.#recover(harness, replay);
+        this.#flushSettlements();
+        this.#recovery = this.#recover(harness, replay).finally(() => {
+          this.#recoveryGuard?.dispose();
+          this.#recoveryGuard = undefined;
+        });
         void this.#recovery.catch(() => undefined);
         return harness;
+      }, error => {
+        this.#flushSettlements();
+        this.#recoveryGuard?.dispose();
+        this.#recoveryGuard = undefined;
+        throw error;
       });
     }
     return this.#opened;
   }
 
-  async ready(): Promise<Harness> {
-    const harness = await this.open();
+  async ready(selected?: PlatformProfileId): Promise<Harness> {
+    const harness = await this.open(selected);
     await this.#recovery;
     return harness;
   }
 
-  reserve(profile: PlatformProfileId): ExecutionLease {
+  reserve(profile: PlatformProfileId, guard?: CloudOperationGuard): ExecutionLease {
     if (!this.#recovered) throw new CloudDoError('CLOUD_EXECUTION_INTERRUPTED');
     if (this.#bootstrapFailure) throw new CloudDoError(this.#bootstrapFailure);
     if (this.#active) throw new CloudDoError('CLOUD_TOOL_BUSY');
     const lease: ExecutionLease = { profile, deadlineAt: Date.now() + this.#limits().turnTimeoutMs,
-      controller: new AbortController(), connected: true };
+      controller: new AbortController(), connected: true, liveOwner: true, settled: false, guard };
     this.#active = lease;
+    this.cloud.setSchedulingState({ busy: true, repairRetrying: this.#repairRetrying });
     return lease;
   }
 
-  attach(lease: ExecutionLease, conversationId: number): void {
+  attach(lease: ExecutionLease, conversationId: number, trigger: 'submit' | 'wake' = 'submit', guard = lease.guard): void {
     if (this.#active !== lease || lease.conversationId !== undefined) throw new CloudDoError('CLOUD_TOOL_BUSY');
     lease.conversationId = conversationId;
-    this.ledger.startExecution(conversationId, lease.deadlineAt);
+    lease.trigger = trigger;
+    lease.guard = guard;
+    if (!lease.guard) throw new CloudDoError('CLOUD_EXECUTION_INTERRUPTED');
+    this.cloud.startRun(conversationId, trigger, lease.deadlineAt, lease.guard);
+    if (trigger === 'submit') this.cloud.markRunning(conversationId, lease.guard);
     lease.timer = setTimeout(() => {
+      if (this.#active !== lease || lease.settled) return;
       this.#recordFatal(conversationId, 'CLOUD_EXECUTION_TIMEOUT');
       lease.controller.abort();
     }, Math.max(0, lease.deadlineAt - Date.now()));
+    this.#doorbell();
   }
 
   cancel(lease: ExecutionLease, code: CloudDoErrorCode = 'CLOUD_EXECUTION_ABORTED'): void {
+    if (this.#active !== lease || lease.settled) return;
+    if (lease.conversationId !== undefined) {
+      const row = this.cloud.run(lease.conversationId);
+      if (row && row.state !== 'starting' && row.state !== 'running') return;
+    }
     lease.connected = false;
     if (lease.conversationId !== undefined) {
       this.#recordFatal(lease.conversationId, code);
@@ -190,9 +281,181 @@ export class SessionRuntime {
     lease.controller.abort();
   }
 
-  release(lease: ExecutionLease): void {
+  async release(lease: ExecutionLease): Promise<void> {
     clearTimeout(lease.timer);
-    if (this.#active === lease) this.#active = undefined;
+    lease.liveOwner = false;
+    if (this.#active !== lease) return;
+    try {
+      const run = lease.conversationId === undefined ? undefined : this.cloud.run(lease.conversationId);
+      if (run?.state === 'running') {
+        // A wake already owns an alarm generation. A submit needs its first repair alarm.
+        this.#repairRetrying = lease.trigger === 'wake';
+        await this.cloud.rearmAlarm({ busy: false, repairRetrying: this.#repairRetrying });
+        return;
+      }
+      if (run?.state === 'starting') {
+        this.cloud.settleRun(run.conversationId, { state: 'interrupted', errorCode: this.fatal(run.conversationId) ?? 'CLOUD_WAKE_EMPTY' }, this.#guard());
+        this.#doorbell();
+      }
+      this.#active = undefined;
+      await this.cloud.rearmAlarm({ busy: false, repairRetrying: this.#repairRetrying });
+    } catch (error) {
+      if (this.#active === lease) {
+        this.#repairRetrying = lease.trigger === 'wake';
+        this.cloud.setSchedulingState({ busy: false, repairRetrying: this.#repairRetrying });
+        // A failed submit has no platform retry generation to protect.
+        if (!this.#repairRetrying) await this.cloud.rearmAlarm({ busy: false, repairRetrying: false });
+      }
+      throw error;
+    } finally {
+      lease.guard?.dispose();
+      lease.guard = undefined;
+    }
+  }
+
+  recordSubmission(conversationId: number, submissionId: number): void {
+    this.cloud.recordSubmission(conversationId, submissionId);
+  }
+  markReservation(conversationId: number, reservation: 'pending' | 'held' | 'none'): void {
+    this.cloud.markReservation(conversationId, reservation, this.#guard());
+    this.#doorbell();
+  }
+  claimWake(lease: ExecutionLease, seqs: readonly number[], profile = lease.profile) {
+    if (this.#active !== lease || lease.conversationId === undefined || !lease.liveOwner) throw new CloudDoError('CLOUD_TOOL_BUSY');
+    const claimed = this.cloud.claim(lease.conversationId, [...seqs], profile, this.#guard());
+    this.#doorbell();
+    return claimed;
+  }
+  async settle(lease: ExecutionLease, outcome: RunOutcome): Promise<void> {
+    if (this.#active !== lease || lease.conversationId === undefined) throw new CloudDoError('CLOUD_EXECUTION_INTERRUPTED');
+    const delivery = await this.#deliveryEvidence(await this.#opened!, lease.conversationId, outcome.state === 'completed');
+    this.state.storage.transactionSync(() => {
+      const fatal = this.fatal(lease.conversationId!)
+        ?? (lease.controller.signal.aborted ? 'CLOUD_EXECUTION_ABORTED' : Date.now() >= lease.deadlineAt ? 'CLOUD_EXECUTION_TIMEOUT' : undefined);
+      const finalOutcome = outcome.state === 'completed' && fatal ? { state: 'failed' as const, errorCode: fatal } : outcome;
+      const stored = this.cloud.settleRun(lease.conversationId!, finalOutcome, this.#guard());
+      for (const link of delivery) this.cloud.setDelivery(link.invocationId,
+        stored?.state === 'completed' ? link.state : 'undelivered',
+        stored?.state === 'completed' ? link.taskId : null,
+        stored?.state === 'completed' ? link.entryId : null, this.#guard());
+    });
+    lease.settled = true;
+    clearTimeout(lease.timer);
+    this.#doorbell();
+  }
+  cancelActive(code: CloudDoErrorCode = 'CLOUD_EXECUTION_ABORTED'): boolean {
+    if (!this.#active || this.#active.settled) return false;
+    this.cancel(this.#active, code);
+    return true;
+  }
+  /** Only an owner that exited may be repaired. A live provider run is never adjudicated here. */
+  async repairPendingRuns(retryCount = 0): Promise<boolean> {
+    if (this.hasLiveOwner || this.#repairing) return false;
+    const runs = this.cloud.unsettledRuns();
+    if (!runs.length) return false;
+    this.#repairing = true;
+    this.#repairRetrying = true;
+    this.cloud.setSchedulingState({ busy: true, repairRetrying: true });
+    let guard: CloudOperationGuard | undefined;
+    const previousGuard = this.#active?.guard;
+    try {
+      guard = await this.prepareGuard();
+      this.#recoveryGuard = guard;
+      if (this.#active) this.#active.guard = guard;
+      const harness = await this.#opened!;
+      const inspection = await harness.inspect(BACKGROUND_CONTEXT);
+      const live = new Set<number>([...inspection.tasks.map(task => task.record.conversationId), ...inspection.submissions.map(submission => submission.conversationId)]);
+      this.cloud.captureEligibility(live);
+      for (const run of runs) {
+        const id = run.conversationId;
+        if (!live.has(id as ConversationId)) continue;
+        this.#stale.add(id);
+        this.#recordFatal(id, 'CLOUD_EXECUTION_INTERRUPTED');
+        const conversation = await harness.conversation(id as ConversationId, BACKGROUND_CONTEXT);
+        if (conversation) { await conversation.abort(BACKGROUND_CONTEXT, { background: true }); await conversation.waitForIdle(BACKGROUND_CONTEXT); }
+      }
+      await this.#adjudicateRuns(harness);
+      clearTimeout(this.#active?.timer);
+      this.#active = undefined;
+      this.#repairRetrying = false;
+      await this.cloud.rearmAlarm({ busy: false, repairRetrying: false });
+      return true;
+    } catch (error) {
+      // The platform's count belongs to this alarm generation. No SDK retry counter or timer.
+      this.#repairRetrying = retryCount < 6;
+      this.cloud.setSchedulingState({ busy: false, repairRetrying: this.#repairRetrying });
+      throw error;
+    } finally {
+      this.#repairing = false;
+      guard?.dispose();
+      previousGuard?.dispose();
+      this.#recoveryGuard = undefined;
+      if (this.#active) this.#active.guard = undefined;
+    }
+  }
+
+  async #adjudicateRuns(harness: Harness): Promise<void> {
+    for (const run of this.cloud.unsettledRuns()) {
+      const eligibility = JSON.parse(run.eligibilityJson ?? JSON.stringify({ steps: run.steps, aborted: run.aborted, fatalCode: run.fatalCode })) as Pick<ExecutionRow, 'steps' | 'aborted' | 'fatalCode'> & { wasStale?: boolean };
+      const aborted = eligibility.aborted || run.aborted;
+      let outcome: RunOutcome;
+      const submission = run.requestId ? await this.#piStorage!.submissionByRequest(run.conversationId as ConversationId, run.requestId, BACKGROUND_CONTEXT) : undefined;
+      if (run.state === 'starting') outcome = { state: 'interrupted', errorCode: 'CLOUD_WAKE_EMPTY' };
+      else if (!aborted && !eligibility.fatalCode && submission?.status === 'done') {
+        const conversation = await harness.conversation(run.conversationId as ConversationId, BACKGROUND_CONTEXT);
+        const context = conversation ? await conversation.context(BACKGROUND_CONTEXT) : undefined;
+        const final = context ? [...context.entries].reverse().find(entry => entry.kind === 'pi.assistant' && entry.model?.some(message => message.role === 'assistant' && message.stopReason !== 'toolUse')) : undefined;
+        const message = final?.model?.find(message => message.role === 'assistant' && message.stopReason !== 'toolUse');
+        const text = message?.role === 'assistant' ? message.content.filter(part => part.type === 'text').map(part => part.text).join('') : '';
+        outcome = { state: 'completed', text, entryId: final?.id };
+      } else if (!aborted && !eligibility.fatalCode && submission?.status === 'unanswered' && submission.reason !== 'aborted') {
+        outcome = { state: 'failed', errorCode: safeCloudError(new Error(typeof submission.detail === 'string' ? submission.detail : '')).code };
+      } else {
+        // Pi abort writes an unanswered/aborted receipt. It is interrupted work, not a model failure.
+        // Eligibility alone decides whether that unpaid wake can return to the inbox.
+        outcome = { state: 'interrupted', errorCode: eligibility.fatalCode ?? (aborted ? 'CLOUD_EXECUTION_ABORTED' : 'CLOUD_EXECUTION_INTERRUPTED'),
+          requeue: run.trigger === 'wake' && eligibility.steps === 0 && !aborted && !eligibility.fatalCode };
+      }
+      const delivery = await this.#deliveryEvidence(harness, run.conversationId, outcome.state === 'completed');
+      this.state.storage.transactionSync(() => {
+        // A binding cancellation can arrive during the asynchronous pi evidence reads.
+        const current = this.cloud.run(run.conversationId);
+        const finalOutcome = current?.aborted && !eligibility.aborted
+          ? { state: 'interrupted' as const, errorCode: 'CLOUD_EXECUTION_ABORTED' as const }
+          : outcome;
+        const stored = this.cloud.settleRun(run.conversationId, finalOutcome, this.#guard());
+        for (const link of delivery) this.cloud.setDelivery(link.invocationId,
+          stored?.state === 'completed' ? link.state : 'undelivered',
+          stored?.state === 'completed' ? link.taskId : null,
+          stored?.state === 'completed' ? link.entryId : null, this.#guard());
+      });
+      this.#doorbell();
+    }
+  }
+
+  async #deliveryEvidence(harness: Harness, conversationId: number, completed: boolean) {
+    const rows = this.ledger.forConversation(conversationId);
+    const links = rows.map(row => ({ invocationId: row.invocationId, state: 'undelivered' as 'delivered' | 'undelivered', taskId: null as number | null, entryId: null as number | null }));
+    if (!completed || !rows.length) return links;
+    const conversation = await harness.conversation(conversationId as ConversationId, BACKGROUND_CONTEXT);
+    if (!conversation) return links;
+    const context = await conversation.context(BACKGROUND_CONTEXT);
+    let cursor: Cursor | undefined;
+    do {
+      const page = await this.#piStorage!.scanTasks({ conversationId: conversationId as ConversationId, kind: ToolTask.definition.name }, 100, cursor, BACKGROUND_CONTEXT);
+      for (const task of page.items) {
+        if (task.state.status !== 'terminal' || task.state.outcome.status !== 'completed') continue;
+        const input = task.input as unknown as { assistant?: number; callId?: string };
+        const rowIndex = rows.findIndex(row => row.assistantEntryId === input.assistant && row.toolCallId === input.callId);
+        if (rowIndex < 0) continue;
+        const result = task.state.outcome.result as unknown as { entryId?: number };
+        const entryIndex = context.entries.findIndex(entry => entry.id === result.entryId && entry.kind === 'pi.tool-result' && entry.byTaskId === task.id);
+        if (entryIndex < 0 || !context.contributions[entryIndex]?.some(message => message.role === 'toolResult')) continue;
+        links[rowIndex] = { invocationId: rows[rowIndex]!.invocationId, state: 'delivered', taskId: task.id, entryId: result.entryId! };
+      }
+      cursor = page.next;
+    } while (cursor !== undefined);
+    return links;
   }
 
   fatal(conversationId: number): CloudDoErrorCode | undefined {
@@ -225,7 +488,7 @@ export class SessionRuntime {
   }
 
   #beforeRequest(): void {
-    if (!this.#recovered || !this.#active || this.#active.conversationId === undefined) {
+    if (!this.#recovered || !this.#active?.liveOwner || this.#active.conversationId === undefined) {
       throw new CloudDoError('CLOUD_EXECUTION_INTERRUPTED');
     }
     const fatal = this.fatal(this.#active.conversationId);
@@ -254,7 +517,11 @@ export class SessionRuntime {
       }
       await this.#runInvocation(row, undefined, true).catch(() => undefined);
     }
+    await this.#adjudicateRuns(harness);
+    await this.cloud.rearmAlarm({ busy: false, repairRetrying: false });
     this.#recovered = true;
+    this.#recoveryGuard?.dispose();
+    this.#recoveryGuard = undefined;
   }
 
   async #execute(name: string, args: Record<string, unknown>, api: ToolExecutionApi, context: Context): Promise<ToolExecutionResult> {
@@ -281,6 +548,7 @@ export class SessionRuntime {
     if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.assistant !== 'number') {
       throw new CloudDoError('CLOUD_TOOL_FAILED');
     }
+    this.#guard().guardPayload(canonicalArgs({ name, id: api.callId, args }));
     const id = await invocationId(api.conversationId, input.assistant, api.callId);
     const execution = this.ledger.execution(api.conversationId);
     if (!execution) throw new CloudDoError('CLOUD_EXECUTION_INTERRUPTED');
@@ -357,7 +625,17 @@ export class SessionRuntime {
       signal.throwIfAborted();
       if (this.#inline >= this.#limits().inlineFetches) throw new CloudDoError('CLOUD_TOOL_BUSY');
       this.#inline++;
-      const dispatchContext = this.#config;
+      const dispatchContext = Object.freeze({
+        identity: Object.freeze({ ...this.#config.identity }),
+        principal: Object.freeze({ ...this.#config.principal }),
+        scopes: Object.freeze([...this.#config.scopes]), dispatcherId: this.#config.dispatcherId,
+        call: Object.freeze({ invocationId: row.invocationId, conversationId: row.conversationId, toolCallId: row.toolCallId, attempt: row.attempt }),
+        lookup: (id: string) => {
+          const found = this.ledger.read(id);
+          if (!found || found.sessionId !== this.#config?.identity.sessionId) return undefined;
+          return Object.freeze({ toolName: found.toolName, state: found.state, errorCode: found.errorCode, resultJson: found.resultJson });
+        },
+      });
       const dispatcher = this.#dispatcher;
       const work = Promise.resolve().then(() => {
         if (Date.now() >= deadline) throw new CloudDoError(this.#timeoutCode(row.conversationId));
@@ -377,7 +655,10 @@ export class SessionRuntime {
       });
       timer = setTimeout(() => controller.abort(), Math.max(0, deadline - Date.now()));
       let result = await Promise.race([work, cancelled]);
-      try { await admitCloudPayload(this.env, result, lease?.profile); }
+      try {
+        await admitCloudPayload(this.env, result, lease?.profile);
+        result = JSON.parse(this.#guard().guardPayload(JSON.stringify(result))) as Record<string, unknown>;
+      }
       catch (error) {
         if (error instanceof CloudDoError && error.code === 'CLOUD_USER_CREDENTIAL_REJECTED') {
           throw new CloudDoError('CLOUD_MODEL_RESPONSE_REJECTED');
@@ -410,7 +691,6 @@ export class SessionRuntime {
       if (!settled) throw new CloudDoError('CLOUD_TOOL_FAILED');
       if (settled.attempt !== row.attempt) throw new StaleInvocationAttempt();
       if (responseFailure && !recovery) this.#recordFatal(row.conversationId, responseFailure);
-      await this.options.onInvocationSettled?.(settled.invocationId, settled.state as InvocationTerminalState);
       return this.#result(settled);
     } catch (error) {
       if (error instanceof StaleInvocationAttempt) throw error;
@@ -424,9 +704,6 @@ export class SessionRuntime {
       catch { /* Do not replace a fixed code with raw storage error text. */ }
       if (settled && settled.attempt !== row.attempt) throw new StaleInvocationAttempt();
       if (!recovery) this.#recordFatal(row.conversationId, code);
-      if (settled && settled.state !== 'running' && settled.state !== 'accepted') {
-        await this.options.onInvocationSettled?.(settled.invocationId, settled.state);
-      }
       throw new CloudDoError(code);
     } finally {
       clearTimeout(timer);
