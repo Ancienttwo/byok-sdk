@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR ef893ac for injected processes, native-first recording and bounded request refusal (Apache-2.0).
+// BYOK change: Modified from OAR 1775b57 for injected processes, native-first recording and bounded request refusal (Apache-2.0).
 import type { AvailableInstallation } from "../../contracts/installation.js"; // BYOK change: direct type-only contract import.
 import { randomUUID } from "node:crypto";
 import type {
@@ -59,6 +59,11 @@ interface CodexSessionState {
   projection: CodexProjectionState;
 }
 
+// BYOK change: Codex implements steer even though the generic 0.18.0 adapter contract makes it optional.
+export interface CodexAdapterSession extends AdapterSession {
+  steer(input: string, options?: InputOptions): Promise<ControlResult>;
+}
+
 // BYOK change: No production spawn implementation or convenience Session layer is imported here.
 export async function codexSession(
   spawnLineProcess: SpawnLineProcess,
@@ -71,7 +76,7 @@ export async function codexSession(
     readonly maxBytes?: number;
     readonly onLimit?: () => never;
   } = {},
-): Promise<AdapterSession> {
+): Promise<CodexAdapterSession> {
   if (installation.via !== "executable") {
     throw new Error("The codex session adapter needs an executable installation");
   }
@@ -271,7 +276,7 @@ export async function codexSession(
       }
       return result;
     };
-  const capabilities = { steer: true, queue: { durable: true }, attribution: "nested", images: true } as const;
+  const capabilities = { queue: { durable: true }, attribution: "nested", images: true } as const;
   const promptPlan = (input: string, inputOptions?: InputOptions): RpcControlPlan => ({
     body: { kind: "prompt", input, ...inputOptions },
     gate: (request) => {
@@ -327,12 +332,13 @@ export async function codexSession(
     onError: (message) => ({ kind: "rejected", code: "runtime_refused", reason: message }),
   });
 
-  const session: AdapterSession = { // BYOK change: raw adapter without sealSession/observe dependencies.
+  const session: CodexAdapterSession = { // BYOK change: raw adapter without sealSession/observe dependencies.
     id: kernel.sessionId,
     capabilities,
     prompt: via(promptPlan),
     steer: via(steerPlan),
     queue: via(queuePlan),
+    // No withdraw: the queue is codex's own, and thread/queue/delete is experimental and not live-verified (docs/runtimes/input-cancellation.md).
     abort: via(abortPlan),
     rawEvents: (observer, cursor) => kernel.rawEvents(observer, cursor),
     records: () => kernel.records(),
