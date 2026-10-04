@@ -11,20 +11,11 @@ import { createPlatformModels } from './platform-provider';
 import { platformCredentialReader, type PlatformProfileId } from './platform-credentials';
 import { CLOUD_LIMITS, admitSessionConfig, type CloudSessionConfig } from './session-config';
 import { openDurableObjectStorage } from './storage';
-import { admitCloudTools, argsDigest, canonicalArgs, invocationId, replayForTool, type CloudToolDispatcher } from './tools';
+import { admitCloudDispatcher, dispatcherDigest, CLOUD_DOMAIN_ERROR_CODES, argsDigest, canonicalArgs, invocationId, replayForTool, type CloudToolDispatcher } from './tools';
 
 export const CLOUD_HARNESS_SETTINGS = {
   compaction: { enabled: false }, retry: { enabled: false, maxRetries: 0 }, stream: { maxRetries: 0 },
 } as const;
-
-// Fixed serving-domain failures remain data outcomes. Raw upstream diagnostics never enter pi.
-const domainErrorCodes: Readonly<Record<string, CloudDoErrorCode>> = Object.freeze({
-  NOT_FOUND: 'CLOUD_TOOL_NOT_AVAILABLE', DATA_NOT_LICENSED: 'CLOUD_TOOL_NOT_AVAILABLE',
-  DATA_QUALITY_HOLD: 'CLOUD_TOOL_NOT_AVAILABLE', SCOPE_DENIED: 'CLOUD_TOOL_NOT_AVAILABLE',
-  TOOL_UNAVAILABLE: 'CLOUD_TOOL_NOT_AVAILABLE', TOOL_ARGUMENT_INVALID: 'CLOUD_TOOL_ARGUMENT_INVALID',
-  OUT_OF_RANGE: 'CLOUD_TOOL_ARGUMENT_INVALID', TOO_MANY_ROWS: 'CLOUD_TOOL_ARGUMENT_INVALID',
-  AMBIGUOUS_SECURITY: 'CLOUD_TOOL_ARGUMENT_INVALID', SYMBOL_AMBIGUOUS: 'CLOUD_TOOL_ARGUMENT_INVALID',
-});
 
 class StaleInvocationAttempt extends CloudDoError {
   constructor() { super('CLOUD_EXECUTION_INTERRUPTED'); }
@@ -91,9 +82,12 @@ export class SessionRuntime {
       startedCommitted: () => this.#doorbell(),
       terminal: (row, recovery) => {
         const guard = this.#guard();
-        this.cloud.appendEvent({ eventKey: `tool:${row.invocationId}:settled`, type: 'tool.settled', conversationId: row.conversationId,
+        const event = this.cloud.appendEvent({ eventKey: `tool:${row.invocationId}:settled`, type: 'tool.settled', conversationId: row.conversationId,
           ref: row.invocationId, data: { invocationId: row.invocationId, state: row.state, errorCode: row.errorCode, late: recovery } }, guard);
+        row.settledAt = event.createdAt;
+        row.settledEventSeq = event.seq;
         this.cloud.projectInvocation(row, this.options.projectInvocation, guard);
+        return event;
       },
       committed: row => {
         if (this.#initializing) this.#deferredSettlements.push(row);
@@ -128,19 +122,20 @@ export class SessionRuntime {
   async configure(input: unknown): Promise<void> {
     const config = admitSessionConfig(input);
     await admitCloudPayload(this.env, config);
-    const dispatcher = this.options.createDispatcher(config.dispatcherId);
-    if (!dispatcher) throw new CloudDoError('CLOUD_TOOL_NOT_AVAILABLE');
-    admitCloudTools(dispatcher.tools);
+    const candidate = this.options.createDispatcher(config.dispatcherId);
+    if (!candidate) throw new CloudDoError('CLOUD_TOOL_NOT_AVAILABLE');
+    const dispatcher = admitCloudDispatcher(candidate);
     await this.#guardToolMetadata(dispatcher);
+    const policyDigest = await dispatcherDigest(dispatcher);
     this.#sessionSchema();
     this.state.storage.transactionSync(() => {
       const existing = this.#storedConfig();
       if (existing) {
-        if (JSON.stringify(existing) !== JSON.stringify(config)) throw new CloudDoError('CLOUD_SESSION_CONFLICT');
+        if (JSON.stringify(existing) !== JSON.stringify(config) || this.#storedDispatcherDigest() !== policyDigest) throw new CloudDoError('CLOUD_SESSION_CONFLICT');
         return;
       }
       if (this.#opened) throw new CloudDoError('CLOUD_SESSION_CONFLICT');
-      this.state.storage.sql.exec('UPDATE cloud_session SET configJson=? WHERE id=1', JSON.stringify(config));
+      this.state.storage.sql.exec('UPDATE cloud_session SET configJson=?,dispatcherDigest=? WHERE id=1', JSON.stringify(config), policyDigest);
     });
   }
 
@@ -158,12 +153,14 @@ export class SessionRuntime {
           if (!this.#config && this.ledger.pending().length) this.#bootstrapFailure = 'CLOUD_TOOL_NOT_AVAILABLE';
           if (this.#config) {
             this.#config = admitSessionConfig(this.#config);
-            this.#dispatcher = this.options.createDispatcher(this.#config.dispatcherId);
-            if (!this.#dispatcher) this.#bootstrapFailure = 'CLOUD_TOOL_NOT_AVAILABLE';
+            const candidate = this.options.createDispatcher(this.#config.dispatcherId);
+            if (!candidate) this.#bootstrapFailure = 'CLOUD_TOOL_NOT_AVAILABLE';
             else {
-              admitCloudTools(this.#dispatcher.tools);
-              const metadata = this.#dispatcher.tools.map(({ name, description, parameters }) => ({ name, description, parameters }));
+              const dispatcher = admitCloudDispatcher(candidate);
+              const metadata = dispatcher.tools.map(({ name, description, parameters }) => ({ name, description, parameters }));
               guard.guardPayload(JSON.stringify(metadata));
+              if (await dispatcherDigest(dispatcher) !== this.#storedDispatcherDigest()) this.#bootstrapFailure = 'CLOUD_SESSION_CONFLICT';
+              else this.#dispatcher = dispatcher;
             }
           }
           const registry = createRegistry();
@@ -480,6 +477,12 @@ export class SessionRuntime {
     this.state.storage.sql.exec(`CREATE TABLE IF NOT EXISTS cloud_session (
       id INTEGER PRIMARY KEY CHECK(id=1), configJson TEXT, staleJson TEXT NOT NULL DEFAULT '[]'
     ); INSERT OR IGNORE INTO cloud_session(id) VALUES(1)`);
+    const columns = this.state.storage.sql.exec<{ name: string }>('PRAGMA table_info(cloud_session)').toArray();
+    if (!columns.some(row => row.name === 'dispatcherDigest')) this.state.storage.sql.exec('ALTER TABLE cloud_session ADD COLUMN dispatcherDigest TEXT');
+  }
+
+  #storedDispatcherDigest(): string | null {
+    return this.state.storage.sql.exec<{ dispatcherDigest: string | null }>('SELECT dispatcherDigest FROM cloud_session WHERE id=1').one().dispatcherDigest;
   }
 
   #storedConfig(): CloudSessionConfig | undefined {
@@ -557,21 +560,28 @@ export class SessionRuntime {
       toolName: name, argsDigest: await argsDigest(name, args), argsJson: canonicalArgs(args), replay: replayForTool(name),
       deadlineAt: Math.min(Date.now() + this.#limits().callTimeoutMs, execution.deadlineAt),
     });
-    let result: Record<string, unknown>;
-    if (begun.kind === 'settled') result = this.#result(begun.row);
-    else if (begun.kind === 'pending') {
+    if (begun.kind === 'pending') {
       const pending = this.#invocations.get(id);
       if (!pending) throw new CloudDoError('CLOUD_EXECUTION_INTERRUPTED');
-      result = await pending;
-    } else {
+      await pending;
+    } else if (begun.kind === 'started') {
       const running = this.#runInvocation(begun.row, context.abortSignal, false);
       this.#invocations.set(id, running);
-      try { result = await running; }
+      try { await running; }
       finally { this.#invocations.delete(id); }
     }
+    return this.#modelResult(this.ledger.read(id)!);
+  }
+
+  #modelResult(row: InvocationRow): ToolExecutionResult {
+    const result = this.#result(row);
+    const error = result.error as { code: string; data?: unknown } | undefined;
+    if (Object.hasOwn(result, 'modelView')) return { isError: result.ok === false,
+      content: [{ type: 'text', text: JSON.stringify(result.modelView) }] };
     if (result.ok === false) {
-      const error = result.error as { code: CloudDoErrorCode };
-      return this.#errorResult(error.code);
+      if (this.#dispatcher?.domainErrors?.includes(error!.code)) return { isError: true,
+        content: [{ type: 'text', text: JSON.stringify({ ok: false, error }) }] };
+      return this.#errorResult(error!.code as CloudDoErrorCode);
     }
     return { content: [{ type: 'text', text: JSON.stringify(result) }] };
   }
@@ -623,8 +633,9 @@ export class SessionRuntime {
       await admitCloudPayload(this.env, args, lease?.profile);
       if (Date.now() >= deadline) throw new CloudDoError(this.#timeoutCode(row.conversationId));
       signal.throwIfAborted();
-      if (this.#inline >= this.#limits().inlineFetches) throw new CloudDoError('CLOUD_TOOL_BUSY');
-      this.#inline++;
+      const usesFetchSlot = this.#dispatcher.tools.find(tool => tool.name === row.toolName)?.execution !== 'pure';
+      if (usesFetchSlot && this.#inline >= this.#limits().inlineFetches) throw new CloudDoError('CLOUD_TOOL_BUSY');
+      if (usesFetchSlot) this.#inline++;
       const dispatchContext = Object.freeze({
         identity: Object.freeze({ ...this.#config.identity }),
         principal: Object.freeze({ ...this.#config.principal }),
@@ -633,7 +644,8 @@ export class SessionRuntime {
         lookup: (id: string) => {
           const found = this.ledger.read(id);
           if (!found || found.sessionId !== this.#config?.identity.sessionId) return undefined;
-          return Object.freeze({ toolName: found.toolName, state: found.state, errorCode: found.errorCode, resultJson: found.resultJson });
+          return Object.freeze({ toolName: found.toolName, state: found.state, errorCode: found.errorCode, resultJson: found.resultJson,
+            conversationId: found.conversationId, toolCallId: found.toolCallId, settledAt: found.settledAt, settledEventSeq: found.settledEventSeq });
         },
       });
       const dispatcher = this.#dispatcher;
@@ -643,7 +655,7 @@ export class SessionRuntime {
         return dispatcher.execute(dispatchContext, row.toolName, args, signal);
       });
       // A dispatcher that ignores cancellation cannot release a still-running fetch slot early.
-      void work.finally(() => { this.#inline--; }).catch(() => undefined);
+      void work.finally(() => { if (usesFetchSlot) this.#inline--; }).catch(() => undefined);
       const cancelled = new Promise<never>((_resolve, reject) => {
         const abort = () => reject(new CloudDoError(Date.now() >= deadline
           ? Date.now() >= (this.ledger.execution(row.conversationId)?.deadlineAt ?? Infinity)
@@ -665,6 +677,7 @@ export class SessionRuntime {
         }
         throw error;
       }
+      if (Object.hasOwn(result, 'modelView') && !this.#dispatcher.modelViews) throw new CloudDoError('CLOUD_TOOL_FAILED');
       const usage = result.usage;
       if (!usage || typeof usage !== 'object' || Array.isArray(usage)
         || !Number.isSafeInteger((usage as Record<string, unknown>).credits) || Number((usage as Record<string, unknown>).credits) < 0) {
@@ -675,14 +688,22 @@ export class SessionRuntime {
       if (result.ok === false) {
         const rawCode = result.error && typeof result.error === 'object' && !Array.isArray(result.error)
           ? (result.error as Record<string, unknown>).code : undefined;
-        const domainCode = typeof rawCode === 'string' && Object.hasOwn(domainErrorCodes, rawCode) ? domainErrorCodes[rawCode] : undefined;
-        const code = domainCode ?? 'CLOUD_TOOL_FAILED';
-        const bill = usage as Record<string, unknown>;
-        result = { ok: false, error: { code }, usage: { credits: bill.credits,
-          ...(Number.isSafeInteger(bill.rows) && Number(bill.rows) >= 0 ? { rows: bill.rows } : {}),
-          ...(typeof bill.cached === 'boolean' ? { cached: bill.cached } : {}),
-        } };
-        if (!domainCode) responseFailure = code;
+        const domainCode = typeof rawCode === 'string' && Object.hasOwn(CLOUD_DOMAIN_ERROR_CODES, rawCode) ? CLOUD_DOMAIN_ERROR_CODES[rawCode] : undefined;
+        if (typeof rawCode === 'string' && this.#dispatcher.domainErrors?.includes(rawCode)) {
+          const rawError = result.error as Record<string, unknown>;
+          const hasData = Object.hasOwn(rawError, 'data');
+          // Measure the guard-parsed value with the same JSON serialization used by the ledger.
+          if (hasData && new TextEncoder().encode(JSON.stringify(rawError.data)).length > 2_048) throw new CloudDoError('CLOUD_TOOL_RESULT_LIMIT');
+          result = { ...result, error: { code: rawCode, ...(hasData ? { data: rawError.data } : {}) } };
+        } else {
+          const code = domainCode ?? 'CLOUD_TOOL_FAILED';
+          const bill = usage as Record<string, unknown>;
+          result = { ok: false, error: { code }, usage: { credits: bill.credits,
+            ...(Number.isSafeInteger(bill.rows) && Number(bill.rows) >= 0 ? { rows: bill.rows } : {}),
+            ...(typeof bill.cached === 'boolean' ? { cached: bill.cached } : {}),
+          } };
+          if (!domainCode) responseFailure = code;
+        }
       }
       if (new TextEncoder().encode(JSON.stringify(result)).length > this.#limits().resultBytes) throw new CloudDoError('CLOUD_TOOL_RESULT_LIMIT');
       const settled = this.ledger.finish(row.invocationId, 'succeeded', result, undefined, Date.now(), {

@@ -22,6 +22,8 @@ export interface InvocationRow extends InvocationInput {
   replayCount: number;
   abortRequested: number;
   resultJson: string | null;
+  settledAt: number | null;
+  settledEventSeq: number | null;
   errorCode: CloudDoErrorCode | null;
   mode: 'inline' | 'job';
   segmentStartedAt: number | null;
@@ -52,7 +54,7 @@ export interface InvocationLedgerOptions {
   started?(row: InvocationRow, guard?: CloudOperationGuard): void;
   startedCommitted?(row: InvocationRow): void;
   /** Runs inside the state transaction. Errors roll back state and events together. */
-  terminal?(row: InvocationRow, recovery: boolean): void;
+  terminal?(row: InvocationRow, recovery: boolean): { seq: number; createdAt: number } | void;
   /** Post-commit notification cannot affect the invocation outcome. */
   committed?(row: InvocationRow): void;
 }
@@ -94,6 +96,10 @@ export class InvocationLedger {
         conversationId INTEGER NOT NULL, taskId TEXT NOT NULL,
         PRIMARY KEY(conversationId,taskId)
       )`);
+      const columns = new Set(this.storage.sql.exec<{ name: string }>('PRAGMA table_info(cloud_invocations)').toArray().map(row => row.name));
+      for (const name of ['settledAt', 'settledEventSeq']) {
+        if (!columns.has(name)) this.storage.sql.exec(`ALTER TABLE cloud_invocations ADD COLUMN ${name} INTEGER`);
+      }
     });
   }
 
@@ -154,11 +160,19 @@ export class InvocationLedger {
       settledState, settledState === 'succeeded' && result !== undefined ? JSON.stringify(result) : null, settledError, id, row.attempt);
       if (settledError && fatalCodes.has(settledError)) this.failExecution(row.conversationId, settledError);
       changed = this.read(id)!;
-      this.options.terminal?.(changed, options.recovery === true);
+      changed = this.#terminal(changed, options.recovery === true);
       return changed;
     });
     if (changed) this.#notify(changed);
     return resultRow;
+  }
+
+  #terminal(row: InvocationRow, recovery: boolean): InvocationRow {
+    const event = this.options.terminal?.(row, recovery);
+    if (event) {
+      this.storage.sql.exec('UPDATE cloud_invocations SET settledAt=?,settledEventSeq=? WHERE invocationId=?', event.createdAt, event.seq, row.invocationId);
+    }
+    return this.read(row.invocationId)!;
   }
 
   #notify(row: InvocationRow): void {
@@ -192,8 +206,7 @@ export class InvocationLedger {
         }
         const updated = this.read(row.invocationId)!;
         if (terminal(updated.state)) {
-          this.options.terminal?.(updated, true);
-          settled.push(updated);
+          settled.push(this.#terminal(updated, true));
         }
       }
       return claimed;
