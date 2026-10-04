@@ -78,7 +78,7 @@ describe('Codex persistent app-server adapter', () => {
   it('detects the pinned version, app-server and native auth', async () => {
     expect(await adapter().detect()).toEqual({
       kind: 'available',
-      version: 'codex-cli 0.159.2',
+      version: 'codex-cli 0.160.0',
       authPresent: true,
     });
   });

@@ -77,9 +77,9 @@ export async function preflightCodexRelay(codexBin: string, signal: AbortSignal)
   if (!path.isAbsolute(codexBin)) throw new Error('Codex executable must be absolute');
   return new Promise((resolve, reject) => {
     execFile(codexBin, ['--version'], { timeout: 10_000, maxBuffer: 1024, signal }, (error, stdout) => {
-      if (error || stdout.trim() !== 'codex-cli 0.159.2') {
-        reject(new Error('team relay requires the qualified codex-cli 0.159.2 executable'));
-      } else resolve('0.159.2');
+      if (error || stdout.trim() !== 'codex-cli 0.160.0') {
+        reject(new Error('team relay requires the qualified codex-cli 0.160.0 executable'));
+      } else resolve('0.160.0');
     });
   });
 }

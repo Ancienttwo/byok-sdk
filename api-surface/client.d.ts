@@ -387,7 +387,7 @@ export interface CodexAdapterOptions {
     maxRetainedBytes?: number;
     interruptTimeoutMs?: number;
 }
-/** Codex app-server is experimental. Only the qualified 0.159.2 binary is admitted; no exec compatibility path. */
+/** Codex app-server is experimental. Only the qualified 0.160.0 binary is admitted; no exec compatibility path. */
 export declare class CodexAdapter implements RuntimeAdapter {
     private readonly options;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;

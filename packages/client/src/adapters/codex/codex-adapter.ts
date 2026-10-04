@@ -51,7 +51,7 @@ import { withoutProviderCredentials } from '../provider-credential-environment';
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5000;
 const RESERVED_MCP_POLICY_PROBE_TIMEOUT_MS = 5000;
-const PINNED_CODEX_VERSION = '0.159.2';
+const PINNED_CODEX_VERSION = '0.160.0';
 export interface CodexAdapterOptions {
   sdkHelperHost?: SdkHelperHostConfig;
   resolveBin?: () => ResolvedBin;
@@ -60,7 +60,7 @@ export interface CodexAdapterOptions {
   interruptTimeoutMs?: number;
 }
 
-/** Codex app-server is experimental. Only the qualified 0.159.2 binary is admitted; no exec compatibility path. */
+/** Codex app-server is experimental. Only the qualified 0.160.0 binary is admitted; no exec compatibility path. */
 export class CodexAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
     id: 'codex',
@@ -519,7 +519,7 @@ async function probeCodexMcpToolApproval(
   server: NonNullable<RuntimeAdapterPrepareInput['mcpServers']>[string],
   tools: readonly string[],
 ): Promise<void> {
-  // Qualified app-server 0.159.2 does not accept the old exec ignore-user-config flag.
+  // Qualified app-server 0.160.0 does not accept the old exec ignore-user-config flag.
   // Pin the named server's exact enabled_tools and per-tool settings and read back only that grant.
   const probeArgs = [
     'mcp',
@@ -603,7 +603,7 @@ function codexMcpConfigArgs(
   const grantedTools = new Map(
     grants.map((grant) => [grant.server, grant.tools] as const),
   );
-  const args: string[] = []; // app-server 0.159.2 has no ignore-user-config flag.
+  const args: string[] = []; // app-server 0.160.0 has no ignore-user-config flag.
   for (const [name, server] of Object.entries(servers).sort(([left], [right]) =>
     left.localeCompare(right),
   )) {
