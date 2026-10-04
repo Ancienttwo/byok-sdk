@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR ef893ac for a required consumer and fatal retained-record byte budget (Apache-2.0).
+// BYOK change: Modified from OAR 1775b57 for a required consumer and fatal retained-record byte budget (Apache-2.0).
 import { randomUUID } from "node:crypto";
 import type {
   ControlResult,
@@ -52,7 +52,7 @@ export interface RecordAt {
  * prunes facts (record-stream.md, "The rules"). The single-active-turn rule
  * is the adapter's control decision and shows up as a rejected prompt
  * response, never as a dropped event. Adapters keep only runtime-specific
- * pumping (frame → `frame()`) and control decisions (busy, not_steerable).
+ * pumping (frame → `frame()`) and control decisions (busy, no_active_turn).
  */
 export interface SessionKernel {
   readonly sessionId: string;

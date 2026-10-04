@@ -1,4 +1,6 @@
-import type { InputImage } from "./input.js";
+import type { InputImage, InputOrigin } from "./input.js";
+import type { TaskEventBody } from "./tasks.js";
+import type { ToolOutputPart } from "./tool-output.js";
 
 /**
  * The record stream and the events read off it. Three words, three layers:
@@ -46,7 +48,7 @@ export interface Frame extends RecordEnvelope {
 
 export type RequestDirection = "toRuntime" | "toApp";
 
-/** An action record that expects an outcome. `toRuntime`: prompt / steer / queue / abort / dispose, issued through this Session. `toApp`: the runtime asking the application something (approval, question, external tool), body verbatim. */
+/** An action record that expects an outcome. `toRuntime`: prompt / steer / queue / withdraw / abort / dispose, issued through this Session. `toApp`: the runtime asking the application something (approval, question, external tool), body verbatim. */
 export interface RequestRecord extends RecordEnvelope {
   readonly kind: "request";
   readonly id: string;
@@ -122,7 +124,8 @@ export interface UserMessage {
  * merges consecutive pieces for consumers who want blocks.
  */
 export type RuntimeEventBody = UserMessage
-  | { readonly kind: "text_delta"; readonly text: string }
+  /** `messageId`: the runtime's id of the assistant message the text is part of (codex `agentMessage` item, claude API message), so two messages of one turn stay apart; absent when it names none (pi, ACP) and in older records. */
+  | { readonly kind: "text_delta"; readonly text: string; readonly messageId?: string }
   /** A reasoning output item; its lifecycle remains observable without readable contents. */
   | { readonly kind: "reasoning"; readonly content: ReasoningContent }
   | {
@@ -135,8 +138,8 @@ export type RuntimeEventBody = UserMessage
   | {
       readonly kind: "tool_call_ended";
       readonly callId: string;
-      /** Best-effort human-readable result detail when the runtime exposes it: the result's text when the frame carries text parts, otherwise its JSON. */
-      readonly output?: string;
+      /** The result as the runtime reported it, in its order: text parts, images (base64 with their media type, normalized from the runtime's own block shape), and blocks OAR does not recognize kept whole as `other`. Absent when the runtime reported no result. The native frame keeps the original. */
+      readonly content?: readonly ToolOutputPart[];
       /** The runtime's explicit tool outcome; absent when it reported none. */
       readonly result?: "ok" | "failed";
       /** The process exit status the runtime reported for a command it ran (codex `commandExecution.exitCode`, grok `rawOutput.exit_code`); `null` when the runtime says it ended without one (a signal). Absent when the runtime reports none (claude, pi), never derived from `result` or output. */
@@ -146,11 +149,7 @@ export type RuntimeEventBody = UserMessage
   | { readonly kind: "tool_call_progress"; readonly callId: string; readonly output?: string }
   /** The runtime's OWN completion report for a turn (claude `result`, codex `turn/completed`, pi `agent_end`, an ACP prompt answer). The turn's start is the prompt request record itself; if a runtime reports no end, none appears. */
   | { readonly kind: "turn_ended"; readonly outcome: TurnOutcome }
-  /**
-   * The runtime began compacting its context. `trigger` is the runtime's own
-   * word for why (pi: manual | threshold | overflow; codex: none). claude
-   * reports only the boundary after the fact, so it never says this.
-   */
+  /** The runtime began compacting its context. `trigger` is the runtime's own word for why (pi: manual | threshold | overflow; codex: none). claude reports only the boundary after the fact, so it never says this. */
   | { readonly kind: "compaction_started"; readonly trigger?: string }
   /**
    * The runtime finished (or gave up) compacting (pi `compaction_end`, claude
@@ -164,22 +163,26 @@ export type RuntimeEventBody = UserMessage
   | { readonly kind: "usage"; readonly usage: UsageReport }
   /** The model the runtime reports as in effect: its own report, never the request echoed. */
   | { readonly kind: "model"; readonly model: string }
+  | TaskEventBody
   /** The reasoning-effort level the runtime reports as in effect, in its own spelling (codex `reasoningEffort`, an ACP `thought_level` option's current value, pi `thinkingLevel`): its own report, never the request echoed. claude's stream carries none. */
   | { readonly kind: "effort"; readonly effort: string };
 
 /** The toRuntime control actions a Session issues. */
-export type ControlAction = "prompt" | "steer" | "queue" | "abort" | "dispose";
+export type ControlAction = "prompt" | "steer" | "queue" | "withdraw" | "abort" | "dispose";
 
 /**
  * Event kinds read off request and response records, so a consumer of
  * `Session.events()` sees the control facts that matter without handling
- * record kinds: a turn's start (the prompt request), a control action the runtime or
- * adapter refused, a runtime→app request and oar's answer to it, and the
- * process exit. Never carried by a Frame.
+ * record kinds: a turn's start (the prompt request), a held input taken back
+ * (an accepted withdraw), a control action the runtime or adapter refused, a
+ * runtime→app request and oar's answer to it, and the process exit. Never
+ * carried by a Frame.
  */
 export type ControlEventBody =
   /** A prompt request was recorded: the turn's start. `requestId` pairs it with a later `control_rejected` when the prompt did not begin a turn. */
   | { readonly kind: "turn_started"; readonly requestId: string; readonly input: string }
+  /** A withdraw was accepted: the held input `inputId` was removed before it was sent, and the caller owns it again. The queue request that held it stays in the stream unchanged. */
+  | { readonly kind: "input_withdrawn"; readonly requestId: string; readonly inputId: string }
   /** A `toRuntime` control action was rejected; the caller still owns the input. */
   | { readonly kind: "control_rejected"; readonly requestId: string; readonly action: ControlAction; readonly code: RejectionCode; readonly reason: string }
   /** The runtime asked the application something (a `toApp` request: approval, question, terminal). `type` is the runtime's method or subtype; the body is on the request record. */
@@ -203,9 +206,11 @@ export type EventBody = RuntimeEventBody | ControlEventBody;
 export type Event = EventBody & RecordEnvelope;
 
 export type RequestBody =
-  | { readonly kind: "prompt"; readonly inputId?: string; readonly input: string; readonly images?: readonly InputImage[] }
-  | { readonly kind: "steer"; readonly inputId?: string; readonly input: string; readonly images?: readonly InputImage[] }
-  | { readonly kind: "queue"; readonly inputId?: string; readonly input: string; readonly images?: readonly InputImage[] }
+  | { readonly kind: "prompt"; readonly inputId?: string; readonly input: string; readonly images?: readonly InputImage[]; readonly origin?: InputOrigin }
+  | { readonly kind: "steer"; readonly inputId?: string; readonly input: string; readonly images?: readonly InputImage[]; readonly origin?: InputOrigin }
+  | { readonly kind: "queue"; readonly inputId?: string; readonly input: string; readonly images?: readonly InputImage[]; readonly origin?: InputOrigin }
+  /** Take back the held input `inputId` (an earlier queue request's) before it is sent. The queue request and its response are never changed. */
+  | { readonly kind: "withdraw"; readonly inputId: string }
   | { readonly kind: "abort" }
   | { readonly kind: "dispose" }
   /** A runtime→app request, verbatim; `type` is the runtime's method/subtype. */
@@ -223,7 +228,9 @@ export type RejectionCode =
   | "busy"
   /** steer / abort: nothing is running; a late abort is a normal race, not an error. */
   | "no_active_turn"
-  /** The runtime cannot do this at all: queue on a runtime that holds no input, steer on one that cannot inject. */
+  /** withdraw: no held input with this `inputId` is waiting: it was already sent to the runtime, never queued in this session, or already withdrawn. Never answered `accepted` when the input may already have gone. */
+  | "not_queued"
+  /** The runtime cannot do this control with these inputs: images where it takes none, or a format it does not read, images on a cursor steer. A control the runtime cannot do at all is an absent member (`Session.steer`), not a rejection. */
   | "unsupported"
   /** The stream already holds the process exit. */
   | "runtime_exited"
@@ -240,7 +247,7 @@ export type RejectionCode =
  * observes: its own answer to a runtime→app request, and the process exit.
  */
 export type ResponseBody =
-  /** The adapter (or runtime) took the action over. For prompt/steer/queue this is ONE deliberately weak promise: the caller's delivery obligation ENDS; do not resubmit. No guarantee it lands in the current turn, that the model attends to it, or that any business outcome happened; where input landed is the event stream's job. `native` is the runtime's own acknowledgement when it gave one. */
+  /** The adapter (or runtime) took the action over. For prompt/steer/queue this is ONE deliberately weak promise: the caller's delivery obligation ENDS; do not resubmit. No guarantee it lands in the current turn, that the model attends to it, or that any business outcome happened; where input landed is the event stream's job. For withdraw it is a strong one: the held input was removed before it was sent, and the caller owns it again. `native` is the runtime's own acknowledgement when it gave one. */
   | { readonly kind: "accepted"; readonly native?: unknown }
   /** Not taken over; the caller still owns the input. `code` says why in one word; `reason` is the prose. */
   | { readonly kind: "rejected"; readonly code: RejectionCode; readonly reason: string; readonly native?: unknown }
@@ -275,26 +282,6 @@ export interface ContextUsage {
   readonly percent: number | null;
 }
 
-// ─── Session graph and cursor ─────────────────────────────────────────────
+// ─── Session graph and cursor: ./graph.ts ─────────────────────────────────
 
-/** True sessions only (docs/spec/session-graph-and-cursor.md): derived child sessions and transcript branches. Agent parent/child is `agentPath`, not a node. */
-export interface SessionNode {
-  readonly id: string;
-}
-
-export interface SessionEdge {
-  readonly parent: string;
-  readonly child: string;
-  readonly via: "tool_call";
-}
-
-export interface SessionGraph {
-  readonly nodes: readonly SessionNode[];
-  readonly edges: readonly SessionEdge[];
-}
-
-/** Resume reading after `afterSeq`; `-1` (or omitting the cursor) reads from the start. */
-export interface Cursor {
-  readonly sessionId: string;
-  readonly afterSeq: number;
-}
+export type { Cursor, SessionEdge, SessionGraph, SessionNode } from "./graph.js";

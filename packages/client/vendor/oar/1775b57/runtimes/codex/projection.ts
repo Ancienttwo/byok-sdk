@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR ef893ac to retain failure reasons without regex classification (Apache-2.0).
+// BYOK change: Modified from OAR 1775b57 to retain failure reasons without regex classification (Apache-2.0).
 import type {
   FrameBody,
   RuntimeEventBody,
@@ -7,8 +7,9 @@ import type {
 } from "../../contracts/session.js";
 // BYOK change: Failure classification belongs to BYOK typed failure authority.
 import { asNumber, asRecord, type JsonRecord } from "../../shared/json.js";
-import { codexItemExitCode, codexItemInput, codexItemOutput } from "./item-detail.js";
+import { codexItemExitCode, codexItemInput, codexToolContent } from "./item-detail.js";
 import { codexReasoningContent } from "./reasoning.js";
+import { aboutOwnChild, codexTaskViews, withStartedChild, type SubagentThreads } from "./tasks.js";
 
 /**
  * The codex notification → record projection as a PURE FOLD (see
@@ -22,7 +23,9 @@ import { codexReasoningContent } from "./reasoning.js";
  * recorded fixtures.
  */
 
-const TOOL_ITEM_TYPES = new Set(["commandExecution", "fileChange", "mcpToolCall", "webSearch"]);
+// `sleep` is the model waiting (`{durationMs}`, the wait it asked for; a steer
+// can end it early). It reports no status, so its end carries no result.
+const TOOL_ITEM_TYPES = new Set(["commandExecution", "fileChange", "mcpToolCall", "webSearch", "sleep"]);
 const COLLAB_ITEM_TYPES = new Set(["collabAgentToolCall", "collabToolCall", "subAgentActivity"]);
 
 export type ProjectionCommand =
@@ -50,10 +53,12 @@ export interface CodexProjectionState {
    * flag lets the second report close nothing instead of ending twice.
    */
   readonly compacting: boolean;
+  /** Subagent threads the stream reported starting: who started each, and its path. */
+  readonly subagents: SubagentThreads;
 }
 
 export function initialCodexProjection(rootThreadId: string): CodexProjectionState {
-  return { rootThreadId, lastErrorDetail: null, compacting: false };
+  return { rootThreadId, lastErrorDetail: null, compacting: false, subagents: new Map() };
 }
 
 const COMPACTION_ITEM_TYPE = "contextCompaction";
@@ -89,7 +94,7 @@ function toolViews(method: string, item: JsonRecord | null): RuntimeEventBody[] 
       ? { kind: "tool_call_started", callId: itemId, tool: itemType }
       : { kind: "tool_call_started", callId: itemId, tool: itemType, input }];
   }
-  const output = item === null ? undefined : codexItemOutput(item);
+  const content = item === null ? undefined : codexToolContent(item);
   const exitCode = item === null ? undefined : codexItemExitCode(item);
   const status = typeof item?.status === "string" ? item.status : undefined;
   let result: "ok" | "failed" | undefined = undefined;
@@ -101,7 +106,7 @@ function toolViews(method: string, item: JsonRecord | null): RuntimeEventBody[] 
   return [{
     kind: "tool_call_ended",
     callId: itemId,
-    ...(output === undefined ? {} : { output }),
+    ...(content === undefined ? {} : { content }),
     ...(result === undefined ? {} : { result }),
     ...(exitCode === undefined ? {} : { exitCode }),
   }];
@@ -172,12 +177,15 @@ function settingsViews(params: JsonRecord): RuntimeEventBody[] {
   return events;
 }
 
-/** Edges a collaboration item establishes: the root (sender) thread spawned or addressed the named threads. */
-function collabEdges(state: CodexProjectionState, item: JsonRecord | null): SessionEdge[] {
+/** Edges a collaboration item establishes: the sender thread (the reporting thread unless the item names one) spawned or addressed the named threads. */
+function collabEdges(state: CodexProjectionState, reporter: string, item: JsonRecord | null): SessionEdge[] {
   if (item === null || typeof item.type !== "string" || !COLLAB_ITEM_TYPES.has(item.type)) {
     return [];
   }
-  const parent = typeof item.senderThreadId === "string" ? item.senderThreadId : state.rootThreadId;
+  if (item.type === "subAgentActivity" && !aboutOwnChild(state.subagents, state.rootThreadId, reporter, item)) {
+    return [];
+  }
+  const parent = typeof item.senderThreadId === "string" ? item.senderThreadId : reporter;
   const receivers: unknown[] = Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds : [];
   const children = [...receivers, item.agentThreadId]
     .filter((id): id is string => typeof id === "string" && id.length > 0 && id !== parent);
@@ -192,10 +200,13 @@ function spanIdOf(params: JsonRecord): string | undefined {
   return typeof turnId === "string" ? turnId : undefined;
 }
 
-function viewsFor(state: CodexProjectionState, method: string, params: JsonRecord): RuntimeEventBody[] {
+function viewsFor(state: CodexProjectionState, reporter: string, method: string, params: JsonRecord): RuntimeEventBody[] {
   switch (method) {
     case "item/agentMessage/delta":
-      return typeof params.delta === "string" ? [{ kind: "text_delta", text: params.delta }] : [];
+      // `itemId` names the agentMessage item: one turn can say several.
+      return typeof params.delta === "string"
+        ? [{ kind: "text_delta", text: params.delta, ...(typeof params.itemId === "string" ? { messageId: params.itemId } : {}) }]
+        : [];
     case "item/commandExecution/outputDelta":
       // Streamed stdout of a running command item; `itemId` is the tool call.
       return typeof params.itemId === "string"
@@ -219,8 +230,16 @@ function viewsFor(state: CodexProjectionState, method: string, params: JsonRecor
       }
       return isCompactionItem(params) ? [{ kind: "compaction_started" }] : toolViews(method, asRecord(params.item));
     }
-    case "item/completed":
-      return isCompactionItem(params) ? [{ kind: "compaction_ended", outcome: "completed" }] : toolViews(method, asRecord(params.item));
+    case "item/completed": {
+      if (isCompactionItem(params)) {
+        return [{ kind: "compaction_ended", outcome: "completed" }];
+      }
+      const item = asRecord(params.item);
+      if (item?.type === "subAgentActivity") {
+        return aboutOwnChild(state.subagents, state.rootThreadId, reporter, item) ? codexTaskViews(item) : [];
+      }
+      return toolViews(method, item);
+    }
     case "turn/completed":
       return [{ kind: "turn_ended", outcome: settleOutcome(state, asRecord(params.turn)?.status) }];
     case "thread/tokenUsage/updated":
@@ -242,12 +261,12 @@ export function foldCodexNotification(
   const spanId = spanIdOf(params);
   const event: ProjectionCommand = {
     kind: "frame",
-    body: { type: method, native: params, events: viewsFor(state, method, params) },
+    body: { type: method, native: params, events: viewsFor(state, threadId, method, params) },
     ...(spanId === undefined ? {} : { spanId }),
     ...(threadId === state.rootThreadId ? {} : { sessionId: threadId }),
   };
   const links = method === "item/started" || method === "item/completed"
-    ? collabEdges(state, asRecord(params.item)).map((edge): ProjectionCommand => ({ kind: "link", edge }))
+    ? collabEdges(state, threadId, asRecord(params.item)).map((edge): ProjectionCommand => ({ kind: "link", edge }))
     : [];
 
   let next = state;
@@ -265,6 +284,10 @@ export function foldCodexNotification(
     next = { ...state, compacting: method === "item/started" };
   } else if (method === "thread/compacted" && threadId === state.rootThreadId) {
     next = { ...state, compacting: false };
+  }
+  const subagents = withStartedChild(next.subagents, threadId, asRecord(params.item));
+  if (subagents !== next.subagents) {
+    next = { ...next, subagents };
   }
   return { state: next, commands: [event, ...links] };
 }

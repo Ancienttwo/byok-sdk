@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR ef893ac for injected processes, bounded RPCs and server replies (Apache-2.0).
+// BYOK change: Modified from OAR 1775b57 for injected processes, bounded RPCs and server replies (Apache-2.0).
 // BYOK change: The caller owns process creation and must enforce bounded kill/exited semantics.
 export interface LineProcess {
   readonly spawned: Promise<void>;
@@ -27,6 +27,8 @@ export class RpcTimeoutError extends Error {
   }
 }
 import { asRecord, parseJson, type JsonRecord } from "../../shared/json.js";
+// BYOK change: Keep startup synchronous at the injected spawn seam; do not use the upstream queued-client wrapper.
+// BYOK change: Use caller-owned exitError diagnostics instead of shared/executable processFailure.
 
 /**
  * Minimal persistent JSON-RPC client over codex app-server's stdio JSONL
@@ -111,6 +113,11 @@ export function startAppServerClient(
     ["app-server", ...overrideArgs, "--listen", "stdio://"],
     { ...(cwd === undefined ? {} : { cwd }), env }, // BYOK change: preserve filtered env verbatim.
   );
+  // Session initialization observes spawn failures through its pending RPC.
+  // Mark this parallel promise handled while preserving its rejection for
+  // callers that explicitly await spawned.
+  // oxlint-disable-next-line promise/prefer-await-to-then -- client construction remains synchronous
+  void child.spawned.catch(() => {});
   const pending = new Map<number, Pending>();
   // Inbound frames and marks share one queue until `handle` registers the
   // handlers, so their relative order is the wire's whatever kind they are.
