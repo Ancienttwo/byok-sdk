@@ -5,7 +5,7 @@ client and the environment-neutral cloud domain kernel. It is private: ADR-035's
 published package inventory and API baselines remain unchanged. A later public
 distribution decision is outside 4a.
 
-`AgentDO` hosts native pi-durable 1.0.0 `Harness` and `Storage`. `openExecution()`
+`AgentDO` hosts native pi-durable 1.0.1 `Harness` and `Storage`. `openExecution()`
 always creates a new ownerless conversation. `appendExecution(id, text)` and
 `readExecution(id)` round-trip passive entries without model or tool execution.
 The consuming platform must authorize the identity before `getAgentObject()`;
@@ -81,7 +81,7 @@ physical SQLite connection; native storage close invalidates the adapter, and
 reopening preserves data. Open one native storage instance per DO at a time.
 
 This follows the async adapter in [Cloudflare Agents d6656161](https://github.com/cloudflare/agents/blob/d6656161/packages/agents/src/harness/pi/session-store.ts).
-Current upstream uses a different synchronous pi contract. Pinned pi 1.0.0 takes
+Current upstream uses a different synchronous pi contract. Pinned pi 1.0.1 takes
 async callbacks, so `transactionSync()` cannot host its transaction callback.
 Cloudflare documents async SQL transactions on the
 [SQLite storage API](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/).

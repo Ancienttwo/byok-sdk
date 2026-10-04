@@ -1,3 +1,4 @@
+import { verifyOfficialPiClosure } from '../src/adapters/pi/official-pi-installation.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile, copyFile, unlink } from 'node:fs/promises';
@@ -13,6 +14,25 @@ const rows = [];
 // The frozen inventory covers every third-party input, including files later
 // removed by tree shaking; additions or changed bytes require a new inventory.
 const thirdParty = JSON.parse(await readFile(new URL('vendor/third-party-manifest.json', root), 'utf8'));
+if (process.argv.includes('--refresh-official-pi')) {
+  const { provenance } = verifyOfficialPiClosure(fileURLToPath(root));
+  const closure = JSON.parse(await readFile(new URL('src/adapters/pi/official-pi-closure.json', root), 'utf8'));
+  const noticesUrl = new URL('vendor/THIRD-PARTY.md', root);
+  let notices = await readFile(noticesUrl, 'utf8');
+  for (const pkg of thirdParty.packages) {
+    const official = closure.packages.find(entry => entry.name === pkg.name);
+    if (!official) continue;
+    for (const file of pkg.files) {
+      const attested = official.files.find(entry => entry.path === file.path);
+      assert.equal(file.sha256, attested?.sha256, `official Pi build input changed: ${pkg.name}/${file.path}`);
+    }
+    pkg.version = provenance.packageVersion;
+    notices = notices.split('\n').map(line => line.startsWith(`## ${pkg.name}@`)
+      ? `## ${pkg.name}@${pkg.version}` : line).join('\n');
+  }
+  await writeFile(noticesUrl, notices);
+  await writeFile(new URL('vendor/third-party-manifest.json', root), JSON.stringify(thirdParty, null, 2) + '\n');
+}
 const expectedInputs = new Map(thirdParty.packages.flatMap(pkg => pkg.files.map(file =>
   [`${pkg.name}@${pkg.version}/${file.path}`, file.sha256])));
 const meta = JSON.parse(await readFile(new URL('dist/bin/metafile-esm.json', root), 'utf8'));
