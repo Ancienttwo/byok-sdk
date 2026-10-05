@@ -337,6 +337,111 @@ describe('the prepared pi tool surface', () => {
   });
 });
 
+/**
+ * A device configuring MORE toolsets than one record names: the producer counts
+ * the named ones only, and the launch must reproduce that, not the whole registry.
+ */
+function twoToolsetRegistry(): McpToolsetRegistry {
+  return new McpToolsetRegistry({
+    team: { mcpServers: { teamserver: fixtureServer() }, readOnlyTools: { teamserver: ['echo'] } },
+    unrelated: { mcpServers: { otherserver: fixtureServer() }, readOnlyTools: { otherserver: ['echo'] } },
+  });
+}
+
+async function countedFor(
+  toolsets: McpToolsetRegistry,
+  requiredToolsets: readonly string[],
+  permissionMode: PermissionMode = 'auto',
+): Promise<PreparedToolSurface> {
+  const assembled = await createPreparedToolSurfaceAssembler({
+    toolsetRegistry: toolsets,
+    runtimeEnv: () => ({ PATH: process.env.PATH ?? '' }),
+  }).assemble({ agentMemory: 'none', requiredToolsets, permissionMode, runtimeIdentity: RUNTIME_IDENTITY });
+  if (!assembled.ok) throw new Error(`the daemon refused to assemble the counted surface: ${assembled.detail}`);
+  return assembled.surface;
+}
+
+describe('a tool-less prepared surface (requiredToolsets [] and agentMemory none)', () => {
+  const AUTO_NO_NATIVE: PermissionPolicy = { mode: 'auto', allowTools: [] };
+
+  function toollessInput(counted: PreparedToolSurface, overrides: Partial<PreparedPiToolSurfaceInput> = {}): PreparedPiToolSurfaceInput {
+    return {
+      policy: AUTO_NO_NATIVE, countedPermissionMode: 'auto', agentMemory: 'none', memory: null,
+      observation: {}, toolsetDefinitionRevisions: counted.toolsetDefinitionRevisions, servers: [],
+      launch: counted.launch, toolImplementations: {}, runtimeIdentity: RUNTIME_IDENTITY,
+      expectedToolBindingDigest: counted.toolBindingDigest, expectedObservationDigest: counted.observationDigest,
+      host: UNUSED_HOST, ...overrides,
+    };
+  }
+
+  it('is counted with no tool, no revision and no implementation, beside a configured toolset', async () => {
+    const counted = await countedFor(twoToolsetRegistry(), []);
+    expect(counted.tools).toEqual([]);
+    expect(counted.toolExecutors).toEqual({});
+    expect(counted.toolImplementationKinds).toEqual({});
+    expect(counted.toolsetDefinitionRevisions).toEqual({});
+    expect(counted.memory).toBeNull();
+  }, 30_000);
+
+  it('is launched with zero tools, reproducing both digests of the counted surface', async () => {
+    const counted = await countedFor(twoToolsetRegistry(), []);
+    const surface = await assemblePreparedPiToolSurface(toollessInput(counted));
+    if (!surface.ok) throw new Error(`${surface.code}: ${surface.message}`);
+    expect(surface.tools).toEqual([]);
+    expect(surface.toolNames).toEqual([]);
+    expect(surface.toolBindingDigest).toBe(counted.toolBindingDigest);
+    expect(surface.observationDigest).toBe(counted.observationDigest);
+  }, 30_000);
+
+  it('still refuses a launch whose facts moved: another launch directory, an unnamed toolset revision, memory state', async () => {
+    const counted = await countedFor(twoToolsetRegistry(), []);
+    const moved = await assemblePreparedPiToolSurface(toollessInput(counted, {
+      launch: { ...counted.launch, launchCwd: `${counted.launch.launchCwd}/elsewhere` },
+    }));
+    expect(moved).toMatchObject({ ok: false, code: 'tool_binding_drift' });
+
+    // Binding every configured toolset, not the record's, is a different surface.
+    const wide = await assemblePreparedPiToolSurface(toollessInput(counted, {
+      toolsetDefinitionRevisions: { unrelated: `sha256:${'7'.repeat(64)}` },
+    }));
+    expect(wide).toMatchObject({ ok: false, code: 'tool_binding_drift' });
+
+    const memory = await assemblePreparedPiToolSurface(toollessInput(counted, { memory: MEMORY }));
+    expect(memory).toMatchObject({ ok: false, code: 'tool_surface_unfingerprintable' });
+
+    const mode = await assemblePreparedPiToolSurface(toollessInput(counted, { policy: { mode: 'readonly', allowTools: [] } }));
+    expect(mode).toMatchObject({ ok: false, code: 'permission_mode_mismatch' });
+  }, 30_000);
+
+  it.each([
+    ['auto without allowTools', { mode: 'auto' } as PermissionPolicy, 'policy_inexpressible'],
+    ['readonly (selects native tools)', { mode: 'readonly' } as PermissionPolicy, 'native_tools_uncounted'],
+    ['allowTools naming a native tool', { mode: 'auto', allowTools: ['read'] } as PermissionPolicy, 'native_tools_uncounted'],
+  ])('refuses %s even with an empty counted surface', async (_name, policy, code) => {
+    const counted = await countedFor(twoToolsetRegistry(), []);
+    const surface = await assemblePreparedPiToolSurface(toollessInput(counted, { policy, countedPermissionMode: policy.mode }));
+    expect(surface).toMatchObject({ ok: false, code });
+  }, 30_000);
+
+  it('binds only the toolset the record names when the device configures another', async () => {
+    const toolsets = twoToolsetRegistry();
+    const counted = await countedFor(toolsets, ['team'], 'readonly');
+    const revisions = Object.keys(counted.toolsetDefinitionRevisions);
+    expect(revisions).toEqual(['team']);
+    const facts = await deviceFacts('readonly');
+    // The launch side, fed the record's own revisions, reproduces the counted digests.
+    const surface = await assemblePreparedPiToolSurface(launchInput(facts, READONLY_NO_NATIVE, {
+      toolsetDefinitionRevisions: counted.toolsetDefinitionRevisions,
+      expectedToolBindingDigest: counted.toolBindingDigest,
+      expectedObservationDigest: counted.observationDigest,
+      launch: counted.launch,
+    }));
+    if (!surface.ok) throw new Error(`${surface.code}: ${surface.message}`);
+    expect(surface.toolBindingDigest).toBe(counted.toolBindingDigest);
+    expect(surface.observationDigest).toBe(counted.observationDigest);
+  }, 60_000);
+});
+
 describe('the shared prepared surface observation digest', () => {
   const TOOLS: readonly InputPreparationToolV1[] = [
     { name: 'mcp__teamserver__echo', description: 'echo', parameters: { type: 'object', properties: {} } },

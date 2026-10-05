@@ -264,9 +264,6 @@ export async function assemblePreparedPiToolSurface(
   // The SAME projection, in the SAME order, that the preparation counted and
   // that the ordinary extension registers.
   const projected = projectMcpTools(allowed.observation);
-  if (projected.length === 0 && input.agentMemory === 'none') {
-    return refuse('tool_surface_unfingerprintable', 'the admitted observation projects no tools at all');
-  }
 
   const tools: InputPreparationToolV1[] = projected.map((tool) => ({
     name: qualifiedMcpToolName(tool.serverName, tool.toolName),

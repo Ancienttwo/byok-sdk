@@ -8,6 +8,17 @@
 
 ## Unreleased
 
+- **Fixed (client)** — the prepared lane now supports a truly tool-less record
+  (`requiredToolsets: []`, `agentMemory: 'none'`; the offer omits
+  `requiredToolsets`). It was accepted by the protocol but refused by the device at
+  preparation, admission and the Pi launch. The launch attestation is still bound,
+  and a device that cannot prove a non-writable launch directory still declines.
+  Admission also binds only the toolsets the record names, not every configured
+  toolset, so an unrelated configured toolset no longer produces
+  `preparation_tool_binding_digest_mismatch`. The Pi prepared session now proves its
+  registered tool set equals the manifest and fails `prepared_registry_drift`
+  otherwise. No wire, record, digest, capability or version change.
+
 - **Added (cloud-do)** — prepare `@byok-sdk/cloud-do` for the public SDK train.
   Add an ESM library build, a local declaration closure, an API golden, and
   an installed-tarball Worker smoke in the release-pack driver. The source

@@ -11,7 +11,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, type Envelope, type InputPreparationOfferBinding, type TaskOfferPreparedPayload } from '@byok-sdk/protocol';
+import { createEnvelope, TaskOfferPreparedPayloadSchema, type Envelope, type InputPreparationOfferBinding, type TaskOfferPreparedPayload } from '@byok-sdk/protocol';
 import { AgentHomeManager } from '../agent-home';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
@@ -21,6 +21,7 @@ import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import {
   PREPARED_CONTEXT_OVERFLOW_REASON_PREFIX,
   PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX,
+  RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX,
   TaskRunner,
   type TaskRunnerDeps,
 } from '../daemon/task-runner';
@@ -30,7 +31,7 @@ import {
   type InputPreparationArtifact,
 } from '../daemon/input-preparation-store';
 import { SUPPORTED_PREPARED_COMPILER_VERSION } from '../adapters/pi/input-preparation';
-import { fingerprintPreparedToolSurface } from '../daemon/prepared-tool-surface';
+import { createPreparedToolSurfaceAssembler, fingerprintPreparedToolSurface } from '../daemon/prepared-tool-surface';
 import { admitPreparedOffer } from '../daemon/prepared-offer-admission';
 import { preparedMemoryProjection, type PreparedAgentMemoryState } from '../daemon/prepared-agent-memory';
 import * as preparedAgentMemory from '../daemon/prepared-agent-memory';
@@ -560,7 +561,152 @@ async function memoryOnlyRecord(): Promise<{
   return { store, recordId: reserved.record.recordId };
 }
 
+/** A sealed record whose tool surface is empty: no Agent memory, no Host MCP toolsets. */
+async function toollessRecord(options: {
+  readonly permissionMode?: 'auto' | 'confirm' | 'readonly' | 'plan';
+  /** A launch directory other than this machine's trusted one. */
+  readonly launchCwd?: string;
+  /** Digests counted elsewhere (the real daemon assembler) instead of by this fixture. */
+  readonly counted?: { readonly toolBindingDigest: string; readonly observationDigest: string };
+} = {}): Promise<{
+  readonly store: InputPreparationStore;
+  readonly recordId: string;
+}> {
+  const permissionMode = options.permissionMode ?? 'auto';
+  const store = new InputPreparationStore({
+    storeDir: await tempDir('byok-prepared-toolless-runner-store-'),
+    retentionMs: 60 * 60 * 1000,
+    retryHorizonMs: 60 * 60 * 1000,
+  });
+  await store.open();
+  const launch = { cwd: options.launchCwd ?? await trustedCwd() } as const;
+  const attestation = mcpLaunchAttestation(launch);
+  const fingerprinted = await fingerprintPreparedToolSurface({
+    agentMemory: 'none', memory: null, observation: {}, permissionMode,
+    runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME), launch: attestation,
+    toolsetDefinitionRevisions: {}, implementations: {},
+  });
+  if (!fingerprinted.ok) throw new Error(fingerprinted.message);
+  const reserved = await store.reserve({
+    key: { scopeId: SCOPE_ID, agentRef: AGENT_REF.agentId, requestId: 'toolless-request' },
+    requestDigest: REQUEST_DIGEST, binding: binding({ permissionMode }), model: MODEL, maxInFlight: 8,
+  });
+  if (reserved.kind !== 'created') throw new Error('toolless record was not created');
+  const summary: InputPreparationArtifactSummaryV1 = {
+    requestDigest: REQUEST_DIGEST, envelopeDigest: ENVELOPE_DIGEST, toolManifestDigest: TOOL_MANIFEST_DIGEST,
+    requestBytes: 33, projectionBytes: 19, projection: PROJECTION, residual: [...RESIDUAL],
+    observationDigest: options.counted?.observationDigest ?? fingerprinted.fingerprint.observationDigest,
+    toolBindingDigest: options.counted?.toolBindingDigest ?? preparedToolBindingDigest({
+      agentMemory: 'none', memoryImplementation: null, launch: attestation,
+      toolsetDefinitionRevisions: {}, servers: [],
+    }),
+    toolImplementationKinds: fingerprinted.fingerprint.toolImplementationKinds,
+  };
+  await store.commitCounterReservation({
+    recordId: reserved.record.recordId, artifact: artifact(reserved.record.recordId), summary,
+    requestContentTextOnly: true, bounds: { maxScopeAggregateBytes: 10_000_000, maxCounterCallsPerScope: 4 },
+  });
+  await store.update(reserved.record.recordId, { state: 'prepared', counter: COUNTER_EVIDENCE });
+  return { store, recordId: reserved.record.recordId };
+}
+
 describe('a prepared offer is admitted only by item-by-item equality with its record', () => {
+  it('binds only the toolsets the record names, so an unrelated registry toolset does not perturb the digests', async () => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(built, adapter, sent, {
+      inputPreparationLane: {
+        store: built.store,
+        authorizeAgentMemory: async () => {},
+        open: () => built.store.open(),
+        runtime: RUNTIME,
+        policyRevision: POLICY_REVISION,
+        toolsetDefinitionRevisions: () => new Map([[TOOLSET_ID, TOOLSET_REVISION], ['unrelated', 'unrelated-definition-r1']]),
+      },
+    });
+
+    await runner.handleEnvelope(preparedOffer('task-unrelated-registry-toolset', reference(built)));
+
+    expect(sent.some((envelope) => envelope.type === 'task.decline') ? declineReason(sent) : undefined).toBeUndefined();
+    expect(adapter.preparedStartCalls).toHaveLength(1);
+    expect(adapter.preparedStartCalls[0]!.preparation.toolsetDefinitionRevisions).toEqual({ [TOOLSET_ID]: TOOLSET_REVISION });
+    await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-unrelated-registry-toolset', seq: 2 }));
+  });
+
+  it('runs a tool-less result-document offer with no requiredToolsets and no message egress to a document terminal', async () => {
+    const record = await toollessRecord();
+    const support = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const selector = { mode: 'result-document' as const, contract: 'test.internal-summary.v1' };
+    const document = { schemaVersion: 'test.internal-summary.v1', text: 'Frozen input summary.' };
+    const extracts: unknown[] = [];
+    const order: string[] = [];
+    const runner = await makeRunner(support, adapter, sent, {
+      send: (envelope) => {
+        if (envelope.type === 'task.claim') order.push('claim');
+        sent.push(envelope);
+      },
+      beforeClaim: async () => {
+        order.push(record.store.get(record.recordId)?.pin === undefined ? 'unpinned-at-claim' : 'pin');
+      },
+      getServerCapabilities: () => ['result-document'],
+      resultDocument: { extract: (output, task) => {
+        extracts.push(task.terminalProjection);
+        return JSON.parse(output);
+      } },
+      inputPreparationLane: {
+        store: record.store,
+        authorizeAgentMemory: async () => {},
+        open: () => record.store.open(),
+        runtime: RUNTIME,
+        policyRevision: POLICY_REVISION,
+        // A configured toolset the record never named: it must not enter the binding.
+        toolsetDefinitionRevisions: () => new Map([['unrelated', 'unrelated-definition-r1']]),
+      },
+    });
+
+    const offer = preparedOffer('task-toolless-summary', {
+      reference: record.recordId, requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST,
+    }, 1, { requiredToolsets: undefined, terminalProjection: selector });
+    expect(offer.payload).not.toHaveProperty('requiredToolsets');
+    expect(offer.payload).not.toHaveProperty('messageEgress');
+
+    await runner.handleEnvelope(offer);
+
+    expect(sent.some((envelope) => envelope.type === 'task.decline') ? declineReason(sent) : undefined).toBeUndefined();
+    expect(order).toEqual(['pin', 'claim']);
+    expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(1);
+    expect(record.store.get(record.recordId)?.pin?.taskId).toBe('task-toolless-summary');
+    expect(adapter.startCalls).toHaveLength(0);
+    expect(adapter.preparedStartCalls).toHaveLength(1);
+    const start = adapter.preparedStartCalls[0]!;
+    // Zero tools: no MCP server map, no Agent memory server, no toolset tool list.
+    expect(Object.keys(start.input.mcpServers ?? {})).toEqual([]);
+    expect(start.input.mcpToolsetTools).toBeUndefined();
+    expect(start.preparation.agentMemory).toBe('none');
+    expect(start.preparation.toolImplementations).toEqual({});
+    expect(start.preparation.toolsetDefinitionRevisions).toEqual({});
+    // The launch boundary is still proven and bound; it comes only from the trusted resolver.
+    expect(start.input.mcpLaunch).toEqual({ cwd: await trustedCwd() });
+    expect(start.preparation.launch).toEqual({ cwd: await trustedCwd() });
+
+    const session = adapter.sessions[0]!;
+    session.emit({ type: 'progress', text: JSON.stringify(document) });
+    session.emit({ type: 'usage', inputTokens: 1_000, outputTokens: 10 });
+    session.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(true));
+
+    const completed = sent.find((envelope) => envelope.type === 'task.complete');
+    if (completed?.type !== 'task.complete') throw new Error('no task.complete');
+    expect(completed.payload.document).toEqual(document);
+    expect(extracts).toEqual([selector]);
+    // No message egress: nothing was published on the Agent message lane.
+    expect(sent.some((envelope) => envelope.type === 'agent.message.publish')).toBe(false);
+    await vi.waitFor(() => expect(record.store.get(record.recordId)?.pin).toBeUndefined());
+  });
+
   it('pins the record strictly before the claim, then starts the prepared variant', async () => {
     const built = await lane();
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
@@ -1657,6 +1803,251 @@ describe('prepared daemon-authored message egress', () => {
     expect(sent.some(e => e.type === 'task.claim')).toBe(false);
     expect(adapter.preparedStartCalls).toHaveLength(0);
     await runner.shutdownActiveTasks('test complete');
+  });
+});
+
+describe('a tool-less prepared record (requiredToolsets [], agentMemory none, the offer omits requiredToolsets)', () => {
+  const ALL_MODES: RuntimeCapabilities = { ...MCP_CAPABLE, permissionModes: ['auto', 'confirm', 'readonly', 'plan'] };
+  const selector = { mode: 'result-document' as const, contract: 'test.internal-summary.v1' };
+  const document = { schemaVersion: 'test.internal-summary.v1', text: 'Frozen input summary.' };
+
+  function toollessLane(
+    record: { readonly store: InputPreparationStore },
+    revisions: ReadonlyMap<string, string> = new Map([['unrelated', 'unrelated-definition-r1']]),
+  ) {
+    return {
+      store: record.store,
+      authorizeAgentMemory: async () => {},
+      open: () => record.store.open(),
+      runtime: RUNTIME,
+      policyRevision: POLICY_REVISION,
+      // Includes a configured toolset the record never named.
+      toolsetDefinitionRevisions: () => revisions,
+    };
+  }
+
+  function toollessOffer(recordId: string, taskId: string, overrides: Partial<TaskOfferPreparedPayload> = {}): Envelope {
+    return preparedOffer(taskId, { reference: recordId, requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST },
+      1, { requiredToolsets: undefined, terminalProjection: selector, ...overrides });
+  }
+
+  function expectNothingCommitted(
+    sent: readonly Envelope[],
+    adapter: StubRuntimeAdapter,
+    record: { readonly store: InputPreparationStore; readonly recordId: string },
+  ): void {
+    const declined = sent.find((envelope) => envelope.type === 'task.decline');
+    expect(declined?.type === 'task.decline' ? declined.payload.retryable : undefined).toBe(false);
+    expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(0);
+    expect(adapter.preparedStartCalls).toHaveLength(0);
+    expect(adapter.startCalls).toHaveLength(0);
+    expect(record.store.get(record.recordId)?.pin).toBeUndefined();
+  }
+
+  async function run(
+    record: { readonly store: InputPreparationStore; readonly recordId: string },
+    offer: (recordId: string) => Envelope,
+    options: {
+      readonly adapter?: StubRuntimeAdapter;
+      readonly extra?: Partial<TaskRunnerDeps>;
+      readonly support?: Lane;
+      readonly revisions?: ReadonlyMap<string, string>;
+    } = {},
+  ) {
+    const support = options.support ?? await lane();
+    const adapter = options.adapter ?? new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
+    const sent: Envelope[] = [];
+    const pin = vi.spyOn(record.store, 'pin');
+    const runner = await makeRunner(support, adapter, sent, {
+      getServerCapabilities: () => ['result-document'],
+      resultDocument: { extract: (output) => JSON.parse(output) },
+      inputPreparationLane: toollessLane(record, options.revisions),
+      ...options.extra,
+    });
+    await runner.handleEnvelope(offer(record.recordId));
+    return { sent, adapter, runner, pin };
+  }
+
+  it('admits a record counted by the real daemon assembler: producer, admission and launch agree on both digests', async () => {
+    const counted = await createPreparedToolSurfaceAssembler({
+      toolsetRegistry: new McpToolsetRegistry({
+        unrelated: { mcpServers: { otherserver: { command: process.execPath, args: ['--version'] } } },
+      }),
+      runtimeEnv: () => ({ PATH: process.env.PATH ?? '' }),
+    }).assemble({
+      agentMemory: 'none', requiredToolsets: [], permissionMode: 'auto',
+      runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
+    });
+    if (!counted.ok) throw new Error(`${counted.code}: ${counted.detail}`);
+    const record = await toollessRecord({ counted: counted.surface });
+    const stored = record.store.get(record.recordId);
+    if (stored === undefined) throw new Error('tool-less record disappeared');
+    const launch = { cwd: await trustedCwd() } as const;
+    const admitted = await admitPreparedOffer({
+      record: stored, artifactPath: record.store.artifactPathOf(stored),
+      offered: { reference: record.recordId, requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST },
+      agentRef: AGENT_REF, deviceId: DEVICE_ID, policyRevision: POLICY_REVISION, runtime: RUNTIME,
+      admittedMode: 'auto', offeredAgentMemory: 'none', memory: null, launch,
+      observation: {}, implementations: {}, servers: [], toolsetDefinitionRevisions: {}, nowMs: Date.now(),
+    });
+    if (!admitted.ok) throw new Error(`${admitted.reason}: ${admitted.detail}`);
+    expect(admitted.launch.agentMemory).toBe('none');
+    expect(admitted.launch.memory).toBeNull();
+    expect(admitted.launch.launch).toEqual(launch);
+    expect(Object.keys(admitted.launch.toolImplementations)).toEqual([]);
+    expect(admitted.launch.toolsetDefinitionRevisions).toEqual({});
+    // Admission recomputed both digests from live facts and matched the producer's.
+    expect(admitted.launch.toolBindingDigest).toBe(counted.surface.toolBindingDigest);
+    expect(admitted.launch.observationDigest).toBe(counted.surface.observationDigest);
+  });
+
+  it('still declines a missing observation while servers are projected (fail closed, not defaulted)', async () => {
+    const built = await lane();
+    const stored = built.store.get(built.recordId);
+    if (stored === undefined) throw new Error('record disappeared');
+    const declined = await admitPreparedOffer({
+      record: stored, artifactPath: built.store.artifactPathOf(stored),
+      offered: reference(built),
+      agentRef: AGENT_REF, deviceId: DEVICE_ID, policyRevision: POLICY_REVISION, runtime: RUNTIME,
+      admittedMode: 'auto', offeredAgentMemory: 'none', memory: null, launch: { cwd: await trustedCwd() },
+      observation: undefined, implementations: built.implementations,
+      servers: [{ serverName: SERVER_NAME, toolsetId: TOOLSET_ID, command: built.serverCommand, args: ['--stdio'] }],
+      toolsetDefinitionRevisions: { [TOOLSET_ID]: TOOLSET_REVISION }, nowMs: Date.now(),
+    });
+    expect(declined).toMatchObject({ ok: false, reason: 'preparation_tool_set_mismatch' });
+  });
+
+  it('declines a tool-bearing record for a tool-less offer (preparation_tool_set_mismatch), before any pin', async () => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
+    const { sent, pin } = await run(built, (id) => toollessOffer(id, 'task-toolbearing-for-toolless'), { adapter, support: built });
+    expect(declineReason(sent)).toContain('preparation_tool_set_mismatch');
+    expectNothingCommitted(sent, adapter, built);
+    expect(pin).not.toHaveBeenCalled();
+  });
+
+  it('declines a tool-less record for an offer that names a toolset (preparation_tool_set_mismatch), before any pin', async () => {
+    const record = await toollessRecord();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
+    const { sent, pin } = await run(record, (id) => toollessOffer(id, 'task-toolless-for-toolbearing', { requiredToolsets: [TOOLSET_ID] }), {
+      adapter,
+      revisions: new Map([[TOOLSET_ID, TOOLSET_REVISION], ['unrelated', 'unrelated-definition-r1']]),
+    });
+    expect(declineReason(sent)).toContain('preparation_tool_set_mismatch');
+    expectNothingCommitted(sent, adapter, record);
+    expect(pin).not.toHaveBeenCalled();
+  });
+
+  it('declines an Agent memory selection that differs from a tool-less record, and a tool-less offer for a memory record', async () => {
+    const record = await toollessRecord();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
+    const wantsMemory = await run(record, (id) => toollessOffer(id, 'task-toolless-wants-memory', { agentMemory: 'read' }), { adapter });
+    expect(declineReason(wantsMemory.sent)).toBe('agent_memory_mismatch: the offered Agent memory selection differs from the named preparation');
+    expectNothingCommitted(wantsMemory.sent, adapter, record);
+
+    const memoryRecord = await memoryOnlyRecord();
+    const memoryAdapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
+    const wantsNone = await run(memoryRecord, (id) => toollessOffer(id, 'task-memory-record-wants-none', { agentMemory: 'none' }), { adapter: memoryAdapter });
+    expect(declineReason(wantsNone.sent)).toBe('agent_memory_mismatch: the offered Agent memory selection differs from the named preparation');
+    expectNothingCommitted(wantsNone.sent, memoryAdapter, memoryRecord);
+  });
+
+  it.each([
+    ['auto without allowTools', 'auto', { mode: 'auto' }, 'policy_inexpressible'],
+    ['auto allowing a native tool', 'auto', { mode: 'auto', allowTools: ['read'] }, 'native_tools_uncounted'],
+    ['readonly', 'readonly', { mode: 'readonly' }, 'native_tools_uncounted'],
+    ['readonly allowing a native tool', 'readonly', { mode: 'readonly', allowTools: ['read'] }, 'native_tools_uncounted'],
+  ] as const)('refuses the native policy %s on a tool-less record before pin or claim', async (_name, mode, policy, reason) => {
+    const record = await toollessRecord({ permissionMode: mode });
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
+    const { sent, pin } = await run(record, (id) => toollessOffer(id, `task-toolless-${reason}`, { policy: { ...policy } as never }), { adapter });
+    expect(declineReason(sent)).toContain(reason);
+    expectNothingCommitted(sent, adapter, record);
+    expect(pin).not.toHaveBeenCalled();
+  });
+
+  it('declines non-retryably, before any pin, when no launch directory can be proven', async () => {
+    const record = await toollessRecord();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
+    const { sent, pin } = await run(record, (id) => toollessOffer(id, 'task-toolless-no-launch-dir'), {
+      adapter,
+      extra: { mcpLaunchCwd: { dir: path.join(os.tmpdir(), 'byok-no-such-launch-dir-for-toolless') } },
+    });
+    expect(declineReason(sent)).toContain('MCP toolset launch directory unavailable');
+    expectNothingCommitted(sent, adapter, record);
+    expect(pin).not.toHaveBeenCalled();
+  });
+
+  it('declines a launcher-wrapped runtime as preparation_launch_attestation_mismatch', async () => {
+    const record = await toollessRecord();
+    const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, ALL_MODES, true, {
+      mcpServerLaunch: 'launcher-wrapped',
+    });
+    const { sent, pin } = await run(record, (id) => toollessOffer(id, 'task-toolless-launcher-wrapped', { runtime: 'claude' }), { adapter });
+    expect(declineReason(sent)).toContain('preparation_launch_attestation_mismatch');
+    expectNothingCommitted(sent, adapter, record);
+    expect(pin).not.toHaveBeenCalled();
+  });
+
+  it('declines a record bound to another launch directory as preparation_tool_binding_digest_mismatch', async () => {
+    const record = await toollessRecord({ launchCwd: '/byok-another-launch-directory' });
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
+    const { sent, pin } = await run(record, (id) => toollessOffer(id, 'task-toolless-other-launch-dir'), { adapter });
+    expect(declineReason(sent)).toContain('preparation_tool_binding_digest_mismatch');
+    expectNothingCommitted(sent, adapter, record);
+    expect(pin).not.toHaveBeenCalled();
+  });
+
+  it('is rejected by the protocol schema when an offer names an empty requiredToolsets', () => {
+    const parsed = TaskOfferPreparedPayloadSchema.safeParse({
+      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, policy: { mode: 'auto', allowTools: [] }, runtime: 'pi',
+      agentRef: AGENT_REF, preparation: { reference: 'r', requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST },
+      agentMemory: 'none', requiredToolsets: [], terminalProjection: selector, taskId: 'schema-check',
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('declines an offer that selects a result document when the daemon has no extractor', async () => {
+    const record = await toollessRecord();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
+    const { sent, pin } = await run(record, (id) => toollessOffer(id, 'task-toolless-no-extractor'), { adapter, extra: { resultDocument: undefined } });
+    expect(declineReason(sent)).toContain('resultDocument extractor');
+    expectNothingCommitted(sent, adapter, record);
+    expect(pin).not.toHaveBeenCalled();
+  });
+
+  it('fails the task, never completing with a silent gap, when the server lacks result-document or the extractor yields none', async () => {
+    for (const [name, extra] of [
+      ['capability', { getServerCapabilities: () => [] as string[] }],
+      ['undefined-document', { resultDocument: { extract: () => undefined } }],
+    ] as const) {
+      const record = await toollessRecord();
+      const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
+      const { sent } = await run(record, (id) => toollessOffer(id, `task-toolless-${name}`), { adapter, extra });
+      expect(sent.some((envelope) => envelope.type === 'task.decline')).toBe(false);
+      const session = adapter.sessions[0]!;
+      session.emit({ type: 'progress', text: JSON.stringify(document) });
+      session.emit({ type: 'usage', inputTokens: 1_000, outputTokens: 10 });
+      session.emit({ type: 'turn_end' });
+      await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail' || envelope.type === 'task.complete')).toBe(true));
+      const failed = sent.find((envelope) => envelope.type === 'task.fail');
+      if (failed?.type !== 'task.fail') throw new Error(`${name}: expected task.fail`);
+      expect(failed.payload.reason.startsWith(RESULT_DOCUMENT_UNDELIVERABLE_REASON_PREFIX)).toBe(true);
+      expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(false);
+    }
+  });
+
+  it('fails usage_unavailable and completes nothing when no usage was observed before turn_end', async () => {
+    const record = await toollessRecord();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
+    const { sent } = await run(record, (id) => toollessOffer(id, 'task-toolless-no-usage'), { adapter });
+    adapter.sessions[0]!.emit({ type: 'progress', text: JSON.stringify(document) });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true));
+    const failed = sent.find((envelope) => envelope.type === 'task.fail');
+    if (failed?.type !== 'task.fail') throw new Error('no task.fail');
+    expect(failed.payload.reason.startsWith(`${PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX}:`)).toBe(true);
+    expect(sent.some((envelope) => envelope.type === 'task.complete')).toBe(false);
   });
 });
 

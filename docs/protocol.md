@@ -323,7 +323,11 @@ immutable message requirement and is never sent to the daemon.
 
 The v8 cut retains Host-owned `prompt.systemPrompt`, official closure identity and
 envelope v4, and requires record v8 plus explicit `agentMemory`. Memory-only
-preparation accepts empty requiredToolsets; the corresponding offer omits that field. Required
+preparation accepts empty requiredToolsets; the corresponding offer omits that field.
+From 0.24.0 the same holds with `agentMemory: 'none'`: a tool-less preparation (empty
+requiredToolsets, no memory) is admitted and launched with zero tools, and its offer
+omits `requiredToolsets` (an offer's own `requiredToolsets` stays `.min(1)`). No wire,
+record, digest or capability changes. Required
 `egressPolicy` and optional `messageEgress` remain, with no dual token/read. **Precondition:** drain preparation requests,
 prepared Executions and required message dispositions, ensure device cursors have
 passed all old entries, then upgrade cloud and device together. Existing pre-v8

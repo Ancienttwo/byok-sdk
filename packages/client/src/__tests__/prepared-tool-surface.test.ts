@@ -869,3 +869,69 @@ describe('a memory preparation replay never probes the descriptor again', () => 
     expect(observe).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('a tool-less preparation (requiredToolsets [] and agentMemory none)', () => {
+  const TOOLLESS = { agentMemory: 'none', requiredToolsets: [], permissionMode: 'auto', runtimeIdentity: RUNTIME_IDENTITY } as const;
+
+  it('is counted with an empty manifest, the proven launch boundary, and no server probed', async () => {
+    const spawns: string[] = [];
+    const bound = await assembler(registryWith()).resolveBinding({ agentMemory: 'none', requiredToolsets: [] });
+    if (!bound.ok) throw new Error(`${bound.code}: ${bound.detail}`);
+    expect(bound.binding.servers).toEqual([]);
+    expect(bound.binding.toolsetDefinitionRevisions).toEqual({});
+    expect(bound.binding.launch.launchCwd.length).toBeGreaterThan(0);
+
+    const result = await assembler(registryWith(), {
+      probe: async (serverName, server, options) => {
+        spawns.push(serverName);
+        return probeMcpServer(serverName, server, options);
+      },
+    }).assemble(TOOLLESS);
+    if (!result.ok) throw new Error(`${result.code}: ${result.detail}`);
+    expect(result.surface.tools).toEqual([]);
+    expect(result.surface.toolExecutors).toEqual({});
+    expect(result.surface.toolImplementationKinds).toEqual({});
+    expect(result.surface.launch).toEqual(bound.binding.launch);
+    // The binding digest is the same one stage 1 alone answered.
+    expect(result.surface.toolBindingDigest).toBe(bound.binding.toolBindingDigest);
+    expect(spawns).toEqual([]);
+  });
+
+  it('keeps refusing a tool-less preparation on a device that can prove no launch directory', async () => {
+    const result = await assembler(registryWith(), {
+      mcpLaunchCwd: { dir: path.join(os.tmpdir(), 'byok-no-such-launch-dir-for-toolless') },
+    }).assemble(TOOLLESS);
+    expect(result).toMatchObject({ ok: false, code: 'launch_boundary_unavailable' });
+  });
+
+  it('answers a replay from the durable record, and no longer depends on toolsets it never named', async () => {
+    const spawns: string[] = [];
+    const registry = registryWith();
+    const counting = assembler(registry, {
+      probe: async (serverName, server, options) => {
+        spawns.push(serverName);
+        return probeMcpServer(serverName, server, options);
+      },
+    });
+    const compiler = stubCompiler();
+    const counter = fixtureCounter();
+    const service = await makeService(counting, compiler, counter);
+    const request = localRequest({ requiredToolsets: [] });
+
+    const first = await service.prepare(request);
+    expect(compiler.calls).toHaveLength(1);
+    expect(compiler.calls[0]!.snapshot.tools).toEqual([]);
+    expect(compiler.calls[0]!.toolExecutors).toEqual({});
+
+    // The operator changes a toolset this record never named: same requestId,
+    // and the replay is still the same answer from the same record.
+    registry.reload(
+      { team: { mcpServers: { teamserver: fixtureServer({ protocolVersion: '2025-06-18' }) }, readOnlyTools: { teamserver: ['echo'] } } },
+      registry.snapshot().revision,
+    );
+    expect(await service.prepare(request)).toEqual(first);
+    expect(compiler.calls).toHaveLength(1);
+    expect(counter.calls).toHaveLength(1);
+    expect(spawns).toEqual([]);
+  });
+});

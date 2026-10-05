@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { ModelRuntime, type ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { AgentSession, ModelRuntime, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { InMemoryCredentialStore } from '@earendil-works/pi-ai';
 import type { InputPreparationCompiledSnapshotV1, InputPreparationModelV1 } from '../../../input-preparation';
 import {
@@ -338,4 +338,70 @@ test.each([0, 2])('A1 double-prime refuses capture fetch called %i times', async
     await expect(compile()).rejects.toMatchObject({ detail: 'prepared_compile_capture_failed' });
     expect(globalFetch.calls).toEqual([]);
   } finally { fake.mockRestore(); }
+});
+
+async function openPrepared(envelope: PreparedPiInputV1, withTool: boolean) {
+  const gate = createPreparedGate({ transport: (async () => textResponse('never', true)) as typeof fetch });
+  const modelRuntime = await ModelRuntime.create({
+    credentials: new InMemoryCredentialStore(), modelsPath: null, refreshOnCreate: false, allowModelNetwork: false,
+  });
+  const model = registerPreparedProvider(modelRuntime, MODEL, { apiKey: 'synthetic-not-a-secret' }, gate);
+  gate.arm(envelope, () => {});
+  const tool = {
+    name: TOOL_NAME,
+    label: 'observe',
+    description: 'Observation-only tool declaration.',
+    parameters: { type: 'object', properties: { note: { type: 'string' } }, required: ['note'] } as never,
+    execute: async () => ({ content: [{ type: 'text', text: 'observed' }], details: {} }),
+  } as ToolDefinition;
+  return createPreparedPiSession({
+    envelope, gate, model,
+    cwd: path.join(root, 'cwd'), agentDir: path.join(root, 'agent'), modelRuntime,
+    tools: withTool ? [{ name: TOOL_NAME, identity: TOOL_IDENTITY, tool }] : [],
+    sessionId: 'prepared-session-registry-test',
+  });
+}
+
+async function compileZeroTools() {
+  const request = compileRequest();
+  return compile({ ...request, snapshot: { ...request.snapshot, tools: [] }, toolExecutors: {} });
+}
+
+describe('the prepared session proves its registry is the manifest', () => {
+  test('a zero-tool manifest yields a session with no active and no registered tool', async () => {
+    const { envelope } = await compileZeroTools();
+    const { session } = await openPrepared(envelope, false);
+    try {
+      expect(session.getActiveToolNames()).toEqual([]);
+      expect(session.getAllTools().map((tool) => tool.name)).toEqual([]);
+    } finally { session.dispose(); }
+  });
+
+  test('a counted tool is both active and registered, and nothing else is', async () => {
+    const { envelope } = await compile();
+    const { session } = await openPrepared(envelope, true);
+    try {
+      expect(session.getActiveToolNames()).toEqual([TOOL_NAME]);
+      expect(session.getAllTools().map((tool) => tool.name)).toEqual([TOOL_NAME]);
+    } finally { session.dispose(); }
+  });
+
+  test.each([
+    ['an extra active tool on a zero-tool manifest', 'getActiveToolNames', ['bash'], true],
+    ['an extra registered tool on a zero-tool manifest', 'getAllTools', [{ name: 'read' }], true],
+    ['a counted tool that is not active', 'getActiveToolNames', [], false],
+    ['an extra registered tool beside a counted one', 'getAllTools', [{ name: TOOL_NAME }, { name: 'edit' }], false],
+  ] as const)('%s fails prepared_registry_drift and disposes the session', async (_name, method, returned, zero) => {
+    const { envelope } = zero ? await compileZeroTools() : await compile();
+    const drift = vi.spyOn(AgentSession.prototype, method).mockReturnValue(returned as never);
+    const dispose = vi.spyOn(AgentSession.prototype, 'dispose');
+    try {
+      await expect(openPrepared(envelope, !zero)).rejects.toMatchObject({ code: 'prepared_registry_drift' });
+      expect(dispose).toHaveBeenCalledTimes(1);
+    } finally {
+      drift.mockRestore();
+      dispose.mockRestore();
+    }
+    expect(globalFetch.calls).toEqual([]);
+  }, TIMEOUT_MS);
 });

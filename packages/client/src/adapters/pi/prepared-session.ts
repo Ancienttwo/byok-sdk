@@ -355,6 +355,18 @@ export async function createPreparedPiSession(options: CreatePreparedSessionOpti
     sessionManager: SessionManager.inMemory(options.cwd, options.sessionId === undefined ? undefined : { id: options.sessionId }),
     settingsManager,
   });
+  // The names handed to `createAgentSession` are an allowlist, not a proof: the
+  // session must expose exactly them, active and registered, and nothing else
+  // (a Pi default or built-in the manifest never counted). A zero-tool manifest
+  // is the case this matters most for, because an empty allowlist is the one an
+  // upstream default could silently widen.
+  const expectedNames = options.tools.map((entry) => entry.name).sort();
+  const sameAsManifest = (names: readonly string[]): boolean =>
+    canonicalPreparedValue([...names].sort()) === canonicalPreparedValue(expectedNames);
+  if (!sameAsManifest(session.getActiveToolNames()) || !sameAsManifest(session.getAllTools().map((tool) => tool.name))) {
+    session.dispose();
+    throw new PreparedSessionError('prepared_registry_drift', 'The session registered a tool surface that is not the prepared tool manifest.');
+  }
   // Every session carries a cache warmer; its mode is the setting above. A warm
   // request would re-send through the gate and be refused there, but a session
   // that would even try is not a prepared session.

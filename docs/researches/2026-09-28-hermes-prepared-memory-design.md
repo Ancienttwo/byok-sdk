@@ -154,6 +154,7 @@ bun run --cwd packages/client test -- src/__tests__/agent-memory-mcp.test.ts src
 
 1. 往远程 request 加 `memoryTools`、`tools` 或 `toolExecutors`：严格 schema 拒绝 unknown key。三个字段只是反例输入，不是拟议 wire。
 2. 不加字段、`requiredToolsets=[]`：`resolvePreparedToolBinding` 在没有 servers 时返回 `required_toolsets_resolved_to_no_servers`（源码证明，未执行装配）。
+   > 已被取代（0.24.0）：`agentMemory` 为 `none` 且 `requiredToolsets=[]` 时不再拒绝，而是得到一条零工具记录，offer 省略 `requiredToolsets`，launch attestation 仍然绑定。见 `docs/spec.md` 的 prepared 章节与 `plans/plan-20260929-1735-toolless-prepared-lane.md`。上面这条只描述 0.24.0 之前的行为。
 3. 传 `requiredToolsets=['byokagentmemory']`：没有对应 registry entry 时返回 `required_toolset_unconfigured`。即使另起一个 toolset ID，把其 server 命名为 `byokagentmemory` 仍被 registry reserved-name 检查拒绝（源码证明）。
 4. 改 server 名仍不构成现成复用：它变成 Host-configured executable authority；当前 task-free preparation 没有活跃 task credential。实际 helper 在开始 serve 之前要求 STORE_DIR、PRODUCT_ID、AGENT_MEMORY_CONTEXT，见 `packages/client/src/bin/sdk-reserved-helper-runners.ts:50`。单纯绕过名称检查不能补齐授权，不能把假的 context 当真实 authority。
 5. 事后注入 handler 则没有同一 observation/manifest；prepared session 的 exact name/identity 比对拒绝。memory 内容也不得预读成 prompt 以绕过工具链。
