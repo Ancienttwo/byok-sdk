@@ -460,7 +460,10 @@ export declare const PROVIDER_TIMEOUT_MS = 15000;
  * (`providers.ts:1711-1743`): the URL is re-validated immediately before the
  * call, the caller's abort signal is chained, and an internal timeout aborts
  * with a distinguishable reason so a timeout maps to
- * `PROVIDER_REQUEST_TIMEOUT` rather than a bare `AbortError`.
+ * `PROVIDER_REQUEST_TIMEOUT` rather than a bare `AbortError`. The returned
+ * response owns the guarded body: consume or cancel it to release the guard;
+ * otherwise the original deadline cancels it. Neither headers nor body reads
+ * depend on the injected transport honoring its abort signal.
  */
 export declare function fetchWithProviderGuards(fetchImpl: ProviderFetch, url: string, init: RequestInit, signal: AbortSignal): Promise<Response>;
 /**
