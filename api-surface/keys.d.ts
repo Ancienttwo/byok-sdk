@@ -468,8 +468,9 @@ export declare const PROVIDER_TIMEOUT_MS = 15000;
 export declare function fetchWithProviderGuards(fetchImpl: ProviderFetch, url: string, init: RequestInit, signal: AbortSignal): Promise<Response>;
 /**
  * Read a JSON body with a size ceiling (`providers.ts:1825-1851`). The
- * `content-length` check is an early exit; the decoded-byte check is the one
- * that actually holds, since `content-length` is attacker-controlled.
+ * `content-length` check is an early exit. Count actual transport body bytes
+ * before decoding each chunk: headers may be absent, false, or compressed.
+ * Cancel at the first chunk crossing the ceiling without waiting for EOF.
  */
 export declare function parseBoundedJsonResponse(response: Response): Promise<unknown>;
 /**
