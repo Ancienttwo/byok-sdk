@@ -22,7 +22,7 @@
   closureDigest `4aafae2b3780c4c8565eff17ebeb4d3842b6fe4aa31eb32cfbf104d36f453945`. No third-party dependency changes.
   pi-ai adds opt-in `samplingParamsByThinkingLevel`. pi-durable persists a per-conversation
   provider session id (`pi.provider` document) and forwards it to the provider on
-  generation and compaction (pi-durable 1.0.2 ruling pending). Fixes `check:release-pack`, which
+  generation and compaction (pi-durable 1.0.2 ruling approved 2026-10-05 by Aimpact). Fixes `check:release-pack`, which
   failed after 1.0.2 was published because npm resolved transitive `^1.0.1` siblings to 1.0.2.
 
 - **Changed (client, cloud-do)** — official Pi runtime 1.0.0 -> 1.0.1.
