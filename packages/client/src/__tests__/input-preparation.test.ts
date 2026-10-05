@@ -1466,7 +1466,10 @@ describe('PR187 retention lifecycle races', () => {
       await new Promise((done) => setTimeout(done, 60));
       expect(service.store.list()[0]?.state).toBe('reserved');
     } finally { release(); }
-    expect((await pending).state).toBe('prepared');
+    // Retention protection does not extend the absolute preparation deadline.
+    // The owned compile's late result is cancelled, never admitted for counting.
+    expect(await codeOf(pending)).toBe('cancelled');
+    expect(service.store.list()[0]?.state).toBe('cancelled');
   });
 
   it('waits for in-flight GC on stop and leaves no timer running', async () => {

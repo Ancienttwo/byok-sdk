@@ -2310,10 +2310,8 @@ export function buildDaemonWithAdapters(
         ? { unavailableReason: inputPreparationLaneOff?.code ?? 'runtime_identity_unavailable' }
         : {}),
       completion: inputPreparationCompletion,
-      resolveBlobText: (blobRef) =>
-        blobClient.resolveInstruction(blobRef, {
-          ...(blobLifecycleAbort === undefined ? {} : { signal: blobLifecycleAbort.signal }),
-        }),
+      signal: blobLifecycleAbort.signal,
+      resolveBlobText: (blobRef, signal) => blobClient.resolveInstruction(blobRef, { signal }),
     });
 
     capabilities.push('custom-harness');
