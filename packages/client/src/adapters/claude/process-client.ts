@@ -176,6 +176,14 @@ export class ClaudeProcessClient {
     });
   }
 
+  /** Stop startup admission immediately, independently of the process-close receipt.
+   * The stopped transport latch is checked again after adoption, so an abandoned
+   * write cannot send a late prompt when delayed adoption eventually resolves.
+   */
+  abortStartup(error: Error): void {
+    this.onTransportError(error);
+  }
+
   private onTransportError(error: Error): void {
     if (this.closed || this.transportError) return;
     this.transportError = error;

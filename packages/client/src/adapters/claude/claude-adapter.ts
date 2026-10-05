@@ -56,7 +56,7 @@ async function cleanupMcpConfigDir(dir: string | undefined): Promise<void> {
 }
 
 /** One owner covers process teardown and task config on every failed start. */
-async function rejectOwnedStartup(cause: unknown, client: ClaudeProcessClient | undefined, mcpConfigDir: string | undefined): Promise<never> {
+async function rejectOwnedStartup(cause: unknown, client: ClaudeProcessClient | undefined, mcpConfigDir: string | undefined, retainPendingDisposal = false): Promise<never> {
   const failure = isRuntimeExecutionFailure(cause) ? cause : new RuntimeExecutionFailure({
     phase: 'start', category: 'infrastructure', retry: 'retryable',
     reason: 'claude runtime startup failed',
@@ -76,6 +76,12 @@ async function rejectOwnedStartup(cause: unknown, client: ClaudeProcessClient | 
     }
     return disposalAttempt;
   };
+  if (retainPendingDisposal) {
+    // Cancellation must expose its owner even while teardown is pending.
+    // The same callback joins this attempt and retries it only after failure.
+    void retryDisposal().catch(() => {});
+    throw new RuntimeStartupDisposalFailure(retryDisposal, { cause: failure });
+  }
   try {
     await retryDisposal();
   } catch (disposalError) {
@@ -251,6 +257,12 @@ export class ClaudeAdapter implements RuntimeAdapter {
     /** The mode the grants were resolved under; re-filtering with any other would compare two different policies. */
     permissionMode: PermissionMode,
   ): Promise<Session> {
+    const signal = startInput.signal;
+    const cancellationFailure = () => new RuntimeExecutionFailure({
+      phase: 'start', category: 'infrastructure', retry: 'retryable',
+      reason: 'claude runtime startup was cancelled',
+    }, { cause: signal?.reason });
+    if (signal?.aborted) throw cancellationFailure();
     if (!initialMapping.ok) throw new RuntimeExecutionFailure({
       phase: 'start',
       category: 'authority',
@@ -298,13 +310,35 @@ export class ClaudeAdapter implements RuntimeAdapter {
     // Generate only task-scoped host/reserved MCP config outside the operation workspace.
     let mcpConfigDir: string | undefined;
     let client: ClaudeProcessClient | undefined;
+    let cancellation: RuntimeExecutionFailure | undefined;
+    let rejectCancellation!: (failure: RuntimeExecutionFailure) => void;
+    const cancelled = new Promise<never>((_, reject) => { rejectCancellation = reject; });
+    // Aborts can arrive during awaited config work, before either race starts.
+    void cancelled.catch(() => {});
+    const onAbort = () => {
+      cancellation ??= cancellationFailure();
+      client?.abortStartup(cancellation);
+      rejectCancellation(cancellation);
+    };
+    const throwIfCancelled = () => {
+      if (signal?.aborted && !cancellation) onAbort();
+      if (cancellation) {
+        // Also covers an abort inside spawnFn, before client was assigned.
+        client?.abortStartup(cancellation);
+        throw cancellation;
+      }
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
     try {
+      throwIfCancelled();
       const taskMcpServers = startInput.mcpServers ?? {};
       const needsMcpConfig = Object.keys(taskMcpServers).length > 0;
 
       if (needsMcpConfig) {
         mcpConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-mcp-'));
+        throwIfCancelled();
         await fs.chmod(mcpConfigDir, 0o700).catch(() => {});
+        throwIfCancelled();
         const mcpConfigPath = path.join(mcpConfigDir, 'mcp-config.json');
         const mcpServers: Record<string, unknown> = { ...taskMcpServers };
         // The claude CLI spawns every server in this file itself, and
@@ -346,6 +380,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
             }
           }
         }
+        throwIfCancelled();
         await fs.writeFile(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });
         mapping.args = [
           ...mapping.args,
@@ -400,6 +435,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         ...mapping.args,
       ];
 
+      throwIfCancelled();
       const control = createClaudeControlChannel(this.options.interruptTimeoutMs ?? 1000);
       try {
         client = new ClaudeProcessClient({
@@ -418,6 +454,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         }, { cause });
       }
 
+      throwIfCancelled();
       // `--input-format stream-json` expects the first turn's instruction on
       // stdin too, not as a positional CLI argument — empirically confirmed
       // live (this task's persistent-process multi-turn probes never passed
@@ -427,9 +464,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
       // `ClaudeProcessClient.writeUserMessage`) avoids two different
       // send-a-prompt code paths.
       try {
-        await client.writeUserMessage(startInput.instruction);
+        await Promise.race([client.writeUserMessage(startInput.instruction), cancelled]);
       } catch (cause) {
-        if (isRuntimeStartupDisposalFailure(cause)) throw cause;
+        if (isRuntimeStartupDisposalFailure(cause) || isRuntimeExecutionFailure(cause)) throw cause;
         throw new RuntimeExecutionFailure({
           phase: 'start', category: 'infrastructure', retry: 'retryable',
           reason: 'claude initial instruction transport failed',
@@ -452,7 +489,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         // error in that case (see `process-client.ts`), which is exactly
         // what should make `start()` fail here, fail-closed, never a
         // fabricated sessionRef.
-        sessionRef = await client.waitForInit();
+        sessionRef = await Promise.race([client.waitForInit(), cancelled]);
       } catch (err) {
         if (isRuntimeStartupDisposalFailure(err)) throw err;
         if (isRuntimeExecutionFailure(err)) throw err;
@@ -479,6 +516,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         });
       }
 
+      throwIfCancelled();
       return new ClaudeSession(
         sessionRef,
         client,
@@ -488,7 +526,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
         manifestModelId,
       );
     } catch (cause) {
-      return rejectOwnedStartup(cause, client, mcpConfigDir);
+      return rejectOwnedStartup(cause, client, mcpConfigDir, cancellation !== undefined);
+    } finally {
+      signal?.removeEventListener('abort', onAbort);
     }
   }
 
