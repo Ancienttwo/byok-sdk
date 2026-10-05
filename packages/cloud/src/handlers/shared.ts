@@ -48,8 +48,23 @@ export async function readBoundedJsonBody(
     }
   }
 
-  const stream = c.req.raw.body;
-  if (stream === null) return { body: undefined, tooLarge: false };
+  const bytes = await readBoundedRawBody(c.req.raw.body, maximum);
+  return {
+    body: bytes === undefined || bytes === 'too_large' ? undefined : parseJsonBytes(bytes),
+    tooLarge: bytes === 'too_large',
+  };
+}
+
+/**
+ * Count actual request bytes before retaining each chunk. Keep the bytes intact
+ * for consumers that authenticate a raw-body hash before decoding JSON.
+ * Content-Length policy belongs to the caller; it never replaces this ceiling.
+ */
+export async function readBoundedRawBody(
+  stream: ReadableStream<Uint8Array> | null,
+  maximum: number,
+): Promise<Uint8Array | 'too_large' | undefined> {
+  if (stream === null) return new Uint8Array();
 
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
@@ -60,14 +75,14 @@ export async function readBoundedJsonBody(
       if (done) break;
       if (value.byteLength > maximum - total) {
         cancelBody(reader);
-        return { body: undefined, tooLarge: true };
+        return 'too_large';
       }
       if (value.byteLength === 0) continue;
       chunks.push(value);
       total += value.byteLength;
     }
   } catch {
-    return { body: undefined, tooLarge: false };
+    return undefined;
   } finally {
     reader.releaseLock();
   }
@@ -78,7 +93,7 @@ export async function readBoundedJsonBody(
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return { body: parseJsonBytes(bytes), tooLarge: false };
+  return bytes;
 }
 
 /**
@@ -87,7 +102,7 @@ export async function readBoundedJsonBody(
  * before a reader exists; `ReadableStreamDefaultReader.cancel()` owns the
  * same underlying request stream after an overflow has been observed.
  */
-function cancelBody(
+export function cancelBody(
   body: ReadableStream<Uint8Array> | ReadableStreamDefaultReader<Uint8Array> | null,
 ): void {
   if (body === null) return;

@@ -29,6 +29,7 @@ import {
   type TruthRecordMetadata,
 } from '../truth/contract';
 import { isTruthCommitError } from '../truth/errors';
+import { cancelBody, readBoundedRawBody } from './shared';
 
 // Re-exported from core (single source of truth for the wire header); still
 // part of this module's public surface for callers importing it from cloud.
@@ -281,11 +282,13 @@ async function readBoundedBody(
   if (length !== undefined) {
     const parsed = Number(length);
     if (!Number.isSafeInteger(parsed) || parsed < 0) return undefined;
-    if (parsed > maximum) return 'too_large';
+    if (parsed > maximum) {
+      cancelBody(c.req.raw.body);
+      return 'too_large';
+    }
   }
   try {
-    const bytes = new Uint8Array(await c.req.arrayBuffer());
-    return bytes.byteLength > maximum ? 'too_large' : bytes;
+    return await readBoundedRawBody(c.req.raw.body, maximum);
   } catch {
     return undefined;
   }
