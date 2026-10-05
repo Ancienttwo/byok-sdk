@@ -439,12 +439,6 @@ interface ActiveRun {
 export function createInputPreparationService(options: InputPreparationServiceOptions): InputPreparationService {
   const now = options.now ?? Date.now;
   const limits = options.limits;
-  const store = new InputPreparationStore({
-    storeDir: options.storeDir,
-    retentionMs: limits.retentionMs,
-    retryHorizonMs: limits.retryHorizonMs,
-    now,
-  });
   const active = new Map<string, ActiveRun>();
   /** Per-record serialization, so two concurrent duplicates cannot both compile or both count. */
   const locks = new Map<string, Promise<unknown>>();
@@ -453,6 +447,27 @@ export function createInputPreparationService(options: InputPreparationServiceOp
   let gcTimer: ReturnType<typeof setTimeout> | undefined;
   let gcInFlight: Promise<void> | undefined;
   let gcFailure: { cause: unknown } | undefined;
+
+  // The service owns retention scheduling even when TaskRunner releases a pin
+  // directly through its store. Keep this binding private: a standalone store
+  // has no timer/lifecycle owner and needs no public observer API.
+  class ServiceOwnedPreparationStore extends InputPreparationStore {
+    override async unpin(recordId: string, taskId: string): Promise<InputPreparationRecord> {
+      const record = await super.unpin(recordId, taskId);
+      // Never turn a committed unpin into a failed release because scheduling
+      // failed. Surface that fault through the existing service GC failure
+      // latch instead. Stopped services stay stopped; an in-flight GC's final
+      // scan will schedule from the newly committed state.
+      try { scheduleGc(); } catch (cause) { gcFailure = { cause }; }
+      return record;
+    }
+  }
+  const store = new ServiceOwnedPreparationStore({
+    storeDir: options.storeDir,
+    retentionMs: limits.retentionMs,
+    retryHorizonMs: limits.retryHorizonMs,
+    now,
+  });
 
   function assertAvailable(): void {
     if (gcFailure) rethrowDurable(gcFailure.cause);
