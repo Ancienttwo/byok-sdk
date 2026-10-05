@@ -22,3 +22,8 @@ describe('fixed cloud error normalization', () => {
     expect(normalized.cause).toBeUndefined();
   });
 });
+
+it('keeps the budget code and its fixed client-error status', () => {
+  const normalized = safeCloudError(new Error('CLOUD_BUDGET_EXCEEDED'));
+  expect(normalized).toMatchObject({ code: 'CLOUD_BUDGET_EXCEEDED', status: 400, retryable: false });
+});

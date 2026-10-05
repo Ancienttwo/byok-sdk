@@ -4,15 +4,20 @@ import { AgentDO } from '../src/agent-do';
 import { CloudDoError, cloudErrorResponse } from '../src/errors';
 import type { InvocationRow, InvocationTerminalState } from '../src/invocation-ledger';
 import type { InboxRow } from '../src/cloud-state';
+import type { CloudRenewRequest, CloudRunSettlement } from '../src/session-runtime';
+import type { PlatformProfileId } from '../src/platform-credentials';
 import type { CloudToolDispatcher, CloudDispatchContext } from '../src/tools';
 
 declare const __FINANCIAL_ANALYSIS_SKILL__: string;
 const KEY = 'Primary~0123456789ABCDEFGHIJKLMNOP';
-interface Controls { nativePause?: 'request' | 'receipt' | 'recovery'; pauseAlarm?: boolean; holdNativeOutcome?: boolean; pauseTool?: boolean; pauseAdmission?: boolean; deny?: boolean; failCredentials?: boolean; throwDoorbell?: boolean; projection?: 'valid' | 'throw' | 'json' | 'large' | 'key' | 'unicode' | 'marker'; largeSchema?: boolean }
+interface Controls { audit?: boolean; instructionsText?: string; renewDeny?: 'model' | 'tool' | 'recovery'; renewDenyAt?: number; pauseRenew?: 'model' | 'tool'; pauseSettlement?: boolean; pauseSettlementRunId?: number; failSettlement?: boolean; failSettlementRunId?: number; failSettlementOnce?: boolean; receiptThenFail?: boolean; toolCredits?: number; pauseInput?: boolean; nativePause?: 'request' | 'receipt' | 'recovery'; pauseAlarm?: boolean; holdNativeOutcome?: boolean; pauseTool?: boolean; pauseAdmission?: boolean; deny?: boolean; failCredentials?: boolean; throwDoorbell?: boolean; projection?: 'valid' | 'throw' | 'json' | 'large' | 'key' | 'unicode' | 'marker'; largeSchema?: boolean }
 let nativePause: Controls['nativePause'];
 let nativeGate: Promise<void> | undefined;
 let releaseNative: (() => void) | undefined;
 let holdNativeOutcome = false;
+let pauseInput = false;
+let inputGate: Promise<void> | undefined;
+let releaseInput: (() => void) | undefined;
 const CompletionChild = defineTask<Record<string, never>, { phase: 'hold' }, null>({
   name: 'fixture.completion-child', version: 1, initial: () => ({ phase: 'hold' }),
   phases: { hold: async (_task, api) => {
@@ -48,6 +53,14 @@ Harness.open = async (storage, options, context) => {
   const harness = await nativeOpen(storage, options, context);
   opened = harness;
   const wrap = (conversation: Awaited<ReturnType<typeof harness.createConversation>>) => {
+    const commit = conversation.commit.bind(conversation);
+    let firstCommit = true;
+    conversation.commit = async (fn, callContext) => {
+      // The wake runner's first explicit native commit contains byok.run-input.
+      if (firstCommit && pauseInput) await inputGate;
+      firstCommit = false;
+      return commit(fn, callContext);
+    };
     const submit = conversation.submit.bind(conversation);
     conversation.submit = async (input, callContext) => {
       const handle = await submit(input, callContext);
@@ -81,6 +94,10 @@ export class WakeAuditDO extends AgentDO {
   private bells: { id: string; state: InvocationTerminalState }[] = [];
   private alarmGate?: Promise<void>;
   private releaseAlarm?: () => void;
+  private renewGate?: Promise<void>;
+  private releaseRenew?: () => void;
+  private settlementGate?: Promise<void>;
+  private releaseSettlement?: () => void;
   private pausedEventReader?: ReadableStreamDefaultReader<Uint8Array>;
 
   constructor(ctx: DurableObjectState, env: Record<string, unknown>) {
@@ -105,7 +122,7 @@ export class WakeAuditDO extends AgentDO {
         this.ctx.storage.sql.exec('UPDATE fixture_dispatches SET aborted=?,completed=1 WHERE seq=?', signal.aborted ? 1 : 0, seq);
         if (name !== 'load_financial_analysis_skill') throw new CloudDoError('CLOUD_TOOL_NOT_AVAILABLE');
         const instructions = this.ctx.storage.sql.exec<{ body: string }>('SELECT body FROM fixture_documents WHERE id=1').one().body;
-        return { ok: true, data: { instructions }, usage: { credits: 0, rows: 1, cached: false } };
+        return { ok: true, data: { instructions }, usage: { credits: this.controls.toolCredits ?? 0, rows: 1, cached: false } };
       } };
   }
 
@@ -127,7 +144,8 @@ export class WakeAuditDO extends AgentDO {
     }
   }
 
-  protected override async admitWake(items: readonly InboxRow[], signal: AbortSignal, key: string) {
+  protected override async admitWake(items: readonly InboxRow[], signal: AbortSignal, key: string, admission?: { digest: string; seqs: number[] }) {
+    if (this.auditEnabled()) this.ctx.storage.sql.exec('INSERT INTO fixture_admission_details(admissionKey,detailJson) VALUES (?,?)', key, JSON.stringify(admission));
     const response = await fetch('https://billing.fixture/reserve', { method: 'POST', body: JSON.stringify({ key, count: items.length, deny: this.controls.deny === true }) });
     const receipt = await response.json() as { allowed: boolean };
     this.ctx.storage.sql.exec('INSERT INTO fixture_admissions(admissionKey,aborted) VALUES (?,0)', key ?? 'missing-key');
@@ -136,6 +154,36 @@ export class WakeAuditDO extends AgentDO {
     return receipt.allowed && !this.controls.deny ? { accepted: true as const, reservation: 'held' as const } : { accepted: false as const, code: 'CLOUD_TOOL_NOT_AVAILABLE' as const };
   }
 
+  private auditEnabled(): boolean {
+    return this.controls.audit === true || this.ctx.storage.sql.exec<{ enabled: number }>('SELECT enabled FROM fixture_audit WHERE id=1').toArray()[0]?.enabled === 1;
+  }
+  protected override instructions(_profile: PlatformProfileId): string | undefined { return this.controls.instructionsText; }
+  protected override async renew(request: CloudRenewRequest, signal: AbortSignal) {
+    if (!this.auditEnabled()) return { ok: true as const };
+    this.ctx.storage.sql.exec('INSERT INTO fixture_renewals(requestJson,aborted) VALUES (?,0)', JSON.stringify(request));
+    const seq = this.ctx.storage.sql.exec<{ seq: number }>('SELECT last_insert_rowid() AS seq').one().seq;
+    if (this.controls.pauseRenew === request.kind) await this.renewGate;
+    this.ctx.storage.sql.exec('UPDATE fixture_renewals SET aborted=? WHERE seq=?', signal.aborted ? 1 : 0, seq);
+    const count = this.ctx.storage.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM fixture_renewals WHERE json_extract(requestJson,'$.kind')=?", request.kind).one().count;
+    const denied = this.controls.renewDeny === request.kind || this.controls.renewDeny === 'recovery' && request.recovery;
+    return denied && count >= (this.controls.renewDenyAt ?? 1) ? { ok: false as const, code: 'CLOUD_TOOL_NOT_AVAILABLE' as const } : { ok: true as const };
+  }
+  protected override async settleRun(run: CloudRunSettlement, signal: AbortSignal): Promise<void> {
+    if (!this.auditEnabled()) return;
+    const row = this.sessionRuntime().cloud.readRun(run.nativeRunId);
+    const terminal = this.ctx.storage.sql.exec<{ seq: number }>("SELECT seq FROM cloud_events WHERE conversationId=? AND type IN ('run.completed','run.failed','run.interrupted') ORDER BY seq DESC LIMIT 1", run.nativeRunId).toArray()[0];
+    this.ctx.storage.sql.exec('INSERT INTO fixture_settlements(runId,runJson,state,ack,terminalEvent,aborted) VALUES (?,?,?,?,?,0)', run.nativeRunId, JSON.stringify(run), row?.state ?? null, row?.settlementAck ?? null, terminal?.seq ?? null);
+    const seq = this.ctx.storage.sql.exec<{ seq: number }>('SELECT last_insert_rowid() AS seq').one().seq;
+    if (this.controls.pauseSettlement || this.controls.pauseSettlementRunId === run.nativeRunId) await this.settlementGate;
+    this.ctx.storage.sql.exec('UPDATE fixture_settlements SET aborted=? WHERE seq=?', signal.aborted ? 1 : 0, seq);
+    const attempts = this.ctx.storage.sql.exec<{ count: number }>('SELECT COUNT(*) AS count FROM fixture_settlements WHERE runId=?', run.nativeRunId).one().count;
+    if (this.controls.failSettlement || this.controls.failSettlementRunId === run.nativeRunId || this.controls.failSettlementOnce && attempts === 1) throw new Error('fixture-settlement-unavailable');
+    const existed = this.ctx.storage.sql.exec('SELECT runId FROM fixture_receipts WHERE runId=?', run.nativeRunId).toArray().length > 0;
+    const usage = run.usage;
+    const compensated = usage.sentRequests < usage.steps || usage.sentRequests === 0 && usage.inputTokens === 0 && usage.outputTokens === 0 && usage.credits === 0;
+    this.ctx.storage.sql.exec('INSERT OR IGNORE INTO fixture_receipts(runId,runJson,compensated) VALUES (?,?,?)', run.nativeRunId, JSON.stringify(run), compensated ? 1 : 0);
+    if (this.controls.receiptThenFail && !existed) throw new Error('fixture-receipt-before-ack-loss');
+  }
   async setup(config: CloudDispatchContext, controls: Controls = {}) {
     this.setControls(controls);
     const configured = await this.configureSession(config);
@@ -143,13 +191,23 @@ export class WakeAuditDO extends AgentDO {
     this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS fixture_documents(id INTEGER PRIMARY KEY,body TEXT);
       CREATE TABLE IF NOT EXISTS fixture_dispatches(seq INTEGER PRIMARY KEY AUTOINCREMENT,contextJson TEXT,aborted INTEGER,completed INTEGER);
       CREATE TABLE IF NOT EXISTS fixture_admissions(seq INTEGER PRIMARY KEY AUTOINCREMENT,admissionKey TEXT,aborted INTEGER);
+      CREATE TABLE IF NOT EXISTS fixture_audit(id INTEGER PRIMARY KEY,enabled INTEGER);
+      CREATE TABLE IF NOT EXISTS fixture_renewals(seq INTEGER PRIMARY KEY AUTOINCREMENT,requestJson TEXT,aborted INTEGER);
+      CREATE TABLE IF NOT EXISTS fixture_settlements(seq INTEGER PRIMARY KEY AUTOINCREMENT,runId INTEGER,runJson TEXT,state TEXT,ack INTEGER,terminalEvent INTEGER,aborted INTEGER);
+      CREATE TABLE IF NOT EXISTS fixture_receipts(runId INTEGER PRIMARY KEY,runJson TEXT,compensated INTEGER);
+      CREATE TABLE IF NOT EXISTS fixture_admission_details(seq INTEGER PRIMARY KEY AUTOINCREMENT,admissionKey TEXT,detailJson TEXT);
       CREATE TABLE IF NOT EXISTS fixture_alarms(seq INTEGER PRIMARY KEY AUTOINCREMENT,retryCount INTEGER,at INTEGER);`);
+    this.ctx.storage.sql.exec('INSERT OR REPLACE INTO fixture_audit VALUES (1,?)', controls.audit ? 1 : 0);
     this.ctx.storage.sql.exec('INSERT OR IGNORE INTO fixture_documents VALUES (1,?)', __FINANCIAL_ANALYSIS_SKILL__);
     await this.sessionRuntime().ready();
     return Response.json({ ok: true });
   }
   setControls(controls: Controls) {
     this.controls = controls;
+    pauseInput = controls.pauseInput === true;
+    if (pauseInput) inputGate ??= new Promise(resolve => { releaseInput = resolve; });
+    if (controls.pauseRenew) this.renewGate ??= new Promise(resolve => { this.releaseRenew = resolve; });
+    if (controls.pauseSettlement || controls.pauseSettlementRunId !== undefined) this.settlementGate ??= new Promise(resolve => { this.releaseSettlement = resolve; });
     this.env.AIPHABEE_ZAI_API_KEY = controls.failCredentials ? '' : KEY;
     nativePause = controls.nativePause;
     holdNativeOutcome = controls.holdNativeOutcome === true;
@@ -160,11 +218,15 @@ export class WakeAuditDO extends AgentDO {
     return { ok: true };
   }
   releasePauses() {
+    this.controls.pauseRenew = undefined; this.controls.pauseSettlement = false; this.controls.pauseSettlementRunId = undefined; pauseInput = false;
+    this.releaseRenew?.(); this.releaseSettlement?.(); releaseInput?.(); inputGate = undefined; this.renewGate = undefined; this.settlementGate = undefined;
     this.controls.pauseTool = false; this.controls.pauseAdmission = false;
     this.releaseTool?.(); this.releaseAdmission?.(); this.releaseAlarm?.(); this.controls.pauseAlarm = false; holdNativeOutcome = false; releaseNative?.(); nativePause = undefined; nativeGate = undefined;
     this.toolGate = undefined; this.admissionGate = undefined; this.alarmGate = undefined; this.releaseAlarm = undefined;
     return { ok: true };
   }
+  releaseAlarmOnly() { this.controls.pauseAlarm = false; this.releaseAlarm?.(); this.alarmGate = undefined; return { ok: true }; }
+  releaseSettlementOnly() { this.controls.pauseSettlement = false; this.controls.pauseSettlementRunId = undefined; this.releaseSettlement?.(); this.settlementGate = undefined; return { ok: true }; }
   async alarm(info?: AlarmInvocationInfo) {
     // Observe the real platform handler arguments without changing retries or scheduling.
     this.ctx.storage.sql.exec('INSERT INTO fixture_alarms(retryCount,at) VALUES (?,?)', info?.retryCount ?? 0, Date.now());
@@ -172,6 +234,8 @@ export class WakeAuditDO extends AgentDO {
     await super.alarm(info);
   }
   async status() { return { alarm: await this.ctx.storage.getAlarm(), bells: this.bells, recovering: this.sessionRuntime().recovering }; }
+  runtimeAudit() { return { busy: this.sessionRuntime().busy, hasLiveOwner: this.sessionRuntime().hasLiveOwner }; }
+  async repairAudit(info?: AlarmInvocationInfo) { await this.alarm(info); return this.status(); }
   async readyAudit() { await this.sessionRuntime().ready(); return this.status(); }
   async openRecoveryAudit() { await this.sessionRuntime().open(); return this.status(); }
   async pauseEvents(after: number): Promise<Response> {
@@ -212,11 +276,16 @@ export default { async fetch(request: Request, env: Env) {
       case 'billing-cancel': return fetch('https://billing.fixture/cancel', { method: 'POST', body: JSON.stringify({ key: input.key }) });
       case 'setup': return stub.setup(input.config as CloudDispatchContext, input.controls as Controls);
       case 'controls': return Response.json(await stub.setControls(input.controls as Controls));
+      case 'release-alarm': return Response.json(await stub.releaseAlarmOnly());
+      case 'release-settlement': return Response.json(await stub.releaseSettlementOnly());
       case 'release': return Response.json(await stub.releasePauses());
       case 'enqueue': return stub.enqueue(input.item);
       case 'submit': return stub.submit(input.input);
       case 'events': return stub.events(input.cursor as { after?: number });
       case 'snapshot': return Response.json(await stub.readSnapshot());
+      case 'transcript': return Response.json(await stub.readTranscript(input.page as { after?: { horizon: number; run: number | null; item: number | null }; limit?: number }));
+      case 'runtime': return Response.json(await stub.runtimeAudit());
+      case 'alarm': return Response.json(await stub.repairAudit(input.info as AlarmInvocationInfo));
       case 'runs': return Response.json(await stub.readRuns(input.page as { after?: number }));
       case 'inbox': return Response.json(await stub.readInbox(input.page as { after?: number }));
       case 'invocations': return Response.json(await stub.readInvocations(input.page as { after?: number }));
