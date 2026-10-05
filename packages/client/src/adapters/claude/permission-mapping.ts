@@ -214,7 +214,9 @@ export function mapPermissionPolicyToClaudeArgs(
 
   const permissionMode = policy.mode === 'plan' ? 'plan' : 'acceptEdits';
   const args = ['--permission-mode', permissionMode];
-  if (policy.allowTools && policy.allowTools.length > 0) {
+  // An explicit empty list (including a disjoint device-ceiling intersection)
+  // selects zero built-ins. Only an absent list leaves Claude's defaults intact.
+  if (policy.allowTools !== undefined) {
     args.push('--tools', policy.allowTools.join(','));
   }
   // Only `auto` takes the MCP grant here; `plan` shares this branch but not

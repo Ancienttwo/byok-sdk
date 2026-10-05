@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PermissionPolicy } from '@byok-sdk/protocol';
 import { mapPermissionPolicyToClaudeArgs } from '../adapters/claude/permission-mapping';
+import { computeEffectivePolicy } from '../daemon/policy';
 
 describe('mapPermissionPolicyToClaudeArgs', () => {
   it('auto with no restrictions maps to acceptEdits, empirically confirmed to auto-accept both Write and Bash', () => {
@@ -11,6 +12,29 @@ describe('mapPermissionPolicyToClaudeArgs', () => {
   it('auto with allowTools adds a --tools restriction on top of acceptEdits', () => {
     const result = mapPermissionPolicyToClaudeArgs({ mode: 'auto', allowTools: ['Bash', 'Read'] });
     expect(result).toEqual({ ok: true, args: ['--permission-mode', 'acceptEdits', '--tools', 'Bash,Read'] });
+  });
+
+  it.each([
+    ['auto', 'acceptEdits'],
+    ['plan', 'plan'],
+  ] as const)('%s with an explicit empty allowTools disables every built-in', (mode, permissionMode) => {
+    expect(mapPermissionPolicyToClaudeArgs({ mode, allowTools: [] })).toEqual({
+      ok: true,
+      args: ['--permission-mode', permissionMode, '--tools', ''],
+    });
+  });
+
+  it.each(['auto', 'plan'] as const)('%s preserves a disjoint device ceiling as zero built-ins', (mode) => {
+    const decision = computeEffectivePolicy(
+      { mode, allowTools: ['Bash'] },
+      { mode: 'auto', allowTools: ['Read'] },
+    );
+    expect(decision.ok).toBe(true);
+    expect(decision.policy.allowTools).toEqual([]);
+    expect(mapPermissionPolicyToClaudeArgs(decision.policy)).toEqual({
+      ok: true,
+      args: ['--permission-mode', mode === 'auto' ? 'acceptEdits' : 'plan', '--tools', ''],
+    });
   });
 
   it('rejects confirm with every tool restriction without preparing CLI grants', () => {
@@ -140,6 +164,26 @@ describe('mapPermissionPolicyToClaudeArgs', () => {
     expect(mapPermissionPolicyToClaudeArgs({ mode: 'auto' }, ECHO_GRANT)).toEqual({
       ok: true,
       args: ['--permission-mode', 'acceptEdits', '--allowedTools', 'mcp__saleskoprobe__echo'],
+    });
+  });
+
+  it('auto with zero built-ins still grants exactly the observed MCP tools', () => {
+    expect(mapPermissionPolicyToClaudeArgs({ mode: 'auto', allowTools: [] }, [
+      { server: 'mail', tools: ['send', 'list'] },
+      { server: 'crm', tools: ['find_leads'] },
+    ])).toEqual({
+      ok: true,
+      args: [
+        '--permission-mode', 'acceptEdits', '--tools', '',
+        '--allowedTools', 'mcp__crm__find_leads,mcp__mail__list,mcp__mail__send',
+      ],
+    });
+  });
+
+  it('plan with zero built-ins still withholds MCP pre-grants', () => {
+    expect(mapPermissionPolicyToClaudeArgs({ mode: 'plan', allowTools: [] }, ECHO_GRANT)).toEqual({
+      ok: true,
+      args: ['--permission-mode', 'plan', '--tools', ''],
     });
   });
 
