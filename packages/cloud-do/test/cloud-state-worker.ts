@@ -1,12 +1,12 @@
 import { DurableObject } from 'cloudflare:workers';
-import { CloudState, composeCloudInput } from '../src/cloud-state';
+import { CloudState, composeCloudInput, admissionIdentity, type TranscriptCursor } from '../src/cloud-state';
 import { admitCloudInbox } from '../src/inbox-admission';
 import { prepareCloudGuard } from '../src/input-guard';
 import { InvocationLedger } from '../src/invocation-ledger';
 import { cloudErrorResponse } from '../src/errors';
 
 const key='CloudStatePlatformSecret0123456789Aa';
-interface Operation { name:string;op:string;now:number;input?:unknown;seq?:number;seqs?:number[];stale?:number[];id?:number;after?:number;count?:number;profile?:'zai_openai'|'deepseek_direct';outcome?:'completed'|'failed'|'interrupted';text?:string;projection?:string;invocationId?:string;busy?:boolean;retrying?:boolean }
+interface Operation { name:string;op:string;now:number;input?:unknown;seq?:number;seqs?:number[];stale?:number[];id?:number;after?:number;count?:number;profile?:'zai_openai'|'deepseek_direct';outcome?:'completed'|'failed'|'interrupted';text?:string;projection?:string;invocationId?:string;busy?:boolean;retrying?:boolean;cursor?:TranscriptCursor;limit?:number;sql?:string;admission?:{digest:string;seqs:number[]};trigger?:'wake'|'submit' }
 export class CloudStateDO extends DurableObject {
   readonly cloud=new CloudState(this.ctx.storage);
   readonly ledger=new InvocationLedger(this.ctx.storage);
@@ -24,11 +24,28 @@ export class CloudStateDO extends DurableObject {
         case 'read': return this.cloud.readInboxItem(input.seq!)??null;
         case 'select': return this.cloud.selectBatch(input.now,guard);
         case 'compose': return composeCloudInput(this.cloud.selectBatch(input.now,guard),[{input:'older',reply:'reply'},{input:'oldest',reply:'old reply'}]);
-        case 'start': return this.cloud.startRun(input.id!,'wake',input.now+100000,guard,input.now);
+        case 'start': return this.cloud.startRun(input.id!,input.trigger??'wake',input.now+100000,guard,input.now);
         case 'claim': return this.cloud.claim(input.id!,input.seqs!,input.profile??'zai_openai',guard,input.now);
         case 'settle': return this.cloud.settleRun(input.id!,{state:input.outcome??'completed',text:input.text,requeue:input.outcome==='interrupted',errorCode:input.outcome==='failed'?'CLOUD_MODEL_REQUEST_FAILED':undefined},guard,input.now);
         case 'eligible': return this.cloud.captureEligibility(input.stale===undefined?undefined:new Set(input.stale));
-        case 'reserve': this.cloud.markReservation(input.id!,'pending',guard,input.now);this.cloud.markReservation(input.id!,'held',guard,input.now);return this.cloud.readRun(input.id!);
+        case 'reserve': this.cloud.markReservation(input.id!,'pending',guard,input.now,input.admission);this.cloud.markReservation(input.id!,'held',guard,input.now);return this.cloud.readRun(input.id!);
+        case 'identity': return admissionIdentity(this.cloud.selectBatch(input.now,guard));
+        case 'claimed': return this.cloud.claimedSeqs(input.id!);
+        case 'durable': this.cloud.markInputDurable(input.id!,input.seqs!);return this.cloud.readInboxItem(input.seqs![0]!);
+        case 'run': return this.cloud.run(input.id!);
+        case 'unacked': return this.cloud.unackedRuns();
+        case 'ack': return this.cloud.ackSettlement(input.id!,guard,input.now);
+        case 'pending': return this.cloud.pendingBackfills();
+        case 'backfill': this.cloud.applyBackfill(input.id!,input.seqs!);return this.cloud.claimedSeqs(input.id!);
+        case 'transcript': return this.cloud.planTranscript(input.cursor,input.limit??20);
+        case 'plan-claim': {
+          const plan=this.cloud.planTranscript(input.cursor,input.limit??20);
+          this.cloud.claim(input.id!,input.seqs!,input.profile??'zai_openai',guard,input.now);
+          this.cloud.settleRun(input.id!,{state:'completed'},guard,input.now);
+          return plan;
+        }
+        case 'sql': return this.ctx.storage.sql.exec(input.sql!).toArray();
+        case 'ensure': this.cloud.ensureSchema();return {runs:this.ctx.storage.sql.exec('SELECT * FROM cloud_executions ORDER BY conversationId').toArray(),turns:this.ctx.storage.sql.exec('SELECT * FROM cloud_run_turns ORDER BY runId,seq').toArray(),events:this.cloud.eventPage(0)};
         case 'mark': return this.ledger.failExecution(input.id!,'CLOUD_EXECUTION_INTERRUPTED');
         case 'cancel': return this.cloud.cancelQueued(input.seq!,guard,input.now);
         case 'expire': return this.cloud.expireQueued(guard,input.now);

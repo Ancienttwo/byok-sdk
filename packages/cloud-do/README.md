@@ -116,3 +116,61 @@ inbox and event scheduling remain deferred. 4c owns invocation and interruption
 policy. 4d owns wake/inbox/event scheduling. Retention needs a
 bounded native-document/conversation cleanup design; deleting the DO's database
 would erase other executions and host tables, so cleanup is deferred.
+
+## Consumer hooks and durable transcript
+
+Cloud 4e-2 adds protected `instructions(profile)`, `renew(request, signal)` and
+`settleRun(run, signal)` hooks. Instructions enter the native pi system message.
+Renew runs before each model send gate and each tool dispatch, including recovery.
+The fixed run caps are 100 credits, 128,000 input tokens and 32,768 output tokens.
+A tool may cross the credit cap once. Its result and actual credits stay recorded.
+The next paid gate stops the run.
+
+The execution row records token usage, credits, model gate passes and
+`sentRequests`. The latter is durable dispatch intent. The host builds the final
+request, checks cancellation, writes the mark and calls fetch without an await
+between the last three steps. A failure before the mark is known-unsent.
+A positive mark with no usage is uncertain. A crash after the mark can occur
+before the provider receives the request. The consumer does not refund or retry
+that uncertain call. A run with no marks, tokens or credits is unpaid and gets
+compensation. Mixed runs settle their earlier paid usage before the unpaid
+remainder is released. The consumer owns billing and refunds.
+
+Settlement runs after the terminal transaction. Success writes `settlementAck`
+and `run.settlement` together. Failure leaves the terminal run unacked. Only
+settlement is retried. The existing alarm generation retries up to six times.
+After exhaustion, the next enqueue, release or boot can rearm the alarm.
+
+`readTranscript({after?, limit?})` returns runs, turns and inbox items. The limit
+is 1 to 50, with a default of 20. Return `next` unchanged as the next `after`.
+Its horizon fixes turn membership for the whole pass. A null run or item cursor
+means that list has ended. Current turn state and its run link carry a durable
+revision. Real native input is the text authority. The inbox retains text until
+that input is durable and requeue is no longer possible. Never-run text stays
+until the seven-day inbox purge. A large final answer returns a preview; use
+`readRunOutput` to read its full text.
+
+Legacy membership is backfilled once from committed input. Progress commits per
+run and resumes on restart. Missing clocks, state and current links stay unknown.
+The transcript keeps the historical source text without inventing current
+ownership. The product route must remove final answer text until settlement is
+acknowledged. The SDK remains private at version 0.0.0.
+
+Settlement is isolated per run. Delivery tries every unacked run concurrently.
+A failed run stays unacked. Later runs can ack and new work can start. The batch
+still reports failure to the existing alarm retry generation. The native lease
+is released before consumer delivery. For N runs, the batch uses N concurrent
+hooks and at most N hook deadlines. The asynchronous wait is at most 60 seconds,
+plus setup and ack processing. Local work and memory are O(N). The consumer must
+bound its external connections. There is no added SDK retry timer.
+
+Legacy backfill reads each pending run at most once per boot. Its cost is one
+context read per pending run plus at most 16 membership checks and one transaction.
+The scan pages by 25. A failed native read stays pending and retries next boot.
+Healthy legacy runs and new work remain usable. Transactional backfill write
+failures still fail recovery without a partial write. Pending unreadable legacy
+context is omitted from model history and remains unknown in transcript reads.
+
+Legacy backfill can keep real input after a requeued item expires and is purged;
+a released live membership is excluded from a new transcript horizon.
+The default settlement hook adds one `run.settlement` event per terminal run.

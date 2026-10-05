@@ -9,14 +9,37 @@ export type InboxState = 'queued' | 'running' | 'done' | 'failed' | 'interrupted
 export interface InboxRow {
   seq: number; dedupKey: string; payloadDigest: string; source: InboxSource; profile: PlatformProfileId;
   payloadJson: string | null; availableAt: number; expiresAt: number; state: InboxState;
-  runId: number | null; attempts: number; errorCode: CloudDoErrorCode | null; createdAt: number; settledAt: number | null;
+  runId: number | null; attempts: number; errorCode: CloudDoErrorCode | null; createdAt: number; settledAt: number | null; inputDurable: number; revision: number | null;
 }
 export interface RunRow extends ExecutionRow {
   trigger: 'submit' | 'wake'; requestId: string | null; submissionId: number | null;
   state: 'starting' | 'running' | 'completed' | 'failed' | 'interrupted';
   errorCode: CloudDoErrorCode | null; startedAt: number | null; settledAt: number | null;
   reservation: 'none' | 'pending' | 'held' | 'released'; eligibilityJson: string | null;
+  admissionDigest: string | null; admittedSeqs: string | null; settlementAck: number | null; revision: number | null; membershipPending: number | null;
 }
+export interface TranscriptCursor { horizon: number; run: number | null; item: number | null }
+export interface TranscriptTurn {
+  seq: number; runId: number | null; state: InboxState | null; errorCode: CloudDoErrorCode | null;
+  revision: number | null; text: string | null;
+}
+export interface TranscriptItem {
+  seq: number; dedupKey: string; state: InboxState; errorCode: CloudDoErrorCode | null;
+  runId: number | null; attempts: number; revision: number | null; text: string | null;
+}
+export interface TranscriptInvocation {
+  invocationId: string; toolName: string; state: InvocationRow['state']; errorCode: CloudDoErrorCode | null; revision: number | null;
+}
+export interface TranscriptRun {
+  nativeRunId: number; revision: number | null; state: RunRow['state']; errorCode: CloudDoErrorCode | null;
+  trigger: RunRow['trigger']; settlementAck: boolean; claimedSeqs: number[]; turns: TranscriptTurn[];
+  text?: string; truncated?: boolean; invocations: TranscriptInvocation[];
+}
+export interface TranscriptPlan {
+  runs: Array<{ run: RunRow; turns: TranscriptTurn[]; invocations: TranscriptInvocation[] }>;
+  items: TranscriptItem[]; next: TranscriptCursor;
+}
+export interface AdmissionIdentity { digest: string; seqs: number[] }
 export interface CloudEventRow {
   seq: number; eventKey: string; type: string; conversationId: number | null; ref: string | null; dataJson: string; createdAt: number;
 }
@@ -43,6 +66,34 @@ const terminalInvocation = "state NOT IN ('accepted','running')";
 
 export function inboxInput(rows: readonly InboxRow[]): InboxInput[] {
   return rows.map(row => ({ seq: row.seq, source: row.source, text: (JSON.parse(row.payloadJson!) as { text: string }).text }));
+}
+export function admissionIdentity(rows: readonly InboxRow[]): AdmissionIdentity {
+  return { digest: sha256(JSON.stringify(rows.map(row => [row.seq, row.dedupKey,
+    sha256((JSON.parse(row.payloadJson!) as { text: string }).text), row.profile]))), seqs: rows.map(row => row.seq) };
+}
+/** Accept only the committed native wake input shape. */
+export function runInputSeqs(entries: readonly unknown[]): number[] {
+  if (!Array.isArray(entries)) return [];
+  const entry = entries.find(value => value !== null && typeof value === 'object' && (value as {kind?:unknown}).kind === 'byok.run-input');
+  if (!entry || typeof entry !== 'object') return [];
+  const data = (entry as {data?:unknown}).data;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return [];
+  const items = (data as {items?:unknown}).items;
+  if (!Array.isArray(items) || items.length > 16) return [];
+  const seqs: number[] = [];
+  for (const item of items) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const {seq, source, text} = item as {seq?:unknown;source?:unknown;text?:unknown};
+    if (typeof seq !== 'number' || !Number.isSafeInteger(seq) || seq <= 0 || seqs.includes(seq)
+      || (typeof source !== 'string' || !['message','schedule','invocation'].includes(source)) || typeof text !== 'string') return [];
+    seqs.push(seq);
+  }
+  return seqs;
+}
+function payloadText(row: InboxRow | undefined): string | null {
+  if (row?.payloadJson === null || row?.payloadJson === undefined) return null;
+  const value = JSON.parse(row.payloadJson) as {text?:unknown};
+  return typeof value.text === 'string' ? value.text : null;
 }
 /** Fit inbox first. Add the newest history prefix, then emit it in chronological order. */
 export function composeCloudInput(rows: readonly InboxRow[], historyNewestFirst: readonly RunHistory[] = []): string {
@@ -127,11 +178,22 @@ export class CloudState {
         CREATE TABLE IF NOT EXISTS cloud_projections (
         key TEXT PRIMARY KEY,invocationId TEXT NOT NULL,state TEXT NOT NULL,payloadDigest TEXT NOT NULL,
         dataJson TEXT NOT NULL,errorCode TEXT,createdAt INTEGER NOT NULL)`);
+      const legacyMembership = !this.rows<{name:string}>('PRAGMA table_info(cloud_executions)').some(row => row.name === 'membershipPending');
+      this.migrate('cloud_inbox', { inputDurable: 'INTEGER NOT NULL DEFAULT 0', revision: 'INTEGER' });
+      this.storage.sql.exec(`CREATE TABLE IF NOT EXISTS cloud_run_turns (
+        runId INTEGER NOT NULL, seq INTEGER NOT NULL, claimEvent INTEGER, releaseEvent INTEGER,
+        PRIMARY KEY (runId,seq));
+        CREATE INDEX IF NOT EXISTS cloud_run_turns_by_seq ON cloud_run_turns(seq,runId)`);
       this.migrate('cloud_executions', {
         trigger: "TEXT NOT NULL DEFAULT 'submit'", requestId: 'TEXT', submissionId: 'INTEGER',
         state: "TEXT NOT NULL DEFAULT 'interrupted'", errorCode: 'TEXT', startedAt: 'INTEGER', settledAt: 'INTEGER',
         reservation: "TEXT NOT NULL DEFAULT 'none'", eligibilityJson: 'TEXT',
+        admissionDigest: 'TEXT', admittedSeqs: 'TEXT', settlementAck: 'INTEGER', revision: 'INTEGER', membershipPending: 'INTEGER',
       });
+      if (legacyMembership) {
+        this.storage.sql.exec('INSERT OR IGNORE INTO cloud_run_turns(runId,seq) SELECT runId,seq FROM cloud_inbox WHERE runId IS NOT NULL');
+        this.storage.sql.exec("UPDATE cloud_executions SET membershipPending=1 WHERE trigger='wake'");
+      }
       this.migrate('cloud_invocations', { deliveredState: "TEXT NOT NULL DEFAULT 'undelivered'", taskId: 'INTEGER', resultEntryId: 'INTEGER' });
     });
   }
@@ -144,6 +206,43 @@ export class CloudState {
   unsettledRuns(): RunRow[] { return this.rows<RunRow>(`SELECT * FROM cloud_executions WHERE ${terminalRun.replace('NOT IN', 'IN')} ORDER BY conversationId`); }
   completedRuns(): RunRow[] { return this.rows<RunRow>("SELECT * FROM cloud_executions WHERE state='completed' ORDER BY conversationId DESC LIMIT 20"); }
   invocationRowsForRun(id: number): InvocationRow[] { return this.rows<InvocationRow>('SELECT * FROM cloud_invocations WHERE conversationId=? ORDER BY seq', id); }
+
+  private stamp(table: 'cloud_inbox' | 'cloud_executions', key: number, revision: number): void {
+    this.storage.sql.exec(`UPDATE ${table} SET revision=? WHERE ${table === 'cloud_inbox' ? 'seq' : 'conversationId'}=? AND (revision IS NULL OR revision<?)`, revision, key, revision);
+  }
+  claimedSeqs(id: number): number[] {
+    return this.rows<{seq:number}>('SELECT seq FROM cloud_run_turns WHERE runId=? ORDER BY seq',id).map(row => row.seq);
+  }
+  markInputDurable(id: number, seqs: readonly number[]): void {
+    this.storage.transactionSync(() => {
+      for (const seq of seqs) this.storage.sql.exec("UPDATE cloud_inbox SET inputDurable=1 WHERE seq=? AND runId=? AND state='running'",seq,id);
+    });
+  }
+  pendingBackfills(before = Number.MAX_SAFE_INTEGER): RunRow[] {
+    return this.rows<RunRow>('SELECT * FROM cloud_executions WHERE membershipPending=1 AND conversationId<? ORDER BY conversationId DESC LIMIT 25',before);
+  }
+  applyBackfill(id: number, seqs: readonly number[]): void {
+    this.storage.transactionSync(() => {
+      if (this.run(id)?.membershipPending !== 1) return;
+      for (const seq of seqs) this.storage.sql.exec(`INSERT INTO cloud_run_turns(runId,seq)
+        SELECT ?,? WHERE NOT EXISTS(SELECT 1 FROM cloud_run_turns WHERE seq=?)
+        AND NOT EXISTS(SELECT 1 FROM cloud_inbox WHERE seq=?)`,id,seq,seq,seq);
+      this.storage.sql.exec('UPDATE cloud_executions SET membershipPending=0 WHERE conversationId=?',id);
+    });
+  }
+  unackedRuns(): RunRow[] {
+    return this.rows<RunRow>(`SELECT * FROM cloud_executions WHERE ${terminalRun} AND settlementAck=0 ORDER BY conversationId`);
+  }
+  ackSettlement(id: number, guard: CloudOperationGuard, now=Date.now()): boolean {
+    return this.storage.transactionSync(() => {
+      if (this.run(id)?.settlementAck !== 0) return false;
+      this.storage.sql.exec('UPDATE cloud_executions SET settlementAck=1 WHERE conversationId=?',id);
+      const event = this.appendEvent({eventKey:`run:${id}:settlement`,type:'run.settlement',conversationId:id,
+        data:{nativeRunId:id,ack:true},createdAt:now},guard);
+      this.stamp('cloud_executions',id,event.seq);
+      return true;
+    });
+  }
 
   /** Read-only preflight also works before this DO has initialized its schema. */
   validateEnqueue(input: CloudInboxAdmission, guard: CloudOperationGuard, now = Date.now()): void {
@@ -175,9 +274,10 @@ export class CloudState {
       const row = this.rows<InboxRow>(`INSERT INTO cloud_inbox(dedupKey,payloadDigest,source,profile,payloadJson,availableAt,expiresAt,state,createdAt)
         VALUES(?,?,?,?,?,?,?,'queued',?) RETURNING *`, input.dedupKey,payloadDigest,input.source,input.profile,
       guard.guardPayload(JSON.stringify({ text: input.text })),availableAt,expiresAt,now)[0]!;
-      this.appendEvent({ eventKey: `inbox:${row.seq}:accepted`,type:'inbox.accepted',ref:String(row.seq),data:{ seq:row.seq,source:row.source,profile:row.profile,availableAt,expiresAt },createdAt:now },guard);
+      const event = this.appendEvent({ eventKey: `inbox:${row.seq}:accepted`,type:'inbox.accepted',ref:String(row.seq),data:{ seq:row.seq,source:row.source,profile:row.profile,availableAt,expiresAt },createdAt:now },guard);
+      this.stamp('cloud_inbox',row.seq,event.seq);
       await this.rearmAlarm(undefined, now);
-      return { accepted: true, row };
+      return { accepted: true, row: this.readInboxItem(row.seq)! };
     });
   }
 
@@ -199,10 +299,13 @@ export class CloudState {
   }
   startRun(id: number, trigger: 'submit' | 'wake', deadlineAt: number, guard: CloudOperationGuard, now = Date.now()): RunRow {
     return this.storage.transactionSync(() => {
-      this.storage.sql.exec(`INSERT INTO cloud_executions(conversationId,deadlineAt,trigger,requestId,state,startedAt)
-        VALUES(?,?,?,?,?,?) ON CONFLICT(conversationId) DO UPDATE SET trigger=excluded.trigger,
-        requestId=excluded.requestId,state=excluded.state,startedAt=excluded.startedAt WHERE cloud_executions.startedAt IS NULL`,id,deadlineAt,trigger,`${trigger}:${id}`,trigger==='wake'?'starting':'running',now);
-      if (trigger==='submit') this.appendEvent({eventKey:`run:${id}:started`,type:'run.started',conversationId:id,data:{trigger},createdAt:now},guard);
+      this.storage.sql.exec(`INSERT INTO cloud_executions(conversationId,deadlineAt,trigger,requestId,state,startedAt,settlementAck)
+        VALUES(?,?,?,?,?,?,0) ON CONFLICT(conversationId) DO UPDATE SET trigger=excluded.trigger,
+        requestId=excluded.requestId,state=excluded.state,startedAt=excluded.startedAt,settlementAck=0 WHERE cloud_executions.startedAt IS NULL`,id,deadlineAt,trigger,`${trigger}:${id}`,trigger==='wake'?'starting':'running',now);
+      if (trigger==='submit') {
+        const event = this.appendEvent({eventKey:`run:${id}:started`,type:'run.started',conversationId:id,data:{trigger},createdAt:now},guard);
+        this.stamp('cloud_executions',id,event.seq);
+      }
       return this.run(id)!;
     });
   }
@@ -211,14 +314,18 @@ export class CloudState {
       const row = this.run(id);
       if (!row || row.state !== 'starting') return;
       this.storage.sql.exec("UPDATE cloud_executions SET state='running' WHERE conversationId=?",id);
-      this.appendEvent({eventKey:`run:${id}:started`,type:'run.started',conversationId:id,data:{trigger:row.trigger},createdAt:now},guard);
+      const event = this.appendEvent({eventKey:`run:${id}:started`,type:'run.started',conversationId:id,data:{trigger:row.trigger},createdAt:now},guard);
+      this.stamp('cloud_executions',id,event.seq);
     });
   }
   recordSubmission(id: number, submissionId: number): void { this.storage.sql.exec('UPDATE cloud_executions SET submissionId=? WHERE conversationId=?',submissionId,id); }
-  markReservation(id: number, reservation: RunRow['reservation'], guard: CloudOperationGuard, now = Date.now()): void {
+  markReservation(id: number, reservation: RunRow['reservation'], guard: CloudOperationGuard, now = Date.now(), admission?: AdmissionIdentity): void {
     this.storage.transactionSync(() => {
       const row = this.run(id);
-      if (!row || (row.state !== 'starting' && row.state !== 'running') || row.reservation === reservation) return;
+      if (!row || (row.state !== 'starting' && row.state !== 'running')) return;
+      if (reservation === 'pending' && admission && row.admissionDigest === null) this.storage.sql.exec(
+        'UPDATE cloud_executions SET admissionDigest=?,admittedSeqs=? WHERE conversationId=? AND admissionDigest IS NULL',admission.digest,JSON.stringify(admission.seqs),id);
+      if (row.reservation === reservation) return;
       this.storage.sql.exec('UPDATE cloud_executions SET reservation=? WHERE conversationId=?',reservation,id);
       if (reservation !== 'pending') this.appendEvent({eventKey:`run:${id}:reservation:${reservation}`,type:'run.reservation',conversationId:id,
         data:{key:row.requestId,reservation,action:reservation==='released'?'release':'reserve'},createdAt:now},guard);
@@ -252,13 +359,19 @@ export class CloudState {
       }
       if (!claimed.length) { this.settleRun(id,{state:'interrupted',errorCode:'CLOUD_WAKE_EMPTY'},guard,now); return []; }
       this.storage.sql.exec("UPDATE cloud_executions SET state='running' WHERE conversationId=?",id);
-      this.appendEvent({eventKey:`run:${id}:started`,type:'run.started',conversationId:id,data:{trigger:'wake',seqs:claimed.map(row=>row.seq)},createdAt:now},guard);
-      return claimed;
+      const event = this.appendEvent({eventKey:`run:${id}:started`,type:'run.started',conversationId:id,data:{trigger:'wake',seqs:claimed.map(row=>row.seq)},createdAt:now},guard);
+      for (const item of claimed) {
+        this.storage.sql.exec('INSERT INTO cloud_run_turns(runId,seq,claimEvent) VALUES(?,?,?)',id,item.seq,event.seq);
+        this.stamp('cloud_inbox',item.seq,event.seq);
+      }
+      this.stamp('cloud_executions',id,event.seq);
+      return claimed.map(item => this.readInboxItem(item.seq)!);
     });
   }
   private settleItem(row: InboxRow, state: Exclude<InboxState,'queued'|'running'>, code: CloudDoErrorCode | undefined, guard: CloudOperationGuard, now: number): void {
-    this.storage.sql.exec('UPDATE cloud_inbox SET state=?,errorCode=?,payloadJson=NULL,settledAt=? WHERE seq=? AND state IN (\'queued\',\'running\')',state,code??null,now,row.seq);
-    this.appendEvent({eventKey:`inbox:${row.seq}:settled`,type:'inbox.settled',conversationId:row.runId??undefined,ref:String(row.seq),data:{seq:row.seq,state,errorCode:code??null},createdAt:now},guard);
+    this.storage.sql.exec('UPDATE cloud_inbox SET state=?,errorCode=?,payloadJson=CASE WHEN inputDurable=1 THEN NULL ELSE payloadJson END,settledAt=? WHERE seq=? AND state IN (\'queued\',\'running\')',state,code??null,now,row.seq);
+    const event = this.appendEvent({eventKey:`inbox:${row.seq}:settled`,type:'inbox.settled',conversationId:row.runId??undefined,ref:String(row.seq),data:{seq:row.seq,state,errorCode:code??null},createdAt:now},guard);
+    this.stamp('cloud_inbox',row.seq,event.seq);
   }
   failQueued(seqs: readonly number[], code: CloudDoErrorCode, guard: CloudOperationGuard, now = Date.now()): void {
     this.storage.transactionSync(() => { for (const seq of seqs) { const row=this.readInboxItem(seq); if(row?.state==='queued') this.settleItem(row,'failed',code,guard,now); } });
@@ -279,7 +392,7 @@ export class CloudState {
       if(!row || (row.state!=='starting' && row.state!=='running')) return row;
       const items=this.rows<InboxRow>("SELECT * FROM cloud_inbox WHERE runId=? AND state='running' ORDER BY seq",id);
       for(const item of items) {
-        if(outcome.requeue && item.expiresAt>now) this.storage.sql.exec("UPDATE cloud_inbox SET state='queued',runId=NULL WHERE seq=? AND state='running'",item.seq);
+        if(outcome.requeue && item.expiresAt>now) this.storage.sql.exec("UPDATE cloud_inbox SET state='queued',runId=NULL,inputDurable=0 WHERE seq=? AND state='running'",item.seq);
         else {
           const expiredRequeue = outcome.requeue && item.expiresAt <= now;
           this.settleItem(item,expiredRequeue?'expired':outcome.state==='completed'?'done':outcome.state==='failed'?'failed':'interrupted',
@@ -290,7 +403,7 @@ export class CloudState {
         this.storage.sql.exec("UPDATE cloud_executions SET reservation='released' WHERE conversationId=?",id);
         this.appendEvent({eventKey:`run:${id}:reservation:released`,type:'run.reservation',conversationId:id,data:{key:row.requestId,reservation:'released',action:'release'},createdAt:now},guard);
       }
-      this.storage.sql.exec('UPDATE cloud_executions SET state=?,errorCode=?,settledAt=? WHERE conversationId=?',outcome.state,outcome.errorCode??null,now,id);
+      this.storage.sql.exec('UPDATE cloud_executions SET state=?,errorCode=?,settledAt=?,settlementAck=0 WHERE conversationId=?',outcome.state,outcome.errorCode??null,now,id);
       const data:Record<string,unknown>={state:outcome.state,errorCode:outcome.errorCode??null,seqs:items.map(item=>item.seq)};
       if(outcome.requeue) data.requeued=items.filter(item=>item.expiresAt>now).map(item=>item.seq);
       if(outcome.entryId!==undefined) data.entryId=outcome.entryId;
@@ -299,7 +412,12 @@ export class CloudState {
         catch { data.errorCode='CLOUD_MODEL_RESPONSE_REJECTED'; }
         if(encoder.encode(JSON.stringify(data)).length>65_536) { data.text=utf8Prefix(outcome.text,1024); data.truncated=true; }
       }
-      this.appendEvent({eventKey:`run:${id}:settled`,type:`run.${outcome.state}`,conversationId:id,data,createdAt:now},guard);
+      const event = this.appendEvent({eventKey:`run:${id}:settled`,type:`run.${outcome.state}`,conversationId:id,data,createdAt:now},guard);
+      for (const item of items) if (outcome.requeue && item.expiresAt > now) {
+        this.storage.sql.exec('UPDATE cloud_run_turns SET releaseEvent=? WHERE runId=? AND seq=? AND releaseEvent IS NULL',event.seq,id,item.seq);
+        this.stamp('cloud_inbox',item.seq,event.seq);
+      }
+      this.stamp('cloud_executions',id,event.seq);
       return this.run(id);
     });
   }
@@ -333,6 +451,49 @@ export class CloudState {
   private pageLimit(value=100): number {
     if(!Number.isSafeInteger(value)||value<1||value>100) throw new CloudDoError('CLOUD_REQUEST_INVALID');
     return value;
+  }
+  /** Capture ownership and payloads before any asynchronous pi context read. */
+  planTranscript(after: TranscriptCursor | undefined, limit: number): TranscriptPlan {
+    return this.storage.transactionSync(() => {
+      const highWater = this.eventMeta().highWater;
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new CloudDoError('CLOUD_REQUEST_INVALID');
+      if (after !== undefined) {
+        if (!after || typeof after !== 'object' || Array.isArray(after)
+          || Object.keys(after).length !== 3 || !['horizon','run','item'].every(key => Object.hasOwn(after,key))
+          || !Number.isSafeInteger(after.horizon) || after.horizon < 0 || after.horizon > highWater
+          || [after.run,after.item].some(value => value !== null && (!Number.isSafeInteger(value) || value <= 0))) {
+          throw new CloudDoError('CLOUD_REQUEST_INVALID');
+        }
+      }
+      const horizon = after?.horizon ?? highWater;
+      const runRows = after?.run === null ? [] : this.rows<RunRow>(
+        'SELECT * FROM cloud_executions WHERE conversationId<? ORDER BY conversationId DESC LIMIT ?',after?.run ?? Number.MAX_SAFE_INTEGER,limit);
+      const runs = runRows.map(run => {
+        const memberships = this.rows<{seq:number}>(`SELECT seq FROM cloud_run_turns WHERE runId=?
+          AND (claimEvent IS NULL OR claimEvent<=?) AND (releaseEvent IS NULL OR releaseEvent>?) ORDER BY seq`,run.conversationId,horizon,horizon);
+        const turns = memberships.map(({seq}): TranscriptTurn => {
+          const inbox = this.readInboxItem(seq);
+          // A NULL legacy clock proves historical input only. Live membership proves the current link.
+          const current = inbox ? inbox.runId : this.rows<{runId:number}>(`SELECT runId FROM cloud_run_turns
+            WHERE seq=? AND claimEvent IS NOT NULL AND releaseEvent IS NULL ORDER BY runId DESC LIMIT 1`,seq)[0]?.runId ?? null;
+          return {seq,runId:current,state:inbox?.state ?? null,errorCode:inbox?.errorCode ?? null,
+            revision:inbox?.revision ?? null,text:payloadText(inbox)};
+        });
+        const invocations = this.invocationRowsForRun(run.conversationId).map(row => ({
+          invocationId:row.invocationId,toolName:row.toolName,state:row.state,errorCode:row.errorCode,
+          revision:row.state === 'accepted' || row.state === 'running' ? null : row.settledEventSeq,
+        }));
+        return {run,turns,invocations};
+      });
+      const itemRows = after?.item === null ? [] : this.rows<InboxRow>(`SELECT i.* FROM cloud_inbox i WHERE i.seq<?
+        AND NOT EXISTS(SELECT 1 FROM cloud_run_turns t WHERE t.seq=i.seq
+          AND (t.claimEvent IS NULL OR t.claimEvent<=?) AND (t.releaseEvent IS NULL OR t.releaseEvent>?))
+        ORDER BY i.seq DESC LIMIT ?`,after?.item ?? Number.MAX_SAFE_INTEGER,horizon,horizon,limit);
+      const items = itemRows.map(row => ({seq:row.seq,dedupKey:row.dedupKey,state:row.state,errorCode:row.errorCode,
+        runId:row.runId,attempts:row.attempts,revision:row.revision,text:payloadText(row)}));
+      return {runs,items,next:{horizon,run:runRows.length < limit ? null : runRows.at(-1)!.conversationId,
+        item:itemRows.length < limit ? null : itemRows.at(-1)!.seq}};
+    });
   }
   readRun(id: number): RunRow | undefined { return this.run(id); }
   readRuns(options: {after?:number;limit?:number} = {}): RunRow[] {
@@ -426,7 +587,7 @@ export class CloudState {
       if(!busy||row.availableAt>now) targets.push(Math.max(now,row.availableAt));
       targets.push(Math.max(now,row.expiresAt));
     }
-    if(!busy&&this.unsettledRuns().length) targets.push(now);
+    if(!busy&&(this.unsettledRuns().length||this.unackedRuns().length)) targets.push(now);
     const head=this.rows<{createdAt:number}>('SELECT createdAt FROM cloud_events ORDER BY seq LIMIT 1')[0];
     if(head) targets.push(Math.max(now,head.createdAt+RETENTION));
     const settled=this.rows<{settledAt:number}>(`SELECT settledAt FROM cloud_inbox WHERE ${terminalInbox} AND settledAt IS NOT NULL ORDER BY settledAt LIMIT 1`)[0];
