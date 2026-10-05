@@ -98,6 +98,8 @@ export async function fetchWithProviderGuards(
     }
     reader = response.body.getReader();
     ownedResponse = undefined;
+    // Keep reads demand-driven so bounded consumers can stop at the crossing
+    // chunk without this wrapper prefetching another source chunk.
     const body = new ReadableStream<Uint8Array>({
       start(streamController) { bodyController = streamController; },
       async pull(streamController) {
@@ -127,7 +129,7 @@ export async function fetchWithProviderGuards(
         disposeBody(reason);
         controller.abort(reason);
       },
-    });
+    }, { highWaterMark: 0 });
     const guarded = new Response(body, {
       status: response.status,
       statusText: response.statusText,
@@ -148,8 +150,9 @@ export async function fetchWithProviderGuards(
 
 /**
  * Read a JSON body with a size ceiling (`providers.ts:1825-1851`). The
- * `content-length` check is an early exit; the decoded-byte check is the one
- * that actually holds, since `content-length` is attacker-controlled.
+ * `content-length` check is an early exit. Count actual transport body bytes
+ * before decoding each chunk: headers may be absent, false, or compressed.
+ * Cancel at the first chunk crossing the ceiling without waiting for EOF.
  */
 export async function parseBoundedJsonResponse(
   response: Response,
@@ -165,12 +168,35 @@ export async function parseBoundedJsonResponse(
       'Provider response exceeds the local safety limit',
     );
   }
-  const text = await response.text();
-  if (new TextEncoder().encode(text).byteLength > PROVIDER_RESPONSE_MAX_BYTES) {
-    throw new ByokKeysError(
-      'PROVIDER_RESPONSE_TOO_LARGE',
-      'Provider response exceeds the local safety limit',
-    );
+  if (response.bodyUsed) throw new TypeError('Response body is already consumed');
+  let text = '';
+  const reader = response.body?.getReader();
+  if (reader) {
+    const decoder = new TextDecoder();
+    let bytes = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        // Fetch exposes decompressed bytes. Do not decode or retain a chunk
+        // that exceeds the remaining budget, even if no EOF ever arrives.
+        if (value.byteLength > PROVIDER_RESPONSE_MAX_BYTES - bytes) {
+          throw new ByokKeysError(
+            'PROVIDER_RESPONSE_TOO_LARGE',
+            'Provider response exceeds the local safety limit',
+          );
+        }
+        bytes += value.byteLength;
+        text += decoder.decode(value, { stream: true });
+      }
+      text += decoder.decode();
+    } catch (error) {
+      // Cancellation hooks are untrusted: release our lock and reject now.
+      void reader.cancel(error).catch(() => {});
+      throw error;
+    } finally {
+      reader.releaseLock();
+    }
   }
   try {
     return JSON.parse(text);
