@@ -485,3 +485,129 @@ describe('S11-F3 absolute preparation deadlines', () => {
   });
 
 });
+
+it('R1: fences counter evidence received after absolute deadline without timer delivery', async () => {
+  const h = await harness();
+  const count = h.counter.count.bind(h.counter);
+  vi.spyOn(h.counter, 'count').mockImplementationOnce(async input => {
+    const result = await count(input);
+    vi.setSystemTime(Date.now() + 101);
+    return result;
+  });
+  await expect(h.handle(h.request)).resolves.toMatchObject({ outcome: 'rejected', reason: 'counter_interrupted' });
+  expect(h.service.store.list()[0]).toMatchObject({ state: 'counter_interrupted', counterCalls: 1, detail: 'counter_deadline_elapsed' });
+  expect(h.service.store.list()[0]?.counter).toBeUndefined();
+  await expect(h.service.prepare(localRequest(h.request), { deadlineAt: Date.now() + 1_000 })).resolves.toMatchObject({ state: 'counter_interrupted' });
+  expect(h.counter.calls).toHaveLength(1);
+});
+
+it.each([0, 1, 2, 3, 4, 5])('R1: no counter admission after expiry between microtasks %s', async depth => {
+  const h = await harness();
+  const deadline = Date.parse(h.request.deadlineAt);
+  const commit = h.service.store.commitCounterReservation.bind(h.service.store);
+  const lateCalls: number[] = [];
+  const count = h.counter.count.bind(h.counter);
+  vi.spyOn(h.counter, 'count').mockImplementation(input => {
+    if (Date.now() >= deadline) lateCalls.push(Date.now());
+    return count(input);
+  });
+  vi.spyOn(h.service.store, 'commitCounterReservation').mockImplementationOnce(async input => {
+    const result = await commit(input);
+    const advance = (n: number): void => {
+      if (n === 0) vi.setSystemTime(deadline + 1);
+      else queueMicrotask(() => advance(n - 1));
+    };
+    queueMicrotask(() => advance(depth));
+    return result;
+  });
+  await h.handle(h.request);
+  expect(lateCalls).toHaveLength(0);
+});
+
+it.each([0, 1, 2])('R1: no assembly admission after expiry between reservation microtasks %s', async depth => {
+  const h = await harness();
+  const deadline = Date.parse(h.request.deadlineAt);
+  const assemble = h.toolSurface.assemble.bind(h.toolSurface);
+  const lateCalls: number[] = [];
+  vi.spyOn(h.toolSurface, 'assemble').mockImplementation(input => {
+    if (Date.now() >= deadline) lateCalls.push(Date.now());
+    return assemble(input);
+  });
+  h.reserve.mockImplementationOnce(async input => {
+    const result = await h.realReserve(input);
+    const advance = (n: number): void => {
+      if (n === 0) vi.setSystemTime(deadline + 1);
+      else queueMicrotask(() => advance(n - 1));
+    };
+    queueMicrotask(() => advance(depth));
+    return result;
+  });
+  await h.handle(h.request);
+  expect(lateCalls).toHaveLength(0);
+  expect(h.counter.calls).toHaveLength(0);
+});
+
+it('R1: cancels cleanly when counter setup consumes the remaining budget', async () => {
+  let advanceClock = false;
+  const limits = { ...LIMITS, get counterTimeoutMs() {
+    if (advanceClock) vi.setSystemTime(Date.now() + 101);
+    return LIMITS.counterTimeoutMs;
+  } };
+  const h = await harness({ limits });
+  const commit = h.service.store.commitCounterReservation.bind(h.service.store);
+  vi.spyOn(h.service.store, 'commitCounterReservation').mockImplementationOnce(async input => {
+    const result = await commit(input);
+    advanceClock = true;
+    return result;
+  });
+  await expect(h.handle(h.request)).resolves.toMatchObject({ outcome: 'rejected', reason: 'cancelled' });
+  expect(h.counter.calls).toHaveLength(0);
+  expect(h.service.store.list()[0]).toMatchObject({ state: 'cancelled', counterCalls: 1 });
+});
+
+it('R1: fences evidence validation that consumes the remaining budget', async () => {
+  const h = await harness();
+  const count = h.counter.count.bind(h.counter);
+  vi.spyOn(h.counter, 'count').mockImplementationOnce(async input => {
+    const result = await count(input);
+    return { ...result, get value() { vi.setSystemTime(Date.now() + 101); return result.value; } };
+  });
+  await expect(h.handle(h.request)).resolves.toMatchObject({ outcome: 'rejected', reason: 'counter_interrupted' });
+  expect(h.counter.calls).toHaveLength(1);
+  expect(h.service.store.list()[0]).toMatchObject({ state: 'counter_interrupted', counterCalls: 1 });
+  expect(h.service.store.list()[0]?.counter).toBeUndefined();
+});
+
+it('R1: drains an in-budget counter terminal write whose acknowledgement crosses expiry', async () => {
+  const h = await harness(); const entered = deferred(); const gate = deferred();
+  cleanups.push(async () => { gate.resolve(); });
+  const update = h.service.store.update.bind(h.service.store);
+  vi.spyOn(h.service.store, 'update').mockImplementation(async (recordId, changes) => {
+    const record = await update(recordId, changes);
+    if (changes.state === 'prepared') { entered.resolve(); await gate.promise; }
+    return record;
+  });
+  const pending = h.handle(h.request); await entered.promise;
+  await vi.advanceTimersByTimeAsync(101);
+  expect(h.completions).toHaveLength(0);
+  gate.resolve();
+  await expect(pending).resolves.toMatchObject({ outcome: 'rejected', reason: 'cancelled' });
+  expect(h.counter.calls).toHaveLength(1);
+  expect(h.service.store.list()[0]).toMatchObject({ state: 'prepared', counterCalls: 1, counter: { value: 123 } });
+});
+
+it.each([false, true])('R1: refuses new artifact commitment after summary work consumes the budget (counter=%s)', async counter => {
+  const h = await harness({ counter: counter ? undefined : false });
+  const compile = h.compiler.compile.bind(h.compiler);
+  vi.spyOn(h.compiler, 'compile').mockImplementationOnce(async input => {
+    const compiled = await compile(input);
+    return { ...compiled, get requestBytes() { vi.setSystemTime(Date.now() + 101); return compiled.requestBytes; } };
+  });
+  const commitCounter = vi.spyOn(h.service.store, 'commitCounterReservation');
+  const commitPrepared = vi.spyOn(h.service.store, 'commitPreparedArtifact');
+  await expect(h.handle(h.request)).resolves.toMatchObject({ outcome: 'rejected', reason: 'cancelled' });
+  expect(commitCounter).not.toHaveBeenCalled();
+  expect(commitPrepared).not.toHaveBeenCalled();
+  expect(h.counter.calls).toHaveLength(0);
+  expect(h.service.store.list()[0]).toMatchObject({ state: 'cancelled', counterCalls: 0 });
+});
