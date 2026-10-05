@@ -248,7 +248,9 @@ function projectItems(events: readonly TimelineEvent[]): readonly TimelineItem[]
     switch (event.type) {
       case 'progress': {
         const last = items.at(-1);
-        if (last?.kind === 'text-activity' && previous !== undefined && contiguous(previous, timelineEvent)) {
+        // Correlated tools can update an earlier item without appending one.
+        // Group by adjacent source events, not just the last display item.
+        if (last?.kind === 'text-activity' && previous?.event.type === 'progress' && contiguous(previous, timelineEvent)) {
           items[items.length - 1] = Object.freeze({
             ...last,
             eventKeys: Object.freeze([...last.eventKeys, key]),
