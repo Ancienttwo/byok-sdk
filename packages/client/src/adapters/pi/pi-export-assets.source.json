@@ -2,7 +2,7 @@
   "format": "byok.pi-export-asset-source",
   "version": 1,
   "packageName": "@earendil-works/pi-coding-agent",
-  "packageVersion": "1.0.1",
+  "packageVersion": "1.0.2",
   "sourceBasePath": "dist/core/export-html",
   "files": [
     {
