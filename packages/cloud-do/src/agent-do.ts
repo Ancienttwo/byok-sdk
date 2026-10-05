@@ -1,16 +1,16 @@
 import { DurableObject } from 'cloudflare:workers';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { Harness, watchEvents, type AgentEvent, type ConversationId } from '@earendil-works/pi-durable';
+import { Harness, watchEvents, type AgentEvent, type ConversationId, type EntryRecord } from '@earendil-works/pi-durable';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { admitCloudSubmission } from './admission';
 import { CloudDoError, cloudErrorResponse, type CloudDoErrorCode } from './errors';
 import { PLATFORM_PROFILES, platformCredentialReader, type PlatformProfileId } from './platform-credentials';
 import { admitCloudText } from './input-guard';
-import { SessionRuntime, type ExecutionLease } from './session-runtime';
+import { SessionRuntime, type CloudRenewRequest, type CloudRenewResult, type CloudRunSettlement, type ExecutionLease } from './session-runtime';
 import type { CloudToolDispatcher } from './tools';
 import type { InvocationTerminalState, InvocationRow } from './invocation-ledger';
 import { admitCloudInbox } from './inbox-admission';
-import { type InboxRow } from './cloud-state';
+import { runInputSeqs, utf8Prefix, type AdmissionIdentity, type InboxRow, type TranscriptCursor, type TranscriptRun } from './cloud-state';
 import { CloudEventDoorbell, CloudEventStreams } from './event-stream';
 import { runCloudWake, committedRunOutcome, type CloudWakeAdmission } from './wake-runner';
 import { safeCloudError } from './errors';
@@ -23,6 +23,33 @@ function modelFailureCode(message: string | undefined): CloudDoErrorCode {
 
 function assistantText(message: AssistantMessage): string {
   return message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('');
+}
+
+function finalAssistant(entries: readonly EntryRecord[]) {
+  const entry = [...entries].reverse().find(entry => entry.kind === 'pi.assistant'
+    && entry.model?.some(message => message.role === 'assistant' && message.stopReason !== 'toolUse'));
+  const assistant = entry?.model?.find(message => message.role === 'assistant' && message.stopReason !== 'toolUse');
+  return assistant?.role === 'assistant' && entry ? { entry, assistant } : undefined;
+}
+
+function inputTexts(entries: readonly EntryRecord[]): Map<number, string> {
+  const seqs = new Set(runInputSeqs(entries));
+  if (!seqs.size) return new Map();
+  const data = entries.find(entry => entry.kind === 'byok.run-input')?.data as {items?:{seq:number;text:string}[]} | undefined;
+  return new Map((data?.items ?? []).filter(item => seqs.has(item.seq)).map(item => [item.seq,item.text]));
+}
+
+/** RPC options accept data properties only. */
+function transcriptRecord(value: unknown, keys: readonly string[]): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) throw new CloudDoError('CLOUD_REQUEST_INVALID');
+  const result: Record<string, unknown> = {};
+  for (const key of Reflect.ownKeys(value)) {
+    const field = Object.getOwnPropertyDescriptor(value, key);
+    if (typeof key !== 'string' || !keys.includes(key) || !field?.enumerable || !('value' in field)) throw new CloudDoError('CLOUD_REQUEST_INVALID');
+    result[key] = field.value;
+  }
+  return result;
 }
 
 /** Native watch batches can contain a whole message, a block, or a delta. */
@@ -62,9 +89,13 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
   protected projectInvocation(_row: InvocationRow): { key: string; dataJson: string } | undefined { return undefined; }
 
   /** The consumer owns billing truth and fences every pending admission key on release. */
-  protected admitWake(_items: readonly InboxRow[], _signal: AbortSignal, _key: string): CloudWakeAdmission | Promise<CloudWakeAdmission> {
+  protected admitWake(_items: readonly InboxRow[], _signal: AbortSignal, _key: string, _admission: AdmissionIdentity): CloudWakeAdmission | Promise<CloudWakeAdmission> {
     return { accepted: true, reservation: 'none' };
   }
+
+  protected instructions(_profile: PlatformProfileId): string | undefined { return undefined; }
+  protected renew(_request: CloudRenewRequest, _signal: AbortSignal): CloudRenewResult | Promise<CloudRenewResult> { return { ok: true }; }
+  protected settleRun(_run: CloudRunSettlement, _signal: AbortSignal): void | Promise<void> {}
 
   protected sessionRuntime(): SessionRuntime {
     return this.#runtime ??= new SessionRuntime(this.ctx, this.env, {
@@ -72,6 +103,9 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
       projectInvocation: row => this.projectInvocation(row),
       onCommit: () => this.#doorbell.ring(),
       onInvocationSettled: (id, state) => this.onInvocationSettled(id, state),
+      instructions: profile => this.instructions(profile),
+      renew: (request, signal) => this.renew(request, signal),
+      settleRun: (run, signal) => this.settleRun(run, signal),
     });
   }
 
@@ -118,13 +152,17 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
       if (guard) runtime.cloud.expireQueued(guard);
       runtime.cloud.retention();
       this.#doorbell.ring();
-      await runtime.cloud.rearmAlarm({ busy: true, repairRetrying: runtime.repairRetrying });
+      // Settlement debt has no lease and may progress while unrelated native work is live.
+      if (runtime.cloud.unackedRuns().length) await runtime.deliverSettlementsForAlarm(info?.retryCount ?? 0,guard);
+      else await runtime.cloud.rearmAlarm({ busy: true, repairRetrying: runtime.repairRetrying });
       return;
     }
     try {
       await runtime.repairPendingRuns(info?.retryCount ?? 0);
       if (runtime.busy) return;
-      await runCloudWake(runtime, harness, this.env, (items, signal, key) => this.admitWake(items, signal, key), () => this.#doorbell.ring());
+      const woke = await runCloudWake(runtime, harness, this.env, (items, signal, key, admission) => this.admitWake(items, signal, key, admission),
+        () => this.#doorbell.ring(),info?.retryCount ?? 0);
+      if (!woke) await runtime.deliverSettlementsForAlarm(info?.retryCount ?? 0);
     } catch (error) { throw safeCloudError(error); }
   }
 
@@ -146,6 +184,56 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
   }
   async readInvocations(input: { after?: number; limit?: number } = {}) {
     await this.sessionRuntime().ready(); return this.sessionRuntime().cloud.readInvocations(this.#readOptions(input, ['after', 'limit']));
+  }
+  async readTranscript(input: { after?: TranscriptCursor; limit?: number } = {}) {
+    const options = transcriptRecord(input, ['after','limit']);
+    const limit = options.limit === undefined ? 20 : options.limit;
+    if (typeof limit !== 'number' || !Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new CloudDoError('CLOUD_REQUEST_INVALID');
+    let after: TranscriptCursor | undefined;
+    if (options.after !== undefined) {
+      const cursor = transcriptRecord(options.after, ['horizon','run','item']);
+      if (Object.keys(cursor).length !== 3 || typeof cursor.horizon !== 'number' || !Number.isSafeInteger(cursor.horizon) || cursor.horizon < 0
+        || [cursor.run,cursor.item].some(value => value !== null && (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0))) {
+        throw new CloudDoError('CLOUD_REQUEST_INVALID');
+      }
+      after = cursor as unknown as TranscriptCursor;
+    }
+    const runtime = this.sessionRuntime();
+    const harness = await runtime.ready();
+    const plan = runtime.cloud.planTranscript(after,limit);
+    const contexts = new Map<number, Promise<readonly EntryRecord[]>>();
+    const entries = (id: number): Promise<readonly EntryRecord[]> => {
+      const cached = contexts.get(id);
+      if (cached) return cached;
+      const read = harness.conversation(id as ConversationId, BACKGROUND_CONTEXT).then(async conversation =>
+        conversation ? (await conversation.context(BACKGROUND_CONTEXT)).entries : []).catch(error => {
+          if (runtime.cloud.readRun(id)?.membershipPending === 1) return [];
+          throw error;
+        });
+      contexts.set(id,read);
+      return read;
+    };
+    const runs: TranscriptRun[] = [];
+    for (const {run,turns,invocations} of plan.runs) {
+      const claimedSeqs = runtime.cloud.claimedSeqs(run.conversationId);
+      const view = await entries(run.conversationId);
+      const texts = inputTexts(view);
+      const final = finalAssistant(view);
+      const result: TranscriptRun = { nativeRunId: run.conversationId, revision: run.revision, state: run.state,
+        errorCode: run.errorCode, trigger: run.trigger, settlementAck: run.settlementAck === null || run.settlementAck === 1,
+        claimedSeqs, turns: turns.map(turn => ({ ...turn, text: texts.get(turn.seq) ?? turn.text })), invocations };
+      if (final) {
+        const text = assistantText(final.assistant);
+        const truncated = new TextEncoder().encode(text).length > 16_384;
+        result.text = truncated ? utf8Prefix(text,1024) : text;
+        if (truncated) result.truncated = true;
+      }
+      runs.push(result);
+    }
+    for (const item of plan.items) if (item.text === null && item.runId !== null) {
+      item.text = inputTexts(await entries(item.runId)).get(item.seq) ?? null;
+    }
+    return { runs, items: plan.items, next: plan.next };
   }
   #readOptions(input: unknown, allowed: readonly string[]): Record<string, number | undefined> {
     if (!input || typeof input !== 'object' || Array.isArray(input)
@@ -169,10 +257,9 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
     const conversation = await harness.conversation(conversationId as ConversationId, BACKGROUND_CONTEXT);
     if (!conversation) throw new CloudDoError('CLOUD_REQUEST_INVALID');
     const context = await conversation.context(BACKGROUND_CONTEXT);
-    const entry = [...context.entries].reverse().find(entry => entry.kind === 'pi.assistant'
-      && entry.model?.some(message => message.role === 'assistant' && message.stopReason !== 'toolUse'));
-    const assistant = entry?.model?.find(message => message.role === 'assistant' && message.stopReason !== 'toolUse');
-    if (!entry || assistant?.role !== 'assistant' || (options.entryId !== undefined && options.entryId !== entry.id)) throw new CloudDoError('CLOUD_REQUEST_INVALID');
+    const final = finalAssistant(context.entries);
+    if (!final || (options.entryId !== undefined && options.entryId !== final.entry.id)) throw new CloudDoError('CLOUD_REQUEST_INVALID');
+    const {entry,assistant} = final;
     const bytes = new TextEncoder().encode(assistantText(assistant));
     const offset = options.offset ?? 0;
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > bytes.length
@@ -267,7 +354,7 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
       guard = await runtime.prepareGuard(admitted.profile);
       lease = runtime.reserve(admitted.profile, guard);
       const conversation = await harness.createConversation({ ownership: { kind: 'ownerless' },
-        agent: { model: { provider: admitted.profile, modelId: profile.model } } }, BACKGROUND_CONTEXT);
+        agent: runtime.agentChange(admitted.profile, guard) }, BACKGROUND_CONTEXT);
       const execution = lease;
       runtime.attach(execution, conversation.id);
       const events = await watchEvents(harness, conversation.id, BACKGROUND_CONTEXT);

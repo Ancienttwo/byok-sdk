@@ -1,34 +1,24 @@
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import type { Conversation, Harness } from '@earendil-works/pi-durable';
-import { composeCloudInput, inboxInput, type InboxRow, type RunHistory } from './cloud-state';
+import { admissionIdentity, composeCloudInput, inboxInput, type AdmissionIdentity, type InboxRow, type RunHistory } from './cloud-state';
 import { CloudDoError, safeCloudError, type CloudDoErrorCode } from './errors';
 import { PLATFORM_PROFILES, platformCredentialReader } from './platform-credentials';
 import type { CloudOperationGuard } from './input-guard';
-import type { ExecutionLease, RunOutcome, SessionRuntime } from './session-runtime';
+import { raceLease, type ExecutionLease, type RunOutcome, type SessionRuntime } from './session-runtime';
 
 export type CloudWakeAdmission = { accepted: true; reservation: 'held' | 'none' }
   | { accepted: false; code: CloudDoErrorCode };
-export type WakeAdmission = (items: readonly InboxRow[], signal: AbortSignal, key: string) => CloudWakeAdmission | Promise<CloudWakeAdmission>;
-
-/** The timer also bounds a consumer that ignores the supplied abort signal. */
-async function admittedBeforeDeadline(work: Promise<CloudWakeAdmission>, lease: ExecutionLease): Promise<CloudWakeAdmission> {
-  let remove = () => {};
-  const cancelled = new Promise<never>((_resolve, reject) => {
-    const abort = () => reject(new CloudDoError(Date.now() >= lease.deadlineAt ? 'CLOUD_EXECUTION_TIMEOUT' : 'CLOUD_EXECUTION_ABORTED'));
-    lease.controller.signal.addEventListener('abort', abort, { once: true });
-    remove = () => lease.controller.signal.removeEventListener('abort', abort);
-    if (lease.controller.signal.aborted) abort();
-  });
-  try { return await Promise.race([work, cancelled]); }
-  finally { remove(); }
-}
+export type WakeAdmission = (items: readonly InboxRow[], signal: AbortSignal, key: string,
+  admission: AdmissionIdentity) => CloudWakeAdmission | Promise<CloudWakeAdmission>;
 
 export async function cloudRunHistory(runtime: SessionRuntime, harness: Harness): Promise<RunHistory[]> {
   const history: RunHistory[] = [];
   for (const run of runtime.cloud.completedRuns()) {
     const conversation = await harness.conversation(run.conversationId as Conversation['id'], BACKGROUND_CONTEXT);
     if (!conversation) continue;
-    const view = await conversation.context(BACKGROUND_CONTEXT);
+    let view;
+    try { view = await conversation.context(BACKGROUND_CONTEXT); }
+    catch (error) { if (run.membershipPending === 1) continue; throw error; }
     const input = run.trigger === 'wake'
       ? view.entries.find(entry => entry.kind === 'byok.run-input')?.data
       : view.entries.find(entry => entry.kind === 'pi.user')?.model?.find(message => message.role === 'user')?.content;
@@ -56,7 +46,7 @@ export async function committedRunOutcome(conversation: Conversation, runtime: S
 
 /** Each invocation of this function owns a fresh conversation and one shared runtime lease. */
 export async function runCloudWake(runtime: SessionRuntime, harness: Harness,
-  env: Readonly<Record<string, unknown>>, admit: WakeAdmission, notify: () => void): Promise<void> {
+  env: Readonly<Record<string, unknown>>, admit: WakeAdmission, notify: () => void, retryCount = 0): Promise<boolean> {
   const guard = await runtime.prepareGuard();
   let lease: ExecutionLease | undefined;
   let conversation: Conversation | undefined;
@@ -67,15 +57,17 @@ export async function runCloudWake(runtime: SessionRuntime, harness: Harness,
     runtime.cloud.retention();
     selected = runtime.cloud.selectBatch(Date.now(), guard);
     notify();
-    if (!selected.length) { await runtime.cloud.rearmAlarm({ busy: runtime.busy, repairRetrying: runtime.repairRetrying }); return; }
+    if (!selected.length) { await runtime.cloud.rearmAlarm({ busy: runtime.hasLiveOwner, repairRetrying: runtime.repairRetrying }); return false; }
     lease = runtime.reserve(selected[0]!.profile, guard);
     const profile = PLATFORM_PROFILES[lease.profile];
     conversation = await harness.createConversation({ ownership: { kind: 'ownerless' },
-      agent: { model: { provider: lease.profile, modelId: profile.model } } }, BACKGROUND_CONTEXT);
+      agent: runtime.agentChange(lease.profile, guard) }, BACKGROUND_CONTEXT);
     runtime.attach(lease, conversation.id, 'wake', guard);
-    runtime.markReservation(conversation.id, 'pending');
+    const identity = admissionIdentity(selected);
+    runtime.markReservation(conversation.id, 'pending', identity);
     const key = runtime.cloud.readRun(conversation.id)!.requestId!;
-    const admission = await admittedBeforeDeadline(Promise.resolve().then(() => admit(Object.freeze(selected.map(row => Object.freeze({ ...row }))), lease!.controller.signal, key)), lease);
+    const admission = await raceLease(Promise.resolve().then(() => admit(Object.freeze(selected.map(row => Object.freeze({ ...row }))),
+      lease!.controller.signal, key, identity)), lease);
     if (!admission || typeof admission !== 'object' || typeof admission.accepted !== 'boolean') throw new CloudDoError('CLOUD_REQUEST_INVALID');
     if (!admission.accepted) {
       runtime.markReservation(conversation.id, 'none');
@@ -89,11 +81,18 @@ export async function runCloudWake(runtime: SessionRuntime, harness: Harness,
     if (!claimed.length) {
       const closed = runtime.cloud.readRun(conversation.id);
       if (closed?.errorCode && closed.errorCode !== 'CLOUD_WAKE_EMPTY') throw new CloudDoError(closed.errorCode);
-      return;
+      return true;
     }
     const inputs = { items: inboxInput(claimed) };
     const data = JSON.parse(guard.guardPayload(JSON.stringify(inputs)));
-    await conversation.commit(tx => tx.appendEntry(conversation!.id, { kind: 'byok.run-input', data }), BACKGROUND_CONTEXT);
+    await conversation.commit(tx => {
+      if (lease!.controller.signal.aborted) throw new CloudDoError(runtime.fatal(conversation!.id) ?? 'CLOUD_EXECUTION_ABORTED');
+      return tx.appendEntry(conversation!.id, { kind: 'byok.run-input', data });
+    }, BACKGROUND_CONTEXT);
+    const committed = (await conversation.context(BACKGROUND_CONTEXT)).entries.find(entry => entry.kind === 'byok.run-input')?.data as typeof inputs | undefined;
+    const durable = claimed.filter(row => committed?.items.some(item => item.seq === row.seq
+      && item.text === (JSON.parse(row.payloadJson!) as {text:string}).text)).map(row => row.seq);
+    runtime.cloud.markInputDurable(conversation.id, durable);
     const content = composeCloudInput(claimed, await cloudRunHistory(runtime, harness));
     guard.guardText(content);
     const submission = await conversation.submit({ type: 'input', content, whenBusy: 'reject', requestId: key }, BACKGROUND_CONTEXT);
@@ -105,12 +104,12 @@ export async function runCloudWake(runtime: SessionRuntime, harness: Harness,
     await runtime.settle(lease, outcome);
   } catch (error) {
     if (!lease || error instanceof CloudDoError && error.code === 'CLOUD_TOOL_BUSY') {
-      if (error instanceof CloudDoError && error.code === 'CLOUD_TOOL_BUSY') return;
+      if (error instanceof CloudDoError && error.code === 'CLOUD_TOOL_BUSY') return false;
       throw safeCloudError(error);
     }
     // Infrastructure failures retain the running claim for alarm repair. Do not replace a completed pi outcome.
     if (settling || !(error instanceof CloudDoError)) throw safeCloudError(error);
-    const code = runtime.fatal(lease.conversationId!) ?? safeCloudError(error).code;
+    const code = (lease.conversationId === undefined ? undefined : runtime.fatal(lease.conversationId)) ?? safeCloudError(error).code;
     runtime.cloud.failQueued(selected.map(row => row.seq), code, guard);
     if (conversation && runtime.cloud.readRun(conversation.id)?.state === 'running') {
       runtime.cancel(lease, code);
@@ -123,7 +122,8 @@ export async function runCloudWake(runtime: SessionRuntime, harness: Harness,
     }
     notify();
   } finally {
-    if (lease) await runtime.release(lease);
+    if (lease) await runtime.release(lease,retryCount);
     else guard.dispose();
   }
+  return lease !== undefined;
 }

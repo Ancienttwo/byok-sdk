@@ -221,3 +221,113 @@ describe('native platform model tool messages and stop gate', () => {
     });
   }
 });
+
+describe('provider dispatch intent and numeric usage boundary', () => {
+  const stop = 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n';
+  const usageFrame = (usage: unknown) => `data: ${JSON.stringify({ choices: [], usage })}\n\n`;
+  const transport = (callbacks: Pick<CloudToolTransport, 'onSend' | 'onUsage'> = {}): CloudToolTransport => ({
+    offeredToolNames: names, admitToolCall() {}, ...callbacks,
+  });
+  it('refuses a pre-aborted request before the mark and fetch', async () => {
+    const abort = new AbortController(); abort.abort();
+    const onSend = vi.fn(); const fetchImpl = vi.fn(async () => response(stop));
+    const fetch = createProviderFetch(profile, KEY, fetchImpl, transport({ onSend }));
+    await expect(fetch(endpoint, { method: 'POST', body: '{}', signal: abort.signal })).rejects.toMatchObject({ code: 'CLOUD_MODEL_REQUEST_FAILED' });
+    expect(onSend).not.toHaveBeenCalled(); expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it('marks once before immediate dispatch of the final authenticated Request', async () => {
+    const order: string[] = [];
+    const onSend = vi.fn(() => { order.push('send'); queueMicrotask(() => order.push('microtask')); });
+    const fetch = createProviderFetch(profile, KEY, async input => {
+      order.push('fetch');
+      expect(input).toBeInstanceOf(Request);
+      const request = input as Request;
+      expect(request.headers.get('authorization')).toBe(`Bearer ${KEY}`);
+      expect(request.redirect).toBe('manual');
+      expect(await request.text()).toBe('{"body":"exact"}');
+      return response(stop);
+    }, transport({ onSend }));
+    await (await fetch(endpoint, { method: 'POST', body: '{"body":"exact"}' })).text();
+    expect(onSend).toHaveBeenCalledOnce(); expect(order).toEqual(['send', 'fetch', 'microtask']);
+  });
+  it('prevents dispatch when its mark throws and returns a fixed SDK error', async () => {
+    const fetchImpl = vi.fn(async () => response(stop));
+    const onSend = vi.fn(() => { throw new Error('private-write-error'); });
+    const fetch = createProviderFetch(profile, KEY, fetchImpl, transport({ onSend }));
+    await expect(fetch(endpoint, { method: 'POST', body: '{}' })).rejects.toMatchObject({ code: 'CLOUD_MODEL_REQUEST_FAILED' });
+    expect(onSend).toHaveBeenCalledOnce(); expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it('keeps per-field monotone totals across repeats, increases and malformed frames', async () => {
+    const onUsage = vi.fn();
+    const wire = usageFrame({ prompt_tokens: 100, completion_tokens: 10 }) + usageFrame({ prompt_tokens: 100 })
+      + usageFrame({ completion_tokens: 13 }) + usageFrame({ prompt_tokens: 120 })
+      + usageFrame({ prompt_tokens: 'bad', completion_tokens: -1 }) + usageFrame({}) + usageFrame(null) + stop;
+    const fetch = createProviderFetch(profile, KEY, async () => response(wire), transport({ onUsage }));
+    const text = await (await fetch(endpoint, { method: 'POST', body: '{}' })).text();
+    expect(onUsage.mock.calls).toEqual([
+      [{ prompt_tokens: 100, completion_tokens: 10 }], [{ prompt_tokens: 100, completion_tokens: 10 }],
+      [{ prompt_tokens: 100, completion_tokens: 13 }], [{ prompt_tokens: 120, completion_tokens: 13 }],
+    ]);
+    expect(text).toContain('"prompt_tokens":120,"completion_tokens":13');
+  });
+  for (const field of ['prompt_tokens', 'completion_tokens', 'total_tokens']) it(`rejects ${field} decreases before reporting any part of the frame`, async () => {
+    const onUsage = vi.fn();
+    const fetch = createProviderFetch(profile, KEY, async () => response(usageFrame({ [field]: 100 })
+      + usageFrame({ [field]: 90, ...(field !== 'completion_tokens' ? { completion_tokens: 999 } : { prompt_tokens: 999 }) }) + stop), transport({ onUsage }));
+    await expect((await fetch(endpoint, { method: 'POST', body: '{}' })).text()).rejects.toMatchObject({ code: 'CLOUD_MODEL_RESPONSE_REJECTED' });
+    expect(onUsage.mock.calls).toEqual([[{ [field]: 100 }]]);
+  });
+  const rejections = [
+    { reason: 'text type', wire: `data: ${JSON.stringify({ usage: { prompt_tokens: 42 }, choices: [{ index: 0, delta: { content: 123 }, finish_reason: null }] })}\n\n` },
+    { reason: 'text leak', wire: `data: ${JSON.stringify({ usage: { prompt_tokens: 42 }, choices: [{ index: 0, delta: { content: KEY }, finish_reason: null }] })}\n\n` },
+    { reason: 'tool rejection', wire: usageFrame({ prompt_tokens: 42 }) + frame([call(0, 'unknown')]) + ending },
+    { reason: 'interrupted stream', wire: usageFrame({ prompt_tokens: 42 }) },
+  ];
+  for (const { reason, wire } of rejections) it(`reports checked usage before ${reason}`, async () => {
+    const onUsage = vi.fn();
+    const fetch = createProviderFetch(profile, KEY, async () => response(wire), transport({ onUsage }));
+    await expect((await fetch(endpoint, { method: 'POST', body: '{}' })).text()).rejects.toMatchObject({ code: 'CLOUD_MODEL_RESPONSE_REJECTED' });
+    expect(onUsage.mock.calls).toEqual([[{ prompt_tokens: 42 }]]);
+  });
+  it('reports no invented usage when the provider omits it', async () => {
+    const onUsage = vi.fn(); const fetch = createProviderFetch(profile, KEY, async () => response(stop), transport({ onUsage }));
+    await (await fetch(endpoint, { method: 'POST', body: '{}' })).text(); expect(onUsage).not.toHaveBeenCalled();
+  });
+  it('fails before stream success when the usage write throws', async () => {
+    const onUsage = vi.fn(() => { throw new Error('private-write-error'); });
+    const fetch = createProviderFetch(profile, KEY, async () => response(usageFrame({ prompt_tokens: 11 }) + stop), transport({ onUsage }));
+    await expect((await fetch(endpoint, { method: 'POST', body: '{}' })).text()).rejects.toMatchObject({ code: 'CLOUD_MODEL_REQUEST_FAILED' });
+    expect(onUsage).toHaveBeenCalledOnce();
+  });
+  it('gates the exact final UTF-8 body and binds the returned account', async () => {
+    let inputBytes = 0; const order: string[] = []; const usage = vi.fn(); const sent = vi.fn(() => order.push('sent'));
+    const { models: registry, model } = models({ beforeRequest(info) { inputBytes = info.inputBytes; order.push('gate'); return { sent, usage }; }, admitToolCall() {} });
+    let body = '';
+    const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async input => {
+      order.push('fetch'); body = await (input as Request).text(); return response(usageFrame({ prompt_tokens: 17, completion_tokens: 4 }) + stop);
+    });
+    try {
+      const stream = registry.stream(model, { messages: [
+        { role: 'system', content: 'Read 数据.', toolsAdded: [tool(names[0]!)], timestamp: 0 },
+        { role: 'user', content: 'Read 中文.', timestamp: 1 },
+      ] });
+      const events = []; for await (const event of stream) events.push(event);
+      expect((await stream.result()).stopReason).toBe('stop');
+      expect(inputBytes).toBe(new TextEncoder().encode(body).byteLength); expect(inputBytes).toBeGreaterThan(body.length);
+      expect(JSON.parse(body).max_tokens).toBe(4096);
+      expect(JSON.parse(body).tools).toEqual([{ type: 'function', function: tool(names[0]!) }]);
+      expect(order).toEqual(['gate', 'sent', 'fetch']); expect(sent).toHaveBeenCalledOnce();
+      expect(usage.mock.calls).toEqual([[{ input: 17, output: 4 }]]); expect(events.at(-1)?.type).toBe('done');
+    } finally { fetch.mockRestore(); }
+  });
+  it('rejects an invalid body before the paid gate', async () => {
+    const beforeRequest = vi.fn(); const { models: registry, model } = models({ beforeRequest, admitToolCall() {} });
+    const fetch = vi.spyOn(globalThis, 'fetch');
+    try {
+      const stream = registry.stream(model, { messages: [{ role: 'user', content: [{ type: 'image', data: 'x', mimeType: 'image/png' }], timestamp: 0 }] });
+      for await (const _event of stream) { /* Drain the real model boundary. */ }
+      expect((await stream.result()).errorMessage).toBe('CLOUD_REQUEST_INVALID');
+      expect(beforeRequest).not.toHaveBeenCalled(); expect(fetch).not.toHaveBeenCalled();
+    } finally { fetch.mockRestore(); }
+  });
+});

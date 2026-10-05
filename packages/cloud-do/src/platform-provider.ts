@@ -8,6 +8,9 @@ import { CloudDoError, safeCloudError } from './errors';
 import { createProviderFetch, readSseData } from './provider-fetch';
 import { PLATFORM_PROFILES, platformCredentialReader, requirePlatformKey, type PlatformProfile } from './platform-credentials';
 
+export const PLATFORM_MAX_OUTPUT_TOKENS = 4096;
+export const REQUEST_FRAMING_BYTES = 4096;
+
 function emptyAssistant(model: Model<Api>): AssistantMessage {
   return { role: 'assistant', content: [], api: model.api, provider: model.provider, model: model.id,
     usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
@@ -44,8 +47,13 @@ function fixedModelErrors(source: AssistantMessageEventStream, model: Model<Api>
   return events;
 }
 
+export interface CloudModelAccount {
+  sent(): void;
+  usage(usage: { input?: number; output?: number }): void;
+}
+
 export interface CloudModelRuntime {
-  beforeRequest(): void | Promise<void>;
+  beforeRequest(info: { inputBytes: number }): void | CloudModelAccount | Promise<void | CloudModelAccount>;
   admitToolCall(name: string, id: string, args: Record<string, unknown>): void | Promise<void>;
   requestSignal?(signal?: AbortSignal): AbortSignal;
 }
@@ -82,15 +90,19 @@ function stream(profile: PlatformProfile, model: Model<Api>, context: Transcript
   const blocks = new Map<'content' | 'reasoning_content', number>();
   const run = async () => {
     try {
-      await runtime?.beforeRequest();
-      const key = requirePlatformKey(options?.apiKey);
       const currentTools = getCurrentTools(context.messages);
+      const body = JSON.stringify({ model: profile.model, messages: messages(context), stream: true,
+        stream_options: { include_usage: true }, max_tokens: PLATFORM_MAX_OUTPUT_TOKENS,
+        ...(currentTools.length ? { tools: currentTools.map(tool => ({ type: 'function',
+          function: { name: tool.name, description: tool.description, parameters: tool.parameters } })) } : {}) });
+      const account = await runtime?.beforeRequest({ inputBytes: new TextEncoder().encode(body).byteLength });
+      const key = requirePlatformKey(options?.apiKey);
       const request = createProviderFetch(profile, key, globalThis.fetch, { offeredToolNames: currentTools.map(tool => tool.name),
-        admitToolCall: (name, id, args) => runtime?.admitToolCall(name, id, args) });
+        admitToolCall: (name, id, args) => runtime?.admitToolCall(name, id, args),
+        onSend: () => account?.sent(),
+        onUsage: usage => account?.usage({ input: usage.prompt_tokens, output: usage.completion_tokens }) });
       const response = await request(`${profile.baseUrl}/chat/completions`, { method: 'POST', signal: runtime?.requestSignal?.(options?.signal) ?? options?.signal,
-        body: JSON.stringify({ model: profile.model, messages: messages(context), stream: true, stream_options: { include_usage: true }, max_tokens: 4096,
-          ...(currentTools.length ? { tools: currentTools.map(tool => ({ type: 'function',
-            function: { name: tool.name, description: tool.description, parameters: tool.parameters } })) } : {}) }) });
+        body });
       events.push({ type: 'start', partial: output });
       for await (const data of readSseData(response.body!)) {
         if (data === '[DONE]') break;
@@ -152,7 +164,7 @@ export function createPlatformModels(env: Readonly<Record<string, unknown>>,
     const implementation: ProviderStreams = { stream: (model, context, options) => stream(profile, model, context, options, runtime),
       streamSimple: (model, context, options) => stream(profile, model, context, options, runtime) };
     const model: Model<'openai-completions'> = { id: profile.model, name: profile.model, provider: id, api: 'openai-completions', baseUrl: profile.baseUrl,
-      reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 65_536, maxTokens: 4096 };
+      reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 65_536, maxTokens: PLATFORM_MAX_OUTPUT_TOKENS };
     models.setProvider(createProvider({ id, models: [model], api: implementation,
       auth: { apiKey: { name: 'Platform model key', resolve: async () => {
         try {
