@@ -1,3 +1,4 @@
+import { awaitAdmission } from './admission-wait';
 import { createHash } from 'node:crypto';
 import {
   InputPreparationContextDocumentSchema,
@@ -138,11 +139,14 @@ export interface RemoteInputPreparationDeps {
   /** Why the service is absent, when it is absent for a reason other than "unconfigured". */
   readonly unavailableReason?: InputPreparationRejectionReason;
   readonly completion: InputPreparationCompletionClient;
-  /** Resolves a `BlobRef` context to text. The inline form never reaches it. */
+  /** Resolves a `BlobRef` context to text; must propagate the signal to owned I/O. */
   readonly resolveBlobText: (
     blobRef: Extract<AgentInputPreparationPayload['context'], { blobRef: unknown }>['blobRef'],
+    signal: AbortSignal,
   ) => Promise<string>;
   readonly now?: () => number;
+  /** Daemon lifetime cancellation for new context/admission work. */
+  readonly signal?: AbortSignal;
 }
 
 /** A refusal that is reported, not thrown. */
@@ -212,13 +216,14 @@ export function toInputPreparationReceiptSummary(
 async function resolveContextDocument(
   payload: AgentInputPreparationPayload,
   deps: RemoteInputPreparationDeps,
+  signal: AbortSignal,
 ): Promise<InputPreparationContextDocument> {
   let text: string;
   if ('inline' in payload.context) {
     text = payload.context.inline;
   } else {
     try {
-      text = await deps.resolveBlobText(payload.context.blobRef);
+      text = await deps.resolveBlobText(payload.context.blobRef, signal);
     } catch (cause) {
       throw new RemoteRejection('context_unresolvable', 'the referenced context blob could not be resolved', { cause });
     }
@@ -262,8 +267,9 @@ async function resolveContextDocument(
 async function buildRequest(
   payload: AgentInputPreparationPayload,
   deps: RemoteInputPreparationDeps,
+  signal: AbortSignal,
 ): Promise<InputPreparationRequestV1> {
-  const context = await resolveContextDocument(payload, deps);
+  const context = await resolveContextDocument(payload, deps, signal);
   return {
     format: INPUT_PREPARATION_REQUEST_FORMAT,
     version: INPUT_PREPARATION_VERSION,
@@ -304,6 +310,7 @@ export function createRemoteInputPreparationHandler(deps: RemoteInputPreparation
   return async function handleRemoteInputPreparation(
     payload: AgentInputPreparationPayload,
   ): Promise<InputPreparationCompletionRequest> {
+    const startedAt = now();
     const identity = {
       requestId: payload.requestId,
       agentRef: payload.agentRef,
@@ -329,25 +336,35 @@ export function createRemoteInputPreparationHandler(deps: RemoteInputPreparation
         );
       }
 
-      // The Host deadline can only ever TIGHTEN the configured bound. An
-      // already-elapsed one refuses before a single byte is compiled rather
-      // than after, because a preparation that cannot be consumed is work this
-      // device should never have started.
-      const remainingMs = Date.parse(payload.deadlineAt) - now();
-      if (!Number.isFinite(remainingMs) || remainingMs <= 0) {
-        throw new RemoteRejection('deadline_elapsed', 'the authorized preparation deadline has already elapsed');
+      const deadlineAt = Math.min(Date.parse(payload.deadlineAt), startedAt + deps.limits.preparationDeadlineMs);
+      const controller = new AbortController();
+      const owner = deps.signal;
+      const expire = (): void => controller.abort(new RemoteRejection('deadline_elapsed', 'the authorized preparation deadline has elapsed'));
+      const cancel = (): void => controller.abort(new RemoteRejection('cancelled', 'remote input preparation was cancelled'));
+      const checkActive = (): void => {
+        if (!Number.isFinite(deadlineAt) || now() >= deadlineAt) expire();
+        controller.signal.throwIfAborted();
+      };
+      owner?.addEventListener('abort', cancel, { once: true });
+      if (owner?.aborted) cancel();
+      const deadline = setTimeout(expire, Math.min(Math.max(0, deadlineAt - now()), 2_147_483_647));
+      deadline.unref?.();
+      try {
+        checkActive();
+        const request = await awaitAdmission(() => {
+          checkActive();
+          return buildRequest(payload, deps, controller.signal);
+        }, controller.signal);
+        checkActive();
+        // Carry the original absolute ceiling into authority, lock and durable
+        // reservation waits. Do not race owned writes against the outer timer.
+        const receipt = await service.prepare(request, { deadlineAt, signal: owner });
+        checkActive();
+        completion = { ...identity, outcome: 'prepared', receipt: toInputPreparationReceiptSummary(receipt) };
+      } finally {
+        clearTimeout(deadline);
+        owner?.removeEventListener('abort', cancel);
       }
-
-      const request = await buildRequest(payload, deps);
-      // While the cloud is still pending, the durable reserve -> `existing`
-      // path prevents another compile/counter within the retention horizon.
-      // Its current receipt is NOT an immutable remote completion: only the
-      // cloud fact read above has that authority. If another completion wins
-      // after our pending read, PUT still conflicts; redelivery reads the winner.
-      const receipt = await service.prepare(request, {
-        deadlineMs: Math.min(remainingMs, deps.limits.preparationDeadlineMs),
-      });
-      completion = { ...identity, outcome: 'prepared', receipt: toInputPreparationReceiptSummary(receipt) };
     } catch (error) {
       if (error instanceof RemoteRejection) {
         completion = { ...identity, outcome: 'rejected', reason: error.reason };

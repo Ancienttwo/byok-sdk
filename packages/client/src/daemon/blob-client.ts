@@ -64,6 +64,7 @@ export class BlobClient implements BlobResolver {
       (signal) => authedFetch(new URL(byokBlobUrlPath(blobRef.blobId), base), { method: 'GET', signal }, this.auth),
       options.signal,
     );
+    this.#throwIfAborted(options.signal, urlRes);
     if (!urlRes.ok) {
       throw new Error(`failed to resolve blob download url: HTTP ${urlRes.status} ${await this.#safeErrorText(urlRes, options.signal)}`.trimEnd());
     }
@@ -75,6 +76,7 @@ export class BlobClient implements BlobResolver {
     // LocalDiskBlobStore returns a same-origin relative URL while object stores
     // return an absolute presigned URL; URL resolution is structural for both.
     const contentRes = await this.#request((signal) => fetch(new URL(downloadUrl, base), { signal }), options.signal);
+    this.#throwIfAborted(options.signal, contentRes);
     if (!contentRes.ok) {
       throw new Error(`failed to download blob content: HTTP ${contentRes.status}`);
     }
@@ -225,38 +227,49 @@ export class BlobClient implements BlobResolver {
    * already resolved at headers.
    */
   async #readBody(res: Response, signal: AbortSignal | undefined): Promise<Uint8Array> {
-    return this.#request(async (requestSignal) => {
-      if (res.body === null) return new Uint8Array();
-      const reader = res.body.getReader();
-      const cancelBody = (): void => {
-        void reader.cancel().catch(() => undefined);
-      };
-      requestSignal.addEventListener('abort', cancelBody, { once: true });
-      try {
-        const chunks: Uint8Array[] = [];
-        let length = 0;
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          chunks.push(value);
-          length += value.byteLength;
+    try {
+      return await this.#request(async (requestSignal) => {
+        if (res.body === null) return new Uint8Array();
+        const reader = res.body.getReader();
+        const cancelBody = (): void => {
+          void reader.cancel().catch(() => undefined);
+        };
+        requestSignal.addEventListener('abort', cancelBody, { once: true });
+        try {
+          const chunks: Uint8Array[] = [];
+          let length = 0;
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            length += value.byteLength;
+          }
+          const bytes = new Uint8Array(length);
+          let offset = 0;
+          for (const chunk of chunks) {
+            bytes.set(chunk, offset);
+            offset += chunk.byteLength;
+          }
+          return bytes;
+        } finally {
+          requestSignal.removeEventListener('abort', cancelBody);
+          reader.releaseLock();
         }
-        const bytes = new Uint8Array(length);
-        let offset = 0;
-        for (const chunk of chunks) {
-          bytes.set(chunk, offset);
-          offset += chunk.byteLength;
-        }
-        return bytes;
-      } finally {
-        requestSignal.removeEventListener('abort', cancelBody);
-        reader.releaseLock();
+      }, signal);
+    } catch (error) {
+      // Cancellation may have landed after headers but before #request could
+      // acquire a reader. A reader already owned by us cancels itself; an
+      // unlocked Response still needs explicit nonblocking disposal here.
+      if (error instanceof BlobRequestAbortedError && !res.body?.locked) {
+        void res.body?.cancel().catch(() => undefined);
       }
-    }, signal);
+      throw error;
+    }
   }
 
-  #throwIfAborted(signal: AbortSignal | undefined): void {
+  #throwIfAborted(signal: AbortSignal | undefined, response?: Response): void {
     if (this.options.signal?.aborted || signal?.aborted) {
+      void response?.body?.cancel().catch(() => undefined);
       throw new BlobRequestAbortedError('cancelled');
     }
   }
@@ -277,14 +290,34 @@ export class BlobClient implements BlobResolver {
     }
     const deadline = setTimeout(() => abort('deadline'), this.requestDeadlineMs);
     deadline.unref?.();
+    // Keep a received Response owned until it is actually returned to the
+    // caller. An abort can win between promise continuations, or fetch can
+    // resolve late despite its signal. Neither may abandon an unread body.
+    let response: Response | undefined;
+    let responseDiscarded = false;
+    const discardResponse = (): void => {
+      if (response === undefined || responseDiscarded) return;
+      responseDiscarded = true;
+      void response.body?.cancel().catch(() => undefined);
+    };
     let rejectAbort: (error: BlobRequestAbortedError) => void = () => {};
     const aborted = new Promise<never>((_resolve, reject) => {
       rejectAbort = reject;
     });
-    const rejectOnAbort = (): void => rejectAbort(new BlobRequestAbortedError(abortReason));
+    const rejectOnAbort = (): void => { discardResponse(); rejectAbort(new BlobRequestAbortedError(abortReason)); };
     controller.signal.addEventListener('abort', rejectOnAbort, { once: true });
     try {
-      return await Promise.race([request(controller.signal), aborted]);
+      const operation = request(controller.signal).then(value => {
+        if (value instanceof Response) response = value;
+        if (controller.signal.aborted) {
+          discardResponse();
+          throw new BlobRequestAbortedError(abortReason);
+        }
+        return value;
+      });
+      const value = await Promise.race([operation, aborted]);
+      if (controller.signal.aborted) { discardResponse(); throw new BlobRequestAbortedError(abortReason); }
+      return value;
     } catch (error) {
       if (error instanceof BlobRequestAbortedError) throw error;
       if (controller.signal.aborted) throw new BlobRequestAbortedError(abortReason);
