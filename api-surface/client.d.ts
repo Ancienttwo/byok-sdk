@@ -9158,7 +9158,7 @@ export declare class TaskRunner {
     private readonly finalizationAttempts;
     private finish;
     private finishOnce;
-    private reserveSemanticTerminal;
+    private settleSemanticTerminal;
     /**
      * Release the preparation pin this Execution holds, if it took one.
      *
