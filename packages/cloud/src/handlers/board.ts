@@ -174,12 +174,21 @@ export function boardStreamHandler(deps: BoardStreamRouteDeps) {
           { ...query, afterSeq: headerSince ?? querySince },
           () => stopped || signal.aborted,
           stopController.signal,
-        ).finally(() => {
-          stopped = true;
-          stopController.abort();
-          signal.removeEventListener('abort', onAbort);
-          closeController(controller);
-        });
+        )
+          .finally(() => {
+            stopped = true;
+            stopController.abort();
+            signal.removeEventListener('abort', onAbort);
+          })
+          .then(
+            () => closeController(controller),
+            (error: unknown) => {
+              // Observe both pump and cleanup failures through the response body.
+              // The HTTP status is already committed; a clean EOF would hide the
+              // failure. error() is a no-op if the peer already closed/cancelled.
+              controller.error(error);
+            },
+          );
       },
       cancel() {
         stopped = true;
