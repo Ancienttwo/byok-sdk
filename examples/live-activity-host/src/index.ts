@@ -179,7 +179,9 @@ export async function redactActivityTail<User>(
     let redacted: TimelineEvent;
     try {
       redacted = TimelineEventSchema.parse(
-        await redact(original, { user, tenantId: tail.tenantId, taskId: tail.taskId }),
+        // All compared authority is scalar on the envelope or event. Keep
+        // both originals private while allowing in-place content redaction.
+        await redact({ ...original, event: { ...original.event } }, { user, tenantId: tail.tenantId, taskId: tail.taskId }),
       ) as TimelineEvent;
     } catch (error) {
       if (error instanceof LiveActivityHostError) throw error;
@@ -246,7 +248,9 @@ export async function redactApprovalTail<User>(
     let redacted: ApprovalObservation;
     try {
       redacted = ApprovalObservationSchema.parse(
-        await redact(original, { user, tenantId: tail.tenantId, taskId: tail.taskId }),
+        // All compared authority is scalar on the envelope or event. Keep
+        // both originals private while allowing in-place content redaction.
+        await redact({ ...original, event: { ...original.event } }, { user, tenantId: tail.tenantId, taskId: tail.taskId }),
       ) as ApprovalObservation;
     } catch (error) {
       if (error instanceof LiveActivityHostError) throw error;
