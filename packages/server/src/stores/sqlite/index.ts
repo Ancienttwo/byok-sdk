@@ -63,7 +63,7 @@ const DEFAULT_MAILBOX_READ_LIMIT = 50;
 const DEFAULT_OBJECT_LIST_LIMIT = 100;
 const DEFAULT_BLOB_URL_TTL_MS = 15 * 60_000;
 const SIGNING_SECRET_BYTES = 32;
-const SQLITE_SCHEMA_VERSION = '3';
+const SQLITE_SCHEMA_VERSION = '4';
 
 import { SqliteDeviceDirectory, DEVICE_SCHEMA } from './device-directory';
 
@@ -111,6 +111,7 @@ CREATE TABLE IF NOT EXISTS task_attempt (
   agent_ref_json TEXT,
   owner_device_id TEXT,
   claimed_runtime TEXT,
+  claimed_harness_id TEXT,
   claimed_runtime_capabilities_json TEXT,
   status TEXT NOT NULL,
   terminal_cause TEXT,
@@ -164,7 +165,7 @@ CREATE TABLE IF NOT EXISTS blob (
 export interface SqliteEmbeddedStoreOptions {
   readonly path: string;
   readonly urlTtlMs?: number;
-  readonly migration?: 'v1-to-v3' | 'v2-to-v3';
+  readonly migration?: 'v1-to-v4' | 'v2-to-v4' | 'v3-to-v4';
 }
 
 export interface SqliteEmbeddedStores {
@@ -181,7 +182,7 @@ class SqliteCoordinator {
   #closing = false;
   #closePromise: Promise<void> | undefined;
 
-  constructor(path: string, migration?: 'v1-to-v3' | 'v2-to-v3') {
+  constructor(path: string, migration?: 'v1-to-v4' | 'v2-to-v4' | 'v3-to-v4') {
     this.db = openSqliteDatabase(path);
     try {
       // The host must stop every old writer before this open. A version fence
@@ -194,9 +195,9 @@ class SqliteCoordinator {
         if (hasMetadata !== undefined) {
           const version = this.db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'")
             .get() as { value: string } | undefined;
-          if (version?.value !== SQLITE_SCHEMA_VERSION && !((version?.value === '1' && migration === 'v1-to-v3') || (version?.value === '2' && migration === 'v2-to-v3'))) {
+          if (version?.value !== SQLITE_SCHEMA_VERSION && !((version?.value === '1' && migration === 'v1-to-v4') || (version?.value === '2' && migration === 'v2-to-v4') || (version?.value === '3' && migration === 'v3-to-v4'))) {
             throw new Error(`Unsupported BYOK SQLite schema version ${JSON.stringify(version?.value)}; ` +
-              `this build requires ${SQLITE_SCHEMA_VERSION}. Stop all writers, back up the database and explicitly select migration: 'v1-to-v3' or 'v2-to-v3' for a receipt-free legacy database without task history.`);
+              `this build requires ${SQLITE_SCHEMA_VERSION}. Stop all writers, back up the database and explicitly select migration: 'v1-to-v4' or 'v2-to-v4' for a receipt-free legacy database without task history, or 'v3-to-v4' for a database without ambiguous claimed identity. Target-v3 migration selectors are no longer supported.`);
           }
           // Do not silently recreate missing durable authorities in an existing file.
           for (const projection of [
@@ -210,7 +211,7 @@ class SqliteCoordinator {
           ]) {
             this.db.prepare(`SELECT ${projection} LIMIT 0`);
           }
-          if (version?.value !== SQLITE_SCHEMA_VERSION) {
+          if (version?.value === '1' || version?.value === '2') {
             // Old compositions lost these facts on restart. Never synthesize
             // receipts from status, mailbox bodies or a caller's retry payload.
             for (const table of ['task_attempt', 'mailbox_message', 'agent_message_admission']) {
@@ -232,6 +233,13 @@ class SqliteCoordinator {
             this.db.exec(DEVICE_SCHEMA);
           }
           if (version?.value !== SQLITE_SCHEMA_VERSION) {
+            // A v3 claim without a runtime may be a legacy built-in claim or a
+            // custom claim whose identity was discarded. Neither mutable device
+            // inventory nor the requested offer proves the actual adapter.
+            if (this.db.prepare('SELECT 1 FROM task_attempt WHERE owner_device_id IS NOT NULL AND claimed_runtime IS NULL LIMIT 1').get() !== undefined) {
+              throw new Error('Cannot migrate BYOK SQLite database with ambiguous claimed identity: historical harness identities are unavailable; preserve this database for reconciliation');
+            }
+            this.db.exec('ALTER TABLE task_attempt ADD COLUMN claimed_harness_id TEXT');
             this.db.prepare("UPDATE byok_sqlite_meta SET value = ? WHERE key = 'schema_version'").run(SQLITE_SCHEMA_VERSION);
           }
         } else {
@@ -242,6 +250,7 @@ class SqliteCoordinator {
           this.db.exec(DEVICE_SCHEMA);
           this.db.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('schema_version', ?)").run(SQLITE_SCHEMA_VERSION);
         }
+        this.db.prepare('SELECT claimed_harness_id FROM task_attempt LIMIT 0');
         this.db.prepare('SELECT tenant_id, device_id, product_id, machine_id, device_name, device_public_key, proof_key_id, proof_key_epoch, capabilities_json, harnesses_json FROM device_directory LIMIT 0');
         const receiptColumns = this.db.prepare('PRAGMA table_info(request_receipt)').all() as unknown as
           { name: string; type: string; notnull: number; pk: number }[];
@@ -305,6 +314,7 @@ interface TaskRow extends Record<string, unknown> {
   agent_ref_json: string | null;
   owner_device_id: string | null;
   claimed_runtime: string | null;
+  claimed_harness_id: string | null;
   claimed_runtime_capabilities_json: string | null;
   status: string;
   terminal_cause: string | null;
@@ -322,6 +332,7 @@ function taskRow(row: TaskRow): TaskAttempt {
     ...(row.agent_ref_json === null ? {} : { agentRef: JSON.parse(row.agent_ref_json) as AgentRef }),
     ...(row.owner_device_id === null ? {} : { ownerDeviceId: row.owner_device_id }),
     ...(row.claimed_runtime === null ? {} : { claimedRuntime: row.claimed_runtime as RuntimeId }),
+    ...(row.claimed_harness_id === null ? {} : { claimedHarnessId: row.claimed_harness_id }),
     ...(row.claimed_runtime_capabilities_json === null
       ? {}
       : { claimedRuntimeCapabilities: JSON.parse(row.claimed_runtime_capabilities_json) as RuntimeCapabilities }),
@@ -526,17 +537,18 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
 
   claim(
     tenant: TenantId,
-    input: { taskId: string; deviceId: string; runtime?: RuntimeId; capabilities?: RuntimeCapabilities },
+    input: { taskId: string; deviceId: string; runtime?: RuntimeId; harnessId?: string; capabilities?: RuntimeCapabilities },
   ): Promise<TaskAttempt | undefined> {
     return this.coordinator.run((db) => {
       db.prepare(
-        `UPDATE task_attempt SET owner_device_id = ?, claimed_runtime = ?, claimed_runtime_capabilities_json = ?,
+        `UPDATE task_attempt SET owner_device_id = ?, claimed_runtime = ?, claimed_harness_id = ?, claimed_runtime_capabilities_json = ?,
           status = 'claimed', updated_at = ?
          WHERE tenant_id = ? AND task_id = ? AND device_id = ? AND owner_device_id IS NULL
            AND cancellation_requested_at IS NULL AND status = 'offered'`,
       ).run(
         input.deviceId,
         input.runtime ?? null,
+        input.harnessId ?? null,
         input.capabilities === undefined ? null : JSON.stringify(input.capabilities),
         this.#now(),
         tenant,

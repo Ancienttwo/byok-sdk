@@ -206,6 +206,29 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
       });
     });
 
+    it('snapshots custom harness identity once with ownership and every read model', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        const taskId = 'custom-task';
+        const deviceId = 'device-1';
+        const expected = { ownerDeviceId: deviceId, claimedHarnessId: 'acme-harness',
+          claimedRuntimeCapabilities: { steer: true }, status: 'claimed' };
+        await stores.tasks.open(TENANT_A, { taskId, deviceId });
+        expect(await stores.tasks.claim(TENANT_A, { taskId, deviceId,
+          harnessId: 'acme-harness', capabilities: { steer: true } })).toMatchObject(expected);
+        for (const retry of [
+          { deviceId, harnessId: 'other', capabilities: { steer: false } },
+          { deviceId: 'device-2', harnessId: 'other' },
+          { deviceId, runtime: 'pi' as const },
+          { deviceId },
+        ]) expect(await stores.tasks.claim(TENANT_A, { taskId, ...retry })).toMatchObject(expected);
+        expect(await stores.tasks.claim(TENANT_B, { taskId, deviceId, harnessId: 'other' })).toBeUndefined();
+        expect(await stores.tasks.get(TENANT_A, taskId)).toMatchObject(expected);
+        expect(await stores.tasks.getMany(TENANT_A, [taskId])).toMatchObject([expected]);
+        expect((await stores.tasks.list(TENANT_A, { limit: 10 })).attempts).toMatchObject([expected]);
+        expect((await stores.tasks.get(TENANT_A, taskId))?.claimedRuntime).toBeUndefined();
+      });
+    });
+
     /**
      * `list` is the tenant-level read model the host façade pages over. The
      * property that matters is the WALK: every attempt exactly once, no gaps and

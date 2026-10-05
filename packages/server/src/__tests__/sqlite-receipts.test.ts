@@ -23,7 +23,7 @@ describe('SQLite receipt recovery', () => {
     const clock = createMutableClock();
     const crypto = createWebCrypto();
     const path = join(root, 'server.sqlite');
-    function open(migration?: 'v1-to-v3' | 'v2-to-v3') {
+    function open(migration?: 'v1-to-v4' | 'v2-to-v4') {
       const stores = createSqliteEmbeddedStores({ path, ...(migration === undefined ? {} : { migration }) }, { clock, crypto });
       const cloud = createByokCloud({ ...stores, clock, crypto,
         tokenSigner: createHmacTokenSigner(new Uint8Array(32), clock), capabilities: fullCapabilityDeclaration(),
@@ -156,12 +156,13 @@ describe('SQLite receipt recovery', () => {
     await runtime.stores.cloud.tasks.open(tenant, { taskId: 'historical', deviceId });
     await runtime.stores.close();
     const db = new DatabaseSync(path);
-    db.exec('DROP TABLE request_receipt');
+    db.exec('DROP TABLE request_receipt; ALTER TABLE task_attempt DROP COLUMN claimed_harness_id');
     if (version === '1') db.exec('DROP TABLE device_directory');
     db.prepare("UPDATE byok_sqlite_meta SET value = ? WHERE key = 'schema_version'").run(version);
     db.close();
-    const migration = version === '1' ? 'v1-to-v3' : 'v2-to-v3';
+    const migration = version === '1' ? 'v1-to-v4' : 'v2-to-v4';
     expect(() => open()).toThrow('Unsupported BYOK SQLite schema version');
+    expect(() => open(`v${version}-to-v3` as typeof migration)).toThrow('Target-v3 migration selectors are no longer supported');
     expect(() => open(migration)).toThrow('historical receipts are unavailable');
     const check = new DatabaseSync(path);
     expect(check.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe(version);
@@ -175,7 +176,7 @@ describe('SQLite receipt recovery', () => {
       expect((await runtime.stores.cloud.devices.list(tenant)).length).toBe(version === '1' ? 0 : 1);
     } finally { await runtime.stores.close(); }
     const current = new DatabaseSync(path, { readOnly: true });
-    expect(current.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('3');
+    expect(current.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('4');
     current.close();
   });
 
@@ -223,15 +224,15 @@ describe('SQLite receipt recovery', () => {
   });
 
 
-  it('rejects cleaned legacy delivery history and a v3 table missing its composite primary key', async () => {
+  it('rejects cleaned legacy delivery history and a v4 table missing its composite primary key', async () => {
     const { open, path } = fixture(); await open().stores.close();
     const db = new DatabaseSync(path);
-    db.exec("DROP TABLE request_receipt; UPDATE byok_sqlite_meta SET value = '2' WHERE key = 'schema_version'; INSERT INTO mailbox_cursor VALUES ('receipts', 'device-receipts', 2, 1, 1, '2026-01-01T00:00:00.000Z')");
+    db.exec("DROP TABLE request_receipt; ALTER TABLE task_attempt DROP COLUMN claimed_harness_id; UPDATE byok_sqlite_meta SET value = '2' WHERE key = 'schema_version'; INSERT INTO mailbox_cursor VALUES ('receipts', 'device-receipts', 2, 1, 1, '2026-01-01T00:00:00.000Z')");
     db.close();
-    expect(() => open('v2-to-v3')).toThrow('delivery history');
+    expect(() => open('v2-to-v4')).toThrow('delivery history');
     const corrupt = new DatabaseSync(path);
     expect(corrupt.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('2');
-    corrupt.exec("UPDATE byok_sqlite_meta SET value = '3' WHERE key = 'schema_version'; CREATE TABLE request_receipt (tenant_id TEXT NOT NULL, key TEXT NOT NULL, body TEXT NOT NULL, recorded_at TEXT NOT NULL)");
+    corrupt.exec("ALTER TABLE task_attempt ADD COLUMN claimed_harness_id TEXT; UPDATE byok_sqlite_meta SET value = '4' WHERE key = 'schema_version'; CREATE TABLE request_receipt (tenant_id TEXT NOT NULL, key TEXT NOT NULL, body TEXT NOT NULL, recorded_at TEXT NOT NULL)");
     corrupt.close();
     expect(() => open()).toThrow('Invalid BYOK SQLite request receipt schema');
   });

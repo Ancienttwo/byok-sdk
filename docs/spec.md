@@ -271,12 +271,19 @@ lookup, revoke and same-machine replacement share the durable device directory.
 Device IDs are globally tenant-unique. Presence, nonces and unredeemed pairing
 codes remain process-local; no runtime or TaskHandle is reconstructed.
 
-Schema v3 fences older writers. Stop every writer and take a consistent backup
-before explicitly adopting eligible legacy storage with v1-to-v3 or v2-to-v3.
-Migration rejects any task, message, agent-admission or advanced cursor history:
-old in-memory receipt facts cannot be fabricated. Eligible v1 adds an empty
-device directory, v2 retains devices; tables and version advance atomically.
-Failure preserves the old database. Never delete history to pass this check.
+Schema v4 fences older writers and stores nullable claimed harness identity in
+the ownership CAS. Stop every writer and take a consistent backup before explicit
+adoption. `v1-to-v4` / `v2-to-v4` reject any task, message, agent-admission or
+advanced cursor history: old in-memory receipt facts cannot be fabricated.
+Eligible v1 adds an empty device directory; v2 retains devices. `v3-to-v4`
+preserves existing receipts, unclaimed offers and identified built-in claims,
+but rejects every owned row without a claimed runtime, including terminal rows:
+lost custom-harness identity cannot be distinguished from legacy identity-free
+built-in claims. No actual adapter identity is inferred from an offer or mutable
+inventory. Existing rows get a null harness identity. Tables and version advance
+atomically; failure preserves the old database. Never delete history to pass these
+checks. The public target-v3 selectors are replaced by target-v4 selectors without
+compatibility aliases; callers must update one-shot migration configuration.
 Receipts use tenant/key first-write-wins and have no TTL/deletion path; mailbox
 retention cannot remove the delivered/immutable/terminal facts. Receipt columns
 and composite primary key are validated on open. Capacity exhaustion is an
@@ -2266,7 +2273,9 @@ The actual custom adapter echoes `task.claim.harnessId`; the same claim CAS stor
 An explicitly selected harness must match the immutable offer receipt. Old peers
 without the capability are refused; no identity is inferred from display names
 or provider/model fields. Business scheduling and device choice stay with the
-host. Deploy migration `0021_custom_harness_identity.sql` before this server code.
+host. Deploy migration `0021_custom_harness_identity.sql` for PostgreSQL before
+this server code; embedded SQLite requires schema v4 and its explicit adoption
+rules above.
 
 ### Terminal boundary acceptance follow-up (#163 / #167)
 
