@@ -78,6 +78,8 @@ export class ClaudeProcessClient {
   private readonly eventQueue = new AsyncQueue<ClaudeStreamMessage>();
   private closed = false;
   private exitError: Error | undefined;
+  private transportError: Error | undefined;
+  private readonly pendingWrites = new Set<(error: Error) => void>();
   private readonly closedPromise: Promise<void>;
   private resolveClosed!: () => void;
   private disposalAttempt: Promise<void> | undefined;
@@ -101,19 +103,16 @@ export class ClaudeProcessClient {
     this.closedPromise = new Promise((resolve) => {
       this.resolveClosed = resolve;
     });
+    // A Writable emits its own error even when its write callback handles it.
+    // Own that event for the full stream lifetime, including after child close.
+    this.child.stdin.on('error', (error: Error) => this.onTransportError(error));
     this.adopted = this.adoptOwnedTree(options);
     // The rejection is consumed by `waitForInit()`; this keeps a client that is
     // constructed and then abandoned from raising an unhandled rejection.
     this.adopted.catch(() => {});
     if (options.control) {
       controls.set(this, options.control);
-      options.control.bind(async frame => {
-        await this.adopted;
-        if (this.closed) throw this.exitError ?? new Error('claude process is closed');
-        await new Promise<void>((resolve, reject) => {
-          this.child.stdin.write(JSON.stringify(frame) + '\n', error => { if (error) reject(error); else resolve(); });
-        });
-      });
+      options.control.bind(frame => this.writeFrame(JSON.stringify(frame) + '\n'));
     }
 
     this.child.stdout.setEncoding('utf8');
@@ -147,16 +146,42 @@ export class ClaudeProcessClient {
    * mechanism `followUp()` relies on instead of spawning a fresh
    * `--resume`'d process per follow-up.
    */
-  writeUserMessage(text: string): void {
-    if (this.closed) {
-      throw this.exitError ?? new Error('claude process is closed');
-    }
+  async writeUserMessage(text: string): Promise<void> {
     const line = `${JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] } })}\n`;
-    this.child.stdin.write(line, (err) => {
-      if (err) {
-        console.error(`[byok/claude-adapter] failed to write to claude stdin: ${err.message}`);
+    await this.writeFrame(line);
+  }
+
+  private async writeFrame(line: string): Promise<void> {
+    await this.adopted;
+    if (this.transportError) throw this.transportError;
+    if (this.closed) throw this.exitError ?? new Error('claude process is closed');
+    await new Promise<void>((resolve, reject) => {
+      const fail = (error: Error) => { this.pendingWrites.delete(fail); reject(error); };
+      this.pendingWrites.add(fail);
+      try {
+        this.child.stdin.write(line, error => {
+          if (error) this.onTransportError(error);
+          else { this.pendingWrites.delete(fail); resolve(); }
+        });
+      } catch (cause) {
+        this.onTransportError(cause instanceof Error ? cause : new Error(String(cause)));
       }
     });
+  }
+
+  private onTransportError(error: Error): void {
+    if (this.closed || this.transportError) return;
+    this.transportError = error;
+    this.exitError = error;
+    for (const reject of [...this.pendingWrites]) reject(error);
+    this.initWaiter?.reject(error);
+    this.initWaiter = undefined;
+    controls.get(this)?.closed();
+    controls.delete(this);
+    this.eventQueue.end();
+    // A broken pipe is a transport failure, not proof the child/tree closed.
+    // The startup catch or Session.close still owns the disposal receipt.
+    this.kill();
   }
 
   /**
@@ -172,6 +197,7 @@ export class ClaudeProcessClient {
     // no backstop owns, and claude can emit `system/init` inside the window
     // the assignment is still in flight.
     await this.adopted;
+    if (this.transportError) throw this.transportError;
     if (this.sessionId !== undefined) return this.sessionId;
     if (this.closed) throw this.exitError ?? new Error('claude process is closed');
     return new Promise((resolve, reject) => {
@@ -270,6 +296,7 @@ export class ClaudeProcessClient {
   }
 
   private onData(chunk: string): void {
+    if (this.transportError) return;
     this.buffer += chunk;
     let newlineIndex = this.buffer.indexOf('\n');
     while (newlineIndex !== -1) {
@@ -336,8 +363,9 @@ export class ClaudeProcessClient {
     // An adoption failure outranks the exit status of the termination it
     // itself requested: reporting `exit code=null, signal=SIGKILL` would bury
     // the only reason anyone can act on.
-    const terminal = this.adoptionFailure ?? err;
+    const terminal = this.adoptionFailure ?? this.transportError ?? err;
     this.exitError = terminal;
+    for (const reject of [...this.pendingWrites]) reject(terminal);
     this.resolveClosed();
     this.initWaiter?.reject(terminal);
     this.initWaiter = undefined;

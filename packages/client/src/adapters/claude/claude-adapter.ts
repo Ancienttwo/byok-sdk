@@ -18,7 +18,7 @@ import {
   type Session,
 } from '../../types';
 import { wrapMcpServerWithLaunchCwd } from '../../daemon/trusted-launch-cwd';
-import { RuntimeDisposalFailure, RuntimeExecutionFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
+import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
 import { withoutProviderCredentials } from '../provider-credential-environment';
 import { createClaudeControlChannel } from './control-channel';
@@ -52,6 +52,19 @@ async function cleanupMcpConfigDir(dir: string | undefined): Promise<void> {
       stage: 'cleanup',
       reason: 'claude task-scoped MCP configuration could not be removed',
     }, { cause });
+  }
+}
+
+/** Failed transport/init still owns the process and its task-scoped config. */
+async function disposeFailedTransportStart(client: ClaudeProcessClient, mcpConfigDir: string | undefined): Promise<void> {
+  const retryDisposal = async () => {
+    await client.dispose();
+    await cleanupMcpConfigDir(mcpConfigDir);
+  };
+  try {
+    await retryDisposal();
+  } catch (cause) {
+    throw new RuntimeStartupDisposalFailure(retryDisposal, { cause });
   }
 }
 
@@ -395,10 +408,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
     // `ClaudeProcessClient.writeUserMessage`) avoids two different
     // send-a-prompt code paths.
     try {
-      client.writeUserMessage(startInput.instruction);
+      await client.writeUserMessage(startInput.instruction);
     } catch (cause) {
-      client.kill();
-      await cleanupMcpConfigDir(mcpConfigDir);
+      await disposeFailedTransportStart(client, mcpConfigDir);
       throw new RuntimeExecutionFailure({
         phase: 'start', category: 'infrastructure', retry: 'retryable',
         reason: 'claude initial instruction transport failed',
@@ -423,8 +435,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       // fabricated sessionRef.
       sessionRef = await client.waitForInit();
     } catch (err) {
-      client.kill();
-      await cleanupMcpConfigDir(mcpConfigDir);
+      await disposeFailedTransportStart(client, mcpConfigDir);
       if (isRuntimeExecutionFailure(err)) throw err;
       throw new RuntimeExecutionFailure({
         phase: 'start', category: 'infrastructure', retry: 'retryable',
@@ -656,7 +667,14 @@ class ClaudeSession implements Session {
     // reusing the identical `session_id`, until stdin closes or the
     // process is killed (see `ClaudeProcessClient.writeUserMessage`'s doc
     // comment).
-    this.client.writeUserMessage(task.instruction);
+    try {
+      await this.client.writeUserMessage(task.instruction);
+    } catch (cause) {
+      throw new RuntimeExecutionFailure({
+        phase: 'run', category: 'infrastructure', retry: 'retryable',
+        reason: 'claude follow-up instruction transport failed',
+      }, { cause });
+    }
   }
 
   /** Native interrupt ACK is bounded; TaskRunner still closes after cancellation acknowledgment. */
