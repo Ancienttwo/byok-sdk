@@ -128,7 +128,7 @@ describe('private bindings and native transport', () => {
     const s = await setup(); const bin = path.join(s.dir, 'fake-codex'); const argv = path.join(s.dir, 'argv.json');
     const write = async (output: string, code = 0) => fs.writeFile(bin, `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(argv)}, JSON.stringify(process.argv.slice(2))); console.log(${JSON.stringify(output)}); process.exit(${code});`, { mode: 0o700 });
     const input = { codexBin: bin, binding: s.bindings[0]!, throughSeq: 2, signal: new AbortController().signal };
-    await write('codex-cli 0.153.4'); expect(await preflightCodexRelay(bin, input.signal)).toBe('0.153.4');
+    await write('codex-cli 0.160.0'); expect(await preflightCodexRelay(bin, input.signal)).toBe('0.160.0');
     await write('codex-cli 0.153.5'); await expect(preflightCodexRelay(bin, input.signal)).rejects.toThrow();
     await write(`Queued message ${receipt} for thread ${input.binding.threadId}.`); expect(await queueCodexTeamNotification(input)).toBe(receipt);
     const args = JSON.parse(await fs.readFile(argv, 'utf8')); expect(args.slice(0,5)).toEqual(['queue', '--remote', input.binding.endpoint, '--thread', input.binding.threadId]); expect(JSON.stringify(args)).not.toContain(input.binding.context);

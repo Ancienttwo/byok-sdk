@@ -23,7 +23,7 @@ async function takeEvents(session: Session, count: number): Promise<AgentEvent[]
   const events: AgentEvent[] = [];
   for await (const event of session.events) {
     events.push(event);
-    if (events.length === count) break;
+    if (events.length === count || event.type === 'turn_end') break;
   }
   return events;
 }
@@ -43,7 +43,7 @@ describe('Codex reserved Agent-message permission composition', () => {
     const resources: PreparedOperationResources = {
       workspaceDir,
       policy: { mode: 'auto' },
-      env: process.env,
+      env: {...process.env,FAKE_CODEX_RPC_RECEIPT:path.join(workspaceDir,'rpc.jsonl')},
       mcpServers: {
         byokagentmessage: {
           command: '/opt/byok-agent-message-mcp',
@@ -58,8 +58,10 @@ describe('Codex reserved Agent-message permission composition', () => {
     sessions.push(session);
     await takeEvents(session, 7);
 
+    const frames=(await fs.readFile(path.join(workspaceDir,'rpc.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line));
+    expect(frames.find(frame=>frame.method==='thread/start').params.approvalPolicy).toBe('never');
     const argv = captured[0] ?? [];
-    expect(argv).toContain('approval_policy=never');
+    expect(argv).toContain('sandbox_mode="danger-full-access"');
     expect(argv).toContain('mcp_servers.byokagentmessage.enabled_tools=["send_agent_message"]');
     expect(argv).toContain('mcp_servers.byokagentmessage.tools.send_agent_message.approval_mode="approve"');
     // The reserved grant stays exactly one tool: a second server on the same
@@ -92,7 +94,7 @@ describe('Codex reserved Agent-message permission composition', () => {
       });
       expect(prepared).toMatchObject({
         kind: 'reject', retryable: false,
-        reason: expect.stringContaining('lacks the required per-MCP-tool approval contract'),
+        reason: expect.stringContaining('runtime_version_unsupported'),
       });
       expect(captured).toHaveLength(0);
     } finally {

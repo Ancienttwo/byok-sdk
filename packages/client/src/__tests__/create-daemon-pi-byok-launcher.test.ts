@@ -15,6 +15,10 @@ function config(piByokLauncher: DaemonConfig['piByokLauncher']): DaemonConfig {
 }
 
 describe('DaemonConfig.piByokLauncher', () => {
+  it('durablePi refuses missing home, journal or custody configuration before daemon work', () => {
+    expect(() => createDaemon({ ...config(undefined), durablePi: true })).toThrow('durablePi requires');
+    expect(() => createDaemon({ ...config(undefined), durablePi: 'true' as never })).toThrow('durablePi must be boolean');
+  });
   it('rejects empty or relative custody paths at daemon construction', () => {
     expect(() =>
       createDaemon(

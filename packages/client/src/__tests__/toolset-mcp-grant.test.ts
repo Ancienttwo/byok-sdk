@@ -15,13 +15,12 @@ import { observationOf } from './fixtures/mcp-observation';
  * Adapter-level contract for the projected-toolset MCP grant, against the
  * argv-validating fake CLIs. Both fixtures enforce the real binaries'
  * empirically-confirmed refusal (claude auto-denies an MCP tool missing from
- * `--allowedTools`; fake-codex rejects an `enabled_tools` entry with no
- * matching `approval_mode`), so a regression that stops emitting the grant
+ * `--allowedTools`; fake-codex enforces the exact `enabled_tools` list), so a regression that stops emitting the grant
  * fails here rather than passing against a permissive double.
  *
- * `scripts/claude-toolset-permission-smoke.mjs` and
- * `scripts/codex-toolset-permission-smoke.mjs` are the same assertions
- * against the real installed CLIs.
+ * Claude has a separate real permission smoke. Codex app-server observations
+ * are recorded by `scripts/codex-app-server-real.mjs`; its real YOLO probe did
+ * not establish denial merely from an absent per-tool preapproval.
  */
 const CLAUDE_FIXTURE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 const CODEX_FIXTURE = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.meta.url));
@@ -70,7 +69,13 @@ async function startWith(
   instruction = 'call the toolset',
 ): Promise<Session> {
   const task: TaskOfferPayload = { instruction, policy: resources.policy };
+  const rpcReceipt=path.join(resources.workspaceDir,'codex-grant-rpc.jsonl');
+  if(adapter.descriptor.id==='codex') resources={...resources,env:{...resources.env,FAKE_CODEX_RPC_RECEIPT:rpcReceipt}};
   const session = await startPreparedOperation(adapter, task, resources);
+  if(adapter.descriptor.id==='codex') {
+    const frames=(await fs.readFile(rpcReceipt,'utf8')).trim().split('\n').map(line=>JSON.parse(line));
+    expect(frames.find(frame=>frame.method==='thread/start').params.approvalPolicy).toBe('never');
+  }
   sessions.push(session);
   return session;
 }
@@ -232,14 +237,14 @@ describe('projected MCP toolset grant — codex', () => {
     });
     const session = await startWith(adapter, {
       workspaceDir: await workspace('byok-codex-memory-grant-'),
-      policy: { mode: 'readonly', allowTools: [] },
+      policy: { mode: 'auto', allowTools: [] },
       env: process.env,
       mcpServers: { byokagentmemory: { command: '/opt/byok-agent-memory-mcp' } },
     });
     await drain(session, 1);
 
     const argv = captured[0] ?? [];
-    expect(argv).toContain('approval_policy=never');
+    expect(argv).not.toContain('approval_policy=never'); // ApprovalPolicy is pinned in thread/start, asserted in the adapter RPC tests.
     expect(argv).toContain('mcp_servers.byokagentmemory.enabled_tools=["memory_recall","memory_save"]');
     expect(argv).toContain('mcp_servers.byokagentmemory.tools.memory_recall.approval_mode="approve"');
     expect(argv).toContain('mcp_servers.byokagentmemory.tools.memory_save.approval_mode="approve"');
@@ -254,7 +259,7 @@ describe('projected MCP toolset grant — codex', () => {
     });
     const session = await startWith(adapter, {
       workspaceDir: await workspace('byok-codex-toolset-grant-'),
-      policy: { mode: 'readonly', allowTools: [] },
+      policy: { mode: 'auto', allowTools: [] },
       env: process.env,
       mcpServers: { saleskoprobe: { command: process.execPath, args: ['/opt/probe.mjs'] } },
       mcpToolsetTools: observationOf({ saleskoprobe: ['echo'] }, READ_ONLY),
@@ -262,8 +267,8 @@ describe('projected MCP toolset grant — codex', () => {
     await drain(session, 1);
 
     const argv = captured[0] ?? [];
-    expect(argv).toContain('sandbox_mode=read-only');
-    expect(argv).toContain('approval_policy=never');
+    expect(argv).toContain('sandbox_mode="danger-full-access"');
+    expect(argv).not.toContain('approval_policy=never'); // ApprovalPolicy is pinned in thread/start, asserted in the adapter RPC tests.
     expect(argv).toContain('mcp_servers.saleskoprobe.enabled_tools=["echo"]');
     expect(argv).toContain('mcp_servers.saleskoprobe.tools.echo.approval_mode="approve"');
     expect(argv.some((arg) => arg.includes('default_tools_approval_mode'))).toBe(false);
@@ -277,7 +282,7 @@ describe('projected MCP toolset grant — codex', () => {
     });
     const session = await startWith(adapter, {
       workspaceDir: await workspace('byok-codex-no-toolset-'),
-      policy: { mode: 'readonly', allowTools: [] },
+      policy: { mode: 'auto', allowTools: [] },
       env: process.env,
     });
     await drain(session, 1);
@@ -295,7 +300,7 @@ describe('projected MCP toolset grant — codex', () => {
     });
     const session = await startWith(adapter, {
       workspaceDir: await workspace('byok-codex-observed-only-'),
-      policy: { mode: 'readonly', allowTools: [] },
+      policy: { mode: 'auto', allowTools: [] },
       env: process.env,
       mcpServers: { saleskoprobe: { command: process.execPath, args: ['/opt/probe.mjs'] } },
       mcpToolsetTools: observationOf({ saleskoprobe: ['echo'] }, READ_ONLY),
@@ -320,8 +325,8 @@ describe('projected MCP toolset grant — codex', () => {
     process.env.FAKE_CODEX_VERSION = 'codex-cli 0.148.0';
     try {
       await expect(adapter.prepare({
-        offer: { instruction: 'x', policy: { mode: 'readonly', allowTools: [] } },
-        policy: { mode: 'readonly', allowTools: [] },
+        offer: { instruction: 'x', policy: { mode: 'auto', allowTools: [] } },
+        policy: { mode: 'auto', allowTools: [] },
         descriptor: adapter.descriptor,
         requiredToolsetIds: ['salesko'],
         mcpServers: { saleskoprobe: { command: process.execPath } },
@@ -329,7 +334,7 @@ describe('projected MCP toolset grant — codex', () => {
       })).resolves.toMatchObject({
         kind: 'reject',
         retryable: false,
-        reason: expect.stringContaining('lacks the required per-MCP-tool approval contract'),
+        reason: expect.stringContaining('runtime_version_unsupported'),
       });
       expect(captured).toHaveLength(0);
     } finally {
@@ -341,8 +346,8 @@ describe('projected MCP toolset grant — codex', () => {
   it('rejects pre-claim when a projected server carries no tools/list observation', async () => {
     const adapter = new CodexAdapter({ resolveBin: () => ({ command: CODEX_FIXTURE, source: 'path' }) });
     await expect(adapter.prepare({
-      offer: { instruction: 'x', policy: { mode: 'readonly', allowTools: [] } },
-      policy: { mode: 'readonly', allowTools: [] },
+      offer: { instruction: 'x', policy: { mode: 'auto', allowTools: [] } },
+      policy: { mode: 'auto', allowTools: [] },
       descriptor: adapter.descriptor,
       requiredToolsetIds: ['salesko'],
       mcpServers: { saleskoprobe: { command: process.execPath } },
@@ -361,7 +366,7 @@ describe('projected MCP toolset grant — codex', () => {
     });
     await expect(startWith(adapter, {
       workspaceDir: await workspace('byok-codex-grant-drift-'),
-      policy: { mode: 'readonly', allowTools: [] },
+      policy: { mode: 'auto', allowTools: [] },
       env: process.env,
       mcpServers: { saleskoprobe: { command: process.execPath, args: ['/opt/probe.mjs'] } },
       mcpToolsetTools: observationOf({ saleskoprobe: ['echo'] }, READ_ONLY),
@@ -382,8 +387,8 @@ describe('projected MCP toolset grant — codex', () => {
   it('rejects a projected server name that cannot form a flat mcp_servers.<name> config key', async () => {
     const adapter = new CodexAdapter({ resolveBin: () => ({ command: CODEX_FIXTURE, source: 'path' }) });
     await expect(adapter.prepare({
-      offer: { instruction: 'x', policy: { mode: 'readonly', allowTools: [] } },
-      policy: { mode: 'readonly', allowTools: [] },
+      offer: { instruction: 'x', policy: { mode: 'auto', allowTools: [] } },
+      policy: { mode: 'auto', allowTools: [] },
       descriptor: adapter.descriptor,
       requiredToolsetIds: ['salesko'],
       mcpServers: { 'salesko.probe': { command: process.execPath } },
@@ -452,29 +457,12 @@ describe('operator-classified readonly toolset', () => {
     expect(argv.join(' ')).not.toContain('propose_graph_change_set');
   });
 
-  it('codex enables exactly the classified read tools and never the propose tool', async () => {
+  it('codex refuses readonly even for a fully classified read-only toolset before runtime spawn', async () => {
     const captured: string[][] = [];
-    const adapter = new CodexAdapter({
-      resolveBin: () => ({ command: CODEX_FIXTURE, source: 'path' }),
-      spawnFn: capturingSpawn(captured),
-    });
-    const session = await startWith(adapter, {
-      workspaceDir: await workspace('byok-codex-readonly-classified-'),
-      policy: { mode: 'readonly', allowTools: [] },
-      env: process.env,
-      mcpServers: { salesko: { command: process.execPath, args: ['/opt/salesko-mcp.mjs'] } },
-      mcpToolsetTools: SALESKO_CLASSIFIED,
-    });
-    await drain(session, 1);
-
-    const argv = captured[0] ?? [];
-    expect(argv).toContain(
-      `mcp_servers.salesko.enabled_tools=${JSON.stringify([...SALESKO_READ_TOOLS])}`,
-    );
-    expect(argv.filter((arg) => arg.startsWith('mcp_servers.salesko.tools.'))).toEqual(
-      SALESKO_READ_TOOLS.map((tool) => `mcp_servers.salesko.tools.${tool}.approval_mode="approve"`),
-    );
-    expect(argv.join(' ')).not.toContain('propose_graph_change_set');
+    const adapter = new CodexAdapter({resolveBin:()=>({command:CODEX_FIXTURE,source:'path'}),spawnFn:capturingSpawn(captured)});
+    const rejection=await adapter.prepare(readonlyPrepareInput(adapter,SALESKO_CLASSIFIED));
+    expect(rejection).toMatchObject({kind:'reject',retryable:false,reason:expect.stringContaining('readonly')});
+    expect(captured).toEqual([]);
   });
 
   it.each([
@@ -485,6 +473,7 @@ describe('operator-classified readonly toolset', () => {
     const rejection = await adapter.prepare(readonlyPrepareInput(adapter, SALESKO_UNCLASSIFIED));
     expect(rejection).toMatchObject({ kind: 'reject', retryable: false });
     const { reason } = rejection as { reason: string };
+    if (_runtime==='codex') {expect(reason).toContain('readonly');return;}
     expect(reason).toMatch(/McpToolsetConfig\.readOnlyTools/u);
     expect(reason).toMatch(/salesko\.read\.v1/u);
     // Never inferred from what the tools happen to be called.
@@ -502,7 +491,8 @@ describe('operator-classified readonly toolset', () => {
       { salesko: SALESKO_TOOLS },
       { toolsetId: 'salesko.read.v1', readOnlyTools: { salesko: ['get_account'] } },
     )));
-    expect(prepared).toMatchObject({ kind: 'prepared' });
+    if (_runtime==='codex') expect(prepared).toMatchObject({kind:'reject',retryable:false,reason:expect.stringContaining('readonly')});
+    else expect(prepared).toMatchObject({ kind: 'prepared' });
   });
 
   it('refuses a readonly task whose server has no read-only tool at all', async () => {

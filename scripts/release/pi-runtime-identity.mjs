@@ -6,9 +6,9 @@ import { verifyOfficialPiPackage, OFFICIAL_PI_PROVENANCE } from '../../packages/
 // closure package the SDK imports directly to that same exact version.
 // Transitive siblings are fixed by the lockfile and verified installed closure.
 // `pi-tui` ships prebuilt `.node` addons and may not be a direct dependency
-// (release-graph purity gate); the other siblings (`chord`, `pi-telemetry`,
-// `pi-codemode`, `pi-mcp`) are never imported by the SDK. All of them reach the
-// install only through the coding agent, and the lockfile and installed
+// (release-graph purity gate); pi-durable and chord are direct exact pins under
+// the R4 durable ruling. The remaining siblings (`pi-telemetry`,
+// `pi-codemode`, `pi-mcp`) reach the install only through the coding agent, and the lockfile and installed
 // integrity checks below still hold each to the exact version. The integrity of each
 // `name@version` is recorded once, in `bun.lock`. Every release gate derives the
 // expected identity here instead of hardcoding any half of it:
@@ -39,6 +39,7 @@ export const PI_RUNTIME_CLOSURE = Object.freeze([
   PI_DEPENDENCY_SPECIFIER,
   '@earendil-works/pi-ai',
   '@earendil-works/pi-agent-core',
+  '@earendil-works/pi-durable',
   '@earendil-works/chord',
   '@earendil-works/pi-telemetry',
   '@earendil-works/pi-tui',
@@ -54,7 +55,6 @@ export const PI_RUNTIME_CLOSURE = Object.freeze([
  */
 const PI_INDIRECT_CLOSURE = Object.freeze([
   '@earendil-works/pi-tui',
-  '@earendil-works/chord',
   '@earendil-works/pi-telemetry',
   '@earendil-works/pi-codemode',
   '@earendil-works/pi-mcp',
@@ -362,13 +362,10 @@ export function assertInstalledPiRuntime(installRoot, identity, locked, label, n
   }
   const [pi] = installed.filter((entry) => entry.manifest.name === identity.packageName);
 
-  // npm verified each tarball against the registry integrity before
-  // extraction and records that integrity in its lockfile, EXCEPT for copies
-  // it placed from the coding agent's own `npm-shrinkwrap.json`, which lists
-  // the closure with no `integrity` field. A copy with a recorded integrity
-  // must carry exactly the locked one; a copy without one is proven instead by
-  // its file set being byte-identical to the official tarball whose `sha512`
-  // is the locked integrity.
+  // npm records tarball integrity in its lockfile. Pi 1.0.2 does not ship
+  // npm-shrinkwrap.json. A copy with recorded integrity must match the lock.
+  // A copy without it must have the exact file set of the official tarball
+  // whose sha512 is the locked integrity.
   const npmLock = readManifest(path.join(installRoot, 'package-lock.json'));
   if (npmLock?.packages === undefined) throw new Error(`${label}: ${installRoot} has no npm package-lock.json`);
   const copies = new Map(PI_RUNTIME_CLOSURE.map((name) => [name, []]));
@@ -406,7 +403,7 @@ export function assertInstalledPiRuntime(installRoot, identity, locked, label, n
     `[${label}] official Pi closure ${PI_RUNTIME_CLOSURE.map((name) => name.slice('@earendil-works/'.length)).join(', ')}` +
       `@${identity.version}: recorded npm integrities equal bun.lock; single ${identity.packageName} at ` +
       `${path.relative(installRoot, pi.root)} matches the official tarball (${tarballFiles.size} files); ` +
-      `${fileProven} shrinkwrap-placed cop${fileProven === 1 ? 'y' : 'ies'} without npm integrity matched their official tarballs; fork manifests=0`,
+      `${fileProven} cop${fileProven === 1 ? 'y' : 'ies'} without npm integrity matched their official tarballs; fork manifests=0`,
   );
   return pi;
 }

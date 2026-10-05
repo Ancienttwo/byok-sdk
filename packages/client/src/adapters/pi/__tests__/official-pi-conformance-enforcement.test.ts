@@ -1,5 +1,5 @@
 /**
- * Official Pi 0.99.1 conformance — enforcement and determinism: D drift (c),
+ * Official Pi 1.0.2 conformance — enforcement and determinism: D drift (c),
  * upstream ignoring the injected fetch (d), determinism knobs (e) and a
  * usage-absent stream (f). Synthetic SSE only; the only socket ever opened is
  * the refused connection to the non-routable sink in (d).
@@ -45,7 +45,7 @@ function gateAgainst(frozenD: string, respond: () => Response) {
       };
 }
 
-describe('official Pi 0.99.1: final byte gate', () => {
+describe('official Pi 1.0.2: final byte gate', () => {
   test('(c) D drift: one injected-fetch call, zero sends, prompt resolves, run-scoped typed reason, no retry', async () => {
     globalFetch = installGlobalFetchSpy();
     const frozen = await compileA1(hostTranscript());
@@ -86,7 +86,7 @@ describe('official Pi 0.99.1: final byte gate', () => {
   }, TIMEOUT_MS);
 });
 
-describe('official Pi 0.99.1: transport scoping', () => {
+describe('official Pi 1.0.2: transport scoping', () => {
   test('(d) upstream ignoring the injected fetch reaches only the sink, is refused, and yields no D', async () => {
     globalFetch = installGlobalFetchSpy(true);
     const terminal = await compileWithoutInjectedFetch(hostTranscript());
@@ -100,7 +100,7 @@ describe('official Pi 0.99.1: transport scoping', () => {
   }, 10_000);
 });
 
-describe('official Pi 0.99.1: determinism knobs', () => {
+describe('official Pi 1.0.2: determinism knobs', () => {
   test('(e) PI_CACHE_RETENTION changes D unless cacheRetention is pinned; pinned D is identical', async () => {
     globalFetch = installGlobalFetchSpy();
     const previous = process.env.PI_CACHE_RETENTION;
@@ -130,7 +130,7 @@ describe('official Pi 0.99.1: determinism knobs', () => {
   });
 });
 
-describe('official Pi 0.99.1: usage observation', () => {
+describe('official Pi 1.0.2: usage observation', () => {
   test('(f) usage-absent SSE leaves all-zero usage, which the SDK maps to a zero prompt (usage_unavailable input)', async () => {
     globalFetch = installGlobalFetchSpy();
     const frozenD = (await compileA1(hostTranscript())).body;
@@ -161,9 +161,43 @@ describe('official Pi 0.99.1: usage observation', () => {
       // as `usage_unavailable` (covered end-to-end by prepared-offer-lane.test.ts).
       const event = mapPiMessageToAgentEvent({ type: 'message_end', message: assistant[0] } as never);
       expect(event).toEqual({ type: 'usage', inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, totalTokens: 0 });
+      const stats = harness.session.getSessionStats();
+      expect(stats.contextUsage?.contextWindow).toBe(128000);
+      expect(stats.contextUsage?.tokens).toEqual(expect.any(Number));
       expect(globalFetch.calls).toEqual([]);
     } finally {
       harness.dispose();
     }
+  }, TIMEOUT_MS);
+});
+
+// Public 1.0 AgentSession stats: provider cost and local context estimate stay separate.
+describe('official Pi 1.0 context usage', () => {
+  test('estimates occupancy even when the provider reports no usage', async () => {
+    globalFetch = installGlobalFetchSpy();
+    const harness = await createOfficialSession({ transcript: () => hostTranscript(), gate: () => textResponse('no usage', false) });
+    try {
+      expect(harness.session.getSessionStats().contextUsage).toEqual({ tokens: 0, contextWindow: 128000, percent: 0 });
+      await harness.session.prompt(TRIGGER_TEXT);
+      const stats = harness.session.getSessionStats();
+      expect(stats.tokens.total).toBe(0);
+      expect(stats.contextUsage?.tokens).toBeGreaterThan(0);
+      expect(stats.contextUsage?.contextWindow).toBe(128000);
+      expect(globalFetch.calls).toEqual([]);
+    } finally { harness.dispose(); }
+  }, TIMEOUT_MS);
+
+  test('manual compaction makes context tokens null until post-compaction usage', async () => {
+    globalFetch = installGlobalFetchSpy();
+    const harness = await createOfficialSession({ transcript: () => hostTranscript(), gate: () => textResponse('answer and summary', true) });
+    try {
+      harness.session.settingsManager.applyOverrides({ compaction: { enabled: false, keepRecentTokens: 0 } });
+      await harness.session.prompt(TRIGGER_TEXT);
+      expect(harness.session.getSessionStats().contextUsage).toMatchObject({ tokens: 118, contextWindow: 128000 });
+      await harness.session.prompt(TRIGGER_TEXT);
+      await harness.session.compact();
+      expect(harness.session.getSessionStats().contextUsage).toEqual({ tokens: null, contextWindow: 128000, percent: null });
+      expect(globalFetch.calls).toEqual([]);
+    } finally { harness.dispose(); }
   }, TIMEOUT_MS);
 });

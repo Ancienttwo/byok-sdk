@@ -41,9 +41,9 @@ export interface DescendantContextV1 {
     readonly envValues: Readonly<Record<string, string | null>>;
     readonly controlledDirValues: Readonly<Record<string, string>>;
 }
-export interface DescendantLaunchV1 {
+export interface PiDescendantLaunchV2 {
     readonly format: 'byok.descendant-launch';
-    readonly version: 1;
+    readonly version: 2;
     readonly template: ImplementationSpawnBindingV1;
     readonly templateDigest: string;
     readonly policy: RuntimeDescendantPolicyV1;
@@ -77,12 +77,12 @@ export declare class DescendantLaunchError extends Error {
 /** Hash original JSON member order, before the V1 parser projects its output. */
 export declare function descendantTemplateDigest(template: ImplementationSpawnBindingV1): string;
 /** Strict owned shape only. Independent parent and final-env comparisons are mandatory in assertDescendantSpawn. */
-export declare function parseDescendantLaunch(value: unknown): DescendantLaunchV1;
+export declare function parseDescendantLaunch(value: unknown): PiDescendantLaunchV2;
 /** Necessary launch consistency, not an atomic budget claim or permission to enable recursive execution. */
-export declare function validateDescendantSpawn(input: unknown, expected: DescendantSpawnExpectationV1, actual: DescendantSpawnActualV1): DescendantLaunchV1;
+export declare function validateDescendantSpawn(input: unknown, expected: DescendantSpawnExpectationV1, actual: DescendantSpawnActualV1): PiDescendantLaunchV2;
 // ==== @byok-sdk/implementation-identity dist/environment.d.ts ====
 /** Fixed credential-name projection shared by measurement and client stripping. */
-export declare const PROVIDER_CREDENTIAL_ENV_DENY_NAMES: readonly ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "AZURE_OPENAI_API_KEY", "DEEPSEEK_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY", "OPENROUTER_API_KEY", "XAI_API_KEY", "ZAI_API_KEY", "ANT_LING_API_KEY", "NVIDIA_API_KEY", "CEREBRAS_API_KEY", "CLOUDFLARE_API_KEY", "AI_GATEWAY_API_KEY", "ZAI_CODING_CN_API_KEY", "OPENCODE_API_KEY", "RADIUS_API_KEY", "FIREWORKS_API_KEY", "TOGETHER_API_KEY", "BASETEN_API_KEY", "KIMI_API_KEY", "HF_TOKEN", "MOONSHOT_API_KEY", "MINIMAX_API_KEY", "MINIMAX_CN_API_KEY", "QWEN_TOKEN_PLAN_API_KEY", "QWEN_TOKEN_PLAN_CN_API_KEY", "XIAOMI_API_KEY", "XIAOMI_TOKEN_PLAN_CN_API_KEY", "XIAOMI_TOKEN_PLAN_AMS_API_KEY", "XIAOMI_TOKEN_PLAN_SGP_API_KEY", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS", "PI_PROVIDER_API_KEY"];
+export declare const PROVIDER_CREDENTIAL_ENV_DENY_NAMES: readonly ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "OPENAI_API_KEY", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "GEMINI_API_KEY", "AZURE_OPENAI_API_KEY", "DEEPSEEK_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY", "OPENROUTER_API_KEY", "XAI_API_KEY", "ZAI_API_KEY", "ANT_LING_API_KEY", "NVIDIA_API_KEY", "CEREBRAS_API_KEY", "CLOUDFLARE_API_KEY", "AI_GATEWAY_API_KEY", "ZAI_CODING_CN_API_KEY", "OPENCODE_API_KEY", "RADIUS_API_KEY", "FIREWORKS_API_KEY", "TOGETHER_API_KEY", "BASETEN_API_KEY", "KIMI_API_KEY", "HF_TOKEN", "MOONSHOT_API_KEY", "MINIMAX_API_KEY", "MINIMAX_CN_API_KEY", "QWEN_TOKEN_PLAN_API_KEY", "QWEN_TOKEN_PLAN_CN_API_KEY", "XIAOMI_API_KEY", "XIAOMI_TOKEN_PLAN_CN_API_KEY", "XIAOMI_TOKEN_PLAN_AMS_API_KEY", "XIAOMI_TOKEN_PLAN_SGP_API_KEY", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS", "PI_PROVIDER_API_KEY"];
 export declare const LOADER_ENV_DENY_PATTERNS: readonly string[];
 export declare function loaderEnvInjections(env: Readonly<Record<string, string | undefined>>, platform?: NodeJS.Platform): readonly string[];
 /** Directory selectors whose trusted values must be explicitly committed by a runtime launch. */
@@ -90,9 +90,72 @@ export declare const CONTROLLED_PI_DIRECTORY_ENV_NAMES: readonly ["PI_PACKAGE_DI
 /** Fixed names of the credential launcher's inherited environment, shared with admission measurement. */
 export declare const KEYS_PI_INHERITED_ENV_NAMES: readonly ["PATH", "HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP", "LANG", "TZ", "TERM", "SHELL", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy"];
 export declare const KEYS_PI_WINDOWS_ENV_NAMES: readonly ["SystemRoot", "COMSPEC", "PATHEXT", "windir", "SYSTEMDRIVE", "PROGRAMFILES", "APPDATA", "LOCALAPPDATA"];
+// ==== @byok-sdk/implementation-identity dist/external-cli.d.ts ====
+import { type ToolImplementationAuthority, type ToolImplementationAttestedV1, type ToolImplementationInstallRecordV1, type ToolImplementationFsProbe } from './identity';
+export declare const OFFICIAL_EXTERNAL_CLI_ADAPTERS: readonly ["claude-code", "claude-code-writer", "codex-exec", "codex-exec-writer", "cursor-agent", "cursor-agent-writer"];
+export type OfficialExternalCliAdapter = typeof OFFICIAL_EXTERNAL_CLI_ADAPTERS[number];
+export declare function isOfficialExternalCliAdapter(value: unknown): value is OfficialExternalCliAdapter;
+/** Host verifies official release provenance and the sealed effective config scope.
+ * References contain no auth-store contents. A task can never submit this declaration. */
+export interface OfficialExternalCliInstallV2 {
+    readonly format: 'byok.official-cli-install';
+    readonly version: 2;
+    readonly adapter: OfficialExternalCliAdapter;
+    readonly sourceProofRef: string;
+    readonly configProofRef: string;
+    readonly restriction: 'codex-chatgpt-terminal-v1' | 'claude-subscription-terminal-v1';
+    readonly homeDir: string;
+    readonly configDir: string;
+    readonly record: ToolImplementationInstallRecordV1;
+}
+export interface AttestedOfficialExternalCliV2 extends Omit<OfficialExternalCliInstallV2, 'record'> {
+    readonly identity: ToolImplementationAttestedV1;
+    readonly directoryStats: {
+        readonly home: ExternalCliDirectoryStat;
+        readonly config: ExternalCliDirectoryStat;
+    };
+}
+export interface ExternalCliDirectoryStat {
+    readonly dev: number;
+    readonly ino: number;
+    readonly mode: number;
+    readonly uid: number;
+    readonly gid: number;
+}
+export declare function reverifyOfficialExternalCliDirectories(install: AttestedOfficialExternalCliV2): Promise<boolean>;
+/** Directory tuple check inside the final admission lock; reads no login-store contents. */
+export declare function reverifyOfficialExternalCliDirectoriesSync(install: AttestedOfficialExternalCliV2): boolean;
+export declare function externalCliCommitment(value: unknown): string;
+export declare function parseAttestedOfficialExternalCli(value: unknown): AttestedOfficialExternalCliV2 | undefined;
+export declare function resolveOfficialExternalCliInstall(authority: ToolImplementationAuthority | undefined, adapter: OfficialExternalCliAdapter, probe?: ToolImplementationFsProbe): Promise<AttestedOfficialExternalCliV2 | undefined>;
+/** V2 terminal branch. Five Pi helper records use the same cohort version. */
+export interface ExternalCliDescendantLaunchV2 {
+    readonly format: 'byok.descendant-launch';
+    readonly version: 2;
+    readonly target: 'official-external-cli';
+    readonly edge: {
+        readonly parent: 'pi-subagent-runner';
+        readonly child: 'official-external-cli';
+        readonly inheritsCredential: false;
+    };
+    readonly installation: AttestedOfficialExternalCliV2;
+    readonly rootTaskId: string;
+    readonly parentRecordDigest: string;
+    readonly policyDigest: string;
+    readonly operation: string;
+    readonly attempt: number;
+    readonly stepIndex: number;
+    readonly depth: number;
+    readonly launchId: string;
+    readonly invocationDigest: string;
+    readonly launchEnvNamesDigest: string;
+    readonly loaderEnvValuesDigest: string;
+}
+export declare function parseExternalCliDescendantLaunch(value: unknown): ExternalCliDescendantLaunchV2 | undefined;
 // ==== @byok-sdk/implementation-identity dist/identity.d.ts ====
 import { type DescendantSpawnExpectationV1, type DescendantSpawnActualV1 } from './descendant-launch';
 import type { McpLaunchAttestation } from './launch-attestation';
+import type { OfficialExternalCliAdapter, OfficialExternalCliInstallV2 } from './external-cli';
 /**
  * The ONE authority for "which implementation backs this tool", and the only
  * file in this package that may produce an `attested` identity
@@ -413,6 +476,10 @@ export type ToolImplementationSubjectV1 = {
     /** A finite SDK-owned helper, never a Host MCP server or a runtime. */
     readonly kind: 'sdk-helper';
     readonly helperId: SdkHelperIdV1;
+} | {
+    /** Independent official installation, never a Pi helper identity. */
+    readonly kind: 'official-external-cli';
+    readonly adapter: OfficialExternalCliAdapter;
 };
 /** What the resolver is asked about: one subject, and where it launches. */
 export type ToolImplementationLocatorV1 = {
@@ -438,6 +505,13 @@ export type ToolImplementationLocatorV1 = {
     readonly command?: never;
     readonly args?: never;
     readonly launch?: never;
+} | {
+    readonly subject: Extract<ToolImplementationSubjectV1, {
+        kind: 'official-external-cli';
+    }>;
+    readonly command?: never;
+    readonly args?: never;
+    readonly launch?: never;
 };
 /**
  * The install record a resolver returns, which is an attested identity MINUS
@@ -455,7 +529,7 @@ export type ToolImplementationLocatorV1 = {
  */
 export type ToolImplementationInstallRecordV1 = Omit<ToolImplementationAttestedV1, 'installStat' | 'interpreterStat' | 'assetStats' | 'launchEnvNamesDigest' | 'loaderEnvValuesDigest'>;
 /** Frozen M0 runtime vocabulary; declaration does not enable a dispatcher. */
-export type RuntimeEntryV1 = 'pi-prepared' | 'pi-rpc' | 'pi-subagent-print' | 'pi-subagent-runner';
+export type RuntimeEntryV1 = 'pi-prepared' | 'pi-rpc' | 'pi-durable' | 'pi-subagent-print' | 'pi-subagent-runner';
 export declare const RUNTIME_ENTRIES: readonly RuntimeEntryV1[];
 /** Canonical runtime prefix. Host declares it; the SDK checks exact equality. */
 export declare function runtimeEntryFixedArgv(kind: RuntimeEntryV1): readonly string[];
@@ -525,7 +599,7 @@ export type RuntimeInstallationReverifyResult = 'ok' | {
     readonly reason: ToolImplementationMeasurementFailure;
     readonly subject: 'artifact' | 'interpreter' | 'asset';
 };
-export type ToolImplementationResolutionV1 = ToolImplementationUnavailableV1 | ToolImplementationInstallRecordV1 | RuntimeImplementationRecordV1;
+export type ToolImplementationResolutionV1 = ToolImplementationUnavailableV1 | ToolImplementationInstallRecordV1 | RuntimeImplementationRecordV1 | OfficialExternalCliInstallV2;
 /**
  * The host's install-record authority.
  *
@@ -562,6 +636,9 @@ export interface ToolImplementationFsProbe {
     realpath(target: string): Promise<string>;
     /** sha256 hex of the file's bytes, streamed. */
     digest(target: string): Promise<string>;
+    /** Synchronous tuple-only supplement; required when this probe is used inside an admission lock. */
+    lstatSync?(target: string): ToolImplementationStatEntry;
+    realpathSync?(target: string): string;
 }
 export declare const realToolImplementationFsProbe: ToolImplementationFsProbe;
 /**
@@ -708,6 +785,8 @@ export declare function resolveRuntimeImplementation(authority: ToolImplementati
 export declare function measureRuntimeInstallation(authority: ToolImplementationAuthority, locator: RuntimeImplementationLocatorV1, probe?: ToolImplementationFsProbe): Promise<RuntimeInstallationMeasurementResultV1>;
 /** Fresh read-only observation, never a pre-spawn authorization or environment claim. */
 export declare function reverifyRuntimeInstallation(measurement: RuntimeInstallationMeasurementV1, probe?: ToolImplementationFsProbe): Promise<RuntimeInstallationReverifyResult>;
+/** Same install parser/measurement as other subjects; no second physical resolver. */
+export declare function measureOfficialExternalCliRecord(value: unknown, launchEnv: LaunchEnvironment, probe?: ToolImplementationFsProbe): Promise<ToolImplementationIdentityV1>;
 /**
  * The one failure that exists only at spawn.
  *
@@ -777,6 +856,14 @@ export type ToolImplementationReverifyResult = 'ok' | {
  */
 export declare function reverifyToolImplementationIdentity(identity: ToolImplementationAttestedV1, launchEnv: Readonly<Record<string, string>>, probe?: ToolImplementationFsProbe): Promise<ToolImplementationReverifyResult>;
 /**
+ * Tuple-only supplement AFTER admission-lock acquisition. It preserves the
+ * physical gate's canonical parent / non-symlink leaf / exact tuple rules,
+ * including hardlink aliases. It never replaces full byte/environment reverify
+ * and does not claim atomicity against a same-UID edit after this check.
+ * A custom test probe without synchronous capabilities fails closed.
+ */
+export declare function reverifyToolImplementationTuples(identity: ToolImplementationAttestedV1, probe?: ToolImplementationFsProbe): ToolImplementationReverifyResult;
+/**
  * Reverify a finite SDK helper with its role-specific lifecycle projection.
  * The descriptor accepts no task lifecycle inputs. The execution entry is the
  * sole attested role that may receive the late-bound memory context and its
@@ -817,6 +904,7 @@ export * from './environment';
 export type { McpLaunchAttestation, ResolvedMcpLaunchCwdLauncher } from './launch-attestation';
 export * from './spawn-binding';
 export * from './descendant-launch';
+export * from './external-cli';
 // ==== @byok-sdk/implementation-identity dist/launch-attestation.d.ts ====
 export type ResolvedMcpLaunchCwdLauncher = 
 /** POSIX: `interpreter` is the realpath of the system shell, `script` is the client-owned shell bootstrap. */

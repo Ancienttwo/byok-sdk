@@ -6,797 +6,515 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
-import { SteerUnsupportedError, type Session } from '../types';
-import { CodexProcessRunner } from '../adapters/codex/process-runner';
-import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
-import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
-import { launchArgvPrefix, trustedLaunchBinding } from './fixtures/launch-cwd';
-
-const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.meta.url));
-
-function fakeCodexAdapter(): CodexAdapter {
-  return new CodexAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }) });
-}
-
-function processExists(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
-  }
-}
-
-function capturingSpawn(
-  captured: string[][],
-  capturedEnvs?: NodeJS.ProcessEnv[],
-): never {
-  return ((command: string, args: string[], options: Parameters<typeof spawn>[2]) => {
-    captured.push([...args]);
-    capturedEnvs?.push(options?.env ?? {});
-    return spawn(command, args, options);
-  }) as never;
-}
-
-async function takeEvents(session: Session, count: number): Promise<AgentEvent[]> {
-  const results: AgentEvent[] = [];
-  for await (const event of session.events) {
-    results.push(event);
-    if (results.length >= count) break;
-  }
-  return results;
-}
-
-/** Drain exactly one turn's events (the fixture's frame count varies per env toggle). */
-async function takeTurn(session: Session): Promise<AgentEvent[]> {
-  const results: AgentEvent[] = [];
-  for await (const event of session.events) {
-    results.push(event);
-    if (event.type === 'turn_end') break;
-  }
-  return results;
-}
-
-/** The MCP half of a codex turn argv: `--ignore-user-config` and every `mcp_servers.*` override. */
-function mcpConfigSlice(argv: readonly string[]): string[] {
-  const slice: string[] = [];
-  for (let index = 0; index < argv.length; index += 1) {
-    if (argv[index] === '--ignore-user-config') slice.push('--ignore-user-config');
-    if (argv[index] === '-c' && argv[index + 1]?.startsWith('mcp_servers.')) slice.push('-c', argv[index + 1]!);
-  }
-  return slice;
-}
-
-async function makeCtx(env: NodeJS.ProcessEnv = process.env): Promise<PreparedOperationResources> {
-  const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-adapter-test-'));
-  return { workspaceDir, policy: { mode: 'auto' }, env };
-}
-
-async function startAdapter(adapter: CodexAdapter, task: TaskOfferPayload, resources: PreparedOperationResources): Promise<Session> {
-  return startPreparedOperation(adapter, task, resources);
-}
-
-const baseTask: TaskOfferPayload = {
-  instruction: 'say hi',
+import type { Session } from '../types';
+import {
+  RuntimeExecutionFailure,
+  RuntimeDisposalFailure,
+  RuntimeStartupDisposalFailure,
+} from '../runtime-failure';
+import {
+  startPreparedOperation,
+  type PreparedOperationResources,
+} from './fixtures/prepared-operation';
+import * as processTree from '../adapters/process-tree';
+import { observationOf } from './fixtures/mcp-observation';
+const fixture = fileURLToPath(
+  new URL('./fixtures/fake-codex.mjs', import.meta.url),
+);
+const sessions: Session[] = [];
+const dirs: string[] = [];
+const task: TaskOfferPayload = {
+  instruction: 'hello',
   policy: { mode: 'auto' },
 };
-
-describe('CodexAdapter against the fake-codex fixture', () => {
-  const openSessions: Session[] = [];
-
-  afterEach(async () => {
-    await Promise.all(openSessions.splice(0).map((s) => s.close()));
-    vi.restoreAllMocks();
+function adapter(options: ConstructorParameters<typeof CodexAdapter>[0] = {}) {
+  return new CodexAdapter({
+    resolveBin: () => ({ command: fixture, source: 'path' }),
+    ...options,
   });
-
-  it('detect() reports present + version + authPresent from the fake binary', async () => {
-    const adapter = fakeCodexAdapter();
-    const result = await adapter.detect();
-    expect(result.kind).toBe('available');
-    if (result.kind !== 'available') throw new Error('expected available runtime');
-    expect(result.version).toBe('codex-cli 0.149.0-fake');
-    expect(result.authPresent).toBe(true);
+}
+async function ctx(
+  env: NodeJS.ProcessEnv = {},
+): Promise<PreparedOperationResources> {
+  const workspaceDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), 'byok-codex-app-'),
+  );
+  dirs.push(workspaceDir);
+  return {
+    workspaceDir,
+    env: { PATH: process.env.PATH, HOME: os.homedir(), ...env },
+    policy: { mode: 'auto' },
+  };
+}
+async function open(
+  a = adapter(),
+  offer = task,
+  resources?: PreparedOperationResources,
+) {
+  const session = await startPreparedOperation(
+    a,
+    offer,
+    resources ?? (await ctx()),
+  );
+  sessions.push(session);
+  return session;
+}
+async function turn(s: Session) {
+  const out: AgentEvent[] = [];
+  for await (const e of s.events) {
+    out.push(e);
+    if (e.type === 'turn_end') break;
+  }
+  return out;
+}
+afterEach(async () => {
+  await Promise.all(sessions.splice(0).map((s) => s.close()));
+  for (const d of dirs.splice(0))
+    await fs.rm(d, { recursive: true, force: true });
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
+describe('Codex persistent app-server adapter', () => {
+  it('detects the pinned version, app-server and native auth', async () => {
+    expect(await adapter().detect()).toEqual({
+      kind: 'available',
+      version: 'codex-cli 0.160.0',
+      authPresent: true,
+    });
   });
-
-  it('detect() reports authPresent:false when the fake binary reports not logged in', async () => {
-    const adapter = fakeCodexAdapter();
-    // detect() spawns the fake binary with `process.env` (via execFile's default), so toggling this
-    // process's own env var is how the fixture's FAKE_CODEX_LOGGED_IN branch gets exercised here.
-    const original = process.env.FAKE_CODEX_LOGGED_IN;
-    process.env.FAKE_CODEX_LOGGED_IN = '0';
-    try {
-      const result = await adapter.detect();
-      expect(result.kind).toBe('available');
-      if (result.kind !== 'available') throw new Error('expected available runtime');
-      expect(result.authPresent).toBe(false);
-    } finally {
-      if (original === undefined) delete process.env.FAKE_CODEX_LOGGED_IN;
-      else process.env.FAKE_CODEX_LOGGED_IN = original;
-    }
+  it('keeps not-logged-in detection honest', async () => {
+    vi.stubEnv('FAKE_CODEX_LOGGED_IN', '0');
+    expect(await adapter().detect()).toMatchObject({
+      kind: 'available',
+      authPresent: false,
+    });
   });
-
-  it('descriptor advertises exactly what the adapter can express (no steer, resume yes, auto+readonly only)', () => {
-    const adapter = fakeCodexAdapter();
-    expect(adapter.descriptor.capabilities).toEqual({
-      steer: false,
+  it('declares steer, resume, no interactive approval and YOLO-only auto', () => {
+    expect(adapter().descriptor.capabilities).toEqual({
+      steer: true,
       resume: true,
-      // S0/H-002: codex exec never emits a needs_approval-equivalent event,
-      // so resolveApproval() throws and this is honestly false.
       approvalInteractive: false,
       mcpToolsets: true,
-      permissionModes: ['auto', 'readonly'],
+      permissionModes: ['auto'],
+    });
+    expect(
+      adapter().descriptor.environmentRequirements.credentialNames,
+    ).toEqual([]);
+  });
+  it('detect returns typed refusal for unqualified versions', async () => {
+    vi.stubEnv('FAKE_CODEX_VERSION', 'codex-cli 0.159.1');
+    expect(await adapter().detect()).toEqual({
+      kind: 'refused',
+      reason: 'runtime_version_unsupported',
     });
   });
-
-  it('descriptor declares no credential env vars (M5 — same deliberate ToS posture as claude: codex authenticates via its own OAuth session, not an env var)', () => {
-    const adapter = fakeCodexAdapter();
-    expect(adapter.descriptor.environmentRequirements).toEqual({ credentialNames: [] });
-  });
-
-  it('a failed handshake waits for disposal and retains a retryable owner when disposal fails', async () => {
-    const actualDispose = CodexProcessRunner.prototype.dispose;
-    let runner: CodexProcessRunner | undefined;
-    const disposal = vi.spyOn(CodexProcessRunner.prototype, 'dispose').mockImplementationOnce(function (this: CodexProcessRunner) {
-      runner = this;
-      return Promise.reject(new Error('injected disposal failure'));
+  it('detect refuses a missing app-server subcommand', async () => {
+    vi.stubEnv('FAKE_CODEX_NO_APP_SERVER', '1');
+    expect(await adapter().detect()).toEqual({
+      kind: 'refused',
+      reason: 'app_server_unavailable',
     });
-    try {
-      const ctx = await makeCtx({ ...process.env, FAKE_CODEX_NO_THREAD_STARTED: '1' });
-      const error = await startAdapter(fakeCodexAdapter(), baseTask, ctx).catch(error => error);
-      expect(disposal).toHaveBeenCalledTimes(1);
-      expect(error).toBeInstanceOf(RuntimeStartupDisposalFailure);
-      disposal.mockRestore();
-      await expect(error.retryDisposal()).resolves.toBeUndefined();
-    } finally {
-      disposal.mockRestore();
-      if (runner) await actualDispose.call(runner);
-    }
   });
-
-  it('start() resolves sessionRef from thread.started and drives the canned sequence into normalized AgentEvents', async () => {
-    const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx();
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-
-    expect(session.sessionRef).toBe('fake-thread-1');
-
-    const events = await takeEvents(session, 7);
-    expect(events).toEqual([
-      { type: 'error', message: 'Exceeded skills context budget of 2%. All skill descriptions were removed and 54 additional skills were not included in the model-visible skills list.' },
-      { type: 'progress', text: 'Running the command now.' },
-      { type: 'tool_use', tool: 'command_execution', input: { command: '/bin/sh -c "echo hi"' }, toolCallId: 'item_2' },
-      {
-        type: 'tool_result',
-        tool: 'command_execution',
-        output: { command: '/bin/sh -c "echo hi"', aggregatedOutput: 'hi\n', exitCode: 0, status: 'completed' },
-        toolCallId: 'item_2',
+  it.each([
+    { mode: 'readonly' },
+    { mode: 'confirm' },
+    { mode: 'plan' },
+    { mode: 'auto', network: false },
+    { mode: 'auto', allowTools: ['Bash'] },
+    { mode: 'auto', denyTools: ['Read'] },
+  ] satisfies NonNullable<TaskOfferPayload['policy']>[])(
+    'rejects effective policy before bin/spawn effects: %j',
+    async (policy) => {
+      const resolveBin = vi.fn(() => ({
+        command: fixture,
+        source: 'path' as const,
+      }));
+      const a = new CodexAdapter({ resolveBin });
+      const r = await a.prepare({
+        offer: { ...task, policy },
+        policy,
+        descriptor: a.descriptor,
+        requiredToolsetIds: [],
+      });
+      expect(r.kind).toBe('reject');
+      expect(resolveBin).not.toHaveBeenCalled();
+    },
+  );
+  it.each([undefined, true])('allows auto with network=%s', async (network) => {
+    const resources = await ctx();
+    resources.policy = {
+      mode: 'auto',
+      ...(network === undefined ? {} : { network }),
+    };
+    const s = await open(
+      adapter(),
+      { ...task, policy: resources.policy },
+      resources,
+    );
+    expect((await turn(s)).at(-1)?.type).toBe('turn_end');
+  });
+  it('opens a native thread and projects structured command/progress/usage before terminal', async () => {
+    const s = await open();
+    expect(s.sessionRef).toBe('fake-thread-1');
+    const events = await turn(s);
+    expect(events).toContainEqual({
+      type: 'tool_use',
+      tool: 'command_execution',
+      toolCallId: 'cmd-1',
+      input: { command: 'echo hello' },
+    });
+    expect(events).toContainEqual({
+      type: 'tool_result',
+      tool: 'command_execution',
+      toolCallId: 'cmd-1',
+      output: {
+        command: 'echo hello',
+        aggregatedOutput: 'hello\n',
+        exitCode: 0,
+        status: 'completed',
       },
-      { type: 'progress', text: 'Done.' },
-      // Pre-freeze protocol addition: turn.completed.usage now maps to a
-      // usage AgentEvent (emitted before turn_end — see events.ts's
-      // mapCodexEventToAgentEvents doc comment on why the ordering matters).
-      { type: 'usage', inputTokens: 100, cachedInputTokens: 0, outputTokens: 10, reasoningTokens: 0 },
+    });
+    expect(events).toContainEqual({
+      type: 'progress',
+      text: 'hello from fake codex',
+    });
+    expect(events.slice(-2)).toEqual([
+      {
+        type: 'usage',
+        inputTokens: 100,
+        cachedInputTokens: 20,
+        outputTokens: 10,
+        reasoningTokens: 2,
+        contextTokens: 110, contextWindow: 10000, contextSource: 'provider',
+      },
       { type: 'turn_end' },
     ]);
   });
-
-  it('retains --skip-git-repo-check for a plain workspace without changing argv ordering', async () => {
-    const captured: string[][] = [];
-    const adapter = new CodexAdapter({
-      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
-      spawnFn: capturingSpawn(captured),
-    });
-    const ctx = await makeCtx();
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-    await takeEvents(session, 7);
-
-    expect(captured[0]).toEqual([
-      'exec',
-      '--json',
-      '--skip-git-repo-check',
-      '-c',
-      'sandbox_mode=workspace-write',
-      '-c',
-      'approval_policy=never',
-      '-',
-    ]);
+  it('uses thread/resume without migrating thread identity', async () => {
+    const s = await open(adapter(), { ...task, sessionRef: 'fake-thread-1' });
+    expect(s.sessionRef).toBe('fake-thread-1');
+    await turn(s);
   });
-
-  it('projects task-scoped MCP command, args, and sealed env through Codex config overrides', async () => {
-    const captured: string[][] = [];
-    const envs: NodeJS.ProcessEnv[] = [];
-    const adapter = new CodexAdapter({
-      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
-      spawnFn: capturingSpawn(captured, envs),
-    });
-    const ctx = await makeCtx();
-    ctx.mcpServers = {
-      byokagentmessage: {
-        command: '/opt/byok-agent-message-mcp',
-        args: ['--stdio'],
-        env: { BYOK_AGENT_MESSAGE_CONTEXT: 'sealed-context' },
-      },
-    };
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-    await takeEvents(session, 7);
-    expect(captured[0]!.join(' ')).not.toContain('sealed-context');
-    expect(captured[0]!.at(-1)).toBe('-');
-    const key = Object.keys(envs[0]!).find(name => name.startsWith('BYOK_MCP_PAYLOAD_'))!;
-    expect(JSON.parse(envs[0]![key]!)).toEqual(ctx.mcpServers.byokagentmessage);
-    expect(captured[0]).toContain(`mcp_servers.byokagentmessage.env_vars=${JSON.stringify([key])}`);
-
-    // Codex spawns the `mcp-env` helper itself and `mcp_servers.*` has no cwd
-    // field, so the helper is reached through the SDK's launcher, which chdirs
-    // into the daemon's proven-non-writable directory before exec'ing it. The
-    // real server inherits that directory from the helper, and the operator's
-    // own command/args never leave the sealed env payload.
-    const launch = await trustedLaunchBinding();
-    const commandArg = captured[0]!.find((arg) => arg.startsWith('mcp_servers.byokagentmessage.command='))!;
-    const argsArg = captured[0]!.find((arg) => arg.startsWith('mcp_servers.byokagentmessage.args='))!;
-    expect(JSON.parse(commandArg.slice('mcp_servers.byokagentmessage.command='.length)))
-      .toBe(launch.launcher!.interpreter);
-    const wrappedArgs = JSON.parse(argsArg.slice('mcp_servers.byokagentmessage.args='.length)) as string[];
-    const prefix = launchArgvPrefix(launch);
-    expect(wrappedArgs.slice(0, prefix.length)).toEqual(prefix);
-    expect(wrappedArgs.length).toBeGreaterThan(prefix.length);
+  it('refuses an unresolvable resume without hanging or fabricating id', async () => {
+    await expect(
+      open(adapter(), { ...task, sessionRef: 'absent' }),
+    ).rejects.toThrow('no rollout found');
   });
-
-  it('replays the first turn\'s exact MCP config argv on a resumed turn, so the MCP tool still resolves', async () => {
-    const captured: string[][] = [];
-    const adapter = new CodexAdapter({
-      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
-      spawnFn: capturingSpawn(captured),
-    });
-    // The fixture calls this MCP tool on EVERY turn and refuses the call —
-    // exactly like real codex under `approval_policy=never` — unless that
-    // turn's own argv carries the full grant. A resume that drops the MCP
-    // config therefore fails the turn instead of passing quietly.
-    const ctx = await makeCtx({ ...process.env, FAKE_CODEX_MCP_TOOL_CALL: 'byokagentmessage/send_agent_message' });
-    ctx.mcpServers = {
-      byokagentmessage: {
-        command: '/opt/byok-agent-message-mcp',
-        args: ['--stdio'],
-        env: { BYOK_AGENT_MESSAGE_CONTEXT: 'sealed-context' },
-      },
-    };
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-    const firstTurn = await takeTurn(session);
-    expect(firstTurn.some((event) => event.type === 'progress' && event.text === 'called byokagentmessage.send_agent_message')).toBe(true);
-
-    await session.followUp({ instruction: 'follow up', policy: { mode: 'auto' } });
-    const secondTurn = await takeTurn(session);
-    expect(secondTurn.some((event) => event.type === 'progress' && event.text === 'called byokagentmessage.send_agent_message')).toBe(true);
-    // The fixture's refusal shape (`error` + `turn.failed`, no
-    // `turn.completed`) would have ended this turn without a `turn_end`.
-    expect(secondTurn.at(-1)).toEqual({ type: 'turn_end' });
-
-    expect(captured[1]!.join(' ')).not.toContain('sealed-context');
-    expect(captured[1]!.at(-1)).toBe('-');
-
-    // Byte-identical, not merely equivalent: the resume replays the exact
-    // argv the first turn was launched with.
-    expect(mcpConfigSlice(captured[1]!)).toEqual(mcpConfigSlice(captured[0]!));
-    expect(mcpConfigSlice(captured[0]!).length).toBeGreaterThan(0);
+  it('rejects a resumed reply with a different authoritative thread id', async () => {
+    await expect(
+      open(
+        adapter(),
+        { ...task, sessionRef: 'fake-thread-1' },
+        await ctx({ FAKE_CODEX_REPORTED_THREAD_ID: 'other' }),
+      ),
+    ).rejects.toThrow('different thread id');
   });
-
-  it('resumes with no MCP config args at all when the session started without MCP servers', async () => {
-    const captured: string[][] = [];
-    const adapter = new CodexAdapter({
-      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
-      spawnFn: capturingSpawn(captured),
-    });
-    const session = await startAdapter(adapter, baseTask, await makeCtx());
-    openSessions.push(session);
-    await takeTurn(session);
-    await session.followUp({ instruction: 'follow up', policy: { mode: 'auto' } });
-    await takeTurn(session);
-
-    expect(captured[1]).toEqual([
-      'exec', 'resume', 'fake-thread-1', '--json', '--skip-git-repo-check',
-      '-c', 'sandbox_mode=workspace-write',
-      '-c', 'approval_policy=never',
-      '-',
-    ]);
-    expect(mcpConfigSlice(captured[1]!)).toEqual([]);
+  it('does not fabricate a missing thread id', async () => {
+    await expect(
+      open(adapter(), task, await ctx({ FAKE_CODEX_NO_THREAD_STARTED: '1' })),
+    ).rejects.toThrow('no thread id');
   });
-
-  it('passes the subscription selection model to Codex on the exact turn argv', async () => {
-    const captured: string[][] = [];
-    const capturedEnvs: NodeJS.ProcessEnv[] = [];
-    const adapter = new CodexAdapter({
-      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
-      spawnFn: capturingSpawn(captured, capturedEnvs),
-    });
-    const session = await startAdapter(adapter,
+  it('startup crash gives typed failure and owned teardown', async () => {
+    await expect(
+      open(
+        adapter(),
+        task,
+        await ctx({ FAKE_CODEX_CRASH_WITH_STDERR: 'crash' }),
+      ),
+    ).rejects.toBeInstanceOf(RuntimeExecutionFailure);
+  });
+  it('plain and prepared Git workspaces use the same sealed cwd, with no exec skip-git arguments', async () => {
+    for (const git of [false, true]) {
+      const captures: string[][] = [];
+      const resources = await ctx();
+      if (git) resources.gitWorkspace = { workspaceId: 'w' };
+      const s = await open(
+        adapter({
+          spawnFn: ((
+            cmd: string,
+            args: string[],
+            opts: Parameters<typeof spawn>[2],
+          ) => {
+            captures.push(args);
+            return spawn(cmd, args, opts);
+          }) as typeof spawn,
+        }),
+        task,
+        resources,
+      );
+      await turn(s);
+      expect(captures[0]).toContain('app-server');
+      expect(captures[0]).not.toContain('exec');
+      expect(captures[0]).not.toContain('--skip-git-repo-check');
+    }
+  });
+  it('passes model in the authoritative thread/start payload, not CLI argv', async () => {
+    const resources = await ctx();
+    const file = path.join(resources.workspaceDir, 'rpc.jsonl');
+    resources.env.FAKE_CODEX_RPC_RECEIPT = file;
+    const s = await open(
+      adapter(),
       {
-        ...baseTask,
+        ...task,
         dispatchSelection: {
           lane: 'subscription',
           runtimeId: 'codex',
           providerId: null,
-          modelId: 'gpt-5.6-sol',
+          modelId: 'wanted',
         },
       },
-      await makeCtx({ ...process.env, OPENAI_API_KEY: 'sk-sentinel' }),
+      resources,
     );
-    openSessions.push(session);
-    await takeEvents(session, 7);
-    expect(captured[0]?.slice(0, 5)).toEqual([
-      'exec',
-      '--json',
-      '--model',
-      'gpt-5.6-sol',
-      '--skip-git-repo-check',
-    ]);
-    expect(capturedEnvs[0]?.OPENAI_API_KEY).toBeUndefined();
-
-    await session.followUp({ instruction: 'same model', policy: { mode: 'auto' } });
-    await takeEvents(session, 7);
-    expect(captured[1]?.slice(0, 8)).toEqual([
-      'exec',
-      'resume',
-      'fake-thread-1',
-      '--json',
-      '--model',
-      'gpt-5.6-sol',
-      '--skip-git-repo-check',
-      '-c',
-    ]);
-
-    await expect(session.followUp({
-      instruction: 'different model',
-      policy: { mode: 'auto' },
-      dispatchSelection: {
-        lane: 'subscription',
-        runtimeId: 'codex',
-        providerId: null,
-        modelId: 'gpt-other',
-      },
-    })).rejects.toThrow(/persistent session cannot change model/);
-    expect(captured).toHaveLength(2);
-  });
-
-  it('omits only --skip-git-repo-check for a prepared Git workspace on fresh and resume turns', async () => {
-    const captured: string[][] = [];
-    const adapter = new CodexAdapter({
-      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
-      spawnFn: capturingSpawn(captured),
-    });
-    const ctx = await makeCtx({ ...process.env, FAKE_CODEX_THREAD_ID: 'prepared-thread' });
-    ctx.gitWorkspace = { workspaceId: 'workspace-1', baseline: 'abc123' };
-
-    const fresh = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(fresh);
-    await takeEvents(fresh, 7);
-
-    const resumed = await startAdapter(adapter, { ...baseTask, sessionRef: 'prepared-thread' }, ctx);
-    openSessions.push(resumed);
-    await takeEvents(resumed, 7);
-
-    expect(captured).toEqual([
-      [
-        'exec',
-        '--json',
-        '-c',
-        'sandbox_mode=workspace-write',
-        '-c',
-        'approval_policy=never',
-        '-',
-      ],
-      [
-        'exec',
-        'resume',
-        'prepared-thread',
-        '--json',
-        '-c',
-        'sandbox_mode=workspace-write',
-        '-c',
-        'approval_policy=never',
-        '-',
-      ],
-    ]);
-  });
-
-  it('a task.offer carrying a known sessionRef resumes via `codex exec resume`, keeping the same sessionRef', async () => {
-    const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx({ ...process.env, FAKE_CODEX_THREAD_ID: 'resume-me-123' });
-    const task: TaskOfferPayload = { ...baseTask, sessionRef: 'resume-me-123' };
-    const session = await startAdapter(adapter, task, ctx);
-    openSessions.push(session);
-    expect(session.sessionRef).toBe('resume-me-123');
-    await takeEvents(session, 7); // drain the full turn, including the trailing usage + turn_end
-  });
-
-  it("an unresolvable sessionRef surfaces codex's real resume rejection as a clean start() failure, not a hang", async () => {
-    const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx(); // FAKE_CODEX_THREAD_ID defaults to 'fake-thread-1' — this ref never matches it
-    const task: TaskOfferPayload = { ...baseTask, sessionRef: 'some-other-unknown-id' };
-    await expect(startAdapter(adapter, task, ctx)).rejects.toThrow(/no rollout found/);
-  });
-
-  it('cross-model review (Fix 2): fails closed when codex resume echoes a thread id different from the one requested (never silently continues in a possibly-wrong session)', async () => {
-    const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx({
-      ...process.env,
-      FAKE_CODEX_THREAD_ID: 'resume-me-123', // what the resume-target validation checks against (so the resume itself "succeeds")
-      FAKE_CODEX_REPORTED_THREAD_ID: 'some-other-thread', // but thread.started reports a DIFFERENT id
-    });
-    const task: TaskOfferPayload = { ...baseTask, sessionRef: 'resume-me-123' };
-    let failure: unknown;
-    try {
-      await startAdapter(adapter, task, ctx);
-    } catch (error) {
-      failure = error;
-    }
-    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ phase: 'start', category: 'authority', retry: 'non-retryable' });
-    expect(failure).toHaveProperty('message', expect.stringMatching(/echoed a different thread id than requested/));
-  });
-
-  it('fails closed (never a fabricated sessionRef) when codex does not yield thread.started as its first event', async () => {
-    const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx({ ...process.env, FAKE_CODEX_NO_THREAD_STARTED: '1' });
-    await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/did not yield thread\.started/);
-  });
-
-  it('surfaces stderr context in the start() failure when codex exits immediately (bad-flag/crash shape)', async () => {
-    const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx({ ...process.env, FAKE_CODEX_CRASH_WITH_STDERR: 'Error: Unknown option: --bogus' });
-    let failure: unknown;
-    try {
-      await startAdapter(adapter, baseTask, ctx);
-    } catch (error) {
-      failure = error;
-    }
-    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ phase: 'start', category: 'infrastructure', retry: 'retryable' });
-    expect(failure).toHaveProperty('message', expect.stringMatching(/Unknown option: --bogus/));
-  });
-
-  it('maps turn.failed to a diagnostic error, then typed semantic non-retryable terminal evidence', async () => {
-    const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx({ ...process.env, FAKE_CODEX_TURN_FAILS: '1', FAKE_CODEX_FAIL_MESSAGE: 'model rejected the request' });
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-
-    // 4 mapped events total: the always-present skills-budget notice, the
-    // "attempting..." progress message, the top-level error, and
-    // turn.failed's own diagnostic — never a turn_end. The subsequent fresh
-    // iterator observes the shared typed terminal authority.
-    const events = await takeEvents(session, 4);
-    expect(events.some((e) => e.type === 'turn_end')).toBe(false);
-    expect(events).toContainEqual({ type: 'progress', text: 'attempting...' });
-    expect(events).toContainEqual({ type: 'error', message: 'model rejected the request' });
-    await expect(async () => {
-      for await (const _event of session.events) void _event;
-    }).rejects.toMatchObject({ phase: 'run', category: 'semantic', retry: 'non-retryable' });
-  });
-
-  it('cross-model review (Fix 1): fake-codex exits after a partial turn with NO terminal event at all — the event stream ENDS (not a hang) and surfaces a synthetic error with stderr context', async () => {
-    const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx({ ...process.env, FAKE_CODEX_EXIT_NO_TERMINAL: '1' });
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-
-    // A bare, UNBOUNDED for-await here is the whole point: pre-fix, this is
-    // exactly what the reviewer reproduced hanging forever ("process exited,
-    // 250ms later next() still pending"). If this regresses, the test fails
-    // via vitest's own per-test timeout below rather than hanging the suite.
-    const events: AgentEvent[] = [];
-    let failure: unknown;
-    try {
-      for await (const event of session.events) events.push(event);
-    } catch (error) {
-      failure = error;
-    }
-
-    expect(events.some((e) => e.type === 'turn_end')).toBe(false);
-    expect(events).toContainEqual({ type: 'tool_use', tool: 'command_execution', input: { command: '/bin/sh -c "long-running-thing"' }, toolCallId: 'item_1' });
-    const lastEvent = events[events.length - 1] as { type: string; message?: string };
-    expect(lastEvent.type).toBe('error');
-    expect(lastEvent.message).toMatch(/exited without completing the turn/);
-    expect(lastEvent.message).toMatch(/worker crashed unexpectedly/); // stderr ring context, per buildExitError
-    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ phase: 'run', category: 'infrastructure', retry: 'retryable' });
-  }, 5000);
-
-  it('FAKE_CODEX_ARTIFACT_NAME drives a real file write + an artifact AgentEvent with a workspace-relative name', async () => {
-    const adapter = fakeCodexAdapter();
-    const artifactName = 'output/result.txt';
-    const ctx = await makeCtx({ ...process.env, FAKE_CODEX_ARTIFACT_NAME: artifactName, FAKE_CODEX_ARTIFACT_CONTENT: 'artifact body\n' });
-    await fs.mkdir(path.join(ctx.workspaceDir, 'output'), { recursive: true });
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-
-    // 10 mapped events: skills-budget error, progress, tool_use+tool_result
-    // for the shell command, tool_use+(tool_result+artifact) for the file
-    // change, a final progress, then usage, then turn_end.
-    const events = await takeEvents(session, 10);
-    const artifactEvent = events.find((e) => e.type === 'artifact');
-    expect(artifactEvent).toEqual({ type: 'artifact', name: artifactName, contentType: 'text/plain' });
-    expect(events).toContainEqual({ type: 'turn_end' });
-
-    const written = await fs.readFile(path.join(ctx.workspaceDir, artifactName), 'utf8');
-    expect(written).toBe('artifact body\n');
-  });
-
-  it('followUp() spawns a new resume turn and pushes more events into the same events stream', async () => {
-    const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx();
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-    await takeEvents(session, 7); // drain the first turn (including usage + turn_end)
-
-    await session.followUp({ instruction: 'now do more', policy: { mode: 'auto' } });
-    const followUpEvents = await takeEvents(session, 7);
-    expect(followUpEvents).toContainEqual({ type: 'turn_end' });
-    expect(followUpEvents.filter((e) => e.type === 'turn_end')).toHaveLength(1);
-    expect(followUpEvents).toContainEqual({ type: 'usage', inputTokens: 100, cachedInputTokens: 0, outputTokens: 10, reasoningTokens: 0 });
-  });
-
-  it('cross-model re-review (Fix 2): followUp() fails closed when codex resume echoes a DIFFERENT thread id than the one it asked to resume — never silently migrates this session\'s identity', async () => {
-    const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx({ ...process.env, FAKE_CODEX_THREAD_ID: 'thread-a' });
-    const session = await startAdapter(adapter, baseTask, ctx); // fresh start, no resume requested
-    openSessions.push(session);
-    expect(session.sessionRef).toBe('thread-a');
-    await takeEvents(session, 7);
-
-    // Turn 2: codex resumes 'thread-a' successfully (the fixture's own
-    // resume-target validation still checks against FAKE_CODEX_THREAD_ID, so
-    // the resume itself "succeeds") but THIS run reports a DIFFERENT thread
-    // id ('thread-b') on its own thread.started — e.g. codex silently
-    // re-keyed the thread on resume. A previous wave's followUp() adopted
-    // this as the new sessionRef; this cross-model re-review found that
-    // silently migrates identity instead of failing closed — codex has no
-    // documented contract for re-keying a thread on resume, so a mismatch
-    // must be treated as an error, never silently adopted.
-    ctx.env.FAKE_CODEX_REPORTED_THREAD_ID = 'thread-b';
-    await expect(session.followUp({ instruction: 'turn 2', policy: { mode: 'auto' } })).rejects.toThrow(
-      /echoed a different thread id than requested/,
+    await turn(s);
+    const frames = (await fs.readFile(file, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(frames.find((f) => f.method === 'thread/start').params.model).toBe(
+      'wanted',
     );
-
-    // The session's own identity is UNCHANGED by the failed attempt — never
-    // migrated to the mismatched id.
-    expect(session.sessionRef).toBe('thread-a');
-
-    // And the session remains otherwise usable afterward: a later followUp()
-    // whose reflected id actually matches what it asked to resume succeeds
-    // normally, proving the failed attempt didn't corrupt the session.
-    delete ctx.env.FAKE_CODEX_REPORTED_THREAD_ID;
-    await expect(session.followUp({ instruction: 'turn 3', policy: { mode: 'auto' } })).resolves.toBeUndefined();
-    expect(session.sessionRef).toBe('thread-a');
   });
-
-  it('M4 Fix 2: followUp() failing on a session-identity mismatch ends the shared queue so an in-flight/subsequent consumer terminates instead of hanging forever', async () => {
-    const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx({ ...process.env, FAKE_CODEX_THREAD_ID: 'thread-a' });
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-    await takeEvents(session, 7); // drain turn 1
-
-    // Pre-fix, confirmed empirically with a diagnostic unbounded for-await
-    // here: it never returned on its own (only vitest's own afterEach —
-    // which calls session.close() on every pushed session regardless of
-    // pass/fail — eventually unblocked it, well after this test had already
-    // failed on its OWN timeout). Whether the mismatched turn's own onEvent
-    // processing happens to reach turn.completed before runCodexTurn's
-    // mismatch check runs (racing the child's stdout delivery against the
-    // "await sessionRef" continuation) decides whether 0 or 7 of ITS events
-    // are already buffered by the time this runs — not something this test
-    // pins down either way. A bounded (test-timeout-only) unbounded
-    // for-await, exactly like the "cross-model review (Fix 1)" test above,
-    // so a regression here fails loudly instead of hanging the whole suite.
-    ctx.env.FAKE_CODEX_REPORTED_THREAD_ID = 'thread-b';
-    await expect(session.followUp({ instruction: 'turn 2', policy: { mode: 'auto' } })).rejects.toThrow(
-      /echoed a different thread id than requested/,
-    );
-
-    // Drain whatever this (possibly-mismatched) turn's own onEvent
-    // processing already pushed before the identity check ran — race-
-    // dependent (0 or more items), and not what this test asserts on.
-    await expect(async () => {
-      for await (const _drained of session.events) void _drained;
-    }).rejects.toMatchObject({ phase: 'run', category: 'authority', retry: 'non-retryable' });
-
-    // The property this fix actually guarantees: the queue is DURABLY ended,
-    // not just lucky once — a second, entirely fresh for-await over the same
-    // session.events (a new iterator, same underlying queue) also completes
-    // immediately with nothing further, rather than hanging on its own first
-    // next() call.
-    const secondPass: AgentEvent[] = [];
-    await expect(async () => {
-      for await (const event of session.events) secondPass.push(event);
-    }).rejects.toBeInstanceOf(RuntimeExecutionFailure);
-  }, 5000);
-
-  it('M4 Fix 2: followUp() failing on a session-identity mismatch terminates the events stream promptly even when the underlying process would otherwise hang, and close() afterward still resolves cleanly', async () => {
-    const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx({ ...process.env, FAKE_CODEX_THREAD_ID: 'thread-a', FAKE_CODEX_HANG: '1' });
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-    await takeEvents(session, 1); // only the skills-budget notice arrives before the fixture hangs
-
-    // Here the mismatched turn's own process never reaches turn.completed on
-    // its own (FAKE_CODEX_HANG keeps it alive via setInterval) —
-    // runCodexTurn's mismatch branch SIGTERMs it, but the process actually
-    // exiting (`waitClosed()` resolving) is a real async round-trip through
-    // the OS. This fix's `this.queue.end()` runs synchronously in
-    // followUp()'s own catch, the instant the mismatch is detected — it does
-    // not wait for that round-trip, so the stream terminates immediately
-    // rather than only once the killed process eventually exits. If the kill
-    // itself silently failed to land, `close()` below (via a fresh SIGTERM)
-    // would be this test's last chance to end it before the bound below.
-    ctx.env.FAKE_CODEX_REPORTED_THREAD_ID = 'thread-b';
-    await expect(session.followUp({ instruction: 'turn 2', policy: { mode: 'auto' } })).rejects.toThrow(
-      /echoed a different thread id than requested/,
-    );
-
-    await expect(async () => {
-      for await (const _drained of session.events) void _drained;
-    }).rejects.toMatchObject({ phase: 'run', category: 'authority', retry: 'non-retryable' });
-
-    const secondPass: AgentEvent[] = [];
-    await expect(async () => {
-      for await (const event of session.events) secondPass.push(event);
-    }).rejects.toBeInstanceOf(RuntimeExecutionFailure);
-
-    // The other half of "child/runner is cleaned up": close() (which
-    // SIGTERMs whatever `currentRunner` still refers to — here, turn 1's own
-    // still-hanging runner, since the failed turn 2 never got a chance to
-    // replace it) resolves cleanly rather than hanging waiting on anything
-    // this fix left dangling.
-    await expect(session.close()).resolves.toBeUndefined();
-  }, 5000);
-
-  it('followUp() fails closed on a policy codex cannot express, without disturbing the already-open session', async () => {
-    const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx();
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-    await takeEvents(session, 7);
-
-    await expect(session.followUp({ instruction: 'x', policy: { mode: 'confirm' } })).rejects.toThrow(/cannot express permission mode "confirm"/);
-  });
-
-  it('followUp() fails closed on a blob-ref instruction', async () => {
-    const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx();
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-    await takeEvents(session, 7);
-
-    await expect(
-      session.followUp({
-        instruction: { blobRef: { blobId: 'b1', contentHash: 'sha256:x', size: 10, contentType: 'text/plain' } },
-        policy: { mode: 'auto' },
+  it('followUp uses one persistent process and the same event stream', async () => {
+    let starts = 0;
+    const s = await open(
+      adapter({
+        spawnFn: ((...args: Parameters<typeof spawn>) => {
+          starts++;
+          return spawn(...args);
+        }) as typeof spawn,
       }),
-    ).rejects.toThrow(/only supports string instructions/);
+    );
+    await turn(s);
+    await s.followUp({ ...task, instruction: 'next' });
+    expect((await turn(s)).at(-1)?.type).toBe('turn_end');
+    expect(starts).toBe(1);
   });
-
-  it('fails closed on a policy codex cannot express, without ever spawning a process', async () => {
-    const spawnFn = vi.fn();
-    const adapter = new CodexAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }), spawnFn: spawnFn as never });
-    const ctx = await makeCtx();
-    ctx.policy = { mode: 'plan' };
-    await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/cannot express permission mode "plan"/);
-    expect(spawnFn).not.toHaveBeenCalled();
+  it('followUp rejects changed policy and blob-ref input without touching the open session', async () => {
+    const s = await open();
+    await turn(s);
+    await expect(
+      s.followUp({ ...task, policy: { mode: 'readonly' } }),
+    ).rejects.toThrow('policy');
+    await expect(
+      s.followUp({ ...task, instruction: { blobId: 'b' } as never }),
+    ).rejects.toThrow('string');
+    await s.followUp({ ...task, instruction: 'valid' });
+    await turn(s);
   });
-
-  it('prepares a valid blob-ref without fetching it; TaskRunner resolves its string after claim', async () => {
-    const adapter = fakeCodexAdapter();
-    const task: TaskOfferPayload = {
-      ...baseTask,
-      instruction: { blobRef: { blobId: 'b1', contentHash: `sha256:${'0'.repeat(64)}`, size: 10, contentType: 'text/plain' } },
-    };
-    await expect(adapter.prepare({
-      offer: task,
-      policy: task.policy,
-      descriptor: adapter.descriptor,
-      requiredToolsetIds: [],
-    })).resolves.toMatchObject({ kind: 'prepared' });
-  });
-
-  it('interrupt() SIGTERMs a hanging turn and close() tears it down cleanly (no hang, no orphaned process)', async () => {
-    const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx({ ...process.env, FAKE_CODEX_HANG: '1' });
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-
-    // Only the benign skills-budget notice arrives before the fixture hangs.
-    const events = await takeEvents(session, 1);
-    expect(events).toEqual([
-      { type: 'error', message: 'Exceeded skills context budget of 2%. All skill descriptions were removed and 54 additional skills were not included in the model-visible skills list.' },
-    ]);
-
-    await expect(session.interrupt()).resolves.toBeUndefined();
-    await expect(session.close()).resolves.toBeUndefined();
-  });
-
-  it('close() is idempotent', async () => {
-    const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx();
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-    await takeEvents(session, 7);
-    await session.close();
-    await expect(session.close()).resolves.toBeUndefined();
-  });
-
-  it('close() joins an in-flight followUp spawn before proving session quiescence', async () => {
-    const env = { ...process.env };
-    const children: ReturnType<typeof spawn>[] = [];
-    const adapter = new CodexAdapter({
-      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
-      spawnFn: ((command: string, args: string[], options: Parameters<typeof spawn>[2]) => {
-        const child = spawn(command, args, options);
-        children.push(child);
-        return child;
-      }) as never,
+  it('projection failures are typed run authority failures, not swallowed observer exceptions', async () => {
+    const s = await open(
+      adapter(),
+      task,
+      await ctx({ FAKE_CODEX_MISSING_TOOL_ID: '1' }),
+    );
+    await expect(turn(s)).rejects.toMatchObject({
+      phase: 'run',
+      category: 'authority',
+      retry: 'non-retryable',
     });
-    const ctx = await makeCtx(env);
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-    await takeEvents(session, 7);
-
-    env.FAKE_CODEX_HANG_BEFORE_THREAD = '1';
-    const followUp = session.followUp({ instruction: 'race close', policy: { mode: 'auto' } });
-    await vi.waitFor(() => expect(children).toHaveLength(2));
-    const followUpPid = children[1]?.pid;
-    expect(followUpPid).toBeGreaterThan(0);
-
-    await expect(session.close()).resolves.toBeUndefined();
-    await expect(followUp).rejects.toBeInstanceOf(Error);
-    expect(processExists(followUpPid!)).toBe(false);
   });
-
-  it('steer() throws a typed SteerUnsupportedError rather than silently no-op-ing (codex exec has no in-band mid-turn channel)', async () => {
-    const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx();
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-    await expect(session.steer('inject this')).rejects.toBeInstanceOf(SteerUnsupportedError);
-    await expect(session.steer('inject this')).rejects.toThrow(/does not support steer/);
-    await expect(session.steer('inject this')).rejects.toMatchObject({ runtimeId: 'codex' });
+  it('turn failure exposes error then typed semantic terminal failure', async () => {
+    const s = await open(
+      adapter(),
+      task,
+      await ctx({
+        FAKE_CODEX_TURN_FAILS: '1',
+        FAKE_CODEX_FAIL_MESSAGE: 'quota',
+      }),
+    );
+    const out: AgentEvent[] = [];
+    await expect(
+      (async () => {
+        for await (const e of s.events) out.push(e);
+      })(),
+    ).rejects.toMatchObject({ category: 'semantic', retry: 'non-retryable' });
+    expect(out.some((e) => e.type === 'error' && e.message === 'quota')).toBe(
+      true,
+    );
+    expect(out.some((e) => e.type === 'turn_end')).toBe(false);
   });
-
-  it('resolveApproval() throws honestly rather than silently no-op-ing (codex exec never emits needs_approval)', async () => {
-    const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx();
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-    await expect(session.resolveApproval(true)).rejects.toThrow(/does not support approval resume/);
+  it('unexpected process exit closes the stream with typed infrastructure failure', async () => {
+    const s = await open(
+      adapter(),
+      task,
+      await ctx({ FAKE_CODEX_EXIT_NO_TERMINAL: '1' }),
+    );
+    await expect(turn(s)).rejects.toMatchObject({ category: 'infrastructure' });
   });
-
-  it('unmapped-frame accounting: a genuinely unrecognized frame type does not break the stream and is logged once', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const adapter = fakeCodexAdapter();
-    const ctx = await makeCtx({ ...process.env, FAKE_CODEX_UNMAPPED_TYPE: '1' });
-    const session = await startAdapter(adapter, baseTask, ctx);
-    openSessions.push(session);
-
-    const events = await takeEvents(session, 7); // the 2 unmapped frames are silently absorbed, not pushed
-    expect(events.every((e) => (e as { type: string }).type !== undefined)).toBe(true);
-    expect(events).toContainEqual({ type: 'turn_end' });
-
-    const unmappedWarnings = warnSpy.mock.calls.filter((call) => String(call[0]).includes('no AgentEvent mapping'));
-    expect(unmappedWarnings.length).toBeGreaterThanOrEqual(2); // one for the unknown item type, one for the unknown top-level type
+  it('file changes produce real workspace-relative artifacts', async () => {
+    const resources = await ctx({
+      FAKE_CODEX_ARTIFACT_NAME: 'result.md',
+      FAKE_CODEX_ARTIFACT_CONTENT: 'content',
+    });
+    const s = await open(adapter(), task, resources);
+    expect(await turn(s)).toContainEqual({
+      type: 'artifact',
+      name: 'result.md',
+      contentType: 'text/markdown',
+    });
+    expect(
+      await fs.readFile(path.join(resources.workspaceDir, 'result.md'), 'utf8'),
+    ).toBe('content');
   });
-});
-
-describe('CodexAdapter against the real installed codex binary (no auth.json read, no network/model call required)', () => {
-  it('detect() returns a well-formed result whether or not codex is actually installed here', async () => {
-    const adapter = new CodexAdapter();
-    const result = await adapter.detect();
-    expect(typeof result.kind).toBe('string');
-    if (result.kind === 'available') {
-      expect(typeof result.version).toBe('string');
-      expect(result.version?.length).toBeGreaterThan(0);
-      expect(typeof result.authPresent).toBe('boolean');
+  it('steer reaches the runtime with its exact active expectedTurnId', async () => {
+    const resources = await ctx({ FAKE_CODEX_HANG: '1' });
+    const file = path.join(resources.workspaceDir, 'rpc');
+    resources.env.FAKE_CODEX_RPC_RECEIPT = file;
+    const s = await open(adapter(), task, resources);
+    await s.steer('redirect');
+    const frames = (await fs.readFile(file, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(frames.find((f) => f.method === 'turn/steer')).toMatchObject({
+      params: {
+        expectedTurnId: 'turn-1',
+        input: [{ type: 'text', text: 'redirect' }],
+      },
+    });
+  });
+  it('interrupt performs turn/interrupt and closes outstanding tools as interrupted', async () => {
+    const s = await open(adapter(), task, await ctx({ FAKE_CODEX_HANG: '1' }));
+    await new Promise((r) => setTimeout(r, 30));
+    await s.interrupt();
+    const events = await turn(s);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'tool_result',
+        output: expect.objectContaining({ status: 'interrupted' }),
+      }),
+    );
+  });
+  it('late interrupt has a deadline and terminates the affected session', async () => {
+    const s = await open(
+      adapter({ interruptTimeoutMs: 30 }),
+      task,
+      await ctx({ FAKE_CODEX_HANG: '1', FAKE_CODEX_LATE_INTERRUPT: '1' }),
+    );
+    await expect(s.interrupt()).rejects.toThrow('late interrupt timed out');
+    await expect(turn(s)).rejects.toBeInstanceOf(RuntimeExecutionFailure);
+  });
+  it.each([
+    'item/commandExecution/requestApproval',
+    'item/fileChange/requestApproval',
+    'item/permissions/requestApproval',
+    'item/tool/requestUserInput',
+    'mcpServer/elicitation/request',
+    'item/tool/call',
+    'unrecognized',
+  ])('server request %s settles without hanging', async (method) => {
+    const resources = await ctx({ FAKE_CODEX_SERVER_REQUEST: method });
+    const file = path.join(resources.workspaceDir, 'rpc');
+    resources.env.FAKE_CODEX_RPC_RECEIPT = file;
+    const s = await open(adapter(), task, resources);
+    await turn(s);
+    await new Promise((r) => setTimeout(r, 20));
+    const frames = (await fs.readFile(file, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(
+      frames.find((f) => f.id === 'server-req' && !f.method),
+    ).toBeDefined();
+  });
+  it('retention overflow is explicit typed failure and termination', async () => {
+    await expect(open(adapter({ maxRetainedBytes: 1 }))).rejects.toThrow(
+      'record byte budget',
+    );
+  });
+  it('close joins a pending persistent followUp and rejects its RPC instead of leaving it hanging', async () => {
+    const s = await open(
+      adapter(),
+      task,
+      await ctx({ FAKE_CODEX_HANG_FOLLOWUP: '1' }),
+    );
+    await turn(s);
+    const pending = s.followUp(task).catch((error) => error);
+    await new Promise((r) => setTimeout(r, 30));
+    await s.close();
+    expect(await pending).toBeInstanceOf(RuntimeExecutionFailure);
+  });
+  it('failed startup retains a retryable owner until owned disposal is proven', async () => {
+    const disposal = new RuntimeDisposalFailure({
+      stage: 'quiescence',
+      reason: 'fixture disposal failure',
+    });
+    const spy = vi
+      .spyOn(processTree, 'disposeOwnedProcessTree')
+      .mockRejectedValueOnce(disposal)
+      .mockRejectedValueOnce(disposal);
+    const error = await open(
+      adapter(),
+      task,
+      await ctx({ FAKE_CODEX_NO_THREAD_STARTED: '1' }),
+    ).catch((error) => error);
+    try {
+      expect(error).toBeInstanceOf(RuntimeStartupDisposalFailure);
+    } finally {
+      spy.mockRestore();
+      if (error instanceof RuntimeStartupDisposalFailure)
+        await error.retryDisposal();
     }
+  });
+  it('close is idempotent and joins the owned process receipt', async () => {
+    const s = await open(adapter(), task, await ctx({ FAKE_CODEX_HANG: '1' }));
+    await s.close();
+    await s.close();
+  });
+  it('approval resume rejects rather than pretending an interactive product lane', async () => {
+    const s = await open();
+    await turn(s);
+    await expect(s.resolveApproval(true)).rejects.toThrow(
+      'interactive approval',
+    );
+  });
+  it('reserved MCP approval args and sealed env remain present across follow-up turns', async () => {
+    const captured: string[][] = [];
+    const envs: NodeJS.ProcessEnv[] = [];
+    const resources = await ctx({
+      FAKE_CODEX_MCP_TOOL_CALL: 'byokagentmessage/send_agent_message',
+    });
+    resources.mcpServers = {
+      byokagentmessage: {
+        command: '/fixture/server',
+        env: { SERVER_ONLY: 'secret' },
+      },
+    };
+    const s = await open(
+      adapter({
+        spawnFn: ((
+          cmd: string,
+          args: string[],
+          options: Parameters<typeof spawn>[2],
+        ) => {
+          captured.push(args);
+          envs.push(options?.env ?? {});
+          return spawn(cmd, args, options);
+        }) as typeof spawn,
+      }),
+      task,
+      resources,
+    );
+    await turn(s);
+    await s.followUp(task);
+    await turn(s);
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toContain(
+      'mcp_servers.byokagentmessage.enabled_tools=["send_agent_message"]',
+    );
+    expect(captured[0]).toContain(
+      'mcp_servers.byokagentmessage.tools.send_agent_message.approval_mode="approve"',
+    );
+    expect(
+      Object.keys(envs[0]!).some((k) => k.startsWith('BYOK_MCP_PAYLOAD_')),
+    ).toBe(true);
+    expect(envs[0]).not.toHaveProperty('SERVER_ONLY');
+  });
+  it('projected MCP toolsets use only the observed per-tool grant', async () => {
+    const resources = await ctx({ FAKE_CODEX_MCP_TOOL_CALL: 'host/echo' });
+    resources.mcpServers = { host: { command: '/fixture/server' } };
+    resources.mcpToolsetTools = observationOf({ host: ['echo'] });
+    const s = await open(adapter(), task, resources);
+    await turn(s);
   });
 });

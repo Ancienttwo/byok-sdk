@@ -2,8 +2,6 @@
 
 Durable research reports live in this directory as topic-scoped Markdown files. Keep task-local implementation decisions in `tasks/notes/` and correction-derived rules in `tasks/lessons.md`.
 
-- [GPT Pro 待审 handoff：Fresh MVP、服务端存储与每周计量 (2026-09-10)](./2026-09-10_fresh-mvp-gpt-pro-review-handoff.md)
-
 - [Execution receipts and custom harness identity (#158–#167)](./2026-09-07-execution-receipts-and-harness-identity.md)
 
 Architecture decisions:
@@ -13,6 +11,10 @@ Architecture decisions:
 
 Reference reports:
 
+- [Cloud slice 4c：session DO 上的工具与长作业设计稿 (2026-10-03)](./2026-10-03_cloud-4c-tools-jobs.md)（设计稿，未获实现授权）
+- [Cloud slice 4b：platform-key credentials 设计稿 (2026-10-03)](./2026-10-03_cloud-4b-platform-key.md)（Aimpact 已批准实现，使用 streaming guard）
+- [#258 durable slice 1 vs Cloudflare PiHarness：差距分析、Generic Agent 双模式与云端 backend (2026-10-03)](./2026-10-03_pi-harness-cf-gap-and-cloud-generic-agent.md)（已定决策见 [ADR-036](../architecture/adr-2026-10-03-cloud-generic-agent.md)）
+- [OAR（botiverse/oar）对 byok-sdk 的集成与萃取评估 (2026-10-01)](./2026-10-01_oar-extraction-assessment.md)
 - [Chasen Pi Harness：10 个 Packages 与 byok-sdk 集成评估 (2026-09-30)](./2026-09-30_chasen-pi-packages-integration-assessment.md)
 - [RAFT 存储与计费参考 (2026-09-10)](./2026-09-10_raft-storage-billing-reference.md)
 - [Hermes context 对 Fresh MVP PRD / Sprint 的萃取评估 (2026-09-10)](./2026-09-10_hermes-context-prd-sprint-assessment.md)

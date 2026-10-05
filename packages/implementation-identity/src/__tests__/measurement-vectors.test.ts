@@ -16,6 +16,17 @@ const env = {
 };
 
 describe('measurement extraction fixed vectors', () => {
+  it('excludes the bounded Codex auth inventory and its case aliases without excluding configuration', () => {
+    const config = { CODEX_HOME: '/synthetic-home' };
+    for (const name of ['CODEX_API_KEY', 'CODEX_ACCESS_TOKEN']) {
+      expect(PROVIDER_CREDENTIAL_ENV_DENY_NAMES).toContain(name);
+      for (const alias of [name, name.toLowerCase()]) {
+        expect(toolImplementationLaunchEnvNamesDigest({ ...config, [alias]: 'synthetic' })).toBe(toolImplementationLaunchEnvNamesDigest(config));
+      }
+    }
+    expect(toolImplementationLaunchEnvNamesDigest(config)).not.toBe(toolImplementationLaunchEnvNamesDigest({}));
+  });
+
   it('preserves names and loader digest bytes, including Windows name handling', () => {
     expect(toolImplementationLaunchEnvNamesDigest({})).toBe('4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945');
     expect(toolImplementationLoaderEnvValuesDigest({}, 'linux')).toBe('44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a');

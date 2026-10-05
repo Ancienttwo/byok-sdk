@@ -19,7 +19,7 @@ export const PI_PROJECTED_KEY_ENV = 'PI_PROVIDER_API_KEY';
  * never parents, so restating the pair here is a narrowing, not a second
  * vocabulary.
  */
-export const PI_LAUNCHER_RUNTIME_ENTRIES = ['pi-rpc', 'pi-prepared'] as const;
+export const PI_LAUNCHER_RUNTIME_ENTRIES = ['pi-rpc', 'pi-prepared', 'pi-durable'] as const;
 export type PiLauncherRuntimeEntry = (typeof PI_LAUNCHER_RUNTIME_ENTRIES)[number];
 
 /** Keep projected providers disjoint from Pi built-ins so composition can never fall back to one. */
@@ -37,7 +37,7 @@ export function piProjectionProviderId(profileRef: string): string {
  * declared local configuration is the only authority; nothing is inferred from
  * the model name or base URL.
  */
-export function buildPiProviderProjection(profile: ModelProviderProfile): object {
+export function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry = 'pi-rpc'): object {
   const { thinkingLevel: _, ...modelSettings } = requirePiModelConfig(profile);
   const projectedProviderId = piProjectionProviderId(profile.profile_ref);
   return {
@@ -50,7 +50,7 @@ export function buildPiProviderProjection(profile: ModelProviderProfile): object
             : 'openai-completions',
         ...(profile.auth_mode === 'none'
           ? {}
-          : { apiKey: `$${PI_PROJECTED_KEY_ENV}` }),
+          : { apiKey: runtimeEntry === 'pi-durable' ? 'byok:durable-ipc' : `$${PI_PROJECTED_KEY_ENV}` }),
         ...(profile.auth_mode === 'bearer' ? { authHeader: true } : {}),
         models: [
           {

@@ -1,5 +1,5 @@
 /**
- * Official Pi 0.99.1 conformance — A1' compile parity (a) and A2' wire
+ * Official Pi 1.0.2 conformance — A1' compile parity (a) and A2' wire
  * neutrality (b). Synthetic SSE only; zero network.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -34,7 +34,7 @@ afterEach(() => {
   globalFetch.restore();
 });
 
-describe('official Pi 0.99.1: A1\' compile parity', () => {
+describe('official Pi 1.0.2: A1\' compile parity', () => {
   test('(a) A1\' sink compile equals the live registerProvider-gated body, first and tool-result request', async () => {
     const first = await compileA1(hostTranscript());
     const again = await compileA1(hostTranscript());
@@ -100,7 +100,7 @@ describe('official Pi 0.99.1: A1\' compile parity', () => {
   }, TIMEOUT_MS);
 });
 
-describe('official Pi 0.99.1: A2\' sentinel provenance', () => {
+describe('official Pi 1.0.2: A2\' sentinel provenance', () => {
   test('(b) sentinel and same-model provenance compile to identical bytes; admission refuses thinking', async () => {
     const sentinel = await compileA1(hostTranscript(SENTINEL_PROVENANCE));
     const sameModel = await compileA1(hostTranscript(SAME_MODEL_PROVENANCE));

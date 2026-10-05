@@ -1,3 +1,4 @@
+import { startDurablePi } from '../pi-durable/session';
 import { observePiInstallation } from './installation-observation';
 import type { RuntimeInstallationObservationContext } from '../../types';
 import { serializePiHostConfig } from './runtime-host-binding';
@@ -43,8 +44,9 @@ import { grantFingerprint, resolveMcpToolsetGrants, resolveReservedMcpToolGrants
 import { clientPackageRoot } from './client-manifest';
 import { resolvePiBin, type ResolvedBin } from './resolve-bin';
 import { mapPermissionPolicyToPiArgs } from './permission-mapping';
-import { mapPiMessageToAgentEvent, ROUTINE_PI_EVENT_TYPES } from './events';
+import { mapPiContextUsage, mapPiMessageToAgentEvent, ROUTINE_PI_EVENT_TYPES } from './events';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client';
+import { abortPiRpcAndSettle } from './interrupt-settlement';
 import { buildPreparedPromptCommand, PREPARED_PROMPT_COMMAND_ID } from './prepared-prompt-frame';
 import {
   PROVIDER_CREDENTIAL_ENV_NAMES,
@@ -86,6 +88,8 @@ async function cleanupMcpConfigDir(dir: string | undefined): Promise<void> {
  * providers); covers the common ones for a useful `authPresent` signal.
  */
 export interface PiAdapterOptions {
+  /** Opt-in ordinary, lease-bound durable worker. */
+  durablePi?: { readonly replicaRoot: string };
   /** Override bin resolution — tests substitute the fake-pi fixture script. */
   resolveBin?: () => ResolvedBin;
   /** Override process spawning — tests substitute a fake spawn. */
@@ -208,11 +212,12 @@ export class PiAdapter implements RuntimeAdapter {
   });
 
   constructor(private readonly options: PiAdapterOptions = {}) {
+    if (options.durablePi !== undefined) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, capabilities: { ...this.descriptor.capabilities, durablePi: true, steer: false, resume: false, permissionModes: ['auto'] }, environmentRequirements: { credentialNames: [] } });
     validatePiByokLauncherConfig(options.byokLauncher);
   }
 
   async detectInstallation(context: RuntimeInstallationObservationContext, signal?: AbortSignal): Promise<RuntimeDetectResult> {
-    try { return await observePiInstallation(context, signal); }
+    try { return await observePiInstallation(context, signal, this.options.durablePi !== undefined); }
     catch (error) { return classifyDetectError(error); }
   }
 
@@ -232,6 +237,10 @@ export class PiAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    if (this.options.durablePi !== undefined && process.platform === 'win32') return { kind: 'reject', reason: 'durable Pi is unavailable on Windows until parent-death Job Object recovery is validated', retryable: false };
+    if (this.options.durablePi !== undefined && (input.policy.mode !== 'auto' || input.policy.network === false || input.policy.allowTools !== undefined || input.policy.denyTools !== undefined || input.offer.dispatchSelection === undefined)) {
+      return { kind: 'reject', reason: 'durable Pi requires YOLO ordinary BYOK selection', retryable: false };
+    }
     // The policy mapping runs FIRST: a mode pi cannot express at all is a
     // refusal about the mode, and resolving toolset grants before it would
     // answer that task with a toolset-shaped reason instead. The reserved
@@ -371,7 +380,8 @@ export class PiAdapter implements RuntimeAdapter {
       operation: {
         resolveRuntimeLaunch: async (resources) => {
           if (boundRuntime !== undefined) throw authorityFailure('runtime launch resources were already resolved');
-          const kind = resources.kind === 'prepared' ? 'pi-prepared' : 'pi-rpc';
+          if (this.options.durablePi !== undefined && resources.kind === 'prepared') throw authorityFailure('durable Pi does not admit the prepared lane');
+          const kind = this.options.durablePi !== undefined ? 'pi-durable' : resources.kind === 'prepared' ? 'pi-prepared' : 'pi-rpc';
           boundRuntime = await resolvePiRuntimeLaunch({
             ...resources, sessionCwd: resources.cwd, kind,
             env: pinnedSelection === undefined ? resources.env : withoutProviderCredentials(resources.env),
@@ -379,6 +389,7 @@ export class PiAdapter implements RuntimeAdapter {
               // Validate the installed native package before choosing the SDK
               // entry. Configured authority lanes never reach this dev resolver.
               const bin = this.resolveBin();
+              if (kind === 'pi-durable') return { command: process.execPath, entry: path.join(clientPackageRoot(), 'dist', 'bin', 'byok-pi-durable.js') };
               if (kind === 'pi-prepared') return { command: process.execPath, entry: preparedPiLaunchBin() };
               return this.options.resolveBin === undefined
                 ? { command: process.execPath, entry: path.join(clientPackageRoot(), 'dist', 'bin', 'byok-pi-rpc.js') }
@@ -399,7 +410,7 @@ export class PiAdapter implements RuntimeAdapter {
         start: async (startInput: RuntimeOperationStartInput): Promise<Session> => {
           const runtimeLaunch = startInput.runtimeLaunch;
           if (runtimeLaunch === undefined || runtimeLaunch !== boundRuntime) throw authorityFailure('Pi start requires its resolved runtime launch binding');
-          if (runtimeLaunch.kind !== (startInput.kind === 'prepared' ? 'pi-prepared' : 'pi-rpc')) throw authorityFailure('Pi start lane differs from runtime launch binding');
+          if (runtimeLaunch.kind !== (this.options.durablePi !== undefined ? 'pi-durable' : startInput.kind === 'prepared' ? 'pi-prepared' : 'pi-rpc')) throw authorityFailure('Pi start lane differs from runtime launch binding');
           if (runtimeLaunch.sessionCwd !== startInput.manifest.cwd) throw authorityFailure('Pi runtime session cwd differs from manifest');
           parsePiMcpEnvironment(startInput.mcpEnv);
           const mcpEnv = startInput.mcpEnv!; // Preserve the daemon admission object through serialization.
@@ -441,6 +452,11 @@ export class PiAdapter implements RuntimeAdapter {
           // `pi --mode rpc` can never consume a prepared request, so this branch
           // launches the SDK-owned in-process host instead
           // (`../../bin/byok-pi-prepared.ts`).
+          if (this.options.durablePi !== undefined) {
+            if (startInput.kind !== 'instruction' || launcherArgs === undefined || this.options.byokLauncher === undefined) throw authorityFailure('durable Pi requires ordinary custody launch');
+            return await startDurablePi({ input: startInput, runtimeLaunch, replicaRoot: this.options.durablePi.replicaRoot,
+              launcher: this.options.byokLauncher, launcherArgs, spawnFn: this.options.spawnFn });
+          }
           if (startInput.kind === 'prepared') {
             return await startPreparedPiOperation({
               runtimeLaunch,
@@ -971,7 +987,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     throw authorityFailure('pi reported a different session id than the one that admitted the prepared request');
   }
 
-  return new PiSession(sessionRef, rpc, input.manifestSelection, configDir, input.runtimeLaunch.release);
+  return new PiSession(sessionRef, rpc, input.manifestSelection, configDir, input.runtimeLaunch.release, preparation.expected.model.contextWindow);
 }
 
 /**
@@ -1111,6 +1127,7 @@ async function resolveAuthoritativeSessionId(rpc: PiRpcClient): Promise<string> 
 }
 
 class PiSession implements Session {
+  private pendingTurnEnd = false;
   private closeAttempt: Promise<void> | undefined;
 
   constructor(
@@ -1120,10 +1137,13 @@ class PiSession implements Session {
     /** Task-scoped isolated MCP extension configuration, removed in close(). */
     private readonly mcpConfigDir?: string,
     private readonly releaseRuntime?: () => Promise<void>,
+    private readonly hostContextWindow?: number,
   ) {}
 
   get events(): AsyncIterable<AgentEvent> {
     const rpc = this.rpc;
+    const hostContextWindow = this.hostContextWindow;
+    const session = this;
     return {
       [Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
         const inner = rpc.events[Symbol.asyncIterator]();
@@ -1131,6 +1151,7 @@ class PiSession implements Session {
         return {
           async next(): Promise<IteratorResult<AgentEvent>> {
             for (;;) {
+              if (session.pendingTurnEnd) { session.pendingTurnEnd = false; return { value: { type: 'turn_end' }, done: false }; }
               if (terminalFailure) throw terminalFailure;
               let result: IteratorResult<PiRpcMessage>;
               try {
@@ -1151,6 +1172,21 @@ class PiSession implements Session {
                   retry: 'retryable',
                   reason: 'pi runtime process ended before agent_settled',
                 }, { cause: rpc.terminalError });
+              }
+              if (value.type === 'agent_settled') {
+                // Read after settlement and deliver before turn_end, where the consumer stops.
+                let timer: ReturnType<typeof setTimeout> | undefined;
+                let stats: PiRpcMessage;
+                try {
+                  stats = await Promise.race([rpc.send({ type: 'get_session_stats' }),
+                    new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new RuntimeExecutionFailure({
+                      phase: 'run', category: 'infrastructure', retry: 'retryable',
+                      reason: 'pi get_session_stats response timed out',
+                    })), 1000); }),
+                  ]);
+                } finally { if (timer !== undefined) clearTimeout(timer); }
+                session.pendingTurnEnd = true;
+                return { value: mapPiContextUsage(stats.success === false ? undefined : stats.data, hostContextWindow), done: false };
               }
               const mapped = mapPiMessageToAgentEvent(value);
               if (value.type === 'auto_retry_end' && value.success === false) {
@@ -1201,7 +1237,7 @@ class PiSession implements Session {
   }
 
   async interrupt(): Promise<void> {
-    await this.rpc.send({ type: 'abort' });
+    await abortPiRpcAndSettle(this.rpc);
   }
 
   async close(): Promise<void> {

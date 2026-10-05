@@ -2,7 +2,7 @@
   "name": "@byok-sdk/client",
   "version": "0.24.0-rc.1",
   "byok": {
-    "piRuntimePin": "0.99.1"
+    "piRuntimePin": "1.0.2"
   },
   "description": "BYOK SDK client daemon: runs on the end user's machine, pairs with a SaaS server, and drives a local coding-agent runtime",
   "type": "module",
@@ -17,7 +17,7 @@
   },
   "homepage": "https://github.com/Ancienttwo/byok-sdk#readme",
   "engines": {
-    "node": ">=22.22.0"
+    "node": ">=24.15.0"
   },
   "sideEffects": false,
   "main": "./dist/index.js",
@@ -25,10 +25,10 @@
   "types": "./dist/index.d.ts",
   "bin": {
     "byok-agent": "./dist/bin/byok-agent.js",
-    "byok-approval-mcp": "./dist/bin/byok-approval-mcp.js",
     "byok-agent-message-mcp": "./dist/bin/byok-agent-message-mcp.js",
     "byok-agent-memory-mcp": "./dist/bin/byok-agent-memory-mcp.js",
     "byok-agent-team-mcp": "./dist/bin/byok-agent-team-mcp.js",
+    "byok-pi-durable": "./dist/bin/byok-pi-durable.js",
     "byok-pi-prepared": "./dist/bin/byok-pi-prepared.js",
     "byok-pi-rpc": "./dist/bin/byok-pi-rpc.js"
   },
@@ -72,7 +72,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.vendor.json",
     "smoke:adapters": "node scripts/adapter-task-smoke.mjs",
     "smoke:claude-toolset-permission": "node scripts/claude-toolset-permission-smoke.mjs",
-    "smoke:codex-toolset-permission": "node scripts/codex-toolset-permission-smoke.mjs",
+    "smoke:codex-app-server": "node scripts/codex-app-server-real.mjs",
     "audit:adapter-task-smoke": "node scripts/adapter-task-smoke.mjs",
     "audit:credentials": "node scripts/linux-credential-audit.mjs",
     "clean": "rm -rf dist"
@@ -83,7 +83,7 @@
   "dependencies": {
     "@byok-sdk/core": "workspace:*",
     "@byok-sdk/protocol": "workspace:*",
-    "@earendil-works/pi-coding-agent": "0.99.1",
+    "@earendil-works/pi-coding-agent": "1.0.2",
     "@modelcontextprotocol/client": "2.0.0",
     "pi-web-access": "0.24.1",
     "@byok-sdk/implementation-identity": "workspace:*",
@@ -99,8 +99,10 @@
     "@juicesharp/rpiv-i18n": "2.8.0",
     "@juicesharp/rpiv-config": "2.8.0",
     "typebox": "1.3.27",
-    "@earendil-works/pi-ai": "0.99.1",
-    "@earendil-works/pi-agent-core": "0.99.1"
+    "@earendil-works/pi-ai": "1.0.2",
+    "@earendil-works/pi-agent-core": "1.0.2",
+    "@earendil-works/pi-durable": "1.0.2",
+    "@earendil-works/chord": "1.0.2"
   },
   "devDependencies": {
     "@byok-sdk/server": "workspace:*",

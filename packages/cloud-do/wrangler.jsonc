@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "byok-agent-do",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-18",
+  "compatibility_flags": ["no_nodejs_compat", "no_nodejs_compat_v2"],
+  "durable_objects": {
+    "bindings": [{ "name": "AGENTS", "class_name": "AgentDO" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AgentDO"] }]
+}

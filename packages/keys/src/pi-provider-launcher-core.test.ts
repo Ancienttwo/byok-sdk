@@ -13,6 +13,7 @@ import {
   assertPiProjectionDirectory,
   assertWindowsPiProjectionAcl,
   startPiProvider,
+  type PiProviderLaunchDependencies,
   buildPiProviderChildEnvironment,
   ensurePiSessionDirectory,
   resolvePiProviderSecret,
@@ -370,6 +371,24 @@ describe('committed Pi spawn boundary', () => {
     await expect(assertPiProjectionDirectory('/projection', '/other')).rejects.toThrow(/committed path/);
   });
 
+  // Production refuses the Windows durable entry before custody; POSIX IPC evidence runs elsewhere.
+  it.skipIf(process.platform === 'win32')('durable uses one private IPC receipt and never constructs a credential-bearing child environment', async () => {
+    const f = await fixture();
+    try {
+      const child = new ChildProcess(); const send = vi.fn((_frame: unknown) => true); const kill = vi.spyOn(child,'kill').mockReturnValue(true);
+      Object.assign(child, { connected: true, send });
+      const spawn = vi.fn((..._args: Parameters<NonNullable<PiProviderLaunchDependencies['spawn']>>) => child);
+      const launched = await startPiProvider(f.provider, { ...f.options, runtimeEntry:'pi-durable', piArgs:['--config',path.join(f.root,'config.json')] },
+        { ambient:{PI_PROVIDER_API_KEY:'ambient-key',OPENAI_API_KEY:'ambient-key'}, createSecretStore:() => f.store, profiles:f.profiles, spawn });
+      const options = spawn.mock.calls[0]![2] as {env:Record<string,string>;stdio:unknown};
+      expect(options.env.PI_PROVIDER_API_KEY).toBeUndefined(); expect(JSON.stringify(options.env)).not.toContain(CANARY);
+      expect(options.stdio).toEqual(['inherit','inherit','inherit','ipc']); expect(send).not.toHaveBeenCalled();
+      child.emit('message', { type:'byok.pi.durable.credential-request', configDigest:'a'.repeat(64) });
+      expect(send.mock.calls[0]![0]).toEqual({ type:'byok.pi.durable.credential', configDigest:'a'.repeat(64), secret:CANARY });
+      child.emit('message', { type:'byok.pi.durable.credential-request', configDigest:'a'.repeat(64) }); expect(send).toHaveBeenCalledTimes(1);
+      expect(kill).not.toHaveBeenCalled(); await launched.cleanup();
+    } finally { await fs.rm(f.root,{recursive:true,force:true}); }
+  });
   it('injects exactly one secret after layout checks, rechecks final env, and spawns the checked argv/cwd', async () => {
     const f = await fixture();
     try {
@@ -479,7 +498,7 @@ describe('the required runtime entry', () => {
     },
   );
 
-  it.each(['pi-rpc', 'pi-prepared'] as const)('carries the declared entry %s', (entry) => {
+  it.each(['pi-rpc', 'pi-prepared', 'pi-durable'] as const)('carries the declared entry %s', (entry) => {
     expect(parsePiProviderLauncherOptions([...base, '--runtime-entry', entry]).runtimeEntry).toBe(entry);
   });
 

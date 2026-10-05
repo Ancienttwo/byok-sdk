@@ -12,7 +12,7 @@ if (!evidence) throw new Error(usage);
 if (!/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(version??'')) throw new Error(`${usage}\nversion must be one exact x.y.z, got ${String(version)}`);
 if (!/^[0-9a-f]{40}$/.test(commit??'')) throw new Error(`${usage}\nupstream commit must be 40 lowercase hex characters, got ${String(commit)}`);
 mkdirSync(evidence, {recursive:true});
-const names=['chord','pi-agent-core','pi-ai','pi-codemode','pi-coding-agent','pi-mcp','pi-telemetry','pi-tui'].map(x=>'@earendil-works/'+x);
+const names=['chord','pi-agent-core','pi-ai','pi-codemode','pi-coding-agent','pi-durable','pi-mcp','pi-telemetry','pi-tui'].map(x=>'@earendil-works/'+x);
 const keys=(await (await fetch('https://registry.npmjs.org/-/npm/v1/keys')).json()).keys;
 const sha=(bytes,algorithm='sha256')=>createHash(algorithm).update(bytes).digest('hex');
 const records=[];

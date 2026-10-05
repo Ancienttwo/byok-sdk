@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   RUNTIME_DESCENDANT_EDGES,
-  type DescendantLaunchV1,
+  type PiDescendantLaunchV2,
   type DescendantSpawnExpectationV1,
 } from '@byok-sdk/implementation-identity';
 
@@ -118,7 +118,7 @@ export function loadCustodyRunnerConfigPath(env: Readonly<Record<string, string 
  * commitment: the parent charge comes from the environment commitment, so a
  * record forged with a different parent depth cannot self-consistently pass.
  */
-export function deriveCustodyExpectation(launch: DescendantLaunchV1, parentDepth: number): DescendantSpawnExpectationV1 {
+export function deriveCustodyExpectation(launch: PiDescendantLaunchV2, parentDepth: number): DescendantSpawnExpectationV1 {
   return {
     template: launch.template,
     policy: launch.policy,

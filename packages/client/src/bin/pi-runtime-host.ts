@@ -10,3 +10,5 @@ export { runCustodyRunnerPayload } from './custody-runner-payload-host';
 // the custody preset entries' import.meta.main CLI guard) out of the thin
 // bins' own bundles.
 export { runSdkReservedHelperCommand } from '../sdk-reserved-helper-host';
+
+export { runPiDurableHost } from './pi-durable-host';

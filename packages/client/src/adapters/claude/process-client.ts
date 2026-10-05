@@ -11,6 +11,12 @@ export interface ClaudeProcessClientOptions {
   cwd: string;
   env: NodeJS.ProcessEnv;
   spawnFn?: SpawnFn;
+  /** Internal control-plane binding; control frames never enter the user/result event queue. */
+  control?: {
+    bind(write: (frame: Record<string, unknown>) => Promise<void>): void;
+    receive(message: ClaudeStreamMessage): void;
+    closed(): void;
+  };
   /**
    * DI seam scoped to ADOPTION only (`../process-tree.ts`'s
    * `adoptOwnedProcessTree`), so the win32 job-object branch is exercisable
@@ -21,6 +27,9 @@ export interface ClaudeProcessClientOptions {
   /** DI seam for the win32 job-object backstop; see `../win32-job-object.ts`. */
   jobObject?: { assign(pid: number): Promise<void> };
 }
+
+// Option-owned hooks keep control-plane state out of the public client API.
+const controls = new WeakMap<ClaudeProcessClient, NonNullable<ClaudeProcessClientOptions['control']>>();
 
 /** Bound on retained stderr lines, mirroring pi's identical constant/rationale in `../pi/rpc-client.ts`. */
 const STDERR_RING_CAPACITY = 20;
@@ -96,6 +105,16 @@ export class ClaudeProcessClient {
     // The rejection is consumed by `waitForInit()`; this keeps a client that is
     // constructed and then abandoned from raising an unhandled rejection.
     this.adopted.catch(() => {});
+    if (options.control) {
+      controls.set(this, options.control);
+      options.control.bind(async frame => {
+        await this.adopted;
+        if (this.closed) throw this.exitError ?? new Error('claude process is closed');
+        await new Promise<void>((resolve, reject) => {
+          this.child.stdin.write(JSON.stringify(frame) + '\n', error => { if (error) reject(error); else resolve(); });
+        });
+      });
+    }
 
     this.child.stdout.setEncoding('utf8');
     this.child.stdout.on('data', (chunk: string) => this.onData(chunk));
@@ -282,6 +301,8 @@ export class ClaudeProcessClient {
       this.initWaiter = undefined;
     }
 
+    controls.get(this)?.receive(msg);
+    if (msg.type === 'control_response') return;
     this.eventQueue.push(msg);
   }
 
@@ -310,6 +331,8 @@ export class ClaudeProcessClient {
   private onClosed(err: Error): void {
     if (this.closed) return;
     this.closed = true;
+    controls.get(this)?.closed();
+    controls.delete(this);
     // An adoption failure outranks the exit status of the termination it
     // itself requested: reporting `exit code=null, signal=SIGKILL` would bury
     // the only reason anyone can act on.

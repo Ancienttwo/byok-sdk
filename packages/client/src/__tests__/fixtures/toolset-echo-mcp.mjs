@@ -1,9 +1,7 @@
 #!/usr/bin/env node
 /**
  * A one-tool stdio MCP server standing in for a host-configured toolset
- * server, used by the two live permission smokes
- * (`scripts/claude-toolset-permission-smoke.mjs`,
- * `scripts/codex-toolset-permission-smoke.mjs`).
+ * server, used by `scripts/claude-toolset-permission-smoke.mjs`.
  *
  * It writes an audit line for every request it receives, so a smoke can prove
  * the distinction that matters: an ungranted runtime reaches `tools/list` and
