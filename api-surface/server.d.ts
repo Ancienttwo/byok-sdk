@@ -740,8 +740,9 @@ export interface CreateByokServerOptions {
     /**
      * How long after a task reaches a terminal its relay buffer and terminal
      * promise are RETAINED before being reclaimed, ms. A late `events()` reader
-     * within this window still replays the whole feed; past it, the durable read
-     * model (`tasks.get`) is the only answer. Default 5 minutes.
+     * within this window still replays the retained feed; past it, new event
+     * reads complete empty. Use the durable read model (`tasks.get`, `result()`)
+     * for terminal facts after expiry. Default 5 minutes.
      *
      * Retention never decides when a feed ENDS: {@link TaskHandle.events}
      * completes at the terminal event itself, whenever that happens, so a
@@ -930,6 +931,12 @@ export type ServerTaskEvent = {
 /** Handle returned by {@link ByokServer.dispatch} for one in-flight task. */
 export interface TaskHandle {
     readonly taskId: string;
+    /**
+     * Replay retained notifications and follow live updates until terminal.
+     * New reads after terminal retention expires or the server stops complete
+     * empty; they never reopen a feed. Durable terminal facts remain available
+     * through `result()` and `ByokServer.tasks.get`.
+     */
     events(): AsyncIterable<ServerTaskEvent>;
     cancel(reason?: string): Promise<void>;
     /**

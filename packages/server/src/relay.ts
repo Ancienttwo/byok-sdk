@@ -143,7 +143,12 @@ export class TaskEventRelay implements ByokCloudObserver {
 
   /** The per-task feed backing `TaskHandle.events()`, replayed from the start of what is retained. */
   events(taskId: string): AsyncIterable<ServerTaskEvent> {
-    return this.#open(taskId).queue.subscribe();
+    // Reads never create delivery plumbing: expiry and stop both remove it.
+    // Keeping a queue on the handle instead would defeat terminal reclamation.
+    const state = this.#tasks.get(taskId);
+    return state === undefined
+      ? { async *[Symbol.asyncIterator](): AsyncGenerator<ServerTaskEvent> {} }
+      : state.queue.subscribe();
   }
 
   /** Settles when this task first reaches a terminal — the barrier `TaskHandle.result()` awaits. */
