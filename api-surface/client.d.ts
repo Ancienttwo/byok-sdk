@@ -271,10 +271,12 @@ export declare class ClaudeProcessClient {
     private readonly eventQueue;
     private closed;
     private exitError;
+    private transportError;
+    private readonly pendingWrites;
     private readonly closedPromise;
     private resolveClosed;
     private disposalAttempt;
-    /** Resolves once this tree is backstopped (see `adoptOwnedProcessTree`); rejects with the adoption failure, having already terminated the tree. */
+    /** Resolves once this tree is backstopped; rejection carries either completed disposal or an owned retry receipt. */
     private readonly adopted;
     /** Set before the fail-closed termination starts, so it — not the exit code of the kill we ourselves requested — becomes this client's exit error. */
     private adoptionFailure;
@@ -296,7 +298,14 @@ export declare class ClaudeProcessClient {
      * mechanism `followUp()` relies on instead of spawning a fresh
      * `--resume`'d process per follow-up.
      */
-    writeUserMessage(text: string): void;
+    writeUserMessage(text: string): Promise<void>;
+    private writeFrame;
+    /** Stop startup admission immediately, independently of the process-close receipt.
+     * The stopped transport latch is checked again after adoption, so an abandoned
+     * write cannot send a late prompt when delayed adoption eventually resolves.
+     */
+    abortStartup(error: Error): void;
+    private onTransportError;
     /**
      * Resolves with claude's own `session_id` once its `system/init` frame
      * arrives (see this class's doc comment for why this exists at all).
@@ -336,8 +345,8 @@ export declare class ClaudeProcessClient {
      * precondition, not a degraded mode: the child is terminated through the one
      * disposal authority and the failure is re-thrown, which is what makes
      * `waitForInit()` — and therefore `ClaudeAdapter.start()` — fail before any
-     * session is published. Both cleanup attempts are best-effort because the
-     * adoption failure, not a terminator's own complaint, is the reason to report.
+     * session is published. If disposal fails, retain both failures and a retry
+     * owner; adoption rejection alone is never a tree-quiescence receipt.
      */
     private adoptOwnedTree;
     private onData;
