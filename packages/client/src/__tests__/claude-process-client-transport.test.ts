@@ -235,7 +235,10 @@ describe('Claude stdin transport failure ownership', () => {
     await flush(); await flush();
     expect(start.error).toBeInstanceOf(RuntimeStartupDisposalFailure);
     const receipt = start.error as RuntimeStartupDisposalFailure;
-    expect(receipt.cause).toBe(failure);
+    expect(receipt.cause).toBeInstanceOf(AggregateError);
+    expect((receipt.cause as AggregateError).errors).toEqual([
+      expect.objectContaining({ phase: 'start', cause: fixture.error }), failure,
+    ]);
     await receipt.retryDisposal();
     expect(tree.dispose).toHaveBeenCalledTimes(2);
   });

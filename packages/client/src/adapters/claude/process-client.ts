@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { AsyncQueue } from '../../util/async-queue';
+import { RuntimeStartupDisposalFailure } from '../../runtime-failure';
 import type { ClaudeStreamMessage } from './events';
 import { adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../process-tree';
 
@@ -83,7 +84,7 @@ export class ClaudeProcessClient {
   private readonly closedPromise: Promise<void>;
   private resolveClosed!: () => void;
   private disposalAttempt: Promise<void> | undefined;
-  /** Resolves once this tree is backstopped (see `adoptOwnedProcessTree`); rejects with the adoption failure, having already terminated the tree. */
+  /** Resolves once this tree is backstopped; rejection carries either completed disposal or an owned retry receipt. */
   private readonly adopted: Promise<void>;
   /** Set before the fail-closed termination starts, so it — not the exit code of the kill we ourselves requested — becomes this client's exit error. */
   private adoptionFailure: Error | undefined;
@@ -103,34 +104,40 @@ export class ClaudeProcessClient {
     this.closedPromise = new Promise((resolve) => {
       this.resolveClosed = resolve;
     });
-    // A Writable emits its own error even when its write callback handles it.
-    // Own that event for the full stream lifetime, including after child close.
-    this.child.stdin.on('error', (error: Error) => this.onTransportError(error));
-    this.adopted = this.adoptOwnedTree(options);
-    // The rejection is consumed by `waitForInit()`; this keeps a client that is
-    // constructed and then abandoned from raising an unhandled rejection.
-    this.adopted.catch(() => {});
-    if (options.control) {
-      controls.set(this, options.control);
-      options.control.bind(frame => this.writeFrame(JSON.stringify(frame) + '\n'));
+    try {
+      // `close` (not `exit`) — see pi's rpc-client.ts doc comment for why
+      // this matters: it's Node's guarantee every stdout/stderr byte the
+      // process wrote has already been delivered, so a bad-flag/auth-failure
+      // exit error always carries the complete stderr tail.
+      this.child.on('close', (code, signal) => {
+        this.onClosed(this.buildExitError(code, signal));
+      });
+      this.child.on('error', (err) => {
+        this.onClosed(err);
+      });
+      // A Writable emits its own error even when its write callback handles it.
+      // Own that event for the full stream lifetime, including after child close.
+      this.child.stdin.on('error', (error: Error) => this.onTransportError(error));
+      this.adopted = this.adoptOwnedTree(options);
+      // The rejection is consumed by `waitForInit()`; this keeps a client that is
+      // constructed and then abandoned from raising an unhandled rejection.
+      this.adopted.catch(() => {});
+      if (options.control) {
+        controls.set(this, options.control);
+        options.control.bind(frame => this.writeFrame(JSON.stringify(frame) + '\n'));
+      }
+
+      this.child.stdout.setEncoding('utf8');
+      this.child.stdout.on('data', (chunk: string) => this.onData(chunk));
+
+      this.child.stderr.setEncoding('utf8');
+      this.child.stderr.on('data', (chunk: string) => this.onStderr(chunk));
+    } catch (cause) {
+      // Spawn already succeeded. Even a synchronous setup failure must return
+      // the live tree's disposal owner to the adapter, never an ordinary error.
+      this.kill();
+      throw new RuntimeStartupDisposalFailure(() => this.dispose(), { cause });
     }
-
-    this.child.stdout.setEncoding('utf8');
-    this.child.stdout.on('data', (chunk: string) => this.onData(chunk));
-
-    this.child.stderr.setEncoding('utf8');
-    this.child.stderr.on('data', (chunk: string) => this.onStderr(chunk));
-
-    // `close` (not `exit`) — see pi's rpc-client.ts doc comment for why
-    // this matters: it's Node's guarantee every stdout/stderr byte the
-    // process wrote has already been delivered, so a bad-flag/auth-failure
-    // exit error always carries the complete stderr tail.
-    this.child.on('close', (code, signal) => {
-      this.onClosed(this.buildExitError(code, signal));
-    });
-    this.child.on('error', (err) => {
-      this.onClosed(err);
-    });
   }
 
   /**
@@ -275,8 +282,8 @@ export class ClaudeProcessClient {
    * precondition, not a degraded mode: the child is terminated through the one
    * disposal authority and the failure is re-thrown, which is what makes
    * `waitForInit()` — and therefore `ClaudeAdapter.start()` — fail before any
-   * session is published. Both cleanup attempts are best-effort because the
-   * adoption failure, not a terminator's own complaint, is the reason to report.
+   * session is published. If disposal fails, retain both failures and a retry
+   * owner; adoption rejection alone is never a tree-quiescence receipt.
    */
   private async adoptOwnedTree(options: ClaudeProcessClientOptions): Promise<void> {
     try {
@@ -289,8 +296,13 @@ export class ClaudeProcessClient {
     } catch (cause) {
       const failure = cause instanceof Error ? cause : new Error(String(cause));
       this.adoptionFailure = failure;
-      await requestOwnedProcessTreeTermination(this.processTreeOptions()).catch(() => {});
-      await disposeOwnedProcessTree(this.processTreeOptions()).catch(() => {});
+      try {
+        await this.dispose();
+      } catch (disposalError) {
+        throw new RuntimeStartupDisposalFailure(() => this.dispose(), {
+          cause: new AggregateError([failure, disposalError], 'claude adoption failed and owned disposal did not complete'),
+        });
+      }
       throw failure;
     }
   }

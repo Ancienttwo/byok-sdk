@@ -18,7 +18,7 @@ import {
   type Session,
 } from '../../types';
 import { wrapMcpServerWithLaunchCwd } from '../../daemon/trusted-launch-cwd';
-import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
+import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../../runtime-failure';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
 import { withoutProviderCredentials } from '../provider-credential-environment';
 import { createClaudeControlChannel } from './control-channel';
@@ -55,17 +55,35 @@ async function cleanupMcpConfigDir(dir: string | undefined): Promise<void> {
   }
 }
 
-/** Failed transport/init still owns the process and its task-scoped config. */
-async function disposeFailedTransportStart(client: ClaudeProcessClient, mcpConfigDir: string | undefined): Promise<void> {
-  const retryDisposal = async () => {
-    await client.dispose();
-    await cleanupMcpConfigDir(mcpConfigDir);
+/** One owner covers process teardown and task config on every failed start. */
+async function rejectOwnedStartup(cause: unknown, client: ClaudeProcessClient | undefined, mcpConfigDir: string | undefined): Promise<never> {
+  const failure = isRuntimeExecutionFailure(cause) ? cause : new RuntimeExecutionFailure({
+    phase: 'start', category: 'infrastructure', retry: 'retryable',
+    reason: 'claude runtime startup failed',
+  }, { cause });
+  let disposalAttempt: Promise<void> | undefined;
+  const retryDisposal = (): Promise<void> => {
+    if (!disposalAttempt) {
+      const attempt = (async () => {
+        // Construction/adoption may already hold a cleanup receipt without
+        // having returned a client. Preserve that owner, rather than guessing
+        // that a thrown constructor means no process was spawned.
+        if (isRuntimeStartupDisposalFailure(cause)) await cause.retryDisposal();
+        else await client?.dispose();
+        await cleanupMcpConfigDir(mcpConfigDir);
+      })();
+      disposalAttempt = attempt.catch(error => { disposalAttempt = undefined; throw error; });
+    }
+    return disposalAttempt;
   };
   try {
     await retryDisposal();
-  } catch (cause) {
-    throw new RuntimeStartupDisposalFailure(retryDisposal, { cause });
+  } catch (disposalError) {
+    throw new RuntimeStartupDisposalFailure(retryDisposal, {
+      cause: new AggregateError([failure, disposalError], 'claude startup failed and owned disposal did not complete'),
+    });
   }
+  throw failure;
 }
 
 export interface ClaudeAdapterOptions {
@@ -279,197 +297,199 @@ export class ClaudeAdapter implements RuntimeAdapter {
 
     // Generate only task-scoped host/reserved MCP config outside the operation workspace.
     let mcpConfigDir: string | undefined;
-    const taskMcpServers = startInput.mcpServers ?? {};
-    const needsMcpConfig = Object.keys(taskMcpServers).length > 0;
+    let client: ClaudeProcessClient | undefined;
+    try {
+      const taskMcpServers = startInput.mcpServers ?? {};
+      const needsMcpConfig = Object.keys(taskMcpServers).length > 0;
 
-    if (needsMcpConfig) {
-      mcpConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-mcp-'));
-      await fs.chmod(mcpConfigDir, 0o700).catch(() => {});
-      const mcpConfigPath = path.join(mcpConfigDir, 'mcp-config.json');
-      const mcpServers: Record<string, unknown> = { ...taskMcpServers };
-      // The claude CLI spawns every server in this file itself, and
-      // `mcpServers` has no per-server cwd field — the child would inherit the
-      // CLI's cwd, which is the manifest cwd, which for an Agent task is the
-      // Agent home the agent writes by design. A `bun --compile` server binary
-      // runs `$cwd/bunfig.toml` `preload` before its own code, so every entry
-      // is rewritten through this package's `bin/byok-launch-cwd.mjs`, which
-      // chdirs into the daemon's proven-non-writable launch directory and
-      // execs the real command with its argv byte-identical.
-      //
-      // The CLI's OWN cwd is deliberately unchanged: session resume and
-      // relative path resolution depend on it (`agent-home-contract.test.ts`).
-      //
-      const launchBinding = startInput.mcpLaunch;
-      if (Object.keys(mcpServers).length > 0
-        && (launchBinding === undefined || launchBinding.launcher === undefined)) {
-        throw new RuntimeExecutionFailure({
-          phase: 'start', category: 'authority', retry: 'non-retryable',
-          reason: 'prepared claude operation received MCP servers without a trusted launch directory',
-        });
-      }
-      if (launchBinding?.launcher !== undefined) {
-        const wrapped = { cwd: launchBinding.cwd, launcher: launchBinding.launcher };
-        for (const [name, server] of Object.entries(mcpServers)) {
-          try {
-            mcpServers[name] = wrapMcpServerWithLaunchCwd(server as McpStdioServerConfig, wrapped);
-          } catch (cause) {
-            // A refusal from the launcher wrapper is this adapter's own
-            // pre-spawn refusal, exactly like the ones above, and must reach
-            // TaskRunner as one: an untyped throw is projected as a generic
-            // `runtime adapter contract violation during start`, which hides
-            // the `launch_cwd_*` reason the operator needs to fix their MCP
-            // server configuration.
-            throw new RuntimeExecutionFailure({
-              phase: 'start', category: 'authority', retry: 'non-retryable',
-              reason: `prepared claude operation cannot launch an MCP server in the trusted launch directory: ${cause instanceof Error ? cause.message : 'launch_cwd_target_refused'}`,
-            }, { cause });
+      if (needsMcpConfig) {
+        mcpConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-mcp-'));
+        await fs.chmod(mcpConfigDir, 0o700).catch(() => {});
+        const mcpConfigPath = path.join(mcpConfigDir, 'mcp-config.json');
+        const mcpServers: Record<string, unknown> = { ...taskMcpServers };
+        // The claude CLI spawns every server in this file itself, and
+        // `mcpServers` has no per-server cwd field — the child would inherit the
+        // CLI's cwd, which is the manifest cwd, which for an Agent task is the
+        // Agent home the agent writes by design. A `bun --compile` server binary
+        // runs `$cwd/bunfig.toml` `preload` before its own code, so every entry
+        // is rewritten through this package's `bin/byok-launch-cwd.mjs`, which
+        // chdirs into the daemon's proven-non-writable launch directory and
+        // execs the real command with its argv byte-identical.
+        //
+        // The CLI's OWN cwd is deliberately unchanged: session resume and
+        // relative path resolution depend on it (`agent-home-contract.test.ts`).
+        //
+        const launchBinding = startInput.mcpLaunch;
+        if (Object.keys(mcpServers).length > 0
+          && (launchBinding === undefined || launchBinding.launcher === undefined)) {
+          throw new RuntimeExecutionFailure({
+            phase: 'start', category: 'authority', retry: 'non-retryable',
+            reason: 'prepared claude operation received MCP servers without a trusted launch directory',
+          });
+        }
+        if (launchBinding?.launcher !== undefined) {
+          const wrapped = { cwd: launchBinding.cwd, launcher: launchBinding.launcher };
+          for (const [name, server] of Object.entries(mcpServers)) {
+            try {
+              mcpServers[name] = wrapMcpServerWithLaunchCwd(server as McpStdioServerConfig, wrapped);
+            } catch (cause) {
+              // A refusal from the launcher wrapper is this adapter's own
+              // pre-spawn refusal, exactly like the ones above, and must reach
+              // TaskRunner as one: an untyped throw is projected as a generic
+              // `runtime adapter contract violation during start`, which hides
+              // the `launch_cwd_*` reason the operator needs to fix their MCP
+              // server configuration.
+              throw new RuntimeExecutionFailure({
+                phase: 'start', category: 'authority', retry: 'non-retryable',
+                reason: `prepared claude operation cannot launch an MCP server in the trusted launch directory: ${cause instanceof Error ? cause.message : 'launch_cwd_target_refused'}`,
+              }, { cause });
+            }
           }
         }
+        await fs.writeFile(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });
+        mapping.args = [
+          ...mapping.args,
+          '--mcp-config',
+          mcpConfigPath,
+          // The generated file is the complete task-scoped MCP authority.
+          // Never merge ambient user/project MCP configuration into it.
+          '--strict-mcp-config',
+        ];
       }
-      await fs.writeFile(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });
-      mapping.args = [
+
+      const resumeSessionId = startInput.manifest.sessionRef;
+      let manifestModelId: string | undefined;
+      try {
+        manifestModelId = subscriptionModel(startInput.manifest.dispatchSelection, 'claude');
+      } catch (cause) {
+        throw new RuntimeExecutionFailure({
+          phase: 'start',
+          category: 'authority',
+          retry: 'non-retryable',
+          reason: 'prepared claude operation received an invalid runtime selection manifest',
+        }, { cause });
+      }
+      if (manifestModelId !== modelId) {
+        throw new RuntimeExecutionFailure({
+          phase: 'start',
+          category: 'authority',
+          retry: 'non-retryable',
+          reason: 'prepared claude operation received a manifest with different runtime selection',
+        });
+      }
+      const manifestCwd = startInput.manifest.cwd;
+      if (manifestCwd === undefined) {
+        throw new RuntimeExecutionFailure({
+          phase: 'start', category: 'authority', retry: 'non-retryable',
+          reason: 'prepared claude operation received a manifest without a sealed cwd',
+        });
+      }
+      const args = [
+        '-p',
+        '--input-format',
+        'stream-json',
+        '--output-format',
+        'stream-json',
+        // REQUIRED alongside `--output-format stream-json` in `--print` mode —
+        // empirically confirmed: omitting this exits 1 immediately with
+        // "Error: When using --print, --output-format=stream-json requires
+        // --verbose", before spawning any model call.
+        '--verbose',
+        ...(manifestModelId ? ['--model', manifestModelId] : []),
+        ...(resumeSessionId ? ['--resume', resumeSessionId] : []),
         ...mapping.args,
-        '--mcp-config',
-        mcpConfigPath,
-        // The generated file is the complete task-scoped MCP authority.
-        // Never merge ambient user/project MCP configuration into it.
-        '--strict-mcp-config',
       ];
-    }
 
-    const resumeSessionId = startInput.manifest.sessionRef;
-    let manifestModelId: string | undefined;
-    try {
-      manifestModelId = subscriptionModel(startInput.manifest.dispatchSelection, 'claude');
-    } catch (cause) {
-      throw new RuntimeExecutionFailure({
-        phase: 'start',
-        category: 'authority',
-        retry: 'non-retryable',
-        reason: 'prepared claude operation received an invalid runtime selection manifest',
-      }, { cause });
-    }
-    if (manifestModelId !== modelId) {
-      throw new RuntimeExecutionFailure({
-        phase: 'start',
-        category: 'authority',
-        retry: 'non-retryable',
-        reason: 'prepared claude operation received a manifest with different runtime selection',
-      });
-    }
-    const manifestCwd = startInput.manifest.cwd;
-    if (manifestCwd === undefined) {
-      throw new RuntimeExecutionFailure({
-        phase: 'start', category: 'authority', retry: 'non-retryable',
-        reason: 'prepared claude operation received a manifest without a sealed cwd',
-      });
-    }
-    const args = [
-      '-p',
-      '--input-format',
-      'stream-json',
-      '--output-format',
-      'stream-json',
-      // REQUIRED alongside `--output-format stream-json` in `--print` mode —
-      // empirically confirmed: omitting this exits 1 immediately with
-      // "Error: When using --print, --output-format=stream-json requires
-      // --verbose", before spawning any model call.
-      '--verbose',
-      ...(manifestModelId ? ['--model', manifestModelId] : []),
-      ...(resumeSessionId ? ['--resume', resumeSessionId] : []),
-      ...mapping.args,
-    ];
+      const control = createClaudeControlChannel(this.options.interruptTimeoutMs ?? 1000);
+      try {
+        client = new ClaudeProcessClient({
+          command: bin.command,
+          args,
+          cwd: manifestCwd,
+          env: withoutProviderCredentials(startInput.env),
+          spawnFn: this.options.spawnFn,
+          control,
+        });
+      } catch (cause) {
+        if (isRuntimeStartupDisposalFailure(cause)) throw cause;
+        throw new RuntimeExecutionFailure({
+          phase: 'start', category: 'infrastructure', retry: 'retryable',
+          reason: 'claude runtime process could not be spawned',
+        }, { cause });
+      }
 
-    const control = createClaudeControlChannel(this.options.interruptTimeoutMs ?? 1000);
-    let client: ClaudeProcessClient;
-    try {
-      client = new ClaudeProcessClient({
-        command: bin.command,
-        args,
-        cwd: manifestCwd,
-        env: withoutProviderCredentials(startInput.env),
-        spawnFn: this.options.spawnFn,
+      // `--input-format stream-json` expects the first turn's instruction on
+      // stdin too, not as a positional CLI argument — empirically confirmed
+      // live (this task's persistent-process multi-turn probes never passed
+      // a positional prompt at all, relying entirely on this same write for
+      // turn one). Using the identical mechanism for turn one and every
+      // `followUp()` afterward (see `ClaudeSession.followUp` /
+      // `ClaudeProcessClient.writeUserMessage`) avoids two different
+      // send-a-prompt code paths.
+      try {
+        await client.writeUserMessage(startInput.instruction);
+      } catch (cause) {
+        if (isRuntimeStartupDisposalFailure(cause)) throw cause;
+        throw new RuntimeExecutionFailure({
+          phase: 'start', category: 'infrastructure', retry: 'retryable',
+          reason: 'claude initial instruction transport failed',
+        }, { cause });
+      }
+
+      let sessionRef: string;
+      try {
+        // Resolves with claude's own real `session_id` off its `system/init`
+        // frame — see `ClaudeProcessClient.waitForInit`'s doc comment for why
+        // this is needed at all (claude's stream-json protocol has no
+        // request/response ack the way pi's RPC mode does) and why, unlike
+        // pi's `resolveFreshSessionId`, no separate follow-up round-trip is
+        // needed: claude always surfaces `session_id` directly on the very
+        // first frame of a successful run, resume or fresh alike (confirmed:
+        // a `--resume <id>` run's own `system/init.session_id` always equals
+        // the requested id). An unresolvable `--resume` target (or any other
+        // immediate failure) never emits an `init` frame at all and instead
+        // exits promptly — `waitForInit()` rejects with the enriched exit
+        // error in that case (see `process-client.ts`), which is exactly
+        // what should make `start()` fail here, fail-closed, never a
+        // fabricated sessionRef.
+        sessionRef = await client.waitForInit();
+      } catch (err) {
+        if (isRuntimeStartupDisposalFailure(err)) throw err;
+        if (isRuntimeExecutionFailure(err)) throw err;
+        throw new RuntimeExecutionFailure({
+          phase: 'start', category: 'infrastructure', retry: 'retryable',
+          reason: `claude exited before yielding an authoritative session id: ${errorMessage(err)}`,
+        }, { cause: err });
+      }
+
+      // Cross-model review finding: the doc comment above states this is
+      // "confirmed" to always hold empirically — but nothing actually verified
+      // it in code, so a future/unobserved claude behavior (or a bug) silently
+      // resuming a DIFFERENT session than `task.sessionRef` asked for would
+      // have gone completely unnoticed: this adapter would return a
+      // `ClaudeSession` for whatever `sessionRef` claude happened to report,
+      // running the task against the wrong workspace/history with no signal
+      // to the caller at all. Fail closed instead of trusting the assumption.
+      if (resumeSessionId !== undefined && sessionRef !== resumeSessionId) {
+        throw new RuntimeExecutionFailure({
+          phase: 'start',
+          category: 'authority',
+          retry: 'non-retryable',
+          reason: `claude --resume echoed a different session id than requested (requested ${resumeSessionId}, got ${sessionRef})`,
+        });
+      }
+
+      return new ClaudeSession(
+        sessionRef,
+        client,
+        manifestCwd,
         control,
-      });
+        mcpConfigDir,
+        manifestModelId,
+      );
     } catch (cause) {
-      await cleanupMcpConfigDir(mcpConfigDir);
-      throw new RuntimeExecutionFailure({
-        phase: 'start', category: 'infrastructure', retry: 'retryable',
-        reason: 'claude runtime process could not be spawned',
-      }, { cause });
+      return rejectOwnedStartup(cause, client, mcpConfigDir);
     }
-
-    // `--input-format stream-json` expects the first turn's instruction on
-    // stdin too, not as a positional CLI argument — empirically confirmed
-    // live (this task's persistent-process multi-turn probes never passed
-    // a positional prompt at all, relying entirely on this same write for
-    // turn one). Using the identical mechanism for turn one and every
-    // `followUp()` afterward (see `ClaudeSession.followUp` /
-    // `ClaudeProcessClient.writeUserMessage`) avoids two different
-    // send-a-prompt code paths.
-    try {
-      await client.writeUserMessage(startInput.instruction);
-    } catch (cause) {
-      await disposeFailedTransportStart(client, mcpConfigDir);
-      throw new RuntimeExecutionFailure({
-        phase: 'start', category: 'infrastructure', retry: 'retryable',
-        reason: 'claude initial instruction transport failed',
-      }, { cause });
-    }
-
-    let sessionRef: string;
-    try {
-      // Resolves with claude's own real `session_id` off its `system/init`
-      // frame — see `ClaudeProcessClient.waitForInit`'s doc comment for why
-      // this is needed at all (claude's stream-json protocol has no
-      // request/response ack the way pi's RPC mode does) and why, unlike
-      // pi's `resolveFreshSessionId`, no separate follow-up round-trip is
-      // needed: claude always surfaces `session_id` directly on the very
-      // first frame of a successful run, resume or fresh alike (confirmed:
-      // a `--resume <id>` run's own `system/init.session_id` always equals
-      // the requested id). An unresolvable `--resume` target (or any other
-      // immediate failure) never emits an `init` frame at all and instead
-      // exits promptly — `waitForInit()` rejects with the enriched exit
-      // error in that case (see `process-client.ts`), which is exactly
-      // what should make `start()` fail here, fail-closed, never a
-      // fabricated sessionRef.
-      sessionRef = await client.waitForInit();
-    } catch (err) {
-      await disposeFailedTransportStart(client, mcpConfigDir);
-      if (isRuntimeExecutionFailure(err)) throw err;
-      throw new RuntimeExecutionFailure({
-        phase: 'start', category: 'infrastructure', retry: 'retryable',
-        reason: `claude exited before yielding an authoritative session id: ${errorMessage(err)}`,
-      }, { cause: err });
-    }
-
-    // Cross-model review finding: the doc comment above states this is
-    // "confirmed" to always hold empirically — but nothing actually verified
-    // it in code, so a future/unobserved claude behavior (or a bug) silently
-    // resuming a DIFFERENT session than `task.sessionRef` asked for would
-    // have gone completely unnoticed: this adapter would return a
-    // `ClaudeSession` for whatever `sessionRef` claude happened to report,
-    // running the task against the wrong workspace/history with no signal
-    // to the caller at all. Fail closed instead of trusting the assumption.
-    if (resumeSessionId !== undefined && sessionRef !== resumeSessionId) {
-      client.kill();
-      await cleanupMcpConfigDir(mcpConfigDir);
-      throw new RuntimeExecutionFailure({
-        phase: 'start',
-        category: 'authority',
-        retry: 'non-retryable',
-        reason: `claude --resume echoed a different session id than requested (requested ${resumeSessionId}, got ${sessionRef})`,
-      });
-    }
-
-    return new ClaudeSession(
-      sessionRef,
-      client,
-      manifestCwd,
-      control,
-      mcpConfigDir,
-      manifestModelId,
-    );
   }
 
   /**
