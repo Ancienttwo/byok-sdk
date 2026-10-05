@@ -12,6 +12,14 @@
   adapter and team relay. The 0.159.2 and 0.160.0 protocol trees are identical.
   Other CLI versions remain unsupported.
 
+- **Changed (client, cloud-do)** — official Pi runtime 1.0.1 -> 1.0.2.
+  The nine-package closure uses upstream commit `cd32f7725fdbddbaecdff5b1e68491563394e0ca`,
+  closureDigest `4aafae2b3780c4c8565eff17ebeb4d3842b6fe4aa31eb32cfbf104d36f453945`. No third-party dependency changes.
+  pi-ai adds opt-in `samplingParamsByThinkingLevel`. pi-durable persists a per-conversation
+  provider session id (`pi.provider` document) and forwards it to the provider on
+  generation and compaction (pi-durable 1.0.2 ruling pending). Fixes `check:release-pack`, which
+  failed after 1.0.2 was published because npm resolved transitive `^1.0.1` siblings to 1.0.2.
+
 - **Changed (client, cloud-do)** — official Pi runtime 1.0.0 -> 1.0.1.
   The nine-package closure uses upstream commit `a7229ddc21810d6245105978033b7df645ecc2f7`,
   closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`.
@@ -28,7 +36,7 @@
   Claude interrupt now uses correlated `control_request` with bounded ACK and
   owned-process fallback. `usage` adds optional `contextTokens`, `contextWindow`
   and `contextSource` fields (additive, independent of provider cost counters),
-  and the official Pi runtime pin moves to 1.0.1 (see below).
+  and the official Pi runtime pin moves to 1.0.2 (see below).
 
 - **Changed (client)** — official Pi runtime 0.87.1 -> 1.0.0. The attested
   closure is now nine package names (chord, pi-agent-core, pi-ai, pi-codemode,
