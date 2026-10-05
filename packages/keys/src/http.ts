@@ -18,7 +18,10 @@ export const PROVIDER_TIMEOUT_MS = 15_000;
  * (`providers.ts:1711-1743`): the URL is re-validated immediately before the
  * call, the caller's abort signal is chained, and an internal timeout aborts
  * with a distinguishable reason so a timeout maps to
- * `PROVIDER_REQUEST_TIMEOUT` rather than a bare `AbortError`.
+ * `PROVIDER_REQUEST_TIMEOUT` rather than a bare `AbortError`. The returned
+ * response owns the guarded body: consume or cancel it to release the guard;
+ * otherwise the original deadline cancels it. Neither headers nor body reads
+ * depend on the injected transport honoring its abort signal.
  */
 export async function fetchWithProviderGuards(
   fetchImpl: ProviderFetch,
@@ -27,31 +30,102 @@ export async function fetchWithProviderGuards(
   signal: AbortSignal,
 ): Promise<Response> {
   normalizeProviderUrl(url);
+  signal.throwIfAborted();
   const controller = new AbortController();
-  const onAbort = () => controller.abort(signal.reason);
-  signal.addEventListener('abort', onAbort, { once: true });
-  if (signal.aborted) onAbort();
-  const timeout = setTimeout(
-    () => controller.abort('provider_timeout'),
-    PROVIDER_TIMEOUT_MS,
-  );
-  try {
-    return await fetchImpl(url, { ...init, signal: controller.signal });
-  } catch (error) {
-    if (
-      !signal.aborted &&
-      controller.signal.aborted &&
-      controller.signal.reason === 'provider_timeout'
-    ) {
-      throw new ByokKeysError(
-        'PROVIDER_REQUEST_TIMEOUT',
-        'Provider request timed out',
-      );
-    }
-    throw error;
-  } finally {
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined;
+  let finished = false;
+  let rejectAbort!: (reason: unknown) => void;
+  const aborted = new Promise<never>((_, reject) => { rejectAbort = reject; });
+  // The header race may already be settled when body cancellation rejects this.
+  void aborted.catch(() => {});
+  const cleanup = () => {
     clearTimeout(timeout);
     signal.removeEventListener('abort', onAbort);
+  };
+  const cancelReader = (reason: unknown) => {
+    // An injected source's cancel hook may itself stall or reject. Cancellation
+    // is best effort and must never delay the caller's terminal result.
+    if (reader) {
+      void reader.cancel(reason).catch(() => {});
+      reader.releaseLock();
+    }
+  };
+  const abort = (reason: unknown) => {
+    if (finished) return;
+    finished = true;
+    cleanup();
+    rejectAbort(reason);
+    bodyController?.error(reason);
+    cancelReader(reason);
+    controller.abort(reason);
+  };
+  const onAbort = () => abort(signal.reason);
+  const timeout = setTimeout(() => abort(new ByokKeysError(
+    'PROVIDER_REQUEST_TIMEOUT',
+    'Provider request timed out',
+  )), PROVIDER_TIMEOUT_MS);
+  signal.addEventListener('abort', onAbort, { once: true });
+  try {
+    const pending = Promise.resolve(fetchImpl(url, { ...init, signal: controller.signal }));
+    // A transport can ignore abort and supply a response after we have returned.
+    // That response still belongs to this operation and must be disposed of.
+    void pending.then(response => {
+      if (finished) void response.body?.cancel(controller.signal.reason).catch(() => {});
+    }, () => {});
+    const response = await Promise.race([pending, aborted]);
+    if (finished) throw controller.signal.reason;
+    if (!response.body) {
+      finished = true;
+      cleanup();
+      return response;
+    }
+    reader = response.body.getReader();
+    const body = new ReadableStream<Uint8Array>({
+      start(streamController) { bodyController = streamController; },
+      async pull(streamController) {
+        try {
+          const chunk = await reader!.read();
+          if (finished) return;
+          if (chunk.done) {
+            finished = true;
+            cleanup();
+            reader!.releaseLock();
+            streamController.close();
+          } else {
+            streamController.enqueue(chunk.value);
+          }
+        } catch (error) {
+          if (finished) return;
+          finished = true;
+          cleanup();
+          reader!.releaseLock();
+          streamController.error(error);
+        }
+      },
+      cancel(reason) {
+        if (finished) return;
+        finished = true;
+        cleanup();
+        cancelReader(reason);
+        controller.abort(reason);
+      },
+    });
+    const guarded = new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+    // Rewrapping transfers body ownership but must retain fetch metadata.
+    for (const key of ['url', 'redirected', 'type'] as const) {
+      Object.defineProperty(guarded, key, { value: response[key] });
+    }
+    return guarded;
+  } catch (error) {
+    finished = true;
+    cleanup();
+    cancelReader(error);
+    throw error;
   }
 }
 
@@ -68,6 +142,7 @@ export async function parseBoundedJsonResponse(
     Number.isFinite(contentLength) &&
     contentLength > PROVIDER_RESPONSE_MAX_BYTES
   ) {
+    void response.body?.cancel().catch(() => {});
     throw new ByokKeysError(
       'PROVIDER_RESPONSE_TOO_LARGE',
       'Provider response exceeds the local safety limit',
