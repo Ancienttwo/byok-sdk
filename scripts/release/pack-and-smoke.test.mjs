@@ -94,7 +94,7 @@ test('the locked closure is exact, integrity-bearing and fork-free', () => {
   const good = PI_RUNTIME_CLOSURE.map((name) => entry(name, '1.0.2')).join('');
   assert.equal(readLockedPiClosure(lock(good), identity).size, PI_RUNTIME_CLOSURE.length);
   assert.throws(() => readLockedPiClosure(lock(good + entry('pi-subagents/@earendil-works/pi-tui', '0.85.1').replace('"pi-subagents/@earendil-works/pi-tui@0.85.1"', '"@earendil-works/pi-tui@0.85.1"')), identity),
-    /resolves to @earendil-works\/pi-tui@0\.85\.1, but the Pi closure is pinned to 1\.0\.1/);
+    /resolves to @earendil-works\/pi-tui@0\.85\.1, but the Pi closure is pinned to 1\.0\.2/);
   assert.throws(() => readLockedPiClosure(lock(good + `    "@earendil-works/pi-agent-core": ["@byok-sdk/pi-agent-core@0.86.1001", "", {}, "sha512-${'B'.repeat(86)}=="],\n`), identity),
     /retired fork/);
   assert.throws(() => readLockedPiClosure(lock(good.replace(`sha512-${'A'.repeat(86)}==`, '')), identity), /carries no sha512 integrity/);
