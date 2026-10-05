@@ -362,7 +362,7 @@ export function assertInstalledPiRuntime(installRoot, identity, locked, label, n
   }
   const [pi] = installed.filter((entry) => entry.manifest.name === identity.packageName);
 
-  // npm records tarball integrity in its lockfile. Pi 1.0.2 does not ship
+  // npm records tarball integrity in its lockfile. Pi 1.0.3 does not ship
   // npm-shrinkwrap.json. A copy with recorded integrity must match the lock.
   // A copy without it must have the exact file set of the official tarball
   // whose sha512 is the locked integrity.
