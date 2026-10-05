@@ -50,6 +50,15 @@ export function cancellationTiming(runtime: string, scenario: string) {
           return Reflect.apply(sender, receiver, args);
         },
       });
+      let stderr = '';
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString('utf8');
+        let newline: number;
+        while ((newline = stderr.indexOf('\n')) >= 0) {
+          const line = stderr.slice(0, newline); stderr = stderr.slice(newline + 1);
+          if (line === 'T1_STARTUP_READY') record('startup.ready', { pid: child.pid });
+        }
+      });
       let buffered = '';
       child.stdout.on('data', (chunk: Buffer) => {
         buffered += chunk.toString('utf8');
@@ -84,8 +93,8 @@ export function cancellationTiming(runtime: string, scenario: string) {
     globalThis.setTimeout = new Proxy(originalSet, {
       apply(target, receiver, args) {
         const [callback, ms, ...rest] = args;
-        if (ms !== 60 && ms !== 100) return Reflect.apply(target, receiver, args);
-        const source = new Error().stack?.split('\n').find(line => line.includes('task-runner.ts') || line.includes('codex-adapter.ts') || line.includes('control-channel.ts'))?.trim();
+        if (ms !== 60 && ms !== 100 && ms !== 1000) return Reflect.apply(target, receiver, args);
+        const source = new Error().stack?.split('\n').find(line => line.includes('task-runner.ts') || line.includes('runtime-start.ts') || line.includes('codex-adapter.ts') || line.includes('control-channel.ts'))?.trim();
         const timer = { id: nextId++, ms, source };
         record('deadline.arm', timer);
         const handle = Reflect.apply(target, receiver, [function (this: unknown) {
