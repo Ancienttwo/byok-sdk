@@ -22,6 +22,21 @@ const cases: Array<{ dir: string; gate: string; runner: TaskRunner; sessions: Se
   resultGate: string; startSettled: ReturnType<typeof deferred>; hasStarted: () => boolean;
   releaseStartupReceipt: () => void;
   restoreClock: () => void; stopTimers: () => void; saveEvidence: () => Promise<void> }> = [];
+const releaseDisposalFixtures: (() => void)[] = [];
+
+/** A missing cleanup receipt is explicit, not inferred from a delayed init frame. */
+function failClaudeDisposalUntilReleased() {
+  let released = false;
+  const realDispose = ClaudeProcessClient.prototype.dispose;
+  const dispose = vi.spyOn(ClaudeProcessClient.prototype, 'dispose').mockImplementation(function (this: ClaudeProcessClient) {
+    if (!released) return Promise.reject(new RuntimeDisposalFailure({ stage: 'cleanup', reason: 'fixture withholds startup disposal receipt' }));
+    return realDispose.call(this);
+  });
+  const release = () => { released = true; };
+  releaseDisposalFixtures.push(release);
+  return { dispose, release };
+}
+
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>(r => { resolve = r; });
@@ -166,6 +181,8 @@ async function setup(runtime: RuntimeId, scenario: string, {
   return c;
 }
 afterEach(async () => {
+  // Always allow real native cleanup after a failed assertion as well.
+  for (const release of releaseDisposalFixtures.splice(0)) release();
   try {
     for (const c of cases.splice(0)) {
       try {
@@ -262,7 +279,10 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
     await new Promise<void>(resolve => setImmediate(resolve));
     c.releaseStartupReceipt();
     await c.runner.shutdownActiveTasks('retry'); await c.cancel();
-    expect(c.terminals()).toHaveLength(1); expectNoErrors(c); await c.assertReaped();
+    expect(c.terminals()).toHaveLength(1);
+    expect(c.sent.some(event => event.type === 'task.started')).toBe(false);
+    if (runtime === 'claude') expect(c.sessions).toHaveLength(0);
+    expectNoErrors(c); await c.assertReaped();
   });
 
   it('startup deadline publishes one failure and retains the late owner until its disposal receipt', async () => {
@@ -278,7 +298,10 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
     await new Promise<void>(resolve => setImmediate(resolve));
     c.releaseStartupReceipt();
     await c.runner.shutdownActiveTasks('deadline owner disposal'); await c.cancel();
-    expect(c.terminals()).toHaveLength(1); expectNoErrors(c); await c.assertReaped();
+    expect(c.terminals()).toHaveLength(1);
+    expect(c.sent.some(event => event.type === 'task.started')).toBe(false);
+    if (runtime === 'claude') expect(c.sessions).toHaveLength(0);
+    expectNoErrors(c); await c.assertReaped();
   });
 
   it('delivers Host cancellation across the daemon transport to the native tree and returns metering once', async () => {
@@ -383,6 +406,44 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
     expect(c.terminals().map(event => event.type)).toEqual(['task.complete']);
     expectUsage(c, runtime === 'claude' ? 456 : 123, runtime === 'claude' ? 29 : 17);
     await c.cancel(); expect(c.terminals()).toHaveLength(1); expectNoErrors(c); await c.assertReaped();
+  });
+});
+
+describe('native Claude with an explicitly failed startup disposal receipt', () => {
+  it.each(['shutdown', 'deadline'] as const)('retains ownership after %s until a successful cleanup retry', async trigger => {
+    const disposal = failClaudeDisposalUntilReleased();
+    const c = await setup('claude', 'startup', trigger === 'deadline' ? { startupTimeoutMs: 1000 } : {});
+    const offered = c.offer();
+    await vi.waitFor(async () => expect(await c.trace()).toContain('startup'));
+    if (trigger === 'shutdown') c.runner.stopAcceptingOffers();
+    else await vi.waitFor(() => expect(c.terminals()).toHaveLength(1));
+    await expect(c.runner.shutdownActiveTasks('receipt unavailable')).rejects.toMatchObject({ name: 'RuntimeDisposalFailure' });
+    await offered;
+    expect(disposal.dispose).toHaveBeenCalled();
+    expect(c.runner.activeTaskCount).toBe(1);
+    expect(c.terminals()).toHaveLength(1);
+    expect(c.terminals()[0]).toMatchObject({ type: 'task.fail', payload: { retryable: trigger === 'shutdown' } });
+    expect(c.sent.some(event => event.type === 'task.started')).toBe(false);
+    expect(c.sessions).toHaveLength(0);
+    await expect(fs.stat(c.gate)).rejects.toMatchObject({ code: 'ENOENT' });
+    // A second failed cleanup cannot release quarantine or republish terminal.
+    await expect(c.runner.shutdownActiveTasks('still unavailable')).rejects.toMatchObject({ name: 'RuntimeDisposalFailure' });
+    expect(c.runner.activeTaskCount).toBe(1);
+    expect(c.terminals()).toHaveLength(1);
+    const failedAttempts = disposal.dispose.mock.calls.length;
+    disposal.release();
+    await c.runner.shutdownActiveTasks('cleanup available');
+    expect(disposal.dispose.mock.calls.length).toBeGreaterThan(failedAttempts);
+    await c.assertReaped(); // All root/descendant/grandchild PIDs and owner gone.
+    await fs.writeFile(c.gate, 'late init release');
+    await c.startSettled.promise;
+    await c.cancel();
+    await c.runner.shutdownActiveTasks('idempotent retry');
+    expect(c.terminals()).toHaveLength(1);
+    expect(c.sessions).toHaveLength(0);
+    expect(c.sent.some(event => event.type === 'task.started')).toBe(false);
+    expectNoErrors(c);
+    await c.assertReaped();
   });
 });
 

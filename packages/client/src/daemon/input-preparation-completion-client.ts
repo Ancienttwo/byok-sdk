@@ -84,6 +84,11 @@ export class InputPreparationCompletionClient {
     timer.unref?.();
     const checkActive = (): void => controller.signal.throwIfAborted();
     const discard = (response: Response): void => { void response.body?.cancel().catch(() => undefined); };
+    // send() and its caller resume in different microtasks. Until a reader is
+    // acquired, every handoff must discard the Response if ownership ended.
+    const checkResponseActive = (response: Response): void => {
+      if (controller.signal.aborted) { discard(response); checkActive(); }
+    };
     const read = async (): Promise<unknown> => {
       // Same single-401 renewal convention as authedFetch. The status lane
       // additionally gates each post-auth/post-fetch continuation, so an auth
@@ -96,15 +101,15 @@ export class InputPreparationCompletionClient {
         } catch (cause) {
           throw new InputPreparationCompletionError('input preparation status transport failed', { cause });
         }
-        if (controller.signal.aborted) { discard(response); checkActive(); }
+        checkResponseActive(response);
         return response;
       };
       let response = await send(await this.options.auth.getValidAccessToken());
-      checkActive();
+      checkResponseActive(response);
       if (response.status === 401) {
         discard(response);
         response = await send(await this.options.auth.handleUnauthorized());
-        checkActive();
+        checkResponseActive(response);
       }
       if (!response.ok) {
         discard(response);

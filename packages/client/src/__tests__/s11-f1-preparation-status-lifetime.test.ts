@@ -62,6 +62,53 @@ describe('S11-F1 status read owns headers, body and cancellation', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it.each(['first', 'renewed'])('discards the %s response when abort lands between send and read continuations', async handoff => {
+    vi.useFakeTimers();
+    const owner = new AbortController();
+    const entered = deferred<void>();
+    const cancel = vi.fn(() => new Promise<void>(() => {}));
+    const stream = new ReadableStream({ cancel });
+    const auth = { getValidAccessToken: async () => 'fixture-token', handleUnauthorized: vi.fn(async () => 'renewed-token') } as unknown as AuthManager;
+    let requests = 0;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      expect(init?.method).toBe('GET'); // No preparation-completion PUT may escape.
+      requests += 1;
+      if (handoff === 'renewed' && requests === 1) return new Response('', { status: 401 });
+      entered.resolve();
+      return new Response(stream);
+    });
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-s11-handoff-'));
+    cleanup.push(() => fs.rm(dir, { recursive: true, force: true }));
+    const h = harness({ auth, statusReadSignal: owner.signal });
+    const cursorStore = new CursorStore(dir);
+    let result!: ReturnType<typeof observe>;
+    const connection = new ConnectionManager({ serverUrl: 'http://cloud.test', deviceId: 'device', productId: 'fixture', capabilities: [], runtimes: [], auth, cursorStore,
+      onEnvelope: async () => { const operation = h.handle(); result = observe(operation); await operation; },
+    });
+    cleanup.push(() => connection.stop());
+    const delivery = connection as unknown as { deliver: (e: ReturnType<typeof createEnvelope>) => boolean; processingChain: Promise<void> };
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    delivery.deliver(createEnvelope('agent.input.preparation', payload, { seq: 1 }));
+    await entered.promise;
+    // send() has checked the signal and returned its Response, but read() has
+    // not resumed to own a reader. This is the actual daemon-stop handoff gap.
+    await Promise.resolve();
+    expect(stream.locked).toBe(false);
+    owner.abort();
+    await vi.advanceTimersByTimeAsync(0);
+    expectAborted(result, 'cancelled');
+    await delivery.processingChain;
+    expect(await cursorStore.load('http://cloud.test', 'device')).toBe(0);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(stream.locked).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(handoff === 'first' ? 1 : 2);
+    expect(auth.handleUnauthorized).toHaveBeenCalledTimes(handoff === 'first' ? 0 : 1);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(result.state).toBe('rejected');
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
   it('uses one header-and-body budget and cancels a stalled reader without awaiting its cancel acknowledgement', async () => {
     vi.useFakeTimers();
     const headers = deferred<Response>();
