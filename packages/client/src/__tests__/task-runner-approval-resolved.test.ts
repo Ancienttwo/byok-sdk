@@ -86,8 +86,8 @@ function findApprovalResolved(sent: Envelope[]) {
 /**
  * A minimal `Session`/`RuntimeAdapter` double whose `resolveApproval` genuinely
  * routes through `TaskContext.approvalChannel.resolve` — deliberately
- * mirroring what the real claude adapter's `ClaudeSession.resolveApproval`
- * does under `confirm` mode (see `claude-adapter.ts`), which is what actually
+ * exercising the shared custom-adapter approval seam (bundled Claude
+ * rejects `confirm`), which is what actually
  * exercises the WIRE path (`TaskRunner.handleApprove`/`handleReject` ->
  * `session.resolveApproval` -> `approvalChannel.resolve` ->
  * `ApprovalRegistry.resolve(..., 'wire')`). `StubSession`

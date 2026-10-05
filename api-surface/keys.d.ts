@@ -716,7 +716,7 @@ export declare const PI_PROJECTED_KEY_ENV = "PI_PROVIDER_API_KEY";
  * never parents, so restating the pair here is a narrowing, not a second
  * vocabulary.
  */
-export declare const PI_LAUNCHER_RUNTIME_ENTRIES: readonly ['pi-rpc', 'pi-prepared'];
+export declare const PI_LAUNCHER_RUNTIME_ENTRIES: readonly ['pi-rpc', 'pi-prepared', 'pi-durable'];
 export type PiLauncherRuntimeEntry = (typeof PI_LAUNCHER_RUNTIME_ENTRIES)[number];
 /** Keep projected providers disjoint from Pi built-ins so composition can never fall back to one. */
 export declare function piProjectionProviderId(profileRef: string): string;
@@ -730,7 +730,7 @@ export declare function piProjectionProviderId(profileRef: string): string;
  * declared local configuration is the only authority; nothing is inferred from
  * the model name or base URL.
  */
-export declare function buildPiProviderProjection(profile: ModelProviderProfile): object;
+export declare function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry?: PiLauncherRuntimeEntry): object;
 /**
  * Validate the credential-blind RPC argv the client may delegate, then bind
  * the Pi child to the namespaced projection and exact configured model.

@@ -1,6 +1,6 @@
 # sdk/sdk-root 架構文檔
 
-<!-- BEGIN ARCHCONTEXT:generated target="projection_target.entity.capability-sdk-sdk-root" sourceDigest="sha256:b529778eefbc69b17bb089e832735ad1e7f2df5d56b635619f6d4b074941f00b" rendererVersion="archcontext.docs-renderer/v4" outputDigest="sha256:8222fcd9af4f9c98f517da7bef7d2e7d4598d5b86469f723f04a6d54ce6f0f53" -->
+<!-- BEGIN ARCHCONTEXT:generated target="projection_target.entity.capability-sdk-sdk-root" sourceDigest="sha256:8a356f1f8cde7afe326b5033ae8d6ea5bba3db826b1db3e1223405ed3e6361e2" rendererVersion="archcontext.docs-renderer/v4" outputDigest="sha256:2bf05588105f46b1329f21cb42bdb87f212de8fd4a636783b09e7a9de9f2bea3" -->
 > **狀態**:`active`
 > **Capability ID**:`capability.sdk.sdk-root`(kind `capability`)
 > **Matched Prefixes**:`packages/**`
@@ -36,7 +36,7 @@ flowchart LR
 
 ### 1.3 規模信號
 
-- 規模量級:`1000–2000` 個文件 / `200k–500k` 行
+- 規模量級:`2000–5000` 個文件 / `500k–1000k` 行
 - 匹配前綴:`packages/**`
 - 推導:掃描 `source.include` 減 `source.exclude`,跳過 `.git/` 與 `node_modules/`,再按 1–2–5 階梯分桶。精確計數不入本文檔:量級足以回答「這個能力有多大」,而逐行計數會讓覆蓋範圍內任何一次源碼改動都改寫本文檔。
 
@@ -83,5 +83,24 @@ The generated map is a representative local execution slice, not an exhaustive d
 C07's proposed pre-Execution full-request preparation API remains a separate unimplemented contract. This flow begins after an SDK offer exists. The offline preparation/consume spike proves its controlled native request seam only; it does not authorize production budget configuration.
 
 ## 4. 歷史決策記錄(append-only)
+
+### Cloud slice 4a (2026-10-03)
+
+`packages/cloud-do` is a private Cloudflare deployment boundary under the existing
+SDK root capability. ADR-035 preserves runtime boundaries and the nine published
+artifacts: this host adds no published package or public client export. The client
+retains its local replica admission/lock/reset/inspect path; only native pi Storage
+construction is injectable. The DO adapter consumes portable pi SQLite and Harness
+exports, with a type-only reference to the factory declaration; it does not import
+the local client engine or environment. One named DO owns one Harness and creates
+a new ownerless conversation for each execution. Its async SQL transaction queue
+and pi-prefixed schema preserve native storage semantics. Configuration, tests,
+runtime constraints and deferred 4b–4d responsibilities are documented in
+[`packages/cloud-do/README.md`](../../../../packages/cloud-do/README.md).
+
+The broader unmatched examples and ancestor capability coverage are intentional
+repository ownership observations for separate architecture work; 4a does not
+repartition them. Verification is the complete native pi conformance suite on
+local SQLite and real workerd, execution isolation/restart and the root gates.
 
 ## Optimization Backlog

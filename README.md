@@ -50,7 +50,8 @@ and the keys SQLite profile schema; then **0.17.0** with keys **0.4.3**
 [0.16.0](docs/releases/v0.16.0-publication.md).
 
 The published 0.23.0 train, like 0.22.0, uses unmodified official
-`@earendil-works/pi-coding-agent@0.87.1` and its attested sibling closure.
+`@earendil-works/pi-coding-agent@0.87.1` and its attested sibling closure;
+the current source pins 1.0.2 (unreleased).
 The maintained fork is retired from this train; 0.21.0 remains the historical
 fork-based release. Release SemVer is observability only;
 protocol intersection and advertised capabilities remain the execution gates.
@@ -80,8 +81,18 @@ npm install @byok-sdk/server@0.24.0-rc.1 @byok-sdk/client@0.24.0-rc.1
 import { createByokServer } from '@byok-sdk/server';
 ```
 
+The Worker-only cloud-do source candidate is pending npm publication.
+This example becomes available after the stable release and registry readback.
+See [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
+
+~~~sh
+# Pending publication. The first release is stable 0.24.0.
+npm install @byok-sdk/cloud-do@0.24.0-rc.1
+npm install --save-dev @cloudflare/workers-types
+~~~
+
 The published dispatch packages are `@byok-sdk/client`, `@byok-sdk/server`,
-`@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/core`,
+`@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`, `@byok-sdk/core`,
 `@byok-sdk/protocol`, and `@byok-sdk/ui-runtime`, all on the same train;
 `@byok-sdk/implementation-identity` follows the train as a support package that
 client and keys install for you. Starting with 0.21.0, the `byok-sdk` namespace
@@ -230,4 +241,4 @@ included.
 ## Runtime and license
 
 The dispatch SDK and the independently installable `@byok-sdk/keys@0.8.1-rc.1`
-require Node.js 22.22.0 or newer. MIT licensed.
+require Node.js 24.15.0 or newer. MIT licensed.

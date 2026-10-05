@@ -214,14 +214,14 @@ path now.
 
 ## Node version and storage backends
 
-`engines.node` is `>=22.22.0`, aligned with its `@byok-sdk/core` contract
+`engines.node` is `>=24.15.0`, aligned with its `@byok-sdk/core` contract
 dependency and the workspace release floor.
 
 | Backend | Requirement | Behaviour below it |
 | --- | --- | --- |
-| `InMemoryProviderProfileStore` | Node 22.22+ | — the whole configure/resolve lifecycle works |
+| `InMemoryProviderProfileStore` | Node 24.15+ | — the whole configure/resolve lifecycle works |
 | `SqliteProviderProfileStore` | Node 22.5+ (`node:sqlite`) | fails closed with `PROVIDER_STORE_UNAVAILABLE` |
-| `TruthStoreProviderProfileStore` | Node 22.22+ plus an injected tenant-bound `TruthStore` | stale CAS or malformed/hash-mismatched authority fails closed; never falls back to SQLite |
+| `TruthStoreProviderProfileStore` | Node 24.15+ plus an injected tenant-bound `TruthStore` | stale CAS or malformed/hash-mismatched authority fails closed; never falls back to SQLite |
 | `byok-pi-provider-launcher` | Node 22.5+ (`node:sqlite`) and macOS/Windows for authenticated profiles | fails closed; `auth_mode: none` does not require a credential backend |
 
 On macOS, an isolated host may select one explicit credential authority with

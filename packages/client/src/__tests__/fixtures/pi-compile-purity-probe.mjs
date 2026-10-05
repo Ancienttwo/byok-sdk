@@ -12,7 +12,7 @@
 // binding the SDK compile module and official pi-ai take is a binding to a
 // monitored function.
 //
-// What is loaded (official Pi 0.87.1, A1'): the SDK's own compile entry
+// What is loaded (official Pi 1.0.2, A1'): the SDK's own compile entry
 // `compilePreparedPiInput` (`adapters/pi/input-preparation.ts`), handed in as
 // a pre-built ESM file at `config.compileEntry` (the parent test bundles it
 // from source, since the published dist exports no compile entry), and the

@@ -34,17 +34,9 @@ async function tmpDir(prefix: string): Promise<string> {
  * `ApprovalRegistry` entry a pending `approvals.request` control call is
  * awaiting (the task's own "dual entry convergence" requirement).
  *
- * `ApprovalAwareSession`/`ApprovalAwareAdapter` below are a minimal
- * test-local double whose `resolveApproval` genuinely routes through
- * `TaskContext.approvalChannel` — deliberately mirroring exactly what the
- * real claude adapter's `ClaudeSession.resolveApproval` does (see
- * `claude-adapter.ts`), so the WIRE path (`TaskRunner.handleApprove`/
- * `handleReject` -> `session.resolveApproval` -> `approvalChannel.resolve`
- * -> `ApprovalRegistry.resolve`) is exercised faithfully without needing a
- * real claude binary or MCP round trip — that mechanism itself (the MCP
- * wire shape, `--permission-prompt-tool`) was empirically verified directly
- * against the real installed binary in M4 Phase 3 STEP 0 and is covered at
- * the protocol-handler level by `approval-mcp-server.test.ts`.
+ * ApprovalAwareSession/ApprovalAwareAdapter are test-local third-party-style
+ * implementations of the retained shared approval channel. Claude no longer
+ * consumes that channel; these tests preserve control/wire dual-entry coverage.
  */
 class ApprovalAwareSession implements Session {
   readonly resolveApprovalCalls: Array<{ approved: boolean; reason?: string }> = [];
@@ -266,7 +258,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
     // all (that's the WIRE task.approve/task.reject path's own job — see
     // test (a) above). Both paths converge on the SAME registry entry,
     // which is what actually unblocks a pending approvals.request/
-    // byok-approval-mcp — that convergence is what this test proves, not
+    // a generic out-of-band adapter — that convergence is what this test proves, not
     // that every path notifies the session identically.
     expect(adapter.sessions[0]?.resolveApprovalCalls).toEqual([]);
 

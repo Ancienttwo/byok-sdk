@@ -1,3 +1,4 @@
+import { cloudDoConsumerSmoke } from './cloud-do-consumer-smoke.mjs';
 import { assertImplementationIdentityDependency } from './implementation-identity-edges.mjs';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -35,6 +36,7 @@ const packages = [
   { name: '@byok-sdk/cloud', directory: 'packages/cloud' },
   { name: '@byok-sdk/client', directory: 'packages/client' },
   { name: '@byok-sdk/cloud-dataplane', directory: 'packages/cloud-dataplane' },
+  { name: '@byok-sdk/cloud-do', directory: 'packages/cloud-do' },
   { name: '@byok-sdk/ui-runtime', directory: 'packages/ui-runtime' },
   { name: '@byok-sdk/keys', directory: 'packages/keys' },
 ];
@@ -484,7 +486,7 @@ try {
         `for (const needle of ['ajv','pi-coding-agent','@earendil-works','@modelcontextprotocol/client','@modelcontextprotocol/sdk','new Function']) {\n` +
         `  assert.equal(mcpServerSource.includes(needle), false, mcpServerEntry + ' carries ' + needle);\n` +
         `}\n` +
-        `for (const [name, version] of [['@byok-sdk/core','${releaseVersion}'],['@byok-sdk/implementation-identity','${releaseVersion}'],['@byok-sdk/protocol','${releaseVersion}'],['@byok-sdk/client','${releaseVersion}'],['@byok-sdk/server','${releaseVersion}'],['@byok-sdk/cloud','${releaseVersion}'],['@byok-sdk/cloud-dataplane','${releaseVersion}'],['@byok-sdk/ui-runtime','${releaseVersion}'],['@byok-sdk/keys','${keysVersion}']]) {\n` +
+        `for (const [name, version] of [['@byok-sdk/core','${releaseVersion}'],['@byok-sdk/implementation-identity','${releaseVersion}'],['@byok-sdk/protocol','${releaseVersion}'],['@byok-sdk/client','${releaseVersion}'],['@byok-sdk/server','${releaseVersion}'],['@byok-sdk/cloud','${releaseVersion}'],['@byok-sdk/cloud-dataplane','${releaseVersion}'],['@byok-sdk/cloud-do','${releaseVersion}'],['@byok-sdk/ui-runtime','${releaseVersion}'],['@byok-sdk/keys','${keysVersion}']]) {\n` +
         `  const manifest = require(name + '/package.json');\n` +
         `  assert.equal(manifest.version, version, name);\n` +
         `}\n` +
@@ -503,6 +505,7 @@ try {
         `console.log('[release-pack] isolated imports OK');\n`,
     );
     run(nodeBin, ['smoke.mjs'], smokeDir);
+    await cloudDoConsumerSmoke(smokeDir);
     copyFileSync(path.join(repoRoot, 'scripts/release/recurring-smoke.mjs'), path.join(smokeDir, 'recurring-smoke.mjs'));
     run(nodeBin, ['recurring-smoke.mjs'], smokeDir);
     // Preserve the verifier's relative module graph in the isolated fixture.
@@ -535,7 +538,7 @@ try {
     const clientManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'package.json'), 'utf8'));
     if (clientManifest.dependencies['@juicesharp/rpiv-todo'] !== undefined) throw new Error('packed client retained a second npm todo authority');
     console.log('[release-pack] client dependencies=' + Object.keys(clientManifest.dependencies).length +
-      '; delta from M1a: -rpiv-todo +rpiv-i18n +rpiv-config +typebox +official Pi closure (pi-ai, pi-agent-core, chord, pi-telemetry, pi-tui)');
+      '; delta from M1a: -rpiv-todo +rpiv-i18n +rpiv-config +typebox +official Pi closure (pi-ai, pi-agent-core, chord, pi-codemode, pi-mcp, pi-telemetry, pi-tui)');
 
     const installedAgentBin = path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'dist', 'bin', 'byok-agent.js');
     const emptyAgentHome = path.join(smokeDir, 'empty-agent-home');

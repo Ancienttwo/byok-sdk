@@ -1,3 +1,4 @@
+import { parseClaudeContextWindow } from './control-channel';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
@@ -365,14 +366,20 @@ function tryRealpath(candidate: string): string | undefined {
  * consistency rather than a delivery requirement.
  */
 function mapResult(msg: ClaudeStreamMessage): MapClaudeMessageResult {
-  const usageEvent = extractClaudeUsageEvent(msg.usage);
+  const contextWindow = parseClaudeContextWindow(msg.modelUsage);
+  const cost = extractClaudeUsageEvent(msg.usage);
+  const usageEvent: AgentEvent | undefined = contextWindow === null ? cost : {
+    ...(cost ?? { type: 'usage' as const }), contextWindow, contextSource: 'provider',
+  };
   // Cross-model review finding: success must require `is_error === false`
   // EXPLICITLY — the previous `!== true` check treated a MISSING or
   // non-boolean `is_error` (a malformed/future `result` frame) as success
   // too, which would have reported task.complete for a turn that never
   // actually said it succeeded. `result` is the wire's own terminal signal
   // (see this function's own doc comment above) — never inferred.
-  if (msg.is_error === false) {
+  const aborted = msg.is_error === true && msg.subtype === 'error_during_execution' && (msg.terminal_reason === 'aborted_streaming' || msg.terminal_reason === 'aborted_tools');
+  // This is a runtime turn boundary, not a product success decision; TaskRunner retains cancellation authority.
+  if (msg.is_error === false || aborted) {
     const events: AgentEvent[] = usageEvent ? [usageEvent, { type: 'turn_end' }] : [{ type: 'turn_end' }];
     return { events };
   }
@@ -445,7 +452,7 @@ function truncateResultDiagnostic(text: string): string {
  *   `output_tokens`, not counted separately), so these stay absent rather
  *   than fabricated.
  */
-function extractClaudeUsageEvent(rawUsage: unknown): AgentEvent | undefined {
+function extractClaudeUsageEvent(rawUsage: unknown): Extract<AgentEvent, { type: 'usage' }> | undefined {
   if (!rawUsage || typeof rawUsage !== 'object') return undefined;
   const usage = rawUsage as Record<string, unknown>;
   const inputTokens = toNonNegativeInt(usage.input_tokens);

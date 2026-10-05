@@ -1,11 +1,12 @@
 import { validateDescendantSpawn, type DescendantSpawnExpectationV1, type DescendantSpawnActualV1 } from './descendant-launch';
 import { CONTROLLED_PI_DIRECTORY_ENV_NAMES, KEYS_PI_INHERITED_ENV_NAMES, KEYS_PI_WINDOWS_ENV_NAMES } from './environment';
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createReadStream, lstatSync, realpathSync, type Stats } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES, loaderEnvInjections } from './environment';
 import type { McpLaunchAttestation } from './launch-attestation';
+import type { OfficialExternalCliAdapter, OfficialExternalCliInstallV2 } from './external-cli';
 
 /**
  * The ONE authority for "which implementation backs this tool", and the only
@@ -373,6 +374,11 @@ export type ToolImplementationSubjectV1 =
     /** A finite SDK-owned helper, never a Host MCP server or a runtime. */
     readonly kind: 'sdk-helper';
     readonly helperId: SdkHelperIdV1;
+  }
+  | {
+    /** Independent official installation, never a Pi helper identity. */
+    readonly kind: 'official-external-cli';
+    readonly adapter: OfficialExternalCliAdapter;
   };
 
 /** What the resolver is asked about: one subject, and where it launches. */
@@ -390,6 +396,11 @@ export type ToolImplementationLocatorV1 = {
 } | {
   readonly subject: Extract<ToolImplementationSubjectV1, { kind: 'sdk-helper' }>;
   readonly entry: SdkHelperEntryV1;
+  readonly command?: never;
+  readonly args?: never;
+  readonly launch?: never;
+} | {
+  readonly subject: Extract<ToolImplementationSubjectV1, { kind: 'official-external-cli' }>;
   readonly command?: never;
   readonly args?: never;
   readonly launch?: never;
@@ -415,9 +426,9 @@ export type ToolImplementationInstallRecordV1 = Omit<
 >;
 
 /** Frozen M0 runtime vocabulary; declaration does not enable a dispatcher. */
-export type RuntimeEntryV1 = 'pi-prepared' | 'pi-rpc' | 'pi-subagent-print' | 'pi-subagent-runner';
+export type RuntimeEntryV1 = 'pi-prepared' | 'pi-rpc' | 'pi-durable' | 'pi-subagent-print' | 'pi-subagent-runner';
 export const RUNTIME_ENTRIES: readonly RuntimeEntryV1[] = Object.freeze([
-  'pi-prepared', 'pi-rpc', 'pi-subagent-print', 'pi-subagent-runner',
+  'pi-prepared', 'pi-rpc', 'pi-durable', 'pi-subagent-print', 'pi-subagent-runner',
 ]);
 /** Canonical runtime prefix. Host declares it; the SDK checks exact equality. */
 export function runtimeEntryFixedArgv(kind: RuntimeEntryV1): readonly string[] {
@@ -549,7 +560,8 @@ export type RuntimeInstallationReverifyResult = 'ok' | {
 export type ToolImplementationResolutionV1 =
   | ToolImplementationUnavailableV1
   | ToolImplementationInstallRecordV1
-  | RuntimeImplementationRecordV1;
+  | RuntimeImplementationRecordV1
+  | OfficialExternalCliInstallV2;
 
 /**
  * The host's install-record authority.
@@ -593,6 +605,9 @@ export interface ToolImplementationFsProbe {
   realpath(target: string): Promise<string>;
   /** sha256 hex of the file's bytes, streamed. */
   digest(target: string): Promise<string>;
+  /** Synchronous tuple-only supplement; required when this probe is used inside an admission lock. */
+  lstatSync?(target: string): ToolImplementationStatEntry;
+  realpathSync?(target: string): string;
 }
 
 async function streamDigest(target: string): Promise<string> {
@@ -602,23 +617,26 @@ async function streamDigest(target: string): Promise<string> {
   return hash.digest('hex');
 }
 
+function statEntryOf(stats: Stats): ToolImplementationStatEntry {
+  return Object.freeze({
+    dev: stats.dev,
+    ino: stats.ino,
+    size: stats.size,
+    mtimeMs: stats.mtimeMs,
+    mode: stats.mode,
+    uid: stats.uid,
+    gid: stats.gid,
+    isFile: stats.isFile(),
+    isSymbolicLink: stats.isSymbolicLink(),
+  });
+}
+
 export const realToolImplementationFsProbe: ToolImplementationFsProbe = Object.freeze({
-  async lstat(target: string): Promise<ToolImplementationStatEntry> {
-    const stats = await fs.lstat(target);
-    return Object.freeze({
-      dev: stats.dev,
-      ino: stats.ino,
-      size: stats.size,
-      mtimeMs: stats.mtimeMs,
-      mode: stats.mode,
-      uid: stats.uid,
-      gid: stats.gid,
-      isFile: stats.isFile(),
-      isSymbolicLink: stats.isSymbolicLink(),
-    });
-  },
+  async lstat(target: string): Promise<ToolImplementationStatEntry> { return statEntryOf(await fs.lstat(target)); },
   realpath: (target: string) => fs.realpath(target),
   digest: streamDigest,
+  lstatSync: (target: string) => statEntryOf(lstatSync(target)),
+  realpathSync,
 });
 
 // ---------------------------------------------------------------------------
@@ -745,7 +763,7 @@ function launchEnvUnderIdentity(env: Readonly<Record<string, string>>): Record<s
   const bound: Record<string, string> = {};
   for (const name of Object.keys(env).sort()) {
     if (LIFECYCLE_ENV_NAMES.has(name)) continue;
-    if (CREDENTIAL_ENV_NAMES.has(name)) continue;
+    if (CREDENTIAL_ENV_NAMES.has(name.toUpperCase())) continue;
     bound[name] = env[name]!;
   }
   return bound;
@@ -760,7 +778,7 @@ function sdkHelperLaunchEnvUnderIdentity(
     : AGENT_MEMORY_DESCRIPTOR_LIFECYCLE_ENV_NAMES;
   const bound: Record<string, string> = {};
   for (const name of Object.keys(env).sort()) {
-    if (lifecycleNames.has(name) || CREDENTIAL_ENV_NAMES.has(name)) continue;
+    if (lifecycleNames.has(name) || CREDENTIAL_ENV_NAMES.has(name.toUpperCase())) continue;
     bound[name] = env[name]!;
   }
   return bound;
@@ -792,7 +810,7 @@ function unexpectedSdkHelperEnvNames(
     ? AGENT_MEMORY_EXECUTION_LIFECYCLE_ENV_NAMES
     : AGENT_MEMORY_DESCRIPTOR_LIFECYCLE_ENV_NAMES;
   const unexpected = Object.keys(env)
-    .filter((name) => CREDENTIAL_ENV_NAMES.has(name) || (name.startsWith(BYOK_CONTROL_ENV_PREFIX) && !allowed.has(name)));
+    .filter((name) => CREDENTIAL_ENV_NAMES.has(name.toUpperCase()) || (name.startsWith(BYOK_CONTROL_ENV_PREFIX) && !allowed.has(name)));
   if (entry === 'agent-memory-describe') {
     unexpected.push(...AGENT_MEMORY_EXECUTION_ENV_NAMES.filter((name) => Object.hasOwn(env, name)));
   }
@@ -1602,6 +1620,17 @@ async function measureInstallRecord(
   return 'kind' in physical ? physical : seal(record, { ...physical, ...environment });
 }
 
+/** Same install parser/measurement as other subjects; no second physical resolver. */
+export async function measureOfficialExternalCliRecord(
+  value: unknown, launchEnv: LaunchEnvironment,
+  probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
+): Promise<ToolImplementationIdentityV1> {
+  const record = validateInstallRecord(value);
+  if (typeof record === 'string') return toolImplementationUnavailable(
+    record === 'interpreter_form_unsupported' ? record : 'implementation_identity_unattested');
+  return measureInstallRecord(record, launchEnv, probe);
+}
+
 async function measurePhysicalRecord(
   record: ToolImplementationInstallRecordV1,
   probe: ToolImplementationFsProbe,
@@ -1744,6 +1773,43 @@ export async function reverifyToolImplementationIdentity(
   if (toolImplementationLaunchEnvNamesDigest(launchEnv) !== identity.launchEnvNamesDigest
     || toolImplementationLoaderEnvValuesDigest(launchEnv) !== identity.loaderEnvValuesDigest) {
     return { reason: 'launch_env_drift', subject: 'launch-env' };
+  }
+  return 'ok';
+}
+
+/**
+ * Tuple-only supplement AFTER admission-lock acquisition. It preserves the
+ * physical gate's canonical parent / non-symlink leaf / exact tuple rules,
+ * including hardlink aliases. It never replaces full byte/environment reverify
+ * and does not claim atomicity against a same-UID edit after this check.
+ * A custom test probe without synchronous capabilities fails closed.
+ */
+export function reverifyToolImplementationTuples(
+  identity: ToolImplementationAttestedV1,
+  probe: ToolImplementationFsProbe = realToolImplementationFsProbe,
+): ToolImplementationReverifyResult {
+  const lstat = probe.lstatSync?.bind(probe), realpath = probe.realpathSync?.bind(probe);
+  if (!lstat || !realpath) return { reason: 'reverify_failed', subject: 'artifact' };
+  const matches = (target: string, tuple: ToolImplementationStatTupleV1): boolean => {
+    try {
+      const parent = path.dirname(target);
+      if (realpath(parent) !== parent) return false;
+      const measured = lstat(target);
+      return measured.isFile && !measured.isSymbolicLink && sameStatTuple(measured, tuple);
+    } catch { return false; }
+  };
+  if (!matches(identity.installPath, identity.installStat)) return { reason: 'install_record_mismatch', subject: 'artifact' };
+  if (identity.interpreter && (!identity.interpreterStat || !matches(identity.interpreter.path, identity.interpreterStat))) {
+    return { reason: 'install_record_mismatch', subject: 'interpreter' };
+  }
+  if (identity.assetRoot !== undefined && identity.assets !== undefined) {
+    try { if (realpath(identity.assetRoot) !== identity.assetRoot) return { reason: 'install_record_mismatch', subject: 'asset' }; }
+    catch { return { reason: 'install_record_mismatch', subject: 'asset' }; }
+    if (!identity.assetStats || identity.assetStats.length !== identity.assets.length) return { reason: 'install_record_mismatch', subject: 'asset' };
+    for (const [index, asset] of identity.assets.entries()) {
+      const target = assetAbsolutePath(identity.assetRoot, asset.path);
+      if (target === undefined || !matches(target, identity.assetStats[index]!)) return { reason: 'install_record_mismatch', subject: 'asset' };
+    }
   }
   return 'ok';
 }

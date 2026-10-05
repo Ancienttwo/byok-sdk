@@ -53,16 +53,19 @@ export type RuntimeDetectResult =
   | { readonly kind: 'refused'; readonly reason: RuntimeDetectionRefusalReason };
 
 export type RuntimeDetectionRefusalReason = ToolImplementationUnavailableReasonV1
-  | 'installation_observation_unsupported' | 'native_identity_mismatch' | 'launch_cwd_unavailable';
+  | 'installation_observation_unsupported' | 'native_identity_mismatch' | 'launch_cwd_unavailable'
+  | 'app_server_unavailable' | 'runtime_version_unsupported';
 
 /** Explicit scope, never a launch environment or task/lane-selection authority. */
 export type RuntimeInstallationObservationContext = { readonly authority: ToolImplementationAuthority } & (
-  | { readonly scope: 'entry'; readonly runtimeEntry: 'pi-rpc' | 'pi-prepared' }
+  | { readonly scope: 'entry'; readonly runtimeEntry: 'pi-rpc' | 'pi-prepared' | 'pi-durable' }
   | { readonly scope: 'enabled-top-level' }
 );
 
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
+  /** Local adapter advertisement; no new protocol field or capability vocabulary. */
+  readonly durablePi?: boolean;
   readonly steer: boolean;
   readonly resume: boolean;
   /**
@@ -175,29 +178,10 @@ export interface McpToolsetReloadReceipt {
 }
 
 /**
- * M4 Phase 3: the out-of-band approval channel `TaskRunner` (`daemon/
- * task-runner.ts`) hands to a prepared operation's `start()` via
- * `RuntimeOperationStartInput.approvalChannel`, for a runtime whose approval mechanism genuinely needs
- * to reach back into the daemon from OUTSIDE the adapter's own process — the
- * claude adapter's concrete case: `claude`'s `--permission-prompt-tool`
- * resolves a pending permission entirely inside a SEPARATE MCP-server child
- * process claude itself spawns (see `bin/byok-approval-mcp.ts`), which has
- * no in-process handle to this task's `Session` at all and must instead call
- * back into the SAME daemon over its control socket. `storeDir`/`productId`
- * are exactly what that out-of-process helper needs to find and authenticate
- * against this daemon's control socket (`daemon/control-protocol.ts`
- * `controlEndpointPath`/`controlTokenPath`); `taskId` is how its request gets
- * correlated back to THIS task once it arrives. `resolve()` is the
- * daemon-side counterpart: it resolves the single most-recently-registered
- * pending approval for this task (via `TaskRunner.requestApproval`'s own
- * `ApprovalRegistry` entry — see `daemon/approvals.ts`), and rejects if none
- * is currently pending, mirroring `Session.resolveApproval`'s own
- * no-notion-of-approval-pending fail-closed contract one level up.
- *
- * Optional and adapter-agnostic on purpose: only an adapter whose runtime
- * genuinely supports an out-of-band pause (claude, today) ever reads this;
- * every other adapter (pi, codex) ignores it exactly as before this field
- * existed.
+ * Adapter-agnostic out-of-band channel handed to prepared operations by TaskRunner.
+ * The shared registry resolves one pending approval for this task and rejects
+ * when none is pending. Claude no longer consumes this channel; third-party
+ * adapters and the daemon's generic needs_approval/control path may use it.
  */
 export interface ApprovalChannel {
   taskId: string;
@@ -214,6 +198,8 @@ export interface ApprovalChannel {
  * one underlying runtime process/session for the lifetime of a task.
  */
 export interface Session {
+  /** Current execution artifact, available only after terminal success. */
+  resultDocument?(): unknown;
   /** Opaque runtime session id, reported back to the server via `task.complete.sessionRef`. */
   sessionRef: string;
   /** Normalized events for this session; the daemon batches these into `task.progress`. */
@@ -308,8 +294,8 @@ export interface RuntimeAdapterDescriptor {
   readonly mcpServerLaunch?: 'direct-cwd' | 'launcher-wrapped';
   /**
    * Whether this adapter GENERATES a reserved approval MCP server of its own
-   * when it is started under `policy.mode: 'confirm'` (claude's
-   * `--permission-prompt-tool` server, `adapters/claude/claude-adapter.ts`).
+   * when it is started under `policy.mode: 'confirm'`. This is an extension
+   * seam for custom adapters; none of the bundled adapters declares it.
    *
    * Such a server exists nowhere in the daemon's projected `mcpServers` map,
    * so the daemon cannot see it by counting that map — but it is an MCP
@@ -495,8 +481,17 @@ export interface RuntimePreparedLaunchV1 {
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
 }
 
+/** Trusted daemon barriers for the opt-in durable worker; never serialized. */
+export interface DurableLifecycle {
+  record(kind: 'tool-intent' | 'tool-committed' | 'respawn-intent', ordinal: number): Promise<void>;
+  ownsLease(): boolean;
+}
+
 /** Runtime resources shared by every start variant. */
 interface RuntimeOperationStartBase {
+  /** Trusted parent-only recovery authority; never serialized into the worker. */
+  readonly durableContext?: { readonly tenantId: string; readonly lifecycle: DurableLifecycle };
+
   readonly runtimeLaunch?: PiRuntimeLaunchResources;
   /** Exact daemon MCP admission environment; Pi requires it and never inherits runtime credentials. */
   readonly mcpEnv?: Readonly<Record<string, string>>;
@@ -619,6 +614,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
       ? {}
       : { generatesApprovalMcpServer: descriptor.generatesApprovalMcpServer === true }),
     capabilities: Object.freeze({
+      ...(descriptor.capabilities.durablePi === undefined ? {} : { durablePi: descriptor.capabilities.durablePi === true }),
       steer: descriptor.capabilities.steer === true,
       resume: descriptor.capabilities.resume === true,
       approvalInteractive: descriptor.capabilities.approvalInteractive === true,

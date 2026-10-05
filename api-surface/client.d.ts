@@ -1,18 +1,14 @@
 // ==== @byok-sdk/client dist/adapters/claude/claude-adapter.d.ts ====
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type ResolvedBin } from './resolve-bin';
-import { type ResolvedApprovalMcpBin } from './resolve-approval-mcp-bin';
 import { type SpawnFn } from './process-client';
-import { APPROVAL_MCP_SERVER_NAME } from '../../sdk-reserved-mcp';
-/** The MCP server NAME this adapter registers `byok-approval-mcp` under in the generated `--mcp-config` — combined with {@link APPROVAL_TOOL_NAME} (single-sourced from `bin/approval-mcp-server.ts` so the two can never independently drift) to form the `mcp__<server>__<tool>` identifier `--permission-prompt-tool` expects. Defined in `sdk-reserved-mcp.ts` beside the other SDK-owned server names, and re-exported from here, its original home, so the host-config rejection and the toolset-grant rule read one list. */
-export { APPROVAL_MCP_SERVER_NAME };
 export interface ClaudeAdapterOptions {
     /** Override bin resolution — tests substitute the fake-claude fixture script. */
     resolveBin?: () => ResolvedBin;
     /** Override process spawning — tests substitute a fake spawn. */
     spawnFn?: SpawnFn;
-    /** M4 Phase 3: override `byok-approval-mcp` bin resolution — tests substitute a fixture script instead of computing a real dist path. Mirrors `resolveBin` above. */
-    resolveApprovalMcpBin?: () => ResolvedApprovalMcpBin;
+    /** Deadline for native interrupt ACK before owned-process termination fallback. */
+    interruptTimeoutMs?: number;
 }
 /**
  * Claude Code runtime adapter (`claude -p --input-format stream-json
@@ -62,43 +58,9 @@ export interface ClaudeAdapterOptions {
  * something upstream expected approval support this adapter genuinely does
  * not have.
  *
- * `PermissionPolicy.mode: 'confirm'` — the policy mode whose whole point is
- * "ask a human, then proceed" — was therefore rejected outright at
- * `start()` through M2/M3 (fail-closed, see `permission-mapping.ts`), never
- * silently downgraded to auto-accept or auto-deny.
- *
- * ## M4 Phase 3 update: a genuine out-of-band pause DOES exist — it is
- * just invisible to everything written above
- *
- * `--permission-prompt-tool` (a DIFFERENT flag from `--permission-mode`,
- * undocumented in `claude --help`'s own output on the installed 2.1.216
- * binary but empirically confirmed accepted — an unrecognized flag is
- * rejected outright with `error: unknown option`, this one is not) makes
- * claude block a turn on a real MCP round-trip to a server it spawns
- * itself, waiting for that server to answer allow/deny before continuing —
- * genuinely pausing, for real wall-clock time (live-verified: an instant
- * allow/deny, AND a deliberate multi-second delayed answer, both worked
- * identically; only a permission-prompt-tool call that never answers AT
- * ALL was found to make claude abandon the turn on its own, after roughly
- * 1.5s — never actually reachable by this design, since the bundled
- * `bin/byok-approval-mcp.ts` always eventually answers within its own
- * configured ceiling).
- *
- * Everything above this section remains true and is NOT superseded by
- * this: claude's own stream-json output still emits nothing while this
- * pause is in progress — the gap between a `tool_use` frame and its
- * `tool_result` is indistinguishable from ordinary model latency on the
- * wire, and there is still no `needs_approval`-shaped frame this adapter's
- * event mapper could ever produce. The pause is real, but it is invisible
- * to `ClaudeSession.events` and to `task-runner.ts`'s `pump()` entirely —
- * it is only ever observable from OUTSIDE this adapter's own process, by
- * the separate MCP-server child process claude itself spawns. This is why
- * `confirm` mode's daemon-side wiring (`task-runner.ts`'s `requestApproval`,
- * `types.ts`'s `ApprovalChannel`) is driven from the control socket, not
- * from any `AgentEvent` — see those files' own doc comments for the full
- * design this finding drove. `confirm` is now SUPPORTED (see
- * `permission-mapping.ts` and `resolveApproval()` below), still fail-closed
- * whenever no approval channel was actually wired up for this session.
+ * `PermissionPolicy.mode: 'confirm'` is rejected before runtime side effects.
+ * The private approval MCP helper and permission-prompt-tool integration have
+ * been removed. The shared needs_approval contract remains for other adapters.
  *
  * ## Steering was also found unsupported (a second, related finding)
  *
@@ -247,6 +209,12 @@ export interface ClaudeProcessClientOptions {
     cwd: string;
     env: NodeJS.ProcessEnv;
     spawnFn?: SpawnFn;
+    /** Internal control-plane binding; control frames never enter the user/result event queue. */
+    control?: {
+        bind(write: (frame: Record<string, unknown>) => Promise<void>): void;
+        receive(message: ClaudeStreamMessage): void;
+        closed(): void;
+    };
     /**
      * DI seam scoped to ADOPTION only (`../process-tree.ts`'s
      * `adoptOwnedProcessTree`), so the win32 job-object branch is exercisable
@@ -379,53 +347,6 @@ export declare class ClaudeProcessClient {
     private buildExitError;
     private onClosed;
 }
-// ==== @byok-sdk/client dist/adapters/claude/resolve-approval-mcp-bin.d.ts ====
-import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
-export interface ResolvedApprovalMcpBin {
-    command: string;
-    args: string[];
-    source: 'env' | 'dist' | 'host';
-}
-/**
- * Resolve `byok-approval-mcp` — the small stdio MCP server
- * (`bin/byok-approval-mcp.ts`) `claude`'s own `--permission-prompt-tool`
- * spawns as ITS child process (see that file's doc comment, and
- * `permission-mapping.ts`'s `confirm`-mode doc comment, for the full design).
- *
- * Unlike `resolveClaudeBin` (the end user's own separately-installed,
- * separately-authenticated CLI, resolved via bare-name PATH lookup),
- * `byok-approval-mcp` is a script THIS SAME `@byok-sdk/client` package ships —
- * bare-name PATH lookup is NOT safe for it: `@byok-sdk/client` is typically a
- * project-local dependency, so its `node_modules/.bin/byok-approval-mcp`
- * symlink is only on PATH for processes that inherit THAT project's own
- * shell/PATH, not reliably for a background OS service (launchd/systemd
- * often run with a stripped-down PATH that omits project-local
- * `node_modules/.bin` entirely — see `templates/service/**`). Resolving an
- * ABSOLUTE path to this package's own compiled bin avoids depending on PATH
- * at all.
- *
- * `BYOK_APPROVAL_MCP_BIN` overrides everything when set — the injectable
- * seam for tests (mirrors `BYOK_CLAUDE_BIN`/`BYOK_PI_BIN`), letting a test
- * substitute a fixture script instead of computing any real path. The
- * override is a single command string with no separate args (tests don't
- * need to invoke it any differently than `node <script>`); the real default
- * below is `node <absolute-path-to-the-built-bin>`.
- *
- * The default computation is deliberately anchored to THIS module's own
- * `import.meta.url`, resolved once at the real production entry point: when
- * `@byok-sdk/client` is built (`tsup.config.ts`), this file's code ends up
- * bundled into `dist/index.js` at the package root, with `dist/bin/
- * byok-approval-mcp.js` as its direct sibling (same layout `byok-agent.js`
- * already uses) — `path.join(path.dirname(fileURLToPath(import.meta.url)),
- * 'bin', 'byok-approval-mcp.js')` is therefore correct for that one real
- * shape. It is NOT correct for this file's own unbundled TypeScript source
- * location (`src/adapters/claude/` is two directories deeper than `src/`),
- * but nothing in this codebase ever reaches this fallback unbundled — every
- * test that exercises `confirm` mode sets `BYOK_APPROVAL_MCP_BIN` explicitly
- * (see `claude-adapter.test.ts`), exactly like `BYOK_CLAUDE_BIN` already
- * does for the real `claude` binary.
- */
-export declare function resolveApprovalMcpBin(host?: SdkHelperHostConfig): ResolvedApprovalMcpBin;
 // ==== @byok-sdk/client dist/adapters/claude/resolve-bin.d.ts ====
 export interface ResolvedBin {
     command: string;
@@ -455,233 +376,25 @@ export interface ResolvedBin {
  */
 export declare function resolveClaudeBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/codex/codex-adapter.d.ts ====
-import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
+import { type spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
+import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
 import { type ResolvedBin } from './resolve-bin';
-import { type SpawnFn } from './process-runner';
 export interface CodexAdapterOptions {
     sdkHelperHost?: SdkHelperHostConfig;
-    /** Override bin resolution — tests substitute the fake-codex fixture script. */
     resolveBin?: () => ResolvedBin;
-    /** Override process spawning — tests substitute a fake spawn. */
-    spawnFn?: SpawnFn;
+    spawnFn?: typeof nodeSpawn;
+    maxRetainedBytes?: number;
+    interruptTimeoutMs?: number;
 }
-/**
- * `RuntimeAdapter` for the OpenAI Codex CLI (`codex exec --json`), the M2-b
- * counterpart to `../pi/pi-adapter.ts`. Every empirical claim in this file
- * and its sibling modules (`events.ts`, `permission-mapping.ts`,
- * `process-runner.ts`) was driven live against the real installed `codex-cli
- * 0.144.5` in a scratch directory before being encoded — repeating the pi
- * adapter's own M0-3 discipline ("docs lied and shipped a nonexistent flag")
- * independently found the exact same bug class on codex:
- *
- *   - `codex exec --help` documents `-a`/`--ask-for-approval`; the real
- *     parser rejects it outright on `codex exec` ("unexpected argument").
- *   - `-s`/`--sandbox` works on a fresh `codex exec` but is rejected outright
- *     on `codex exec resume` (whose own --help correctly omits it).
- *   - `codex exec resume` does NOT auto-inherit the sandbox mode a session
- *     was originally started with — a read-only-started session's write
- *     SUCCEEDED on a bare resume with no sandbox override re-passed,
- *     silently falling back to this machine's own ambient config default.
- *   - This task's own brief assumed SIGINT for `interrupt()`; empirically,
- *     `codex exec` ignores SIGINT entirely (a 60s `sleep` ran to completion
- *     despite SIGINT at t=4s) — SIGTERM is used instead (confirmed to work:
- *     immediate exit, no orphaned children, thread stays resumable after).
- *
- * See `./permission-mapping.ts` and `./process-runner.ts` for the full
- * per-finding writeups (sandbox scope, network, approval model, resume
- * mechanics, stdin handling).
- *
- * Architecture, and how it differs from pi: pi is one long-lived `pi --mode
- * rpc` process for a whole session's lifetime, driven by a bidirectional
- * JSONL request/response protocol (`../pi/rpc-client.ts`). `codex exec` has
- * no such thing — it's a one-shot batch process per turn, prompt in via
- * argv, JSONL out via stdout, process exits. `CodexSession` here instead
- * spawns a fresh `CodexProcessRunner` for every turn (the initial `start()`
- * and every later `followUp()`), and forwards each one's mapped events into
- * one shared, session-lifetime `AsyncQueue` — the thing `Session.events`
- * actually exposes. `sessionRef` is codex's own `thread_id`, learned from
- * `thread.started`, which is reliably the first JSONL line codex ever prints
- * (confirmed across every empirical capture, fresh starts and resumes
- * alike) — `runCodexTurn` below awaits specifically for that line before
- * resolving, mirroring pi's own "resolve a real session id before
- * constructing the Session, fail closed if you can't" discipline
- * (`../pi/pi-adapter.ts`'s `resolveFreshSessionId`, finding F8).
- */
+/** Codex app-server is experimental. Only the qualified 0.160.0 binary is admitted; no exec compatibility path. */
 export declare class CodexAdapter implements RuntimeAdapter {
     private readonly options;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     constructor(options?: CodexAdapterOptions);
     detect(): Promise<RuntimeDetectResult>;
-    /**
-     * `authPresent` without ever reading `~/.codex/auth.json` (credential-
-     * isolation rule, `../../types.ts`): spawns codex's OWN `login status`
-     * subcommand and interprets its human-readable report — the exact
-     * "non-secret signal" this adapter is required to use, and cleaner than
-     * pi's env-var-name check since codex's real credential model (on the
-     * reference machine) is a ChatGPT OAuth session, not an env var.
-     *
-     * Two independently-verified channel gotchas apply here, the "pi lesson"
-     * yet again:
-     *   - `codex login status`'s human-readable "Logged in using ChatGPT"
-     *     message prints on STDERR, not stdout — both streams are checked
-     *     here for exactly that reason. pi's `--version` is the same class of
-     *     hazard from the other direction: its channel has moved between pi
-     *     releases (see ../pi/pi-adapter.ts), so neither stream is assumed.
-     *   - The NOT-logged-in message/exit-code shape was deliberately never
-     *     empirically tested: this machine has a real, live ChatGPT login, and
-     *     running `codex logout` to observe the negative case would have
-     *     broken that login for the rest of this session/machine. The match
-     *     below is intentionally conservative (`/logged in (using|with)/i`,
-     *     not a bare `"logged in"` substring) specifically because a bare
-     *     substring check would false-positive on a plausible negative message
-     *     like "Not logged in" (itself containing the substring "logged in").
-     *     This is a documented, known gap — flagged for M2-c / a follow-up
-     *     empirical pass on a logged-out machine, not asserted as verified.
-     */
-    private probeAuthPresent;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
-    private startPrepared;
-    private resolveBin;
-}
-// ==== @byok-sdk/client dist/adapters/codex/process-runner.d.ts ====
-import { RuntimeExecutionFailure } from '../../runtime-failure';
-import { spawn } from 'node:child_process';
-export type SpawnFn = typeof spawn;
-/**
- * One parsed line of `codex exec --json` / `codex exec resume --json`
- * output. Field shapes vary by `type` (see `./events.ts`'s module doc
- * comment for the empirically-captured catalog), so this stays a loose bag
- * rather than a full discriminated union, mirroring `PiRpcMessage` in
- * `../pi/rpc-client.ts`.
- */
-export interface CodexRawEvent {
-    type: string;
-    [key: string]: unknown;
-}
-export interface CodexProcessOptions {
-    command: string;
-    args: string[];
-    instruction?: string;
-    cwd: string;
-    env: NodeJS.ProcessEnv;
-    spawnFn?: SpawnFn;
-    /** Called once per parsed JSONL line, in arrival order. */
-    onEvent: (evt: CodexRawEvent) => void;
-    onFailure?: (error: RuntimeExecutionFailure) => void;
-    /**
-     * DI seam scoped to ADOPTION only (`../process-tree.ts`'s
-     * `adoptOwnedProcessTree`), so the win32 job-object branch is exercisable
-     * from POSIX. Disposal keeps `process.platform` as its own authority — this
-     * must never silently reroute the taskkill sweep on a real host.
-     */
-    platform?: NodeJS.Platform;
-    /** DI seam for the win32 job-object backstop; see `../win32-job-object.ts`. */
-    jobObject?: {
-        assign(pid: number): Promise<void>;
-    };
-}
-export declare const CODEX_MAX_FRAME_BYTES: number;
-export declare const CODEX_MAX_DEFERRED_BYTES: number;
-export declare const CODEX_MAX_STDERR_BYTES: number;
-/**
- * Spawns and streams ONE `codex exec` / `codex exec resume` invocation — i.e.
- * exactly one turn.
- *
- * Unlike pi (a single long-lived RPC server process for a whole session's
- * lifetime — see `../pi/rpc-client.ts`), `codex exec` is a one-shot batch
- * process per turn with no persistent request/response channel: it takes its
- * prompt from stdin with the documented `-` positional, streams JSONL to stdout for the one turn
- * it's running, and exits. `../codex-adapter.ts`'s `CodexSession` constructs
- * a fresh `CodexProcessRunner` for every turn (the initial `start()` and
- * every later `followUp()`), forwarding each one's lines into the same
- * long-lived event queue.
- *
- * Prompt stdin is closed with EOF immediately after writing. This is a one-shot
- * input channel; steer and approvals are not multiplexed over it.
- */
-export declare class CodexProcessRunner {
-    private readonly child;
-    private readonly onEvent;
-    private readonly frameChunks;
-    private frameBytes;
-    private deferredBytes;
-    private stderrBytes;
-    private transportFailure;
-    private readonly onFailure;
-    private readonly stderrRing;
-    private closed;
-    private exitCode;
-    private exitSignal;
-    private readonly closedPromise;
-    private resolveClosed;
-    private disposalAttempt;
-    /** Resolves once this tree is backstopped (see `adoptOwnedProcessTree`); rejects with the adoption failure, having already terminated the tree. */
-    private readonly adopted;
-    /** Set before the fail-closed termination starts; `buildExitError` reports it instead of the exit status of the kill we ourselves requested. */
-    private adoptionFailure;
-    private adoption;
-    /**
-     * Lines parsed before adoption settled. Unlike pi and claude, this runner has
-     * no first awaited operation of its own to gate on — its caller reads the
-     * FIRST event as the authoritative thread id. Holding events until the tree
-     * is backstopped is what keeps that caller from publishing a session for a
-     * tree the job object never took.
-     */
-    private readonly deferredEvents;
-    constructor(options: CodexProcessOptions);
-    private finishClosing;
-    /** Resolves once the child process has fully exited (both exit and stdio-flush guaranteed — see the `close` listener above). Never rejects. */
-    waitClosed(): Promise<void>;
-    get isClosed(): boolean;
-    /**
-     * Immediate tree termination request. SIGTERM on POSIX: SIGINT was empirically confirmed
-     * to be silently ignored by `codex exec` (a real, direct test — a 60s
-     * shell `sleep` ran to full, unaffected completion despite SIGINT sent at
-     * t=4s) — a genuine, evidence-based correction to this task's own initial
-     * assumption ("interrupt: SIGINT — POSIX here"). SIGTERM was separately
-     * confirmed to terminate the process immediately (exit code 143) with no
-     * orphaned child processes left behind (the shell command it was running
-     * died with it), and — critically — the underlying codex thread remained
-     * cleanly resumable afterward via `codex exec resume` (no corruption from
-     * killing mid-turn). `taskkill /T /F` on Windows, mirroring
-     * `../pi/rpc-client.ts`'s own cross-platform convention.
-     *
-     * Fire-and-forget by design: an interrupt must not block on a terminator,
-     * and `dispose()` is the settlement receipt. A request that could not be
-     * spawned is left unrecorded, so `dispose()` re-issues it and raises the
-     * typed `stage:'signal'` failure — swallowing it here loses nothing.
-     */
-    kill(): void;
-    dispose(): Promise<void>;
-    private processTreeOptions;
-    /**
-     * Backstop this tree, or tear it down. Adoption failure is a start-time
-     * precondition, not a degraded mode: the child is terminated through the one
-     * disposal authority, every parsed line is dropped instead of delivered, and
-     * the resulting close makes the caller's own `waitClosed()` race reject with
-     * the adoption failure (`buildExitError`) before a thread id is published.
-     * Both cleanup attempts are best-effort because the adoption failure, not a
-     * terminator's own complaint, is the reason to report.
-     */
-    private adoptOwnedTree;
-    /** Arrival-order delivery, held back until the tree is backstopped (see `deferredEvents`). */
-    private deliver;
-    /**
-     * Builds a descriptive error folding in the exit code/signal and the stderr
-     * tail — mirrors `PiRpcClient.buildExitError`'s reasoning: a post-mortem on a
-     * failed start/resume should never need separately re-running codex by hand
-     * with a raw JSONL logger to learn why.
-     *
-     * A tree this runner could not backstop is the one exception: that process
-     * exited because THIS runner killed it, so `exit code=null, signal=SIGKILL`
-     * plus an empty stderr tail would bury the only reason anyone can act on.
-     */
-    buildExitError(context: string): Error;
-    private failTransport;
-    private onData;
-    private parseLine;
-    private onStderr;
+    private start;
 }
 // ==== @byok-sdk/client dist/adapters/codex/resolve-bin.d.ts ====
 export interface ResolvedBin {
@@ -734,6 +447,10 @@ import { type SpawnFn } from './rpc-client';
  * providers); covers the common ones for a useful `authPresent` signal.
  */
 export interface PiAdapterOptions {
+    /** Opt-in ordinary, lease-bound durable worker. */
+    durablePi?: {
+        readonly replicaRoot: string;
+    };
     /** Override bin resolution — tests substitute the fake-pi fixture script. */
     resolveBin?: () => ResolvedBin;
     /** Override process spawning — tests substitute a fake spawn. */
@@ -811,7 +528,7 @@ export declare function resolvePiRuntimeIdentity(): PiRuntimeIdentity;
  * only ever constructs `new PiAdapter()` with no options (see `createDaemon`),
  * so an out-of-process substitution (e.g. examples/basic's e2e run swapping
  * in the fake-pi fixture, or a single-file product injecting its required
- * Node 22.22+ pi sidecar) has no other seam to use.
+ * Node 24.15+ pi sidecar) has no other seam to use.
  *
  * Deliberately does NOT use `createRequire(...).resolve()`: this package is
  * pure ESM with no `require` export condition (`exports["."]` only offers
@@ -985,6 +702,7 @@ export declare class PiRpcClient {
     private onClosed;
 }
 // ==== @byok-sdk/client dist/adapters/pi/runtime-descendant-plan.d.ts ====
+import type { AttestedOfficialExternalCliV2 } from '@byok-sdk/implementation-identity';
 import { type ImplementationSpawnBindingV1, type RuntimeDescendantEdgeV1, type RuntimeDescendantPolicyV1, type RuntimeEntryV1 } from '@byok-sdk/implementation-identity';
 export interface RuntimeDescendantDeclarationV1 {
     readonly descendantPolicy: RuntimeDescendantPolicyV1;
@@ -995,13 +713,14 @@ export interface RuntimeDescendantTemplateV1 {
     readonly template: ImplementationSpawnBindingV1;
     readonly templateDigest: string;
 }
-export interface RuntimeDescendantPlanV1 {
+export interface RuntimeDescendantPlanV2 {
     readonly format: 'byok.runtime-launch-plan';
-    readonly version: 1;
+    readonly version: 2;
     readonly selfKind: RuntimeEntryV1;
     readonly policy: RuntimeDescendantPolicyV1;
     readonly edges: readonly RuntimeDescendantEdgeV1[];
     readonly templates: readonly RuntimeDescendantTemplateV1[];
+    readonly externalCliInstallations: readonly AttestedOfficialExternalCliV2[];
 }
 /** The finite type closure is independent of instance depth/budget admission. */
 export declare function requiredRuntimePlanKinds(selfKind: RuntimeEntryV1, policy: RuntimeDescendantPolicyV1, edges: readonly RuntimeDescendantEdgeV1[]): readonly RuntimeEntryV1[];
@@ -1009,19 +728,19 @@ export declare function runtimeRecordCommonFields<T extends {
     readonly launchArgv: readonly string[];
 }>(record: T): Omit<T, 'launchArgv'>;
 /** Validate raw template bytes before any V1 parser projection changes member order. */
-export declare function parseRuntimeDescendantPlan(value: unknown, selfKind: RuntimeEntryV1, selfBinding: ImplementationSpawnBindingV1, expectedDeclaration?: RuntimeDescendantDeclarationV1): RuntimeDescendantPlanV1 | null;
+export declare function parseRuntimeDescendantPlan(value: unknown, selfKind: RuntimeEntryV1, selfBinding: ImplementationSpawnBindingV1, expectedDeclaration?: RuntimeDescendantDeclarationV1): RuntimeDescendantPlanV2 | null;
 /** Assemble already measured rows; this helper never resolves or measures Host records. */
-export declare function createRuntimeDescendantPlan(selfKind: RuntimeEntryV1, selfBinding: ImplementationSpawnBindingV1, declaration?: RuntimeDescendantDeclarationV1, templates?: readonly Pick<RuntimeDescendantTemplateV1, 'kind' | 'template'>[]): RuntimeDescendantPlanV1 | null;
+export declare function createRuntimeDescendantPlan(selfKind: RuntimeEntryV1, selfBinding: ImplementationSpawnBindingV1, declaration?: RuntimeDescendantDeclarationV1, templates?: readonly Pick<RuntimeDescendantTemplateV1, 'kind' | 'template'>[], externalCliInstallations?: readonly AttestedOfficialExternalCliV2[]): RuntimeDescendantPlanV2 | null;
 // ==== @byok-sdk/client dist/adapters/pi/runtime-launch.d.ts ====
 import { type ImplementationSpawnBindingV1, type ToolImplementationAuthority, type ResolvedRuntimeImplementationV1 } from '@byok-sdk/implementation-identity';
 import { type RuntimeLaunchDecisionV1, type RuntimeLaunchKindV1 } from '../../daemon/tool-implementation-identity';
-import { type RuntimeDescendantPlanV1 } from './runtime-descendant-plan';
+import { type RuntimeDescendantPlanV2 } from './runtime-descendant-plan';
 export interface PiRuntimeLaunchResources {
     readonly kind: RuntimeLaunchKindV1;
     readonly declaration: ResolvedRuntimeImplementationV1;
     readonly decision: RuntimeLaunchDecisionV1;
     readonly binding: ImplementationSpawnBindingV1;
-    readonly descendantPlan: RuntimeDescendantPlanV1 | null;
+    readonly descendantPlan: RuntimeDescendantPlanV2 | null;
     readonly env: Readonly<Record<string, string>>;
     readonly sessionCwd: string;
     readonly credentialSource: 'pi-auth-store' | 'keys-profile';
@@ -3600,20 +3319,16 @@ export interface ApprovalsResolveParams {
 }
 export declare function parseApprovalsResolveParams(value: unknown): ApprovalsResolveParams | undefined;
 /**
- * M4 Phase 3: the control method `byok-approval-mcp` (`bin/byok-approval-mcp.ts`)
- * calls FROM a claude-spawned MCP-server child process — a genuinely
- * different OS process from the daemon, reachable only over this same
- * control socket (see `../types.ts`'s `ApprovalChannel` doc comment for the
- * full why). `taskId` correlates the request to an active task;
- * `summary` is a short, human-readable description of the gated action
- * (carried verbatim into the wire `task.await_approval.summary`).
+ * Shared control method for an adapter's out-of-process approval channel.
+ * taskId correlates the request to an active task; summary is carried into
+ * task.await_approval. Claude no longer consumes this method.
  */
 export interface ApprovalsRequestParams {
     taskId: string;
     summary: string;
 }
 export declare function parseApprovalsRequestParams(value: unknown): ApprovalsRequestParams | undefined;
-/** Result of `approvals.request` — the outcome `byok-approval-mcp` translates into its own MCP `allow`/`deny` answer. */
+/** Result of the retained shared approvals.request control method. */
 export interface ApprovalsRequestResult {
     approved: boolean;
     reason?: string;
@@ -4083,6 +3798,8 @@ export interface DaemonConfig {
      * `dispatchSelection` in the BYOK lane; subscription runtimes and legacy
      * Pi tasks do not invoke it.
      */
+    /** Disabled by default. Requires Agent homes, journal and custody launcher. */
+    durablePi?: boolean;
     piByokLauncher?: import('../adapters/pi/pi-adapter').PiByokLauncherConfig;
     /**
      * M5 batch-3 (workstream 1): explicit auto-select priority order for
@@ -8119,12 +7836,8 @@ export declare const MAX_PENDING_APPROVALS_PER_TASK = 16;
  * expected race, audit-worthy but never task-state-affecting — apart from
  * "the session's own resolveApproval() failed for some other, genuine
  * reason" (an adapter-level problem, which still fails the task exactly as
- * before). Only ever thrown for an adapter that actually wires up a real
- * approval channel (claude, under `confirm` mode) — pi/codex's own
- * `resolveApproval()` still throw their own unrelated, adapter-specific
- * "not supported at all" errors, which are NOT instances of this class and
- * therefore still fall through to the pre-existing fail-the-task behavior,
- * unchanged.
+ * before). Only thrown for a custom adapter wiring an approval channel.
+ * Bundled adapters reject confirm and throw their own unsupported errors.
  */
 export declare class NoPendingApprovalError extends Error {
     readonly taskId: string;
@@ -8545,6 +8258,8 @@ export interface TaskRunnerDeps {
     resultDocument?: {
         readonly extract: ResultDocumentExtractor;
     };
+    durablePi?: boolean;
+    recordDurableTransition?(taskId: string, leaseId: string, kind: string, ordinal: number): Promise<void>;
     /** SDK-owned, task-scoped MCP helper. Required only for offers declaring messageEgress. */
     agentMessageMcpBin?: Readonly<ResolvedAgentMessageMcpBin>;
     /**
@@ -9119,25 +8834,10 @@ export declare class TaskRunner {
      */
     private handleSteer;
     /**
-     * M4 Phase 3: the daemon-side half of the out-of-band approval channel
-     * (`types.ts`'s `ApprovalChannel`) — called from `create-daemon.ts`'s
-     * `approvals.request` control method, itself called by `byok-approval-mcp`
-     * (a claude-spawned MCP-server child process, NOT the adapter/session
-     * in-process — see `ApprovalChannel`'s own doc comment for the full why
-     * this seam exists at all rather than an `AgentEvent`).
-     *
-     * Deliberately independent of the dormant `needs_approval` `AgentEvent`
-     * path in `pump()` below (~line 611): empirically confirmed (M4 Phase 3
-     * STEP 0), claude's own stream-json output emits NOTHING while a
-     * permission-prompt-tool call is outstanding — the gap between a `tool_use`
-     * frame and its `tool_result` is invisible on the wire, indistinguishable
-     * from ordinary model "thinking" latency. `pump()`'s for-await loop over
-     * `active.session.events` therefore has no event to ever branch on for
-     * this case; the ONLY signal that a task is paused arrives out-of-band,
-     * over the control socket, which is exactly what this method is for. The
-     * `needs_approval` path stays dormant, untouched, for a hypothetical
-     * future adapter whose runtime DOES expose the pause on its own event
-     * stream.
+     * Daemon-side shared out-of-band ApprovalChannel, exposed through the
+     * control socket's approvals.request method for custom adapters. Bundled
+     * Claude no longer uses it. The separate needs_approval event path remains
+     * available to adapters that expose a pause through their event stream.
      *
      * Sends `task.await_approval` (protocol §5), registers a fresh entry in
      * `deps.approvalRegistry`, and races it against `deps.approvalTimeoutMs`
@@ -9154,13 +8854,8 @@ export declare class TaskRunner {
      * that isn't currently active on this device — a stale/unknown/
      * already-finished task has nothing to pause.
      *
-     * M4 Phase 4 (fold-in from the P3 gate — concurrent-approval-overwrite
-     * fix): claude's parallel tool use can call this MORE THAN ONCE for the
-     * SAME task before the first call's approval is resolved — each parallel
-     * tool call is its own independent `byok-approval-mcp` `tools/call`
-     * request, and the MCP protocol lets several be in flight on one
-     * connection at once (see `byok-approval-mcp.ts`'s own doc comment on
-     * sharing one control-socket connection across them). Before this fix,
+     * Custom adapters can request more than one approval for the same task
+     * before the first request resolves. Before the queue was introduced,
      * `active.pendingApprovalId = approvalId` above was unconditional — a
      * second concurrent call for the same task silently overwrote the first
      * call's id, so only the LATEST request was ever wire-resolvable
@@ -9190,7 +8885,7 @@ export declare class TaskRunner {
      * resolves — with the `ApprovalOrigin` (`'wire' | 'local'`) the eventual
      * decision actually resolved through (see `ApprovalRegistry.resolve`'s own
      * `origin` parameter). Purely additive/internal: every existing caller
-     * (`byok-approval-mcp.ts`, `create-daemon.ts`'s control socket, this file's
+     * (`create-daemon.ts`'s control socket and this file's
      * own tests) omits it and observes exactly the same `{approved, reason}`
      * resolution as before. `pump()`'s dormant `needs_approval` branch is the
      * one caller that supplies it, to decide whether it still needs to
@@ -9234,8 +8929,8 @@ export declare class TaskRunner {
      * called, and therefore `deps.send` pushes this envelope onto the outbox,
      * SYNCHRONOUSLY from the `onResolve` callback above — strictly BEFORE the
      * `resolve(...)` call on the very next line that unblocks whatever was
-     * awaiting `requestApproval()`'s promise (`byok-approval-mcp`, ultimately
-     * the paused runtime turn). Any further progress from the resumed session
+     * awaiting `requestApproval()`'s promise (ultimately the custom adapter's
+     * paused runtime turn). Any further progress from the resumed session
      * can only be produced AFTER that unblock, which needs at least one more
      * microtask/event-loop turn — so `task.approval_resolved` is always queued
      * ahead of it with no extra bookkeeping needed here.
@@ -9723,7 +9418,7 @@ export * from '@byok-sdk/implementation-identity';
  * `<interpreter> <entry> __byok_sdk_helper <kind> …`, so the kind is the only
  * thing that differs between them and it is bound, not passed as text.
  */
-export type RuntimeLaunchKindV1 = 'pi-rpc' | 'pi-prepared';
+export type RuntimeLaunchKindV1 = 'pi-rpc' | 'pi-prepared' | 'pi-durable';
 export declare const RUNTIME_LAUNCH_KINDS: readonly RuntimeLaunchKindV1[];
 /**
  * The environment NAMES a runtime launch description commits a value for.
@@ -12898,7 +12593,7 @@ export declare class RuntimeStartupDisposalFailure extends Error {
 export declare function isRuntimeStartupDisposalFailure(value: unknown): value is RuntimeStartupDisposalFailure;
 // ==== @byok-sdk/client dist/sdk-reserved-helper-host.d.ts ====
 export declare const BYOK_SDK_HELPER_SUBCOMMAND = "__byok_sdk_helper";
-export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'approval-mcp' | 'agent-team-mcp' | 'mcp-env' | 'pi-rpc' | 'pi-prepared';
+export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'agent-team-mcp' | 'mcp-env' | 'pi-rpc' | 'pi-prepared' | 'pi-durable';
 export interface SdkHelperHostConfig {
     /**
      * Run SDK-reserved helpers by re-entering the product's single-file/SEA
@@ -12924,30 +12619,6 @@ export declare function resolveSdkReservedHelperBin(kind: SdkReservedHelperKind,
  * stdio EOF before this resolves `true`.
  */
 export declare function runSdkReservedHelperCommand(argv?: readonly string[]): Promise<boolean>;
-// ==== @byok-sdk/client dist/sdk-reserved-mcp.d.ts ====
-/** SDK-owned names shared by daemon injection, adapter policy, and MCP helpers. */
-export declare const AGENT_MESSAGE_MCP_SERVER_NAME = "byokagentmessage";
-export declare const AGENT_MESSAGE_TOOL_NAME = "send_agent_message";
-export declare const AGENT_MEMORY_MCP_SERVER_NAME = "byokagentmemory";
-export declare const AGENT_TEAM_MCP_SERVER_NAME = "byokagentteam";
-/** The MCP server NAME the claude adapter registers `byok-approval-mcp` under in its generated `--mcp-config` — combined with `APPROVAL_TOOL_NAME` (single-sourced from `bin/approval-mcp-server.ts`) to form the `mcp__<server>__<tool>` identifier `--permission-prompt-tool` expects. Lives here, beside the other reserved names, so `toolset-registry.ts`'s host-config rejection and the adapters' own "never treat a reserved server as a projected toolset server" rule read from one list. */
-export declare const APPROVAL_MCP_SERVER_NAME = "byokapproval";
-/**
- * Every MCP server name the SDK owns. A server under one of these names is
- * never a projected host toolset server: `toolset-registry.ts` refuses to
- * configure one, and the adapters grant each reserved server exactly the
- * fixed tool its own protocol needs rather than anything observed.
- *
- * A frozen tuple rather than a `Set`: `Object.freeze` on a `Set` freezes the
- * object's own properties and leaves `add`/`delete` fully functional, so the
- * previous shape advertised an immutability it did not have. Three entries
- * make `includes` the same cost as a hash lookup, and the array really is
- * immutable. Use {@link isReservedMcpServerName} rather than reaching for
- * membership directly.
- */
-export declare const RESERVED_MCP_SERVER_NAMES: readonly ["byokagentmessage", "byokagentmemory", "byokapproval", "byokagentteam"];
-/** Whether `name` is one of the SDK-owned MCP server names above. */
-export declare function isReservedMcpServerName(name: string): boolean;
 // ==== @byok-sdk/client dist/types.d.ts ====
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
@@ -12987,18 +12658,20 @@ export type RuntimeDetectResult = {
     readonly kind: 'refused';
     readonly reason: RuntimeDetectionRefusalReason;
 };
-export type RuntimeDetectionRefusalReason = ToolImplementationUnavailableReasonV1 | 'installation_observation_unsupported' | 'native_identity_mismatch' | 'launch_cwd_unavailable';
+export type RuntimeDetectionRefusalReason = ToolImplementationUnavailableReasonV1 | 'installation_observation_unsupported' | 'native_identity_mismatch' | 'launch_cwd_unavailable' | 'app_server_unavailable' | 'runtime_version_unsupported';
 /** Explicit scope, never a launch environment or task/lane-selection authority. */
 export type RuntimeInstallationObservationContext = {
     readonly authority: ToolImplementationAuthority;
 } & ({
     readonly scope: 'entry';
-    readonly runtimeEntry: 'pi-rpc' | 'pi-prepared';
+    readonly runtimeEntry: 'pi-rpc' | 'pi-prepared' | 'pi-durable';
 } | {
     readonly scope: 'enabled-top-level';
 });
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
+    /** Local adapter advertisement; no new protocol field or capability vocabulary. */
+    readonly durablePi?: boolean;
     readonly steer: boolean;
     readonly resume: boolean;
     /**
@@ -13096,29 +12769,10 @@ export interface McpToolsetReloadReceipt {
     toolsets: readonly Readonly<McpToolsetStatus>[];
 }
 /**
- * M4 Phase 3: the out-of-band approval channel `TaskRunner` (`daemon/
- * task-runner.ts`) hands to a prepared operation's `start()` via
- * `RuntimeOperationStartInput.approvalChannel`, for a runtime whose approval mechanism genuinely needs
- * to reach back into the daemon from OUTSIDE the adapter's own process — the
- * claude adapter's concrete case: `claude`'s `--permission-prompt-tool`
- * resolves a pending permission entirely inside a SEPARATE MCP-server child
- * process claude itself spawns (see `bin/byok-approval-mcp.ts`), which has
- * no in-process handle to this task's `Session` at all and must instead call
- * back into the SAME daemon over its control socket. `storeDir`/`productId`
- * are exactly what that out-of-process helper needs to find and authenticate
- * against this daemon's control socket (`daemon/control-protocol.ts`
- * `controlEndpointPath`/`controlTokenPath`); `taskId` is how its request gets
- * correlated back to THIS task once it arrives. `resolve()` is the
- * daemon-side counterpart: it resolves the single most-recently-registered
- * pending approval for this task (via `TaskRunner.requestApproval`'s own
- * `ApprovalRegistry` entry — see `daemon/approvals.ts`), and rejects if none
- * is currently pending, mirroring `Session.resolveApproval`'s own
- * no-notion-of-approval-pending fail-closed contract one level up.
- *
- * Optional and adapter-agnostic on purpose: only an adapter whose runtime
- * genuinely supports an out-of-band pause (claude, today) ever reads this;
- * every other adapter (pi, codex) ignores it exactly as before this field
- * existed.
+ * Adapter-agnostic out-of-band channel handed to prepared operations by TaskRunner.
+ * The shared registry resolves one pending approval for this task and rejects
+ * when none is pending. Claude no longer consumes this channel; third-party
+ * adapters and the daemon's generic needs_approval/control path may use it.
  */
 export interface ApprovalChannel {
     taskId: string;
@@ -13134,6 +12788,8 @@ export interface ApprovalChannel {
  * one underlying runtime process/session for the lifetime of a task.
  */
 export interface Session {
+    /** Current execution artifact, available only after terminal success. */
+    resultDocument?(): unknown;
     /** Opaque runtime session id, reported back to the server via `task.complete.sessionRef`. */
     sessionRef: string;
     /** Normalized events for this session; the daemon batches these into `task.progress`. */
@@ -13227,8 +12883,8 @@ export interface RuntimeAdapterDescriptor {
     readonly mcpServerLaunch?: 'direct-cwd' | 'launcher-wrapped';
     /**
      * Whether this adapter GENERATES a reserved approval MCP server of its own
-     * when it is started under `policy.mode: 'confirm'` (claude's
-     * `--permission-prompt-tool` server, `adapters/claude/claude-adapter.ts`).
+     * when it is started under `policy.mode: 'confirm'`. This is an extension
+     * seam for custom adapters; none of the bundled adapters declares it.
      *
      * Such a server exists nowhere in the daemon's projected `mcpServers` map,
      * so the daemon cannot see it by counting that map — but it is an MCP
@@ -13404,8 +13060,18 @@ export interface RuntimePreparedLaunchV1 {
     /** `toolsetId` -> the registry definition revision the preparation bound. */
     readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
 }
+/** Trusted daemon barriers for the opt-in durable worker; never serialized. */
+export interface DurableLifecycle {
+    record(kind: 'tool-intent' | 'tool-committed' | 'respawn-intent', ordinal: number): Promise<void>;
+    ownsLease(): boolean;
+}
 /** Runtime resources shared by every start variant. */
 interface RuntimeOperationStartBase {
+    /** Trusted parent-only recovery authority; never serialized into the worker. */
+    readonly durableContext?: {
+        readonly tenantId: string;
+        readonly lifecycle: DurableLifecycle;
+    };
     readonly runtimeLaunch?: PiRuntimeLaunchResources;
     /** Exact daemon MCP admission environment; Pi requires it and never inherits runtime credentials. */
     readonly mcpEnv?: Readonly<Record<string, string>>;

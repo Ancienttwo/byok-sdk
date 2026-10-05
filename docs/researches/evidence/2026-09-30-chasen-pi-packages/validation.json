@@ -1,0 +1,78 @@
+{
+  "TMPDIR": "/tmp/bcr-3onze_6n",
+  "results": [
+    {
+      "check": "build",
+      "command": [
+        "bun",
+        "run",
+        "build"
+      ],
+      "exitCode": 127,
+      "seconds": 0.06,
+      "log": "_ops/chasen-research/build.log"
+    },
+    {
+      "check": "typecheck",
+      "command": [
+        "bun",
+        "run",
+        "typecheck"
+      ],
+      "exitCode": 127,
+      "seconds": 0.03,
+      "log": "_ops/chasen-research/typecheck.log"
+    },
+    {
+      "check": "test",
+      "command": [
+        "bun",
+        "run",
+        "test"
+      ],
+      "exitCode": 127,
+      "seconds": 0.03,
+      "log": "_ops/chasen-research/test.log"
+    },
+    {
+      "check": "api-surface",
+      "command": [
+        "bun",
+        "run",
+        "check:api-surface"
+      ],
+      "exitCode": 1,
+      "seconds": 0.09,
+      "log": "_ops/chasen-research/api-surface.log"
+    },
+    {
+      "check": "version-authority",
+      "command": [
+        "bun",
+        "run",
+        "check:version-authority"
+      ],
+      "exitCode": 0,
+      "seconds": 0.09,
+      "log": "_ops/chasen-research/version-authority.log"
+    },
+    {
+      "check": "task-workflow",
+      "command": [
+        "repo-harness",
+        "run",
+        "check-task-workflow",
+        "--strict"
+      ],
+      "exitCode": 0,
+      "seconds": 2.3,
+      "log": "_ops/chasen-research/task-workflow.log"
+    }
+  ],
+  "documentChecks": {
+    "packageCount": 10,
+    "tarballIntegrity": "PASS",
+    "relativeLinks": "PASS",
+    "localEntrypoints": "PASS"
+  }
+}

@@ -8,6 +8,7 @@ import {
   DEVICE_ASSERTION_MAX_TTL_MS,
 } from '@byok-sdk/core';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import {
   createEnvelope,
@@ -63,7 +64,6 @@ import {
 } from '../release-identity';
 import { PiAdapter, validatePiByokLauncherConfig } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
-import { resolveApprovalMcpBin } from '../adapters/claude/resolve-approval-mcp-bin';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
 import { AuthManager } from './auth-manager';
@@ -404,6 +404,8 @@ export interface DaemonConfig {
    * `dispatchSelection` in the BYOK lane; subscription runtimes and legacy
    * Pi tasks do not invoke it.
    */
+  /** Disabled by default. Requires Agent homes, journal and custody launcher. */
+  durablePi?: boolean;
   piByokLauncher?: import('../adapters/pi/pi-adapter').PiByokLauncherConfig;
   /**
    * M5 batch-3 (workstream 1): explicit auto-select priority order for
@@ -1259,11 +1261,9 @@ const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['pi', 'claude', 'codex'];
 function buildAdapter(id: RuntimeId, config: DaemonConfig): RuntimeAdapter {
   switch (id) {
     case 'pi':
-      return new PiAdapter({ byokLauncher: config.piByokLauncher });
+      return new PiAdapter({ byokLauncher: config.piByokLauncher, ...(config.durablePi === true ? { durablePi: { replicaRoot: path.join(DeviceStore.resolveDir(config.productId, config.storeDir), 'durable') } } : {}) });
     case 'claude':
-      return new ClaudeAdapter({
-        resolveApprovalMcpBin: () => resolveApprovalMcpBin(config.sdkHelperHost),
-      });
+      return new ClaudeAdapter();
     case 'codex':
       return new CodexAdapter({ sdkHelperHost: config.sdkHelperHost });
   }
@@ -1443,6 +1443,9 @@ export function buildDaemonWithAdapters(
   const localAgentRelease = resolveLocalAgentReleaseIdentity(config.localAgentRelease);
   const toolsetRegistry = new McpToolsetRegistry(config.mcpToolsets);
   validatePiByokLauncherConfig(config.piByokLauncher);
+  if (config.durablePi !== undefined && typeof config.durablePi !== 'boolean') throw new Error('durablePi must be boolean');
+  if (config.durablePi === true && (!config.agentHome || !config.hostedJournal || !config.piByokLauncher)) throw new Error('durablePi requires Agent home, hosted journal and Pi custody launcher');
+  if (config.durablePi === true && process.platform === 'win32') throw new Error('durablePi is unavailable on Windows until parent-death Job Object recovery is validated');
   // M5 batch-3 (workstream 2): validated synchronously, up front — see
   // `DaemonConfig.maxTaskOutputBytes`'s own doc comment for the full
   // zero/negative-is-an-error / `Number.POSITIVE_INFINITY`-is-the-real-
@@ -2452,6 +2455,10 @@ export function buildDaemonWithAdapters(
       // before is the entire integration; `task-runner.ts` itself is
       // untouched. See `observer.ts`'s module doc comment.
       send: sendEnvelope,
+      ...(config.durablePi !== true ? {} : { durablePi: true, recordDurableTransition: async (taskId: string, leaseId: string, kind: string, ordinal: number) => {
+        if (!activeJournal) throw new Error('durable journal unavailable');
+        await activeJournal.recordTransition({ transitionId: randomUUID(), taskId, to: 'running', occurredAt: new Date().toISOString(), detail: JSON.stringify({ kind, leaseId, ordinal }) });
+      } }),
       ...(activeJournal === undefined ? {} : {
         beforeClaim: async (taskId: string, runtime: string) => {
           await activeJournal.recordAdmission({ taskId, admitted: true, claimedRuntime: runtime, decidedAt: new Date().toISOString() });
@@ -2482,7 +2489,7 @@ export function buildDaemonWithAdapters(
       // via either the server wire or the local CLI resolves the identical
       // entry. `storeDir`/`productId` let the prepared operation approval channel
       // (populated per-task by `TaskRunner`) tell an out-of-process helper
-      // (`bin/byok-approval-mcp.ts`) exactly which control socket to dial.
+      // exactly which control socket to dial.
       approvalRegistry,
       storeDir,
       productId: config.productId,
@@ -3688,15 +3695,8 @@ export function buildDaemonWithAdapters(
         }
         return { resolved: true };
       },
-      // M4 Phase 3: called by `bin/byok-approval-mcp.ts` — a claude-spawned
-      // MCP-server child process, not this daemon's own adapter/session
-      // in-process (see `types.ts`'s `ApprovalChannel` doc comment). Awaits
-      // `TaskRunner.requestApproval`'s own returned promise directly, which
-      // is exactly what lets this control call stay pending for as long as
-      // `approvalTimeoutMs` allows (`control-server.ts`'s unary dispatch has
-      // no timeout of its own — see its `dispatch()`) — the caller's own
-      // `requestTimeoutMs` (`bin/control-client.ts`) must be configured
-      // longer than that for the same reason.
+      // Shared out-of-process approval control, retained for adapters beyond Claude.
+      // The TaskRunner deadline bounds the wait; callers choose a longer control timeout.
       'approvals.request': (params) => {
         const parsed = parseApprovalsRequestParams(params);
         if (!parsed) throw new ControlError('bad_request', 'approvals.request requires {taskId, summary}');

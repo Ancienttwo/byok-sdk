@@ -12,6 +12,7 @@ const dispatchPackages = [
   ['packages/server', '@byok-sdk/server'],
   ['packages/cloud', '@byok-sdk/cloud'],
   ['packages/cloud-dataplane', '@byok-sdk/cloud-dataplane'],
+  ['packages/cloud-do', '@byok-sdk/cloud-do'],
   ['packages/ui-runtime', '@byok-sdk/ui-runtime'],
 ];
 const keys = ['packages/keys', '@byok-sdk/keys'];
@@ -167,7 +168,7 @@ for (const [directory, expectedName] of publicPackages) {
   if (manifest.version !== expectedVersion) errors.push(`${manifestPath}: expected version ${expectedVersion}, got ${manifest.version}`);
   if (manifest.license !== 'MIT') errors.push(`${manifestPath}: license must be MIT`);
   if (manifest.publishConfig?.access !== 'public') errors.push(`${manifestPath}: publishConfig.access must be public`);
-  const expectedEngine = '>=22.22.0';
+  const expectedEngine = '>=24.15.0';
   if (manifest.engines?.node !== expectedEngine) errors.push(`${manifestPath}: engines.node must be ${expectedEngine}`);
   if (manifest.repository?.url !== 'git+https://github.com/Ancienttwo/byok-sdk.git') {
     errors.push(`${manifestPath}: repository URL is not canonical`);
@@ -267,8 +268,8 @@ for (const entry of readdirSync(path.join(repoRoot, 'packages'), { withFileTypes
   if (manifest.publishConfig !== undefined) {
     errors.push(`${manifestPath}: a private package must not declare publishConfig`);
   }
-  if (manifest.engines?.node !== '>=22.22.0') {
-    errors.push(`${manifestPath}: engines.node must be >=22.22.0`);
+  if (manifest.engines?.node !== '>=24.15.0') {
+    errors.push(`${manifestPath}: engines.node must be >=24.15.0`);
   }
 }
 for (const [directory] of privatePackages) {

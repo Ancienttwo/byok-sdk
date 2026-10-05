@@ -169,7 +169,7 @@ describe('B-P2 native composition: runtime identity', () => {
     // manifest-declared claim.
     expect(Object.hasOwn(installed, 'byokFork')).toBe(false);
     expect(identity.tarballIntegrity).toMatch(/^sha512-/);
-    expect(identity.upstreamCommit).toBe('f07218c4d4bbc12bef056a7058c3dd49dfe41abe');
+    expect(identity.upstreamCommit).toBe('cd32f7725fdbddbaecdff5b1e68491563394e0ca');
     expect(identity.closureDigest).toMatch(/^[0-9a-f]{64}$/);
     // The two lockstep packages the compile and the session load are installed
     // at exactly the coding agent's version.
@@ -351,7 +351,6 @@ describe('B-P2 native composition: pure compile', () => {
       'dist/auth/helpers.js',
       'dist/auth/resolve.js',
       'dist/auth/types.js',
-      'dist/images-models.js',
       'dist/index.js',
       'dist/models-store.js',
       'dist/models.js',
@@ -367,6 +366,8 @@ describe('B-P2 native composition: pure compile', () => {
       'dist/utils/hash.js',
       'dist/utils/headers.js',
       'dist/utils/json-parse.js',
+      'dist/utils/model-operations.js',
+      'dist/utils/models-error.js',
       'dist/utils/overflow.js',
       'dist/utils/pi-user-agent.js',
       'dist/utils/provider-env.js',
@@ -479,9 +480,9 @@ describe('B-P2 native composition: the envelope contract is verified, not assume
 
   const SUPPORTED_IDENTITY = {
     packageName: '@earendil-works/pi-coding-agent',
-    packageVersion: '0.87.1',
+    packageVersion: '1.0.2',
     tarballIntegrity: 'sha512-test', provenanceDigest: 'a'.repeat(64), closureDigest: 'b'.repeat(64),
-    upstreamCommit: 'f07218c4d4bbc12bef056a7058c3dd49dfe41abe',
+    upstreamCommit: 'cd32f7725fdbddbaecdff5b1e68491563394e0ca',
     envelopeFormat: 'byok.pi.prepared-input',
     requestFormat: 'byok.pi.openai-completions.request',
     compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,

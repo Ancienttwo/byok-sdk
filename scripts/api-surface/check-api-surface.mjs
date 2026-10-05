@@ -20,6 +20,7 @@ const PACKAGES = [
   'client',
   'cloud',
   'cloud-dataplane',
+  'cloud-do',
   'core',
   'implementation-identity',
   'protocol',

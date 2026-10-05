@@ -13,6 +13,19 @@ describe('mapPermissionPolicyToClaudeArgs', () => {
     expect(result).toEqual({ ok: true, args: ['--permission-mode', 'acceptEdits', '--tools', 'Bash,Read'] });
   });
 
+  it('rejects confirm with every tool restriction without preparing CLI grants', () => {
+    for (const policy of [
+      { mode: 'confirm' as const },
+      { mode: 'confirm' as const, allowTools: ['Read'] },
+      { mode: 'confirm' as const, denyTools: ['Bash'] },
+      { mode: 'confirm' as const, allowTools: ['Read'], denyTools: ['Bash'] },
+    ]) {
+      expect(mapPermissionPolicyToClaudeArgs(policy)).toEqual({
+        ok: false, args: [], reason: 'claude adapter does not support confirm mode or interactive approval',
+      });
+    }
+  });
+
   it('readonly with no allowTools maps to the default readonly tool set via the replacive --tools flag, never --allowedTools', () => {
     const result = mapPermissionPolicyToClaudeArgs({ mode: 'readonly' });
     expect(result).toEqual({ ok: true, args: ['--permission-mode', 'default', '--tools', 'Read,Glob,Grep'] });
@@ -43,57 +56,6 @@ describe('mapPermissionPolicyToClaudeArgs', () => {
       ok: true,
       args: ['--permission-mode', 'acceptEdits'],
     });
-  });
-
-  it('M4 Phase 3: mode "confirm" is supported — deny-by-default --permission-mode default, plus a flag telling start() to wire the approval-mcp channel (the actual --permission-prompt-tool/--mcp-config flags are appended by start() itself, not here — see needsApprovalMcp\'s own doc comment)', () => {
-    const policy: PermissionPolicy = { mode: 'confirm' };
-    const result = mapPermissionPolicyToClaudeArgs(policy);
-    expect(result).toEqual({ ok: true, args: ['--permission-mode', 'default'], needsApprovalMcp: true });
-  });
-
-  it('confirm mode still fails closed on network:false, same as every other mode', () => {
-    const result = mapPermissionPolicyToClaudeArgs({ mode: 'confirm', network: false });
-    expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/network/i);
-  });
-
-  // Finding F2 (cross-model adversarial review): the confirm branch used to
-  // return unconditionally before ever looking at allowTools/denyTools,
-  // silently discarding both. The four tests below pin the fixed behavior:
-  // allowTools alone is honored (mirrors auto), denyTools alone fails
-  // closed (mirrors auto's identical reasoning — confirm has no bounded
-  // base tool list to subtract from), the combination still fails closed
-  // (denyTools is inexpressible regardless of an accompanying allowTools),
-  // and an inexpressible constraint (network:false) fails closed even
-  // alongside an otherwise-expressible allowTools.
-  it('confirm+allowTools: maps to an explicit --tools restriction, mirroring auto (finding F2 fix)', () => {
-    const result = mapPermissionPolicyToClaudeArgs({ mode: 'confirm', allowTools: ['Bash', 'Read'] });
-    expect(result).toEqual({
-      ok: true,
-      args: ['--permission-mode', 'default', '--tools', 'Bash,Read'],
-      needsApprovalMcp: true,
-    });
-  });
-
-  it('confirm+denyTools: fails closed (finding F2 fix — no bounded base tool list to subtract from, same as auto)', () => {
-    const result = mapPermissionPolicyToClaudeArgs({ mode: 'confirm', denyTools: ['Bash'] });
-    expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/denyTools/);
-    expect(result.reason).toMatch(/confirm/i);
-    expect(result.args).toEqual([]);
-    expect(result.needsApprovalMcp).toBeUndefined();
-  });
-
-  it('confirm+both (allowTools and denyTools together): still fails closed — denyTools is inexpressible regardless of an accompanying allowTools', () => {
-    const result = mapPermissionPolicyToClaudeArgs({ mode: 'confirm', allowTools: ['Read'], denyTools: ['Bash'] });
-    expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/denyTools/);
-  });
-
-  it('confirm+inexpressible: an inexpressible constraint (network:false) fails closed even alongside an otherwise-expressible allowTools', () => {
-    const result = mapPermissionPolicyToClaudeArgs({ mode: 'confirm', allowTools: ['Read'], network: false });
-    expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/network/i);
   });
 
   it('fails closed on network:false (claude has no network sandbox for its Bash tool either)', () => {
@@ -178,14 +140,6 @@ describe('mapPermissionPolicyToClaudeArgs', () => {
     expect(mapPermissionPolicyToClaudeArgs({ mode: 'auto' }, ECHO_GRANT)).toEqual({
       ok: true,
       args: ['--permission-mode', 'acceptEdits', '--allowedTools', 'mcp__saleskoprobe__echo'],
-    });
-  });
-
-  it('confirm never pre-grants a projected toolset tool — the approval channel must see every call', () => {
-    expect(mapPermissionPolicyToClaudeArgs({ mode: 'confirm' }, ECHO_GRANT)).toEqual({
-      ok: true,
-      args: ['--permission-mode', 'default'],
-      needsApprovalMcp: true,
     });
   });
 

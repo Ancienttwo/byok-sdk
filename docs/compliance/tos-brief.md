@@ -10,6 +10,13 @@ Every technical claim is tied to a repository file path (branch `m4`, commit `62
 Every terms claim is tied to a URL and an effective date, with load-bearing text quoted
 verbatim.
 
+**Runtime implementation update (2026-10-01).** The S1–S4 migration replaces
+Codex exec with app-server 0.160.0 (YOLO-only), removes Claude confirm and the
+private approval MCP bin, and adds Claude control_request interrupt. The
+historical terms analysis below remains dated evidence, not a fresh legal
+review of app-server. Owner's current authorization judgment is recorded in
+`researches/2026-10-01_oar-extraction-assessment.md` decisions 8 and 11.
+
 **How to read the terms sections.** Each vendor sub-section separates three things that must
 not be conflated: **[SAY]** what the written terms state, **[SHOWN]** what enforcement has
 actually done, and **[AMBIGUOUS]** what the text does not resolve and only counsel can call.
@@ -29,10 +36,10 @@ CLI's own supported headless mode. It is a launcher, not a proxy.
   test-only override env var), passing **only official, documented-or-empirically-confirmed
   CLI flags**.
 - Runs each binary in its **own official non-interactive mode** (`claude -p --input-format
-  stream-json`; `codex exec --json`).
+  stream-json`; `codex app-server --listen stdio://`).
 - Maps the operator's permission policy onto **the binary's own official permission flags**
-  (`--permission-mode`, and in M4 the official `--permission-prompt-tool` + MCP approval
-  mechanism for Claude; `-c sandbox_mode` / `-c approval_policy` for Codex).
+  (`--permission-mode` for Claude; danger-full-access / approvalPolicy never
+  for the YOLO-only Codex app-server adapter).
 - Isolates state **per product** under `~/.byok/<productId>/` and writes an **append-only,
   secret-redacted audit log**.
 - Requires the user to **initiate pairing** themselves from their own machine
@@ -108,13 +115,11 @@ credentials.**
 **4. Official flags / official mechanisms only.**
 - Claude spawn argv (`claude-adapter.ts:240-253`): `-p --input-format stream-json
   --output-format stream-json --verbose`, plus `--resume <id>` and the policy-mapped flags.
-- Claude M4 "confirm" approval (`claude-adapter.ts:196-236`) uses the **official**
-  `--permission-prompt-tool` + `--mcp-config` + `--strict-mcp-config` mechanism, pointed at a
-  bundled local approval MCP server. The MCP config file it writes carries "no secret/token
-  material at all" (a store path, productId, taskId).
-- Codex spawn argv (`codex-adapter.ts:267-270`, `permission-mapping.ts:136-137`): `exec` /
-  `exec resume <ref>`, `--json`, `--skip-git-repo-check`, `-c sandbox_mode=<…>`,
-  `-c approval_policy=never`.
+- Claude rejects confirm and no longer starts a permission-prompt-tool helper.
+  Interruption uses a correlated stream-json control_request with a bounded ACK.
+- Codex starts app-server 0.160.0, initializes JSON-RPC, and uses thread/start or
+  thread/resume with danger-full-access and approvalPolicy never. readonly and
+  network:false are rejected; the historical exec sandbox claim does not apply.
 
 **5. User's own machine + user-initiated pairing.**
 `packages/client/src/bin/byok-agent.ts:132-137` and `commands/pair.ts:9-14`: pairing runs only

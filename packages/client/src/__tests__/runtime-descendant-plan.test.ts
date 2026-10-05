@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { descendantTemplateDigest, type ImplementationSpawnBindingV1, type RuntimeEntryV1 } from '@byok-sdk/implementation-identity';
-import { createRuntimeDescendantPlan, parseRuntimeDescendantPlan, requiredRuntimePlanKinds, type RuntimeDescendantDeclarationV1, type RuntimeDescendantPlanV1 } from '../adapters/pi/runtime-descendant-plan';
+import { createRuntimeDescendantPlan, parseRuntimeDescendantPlan, requiredRuntimePlanKinds, type RuntimeDescendantDeclarationV1, type RuntimeDescendantPlanV2 } from '../adapters/pi/runtime-descendant-plan';
 const vectors = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/c07-runtime-record/official-pi-087.v1.json', import.meta.url), 'utf8')) as {
   templateVectors: { id: RuntimeEntryV1; template: ImplementationSpawnBindingV1; templateDigest: string; templateUtf8: string }[];
   resolutionVectors: { response: RuntimeDescendantDeclarationV1 }[];
@@ -9,8 +9,8 @@ const vectors = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/c07-
 const declaration = vectors.resolutionVectors[0]!.response;
 const binding = (kind: RuntimeEntryV1) => vectors.templateVectors.find(v => v.id === kind)!.template;
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
-function plan(kind: RuntimeEntryV1 = 'pi-rpc'): RuntimeDescendantPlanV1 {
-  return { format: 'byok.runtime-launch-plan', version: 1, selfKind: kind,
+function plan(kind: RuntimeEntryV1 = 'pi-rpc'): RuntimeDescendantPlanV2 {
+  return { format: 'byok.runtime-launch-plan', version: 2, externalCliInstallations: [], selfKind: kind,
     policy: clone(declaration.descendantPolicy), edges: clone(declaration.edges),
     templates: requiredRuntimePlanKinds(kind, declaration.descendantPolicy, declaration.edges).map(kind => {
       const vector = vectors.templateVectors.find(v => v.id === kind)!;
@@ -64,7 +64,7 @@ describe('strict runtime descendant plan', () => {
     expect(() => parse(input)).toThrow('template_identity_mismatch');
   });
   it.each([
-    ['version', (p: any) => { p.version = 2; }],
+    ['version', (p: any) => { p.version = 1; }],
     ['unknown top key', (p: any) => { p.perLaunch = {}; }],
     ['unknown row key', (p: any) => { p.templates[0].extra = true; }],
     ['unknown policy key', (p: any) => { p.policy.extra = true; }],

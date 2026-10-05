@@ -38,13 +38,14 @@
  * moved names under their original print-entry spellings so the existing
  * import surface (tests included) keeps working unchanged.
  */
+import { activateVerifiedCustodyParent } from './external-cli-authority';
 import { spawn as nodeSpawn } from 'node:child_process';
 import {
   assertDescendantSpawn,
   DescendantLaunchError,
   parseDescendantLaunch,
   validateDescendantSpawn,
-  type DescendantLaunchV1,
+  type PiDescendantLaunchV2,
 } from '@byok-sdk/implementation-identity';
 import {
   BYOK_SDK_CUSTODY_LAUNCH_RECORD_ENV,
@@ -105,7 +106,7 @@ export function assertPrintEntryArgvTemplate(argv: readonly string[]): void {
  * the parent commitment.
  */
 export function projectAttestedPrintExecEnv(
-  launch: DescendantLaunchV1,
+  launch: PiDescendantLaunchV2,
   parentDepth: number,
   observedEnv: Readonly<Record<string, string | undefined>>,
 ): Record<string, string> {
@@ -149,7 +150,7 @@ export interface AttestedPiSubagentPrintLaunchInput {
    * dispatcher always mints this shape). Lazy: it is imported only when a
    * self-reentry actually happens.
    */
-  readonly payloadRunner?: (launch: DescendantLaunchV1) => Promise<number>;
+  readonly payloadRunner?: (launch: PiDescendantLaunchV2) => Promise<number>;
   /** The launch record path commitment, for the spawned-liveness claim. */
   readonly recordPath?: string;
 }
@@ -168,7 +169,7 @@ export async function launchAttestedPiSubagentPrint(input: AttestedPiSubagentPri
   if (!Number.isSafeInteger(parentDepth) || parentDepth < 0) {
     refusal('parent depth commitment is not a safe non-negative integer');
   }
-  let launch: DescendantLaunchV1;
+  let launch: PiDescendantLaunchV2;
   try {
     launch = parseDescendantLaunch(input.launch);
   } catch (error) {
@@ -194,6 +195,7 @@ export async function launchAttestedPiSubagentPrint(input: AttestedPiSubagentPri
     // 已spawn: this process is the attested child. Claim liveness (the sweep
     // sidecar goes away) and run the delegated task in-process.
     if (input.recordPath !== undefined) claimSpawnedLaunchLiveness(input.recordPath);
+    activateVerifiedCustodyParent(launch);
     return input.payloadRunner(launch);
   }
   const exec = input.spawnImpl ?? defaultAttestedExec;

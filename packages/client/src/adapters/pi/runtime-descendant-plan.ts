@@ -1,4 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
+import { validateCustodyExternalInstallations } from '../../custody/external-cli-authority';
+import type { AttestedOfficialExternalCliV2 } from '@byok-sdk/implementation-identity';
 import {
   descendantTemplateDigest, parseImplementationSpawnBinding, parseRuntimeDescendantPolicy,
   RUNTIME_DESCENDANT_EDGES, RUNTIME_ENTRIES, runtimeEntryFixedArgv,
@@ -15,13 +17,14 @@ export interface RuntimeDescendantTemplateV1 {
   readonly template: ImplementationSpawnBindingV1;
   readonly templateDigest: string;
 }
-export interface RuntimeDescendantPlanV1 {
+export interface RuntimeDescendantPlanV2 {
   readonly format: 'byok.runtime-launch-plan';
-  readonly version: 1;
+  readonly version: 2;
   readonly selfKind: RuntimeEntryV1;
   readonly policy: RuntimeDescendantPolicyV1;
   readonly edges: readonly RuntimeDescendantEdgeV1[];
   readonly templates: readonly RuntimeDescendantTemplateV1[];
+  readonly externalCliInstallations: readonly AttestedOfficialExternalCliV2[];
 }
 function fail(reason: string): never { throw new Error(`runtime_launch_plan_${reason}`); }
 function exact(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
@@ -69,7 +72,7 @@ function commonBinding(binding: ImplementationSpawnBindingV1): unknown {
 export function parseRuntimeDescendantPlan(
   value: unknown, selfKind: RuntimeEntryV1, selfBinding: ImplementationSpawnBindingV1,
   expectedDeclaration?: RuntimeDescendantDeclarationV1,
-): RuntimeDescendantPlanV1 | null {
+): RuntimeDescendantPlanV2 | null {
   const parsedSelf = parseImplementationSpawnBinding(selfBinding);
   if (!parsedSelf || !isKind(selfKind)) fail('invalid_self_binding');
   if (parsedSelf.identity.kind === 'unavailable') {
@@ -77,8 +80,9 @@ export function parseRuntimeDescendantPlan(
     return null;
   }
   if (!isDeepStrictEqual(parsedSelf.fixedArgv, runtimeEntryFixedArgv(selfKind))) fail('self_kind_mismatch');
-  if (!exact(value, ['format', 'version', 'selfKind', 'policy', 'edges', 'templates'])
-    || value.format !== 'byok.runtime-launch-plan' || value.version !== 1 || value.selfKind !== selfKind) fail('invalid_shape');
+  if (!exact(value, ['format', 'version', 'selfKind', 'policy', 'edges', 'templates', 'externalCliInstallations'])
+    || value.format !== 'byok.runtime-launch-plan' || value.version !== 2 || value.selfKind !== selfKind) fail('invalid_shape');
+  validateCustodyExternalInstallations(value.externalCliInstallations);
   const policy = parseRuntimeDescendantPolicy(value.policy);
   if (!policy || !validEdges(value.edges)) fail('invalid_declaration');
   if (expectedDeclaration !== undefined) {
@@ -102,21 +106,22 @@ export function parseRuntimeDescendantPlan(
     seen.add(row.kind);
   }
   // Preserve each digest preimage, and own immutable copies independent of the caller.
-  return freezeJson(JSON.parse(JSON.stringify(value)) as RuntimeDescendantPlanV1);
+  return freezeJson(JSON.parse(JSON.stringify(value)) as RuntimeDescendantPlanV2);
 }
 /** Assemble already measured rows; this helper never resolves or measures Host records. */
 export function createRuntimeDescendantPlan(
   selfKind: RuntimeEntryV1, selfBinding: ImplementationSpawnBindingV1,
   declaration?: RuntimeDescendantDeclarationV1,
   templates: readonly Pick<RuntimeDescendantTemplateV1, 'kind' | 'template'>[] = [],
-): RuntimeDescendantPlanV1 | null {
+  externalCliInstallations: readonly AttestedOfficialExternalCliV2[] = [],
+): RuntimeDescendantPlanV2 | null {
   if (selfBinding.identity.kind === 'unavailable') {
     if (templates.length !== 0) fail('unexpected_unconfigured_templates');
     return parseRuntimeDescendantPlan(null, selfKind, selfBinding, declaration);
   }
   if (!declaration) fail('declaration_required');
   return parseRuntimeDescendantPlan({
-    format: 'byok.runtime-launch-plan', version: 1, selfKind,
+    format: 'byok.runtime-launch-plan', version: 2, selfKind, externalCliInstallations,
     policy: declaration.descendantPolicy, edges: declaration.edges,
     templates: templates.map(row => ({ ...row, templateDigest: descendantTemplateDigest(row.template) })),
   }, selfKind, selfBinding, declaration);

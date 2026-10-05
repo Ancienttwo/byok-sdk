@@ -1,7 +1,7 @@
 /**
  * Admission of Host-owned assistant history into a prepared Pi request.
  *
- * On official Pi (0.87.x) Host assistant history enters the request as an
+ * On official Pi (0.99.x) Host assistant history enters the request as an
  * `AssistantMessage` carrying request-scoped sentinel provenance (A2'). The
  * official `transform-messages` step compares that provenance with the target
  * model (`isSameModel`) and handles `thinking` and `toolCall` blocks

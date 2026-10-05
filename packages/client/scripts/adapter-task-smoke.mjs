@@ -3,7 +3,7 @@
 // The adapter processes are the existing fake CLI fixtures, selected through
 // each adapter's public resolver seam; no vendor binary or model call is used.
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -127,6 +127,26 @@ try {
     fs.mkdir(workspaceRoot, { recursive: true, mode: 0o700 }),
   ]);
 
+  // Windows execFile probes need a native executable; a spawn-only Node
+  // wrapper cannot cover Codex.prepare's independent detection. Forward to
+  // real Node so import.meta.url and the descendant fixtures remain valid.
+  let codexCommand = path.join(fixtureDir, 'fake-codex.mjs');
+  if (process.platform === 'win32') {
+    const launcherSource = path.join(workDir, 'codex-launcher.mjs');
+    const nodeBin = process.execPath;
+    await fs.writeFile(launcherSource, `
+      import { spawn } from 'node:child_process';
+      const child = spawn(${JSON.stringify(nodeBin)}, [${JSON.stringify(codexCommand)}, ...process.argv.slice(2)], { stdio: 'inherit' });
+      child.once('error', error => { console.error(error); process.exit(1); });
+      child.once('close', code => process.exit(code ?? 1));
+    `);
+    codexCommand = path.join(workDir, 'codex-launcher.exe');
+    const built = spawnSync(process.env.BYOK_TEST_BUN_BIN ?? 'bun',
+      ['build', '--compile', launcherSource, '--outfile', codexCommand],
+      { encoding: 'utf8' });
+    assert(built.status === 0, `native Codex launcher build failed: ${built.error ?? built.stderr}`);
+  }
+
   // Do not let a developer's ambient credential/config variables reach a fake
   // runtime. Keep only the platform values needed to execute Node and create
   // the isolated temp files; the daemon's environment allowlist is exercised on
@@ -210,8 +230,10 @@ try {
       spawnFn: spawnFixture,
     })),
     lifecycleAdapter(new client.CodexAdapter({
-      resolveBin: () => ({ command: fake('codex'), source: 'path' }),
-      spawnFn: spawnFixture,
+      resolveBin: () => ({ command: codexCommand, source: 'path' }),
+      // Native launcher is already executable; do not feed its .exe to Node.
+      spawnFn: (command, args, options) =>
+        process.platform === 'win32' ? spawn(command, args, options) : spawnFixture(command, args, options),
     })),
     lifecycleAdapter(new client.PiAdapter({
       resolveBin: () => ({ command: fake('pi'), source: 'path' }),

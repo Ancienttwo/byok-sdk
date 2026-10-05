@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.0
+
+- **Breaking (runtime)** — raise the minimum Node.js version to 24.15.0 across
+  all workspace packages. Development/CI baseline is pinned to Node 24.21.0,
+  with a Node 26 forward-compatibility CI leg.
+
 ## Unreleased
 
 - **Fixed (client)** — the prepared lane now supports a truly tool-less record
@@ -12,6 +18,59 @@
   `preparation_tool_binding_digest_mismatch`. The Pi prepared session now proves its
   registered tool set equals the manifest and fails `prepared_registry_drift`
   otherwise. No wire, record, digest, capability or version change.
+
+- **Added (cloud-do)** — prepare `@byok-sdk/cloud-do` for the public SDK train.
+  Add an ESM library build, a local declaration closure, an API golden, and
+  an installed-tarball Worker smoke in the release-pack driver. The source
+  version is 0.24.0-rc.1. No package is published. The first release is stable
+  0.24.0 with keys 0.8.1, through the local publisher.
+
+- **Changed (client)** — qualify exactly Codex CLI 0.160.0 for the app-server
+  adapter and team relay. The 0.159.2 and 0.160.0 protocol trees are identical.
+  Other CLI versions remain unsupported.
+
+- **Changed (client)** — re-vendor the private OAR fork 0.18.0 (`1775b57`) -> 0.20.3
+  (`f385b918176d5ced07179e25e8cd758e75a784d1`) at `vendor/oar/f385b91/`. Upstream changed
+  only comment text in three selected contract files; the BYOK deltas, the bridge and
+  runtime behaviour are unchanged.
+
+- **Changed (client, cloud-do)** — official Pi runtime 1.0.1 -> 1.0.2.
+  The nine-package closure uses upstream commit `cd32f7725fdbddbaecdff5b1e68491563394e0ca`,
+  closureDigest `4aafae2b3780c4c8565eff17ebeb4d3842b6fe4aa31eb32cfbf104d36f453945`. No third-party dependency changes.
+  pi-ai adds opt-in `samplingParamsByThinkingLevel`. pi-durable persists a per-conversation
+  provider session id (`pi.provider` document) and forwards it to the provider on
+  generation and compaction (pi-durable 1.0.2 ruling approved 2026-10-05 by Aimpact). Fixes `check:release-pack`, which
+  failed after 1.0.2 was published because npm resolved transitive `^1.0.1` siblings to 1.0.2.
+
+- **Changed (client, cloud-do)** — official Pi runtime 1.0.0 -> 1.0.1.
+  The nine-package closure uses upstream commit `a7229ddc21810d6245105978033b7df645ecc2f7`,
+  closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`.
+  coding-agent pins brace-expansion 5.0.12. The Bun lock resolves
+  minimatch to the same 5.0.12 version. No 5.0.9 entry remains.
+  The official coding-agent tarball no longer ships npm-shrinkwrap.json.
+  The npm physical root count has not been re-measured.
+
+- **Breaking (client)** — Codex now uses app-server 0.160.0 with the vendored
+  OAR 0.20.3 `f385b91` kernel/driver (Apache-2.0), replacing the exec path. The adapter
+  is YOLO-only: `readonly` and `network:false` are no longer supported;
+  detection adds `app_server_unavailable` and `runtime_version_unsupported`
+  refusal reasons. Claude `confirm` and the `byok-approval-mcp` bin are removed;
+  Claude interrupt now uses correlated `control_request` with bounded ACK and
+  owned-process fallback. `usage` adds optional `contextTokens`, `contextWindow`
+  and `contextSource` fields (additive, independent of provider cost counters),
+  and the official Pi runtime pin moves to 1.0.2 (see below).
+
+- **Changed (client)** — official Pi runtime 0.87.1 -> 1.0.0. The attested
+  closure is now nine package names (chord, pi-agent-core, pi-ai, pi-codemode,
+  pi-coding-agent, pi-durable, pi-mcp, pi-telemetry, pi-tui), upstream commit `a13d35a7`,
+  closureDigest `7f010b1a1bf36bb08e479d6651e0aaa556c00abc2ab02a1275d31ba4c81a1d87`.
+- **Changed (client)** — the OpenAI SDK under Pi moves 6.40 -> 7.19. Request
+  wire bytes were verified identical (2499-cell matrix), but the SSE decoder was
+  rewritten: `[DONE]` is matched exactly, `event: error` frames throw `APIError`,
+  and the malformed-JSON message changed. BYOK users on
+  non-standard OpenAI-compatible servers may see different response handling.
+- **Changed (client)** — Pi now writes the session file at the first user
+  message, so a killed first turn is resumable.
 
 ## 0.24.0-rc.1 / @byok-sdk/keys 0.8.1-rc.1 — 2026-09-29 (prepared; not published)
 
@@ -140,10 +199,6 @@ published SDK before the stable 0.24.0 freezes the Agent memory intent wire.
   replaces Pi renderer inputs/default prompt. Envelope v4 uses P(D)=D and
   residual=[]; Host must reissue its official-identity ruling. Empty
   requiredToolsets is supported; native and reserved message tools remain absent.
-  [Erratum, 0.24.0: for `agentMemory: 'none'` this was accepted on the wire but
-  refused at preparation, admission and launch; only the memory-only shape was
-  admitted. The tool-less record is supported from 0.24.0. The text above is
-  unchanged as published.]
 - **Fixed** — continuation request refusals propagate to daemon task.fail with
   typed codes. Both retry layers are disabled; the first URL/body remains
   frozen and tool continuations retain the accepted post-response overflow rule.

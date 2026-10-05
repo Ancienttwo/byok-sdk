@@ -490,12 +490,15 @@ describe('the prepared pi launch entry', () => {
     const endpoint = await providerEndpoint();
     // The response is held open, so the run is still streaming when the
     // ordinary prompt arrives — the exact window the refusal exists for.
+    let arrived!: () => void;
+    const requestArrived = new Promise<void>((resolve) => { arrived = resolve; });
     let release: (() => void) | undefined;
     endpoint.respond = (_req, res) => {
       release = () => {
         res.writeHead(200, { 'content-type': 'text/event-stream' });
         res.end(sse(completion('done')));
       };
+      arrived();
     };
     const prepared = await prepareOnThisDevice(endpoint);
     const session = await startPrepared(prepared);
@@ -505,6 +508,7 @@ describe('the prepared pi launch entry', () => {
 
     expect(refusal.success).toBe(false);
     expect(String(refusal.error)).toMatch(/already processing/u);
+    await requestArrived;
     release?.();
     for await (const event of session.events) {
       if (event.type === 'turn_end') break;
@@ -514,12 +518,15 @@ describe('the prepared pi launch entry', () => {
 
   it('never sends a steer: the byte gate refuses the request it would ride on', async () => {
     const endpoint = await providerEndpoint();
+    let arrived!: () => void;
+    const requestArrived = new Promise<void>((resolve) => { arrived = resolve; });
     let release: (() => void) | undefined;
     endpoint.respond = (_req, res) => {
       release = () => {
         res.writeHead(200, { 'content-type': 'text/event-stream' });
         res.end(sse(completion('done')));
       };
+      arrived();
     };
     const prepared = await prepareOnThisDevice(endpoint);
     const session = await startPrepared(prepared);
@@ -528,6 +535,7 @@ describe('the prepared pi launch entry', () => {
     }).rpc;
     const steered = await rpc.send({ type: 'steer', message: 'an instruction nobody counted' });
     expect(steered.success).toBe(true);
+    await requestArrived;
     release?.();
     const seen: string[] = [];
     await expect((async () => {

@@ -11,16 +11,8 @@ import type { RuntimeCapabilities } from '../types';
  * Every field, `approvalInteractive` included, is a pure passthrough of the
  * adapter's own self-report: the adapter is the single source of truth for
  * what its runtime can do, and this function does no interpretation of its
- * own. Previously `approvalInteractive` was hardcoded `false` at the sole
- * caller, which had gone stale — as of M4 Phase 3 claude genuinely does
- * support interactive approval, via `--permission-prompt-tool` routing
- * `ClaudeSession.resolveApproval` into the local out-of-process MCP approval
- * channel (`bin/byok-approval-mcp.ts`) under `policy.mode: 'confirm'` (see
- * docs/protocol.md §5.1/§11.2) — so the wire advertised a capability claim no
- * adapter owned. pi and codex report `false` for the same honest reason they
- * always did: neither has any notion of pausing for approval
- * (`resolveApproval()` throws unconditionally for both — see `../types.ts`'s
- * `Session.resolveApproval` doc comment).
+ * own. All bundled adapters currently report approvalInteractive: false;
+ * third-party adapters remain responsible for their own support declaration.
  *
  * This lives in its own module, rather than beside either of its two callers,
  * because those two callers sit on opposite sides of an import edge:

@@ -32,7 +32,6 @@ const source = path.join(fixtureRoot, 'host.ts');
 const expectedTool = {
   'agent-message-mcp': 'send_agent_message',
   'agent-memory-mcp': 'memory_recall',
-  'approval-mcp': 'approval_prompt',
 };
 
 try {

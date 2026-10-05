@@ -36,7 +36,7 @@ import {
   buildPreparedPromptCommand,
   PREPARED_PROMPT_COMMAND_ID,
 } from '../adapters/pi/prepared-prompt-frame';
-// The SDK owns the single-frame bound: official Pi 0.87.1 reads stdin without
+// The SDK owns the single-frame bound: official Pi 1.0.2 reads stdin without
 // one, so this send-side check is the only thing that keeps an oversized frame
 // off the peer. `util/rpc-frame.ts` is the one authority for the cap and the
 // length function.

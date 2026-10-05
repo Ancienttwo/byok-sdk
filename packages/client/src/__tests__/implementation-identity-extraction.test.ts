@@ -23,3 +23,12 @@ it('retains the client legacy allow policy and strips the shared complete deny i
   expect(withoutProviderCredentials(ambient)).toEqual({ PATH: '/usr/bin' });
   expect(ambient.PI_PROVIDER_API_KEY).toBe('secret');
 });
+
+it('strips Codex auth aliases and mixed-case credential names with the same measurement projection', () => {
+  const config = { PATH: '/usr/bin', CODEX_HOME: '/synthetic-home', MY_CONFIG: 'synthetic' };
+  const ambient = { ...config, CODEX_API_KEY: 'synthetic', CODEX_ACCESS_TOKEN: 'synthetic', OpenAI_Api_Key: 'synthetic', Codex_Access_Token: 'synthetic' };
+  expect(JSON.stringify(withoutProviderCredentials(ambient)) === JSON.stringify(config)).toBe(true);
+  expect(shared.toolImplementationLaunchEnvNamesDigest(ambient)).toBe(shared.toolImplementationLaunchEnvNamesDigest(config));
+  expect(shared.toolImplementationLoaderEnvValuesDigest(ambient)).toBe(shared.toolImplementationLoaderEnvValuesDigest(config));
+  expect(Object.hasOwn(ambient, 'CODEX_API_KEY')).toBe(true);
+});

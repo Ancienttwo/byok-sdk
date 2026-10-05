@@ -106,6 +106,10 @@ export const AgentEventSchema = z.discriminatedUnion('type', [
     outputTokens: z.number().int().nonnegative().optional(),
     reasoningTokens: z.number().int().nonnegative().optional(),
     totalTokens: z.number().int().nonnegative().optional(),
+    // Context occupancy is independent of provider cost counters. Unknown stays absent.
+    contextTokens: z.number().int().nonnegative().optional(),
+    contextWindow: z.number().int().positive().optional(),
+    contextSource: z.enum(['provider', 'estimate']).optional(),
   }),
 ]);
 

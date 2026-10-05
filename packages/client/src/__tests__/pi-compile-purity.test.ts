@@ -347,7 +347,7 @@ const nonRuntimeEvents = (phase: ProbePhase): ProbeEvent[] => phase.events.filte
 function purityViolations(phase: ProbePhase): unknown[] {
   return [
     ...phase.events.map((event) => ({ api: event.api, detail: event.detail, origin: event.origin })),
-    ...phase.envReads.filter(event => !(event.origin === 'dep:openai/internal/utils/env.mjs:11:40' && ['OPENAI_ADMIN_KEY','OPENAI_ORG_ID','OPENAI_PROJECT_ID','OPENAI_WEBHOOK_SECRET','OPENAI_LOG','OPENAI_CUSTOM_HEADERS'].includes(event.key))).map((event) => ({ api: 'process.env', detail: event.key, origin: event.origin })),
+    ...phase.envReads.filter(event => !(event.origin === 'dep:openai/internal/utils/env.mjs:11:44' && ['OPENAI_ADMIN_KEY','OPENAI_ORG_ID','OPENAI_PROJECT_ID','OPENAI_WEBHOOK_SECRET','OPENAI_LOG','OPENAI_CUSTOM_HEADERS'].includes(event.key))).map((event) => ({ api: 'process.env', detail: event.key, origin: event.origin })),
     ...phase.envWrites.map((event) => ({ api: 'process.env=', detail: event.key, origin: event.origin })),
   ];
 }
@@ -372,7 +372,7 @@ const originFile = (origin: string): string => origin.replace(/:\d+:\d+$/u, '');
  *    `AssistantMessage.timestamp` of the output message the stream would
  *    fill; never serialized into the request.
  *  - `Math.random` at `openai/client.mjs` — `requestLogID`, "just for
- *    correlating local log entries" (openai 6.40.0); never on the wire body.
+ *    correlating local log entries" (openai 7.19.0); never on the wire body.
  *  - `Date.now` twice at `openai/client.mjs` — request start / headers
  *    timing for the log line and retry bookkeeping.
  *
@@ -398,8 +398,8 @@ const nondeterminismOffAllowlist = (phase: ProbePhase): unknown[] =>
 
 /**
  * The monitors that do not exist on the running Node, measured identically on
- * 22.22.3 (the `.node-version` pin every CI job uses) and 24.18.0 (the local
- * runtime), so this is one list rather than a table keyed by major.
+ * 24.21.0 (the `.node-version` baseline) and historically on
+ * 22.22.3 / 24.18.0, so this is one list rather than a table keyed by major.
  *
  * Nothing security-relevant is here by construction: every `fs` read family in
  * all three call forms, every `child_process`, `net`, `http`, `https`,
@@ -699,7 +699,7 @@ describe('B-P2 native composition: call-time purity, measured in an isolated chi
 describe('B-P2 native composition: the purity gate is falsifiable', () => {
   // Each control rewrites pi-ai's `dist/utils/text.js` in memory through a
   // `module.registerHooks` load hook — available on the pinned Node (>= 22.15;
-  // `.node-version` is 22.22.3 and `engines.node` is >= 22.22.0), synchronous,
+  // `.node-version` is 24.21.0 and `engines.node` is >= 24.15.0), synchronous,
   // and touching nothing on disk. The file is on the real compile path because
   // the official serializer (`dist/api/openai-completions.js`) renders the
   // leading system message with `getSystemMessageText`, and the control firing
