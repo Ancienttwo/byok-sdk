@@ -2598,8 +2598,8 @@ export function buildDaemonWithAdapters(
       if (envelope.type !== 'agent.input.preparation') return false;
       // Resolves once the completion is durably recorded by the cloud. Anything
       // that prevents that recording throws, so the cursor stays put and the
-      // row is redelivered — a redelivery is idempotent because the durable
-      // record answers the second one without a second compile or count.
+      // row is redelivered — a redelivery reads the immutable cloud completion
+      // before local readiness/deadline checks or a second compile/count.
       await handleRemoteInputPreparation(envelope.payload);
       return true;
     };

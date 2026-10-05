@@ -297,6 +297,7 @@ function recordingCompletionClient() {
   return {
     completions,
     client: {
+      async readCompleted() { return completions.at(-1); },
       async complete(input: InputPreparationCompletionRequest) {
         completions.push(structuredClone(input) as InputPreparationCompletionRequest);
         return {} as never;

@@ -2,6 +2,7 @@ import {
   InputPreparationCompletionRequestSchema,
   InputPreparationReadbackSchema,
   byokInputPreparationCompletionPath,
+  byokInputPreparationStatusPath,
   type InputPreparationCompletionRequest,
   type InputPreparationReadback,
 } from '@byok-sdk/protocol';
@@ -45,6 +46,54 @@ export class InputPreparationCompletionClient {
     readonly tenantId: string;
     readonly deviceId: string;
   }) {}
+
+  /**
+   * Recover an already committed terminal fact before doing any local work.
+   * The authenticated cloud owns the immutable request and completion key;
+   * expiry, local GC and changed launch readiness cannot rewrite that history.
+   * Only a validated `pending` response permits new work. Missing, unavailable
+   * or inconsistent readback throws and leaves the mailbox row unacknowledged.
+   */
+  async readCompleted(
+    identity: Pick<InputPreparationCompletionRequest, 'requestId' | 'agentRef' | 'profileId' | 'policyRevision'>,
+  ): Promise<InputPreparationCompletionRequest | undefined> {
+    const url = new URL(byokInputPreparationStatusPath(identity.requestId), toHttpBase(this.options.serverUrl));
+    url.searchParams.set('agentId', identity.agentRef.agentId);
+    url.searchParams.set('profileRevision', identity.agentRef.profileRevision);
+    let response: Response;
+    try {
+      response = await authedFetch(url, { method: 'GET', cache: 'no-store' }, this.options.auth);
+    } catch (cause) {
+      throw new InputPreparationCompletionError('input preparation status transport failed', { cause });
+    }
+    if (!response.ok) {
+      throw new InputPreparationCompletionError(`input preparation status was rejected with HTTP ${response.status}`);
+    }
+    let readback: InputPreparationReadback;
+    try {
+      readback = InputPreparationReadbackSchema.parse(await response.json());
+    } catch (cause) {
+      throw new InputPreparationCompletionError('input preparation status readback is invalid', { cause });
+    }
+    if (
+      readback.tenantId !== this.options.tenantId ||
+      readback.deviceId !== this.options.deviceId ||
+      readback.requestId !== identity.requestId ||
+      !sameAgentRef(readback.agentRef, identity.agentRef) ||
+      readback.profileId !== identity.profileId ||
+      readback.policyRevision !== identity.policyRevision
+    ) {
+      throw new InputPreparationCompletionError('input preparation status readback does not exactly match the authenticated request');
+    }
+    if (readback.status === 'pending') return undefined;
+    // The readback schema requires completedAt and exactly the corresponding
+    // terminal payload. Project the recorded fact, never current local state.
+    return InputPreparationCompletionRequestSchema.parse({
+      ...identity,
+      outcome: readback.status,
+      ...(readback.status === 'prepared' ? { receipt: readback.receipt } : { reason: readback.reason }),
+    });
+  }
 
   async complete(input: InputPreparationCompletionRequest): Promise<InputPreparationReadback> {
     const completion = InputPreparationCompletionRequestSchema.parse(input);

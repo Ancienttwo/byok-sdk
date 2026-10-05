@@ -57,7 +57,7 @@ import type { InputPreparationCompletionClient } from './input-preparation-compl
  *
  * Failure posture: a business refusal is REPORTED as a terminal completion so
  * the mailbox row is discharged and the cursor advances. Only a failure to
- * record that outcome (the completion PUT) throws, which leaves the row
+ * record or read back that outcome throws, which leaves the row
  * undelivered for redelivery — the cursor must never move past an envelope
  * whose outcome the cloud never learned.
  */
@@ -294,8 +294,8 @@ async function buildRequest(
  * Handle one envelope payload end to end and return the completion that was
  * durably recorded by the cloud.
  *
- * Throws only when the completion could not be recorded. Every other outcome —
- * including every refusal — resolves, because the mailbox row is discharged by
+ * Throws when the completion cannot be recorded or authoritatively read back.
+ * Every other outcome, including every refusal, resolves: the row is discharged by
  * a terminal fact, not by the absence of an error.
  */
 export function createRemoteInputPreparationHandler(deps: RemoteInputPreparationDeps) {
@@ -310,6 +310,14 @@ export function createRemoteInputPreparationHandler(deps: RemoteInputPreparation
       profileId: payload.profileId,
       policyRevision: payload.policyRevision,
     } as const;
+
+    // Completion replay is cloud history, not a fresh readiness decision. A
+    // lost PUT response (or crash before the cursor save) must recover the
+    // exact first-write-wins fact even after local expiry/GC, binding drift,
+    // a changed service configuration, or the Host deadline. Read failures are
+    // deliberately outside the business-refusal catch: none authorizes an ack.
+    const recorded = await deps.completion.readCompleted(identity);
+    if (recorded !== undefined) return recorded;
 
     let completion: InputPreparationCompletionRequest;
     try {
@@ -331,10 +339,11 @@ export function createRemoteInputPreparationHandler(deps: RemoteInputPreparation
       }
 
       const request = await buildRequest(payload, deps);
-      // Re-delivery is absorbed by the store's own reserve -> `existing` path:
-      // the same `(scope, Agent, requestId)` under the same normalized digest
-      // returns the durable receipt without a second compile or a second
-      // counter call, so two deliveries produce two EQUAL completions.
+      // While the cloud is still pending, the durable reserve -> `existing`
+      // path prevents another compile/counter within the retention horizon.
+      // Its current receipt is NOT an immutable remote completion: only the
+      // cloud fact read above has that authority. If another completion wins
+      // after our pending read, PUT still conflicts; redelivery reads the winner.
       const receipt = await service.prepare(request, {
         deadlineMs: Math.min(remainingMs, deps.limits.preparationDeadlineMs),
       });
