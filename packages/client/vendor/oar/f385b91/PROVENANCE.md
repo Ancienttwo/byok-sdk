@@ -1,6 +1,6 @@
-# OAR 1775b57 private runtime fork
+# OAR f385b91 private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.18.0, fixed commit `1775b57b774d23522e29acae333700289d0d1230`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.20.3, fixed commit `f385b918176d5ced07179e25e8cd758e75a784d1`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
 `source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 22 source files plus LICENSE. Seventeen source files keep upstream bytes. Five source files contain BYOK changes. The six added files are imports of the selected contracts and Codex fold. No Cursor, ACP, CLI, arena, executable manager or branded resources are included.
 
@@ -48,4 +48,10 @@ Omitted:
 - Derived Session.deliver, sealSession and observe. BYOK returns AdapterSession. The deliver contract is retained only as an imported type. No derived delivery operation is added to the bridge.
 - @cursor/sdk and all non-Codex runtime modules. No selected import needs them.
 
-Build assets copy LICENSE, PROVENANCE.md and source-manifest.json to `dist/assets/provenance/oar/1775b57/`. The existing build-todo-assets.mjs provenance copy generates those assets. `third-party-manifest.json` remains the node_modules todo input inventory. The OAR sources are local vendor inputs and do not add node_modules entries.
+## 0.18.0 → 0.20.3 re-vendor
+
+The base changes from `1775b57b774d23522e29acae333700289d0d1230` to `f385b918176d5ced07179e25e8cd758e75a784d1` (tag v0.20.3). Upstream changed only three of the 23 selected paths between these commits: `contracts/graph.ts`, `contracts/records.ts` and `contracts/session.ts`. Each change is comment text only (d9af714, a weekly maintenance pass). All three files keep upstream bytes. None of the five BYOK-maintained files changed upstream. Their BYOK deltas are unchanged, and only the change-notice header now names f385b91.
+
+Not vendored, with no selected path affected: the Cursor runtime moves to an optional `@cursor/sdk` peer handed over through `createCursorRuntime` (0.19/0.20). OAR moves to Pi ^1.0.2 (0.20.1). The root export and ACP effort-refusal fixes and documentation passes come in 0.20.2/0.20.3. The bridge `.d.ts`, the selected file set and the BYOK seams are unchanged.
+
+Build assets copy LICENSE, PROVENANCE.md and source-manifest.json to `dist/assets/provenance/oar/f385b91/`. The existing build-todo-assets.mjs provenance copy generates those assets. `third-party-manifest.json` remains the node_modules todo input inventory. The OAR sources are local vendor inputs and do not add node_modules entries.

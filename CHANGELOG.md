@@ -12,6 +12,11 @@
   adapter and team relay. The 0.159.2 and 0.160.0 protocol trees are identical.
   Other CLI versions remain unsupported.
 
+- **Changed (client)** — re-vendor the private OAR fork 0.18.0 (`1775b57`) -> 0.20.3
+  (`f385b918176d5ced07179e25e8cd758e75a784d1`) at `vendor/oar/f385b91/`. Upstream changed
+  only comment text in three selected contract files; the BYOK deltas, the bridge and
+  runtime behaviour are unchanged.
+
 - **Changed (client, cloud-do)** — official Pi runtime 1.0.1 -> 1.0.2.
   The nine-package closure uses upstream commit `cd32f7725fdbddbaecdff5b1e68491563394e0ca`,
   closureDigest `4aafae2b3780c4c8565eff17ebeb4d3842b6fe4aa31eb32cfbf104d36f453945`. No third-party dependency changes.
@@ -29,7 +34,7 @@
   The npm physical root count has not been re-measured.
 
 - **Breaking (client)** — Codex now uses app-server 0.160.0 with the vendored
-  OAR 0.18.0 `1775b57` kernel/driver (Apache-2.0), replacing the exec path. The adapter
+  OAR 0.20.3 `f385b91` kernel/driver (Apache-2.0), replacing the exec path. The adapter
   is YOLO-only: `readonly` and `network:false` are no longer supported;
   detection adds `app_server_unavailable` and `runtime_version_unsupported`
   refusal reasons. Claude `confirm` and the `byok-approval-mcp` bin are removed;
