@@ -8,6 +8,10 @@
 
 ## Unreleased
 
+- **Changed (client)** — qualify exactly Codex CLI 0.160.0 for the app-server
+  adapter and team relay. The 0.159.2 and 0.160.0 protocol trees are identical.
+  Other CLI versions remain unsupported.
+
 - **Changed (client, cloud-do)** — official Pi runtime 1.0.0 -> 1.0.1.
   The nine-package closure uses upstream commit `a7229ddc21810d6245105978033b7df645ecc2f7`,
   closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`.
@@ -16,7 +20,7 @@
   The official coding-agent tarball no longer ships npm-shrinkwrap.json.
   The npm physical root count has not been re-measured.
 
-- **Breaking (client)** — Codex now uses app-server 0.159.2 with the vendored
+- **Breaking (client)** — Codex now uses app-server 0.160.0 with the vendored
   OAR 0.18.0 `1775b57` kernel/driver (Apache-2.0), replacing the exec path. The adapter
   is YOLO-only: `readonly` and `network:false` are no longer supported;
   detection adds `app_server_unavailable` and `runtime_version_unsupported`

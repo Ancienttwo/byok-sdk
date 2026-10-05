@@ -727,7 +727,7 @@ explicitly.
   `adapters/claude/events.ts` at least confirms a write outside
   `workspaceDir` is never reported back as a task artifact.
 - **Codex app-server runs with full filesystem and network access.**
-  The 0.159.2 adapter supports `auto` only, rejects `readonly` and
+  The 0.160.0 adapter supports `auto` only, rejects `readonly` and
   `network:false`, and resumes through `thread/resume` on the owned app-server
   process. This migration removes the old sandbox-based confinement claim.
   Exact task MCP tool grants do not establish exclusion of ambient user MCP
