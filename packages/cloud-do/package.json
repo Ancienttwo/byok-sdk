@@ -12,9 +12,9 @@
     "test": "vitest run && node --test test/recovery-walltime.node.mjs test/wake-alarm-retry.node.mjs test/wake-events-walltime.node.mjs test/check-dist.node.mjs"
   },
   "dependencies": {
-    "@earendil-works/pi-durable": "1.0.2",
-    "@earendil-works/pi-ai": "1.0.2",
-    "@earendil-works/chord": "1.0.2"
+    "@earendil-works/pi-durable": "1.0.3",
+    "@earendil-works/pi-ai": "1.0.3",
+    "@earendil-works/chord": "1.0.3"
   },
   "devDependencies": {
     "@byok-sdk/keys": "workspace:*",

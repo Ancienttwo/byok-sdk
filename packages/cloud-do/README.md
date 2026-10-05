@@ -100,13 +100,13 @@ openDurableObjectStorage has the local structural factory type
 (location: DurableObjectStorage) => Promise<Storage>.
 Storage is pi-durable's native interface. The package does not import client
 source or keys types. Its three runtime dependencies are pi-durable, pi-ai,
-and chord, each pinned to 1.0.2.
+and chord, each pinned to 1.0.3.
 
 The Durable Object owns the physical connection. Closing the adapter
 invalidates that adapter. It does not close the Durable Object database.
 
 This follows the async adapter in [Cloudflare Agents d6656161](https://github.com/cloudflare/agents/blob/d6656161/packages/agents/src/harness/pi/session-store.ts).
-Current upstream uses a different synchronous pi contract. Pinned pi 1.0.2 takes
+Current upstream uses a different synchronous pi contract. Pinned pi 1.0.3 takes
 async callbacks, so `transactionSync()` cannot host its transaction callback.
 Cloudflare documents async SQL transactions on the
 [SQLite storage API](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/).
