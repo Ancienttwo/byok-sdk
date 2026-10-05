@@ -407,12 +407,13 @@ export function createGoogleAuthorizationRequest(options: {
   };
 }
 
-async function readBoundedJson(response: Response): Promise<unknown> {
+async function readBoundedJson(response: Response, signal: AbortSignal): Promise<unknown> {
   const contentLength = Number(response.headers.get('content-length'));
   if (
     Number.isFinite(contentLength) &&
     contentLength > OAUTH_RESPONSE_MAX_BYTES
   ) {
+    void response.body?.cancel().catch(() => undefined);
     throw new ConnectorBrokerError(
       'PROVIDER_RESPONSE_INVALID',
       'Google OAuth response exceeds the local byte limit',
@@ -425,15 +426,22 @@ async function readBoundedJson(response: Response): Promise<unknown> {
     );
   }
   const reader = response.body.getReader();
+  // Cancellation must settle pending reads even for injected fetch streams.
+  // Do not wait for an underlying source's potentially stalled cleanup promise.
+  const cancel = () => {
+    void reader.cancel().catch(() => undefined);
+  };
+  signal.addEventListener('abort', cancel, { once: true });
   const chunks: Uint8Array[] = [];
   let bytes = 0;
   try {
+    signal.throwIfAborted();
     while (true) {
       const next = await reader.read();
+      signal.throwIfAborted();
       if (next.done) break;
       bytes += next.value.byteLength;
       if (bytes > OAUTH_RESPONSE_MAX_BYTES) {
-        await reader.cancel().catch(() => undefined);
         throw new ConnectorBrokerError(
           'PROVIDER_RESPONSE_INVALID',
           'Google OAuth response exceeds the local byte limit',
@@ -442,11 +450,15 @@ async function readBoundedJson(response: Response): Promise<unknown> {
       chunks.push(next.value);
     }
   } catch (error) {
+    cancel();
     if (error instanceof ConnectorBrokerError) throw error;
     throw new ConnectorBrokerError(
       'PROVIDER_RESPONSE_INVALID',
       'Google OAuth response body could not be read',
     );
+  } finally {
+    signal.removeEventListener('abort', cancel);
+    reader.releaseLock();
   }
   const body = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), bytes);
   let text: string;
@@ -468,17 +480,20 @@ async function readBoundedJson(response: Response): Promise<unknown> {
   }
 }
 
-async function fetchWithDeadline(
+async function fetchWithDeadline<T>(
   fetchImpl: GoogleFetch,
   url: string,
   init: RequestInit,
-): Promise<Response> {
+  consume: (response: Response, signal: AbortSignal) => Promise<T>,
+): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), OAUTH_REQUEST_TIMEOUT_MS);
   timer.unref?.();
   try {
-    return await fetchImpl(url, { ...init, signal: controller.signal });
-  } catch {
+    const response = await fetchImpl(url, { ...init, signal: controller.signal });
+    return await consume(response, controller.signal);
+  } catch (error) {
+    if (!controller.signal.aborted && error instanceof ConnectorBrokerError) throw error;
     throw new ConnectorBrokerError('PROVIDER_FAILED', 'Google OAuth request failed');
   } finally {
     clearTimeout(timer);
@@ -489,41 +504,50 @@ async function postToken(
   fetchImpl: GoogleFetch,
   fields: Readonly<Record<string, string>>,
 ): Promise<{ readonly response: Response; readonly body: unknown }> {
-  const response = await fetchWithDeadline(fetchImpl, GOOGLE_TOKEN_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/x-www-form-urlencoded',
+  return fetchWithDeadline(
+    fetchImpl,
+    GOOGLE_TOKEN_ENDPOINT,
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams(fields).toString(),
     },
-    body: new URLSearchParams(fields).toString(),
-  });
-  const body = await readBoundedJson(response);
-  return { response, body };
+    async (response, signal) => ({
+      response,
+      body: await readBoundedJson(response, signal),
+    }),
+  );
 }
 
 async function fetchAccountEmail(
   fetchImpl: GoogleFetch,
   accessToken: string,
 ): Promise<string> {
-  const response = await fetchWithDeadline(
+  return fetchWithDeadline(
     fetchImpl,
     GOOGLE_GMAIL_PROFILE_ENDPOINT,
     {
       method: 'GET',
       headers: { Accept: 'application/json', Authorization: `Bearer ${accessToken}` },
     },
+    async (response, signal) => {
+      if (!response.ok) {
+        void response.body?.cancel().catch(() => undefined);
+        throw new ConnectorBrokerError('PROVIDER_FAILED', 'Google Gmail profile request failed');
+      }
+      const parsed = GmailProfileResponseSchema.safeParse(await readBoundedJson(response, signal));
+      if (!parsed.success) {
+        throw new ConnectorBrokerError(
+          'PROVIDER_RESPONSE_INVALID',
+          'Google Gmail profile response is invalid',
+        );
+      }
+      return parsed.data.emailAddress;
+    },
   );
-  if (!response.ok) {
-    throw new ConnectorBrokerError('PROVIDER_FAILED', 'Google Gmail profile request failed');
-  }
-  const parsed = GmailProfileResponseSchema.safeParse(await readBoundedJson(response));
-  if (!parsed.success) {
-    throw new ConnectorBrokerError(
-      'PROVIDER_RESPONSE_INVALID',
-      'Google Gmail profile response is invalid',
-    );
-  }
-  return parsed.data.emailAddress;
 }
 
 export async function exchangeGoogleAuthorizationCode(options: {
@@ -885,6 +909,7 @@ export async function revokeGoogleOAuthConnection(options: {
       },
       body: new URLSearchParams({ token: refresh.refreshToken }).toString(),
     },
+    async (response) => response,
   );
   if (!response.ok) {
     throw new ConnectorBrokerError(
