@@ -9,7 +9,7 @@ import { createInterface } from 'node:readline';
 import { spawnProcessTreeDescendant } from './process-tree-receipt.mjs';
 
 const argv = process.argv.slice(2);
-if (argv.includes('--version')) { console.log('codex-cli 0.159.2'); process.exit(0); }
+if (argv.includes('--version')) { console.log('codex-cli 0.160.0'); process.exit(0); }
 if (argv.includes('--help')) { console.log('app-server --listen stdio://'); process.exit(0); }
 if (argv[0] === 'auth') { console.log(JSON.stringify({ loggedIn: true })); process.exit(0); }
 if (argv[0] === 'login') { console.log('Logged in using ChatGPT'); process.exit(0); }

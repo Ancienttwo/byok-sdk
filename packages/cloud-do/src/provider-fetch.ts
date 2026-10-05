@@ -11,6 +11,8 @@ const TOOL_CALL_LIMIT = 12;
 export interface CloudToolTransport {
   readonly offeredToolNames: readonly string[];
   admitToolCall(name: string, rawId: string, args: Record<string, unknown>): void | Promise<void>;
+  onSend?(): void;
+  onUsage?(usage: Record<string, number>): void;
 }
 
 type ToolAssembly = { id?: string; name?: string; type?: 'function'; arguments: string };
@@ -211,7 +213,13 @@ function guardedBody(body: ReadableStream<Uint8Array>, key: string, profile: Pla
         const payload = object(JSON.parse(data));
         if (!payload || payload.error) throw new CloudDoError('CLOUD_MODEL_RESPONSE_REJECTED');
         const currentUsage = numericUsage(payload.usage);
-        if (currentUsage) usage = { ...usage, ...currentUsage };
+        if (currentUsage) {
+          for (const [field, value] of Object.entries(currentUsage)) {
+            if (usage?.[field] !== undefined && value < usage[field]!) throw new CloudDoError('CLOUD_MODEL_RESPONSE_REJECTED');
+          }
+          usage = { ...usage, ...currentUsage };
+          transport?.onUsage?.(usage);
+        }
         if (!Array.isArray(payload.choices)) throw new CloudDoError('CLOUD_MODEL_RESPONSE_REJECTED');
         const choice = payload.choices.find(item => object(item)?.index === 0);
         if (!choice) continue; // e.g. the terminal numeric-usage frame
@@ -278,8 +286,11 @@ export function createProviderFetch(profile: PlatformProfile, secret: string, fe
     if (request.signal.aborted) abort.abort();
     const cleanup = () => request.signal.removeEventListener('abort', onAbort);
     try {
-      const response = await fetchImpl(new Request(request, { signal: abort.signal,
-        redirect: 'manual', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json', accept: 'text/event-stream' } }));
+      const dispatch = new Request(request, { signal: abort.signal,
+        redirect: 'manual', headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json', accept: 'text/event-stream' } });
+      if (abort.signal.aborted) throw new CloudDoError('CLOUD_MODEL_REQUEST_FAILED');
+      transport?.onSend?.();
+      const response = await fetchImpl(dispatch);
       if (!response.ok || (response.status >= 300 && response.status < 400) || !response.body
         || !response.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream')) {
         abort.abort(); cleanup();

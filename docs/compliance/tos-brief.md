@@ -11,7 +11,7 @@ Every terms claim is tied to a URL and an effective date, with load-bearing text
 verbatim.
 
 **Runtime implementation update (2026-10-01).** The S1–S4 migration replaces
-Codex exec with app-server 0.159.2 (YOLO-only), removes Claude confirm and the
+Codex exec with app-server 0.160.0 (YOLO-only), removes Claude confirm and the
 private approval MCP bin, and adds Claude control_request interrupt. The
 historical terms analysis below remains dated evidence, not a fresh legal
 review of app-server. Owner's current authorization judgment is recorded in
@@ -117,7 +117,7 @@ credentials.**
   --output-format stream-json --verbose`, plus `--resume <id>` and the policy-mapped flags.
 - Claude rejects confirm and no longer starts a permission-prompt-tool helper.
   Interruption uses a correlated stream-json control_request with a bounded ACK.
-- Codex starts app-server 0.159.2, initializes JSON-RPC, and uses thread/start or
+- Codex starts app-server 0.160.0, initializes JSON-RPC, and uses thread/start or
   thread/resume with danger-full-access and approvalPolicy never. readonly and
   network:false are rejected; the historical exec sandbox claim does not apply.
 

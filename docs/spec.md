@@ -218,9 +218,9 @@ published on 2026-09-25 from the `v0.22.0` tag (`0962f14f`). The registry, not t
 authority on what has shipped — read it back with `npm view @byok-sdk/core version`
 and `npm view @byok-sdk/keys version`.
 
-The published package set is exactly nine packages: the eight aligned train
+The published package set is exactly ten packages: the nine aligned train
 packages `@byok-sdk/core`, `@byok-sdk/protocol`, `@byok-sdk/client`,
-`@byok-sdk/server`, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`,
+`@byok-sdk/server`, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`,
 `@byok-sdk/ui-runtime` and `@byok-sdk/implementation-identity`, plus the
 independently versioned `@byok-sdk/keys`. Every other workspace package is
 private. Starting with 0.21.0 the unscoped `byok-sdk` namespace umbrella is
@@ -951,10 +951,10 @@ implied by this source change.
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. The SDK pins the official unmodified
-`@earendil-works/pi-coding-agent@1.0.1` plus chord, pi-agent-core, pi-ai,
-pi-codemode, pi-durable, pi-mcp, pi-telemetry and pi-tui to exactly 1.0.1 (upstream commit
-`a7229ddc21810d6245105978033b7df645ecc2f7`, closureDigest
-`c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`). Fork aliases and dual runtimes are
+`@earendil-works/pi-coding-agent@1.0.2` plus chord, pi-agent-core, pi-ai,
+pi-codemode, pi-durable, pi-mcp, pi-telemetry and pi-tui to exactly 1.0.2 (upstream commit
+`cd32f7725fdbddbaecdff5b1e68491563394e0ca`, closureDigest
+`4aafae2b3780c4c8565eff17ebeb4d3842b6fe4aa31eb32cfbf104d36f453945`). Fork aliases and dual runtimes are
 retired. `resolvePiRuntimeIdentity()` reads the static dependency projection;
 resolved name/version mismatch fails closed. There is no implicit global Pi fallback.
 Only public Pi APIs are used; private imports, patches, copied provider serializers
@@ -972,8 +972,8 @@ its declared assets; runtime checks compare the official provenance and manifest
 bytes without resolving a mutable external package installation. File tampering or
 provenance drift is a refusal, never a substituted runtime.
 
-Official coding-agent 1.0.1 no longer ships an npm shrinkwrap. The npm
-physical root count has not been re-measured for 1.0.1. The local Bun install
+Official coding-agent 1.0.2, like 1.0.1, ships no npm shrinkwrap. The npm
+physical root count has not been re-measured for 1.0.2. The local Bun install
 has eleven resolved physical roots across nine official package names.
 Attestation verifies all instances; no singleton guarantee is claimed.
 The scripted workflow probe covers the vendored arbiter's built-in
@@ -1265,7 +1265,7 @@ names its member context, native thread UUID, explicit loopback WebSocket or
 Unix endpoint, and starting notification sequence. The operator must configure
 each native session with that same member's Team MCP grant; the relay does not
 infer or establish that mapping. The absolute Codex executable must pass the
-qualified `codex-cli 0.159.2` version preflight. This is a client CLI binding,
+qualified `codex-cli 0.160.0` version preflight. This is a client CLI binding,
 not a TaskRunner, native-session lifecycle owner, or new package boundary.
 
 Authenticated `team_notifications.snapshot` accepts the existing member-context
@@ -2383,9 +2383,11 @@ Prepared child environment is rebuilt through an explicit EnvironmentBuilder all
 
 A1'' compile uses only a placeholder key and injected capture-and-throw fetch against the actual baseUrl. The official OpenAI client reads exactly OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET, OPENAI_LOG and OPENAI_CUSTOM_HEADERS. The approved purity contract is D independence plus this exact read set, not zero reads; an upgrade changing the set requires a fresh ruling. Poisoning these variables must leave D unchanged. OPENAI_LOG may cause a local request log during compile: the device owner deliberately enabled this debug setting; the accepted side effect remains local, does not change D and is not sent externally. No global env or transport monkey-patch is permitted.
 
-Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.0.1 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires fresh closure attestation and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive. Measured for the local Pi 1.0.1 install: upstream commit `a7229ddc21810d6245105978033b7df645ecc2f7`, closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`, nine official package names in attestation (was eight; added pi-durable), eleven Bun-resolved official package instances on the attesting host (was eight; duplicate peer instances remain exact 1.0.1). Codex uses SDK-owned OAR 0.18.0 source at `packages/client/vendor/oar/1775b57/`, from upstream commit `1775b57b774d23522e29acae333700289d0d1230`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their measured JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
+Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.0.2 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires fresh closure attestation and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive. Measured for the local Pi 1.0.2 install: upstream commit `cd32f7725fdbddbaecdff5b1e68491563394e0ca`, closureDigest `4aafae2b3780c4c8565eff17ebeb4d3842b6fe4aa31eb32cfbf104d36f453945`, nine official package names in attestation, eleven Bun-resolved official package instances on the attesting host (duplicate peer instances remain exact 1.0.2). Codex uses SDK-owned OAR 0.20.3 source at `packages/client/vendor/oar/f385b91/`, from upstream commit `f385b918176d5ced07179e25e8cd758e75a784d1`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their measured JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
 
 pi-durable 1.0.1 ruling (2026-10-04, approved by Aimpact): admitted at exactly 1.0.1. Its shipped code is byte-identical to 1.0.0 (version-only change), and the closure was freshly attested at closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`.
+
+pi-durable 1.0.2 ruling (2026-10-05, approved by Aimpact): admitted at exactly 1.0.2, closure freshly attested at closureDigest `4aafae2b3780c4c8565eff17ebeb4d3842b6fe4aa31eb32cfbf104d36f453945`. Unlike 1.0.1 this is a behavior change (upstream #10424): the harness creates a built-in conversation document `pi.provider` `{ sessionId }` (uuidv7, fresh on fork) in every created or forked conversation, mounts it in conversation views, and forwards that `sessionId` to the provider on generation and compaction requests for prompt-cache and session affinity. A conversation stored without `pi.provider` receives one migration commit before its first provider request. This applies to the client durable lane and to cloud-do `AgentDO` storage; client replicas are per execution, while cloud-do conversations stored before the upgrade take the migration commit.
 
 Exactness has three independent checks: bun.lock exact versions and sha512 integrity under frozen install; runtime verification of all resolved official package instances' manifests (nine attested package names; eleven resolved instances on the attesting Bun host) and file inventories against tarball/provenance evidence; release-pack and registry-readback isolated-install convergence. Encapsulated runtime records bind the measured artifact and approved closure provenance without looking up external packages. Renamed provenance fields are packageName, packageVersion, tarballIntegrity, upstreamCommit, provenanceDigest, closureDigest and compilerVersion; upstreamBase/forkBuild are retired, not filled with dummy values. The official tarball signatures and provenance are collected reproducibly by `scripts/release/collect-official-pi-closure.mjs`.
 
@@ -2431,7 +2433,7 @@ retain the existing fail-closed behavior.
 
 Codex reports `tokenUsage.last.totalTokens` against `modelContextWindow`;
 its cumulative `total` remains the provider cost authority. Claude reports
-`result.modelUsage`'s window using the init model identity. Official Pi 1.0.1
+`result.modelUsage`'s window using the init model identity. Official Pi 1.0.2
 reports `get_session_stats.contextUsage` as an estimate before task settlement;
 null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
 configuration is the context window authority even if runtime stats differ.

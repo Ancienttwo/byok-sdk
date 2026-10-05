@@ -102,9 +102,9 @@ describe('runtime probe evidence', () => {
     const good = await executable("if (process.argv[2] === '--version') console.log('fixture-v1'); else process.exit(1);");
     const bad = await executable(`console.log('${secret}'); console.error('${secret}'); process.exit(17);`);
     for (const Adapter of [ClaudeAdapter, CodexAdapter, PiAdapter]) {
-      const command=Adapter===CodexAdapter?await executable("if(process.argv[2]==='--version')console.log('codex-cli 0.159.2');else if(process.argv[2]==='app-server')process.exit(0);else process.exit(1);"):good;
+      const command=Adapter===CodexAdapter?await executable("if(process.argv[2]==='--version')console.log('codex-cli 0.160.0');else if(process.argv[2]==='app-server')process.exit(0);else process.exit(1);"):good;
       const result = await new Adapter({ resolveBin: () => ({ command, source: 'env' }) }).detect();
-      expect(result).toMatchObject({ kind: 'available', version: Adapter===CodexAdapter?'codex-cli 0.159.2':'fixture-v1' });
+      expect(result).toMatchObject({ kind: 'available', version: Adapter===CodexAdapter?'codex-cli 0.160.0':'fixture-v1' });
       expect(await new Adapter({ resolveBin: () => ({ command: bad, source: 'env' }) }).detect()).toEqual({ kind: 'probe-failed' });
     }
   });

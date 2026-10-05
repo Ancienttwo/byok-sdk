@@ -1,10 +1,16 @@
-import type { ModelProviderSecretName, SecretStore, ModelProviderVendorId } from '@byok-sdk/keys';
 import { CloudDoError } from './errors';
+
+/** The platform reads one key. It does not own a local credential store. */
+export type ModelProviderSecretName = `model-${string}-api-key`;
+export interface PlatformCredentialReader {
+  get(name: ModelProviderSecretName): Promise<string | undefined>;
+}
+type PlatformVendorId = 'zai' | 'deepseek';
 
 // Aiphabee 3defa6e1; vendor ids/base URLs agree with keys' catalog. No runtime keys import.
 export const PLATFORM_PROFILES = Object.freeze({
-  zai_openai: Object.freeze({ vendor: 'zai' satisfies ModelProviderVendorId, baseUrl: 'https://api.z.ai/api/coding/paas/v4', model: 'glm-5.3-flash', binding: 'AIPHABEE_ZAI_API_KEY', secretName: 'model-zai_openai-api-key' satisfies ModelProviderSecretName }),
-  deepseek_direct: Object.freeze({ vendor: 'deepseek' satisfies ModelProviderVendorId, baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-flash', binding: 'AIPHABEE_DEEPSEEK_API_KEY', secretName: 'model-deepseek_direct-api-key' satisfies ModelProviderSecretName }),
+  zai_openai: Object.freeze({ vendor: 'zai' satisfies PlatformVendorId, baseUrl: 'https://api.z.ai/api/coding/paas/v4', model: 'glm-5.3-flash', binding: 'AIPHABEE_ZAI_API_KEY', secretName: 'model-zai_openai-api-key' satisfies ModelProviderSecretName }),
+  deepseek_direct: Object.freeze({ vendor: 'deepseek' satisfies PlatformVendorId, baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-flash', binding: 'AIPHABEE_DEEPSEEK_API_KEY', secretName: 'model-deepseek_direct-api-key' satisfies ModelProviderSecretName }),
 });
 export type PlatformProfileId = keyof typeof PLATFORM_PROFILES;
 export type PlatformProfile = (typeof PLATFORM_PROFILES)[PlatformProfileId];
@@ -31,5 +37,5 @@ export function platformCredentialReader(env: Readonly<Record<string, unknown>>)
       try { return requirePlatformKey(env[profile.binding]); }
       catch { throw new CloudDoError('CLOUD_MODEL_CREDENTIAL_UNAVAILABLE'); }
     },
-  } satisfies Pick<SecretStore<ModelProviderSecretName>, 'get'>;
+  } satisfies PlatformCredentialReader;
 }

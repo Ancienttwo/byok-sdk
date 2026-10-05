@@ -1,19 +1,20 @@
 {
   "name": "@byok-sdk/cloud-do",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.24.0-rc.1",
   "type": "module",
-  "engines": { "node": ">=24.15.0" },
-  "description": "Private Cloudflare DO SQLite host for native pi-durable storage",
+  "engines": {
+    "node": ">=24.15.0"
+  },
+  "description": "Cloudflare Durable Object session host for native pi-durable storage and execution",
   "scripts": {
-    "build": "wrangler deploy --dry-run --outdir dist",
+    "build": "tsup && tsc -p tsconfig.build.json && node scripts/check-dist.mjs && wrangler deploy --dry-run --outdir dist-worker",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run && node --test test/recovery-walltime.node.mjs test/wake-alarm-retry.node.mjs test/wake-events-walltime.node.mjs"
+    "test": "vitest run && node --test test/recovery-walltime.node.mjs test/wake-alarm-retry.node.mjs test/wake-events-walltime.node.mjs test/check-dist.node.mjs"
   },
   "dependencies": {
-    "@earendil-works/pi-durable": "1.0.1",
-    "@earendil-works/pi-ai": "1.0.1",
-    "@earendil-works/chord": "1.0.1"
+    "@earendil-works/pi-durable": "1.0.2",
+    "@earendil-works/pi-ai": "1.0.2",
+    "@earendil-works/chord": "1.0.2"
   },
   "devDependencies": {
     "@byok-sdk/keys": "workspace:*",
@@ -21,5 +22,34 @@
     "miniflare": "5.20260811.1-alpha",
     "esbuild": "0.28.1",
     "wrangler": "4.123.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ancienttwo/byok-sdk.git",
+    "directory": "packages/cloud-do"
+  },
+  "bugs": {
+    "url": "https://github.com/Ancienttwo/byok-sdk/issues"
+  },
+  "homepage": "https://github.com/Ancienttwo/byok-sdk#readme",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }

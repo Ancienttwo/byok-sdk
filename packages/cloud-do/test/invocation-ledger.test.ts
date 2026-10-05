@@ -204,3 +204,98 @@ describe('durable execution budgets in workerd', () => {
     expect(await start(name, 1000)).toMatchObject({ deadlineAt: 500, steps: 1 });
   });
 });
+
+describe('model usage and dispatch accounting in real workerd', () => {
+  const usage = (name: string, inputDelta: number, outputDelta: number) => rpc<ExecutionRow>(name, 'usage', { conversationId: 1, inputDelta, outputDelta });
+  const model = (name: string, budget: { inputBytes: number; inputTokens: number; outputTokens: number }) => rpc<ExecutionRow>(name, 'model', { conversationId: 1, budget });
+  it('migrates old executions to zero counters and keeps counters on repeated schema checks', async () => {
+    const name = 'usage-migration'; await start(name);
+    const columns = await rpc<string[]>(name, 'legacy-schema');
+    expect(columns).not.toContain('inputTokens');
+    expect(await execution(name)).toMatchObject({ inputTokens: 0, outputTokens: 0, credits: 0, sentRequests: 0 });
+    await usage(name, 123, 45); await rpc(name, 'model', { conversationId: 1 });
+    await rpc(name, 'sent', { conversationId: 1 });
+    expect(await start(name)).toMatchObject({ inputTokens: 123, outputTokens: 45, steps: 1, sentRequests: 1 });
+  });
+  for (const field of ['input', 'output'] as const) it(`admits the exact ${field} bound and durably rejects one over before counting`, async () => {
+    const name = `token-bound-${field}`; await start(name); await usage(name, 100, 20);
+    const budget = { inputBytes: 17, inputTokens: 100 + 17 + 4096, outputTokens: 20 + 4096 };
+    expect(await model(name, budget)).toMatchObject({ steps: 1, inputTokens: 100, outputTokens: 20, fatalCode: null });
+    if (field === 'input') budget.inputBytes++;
+    else budget.outputTokens--;
+    await expect(model(name, budget)).rejects.toThrow('CLOUD_BUDGET_EXCEEDED');
+    expect(await execution(name)).toMatchObject({ steps: 1, inputTokens: 100, outputTokens: 20, fatalCode: 'CLOUD_BUDGET_EXCEEDED' });
+    await expect(model(name, { inputBytes: 0, inputTokens: 128000, outputTokens: 32768 })).rejects.toThrow('CLOUD_BUDGET_EXCEEDED');
+  });
+  it('adds exact per-request deltas and saturates both token counters', async () => {
+    const name = 'usage-deltas'; await start(name);
+    await usage(name, 100, 10); await usage(name, 0, 3); await usage(name, 20, 0);
+    expect(await execution(name)).toMatchObject({ inputTokens: 120, outputTokens: 13 });
+    await usage(name, Number.MAX_SAFE_INTEGER - 120, Number.MAX_SAFE_INTEGER - 13);
+    expect(await usage(name, 11, 22)).toMatchObject({ inputTokens: Number.MAX_SAFE_INTEGER, outputTokens: Number.MAX_SAFE_INTEGER });
+  });
+  it('marks each counted request once and refuses missing or uncounted dispatches', async () => {
+    const name = 'dispatch-intent'; await start(name);
+    await expect(rpc(name, 'sent', { conversationId: 1 })).rejects.toThrow('CLOUD_MODEL_REQUEST_FAILED');
+    await rpc(name, 'model', { conversationId: 1 });
+    expect(await rpc(name, 'sent', { conversationId: 1 })).toMatchObject({ steps: 1, sentRequests: 1 });
+    await expect(rpc(name, 'sent', { conversationId: 1 })).rejects.toThrow('CLOUD_MODEL_REQUEST_FAILED');
+    await rpc(name, 'model', { conversationId: 1 });
+    expect(await rpc(name, 'sent', { conversationId: 1 })).toMatchObject({ steps: 2, sentRequests: 2 });
+    await expect(rpc('dispatch-missing', 'sent', { conversationId: 1 })).rejects.toThrow('CLOUD_MODEL_REQUEST_FAILED');
+  });
+});
+
+describe('tool credits in real workerd', () => {
+  it('keeps the crossing result, counts each finish once, and blocks the next paid gate', async () => {
+    const name = 'credit-cap'; await start(name);
+    const a = await input(1); const b = await input(2); await begin(name, a); await begin(name, b);
+    const first = { ok: true, data: 'first', usage: { credits: 100 } };
+    expect(await finish(name, a.invocationId, { result: first, options: { creditCap: 100 } })).toMatchObject({ state: 'succeeded', resultJson: JSON.stringify(first) });
+    expect(await execution(name)).toMatchObject({ credits: 100, fatalCode: null });
+    const crossing = { ok: true, data: 'crossing', usage: { credits: 1 } };
+    expect(await finish(name, b.invocationId, { result: crossing, options: { creditCap: 100 } })).toMatchObject({ state: 'succeeded', resultJson: JSON.stringify(crossing) });
+    await finish(name, b.invocationId, { result: { usage: { credits: 900 } }, options: { creditCap: 100 } });
+    expect(await execution(name)).toMatchObject({ credits: 101, fatalCode: 'CLOUD_BUDGET_EXCEEDED' });
+    await expect(rpc(name, 'model', { conversationId: 1 })).rejects.toThrow('CLOUD_BUDGET_EXCEEDED');
+  });
+  for (const reason of ['disconnect', 'abort', 'call-timeout', 'execution-timeout', 'fatal'] as const) it(`counts supplied paid credits when success flips for ${reason}`, async () => {
+    const name = `credit-flipped-${reason}`; await start(name, reason === 'execution-timeout' ? 200 : 1000);
+    const invocation = await input(); await begin(name, invocation);
+    if (reason === 'abort') await rpc(name, 'abort', { conversationId: 1, code: 'CLOUD_EXECUTION_ABORTED' });
+    if (reason === 'fatal') await rpc(name, 'fail', { conversationId: 1, code: 'CLOUD_TOOL_RESULT_LIMIT' });
+    const row = await finish(name, invocation.invocationId, { now: reason === 'call-timeout' ? 500 : reason === 'execution-timeout' ? 200 : 100,
+      options: { clientConnected: reason !== 'disconnect', creditCap: 100 }, result: { ok: true, usage: { credits: 9 } } });
+    expect(row.state).toBe(reason === 'fatal' ? 'failed' : reason.endsWith('timeout') ? 'timed_out' : 'aborted');
+    expect(row.resultJson).toBeNull();
+    expect(await execution(name)).toMatchObject({ credits: 9 });
+  });
+  it('counts no stale-attempt or already-terminal result and saturates credits', async () => {
+    const name = 'credit-stale'; await start(name); const invocation = await input(); await begin(name, invocation);
+    await rpc(name, 'recover');
+    await finish(name, invocation.invocationId, { result: { usage: { credits: 50 } }, options: { attempt: 1 } });
+    expect(await execution(name)).toMatchObject({ credits: 0 });
+    await finish(name, invocation.invocationId, { result: { ok: true, usage: { credits: Number.MAX_SAFE_INTEGER - 2 } }, options: { attempt: 2, recovery: true } });
+    const next = await input(2); await begin(name, next);
+    await finish(name, next.invocationId, { result: { ok: true, usage: { credits: 10 } } });
+    expect(await execution(name)).toMatchObject({ credits: Number.MAX_SAFE_INTEGER });
+    await finish(name, next.invocationId, { result: { usage: { credits: 99 } } });
+    expect(await execution(name)).toMatchObject({ credits: Number.MAX_SAFE_INTEGER });
+  });
+  for (const credits of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, '7', null]) it(`ignores invalid supplied credits ${String(credits)}`, async () => {
+    const name = `credit-invalid-${String(credits)}`; await start(name); const invocation = await input(); await begin(name, invocation);
+    await finish(name, invocation.invocationId, { result: { usage: { credits } }, options: { creditCap: 100 } });
+    expect(await execution(name)).toMatchObject({ credits: 0, fatalCode: null });
+  });
+});
+
+describe('terminal accounting cut-off in real workerd', () => {
+  it('does not count paid results that arrive after an invocation was cancelled', async () => {
+    const name = 'credit-late-after-cancel'; await start(name);
+    const invocation = await input(); await begin(name, invocation);
+    const cancelled = await finish(name, invocation.invocationId, { state: 'aborted', code: 'CLOUD_EXECUTION_ABORTED', result: undefined });
+    expect(cancelled).toMatchObject({ state: 'aborted', resultJson: null });
+    expect(await finish(name, invocation.invocationId, { result: { ok: true, usage: { credits: 12 } }, options: { creditCap: 100 } })).toEqual(cancelled);
+    expect(await execution(name)).toMatchObject({ credits: 0, fatalCode: null });
+  });
+});

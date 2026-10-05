@@ -133,7 +133,7 @@ never a configured value, never a wildcard — are what each adapter grants:
   `confirm`; `plan` never pre-grants because it promises not to execute a call.
 - Codex: `mcp_servers.<server>.enabled_tools` plus
   `mcp_servers.<server>.tools.<tool>.approval_mode="approve"` for exactly
-  those tools. Codex requires exactly 0.159.2 with app-server support and uses
+  those tools. Codex requires exactly 0.160.0 with app-server support and uses
   `danger-full-access`/YOLO with `approval_policy=never`. Only `auto` is supported;
   `readonly`, `network:false`, and nonempty built-in allow/deny lists are rejected.
   Detection refuses unavailable app-server or unsupported runtime versions.
@@ -528,7 +528,7 @@ Write an absolute-path JSON file with mode `0600` (its contexts are bearer secre
 byok-agent team relay dev --bindings /absolute/private-bindings.json --codex-bin /absolute/codex --max-notifications 2 --config /absolute/agent.json
 ```
 
-POSIX only; the executable must report `codex-cli 0.159.2`, the qualified native
+POSIX only; the executable must report `codex-cli 0.160.0`, the qualified native
 queue version. Endpoints must be explicit loopback `ws://127.0.0.1:<port>` /
 `ws://[::1]:<port>` or `unix:///absolute/socket`. No remote server discovery. Loopback app-server queue endpoints trust local
 processes; the relay does not add authentication to the native Codex endpoint.
