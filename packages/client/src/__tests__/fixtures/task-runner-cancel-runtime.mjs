@@ -34,6 +34,10 @@ trace('spawn');
 const gate = async () => {
   if (scenario !== 'startup') return;
   trace('startup');
+  // Fixture-owned readiness: all three PIDs and the startup trace now exist,
+  // while native init remains gated. This is not a runtime protocol frame.
+  process.stderr.write('T1_STARTUP_READY\n');
+  timing('startup.ready');
   while (!existsSync(process.env.T1_GATE)) await new Promise(resolve => setTimeout(resolve, 5));
 };
 

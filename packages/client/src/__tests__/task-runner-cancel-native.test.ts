@@ -360,10 +360,34 @@ describe('native Claude with an explicitly failed startup disposal receipt', () 
   it.each(['shutdown', 'deadline'] as const)('retains ownership after %s until a successful cleanup retry', async trigger => {
     const disposal = failClaudeDisposalUntilReleased();
     const c = await setup('claude', 'startup', trigger === 'deadline' ? { startupTimeoutMs: 1000 } : {});
+    // This case tests withheld disposal receipts, not host scheduling while
+    // Node boots the fixture tree. Keep native IPC real, but own exactly when
+    // the unchanged startup deadline fires, as the interrupt cases do above.
+    if (trigger === 'deadline') c.synchronizeInterruptClock();
     const offered = c.offer();
-    await vi.waitFor(async () => expect(await c.trace()).toContain('startup'));
+    await c.timing.waitFor(event => event.event === 'startup.ready');
+    expect(await c.trace()).toContain('startup');
+    const pids = JSON.parse(await fs.readFile(c.tree, 'utf8')) as Record<string, number>;
+    expect(Object.keys(pids).sort()).toEqual(['descendantPid', 'grandchildPid', 'rootPid']);
+    for (const pid of Object.values(pids)) expect(alive(pid), `PID ${pid} absent before cancellation`).toBe(true);
     if (trigger === 'shutdown') c.runner.stopAcceptingOffers();
-    else await vi.waitFor(() => expect(c.terminals()).toHaveLength(1));
+    else {
+      const armed = c.timing.events.find(event => event.event === 'deadline.arm'
+        && (event.detail as { ms: number; source?: string }).ms === 1000
+        && (event.detail as { source?: string }).source?.includes('TaskRunner.handleOffer'))!;
+      expect(armed).toBeDefined();
+      await vi.advanceTimersByTimeAsync(999);
+      expect(c.terminals()).toHaveLength(0);
+      expect(disposal.dispose).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      const fired = c.timing.events.find(event => event.event === 'deadline.fire'
+        && (event.detail as { id: number }).id === (armed.detail as { id: number }).id)!;
+      expect(fired).toBeDefined();
+      expect(fired.wallMs - armed.wallMs).toBe(1000);
+      // Native tree disposal/retry runs with its actual clock and OS receipts.
+      c.restoreClock();
+      await c.waitForTerminal();
+    }
     await expect(c.runner.shutdownActiveTasks('receipt unavailable')).rejects.toMatchObject({ name: 'RuntimeDisposalFailure' });
     await offered;
     expect(disposal.dispose).toHaveBeenCalled();
