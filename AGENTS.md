@@ -18,6 +18,12 @@ This is the root routing contract for Claude Code and Codex. Load this before ta
 - `bun run check:api-surface`
 - `bun run check:version-authority`
 
+## Cursor Cloud
+
+- The image Node is 22. Environment install puts Node 24.21.0 and Bun 1.4.0 on `PATH` ahead of it, then runs `bun ci` and `bun run build`. Package `exports` point at `dist/`, so typecheck and tests need that build.
+- Dataplane suites skip unless `docker compose -f docker-compose.test.yml up -d --wait` is up. That substrate is optional for the baseline checks.
+- `byok-agent pair` stores the device credential in the Secret Service. Each boot starts gnome-keyring and writes `~/.byok-keyring-session.sh`. Source that file in the shell that runs `byok-agent`.
+
 <!-- BEGIN ARCHITECTURE CONTRACT -->
 ## Architecture Contract
 

@@ -47,11 +47,11 @@ export function durableShell(env: NodeExecutionEnv, shellEnv: NodeJS.ProcessEnv,
     // Bound memory; keep raw output on disk only when the public spill option asks for it.
     let prefix: Buffer[] = [];
     let outputWork = Promise.resolve();
-    const stdout={decoder:new StringDecoder('utf8'),pending:Buffer.alloc(0)},stderr={decoder:new StringDecoder('utf8'),pending:Buffer.alloc(0)};
-    const consume = (chunk: Buffer,stream:typeof stdout) => {
+    const stdout={decoder:new StringDecoder('utf8'),pending:Buffer.alloc(0),name:'stdout' as const},stderr={decoder:new StringDecoder('utf8'),pending:Buffer.alloc(0),name:'stderr' as const};
+    const consume = (chunk: Buffer,stream:typeof stdout | typeof stderr) => {
       child.stdout!.pause(); child.stderr!.pause();
       outputWork = outputWork.then(async () => {
-        options?.onOutput?.(stream.decoder.write(chunk), context);
+        options?.onOutput?.(stream.decoder.write(chunk), context, { stream: stream.name });
         bytes += chunk.length; lines += chunk.toString('utf8').split('\n').length - 1;
         if (options?.spill) {
           const raw=stream.pending.length?Buffer.concat([stream.pending,chunk]):chunk,boundary=utf8Boundary(raw);
@@ -84,7 +84,7 @@ export function durableShell(env: NodeExecutionEnv, shellEnv: NodeJS.ProcessEnv,
       child.stdin!.end('byok-durable-shell\n');
       await receipt; await outputWork;
       for(const stream of [stdout,stderr]){
-        try{const tail=stream.decoder.end();if(tail)options?.onOutput?.(tail,context);}catch{state.failure??=new ExecutionError('callback_error','Durable shell output failed');}
+        try{const tail=stream.decoder.end();if(tail)options?.onOutput?.(tail,context,{stream:stream.name});}catch{state.failure??=new ExecutionError('callback_error','Durable shell output failed');}
         try{if(output&&stream.pending.length){if(output.destroyed)throw new Error('durable spill closed');if(!output.write(stream.pending))await once(output,'drain');}}catch{state.failure??=new ExecutionError('callback_error','Durable shell output failed');}
       }
       if (output) { if(!output.destroyed)output.end();await outputDone; }

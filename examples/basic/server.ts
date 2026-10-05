@@ -71,8 +71,9 @@ const indexHtml = await readFile(path.join(publicDir, 'index.html'), 'utf8');
 // Compose our own app and mount byok's routes into it (`POST /byok/pair`),
 // the way a real product would alongside its own unrelated routes — rather
 // than bolting the demo's routes directly onto `byok.hono`.
+// Product routes are registered first. `byok.hono` ends in `ALL /*`, so
+// mounting it first swallows `/` and `/api/*`.
 const app = new Hono();
-app.route('/', byok.hono);
 
 app.get('/', (c) => c.html(indexHtml));
 
@@ -251,6 +252,8 @@ app.post('/api/tasks/:taskId/cancel', async (c) => {
     return c.json({ error: err instanceof Error ? err.message : String(err) }, 409);
   }
 });
+
+app.route('/', byok.hono);
 
 const server = serve({ fetch: app.fetch, port: PORT }, (info) => {
   console.log(

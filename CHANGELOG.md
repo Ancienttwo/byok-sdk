@@ -34,6 +34,16 @@
   only comment text in three selected contract files; the BYOK deltas, the bridge and
   runtime behaviour are unchanged.
 
+- **Changed (client, cloud-do)** — official Pi runtime 1.0.2 -> 1.0.3.
+  The nine-package closure uses upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`,
+  closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`. No third-party dependency changes.
+  The durable-shell adapter now passes `ShellOutputInfo` (`stream`) as the third
+  `onOutput` argument required by pi-durable 1.0.3. `ShellOutputWindow` is not
+  implemented in the BYOK override yet.
+  Fixes `check:release-pack` / npm pack-install after upstream published 1.0.3
+  (transitive `^1.0.2` siblings, e.g. pi-codemode, resolved to 1.0.3).
+  Structural hardening of those ranges remains a separate follow-up.
+
 - **Changed (client, cloud-do)** — official Pi runtime 1.0.1 -> 1.0.2.
   The nine-package closure uses upstream commit `cd32f7725fdbddbaecdff5b1e68491563394e0ca`,
   closureDigest `4aafae2b3780c4c8565eff17ebeb4d3842b6fe4aa31eb32cfbf104d36f453945`. No third-party dependency changes.
@@ -58,7 +68,7 @@
   Claude interrupt now uses correlated `control_request` with bounded ACK and
   owned-process fallback. `usage` adds optional `contextTokens`, `contextWindow`
   and `contextSource` fields (additive, independent of provider cost counters),
-  and the official Pi runtime pin moves to 1.0.2 (see below).
+  and the official Pi runtime pin moves to 1.0.3 (see below).
 
 - **Changed (client)** — official Pi runtime 0.87.1 -> 1.0.0. The attested
   closure is now nine package names (chord, pi-agent-core, pi-ai, pi-codemode,
