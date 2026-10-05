@@ -169,4 +169,45 @@ describe('provider total round-trip deadline', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it.each(['handoff', 'late-fetch', 'active-body'] as const)(
+    'disposes exactly once for a microtask abort during %s, even if cancellation never settles',
+    async phase => {
+      vi.useFakeTimers();
+      const caller = new AbortController();
+      const remove = vi.spyOn(caller.signal, 'removeEventListener');
+      const cancel = vi.fn(() => new Promise<void>(() => {}));
+      const response = new Response(new ReadableStream<Uint8Array>({ cancel }));
+      let resolve!: (response: Response) => void;
+      const pending = new Promise<Response>(r => { resolve = r; });
+      const reason = new Error('handoff abort');
+      const operation = fetchWithProviderGuards(() => pending, url, {}, caller.signal);
+      const result = outcome(operation.then(readModelProviderResponse));
+      if (phase === 'handoff') {
+        // Runs after the helper's late-response observer, but before its
+        // Promise.race await continuation acquires the body's reader.
+        void pending.then(() => caller.abort(reason));
+        resolve(response);
+      } else if (phase === 'late-fetch') {
+        caller.abort(reason);
+        await vi.advanceTimersByTimeAsync(0);
+        resolve(response);
+      } else {
+        resolve(response);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(response.body!.locked).toBe(true);
+        caller.abort(reason);
+      }
+      await vi.advanceTimersByTimeAsync(0);
+      expect(result()).toBe(reason);
+      expect(cancel).toHaveBeenCalledExactlyOnceWith(reason);
+      expect(response.body!.locked).toBe(false);
+      expect(remove).toHaveBeenCalledTimes(1);
+      expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(PROVIDER_TIMEOUT_MS);
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(remove).toHaveBeenCalledTimes(1);
+    },
+  );
+
 });

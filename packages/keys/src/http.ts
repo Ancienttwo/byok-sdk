@@ -32,23 +32,34 @@ export async function fetchWithProviderGuards(
   normalizeProviderUrl(url);
   signal.throwIfAborted();
   const controller = new AbortController();
+  let ownedResponse: Response | undefined;
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined;
   let finished = false;
+  let cleanedUp = false;
   let rejectAbort!: (reason: unknown) => void;
   const aborted = new Promise<never>((_, reject) => { rejectAbort = reject; });
   // The header race may already be settled when body cancellation rejects this.
   void aborted.catch(() => {});
   const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
     clearTimeout(timeout);
     signal.removeEventListener('abort', onAbort);
   };
-  const cancelReader = (reason: unknown) => {
-    // An injected source's cancel hook may itself stall or reject. Cancellation
-    // is best effort and must never delay the caller's terminal result.
-    if (reader) {
-      void reader.cancel(reason).catch(() => {});
-      reader.releaseLock();
+  const disposeBody = (reason: unknown) => {
+    // Transfer ownership out before cancellation: observer, abort and await
+    // continuation may all try to dispose, but only one owns the resource.
+    const ownedReader = reader;
+    const response = ownedResponse;
+    reader = undefined;
+    ownedResponse = undefined;
+    // An injected cancel hook may itself stall or reject. Never await it.
+    if (ownedReader) {
+      void ownedReader.cancel(reason).catch(() => {});
+      ownedReader.releaseLock();
+    } else if (response) {
+      void response.body?.cancel(reason).catch(() => {});
     }
   };
   const abort = (reason: unknown) => {
@@ -57,7 +68,7 @@ export async function fetchWithProviderGuards(
     cleanup();
     rejectAbort(reason);
     bodyController?.error(reason);
-    cancelReader(reason);
+    disposeBody(reason);
     controller.abort(reason);
   };
   const onAbort = () => abort(signal.reason);
@@ -68,19 +79,25 @@ export async function fetchWithProviderGuards(
   signal.addEventListener('abort', onAbort, { once: true });
   try {
     const pending = Promise.resolve(fetchImpl(url, { ...init, signal: controller.signal }));
-    // A transport can ignore abort and supply a response after we have returned.
-    // That response still belongs to this operation and must be disposed of.
+    // Acquire ownership in the first response reaction, including when fetch
+    // ignores abort. Keep it across the race's separate await continuation.
     void pending.then(response => {
-      if (finished) void response.body?.cancel(controller.signal.reason).catch(() => {});
+      ownedResponse = response;
+      if (finished) disposeBody(controller.signal.reason);
     }, () => {});
     const response = await Promise.race([pending, aborted]);
-    if (finished) throw controller.signal.reason;
+    if (finished) {
+      disposeBody(controller.signal.reason);
+      throw controller.signal.reason;
+    }
     if (!response.body) {
+      ownedResponse = undefined;
       finished = true;
       cleanup();
       return response;
     }
     reader = response.body.getReader();
+    ownedResponse = undefined;
     const body = new ReadableStream<Uint8Array>({
       start(streamController) { bodyController = streamController; },
       async pull(streamController) {
@@ -107,7 +124,7 @@ export async function fetchWithProviderGuards(
         if (finished) return;
         finished = true;
         cleanup();
-        cancelReader(reason);
+        disposeBody(reason);
         controller.abort(reason);
       },
     });
@@ -124,7 +141,7 @@ export async function fetchWithProviderGuards(
   } catch (error) {
     finished = true;
     cleanup();
-    cancelReader(error);
+    disposeBody(error);
     throw error;
   }
 }
