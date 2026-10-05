@@ -728,9 +728,12 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     throw new InputPreparationRequestError(refusal.code, refusal.message);
   }
 
-  async function cancelBeforeCounter(recordId: string, run: ActiveRun): Promise<void> {
+  function runAborted(run: ActiveRun): boolean {
     if (now() >= run.deadlineAt) run.controller.abort();
-    if (!run.controller.signal.aborted) return;
+    return run.controller.signal.aborted;
+  }
+
+  async function cancelBeforeCounter(recordId: string, run: ActiveRun): Promise<never> {
     const detail = run.cancelRequested ? 'cancelled_before_counter' : 'deadline_elapsed_before_counter';
     try { await store.update(recordId, { state: 'cancelled', detail }); }
     catch (cause) { rethrowDurable(cause); }
@@ -744,7 +747,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     target: InputPreparationCounterTargetV1,
     run: ActiveRun,
   ): Promise<InputPreparationRecord> {
-    await cancelBeforeCounter(record.recordId, run);
+    if (runAborted(run)) await cancelBeforeCounter(record.recordId, run);
     // --- observation stage ------------------------------------------------
     // The one entry that resolves the launch boundary, resolves an
     // implementation identity per server, probes through both, and returns the
@@ -761,7 +764,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       });
       // Assembly owns any probes it started. Wait for their cleanup before
       // refusing, but never begin compilation after the absolute deadline.
-      await cancelBeforeCounter(record.recordId, run);
+      if (runAborted(run)) await cancelBeforeCounter(record.recordId, run);
       if (!assembled.ok) await refuseAssembly(record.recordId, assembled);
       surface = (assembled as { readonly surface: PreparedToolSurface }).surface;
     }
@@ -795,7 +798,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
         });
       }, run.controller.signal);
     } catch (cause) {
-      if (run.controller.signal.aborted) await cancelBeforeCounter(record.recordId, run);
+      if (runAborted(run)) await cancelBeforeCounter(record.recordId, run);
       if (cause instanceof InputPreparationRuntimeIdentityError) {
         await markFailed(record.recordId, 'runtime_identity_unavailable');
         throw new InputPreparationRequestError('runtime_identity_unavailable', cause.message, { cause });
@@ -877,7 +880,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     // Nothing has been called yet, so an abort that has already landed is a
     // clean cancellation — provably not an unknown counter outcome. Checked
     // before the reservation so the allowance is not spent either.
-    await cancelBeforeCounter(record.recordId, run);
+    if (runAborted(run)) await cancelBeforeCounter(record.recordId, run);
 
     const summary = {
       requestDigest: compiled.requestDigest,
@@ -894,6 +897,10 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     // Decided once, over D's own bytes, and retained beside the artifact in
     // the same durable transition.
     const requestContentTextOnly = preparedRequestContentIsTextOnly(compiled.requestBody);
+
+    // Only cancellation has an asynchronous durable barrier. An active check
+    // must not yield and then admit a new phase using a stale clock reading.
+    if (runAborted(run)) await cancelBeforeCounter(record.recordId, run);
 
     // --- no counter: retain and settle -------------------------------------
     // The size evidence is `summary.requestBytes`, measured by the compiler
@@ -950,7 +957,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     // The call still provably has not been placed, so this stays a clean
     // cancellation — but the reserved allowance is already spent and is not
     // given back.
-    await cancelBeforeCounter(record.recordId, run);
+    if (runAborted(run)) await cancelBeforeCounter(record.recordId, run);
 
     // --- counter ----------------------------------------------------------
     // The per-call timeout starts HERE, not when the preparation started: it
@@ -961,31 +968,37 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     callTimeout.unref?.();
     const calledAt = new Date(now()).toISOString();
     let counted: InputPreparationCounterResultV1;
+    let evidence: InputPreparationCounterEvidenceV1;
+    let callPlaced = false;
     let removeAbortListener = (): void => {};
     try {
-      counted = validateCounterResult(
-        await new Promise<InputPreparationCounterResultV1>((resolve, reject) => {
-          const interrupted = (): void => reject(new InputPreparationRequestError(
-            'counter_interrupted', 'the counter wait was interrupted; its outcome is unknown',
-          ));
-          run.controller.signal.addEventListener('abort', interrupted, { once: true });
-          removeAbortListener = () => run.controller.signal.removeEventListener('abort', interrupted);
-          if (run.controller.signal.aborted) { interrupted(); return; }
-          // Both handlers stay attached even after the SDK wait has settled.
-          // Late adapter resolution cannot write state; late rejection is consumed.
-          counter.count({
-            counterProjection: compiled.counterProjection,
-            target,
-            timeoutMs: limits.counterTimeoutMs,
-            signal: run.controller.signal,
-          }).then(resolve, reject);
-        }),
-      );
-      if (run.controller.signal.aborted) {
+      const result = await new Promise<InputPreparationCounterResultV1>((resolve, reject) => {
+        const interrupted = (): void => reject(new InputPreparationRequestError(
+          'counter_interrupted', 'the counter wait was interrupted; its outcome is unknown',
+        ));
+        run.controller.signal.addEventListener('abort', interrupted, { once: true });
+        removeAbortListener = () => run.controller.signal.removeEventListener('abort', interrupted);
+        if (runAborted(run)) { interrupted(); return; }
+        // Both handlers stay attached even after the SDK wait has settled.
+        // Late adapter resolution cannot write state; late rejection is consumed.
+        const counterRequest = {
+          counterProjection: compiled.counterProjection,
+          target,
+          timeoutMs: limits.counterTimeoutMs,
+          signal: run.controller.signal,
+        };
+        // Recheck at invocation after request/setup work, without an await
+        // on the active path. Timers may not yet have had an event-loop turn.
+        if (runAborted(run)) { interrupted(); return; }
+        callPlaced = true;
+        counter.count(counterRequest).then(resolve, reject);
+      });
+      if (runAborted(run)) {
         // The adapter resolved, but this run was already aborted: the outcome
         // reached us after the decision to stop, so it is not a clean count.
         throw new InputPreparationRequestError('counter_interrupted', 'the counter call was aborted before its result was accepted');
       }
+      counted = validateCounterResult(result);
       // The count must be evidence about THIS preparation. The adapter was
       // handed P(D) and a target; the evidence it answers with names a
       // projection digest and an endpoint/model, and both are compared against
@@ -1003,7 +1016,21 @@ export function createInputPreparationService(options: InputPreparationServiceOp
           'the counter evidence names a projection or target other than the one this preparation compiled',
         );
       }
+      evidence = {
+        ...counted,
+        target,
+        calledAt,
+        completedAt: new Date(now()).toISOString(),
+      };
+      // Validation/assembly of evidence is synchronous but consumes budget too.
+      // Fence it before starting a new terminal write. Once started, that write
+      // remains owned even if its acknowledgement crosses the deadline.
+      if (runAborted(run)) {
+        throw new InputPreparationRequestError('counter_interrupted', 'the counter deadline elapsed before its evidence was accepted');
+      }
     } catch (cause) {
+      const aborted = runAborted(run);
+      if (!callPlaced && aborted) await cancelBeforeCounter(record.recordId, run);
       const detail = run.cancelRequested
         ? 'cancelled_during_counter'
         : run.controller.signal.aborted
@@ -1027,12 +1054,6 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       removeAbortListener();
     }
 
-    const evidence: InputPreparationCounterEvidenceV1 = {
-      ...counted,
-      target,
-      calledAt,
-      completedAt: new Date(now()).toISOString(),
-    };
     try {
       return await store.update(record.recordId, { state: 'prepared', counter: evidence });
     } catch (cause) {
