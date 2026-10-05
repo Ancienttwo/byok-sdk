@@ -8,6 +8,12 @@
 
 ## Unreleased
 
+- **Added (cloud-do)** — prepare `@byok-sdk/cloud-do` for the public SDK train.
+  Add an ESM library build, a local declaration closure, an API golden, and
+  an installed-tarball Worker smoke in the release-pack driver. The source
+  version is 0.24.0-rc.1. No package is published. The first release is stable
+  0.24.0 with keys 0.8.1, through the local publisher.
+
 - **Changed (client)** — qualify exactly Codex CLI 0.160.0 for the app-server
   adapter and team relay. The 0.159.2 and 0.160.0 protocol trees are identical.
   Other CLI versions remain unsupported.

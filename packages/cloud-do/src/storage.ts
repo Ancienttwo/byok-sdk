@@ -1,5 +1,8 @@
 import { SQLITE_MIGRATIONS, SqliteStorage, type SqliteDatabase, type SqliteExecutor, type SqliteValue } from '@earendil-works/pi-durable/storage/sqlite';
-import type { DurableStorageFactory } from '../../client/src/adapters/pi-durable/storage';
+import type { Storage } from '@earendil-works/pi-durable';
+
+/** Construction returns pi's native Storage interface. */
+type DurableStorageFactory<Location> = (location: Location) => Promise<Storage>;
 
 // pi owns schema/migrations. Discover its identifiers rather than maintaining a second schema.
 const names = new Set(['durable_schema']);

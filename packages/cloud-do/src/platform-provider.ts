@@ -3,10 +3,9 @@ import { AssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-s
 import type { Api, AssistantMessage, JsonObject, Model, ProviderStreams, StreamOptions, ToolCall } from '@earendil-works/pi-ai';
 import { getCurrentTools, type TranscriptContext } from '@earendil-works/pi-ai/utils/transcript';
 import { getSystemMessageText } from '@earendil-works/pi-ai/utils/text';
-import type { ModelProviderSecretName, SecretStore } from '@byok-sdk/keys';
 import { CloudDoError, safeCloudError } from './errors';
 import { createProviderFetch, readSseData } from './provider-fetch';
-import { PLATFORM_PROFILES, platformCredentialReader, requirePlatformKey, type PlatformProfile } from './platform-credentials';
+import { PLATFORM_PROFILES, platformCredentialReader, requirePlatformKey, type PlatformProfile, type PlatformCredentialReader } from './platform-credentials';
 
 export const PLATFORM_MAX_OUTPUT_TOKENS = 4096;
 export const REQUEST_FRAMING_BYTES = 4096;
@@ -158,7 +157,7 @@ function stream(profile: PlatformProfile, model: Model<Api>, context: Transcript
 }
 
 export function createPlatformModels(env: Readonly<Record<string, unknown>>,
-  credentials: Pick<SecretStore<ModelProviderSecretName>, 'get'> = platformCredentialReader(env), runtime?: CloudModelRuntime) {
+  credentials: PlatformCredentialReader = platformCredentialReader(env), runtime?: CloudModelRuntime) {
   const models = createModels({ authContext: { env: async () => undefined, fileExists: async () => false } });
   for (const [id, profile] of Object.entries(PLATFORM_PROFILES)) {
     const implementation: ProviderStreams = { stream: (model, context, options) => stream(profile, model, context, options, runtime),
