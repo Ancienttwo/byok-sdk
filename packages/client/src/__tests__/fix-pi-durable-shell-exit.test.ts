@@ -86,8 +86,10 @@ describe.skipIf(process.platform === 'win32')('F16-2 foreground exit releases ba
 
   it('stops the command timer while disposing a TERM-ignoring background group', async () => {
     const f = await fixture();
-    const background = `process.on("SIGTERM",()=>{});require("node:fs").writeFileSync("background-ready","");setInterval(()=>{},1000);`;
-    const result = await f.shell.exec(`${JSON.stringify(process.execPath)} -e ${JSON.stringify(background)} & echo $! > background.pid; while [ ! -f background-ready ]; do sleep 0.01; done; printf foreground-complete`,
+    // Install SIGTERM ignore before the ready marker; exec preserves it without
+    // adding a Node startup to the foreground command's unchanged deadline.
+    const background = `(trap '' TERM; : > background-ready; exec sleep 60)`;
+    const result = await f.shell.exec(`${background} & echo $! > background.pid; while [ ! -f background-ready ]; do sleep 0.01; done; printf foreground-complete`,
       { timeout: 0.4 }, BACKGROUND_CONTEXT);
     expect(result).toEqual({ ok: true, value: { exitCode: 0 } });
     await assertReleased(f);
