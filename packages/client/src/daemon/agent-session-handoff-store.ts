@@ -473,6 +473,22 @@ export class AgentSessionHandoffStore {
       await handle.sync();
       await handle.close();
       handle = undefined;
+      // Sync each name-bearing directory even when it already existed: a
+      // previous attempt may have created it but failed its durability barrier.
+      // The caller supplies the canonical home; its ancestors remain outside
+      // this store's ownership. Node has no Windows directory-fsync surface.
+      if (process.platform !== 'win32') {
+        let directory = path.dirname(filePath);
+        for (let depth = 0; depth < 3; depth++) {
+          const parent = await fs.open(directory, 'r');
+          try {
+            await parent.sync();
+          } finally {
+            await parent.close();
+          }
+          directory = path.dirname(directory);
+        }
+      }
     } catch (error) {
       await handle?.close().catch(() => {});
       throw new AgentSessionHandoffStoreError(
