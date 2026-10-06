@@ -1,9 +1,13 @@
+import { assertFrozenRegistryExpectations, assertPrereleaseRegistryBaseline, frozenRuntimeDependencyMetadata, npmDistTags, npmPackageExists, npmView, readRegistryExpectations } from './registry-contract.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
+import { iterateTarballFiles } from './pi-runtime-identity.mjs';
+import { runtimeDependencyMetadata } from './registry-contract.mjs';
 
 // One-command release driver for the fixed-version train: version gate -> build ->
 // pack-and-smoke -> publish plan -> registry account gate -> npm publish -> registry
@@ -78,6 +82,17 @@ export function assertNoPartialPrereleaseRegistryState(entries, registryState, d
         'refuse automatic continuation — publish a new exact prerelease version instead',
     );
   }
+}
+
+/** Refresh after preparation. This narrows the race window; npm writes are not transactional. */
+export function assertPrereleaseReadyToPublish(entries, expectations, distTag, registry) {
+  if (!distTag) return;
+  for (const entry of entries) {
+    if (registry.isPublished(entry.name, entry.version)) {
+      throw new Error(`${entry.name}@${entry.version}: prerelease registry state changed before publication; prepare a new exact prerelease`);
+    }
+  }
+  assertPrereleaseRegistryBaseline(entries, expectations, distTag, registry);
 }
 
 export function parseArguments(argv) {
@@ -210,10 +225,10 @@ export function verifyFrozenArtifacts({ artifactsDir, headSha, trainVersion, pub
   } catch (error) {
     throw new Error(`${manifestPath} is not readable JSON: ${error.message}`);
   }
-  if (manifest.schemaVersion !== 2) {
+  if (manifest.schemaVersion !== 3) {
     throw new Error(
       `${manifestPath} declares schemaVersion ${JSON.stringify(manifest.schemaVersion ?? null)}; ` +
-        'this script and scripts/release/registry-readback.mjs both read schemaVersion 2',
+        'this script and scripts/release/registry-readback.mjs both read schemaVersion 3',
     );
   }
   if (manifest.releaseVersion !== trainVersion) {
@@ -250,11 +265,24 @@ export function verifyFrozenArtifacts({ artifactsDir, headSha, trainVersion, pub
     if (!existsSync(tarballPath)) {
       throw new Error(`${entry.name}: frozen tarball is missing: ${tarballPath}`);
     }
-    const digest = createHash('sha256').update(readFileSync(tarballPath)).digest('hex');
+    const tarballBytes = readFileSync(tarballPath);
+    const digest = createHash('sha256').update(tarballBytes).digest('hex');
     if (digest !== artifact.sha256) {
       throw new Error(
         `${entry.name}: ${artifact.file} hashes to sha256 ${digest}, the frozen manifest records ${artifact.sha256}`,
       );
+    }
+    const frozenDependencies = frozenRuntimeDependencyMetadata(artifact, entry.name);
+    const integrity = `sha512-${createHash('sha512').update(tarballBytes).digest('base64')}`;
+    if (artifact.sha512Integrity !== integrity) throw new Error(`${entry.name}: frozen SHA-512 integrity differs from tarball bytes`);
+    const manifests = [...iterateTarballFiles(tarballPath)].filter(([name]) => name === 'package/package.json');
+    if (manifests.length !== 1) throw new Error(`${entry.name}: frozen tarball must contain exactly one package/package.json`);
+    const packedManifest = JSON.parse(manifests[0][1].toString('utf8'));
+    if (packedManifest.name !== entry.name || packedManifest.version !== entry.version) {
+      throw new Error(`${entry.name}: frozen tarball package identity/version mismatch`);
+    }
+    if (!isDeepStrictEqual(frozenDependencies, runtimeDependencyMetadata(packedManifest, `${entry.name} packed manifest`))) {
+      throw new Error(`${entry.name}: frozen dependency metadata differs from tarball bytes`);
     }
     return { ...entry, file: artifact.file, sha256: artifact.sha256 };
   });
@@ -280,26 +308,22 @@ export function assertRegistryAccountPolicy({ whoami, profile }) {
   }
 }
 
+function view(selector, fields, allowNotFound = false) {
+  return npmView({ invocation: npmInvocation, cwd: repoRoot, selector, fields, allowNotFound });
+}
+
 /** True when name@version is already on the registry. Anything other than a clean hit or a clean 404 aborts. */
 function isPublished(name, version) {
-  const result = spawnSync(
-    npmInvocation.command,
-    [...npmInvocation.prefix, 'view', `${name}@${version}`, 'version', '--json'],
-    { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
-  );
-  let payload;
-  try {
-    payload = JSON.parse(result.stdout);
-  } catch {
-    throw new Error(`npm view ${name}@${version} returned unreadable output (${result.status})\n${result.stdout}\n${result.stderr}`);
-  }
-  if (result.status === 0) {
-    if (payload === version) return true;
-    throw new Error(`npm view ${name}@${version} reported version ${JSON.stringify(payload)}`);
-  }
-  if (payload?.error?.code === 'E404') return false;
-  throw new Error(`npm view ${name}@${version} failed (${result.status})\n${result.stderr}`);
+  const result = view(`${name}@${version}`, ['version'], true);
+  if (!result.found) return false;
+  if (result.value === version) return true;
+  throw new Error(`npm view ${name}@${version} reported version ${JSON.stringify(result.value)}`);
 }
+
+const registry = {
+  packageExists: (name) => npmPackageExists({ invocation: npmInvocation, cwd: repoRoot, name }),
+  distTags: (name) => npmDistTags({ invocation: npmInvocation, cwd: repoRoot, name }),
+};
 
 async function main() {
   const { execute, otp, outDir: requestedOut, artifacts: requestedArtifacts, tag: requestedTag } = parseArguments(process.argv.slice(2));
@@ -350,6 +374,9 @@ async function main() {
     );
   }
 
+  const registryExpectations = readRegistryExpectations(repoRoot, [...manifests.keys()]);
+  assertPrereleaseRegistryBaseline([...manifests.values()], registryExpectations, distTag, registry);
+
   // --- Step 2: build -------------------------------------------------------
   const bunBin = process.platform === 'win32' ? 'bun.exe' : 'bun';
   const frozen = requestedArtifacts !== undefined;
@@ -376,6 +403,8 @@ async function main() {
     const publishSet = topologicalOrder([...manifests.values()].filter((entry) => !registryState.get(entry.name)));
     if (publishSet.length === 0) throw new Error('publish set is empty — nothing to release');
     const plan = verifyFrozenArtifacts({ artifactsDir: outDir, headSha, trainVersion, publishSet });
+    assertFrozenRegistryExpectations(JSON.parse(readFileSync(releaseManifestPath, 'utf8')), registryExpectations,
+      Object.fromEntries([...manifests.values()].map((entry) => [entry.name, entry.version])));
     console.log(`[release-publish] frozen artifacts verified against ${headSha}`);
 
     // --- Step 4: publish plan, in dependency order -------------------------
@@ -413,6 +442,10 @@ async function main() {
     }
     assertRegistryAccountPolicy({ whoami, profile });
     console.log(`[release-publish] npm account ${whoami} requires a second factor on writes`);
+
+    // Recheck after build/pack/account checks, immediately before irreversible writes.
+    // Any exact RC publication during preparation invalidates this plan.
+    assertPrereleaseReadyToPublish([...manifests.values()], registryExpectations, distTag, { ...registry, isPublished });
 
     // --- Step 6: publish -----------------------------------------------------
     // Provenance attestations are signed from the GitHub OIDC token, so the flag is

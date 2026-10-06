@@ -123,8 +123,14 @@ test('graph and readback use the same prerelease gate and readback checks a requ
   assert.match(graphSource, /const privatePackages = \[\n(?:  \[[^\n]*\],\n)*  \['packages\/testkit', '@byok-sdk\/testkit'\],\n/);
   assert.match(graphSource, /const retiredPublicNames = \['byok-sdk'\];/);
   assert.match(readbackSource, /const distTag = resolveReleaseDistTag\(expectedVersion, requestedTag\)/);
-  assert.match(readbackSource, /'dist-tags', '--json'/);
-  assert.match(readbackSource, /distTags\[distTag\] !== packageVersion/);
-  assert.match(readbackSource, /packages\.map\(\(packageName\) => \[packageName, packageName === '@byok-sdk\/keys' \? '0\.8\.0' : '0\.23\.0'\]\)/);
-  assert.match(readbackSource, /distTags\.latest !== expectedLatestVersion/);
+  const contractSource = readFileSync(path.join(releaseDirectory, 'registry-contract.mjs'), 'utf8');
+  const publishSource = readFileSync(path.join(releaseDirectory, 'publish.mjs'), 'utf8');
+  const packSource = readFileSync(path.join(releaseDirectory, 'pack-and-smoke.mjs'), 'utf8');
+  assert.match(readbackSource, /assertFrozenRegistryExpectations\(manifest, registryExpectations, expectedPackageVersions\)/);
+  assert.match(readbackSource, /readRegistryMetadata\(/);
+  assert.match(publishSource, /assertPrereleaseRegistryBaseline\(/);
+  assert.match(publishSource, /assertFrozenRegistryExpectations\(/);
+  assert.match(packSource, /schemaVersion: 3,\n    registryExpectations,/);
+  assert.match(contractSource, /distTags\[selectedTag\] !== packageVersion/);
+  assert.match(contractSource, /if \(distTag\) assertLatest/);
 });
