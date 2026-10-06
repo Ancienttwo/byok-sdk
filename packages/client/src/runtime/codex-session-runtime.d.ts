@@ -4,7 +4,7 @@ export interface CodexControl {
   // ControlResult also permits an exit response with a numeric or null code.
   response: { body: { kind: string; code?: string | number | null; reason?: string } };
 }
-/** OAR 0.20.3 Codex always implements steer. The bridge retains this required member. */
+/** OAR 0.25.0 Codex always implements steer. The bridge retains this required member. */
 export interface RawCodexSession {
   readonly id: string;
   prompt(input: string): Promise<CodexControl>;
