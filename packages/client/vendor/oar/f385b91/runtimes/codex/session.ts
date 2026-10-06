@@ -39,7 +39,7 @@ import { openThread, rpcControl, type RpcControlPlan } from "./rpc-control.js";
  *   accepted/rejected response, the outcome is turn/completed.
  * - every notification is one frame (verbatim params); notifications
  *   of other threads are child-session records; collab items link them.
- * - BYOK change: server requests are recorded, declined/rejected and settled immediately.
+ * - BYOK change: server requests go to an explicit caller-owned native interaction handler, or are declined/rejected immediately when absent.
  * - reachability (exited / disposed) is the kernel's, read off the stream;
  *   the adapter holds no liveness flag (record-stream.md, "Reachability").
  * Live probe: codex-session-adapter.ts.
@@ -68,13 +68,17 @@ export interface CodexAdapterSession extends AdapterSession {
 export async function codexSession(
   spawnLineProcess: SpawnLineProcess,
   installation: AvailableInstallation,
-  options: SessionOptions,
+  options: SessionOptions & { readonly approvalPolicy?: "never" | "on-request" }, // BYOK change: explicit local interactive opt-in.
   serverRequestTimeoutMs = 1_000,
   hooks: { // BYOK change: required record delivery and retention are injected before registration/replay.
     readonly onReady?: (threadId: string) => void;
     readonly onRecord?: (record: import("../../contracts/session.js").RawEvent) => void;
     readonly maxBytes?: number;
     readonly onLimit?: () => never;
+    // BYOK change: caller-owned, bounded native request lifecycle; no permissive fallback.
+    readonly onServerRequest?: (id: string | number, method: string, params: JsonRecord, reply: {
+      respond(value: JsonRecord): Promise<void>; reject(code: number, message: string): Promise<void>; cancelled(): void;
+    }) => void;
   } = {},
 ): Promise<CodexAdapterSession> {
   if (installation.via !== "executable") {
@@ -124,6 +128,12 @@ export async function codexSession(
   }
   // The reply is codex's word on the model and effort the thread runs (the
   // open frame's events); anything but what was requested refuses the open.
+  // BYOK change: Never advertise an interactive policy the provider did not actually apply.
+  if (options.approvalPolicy === "on-request" && started.approvalPolicy !== "on-request") {
+    client.kill();
+    await client.exited;
+    throw new Error("codex native interaction approval policy readback mismatch");
+  }
   const readback = codexOpenReadback(openMethod, options, started);
   if (readback.refusal !== null) {
     client.kill();
@@ -205,31 +215,66 @@ export async function codexSession(
       throw error;
     }
   };
-  // BYOK change: Every server request is immediately declined/rejected within a local deadline.
+  // BYOK change: Opted-in native requests use the caller-owned lifecycle; absent opt-in keeps bounded refusal.
   const onServerRequest = (id: number | string, method: string, params: JsonRecord): void => {
     // BYOK change: Record ids follow the kernel string contract; the wire reply echoes the original id.
-    const request = kernel.request("toApp", { kind: "native", type: method, native: params }, { id: String(id) });
+    const request = kernel.request("toApp", { kind: "native", type: method, native: params }, { id: `native:${typeof id}:${JSON.stringify(id)}` });
+    // BYOK change: This injected owner uses NativeInteractionController for deadlines and at-most-once answers.
+    if (hooks.onServerRequest !== undefined) {
+      let claimed = false;
+      let recorded = false;
+      const claim = (): void => { if (claimed) throw new Error("codex native request already answered"); claimed = true; };
+      const record = (body: import("../../contracts/session.js").ResponseBody): void => {
+        if (recorded) return;
+        recorded = true; kernel.respond(request.id, body);
+      };
+      const send = async (write: () => Promise<void>, body: import("../../contracts/session.js").ResponseBody): Promise<void> => {
+        claim();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([write(), new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error("codex native reply write deadline exceeded")), serverRequestTimeoutMs);
+          })]);
+          record(body);
+        } catch (error) {
+          try { record({ kind: 'rejected', code: 'error', reason: 'native reply transport failed' }); } finally { client.kill(); }
+          throw error;
+        } finally { clearTimeout(timer); }
+      };
+      try {
+        hooks.onServerRequest(id, method, params, {
+          respond: value => send(() => client.respond(id, value), { kind: "accepted" }),
+          cancelled() {
+            claimed = true; record({ kind: "rejected", code: "error", reason: "native request cancelled" });
+          },
+          reject: (code, message) => send(() => client.rejectRequest(id, code, message), { kind: "rejected", code: "unsupported", reason: message }),
+        });
+      } catch (error) { client.kill(); throw error; }
+      return;
+    }
+    let settled = false;
+    const finish = (body: import("../../contracts/session.js").ResponseBody): void => {
+      if (settled) return;
+      settled = true; clearTimeout(timer);
+      try { kernel.respond(request.id, body); } catch { client.kill(); }
+    };
     const timer = setTimeout(() => {
-      kernel.respond(request.id, { kind: "rejected", code: "error", reason: `codex ${method} response deadline exceeded` });
+      finish({ kind: "rejected", code: "error", reason: `codex ${method} response deadline exceeded` });
       client.kill();
     }, serverRequestTimeoutMs);
-    try {
-      if (method === "item/commandExecution/requestApproval" || method === "item/fileChange/requestApproval") {
-        client.respond(id, { decision: "decline" });
-      } else if (method === "item/permissions/requestApproval") {
-        // BYOK change: codex 0.159.2 requires permissions; empty profile grants no extra permission.
-        client.respond(id, { permissions: {} });
-      } else {
-        client.rejectRequest(id, -32601, `unsupported codex server request: ${method}`);
-      }
-      kernel.respond(request.id, { kind: "rejected", code: "unsupported", reason: `codex ${method} declined by BYOK` });
-    } catch (error) {
-      kernel.respond(request.id, { kind: "rejected", code: "error", reason: error instanceof Error ? error.message : String(error) });
+    const failed = (error: unknown): void => {
+      finish({ kind: "rejected", code: "error", reason: error instanceof Error ? error.message : String(error) });
       client.kill();
-      throw error;
-    } finally {
-      clearTimeout(timer);
-    }
+    };
+    try {
+      const written = method === "item/commandExecution/requestApproval" || method === "item/fileChange/requestApproval"
+        ? client.respond(id, { decision: "decline" })
+        : method === "item/permissions/requestApproval"
+          ? client.respond(id, { permissions: {} })
+          : client.rejectRequest(id, -32601, `unsupported codex server request: ${method}`);
+      void written.then(() => finish({ kind: "rejected", code: "unsupported", reason: `codex ${method} declined by BYOK` }), failed);
+    } catch (error) { failed(error); }
+
   };
   // Registering flushes everything held so far in wire order: the frames
   // from before the thread existed, then the open event (the mark placed at

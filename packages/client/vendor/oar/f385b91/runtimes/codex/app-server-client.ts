@@ -6,6 +6,7 @@ export interface LineProcess {
   onLine(handler: (line: string) => void): void;
   onExit(handler: (code: number | null) => void): void;
   write(text: string): void;
+  writeAcknowledged(text: string): Promise<void>; // BYOK change: native reply write receipt.
   kill(): void;
   exitError?(): Error; // BYOK change: bounded transport diagnostic, never used as a semantic classifier.
 }
@@ -58,8 +59,8 @@ export interface AppServerClient {
   request(method: string, params: JsonRecord, onSettled?: (outcome: RpcOutcome) => void, timeoutMs?: number): Promise<JsonRecord>; // BYOK change: optional per-request deadline (default 30s).
   notify(method: string, params: JsonRecord): void;
   // BYOK change: Answer server requests without coercing their ids.
-  respond(id: number | string, result: unknown): void;
-  rejectRequest(id: number | string, code: number, message: string): void;
+  respond(id: number | string, result: unknown): Promise<void>;
+  rejectRequest(id: number | string, code: number, message: string): Promise<void>;
   /**
    * Register the inbound handlers, once. Notifications and server-initiated
    * requests (frames with both `id` and `method`: approvals, user input,
@@ -250,11 +251,11 @@ export function startAppServerClient(
     // BYOK change: JSON-RPC results and errors echo numeric/string ids unchanged.
     respond(id, result) {
       if (terminalError !== null) throw terminalError;
-      child.write(`${JSON.stringify({ id, result })}\n`);
+      return child.writeAcknowledged(`${JSON.stringify({ id, result })}\n`);
     },
     rejectRequest(id, code, message) {
       if (terminalError !== null) throw terminalError;
-      child.write(`${JSON.stringify({ id, error: { code, message } })}\n`);
+      return child.writeAcknowledged(`${JSON.stringify({ id, error: { code, message } })}\n`);
     },
     handle(registered) {
       if (terminalError !== null) throw terminalError; // BYOK change: do not replay a failed stream.

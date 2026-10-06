@@ -2548,11 +2548,12 @@ rest of the runtime descriptor.
 This local seam is distinct from the existing remote `needs_approval` /
 `resolveApproval(boolean)` contract. It does not add a daemon control command,
 wire payload, remote authorization, UI, persistent grant, or Host reconnect
-protocol. None of the bundled Claude, Codex or Pi adapters advertises or wires
-this seam in this slice: their current native reply protocol qualification is
-incomplete. In particular, adding a capability type is not evidence that an
-adapter can execute it. The existing `approvalInteractive` declarations and
-permission admission rules stay authoritative for the remote task path.
+protocol. Claude and Codex wire this seam only when their local adapter is constructed
+with `nativeInteractions` Host callbacks. With that option absent, neither
+advertises native interaction support. Pi remains unsupported. The existing
+`approvalInteractive` declarations and permission admission rules stay
+authoritative for the remote task path. Local capability metadata does not
+assert that every task exposes every tool or will ask an interactive question.
 
 Each request carries an SDK `requestId`, a fresh process-lifetime `generation`,
 and a separate native identity containing the exact string or numeric wire ID,
@@ -2592,3 +2593,46 @@ controller's receipt says whether the local write completed, was cancelled,
 timed out, or failed; it is not proof that a provider executed a tool. The
 controller itself neither starts nor kills processes, and no live provider,
 credential or persistent-access operation is part of its fixture validation.
+
+
+### Qualified local provider bridges
+
+Claude uses the official Agent SDK stdio control handshake and
+`--permission-prompt-tool stdio`. It preserves `request_id` independently of
+`tool_use_id`, sends one-shot `behavior:allow` with the original `updatedInput`,
+and never sends `updatedPermissions`. It offers only allow-once, deny and cancel.
+`AskUserQuestion` answers retain the native question text and option labels
+inside `updatedInput.answers`; duplicate native text/labels are refused rather
+than overwritten. Cancellation/timeout sends deny plus interrupt, while a
+native `control_cancel_request` writes no answer. Unknown/malformed requests or
+native identity drift dispose the process. Opt-in is admitted only in auto
+mode, and a request cannot override a sealed built-in allowlist or exact observed
+MCP grant. Readonly/plan remain available without native interaction opt-in;
+confirm remains unsupported. Claude's own existing allow rules may bypass the
+callback, so this is not an all-tools-confirmation policy.
+
+Codex remains pinned to CLI 0.160.0. Opt-in opens/resumes with `on-request` and
+requires native policy readback before a session is exposed; ordinary default
+mode remains `never`. The existing danger-full-access sandbox is unchanged,
+so confirm policy remains unsupported. Only command/file approval requests and
+`item/tool/requestUserInput` are mapped. Allow-once maps to `accept`, session
+scope to `acceptForSession`, denial to `decline` and cancellation to `cancel`.
+Structured questions keep native question IDs and answer arrays. User-input
+cancellation rejects that RPC rather than manufacturing an empty answer.
+Permissions-profile requests, dynamic tools and MCP elicitation are not
+implemented and never get an allow fallback.
+
+Codex validates the expected resume thread before held callback replay and
+requires the currently active native turn before exposing any request. Provider
+resolution, exact turn completion, interruption and process exit withdraw the
+matching pending requests. A refused prompt cannot re-arm native callbacks.
+Native reply receipts await stdin completion; cancellation of a pending UI does
+not release ownership of a still-unacknowledged write. Both provider bridges
+use a new SDK generation per process, including resumed provider sessions.
+
+Protocol references and exact inspected hashes are recorded in
+`docs/researches/2026-10-06-native-interaction-sources.json`. T3 supplies the
+separation between steering and typed native requests, not copied code. OAR's
+Apache-2.0 attribution and maintained source inventory remain explicit. Fixture
+qualification does not establish live-provider, desktop or Host-reconnect
+acceptance.

@@ -1,3 +1,5 @@
+import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions';
+import { CodexNativeInteractions } from './native-interactions';
 import { randomBytes } from 'node:crypto';
 import { execFile, type spawn as nodeSpawn } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -58,11 +60,13 @@ export interface CodexAdapterOptions {
   spawnFn?: typeof nodeSpawn;
   maxRetainedBytes?: number;
   interruptTimeoutMs?: number;
+  /** Opt-in local Host UI; independent of the remote boolean approval lane. */
+  nativeInteractions?: NativeInteractionHostOptions;
 }
 
 /** Codex app-server is experimental. Only the qualified 0.160.0 binary is admitted; no exec compatibility path. */
 export class CodexAdapter implements RuntimeAdapter {
-  readonly descriptor = freezeRuntimeAdapterDescriptor({
+  get descriptor() { return freezeRuntimeAdapterDescriptor({
     id: 'codex',
     supportsDispatchSelection: true,
     requiresMcpToolsetToolObservation: true,
@@ -71,12 +75,14 @@ export class CodexAdapter implements RuntimeAdapter {
       steer: true,
       resume: true,
       approvalInteractive: false,
+      ...(this.options.nativeInteractions === undefined ? {} : { nativeInteractions: { approvalDecisions: ['allow-once', 'allow-session', 'deny', 'cancel'] as const, structuredQuestions: true } }),
       mcpToolsets: true,
       permissionModes: ['auto'],
     },
     environmentRequirements: { credentialNames: [] },
-  });
+  }); }
   constructor(private readonly options: CodexAdapterOptions = {}) {
+    this.options = { ...options, ...(options.nativeInteractions === undefined ? {} : { nativeInteractions: snapshotNativeInteractionHostOptions(options.nativeInteractions) }) };
     if (
       !Number.isSafeInteger(options.maxRetainedBytes ?? 16 * 1024 * 1024) ||
       (options.maxRetainedBytes ?? 16 * 1024 * 1024) < 1
@@ -237,6 +243,8 @@ export class CodexAdapter implements RuntimeAdapter {
       model,
       this.options.interruptTimeoutMs ?? 1000,
       input.manifest.sessionRef === undefined,
+      this.options.nativeInteractions,
+      input.manifest.sessionRef,
     );
     try {
       const raw = await codexSession(
@@ -254,6 +262,7 @@ export class CodexAdapter implements RuntimeAdapter {
           cwd,
           env: env as Record<string, string>,
           ...(model === undefined ? {} : { model }),
+          ...(this.options.nativeInteractions === undefined ? {} : { approvalPolicy: "on-request" as const }),
           ...(input.manifest.sessionRef === undefined
             ? {}
             : { resume: input.manifest.sessionRef }),
@@ -262,6 +271,7 @@ export class CodexAdapter implements RuntimeAdapter {
         {
           maxBytes: this.options.maxRetainedBytes ?? 16 * 1024 * 1024,
           onReady: (id) => session.ready(id),
+          ...(this.options.nativeInteractions === undefined ? {} : { onServerRequest: session.serverRequest.bind(session) }),
           onRecord: (record) => session.record(record),
           onLimit: () => {
             const error = infrastructure(
@@ -327,16 +337,29 @@ class CodexSession implements Session {
   private readonly interruptWaiters = new Set<() => void>();
   private stopping = false;
   private closeAttempt?: Promise<void>;
+  private readonly native?: CodexNativeInteractions;
+  declare readonly interactions?: NativeInteractionChannel;
   constructor(
     private readonly workspace: string,
     private readonly model: string | undefined,
     private readonly interruptMs: number,
     private readonly fresh: boolean,
-  ) {}
+    interactions?: NativeInteractionHostOptions,
+    private readonly expectedSessionRef?: string,
+  ) {
+    if (interactions) {
+      this.native = new CodexNativeInteractions(() => this.sessionRef, interactions, () => this.fail(infrastructure('codex native interaction transport failed')));
+      this.interactions = this.native.channel;
+    }
+  }
+  serverRequest(id: string | number, method: string, params: Record<string, unknown>, reply: import('./native-interactions').CodexNativeReply): void {
+    this.native!.receive(id, method, params, reply);
+  }
   own(child: { dispose(): Promise<void>; kill(): void }): void {
     this.child = child;
   }
   ready(id: string): void {
+    if (this.expectedSessionRef !== undefined && id !== this.expectedSessionRef) throw authority('codex resume returned a different thread id');
     this.sessionRef = id;
     this.projection = new CodexProjection(this.workspace, id, this.fresh);
   }
@@ -345,6 +368,8 @@ class CodexSession implements Session {
   }
   record(record: CodexRecord): void {
     try {
+      const nativeFrame = record.body as { origin?: string; type?: string; native?: Record<string, unknown> };
+      if (record.kind === 'frame' && nativeFrame.origin === 'byok-native' && nativeFrame.type && nativeFrame.native) this.native?.notification(nativeFrame.type, nativeFrame.native);
       this.projection?.consume(this.stream, record, (event) =>
         this.queue.push(event),
       );
@@ -381,6 +406,7 @@ class CodexSession implements Session {
     }
   }
   fail(error: unknown): void {
+    this.native?.close("process-exited");
     this.failure ??= isRuntimeExecutionFailure(error)
       ? error
       : infrastructure(
@@ -407,13 +433,16 @@ class CodexSession implements Session {
   }
   async prompt(input: string): Promise<void> {
     if (!this.raw) throw infrastructure('codex session is not open');
+    if (this.active) throw infrastructure('codex turn is already active');
     this.active = true;
-    const result = await this.raw.prompt(input);
-    if (result.response.body.kind !== 'accepted') {
+    this.native?.beginTurn();
+    try {
+      const result = await this.raw.prompt(input);
+      if (result.response.body.kind !== 'accepted') throw infrastructure(result.response.body.reason ?? 'codex prompt refused');
+    } catch (error) {
       this.active = false;
-      throw infrastructure(
-        result.response.body.reason ?? 'codex prompt refused',
-      );
+      this.native?.interrupt();
+      throw error;
     }
   }
   async followUp(task: TaskOfferPayload): Promise<void> {
@@ -436,6 +465,7 @@ class CodexSession implements Session {
       );
   }
   async interrupt(): Promise<void> {
+    this.native?.interrupt();
     if (!this.raw || !this.active) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let resolveTurn!: () => void;
@@ -464,6 +494,7 @@ class CodexSession implements Session {
     }
   }
   async close(): Promise<void> {
+    this.native?.close();
     this.stopping = true;
     if (!this.closeAttempt) {
       const promise = Promise.resolve().then(async () => {

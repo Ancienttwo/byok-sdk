@@ -1,3 +1,4 @@
+// BYOK change: Modified from OAR f385b91 for explicit native interaction approval policy (Apache-2.0).
 import type { RuntimeEventBody, SessionOptions } from "../../contracts/session.js";
 import { asRecord, type JsonRecord } from "../../shared/json.js";
 
@@ -10,7 +11,7 @@ import { asRecord, type JsonRecord } from "../../shared/json.js";
 export type CodexOpenMethod = "thread/start" | "thread/resume";
 
 /** The open request for these options: a new thread, or a resume of `options.resume`. */
-export function codexThreadOpen(options: SessionOptions): { readonly method: CodexOpenMethod; readonly params: JsonRecord } {
+export function codexThreadOpen(options: SessionOptions & { readonly approvalPolicy?: "never" | "on-request" }): { readonly method: CodexOpenMethod; readonly params: JsonRecord } {
   // System prompt seams (probed 2026-08-24 via the aimock journal):
   // baseInstructions REPLACES codex's base prompt; developerInstructions
   // APPENDS as a developer message. "instructions"/"userInstructions" are
@@ -37,7 +38,7 @@ export function codexThreadOpen(options: SessionOptions): { readonly method: Cod
       params: {
         cwd: options.cwd,
         ...modelParams,
-        approvalPolicy: "never",
+        approvalPolicy: options.approvalPolicy ?? "never", // BYOK change: caller-owned interaction opt-in.
         // Required in addition to initialize.experimentalApi. This exposes
         // the completed Responses API reasoning item, whose encrypted_content
         // lets us distinguish redaction from genuinely empty reasoning.
@@ -59,7 +60,7 @@ export function codexThreadOpen(options: SessionOptions): { readonly method: Cod
       // thread is loaded cold, which is the normal case here because every
       // oar session owns its own app-server process.
       ...modelParams,
-      approvalPolicy: "never",
+      approvalPolicy: options.approvalPolicy ?? "never", // BYOK change: caller-owned interaction opt-in.
       ...instructionParams,
     },
   };

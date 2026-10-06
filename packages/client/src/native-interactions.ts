@@ -27,7 +27,7 @@ export interface NativeQuestion {
 export type NativeInteractionInput = {
   readonly native: NativeInteractionIdentity;
 } & (
-  | { readonly kind: 'approval'; readonly title: string; readonly decisions: readonly NativeApprovalDecision[] }
+  | { readonly kind: 'approval'; readonly title: string; readonly details?: Readonly<Record<string, unknown>>; readonly decisions: readonly NativeApprovalDecision[] }
   | { readonly kind: 'question'; readonly questions: readonly NativeQuestion[] }
 );
 export type NativeInteractionRequest = NativeInteractionInput & {
@@ -69,6 +69,8 @@ export interface NativeInteractionOptions {
   /** All request identities/tombstones are retained up to this lifetime bound; none are evicted/reused. */
   readonly maxRequests?: number;
 }
+/** Adapter consumers supply presentation hooks; the adapter always owns fatal transport disposal. */
+export type NativeInteractionHostOptions = Omit<NativeInteractionOptions, 'onFatal'>;
 export interface NativeInteractionTransport {
   respond(response: NativeInteractionResponse): Promise<void>;
   cancel(reason: 'deadline' | 'cancelled'): Promise<void>;
@@ -119,7 +121,7 @@ function snapshot<T>(value: T, code: NativeInteractionErrorCode): T {
 }
 function validateInput(input: NativeInteractionInput): void {
   if (!object(input) || !object(input.native)) throw error('invalid_request', 'native identity is required');
-  keys(input, input.kind === 'approval' ? ['native', 'kind', 'title', 'decisions'] : ['native', 'kind', 'questions'], 'invalid_request');
+  keys(input, input.kind === 'approval' ? ['native', 'kind', 'title', 'details', 'decisions'] : ['native', 'kind', 'questions'], 'invalid_request');
   const native = input.native;
   keys(native, ['id', 'method', 'sessionRef', 'turnId', 'itemId'], 'invalid_request');
   if (!(text(native.id) || (typeof native.id === 'number' && Number.isSafeInteger(native.id))) || !text(native.method) || !text(native.sessionRef)
@@ -127,7 +129,7 @@ function validateInput(input: NativeInteractionInput): void {
     throw error('invalid_request', 'invalid native request identity');
   }
   if (input.kind === 'approval') {
-    if (!text(input.title) || !Array.isArray(input.decisions) || !input.decisions.length
+    if (!text(input.title) || (input.details !== undefined && !object(input.details)) || !Array.isArray(input.decisions) || !input.decisions.length
       || new Set(input.decisions).size !== input.decisions.length || input.decisions.some(d => !decisions.includes(d))) {
       throw error('invalid_request', 'invalid approval decisions');
     }
@@ -171,12 +173,25 @@ function normalizeResponse(request: NativeInteractionRequest, input: NativeInter
     const answer = answers.get(q.id);
     if (!answer || !Array.isArray(answer.selectedOptionIds) || answer.selectedOptionIds.some(id => !q.options.some(o => o.id === id))
       || new Set(answer.selectedOptionIds).size !== answer.selectedOptionIds.length
-      || (!q.multiple && answer.selectedOptionIds.length > 1)
+      || (!q.multiple && answer.selectedOptionIds.length + (answer.text ? 1 : 0) > 1)
       || (answer.text !== undefined && (!q.allowText || typeof answer.text !== 'string'))
       || (!answer.selectedOptionIds.length && !answer.text?.trim())) throw error('invalid_response', 'answer is outside the question schema');
     return { questionId: q.id, selectedOptionIds: [...answer.selectedOptionIds].sort(), ...(answer.text === undefined ? {} : { text: answer.text }) };
   });
   return snapshot({ requestId: response.requestId, kind: 'question', answers: normalized }, 'invalid_response');
+}
+
+/** Internal adapter boundary: snapshot and validate local UI configuration before any process side effect. */
+export function snapshotNativeInteractionHostOptions(options: NativeInteractionHostOptions): NativeInteractionHostOptions {
+  let copied: NativeInteractionHostOptions;
+  try { copied = snapshotPlainData(options, { maxDepth: 2, allowUndefined: true, allowFunctions: true }) as NativeInteractionHostOptions; }
+  catch { throw new TypeError('invalid native interaction options'); }
+  if (!object(copied) || typeof copied.onRequest !== 'function' || (copied.onResolved !== undefined && typeof copied.onResolved !== 'function')) throw new TypeError('native interaction handlers are required');
+  boundedInteger(copied.timeoutMs ?? 60_000, 'interaction timeout');
+  boundedInteger(copied.writeTimeoutMs ?? 1_000, 'interaction write timeout');
+  boundedInteger(copied.maxPending ?? 32, 'interaction pending bound', 4096);
+  boundedInteger(copied.maxRequests ?? 4096, 'interaction lifetime bound', 65536);
+  return Object.freeze(copied);
 }
 
 /**

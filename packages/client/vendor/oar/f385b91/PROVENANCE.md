@@ -2,7 +2,7 @@
 
 Source: https://github.com/botiverse/oar, version 0.20.3, fixed commit `f385b918176d5ced07179e25e8cd758e75a784d1`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
-`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 22 source files plus LICENSE. Seventeen source files keep upstream bytes. Five source files contain BYOK changes. The six added files are imports of the selected contracts and Codex fold. No Cursor, ACP, CLI, arena, executable manager or branded resources are included.
+`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 22 source files plus LICENSE. Sixteen source files keep upstream bytes. Six source files contain BYOK changes. The six added files are imports of the selected contracts and Codex fold. No Cursor, ACP, CLI, arena, executable manager or branded resources are included.
 
 ## BYOK S1 changes
 
@@ -55,3 +55,30 @@ The base changes from `1775b57b774d23522e29acae333700289d0d1230` to `f385b918176
 Not vendored, with no selected path affected: the Cursor runtime moves to an optional `@cursor/sdk` peer handed over through `createCursorRuntime` (0.19/0.20). OAR moves to Pi ^1.0.2 (0.20.1). The root export and ACP effort-refusal fixes and documentation passes come in 0.20.2/0.20.3. The bridge `.d.ts`, the selected file set and the BYOK seams are unchanged.
 
 Build assets copy LICENSE, PROVENANCE.md and source-manifest.json to `dist/assets/provenance/oar/f385b91/`. The existing build-todo-assets.mjs provenance copy generates those assets. `third-party-manifest.json` remains the node_modules todo input inventory. The OAR sources are local vendor inputs and do not add node_modules entries.
+
+## Native interaction opt-in
+
+The selected upstream base and Apache-2.0 license remain unchanged. No T3 source
+was copied. `open.ts` now accepts an explicit local `on-request` approval policy
+for a configured native interaction Host; default policy remains `never`.
+`session.ts` verifies that policy in the native start/resume response before
+publishing a session. It hands server requests to a required bounded Host bridge
+only when configured, and provides one-shot result/error/local-cancellation
+callbacks. Native numeric and string request IDs receive distinct kernel record
+IDs while wire replies preserve the exact original ID. The BYOK controller
+owns timeout, cancellation and process-lifetime invalidation; unsupported
+request methods never receive an allow fallback. Fresh capabilities do not
+promise a remote approval protocol, whole-tool confirmation or restart replay.
+
+Maintained files now number six, adding `runtimes/codex/open.ts`; its original
+upstream digest stays in the source manifest. Native schema qualification uses
+OpenAI Codex `rust-v0.160.0`, separately from this OAR source pin.
+
+Native response result/error writes now use the required acknowledged-write
+transport method, whose Promise resolves only from stdin's completion callback.
+Unlike ordinary outbound requests (which have their own RPC response deadline),
+server-request replies have no subsequent RPC ACK; their local write receipt
+and timeout must therefore remain owned through cancellation. The fork records
+one local settlement even if a provider-resolved notification races an in-flight
+reply; an eventual write failure still terminates the process. The maintained
+file inventory remains six, since app-server-client.ts was already maintained.

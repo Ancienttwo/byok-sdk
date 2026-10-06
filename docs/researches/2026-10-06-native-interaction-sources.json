@@ -1,0 +1,103 @@
+{
+  "retrievedAt": "2026-10-06",
+  "method": "Read-only official source inspection; no source code copied into the implementation",
+  "claudeSdkCommit": "1cc862c469aaf4c738285be745ab12f980a11dbe",
+  "codexTag": "rust-v0.160.0",
+  "t3Commit": "3e6b45028ceec5820dacb37dc3852470ebdc9411",
+  "additionalDocumentation": [
+    "https://platform.claude.com/docs/en/agent-sdk/user-input",
+    "https://developers.openai.com/codex/app-server"
+  ],
+  "sources": [
+    {
+      "file": "claude-query.py",
+      "url": "https://github.com/anthropics/claude-agent-sdk-python/blob/1cc862c469aaf4c738285be745ab12f980a11dbe/src/claude_agent_sdk/_internal/query.py",
+      "sha256": "0562517de949f4431177f204fe84cda3265f495d0eb0a949b9ced96cc5bd8276"
+    },
+    {
+      "file": "claude-types.py",
+      "url": "https://github.com/anthropics/claude-agent-sdk-python/blob/1cc862c469aaf4c738285be745ab12f980a11dbe/src/claude_agent_sdk/types.py",
+      "sha256": "b1054473280782ab57b2b0690a49a820a2f97dbd2eb6b2ff1bbd3e6205b71bdb"
+    },
+    {
+      "file": "claude-transport.py",
+      "url": "https://github.com/anthropics/claude-agent-sdk-python/blob/1cc862c469aaf4c738285be745ab12f980a11dbe/src/claude_agent_sdk/_internal/transport/subprocess_cli.py",
+      "sha256": "23c0b35acfcff5426255f1f17433e66fc7f8f6d5b8f339e93e085233c569e11c"
+    },
+    {
+      "file": "AskForApproval.ts",
+      "url": "https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/schema/typescript/v2/AskForApproval.ts",
+      "sha256": "81dd17defd9a7fd4785346d3ce54c14243353b43174c7417827210cbd3ef3c52"
+    },
+    {
+      "file": "CommandExecutionApprovalDecision.ts",
+      "url": "https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/schema/typescript/v2/CommandExecutionApprovalDecision.ts",
+      "sha256": "9283d7206bc8df353c4fcc9a14682b5f69f7f288d666f975356762ed49d5bc6b"
+    },
+    {
+      "file": "CommandExecutionRequestApprovalParams.ts",
+      "url": "https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/schema/typescript/v2/CommandExecutionRequestApprovalParams.ts",
+      "sha256": "b3425c5bc97dd9a1d74d33ef1cb42d56049da7e4704435021d50fa4eb404abbe"
+    },
+    {
+      "file": "CommandExecutionRequestApprovalResponse.ts",
+      "url": "https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/schema/typescript/v2/CommandExecutionRequestApprovalResponse.ts",
+      "sha256": "454ceee4decc66a9c070273d4344fa8a0187732cd884b8b60edda3a17766aa95"
+    },
+    {
+      "file": "FileChangeApprovalDecision.ts",
+      "url": "https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/schema/typescript/v2/FileChangeApprovalDecision.ts",
+      "sha256": "8a5aa00ea5e9c7b0856da23daa6e799dc1c5f15d16553ce59390ec73b65c8430"
+    },
+    {
+      "file": "FileChangeRequestApprovalParams.ts",
+      "url": "https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/schema/typescript/v2/FileChangeRequestApprovalParams.ts",
+      "sha256": "32ec2fef83e1e17db98ea0b9b86baaa5c8bf2e8979988f5ad8fef3a93ab15074"
+    },
+    {
+      "file": "FileChangeRequestApprovalResponse.ts",
+      "url": "https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/schema/typescript/v2/FileChangeRequestApprovalResponse.ts",
+      "sha256": "527a9af90f753e2b7f1852415523443fc9745376bb2c4b0b735f900c8da8fc71"
+    },
+    {
+      "file": "ServerRequestResolvedNotification.ts",
+      "url": "https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/schema/typescript/v2/ServerRequestResolvedNotification.ts",
+      "sha256": "e428ba289071d7b2e04cedc8b3cd7e6adbe57409dbbc333c38178b316f122ec5"
+    },
+    {
+      "file": "ThreadResumeResponse.ts",
+      "url": "https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/schema/typescript/v2/ThreadResumeResponse.ts",
+      "sha256": "d55c7ff67d8c39ccc7bb4b5756252f134d36ebfa7f14ef5edbe3d569678e120d"
+    },
+    {
+      "file": "ThreadStartResponse.ts",
+      "url": "https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/schema/typescript/v2/ThreadStartResponse.ts",
+      "sha256": "2ecc3c074f9f4092ee0e8703e9c2bcecbe9544cf70663c15e82b325a1fd2efcf"
+    },
+    {
+      "file": "ToolRequestUserInputAnswer.ts",
+      "url": "https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/schema/typescript/v2/ToolRequestUserInputAnswer.ts",
+      "sha256": "271fbffc377b53570fae244df734bb666cb902bdff633bf27842a5bdd7e3d628"
+    },
+    {
+      "file": "ToolRequestUserInputOption.ts",
+      "url": "https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/schema/typescript/v2/ToolRequestUserInputOption.ts",
+      "sha256": "ec2f4b008b872a96c8460f4a830b8d0c20b60ef0421541970e3db62f329ef485"
+    },
+    {
+      "file": "ToolRequestUserInputQuestion.ts",
+      "url": "https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/schema/typescript/v2/ToolRequestUserInputQuestion.ts",
+      "sha256": "d0eaa32baa3b41a8ee3a3b764e84ffd75f7474f385eebeb779fe61f18deb2b24"
+    },
+    {
+      "file": "ToolRequestUserInputResponse.ts",
+      "url": "https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/app-server-protocol/schema/typescript/v2/ToolRequestUserInputResponse.ts",
+      "sha256": "39e4959095a1b31de3f7bf28422a6536d51d651581ad1f50bc5e30c02140498b"
+    },
+    {
+      "file": "t3-ProviderAdapter.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/3e6b45028ceec5820dacb37dc3852470ebdc9411/apps/server/src/orchestration-v2/ProviderAdapter.ts",
+      "sha256": "78079a5e4032ee46fa454be94dc153e8ff2987761863050b28261b4cfd82b325"
+    }
+  ]
+}

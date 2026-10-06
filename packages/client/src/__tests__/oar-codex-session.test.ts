@@ -20,6 +20,7 @@ function fakeServer() {
         : frame.method === 'turn/start' ? { turn: { id: 'turn-root' } } : {};
       receive(JSON.stringify({ id: frame.id, result }));
     }),
+    writeAcknowledged: text => { child.write(text); return Promise.resolve(); },
     kill: vi.fn(() => {
       if (ended) return; ended = true;
       exitHandlers.forEach(fn => fn(null)); resolveExit(null);
@@ -76,6 +77,7 @@ describe('unconnected OAR Codex adapter', () => {
       expect(reply.id).toBe((index + 3) % 2 ? `${index + 3}` : index + 3);
       expect(reply.error).toMatchObject({ code: -32601 });
     }
+    await Promise.resolve();
     expect(vi.getTimerCount()).toBe(0);
     expect(session.records().filter(record => record.kind === 'request' && record.direction === 'toApp')).toHaveLength(methods.length);
     await session.dispose();
@@ -85,7 +87,7 @@ describe('unconnected OAR Codex adapter', () => {
     vi.useFakeTimers();
     const fake = fakeServer(); const session = await fake.open();
     vi.mocked(fake.child.write).mockImplementationOnce(() => { throw new Error('broken transport'); });
-    expect(() => fake.frame({ id: 'request', method: 'item/permissions/requestApproval', params: {} })).toThrow('broken transport');
+    fake.frame({ id: 'request', method: 'item/permissions/requestApproval', params: {} });
     expect(fake.child.kill).toHaveBeenCalledTimes(1); expect(vi.getTimerCount()).toBe(0);
     expect(session.records().some(record => record.kind === 'response' && record.body.kind === 'rejected' && record.body.reason === 'broken transport')).toBe(true);
   });

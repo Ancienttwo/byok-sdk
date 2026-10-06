@@ -37,5 +37,5 @@ export type {
   NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity,
   NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest,
   NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason,
-  NativeInteractionChannel, NativeInteractionOptions, NativeInteractionTransport, NativeInteractionErrorCode,
+  NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode,
 } from '../native-interactions';

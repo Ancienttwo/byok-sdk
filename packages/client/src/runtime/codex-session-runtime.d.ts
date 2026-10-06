@@ -21,6 +21,7 @@ export declare function codexSession(
     env: Readonly<Record<string, string>>;
     resume?: string;
     model?: string;
+    approvalPolicy?: "never" | "on-request";
   },
   timeout?: number,
   hooks?: {
@@ -28,5 +29,8 @@ export declare function codexSession(
     onRecord?: (record: CodexRecord) => void;
     maxBytes?: number;
     onLimit?: () => never;
+    onServerRequest?: (id: string | number, method: string, params: Record<string, unknown>, reply: {
+      respond(value: Record<string, unknown>): Promise<void>; reject(code: number, message: string): Promise<void>; cancelled(): void;
+    }) => void;
   },
 ): Promise<RawCodexSession>;

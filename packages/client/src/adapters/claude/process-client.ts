@@ -42,7 +42,8 @@ const STDERR_RING_CAPACITY = 20;
  * Structurally simpler than pi's `PiRpcClient` in one real way, and
  * different (not simpler) in another:
  *
- * - No request/response correlation. pi's RPC mode replies to each command
+ * - No user-turn request/response correlation. Optional native controls are
+ *   correlated on a separate channel. pi's RPC mode replies to each command
  *   with a `{type:"response", id, success, ...}` — claude's stream-json has
  *   no such acknowledgement at all; writing a `{"type":"user",...}` line
  *   just starts (or queues) a turn, and the ONLY confirmation is the
@@ -220,7 +221,7 @@ export class ClaudeProcessClient {
     });
   }
 
-  /** Every parsed stream-json line — `system/init` is consumed internally (see `waitForInit`) but is also forwarded here like any other frame, so routine-frame accounting in `ClaudeSession`'s mapper stays uniform. */
+  /** Every non-control parsed stream-json line — `system/init` is consumed internally (see `waitForInit`) but is also forwarded here like any other frame, so routine-frame accounting in `ClaudeSession`'s mapper stays uniform. */
   get events(): AsyncIterable<ClaudeStreamMessage> {
     return this.eventQueue;
   }
@@ -336,6 +337,8 @@ export class ClaudeProcessClient {
       return; // a stray non-JSON line is not this client's concern
     }
 
+    if (msg === null || typeof msg !== 'object' || Array.isArray(msg)) return;
+
     if (
       this.sessionId === undefined &&
       msg.type === 'system' &&
@@ -349,7 +352,7 @@ export class ClaudeProcessClient {
     }
 
     controls.get(this)?.receive(msg);
-    if (msg.type === 'control_response') return;
+    if (msg.type === 'control_response' || msg.type === 'control_request' || msg.type === 'control_cancel_request') return;
     this.eventQueue.push(msg);
   }
 
