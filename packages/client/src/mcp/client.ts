@@ -233,6 +233,7 @@ class BoundedStdioTransport implements Transport {
     private readonly server: McpStdioServerSpec,
     private readonly options: McpStdioClientOptions,
     private readonly label: string,
+    private readonly checkDeadline: () => void,
   ) {
     this.childEnv = Object.freeze({ ...options.env, ...(server.env ?? {}) });
   }
@@ -252,6 +253,7 @@ class BoundedStdioTransport implements Transport {
   }
 
   async start(): Promise<void> {
+    this.checkDeadline();
     if (this.child !== undefined) throw new Error(`${this.label} transport already started`);
     let child: ChildProcessWithoutNullStreams;
     try {
@@ -340,6 +342,7 @@ class BoundedStdioTransport implements Transport {
   }
 
   async send(message: JSONRPCMessage): Promise<void> {
+    this.checkDeadline();
     const child = this.child;
     if (child === undefined || this.closed) {
       throw new McpTransportError(`${this.label} is not connected`);
@@ -397,6 +400,7 @@ export class McpStdioClient {
   private readonly label: string;
   private readonly timeoutMs: number;
   private connected = false;
+  private deadline: number | undefined;
 
   constructor(
     private readonly server: McpStdioServerSpec,
@@ -404,7 +408,7 @@ export class McpStdioClient {
   ) {
     this.label = options.label ?? 'MCP server';
     this.timeoutMs = options.timeoutMs ?? MCP_DEFAULT_REQUEST_TIMEOUT_MS;
-    this.transport = new BoundedStdioTransport(server, options, this.label);
+    this.transport = new BoundedStdioTransport(server, options, this.label, () => this.checkDeadline());
     this.client = new Client(CLIENT_INFO, {
       // No `sampling`, no `elicitation`, no `roots`. Declaring a capability is
       // what invites the server to drive this process, and nothing in this SDK
@@ -448,6 +452,12 @@ export class McpStdioClient {
   /**
    * Start the child and complete `initialize`.
    *
+   * Optional `deadline` is an absolute same-process `performance.now()` value
+   * in milliseconds. It must be finite; expired values refuse the spawn. It
+   * guards spawn and every outgoing frame; the signal still cancels protocol
+   * waits. Per-request timeouts remain unchanged. Observations supply both;
+   * long-lived call clients normally omit the absolute deadline.
+   *
    * An attested implementation is re-measured BEFORE the spawn, every time:
    * the artifact, the interpreter of an `interpreter+bundle`, and the
    * environment this child is about to be handed. Resolve and launch are two
@@ -462,9 +472,15 @@ export class McpStdioClient {
    * so the daemon declines the offer permanently — re-offering spawns the same
    * changed file and reaches the same verdict.
    */
-  async connect(signal?: AbortSignal): Promise<void> {
+  async connect(signal?: AbortSignal, deadline?: number): Promise<void> {
     if (this.connected) throw new Error(`${this.label} is already connected`);
     try {
+      signal?.throwIfAborted();
+      if (deadline !== undefined && !Number.isFinite(deadline)) {
+        throw new RangeError(`${this.label} deadline must be a finite performance.now() value`);
+      }
+      this.deadline = deadline;
+      this.checkDeadline();
       const binding = this.options.sdkHelperBinding;
       if (binding !== undefined) {
         const args = this.server.args ?? [];
@@ -492,15 +508,25 @@ export class McpStdioClient {
       throw cause;
     }
     try {
+      signal?.throwIfAborted();
+      this.checkDeadline();
       await this.client.connect(this.transport, {
         timeout: this.timeoutMs,
         ...(signal === undefined ? {} : { signal }),
       });
+      signal?.throwIfAborted();
+      this.checkDeadline();
     } catch (cause) {
       await this.close();
       throw this.classify(cause, 'initialize');
     }
     this.connected = true;
+  }
+
+  private checkDeadline(): void {
+    if (this.deadline !== undefined && performance.now() >= this.deadline) {
+      throw new McpTransportError(`${this.label} observation deadline expired`);
+    }
   }
 
   /** The server's self-reported identity, as returned by `initialize`. */

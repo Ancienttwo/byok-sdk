@@ -117,6 +117,10 @@ export function createBoundedLineReader(options: BoundedLineReaderOptions): Boun
   return { stop };
 }
 
+/** Session-wide retention caps include frames already handed to the output stream. */
+export const MCP_SERVER_MAX_PENDING_BYTES = 4 * 1_048_576;
+export const MCP_SERVER_MAX_PENDING_FRAMES = 256;
+
 export interface BoundedFrameWriterOptions {
   readonly output: NodeJS.WritableStream;
   /** Maximum UTF-8 bytes of one encoded frame, newline included. */
@@ -129,9 +133,10 @@ export interface BoundedFrameWriter {
    *
    * Returns the frame's UTF-8 byte length when it exceeds the cap — in which
    * case NOTHING was written and nothing ever will be for that frame — and
-   * `undefined` when the frame was accepted. Never emits a partial line.
+   * `'pending-limit'` if accepting it would exceed either aggregate retention
+   * cap, and `undefined` when accepted. Never emits a partial line.
    */
-  write(frame: string): number | undefined;
+  write(frame: string): number | 'pending-limit' | undefined;
   /** Drop the queue and refuse every later frame. Idempotent. */
   stop(): void;
 }
@@ -142,30 +147,40 @@ export interface BoundedFrameWriter {
  * parks the queue until `'drain'` instead of letting handlers run ahead of the
  * pipe.
  *
- * The queue is bounded transitively: the only unsolicited frames are responses,
- * and the number of outstanding responses is capped by the session's in-flight
- * bound.
+ * Every frame counts against both aggregate caps until its write callback
+ * completes, including frames buffered inside a Writable whose write() returned
+ * true. Tool completion never releases output capacity. The session closes on
+ * exhaustion rather than pausing input and preventing cancellation delivery.
  */
 export function createBoundedFrameWriter(options: BoundedFrameWriterOptions): BoundedFrameWriter {
   const { output, maxFrameBytes } = options;
   const queue: string[] = [];
   let pumping = false;
   let stopped = false;
+  let pendingBytes = 0;
+  let pendingFrames = 0;
+  let releaseDrain: (() => void) | undefined;
 
   async function pump(): Promise<void> {
     pumping = true;
     try {
       while (queue.length > 0 && !stopped) {
         const frame = queue.shift() as string;
-        if (output.write(frame)) continue;
+        if (output.write(frame, () => {
+          if (stopped) return;
+          pendingBytes -= Buffer.byteLength(frame, 'utf8');
+          pendingFrames -= 1;
+        })) continue;
         if (stopped) return;
         await new Promise<void>((resolve) => {
           const done = (): void => {
             output.off('drain', done);
             output.off('close', done);
             output.off('error', done);
+            releaseDrain = undefined;
             resolve();
           };
+          releaseDrain = done;
           output.once('drain', done);
           output.once('close', done);
           output.once('error', done);
@@ -177,10 +192,15 @@ export function createBoundedFrameWriter(options: BoundedFrameWriterOptions): Bo
   }
 
   return {
-    write(frame: string): number | undefined {
+    write(frame: string): number | 'pending-limit' | undefined {
       if (stopped) return undefined;
       const bytes = Buffer.byteLength(frame, 'utf8');
       if (bytes > maxFrameBytes) return bytes;
+      if (pendingBytes + bytes > MCP_SERVER_MAX_PENDING_BYTES || pendingFrames >= MCP_SERVER_MAX_PENDING_FRAMES) {
+        return 'pending-limit';
+      }
+      pendingBytes += bytes;
+      pendingFrames += 1;
       queue.push(frame);
       if (!pumping) void pump();
       return undefined;
@@ -188,6 +208,9 @@ export function createBoundedFrameWriter(options: BoundedFrameWriterOptions): Bo
     stop(): void {
       stopped = true;
       queue.length = 0;
+      pendingBytes = 0;
+      pendingFrames = 0;
+      releaseDrain?.();
     },
   };
 }
