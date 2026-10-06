@@ -62,7 +62,7 @@ jobs:
         with:
           node-version: '26'
 
-      # setup-bun reads the exact version from root packageManager.
+      # Every setup-bun step reads the exact version from root packageManager (Bun 1.4.2).
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
@@ -85,7 +85,10 @@ jobs:
             exit 1
           fi
           echo "bun path: $BUN_PATH"
+          BUN_EXPECTED_VERSION="$(node -p "require('./package.json').packageManager.slice(4)")"
+          test "$(bun --version)" = "$BUN_EXPECTED_VERSION"
           bun --version
+          bun --revision
           shasum -a 256 "$BUN_PATH"
           echo "BYOK_TEST_BUN_BIN=$BUN_PATH" >> "$GITHUB_ENV"
 
@@ -164,7 +167,7 @@ jobs:
         run: bun run --filter @byok-sdk/client test -- src/__tests__/launch-cwd-launcher.test.ts
 
   execution-recovery-native:
-    name: compiled execution recovery (macOS, Node 24, Bun 1.4)
+    name: compiled execution recovery (macOS, Node 24, Bun 1.4.2)
     runs-on: macos-latest
     timeout-minutes: 15
     steps:

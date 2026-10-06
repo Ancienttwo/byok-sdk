@@ -8,7 +8,7 @@ or authenticated remote SaaS approval transport. Salesko remains Pi-only.
 
 ## Run the fixture
 
-Use the repository's pinned Bun 1.4.0 tooling and Node >=24.15.0 (CI baseline
+Use the repository's pinned Bun 1.4.2 tooling and Node >=24.15.0 (CI baseline
 24.21.0). From the repository root, after the normal frozen dependency setup:
 
 ```sh
