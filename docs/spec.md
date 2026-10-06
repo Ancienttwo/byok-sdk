@@ -1030,7 +1030,7 @@ outside the dispatch dependency graph and delivers credentials through its exist
 separately installed launcher boundary.
 
 The package manager is not the runtime authority. This repository uses Bun
-1.4.0 with its isolated workspace linker and one committed `bun.lock`.
+1.4.2 with its isolated workspace linker and one committed `bun.lock`.
 Downstreams install the standard npm registry artifacts with their chosen npm
 client; published library/CLI execution requires Node.js 24.15.0 or newer.
 The device daemon may also be shipped as a Bun-compiled single-file launcher;

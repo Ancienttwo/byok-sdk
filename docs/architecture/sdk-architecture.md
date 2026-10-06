@@ -108,7 +108,7 @@ flowchart LR
 
 ### 1.2 Monorepo 与依赖图
 
-仓库以 Bun 1.4.0 管理 workspace 与 lockfile，Node `>=24.15.0` 仍是 dispatch/runtime authority。当前有十五个 workspace package：九个 public npm manifest（七个 dispatch ownership package、随 train 发布的 support package `@byok-sdk/implementation-identity`、独立版本的 `@byok-sdk/keys`）、四个 private examples，以及两个只供测试使用的 private package：`@byok-sdk/conformance` 与只被 conformance 消费的 device simulator `@byok-sdk/testkit`。ADR-035 保留有独立 Node/Hono 部署职责的 `@byok-sdk/server`，并退出无独立能力的 `byok-sdk` umbrella：0.21.0 删除 `packages/sdk`，同一 release 把 `@byok-sdk/testkit` 转为 private，public artifacts 由 11 降为 9。`check:release-graph` 要求 `packages/` 下除这九个之外的 manifest 全部 private，并拒绝 `byok-sdk` 重新出现。npm registry tarball 仍由 isolated npm install + Node import smoke 验证；下图画当前 runtime、release 与 test-only edges。
+仓库以 Bun 1.4.2 管理 workspace 与 lockfile，Node `>=24.15.0` 仍是 dispatch/runtime authority。当前有十五个 workspace package：九个 public npm manifest（七个 dispatch ownership package、随 train 发布的 support package `@byok-sdk/implementation-identity`、独立版本的 `@byok-sdk/keys`）、四个 private examples，以及两个只供测试使用的 private package：`@byok-sdk/conformance` 与只被 conformance 消费的 device simulator `@byok-sdk/testkit`。ADR-035 保留有独立 Node/Hono 部署职责的 `@byok-sdk/server`，并退出无独立能力的 `byok-sdk` umbrella：0.21.0 删除 `packages/sdk`，同一 release 把 `@byok-sdk/testkit` 转为 private，public artifacts 由 11 降为 9。`check:release-graph` 要求 `packages/` 下除这九个之外的 manifest 全部 private，并拒绝 `byok-sdk` 重新出现。npm registry tarball 仍由 isolated npm install + Node import smoke 验证；下图画当前 runtime、release 与 test-only edges。
 
 ```mermaid
 flowchart LR
