@@ -1,6 +1,7 @@
 # Correct the 0.24 release and migration contract
 
-Status: documentation candidate; independent review and Draft PR pending.
+Status: [Draft PR #285](https://github.com/Ancienttwo/byok-sdk/pull/285) open;
+OAR 0.25.0 integration candidate awaiting independent review and fresh CI.
 
 Base: `Ancienttwo/byok-sdk` main
 `3e1a9c18d8f2865a07630afdf4746d8f548c5d30` (2026-10-06).
@@ -17,8 +18,9 @@ states local opt-in and fixture limitations; link it rather than introduce a
 competing capability authority.
 
 No implementation, test, package manifest, lock, API golden or SQL file changes.
-No dependency installation, database migration, provider/account/security probe,
-npm publication, tag, merge or deployment. Registry first-publication code and
+The original Draft scope excluded dependency installation, database migration,
+provider/account/security probes, npm publication, tags, merge and deployment.
+The later approval adds only PR merge/cleanup and the bounded integration below. Registry first-publication code and
 its tests are a separate slice; this document does not claim that gate passed.
 The fixture-only Codex reference Host in PR #284 is also separate.
 
@@ -35,8 +37,12 @@ The fixture-only Codex reference Host in PR #284 is also separate.
   from Salesko-specific work; document pre-publication accepted-tarball integration.
 - [x] Check new local Markdown links/anchors, version-authority behavior, source
   inventory and docs-only diff. Record unavailable full-suite evidence honestly.
-- [ ] Independently review the immutable candidate and open the requested Draft
-  PR after exact tree verification. No merge or publication is included.
+- [x] Independently review the original immutable candidate and open Draft PR
+  #285 after exact tree verification (published head `2e924fb0c047ebaab58596ba0249cd55e6843592`).
+- [x] Reconcile the new main OAR 0.25.0 source update with this documentation
+  branch through a normal merge, retaining the external implementation unchanged.
+- [ ] Independently review the combined tree and qualify its own CI before the
+  approved PR merge/cleanup. npm publication and deployment remain excluded.
 
 ## Verified source distinctions
 
@@ -94,7 +100,49 @@ first-publication readback contract and tests before release; registry errors
 cannot prove absence. Pi transitive-range stability needs either a structural
 solution or an explicit risk decision for any stronger fresh-install promise.
 
-This slice ends at the reviewed Draft PR. It does not authorize versions,
+The original delivery was the reviewed Draft PR. The later approved merge/cleanup
+requires the integration and fresh qualification below. It does not authorize versions,
 registry uploads, live provider costs, new permissions or production cutover.
 Rollback of this documentation-only slice is a normal code-review revert;
 runtime/storage rollback follows the separately documented Host procedure.
+
+
+## OAR 0.25.0 integration after main advanced
+
+External PR #286 advanced main to
+`984ec15aaa25c7e94b093dc51e02ce136766f04c`. The integration starts from published
+PR #285 head `2e924fb0c047ebaab58596ba0249cd55e6843592` and merges that main normally.
+Those are the ordered first and second parents; no rebase or force update is used.
+
+The exact OAR source is `a800aa00ba9c754c88ba25f84a6981e757b0f19f`, version
+0.25.0, at `packages/client/vendor/oar/a800aa0/`. The new private type member
+`tool_call_input` carries the complete replacement input. The upstream
+resume-directory edits are comments. All six maintained runtime files retain
+identical implementation bodies after the source-notice pin changes. The
+upstream process-manager options are not admitted into BYOK's injected process
+contract. Native interaction policy, Codex CLI 0.160.0 qualification, public API
+goldens, SQLite/PostgreSQL boundaries, package versions and lock are unchanged.
+
+Only current OAR release prose and this plan require integration edits. The
+intermediate 0.20.3 changelog entry remains explicitly historical. The external
+code, source manifest, bridge/type-check inputs and upgrade note are preserved.
+
+Combined-tree validation is separate from the original docs review and both
+parents' CI. The focused integration checks passed:
+
+- Version-authority and its 11 regression tests.
+- All 80 local Markdown links/anchors across the seven files changed relative
+  to new main, plus whitespace checks.
+- All 23 vendored file hashes and exact main bytes; six maintained implementation
+  bodies after only source-notice pin replacement; live bridge/source references.
+- The existing OAR JS/declaration bridge suite, 2/2 tests, including its TypeScript
+  compatibility assertions over current integration source and BYOK consumers.
+  It used temporary read-only links to an existing installed toolchain with the
+  same lock and unchanged built protocol/identity prerequisites. The links were
+  removed afterward; no dependency installation or build was performed.
+- Exact preservation of new main runtime/tests/workflow/lock/API/SQL files.
+
+No aggregate build/typecheck/test, full API-surface, release pack/install or new
+combined-tree CI acceptance is claimed. Prior build/runtime results are not
+relabelled as a pass for this merged source. No native/security probe or live
+runtime test is part of this integration correction.

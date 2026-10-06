@@ -2,9 +2,9 @@
   "format": "byok.vendor-source",
   "version": 1,
   "package": "@botiverse/oar",
-  "packageVersion": "0.20.3",
+  "packageVersion": "0.25.0",
   "repository": "https://github.com/botiverse/oar",
-  "commit": "f385b918176d5ced07179e25e8cd758e75a784d1",
+  "commit": "a800aa00ba9c754c88ba25f84a6981e757b0f19f",
   "license": "Apache-2.0",
   "files": [
     {
@@ -46,14 +46,14 @@
     {
       "path": "contracts/records.ts",
       "sourcePath": "packages/oar/src/contracts/records.ts",
-      "upstreamSha256": "aa7126fa15e58c8af285d827fe77e1542d8c5c88420c34265b4604904ce19886",
-      "vendoredSha256": "aa7126fa15e58c8af285d827fe77e1542d8c5c88420c34265b4604904ce19886"
+      "upstreamSha256": "548dc9ed85b067f8a5ae5ef8bc9e3fe16cd50ce568e3ff93dc3f752ba9f9208d",
+      "vendoredSha256": "548dc9ed85b067f8a5ae5ef8bc9e3fe16cd50ce568e3ff93dc3f752ba9f9208d"
     },
     {
       "path": "contracts/session.ts",
       "sourcePath": "packages/oar/src/contracts/session.ts",
-      "upstreamSha256": "99b1054550095e1b5791744f1c23cb1f8d27fc3c8d28b52ed16738219a91b8da",
-      "vendoredSha256": "99b1054550095e1b5791744f1c23cb1f8d27fc3c8d28b52ed16738219a91b8da"
+      "upstreamSha256": "36d3e468f0f473faa1e18a3f3d63647b70bf6dc1eece8b6d996861a5aba8d838",
+      "vendoredSha256": "36d3e468f0f473faa1e18a3f3d63647b70bf6dc1eece8b6d996861a5aba8d838"
     },
     {
       "path": "contracts/status.ts",
@@ -76,8 +76,8 @@
     {
       "path": "runtimes/codex/app-server-client.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/app-server-client.ts",
-      "upstreamSha256": "c961f279ad5ab45503afb264a4e581a03f7a173a05ee7af43725960ba250d9d4",
-      "vendoredSha256": "43235759ab7a79a41a131ea0d77fa9c0c708263bd621fe51a6f2561d8b7433db",
+      "upstreamSha256": "5d7bf0505d86eb1526d9fa6755d704b818755f057b345823672fb3bfddcb90ce",
+      "vendoredSha256": "5a959b6dc64855fe244a97c303812ae70ac1beecca5ba4d4d7c671f7fb56eabe",
       "delta": "Inject caller-owned line-process spawn; pass explicit env unchanged; preserve server ids and support replies; default/per-request timeouts; bounded held and pending state with fatal overflow; release timers on settlement, failed write, exit and kill. S2b: settlement consumer errors reject already-dequeued waiters; no uncaught timer failure. Re-vendor: omit upstream home queue and executable diagnostics; preserve direct injected ownership and bounded exitError; retain handled spawned promise. Native replies await acknowledged stdin writes under bounded ownership."
     },
     {
@@ -90,14 +90,14 @@
       "path": "runtimes/codex/open.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/open.ts",
       "upstreamSha256": "9e5400d417a90e27451405a679fc6dea87cb8508d0e4aea26fc4bec184127a8a",
-      "vendoredSha256": "ca022132aae6b1493815e62d33e2e61fe6cb2a3f05a99be601b1ede7602cb4ad",
+      "vendoredSha256": "4013419d8cd61ee8976cbee2922acc61fa47d70c98831e32a2e0da18575f44c9",
       "delta": " Native interactions: explicit on-request policy with readback, opt-in caller-owned request lifecycle, one-shot typed replies and local cancellation records; no fallback allow or persistence. Native replies await acknowledged stdin writes under bounded ownership."
     },
     {
       "path": "runtimes/codex/projection.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/projection.ts",
       "upstreamSha256": "84a6b3284e611c27cdfcbc607fca5ae640e5342a07c4f32a83e8c708460efa8d",
-      "vendoredSha256": "2f993fa2bf5802ebb439f0867d78bbcf2dbe9c3ec8b1325009b614f4fa81fc01",
+      "vendoredSha256": "a3f571fb4750e886d9c916432a2b51a0fe58d8c0e7356a814509177dac0760d0",
       "delta": "BYOK S2a: remove regex failure classification, retain raw reason and required failure unknown sentinel."
     },
     {
@@ -110,14 +110,14 @@
       "path": "runtimes/codex/rpc-control.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/rpc-control.ts",
       "upstreamSha256": "16e1c120f2ac97f19dd6dac6f7342ecd03fbd3c38f16cbfe55833083afcd8127",
-      "vendoredSha256": "450bd5cf4e3f368a867e6341ae22515b2e71bd4b66b9e55670b2083a59e7c5d4",
+      "vendoredSha256": "fcb1c07cbf2ee0215f196af41f85cb76f590be7e2c9417d3bcf9a8adc582274a",
       "delta": "Pass configurable control deadline (default 30000ms) and record typed RPC timeouts as rejected responses. Use an equivalent deferred Promise compatible with the SDK ES2022 lib. S2b: replace the redundant deferred response waiter with synchronous response capture to avoid hanging on required-consumer/budget failure."
     },
     {
       "path": "runtimes/codex/session.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/session.ts",
       "upstreamSha256": "0694bbdb890914ee54482a0663bbd69e2865509ec3b9ab2fa13d3ef2be871173",
-      "vendoredSha256": "a2ce3338139acadb540ce071c780b31b9de5159b0b721ac2ec3464b1200202eb",
+      "vendoredSha256": "c01bb82f4dfcae57834a2f6c68c7a11cb585a236a5765ea09e40952cefdc417e",
       "delta": "BYOK S2a: injected spawn and explicit filtered env; fixed YOLO sandbox; raw AdapterSession without sealSession/input-images; native-first frame capture with visible fold failure/kill; bounded server request decline/reject using 0.159.2 response schemas; ES2022 deferred Promise. S2b: explicit body.origin=byok-native; inject required consumer/budget before registration. Re-vendor: remove capabilities.steer; refine optional generic steer to a required Codex method; no withdraw or derived deliver. Native interactions: explicit on-request policy with readback, opt-in caller-owned request lifecycle, one-shot typed replies and local cancellation records; no fallback allow or persistence. Native replies await acknowledged stdin writes under bounded ownership."
     },
     {
@@ -142,7 +142,7 @@
       "path": "shared/session-kernel.ts",
       "sourcePath": "packages/oar/src/shared/session-kernel.ts",
       "upstreamSha256": "87c9c85cb8bf039cff3ac9c8e2e1ae3c88cbf39bc21d7d9313eff55c25eb561e",
-      "vendoredSha256": "4dd950b09c3a90498c86a9e8d5527eb9dd1aa0a631873e2ca68131e0ff87b265",
+      "vendoredSha256": "5740dfe2cc4d385f5a5a56be5faa5730cc1a4f9bead00c177fa4eafdebbcf93b",
       "delta": "BYOK S2b: fatal serialized retained-record byte budget; required consumer runs after append outside best-effort observers."
     },
     {

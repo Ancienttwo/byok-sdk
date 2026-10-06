@@ -8,6 +8,11 @@
 
 ## Unreleased
 
+- **Changed (client)** — update the private OAR source from 0.20.3 to 0.25.0
+  (`a800aa00ba9c754c88ba25f84a6981e757b0f19f`). Add the upstream
+  `tool_call_input` contract. Keep BYOK process ownership and native request policy.
+  Update source hashes, bridge imports and build provenance.
+
 - **Fixed (client)** — the prepared lane now supports a truly tool-less record
   (`requiredToolsets: []`, `agentMemory: 'none'`; the offer omits
   `requiredToolsets`). It was accepted by the protocol but refused by the device at
@@ -31,7 +36,8 @@
   Other CLI versions remain unsupported.
 
 - **Changed (client)** — re-vendor the private OAR fork 0.18.0 (`1775b57`) -> 0.20.3
-  (`f385b918176d5ced07179e25e8cd758e75a784d1`) at `vendor/oar/f385b91/`. Upstream changed
+  (`f385b918176d5ced07179e25e8cd758e75a784d1`), then at `vendor/oar/f385b91/`.
+  This intermediate source pin is superseded by the 0.25.0 entry above. Upstream changed
   only comment text in three selected contract files; the BYOK deltas, the bridge and
   runtime behaviour are unchanged.
 
@@ -74,7 +80,7 @@
   The npm physical root count has not been re-measured.
 
 - **Breaking (client)** — Codex now uses app-server 0.160.0 with the vendored
-  OAR 0.20.3 `f385b91` kernel/driver (Apache-2.0), replacing the exec path. The adapter
+  current OAR 0.25.0 `a800aa0` kernel/driver (Apache-2.0), replacing the exec path. The adapter
   defaults to auto/YOLO: `readonly` and `network:false` are no longer supported;
   detection adds `app_server_unavailable` and `runtime_version_unsupported`
   refusal reasons. Claude `confirm` and the `byok-approval-mcp` bin are removed;
