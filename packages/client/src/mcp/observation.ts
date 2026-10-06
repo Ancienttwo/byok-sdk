@@ -2,6 +2,8 @@ import { compareCodeUnits } from '../util/compare-code-units';
 import {
   McpAuthorityError,
   McpStdioClient,
+  McpTransportError,
+  MCP_DEFAULT_REQUEST_TIMEOUT_MS,
   MCP_OBSERVATION_MAX_STDOUT_BYTES,
   type McpStdioClientOptions,
   type McpStdioServerSpec,
@@ -145,6 +147,8 @@ export function classifyMcpToolsetServerObservation(
 }
 
 export interface ObserveMcpServerOptions extends Omit<McpStdioClientOptions, 'maxStdoutBytes'> {
+  /** Total initialize + tools/list budget, including every page; cleanup is awaited separately. */
+  readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
 }
 
@@ -221,14 +225,34 @@ export async function observeMcpServer(
   options: ObserveMcpServerOptions,
 ): Promise<McpServerObservation> {
   const label = options.label ?? `MCP server "${serverName}"`;
+  const timeoutMs = options.timeoutMs ?? MCP_DEFAULT_REQUEST_TIMEOUT_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0 || timeoutMs > 2_147_483_647) {
+    throw new RangeError(`${label} observation timeout must be between 0 and 2147483647ms`);
+  }
   const client = new McpStdioClient(server, {
     ...options,
     label,
     maxStdoutBytes: MCP_OBSERVATION_MAX_STDOUT_BYTES,
   });
+  const deadline = performance.now() + timeoutMs;
+  const controller = new AbortController();
+  const signal = options.signal === undefined
+    ? controller.signal
+    : AbortSignal.any([options.signal, controller.signal]);
+  const expire = (): void => controller.abort(new McpTransportError(`${label} observation timed out after ${timeoutMs}ms`));
+  const checkDeadline = (): void => {
+    // Preserve an earlier caller cancellation instead of replacing its reason.
+    signal.throwIfAborted();
+    if (performance.now() >= deadline) expire();
+    signal.throwIfAborted();
+  };
+  const timer = setTimeout(expire, timeoutMs);
   try {
-    await client.connect(options.signal);
-    const tools = await client.listTools(options.signal);
+    checkDeadline();
+    await client.connect(signal, deadline);
+    checkDeadline();
+    const tools = await client.listTools(signal);
+    checkDeadline();
     const descriptors = tools.map((tool) => validateTool(label, tool));
     const names = new Set<string>();
     for (const tool of descriptors) {
@@ -239,13 +263,16 @@ export async function observeMcpServer(
       }
       names.add(tool.name);
     }
-    return Object.freeze({
+    const observation = Object.freeze({
       serverName,
       serverInfo: client.serverInfo(),
       protocolVersion: client.protocolVersion(),
       tools: Object.freeze([...descriptors].sort((left, right) => compareCodeUnits(left.name, right.name))),
     });
+    checkDeadline();
+    return observation;
   } finally {
+    clearTimeout(timer);
     await client.close();
   }
 }

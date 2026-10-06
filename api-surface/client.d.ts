@@ -12113,6 +12113,16 @@ export type McpServerCloseReason =
     readonly kind: 'frame-limit';
     readonly limitBytes: number;
 }
+/**
+ * Accepting another output frame would exceed 4 MiB or 256 pending frames,
+ * including unfinished stream writes. Reading stops, calls abort and queued
+ * replies are discarded. Already-submitted stream writes may still finish.
+ */
+ | {
+    readonly kind: 'outbound-buffer-limit';
+    readonly limitBytes: number;
+    readonly limitFrames: number;
+}
 /** A single outbound frame exceeded `maxOutboundFrameBytes`; nothing was written for it. */
  | {
     readonly kind: 'outbound-frame-limit';
@@ -12299,9 +12309,16 @@ export declare class McpStdioClient {
     private readonly label;
     private readonly timeoutMs;
     private connected;
+    private deadline;
     constructor(server: McpStdioServerSpec, options: McpStdioClientOptions);
     /**
      * Start the child and complete `initialize`.
+     *
+     * Optional `deadline` is an absolute same-process `performance.now()` value
+     * in milliseconds. It must be finite; expired values refuse the spawn. It
+     * guards spawn and every outgoing frame; the signal still cancels protocol
+     * waits. Per-request timeouts remain unchanged. Observations supply both;
+     * long-lived call clients normally omit the absolute deadline.
      *
      * An attested implementation is re-measured BEFORE the spawn, every time:
      * the artifact, the interpreter of an `interpreter+bundle`, and the
@@ -12317,7 +12334,8 @@ export declare class McpStdioClient {
      * so the daemon declines the offer permanently — re-offering spawns the same
      * changed file and reaches the same verdict.
      */
-    connect(signal?: AbortSignal): Promise<void>;
+    connect(signal?: AbortSignal, deadline?: number): Promise<void>;
+    private checkDeadline;
     /** The server's self-reported identity, as returned by `initialize`. */
     serverInfo(): {
         readonly name: string;
@@ -12468,6 +12486,8 @@ export declare function classifyMcpToolsetServerObservation(observation: McpServ
     readonly readOnlyTools: readonly string[] | null;
 }): McpToolsetServerObservation;
 export interface ObserveMcpServerOptions extends Omit<McpStdioClientOptions, 'maxStdoutBytes'> {
+    /** Total initialize + tools/list budget, including every page; cleanup is awaited separately. */
+    readonly timeoutMs?: number;
     readonly signal?: AbortSignal;
 }
 /**
