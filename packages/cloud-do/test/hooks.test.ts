@@ -227,6 +227,7 @@ describe('cloud 4e-1 hooks in real workerd and pi Harness', () => {
     const rows = await hooks.dump(name); expect(rows.cloud_invocations[0]).toMatchObject({ state: 'running', settledAt: null, settledEventSeq: null });
     expect(rows.cloud_events.some((row: any) => row.type === 'tool.settled')).toBe(false); expect(rows.cloud_projections).toHaveLength(0);
   });
+  // Only count retention builds a 10,010-event workerd fixture; age keeps the default budget.
   for (const mode of ['age', 'count'] as const) hooksTest(`uses ledger identity and clock in lookup after ${mode} event retention`, async ({ hooks }) => {
     hooks.provider.reset([['get_financial_statements']]); const name = await hooks.setup(); await hooks.run(name); const before = await hooks.dump(name); const source = before.cloud_invocations[0];
     await hooks.json(name, 'trim', { input: mode === 'age' ? { now: Date.now() + 8 * 86_400_000 } : { count: true } });
@@ -236,7 +237,7 @@ describe('cloud 4e-1 hooks in real workerd and pi Harness', () => {
     expect(lookup).toMatchObject({ conversationId: source.conversationId, toolCallId: source.toolCallId, toolName: source.toolName,
       settledAt: source.settledAt, settledEventSeq: source.settledEventSeq });
     expect(rows.cloud_events.some((row: any) => row.eventKey === `tool:${source.invocationId}:settled`)).toBe(false);
-  });
+  }, mode === 'count' ? 30_000 : undefined);
   hooksTest('migrates old ledger rows without inventing a clock and rejects them as widget sources', async ({ hooks }) => {
     hooks.provider.reset([['get_financial_statements']]); const name = await hooks.setup(); await hooks.run(name);
     await hooks.json(name, 'trim', { input: { legacySchema: true } }); await hooks.restart(); await hooks.json(name, 'ready');
