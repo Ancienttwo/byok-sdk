@@ -7,25 +7,27 @@ composition over Postgres and R2.
 
 ## Release status
 
-The current source candidate is the prerelease **0.24.0-rc.1**, with
-independent keys **0.8.1-rc.1**; publication is pending and will use the npm
-dist-tag `rc`, so `latest` stays 0.23.0. The
-[release notes](docs/releases/v0.24.0.md) describe the new host surfaces in
-`@byok-sdk/client` (the non-secret enrollment identity read, a scoped
-device-proof signer backed by the stored enrollment key, and the programmatic
-input-preparation retirement) and the additive Agent memory intent notice,
-device processor and cloud producer, whose wire the stable 0.24.0 freezes.
-Versioned install examples below target this candidate and become usable after
-registry publication.
+The current source candidate is **0.24.0-rc.1**, with independent keys
+**0.8.1-rc.1**. It is not published. Final keys SemVer and RC-versus-stable
+channel selection remain open; the original keys PATCH rationale no longer
+fits the current API/runtime changes. The public candidate graph is nine
+aligned packages plus keys, including the Worker-only cloud-do package.
+[Release and migration notes](docs/releases/v0.24.0.md) describe the breaking
+Node, adapter, identity and SQLite changes, local native-interaction support,
+Host upgrade/rollback steps and remaining acceptance gates.
 
-The current published release is **0.23.0**, with independent keys **0.8.0**,
-published to npm on 2026-09-28 from the `v0.23.0` tag target (`bcf65a3f`, the
-PR #237 merge) and now `latest` on the registry; readback is
-`npm view @byok-sdk/core version` and `npm view @byok-sdk/keys version`. See the
-[publication record](docs/releases/v0.23.0-publication.md) and the
-[release notes](docs/releases/v0.23.0.md), which describe sealed provider
-provisioning, its breaking keys store and request changes, and the
-input-preparation v8 cut.
+Versioned install examples below describe the current source manifests. They
+are pending publication and usable only after exact registry readback. Before
+publication, a Host can test verified accepted CI tarballs from one exact SHA;
+that does not establish production or live-runtime acceptance.
+
+The last publication recorded here is **0.23.0**, with independent keys
+**0.8.0**, published on 2026-09-28 from `v0.23.0` (`bcf65a3f`, PR #237).
+Its [publication record](docs/releases/v0.23.0-publication.md) records `latest`
+at that time; query the registry before relying on current tags. The
+[0.23 release notes](docs/releases/v0.23.0.md) describe sealed provider
+provisioning, its breaking keys store/request changes and the input-preparation
+v8 cut, which still applies to Hosts upgrading from 0.22.
 
 The preceding release is **0.22.0** with keys **0.7.0**, published on 2026-09-25
 from the `v0.22.0` tag (`0962f14f`, the PR #234 merge); see its
@@ -82,16 +84,17 @@ import { createByokServer } from '@byok-sdk/server';
 ```
 
 The Worker-only cloud-do source candidate is pending npm publication.
-This example becomes available after the stable release and registry readback.
+The exact first-release version/channel is pending the release decision and
+registry readback; the example below shows only the current source version.
 See [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
 
 ~~~sh
-# Pending publication. The first release is stable 0.24.0.
+# Source version only; publication and final release channel are pending.
 npm install @byok-sdk/cloud-do@0.24.0-rc.1
 npm install --save-dev @cloudflare/workers-types
 ~~~
 
-The published dispatch packages are `@byok-sdk/client`, `@byok-sdk/server`,
+The public candidate dispatch packages are `@byok-sdk/client`, `@byok-sdk/server`,
 `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`, `@byok-sdk/core`,
 `@byok-sdk/protocol`, and `@byok-sdk/ui-runtime`, all on the same train;
 `@byok-sdk/implementation-identity` follows the train as a support package that
@@ -175,14 +178,16 @@ second acceptance ledger:
 | Sole acceptance ledger | [Salesko Host reliability Sprint plan](https://github.com/Ancienttwo/salesko-new/blob/codex/recurring-sdk-adoption-test/plans/plan-20260909-private-agent-chat-host-reliability-sprints.md) (external repo, draft branch), with the [SDK-first plan](plans/plan-20260910-conversation-turn-sdk-first.md) as the in-repo stage entry |
 | Active PRs | byok-sdk: #191 (open, unmerged); Salesko integration: draft PR #241 |
 
-Status rows, each bound to a source SHA, artifact, or CI evidence; 未验收
-means not accepted, and no overall percentage is defined:
+Historical adoption checkpoints below are bound to their recorded source SHA,
+artifact or CI evidence; they are not a live main/PR/registry status report. See
+the release status above for the current source candidate. 未验收 means not
+accepted, and no overall percentage is defined:
 
 | Dimension | Status | Bound to |
 |---|---|---|
 | main implementation | Merged | Sealed remote provider provisioning #237 merged at `bcf65a3f` (2026-09-28), with the prepared Agent memory / input-preparation v8 cut #236 (`0a47d4e7`); released as 0.23.0 / keys 0.8.0 from `bcf65a3f`. Earlier: official Pi migration #233 merged at `9fe732e6` (2026-09-25): wire/record 7, Host systemPrompt, envelope v4, M4 regression and M5 calibration complete; released as 0.22.0 through #234 (`0962f14f`). Earlier: `main` @ `8b7a2121` (2026-09-24): #226 P0 prepared message egress (`644f8473`; BREAKING input-preparation wire version 6, capability token `agent-input-preparation-v6`, `TaskOfferPreparedPayload` requires `egressPolicy`, fresh-lane Pi `allowTools: []` means zero native tools), released as 0.21.0 through #227 (`8b7a2121`), which also cut the published set to nine packages (eight aligned plus keys; `byok-sdk` and `@byok-sdk/testkit` retired). Before it, as of `48605554` (2026-09-23): #223 bounded admission — byte evidence replaces the live-tokenizer readiness gate (`c61615f8`; BREAKING input-preparation wire version 5, record schema version 6), released as 0.20.0 through #224. Earlier, as of `26945c8a` (2026-09-19): recurring input, exact message disposition and fresh egress per the spec section above; #193 C07 Pi runtime launch (`d882aef4`), #198 Windows CI elimination (`49ec7477`), #199 custody five-edge enablement (`e0423d84`), #200 N1 external-CLI admission gate (`ec1cea36`); 2026-09-19 batch — #201 reserved agent-message grants, #202 Pi fork pin 1006 / S2 clipboard tripwire, #203 WP5 S2 CI flip (strict bun + real-chain monitor control), #204 #196 durable recurring smoke (embedded roundtrip + crash window), #205 docs authority navigation (#197), #206 WinSW uninstall image-lock retry, #207 Windows link-first cleanup + out-of-tree canary |
 | Open candidates | Unmerged | #191 (draft: MCP launch-cwd boundary); Salesko draft PR #241 — both still open drafts on 2026-09-25. #233 (official Pi migration) and #234 (0.22.0 preparation) are merged |
-| Published packages | 0.23.0 / keys 0.8.0 published | SDK 0.23.0 and keys 0.8.0 were published to npm on 2026-09-28 from the `v0.23.0` tag target (`bcf65a3f`, the PR #237 merge) and are the registry's `latest` — readback `npm view @byok-sdk/core version` / `npm view @byok-sdk/keys version`, receipt in the [0.23.0 publication record](docs/releases/v0.23.0-publication.md), notes in [0.23.0](docs/releases/v0.23.0.md). The annotated `v0.23.0` tag is on origin at `bcf65a3f`. The published set is nine packages: `@byok-sdk/core`, `implementation-identity`, `protocol`, `client`, `cloud`, `cloud-dataplane`, `server` and `ui-runtime` at 0.23.0, plus `@byok-sdk/keys` at 0.8.0; `byok-sdk` and `@byok-sdk/testkit` are no longer published. The previous train is 0.22.0 / keys 0.7.0 (2026-09-25, `0962f14f`, [publication record](docs/releases/v0.22.0-publication.md)), before it 0.21.0 / keys 0.6.2 (2026-09-24/25, `8b7a2121`, [publication record](docs/releases/v0.21.0-publication.md)). 0.23.0 and 0.22.0 pin the unmodified official Pi 0.87.1 closure; the historical 0.21.0 train pinned Pi fork 0.86.1001 |
+| Published packages | 0.23.0 / keys 0.8.0 published | SDK 0.23.0 and keys 0.8.0 were published to npm on 2026-09-28 from the `v0.23.0` tag target (`bcf65a3f`, the PR #237 merge) and were read back as the registry's `latest` on that date; verify current tags with `npm view @byok-sdk/core version` / `npm view @byok-sdk/keys version`, receipt in the [0.23.0 publication record](docs/releases/v0.23.0-publication.md), notes in [0.23.0](docs/releases/v0.23.0.md). The annotated `v0.23.0` tag is on origin at `bcf65a3f`. The published set is nine packages: `@byok-sdk/core`, `implementation-identity`, `protocol`, `client`, `cloud`, `cloud-dataplane`, `server` and `ui-runtime` at 0.23.0, plus `@byok-sdk/keys` at 0.8.0; `byok-sdk` and `@byok-sdk/testkit` are no longer published. The previous train is 0.22.0 / keys 0.7.0 (2026-09-25, `0962f14f`, [publication record](docs/releases/v0.22.0-publication.md)), before it 0.21.0 / keys 0.6.2 (2026-09-24/25, `8b7a2121`, [publication record](docs/releases/v0.21.0-publication.md)). 0.23.0 and 0.22.0 pin the unmodified official Pi 0.87.1 closure; the historical 0.21.0 train pinned Pi fork 0.86.1001 |
 | Real Host integration | In progress, not accepted | Salesko Sprint ledger: K5 in progress, K7 incomplete; A01–A29 at 24 LOCAL_PASS / 5 BLOCKED at the latest recorded checkpoint. Host-side subjects and evidence live in that ledger, not here |
 | Native / production acceptance | 未验收 | Target-runtime S9 not executed; aiphabee (K6) paused by owner decision; no production migration, deployment, or paid-runtime acceptance |
 

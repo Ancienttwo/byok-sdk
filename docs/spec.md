@@ -119,8 +119,11 @@ authenticated session and device assertion.
   reads the snapshot's tenant, device and enrollment revision with
   `readDeviceEnrollmentIdentity`; the enrollment revision is the decimal
   string of the enrollment's device-proof key epoch, which a Host issues from
-  its device row as `String(proof_key_epoch)`. It is monotonic across
-  proof-key rotation for one device id, and re-pair mints a new device id.
+  its device row as `String(proof_key_epoch)`. Current client source projects
+  the fixed pairing key `identity` at epoch `0` (revision `"0"`); re-pair mints
+  a new device id. A future proof-key rotation must carry its authenticated
+  epoch into the local record and replace that projection in the same cut.
+  The current enrollment read is not rotation observation.
   That fence covers only
   placement/enrollment writers that update the local record under the same
   configuration lock. A generation is consumed when its pending marker is
@@ -175,22 +178,26 @@ authorization and registry readback. The current independent keys candidate is
 dispatch release, `0.24.0-rc.1`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-The 0.24.0-rc.1 train is a prepared prerelease, not yet published; it is
-published only under the npm dist-tag `rc`, and `latest` stays 0.23.0 / keys
-0.8.0. A prerelease train publishes every public package as a prerelease on one
-dist-tag, which is why keys is `0.8.1-rc.1`. The 0.24.0 line is a MINOR:
-`@byok-sdk/client` adds public host API — `readDeviceEnrollmentIdentity`,
-`createStoredDeviceProofSigner` and `retireInputPreparation` (see "Gate A"
-below and the input-preparation operator step) — and protocol, core, client
-and cloud add the Agent memory intent notice, device processor and cloud
-producer (see "Durable Agent homes"), all additive. The stable 0.24.0 freezes
-that wire. keys 0.8.1 is a PATCH: its own source is unchanged and it gains no
-new public behavior, API, persistence or security authority; it moves only
-because its packed core and implementation-identity edges must equal the
-current dispatch release. implementation-identity source is unchanged from
-0.23.0, and core only adds the Agent memory intent digest export, which keys
-does not import (the same reasoning as keys 0.6.1 and 0.6.2 for 0.20.0 and
-0.21.0). Notes: `docs/releases/v0.24.0.md`.
+The 0.24.0-rc.1 train is a prepared prerelease, not yet published. The final
+keys version and whether another RC precedes stable remain release-owner
+decisions. If an RC is selected, every public package must be a prerelease on
+one explicit non-`latest` dist-tag (proposed: `rc`); existing stable tags must
+remain unchanged. The new cloud-do package needs a first-publication readback
+contract, not an assumed previous 0.23.0 stable tag. Historical registry receipts
+below are not a fresh readback.
+
+The 0.24 line is a MINOR under this policy: it adds Host surfaces and Agent
+memory intents, and now also includes the Node 24.15.0 floor, Codex app-server
+cut, removed Claude approval API, SQLite v4 and V2 runtime-plan/launch boundary.
+It is not an all-additive upgrade. The original keys PATCH rationale no longer
+fits the source: keys adds the durable launcher entry/API, its Node floor
+changes, and its identity dependency introduces external-CLI authority and V2
+launch records. A next independent MINOR is recommended (for example, stable
+keys `0.9.0`, with a corresponding prerelease if selected). That recommendation
+is pending approval; it does not change the current `0.8.1-rc.1` manifest.
+The Agent memory intent wire remains a candidate contract until stable.
+See [0.24 release and migration notes](releases/v0.24.0.md) for exact source
+evidence, package set, cutover/rollback and the distinct SDK/Host acceptance gates.
 
 The 0.23.0 train is published (see below). It adds sealed remote provider
 provisioning (see "Sealed remote provider provisioning" below). keys 0.8.0 is a
@@ -218,7 +225,7 @@ published on 2026-09-25 from the `v0.22.0` tag (`0962f14f`). The registry, not t
 authority on what has shipped — read it back with `npm view @byok-sdk/core version`
 and `npm view @byok-sdk/keys version`.
 
-The published package set is exactly ten packages: the nine aligned train
+The public candidate package set is exactly ten packages: the nine aligned train
 packages `@byok-sdk/core`, `@byok-sdk/protocol`, `@byok-sdk/client`,
 `@byok-sdk/server`, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`,
 `@byok-sdk/ui-runtime` and `@byok-sdk/implementation-identity`, plus the
