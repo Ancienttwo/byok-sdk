@@ -1,0 +1,26 @@
+{
+  "name": "@byok-sdk/example-codex-interaction-host",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Local terminal reference Host for Codex native interactions; offline fixture entrypoint only",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.15.0"
+  },
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@byok-sdk/client": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "tsup": "^8.5.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
