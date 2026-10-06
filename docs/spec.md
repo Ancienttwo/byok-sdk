@@ -172,19 +172,21 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.24.0-rc.1`; publication requires separate release
+aligned dispatch release is `0.24.0`; publication requires separate release
 authorization and registry readback. The current independent keys candidate is
-`0.8.1-rc.1`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.24.0-rc.1`, proven from an isolated standard npm install rather
+`0.9.0`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.24.0`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-The 0.24.0-rc.1 train is a prepared prerelease, not yet published. The final
-keys version and whether another RC precedes stable remain release-owner
-decisions. If an RC is selected, every public package must be a prerelease on
-one explicit non-`latest` dist-tag (proposed: `rc`); existing stable tags must
-remain unchanged. The new cloud-do package needs a first-publication readback
-contract, not an assumed previous 0.23.0 stable tag. Historical registry receipts
-below are not a fresh readback.
+The release owner approved stable 0.24.0 for all nine aligned packages and
+stable keys 0.9.0 on 2026-10-06. The complete public set is ten packages,
+including cloud-do's first-publication candidate. Stable publication omits
+`--tag` and requires each exact version on `latest` after publication. Source
+preparation is not npm execution approval or evidence of publication. The
+reviewed schema-3 first-publication contract remains in force; cloud-do has no
+assumed previous 0.23.0 stable tag. Historical registry receipts below are not a
+fresh readback. Required exact-source artifacts and SDK/Host acceptance gates
+remain open until independently established.
 
 The 0.24 line is a MINOR under this policy: it adds Host surfaces and Agent
 memory intents, and now also includes the Node 24.15.0 floor, Codex app-server
@@ -192,10 +194,10 @@ cut, removed Claude approval API, SQLite v4 and V2 runtime-plan/launch boundary.
 It is not an all-additive upgrade. The original keys PATCH rationale no longer
 fits the source: keys adds the durable launcher entry/API, its Node floor
 changes, and its identity dependency introduces external-CLI authority and V2
-launch records. A next independent MINOR is recommended (for example, stable
-keys `0.9.0`, with a corresponding prerelease if selected). That recommendation
-is pending approval; it does not change the current `0.8.1-rc.1` manifest.
-The Agent memory intent wire remains a candidate contract until stable.
+launch records. The approved independent MINOR is keys `0.9.0`; its manifest,
+lock workspace record and exact packed core/identity edges follow that decision.
+The Agent memory intent wire remains a candidate contract until the stable
+release is published; changing source versions alone does not freeze it.
 See [0.24 release and migration notes](releases/v0.24.0.md) for exact source
 evidence, package set, cutover/rollback and the distinct SDK/Host acceptance gates.
 
