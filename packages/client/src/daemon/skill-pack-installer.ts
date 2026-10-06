@@ -37,6 +37,7 @@ import path from 'node:path';
 import {
   CONTENT_HASH_PATTERN,
   SKILL_PACK_ENTRY_PATH,
+  SKILL_PACK_FILE_PATH_PATTERN,
   SKILL_PACK_MAX_BYTES,
   checkSkillPackEntry,
   checkSkillPackFileContent,
@@ -181,18 +182,42 @@ async function readBoundedJson(response: Response, what: string): Promise<unknow
   if (declaredLength !== null) {
     const parsed = Number(declaredLength);
     if (Number.isSafeInteger(parsed) && parsed > SKILL_PACK_RESPONSE_MAX_BYTES) {
+      // Cancellation is best-effort: an uncooperative source must not delay
+      // the refusal, and a rejected cancel must not replace the typed error.
+      void response.body?.cancel().catch(() => {});
       throw new SkillPackInstallError(
         'response_too_large',
         `${what} declared ${parsed} bytes, over the ${SKILL_PACK_RESPONSE_MAX_BYTES} byte response limit.`,
       );
     }
   }
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength > SKILL_PACK_RESPONSE_MAX_BYTES) {
-    throw new SkillPackInstallError(
-      'response_too_large',
-      `${what} delivered ${bytes.byteLength} bytes, over the ${SKILL_PACK_RESPONSE_MAX_BYTES} byte response limit.`,
-    );
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  const reader = response.body?.getReader();
+  if (reader !== undefined) {
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        length += value.byteLength;
+        if (length > SKILL_PACK_RESPONSE_MAX_BYTES) {
+          void reader.cancel().catch(() => {});
+          throw new SkillPackInstallError(
+            'response_too_large',
+            `${what} delivered ${length} bytes, over the ${SKILL_PACK_RESPONSE_MAX_BYTES} byte response limit.`,
+          );
+        }
+        if (value.byteLength > 0) chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
   }
   try {
     return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
@@ -239,6 +264,14 @@ function resolveInside(baseDir: string, relative: string): string {
   if (!isSkillPackPathSafe(relative)) {
     throw new SkillPackInstallError('store_unsafe', `${JSON.stringify(relative)} is not a safe pack-relative path.`);
   }
+  return resolveRootedPath(baseDir, relative);
+}
+
+/** Internal store prefixes are not part of the public pack-relative length cap. */
+function resolveRootedPath(baseDir: string, relative: string): string {
+  if (!SKILL_PACK_FILE_PATH_PATTERN.test(relative)) {
+    throw new SkillPackInstallError('store_unsafe', `${JSON.stringify(relative)} has an unsafe path component.`);
+  }
   const resolved = path.resolve(baseDir, relative);
   const prefix = path.resolve(baseDir) + path.sep;
   if (!resolved.startsWith(prefix)) {
@@ -264,11 +297,63 @@ async function assertNotSymlink(target: string): Promise<void> {
   }
 }
 
+/**
+ * Validate the host-selected root and every directory below it before use.
+ * Ancestors above the host root may have platform aliases (e.g. macOS /tmp);
+ * realpath establishes the root's physical boundary. The root itself and all
+ * pack-controlled components must be real directories, never links.
+ *
+ * These pathname checks reject pre-existing unsafe layouts. They do not pin
+ * namespace identity against another process swapping directories mid-call.
+ */
+async function checkedDirectory(root: string, relative: string, create: boolean): Promise<string> {
+  const absoluteRoot = path.resolve(root);
+  const requireDirectory = async (directory: string, recursive = false): Promise<void> => {
+    let stats;
+    try {
+      stats = await fs.lstat(directory);
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === 'ENOTDIR') {
+        throw new SkillPackInstallError('store_unsafe', `${directory} has a non-directory ancestor.`, { cause });
+      }
+      if ((cause as NodeJS.ErrnoException).code !== 'ENOENT' || !create) throw cause;
+      await fs.mkdir(directory, { recursive, mode: DIR_MODE });
+      stats = await fs.lstat(directory);
+    }
+    if (stats.isSymbolicLink() || !stats.isDirectory()) {
+      throw new SkillPackInstallError('store_unsafe', `${directory} is not a non-symlink directory.`);
+    }
+  };
+  await requireDirectory(absoluteRoot, true);
+  const canonicalRoot = await fs.realpath(absoluteRoot);
+  let directory = canonicalRoot;
+  for (const part of relative === '' ? [] : relative.split('/')) {
+    directory = path.join(directory, part);
+    await requireDirectory(directory);
+    if (await fs.realpath(directory) !== directory) {
+      throw new SkillPackInstallError('store_unsafe', `${directory} resolves outside its checked directory chain.`);
+    }
+  }
+  return directory;
+}
+
+/** Resolve a file only through checked directories, including the store root. */
+async function checkedFile(root: string, relative: string, create: boolean): Promise<string> {
+  // The manifest (install) or resolveInside (projection) validates the public
+  // path's length. Here relative can also include SDK-owned store prefixes.
+  resolveRootedPath(root, relative);
+  const parts = relative.split('/');
+  const leaf = parts.pop()!;
+  const directory = await checkedDirectory(root, parts.join('/'), create);
+  const target = path.join(directory, leaf);
+  await assertNotSymlink(target);
+  return target;
+}
+
 async function appendAuditLine(dataDir: string, record: Record<string, unknown>): Promise<void> {
-  const root = skillPacksRoot(dataDir);
-  await fs.mkdir(root, { recursive: true, mode: DIR_MODE });
+  const filePath = await checkedFile(dataDir, `${SKILL_PACKS_DIRNAME}/${SKILL_PACK_AUDIT_FILENAME}`, true);
+  const root = path.dirname(filePath);
   await fs.chmod(root, DIR_MODE).catch(() => {});
-  const filePath = path.join(root, SKILL_PACK_AUDIT_FILENAME);
   const handle = await fs.open(filePath, 'a', FILE_MODE);
   try {
     // chmod BEFORE the append, for the same reason `bin/audit-log.ts` does it:
@@ -422,12 +507,14 @@ async function installOne(
 
   const packRoot = path.join(skillPacksRoot(options.dataDir), manifest.name);
   const revisionDir = path.join(packRoot, (manifest.contentHash as string).slice('sha256:'.length));
-  await fs.mkdir(revisionDir, { recursive: true, mode: DIR_MODE });
+  const revisionRelative = `${SKILL_PACKS_DIRNAME}/${manifest.name}/${(manifest.contentHash as string).slice('sha256:'.length)}`;
+  const targets = new Map<string, string>();
+  for (const relative of bodies.keys()) {
+    targets.set(relative, await checkedFile(options.dataDir, `${revisionRelative}/${relative}`, true));
+  }
+  const lockPath = await checkedFile(options.dataDir, `${SKILL_PACKS_DIRNAME}/${manifest.name}/${SKILL_PACK_LOCK_FILENAME}`, true);
   for (const [relative, content] of bodies) {
-    const target = resolveInside(revisionDir, relative);
-    await fs.mkdir(path.dirname(target), { recursive: true, mode: DIR_MODE });
-    await assertNotSymlink(target);
-    await atomicWriteFile(target, content, { mode: FILE_MODE });
+    await atomicWriteFile(targets.get(relative)!, content, { mode: FILE_MODE });
   }
 
   const lock: SkillPackLock = {
@@ -446,7 +533,7 @@ async function installOne(
   };
   // The lock lands LAST: until it does, the revision directory is content
   // nobody points at, and the previously installed revision stays authoritative.
-  await atomicWriteFile(path.join(packRoot, SKILL_PACK_LOCK_FILENAME), `${JSON.stringify(lock, null, 2)}\n`, {
+  await atomicWriteFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, {
     mode: FILE_MODE,
   });
 
@@ -493,7 +580,8 @@ async function readLock(dataDir: string, name: string): Promise<InstalledSkillPa
   const packRoot = path.join(skillPacksRoot(dataDir), name);
   let raw: string;
   try {
-    raw = await fs.readFile(path.join(packRoot, SKILL_PACK_LOCK_FILENAME), 'utf8');
+    const lockPath = await checkedFile(dataDir, `${SKILL_PACKS_DIRNAME}/${name}/${SKILL_PACK_LOCK_FILENAME}`, false);
+    raw = await fs.readFile(lockPath, 'utf8');
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw err;
@@ -523,7 +611,8 @@ async function readLock(dataDir: string, name: string): Promise<InstalledSkillPa
 export async function listInstalledSkillPacks(dataDir: string): Promise<readonly InstalledSkillPack[]> {
   let entries;
   try {
-    entries = await fs.readdir(skillPacksRoot(dataDir), { withFileTypes: true });
+    const root = await checkedDirectory(dataDir, SKILL_PACKS_DIRNAME, false);
+    entries = await fs.readdir(root, { withFileTypes: true });
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw err;
@@ -569,12 +658,25 @@ export async function projectSkillPack(
   }
 
   const copied: string[] = [];
+  const paths: { source: string; destination: string }[] = [];
+  // Check the complete layout before copying any bytes. Keep reads per-file,
+  // rather than retaining a second in-memory copy of the whole installed pack.
   for (const file of installed.lock.files) {
-    const sourcePath = resolveInside(installed.directory, file.path);
-    await assertNotSymlink(sourcePath);
+    resolveInside(installed.directory, file.path);
+    let source: string;
+    try {
+      source = await checkedFile(dataDir, `${SKILL_PACKS_DIRNAME}/${name}/${installed.lock.content_hash.slice('sha256:'.length)}/${file.path}`, false);
+    } catch (cause) {
+      throw new SkillPackInstallError('store_unsafe', `installed skill pack ${JSON.stringify(name)} has an unsafe path at ${JSON.stringify(file.path)}.`, { cause, packName: name });
+    }
+    const destination = await checkedFile(targetDir, file.path, true);
+    paths.push({ source, destination });
+  }
+  for (const [index, file] of installed.lock.files.entries()) {
+    const { source, destination } = paths[index]!;
     let bytes: Buffer;
     try {
-      bytes = await fs.readFile(sourcePath);
+      bytes = await fs.readFile(source);
     } catch (cause) {
       throw new SkillPackInstallError(
         'store_unsafe',
@@ -590,9 +692,6 @@ export async function projectSkillPack(
       );
     }
 
-    const destination = resolveInside(targetDir, file.path);
-    await fs.mkdir(path.dirname(destination), { recursive: true, mode: DIR_MODE });
-    await assertNotSymlink(destination);
     await atomicWriteFile(destination, bytes, { mode: FILE_MODE });
     copied.push(file.path);
   }

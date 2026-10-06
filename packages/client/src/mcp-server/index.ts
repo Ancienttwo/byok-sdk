@@ -88,7 +88,12 @@
  * routes requests on the advertisement and a capability the core does not
  * implement must never appear in it.
  */
-import { createBoundedFrameWriter, createBoundedLineReader } from './framing';
+import {
+  createBoundedFrameWriter,
+  createBoundedLineReader,
+  MCP_SERVER_MAX_PENDING_BYTES,
+  MCP_SERVER_MAX_PENDING_FRAMES,
+} from './framing';
 import { classifyJsonRpcMessage, isUsableRequestId, SeenRequestIds, type McpServerRequestId } from './dispatch';
 
 /** The revisions this core implements and will answer `initialize` with. Final; see the module header for each entry's and each exclusion's citation. */
@@ -192,6 +197,12 @@ export type McpServerCloseReason =
   | { readonly kind: 'eof' }
   /** A single inbound line exceeded `maxLineBytes`; nothing was parsed or answered. */
   | { readonly kind: 'frame-limit'; readonly limitBytes: number }
+  /**
+   * Accepting another output frame would exceed 4 MiB or 256 pending frames,
+   * including unfinished stream writes. Reading stops, calls abort and queued
+   * replies are discarded. Already-submitted stream writes may still finish.
+   */
+  | { readonly kind: 'outbound-buffer-limit'; readonly limitBytes: number; readonly limitFrames: number }
   /** A single outbound frame exceeded `maxOutboundFrameBytes`; nothing was written for it. */
   | { readonly kind: 'outbound-frame-limit'; readonly limitBytes: number; readonly bytes: number; readonly error: McpServerFrameTooLargeError };
 
@@ -277,7 +288,8 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
   function send(message: Record<string, unknown>, requestId?: McpServerRequestId): void {
     if (closed) return;
     const oversize = writer.write(`${JSON.stringify(message)}\n`);
-    if (oversize !== undefined) closeOutboundLimit(oversize, requestId);
+    if (oversize === 'pending-limit') closeOutboundBufferLimit();
+    else if (oversize !== undefined) closeOutboundLimit(oversize, requestId);
   }
 
   /**
@@ -302,6 +314,20 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
   function abortEverything(): void {
     for (const controller of activeCalls.values()) controller.abort();
     activeCalls.clear();
+  }
+
+  function closeOutboundBufferLimit(): void {
+    if (closed) return;
+    closed = true;
+    writer.stop();
+    reader?.stop();
+    unsubscribeListChanged?.();
+    abortEverything();
+    options.onClose?.({
+      kind: 'outbound-buffer-limit',
+      limitBytes: MCP_SERVER_MAX_PENDING_BYTES,
+      limitFrames: MCP_SERVER_MAX_PENDING_FRAMES,
+    });
   }
 
   function closeOutboundLimit(bytes: number, requestId: McpServerRequestId | undefined): void {
@@ -515,6 +541,8 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
   unsubscribeListChanged = options.toolsListChanged?.onToolsListChanged(() => {
     send({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' });
   });
+  // Subscription itself may synchronously emit enough notifications to close.
+  if (closed) unsubscribeListChanged?.();
 
   return {
     close(): void {

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,11 +24,17 @@ function fabricateArtifacts(entries, mutate = (manifest) => manifest) {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'byok-publish-artifacts-'));
   const packages = entries.map(({ name, version, body, omitFile }) => {
     const file = `${name.replace('@', '').replace('/', '-')}-${version}.tgz`;
-    const bytes = Buffer.from(body ?? `${name}@${version} tarball bytes`);
+    const manifestBytes = Buffer.from(body ?? JSON.stringify({ name, version }));
+    const header = Buffer.alloc(512);
+    header.write('package/package.json');
+    header.write(manifestBytes.length.toString(8).padStart(11, '0') + '\0', 124);
+    header[156] = 48;
+    const bytes = gzipSync(Buffer.concat([header, manifestBytes,
+      Buffer.alloc((512 - manifestBytes.length % 512) % 512), Buffer.alloc(1024)]));
     if (!omitFile) writeFileSync(path.join(directory, file), bytes);
-    return { package: name, version, file, sha256: createHash('sha256').update(bytes).digest('hex') };
+    return { package: name, version, file, runtimeDependencies: { dependencies: {}, optionalDependencies: {}, peerDependencies: {} }, sha512Integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}`, sha256: createHash('sha256').update(bytes).digest('hex') };
   });
-  const manifest = mutate({ schemaVersion: 2, releaseVersion: TRAIN, sourceGitSha: HEAD, packages });
+  const manifest = mutate({ schemaVersion: 3, releaseVersion: TRAIN, sourceGitSha: HEAD, packages });
   writeFileSync(path.join(directory, 'release-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   return directory;
 }
@@ -112,6 +119,39 @@ test('an artifact for an already-published package is ignored instead of publish
 test('frozen artifacts are refused when the manifest stops describing the bytes or the commit', () => {
   const cases = [
     {
+      label: 'frozen SHA-512 integrity must match the actual tarball',
+      entries: [{ name: '@byok-sdk/core', version: TRAIN }],
+      mutate: (manifest) => ({ ...manifest, packages: manifest.packages.map((entry) => ({ ...entry, sha512Integrity: 'sha512-wrong' })) }),
+      publishSet: [publishEntry('@byok-sdk/core')],
+      message: /frozen SHA-512 integrity differs from tarball bytes/,
+    },
+    {
+      label: 'frozen metadata must match packed dependency fields',
+      entries: [{ name: '@byok-sdk/core', version: TRAIN, body: JSON.stringify({ name: '@byok-sdk/core', version: TRAIN, dependencies: { required: '1.0.0' } }) }],
+      publishSet: [publishEntry('@byok-sdk/core')],
+      message: /frozen dependency metadata differs from tarball bytes/,
+    },
+    {
+      label: 'packed package identity must match the publish plan',
+      entries: [{ name: '@byok-sdk/core', version: TRAIN, body: JSON.stringify({ name: '@byok-sdk/wrong', version: TRAIN }) }],
+      publishSet: [publishEntry('@byok-sdk/core')],
+      message: /frozen tarball package identity\/version mismatch/,
+    },
+    {
+      label: 'old artifact schema without explicit registry metadata',
+      entries: [{ name: '@byok-sdk/core', version: TRAIN }],
+      mutate: (manifest) => ({ ...manifest, schemaVersion: 2 }),
+      publishSet: [publishEntry('@byok-sdk/core')],
+      message: /declares schemaVersion 2.*both read schemaVersion 3/,
+    },
+    {
+      label: 'missing frozen runtime dependency maps',
+      entries: [{ name: '@byok-sdk/core', version: TRAIN }],
+      mutate: (manifest) => ({ ...manifest, packages: manifest.packages.map(({ runtimeDependencies, ...entry }) => entry) }),
+      publishSet: [publishEntry('@byok-sdk/core')],
+      message: /no complete runtime dependency metadata/,
+    },
+    {
       label: 'sha256 mismatch',
       entries: [{ name: '@byok-sdk/core', version: TRAIN }],
       mutate: (manifest) => ({
@@ -162,14 +202,14 @@ test('frozen artifacts are refused when the manifest stops describing the bytes 
       entries: [{ name: '@byok-sdk/core', version: TRAIN }],
       mutate: (manifest) => ({ ...manifest, schemaVersion: 1 }),
       publishSet: [publishEntry('@byok-sdk/core')],
-      message: /release-manifest\.json declares schemaVersion 1; this script and scripts\/release\/registry-readback\.mjs both read schemaVersion 2/,
+      message: /release-manifest\.json declares schemaVersion 1; this script and scripts\/release\/registry-readback\.mjs both read schemaVersion 3/,
     },
     {
       label: 'manifest declaring no schema version at all',
       entries: [{ name: '@byok-sdk/core', version: TRAIN }],
       mutate: ({ schemaVersion, ...manifest }) => manifest,
       publishSet: [publishEntry('@byok-sdk/core')],
-      message: /release-manifest\.json declares schemaVersion null; this script and scripts\/release\/registry-readback\.mjs both read schemaVersion 2/,
+      message: /release-manifest\.json declares schemaVersion null; this script and scripts\/release\/registry-readback\.mjs both read schemaVersion 3/,
     },
     {
       label: 'file escaping the artifacts directory with ..',

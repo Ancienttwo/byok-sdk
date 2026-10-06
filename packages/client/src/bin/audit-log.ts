@@ -648,12 +648,23 @@ export async function appendAuditEvent(storeDir: string, event: DaemonEvent): Pr
  */
 const TERMINAL_EVENT_KINDS = new Set(['completed', 'failed', 'cancelled']);
 
-function eventTaskId(event: DaemonEvent): string | undefined {
-  // Git observations are audit metadata, never task lifecycle events. In
-  // particular they must not keep an otherwise-evicted task alive during
-  // rotation or manufacture a task in the replay reducer.
-  if (event.kind === 'git-workspace') return undefined;
-  return 'taskId' in event ? event.taskId : undefined;
+function lifecycleEventTaskId(event: DaemonEvent): string | undefined {
+  // Only kinds that create a task row in deriveTasksFromEvents can anchor
+  // replay state. Artifacts, Git observations and disposal diagnostics must
+  // neither replace a lifecycle anchor nor count as one in the retained tail.
+  switch (event.kind) {
+    case 'offered':
+    case 'claimed':
+    case 'started':
+    case 'progress':
+    case 'awaiting-approval':
+    case 'completed':
+    case 'failed':
+    case 'cancelled':
+      return event.taskId;
+    default:
+      return undefined;
+  }
 }
 
 /**
@@ -668,9 +679,10 @@ function eventTaskId(event: DaemonEvent): string | undefined {
  * Deliberately simple (a full retention policy is more than this finding's
  * own scope calls for): scan every line once, tracking per taskId whether
  * a terminal kind occurs anywhere in the file and the index of its LAST
- * occurrence. Any taskId with no terminal kind whose last occurrence falls
- * in the portion about to be dropped gets exactly that one line preserved
- * — spliced in immediately before the kept tail (so the file stays
+ * state-bearing lifecycle occurrence. Any taskId with no terminal kind whose
+ * last lifecycle occurrence falls in the portion about to be dropped gets
+ * exactly that one line preserved — spliced in immediately before the kept
+ * tail (so the file stays
  * oldest-first overall, matching every other invariant this module
  * documents) as a lifecycle anchor. That's just enough for the reducer to
  * know the task exists and its last-known state; it does NOT preserve that
@@ -707,7 +719,7 @@ function compactPreservingLiveTasks(lines: readonly string[], targetLines: numbe
     if (line === undefined) continue;
     const event = parseAuditLine(line);
     if (!event) continue;
-    const taskId = eventTaskId(event);
+    const taskId = lifecycleEventTaskId(event);
     if (taskId === undefined) continue;
     lastIndexForTask.set(taskId, i);
     if (TERMINAL_EVENT_KINDS.has(event.kind)) hasTerminalEvent.add(taskId);

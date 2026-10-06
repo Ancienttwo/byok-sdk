@@ -2,7 +2,8 @@
 
 Status: CURRENT boundary contract.
 
-The registry's current `latest` is 0.23.0 / keys 0.8.0, published on 2026-09-28
+The last registry receipt recorded here is 0.23.0 / keys 0.8.0, read back as
+`latest` on 2026-09-28
 from the `v0.23.0` tag target (`bcf65a3f`) — see its
 [publication record](../../docs/releases/v0.23.0-publication.md) and the
 [release notes](../../docs/releases/v0.23.0.md), which define the sealed
@@ -10,6 +11,11 @@ provisioning keys store cut and the input-preparation v8 Host upgrade order.
 The previous train is 0.22.0 / keys 0.7.0, published on 2026-09-25 from the
 `v0.22.0` tag target (`0962f14f`) — see its
 [publication record](../../docs/releases/v0.22.0-publication.md).
+
+Current dist-tags and version availability require a fresh registry readback;
+the historical receipt is not a live registry snapshot. The 0.24 source remains
+unpublished, with keys version and first-release channel decisions open. See
+[0.24 release/migration gates](../../docs/releases/v0.24.0.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
 
@@ -26,16 +32,37 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 ## Version selection
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
-The 0.22.0 dispatch MINOR carries official Pi 0.87.1, wire/record 7,
-agent-input-preparation-v7, envelope v4 and required complete Host systemPrompt.
-Fence admissions, drain old queued/in-flight work, upgrade Host/cloud/devices,
-rebuild installation and preparation records and reissue the official-identity
-ruling (ruledResidualKeys=[], C=1024) before reopening admission.
-keys moves to 0.7.0, not a patch: its unchanged credential-launcher source consumes
-the changed strict nativeProvenance binding schema from implementation-identity;
-that changes accepted security authority. Packed core and identity dependencies
-both resolve to 0.22.0. Identity/core consolidation stays deferred.
-Version preparation does not authorize registry publication.
+The current source manifests name train 0.24.0-rc.1 and keys 0.8.1-rc.1.
+The train contains breaking runtime/storage/identity cuts and additive features.
+The old keys dependency-only PATCH rationale is superseded; its next independent
+MINOR and prerelease/stable channel need an explicit release decision. Do not
+change only the manifest: later version preparation must keep lock workspace
+records, API/version docs and packed internal dependencies consistent.
+
+The public candidate set contains nine aligned packages plus keys, including
+cloud-do. If an RC is chosen, all ten must be prereleases on the same explicit
+non-`latest` tag. The [reviewed registry baseline](../../scripts/release/registry-expectations.json)
+keeps existing stable tags fixed and explicitly identifies first publications.
+The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
+package-document absence before a declared first publication, then exact-version
+readback and the declared absent `latest` after an RC. Missing tags/versions or
+failed registry reads do not establish package absence. Stable publication
+omits `--tag` and requires its exact version on `latest`.
+No source version or documentation recommendation authorizes publication.
+
+## Pre-publication Host integration
+
+Use verified accepted CI tarballs and their original schema-3 release manifest
+from one exact source SHA. The manifest freezes the reviewed registry baseline
+and each tarball's runtime dependency maps as well as its hashes. Earlier
+schemas are rejected; obtain fresh accepted artifacts after final integration.
+Record their hashes and the downstream consumer lock digest, and
+exercise the Host's agreed runtime/UI/recovery scope in its authorized test
+environment. This does not require a stable npm release first. Fixtures and
+installed-package smoke are not live Host/provider acceptance. SDK npm gates,
+Salesko-specific Summary/admission/UI work and Host production rollout have
+separate evidence and authorization; see the
+[gate split](../../docs/releases/v0.24.0.md#release-gates-and-downstream-acceptance).
 
 ## Release checklist
 
@@ -47,10 +74,37 @@ Version preparation does not authorize registry publication.
 
    1. Confirm the CI run for the exact release commit is green, including its `npm-release-pack` job. Use the `push` run for the commit (`gh run list --branch main --workflow CI --event push --limit 1`), not a `pull_request` run: on pull-request events `github.sha` is the merge ref, so that run's artifact is named after a commit that is not `HEAD` and the dry run refuses it.
    2. Download that run's accepted tarballs: `gh run download <run-id> -n release-pack-<sha> -D <dir>`, where `<sha>` is the full 40-character commit id (`git rev-parse HEAD`).
-   3. Dry run `node scripts/release/publish.mjs --artifacts <dir>`. It refuses unless the frozen `release-manifest.json` names the release version and was packed from the current `HEAD`, and unless every tarball the publish set needs is present and re-hashes to its recorded sha256. It then prints the ordered publish plan with those digests. Nothing is published, read back or tagged.
-   4. Release with `node scripts/release/publish.mjs --artifacts <dir> --execute`. Run interactively in Terminal.app for npm write 2FA. It refuses if the tag already exists, if `npm whoami` reports no account, or if `npm profile get --json` does not report `tfa.mode` `auth-and-writes` — there is no override. It then publishes each tarball in dependency order (`--provenance` only under GitHub Actions OIDC; a local release logs that no attestation is attached), reads the registry back, and only then creates the annotated `v<version>` tag carrying the source commit.
+   3. After approving the exact package/version/channel plan, dry run `node scripts/release/publish.mjs --artifacts <dir>` for stable; append `--tag rc` for an approved RC. It refuses unless the frozen schema-3 `release-manifest.json` names the release version, exact complete package set and reviewed registry baseline, and was packed from the current `HEAD`. Every tarball the publish set needs must be present and match its recorded SHA-256, SHA-512, package identity and runtime dependency maps. Older manifests are not defaulted or upgraded in place. It queries registry version availability and, for an RC, the explicit prior-publication baseline, then prints the ordered plan. It does not publish, perform post-publication readback or tag. Only the appropriate clean not-found response can establish version/package absence; authentication, transport, malformed-output and other read errors block. `--artifacts` avoids rebuilding/repacking; a bare dry run builds and packs.
+   4. Obtain separate publication authorization for that exact destination, public package/version set, channel and provenance method. For stable, release with `node scripts/release/publish.mjs --artifacts <dir> --execute`; append `--tag rc` only for an approved RC. Run interactively in Terminal.app for npm write 2FA. It refuses if the tag already exists, if `npm whoami` reports no account, or if `npm profile get --json` does not report `tfa.mode` `auth-and-writes` — there is no override. Immediately before the first RC write, it rechecks exact-version absence and the entire baseline; this narrows the race window but npm publication remains nontransactional. It then publishes each tarball in dependency order (`--provenance` only under GitHub Actions OIDC; a local release logs that no attestation is attached), reads the registry back, and only then creates the annotated `v<version>` tag carrying the source commit.
    5. Push the tag: `git push origin v<version>`. A tag exists only for a train the registry has already confirmed.
 
-   Interrupted local publishes (observed in 0.23.0): npm web-auth can fail a single publish with E403 when a browser confirmation does not complete, or retry the PUT after a successful publish and report "cannot publish over the previously published versions"; registry propagation can make the step-7 readback 404 for minutes. Re-run step 4 — `publish.mjs` treats a partially published version as the candidate and publishes only the missing packages from the same frozen tarballs — and/or wait and re-run `node scripts/release/registry-readback.mjs --manifest <dir>/release-manifest.json`. If every package is already on the registry, the script refuses to run again; after the standalone readback passes, create the annotated tag by hand with step 8's exact message (`v<version>`, blank line, `sourceGitSha <sha>`). Never repack.
+   **Uncertain or partial publication:** inspect exact registry versions, digests,
+   dependency edges and dist-tags before retrying. Propagation delay or a second
+   PUT reporting "cannot publish over" is not proof that the first PUT failed.
+   Never repack or overwrite published bytes.
+
+   - **Partial stable:** after readback matches the same frozen artifacts, the
+     publisher can continue with only the missing packages. This is the path
+     exercised by the [0.23 publication receipt](../../docs/releases/v0.23.0-publication.md#interruptions-and-resumption).
+   - **Partial prerelease:** the publisher refuses automatic continuation and
+     requires a new exact prerelease version; the stable retry recipe does not
+     apply. Re-enter version preparation, exact-SHA acceptance and approval.
+   - **Every package present:** the publisher refuses another execute run. Use
+     `node scripts/release/registry-readback.mjs --manifest <dir>/release-manifest.json`
+     (append `--tag rc` for the approved RC). Only after the complete readback
+     passes may an authorized operator create a missing annotated tag with the
+     exact source message (`v<version>`, blank line, `sourceGitSha <sha>`), then
+     push it separately. Do not treat tag creation as a registry repair.
 
    Artifacts expire after 30 days; past that, re-run CI on the same commit rather than repacking locally.
+
+
+## Migration and rollback boundary
+
+Follow the [0.24 Host upgrade/rollback order](../../docs/releases/v0.24.0.md#upgrade-order-for-hosts-on-0230)
+for runtime/identity replacement, SQLite v4 and queued memory intents. Hosts on
+0.22 must also satisfy the 0.23 prepared-v8 and sealed-provisioning cut.
+PostgreSQL 0021/0022 are existing deployment prerequisites, not new SQL changes
+in 0.24. Database migration, backup restoration, device distribution and
+production rollout are separately authorized operations. An npm release performs
+none of them; an application downgrade does not downgrade persisted state.

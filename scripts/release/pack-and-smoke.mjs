@@ -1,3 +1,4 @@
+import { readRegistryExpectations, runtimeDependencyMetadata } from './registry-contract.mjs';
 import { cloudDoConsumerSmoke } from './cloud-do-consumer-smoke.mjs';
 import { assertImplementationIdentityDependency } from './implementation-identity-edges.mjs';
 import { createHash } from 'node:crypto';
@@ -40,6 +41,7 @@ const packages = [
   { name: '@byok-sdk/ui-runtime', directory: 'packages/ui-runtime' },
   { name: '@byok-sdk/keys', directory: 'packages/keys' },
 ];
+const registryExpectations = readRegistryExpectations(repoRoot, packages.map(({ name }) => name));
 const expectedPackageVersions = Object.fromEntries(
   packages.map(({ name }) => [name, name === '@byok-sdk/keys' ? keysVersion : releaseVersion]),
 );
@@ -396,6 +398,10 @@ try {
       file,
       sha256: sha256(tarballPath),
       sha512Integrity: sha512Integrity(tarballPath),
+      runtimeDependencies: runtimeDependencyMetadata(
+        JSON.parse(readTarballEntry(tarballPath, 'package/package.json').toString('utf8')),
+        `${packageName} packed manifest`,
+      ),
     });
   }
 
@@ -600,7 +606,8 @@ try {
   }
 
   const manifest = {
-    schemaVersion: 2,
+    schemaVersion: 3,
+    registryExpectations,
     releaseVersion,
     sourceGitSha: run('git', ['rev-parse', 'HEAD']),
     node: process.version,

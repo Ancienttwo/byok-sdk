@@ -206,6 +206,7 @@ const ALWAYS_AUTHORIZED: InputPreparationAuthorityResolver = {
 function recordingCompletionClient() {
   const completions: InputPreparationCompletionRequest[] = [];
   const client = {
+    async readCompleted() { return completions.at(-1); },
     async complete(input: InputPreparationCompletionRequest) {
       completions.push(structuredClone(input) as InputPreparationCompletionRequest);
       return {} as never;
@@ -401,7 +402,7 @@ describe('remote input preparation: in-process, never the control socket', () =>
     expect(socketOpens).toBe(0);
   });
 
-  it('absorbs a re-delivery: one compile, one counter call, ONE observation, two equal completions', async () => {
+  it('absorbs a re-delivery: one compile, one counter call, ONE observation and the same cloud completion', async () => {
     const harness = await makeHarness();
     const first = await harness.handle(payload());
     const second = await harness.handle(payload());
@@ -413,13 +414,12 @@ describe('remote input preparation: in-process, never the control socket', () =>
     // fact, so it never reaches the assembly entry a second time.
     expect(harness.toolSurface.assembleCalls).toHaveLength(1);
     expect(second).toEqual(first);
-    expect(harness.completions).toHaveLength(2);
-    expect(harness.completions[1]).toEqual(harness.completions[0]);
+    expect(harness.completions).toHaveLength(1);
   });
 
-  it('refuses a re-delivery whose launch binding or implementations moved, instead of re-deriving it', async () => {
+  it('replays recorded completion after binding drift, independently of current consumption readiness', async () => {
     const harness = await makeHarness();
-    await harness.handle(payload());
+    const first = await harness.handle(payload());
 
     // What a `toolsets.reload`, a replaced launch directory or a re-measured
     // implementation looks like to the replay path: the spawn-free binding
@@ -427,10 +427,9 @@ describe('remote input preparation: in-process, never the control socket', () =>
     harness.toolSurface.toolBindingDigest = 'binding-digest-2';
     const replayed = await harness.handle(payload());
 
-    if (replayed.outcome !== 'rejected') throw new Error('unreachable');
-    expect(replayed.reason).toBe('observation_drift');
-    // Still no second observation and no second count: drift is detected on
-    // evidence that costs no spawn.
+    expect(replayed).toEqual(first);
+    // Reporting history does not re-observe or re-count. Prepared execution
+    // admission remains responsible for refusing the changed launch binding.
     expect(harness.toolSurface.assembleCalls).toHaveLength(1);
     expect(harness.counter.calls).toHaveLength(1);
   });
@@ -564,6 +563,7 @@ describe('remote input preparation: in-process, never the control socket', () =>
 
   it('keeps the mailbox row when the completion itself cannot be recorded', async () => {
     const failing = {
+      async readCompleted() { return undefined; },
       async complete() {
         throw new Error('completion transport failed');
       },

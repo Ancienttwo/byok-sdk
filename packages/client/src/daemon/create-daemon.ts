@@ -1818,6 +1818,7 @@ export function buildDaemonWithAdapters(
 
   let connection: ConnectionManager | undefined;
   let blobLifecycleAbort: AbortController | undefined;
+  let inputPreparationStatusAbort: AbortController | undefined;
   let connectionState: ConnectionState = 'closed';
   // A successful start owns tenant-bound egress and journal composition. A
   // re-pair during that lifetime is refused rather than leaving any active
@@ -2290,11 +2291,13 @@ export function buildDaemonWithAdapters(
      * Nothing here touches the local control socket — see
      * `input-preparation-remote.ts` for why that is the point.
      */
+    inputPreparationStatusAbort = new AbortController();
     const inputPreparationCompletion = new InputPreparationCompletionClient({
       serverUrl: config.serverUrl,
       auth,
       tenantId: record.tenantId,
       deviceId: record.deviceId,
+      statusReadSignal: inputPreparationStatusAbort.signal,
     });
     const handleRemoteInputPreparation = createRemoteInputPreparationHandler({
       deviceId: record.deviceId,
@@ -2307,10 +2310,8 @@ export function buildDaemonWithAdapters(
         ? { unavailableReason: inputPreparationLaneOff?.code ?? 'runtime_identity_unavailable' }
         : {}),
       completion: inputPreparationCompletion,
-      resolveBlobText: (blobRef) =>
-        blobClient.resolveInstruction(blobRef, {
-          ...(blobLifecycleAbort === undefined ? {} : { signal: blobLifecycleAbort.signal }),
-        }),
+      signal: blobLifecycleAbort.signal,
+      resolveBlobText: (blobRef, signal) => blobClient.resolveInstruction(blobRef, { signal }),
     });
 
     capabilities.push('custom-harness');
@@ -2598,8 +2599,8 @@ export function buildDaemonWithAdapters(
       if (envelope.type !== 'agent.input.preparation') return false;
       // Resolves once the completion is durably recorded by the cloud. Anything
       // that prevents that recording throws, so the cursor stays put and the
-      // row is redelivered — a redelivery is idempotent because the durable
-      // record answers the second one without a second compile or count.
+      // row is redelivered — a redelivery reads the immutable cloud completion
+      // before local readiness/deadline checks or a second compile/count.
       await handleRemoteInputPreparation(envelope.payload);
       return true;
     };
@@ -3126,6 +3127,10 @@ export function buildDaemonWithAdapters(
     // batch cannot mint in the gap between the RPC returning and this function
     // being scheduled. Latched, never cleared.
     shuttingDown = true;
+    // Release status waits before service/connection drain. Their mailbox rows
+    // remain unacknowledged for a fresh lifecycle to recover authoritatively.
+    inputPreparationStatusAbort?.abort();
+    inputPreparationStatusAbort = undefined;
     blobLifecycleAbort?.abort();
     blobLifecycleAbort = undefined;
     const errors: unknown[] = [];

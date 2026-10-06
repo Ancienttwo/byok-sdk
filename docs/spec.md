@@ -119,8 +119,11 @@ authenticated session and device assertion.
   reads the snapshot's tenant, device and enrollment revision with
   `readDeviceEnrollmentIdentity`; the enrollment revision is the decimal
   string of the enrollment's device-proof key epoch, which a Host issues from
-  its device row as `String(proof_key_epoch)`. It is monotonic across
-  proof-key rotation for one device id, and re-pair mints a new device id.
+  its device row as `String(proof_key_epoch)`. Current client source projects
+  the fixed pairing key `identity` at epoch `0` (revision `"0"`); re-pair mints
+  a new device id. A future proof-key rotation must carry its authenticated
+  epoch into the local record and replace that projection in the same cut.
+  The current enrollment read is not rotation observation.
   That fence covers only
   placement/enrollment writers that update the local record under the same
   configuration lock. A generation is consumed when its pending marker is
@@ -175,22 +178,26 @@ authorization and registry readback. The current independent keys candidate is
 dispatch release, `0.24.0-rc.1`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-The 0.24.0-rc.1 train is a prepared prerelease, not yet published; it is
-published only under the npm dist-tag `rc`, and `latest` stays 0.23.0 / keys
-0.8.0. A prerelease train publishes every public package as a prerelease on one
-dist-tag, which is why keys is `0.8.1-rc.1`. The 0.24.0 line is a MINOR:
-`@byok-sdk/client` adds public host API — `readDeviceEnrollmentIdentity`,
-`createStoredDeviceProofSigner` and `retireInputPreparation` (see "Gate A"
-below and the input-preparation operator step) — and protocol, core, client
-and cloud add the Agent memory intent notice, device processor and cloud
-producer (see "Durable Agent homes"), all additive. The stable 0.24.0 freezes
-that wire. keys 0.8.1 is a PATCH: its own source is unchanged and it gains no
-new public behavior, API, persistence or security authority; it moves only
-because its packed core and implementation-identity edges must equal the
-current dispatch release. implementation-identity source is unchanged from
-0.23.0, and core only adds the Agent memory intent digest export, which keys
-does not import (the same reasoning as keys 0.6.1 and 0.6.2 for 0.20.0 and
-0.21.0). Notes: `docs/releases/v0.24.0.md`.
+The 0.24.0-rc.1 train is a prepared prerelease, not yet published. The final
+keys version and whether another RC precedes stable remain release-owner
+decisions. If an RC is selected, every public package must be a prerelease on
+one explicit non-`latest` dist-tag (proposed: `rc`); existing stable tags must
+remain unchanged. The new cloud-do package needs a first-publication readback
+contract, not an assumed previous 0.23.0 stable tag. Historical registry receipts
+below are not a fresh readback.
+
+The 0.24 line is a MINOR under this policy: it adds Host surfaces and Agent
+memory intents, and now also includes the Node 24.15.0 floor, Codex app-server
+cut, removed Claude approval API, SQLite v4 and V2 runtime-plan/launch boundary.
+It is not an all-additive upgrade. The original keys PATCH rationale no longer
+fits the source: keys adds the durable launcher entry/API, its Node floor
+changes, and its identity dependency introduces external-CLI authority and V2
+launch records. A next independent MINOR is recommended (for example, stable
+keys `0.9.0`, with a corresponding prerelease if selected). That recommendation
+is pending approval; it does not change the current `0.8.1-rc.1` manifest.
+The Agent memory intent wire remains a candidate contract until stable.
+See [0.24 release and migration notes](releases/v0.24.0.md) for exact source
+evidence, package set, cutover/rollback and the distinct SDK/Host acceptance gates.
 
 The 0.23.0 train is published (see below). It adds sealed remote provider
 provisioning (see "Sealed remote provider provisioning" below). keys 0.8.0 is a
@@ -218,7 +225,7 @@ published on 2026-09-25 from the `v0.22.0` tag (`0962f14f`). The registry, not t
 authority on what has shipped — read it back with `npm view @byok-sdk/core version`
 and `npm view @byok-sdk/keys version`.
 
-The published package set is exactly ten packages: the nine aligned train
+The public candidate package set is exactly ten packages: the nine aligned train
 packages `@byok-sdk/core`, `@byok-sdk/protocol`, `@byok-sdk/client`,
 `@byok-sdk/server`, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`,
 `@byok-sdk/ui-runtime` and `@byok-sdk/implementation-identity`, plus the
@@ -2418,7 +2425,7 @@ Prepared child environment is rebuilt through an explicit EnvironmentBuilder all
 
 A1'' compile uses only a placeholder key and injected capture-and-throw fetch against the actual baseUrl. The official OpenAI client reads exactly OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET, OPENAI_LOG and OPENAI_CUSTOM_HEADERS. The approved purity contract is D independence plus this exact read set, not zero reads; an upgrade changing the set requires a fresh ruling. Poisoning these variables must leave D unchanged. OPENAI_LOG may cause a local request log during compile: the device owner deliberately enabled this debug setting; the accepted side effect remains local, does not change D and is not sent externally. No global env or transport monkey-patch is permitted.
 
-Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.0.4 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires fresh closure attestation and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in attestation, eleven Bun-resolved official package instances on the attesting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.20.3 source at `packages/client/vendor/oar/f385b91/`, from upstream commit `f385b918176d5ced07179e25e8cd758e75a784d1`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their measured JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
+Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.0.4 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires fresh closure attestation and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in attestation, eleven Bun-resolved official package instances on the attesting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.25.0 source at `packages/client/vendor/oar/a800aa0/`, from upstream commit `a800aa00ba9c754c88ba25f84a6981e757b0f19f`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their measured JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
 
 pi-durable 1.0.1 ruling (2026-10-04, approved by Aimpact): admitted at exactly 1.0.1. Its shipped code is byte-identical to 1.0.0 (version-only change), and the closure was freshly attested at closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`.
 

@@ -869,7 +869,7 @@ async function readProjectionState(
 
 async function writeProjectionState(
   resolution: AgentHomeResolution,
-  payload: AgentHomeProjectionPayload,
+  payload: Pick<AgentHomeProjectionPayload, 'agentRef' | 'requestId' | 'projectionHash'>,
 ): Promise<void> {
   const filePath = projectionStatePath(resolution);
   const existing = await fs.lstat(filePath).catch((error: NodeJS.ErrnoException) => {
@@ -1023,11 +1023,15 @@ export class AgentHomeManager {
           payload.agentRef.profileRevision,
           current.agentRef.profileRevision,
         );
-        if (order < 0) return 'stale';
-        if (order === 0) {
-          if (payload.projectionHash !== current.projectionHash) return 'conflict';
-          await applyProjection();
-          return 'idempotent';
+        if (order <= 0) {
+          const outcome = order < 0 ? 'stale'
+            : payload.projectionHash !== current.projectionHash ? 'conflict' : 'idempotent';
+          if (outcome === 'idempotent') await applyProjection();
+          // A readable rename may have survived a failed fsync. Re-establish
+          // the ordering barrier before acknowledging any decision based on
+          // it, preserving the original request identity rather than replay's.
+          await writeProjectionState(resolution, current);
+          return outcome;
         }
       }
 

@@ -18,7 +18,10 @@ export const PROVIDER_TIMEOUT_MS = 15_000;
  * (`providers.ts:1711-1743`): the URL is re-validated immediately before the
  * call, the caller's abort signal is chained, and an internal timeout aborts
  * with a distinguishable reason so a timeout maps to
- * `PROVIDER_REQUEST_TIMEOUT` rather than a bare `AbortError`.
+ * `PROVIDER_REQUEST_TIMEOUT` rather than a bare `AbortError`. The returned
+ * response owns the guarded body: consume or cancel it to release the guard;
+ * otherwise the original deadline cancels it. Neither headers nor body reads
+ * depend on the injected transport honoring its abort signal.
  */
 export async function fetchWithProviderGuards(
   fetchImpl: ProviderFetch,
@@ -27,38 +30,129 @@ export async function fetchWithProviderGuards(
   signal: AbortSignal,
 ): Promise<Response> {
   normalizeProviderUrl(url);
+  signal.throwIfAborted();
   const controller = new AbortController();
-  const onAbort = () => controller.abort(signal.reason);
-  signal.addEventListener('abort', onAbort, { once: true });
-  if (signal.aborted) onAbort();
-  const timeout = setTimeout(
-    () => controller.abort('provider_timeout'),
-    PROVIDER_TIMEOUT_MS,
-  );
-  try {
-    return await fetchImpl(url, { ...init, signal: controller.signal });
-  } catch (error) {
-    if (
-      !signal.aborted &&
-      controller.signal.aborted &&
-      controller.signal.reason === 'provider_timeout'
-    ) {
-      throw new ByokKeysError(
-        'PROVIDER_REQUEST_TIMEOUT',
-        'Provider request timed out',
-      );
-    }
-    throw error;
-  } finally {
+  let ownedResponse: Response | undefined;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined;
+  let finished = false;
+  let cleanedUp = false;
+  let rejectAbort!: (reason: unknown) => void;
+  const aborted = new Promise<never>((_, reject) => { rejectAbort = reject; });
+  // The header race may already be settled when body cancellation rejects this.
+  void aborted.catch(() => {});
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
     clearTimeout(timeout);
     signal.removeEventListener('abort', onAbort);
+  };
+  const disposeBody = (reason: unknown) => {
+    // Transfer ownership out before cancellation: observer, abort and await
+    // continuation may all try to dispose, but only one owns the resource.
+    const ownedReader = reader;
+    const response = ownedResponse;
+    reader = undefined;
+    ownedResponse = undefined;
+    // An injected cancel hook may itself stall or reject. Never await it.
+    if (ownedReader) {
+      void ownedReader.cancel(reason).catch(() => {});
+      ownedReader.releaseLock();
+    } else if (response) {
+      void response.body?.cancel(reason).catch(() => {});
+    }
+  };
+  const abort = (reason: unknown) => {
+    if (finished) return;
+    finished = true;
+    cleanup();
+    rejectAbort(reason);
+    bodyController?.error(reason);
+    disposeBody(reason);
+    controller.abort(reason);
+  };
+  const onAbort = () => abort(signal.reason);
+  const timeout = setTimeout(() => abort(new ByokKeysError(
+    'PROVIDER_REQUEST_TIMEOUT',
+    'Provider request timed out',
+  )), PROVIDER_TIMEOUT_MS);
+  signal.addEventListener('abort', onAbort, { once: true });
+  try {
+    const pending = Promise.resolve(fetchImpl(url, { ...init, signal: controller.signal }));
+    // Acquire ownership in the first response reaction, including when fetch
+    // ignores abort. Keep it across the race's separate await continuation.
+    void pending.then(response => {
+      ownedResponse = response;
+      if (finished) disposeBody(controller.signal.reason);
+    }, () => {});
+    const response = await Promise.race([pending, aborted]);
+    if (finished) {
+      disposeBody(controller.signal.reason);
+      throw controller.signal.reason;
+    }
+    if (!response.body) {
+      ownedResponse = undefined;
+      finished = true;
+      cleanup();
+      return response;
+    }
+    reader = response.body.getReader();
+    ownedResponse = undefined;
+    // Keep reads demand-driven so bounded consumers can stop at the crossing
+    // chunk without this wrapper prefetching another source chunk.
+    const body = new ReadableStream<Uint8Array>({
+      start(streamController) { bodyController = streamController; },
+      async pull(streamController) {
+        try {
+          const chunk = await reader!.read();
+          if (finished) return;
+          if (chunk.done) {
+            finished = true;
+            cleanup();
+            reader!.releaseLock();
+            streamController.close();
+          } else {
+            streamController.enqueue(chunk.value);
+          }
+        } catch (error) {
+          if (finished) return;
+          finished = true;
+          cleanup();
+          reader!.releaseLock();
+          streamController.error(error);
+        }
+      },
+      cancel(reason) {
+        if (finished) return;
+        finished = true;
+        cleanup();
+        disposeBody(reason);
+        controller.abort(reason);
+      },
+    }, { highWaterMark: 0 });
+    const guarded = new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+    // Rewrapping transfers body ownership but must retain fetch metadata.
+    for (const key of ['url', 'redirected', 'type'] as const) {
+      Object.defineProperty(guarded, key, { value: response[key] });
+    }
+    return guarded;
+  } catch (error) {
+    finished = true;
+    cleanup();
+    disposeBody(error);
+    throw error;
   }
 }
 
 /**
  * Read a JSON body with a size ceiling (`providers.ts:1825-1851`). The
- * `content-length` check is an early exit; the decoded-byte check is the one
- * that actually holds, since `content-length` is attacker-controlled.
+ * `content-length` check is an early exit. Count actual transport body bytes
+ * before decoding each chunk: headers may be absent, false, or compressed.
+ * Cancel at the first chunk crossing the ceiling without waiting for EOF.
  */
 export async function parseBoundedJsonResponse(
   response: Response,
@@ -68,17 +162,41 @@ export async function parseBoundedJsonResponse(
     Number.isFinite(contentLength) &&
     contentLength > PROVIDER_RESPONSE_MAX_BYTES
   ) {
+    void response.body?.cancel().catch(() => {});
     throw new ByokKeysError(
       'PROVIDER_RESPONSE_TOO_LARGE',
       'Provider response exceeds the local safety limit',
     );
   }
-  const text = await response.text();
-  if (new TextEncoder().encode(text).byteLength > PROVIDER_RESPONSE_MAX_BYTES) {
-    throw new ByokKeysError(
-      'PROVIDER_RESPONSE_TOO_LARGE',
-      'Provider response exceeds the local safety limit',
-    );
+  if (response.bodyUsed) throw new TypeError('Response body is already consumed');
+  let text = '';
+  const reader = response.body?.getReader();
+  if (reader) {
+    const decoder = new TextDecoder();
+    let bytes = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        // Fetch exposes decompressed bytes. Do not decode or retain a chunk
+        // that exceeds the remaining budget, even if no EOF ever arrives.
+        if (value.byteLength > PROVIDER_RESPONSE_MAX_BYTES - bytes) {
+          throw new ByokKeysError(
+            'PROVIDER_RESPONSE_TOO_LARGE',
+            'Provider response exceeds the local safety limit',
+          );
+        }
+        bytes += value.byteLength;
+        text += decoder.decode(value, { stream: true });
+      }
+      text += decoder.decode();
+    } catch (error) {
+      // Cancellation hooks are untrusted: release our lock and reject now.
+      void reader.cancel(error).catch(() => {});
+      throw error;
+    } finally {
+      reader.releaseLock();
+    }
   }
   try {
     return JSON.parse(text);

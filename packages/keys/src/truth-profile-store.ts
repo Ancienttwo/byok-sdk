@@ -347,6 +347,9 @@ function decodeRegistryRecord(
 function assertRegistryInvariants(
   profiles: readonly ModelProviderProfile[],
 ): void {
+  if (profiles.length > MAX_PROVIDER_PROFILES) {
+    throw invalidTruth('Provider profile TruthStore body exceeds the provider registry bound');
+  }
   const seen = new Set<ProviderProfileRef>();
   let enabled = 0;
   for (const profile of profiles) {

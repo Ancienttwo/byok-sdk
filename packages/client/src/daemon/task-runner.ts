@@ -855,10 +855,12 @@ interface ActiveTask {
   beingTornDown?: boolean;
   /** Set before the first disposal await so no racing path can publish a second semantic terminal. */
   finalizationStarted?: boolean;
-  /** Reserved synchronously by the one path allowed to publish this task's terminal envelope. */
-  semanticTerminalReserved?: boolean;
-  semanticTerminalSettled?: Promise<boolean>;
-  resolveSemanticTerminalSettled?: (disposed: boolean) => void;
+  /** The first terminal decision owns all retries, including pre-publication durability. */
+  semanticTerminal?: {
+    readonly prepare: () => Promise<Envelope>;
+    envelope?: Envelope;
+    attempt?: Promise<boolean>;
+  };
   /** Shared receipt for concurrent finish/shutdown callers; cleared after a failed attempt so shutdown can retry. */
   disposalAttempt?: Promise<void>;
   messageRequirement?: Readonly<AgentMessageEgressRequirement>;
@@ -1889,30 +1891,19 @@ export class TaskRunner {
   }
 
   private async teardownActiveTask(active: ActiveTask, reason: string, retryable: boolean, drainEvents = true): Promise<boolean> {
-    if (active.finalizationStarted) return this.finish(active.taskId);
-    if (!this.reserveSemanticTerminal(active)) return active.semanticTerminalSettled ?? false;
-    // A soft interrupt may end the event stream; mark it as runner-initiated
-    // before crossing that boundary.
-    active.beingTornDown = true;
-    active.blobAbort.abort();
-    await this.observeGit(active, 'salvage');
-    await this.interruptBounded(active, drainEvents);
-    if (this.tasks.get(active.taskId) !== active) return true;
-    await this.persistAgentTerminalEvidence(active, 'failed', reason);
-    this.deps.send(
-      createEnvelope(
-        'task.fail',
-        {
-          reason,
-          retryable,
-          ...this.terminalInferenceUsagePayload(active),
-          ...this.preparedObservationPayload(active),
-          ...this.agentTerminalPayload(active),
-        },
-        { taskId: active.taskId },
-      ),
-    );
-    return this.finish(active.taskId);
+    return this.settleSemanticTerminal(active, async () => {
+      active.blobAbort.abort();
+      await this.observeGit(active, 'salvage');
+      await this.interruptBounded(active, drainEvents);
+      await this.persistAgentTerminalEvidence(active, 'failed', reason);
+      return createEnvelope('task.fail', {
+        reason,
+        retryable,
+        ...this.terminalInferenceUsagePayload(active),
+        ...this.preparedObservationPayload(active),
+        ...this.agentTerminalPayload(active),
+      }, { taskId: active.taskId });
+    });
   }
 
   /** Graceful-shutdown caller of {@link teardownActiveTask} — see `shutdownActiveTasks`'s own doc comment. `retryable: true`: nothing about the task/policy itself was ever at fault, only this device's own availability right now. */
@@ -3295,19 +3286,15 @@ export class TaskRunner {
         agentLeaseTransferred = agentBinding !== undefined;
         this.startupOwners.delete(taskId);
         this.tasks.set(taskId, active);
-        this.reserveSemanticTerminal(active);
-        active.eventPump = this.pump(active);
-        await this.interruptBounded(active);
-        await this.updateGitPhaseBestEffort(gitWorkspaceId, 'cancelled');
-        await this.persistAgentTerminalEvidence(active, 'cancelled', reason);
-        this.deps.send(
-          createEnvelope(
-            'task.cancelled',
-            { reason, ...this.terminalInferenceUsagePayload(active), ...this.agentTerminalPayload(active) },
-            { taskId },
-          ),
-        );
-        await this.finish(taskId);
+        await this.settleSemanticTerminal(active, async () => {
+          active.eventPump ??= this.pump(active);
+          await this.interruptBounded(active);
+          await this.updateGitPhaseBestEffort(gitWorkspaceId, 'cancelled');
+          await this.persistAgentTerminalEvidence(active, 'cancelled', reason);
+          return createEnvelope('task.cancelled', {
+            reason, ...this.terminalInferenceUsagePayload(active), ...this.agentTerminalPayload(active),
+          }, { taskId });
+        });
         return;
       }
 
@@ -4135,17 +4122,17 @@ export class TaskRunner {
       );
       return;
     }
-    if (!this.reserveSemanticTerminal(active)) return;
-    await this.persistAgentTerminalEvidence(active, 'complete');
-    this.deps.send(createEnvelope('task.complete', {
-      summary: finalOutput,
-      sessionRef: active.session.sessionRef,
-      ...(document !== undefined ? { document } : {}),
-      ...this.terminalInferenceUsagePayload(active),
-      ...this.preparedObservationPayload(active),
-      ...this.agentTerminalPayload(active),
-    }, { taskId: active.taskId, sessionRef: active.session.sessionRef }));
-    await this.finish(active.taskId);
+    await this.settleSemanticTerminal(active, async () => {
+      await this.persistAgentTerminalEvidence(active, 'complete');
+      return createEnvelope('task.complete', {
+        summary: finalOutput,
+        sessionRef: active.session.sessionRef,
+        ...(document !== undefined ? { document } : {}),
+        ...this.terminalInferenceUsagePayload(active),
+        ...this.preparedObservationPayload(active),
+        ...this.agentTerminalPayload(active),
+      }, { taskId: active.taskId, sessionRef: active.session.sessionRef });
+    });
   }
 
   /**
@@ -4247,41 +4234,30 @@ export class TaskRunner {
       this.inFlightBlobAborts.get(taskId)?.abort();
       return;
     }
-    if (active.finalizationStarted) {
-      await this.finish(taskId);
-      return;
-    }
-    if (!this.reserveSemanticTerminal(active)) {
-      await active.semanticTerminalSettled;
-      return;
-    }
-    active.blobAbort.abort();
-    await this.interruptBounded(active);
-    await this.observeGit(active, 'salvage');
-    // Deliberately NOT active.batcher.flush()-ed here (M1-4 e2e finding):
-    // §4's "server state is authoritative on its own action" rule means the
-    // server already moved this task to `Cancelled` — and already closed
-    // this task's ServerTaskEvent queue (hub.ts's onStateChange, called
-    // synchronously from cancelTask() before task.cancel is even sent) —
-    // before this notification reaches the daemon at all. Any progress
-    // still buffered in the batcher at this point can therefore never reach
-    // an embedder no matter what: sending it only draws a
-    // dropped/illegal-transition warning on the server for a `task.progress`
-    // arriving against an already-terminal task (hub.ts's onProgress has no
-    // §9 stale-terminal-message idempotency for task.progress the way it
-    // does for task.complete/fail/cancelled). `finish()` below already stops
-    // the batcher; nothing else needs to happen with its buffer contents.
-    // M1 gap #6: the canonical, explicit cancellation message — no longer
-    // `task.fail({reason:'cancelled'})`.
-    await this.persistAgentTerminalEvidence(active, 'cancelled', reason);
-    this.deps.send(
-      createEnvelope(
-        'task.cancelled',
-        { reason, ...this.terminalInferenceUsagePayload(active), ...this.agentTerminalPayload(active) },
-        { taskId },
-      ),
-    );
-    await this.finish(taskId);
+    await this.settleSemanticTerminal(active, async () => {
+      active.blobAbort.abort();
+      await this.interruptBounded(active);
+      await this.observeGit(active, 'salvage');
+      // Deliberately NOT active.batcher.flush()-ed here (M1-4 e2e finding):
+      // §4's "server state is authoritative on its own action" rule means the
+      // server already moved this task to `Cancelled` — and already closed
+      // this task's ServerTaskEvent queue (hub.ts's onStateChange, called
+      // synchronously from cancelTask() before task.cancel is even sent) —
+      // before this notification reaches the daemon at all. Any progress
+      // still buffered in the batcher at this point can therefore never reach
+      // an embedder no matter what: sending it only draws a
+      // dropped/illegal-transition warning on the server for a `task.progress`
+      // arriving against an already-terminal task (hub.ts's onProgress has no
+      // §9 stale-terminal-message idempotency for task.progress the way it
+      // does for task.complete/fail/cancelled). `finish()` below already stops
+      // the batcher; nothing else needs to happen with its buffer contents.
+      // M1 gap #6: the canonical, explicit cancellation message — no longer
+      // `task.fail({reason:'cancelled'})`.
+      await this.persistAgentTerminalEvidence(active, 'cancelled', reason);
+      return createEnvelope('task.cancelled', {
+        reason, ...this.terminalInferenceUsagePayload(active), ...this.agentTerminalPayload(active),
+      }, { taskId });
+    });
   }
 
   /** M3-B: bounded insert for `pendingCancelled` — see its class-level doc comment and `MAX_TRACKED_TASK_IDS`. Evicts the oldest SAFE-TO-EVICT entry once over cap — see `evictPendingCancelled` (finding #5: not simply "the oldest entry", which could be an in-flight offer's own cancel marker). */
@@ -4754,8 +4730,8 @@ export class TaskRunner {
   private async handleReject(taskId: string, reason: string | undefined, approvalId: string | undefined): Promise<void> {
     const active = this.tasks.get(taskId);
     if (!active) return;
-    if (active.finalizationStarted) {
-      await this.finish(taskId);
+    if (active.semanticTerminal !== undefined || active.finalizationStarted) {
+      await this.settleSemanticTerminal(active);
       return;
     }
     // M5 (approval targeting): same validate-first mismatch check as
@@ -4795,25 +4771,18 @@ export class TaskRunner {
     // back to a server that already knows this decision (it sent this
     // task.reject itself) if this hadn't already cleared it as 'wire' here.
     this.clearPendingApproval(resolvedId, 'reject', reason);
-    if (!this.reserveSemanticTerminal(active)) {
-      await active.semanticTerminalSettled;
-      return;
-    }
-    await this.interruptBounded(active);
-    await this.observeGit(active, 'salvage');
-    // Same reasoning as handleCancel() above: the server already moved this
-    // task to `Failed` and closed its event queue before this notification
-    // arrived, so flushing buffered progress here would be unobservable and
-    // only trigger a spurious server-side warning.
-    await this.persistAgentTerminalEvidence(active, 'failed', reason ?? 'rejected');
-    this.deps.send(
-      createEnvelope(
-        'task.fail',
-        { reason: reason ?? 'rejected', retryable: false, ...this.terminalInferenceUsagePayload(active), ...this.preparedObservationPayload(active), ...this.agentTerminalPayload(active) },
-        { taskId },
-      ),
-    );
-    await this.finish(taskId);
+    await this.settleSemanticTerminal(active, async () => {
+      await this.interruptBounded(active);
+      await this.observeGit(active, 'salvage');
+      // As with cancel, the server has already closed its progress stream.
+      await this.persistAgentTerminalEvidence(active, 'failed', reason ?? 'rejected');
+      return createEnvelope('task.fail', {
+        reason: reason ?? 'rejected', retryable: false,
+        ...this.terminalInferenceUsagePayload(active),
+        ...this.preparedObservationPayload(active),
+        ...this.agentTerminalPayload(active),
+      }, { taskId });
+    });
   }
 
   /** Pre-claim, fail-closed rejection (protocol §3.2) — never claims first. */
@@ -4827,31 +4796,23 @@ export class TaskRunner {
 
   private async fail(taskId: string, reason: string, retryable: boolean): Promise<void> {
     const active = this.tasks.get(taskId);
-    if (active?.finalizationStarted) {
-      await this.finish(taskId);
+    if (active !== undefined) {
+      await this.settleSemanticTerminal(active, async () => {
+        await this.observeGit(active, 'salvage');
+        await this.persistAgentTerminalEvidence(active, 'failed', reason);
+        return createEnvelope('task.fail', {
+          reason,
+          retryable,
+          ...this.terminalInferenceUsagePayload(active),
+          ...this.preparedObservationPayload(active),
+          ...this.agentTerminalPayload(active),
+        }, { taskId });
+      });
       return;
     }
-    if (active && !this.reserveSemanticTerminal(active)) {
-      await active.semanticTerminalSettled;
-      return;
-    }
-    if (active) await this.observeGit(active, 'salvage');
-    if (active) await this.persistAgentTerminalEvidence(active, 'failed', reason);
-    this.deps.send(
-      createEnvelope(
-        'task.fail',
-        active === undefined
-          ? { reason, retryable, ...terminalIdentity(this.claimedHarnesses.get(taskId)) }
-          : {
-            reason,
-            retryable,
-            ...this.terminalInferenceUsagePayload(active),
-            ...this.preparedObservationPayload(active),
-            ...this.agentTerminalPayload(active),
-          },
-        { taskId },
-      ),
-    );
+    this.deps.send(createEnvelope('task.fail', {
+      reason, retryable, ...terminalIdentity(this.claimedHarnesses.get(taskId)),
+    }, { taskId }));
     await this.finish(taskId);
   }
 
@@ -5153,10 +5114,7 @@ export class TaskRunner {
     // may already be in transport, including its existing admission recovery gate.
     // For unsent messages, join activation and revoke before terminal truth.
     if (cause === 'cancelled' || (cause === 'failed' && !active.messageSendAttempted)) {
-      try { await active.messageOutbox?.revoke(active.taskId); } catch (error) {
-        active.resolveSemanticTerminalSettled?.(false);
-        throw error;
-      }
+      await active.messageOutbox?.revoke(active.taskId);
     }
     active.terminalCause = cause;
     active.terminalReason = reason;
@@ -5237,7 +5195,7 @@ export class TaskRunner {
 
   async retryTerminalFinalization(taskId: string): Promise<void> {
     const active = this.tasks.get(taskId);
-    if (active?.finalizationStarted) await this.finish(taskId);
+    if (active) await this.settleSemanticTerminal(active);
   }
 
   private readonly finalizationAttempts = new Map<string, Promise<boolean>>();
@@ -5324,14 +5282,12 @@ export class TaskRunner {
         stage: failure.stage,
         reason: failure.message,
       });
-      active.resolveSemanticTerminalSettled?.(false);
       return false;
     }
     if (this.tasks.get(taskId) !== active) return true;
     try {
       await this.deps.awaitTerminalCommit?.(taskId);
     } catch {
-      active.resolveSemanticTerminalSettled?.(false);
       return false;
     }
     if (this.tasks.get(taskId) !== active) return true;
@@ -5384,7 +5340,6 @@ export class TaskRunner {
       this.revokeAgentMessageContext(taskId);
       this.revokeAgentMemoryContext(taskId);
       this.deleteHostToolsetContexts(taskId);
-      active.resolveSemanticTerminalSettled?.(leaseReleased);
       return leaseReleased;
     }
     active.gitLease?.release();
@@ -5393,23 +5348,35 @@ export class TaskRunner {
     this.revokeAgentMessageContext(taskId);
     this.revokeAgentMemoryContext(taskId);
     this.deleteHostToolsetContexts(taskId);
-    active.resolveSemanticTerminalSettled?.(true);
     return true;
   }
 
-  private reserveSemanticTerminal(active: ActiveTask): boolean {
-    if (active.semanticTerminalReserved || active.finalizationStarted) return false;
-    // Contract §8.2(1): every semantic terminal (complete, fail, cancel,
-    // reject, shutdown) funnels through this single reservation, so revoking
-    // here covers all of them at the one point that can only be reached once,
-    // synchronously, and before any teardown `await`.
-    this.revokeHostToolsetContexts(active.taskId);
-    active.semanticTerminalReserved = true;
-    active.beingTornDown = true;
-    active.semanticTerminalSettled = new Promise<boolean>((resolve) => {
-      active.resolveSemanticTerminalSettled = resolve;
+  private settleSemanticTerminal(active: ActiveTask, prepare?: () => Promise<Envelope>): Promise<boolean> {
+    if (this.tasks.get(active.taskId) !== active) return Promise.resolve(true);
+    if (active.semanticTerminal?.attempt) return active.semanticTerminal.attempt;
+    if (active.finalizationStarted) return this.finish(active.taskId);
+    if (active.semanticTerminal === undefined) {
+      if (prepare === undefined) return Promise.resolve(false);
+      // First decision wins synchronously, before interrupt or durability I/O.
+      // Keep its closure after failure; competing cancel/fail/shutdown reasons
+      // may retry it, but can never select a replacement semantic terminal.
+      this.revokeHostToolsetContexts(active.taskId);
+      active.beingTornDown = true;
+      active.semanticTerminal = { prepare };
+    }
+    const terminal = active.semanticTerminal;
+    const attempt = Promise.resolve().then(async () => {
+      terminal.envelope ??= await terminal.prepare();
+      if (this.tasks.get(active.taskId) !== active) return true;
+      // Retain the exact envelope even if the synchronous sender throws. The
+      // existing terminal journal remains the sole durable wire authority.
+      this.deps.send(terminal.envelope);
+      return this.finish(active.taskId);
+    }).finally(() => {
+      if (terminal.attempt === attempt) terminal.attempt = undefined;
     });
-    return true;
+    terminal.attempt = attempt;
+    return attempt;
   }
 
   /**

@@ -1,3 +1,4 @@
+import { awaitAdmission } from './admission-wait';
 import { preparedAgentMemoryModeWithinCeiling } from '../agent-memory/prepared-capability';
 import { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import {
@@ -151,13 +152,14 @@ export interface InputPreparationServiceOptions {
  * Per-call bounds a caller may TIGHTEN, never loosen.
  *
  * The remote lane (`input-preparation-remote.ts`) carries a Host-stated
- * `deadlineAt`. It is applied here as `min(requested, configured)` so a
- * generous Host deadline can never enlarge this daemon's configured
- * `preparationDeadlineMs` — the local policy stays the ceiling, and the caller
- * only ever gets less time than it asked for.
+ * `deadlineAt`. The effective instant is `min(caller deadline, entry time +
+ * configured duration)`: context/admission time is never granted again after
+ * an await. A generous Host deadline cannot enlarge the local policy ceiling.
  */
 export interface InputPreparationCallOptions {
-  readonly deadlineMs?: number;
+  /** Absolute epoch milliseconds, measured once before remote context resolution. */
+  readonly deadlineAt?: number;
+  readonly signal?: AbortSignal;
 }
 
 export interface InputPreparationService {
@@ -431,6 +433,7 @@ function validateProviderEvidence(value: unknown): InputPreparationCounterProvid
 
 interface ActiveRun {
   readonly controller: AbortController;
+  readonly deadlineAt: number;
   /** Assigned synchronously right after the run starts, before it can yield. */
   done: Promise<void>;
   cancelRequested: boolean;
@@ -439,13 +442,8 @@ interface ActiveRun {
 export function createInputPreparationService(options: InputPreparationServiceOptions): InputPreparationService {
   const now = options.now ?? Date.now;
   const limits = options.limits;
-  const store = new InputPreparationStore({
-    storeDir: options.storeDir,
-    retentionMs: limits.retentionMs,
-    retryHorizonMs: limits.retryHorizonMs,
-    now,
-  });
   const active = new Map<string, ActiveRun>();
+  const preparationControllers = new Set<AbortController>();
   /** Per-record serialization, so two concurrent duplicates cannot both compile or both count. */
   const locks = new Map<string, Promise<unknown>>();
   let opened: Promise<void> | undefined;
@@ -453,6 +451,27 @@ export function createInputPreparationService(options: InputPreparationServiceOp
   let gcTimer: ReturnType<typeof setTimeout> | undefined;
   let gcInFlight: Promise<void> | undefined;
   let gcFailure: { cause: unknown } | undefined;
+
+  // The service owns retention scheduling even when TaskRunner releases a pin
+  // directly through its store. Keep this binding private: a standalone store
+  // has no timer/lifecycle owner and needs no public observer API.
+  class ServiceOwnedPreparationStore extends InputPreparationStore {
+    override async unpin(recordId: string, taskId: string): Promise<InputPreparationRecord> {
+      const record = await super.unpin(recordId, taskId);
+      // Never turn a committed unpin into a failed release because scheduling
+      // failed. Surface that fault through the existing service GC failure
+      // latch instead. Stopped services stay stopped; an in-flight GC's final
+      // scan will schedule from the newly committed state.
+      try { scheduleGc(); } catch (cause) { gcFailure = { cause }; }
+      return record;
+    }
+  }
+  const store = new ServiceOwnedPreparationStore({
+    storeDir: options.storeDir,
+    retentionMs: limits.retentionMs,
+    retryHorizonMs: limits.retryHorizonMs,
+    now,
+  });
 
   function assertAvailable(): void {
     if (gcFailure) rethrowDurable(gcFailure.cause);
@@ -486,16 +505,22 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     gcTimer.unref?.();
   }
 
-  function withRecordLock<T>(recordId: string, work: () => Promise<T>): Promise<T> {
+  async function withRecordLock<T>(recordId: string, work: () => Promise<T>, signal: AbortSignal): Promise<T> {
+    signal.throwIfAborted();
     const previous = locks.get(recordId) ?? Promise.resolve();
-    const next = previous.then(work, work);
-    locks.set(
-      recordId,
-      next.then(
-        () => undefined,
-        () => undefined,
-      ),
-    );
+    let entered = false;
+    let enter!: () => void;
+    const ready = new Promise<void>(resolve => { enter = resolve; });
+    const begin = (): Promise<T> => { entered = true; enter(); return work(); };
+    const next = previous.then(begin, begin);
+    locks.set(recordId, next.then(() => undefined, () => undefined));
+    try {
+      await awaitAdmission(() => ready, signal);
+    } catch (cause) {
+      // Before entry this is only a wait; the queued closure checks the same
+      // signal before doing anything. Once entered, never abandon its writes.
+      if (!entered) throw cause;
+    }
     return next;
   }
 
@@ -703,6 +728,18 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     throw new InputPreparationRequestError(refusal.code, refusal.message);
   }
 
+  function runAborted(run: ActiveRun): boolean {
+    if (now() >= run.deadlineAt) run.controller.abort();
+    return run.controller.signal.aborted;
+  }
+
+  async function cancelBeforeCounter(recordId: string, run: ActiveRun): Promise<never> {
+    const detail = run.cancelRequested ? 'cancelled_before_counter' : 'deadline_elapsed_before_counter';
+    try { await store.update(recordId, { state: 'cancelled', detail }); }
+    catch (cause) { rethrowDurable(cause); }
+    throw new InputPreparationRequestError('cancelled', 'this preparation was cancelled before any counter call was placed');
+  }
+
   async function runPreparation(
     record: InputPreparationRecord,
     request: InputPreparationRequestV1,
@@ -710,6 +747,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     target: InputPreparationCounterTargetV1,
     run: ActiveRun,
   ): Promise<InputPreparationRecord> {
+    if (runAborted(run)) await cancelBeforeCounter(record.recordId, run);
     // --- observation stage ------------------------------------------------
     // The one entry that resolves the launch boundary, resolves an
     // implementation identity per server, probes through both, and returns the
@@ -724,6 +762,9 @@ export function createInputPreparationService(options: InputPreparationServiceOp
         permissionMode: request.permissionMode,
         runtimeIdentity: inputPreparationRuntimeIdentityString(options.compiler.runtime),
       });
+      // Assembly owns any probes it started. Wait for their cleanup before
+      // refusing, but never begin compilation after the absolute deadline.
+      if (runAborted(run)) await cancelBeforeCounter(record.recordId, run);
       if (!assembled.ok) await refuseAssembly(record.recordId, assembled);
       surface = (assembled as { readonly surface: PreparedToolSurface }).surface;
     }
@@ -734,25 +775,30 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     // once at compiler construction.
     let compiled;
     try {
-      compiled = await options.compiler.compile({
-        snapshot: {
-          prompt: { systemPrompt: request.snapshot.prompt.systemPrompt },
-          messages: request.snapshot.messages,
-          // Daemon-derived, never caller-stated. The tools the model is shown
-          // and the executors the manifest binds come from the same assembly.
-          tools: surface.tools,
-        },
-        model: request.selection.model,
-        options: request.selection.options,
-        binding: {
-          inputIdentity: `${request.source.revision}:${request.source.digest}`,
-          runtimeIdentity: inputPreparationRuntimeIdentityString(options.compiler.runtime),
-          policyIdentity: limits.revision,
-          profileRevision: grant.profileRevision,
-        },
-        toolExecutors: surface.toolExecutors,
-      });
+      compiled = await awaitAdmission(() => {
+        if (now() >= run.deadlineAt) run.controller.abort();
+        run.controller.signal.throwIfAborted();
+        return options.compiler.compile({
+          snapshot: {
+            prompt: { systemPrompt: request.snapshot.prompt.systemPrompt },
+            messages: request.snapshot.messages,
+            // Daemon-derived, never caller-stated. The tools the model is shown
+            // and the executors the manifest binds come from the same assembly.
+            tools: surface.tools,
+          },
+          model: request.selection.model,
+          options: request.selection.options,
+          binding: {
+            inputIdentity: `${request.source.revision}:${request.source.digest}`,
+            runtimeIdentity: inputPreparationRuntimeIdentityString(options.compiler.runtime),
+            policyIdentity: limits.revision,
+            profileRevision: grant.profileRevision,
+          },
+          toolExecutors: surface.toolExecutors,
+        });
+      }, run.controller.signal);
     } catch (cause) {
+      if (runAborted(run)) await cancelBeforeCounter(record.recordId, run);
       if (cause instanceof InputPreparationRuntimeIdentityError) {
         await markFailed(record.recordId, 'runtime_identity_unavailable');
         throw new InputPreparationRequestError('runtime_identity_unavailable', cause.message, { cause });
@@ -834,15 +880,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     // Nothing has been called yet, so an abort that has already landed is a
     // clean cancellation — provably not an unknown counter outcome. Checked
     // before the reservation so the allowance is not spent either.
-    if (run.controller.signal.aborted) {
-      const detail = run.cancelRequested ? 'cancelled_before_counter' : 'deadline_elapsed_before_counter';
-      try {
-        await store.update(record.recordId, { state: 'cancelled', detail });
-      } catch (writeError) {
-        rethrowDurable(writeError);
-      }
-      throw new InputPreparationRequestError('cancelled', 'this preparation was cancelled before any counter call was placed');
-    }
+    if (runAborted(run)) await cancelBeforeCounter(record.recordId, run);
 
     const summary = {
       requestDigest: compiled.requestDigest,
@@ -859,6 +897,10 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     // Decided once, over D's own bytes, and retained beside the artifact in
     // the same durable transition.
     const requestContentTextOnly = preparedRequestContentIsTextOnly(compiled.requestBody);
+
+    // Only cancellation has an asynchronous durable barrier. An active check
+    // must not yield and then admit a new phase using a stale clock reading.
+    if (runAborted(run)) await cancelBeforeCounter(record.recordId, run);
 
     // --- no counter: retain and settle -------------------------------------
     // The size evidence is `summary.requestBytes`, measured by the compiler
@@ -915,15 +957,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     // The call still provably has not been placed, so this stays a clean
     // cancellation — but the reserved allowance is already spent and is not
     // given back.
-    if (run.controller.signal.aborted) {
-      const detail = run.cancelRequested ? 'cancelled_before_counter' : 'deadline_elapsed_before_counter';
-      try {
-        await store.update(record.recordId, { state: 'cancelled', detail });
-      } catch (writeError) {
-        rethrowDurable(writeError);
-      }
-      throw new InputPreparationRequestError('cancelled', 'this preparation was cancelled before any counter call was placed');
-    }
+    if (runAborted(run)) await cancelBeforeCounter(record.recordId, run);
 
     // --- counter ----------------------------------------------------------
     // The per-call timeout starts HERE, not when the preparation started: it
@@ -934,31 +968,37 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     callTimeout.unref?.();
     const calledAt = new Date(now()).toISOString();
     let counted: InputPreparationCounterResultV1;
+    let evidence: InputPreparationCounterEvidenceV1;
+    let callPlaced = false;
     let removeAbortListener = (): void => {};
     try {
-      counted = validateCounterResult(
-        await new Promise<InputPreparationCounterResultV1>((resolve, reject) => {
-          const interrupted = (): void => reject(new InputPreparationRequestError(
-            'counter_interrupted', 'the counter wait was interrupted; its outcome is unknown',
-          ));
-          run.controller.signal.addEventListener('abort', interrupted, { once: true });
-          removeAbortListener = () => run.controller.signal.removeEventListener('abort', interrupted);
-          if (run.controller.signal.aborted) { interrupted(); return; }
-          // Both handlers stay attached even after the SDK wait has settled.
-          // Late adapter resolution cannot write state; late rejection is consumed.
-          counter.count({
-            counterProjection: compiled.counterProjection,
-            target,
-            timeoutMs: limits.counterTimeoutMs,
-            signal: run.controller.signal,
-          }).then(resolve, reject);
-        }),
-      );
-      if (run.controller.signal.aborted) {
+      const result = await new Promise<InputPreparationCounterResultV1>((resolve, reject) => {
+        const interrupted = (): void => reject(new InputPreparationRequestError(
+          'counter_interrupted', 'the counter wait was interrupted; its outcome is unknown',
+        ));
+        run.controller.signal.addEventListener('abort', interrupted, { once: true });
+        removeAbortListener = () => run.controller.signal.removeEventListener('abort', interrupted);
+        if (runAborted(run)) { interrupted(); return; }
+        // Both handlers stay attached even after the SDK wait has settled.
+        // Late adapter resolution cannot write state; late rejection is consumed.
+        const counterRequest = {
+          counterProjection: compiled.counterProjection,
+          target,
+          timeoutMs: limits.counterTimeoutMs,
+          signal: run.controller.signal,
+        };
+        // Recheck at invocation after request/setup work, without an await
+        // on the active path. Timers may not yet have had an event-loop turn.
+        if (runAborted(run)) { interrupted(); return; }
+        callPlaced = true;
+        counter.count(counterRequest).then(resolve, reject);
+      });
+      if (runAborted(run)) {
         // The adapter resolved, but this run was already aborted: the outcome
         // reached us after the decision to stop, so it is not a clean count.
         throw new InputPreparationRequestError('counter_interrupted', 'the counter call was aborted before its result was accepted');
       }
+      counted = validateCounterResult(result);
       // The count must be evidence about THIS preparation. The adapter was
       // handed P(D) and a target; the evidence it answers with names a
       // projection digest and an endpoint/model, and both are compared against
@@ -976,7 +1016,21 @@ export function createInputPreparationService(options: InputPreparationServiceOp
           'the counter evidence names a projection or target other than the one this preparation compiled',
         );
       }
+      evidence = {
+        ...counted,
+        target,
+        calledAt,
+        completedAt: new Date(now()).toISOString(),
+      };
+      // Validation/assembly of evidence is synchronous but consumes budget too.
+      // Fence it before starting a new terminal write. Once started, that write
+      // remains owned even if its acknowledgement crosses the deadline.
+      if (runAborted(run)) {
+        throw new InputPreparationRequestError('counter_interrupted', 'the counter deadline elapsed before its evidence was accepted');
+      }
     } catch (cause) {
+      const aborted = runAborted(run);
+      if (!callPlaced && aborted) await cancelBeforeCounter(record.recordId, run);
       const detail = run.cancelRequested
         ? 'cancelled_during_counter'
         : run.controller.signal.aborted
@@ -1000,12 +1054,6 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       removeAbortListener();
     }
 
-    const evidence: InputPreparationCounterEvidenceV1 = {
-      ...counted,
-      target,
-      calledAt,
-      completedAt: new Date(now()).toISOString(),
-    };
     try {
       return await store.update(record.recordId, { state: 'prepared', counter: evidence });
     } catch (cause) {
@@ -1017,149 +1065,180 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     rawRequest: InputPreparationRequestV1,
     callOptions?: InputPreparationCallOptions,
   ): Promise<InputPreparationReceiptV1> {
-    // Copy before the first await. Everything below reads this copy only.
-    const request = structuredClone(rawRequest) as InputPreparationRequestV1;
-    await ensureOpen();
-
-    if (request.policyRevision !== limits.revision) {
-      throw new InputPreparationRequestError(
-        'policy_revision_mismatch',
-        'this request presents a policy revision this daemon does not enforce',
-      );
+    const startedAt = now();
+    const requestedDeadline = callOptions?.deadlineAt;
+    const owner = callOptions?.signal;
+    if (requestedDeadline !== undefined && !Number.isFinite(requestedDeadline)) {
+      throw new InputPreparationRequestError('bad_request', 'preparation deadline must be a finite epoch timestamp');
     }
-    const normalized = canonicalInputPreparationJson(request);
-    if (Buffer.byteLength(normalized, 'utf8') > limits.maxRequestBytes) {
-      throw new InputPreparationRequestError('limit_exceeded', 'the request exceeds the configured request byte policy');
-    }
-
-    const grant = await resolveAuthority(request.scope);
-    assertMemoryCeiling(request.agentMemory, grant.agentMemory);
-    const source = await resolveSourceAuthority(request, grant);
-    const verifiedRequest = { ...request, source };
-    assertAvailable();
-    const runtime = options.compiler.runtime;
-    const requestDigest = inputPreparationDigest({
-      request,
-      scopeId: grant.scopeId,
-      runtime,
-      policyRevision: limits.revision,
-    });
-    const target: InputPreparationCounterTargetV1 = {
-      endpoint: request.selection.model.baseUrl,
-      modelId: request.selection.model.id,
-    };
-    const key: InputPreparationRecordKey = {
-      scopeId: grant.scopeId,
-      agentRef: grant.agentRef,
-      requestId: request.requestId,
-    };
-    const recordId = inputPreparationRecordId(key);
-
-    return withRecordLock(recordId, async () => {
-      assertAvailable();
-      await store.gc(now(), true).catch(rethrowDurable);
-      assertAvailable();
-      let outcome;
-      try {
-        // The in-flight bound travels WITH the reservation: two different
-        // requestIds take two different record locks, so the only place the
-        // admission and the append cannot be pulled apart is inside the store.
-        outcome = await store.reserve({
-          key,
-          requestDigest,
-          binding: buildBinding(verifiedRequest, grant, target, requestDigest),
-          // Recorded with the reservation, before anything is compiled: a
-          // prepared launch must re-present this exact identity to the native
-          // verifier, and the only other copy of it is inside the envelope the
-          // native contract forbids reading expectations out of.
-          model: request.selection.model,
-          maxInFlight: limits.maxInFlight,
-        });
-      } catch (cause) {
-        if (cause instanceof InputPreparationLimitError) {
-          throw new InputPreparationRequestError('limit_exceeded', cause.message, { cause });
-        }
-        if (cause instanceof InputPreparationConflictError) {
-          throw new InputPreparationRequestError(
-            'request_conflict',
-            'this requestId is already bound to a different request in this scope',
-            { cause },
-          );
-        }
-        return rethrowDurable(cause);
+    const deadlineAt = Math.min(startedAt + limits.preparationDeadlineMs, requestedDeadline ?? Infinity);
+    const controller = new AbortController();
+    const cancel = (): void => controller.abort(new InputPreparationRequestError('cancelled', 'preparation was cancelled during admission'));
+    const expire = (): void => controller.abort(new InputPreparationRequestError('cancelled', 'preparation deadline elapsed'));
+    const checkActive = (): void => {
+      if (now() >= deadlineAt) expire();
+      if (controller.signal.aborted) {
+        const reason: unknown = controller.signal.reason;
+        throw reason instanceof InputPreparationRequestError ? reason : new InputPreparationRequestError('cancelled', 'preparation was cancelled');
       }
-      if (outcome.kind === 'existing') {
-        // Idempotent: the durable fact is the answer. Never a second compile,
-        // never a second counter call, and — since the tool manifest became a
-        // daemon observation rather than caller text — never a second PROBE
-        // either. A repeat that re-observed would mint a second executor fact
-        // under one idempotency key, which is the substitution this key exists
-        // to prevent.
-        //
-        // Drift is still checked, on the half of the evidence that can be
-        // re-derived without starting anything: the launch attestation, the
-        // toolset definition revisions, the configured argv and the
-        // implementation identities. If any of those moved since the recorded
-        // artifact was frozen, the recorded receipt no longer describes this
-        // device and the repeat is REFUSED rather than answered — the caller
-        // mints a new preparation instead of silently receiving one bound to
-        // stale evidence.
-        //
-        // A record with no artifact yet (a concurrent duplicate still in
-        // flight, or one that failed before it froze anything) has nothing to
-        // compare against, so it answers with its own durable state.
-        const recorded = outcome.record.artifact;
-        if (recorded !== undefined) {
-          const rebound = await options.toolSurface.resolveBinding({
-            requiredToolsets: request.requiredToolsets,
-        agentMemory: request.agentMemory,
+      assertAvailable();
+    };
+    const admit = <T>(operation: () => Promise<T>): Promise<T> => awaitAdmission(() => {
+      checkActive();
+      return operation();
+    }, controller.signal);
+    owner?.addEventListener('abort', cancel, { once: true });
+    if (owner?.aborted) cancel();
+    const deadline = setTimeout(expire, Math.min(Math.max(0, deadlineAt - now()), 2_147_483_647));
+    deadline.unref?.();
+    preparationControllers.add(controller);
+    try {
+      checkActive();
+      // Copy before the first await. Everything below reads this copy only.
+      const request = structuredClone(rawRequest) as InputPreparationRequestV1;
+      // Store initialization/maintenance has its own shared lifetime (stop waits
+      // for it); aborting this caller does not abandon those durable writes.
+      await admit(() => ensureOpen());
+      checkActive();
+
+      if (request.policyRevision !== limits.revision) {
+        throw new InputPreparationRequestError(
+          'policy_revision_mismatch',
+          'this request presents a policy revision this daemon does not enforce',
+        );
+      }
+      const normalized = canonicalInputPreparationJson(request);
+      if (Buffer.byteLength(normalized, 'utf8') > limits.maxRequestBytes) {
+        throw new InputPreparationRequestError('limit_exceeded', 'the request exceeds the configured request byte policy');
+      }
+
+      const grant = await admit(() => resolveAuthority(request.scope));
+      checkActive();
+      assertMemoryCeiling(request.agentMemory, grant.agentMemory);
+      const source = await admit(() => resolveSourceAuthority(request, grant));
+      checkActive();
+      const verifiedRequest = { ...request, source };
+      assertAvailable();
+      const runtime = options.compiler.runtime;
+      const requestDigest = inputPreparationDigest({
+        request,
+        scopeId: grant.scopeId,
+        runtime,
+        policyRevision: limits.revision,
+      });
+      const target: InputPreparationCounterTargetV1 = {
+        endpoint: request.selection.model.baseUrl,
+        modelId: request.selection.model.id,
+      };
+      const key: InputPreparationRecordKey = {
+        scopeId: grant.scopeId,
+        agentRef: grant.agentRef,
+        requestId: request.requestId,
+      };
+      const recordId = inputPreparationRecordId(key);
+
+      return await withRecordLock(recordId, async () => {
+        checkActive();
+        await store.gc(now(), true).catch(rethrowDurable);
+        checkActive();
+        let outcome;
+        try {
+          // The in-flight bound travels WITH the reservation: two different
+          // requestIds take two different record locks, so the only place the
+          // admission and the append cannot be pulled apart is inside the store.
+          outcome = await store.reserve({
+            key,
+            requestDigest,
+            binding: buildBinding(verifiedRequest, grant, target, requestDigest),
+            // Recorded with the reservation, before anything is compiled: a
+            // prepared launch must re-present this exact identity to the native
+            // verifier, and the only other copy of it is inside the envelope the
+            // native contract forbids reading expectations out of.
+            model: request.selection.model,
+            maxInFlight: limits.maxInFlight,
           });
-          if (!rebound.ok) {
-            throw new InputPreparationRequestError(rebound.code, rebound.message);
+        } catch (cause) {
+          if (cause instanceof InputPreparationLimitError) {
+            throw new InputPreparationRequestError('limit_exceeded', cause.message, { cause });
           }
-          if (rebound.binding.toolBindingDigest !== recorded.toolBindingDigest) {
+          if (cause instanceof InputPreparationConflictError) {
             throw new InputPreparationRequestError(
-              'observation_drift',
-              'the launch binding, toolset definitions or tool implementations behind this preparation'
-                + ' changed after its artifact was frozen; it will not be re-derived under the same requestId',
+              'request_conflict',
+              'this requestId is already bound to a different request in this scope',
+              { cause },
             );
           }
+          return rethrowDurable(cause);
         }
-        return toReceipt(outcome.record, now());
-      }
+        if (outcome.kind === 'existing') {
+          checkActive();
+          // Idempotent: the durable fact is the answer. Never a second compile,
+          // never a second counter call, and — since the tool manifest became a
+          // daemon observation rather than caller text — never a second PROBE
+          // either. A repeat that re-observed would mint a second executor fact
+          // under one idempotency key, which is the substitution this key exists
+          // to prevent.
+          //
+          // Drift is still checked, on the half of the evidence that can be
+          // re-derived without starting anything: the launch attestation, the
+          // toolset definition revisions, the configured argv and the
+          // implementation identities. If any of those moved since the recorded
+          // artifact was frozen, the recorded receipt no longer describes this
+          // device and the repeat is REFUSED rather than answered — the caller
+          // mints a new preparation instead of silently receiving one bound to
+          // stale evidence.
+          //
+          // A record with no artifact yet (a concurrent duplicate still in
+          // flight, or one that failed before it froze anything) has nothing to
+          // compare against, so it answers with its own durable state.
+          const recorded = outcome.record.artifact;
+          if (recorded !== undefined) {
+            const rebound = await admit(() => options.toolSurface.resolveBinding({
+              requiredToolsets: request.requiredToolsets,
+              agentMemory: request.agentMemory,
+            }));
+            checkActive();
+            if (!rebound.ok) {
+              throw new InputPreparationRequestError(rebound.code, rebound.message);
+            }
+            if (rebound.binding.toolBindingDigest !== recorded.toolBindingDigest) {
+              throw new InputPreparationRequestError(
+                'observation_drift',
+                'the launch binding, toolset definitions or tool implementations behind this preparation'
+                  + ' changed after its artifact was frozen; it will not be re-derived under the same requestId',
+              );
+            }
+          }
+          return toReceipt(outcome.record, now());
+        }
 
-      // One mutable run object, shared by `runPreparation` and `cancel()`: both
-      // halves must observe the same `cancelRequested` flag and the same
-      // controller, or a cancel lands on a copy nobody reads.
-      const controller = new AbortController();
-      // Shutdown may have started while the durable reservation was queued.
-      // Its waiter owns this lock too; do not begin a new counter after stop.
-      if (stopped) controller.abort();
-      const run: ActiveRun = { controller, done: Promise.resolve(), cancelRequested: false };
-      // The whole preparation's deadline. The single counter call has its own,
-      // separate bound, started inside `runPreparation` when that call actually
-      // begins. Both are explicit policy; neither is a default.
-      const requestedDeadlineMs = callOptions?.deadlineMs;
-      const deadlineMs =
-        requestedDeadlineMs === undefined || !Number.isFinite(requestedDeadlineMs)
-          ? limits.preparationDeadlineMs
-          : Math.max(1, Math.min(requestedDeadlineMs, limits.preparationDeadlineMs));
-      const deadline = setTimeout(() => controller.abort(), deadlineMs);
-      deadline.unref?.();
-      active.set(recordId, run);
-      const settled = runPreparation(outcome.record, request, grant, target, run);
-      run.done = settled.then(
-        () => undefined,
-        () => undefined,
-      );
-      try {
-        return toReceipt(await settled, now());
-      } finally {
-        clearTimeout(deadline);
-        active.delete(recordId);
-        scheduleGc();
-      }
-    });
+        // One mutable run object, shared by `runPreparation` and `cancel()`: both
+        // halves must observe the same `cancelRequested` flag and the same
+        // controller, or a cancel lands on a copy nobody reads.
+        // The controller/deadline already covered context and admission. A
+        // reservation is an owned mutation: even after expiry, await its result
+        // and durably cancel the new record before returning a refusal.
+        const run: ActiveRun = { controller, deadlineAt, done: Promise.resolve(), cancelRequested: false };
+        active.set(recordId, run);
+        const settled = runPreparation(outcome.record, request, grant, target, run);
+        run.done = settled.then(
+          () => undefined,
+          () => undefined,
+        );
+        try {
+          const result = await settled;
+          checkActive();
+          return toReceipt(result, now());
+        } finally {
+          active.delete(recordId);
+          scheduleGc();
+        }
+      }, controller.signal);
+    } finally {
+      clearTimeout(deadline);
+      owner?.removeEventListener('abort', cancel);
+      preparationControllers.delete(controller);
+    }
   }
 
   async function locate(params: InputPreparationLookupParamsV1): Promise<{ record: InputPreparationRecord; recordId: string }> {
@@ -1225,6 +1304,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
     },
     async stop(): Promise<void> {
       stopped = true;
+      for (const controller of preparationControllers) controller.abort(new InputPreparationRequestError('cancelled', 'the input-preparation service is stopped'));
       if (gcTimer !== undefined) clearTimeout(gcTimer);
       gcTimer = undefined;
       await opened;
