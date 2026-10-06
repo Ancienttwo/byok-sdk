@@ -73,22 +73,29 @@ export function durableShell(env: NodeExecutionEnv, shellEnv: NodeJS.ProcessEnv,
     };
     child.stdout!.on('data',chunk=>consume(chunk,stdout)); child.stderr!.on('data',chunk=>consume(chunk,stderr));
     child.stdin!.on('error', () => { state.failure ??= new ExecutionError('spawn_error', 'Durable shell command pipe closed'); });
-    child.once('error', () => { state.failure ??= new ExecutionError('spawn_error', 'Unable to spawn durable shell'); });
-    child.once('exit', value => { code = value; });
+    let foregroundEnded = false;
+    const foreground = new Promise<void>(resolve => {
+      const end = () => { foregroundEnded = true; if (timeout) clearTimeout(timeout); resolve(); };
+      child.once('error', () => { state.failure ??= new ExecutionError('spawn_error', 'Unable to spawn durable shell'); end(); });
+      child.once('exit', value => { code = value; end(); });
+    });
     try {
       if (!child.pid) throw new Error('durable shell missing pid');
       // The journal/ownership ACK happens BEFORE the fixed gate executes any tool code.
       await own(child.pid);
       if (context.abortSignal?.aborted || hasFailure()) throw new Error('durable shell admission ended');
-      if (options?.timeout !== undefined) timeout = setTimeout(() => { state.failure ??= new ExecutionError('timeout', 'Command timed out'); void dispose().catch(() => {}); }, options.timeout * 1_000);
+      if (!foregroundEnded && options?.timeout !== undefined) timeout = setTimeout(() => { state.failure ??= new ExecutionError('timeout', 'Command timed out'); void dispose().catch(() => {}); }, options.timeout * 1_000);
       child.stdin!.end('byok-durable-shell\n');
-      await receipt; await outputWork;
+      await foreground;
+      // Descendants can keep stdio open after foreground exit. Dispose the
+      // owned group before waiting for its final close/output-drain receipt.
+      await dispose(); quiesced = true;
+      await outputWork;
       for(const stream of [stdout,stderr]){
         try{const tail=stream.decoder.end();if(tail)options?.onOutput?.(tail,context,{stream:stream.name});}catch{state.failure??=new ExecutionError('callback_error','Durable shell output failed');}
         try{if(output&&stream.pending.length){if(output.destroyed)throw new Error('durable spill closed');if(!output.write(stream.pending))await once(output,'drain');}}catch{state.failure??=new ExecutionError('callback_error','Durable shell output failed');}
       }
       if (output) { if(!output.destroyed)output.end();await outputDone; }
-      await dispose(); quiesced = true; // includes background descendants, even after bash exits
       if (state.failure) { state.failure.spillPath = spillPath; return err(state.failure); }
       return ok({ exitCode: code ?? 1, ...(spillPath ? { spillPath } : {}) });
     } catch (cause) {
