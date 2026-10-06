@@ -267,7 +267,7 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
     let end = Math.min(bytes.length, offset + 65_536);
     while (end < bytes.length && (bytes[end]! & 0xc0) === 0x80) end--;
     return { entryId: entry.id, offset, nextOffset: end, done: end === bytes.length,
-      text: new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes.subarray(offset, end)) };
+      text: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes.subarray(offset, end)) };
   }
 
   async cancelActiveRun(): Promise<Response> {
@@ -359,17 +359,39 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
       runtime.attach(execution, conversation.id);
       const events = await watchEvents(harness, conversation.id, BACKGROUND_CONTEXT);
       const encoder = new TextEncoder();
-      // Native byte-stream backpressure/cancellation survives DO RPC transfer.
-      const body = new IdentityTransformStream();
+      // Keep backpressure, with a controller that can interrupt a pending write.
+      // Native IdentityTransformStream writer.abort() queues behind that write.
+      let bodyController!: TransformStreamDefaultController<Uint8Array>;
+      const body = new TransformStream<Uint8Array, Uint8Array>({ start(controller) { bodyController = controller; } });
       const writer = body.writable.getWriter();
       let cancelled = false;
       let aborting: Promise<void> | undefined;
       let failure: string | undefined;
       let released = '';
       const textBlocks = new Map<number, string>();
+      // Delivery has its own lifetime: durable settlement clears the execution
+      // timer, but must not leave a blocked native write or listener alive.
+      // Briefly allow a draining consumer to receive a timeout/cancel frame.
+      const deliveryGraceMs = 250;
+      let deliveryTimer: ReturnType<typeof setTimeout>;
+      const stopDelivery = () => {
+        cancelled = true;
+        clearTimeout(deliveryTimer);
+        clearInterval(probe);
+        bodyController.error(new CloudDoError('CLOUD_EXECUTION_ABORTED'));
+        void writer.abort().catch(() => undefined);
+      };
+      const boundAbortedDelivery = () => {
+        if (cancelled) return;
+        clearTimeout(deliveryTimer);
+        deliveryTimer = setTimeout(stopDelivery, deliveryGraceMs);
+      };
+      deliveryTimer = setTimeout(stopDelivery, Math.max(0, execution.deadlineAt - Date.now()) + deliveryGraceMs);
+      execution.controller.signal.addEventListener('abort', boundAbortedDelivery, { once: true });
+      if (execution.controller.signal.aborted) boundAbortedDelivery();
       const cancel = () => {
-        if (!aborting) {
-          cancelled = true;
+        stopDelivery();
+        if (!aborting && !execution.settled && execution.liveOwner) {
           runtime.cancel(execution);
           // A disconnected consumer has no error channel. Do not expose a raw exception.
           aborting = conversation.abort(BACKGROUND_CONTEXT).finally(() => events.stop()).catch(() => undefined);
@@ -382,7 +404,7 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
         try { await writer.write(encoder.encode(`data: ${JSON.stringify(value)}\n\n`)); }
         catch { void cancel(); }
       };
-      // A transferred native stream reports a disconnected peer on its next
+      // A transferred response stream reports a disconnected peer on its next
       // write. Keep one request-scoped probe in flight. This is not a DO alarm.
       let probing = false;
       const probe = setInterval(() => {
@@ -413,6 +435,12 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
       });
       const run = async () => {
         let outcomeWriting = false;
+        let ownerReleased = false;
+        const release = async () => {
+          if (ownerReleased) return;
+          ownerReleased = true;
+          await runtime.release(execution);
+        };
         try {
           const submission = await conversation.submit({ type: 'input', content: admitted.instruction, whenBusy: 'reject', requestId: runtime.cloud.readRun(conversation.id)!.requestId! }, BACKGROUND_CONTEXT);
           runtime.recordSubmission(conversation.id, submission.id);
@@ -423,10 +451,7 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
           // committed state is the authority for the final text and error code.
           const context = await conversation.context(BACKGROUND_CONTEXT);
           const last = [...context.entries].reverse().find(entry => entry.kind === 'pi.assistant')?.model?.[0];
-          if (last?.role === 'assistant') {
-            await publish(assistantText(last));
-            if (last.stopReason === 'error') failure = modelFailureCode(last.errorMessage);
-          }
+          if (last?.role === 'assistant' && last.stopReason === 'error') failure = modelFailureCode(last.errorMessage);
           failure = runtime.fatal(conversation.id) ?? failure;
           if (settled.status !== 'done' || stopped.reason === 'listener_error') failure ??= 'CLOUD_MODEL_REQUEST_FAILED';
           const outcome = await committedRunOutcome(conversation, runtime, settled.status, settled.status === 'unanswered' ? settled.detail : undefined);
@@ -435,11 +460,14 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
           await runtime.settle(execution, outcome);
           const committed = runtime.cloud.readRun(conversation.id);
           if (committed?.state !== 'completed') failure = committed?.errorCode ?? 'CLOUD_MODEL_REQUEST_FAILED';
+          // Native work is idle and terminal state is durable. Response delivery
+          // cannot retain this execution's owner or affect its committed outcome.
+          await release();
+          if (last?.role === 'assistant') await publish(assistantText(last));
           if (failure) await write({ type: 'error', code: failure, retryable: false });
           else await write({ type: 'done', conversationId: conversation.id });
         } catch (error) {
           const code = runtime.fatal(conversation.id) ?? safeCloudError(error).code;
-          await write({ type: 'error', code, retryable: false });
           await events.stop();
           // A native/business failure is terminal. A failed durable settlement belongs to repair.
           if (!outcomeWriting && error instanceof CloudDoError && runtime.cloud.readRun(conversation.id)?.state === 'running') {
@@ -448,11 +476,19 @@ export class AgentDO extends DurableObject<Record<string, unknown>> {
             await conversation.waitForIdle(BACKGROUND_CONTEXT);
             await runtime.settle(execution, { state: 'failed', errorCode: code });
           }
+          await release();
+          await write({ type: 'error', code, retryable: false });
         }
         finally {
-          clearInterval(probe);
-          await runtime.release(execution);
-          if (!cancelled) { try { await writer.close(); } catch { void cancel(); } }
+          try {
+            await release();
+            if (!cancelled) { try { await writer.close(); } catch { void cancel(); } }
+          } finally {
+            clearInterval(probe);
+            clearTimeout(deliveryTimer);
+            execution.controller.signal.removeEventListener('abort', boundAbortedDelivery);
+            if (!cancelled) stopDelivery();
+          }
         }
       };
       this.ctx.waitUntil(run());
