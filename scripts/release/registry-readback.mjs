@@ -1,3 +1,4 @@
+import { assertFrozenRegistryExpectations, npmView, readRegistryExpectations, readRegistryMetadata } from './registry-contract.mjs';
 import { assertImplementationIdentityDependency } from './implementation-identity-edges.mjs';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -39,13 +40,6 @@ const packages = [
   '@byok-sdk/ui-runtime',
   '@byok-sdk/keys',
 ];
-// These are the stable sentinels for the prerelease channel: a prerelease must
-// not advance npm's default channel even if every artifact is otherwise exact.
-// Frozen at the last published stable train, 0.23.0 / keys 0.8.0; every public
-// package, implementation-identity included, now has a stable latest.
-const expectedLatestVersions = new Map(
-  packages.map((packageName) => [packageName, packageName === '@byok-sdk/keys' ? '0.8.0' : '0.23.0']),
-);
 const expectedPackageVersions = Object.fromEntries(
   packages.map((packageName) => [packageName, packageName === '@byok-sdk/keys' ? keysVersion : expectedVersion]),
 );
@@ -101,16 +95,16 @@ if (!manifestPath) {
 }
 const distTag = resolveReleaseDistTag(expectedVersion, requestedTag);
 const manifest = JSON.parse(readFileSync(path.resolve(manifestPath), 'utf8'));
-if (manifest.schemaVersion !== 2 || manifest.releaseVersion !== expectedVersion) {
+if (manifest.schemaVersion !== 3 || manifest.releaseVersion !== expectedVersion) {
   throw new Error('frozen release manifest schema/version mismatch');
 }
 if (typeof manifest.sourceGitSha !== 'string' || !/^[0-9a-f]{40}$/.test(manifest.sourceGitSha)) {
   throw new Error('frozen release manifest has no exact source Git SHA');
 }
 const frozenPackages = new Map(
-  manifest.packages.map((entry) => [entry.package, entry]),
+  (Array.isArray(manifest.packages) ? manifest.packages : []).map((entry) => [entry.package, entry]),
 );
-if (frozenPackages.size !== packages.length || packages.some((packageName) => !frozenPackages.has(packageName))) {
+if (manifest.packages?.length !== packages.length || frozenPackages.size !== packages.length || packages.some((packageName) => !frozenPackages.has(packageName))) {
   throw new Error('frozen release manifest package set mismatch');
 }
 for (const packageName of packages) {
@@ -129,46 +123,18 @@ function run(command, args, cwd = process.cwd()) {
   return result.stdout.trim();
 }
 
-const metadata = [];
-for (const packageName of packages) {
-  const packageVersion = expectedPackageVersions[packageName];
-  const value = JSON.parse(run(npmInvocation.command, [...npmInvocation.prefix, 'view', `${packageName}@${packageVersion}`, 'name', 'version', 'maintainers', 'dist', 'dependencies', 'optionalDependencies', 'peerDependencies', '--json']));
-  if (value.name !== packageName || value.version !== packageVersion) throw new Error(`${packageName}: registry identity/version mismatch`);
-  const frozen = frozenPackages.get(packageName);
-  if (frozen.version !== packageVersion || typeof frozen.sha512Integrity !== 'string' || value.dist?.integrity !== frozen.sha512Integrity) {
-    throw new Error(`${packageName}: registry tarball integrity differs from frozen artifact`);
-  }
-  if (distTag) {
-    const distTags = JSON.parse(run(npmInvocation.command, [...npmInvocation.prefix, 'view', packageName, 'dist-tags', '--json']));
-    if (!distTags || typeof distTags !== 'object' || distTags[distTag] !== packageVersion) {
-      throw new Error(`${packageName}: registry dist-tag ${distTag} is ${JSON.stringify(distTags?.[distTag])}, expected ${packageVersion}`);
-    }
-    const expectedLatestVersion = expectedLatestVersions.get(packageName);
-    if (distTags.latest !== expectedLatestVersion) {
-      throw new Error(`${packageName}: registry latest is ${JSON.stringify(distTags.latest)}, expected stable ${expectedLatestVersion}`);
-    }
-  }
-  const maintainers = Array.isArray(value.maintainers) ? value.maintainers : [value.maintainers];
-  if (!maintainers.some((entry) => String(typeof entry === 'string' ? entry : entry?.name).includes('ancienttwo'))) {
-    throw new Error(`${packageName}: ancienttwo is not present in registry maintainers`);
-  }
-  // The registry is the one point where the frozen-artifact checks and the
-  // published graph can diverge silently: publishing rewrites workspace edges
-  // one last time. v0.4.1 shipped with @byok-sdk/*: 0.4.0 internal edges and
-  // no frozen check could see it — the readback can.
-  for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies']) {
-    for (const [dependency, range] of Object.entries(value[field] ?? {})) {
-      if (dependency.startsWith('@byok-sdk/')) {
-        if (range !== expectedVersion) {
-          throw new Error(
-            `${packageName}@${packageVersion}: registry ${field}.${dependency} is ${range}, expected ${expectedVersion} — the published graph is split`,
-          );
-        }
-      }
-    }
-  }
-  metadata.push(value);
-}
+const registryExpectations = readRegistryExpectations(repoRoot, packages);
+assertFrozenRegistryExpectations(manifest, registryExpectations, expectedPackageVersions);
+const metadata = readRegistryMetadata({
+  packageVersions: expectedPackageVersions,
+  frozenPackages,
+  expectedVersion,
+  expectations: registryExpectations,
+  distTag,
+  view: (selector, fields, allowNotFound) => npmView({
+    invocation: npmInvocation, cwd: repoRoot, selector, fields, allowNotFound,
+  }),
+});
 
 /**
  * Asserts the registry install's @byok-sdk graph closes to exactly one version
