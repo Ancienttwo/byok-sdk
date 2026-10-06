@@ -2534,3 +2534,61 @@ A post-PID setup failure requests SIGTERM for the detached child group while ret
 
 ### T6 locked physical tuple supplement (F2)
 Official external CLI probes and terminal task admission retain the full asynchronous byte/environment reverify. After acquiring the shared root admission lock, before permit consumption/native spawn, the SDK additionally checks identity-owned artifact/interpreter/declared asset tuples and canonical parent paths, external home/config directory tuples, and the committed parent record. A known pre-spawn mismatch rolls back the uncommitted reservation under the existing F1 rule. This is a synchronous tuple-only supplement, preserving same-inode hardlink layouts, not an atomic OS execution guarantee or login-store content proof. Same-UID in-place edits preserving every tuple and the residual final check-to-spawn interval remain check-time limits. No credential/billing authority or new per-adapter budget is introduced.
+
+## Local native interaction contract
+
+`@byok-sdk/client` exports `NativeInteractionController` for adapter authors and
+local Hosts. `Session.interactions`, when actually implemented, exposes the
+controller's immutable channel: a process generation, the pending request
+snapshot, and a typed `respond` operation. `RuntimeCapabilities.nativeInteractions`
+is the explicit local support declaration. Omission means unsupported. Its
+approval-decision list and `structuredQuestions` flag are snapshotted with the
+rest of the runtime descriptor.
+
+This local seam is distinct from the existing remote `needs_approval` /
+`resolveApproval(boolean)` contract. It does not add a daemon control command,
+wire payload, remote authorization, UI, persistent grant, or Host reconnect
+protocol. None of the bundled Claude, Codex or Pi adapters advertises or wires
+this seam in this slice: their current native reply protocol qualification is
+incomplete. In particular, adding a capability type is not evidence that an
+adapter can execute it. The existing `approvalInteractive` declarations and
+permission admission rules stay authoritative for the remote task path.
+
+Each request carries an SDK `requestId`, a fresh process-lifetime `generation`,
+and a separate native identity containing the exact string or numeric wire ID,
+method, provider session reference and available turn/item IDs. Numeric `7`
+and string `"7"` remain different native requests. Reusing a native wire ID in
+one generation is refused, including after settlement. Resuming the same
+provider session creates a new generation; it starts with no old pending
+requests and rejects answers addressed to the previous generation. No pending
+approval or question is inferred from transcript history.
+
+Approval responses choose one of the exact request's offered decisions:
+`allow-once`, `allow-session`, `deny`, or `cancel`. There is no always/persistent
+approval decision and no fallback that broadens a one-shot grant. Structured
+questions retain question IDs, option IDs, multiple-selection and free-text
+constraints; every question requires exactly one schema-valid answer. Answers
+are never converted into ordinary steering text. Request and answer data are
+copied into inert, deeply frozen snapshots before use. Unknown fields,
+accessors, proxies, custom prototypes, duplicate questions/options/answers,
+out-of-schema decisions and oversized data fail closed.
+
+The controller owns a bounded number of pending operations and a separate
+process-lifetime bound on all retained request IDs and response receipts. It
+never evicts a tombstone to make an old ID reusable. Duplicate equivalent
+answers join the same in-flight operation or return its settled receipt;
+conflicting answers are refused before a second native write. A request
+timeout invokes its adapter's native cancellation operation. Provider
+withdrawal, interrupt, turn completion and process close invalidate unanswered
+requests without fabricating another native reply. The adapter remains
+responsible for invoking these lifecycle hooks from actual native events.
+
+A native write is attempted at most once and has its own bounded deadline.
+Cancellation settles the logical request but retains ownership of any already
+started write and its capacity reservation. A rejected or uncertain write
+closes the generation and invokes the required owner's `onFatal` callback
+exactly once; the adapter must terminate/dispose its owned process. The
+controller's receipt says whether the local write completed, was cancelled,
+timed out, or failed; it is not proof that a provider executed a tool. The
+controller itself neither starts nor kills processes, and no live provider,
+credential or persistent-access operation is part of its fixture validation.

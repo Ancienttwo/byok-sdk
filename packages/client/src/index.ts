@@ -596,3 +596,11 @@ export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAg
 export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, ExportDeviceSupportBundleInput,
   DeviceSupportBundleExportResult, ArchiveAgentTerminalMessagesInput, AgentTerminalMessagesArchiveResult,
   DeviceOperatorErrorCode } from './diagnostics/operator-actions';
+
+export { NativeInteractionController, NativeInteractionError } from './native-interactions';
+export type {
+  NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity,
+  NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest,
+  NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason,
+  NativeInteractionChannel, NativeInteractionOptions, NativeInteractionTransport, NativeInteractionErrorCode,
+} from './native-interactions';

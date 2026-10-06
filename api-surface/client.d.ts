@@ -433,6 +433,8 @@ export { ClaudeAdapter } from './claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './claude/claude-adapter';
 export { CodexAdapter } from './codex/codex-adapter';
 export type { CodexAdapterOptions } from './codex/codex-adapter';
+export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
+export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from '../native-interactions';
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
 import type { RuntimeInstallationObservationContext } from '../../types';
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
@@ -10351,6 +10353,8 @@ export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairErr
 export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, } from './diagnostics/device-doctor';
 export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions';
 export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, ExportDeviceSupportBundleInput, DeviceSupportBundleExportResult, ArchiveAgentTerminalMessagesInput, AgentTerminalMessagesArchiveResult, DeviceOperatorErrorCode } from './diagnostics/operator-actions';
+export { NativeInteractionController, NativeInteractionError } from './native-interactions';
+export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from './native-interactions';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
 import type { PreparedAgentMemoryImplementation, PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import { type PermissionMode, type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
@@ -12504,6 +12508,125 @@ export interface McpObservationDrift {
  * collapsing them into one "drift" would hide which one happened.
  */
 export declare function diffMcpObservation(frozen: McpServerObservation, observed: McpServerObservation): readonly McpObservationDrift[];
+// ==== @byok-sdk/client dist/native-interactions.d.ts ====
+/** Native permission scope is explicit. There is intentionally no persistent grant. */
+export type NativeApprovalDecision = 'allow-once' | 'allow-session' | 'deny' | 'cancel';
+export interface NativeInteractionCapabilities {
+    readonly approvalDecisions: readonly NativeApprovalDecision[];
+    readonly structuredQuestions: boolean;
+}
+export interface NativeInteractionIdentity {
+    /** Exact provider wire ID, including its original string/number type. */
+    readonly id: string | number;
+    readonly method: string;
+    readonly sessionRef: string;
+    readonly turnId?: string;
+    readonly itemId?: string;
+}
+export interface NativeQuestion {
+    readonly id: string;
+    readonly prompt: string;
+    readonly header?: string;
+    readonly options: readonly {
+        readonly id: string;
+        readonly label: string;
+        readonly description?: string;
+    }[];
+    readonly multiple: boolean;
+    readonly allowText: boolean;
+    readonly secret?: boolean;
+}
+export type NativeInteractionInput = {
+    readonly native: NativeInteractionIdentity;
+} & ({
+    readonly kind: 'approval';
+    readonly title: string;
+    readonly decisions: readonly NativeApprovalDecision[];
+} | {
+    readonly kind: 'question';
+    readonly questions: readonly NativeQuestion[];
+});
+export type NativeInteractionRequest = NativeInteractionInput & {
+    /** SDK identity, unique across process generations, never a tool call ID. */
+    readonly requestId: string;
+    readonly generation: string;
+    readonly expiresAt: number;
+};
+export interface NativeQuestionAnswer {
+    readonly questionId: string;
+    readonly selectedOptionIds: readonly string[];
+    readonly text?: string;
+}
+export type NativeInteractionResponse = {
+    readonly requestId: string;
+} & ({
+    readonly kind: 'approval';
+    readonly decision: NativeApprovalDecision;
+} | {
+    readonly kind: 'question';
+    readonly answers: readonly NativeQuestionAnswer[];
+} | {
+    readonly kind: 'cancel';
+});
+export type NativeInteractionEndReason = 'provider-cancelled' | 'interrupted' | 'turn-ended' | 'process-exited' | 'closed';
+export interface NativeInteractionReceipt {
+    readonly requestId: string;
+    readonly status: 'responded' | 'cancelled' | 'timed-out' | 'failed';
+    readonly reason?: NativeInteractionEndReason | 'deadline' | 'transport';
+}
+/** Local host surface. A snapshot contains only requests still awaiting a decision. */
+export interface NativeInteractionChannel {
+    readonly generation: string;
+    pending(): readonly NativeInteractionRequest[];
+    respond(response: NativeInteractionResponse): Promise<NativeInteractionReceipt>;
+}
+export interface NativeInteractionOptions {
+    readonly onRequest: (request: NativeInteractionRequest, channel: NativeInteractionChannel) => void | Promise<void>;
+    readonly onResolved?: (receipt: NativeInteractionReceipt) => void | Promise<void>;
+    /** Required owner action for an uncertain/failed native write; normally terminate the owned process. */
+    readonly onFatal: (error: NativeInteractionError) => void | Promise<void>;
+    readonly timeoutMs?: number;
+    readonly writeTimeoutMs?: number;
+    readonly maxPending?: number;
+    /** All request identities/tombstones are retained up to this lifetime bound; none are evicted/reused. */
+    readonly maxRequests?: number;
+}
+export interface NativeInteractionTransport {
+    respond(response: NativeInteractionResponse): Promise<void>;
+    cancel(reason: 'deadline' | 'cancelled'): Promise<void>;
+}
+export type NativeInteractionErrorCode = 'invalid_request' | 'invalid_response' | 'unknown_request' | 'duplicate_request' | 'response_conflict' | 'request_settled' | 'closed' | 'capacity' | 'transport';
+export declare class NativeInteractionError extends Error {
+    readonly code: NativeInteractionErrorCode;
+    constructor(code: NativeInteractionErrorCode, message: string);
+}
+/**
+ * One process lifetime's request registry. A resumed runtime gets a new controller;
+ * native IDs from its previous process are never reconstructed or replayed here.
+ * This is a local adapter/Host seam, not a remote authorization or persistence API.
+ */
+export declare class NativeInteractionController {
+    private readonly options;
+    readonly channel: NativeInteractionChannel;
+    private readonly entries;
+    private readonly nativeIds;
+    private readonly generation;
+    private readonly timeoutMs;
+    private readonly writeTimeoutMs;
+    private readonly maxPending;
+    private readonly maxRequests;
+    private closed;
+    private fatal;
+    constructor(options: NativeInteractionOptions);
+    open(input: NativeInteractionInput, transport: NativeInteractionTransport): NativeInteractionRequest;
+    /** Provider cancellation/turn end does not write another native answer. */
+    withdraw(requestId: string, reason?: NativeInteractionEndReason): void;
+    /** Process exit/close invalidates all outstanding requests, without replay or transport writes. */
+    close(reason?: NativeInteractionEndReason): void;
+    private respond;
+    private write;
+    private settle;
+}
 // ==== @byok-sdk/client dist/release-identity.d.ts ====
 /** Local Agent application-release identity. It is observability data, never a protocol or capability gate. */
 export interface LocalAgentReleaseIdentity {
@@ -12620,6 +12743,7 @@ export declare function resolveSdkReservedHelperBin(kind: SdkReservedHelperKind,
  */
 export declare function runSdkReservedHelperCommand(argv?: readonly string[]): Promise<boolean>;
 // ==== @byok-sdk/client dist/types.d.ts ====
+import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import type { ToolImplementationAuthority, ToolImplementationUnavailableReasonV1 } from '@byok-sdk/implementation-identity';
@@ -12670,6 +12794,8 @@ export type RuntimeInstallationObservationContext = {
 });
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
+    /** Local native interaction support only; omission is unsupported. Not the remote boolean approval lane. */
+    readonly nativeInteractions?: NativeInteractionCapabilities;
     /** Local adapter advertisement; no new protocol field or capability vocabulary. */
     readonly durablePi?: boolean;
     readonly steer: boolean;
@@ -12788,6 +12914,8 @@ export interface ApprovalChannel {
  * one underlying runtime process/session for the lifetime of a task.
  */
 export interface Session {
+    /** Process-generation-bound native requests. Never reconstructed from a resumed transcript. */
+    readonly interactions?: NativeInteractionChannel;
     /** Current execution artifact, available only after terminal success. */
     resultDocument?(): unknown;
     /** Opaque runtime session id, reported back to the server via `task.complete.sessionRef`. */
