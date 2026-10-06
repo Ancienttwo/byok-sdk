@@ -34,6 +34,18 @@
   only comment text in three selected contract files; the BYOK deltas, the bridge and
   runtime behaviour are unchanged.
 
+- **Changed (client, cloud-do)** — official Pi runtime 1.0.3 -> 1.0.4.
+  The nine-package closure uses upstream commit `7c10bd4337495ee613f2224843ecdf349b80d1df`,
+  closureDigest `fb68a2820fb78075a9195e930ee8c55f235d9f46abc861dc3f1c3a85592b2625`. No third-party dependency changes.
+  No BYOK source change is required. The pi-durable 1.0.4 breaking changes apply to
+  `NodeExecutionEnv.watch()` and the env conformance suite. The SDK uses neither.
+  The durable coding tools get the upstream fixes: `read` accepts a file that grows
+  while it is read, bounded output keeps a U+FEFF at the start of the retained tail,
+  and `settings.progress` fields given as `undefined` keep their defaults.
+  Fixes `check:release-pack` / npm pack-install after upstream published 1.0.4
+  (transitive `^1.0.3` siblings, e.g. pi-codemode, resolved to 1.0.4).
+  Structural hardening of those ranges remains a separate follow-up.
+
 - **Changed (client, cloud-do)** — official Pi runtime 1.0.2 -> 1.0.3.
   The nine-package closure uses upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`,
   closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`. No third-party dependency changes.
@@ -68,7 +80,7 @@
   Claude interrupt now uses correlated `control_request` with bounded ACK and
   owned-process fallback. `usage` adds optional `contextTokens`, `contextWindow`
   and `contextSource` fields (additive, independent of provider cost counters),
-  and the official Pi runtime pin moves to 1.0.3 (see below).
+  and the official Pi runtime pin moves to 1.0.4 (see below).
 
 - **Changed (client)** — official Pi runtime 0.87.1 -> 1.0.0. The attested
   closure is now nine package names (chord, pi-agent-core, pi-ai, pi-codemode,
