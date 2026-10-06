@@ -29,6 +29,19 @@
         "vitest": "^4.1.10",
       },
     },
+    "examples/codex-interaction-host": {
+      "name": "@byok-sdk/example-codex-interaction-host",
+      "version": "0.0.1",
+      "dependencies": {
+        "@byok-sdk/client": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "^24",
+        "tsup": "^8.5.1",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10",
+      },
+    },
     "examples/live-activity-host": {
       "name": "@byok-sdk/example-live-activity-host",
       "version": "0.0.1",
@@ -306,6 +319,8 @@
     "@byok-sdk/core": ["@byok-sdk/core@workspace:packages/core"],
 
     "@byok-sdk/example-basic": ["@byok-sdk/example-basic@workspace:examples/basic"],
+
+    "@byok-sdk/example-codex-interaction-host": ["@byok-sdk/example-codex-interaction-host@workspace:examples/codex-interaction-host"],
 
     "@byok-sdk/example-live-activity-host": ["@byok-sdk/example-live-activity-host@workspace:examples/live-activity-host"],
 
