@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.24.0
+## 0.24 line (unpublished candidate)
 
 - **Breaking (runtime)** — raise the minimum Node.js version to 24.15.0 across
   all workspace packages. Development/CI baseline is pinned to Node 24.21.0,
@@ -27,15 +27,17 @@
 - **Added (cloud-do)** — prepare `@byok-sdk/cloud-do` for the public SDK train.
   Add an ESM library build, a local declaration closure, an API golden, and
   an installed-tarball Worker smoke in the release-pack driver. The source
-  version is 0.24.0-rc.1. No package is published. The first release is stable
-  0.24.0 with keys 0.8.1, through the local publisher.
+  version is 0.24.0-rc.1. Publication is pending. Final keys SemVer and the
+  first-release channel remain decisions; see the
+  [current release/migration notes](docs/releases/v0.24.0.md).
 
 - **Changed (client)** — qualify exactly Codex CLI 0.160.0 for the app-server
   adapter and team relay. The 0.159.2 and 0.160.0 protocol trees are identical.
   Other CLI versions remain unsupported.
 
 - **Changed (client)** — re-vendor the private OAR fork 0.18.0 (`1775b57`) -> 0.20.3
-  (`f385b918176d5ced07179e25e8cd758e75a784d1`) at `vendor/oar/f385b91/`. Upstream changed
+  (`f385b918176d5ced07179e25e8cd758e75a784d1`), then at `vendor/oar/f385b91/`.
+  This intermediate source pin is superseded by the 0.25.0 entry above. Upstream changed
   only comment text in three selected contract files; the BYOK deltas, the bridge and
   runtime behaviour are unchanged.
 
@@ -78,14 +80,16 @@
   The npm physical root count has not been re-measured.
 
 - **Breaking (client)** — Codex now uses app-server 0.160.0 with the vendored
-  OAR 0.20.3 `f385b91` kernel/driver (Apache-2.0), replacing the exec path. The adapter
-  is YOLO-only: `readonly` and `network:false` are no longer supported;
+  current OAR 0.25.0 `a800aa0` kernel/driver (Apache-2.0), replacing the exec path. The adapter
+  defaults to auto/YOLO: `readonly` and `network:false` are no longer supported;
   detection adds `app_server_unavailable` and `runtime_version_unsupported`
   refusal reasons. Claude `confirm` and the `byok-approval-mcp` bin are removed;
   Claude interrupt now uses correlated `control_request` with bounded ACK and
   owned-process fallback. `usage` adds optional `contextTokens`, `contextWindow`
   and `contextSource` fields (additive, independent of provider cost counters),
-  and the official Pi runtime pin moves to 1.0.4 (see below).
+  and the official Pi runtime pin moves to 1.0.4 (see below). The later local
+  native-interaction opt-in uses Codex `on-request` without widening the admitted
+  policy; see the [support matrix](docs/adapter-capabilities.md).
 
 - **Changed (client)** — official Pi runtime 0.87.1 -> 1.0.0. The attested
   closure is now nine package names (chord, pi-agent-core, pi-ai, pi-codemode,
@@ -101,9 +105,11 @@
 
 ## 0.24.0-rc.1 / @byok-sdk/keys 0.8.1-rc.1 — 2026-09-29 (prepared; not published)
 
-Release candidate for 0.24.0, to be published under the npm dist-tag `rc`;
-`latest` stays 0.23.0 / keys 0.8.0. It lets Host packages build against a
-published SDK before the stable 0.24.0 freezes the Agent memory intent wire.
+Historical preparation entry. The initial proposal was an `rc` publication;
+current source and remaining version/channel decisions are described in the
+[0.24 release notes](docs/releases/v0.24.0.md). A verified accepted-tarball Host
+integration does not depend on first publishing stable. No publication receipt
+is created by this entry.
 
 - **Added (client)** — `readDeviceEnrollmentIdentity` (non-secret
   `{ tenantId, deviceId, proofKeyId, proofKeyEpoch, enrollmentRevision }`,
@@ -153,9 +159,11 @@ published SDK before the stable 0.24.0 freezes the Agent memory intent wire.
   the empty-bytes digest while `targetRevision` stays `null`, and must not be
   rejected as a revision mismatch). Never re-read the current file to overturn a
   historical receipt or infer `applied` from hash equality.
-- **keys 0.8.1-rc.1** — no source change; packed core and
-  implementation-identity edges move to 0.24.0-rc.1. Its version is a
-  prerelease because a prerelease train may only publish prerelease packages.
+- **keys source version 0.8.1-rc.1** — this is still the manifest version. The
+  original dependency-only PATCH rationale is superseded: current keys adds
+  durable launcher/API behavior, raises its Node floor and binds changed identity
+  authority. A policy-consistent independent MINOR decision is pending; no bump
+  is made here. Packed core and identity edges must match the exact train.
 - [Release notes](docs/releases/v0.24.0.md).
 
 ## 0.23.0 / @byok-sdk/keys 0.8.0 — 2026-09-28 (published; tag `v0.23.0` at `bcf65a3f`)
