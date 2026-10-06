@@ -3,8 +3,30 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { nativeAclProbeObserver, type OwnedAclProbe } from './fixtures/owned-acl-probe';
 import { assertPiProjectionDirectory, assertWindowsPiProjectionAcl } from './pi-provider-launcher-core';
+
+// These wrappers only observe one matching test-owned invocation. The original
+// runner/spawn are still called and return their original promise/child/result.
+vi.mock('./command-runner', async importOriginal => {
+  const actual = await importOriginal<typeof import('./command-runner')>();
+  const { nativeAclProbeObserver: observer } = await import('./fixtures/owned-acl-probe');
+  return { ...actual, runCommand: function (this: unknown, ...args: Parameters<typeof actual.runCommand>) {
+    return observer.command(actual.runCommand, this, args);
+  } };
+});
+vi.mock('node:child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  const { nativeAclProbeObserver: observer } = await import('./fixtures/owned-acl-probe');
+  return { ...actual, spawn: function (this: unknown, ...args: Parameters<typeof actual.spawn>) {
+    return observer.spawn(actual.spawn, this, args);
+  } };
+});
+afterAll(() => {
+  vi.doUnmock('./command-runner');
+  vi.doUnmock('node:child_process');
+});
 
 const exec = promisify(execFile);
 // Test-owned physical ACL fixture; no cross-package internal import. This tests
@@ -29,10 +51,13 @@ async function createPrivateFixture(directory: string): Promise<void> {
 // is killed and the phase reports elapsed time plus whatever output it
 // produced, so the next CI run can distinguish environment latency from probe
 // failure. None of this changes an assertion, the approval standard, or the
-// 5000ms budget; the phases only observe.
+// 5000ms budget; phase observation now also retains failed-test disposal ownership.
 const PHASE_LOG_PREFIX = '[pi-acl-positive]';
 const ICACLS_DEADLINE_MS = 2_000;
 const TEST_EVIDENCE_BUDGET_MS = 4_800;
+// Report unresolved disposal inside Vitest's unchanged 10s default hook budget.
+// This does not extend either the existing 4.8s evidence or 5s test budget.
+const TEARDOWN_EVIDENCE_BUDGET_MS = 9_800;
 
 interface BoundedExecResult {
   stdout: string;
@@ -78,6 +103,19 @@ function describeBoundedResult(result: BoundedExecResult): string {
 // Runs in the existing real non-administrator release-pack lane. POSIX cannot
 // provide ACL/token evidence and explicitly skips this platform-only suite.
 describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL', () => {
+  let pendingCleanup: { directory: string; owner: OwnedAclProbe; log: (phase: string, message: string) => void } | undefined;
+  beforeEach(() => nativeAclProbeObserver.assertIdle());
+  afterEach(async () => {
+    const pending = pendingCleanup;
+    if (!pending) return;
+    await pending.owner.dispose(TEARDOWN_EVIDENCE_BUDGET_MS, async () => {
+      const started = Date.now();
+      await fs.rm(pending.directory, { recursive: true, force: true });
+      pending.log('cleanup', `elapsed=${Date.now() - started}ms (owned child closed before fs.rm)`);
+    });
+    pendingCleanup = undefined;
+    nativeAclProbeObserver.assertIdle();
+  });
   it('accepts a private empty directory with the approved ACL', async () => {
     const testStart = Date.now();
     const logPhase = (phase: string, message: string): void => {
@@ -87,6 +125,7 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
     const tmpdirStarted = Date.now();
     const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pi-acl-positive-')));
     logPhase('tmpdir', `elapsed=${Date.now() - tmpdirStarted}ms (mkdtemp+realpath)`);
+    let owner: OwnedAclProbe | undefined;
     try {
       // Phase: process spawn -- the fixture's own icacls child.
       const fixture = await execFileBounded('icacls', privateFixtureArgs(directory), ICACLS_DEADLINE_MS);
@@ -114,19 +153,26 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
       // assertWindowsPiProjectionAcl, then the full approval checks. The
       // watchdog fires just inside vitest's 5000ms budget so a hung probe
       // fails with the phase log above instead of a bare vitest timeout. The
-      // probe child has no test-side handle, so the watchdog reports and the
-      // vitest worker reaps the rest; no budget is extended.
+      // probe is invocation-owned. Expiry cancels the captured child (or
+      // suppresses a late native start); afterEach awaits its disposal receipt.
       const probeBudgetMs = Math.max(TEST_EVIDENCE_BUDGET_MS - (Date.now() - testStart), 0);
       const probeStarted = Date.now();
-      const probe = assertPiProjectionDirectory(directory, directory);
+      owner = nativeAclProbeObserver.create({
+        executable: path.win32.join(process.env.SystemRoot!, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+        stdin: JSON.stringify({ path: directory }),
+      }, event => logPhase(`owned-${event.phase}`, `generation=${event.generation} t=${event.elapsedMs}ms pid=${event.pid ?? 'none'} ${event.detail ?? ''}`));
+      pendingCleanup = { directory, owner, log: logPhase };
+      const probe = owner.run(() => assertPiProjectionDirectory(directory, directory));
       let watchdog: NodeJS.Timeout | undefined;
       const watchdogPromise = new Promise<never>((_resolve, reject) => {
         watchdog = setTimeout(() => {
-          reject(new Error(
+          const failure = new Error(
             `${PHASE_LOG_PREFIX} phase=acl-probe+assertion exceeded its ${probeBudgetMs}ms evidence budget `
             + `(probe started at t+${probeStarted - testStart}ms); the phases above show where the time went; `
             + 'this is instrumentation, the approval checks themselves are unchanged',
-          ));
+          );
+          owner!.cancel(failure);
+          reject(failure);
         }, probeBudgetMs);
       });
       try {
@@ -136,9 +182,12 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
         if (watchdog !== undefined) clearTimeout(watchdog);
       }
     } finally {
-      const rmStarted = Date.now();
-      await fs.rm(directory, { recursive: true, force: true });
-      logPhase('cleanup', `elapsed=${Date.now() - rmStarted}ms (fs.rm of the fixture)`);
+      // Once the assertion starts, only owned teardown may delete this fixture.
+      if (!owner) {
+        const rmStarted = Date.now();
+        await fs.rm(directory, { recursive: true, force: true });
+        logPhase('cleanup', `elapsed=${Date.now() - rmStarted}ms (fixture setup failed before probe)`);
+      }
     }
   });
   it('refuses a real external Allow ACE', async () => {
