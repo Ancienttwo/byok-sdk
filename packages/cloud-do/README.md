@@ -5,13 +5,17 @@ It provides native SQLite storage, inline tools, wake and inbox processing,
 usage limits, settlement hooks, and transcript reads.
 
 The source candidate is 0.24.0-rc.1. It is pending npm publication.
-The first release will be stable 0.24.0, on the SDK train.
+The first-release version/channel is pending the SDK release decision; neither
+an RC nor stable publication is implied by this source. See the
+[release gates](../../docs/releases/v0.24.0.md#release-channel-and-open-version-decision).
 The package needs Node 24.15.0 or later for build tooling.
 
 ## Install and subclass
 
-The following install example is pending publication. Use the stable version
-after registry readback. Do not use a workspace source import in a consumer.
+The following install example names the current source version, which is pending
+publication. Install an exact approved version only after registry readback, or
+use verified accepted CI tarballs for pre-publication integration. Do not use a
+workspace source import as installed-package acceptance evidence.
 
 ~~~sh
 npm install @byok-sdk/cloud-do@0.24.0-rc.1
