@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, type Envelope, type RuntimeId } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
+import { ClaudeProcessClient } from '../adapters/claude/process-client';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ApprovalRegistry } from '../daemon/approvals';
@@ -12,12 +13,14 @@ import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import type { RuntimeAdapter, Session } from '../types';
+import { RuntimeDisposalFailure } from '../runtime-failure';
 import { TestServer } from './fixtures/test-server';
 import { cancellationTiming } from './fixtures/task-runner-cancel-timing';
 
 const fixture = fileURLToPath(new URL('./fixtures/task-runner-cancel-runtime.mjs', import.meta.url));
 const cases: Array<{ dir: string; gate: string; runner: TaskRunner; sessions: Session[];
   resultGate: string; startSettled: ReturnType<typeof deferred>; hasStarted: () => boolean;
+  releaseStartupReceipt: () => void;
   restoreClock: () => void; stopTimers: () => void; saveEvidence: () => Promise<void> }> = [];
 function deferred() {
   let resolve!: () => void;
@@ -30,7 +33,9 @@ function alive(pid: number): boolean {
     throw error;
   }
 }
-async function setup(runtime: RuntimeId, scenario: string, overrides: Partial<Pick<TaskRunnerDeps, 'startupTimeoutMs'>> = {}) {
+async function setup(runtime: RuntimeId, scenario: string, {
+  holdStartupReceipt = false, ...overrides
+}: Partial<Pick<TaskRunnerDeps, 'startupTimeoutMs'>> & { holdStartupReceipt?: boolean } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-t1-native-'));
   const tree = path.join(dir, 'tree.json');
   const traceFile = path.join(dir, 'trace');
@@ -39,6 +44,27 @@ async function setup(runtime: RuntimeId, scenario: string, overrides: Partial<Pi
   const childTiming = process.env.T1_TIMING_EVIDENCE_DIR ? path.join(dir, 'native-timing.jsonl') : undefined;
   vi.stubEnv('T1_TIMING_TRACE', childTiming);
   const timing = cancellationTiming(runtime, scenario);
+  const startupDisposed = deferred();
+  let startupReceiptReleased = !holdStartupReceipt;
+  const releaseStartupReceipt = () => {
+    startupReceiptReleased = true;
+    timing.record('startup.disposal.receipt.release');
+  };
+  if (runtime === 'claude' && holdStartupReceipt) {
+    // Claude aborts native init immediately. Run its REAL tree disposal, then
+    // withhold only the acknowledgement so retention does not depend on init
+    // being uncancellable. A retry cannot claim quiescence before release.
+    const dispose = ClaudeProcessClient.prototype.dispose;
+    vi.spyOn(ClaudeProcessClient.prototype, 'dispose').mockImplementation(async function (this: ClaudeProcessClient) {
+      await dispose.call(this);
+      timing.record('startup.disposal.real.complete');
+      startupDisposed.resolve();
+      if (!startupReceiptReleased) throw new RuntimeDisposalFailure({
+        stage: 'quiescence', reason: 'fixture is withholding the completed startup disposal receipt',
+      });
+      timing.record('startup.disposal.receipt.return');
+    });
+  }
   for (const [name, value] of Object.entries({ T1_SCENARIO: scenario, T1_TREE: tree, T1_TRACE: traceFile, T1_GATE: gate, T1_RESULT_GATE: resultGate })) vi.stubEnv(name, value);
   const resolveBin = () => ({ command: fixture, source: 'path' as const });
   const adapter: RuntimeAdapter = runtime === 'claude' ? new ClaudeAdapter({ resolveBin, interruptTimeoutMs: 60, spawnFn: timing.spawnFn })
@@ -114,14 +140,26 @@ async function setup(runtime: RuntimeId, scenario: string, overrides: Partial<Pi
   const terminals = () => sent.filter(event => ['task.complete', 'task.fail', 'task.cancelled'].includes(event.type));
   const events = () => sent.flatMap(event => event.type === 'task.progress' ? event.payload.events : []);
   const trace = async () => (await fs.readFile(traceFile, 'utf8')).trim().split('\n');
-  const assertReaped = async () => {
+  const assertTreeReaped = async () => {
     const pids = JSON.parse(await fs.readFile(tree, 'utf8')) as Record<string, number>;
     expect(Object.keys(pids).sort()).toEqual(['descendantPid', 'grandchildPid', 'rootPid']);
     for (const pid of Object.values(pids)) expect(alive(pid), `PID ${pid} still live`).toBe(false);
+  };
+  const assertReaped = async () => {
+    await assertTreeReaped();
     expect(runner.activeTaskCount).toBe(0);
   };
+  const assertStartupReceiptRetained = async () => {
+    if (runtime === 'claude') {
+      await startupDisposed.promise;
+      await assertTreeReaped();
+      expect(sessions).toHaveLength(0);
+    }
+    expect(runner.activeTaskCount).toBe(1);
+  };
   const c = { runtime, dir, tree, gate, resultGate, adapter, runner, sent, sessions, startSettled, hasStarted: () => started,
-    offer, cancel, terminals, events, trace, assertReaped, timing, synchronizeInterruptClock, restoreClock,
+    offer, cancel, terminals, events, trace, assertReaped, assertStartupReceiptRetained, releaseStartupReceipt,
+    timing, synchronizeInterruptClock, restoreClock,
     stopTimers: timing.stopTimers, waitForTerminal: () => terminalPublished.promise,
     saveEvidence: () => timing.save(dir, childTiming, expect.getState().currentTestName) };
   cases.push(c);
@@ -132,6 +170,7 @@ afterEach(async () => {
     for (const c of cases.splice(0)) {
       try {
         c.restoreClock();
+        c.releaseStartupReceipt();
         await fs.writeFile(c.gate, 'release');
         await fs.writeFile(c.resultGate, 'release');
         c.runner.stopAcceptingOffers();
@@ -149,6 +188,33 @@ function expectUsage(c: Awaited<ReturnType<typeof setup>>, promptTokens: number,
   expect(c.terminals()).toHaveLength(1);
   expect(c.terminals()[0]?.payload).toMatchObject({ usage: { runtime: c.runtime, promptTokens, completionTokens } });
 }
+
+describe('TaskRunner prompt Claude startup disposal', () => {
+  it.each(['cancel', 'shutdown', 'deadline'] as const)('reaps on %s without releasing native init', async action => {
+    const c = await setup('claude', 'startup', action === 'deadline' ? { startupTimeoutMs: 1000 } : {});
+    const offered = c.offer();
+    await vi.waitFor(async () => expect(await c.trace()).toContain('startup'));
+    if (action === 'cancel') await c.cancel();
+    else if (action === 'shutdown') {
+      c.runner.stopAcceptingOffers();
+      await c.runner.shutdownActiveTasks('operator');
+    } else await c.waitForTerminal();
+    await offered; await c.startSettled.promise;
+    // The first cancellation may precede the adapter's rejected-start receipt.
+    // Join that now-returned owner without opening the native init gate.
+    await new Promise<void>(resolve => setImmediate(resolve));
+    if (action === 'cancel') await c.cancel();
+    await expect(fs.stat(c.gate)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(c.sessions).toHaveLength(0);
+    expect(c.sent.some(event => event.type === 'task.started')).toBe(false);
+    expect(c.terminals()).toHaveLength(1);
+    expect(c.terminals()[0]).toMatchObject(action === 'cancel' ? { type: 'task.cancelled' }
+      : { type: 'task.fail', payload: { retryable: action === 'shutdown' } });
+    expectNoErrors(c); await c.assertReaped();
+    await c.cancel(); await c.runner.shutdownActiveTasks('repeat');
+    expect(c.terminals()).toHaveLength(1);
+  });
+});
 
 describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s and an owned fixture tree', runtime => {
   it('cancels a queued offer without spawning; duplicate cancels are inert', async () => {
@@ -182,28 +248,35 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
   });
 
   it('shutdown exposes a gated startup owner and reaps it on retry without a second terminal', async () => {
-    const c = await setup(runtime, 'startup'); const offered = c.offer();
+    const c = await setup(runtime, 'startup', { holdStartupReceipt: true }); const offered = c.offer();
     await vi.waitFor(async () => expect(await c.trace()).toContain('startup'));
     c.runner.stopAcceptingOffers();
     await expect(c.runner.shutdownActiveTasks('operator')).rejects.toMatchObject({ name: 'RuntimeDisposalFailure' });
     await offered;
     expect(c.terminals()).toHaveLength(1);
     expect(c.terminals()[0]).toMatchObject({ type: 'task.fail', payload: { retryable: true } });
+    await c.assertStartupReceiptRetained();
+    await expect(c.runner.shutdownActiveTasks('receipt still held')).rejects.toMatchObject({ name: 'RuntimeDisposalFailure' });
+    expect(c.terminals()).toHaveLength(1);
     await fs.writeFile(c.gate, 'release'); await c.startSettled.promise;
     await new Promise<void>(resolve => setImmediate(resolve));
+    c.releaseStartupReceipt();
     await c.runner.shutdownActiveTasks('retry'); await c.cancel();
     expect(c.terminals()).toHaveLength(1); expectNoErrors(c); await c.assertReaped();
   });
 
   it('startup deadline publishes one failure and retains the late owner until its disposal receipt', async () => {
-    const c = await setup(runtime, 'startup', { startupTimeoutMs: 1000 }); const offered = c.offer();
+    const c = await setup(runtime, 'startup', { startupTimeoutMs: 1000, holdStartupReceipt: true }); const offered = c.offer();
     await vi.waitFor(async () => expect(await c.trace()).toContain('startup'));
     await vi.waitFor(() => expect(c.terminals()).toHaveLength(1)); await offered;
     expect(c.terminals()[0]).toMatchObject({ type: 'task.fail', payload: { retryable: false } });
     expect(c.sent.some(event => event.type === 'task.started')).toBe(false);
-    expect(c.runner.activeTaskCount).toBe(1);
+    await c.assertStartupReceiptRetained();
+    await expect(c.runner.shutdownActiveTasks('receipt still held')).rejects.toMatchObject({ name: 'RuntimeDisposalFailure' });
+    expect(c.terminals()).toHaveLength(1);
     await fs.writeFile(c.gate, 'release'); await c.startSettled.promise;
     await new Promise<void>(resolve => setImmediate(resolve));
+    c.releaseStartupReceipt();
     await c.runner.shutdownActiveTasks('deadline owner disposal'); await c.cancel();
     expect(c.terminals()).toHaveLength(1); expectNoErrors(c); await c.assertReaped();
   });
