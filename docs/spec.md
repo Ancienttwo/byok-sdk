@@ -2536,3 +2536,105 @@ A post-PID setup failure requests SIGTERM for the detached child group while ret
 
 ### T6 locked physical tuple supplement (F2)
 Official external CLI probes and terminal task admission retain the full asynchronous byte/environment reverify. After acquiring the shared root admission lock, before permit consumption/native spawn, the SDK additionally checks identity-owned artifact/interpreter/declared asset tuples and canonical parent paths, external home/config directory tuples, and the committed parent record. A known pre-spawn mismatch rolls back the uncommitted reservation under the existing F1 rule. This is a synchronous tuple-only supplement, preserving same-inode hardlink layouts, not an atomic OS execution guarantee or login-store content proof. Same-UID in-place edits preserving every tuple and the residual final check-to-spawn interval remain check-time limits. No credential/billing authority or new per-adapter budget is introduced.
+
+## Local native interaction contract
+
+`@byok-sdk/client` exports `NativeInteractionController` for adapter authors and
+local Hosts. `Session.interactions`, when actually implemented, exposes the
+controller's immutable channel: a process generation, the pending request
+snapshot, and a typed `respond` operation. `RuntimeCapabilities.nativeInteractions`
+is the explicit local support declaration. Omission means unsupported. Its
+approval-decision list and `structuredQuestions` flag are snapshotted with the
+rest of the runtime descriptor.
+
+This local seam is distinct from the existing remote `needs_approval` /
+`resolveApproval(boolean)` contract. It does not add a daemon control command,
+wire payload, remote authorization, UI, persistent grant, or Host reconnect
+protocol. Claude and Codex wire this seam only when their local adapter is constructed
+with `nativeInteractions` Host callbacks. With that option absent, neither
+advertises native interaction support. Pi remains unsupported. The existing
+`approvalInteractive` declarations and permission admission rules stay
+authoritative for the remote task path. Local capability metadata does not
+assert that every task exposes every tool or will ask an interactive question.
+
+Each request carries an SDK `requestId`, a fresh process-lifetime `generation`,
+and a separate native identity containing the exact string or numeric wire ID,
+method, provider session reference and available turn/item IDs. Numeric `7`
+and string `"7"` remain different native requests. Reusing a native wire ID in
+one generation is refused, including after settlement. Resuming the same
+provider session creates a new generation; it starts with no old pending
+requests and rejects answers addressed to the previous generation. No pending
+approval or question is inferred from transcript history.
+
+Approval responses choose one of the exact request's offered decisions:
+`allow-once`, `allow-session`, `deny`, or `cancel`. There is no always/persistent
+approval decision and no fallback that broadens a one-shot grant. Structured
+questions retain question IDs, option IDs, multiple-selection and free-text
+constraints; every question requires exactly one schema-valid answer. Answers
+are never converted into ordinary steering text. Request and answer data are
+copied into inert, deeply frozen snapshots before use. Unknown fields,
+accessors, proxies, custom prototypes, duplicate questions/options/answers,
+out-of-schema decisions and oversized data fail closed.
+
+The controller owns a bounded number of pending operations and a separate
+process-lifetime bound on all retained request IDs and response receipts. It
+never evicts a tombstone to make an old ID reusable. Duplicate equivalent
+answers join the same in-flight operation or return its settled receipt;
+conflicting answers are refused before a second native write. A request
+timeout invokes its adapter's native cancellation operation. Provider
+withdrawal, interrupt, turn completion and process close invalidate unanswered
+requests without fabricating another native reply. The adapter remains
+responsible for invoking these lifecycle hooks from actual native events.
+
+A native write is attempted at most once and has its own bounded deadline.
+Cancellation settles the logical request but retains ownership of any already
+started write and its capacity reservation. A rejected or uncertain write
+closes the generation and invokes the required owner's `onFatal` callback
+exactly once; the adapter must terminate/dispose its owned process. The
+controller's receipt says whether the local write completed, was cancelled,
+timed out, or failed; it is not proof that a provider executed a tool. The
+controller itself neither starts nor kills processes, and no live provider,
+credential or persistent-access operation is part of its fixture validation.
+
+
+### Qualified local provider bridges
+
+Claude uses the official Agent SDK stdio control handshake and
+`--permission-prompt-tool stdio`. It preserves `request_id` independently of
+`tool_use_id`, sends one-shot `behavior:allow` with the original `updatedInput`,
+and never sends `updatedPermissions`. It offers only allow-once, deny and cancel.
+`AskUserQuestion` answers retain the native question text and option labels
+inside `updatedInput.answers`; duplicate native text/labels are refused rather
+than overwritten. Cancellation/timeout sends deny plus interrupt, while a
+native `control_cancel_request` writes no answer. Unknown/malformed requests or
+native identity drift dispose the process. Opt-in is admitted only in auto
+mode, and a request cannot override a sealed built-in allowlist or exact observed
+MCP grant. Readonly/plan remain available without native interaction opt-in;
+confirm remains unsupported. Claude's own existing allow rules may bypass the
+callback, so this is not an all-tools-confirmation policy.
+
+Codex remains pinned to CLI 0.160.0. Opt-in opens/resumes with `on-request` and
+requires native policy readback before a session is exposed; ordinary default
+mode remains `never`. The existing danger-full-access sandbox is unchanged,
+so confirm policy remains unsupported. Only command/file approval requests and
+`item/tool/requestUserInput` are mapped. Allow-once maps to `accept`, session
+scope to `acceptForSession`, denial to `decline` and cancellation to `cancel`.
+Structured questions keep native question IDs and answer arrays. User-input
+cancellation rejects that RPC rather than manufacturing an empty answer.
+Permissions-profile requests, dynamic tools and MCP elicitation are not
+implemented and never get an allow fallback.
+
+Codex validates the expected resume thread before held callback replay and
+requires the currently active native turn before exposing any request. Provider
+resolution, exact turn completion, interruption and process exit withdraw the
+matching pending requests. A refused prompt cannot re-arm native callbacks.
+Native reply receipts await stdin completion; cancellation of a pending UI does
+not release ownership of a still-unacknowledged write. Both provider bridges
+use a new SDK generation per process, including resumed provider sessions.
+
+Protocol references and exact inspected hashes are recorded in
+`docs/researches/2026-10-06-native-interaction-sources.json`. T3 supplies the
+separation between steering and typed native requests, not copied code. OAR's
+Apache-2.0 attribution and maintained source inventory remain explicit. Fixture
+qualification does not establish live-provider, desktop or Host-reconnect
+acceptance.

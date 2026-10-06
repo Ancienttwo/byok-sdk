@@ -19,6 +19,7 @@ function fakeProcess() {
     onLine: handler => { lines.push(handler); },
     onExit: handler => { exits.push(handler); },
     write: vi.fn(),
+    writeAcknowledged: text => { child.write(text); return Promise.resolve(); },
     // Deliberately does not emit exit: client cleanup must not depend on prompt process death.
     kill: vi.fn(),
   };
@@ -199,7 +200,7 @@ describe('OAR injected app-server client', () => {
   });
 });
 
-it('accounts for every vendored file and the five maintained runtime source deltas', () => {
+it('accounts for every vendored file and the six maintained runtime source deltas', () => {
   const root = path.resolve(import.meta.dirname, '../../vendor/oar/f385b91');
   const manifest = JSON.parse(readFileSync(path.join(root, 'source-manifest.json'), 'utf8')) as {
     files: Array<{ path: string; sourcePath: string; upstreamSha256: string; vendoredSha256: string; delta?: string }>;
@@ -212,6 +213,6 @@ it('accounts for every vendored file and the five maintained runtime source delt
     if (!row.delta) expect(row.vendoredSha256).toBe(row.upstreamSha256);
     if (row.path.endsWith('.ts')) expect(row.sourcePath).toBe(`packages/oar/src/${row.path}`);
   }
-  expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual(['runtimes/codex/app-server-client.ts', 'runtimes/codex/projection.ts', 'runtimes/codex/rpc-control.ts', 'runtimes/codex/session.ts', 'shared/session-kernel.ts']);
+  expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual(['runtimes/codex/app-server-client.ts', 'runtimes/codex/open.ts', 'runtimes/codex/projection.ts', 'runtimes/codex/rpc-control.ts', 'runtimes/codex/session.ts', 'shared/session-kernel.ts']);
   expect(readFileSync(path.join(root, 'LICENSE'), 'utf8')).toContain('Apache License');
 });

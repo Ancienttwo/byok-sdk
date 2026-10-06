@@ -38,10 +38,31 @@ export function createClaudeControlChannel(timeoutMs: number) {
   let pending:
     | {
         id: string;
+        subtype: 'initialize' | 'interrupt';
         promise: Promise<boolean>;
         settle: (accepted: boolean) => void;
       }
     | undefined;
+  const requestControl = (subtype: 'initialize' | 'interrupt', deadline: number): Promise<boolean> => {
+    if (ended || !write) return Promise.resolve(false);
+    if (pending) return pending.subtype === subtype ? pending.promise : Promise.resolve(false);
+    const id = randomUUID();
+    let resolve!: (accepted: boolean) => void;
+    const promise = new Promise<boolean>((complete) => { resolve = complete; });
+    const timer = setTimeout(() => settle(false), deadline);
+    const settle = (accepted: boolean) => {
+      if (pending?.id !== id) return;
+      clearTimeout(timer);
+      pending = undefined;
+      resolve(accepted);
+    };
+    pending = { id, subtype, promise, settle };
+    void write({
+      type: 'control_request', request_id: id,
+      request: subtype === 'initialize' ? { subtype, hooks: null } : { subtype },
+    }).catch(() => settle(false));
+    return promise;
+  };
   return {
     get contextWindow() {
       return contextWindow;
@@ -79,29 +100,9 @@ export function createClaudeControlChannel(timeoutMs: number) {
       pending?.settle(false);
       for (const resolve of resultWaiters) resolve(false);
     },
-    interrupt(): Promise<boolean> {
-      if (ended || !write) return Promise.resolve(false);
-      if (pending) return pending.promise;
-      const id = randomUUID();
-      let resolve!: (accepted: boolean) => void;
-      const promise = new Promise<boolean>((complete) => {
-        resolve = complete;
-      });
-      const timer = setTimeout(() => pending?.settle(false), timeoutMs);
-      const settle = (accepted: boolean) => {
-        if (pending?.id !== id) return;
-        clearTimeout(timer);
-        pending = undefined;
-        resolve(accepted);
-      };
-      pending = { id, promise, settle };
-      void write({
-        type: 'control_request',
-        request_id: id,
-        request: { subtype: 'interrupt' },
-      }).catch(() => settle(false));
-      return promise;
-    },
+    /** Complete the SDK stdio handshake before the first user frame. */
+    initialize(): Promise<boolean> { return requestControl('initialize', 60_000); },
+    interrupt(): Promise<boolean> { return requestControl('interrupt', timeoutMs); },
     /** ACK and final result share the existing interrupt deadline. */
     async interruptAndSettle(): Promise<boolean> {
       const revision = resultRevision;

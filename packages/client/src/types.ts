@@ -1,3 +1,4 @@
+import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import type { ToolImplementationAuthority, ToolImplementationUnavailableReasonV1 } from '@byok-sdk/implementation-identity';
@@ -64,6 +65,8 @@ export type RuntimeInstallationObservationContext = { readonly authority: ToolIm
 
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
+  /** Local native interaction support only; omission is unsupported. Not the remote boolean approval lane. */
+  readonly nativeInteractions?: NativeInteractionCapabilities;
   /** Local adapter advertisement; no new protocol field or capability vocabulary. */
   readonly durablePi?: boolean;
   readonly steer: boolean;
@@ -198,6 +201,8 @@ export interface ApprovalChannel {
  * one underlying runtime process/session for the lifetime of a task.
  */
 export interface Session {
+  /** Process-generation-bound native requests. Never reconstructed from a resumed transcript. */
+  readonly interactions?: NativeInteractionChannel;
   /** Current execution artifact, available only after terminal success. */
   resultDocument?(): unknown;
   /** Opaque runtime session id, reported back to the server via `task.complete.sessionRef`. */
@@ -615,6 +620,12 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
       : { generatesApprovalMcpServer: descriptor.generatesApprovalMcpServer === true }),
     capabilities: Object.freeze({
       ...(descriptor.capabilities.durablePi === undefined ? {} : { durablePi: descriptor.capabilities.durablePi === true }),
+      ...(descriptor.capabilities.nativeInteractions === undefined ? {} : {
+        nativeInteractions: Object.freeze({
+          approvalDecisions: Object.freeze([...descriptor.capabilities.nativeInteractions.approvalDecisions]),
+          structuredQuestions: descriptor.capabilities.nativeInteractions.structuredQuestions === true,
+        }),
+      }),
       steer: descriptor.capabilities.steer === true,
       resume: descriptor.capabilities.resume === true,
       approvalInteractive: descriptor.capabilities.approvalInteractive === true,

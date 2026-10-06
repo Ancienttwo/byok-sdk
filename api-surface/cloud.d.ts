@@ -1830,6 +1830,19 @@ export interface BoundedJsonBodyResult {
  * existing validation status.
  */
 export declare function readBoundedJsonBody(c: Context, maximum: number): Promise<BoundedJsonBodyResult>;
+/**
+ * Count actual request bytes before retaining each chunk. Keep the bytes intact
+ * for consumers that authenticate a raw-body hash before decoding JSON.
+ * Content-Length policy belongs to the caller; it never replaces this ceiling.
+ */
+export declare function readBoundedRawBody(stream: ReadableStream<Uint8Array> | null, maximum: number): Promise<Uint8Array | 'too_large' | undefined>;
+/**
+ * Cancellation is a resource-release best effort that is never awaited before
+ * rejecting an already oversized request. `ReadableStream.cancel()` is used
+ * before a reader exists; `ReadableStreamDefaultReader.cancel()` owns the
+ * same underlying request stream after an overflow has been observed.
+ */
+export declare function cancelBody(body: ReadableStream<Uint8Array> | ReadableStreamDefaultReader<Uint8Array> | null): void;
 export interface DeviceRouteDeps {
     readonly bearer: BearerAuthDeps;
     readonly root: CloudRootStores;

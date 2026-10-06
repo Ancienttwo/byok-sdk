@@ -31,6 +31,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     let adopted = false;
     let exitCode: number | null = null;
     let failure: Error | undefined;
+    const pendingWrites = new Set<(error: Error) => void>();
     let stderrTail = Buffer.alloc(0);
     let disposal: Promise<void> | undefined;
     let resolveClosed!: () => void;
@@ -54,6 +55,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     const kill = (): void => { void cleanup().catch(error => { failure ??= error instanceof Error ? error : new Error(String(error)); }); };
     const fail = (error: Error): void => {
       failure ??= error;
+      for (const reject of [...pendingWrites]) reject(error);
       buffer = Buffer.alloc(0); held.length = 0; heldBytes = 0;
       rejectSpawn(error);
       kill();
@@ -110,6 +112,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     child.once('close', (code: number | null) => {
       if (closed) return;
       closed = true; exitCode = code; resolveClosed();
+      for (const reject of [...pendingWrites]) reject(failure ?? new Error('owned line process closed during write'));
       // exited is a tree-quiescence receipt, not merely a root exit event.
       void cleanup().then(() => undefined, error => { failure ??= error instanceof Error ? error : new Error(String(error)); }).then(() => {
         released = true;
@@ -127,6 +130,20 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
       write(text: string) {
         if (!adopted || closed || failure !== undefined) throw failure ?? new Error('owned line process is not writable');
         child.stdin.write(text);
+      },
+      /** Native replies have no RPC ACK; expose the stdin completion receipt to their deadline owner. */
+      writeAcknowledged(text: string): Promise<void> {
+        if (!adopted || closed || failure !== undefined) return Promise.reject(failure ?? new Error('owned line process is not writable'));
+        return new Promise<void>((resolve, reject) => {
+          const rejectWrite = (error: Error) => { pendingWrites.delete(rejectWrite); reject(error); };
+          pendingWrites.add(rejectWrite);
+          try {
+            child.stdin.write(text, error => {
+              if (error) fail(error);
+              else { pendingWrites.delete(rejectWrite); resolve(); }
+            });
+          } catch (cause) { fail(cause instanceof Error ? cause : new Error(String(cause))); }
+        });
       },
       onLine(handler: (line: string) => void) { lineHandlers.push(handler); flush(); },
       onExit(handler: (code: number | null) => void) {

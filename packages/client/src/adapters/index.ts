@@ -31,3 +31,11 @@ export type { ClaudeAdapterOptions } from './claude/claude-adapter';
 
 export { CodexAdapter } from './codex/codex-adapter';
 export type { CodexAdapterOptions } from './codex/codex-adapter';
+
+export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
+export type {
+  NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity,
+  NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest,
+  NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason,
+  NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode,
+} from '../native-interactions';

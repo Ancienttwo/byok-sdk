@@ -1,6 +1,7 @@
 // ==== @byok-sdk/client dist/adapters/claude/claude-adapter.d.ts ====
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type ResolvedBin } from './resolve-bin';
+import { type NativeInteractionHostOptions } from '../../native-interactions';
 import { type SpawnFn } from './process-client';
 export interface ClaudeAdapterOptions {
     /** Override bin resolution — tests substitute the fake-claude fixture script. */
@@ -9,75 +10,21 @@ export interface ClaudeAdapterOptions {
     spawnFn?: SpawnFn;
     /** Deadline for native interrupt ACK before owned-process termination fallback. */
     interruptTimeoutMs?: number;
+    /** Local Host callbacks for native stdio requests; never enables remote boolean approvals. */
+    nativeInteractions?: NativeInteractionHostOptions;
 }
 /**
- * Claude Code runtime adapter (`claude -p --input-format stream-json
- * --output-format stream-json`) — the M2-a counterpart to `../pi/pi-adapter.ts`.
- * Every behavioral claim in this file's own doc comments and its sibling
- * modules (`events.ts`, `permission-mapping.ts`, `process-client.ts`) was
- * empirically reproduced against the real installed `claude` 2.1.212 binary
- * on a logged-in machine (per this task's own "do NOT trust docs over the
- * real binary" mandate — `claude --help` was actively wrong/misleading for
- * `--allowedTools`, see `permission-mapping.ts`) — not inferred from
- * training-data recall or the Claude API/Agent-SDK docs, which describe a
- * DIFFERENT product surface (the Messages API, not this CLI's headless
- * wire format).
- *
- * ## The central finding: claude's headless approval model has no
- * `needs_approval` pause, at all
- *
- * This is the first real use of the `needs_approval` /
- * `Session.resolveApproval` seam any adapter in this codebase has
- * implemented (pi never emits `needs_approval` — see `PiSession
- * .resolveApproval`'s own doc comment) — so this finding directly informs
- * the M2-c protocol-freeze decision on that seam.
- *
- * Empirically (see the M2-a report for the full live-capture evidence):
- * spawning `claude -p` **non-interactively** with a tool call that would
- * normally prompt a human is resolved **synchronously, before the turn
- * continues** — there is no pause, no wait, no later resumption point:
- *
- * - Under `--permission-mode default` (or no flag at all — headless has no
- *   TTY to interactively ask), an unapproved tool call is immediately
- *   AUTO-DENIED with a synthesized `tool_result`
- *   (`"Claude requested permissions to write to <path>, but you haven't
- *   granted it yet."`, `is_error:true`) and the run continues normally to
- *   its own `result` frame — no hang, and nothing this adapter could ever
- *   resume later even if it wanted to.
- * - Under a permissive `--permission-mode` (`acceptEdits`/`bypassPermissions`),
- *   the call is auto-GRANTED, again synchronously, again with nothing to
- *   pause on.
- *
- * There is consequently no claude stream-json frame this adapter could
- * ever map to the protocol's `needs_approval` `AgentEvent` — the decision
- * is always already made by the time any frame reaches this adapter at
- * all. `resolveApproval()` below throws a descriptive error rather than
- * silently no-op'ing, mirroring `PiSession.resolveApproval`'s own
- * documented reasoning exactly: a caller that ever receives
- * `task.approve`/`task.reject` for one of this adapter's tasks implies
- * something upstream expected approval support this adapter genuinely does
- * not have.
- *
- * `PermissionPolicy.mode: 'confirm'` is rejected before runtime side effects.
- * The private approval MCP helper and permission-prompt-tool integration have
- * been removed. The shared needs_approval contract remains for other adapters.
- *
- * ## Steering was also found unsupported (a second, related finding)
- *
- * Live-probed via a persistent `--input-format stream-json` process:
- * writing a second `{"type":"user",...}` message to stdin WHILE a turn is
- * still generating does NOT redirect that in-flight turn — it QUEUES as a
- * separate, subsequent turn, processed only after the first one reaches
- * its own `result`. This is genuinely useful for `followUp()` (a new turn
- * "after [the session] has gone idle" — exactly the queued-after-result
- * case), but it is not what `Session.steer`'s "inject steering text into a
- * running turn (mid-stream)" contract promises. `capabilities().steer` is
- * therefore `false`, and `steer()` throws rather than silently behaving
- * like a queued follow-up under a name that implies live redirection.
+ * Claude Code stream-json adapter. Default headless permission behavior remains
+ * unchanged. Explicit nativeInteractions opts into the Agent SDK stdio control
+ * handshake and requests the CLI actually forwards to can_use_tool, including
+ * AskUserQuestion. Existing allow rules may bypass that callback; this is not a
+ * blanket all-tools confirmation policy. PermissionPolicy.confirm and remote
+ * boolean approvals remain unsupported, as does mid-turn steering.
  */
 export declare class ClaudeAdapter implements RuntimeAdapter {
     private readonly options;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
+    private readonly nativeOptions?;
     constructor(options?: ClaudeAdapterOptions);
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
@@ -234,7 +181,8 @@ export interface ClaudeProcessClientOptions {
  * Structurally simpler than pi's `PiRpcClient` in one real way, and
  * different (not simpler) in another:
  *
- * - No request/response correlation. pi's RPC mode replies to each command
+ * - No user-turn request/response correlation. Optional native controls are
+ *   correlated on a separate channel. pi's RPC mode replies to each command
  *   with a `{type:"response", id, success, ...}` — claude's stream-json has
  *   no such acknowledgement at all; writing a `{"type":"user",...}` line
  *   just starts (or queues) a turn, and the ONLY confirmation is the
@@ -271,10 +219,12 @@ export declare class ClaudeProcessClient {
     private readonly eventQueue;
     private closed;
     private exitError;
+    private transportError;
+    private readonly pendingWrites;
     private readonly closedPromise;
     private resolveClosed;
     private disposalAttempt;
-    /** Resolves once this tree is backstopped (see `adoptOwnedProcessTree`); rejects with the adoption failure, having already terminated the tree. */
+    /** Resolves once this tree is backstopped; rejection carries either completed disposal or an owned retry receipt. */
     private readonly adopted;
     /** Set before the fail-closed termination starts, so it — not the exit code of the kill we ourselves requested — becomes this client's exit error. */
     private adoptionFailure;
@@ -296,7 +246,14 @@ export declare class ClaudeProcessClient {
      * mechanism `followUp()` relies on instead of spawning a fresh
      * `--resume`'d process per follow-up.
      */
-    writeUserMessage(text: string): void;
+    writeUserMessage(text: string): Promise<void>;
+    private writeFrame;
+    /** Stop startup admission immediately, independently of the process-close receipt.
+     * The stopped transport latch is checked again after adoption, so an abandoned
+     * write cannot send a late prompt when delayed adoption eventually resolves.
+     */
+    abortStartup(error: Error): void;
+    private onTransportError;
     /**
      * Resolves with claude's own `session_id` once its `system/init` frame
      * arrives (see this class's doc comment for why this exists at all).
@@ -305,7 +262,7 @@ export declare class ClaudeProcessClient {
      * every call rejects with that same exit error.
      */
     waitForInit(): Promise<string>;
-    /** Every parsed stream-json line — `system/init` is consumed internally (see `waitForInit`) but is also forwarded here like any other frame, so routine-frame accounting in `ClaudeSession`'s mapper stays uniform. */
+    /** Every non-control parsed stream-json line — `system/init` is consumed internally (see `waitForInit`) but is also forwarded here like any other frame, so routine-frame accounting in `ClaudeSession`'s mapper stays uniform. */
     get events(): AsyncIterable<ClaudeStreamMessage>;
     /** Local transport diagnostic retained when the process closes; consumers classify it at the session boundary. */
     get terminalError(): Error | undefined;
@@ -336,8 +293,8 @@ export declare class ClaudeProcessClient {
      * precondition, not a degraded mode: the child is terminated through the one
      * disposal authority and the failure is re-thrown, which is what makes
      * `waitForInit()` — and therefore `ClaudeAdapter.start()` — fail before any
-     * session is published. Both cleanup attempts are best-effort because the
-     * adoption failure, not a terminator's own complaint, is the reason to report.
+     * session is published. If disposal fails, retain both failures and a retry
+     * owner; adoption rejection alone is never a tree-quiescence receipt.
      */
     private adoptOwnedTree;
     private onData;
@@ -376,6 +333,7 @@ export interface ResolvedBin {
  */
 export declare function resolveClaudeBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/codex/codex-adapter.d.ts ====
+import { type NativeInteractionHostOptions } from '../../native-interactions';
 import { type spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
@@ -386,11 +344,13 @@ export interface CodexAdapterOptions {
     spawnFn?: typeof nodeSpawn;
     maxRetainedBytes?: number;
     interruptTimeoutMs?: number;
+    /** Opt-in local Host UI; independent of the remote boolean approval lane. */
+    nativeInteractions?: NativeInteractionHostOptions;
 }
 /** Codex app-server is experimental. Only the qualified 0.160.0 binary is admitted; no exec compatibility path. */
 export declare class CodexAdapter implements RuntimeAdapter {
     private readonly options;
-    readonly descriptor: import("..").RuntimeAdapterDescriptor;
+    get descriptor(): import("..").RuntimeAdapterDescriptor;
     constructor(options?: CodexAdapterOptions);
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
@@ -433,6 +393,8 @@ export { ClaudeAdapter } from './claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './claude/claude-adapter';
 export { CodexAdapter } from './codex/codex-adapter';
 export type { CodexAdapterOptions } from './codex/codex-adapter';
+export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
+export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from '../native-interactions';
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
 import type { RuntimeInstallationObservationContext } from '../../types';
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
@@ -10351,6 +10313,8 @@ export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairErr
 export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, } from './diagnostics/device-doctor';
 export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions';
 export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, ExportDeviceSupportBundleInput, DeviceSupportBundleExportResult, ArchiveAgentTerminalMessagesInput, AgentTerminalMessagesArchiveResult, DeviceOperatorErrorCode } from './diagnostics/operator-actions';
+export { NativeInteractionController, NativeInteractionError } from './native-interactions';
+export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from './native-interactions';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
 import type { PreparedAgentMemoryImplementation, PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import { type PermissionMode, type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
@@ -12504,6 +12468,130 @@ export interface McpObservationDrift {
  * collapsing them into one "drift" would hide which one happened.
  */
 export declare function diffMcpObservation(frozen: McpServerObservation, observed: McpServerObservation): readonly McpObservationDrift[];
+// ==== @byok-sdk/client dist/native-interactions.d.ts ====
+/** Native permission scope is explicit. There is intentionally no persistent grant. */
+export type NativeApprovalDecision = 'allow-once' | 'allow-session' | 'deny' | 'cancel';
+export interface NativeInteractionCapabilities {
+    readonly approvalDecisions: readonly NativeApprovalDecision[];
+    readonly structuredQuestions: boolean;
+}
+export interface NativeInteractionIdentity {
+    /** Exact provider wire ID, including its original string/number type. */
+    readonly id: string | number;
+    readonly method: string;
+    readonly sessionRef: string;
+    readonly turnId?: string;
+    readonly itemId?: string;
+}
+export interface NativeQuestion {
+    readonly id: string;
+    readonly prompt: string;
+    readonly header?: string;
+    readonly options: readonly {
+        readonly id: string;
+        readonly label: string;
+        readonly description?: string;
+    }[];
+    readonly multiple: boolean;
+    readonly allowText: boolean;
+    readonly secret?: boolean;
+}
+export type NativeInteractionInput = {
+    readonly native: NativeInteractionIdentity;
+} & ({
+    readonly kind: 'approval';
+    readonly title: string;
+    readonly details?: Readonly<Record<string, unknown>>;
+    readonly decisions: readonly NativeApprovalDecision[];
+} | {
+    readonly kind: 'question';
+    readonly questions: readonly NativeQuestion[];
+});
+export type NativeInteractionRequest = NativeInteractionInput & {
+    /** SDK identity, unique across process generations, never a tool call ID. */
+    readonly requestId: string;
+    readonly generation: string;
+    readonly expiresAt: number;
+};
+export interface NativeQuestionAnswer {
+    readonly questionId: string;
+    readonly selectedOptionIds: readonly string[];
+    readonly text?: string;
+}
+export type NativeInteractionResponse = {
+    readonly requestId: string;
+} & ({
+    readonly kind: 'approval';
+    readonly decision: NativeApprovalDecision;
+} | {
+    readonly kind: 'question';
+    readonly answers: readonly NativeQuestionAnswer[];
+} | {
+    readonly kind: 'cancel';
+});
+export type NativeInteractionEndReason = 'provider-cancelled' | 'interrupted' | 'turn-ended' | 'process-exited' | 'closed';
+export interface NativeInteractionReceipt {
+    readonly requestId: string;
+    readonly status: 'responded' | 'cancelled' | 'timed-out' | 'failed';
+    readonly reason?: NativeInteractionEndReason | 'deadline' | 'transport';
+}
+/** Local host surface. A snapshot contains only requests still awaiting a decision. */
+export interface NativeInteractionChannel {
+    readonly generation: string;
+    pending(): readonly NativeInteractionRequest[];
+    respond(response: NativeInteractionResponse): Promise<NativeInteractionReceipt>;
+}
+export interface NativeInteractionOptions {
+    readonly onRequest: (request: NativeInteractionRequest, channel: NativeInteractionChannel) => void | Promise<void>;
+    readonly onResolved?: (receipt: NativeInteractionReceipt) => void | Promise<void>;
+    /** Required owner action for an uncertain/failed native write; normally terminate the owned process. */
+    readonly onFatal: (error: NativeInteractionError) => void | Promise<void>;
+    readonly timeoutMs?: number;
+    readonly writeTimeoutMs?: number;
+    readonly maxPending?: number;
+    /** All request identities/tombstones are retained up to this lifetime bound; none are evicted/reused. */
+    readonly maxRequests?: number;
+}
+/** Adapter consumers supply presentation hooks; the adapter always owns fatal transport disposal. */
+export type NativeInteractionHostOptions = Omit<NativeInteractionOptions, 'onFatal'>;
+export interface NativeInteractionTransport {
+    respond(response: NativeInteractionResponse): Promise<void>;
+    cancel(reason: 'deadline' | 'cancelled'): Promise<void>;
+}
+export type NativeInteractionErrorCode = 'invalid_request' | 'invalid_response' | 'unknown_request' | 'duplicate_request' | 'response_conflict' | 'request_settled' | 'closed' | 'capacity' | 'transport';
+export declare class NativeInteractionError extends Error {
+    readonly code: NativeInteractionErrorCode;
+    constructor(code: NativeInteractionErrorCode, message: string);
+}
+/** Internal adapter boundary: snapshot and validate local UI configuration before any process side effect. */
+export declare function snapshotNativeInteractionHostOptions(options: NativeInteractionHostOptions): NativeInteractionHostOptions;
+/**
+ * One process lifetime's request registry. A resumed runtime gets a new controller;
+ * native IDs from its previous process are never reconstructed or replayed here.
+ * This is a local adapter/Host seam, not a remote authorization or persistence API.
+ */
+export declare class NativeInteractionController {
+    private readonly options;
+    readonly channel: NativeInteractionChannel;
+    private readonly entries;
+    private readonly nativeIds;
+    private readonly generation;
+    private readonly timeoutMs;
+    private readonly writeTimeoutMs;
+    private readonly maxPending;
+    private readonly maxRequests;
+    private closed;
+    private fatal;
+    constructor(options: NativeInteractionOptions);
+    open(input: NativeInteractionInput, transport: NativeInteractionTransport): NativeInteractionRequest;
+    /** Provider cancellation/turn end does not write another native answer. */
+    withdraw(requestId: string, reason?: NativeInteractionEndReason): void;
+    /** Process exit/close invalidates all outstanding requests, without replay or transport writes. */
+    close(reason?: NativeInteractionEndReason): void;
+    private respond;
+    private write;
+    private settle;
+}
 // ==== @byok-sdk/client dist/release-identity.d.ts ====
 /** Local Agent application-release identity. It is observability data, never a protocol or capability gate. */
 export interface LocalAgentReleaseIdentity {
@@ -12620,6 +12708,7 @@ export declare function resolveSdkReservedHelperBin(kind: SdkReservedHelperKind,
  */
 export declare function runSdkReservedHelperCommand(argv?: readonly string[]): Promise<boolean>;
 // ==== @byok-sdk/client dist/types.d.ts ====
+import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import type { ToolImplementationAuthority, ToolImplementationUnavailableReasonV1 } from '@byok-sdk/implementation-identity';
@@ -12670,6 +12759,8 @@ export type RuntimeInstallationObservationContext = {
 });
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
+    /** Local native interaction support only; omission is unsupported. Not the remote boolean approval lane. */
+    readonly nativeInteractions?: NativeInteractionCapabilities;
     /** Local adapter advertisement; no new protocol field or capability vocabulary. */
     readonly durablePi?: boolean;
     readonly steer: boolean;
@@ -12788,6 +12879,8 @@ export interface ApprovalChannel {
  * one underlying runtime process/session for the lifetime of a task.
  */
 export interface Session {
+    /** Process-generation-bound native requests. Never reconstructed from a resumed transcript. */
+    readonly interactions?: NativeInteractionChannel;
     /** Current execution artifact, available only after terminal success. */
     resultDocument?(): unknown;
     /** Opaque runtime session id, reported back to the server via `task.complete.sessionRef`. */

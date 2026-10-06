@@ -22,6 +22,8 @@ import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposal
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
 import { withoutProviderCredentials } from '../provider-credential-environment';
 import { createClaudeControlChannel } from './control-channel';
+import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES } from './native-interactions';
+import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions';
 import { mapPermissionPolicyToClaudeArgs } from './permission-mapping';
 import { createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ToolUseCorrelation } from './events';
 import { ClaudeProcessClient, type SpawnFn } from './process-client';
@@ -99,95 +101,44 @@ export interface ClaudeAdapterOptions {
   spawnFn?: SpawnFn;
   /** Deadline for native interrupt ACK before owned-process termination fallback. */
   interruptTimeoutMs?: number;
+  /** Local Host callbacks for native stdio requests; never enables remote boolean approvals. */
+  nativeInteractions?: NativeInteractionHostOptions;
 }
 
 /**
- * Claude Code runtime adapter (`claude -p --input-format stream-json
- * --output-format stream-json`) — the M2-a counterpart to `../pi/pi-adapter.ts`.
- * Every behavioral claim in this file's own doc comments and its sibling
- * modules (`events.ts`, `permission-mapping.ts`, `process-client.ts`) was
- * empirically reproduced against the real installed `claude` 2.1.212 binary
- * on a logged-in machine (per this task's own "do NOT trust docs over the
- * real binary" mandate — `claude --help` was actively wrong/misleading for
- * `--allowedTools`, see `permission-mapping.ts`) — not inferred from
- * training-data recall or the Claude API/Agent-SDK docs, which describe a
- * DIFFERENT product surface (the Messages API, not this CLI's headless
- * wire format).
- *
- * ## The central finding: claude's headless approval model has no
- * `needs_approval` pause, at all
- *
- * This is the first real use of the `needs_approval` /
- * `Session.resolveApproval` seam any adapter in this codebase has
- * implemented (pi never emits `needs_approval` — see `PiSession
- * .resolveApproval`'s own doc comment) — so this finding directly informs
- * the M2-c protocol-freeze decision on that seam.
- *
- * Empirically (see the M2-a report for the full live-capture evidence):
- * spawning `claude -p` **non-interactively** with a tool call that would
- * normally prompt a human is resolved **synchronously, before the turn
- * continues** — there is no pause, no wait, no later resumption point:
- *
- * - Under `--permission-mode default` (or no flag at all — headless has no
- *   TTY to interactively ask), an unapproved tool call is immediately
- *   AUTO-DENIED with a synthesized `tool_result`
- *   (`"Claude requested permissions to write to <path>, but you haven't
- *   granted it yet."`, `is_error:true`) and the run continues normally to
- *   its own `result` frame — no hang, and nothing this adapter could ever
- *   resume later even if it wanted to.
- * - Under a permissive `--permission-mode` (`acceptEdits`/`bypassPermissions`),
- *   the call is auto-GRANTED, again synchronously, again with nothing to
- *   pause on.
- *
- * There is consequently no claude stream-json frame this adapter could
- * ever map to the protocol's `needs_approval` `AgentEvent` — the decision
- * is always already made by the time any frame reaches this adapter at
- * all. `resolveApproval()` below throws a descriptive error rather than
- * silently no-op'ing, mirroring `PiSession.resolveApproval`'s own
- * documented reasoning exactly: a caller that ever receives
- * `task.approve`/`task.reject` for one of this adapter's tasks implies
- * something upstream expected approval support this adapter genuinely does
- * not have.
- *
- * `PermissionPolicy.mode: 'confirm'` is rejected before runtime side effects.
- * The private approval MCP helper and permission-prompt-tool integration have
- * been removed. The shared needs_approval contract remains for other adapters.
- *
- * ## Steering was also found unsupported (a second, related finding)
- *
- * Live-probed via a persistent `--input-format stream-json` process:
- * writing a second `{"type":"user",...}` message to stdin WHILE a turn is
- * still generating does NOT redirect that in-flight turn — it QUEUES as a
- * separate, subsequent turn, processed only after the first one reaches
- * its own `result`. This is genuinely useful for `followUp()` (a new turn
- * "after [the session] has gone idle" — exactly the queued-after-result
- * case), but it is not what `Session.steer`'s "inject steering text into a
- * running turn (mid-stream)" contract promises. `capabilities().steer` is
- * therefore `false`, and `steer()` throws rather than silently behaving
- * like a queued follow-up under a name that implies live redirection.
+ * Claude Code stream-json adapter. Default headless permission behavior remains
+ * unchanged. Explicit nativeInteractions opts into the Agent SDK stdio control
+ * handshake and requests the CLI actually forwards to can_use_tool, including
+ * AskUserQuestion. Existing allow rules may bypass that callback; this is not a
+ * blanket all-tools confirmation policy. PermissionPolicy.confirm and remote
+ * boolean approvals remain unsupported, as does mid-turn steering.
  */
 export class ClaudeAdapter implements RuntimeAdapter {
-  readonly descriptor = freezeRuntimeAdapterDescriptor({
-    id: 'claude',
-    supportsDispatchSelection: true,
-    // `--allowedTools mcp__<server>__<tool>` names each projected toolset
-    // tool explicitly, so this adapter cannot admit a projected server
-    // without the daemon's own `tools/list` observation of it.
-    requiresMcpToolsetToolObservation: true,
-    mcpServerLaunch: 'launcher-wrapped',
-    capabilities: {
-      steer: false,
-      resume: true,
-      approvalInteractive: false,
-      mcpToolsets: true,
-      permissionModes: ['auto', 'readonly', 'plan'],
-    },
-    environmentRequirements: { credentialNames: [] },
-  });
+  readonly descriptor;
+  private readonly nativeOptions?: NativeInteractionHostOptions;
 
   constructor(private readonly options: ClaudeAdapterOptions = {}) {
     const timeout = options.interruptTimeoutMs ?? 1000;
     if (!Number.isFinite(timeout) || timeout <= 0 || timeout > 2_147_483_647) throw new TypeError('invalid Claude interrupt timeout');
+    this.nativeOptions = options.nativeInteractions === undefined ? undefined : snapshotNativeInteractionHostOptions(options.nativeInteractions);
+    this.descriptor = freezeRuntimeAdapterDescriptor({
+      id: 'claude',
+      supportsDispatchSelection: true,
+      // `--allowedTools mcp__<server>__<tool>` names each projected toolset
+      // tool explicitly, so this adapter cannot admit a projected server
+      // without the daemon's own `tools/list` observation of it.
+      requiresMcpToolsetToolObservation: true,
+      mcpServerLaunch: 'launcher-wrapped',
+      capabilities: {
+        steer: false,
+        resume: true,
+        approvalInteractive: false,
+        mcpToolsets: true,
+        permissionModes: this.nativeOptions === undefined ? ['auto', 'readonly', 'plan'] : ['auto'],
+        ...(this.nativeOptions === undefined ? {} : { nativeInteractions: CLAUDE_NATIVE_INTERACTION_CAPABILITIES }),
+      },
+      environmentRequirements: { credentialNames: [] },
+    });
   }
 
   async detect(): Promise<RuntimeDetectResult> {
@@ -204,6 +155,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    if (this.nativeOptions !== undefined && input.policy.mode !== 'auto') return {
+      kind: 'reject', reason: 'Claude native interaction approvals require auto mode; they cannot override readonly, plan or confirm policy', retryable: false,
+    };
     // Fail closed BEFORE the mapping: a projected toolset server whose tools
     // were never observed cannot be granted, and an ungranted MCP tool is
     // auto-denied by claude at call time (see permission-mapping.ts) — a
@@ -432,11 +386,23 @@ export class ClaudeAdapter implements RuntimeAdapter {
         '--verbose',
         ...(manifestModelId ? ['--model', manifestModelId] : []),
         ...(resumeSessionId ? ['--resume', resumeSessionId] : []),
+        ...(this.nativeOptions === undefined ? [] : ['--permission-prompt-tool', 'stdio']),
         ...mapping.args,
       ];
 
       throwIfCancelled();
       const control = createClaudeControlChannel(this.options.interruptTimeoutMs ?? 1000);
+      const native = this.nativeOptions === undefined ? undefined : new ClaudeNativeInteractionBridge({
+        ...this.nativeOptions,
+        // The adapter, never the host callback, owns fatal process termination.
+        onFatal: error => client?.abortStartup(error),
+      }, resumeSessionId, toolName => {
+        if (toolName.startsWith('mcp__')) {
+          const grants = [...preparedGrants, ...resolveReservedMcpToolGrants(startInput.mcpServers)];
+          return grants.some(grant => grant.tools.some(tool => toolName === `mcp__${grant.server}__${tool}`));
+        }
+        return startInput.manifest.policy.allowTools === undefined || startInput.manifest.policy.allowTools.includes(toolName);
+      });
       try {
         client = new ClaudeProcessClient({
           command: bin.command,
@@ -444,7 +410,11 @@ export class ClaudeAdapter implements RuntimeAdapter {
           cwd: manifestCwd,
           env: withoutProviderCredentials(startInput.env),
           spawnFn: this.options.spawnFn,
-          control,
+          control: native === undefined ? control : {
+            bind: write => { control.bind(write); native.bind(write); },
+            receive: message => { control.receive(message); native.receive(message); },
+            closed: () => { control.closed(); native.close(); },
+          },
         });
       } catch (cause) {
         if (isRuntimeStartupDisposalFailure(cause)) throw cause;
@@ -455,6 +425,16 @@ export class ClaudeAdapter implements RuntimeAdapter {
       }
 
       throwIfCancelled();
+      if (native !== undefined) {
+        const initialized = await Promise.race([control.initialize(), cancelled]);
+        throwIfCancelled();
+        if (!initialized) throw new RuntimeExecutionFailure({
+          phase: 'start', category: 'infrastructure', retry: 'retryable',
+          reason: 'Claude native control initialization failed',
+        });
+        throwIfCancelled();
+        native.beginTurn();
+      }
       // `--input-format stream-json` expects the first turn's instruction on
       // stdin too, not as a positional CLI argument — empirically confirmed
       // live (this task's persistent-process multi-turn probes never passed
@@ -524,6 +504,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         control,
         mcpConfigDir,
         manifestModelId,
+        native,
       );
     } catch (cause) {
       return rejectOwnedStartup(cause, client, mcpConfigDir, cancellation !== undefined);
@@ -580,6 +561,7 @@ function subscriptionModel(
 }
 
 class ClaudeSession implements Session {
+  declare readonly interactions?: NativeInteractionChannel;
   private readonly correlation: ToolUseCorrelation = createToolUseCorrelation();
   private closeAttempt: Promise<void> | undefined;
 
@@ -591,7 +573,8 @@ class ClaudeSession implements Session {
     /** Task-scoped temp `--mcp-config` directory, if any — removed in `close()`. */
     private readonly mcpConfigDir?: string,
     private readonly modelId?: string,
-  ) {}
+    private readonly native?: ClaudeNativeInteractionBridge,
+  ) { if (native !== undefined) this.interactions = native.channel; }
 
   get events(): AsyncIterable<AgentEvent> {
     const client = this.client;
@@ -728,6 +711,7 @@ class ClaudeSession implements Session {
     // process is killed (see `ClaudeProcessClient.writeUserMessage`'s doc
     // comment).
     try {
+      this.native?.beginTurn();
       await this.client.writeUserMessage(task.instruction);
     } catch (cause) {
       throw new RuntimeExecutionFailure({
@@ -739,10 +723,12 @@ class ClaudeSession implements Session {
 
   /** Native interrupt ACK is bounded; TaskRunner still closes after cancellation acknowledgment. */
   async interrupt(): Promise<void> {
+    this.native?.endTurn('interrupted');
     if (!await this.control.interruptAndSettle()) { this.client.kill(); await this.client.dispose(); }
   }
 
   async close(): Promise<void> {
+    this.native?.close('closed');
     if (!this.closeAttempt) {
       const attempt = (async () => {
         await this.client.dispose();
@@ -756,7 +742,7 @@ class ClaudeSession implements Session {
     await this.closeAttempt;
   }
 
-  /** Claude has no interactive approval lane; shared Session contracts remain fail-closed. */
+  /** The legacy remote boolean approval lane remains unsupported, even with local native interactions. */
   async resolveApproval(_approved: boolean, _reason?: string): Promise<void> {
     throw new PolicyUnsupportedError('claude adapter does not support interactive approval');
   }

@@ -714,6 +714,7 @@ describe('durable events, SSE resume, snapshots and byte-offset final output', (
     await json(name, 'release'); await waitState(name);
   });
 
+  // Budget the 540 sequential fixture RPCs separately from the unchanged alarm wait.
   it('retains a 30-day schedule while trimming over 500 expired events by real maintenance alarms', async () => {
     const name = await setup(); const availableAt = Date.now() + 30 * DAY - 1_000;
     await enqueue(name, { dedupKey: 'old-schedule', source: 'schedule', text: 'do not lose this', availableAt });
@@ -732,7 +733,7 @@ describe('durable events, SSE resume, snapshots and byte-offset final output', (
     const head = Number(rows.cloud_events![0]!.seq);
     const retained = await readFrames(await rpc(name, 'events', { cursor: { after: head - 1 } }), rows.cloud_events!.length);
     expect(retained.map(event => event.id)).toEqual(rows.cloud_events!.map(row => row.seq));
-  });
+  }, 30_000);
 });
 
 interface TranscriptPage { runs: (Row & { nativeRunId: number; claimedSeqs: number[]; turns: Row[] })[]; items: Row[]; next: { horizon: number; run: number | null; item: number | null } }
