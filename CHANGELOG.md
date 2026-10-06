@@ -8,6 +8,11 @@
 
 ## Unreleased
 
+- **Changed (client)** — update the private OAR source from 0.20.3 to 0.25.0
+  (`a800aa00ba9c754c88ba25f84a6981e757b0f19f`). Add the upstream
+  `tool_call_input` contract. Keep BYOK process ownership and native request policy.
+  Update source hashes, bridge imports and build provenance.
+
 - **Fixed (client)** — the prepared lane now supports a truly tool-less record
   (`requiredToolsets: []`, `agentMemory: 'none'`; the offer omits
   `requiredToolsets`). It was accepted by the protocol but refused by the device at
