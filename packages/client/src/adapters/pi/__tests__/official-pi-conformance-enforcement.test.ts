@@ -1,5 +1,5 @@
 /**
- * Official Pi 1.0.3 conformance — enforcement and determinism: D drift (c),
+ * Official Pi 1.0.4 conformance — enforcement and determinism: D drift (c),
  * upstream ignoring the injected fetch (d), determinism knobs (e) and a
  * usage-absent stream (f). Synthetic SSE only; the only socket ever opened is
  * the refused connection to the non-routable sink in (d).
@@ -45,7 +45,7 @@ function gateAgainst(frozenD: string, respond: () => Response) {
       };
 }
 
-describe('official Pi 1.0.3: final byte gate', () => {
+describe('official Pi 1.0.4: final byte gate', () => {
   test('(c) D drift: one injected-fetch call, zero sends, prompt resolves, run-scoped typed reason, no retry', async () => {
     globalFetch = installGlobalFetchSpy();
     const frozen = await compileA1(hostTranscript());
@@ -86,7 +86,7 @@ describe('official Pi 1.0.3: final byte gate', () => {
   }, TIMEOUT_MS);
 });
 
-describe('official Pi 1.0.3: transport scoping', () => {
+describe('official Pi 1.0.4: transport scoping', () => {
   test('(d) upstream ignoring the injected fetch reaches only the sink, is refused, and yields no D', async () => {
     globalFetch = installGlobalFetchSpy(true);
     const terminal = await compileWithoutInjectedFetch(hostTranscript());
@@ -100,7 +100,7 @@ describe('official Pi 1.0.3: transport scoping', () => {
   }, 10_000);
 });
 
-describe('official Pi 1.0.3: determinism knobs', () => {
+describe('official Pi 1.0.4: determinism knobs', () => {
   test('(e) PI_CACHE_RETENTION changes D unless cacheRetention is pinned; pinned D is identical', async () => {
     globalFetch = installGlobalFetchSpy();
     const previous = process.env.PI_CACHE_RETENTION;
@@ -130,7 +130,7 @@ describe('official Pi 1.0.3: determinism knobs', () => {
   });
 });
 
-describe('official Pi 1.0.3: usage observation', () => {
+describe('official Pi 1.0.4: usage observation', () => {
   test('(f) usage-absent SSE leaves all-zero usage, which the SDK maps to a zero prompt (usage_unavailable input)', async () => {
     globalFetch = installGlobalFetchSpy();
     const frozenD = (await compileA1(hostTranscript())).body;

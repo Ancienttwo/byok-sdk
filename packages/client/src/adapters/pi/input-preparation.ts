@@ -63,7 +63,7 @@ import {
 /**
  * The ONE prepared-request compiler version this SDK produces and consumes.
  *
- * 4 is the first SDK-owned compiler (A1' on official Pi; unchanged on 1.0.3). Version 3
+ * 4 is the first SDK-owned compiler (A1' on official Pi; unchanged on 1.0.4). Version 3
  * artifacts were compiled by the retired fork and are not read forward.
  */
 export const SUPPORTED_PREPARED_COMPILER_VERSION = 4;
