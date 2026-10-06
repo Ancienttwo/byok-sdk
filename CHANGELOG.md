@@ -1,6 +1,14 @@
 # Changelog
 
-## 0.24 line (unpublished candidate)
+## 0.24.0 / @byok-sdk/keys 0.9.0 — 2026-10-06 (stable source; unpublished)
+
+- **Release preparation** — the owner approved stable 0.24.0 for all nine aligned
+  packages, including cloud-do, and independent keys 0.9.0. Update public manifests
+  and lock workspace records together. keys is a MINOR for durable launcher/API,
+  Node-floor and identity-authority changes; its exact packed core and identity
+  edges are 0.24.0. Fresh final-source schema-3 artifacts, registry checks, required
+  Host acceptance and separate npm execution approval remain gates.
+  See the [stable publication plan](docs/releases/v0.24.0.md#stable-publication-plan).
 
 - **Breaking (runtime)** — raise the minimum Node.js version to 24.15.0 across
   all workspace packages. Development/CI baseline is pinned to Node 24.21.0,
@@ -27,8 +35,8 @@
 - **Added (cloud-do)** — prepare `@byok-sdk/cloud-do` for the public SDK train.
   Add an ESM library build, a local declaration closure, an API golden, and
   an installed-tarball Worker smoke in the release-pack driver. The source
-  version is 0.24.0-rc.1. Publication is pending. Final keys SemVer and the
-  first-release channel remain decisions; see the
+  version is now the approved stable 0.24.0, with keys 0.9.0. Publication is
+  pending; cloud-do is included in the full ten-package set. See the
   [current release/migration notes](docs/releases/v0.24.0.md).
 
 - **Changed (client)** — qualify exactly Codex CLI 0.160.0 for the app-server
@@ -106,7 +114,7 @@
 ## 0.24.0-rc.1 / @byok-sdk/keys 0.8.1-rc.1 — 2026-09-29 (prepared; not published)
 
 Historical preparation entry. The initial proposal was an `rc` publication;
-current source and remaining version/channel decisions are described in the
+the later approved stable 0.24.0 / keys 0.9.0 set is described in the
 [0.24 release notes](docs/releases/v0.24.0.md). A verified accepted-tarball Host
 integration does not depend on first publishing stable. No publication receipt
 is created by this entry.
@@ -159,11 +167,10 @@ is created by this entry.
   the empty-bytes digest while `targetRevision` stays `null`, and must not be
   rejected as a revision mismatch). Never re-read the current file to overturn a
   historical receipt or infer `applied` from hash equality.
-- **keys source version 0.8.1-rc.1** — this is still the manifest version. The
-  original dependency-only PATCH rationale is superseded: current keys adds
-  durable launcher/API behavior, raises its Node floor and binds changed identity
-  authority. A policy-consistent independent MINOR decision is pending; no bump
-  is made here. Packed core and identity edges must match the exact train.
+- **Historical keys source version 0.8.1-rc.1** — superseded by the approved
+  stable 0.9.0 preparation above. The original dependency-only PATCH rationale
+  is invalid for the later durable launcher/API, Node-floor and identity-authority
+  changes. Packed core and identity edges must match the exact train.
 - [Release notes](docs/releases/v0.24.0.md).
 
 ## 0.23.0 / @byok-sdk/keys 0.8.0 — 2026-09-28 (published; tag `v0.23.0` at `bcf65a3f`)
