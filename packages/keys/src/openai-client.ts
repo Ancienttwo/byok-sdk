@@ -5,6 +5,7 @@ import {
   modelMessageText,
   objectValue,
   readModelProviderResponse,
+  PROVIDER_TIMEOUT_MS,
   type ProviderFetch,
 } from './http';
 import { providerHeaders, requiredProviderSecret } from './headers';
@@ -14,6 +15,7 @@ import {
   type ModelProviderProfile,
 } from './provider-profile';
 import { isLoopbackProviderUrl } from './url';
+import { validateRequestTimeoutMs } from './request-timeout';
 
 /** One chat message. `content` is `unknown` so multimodal block arrays pass through. */
 export interface ChatMessage {
@@ -36,6 +38,8 @@ export interface ChatCompletionRequest {
 export interface ModelProviderClientOptions {
   fetchImpl?: ProviderFetch;
   profile: unknown;
+  /** Total headers/body deadline in ms (1–2147483647); defaults to 15,000. */
+  requestTimeoutMs?: number;
   secret?: string;
 }
 
@@ -55,9 +59,13 @@ export class OpenAiCompatibleChatClient {
   readonly remoteDataTransfer: boolean;
   readonly #fetch: ProviderFetch;
   readonly #profile: ModelProviderProfile;
+  readonly #requestTimeoutMs: number;
   readonly #secret: string | undefined;
 
   constructor(options: ModelProviderClientOptions) {
+    this.#requestTimeoutMs = validateRequestTimeoutMs(
+      options.requestTimeoutMs === undefined ? PROVIDER_TIMEOUT_MS : options.requestTimeoutMs,
+    );
     this.#fetch = options.fetchImpl ?? ((input, init) => fetch(input, init));
     this.#profile = parseModelProviderProfile(options.profile);
     this.#secret = requiredProviderSecret(this.#profile, options.secret);
@@ -80,6 +88,7 @@ export class OpenAiCompatibleChatClient {
         redirect: 'error',
       },
       signal,
+      this.#requestTimeoutMs,
     );
     const payload = objectValue(await readModelProviderResponse(response));
     if (payload === undefined) {

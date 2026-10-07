@@ -5,6 +5,7 @@ import {
   modelMessageText,
   objectValue,
   readModelProviderResponse,
+  PROVIDER_TIMEOUT_MS,
   type ProviderFetch,
 } from './http';
 import { providerHeaders, requiredProviderSecret } from './headers';
@@ -15,6 +16,7 @@ import {
 } from './provider-profile';
 import type { ModelProviderClientOptions } from './openai-client';
 import { isLoopbackProviderUrl } from './url';
+import { validateRequestTimeoutMs } from './request-timeout';
 
 /** One Anthropic message. `content` is `unknown` so block arrays pass through. */
 export interface AnthropicMessage {
@@ -47,9 +49,13 @@ export class AnthropicMessagesClient {
   readonly remoteDataTransfer: boolean;
   readonly #fetch: ProviderFetch;
   readonly #profile: ModelProviderProfile;
+  readonly #requestTimeoutMs: number;
   readonly #secret: string;
 
   constructor(options: ModelProviderClientOptions) {
+    this.#requestTimeoutMs = validateRequestTimeoutMs(
+      options.requestTimeoutMs === undefined ? PROVIDER_TIMEOUT_MS : options.requestTimeoutMs,
+    );
     this.#fetch = options.fetchImpl ?? ((input, init) => fetch(input, init));
     this.#profile = parseModelProviderProfile(options.profile);
     if (this.#profile.adapter !== 'anthropic') {
@@ -81,6 +87,7 @@ export class AnthropicMessagesClient {
         redirect: 'error',
       },
       signal,
+      this.#requestTimeoutMs,
     );
     const payload = objectValue(await readModelProviderResponse(response));
     if (payload === undefined) {

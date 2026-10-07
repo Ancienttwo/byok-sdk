@@ -1,5 +1,6 @@
 import { ByokKeysError } from './errors';
 import { normalizeProviderUrl } from './url';
+import { validateRequestTimeoutMs } from './request-timeout';
 
 /** Injectable `fetch`. Defaults to `globalThis.fetch` at every call site. */
 export type ProviderFetch = (
@@ -10,7 +11,7 @@ export type ProviderFetch = (
 /** Response body ceiling, ported from `providers.ts:106`. */
 export const PROVIDER_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
 
-/** Per-request timeout, ported from `providers.ts:107`. */
+/** Default total request timeout, ported from `providers.ts:107`. */
 export const PROVIDER_TIMEOUT_MS = 15_000;
 
 /**
@@ -28,7 +29,9 @@ export async function fetchWithProviderGuards(
   url: string,
   init: RequestInit,
   signal: AbortSignal,
+  requestTimeoutMs: number = PROVIDER_TIMEOUT_MS,
 ): Promise<Response> {
+  const timeoutMs = validateRequestTimeoutMs(requestTimeoutMs);
   normalizeProviderUrl(url);
   signal.throwIfAborted();
   const controller = new AbortController();
@@ -75,7 +78,7 @@ export async function fetchWithProviderGuards(
   const timeout = setTimeout(() => abort(new ByokKeysError(
     'PROVIDER_REQUEST_TIMEOUT',
     'Provider request timed out',
-  )), PROVIDER_TIMEOUT_MS);
+  )), timeoutMs);
   signal.addEventListener('abort', onAbort, { once: true });
   try {
     const pending = Promise.resolve(fetchImpl(url, { ...init, signal: controller.signal }));

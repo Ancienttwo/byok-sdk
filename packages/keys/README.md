@@ -47,6 +47,27 @@ landed. K3 settled the settings-page question, recorded under
 `TruthStoreProviderProfileStore` without moving provider secrets out of the OS
 credential store.
 
+## Direct provider request deadline
+
+`OpenAiCompatibleChatClient` and `AnthropicMessagesClient` accept optional
+`requestTimeoutMs` in their constructor options:
+
+```ts
+const client = new OpenAiCompatibleChatClient({
+  profile,
+  secret,
+  requestTimeoutMs: 60_000,
+});
+```
+
+The default is 15,000 ms. The value must be an integer from 1 through
+2,147,483,647; invalid options throw `RangeError` before a request starts.
+One deadline covers both headers and the complete response body. Expiry keeps
+the `PROVIDER_REQUEST_TIMEOUT` error code, and a caller's `AbortSignal` can
+cancel sooner. The 2 MiB response ceiling still applies. `checkProviderKey`
+retains its independent default 10,000 ms budget and the transport's default
+15,000 ms ceiling.
+
 ## Security boundary
 
 `@byok-sdk/keys` is a separate package with a separate security model from
@@ -269,6 +290,7 @@ whatever `index.ts` re-exports; nothing here is reachable by deep import.
 | `headers.ts` | `providerHeaders()` and fail-closed `requiredProviderSecret()` |
 | `url.ts` | `normalizeProviderUrl()` with the HTTPS / loopback / private-network guard |
 | `http.ts` | Shared transport guards: injectable `fetch`, timeout, bounded JSON, HTTP error classification |
+| `request-timeout.ts` | Shared validation of the supported request timer range |
 | `openai-client.ts` | `OpenAiCompatibleChatClient` — chat/completions, injected `fetchImpl` |
 | `anthropic-client.ts` | `AnthropicMessagesClient` — Messages API, injected `fetchImpl` |
 | `secret-store.ts` | The `SecretStore` contract one credential entry is read and written through, plus the shared value/encoding guards |

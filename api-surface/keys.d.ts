@@ -453,7 +453,7 @@ export declare function providerHeaders(profile: ProviderAuthProfile, secret: st
 export type ProviderFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 /** Response body ceiling, ported from `providers.ts:106`. */
 export declare const PROVIDER_RESPONSE_MAX_BYTES: number;
-/** Per-request timeout, ported from `providers.ts:107`. */
+/** Default total request timeout, ported from `providers.ts:107`. */
 export declare const PROVIDER_TIMEOUT_MS = 15000;
 /**
  * Issue a provider request under the source's guards
@@ -465,7 +465,7 @@ export declare const PROVIDER_TIMEOUT_MS = 15000;
  * otherwise the original deadline cancels it. Neither headers nor body reads
  * depend on the injected transport honoring its abort signal.
  */
-export declare function fetchWithProviderGuards(fetchImpl: ProviderFetch, url: string, init: RequestInit, signal: AbortSignal): Promise<Response>;
+export declare function fetchWithProviderGuards(fetchImpl: ProviderFetch, url: string, init: RequestInit, signal: AbortSignal, requestTimeoutMs?: number): Promise<Response>;
 /**
  * Read a JSON body with a size ceiling (`providers.ts:1825-1851`). The
  * `content-length` check is an early exit. Count actual transport body bytes
@@ -617,6 +617,8 @@ export interface ChatCompletionRequest {
 export interface ModelProviderClientOptions {
     fetchImpl?: ProviderFetch;
     profile: unknown;
+    /** Total headers/body deadline in ms (1–2147483647); defaults to 15,000. */
+    requestTimeoutMs?: number;
     secret?: string;
 }
 /**
