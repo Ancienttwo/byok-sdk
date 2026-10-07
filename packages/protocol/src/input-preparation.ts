@@ -581,12 +581,12 @@ export const InputPreparationProjectionSchema = z
  * launch checkable rather than assumed:
  *
  * - `observationDigest` binds everything the device OBSERVED — the projected
- *   tools, their executor fingerprints, the launch attestation and the
- *   implementation identities — so a launch whose live observation differs is
+ *   tools, their executor fingerprints and the implementation identities —
+ *   so a launch whose live observation differs is
  *   a different manifest, whatever the schemas say.
  * - `toolBindingDigest` binds only the facts that can be re-derived WITHOUT
- *   spawning a server: the launch attestation, the toolset definition
- *   revisions and the implementation identities. It is what a replay of an
+ *   spawning a server: the toolset definition revisions and the
+ *   implementation identities. It is what a replay of an
  *   already-recorded requestId compares against, because re-probing to detect
  *   drift would be the second executor fact the idempotency key exists to
  *   prevent.
@@ -743,18 +743,9 @@ export const InputPreparationRejectionReasonSchema = z.enum([
   'toolsets_unobservable',
   'deadline_elapsed',
   /**
-   * The device could not prove a non-writable launch directory (or a trusted
-   * launcher) for the MCP toolset servers this preparation names, so it
-   * refused rather than observing them in a directory the agent's own uid can
-   * write. The specific `TrustedLaunchCwdUnavailableReason` travels in the
-   * receipt's `detail`; it is not widened into a spawn.
-   */
-  'launch_boundary_unavailable',
-  /**
    * A repeat of an already-recorded `requestId` arrived after the facts its
    * executor fingerprints were frozen against changed — a toolset definition
-   * revision, the launch attestation, or an implementation identity that no
-   * longer measures the same. The recorded receipt is not re-derived and no
+   * revision or an implementation identity that no longer measures the same. The recorded receipt is not re-derived and no
    * server is re-probed; the repeat is refused so the caller mints a new
    * preparation instead of silently receiving one bound to stale evidence.
    */

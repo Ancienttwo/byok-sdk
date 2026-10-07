@@ -10,8 +10,6 @@ import {
   type RuntimeAdapter,
   type Session,
 } from '../../types';
-import type { McpLaunchBinding } from '../../daemon/trusted-launch-cwd';
-import { trustedLaunchBinding } from './launch-cwd';
 
 /** Test-only resources passed to a prepared operation after admission. */
 export interface PreparedOperationResources {
@@ -29,14 +27,6 @@ export interface PreparedOperationResources {
   startMcpToolsetTools?: McpToolsetToolObservation;
   gitWorkspace?: { workspaceId: string; baseline?: string };
   approvalChannel?: ApprovalChannel;
-  /**
-   * What `TaskRunner` resolves once per offer
-   * (`daemon/trusted-launch-cwd.ts`). Left unset, this helper resolves the
-   * REAL one for the machine the test runs on, exactly as the daemon would,
-   * so an adapter test never gets a directory the daemon would have refused.
-   * Set it to exercise an adapter's own fail-closed branches.
-   */
-  mcpLaunch?: McpLaunchBinding | null;
 }
 
 /** Exercise the public descriptor → prepare → sealed-manifest → operation path in adapter unit tests. */
@@ -69,12 +59,6 @@ export async function startPreparedOperation(
     },
     forwardedEnvironmentNames: Object.keys(resources.env).sort(),
   });
-  // Mirrors `TaskRunner`'s own predicate: the daemon resolves the binding for
-  // every task that will GENERATE an MCP server.
-  const mcpLaunch = resources.mcpLaunch === null
-    ? undefined
-    : resources.mcpLaunch
-      ?? (resources.mcpServers === undefined ? undefined : await trustedLaunchBinding());
   const runtimeLaunch = await prepared.operation.resolveRuntimeLaunch?.({
     kind: 'instruction', cwd: resources.workspaceDir, env: resources.env,
     projectionRoot: path.join(os.tmpdir(), 'byok-adapter-test-runtime-projections'),
@@ -87,7 +71,6 @@ export async function startPreparedOperation(
       manifest,
       instruction: offer.instruction,
       env: resources.env,
-      ...(mcpLaunch === undefined ? {} : { mcpLaunch }),
       ...(resources.mcpServers === undefined ? {} : { mcpServers: resources.mcpServers }),
       ...(resources.startMcpToolsetTools !== undefined
         ? { mcpToolsetTools: resources.startMcpToolsetTools }

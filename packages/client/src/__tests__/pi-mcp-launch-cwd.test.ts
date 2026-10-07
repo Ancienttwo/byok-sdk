@@ -5,35 +5,19 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BYOK_PI_MCP_CONFIG_PATH } from '../adapters/pi/mcp-config';
 import { observeMcpServer } from '../mcp/observation';
-import { trustedCwd } from './fixtures/launch-cwd';
-import { resolveBunBin } from './support/test-bun-bin';
 
 /**
- * The Pi call path's half of the launch-cwd boundary.
- *
- * `McpServerPool.open` used to pass no cwd at all, so every MCP toolset server
- * inherited the Pi child's cwd — the canonical Agent home, which the agent's
- * own tools write by design. A `bun --compile` server binary runs
- * `$cwd/bunfig.toml` `preload` before its own code, so that inheritance handed
- * the agent a code-injection seam into the server it was being served by.
+ * The Pi MCP server pool starts every server in the `launchCwd` of the
+ * task-scoped config: the session cwd, as in OAR. It never falls back to the
+ * Pi process cwd.
  *
  * These tests run the REAL extension against the REAL fixture server, with
- * this process's own cwd set to the planted "Agent home", so "it did not
- * inherit" is a fact read back out of the child rather than an assumption.
+ * this process's own cwd set to a different directory, so the start cwd is a
+ * fact read back out of the child rather than an assumption.
  */
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/mcp-fixture-server.mjs', import.meta.url));
 const ENV = { PATH: process.env.PATH ?? '' } as const;
-const BUNFIG = 'preload = ["./byok-preload.js"]\n';
-const PRELOAD = 'globalThis.__BYOK_LAUNCH_CWD_PRELOADED__ = true;\n';
-
-/**
- * bun, if this machine has one. Resolved once, synchronously, so the case
- * below is either RUN or visibly SKIPPED — never a body that returns early and
- * reports as a pass. The candidate list and the BYOK_REQUIRE_BUN fail-closed
- * law live in the shared helper.
- */
-const BUN_BIN = resolveBunBin();
 
 const originalCwd = process.cwd();
 afterEach(() => {
@@ -41,15 +25,11 @@ afterEach(() => {
   delete process.env[BYOK_PI_MCP_CONFIG_PATH];
 });
 
-/** A directory shaped exactly like a canonical Agent home: this uid can write it. */
-async function plantedAgentHome(): Promise<string> {
-  const home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-agent-home-')));
-  await fs.writeFile(path.join(home, 'bunfig.toml'), BUNFIG);
-  await fs.writeFile(path.join(home, 'byok-preload.js'), PRELOAD);
-  return home;
+async function tempDir(prefix: string): Promise<string> {
+  return fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), prefix)));
 }
 
-interface Started { cwd: string; preloaded: boolean }
+interface Started { cwd: string }
 
 async function callThroughExtension(
   command: string,
@@ -89,58 +69,28 @@ async function startRecord(recordTo: string): Promise<Started> {
   const starts = lines.filter((entry) => entry.event === 'start');
   const last = starts[starts.length - 1];
   if (last === undefined) throw new Error('the fixture server never recorded a start');
-  return { cwd: String(last.cwd), preloaded: last.preloaded === true };
+  return { cwd: String(last.cwd) };
 }
 
 describe('Pi MCP server pool — launch cwd', () => {
-  it('starts the server in the trusted directory, not in the Agent home it inherits', async () => {
-    const home = await plantedAgentHome();
-    const recordTo = path.join(home, 'records.jsonl');
-    process.chdir(home);
-    const trusted = await trustedCwd();
-    expect(trusted).not.toBe(home);
+  it('starts the server in the session cwd of the config, not in the Pi process cwd', async () => {
+    const session = await tempDir('byok-session-');
+    const processCwd = await tempDir('byok-pi-process-');
+    const recordTo = path.join(session, 'records.jsonl');
+    process.chdir(processCwd);
 
-    await callThroughExtension(process.execPath, trusted, recordTo);
+    await callThroughExtension(process.execPath, session, recordTo);
 
     const started = await startRecord(recordTo);
-    expect(await fs.realpath(started.cwd)).toBe(await fs.realpath(trusted));
-    expect(started.cwd).not.toBe(home);
+    expect(await fs.realpath(started.cwd)).toBe(session);
+    expect(started.cwd).not.toBe(processCwd);
   });
 
   it('refuses to open a server at all when the config carries no launch directory', async () => {
-    const home = await plantedAgentHome();
+    const home = await tempDir('byok-agent-home-');
     const recordTo = path.join(home, 'records.jsonl');
     process.chdir(home);
     await expect(callThroughExtension(process.execPath, undefined, recordTo))
       .rejects.toThrow(/absolute launchCwd/u);
   });
-
-  // The vector itself, with the real mechanism: a bun interpreter reads
-  // `$cwd/bunfig.toml` and runs its `preload` before the server's own first
-  // line (probe 1, `attestation-probes/results.md`). Under the old inherited
-  // cwd this test's planted preload would run; under the trusted directory it
-  // is unreachable. Skipped where bun is not installed — the cwd assertion
-  // above still holds there.
-  it.skipIf(BUN_BIN === undefined)(
-    'leaves a bunfig.toml preload planted in the Agent home unexecuted',
-    async () => {
-      const bun = BUN_BIN!;
-      const home = await plantedAgentHome();
-      process.chdir(home);
-
-      // Negative control FIRST: the same planted file, the same bun, with the
-      // old inherited cwd. If this does not preload, the positive case below
-      // proves nothing.
-      const inherited = path.join(home, 'inherited.jsonl');
-      await callThroughExtension(bun, home, inherited);
-      expect((await startRecord(inherited)).preloaded).toBe(true);
-
-      const trusted = await trustedCwd();
-      const guarded = path.join(home, 'guarded.jsonl');
-      await callThroughExtension(bun, trusted, guarded);
-      const started = await startRecord(guarded);
-      expect(started.preloaded).toBe(false);
-      expect(await fs.realpath(started.cwd)).toBe(await fs.realpath(trusted));
-    },
-  );
 });

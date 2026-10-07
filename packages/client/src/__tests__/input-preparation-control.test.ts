@@ -35,7 +35,6 @@ import {
 } from '../input-preparation';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
-import { trustedCwd } from './fixtures/launch-cwd';
 
 /**
  * One real stdio MCP server, configured as a device toolset.
@@ -43,8 +42,8 @@ import { trustedCwd } from './fixtures/launch-cwd';
  * It is here because the request contract no longer lets a caller state a tool
  * manifest: a preparation names `requiredToolsets`, and the daemon observes
  * them itself. So the end-to-end path only exists when this device actually
- * has a toolset to observe, and these cases now exercise the real probe, the
- * real launch boundary and the real fingerprints along with everything else.
+ * has a toolset to observe, and these cases now exercise the real probe and
+ * the real fingerprints along with everything else.
  */
 const MCP_FIXTURE = fileURLToPath(new URL('./fixtures/mcp-fixture-server.mjs', import.meta.url));
 const TOOLSETS = {
@@ -387,8 +386,6 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     );
     expect(receipt.artifact?.observationDigest).toMatch(/^[0-9a-f]{64}$/u);
     expect(receipt.artifact?.toolBindingDigest).toMatch(/^[0-9a-f]{64}$/u);
-    // The observation happened inside the proven launch boundary.
-    expect(await trustedCwd()).toBeTruthy();
     expect(receipt.counter).toMatchObject({ authority: 'test_fixture', value: 4_242 });
 
     // A fixture count, an unruled residual set and unattested executors can

@@ -38,7 +38,6 @@ import {
   INPUT_PREPARATION_ARTIFACT_FORMAT,
   INPUT_PREPARATION_VERSION,
 } from '../../input-preparation';
-import { mcpLaunchAttestation, type McpLaunchBinding } from '../../daemon/trusted-launch-cwd';
 import type { ToolImplementationIdentityV1 } from '../../daemon/tool-implementation-identity';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
 import { clientPackageRoot } from './client-manifest';
@@ -200,7 +199,6 @@ export class PiAdapter implements RuntimeAdapter {
     // authority on what a toolset contains. Claude and Codex list the tools
     // themselves, so pi is the one bundled adapter that needs this.
     requiresMcpToolsetToolObservation: true,
-    mcpServerLaunch: 'direct-cwd',
     capabilities: {
       steer: true,
       resume: true,
@@ -443,7 +441,6 @@ export class PiAdapter implements RuntimeAdapter {
               }),
               ...(startInput.mcpServers === undefined ? {} : { mcpServers: startInput.mcpServers }),
               ...(startInput.mcpToolsetTools === undefined ? {} : { mcpToolsetTools: startInput.mcpToolsetTools }),
-              ...(startInput.mcpLaunch === undefined ? {} : { mcpLaunch: startInput.mcpLaunch }),
               ...(startInput.mcpToolImplementations === undefined
                 ? {}
                 : { mcpToolImplementations: startInput.mcpToolImplementations }),
@@ -460,22 +457,6 @@ export class PiAdapter implements RuntimeAdapter {
           let mcpConfigDir: string | undefined;
           let runtimeEnv = { ...runtimeLaunch.env };
           const taskMcpServers = startInput.mcpServers ?? {};
-          // The daemon resolved ONE proven-non-writable launch directory for
-          // this task (`daemon/trusted-launch-cwd.ts`) and probed every server
-          // in it. pi's own extension opens the servers, so the directory
-          // travels in the task-scoped config and is passed straight to
-          // `spawn` — no launcher, because this adapter owns the spawn.
-          //
-          // Fail closed rather than omit it: an MCP server started without it
-          // would inherit the Pi process directory instead of consuming the
-          // independently admitted MCP launch binding.
-          const mcpLaunchCwd = startInput.mcpLaunch?.cwd;
-          if (Object.keys(taskMcpServers).length > 0 && mcpLaunchCwd === undefined) {
-            throw new RuntimeExecutionFailure({
-              phase: 'start', category: 'authority', retry: 'non-retryable',
-              reason: 'prepared pi operation received MCP servers without a trusted launch directory',
-            });
-          }
           let mcpConfigPath: string;
           let hostConfigDigest: string;
           let hostConfigPath: string;
@@ -496,9 +477,10 @@ export class PiAdapter implements RuntimeAdapter {
                 mcpEnv,
                 mcpServers: taskMcpServers,
                 observation: startInput.mcpToolsetTools ?? {},
-                ...(mcpLaunchCwd === undefined ? {} : { launchCwd: mcpLaunchCwd }),
-                // The daemon resolved these once, at admission, alongside the
-                // launch directory (`daemon/tool-implementation-identity.ts`).
+                // The servers start in the session cwd, as in OAR.
+                launchCwd: runtimeLaunch.sessionCwd,
+                // The daemon resolved these once, at admission
+                // (`daemon/tool-implementation-identity.ts`).
                 // The extension opens the servers in this child, so the
                 // identities travel here and are re-measured there before each
                 // spawn. This adapter resolves nothing of its own: a second
@@ -660,7 +642,6 @@ interface PreparedPiLaunchInput {
   };
   readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
   readonly mcpToolsetTools?: McpToolsetToolObservation;
-  readonly mcpLaunch?: McpLaunchBinding;
   readonly mcpToolImplementations?: Readonly<Record<string, ToolImplementationIdentityV1>>;
   readonly spawnFn?: SpawnFn;
 }
@@ -750,8 +731,8 @@ async function readPreparedArtifact(preparation: RuntimePreparedLaunchV1): Promi
  *    the native session would reject it as `prepared_context_drift` after the
  *    process, the servers and the session file already existed.
  * 2. The counted mode and the admitted mode must be the same mode, and the
- *    launch boundary and implementation identities this task resolved must be
- *    the ones the preparation attested. These are the adapter's own fail-closed
+ *    implementation identities this task resolved must be the ones the
+ *    preparation bound. These are the adapter's own fail-closed
  *    re-checks, on the same shape as the MCP grant fingerprint the shared path
  *    already compares; the child re-derives the digests independently anyway,
  *    so a divergence that slips past here still fails closed — just later and
@@ -774,17 +755,6 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
     throw authorityFailure('prepared pi operation received a manifest whose Agent memory selection differs from its sealed preparation');
   }
   const memoryServer = splitPreparedMemoryServer(input.mcpServers, preparation.agentMemory);
-  const mcpLaunch = input.mcpLaunch;
-  if (mcpLaunch === undefined) {
-    throw authorityFailure('prepared pi operation received no trusted launch directory');
-  }
-  const launch = mcpLaunchAttestation(mcpLaunch);
-  const attested = mcpLaunchAttestation(preparation.launch);
-  if (inputPreparationDigest(launch) !== inputPreparationDigest(attested)) {
-    throw authorityFailure(
-      'prepared pi operation resolved a different MCP launch boundary than the one its preparation attested',
-    );
-  }
   const toolImplementations = input.mcpToolImplementations ?? {};
   if (inputPreparationDigest(toolImplementations) !== inputPreparationDigest(preparation.toolImplementations)) {
     throw authorityFailure(
@@ -833,7 +803,6 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
         toolBindingDigest: preparation.toolBindingDigest,
         observationDigest: preparation.observationDigest,
         toolsetDefinitionRevisions: preparation.toolsetDefinitionRevisions,
-        launch,
         agentMemory: preparation.agentMemory,
         memory: preparation.memory,
         memoryCall: memoryServer.memoryCall,
@@ -844,7 +813,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
           mcpEnv: input.mcpEnv,
           mcpServers: memoryServer.hostServers,
           observation: input.mcpToolsetTools ?? {},
-          launchCwd: mcpLaunch.cwd,
+          launchCwd: input.manifestCwd,
           toolImplementations,
         },
       });

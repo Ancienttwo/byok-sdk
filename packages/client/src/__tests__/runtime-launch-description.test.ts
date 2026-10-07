@@ -330,7 +330,6 @@ describe('the attestation subject is explicit, and the two are not interchangeab
     };
   }
 
-  const LAUNCH = Object.freeze({ launchCwd: '/', launcher: null });
   const ENV = Object.freeze({ PATH: '/usr/bin:/bin' });
 
   it('hands the resolver the runtime subject verbatim', async () => {
@@ -352,7 +351,6 @@ describe('the attestation subject is explicit, and the two are not interchangeab
         subject: { kind: 'mcp-server', toolsetId: 'salesko', serverName: 'salesko' },
         command: '/opt/salesko/agent',
         args: ['mcp', 'serve'],
-        launch: LAUNCH,
       },
       ENV,
     );

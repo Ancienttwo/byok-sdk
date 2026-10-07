@@ -15,13 +15,6 @@ import { McpAuthorityError } from '../mcp/client';
 import { MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from './mcp-tools-probe';
 import type { McpToolsetRegistry } from './toolset-registry';
 import {
-  mcpLaunchAttestation,
-  resolveTrustedLaunchCwd,
-  type McpLaunchAttestation,
-  type McpLaunchBinding,
-  type McpLaunchCwdConfig,
-} from './trusted-launch-cwd';
-import {
   resolveToolImplementationIdentity,
   type ToolImplementationAuthority,
   type ToolImplementationFsProbe,
@@ -32,15 +25,13 @@ import {
  * The ONE place a prepared input's tool surface is assembled.
  *
  * Before this module there were two answers to "what tools does this device
- * have, and who executes them": `TaskRunner.handleOffer`, which resolved a
- * trusted launch directory, resolved one implementation identity per projected
- * server and probed each server through that binding; and the remote
- * preparation lane, which probed with a label, a timeout and an environment and
- * nothing else. The second one produced executor fingerprints for servers
- * launched in whatever directory the daemon happened to be in, under no
- * implementation claim at all — so a fingerprint frozen by a preparation and a
- * fingerprint frozen at admission could disagree for reasons neither side
- * recorded.
+ * have, and who executes them": `TaskRunner.handleOffer`, which resolved one
+ * implementation identity per projected server and probed each server under
+ * it; and the remote preparation lane, which probed with a label, a timeout and
+ * an environment and nothing else. The second one produced executor
+ * fingerprints under no implementation claim at all — so a fingerprint frozen
+ * by a preparation and a fingerprint frozen at admission could disagree for
+ * reasons neither side recorded.
  *
  * This module is the single entry both preparation paths — the local
  * `input_preparation.prepare` control call and the remote
@@ -50,9 +41,8 @@ import {
  *
  * Two stages, split by whether they SPAWN anything:
  *
- * 1. {@link resolvePreparedToolBinding} — registry snapshot, trusted launch
- *    directory, launcher, and one implementation identity per projected
- *    server. It reads configuration and the filesystem; it starts no child.
+ * 1. {@link resolvePreparedToolBinding} — registry snapshot and one
+ *    implementation identity per projected server. It reads configuration and the filesystem; it starts no child.
  *    Its {@link PreparedToolBinding.toolBindingDigest} is what a replay of an
  *    already-recorded `requestId` is compared against, because re-probing to
  *    detect drift would be exactly the second executor fact the durable
@@ -64,9 +54,7 @@ import {
  *
  * Fail-closed, and by VALUE rather than by exception: every refusal is a
  * `{ ok: false, code, detail }` the service maps straight onto a typed
- * rejection. A launch boundary that cannot be proven is never widened into a
- * spawn in an unproven directory, and an unobservable server is never widened
- * into a smaller manifest.
+ * rejection. An unobservable server is never widened into a smaller manifest.
  */
 
 // ---------------------------------------------------------------------------
@@ -77,8 +65,6 @@ import {
 export type PreparedToolSurfaceRefusalCode =
   /** A named toolset is not configured here, or its servers collide. */
   | 'unsupported_input'
-  /** No non-writable launch directory / trusted launcher could be proven. */
-  | 'launch_boundary_unavailable'
   /** A required server could not be observed, or its answer is ungrantable. */
   | 'toolsets_unobservable';
 
@@ -106,12 +92,11 @@ export interface PreparedToolServerBinding {
 export interface PreparedToolBinding {
   readonly memoryImplementation: PreparedAgentMemoryImplementation | null;
   readonly requiredToolsets: readonly string[];
-  readonly launch: McpLaunchAttestation;
   /** `toolsetId` -> the registry's definition revision. Every named toolset appears. */
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
   /** Canonically ordered by server name. */
   readonly servers: readonly PreparedToolServerBinding[];
-  /** Digest over the launch attestation, the definition revisions, the argv and the identities. */
+  /** Digest over the definition revisions, the argv and the identities. */
   readonly toolBindingDigest: string;
   /**
    * The exact environment object every identity above was measured against,
@@ -129,10 +114,9 @@ export interface PreparedToolSurface {
   readonly memory: PreparedAgentMemoryState | null;
   readonly tools: readonly InputPreparationToolV1[];
   readonly toolExecutors: Readonly<Record<string, string>>;
-  /** Digest over the tools, the executors, the launch attestation and the identities. */
+  /** Digest over the tools, the executors and the identities. */
   readonly observationDigest: string;
   readonly toolBindingDigest: string;
-  readonly launch: McpLaunchAttestation;
   /** Model-visible tool name -> `attested` | `unavailable:<reason>`. */
   readonly toolImplementationKinds: Readonly<Record<string, string>>;
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
@@ -150,7 +134,7 @@ export type PreparedToolSurfaceResult =
  * The seam `input-preparation-service.ts` depends on.
  *
  * Declared as an interface the daemon implements once, so the service never
- * reaches the toolset registry, the launch-cwd config or the implementation
+ * reaches the toolset registry or the implementation
  * authority itself — and so a test can hand it an assembler that counts its own
  * probes.
  */
@@ -175,8 +159,6 @@ export interface PreparedToolSurfaceInput {
 export interface PreparedToolSurfaceDeps {
   readonly memoryAvailable?: () => boolean;
   readonly toolsetRegistry: Pick<McpToolsetRegistry, 'snapshot' | 'status'>;
-  /** The operator's `DaemonConfig.mcpLaunchCwd`, already validated. */
-  readonly mcpLaunchCwd?: McpLaunchCwdConfig;
   /**
    * The exact base environment a RUNTIME child of a task receives
    * (`./environment.ts`'s `buildRuntimeEnv`) — never `process.env`. Resolved
@@ -207,31 +189,6 @@ function refuse(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * Resolve the launch binding for a preparation, with the SAME two functions
- * `TaskRunner.handleOffer` resolves an offer's binding with.
- *
- * The launcher half is resolved for the `direct-cwd` shape, because that is
- * what the runtime this preparation compiles for uses: the artifact is bound
- * to the verified installed pi closure (`adapters/pi/input-preparation.ts`),
- * and the pi adapter declares `mcpServerLaunch: 'direct-cwd'` — it hands the
- * directory to `spawn` and needs no launcher. A preparation that attested a
- * launcher the pi path never uses would produce fingerprints that can never
- * match the admission it is meant to be compared against.
- */
-async function resolveLaunch(deps: PreparedToolSurfaceDeps): Promise<McpLaunchBinding | PreparedToolSurfaceRefusal> {
-  const trusted = await resolveTrustedLaunchCwd(deps.mcpLaunchCwd);
-  if (trusted.kind === 'unavailable') {
-    return refuse(
-      'launch_boundary_unavailable',
-      `launch_boundary_unavailable:${trusted.reason}`,
-      `no non-writable MCP launch directory could be proven on this device (${trusted.reason});`
-        + ' a preparation never observes a server in a directory this uid can write',
-    );
-  }
-  return Object.freeze({ cwd: trusted.dir });
 }
 
 export async function resolvePreparedToolBinding(
@@ -283,11 +240,6 @@ export async function resolvePreparedToolBinding(
     }
   }
   // No servers AND no memory is a valid counted manifest: a tool-less record.
-  // It still binds the launch attestation resolved below, so a device that
-  // cannot prove a non-writable launch directory refuses it there.
-  const launchBinding = await resolveLaunch(deps);
-  if ('ok' in launchBinding) return launchBinding;
-  const launch = mcpLaunchAttestation(launchBinding);
 
   // Resolved ONCE per server, here, and consumed by the probe spawn below.
   // Resolution never refuses: this SDK ships no resolver, so the unconfigured
@@ -304,7 +256,7 @@ export async function resolvePreparedToolBinding(
   let memoryImplementation: PreparedAgentMemoryImplementation | null = null;
   if (input.agentMemory !== 'none') {
     if (deps.memoryAvailable?.() !== true) return refuse('unsupported_input', 'agent_memory_unavailable', 'secure Agent memory is unavailable');
-    try { memoryImplementation = await resolvePreparedMemoryImplementation(deps.toolImplementationAuthority, launchEnv, launch, deps.toolImplementationFsProbe); }
+    try { memoryImplementation = await resolvePreparedMemoryImplementation(deps.toolImplementationAuthority, launchEnv, deps.toolImplementationFsProbe); }
     catch (error) { return refuse('unsupported_input', 'agent_memory_implementation_unproven', errorMessage(error)); }
   }
 
@@ -316,7 +268,6 @@ export async function resolvePreparedToolBinding(
         subject: { kind: 'mcp-server', toolsetId: entry.toolsetId, serverName },
         command: entry.server.command,
         args: Object.freeze([...(entry.server.args ?? [])]),
-        launch,
       },
       launchEnv,
       deps.toolImplementationFsProbe,
@@ -334,7 +285,6 @@ export async function resolvePreparedToolBinding(
   // matches the artifact (`adapters/pi/prepared-tools.ts`).
   const toolBindingDigest = preparedToolBindingDigest({
     agentMemory: input.agentMemory, memoryImplementation,
-    launch,
     toolsetDefinitionRevisions,
     servers: resolved.map((entry) => ({
       serverName: entry.serverName,
@@ -350,7 +300,6 @@ export async function resolvePreparedToolBinding(
     binding: Object.freeze({
       requiredToolsets: Object.freeze([...input.requiredToolsets]),
       memoryImplementation,
-      launch,
       toolsetDefinitionRevisions: Object.freeze(toolsetDefinitionRevisions),
       servers: Object.freeze(resolved),
       toolBindingDigest,
@@ -397,10 +346,9 @@ export async function assemblePreparedToolSurface(
       label: `MCP toolset server "${entry.serverName}"`,
       timeoutMs,
       env,
-      // The trusted directory, and the implementation identity resolved above.
-      // `mcp/client.ts`'s connect gate re-measures an attested one before this
-      // child starts; a failure is an `McpAuthorityError`.
-      cwd: binding.launch.launchCwd,
+      // The implementation identity resolved above. `mcp/client.ts`'s connect
+      // gate re-measures an attested one before this child starts; a failure
+      // is an `McpAuthorityError`.
       implementation: entry.implementation,
     });
     if (observation.tools.length === 0) {
@@ -436,7 +384,6 @@ export async function assemblePreparedToolSurface(
     agentMemory: input.agentMemory, memory,
     observation,
     runtimeIdentity: input.runtimeIdentity,
-    launch: binding.launch,
     toolsetDefinitionRevisions: binding.toolsetDefinitionRevisions,
     implementations: Object.freeze(implementations),
   });
@@ -450,7 +397,6 @@ export async function assemblePreparedToolSurface(
       toolExecutors: fingerprinted.fingerprint.toolExecutors,
       observationDigest: fingerprinted.fingerprint.observationDigest,
       toolBindingDigest: binding.toolBindingDigest,
-      launch: binding.launch,
       toolImplementationKinds: fingerprinted.fingerprint.toolImplementationKinds,
       toolsetDefinitionRevisions: binding.toolsetDefinitionRevisions,
     }),
@@ -469,7 +415,6 @@ export interface PreparedToolSurfaceFingerprintInput {
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
   /** The resolved native runtime identity string every fingerprint binds. */
   readonly runtimeIdentity: string;
-  readonly launch: McpLaunchAttestation;
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
   readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
 }
@@ -533,7 +478,6 @@ export async function fingerprintPreparedToolSurface(
     ({ toolExecutors } = await buildToolExecutorsFromObservation({
       observation: input.observation,
       toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
-      launch: input.launch,
       implementations: input.implementations,
       // The prepared Main set is MCP tools only: a task-free preparation has
       // no workspace to resolve Pi's own built-ins against, and the prepared
@@ -564,7 +508,6 @@ export async function fingerprintPreparedToolSurface(
   Object.assign(toolImplementationKinds, memoryProjection.toolImplementationKinds);
   const observationDigest = preparedToolSurfaceObservationDigest({
     agentMemory: input.agentMemory, memory: input.memory,
-    launch: input.launch,
     runtimeIdentity: input.runtimeIdentity,
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     tools,

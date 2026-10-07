@@ -50,8 +50,8 @@ import type { InputPreparationCompletionClient } from './input-preparation-compl
  * 2. Tools and tool-executor identities are LOCAL observations. The payload
  *    names required toolsets; the daemon's ONE prepared
  *    tool-surface entry (`./prepared-tool-surface.ts`, reached through
- *    `InputPreparationService.prepare`) resolves the launch boundary, resolves
- *    an implementation identity per server, probes them itself and
+ *    `InputPreparationService.prepare`) resolves an implementation identity
+ *    per server, probes them itself and
  *    fingerprints what they actually report. This module states no tool and no
  *    executor, which is why it no longer has an observation seam of its own.
  * 3. The Host's `deadlineAt` may only TIGHTEN the configured local deadline.

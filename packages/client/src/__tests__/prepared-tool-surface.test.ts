@@ -47,7 +47,6 @@ import type {
   CompiledPreparedInput,
   InputPreparationCompiler,
 } from '../adapters/pi/input-preparation';
-import { trustedCwd } from './fixtures/launch-cwd';
 import * as preparedAgentMemory from '../daemon/prepared-agent-memory';
 import type { PreparedAgentMemoryState } from '../daemon/prepared-agent-memory';
 import { validatePreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
@@ -61,8 +60,7 @@ const ASSEMBLER_ENV: Readonly<Record<string, string>> = Object.freeze({ PATH: pr
 
 /**
  * The ONE prepared-tool-surface entry (`daemon/prepared-tool-surface.ts`),
- * driven against REAL MCP server children, a REAL toolset registry and the
- * REAL launch boundary of the machine the suite runs on.
+ * driven against REAL MCP server children and a REAL toolset registry.
  *
  * What these cases are for, stated as properties rather than as mechanisms:
  *
@@ -70,9 +68,6 @@ const ASSEMBLER_ENV: Readonly<Record<string, string>> = Object.freeze({ PATH: pr
  *   manifest for the same `requiredToolsets`, byte for byte, because there is
  *   only one thing that can produce one. A path that grew its own observation
  *   would diverge here on the first schema, order or fingerprint difference.
- * - A preparation's servers start inside the proven launch boundary, so a
- *   `bunfig.toml` `preload` planted in a directory the agent can write never
- *   runs before a probed server's own first statement.
  * - An attested server is re-measured before the probe spawn, so a tampered
  *   install refuses the preparation instead of fingerprinting the replacement.
  * - One `requestId` yields one observation. A repeat answers from the durable
@@ -373,38 +368,6 @@ describe('one assembly entry, consumed by both preparation paths', () => {
     // Two preparations, two compiles, and every tool in both came from the
     // entry above — the compiler is handed no other source.
     expect(compiler.calls).toHaveLength(2);
-  });
-});
-
-describe('a preparation observes inside the proven launch boundary', () => {
-  it('starts every probed server in the trusted directory, with the planted preload unexecuted', async () => {
-    const recordTo = path.join(await tempDir('byok-prepared-surface-record-'), 'record.jsonl');
-    // The negative control: a `bunfig.toml` `preload` in a directory the agent
-    // can write. It is only ever executed by a child whose cwd is that
-    // directory, so the fixture's `preloaded` flag is the observable that
-    // separates "started in the trusted directory" from "started in the
-    // agent's own home".
-    const agentWritable = await tempDir('byok-prepared-surface-home-');
-    await fs.writeFile(path.join(agentWritable, 'bunfig.toml'), 'preload = ["./preload.mjs"]\n');
-    await fs.writeFile(
-      path.join(agentWritable, 'preload.mjs'),
-      'globalThis.__BYOK_LAUNCH_CWD_PRELOADED__ = true;\n',
-    );
-
-    const result = await assembler(registryWith(recordTo)).assemble({
-      agentMemory: 'none', requiredToolsets: ['team'],
-      runtimeIdentity: RUNTIME_IDENTITY,
-    });
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error('unreachable');
-
-    const start = JSON.parse((await fs.readFile(recordTo, 'utf8')).split('\n')[0]!) as {
-      cwd: string;
-      preloaded: boolean;
-    };
-    expect(start.cwd).toBe(await trustedCwd());
-    expect(start.preloaded).toBe(false);
-    expect(result.surface.launch.launchCwd).toBe(await trustedCwd());
   });
 });
 
@@ -719,7 +682,7 @@ function rootOwnedProbe(): ToolImplementationFsProbe {
  */
 async function memoryHelper(body: string): Promise<{ authority: ToolImplementationAuthority; rewrite: (next: string) => Promise<void> }> {
   const script = path.join(await tempDir('byok-prepared-memory-helper-'), 'agent-memory-helper');
-  const launchCwd = await trustedCwd();
+  const launchCwd = path.dirname(script);
   let closureDigest = '';
   const rewrite = async (next: string): Promise<void> => {
     await fs.writeFile(script, next);
@@ -826,13 +789,12 @@ describe('a memory preparation replay never probes the descriptor again', () => 
 describe('a tool-less preparation (requiredToolsets [] and agentMemory none)', () => {
   const TOOLLESS = { agentMemory: 'none', requiredToolsets: [], runtimeIdentity: RUNTIME_IDENTITY } as const;
 
-  it('is counted with an empty manifest, the proven launch boundary, and no server probed', async () => {
+  it('is counted with an empty manifest and no server probed', async () => {
     const spawns: string[] = [];
     const bound = await assembler(registryWith()).resolveBinding({ agentMemory: 'none', requiredToolsets: [] });
     if (!bound.ok) throw new Error(`${bound.code}: ${bound.detail}`);
     expect(bound.binding.servers).toEqual([]);
     expect(bound.binding.toolsetDefinitionRevisions).toEqual({});
-    expect(bound.binding.launch.launchCwd.length).toBeGreaterThan(0);
 
     const result = await assembler(registryWith(), {
       probe: async (serverName, server, options) => {
@@ -844,17 +806,9 @@ describe('a tool-less preparation (requiredToolsets [] and agentMemory none)', (
     expect(result.surface.tools).toEqual([]);
     expect(result.surface.toolExecutors).toEqual({});
     expect(result.surface.toolImplementationKinds).toEqual({});
-    expect(result.surface.launch).toEqual(bound.binding.launch);
     // The binding digest is the same one stage 1 alone answered.
     expect(result.surface.toolBindingDigest).toBe(bound.binding.toolBindingDigest);
     expect(spawns).toEqual([]);
-  });
-
-  it('keeps refusing a tool-less preparation on a device that can prove no launch directory', async () => {
-    const result = await assembler(registryWith(), {
-      mcpLaunchCwd: { dir: path.join(os.tmpdir(), 'byok-no-such-launch-dir-for-toolless') },
-    }).assemble(TOOLLESS);
-    expect(result).toMatchObject({ ok: false, code: 'launch_boundary_unavailable' });
   });
 
   it('answers a replay from the durable record, and no longer depends on toolsets it never named', async () => {

@@ -20,7 +20,6 @@ import { TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED } from '../../daemon/tool-imp
 import { PiAdapter } from '../../adapters/pi/pi-adapter';
 import { resolveInstalledPiRuntimeIdentity, createPiInputPreparationCompiler } from '../../adapters/pi/input-preparation';
 import { projectPiMcpEnvironment } from '../../adapters/pi/mcp-environment';
-import { trustedLaunchBinding } from './launch-cwd';
 
 const FIXTURE = fileURLToPath(new URL('./mcp-fixture-server.mjs', import.meta.url));
 const RUNTIME_IDENTITY_TOOLSET = 'team';
@@ -138,7 +137,6 @@ export interface Prepared {
   readonly preparation: RuntimePreparedLaunchV1;
   readonly mcpServers: Readonly<Record<string, { command: string; args: string[] }>>;
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
-  readonly launchCwd: string;
   readonly childEnv: Record<string, string>;
   readonly recordPath: string;
 }
@@ -170,7 +168,6 @@ export async function prepareOnThisDevice(endpoint: ProviderEndpoint, input: {
       mcpServers: { teamserver: server },
     },
   });
-  const launchBinding = await trustedLaunchBinding();
   const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
   const runtimeIdentity =
     `${compiler.runtime.packageName}@${compiler.runtime.packageVersion}`
@@ -190,7 +187,6 @@ export async function prepareOnThisDevice(endpoint: ProviderEndpoint, input: {
   const observed = await probeMcpServer('teamserver', server, {
     label: 'MCP toolset server "teamserver"',
     env: { PATH: process.env.PATH ?? '' },
-    cwd: surface.launch.launchCwd,
     timeoutMs: 10_000,
   });
   const observation = Object.freeze({
@@ -248,7 +244,6 @@ export async function prepareOnThisDevice(endpoint: ProviderEndpoint, input: {
     artifactPath,
     requestBody: compiled.requestBody,
     recordPath,
-    launchCwd: launchBinding.cwd,
     mcpServers: { teamserver: server },
     observation,
     childEnv: {
@@ -271,7 +266,6 @@ export async function prepareOnThisDevice(endpoint: ProviderEndpoint, input: {
       },
       toolBindingDigest: surface.toolBindingDigest,
       observationDigest: surface.observationDigest,
-      launch: { cwd: surface.launch.launchCwd },
       toolImplementations: { teamserver: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
       toolsetDefinitionRevisions: surface.toolsetDefinitionRevisions,
     },
@@ -315,7 +309,6 @@ export async function startPrepared(prepared: Prepared, overrides: { taskId: str
       env: prepared.childEnv,
       mcpServers: prepared.mcpServers,
       mcpToolsetTools: prepared.observation,
-      mcpLaunch: { cwd: prepared.launchCwd },
       mcpToolImplementations: { teamserver: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
       preparation: overrides.preparation ?? prepared.preparation,
     });

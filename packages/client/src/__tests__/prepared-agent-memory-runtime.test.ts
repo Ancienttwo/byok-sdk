@@ -14,7 +14,6 @@ import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../bin/agent-m
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
 import { AGENT_MEMORY_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
 import { sealRuntimeOperationManifest, type RuntimePreparedLaunchV1 } from '../types';
-import { trustedCwd } from './fixtures/launch-cwd';
 import { openPreparedMemoryCall } from '../bin/pi-prepared-host';
 import { McpStdioClient } from '../mcp/client';
 
@@ -183,7 +182,6 @@ describe('prepared Agent memory runtime configuration', () => {
       requiredToolsetIds: [],
     });
     if (prepared.kind === 'reject') throw new Error(prepared.reason);
-    const launchCwd = await trustedCwd();
     const preparation: RuntimePreparedLaunchV1 = {
       agentMemory: 'read',
       memory: MEMORY as never,
@@ -200,7 +198,6 @@ describe('prepared Agent memory runtime configuration', () => {
       },
       toolBindingDigest: 'memory-tool-binding',
       observationDigest: 'memory-observation',
-      launch: { cwd: launchCwd },
       toolImplementations: {},
       toolsetDefinitionRevisions: {},
     };
@@ -241,7 +238,6 @@ describe('prepared Agent memory runtime configuration', () => {
       manifest,
       env,
       mcpEnv: projectPiMcpEnvironment(env),
-      mcpLaunch: { cwd: launchCwd },
       mcpServers: { [AGENT_MEMORY_MCP_SERVER_NAME]: memoryServer },
     });
     try {

@@ -87,7 +87,7 @@ import {
  *  5. Durable reserve, before any counter is ever invoked. Same key and digest
  *     returns the existing fact; a different digest conflicts (§10.3.5).
  *  6. The ONE prepared-tool-surface assembly (`./prepared-tool-surface.ts`) —
- *     launch boundary, implementation identities, probe, policy filter,
+ *     implementation identities, probe, policy filter,
  *     projection, fingerprints — deliberately AFTER the reserve, so a
  *     re-delivery of an already-recorded requestId answers from the durable
  *     record without starting a single server.
@@ -748,9 +748,8 @@ export function createInputPreparationService(options: InputPreparationServiceOp
   ): Promise<InputPreparationRecord> {
     if (runAborted(run)) await cancelBeforeCounter(record.recordId, run);
     // --- observation stage ------------------------------------------------
-    // The one entry that resolves the launch boundary, resolves an
-    // implementation identity per server, probes through both, and returns the
-    // frozen tool surface. It runs AFTER the durable reserve above, which is
+    // The one entry that resolves an implementation identity per server,
+    // probes under it, and returns the frozen tool surface. It runs AFTER the durable reserve above, which is
     // what makes a re-delivery return the recorded fact without a second
     // spawn: no server is started until this key is provably new.
     let surface: PreparedToolSurface;
@@ -1178,9 +1177,8 @@ export function createInputPreparationService(options: InputPreparationServiceOp
           // to prevent.
           //
           // Drift is still checked, on the half of the evidence that can be
-          // re-derived without starting anything: the launch attestation, the
-          // toolset definition revisions, the configured argv and the
-          // implementation identities. If any of those moved since the recorded
+          // re-derived without starting anything: the toolset definition
+          // revisions, the configured argv and the implementation identities. If any of those moved since the recorded
           // artifact was frozen, the recorded receipt no longer describes this
           // device and the repeat is REFUSED rather than answered — the caller
           // mints a new preparation instead of silently receiving one bound to
@@ -1202,7 +1200,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
             if (rebound.binding.toolBindingDigest !== recorded.toolBindingDigest) {
               throw new InputPreparationRequestError(
                 'observation_drift',
-                'the launch binding, toolset definitions or tool implementations behind this preparation'
+                'the toolset definitions or tool implementations behind this preparation'
                   + ' changed after its artifact was frozen; it will not be re-derived under the same requestId',
               );
             }

@@ -19,7 +19,6 @@ import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { bindMcpToolsetServerObservation, observeMcpServer } from '../mcp/observation';
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
 import { TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED } from '../daemon/tool-implementation-identity';
-import { trustedCwd } from './fixtures/launch-cwd';
 import { resolveBunBin } from './support/test-bun-bin';
 
 const execFileAsync = promisify(execFile);
@@ -77,7 +76,7 @@ if (process.argv[2] !== 'capture' && process.argv[2] !== 'capture-untrusted') {
       requiredToolsetIds:[],workspace:{workspaceDir:input.cwd},forwardedEnvironmentNames:Object.keys(runtime.env).sort()});
     await prepared.operation.start({kind:input.kind,...(input.kind==='prepared'?{preparation:input.preparation}:{instruction:'Never sent'}),
       manifest,runtimeLaunch:runtime,env:runtime.env,mcpEnv:input.mcpEnv,mcpServers:input.mcpServers,
-      mcpToolsetTools:input.observation,mcpLaunch:input.launch,mcpToolImplementations:input.implementations});
+      mcpToolsetTools:input.observation,mcpToolImplementations:input.implementations});
     throw new Error('unexpected prompt-capable start');
   } catch(error) {
     await fs.writeFile(input.report,JSON.stringify({stage,error:String(error),capture,resolveCalls,
@@ -186,12 +185,12 @@ async function preparedFixture(root: string, cwd: string, env: Record<string, st
     .assemble({ agentMemory: 'none', requiredToolsets: ['s2.echo.v1'], runtimeIdentity });
   if (!assembled.ok) throw new Error(`fixture assembly failed: ${assembled.detail}`);
   const surface = assembled.surface;
-  const observed = await observeMcpServer('fixture', server, { env, cwd: surface.launch.launchCwd, timeoutMs: 15_000 });
+  const observed = await observeMcpServer('fixture', server, { env, timeoutMs: 15_000 });
   const observation = { fixture: bindMcpToolsetServerObservation(observed, 's2.echo.v1') };
   const validation = await assemblePreparedPiToolSurface({ agentMemory: 'none', memory: null,
     observation, toolsetDefinitionRevisions: surface.toolsetDefinitionRevisions,
     servers: [{ serverName: 'fixture', toolsetId: 's2.echo.v1', command: server.command, args: server.args }],
-    launch: surface.launch, toolImplementations: { fixture: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED }, runtimeIdentity,
+    toolImplementations: { fixture: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED }, runtimeIdentity,
     expectedToolBindingDigest: surface.toolBindingDigest, expectedObservationDigest: surface.observationDigest,
     host: { call: async () => { throw new Error('fixture validation must not call a tool'); } } });
   if (!validation.ok) throw new Error(`invalid prepared fixture: ${validation.code}: ${validation.message}`);
@@ -211,11 +210,11 @@ async function preparedFixture(root: string, cwd: string, env: Record<string, st
     toolManifestDigest: compiled.toolManifestDigest, requestBody: compiled.requestBody, counterProjection: compiled.counterProjection,
     projection: compiled.projection, residual: [...compiled.residual], envelope: compiled.envelope }));
   return { model, runtime: compiler.runtime, mcpServers: { fixture: server }, observation,
-    implementations: { fixture: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED }, launch: { cwd: surface.launch.launchCwd },
+    implementations: { fixture: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
     preparation: { agentMemory: 'none', memory: null, reference: { scopeId: 's2', agentRef: 's2', requestId: 's2', recordId: 's2-record' }, artifactPath,
       expected: { envelopeDigest: compiled.envelopeDigest, toolManifestDigest: compiled.toolManifestDigest, model, binding },
       toolBindingDigest: surface.toolBindingDigest, observationDigest: surface.observationDigest,
-      launch: { cwd: surface.launch.launchCwd }, toolImplementations: { fixture: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
+      toolImplementations: { fixture: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
       toolsetDefinitionRevisions: surface.toolsetDefinitionRevisions }, cwd };
 }
 
@@ -302,7 +301,7 @@ describe('Pi launch path — S2 release containment', () => {
             installPath: bundle, closureDigest: await digest(bundle), closureKind: 'artifact',
             interpreter: { path: interpreter, digest: await digest(interpreter), // Synthetic host assertion, not a platform installer/load-command verification.
               loadCommandsDigest: '0'.repeat(64) },
-            launchArgv: ['__byok_sdk_helper', entryKind], launchCwd: await trustedCwd(), assetRoot, assets,
+            launchArgv: ['__byok_sdk_helper', entryKind], launchCwd: path.parse(release).root, assetRoot, assets,
             nativeProvenance: { packageName: fixture.runtime.packageName, packageVersion: fixture.runtime.packageVersion,
               tarballIntegrity: fixture.runtime.tarballIntegrity, provenanceDigest: fixture.runtime.provenanceDigest, closureDigest: fixture.runtime.closureDigest, upstreamCommit: fixture.runtime.upstreamCommit,
               compilerVersion: fixture.runtime.compilerVersion } };

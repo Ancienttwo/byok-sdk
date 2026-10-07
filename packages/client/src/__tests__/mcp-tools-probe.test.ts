@@ -35,7 +35,6 @@ interface FixtureConfig {
   silent?: boolean;
   floodBytes?: number;
   dumpEnvTo?: string;
-  dumpCwdTo?: string;
   dumpPidTo?: string;
 }
 
@@ -50,13 +49,12 @@ function runtimeEnv(): Record<string, string> {
 
 async function probe(
   server: McpStdioServerConfig,
-  overrides: { timeoutMs?: number; cwd?: string; env?: Record<string, string> } = {},
+  overrides: { timeoutMs?: number; env?: Record<string, string> } = {},
 ): Promise<readonly string[]> {
   return probeMcpServerTools('probed_server', server, {
     label: 'probed server',
     timeoutMs: overrides.timeoutMs ?? 5_000,
     env: overrides.env ?? runtimeEnv(),
-    ...(overrides.cwd === undefined ? {} : { cwd: overrides.cwd }),
   });
 }
 
@@ -167,13 +165,6 @@ describe('probeMcpServerTools — spawned child', () => {
     // task-scoped value the SDK deliberately hands one of its own reserved
     // helpers is layered on top, exactly as the runtime path layers it.
     expect(childEnv.BYOK_AGENT_MESSAGE_CONTEXT).toBe('context-token');
-  });
-
-  it('runs the server in the supplied working directory', async () => {
-    const root = await tmpRoot();
-    const dumpCwdTo = path.join(root, 'cwd.txt');
-    await probe(fixtureServer({ tools: [{ name: 'echo' }], dumpCwdTo }), { cwd: root });
-    expect(await fs.realpath(await fs.readFile(dumpCwdTo, 'utf8'))).toBe(await fs.realpath(root));
   });
 
   it('times out and leaves no lingering child behind', async () => {

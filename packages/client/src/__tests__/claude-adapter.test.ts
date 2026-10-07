@@ -11,7 +11,6 @@ import { SteerUnsupportedError, type Session } from '../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 import { observationOf } from './fixtures/mcp-observation';
-import { launchArgvPrefix, trustedLaunchBinding } from './fixtures/launch-cwd';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 
@@ -274,17 +273,13 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(args).not.toContain('--allowedTools');
     const configPath = args[args.indexOf('--mcp-config') + 1];
     if (typeof configPath !== 'string') throw new Error('missing mcp config path');
-    // claude spawns this server itself and `mcpServers` has no cwd field, so
-    // the operator's command/args are reached through the SDK's launcher,
-    // which chdirs into the daemon's proven-non-writable directory first. The
-    // operator's own argv is preserved position-for-position after it, and the
-    // task-scoped env is untouched.
-    const launch = await trustedLaunchBinding();
+    // claude spawns this server itself, in its own cwd, as in OAR. The
+    // operator's command/args and the task-scoped env reach it unchanged.
     expect(JSON.parse(await fs.readFile(configPath, 'utf8'))).toEqual({
       mcpServers: {
         salesko: {
-          command: launch.launcher!.interpreter,
-          args: [...launchArgvPrefix(launch), process.execPath, '/opt/salesko/fake-mcp.mjs'],
+          command: process.execPath,
+          args: ['/opt/salesko/fake-mcp.mjs'],
           env: { BYOK_AGENT_MESSAGE_CONTEXT: 'sealed-context' },
         },
       },
@@ -293,28 +288,6 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     await session.close();
     openSessions.pop();
     await expect(fs.access(configPath)).rejects.toThrow();
-  });
-
-  it('refuses a toolset server whose command is a bare name with the launcher rule that rejected it, before any spawn', async () => {
-    const spawnFn = vi.fn();
-    const adapter = new ClaudeAdapter({
-      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
-      spawnFn: spawnFn as unknown as SpawnFn,
-    });
-    const ctx = await makeCtx();
-    // A PATH lookup performed after the chdir is not the identity the binding
-    // attested, so the launcher wrapper refuses it. The refusal must reach
-    // TaskRunner as this adapter's own typed start failure: an untyped throw
-    // is projected as a generic adapter contract violation, which hides the
-    // rule that refused and leaves the operator with nothing to fix.
-    ctx.mcpServers = { salesko: { command: 'npx', args: ['@salesko/mcp'] } };
-    ctx.mcpToolsetTools = observationOf({ salesko: ['find_leads'] });
-
-    const failure = await startAdapter(adapter, baseTask, ctx).catch((error: unknown) => error);
-    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ phase: 'start', retry: 'non-retryable' });
-    expect((failure as RuntimeExecutionFailure).message).toMatch(/launch_cwd_target_command_not_absolute/u);
-    expect(spawnFn).not.toHaveBeenCalled();
   });
 
   it('prepares a valid blob-ref without fetching it; TaskRunner resolves its string after claim', async () => {

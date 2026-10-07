@@ -68,15 +68,9 @@ export interface TaskScopedMcpConfig {
    */
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
   /**
-   * The working directory every server below is spawned in — the one the
-   * daemon proved this uid cannot write and probed each server in
-   * (`daemon/trusted-launch-cwd.ts`).
-   *
-   * Required whenever this task projects any server, and NOT defaulted here:
-   * omitting it would silently hand the child the Pi process's own cwd, which
-   * is the canonical Agent home — a directory the agent writes by design, and
-   * from which a `bun --compile` server binary reads `bunfig.toml` `preload`
-   * before running its own code.
+   * The working directory every server below is spawned in: the session
+   * workspace or the Agent home, as in OAR. Required whenever this task
+   * projects any server, so a server never inherits a different process cwd.
    */
   readonly launchCwd?: string;
   /**
@@ -277,10 +271,6 @@ export class McpServerPool implements McpToolCallHost {
       // re-measure.
       ...(implementation === undefined ? {} : { implementation }),
       env: this.childEnv(),
-      // Passed explicitly rather than inherited: this process's cwd is the Agent
-      // home. `spawn` chdirs in the child before exec, so the server binary's
-      // own runtime initialisation — `bunfig.toml` preload included — already
-      // sees the trusted directory.
       cwd: launchCwd,
     });
     try {

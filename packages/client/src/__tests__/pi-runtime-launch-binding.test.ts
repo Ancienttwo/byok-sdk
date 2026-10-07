@@ -12,7 +12,6 @@ import {
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { resolvePiRuntimeLaunch } from '../adapters/pi/runtime-launch';
 import { resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
-import { resolveTrustedLaunchCwd } from '../daemon/trusted-launch-cwd';
 
 const roots: string[] = [];
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map((root) => fs.rm(root,{recursive:true,force:true}))); });
@@ -80,7 +79,7 @@ describe('client runtime launch admission and resource binding', () => {
     expect(await fs.readdir(f.options.projectionRoot)).toEqual([]);
   });
 
-  it('uses explicit resolver-unconfigured dev launch with a sealed process cwd and a private client-owned projection', async () => {
+  it('uses explicit resolver-unconfigured dev launch in the session cwd and a private client-owned projection', async () => {
     const f = await fixture();
     const resources = await resolvePiRuntimeLaunch(f.options);
     try {
@@ -88,11 +87,8 @@ describe('client runtime launch admission and resource binding', () => {
       expect(resources.decision.kind).toBe('unconfigured');
       expect(resources.binding.identity).toEqual({kind:'unavailable',reason:'resolver_unconfigured'});
       expect(resources.descendantPlan).toBeNull();
-      const trusted = await resolveTrustedLaunchCwd();
-      expect(trusted.kind).toBe('resolved');
-      if (trusted.kind !== 'resolved') throw new Error(trusted.reason);
-      expect(resources.binding.cwd).toBe(trusted.dir);
-      expect(resources.binding.cwd).not.toBe(f.options.sessionCwd);
+      // The Pi process starts in the session cwd, as in OAR, bound as a real path.
+      expect(resources.binding.cwd).toBe(await fs.realpath(f.options.sessionCwd));
       expect(resources.sessionCwd).toBe(f.options.sessionCwd);
       expect(resources.binding.command).toBe(process.execPath);
       expect(resources.binding.entry).toBe(path.join(f.root,'sdk entry.js'));
@@ -140,11 +136,9 @@ describe('client runtime launch admission and resource binding', () => {
     }) as typeof fs.lstat);
     const digest = createHash('sha256').update(await fs.readFile(executable)).digest('hex');
     const pin = resolvePiRuntimeIdentity();
-    const trusted = await resolveTrustedLaunchCwd();
-    if (trusted.kind !== 'resolved') throw new Error(trusted.reason);
     const record: ToolImplementationInstallRecordV1 = {
       kind:'attested',authority:'host-install-record',manifestRevision:'binding-test',form:'compiled-executable',
-      installPath:executable,closureDigest:digest,closureKind:'artifact',launchArgv:['__byok_sdk_helper','pi-rpc'],launchCwd:trusted.dir,
+      installPath:executable,closureDigest:digest,closureKind:'artifact',launchArgv:['__byok_sdk_helper','pi-rpc'],launchCwd:path.parse(f.root).root,
       assetRoot:path.dirname(executable),assets:[{path:path.basename(executable),digest}],
       nativeProvenance:{packageName:pin.name,packageVersion:pin.version,tarballIntegrity: 'sha512-'+ 'YQ=='.repeat(1),upstreamCommit:'c'.repeat(40),provenanceDigest: 'a'.repeat(64), closureDigest: 'b'.repeat(64),compilerVersion:1},
     };

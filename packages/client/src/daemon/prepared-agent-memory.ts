@@ -3,7 +3,6 @@ import { resolveSdkHelperImplementation, sdkHelperLaunch, parseToolImplementatio
 import { McpStdioClient, MCP_OBSERVATION_MAX_STDOUT_BYTES } from '../mcp/client';
 import { inputPreparationDigest } from '../input-preparation';
 import { validatePreparedAgentMemoryObservation, preparedAgentMemoryTools, preparedAgentMemoryExecutorFingerprints, type PreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
-import type { McpLaunchAttestation } from './trusted-launch-cwd';
 
 export interface PreparedAgentMemoryImplementation {
   readonly descriptor: ToolImplementationAttestedV1;
@@ -13,11 +12,10 @@ export interface PreparedAgentMemoryState {
   readonly implementation: PreparedAgentMemoryImplementation;
   readonly observation: PreparedAgentMemoryObservation;
 }
-export async function resolvePreparedMemoryImplementation(authority: ToolImplementationAuthority | undefined, env: Readonly<Record<string,string>>, launch: McpLaunchAttestation, probe?: ToolImplementationFsProbe): Promise<PreparedAgentMemoryImplementation> {
+export async function resolvePreparedMemoryImplementation(authority: ToolImplementationAuthority | undefined, env: Readonly<Record<string,string>>, probe?: ToolImplementationFsProbe): Promise<PreparedAgentMemoryImplementation> {
   const descriptor = await resolveSdkHelperImplementation(authority, { subject: {kind:'sdk-helper',helperId:'agent-memory'}, entry:'agent-memory-describe' }, env, probe);
   const execution = await resolveSdkHelperImplementation(authority, { subject: {kind:'sdk-helper',helperId:'agent-memory'}, entry:'agent-memory-mcp' }, env, probe);
   if (descriptor.kind !== 'attested' || execution.kind !== 'attested') throw new Error('agent_memory_implementation_unproven');
-  if (descriptor.launchCwd !== launch.launchCwd || execution.launchCwd !== launch.launchCwd) throw new Error('agent_memory_launch_mismatch');
   return Object.freeze({descriptor, execution});
 }
 export function memorySpawnBinding(identity: ToolImplementationAttestedV1, entry: 'agent-memory-describe'|'agent-memory-mcp', mode: PreparedAgentMemoryMode): SdkHelperSpawnBindingV1 {

@@ -26733,7 +26733,6 @@
                 "context_hash_mismatch",
                 "toolsets_unobservable",
                 "deadline_elapsed",
-                "launch_boundary_unavailable",
                 "observation_drift",
                 "rpc_frame_too_large",
                 "input_preparation_record_log_unsupported"
@@ -27430,7 +27429,6 @@
             "context_hash_mismatch",
             "toolsets_unobservable",
             "deadline_elapsed",
-            "launch_boundary_unavailable",
             "observation_drift",
             "rpc_frame_too_large",
             "input_preparation_record_log_unsupported"

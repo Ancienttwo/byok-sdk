@@ -41,7 +41,7 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
     binding: runtimeLaunch.binding, replica: binding, replicaRoot: options.replicaRoot,
     provider: `byok-sdk-${profileRef}`, model, instruction: input.instruction,
     mcp: { mcpEnv: input.mcpEnv, mcpServers: input.mcpServers ?? {}, observation: input.mcpToolsetTools ?? {},
-      ...(input.mcpLaunch?.cwd === undefined ? {} : { launchCwd: input.mcpLaunch.cwd }), toolImplementations: input.mcpToolImplementations ?? {} },
+      launchCwd: binding.canonicalHome, toolImplementations: input.mcpToolImplementations ?? {} },
   });
   try { await fs.writeFile(configPath, serialized.bytes, { mode: 0o600 }); }
   catch (error) { await fs.rm(configDir, { recursive: true, force: true }); throw error; }

@@ -35,9 +35,6 @@ import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credent
  * uid and the write bits. Size, mtime, dev, ino and the content digest are
  * still read off a real file on disk, so the mutation tests below mutate real
  * bytes and real timestamps.
- *
- * This is the same seam, for the same reason, as `LaunchCwdShellStat` in
- * `daemon/trusted-launch-cwd.ts`.
  */
 function rootOwnedProbe(overrides: { readonly uid?: number; readonly mode?: number } = {}): ToolImplementationFsProbe {
   return {
@@ -54,17 +51,11 @@ function rootOwnedProbe(overrides: { readonly uid?: number; readonly mode?: numb
   };
 }
 
-const LAUNCH = Object.freeze({
-  launchCwd: '/',
-  launcher: null,
-});
-
 function locator(command: string): McpImplementationLocatorV1 {
   return {
     subject: { kind: 'mcp-server', toolsetId: 'salesko', serverName: 'salesko' },
     command,
     args: [],
-    launch: LAUNCH,
   };
 }
 

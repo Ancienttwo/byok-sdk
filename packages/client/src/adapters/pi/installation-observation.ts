@@ -5,7 +5,6 @@ import {
 } from '@byok-sdk/implementation-identity';
 import type { RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeInstallationObservationContext } from '../../types';
 import { RUNTIME_LAUNCH_KINDS } from '../../daemon/tool-implementation-identity';
-import { inspectTrustedLaunchCwd } from '../../daemon/trusted-launch-cwd';
 import { verifyPiNativeInstallation } from './native-installation';
 import { runtimeRecordCommonFields } from './runtime-descendant-plan';
 
@@ -37,7 +36,6 @@ export async function observePiInstallation(
     if (value.kind === 'unavailable') return refused(value.reason);
     // A second entry field is a second physical author, never an alternative to installPath.
     if (value.record.entry !== undefined) return refused('install_record_mismatch');
-    if ((await inspectTrustedLaunchCwd(value.record.launchCwd)).kind !== 'resolved') return refused('launch_cwd_unavailable');
     let native;
     try { native = verifyPiNativeInstallation(value.record); }
     catch { return refused('native_identity_mismatch'); }

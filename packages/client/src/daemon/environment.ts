@@ -12,8 +12,10 @@ export { LOADER_ENV_DENY_PATTERNS, loaderEnvInjections } from '@byok-sdk/impleme
  * - `CLAUDECODE`: Claude Code sets it inside its own sessions. OAR removes
  *   it so that a child agent starts as its own top-level session.
  * - `BYOK_*`: this SDK's own control-plane variables (key custody).
- * - Loader injection names ({@link LOADER_ENV_DENY_PATTERNS}). The trusted
- *   MCP launch directory depends on them being absent.
+ * - Loader injection names ({@link LOADER_ENV_DENY_PATTERNS}). The
+ *   implementation attestation (measured spawn bindings, the Pi hosts' own
+ *   binding check, descendant and external-CLI custody) depends on them
+ *   being absent.
  *
  * {@link buildAllowlistedEnv} is the narrow form. Only the Pi custody lanes
  * use it: the durable Pi tool shell, the prepared Pi lane and the
@@ -108,9 +110,8 @@ const HARD_DENY_PATTERNS: readonly string[] = [
   'CLAUDECODE',
   'BYOK_*',
   // Loader injection. These change how an interpreter LOADS code, before the
-  // first statement of whatever it was asked to run — including this SDK's own
-  // `bin/byok-launch-cwd.mjs`, whose entire job is to establish a trusted cwd
-  // before a server binary starts. See `./trusted-launch-cwd.ts`.
+  // first statement of whatever it was asked to run, so a measured
+  // implementation identity would no longer describe what runs.
   ...LOADER_ENV_DENY_PATTERNS,
 ];
 

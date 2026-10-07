@@ -1,6 +1,6 @@
 // Installed composition: no prompt, provider request, real profile or OS key access.
 import assert from 'node:assert/strict';
-import { access, mkdtemp, mkdir, writeFile, readFile, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, realpath, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,7 +14,7 @@ import { SqliteProviderProfileStore, parseModelProviderProfile, exactProviderPro
 import { parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER } from './pi-runtime-identity.mjs';
 
 import { PiAdapter } from '@byok-sdk/client/adapters';
-import { resolveTrustedLaunchCwd, sealRuntimeOperationManifest } from '@byok-sdk/client';
+import { sealRuntimeOperationManifest } from '@byok-sdk/client';
 
 const require = createRequire(import.meta.url);
 const keysRoot = path.dirname(require.resolve('@byok-sdk/keys/package.json'));
@@ -99,36 +99,6 @@ try {
   const toolsObserver = path.join(dir, 'tools-observer.mjs');
   const sdkMcpExtension = path.join(clientRoot, 'dist/adapters/pi/mcp-extension.js');
   const reservedServerCwdMarker = path.join(dir, 'reserved-server-cwd.txt');
-  // The directory proof is a property of the HOST, not of the packed tarball,
-  // and a host that cannot prove it is not a packaging failure. An elevated
-  // Windows runner can write `%SystemRoot%` (`platform_default_is_writable`)
-  // and a uid-0 POSIX daemon can write everything
-  // (`root_cannot_prove_write_boundary`); both refusals are the boundary
-  // working. So this smoke branches rather than asserting a proof it cannot
-  // demand: with a directory, it runs the full launch smoke below; without
-  // one, it asserts the FAIL-CLOSED path instead — the packed adapter must
-  // refuse to start a non-empty `mcpServers` task with no launch binding, and
-  // must surface why. Any other `unavailable` reason still fails the smoke.
-  //
-  // `BYOK_RELEASE_SMOKE_FORCE_UNPROVABLE_LAUNCH_CWD=1` makes the resolver
-  // report `root_cannot_prove_write_boundary` on a host where the proof would
-  // have succeeded. It exists so the fail-closed branch is executable — and is
-  // executed — off Windows; it is a test seam, never a product path.
-  const trustedLaunch = await resolveTrustedLaunchCwd(
-    undefined,
-    process.env.BYOK_RELEASE_SMOKE_FORCE_UNPROVABLE_LAUNCH_CWD === '1' ? { getuid: () => 0 } : {},
-  );
-  const launchUnprovable = trustedLaunch.kind !== 'resolved';
-  if (launchUnprovable) {
-    assert.ok(
-      trustedLaunch.reason === 'platform_default_is_writable'
-        || trustedLaunch.reason === 'root_cannot_prove_write_boundary',
-      `no trusted MCP launch directory here, and the reason is not one this smoke accepts: ${trustedLaunch.reason}`,
-    );
-    console.log(`pi-launcher-smoke: trusted launch directory unavailable (${trustedLaunch.reason}); asserted fail-closed refusal instead`);
-  } else {
-    assert.notEqual(trustedLaunch.dir, dir);
-  }
   // A real stdio MCP server, so the installed package's own MCP extension is
   // run against a server that really has to start and really has to answer,
   // rather than stubbed away. Hand-rolled for the same reason the in-repo
@@ -148,8 +118,7 @@ try {
   await writeFile(fixtureServer, `import { createInterface } from 'node:readline';
 import { writeFileSync } from 'node:fs';
 // The directory this server was actually started in, read back out of the
-// child. Both runtime and MCP process cwd must use the proven sealed directory;
-// the writable session cwd is transported separately in the SDK host config.
+// child. The runtime and its MCP servers start in the session cwd, as in OAR.
 let initialized = false;
 const TOOL = { name: process.argv[2] ?? 'echo', description: 'Echo text back.', inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false } };
 const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n');
@@ -195,12 +164,9 @@ createInterface({ input: process.stdin }).on('line', line => {
       },
     },
     toolImplementations: {},
-    // The daemon resolves this once per offer and the extension refuses to open
-    // any server without it; the installed package must therefore honour it out
-    // of the packed tarball, launcher script included. Absent on a host where
-    // no directory could be proven — which is exactly the shape the fail-closed
-    // branch below requires the packed extension to refuse.
-    ...(launchUnprovable ? {} : { launchCwd: trustedLaunch.dir }),
+    // The extension refuses to open any server without it. It is the session
+    // cwd, as in OAR.
+    launchCwd: dir,
   };
   await writeFile(mcpConfigPath, JSON.stringify(mcpTaskConfig));
   // Separate installed MCP registry proof. The SDK host intentionally accepts
@@ -330,27 +296,20 @@ await runtime.dispose();
     const manifest=sealRuntimeOperationManifest({taskId:'packed-direct-capture',runtimeId:'pi',descriptor:adapter.descriptor,
       requiredToolsetIds:[],workspace:{workspaceDir:dir},forwardedEnvironmentNames:Object.keys(directRuntime.env).sort()});
     await prepared.operation.start({kind:'instruction',mcpEnv:mcpTaskConfig.mcpEnv,manifest,instruction:'Never sent',env:directRuntime.env,runtimeLaunch:directRuntime,
-      mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation,
-      ...(launchUnprovable?{}:{mcpLaunch:{cwd:trustedLaunch.dir}})});
+      mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation});
   };
   try {
-    if (launchUnprovable) {
-      await assert.rejects(captureDirect,/MCP servers without a trusted launch directory|Pi process cwd unavailable/);
-      assert.equal(directInvocation,undefined,'unprovable launch reached spawn');
-      assert.equal(requests,0);
-      console.log(`[release-pack] installed Pi${piManifest.version} detect passed; explicit admission refused unprovable launch (${trustedLaunch.reason}); spawns=0 prompts=0`);
-    } else {
+    {
       await assert.rejects(captureDirect,/pi runtime process could not be spawned/);
       assert.equal(directInvocation.command,directRuntime.binding.command);
       assert.deepEqual(directInvocation.args.slice(0,1),[sdkPiEntry]);
-      assert.equal(directInvocation.options.cwd,trustedLaunch.dir);
+      assert.equal(directInvocation.options.cwd,dir);
       assert.equal(directInvocation.options.shell,undefined);
       assert.ok(!directInvocation.args.includes('--extension'),'ordinary entry must own its factories');
-      assert.ok(directInvocation.args.includes('--no-skills'));
       assert.equal(directConfig.format,'byok.pi.rpc-launch');
       assert.equal(directConfig.cwd,dir);
       assert.deepEqual(directConfig.mcp.observation,mcpTaskConfig.observation);
-      assert.equal(directConfig.mcp.launchCwd,trustedLaunch.dir);
+      assert.equal(directConfig.mcp.launchCwd,dir);
       const configPath=directInvocation.args[directInvocation.args.indexOf('--config')+1];
       await mkdir(path.dirname(configPath),{recursive:true});
       await writeFile(configPath,directConfigBytes);
@@ -368,9 +327,9 @@ await runtime.dispose();
         }),{mode:0o600});
         const state=await rpcState(directInvocation.command,directInvocation.args,directInvocation.options);
         assert.equal(state.messageCount,0);
-        assert.equal(await realpath((await readFile(reservedServerCwdMarker,'utf8')).trim()),await realpath(trustedLaunch.dir));
+        assert.equal(await realpath((await readFile(reservedServerCwdMarker,'utf8')).trim()),dir);
       } finally {await rm(path.dirname(configPath),{recursive:true,force:true});}
-      console.log(`[release-pack] installed Pi${piManifest.version} explicit resolve/start capture and SDK host RPC passed; session/process cwd split and real reserved MCP handshake observed; prompts=0`);
+      console.log(`[release-pack] installed Pi${piManifest.version} explicit resolve/start capture and SDK host RPC passed; session cwd and real reserved MCP handshake observed; prompts=0`);
     }
   } finally {await directRuntime?.release();}
 
@@ -436,14 +395,8 @@ await runtime.dispose();
     `pi provider launcher: ${binding.profileRef} declares auth_mode "none"; the prepared runtime entry requires a provider credential\n`);
   assert.equal(requests, 0);
   console.log('[release-pack] installed keys launcher bin admission passed: missing/closed-set --runtime-entry refusals, rpc/prepared parity on a credential-bearing profile, and the prepared-entry auth_mode refusal; spawns=0 requests=0');
-  // The full launch smoke: only reachable with a proven launch directory,
-  // because everything it asserts is about WHERE the servers started.
-  if (launchUnprovable) {
-    // The one fact in that block that is about the TARBALL rather than about
-    // this host, so it is asserted on both branches.
-    await access(path.join(clientRoot, 'bin', 'byok-launch-cwd.mjs'));
-    console.log(`[release-pack] launch boundary unprovable on this host (${trustedLaunch.reason}); the packed tarball's fail-closed refusal was asserted instead of the launch smoke`);
-  } else {
+  // The full launch smoke through the keys launcher.
+  {
     // Obtain keys projection directory and commitments through the installed
     // adapter's resource phase, exactly as a real operation does. No credential
     // is read: this profile declares auth_mode:none and start is intercepted.
@@ -468,13 +421,13 @@ await runtime.dispose();
       const manifest=sealRuntimeOperationManifest({taskId:'packed-keys-capture',runtimeId:'pi',descriptor:keysAdapter.descriptor,
         dispatchSelection:selection,requiredToolsetIds:[],workspace:{workspaceDir:dir},forwardedEnvironmentNames:Object.keys(keysRuntime.env).sort()});
       await assert.rejects(keysPrepared.operation.start({kind:'instruction',mcpEnv:mcpTaskConfig.mcpEnv,manifest,instruction:'Never sent',env:keysRuntime.env,runtimeLaunch:keysRuntime,
-        mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation,mcpLaunch:{cwd:trustedLaunch.dir}}),/pi runtime process could not be spawned/);
+        mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation}),/pi runtime process could not be spawned/);
       const option=(name)=>keysInvocation.args[keysInvocation.args.indexOf(name)+1];
       assert.deepEqual(JSON.parse(option('--launch-binding')),keysRuntime.binding);
-      assert.equal(option('--pi-cwd'),trustedLaunch.dir);
+      assert.equal(option('--pi-cwd'),dir);
       assert.deepEqual(JSON.parse(option('--pi-fixed-args')),keysRuntime.binding.fixedArgv);
       assert.equal(option('--pi-entry'),sdkPiEntry);
-      assert.equal(keysInvocation.options.cwd,trustedLaunch.dir);
+      assert.equal(keysInvocation.options.cwd,dir);
       assert.equal(keysInvocation.options.env.ZAI_API_KEY,undefined);
       assert.equal(keysInvocation.options.env.UNRELATED_CANARY,undefined);
       assert.equal(keysInvocation.options.env.BYOK_PI_MCP_CONFIG_PATH,undefined);
@@ -502,23 +455,21 @@ await runtime.dispose();
         assert.equal(state.thinkingLevel,modelConfig.thinkingLevel);
         assert.equal(state.messageCount,0);
         const reservedCwd=(await readFile(reservedServerCwdMarker,'utf8')).trim();
-        assert.equal(await realpath(reservedCwd),await realpath(trustedLaunch.dir));
-        assert.notEqual(reservedCwd,dir);
+        assert.equal(await realpath(reservedCwd),dir);
       } finally {await rm(path.dirname(configPath),{recursive:true,force:true});}
     } finally {await keysRuntime.release();}
 
     // Preserve the original active MCP registry checks as explicitly separate
     // native-session evidence; no custom extension is injected into the SDK host.
-    const observed=spawnSync(process.execPath,[toolsObserver],{cwd:trustedLaunch.dir,env:startupEnv,encoding:'utf8',timeout:30_000});
+    const observed=spawnSync(process.execPath,[toolsObserver],{cwd:dir,env:startupEnv,encoding:'utf8',timeout:30_000});
     assert.equal(observed.status,0,observed.stderr||String(observed.error));
     const activeTools=JSON.parse(await readFile(toolsMarker,'utf8'));
     assert.ok(activeTools.includes('mcp__fixture__echo'),`registered tools: ${activeTools.join(', ')}`);
     assert.ok(activeTools.includes('relay_probe'),`reserved helper tool missing: ${activeTools.join(', ')}`);
     assert.ok(!activeTools.includes('mcp'),'the retired MCP proxy tool must not be registered');
     assert.ok(!activeTools.includes('mcpScript'),'the retired mcpScript tool must not be registered');
-    await access(path.join(clientRoot,'bin','byok-launch-cwd.mjs'));
     assert.equal(requests,0);
-    console.log(`[release-pack] keys -> installed SDK Pi${piManifest.version} host model/start, actual inherited-subprocess custody/session-cwd probe, and real MCP handshake/cwd passed; sealed process cwd is the captured spawn input; LLM requests=0`);
+    console.log(`[release-pack] keys -> installed SDK Pi${piManifest.version} host model/start, actual inherited-subprocess custody/session-cwd probe, and real MCP handshake/cwd passed; the process cwd is the session cwd; LLM requests=0`);
     console.log('[release-pack] separate installed native MCP session active-tool assertions passed; active registry inside the keys-launched child is NOT observed');
   }
 } finally {

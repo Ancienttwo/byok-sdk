@@ -15,8 +15,6 @@ export type {
   RuntimeInstallationObservationContext,
   Session,
   GitWorkspaceConfig,
-  McpLaunchBinding,
-  McpLaunchCwdConfig,
   McpStdioServerConfig,
   McpToolsetConfig,
   McpToolsetLifecycleState,
@@ -25,11 +23,7 @@ export type {
   McpToolsetRegistryStatus,
   McpToolsetReloadReceipt,
   AgentEgressPolicy,
-  LaunchCwdRejection,
-  TrustedLaunchCwd,
-  TrustedLaunchCwdUnavailableReason,
 } from './types';
-export { resolveMcpLaunchCwdLauncher, resolveTrustedLaunchCwd } from './daemon/trusted-launch-cwd';
 /**
  * The host install-record authority this SDK declares and never implements
  * (`daemon/tool-implementation-identity.ts`). A daemon constructed without one

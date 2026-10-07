@@ -12,7 +12,6 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import * as mutationGate from '../daemon/path-mutation-gate';
-import * as launchCwd from '../daemon/trusted-launch-cwd';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 const roots: string[] = [];
@@ -79,16 +78,12 @@ const TASK = 'active-revoke-task';
 
 async function activeFixture(unsent: boolean, overrides: Partial<TaskRunnerDeps> = {}) {
   const h = await cancellationFixture(overrides);
-  // This fixture never spawns MCP/runtime processes. Only its admission-time
-  // launch-directory dependency is injected; restore it before settlement.
-  const originalResolver = launchCwd.resolveTrustedLaunchCwd;
-  const launch = vi.spyOn(launchCwd, 'resolveTrustedLaunchCwd').mockResolvedValue({ kind: 'resolved', dir: await temporary('byok-inert-launch-') });
-  try { await h.runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+  // This fixture never spawns MCP/runtime processes.
+  await h.runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
     instruction: 'reply', runtime: 'pi', agentRef: AGENT,
     egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
-  }, { taskId: TASK, seq: 1 })); } finally { launch.mockRestore(); }
-  expect(launchCwd.resolveTrustedLaunchCwd).toBe(originalResolver);
+  }, { taskId: TASK, seq: 1 }));
   expect(h.runner.activeTaskCount, JSON.stringify(h.sent)).toBe(1);
   expect(h.sent.filter(e => e.type === 'task.started')).toHaveLength(1);
   const ctx = h.adapter.startCalls[0]!.ctx;

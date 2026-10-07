@@ -5862,7 +5862,6 @@ export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminated
         durable_write_failed: "durable_write_failed";
         input_preparation_record_log_unsupported: "input_preparation_record_log_unsupported";
         input_preparation_unconfigured: "input_preparation_unconfigured";
-        launch_boundary_unavailable: "launch_boundary_unavailable";
         limit_exceeded: "limit_exceeded";
         not_found: "not_found";
         observation_drift: "observation_drift";
@@ -6047,7 +6046,6 @@ export declare const InputPreparationReadbackSchema: z.ZodObject<{
         durable_write_failed: "durable_write_failed";
         input_preparation_record_log_unsupported: "input_preparation_record_log_unsupported";
         input_preparation_unconfigured: "input_preparation_unconfigured";
-        launch_boundary_unavailable: "launch_boundary_unavailable";
         limit_exceeded: "limit_exceeded";
         not_found: "not_found";
         observation_drift: "observation_drift";
@@ -6821,12 +6819,12 @@ export declare const InputPreparationProjectionSchema: z.ZodObject<{
  * launch checkable rather than assumed:
  *
  * - `observationDigest` binds everything the device OBSERVED — the projected
- *   tools, their executor fingerprints, the launch attestation and the
- *   implementation identities — so a launch whose live observation differs is
+ *   tools, their executor fingerprints and the implementation identities —
+ *   so a launch whose live observation differs is
  *   a different manifest, whatever the schemas say.
  * - `toolBindingDigest` binds only the facts that can be re-derived WITHOUT
- *   spawning a server: the launch attestation, the toolset definition
- *   revisions and the implementation identities. It is what a replay of an
+ *   spawning a server: the toolset definition revisions and the
+ *   implementation identities. It is what a replay of an
  *   already-recorded requestId compares against, because re-probing to detect
  *   drift would be the second executor fact the idempotency key exists to
  *   prevent.
@@ -7101,7 +7099,6 @@ export declare const InputPreparationRejectionReasonSchema: z.ZodEnum<{
     durable_write_failed: "durable_write_failed";
     input_preparation_record_log_unsupported: "input_preparation_record_log_unsupported";
     input_preparation_unconfigured: "input_preparation_unconfigured";
-    launch_boundary_unavailable: "launch_boundary_unavailable";
     limit_exceeded: "limit_exceeded";
     not_found: "not_found";
     observation_drift: "observation_drift";

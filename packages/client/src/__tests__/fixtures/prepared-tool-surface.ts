@@ -51,7 +51,6 @@ export function recordingToolSurface(
         binding: {
           memoryImplementation: null,
           requiredToolsets: [...input.requiredToolsets],
-          launch: { launchCwd: '/', launcher: null },
           toolsetDefinitionRevisions: Object.fromEntries(
             input.requiredToolsets.map((id) => [id, `sha256:${'9'.repeat(64)}`]),
           ),
@@ -76,7 +75,6 @@ export function recordingToolSurface(
           toolExecutors: Object.fromEntries(toolNames.map((name, index) => [name, `${index}`.repeat(64).slice(0, 64)])),
           observationDigest: 'observation-digest-1',
           toolBindingDigest: state.toolBindingDigest,
-          launch: { launchCwd: '/', launcher: null },
           toolImplementationKinds: { ...state.toolImplementationKinds },
           toolsetDefinitionRevisions: Object.fromEntries(
             input.requiredToolsets.map((id) => [id, `sha256:${'9'.repeat(64)}`]),

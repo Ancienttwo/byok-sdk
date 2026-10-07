@@ -16,6 +16,36 @@
 
 ## Unreleased
 
+- **Breaking (protocol, client, implementation-identity)** — remove the
+  trusted MCP launch cwd and the MCP launcher wrapper. The runtime and its MCP
+  servers start in the session cwd (the workspace or the Agent home), as in
+  OAR. Pi pre-trusts the session cwd in every lane, so project
+  `.pi/extensions` load.
+  Plan: `plans/plan-20261007-1340-minimal-guardrails.md` (slice 4, D8).
+  - Client: remove `daemon/trusted-launch-cwd.ts` and `bin/byok-launch-cwd.mjs`.
+    The package no longer ships `bin/`. Remove the exports
+    `resolveTrustedLaunchCwd`, `resolveMcpLaunchCwdLauncher`, `McpLaunchBinding`,
+    `McpLaunchCwdConfig`, `LaunchCwdRejection`, `TrustedLaunchCwd` and
+    `TrustedLaunchCwdUnavailableReason`.
+  - Remove `DaemonConfig.mcpLaunchCwd`. `createDaemon` throws when it is set.
+  - Remove `RuntimeAdapterDescriptor.mcpServerLaunch`,
+    `RuntimeOperationStartBase.mcpLaunch`, `RuntimePreparedLaunchV1.launch` and
+    the `launch_cwd_unavailable` refusal reason. Claude and Codex get their
+    task servers unwrapped.
+  - Prepared lane: remove the launch attestation, the
+    `preparation_launch_attestation_mismatch` decline reason and the
+    `agent_memory_launch_mismatch` check. The prepared tool binding and surface
+    digests move to version 3, and the Pi MCP fingerprint to version 2. A
+    record prepared before this change declines with
+    `preparation_tool_binding_digest_mismatch`.
+  - Protocol v2 (unreleased, goldens amended, no second bump): remove the
+    `launch_boundary_unavailable` input-preparation error code.
+  - implementation-identity: remove `McpLaunchAttestation`,
+    `ResolvedMcpLaunchCwdLauncher` and the `launch` field of the mcp-server
+    locator.
+  - Kept: the loader environment deny. Implementation attestation still
+    depends on it. Slice 5 removes both.
+
 - **Breaking (protocol, client)** — Agent egress goes to the Host as is, as
   in OAR ("nothing gated, nothing dropped").
   Plan: `plans/plan-20261007-1340-minimal-guardrails.md` (slice 3, D4).

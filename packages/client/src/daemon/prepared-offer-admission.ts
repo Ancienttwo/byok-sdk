@@ -5,10 +5,9 @@ import {
   preparedToolBindingDigest,
   type InputPreparationRuntimeIdentityV1,
 } from '../input-preparation';
-import type { McpLaunchBinding, RuntimePreparedLaunchV1 } from '../types';
+import type { RuntimePreparedLaunchV1 } from '../types';
 import type { McpToolsetServerObservation } from '../mcp/observation';
 import { fingerprintPreparedToolSurface } from './prepared-tool-surface';
-import { mcpLaunchAttestation } from './trusted-launch-cwd';
 import type { ToolImplementationIdentityV1 } from './tool-implementation-identity';
 import type { InputPreparationRecord } from './input-preparation-store';
 import { inputPreparationReadinessReasons } from './input-preparation-service';
@@ -35,18 +34,13 @@ import type { PreparedAgentMemoryState } from './prepared-agent-memory';
  * - The artifact summary answers the envelope digest, the tool implementation
  *   kinds (which are keyed by model-visible tool NAME, so they also answer the
  *   counted tool SET), and the two surface digests.
- * - Nothing durable carries the launch attestation, the toolset definition
- *   revisions or the observed schemas as values — they exist only inside
- *   `toolBindingDigest` and `observationDigest`. So the launcher half of the
- *   attestation is compared structurally (a preparation is counted under the
- *   direct-cwd boundary the pi lane uses and never attests a launcher, so a
- *   launcher-wrapped task can never match one), the launch directory and the
- *   definition revisions are compared through `toolBindingDigest`, and the
- *   schemas through `observationDigest`.
+ * - Nothing durable carries the toolset definition revisions or the observed
+ *   schemas as values — they exist only inside `toolBindingDigest` and
+ *   `observationDigest`. So the definition revisions are compared through
+ *   `toolBindingDigest`, and the schemas through `observationDigest`.
  *
  * WHERE the live values come from: this daemon's OWN admission of this offer —
- * the one trusted launch binding it resolved, the one
- * implementation identity per server it resolved, and the `tools/list`
+ * the one implementation identity per server it resolved, and the `tools/list`
  * observation its admission probe took. Nothing is re-resolved here. A second
  * resolution would be a second opinion about the same install, and the two
  * could disagree without anything noticing.
@@ -88,13 +82,11 @@ export type PreparedOfferDeclineReason =
   | 'agent_memory_mismatch'
   /** The installed native closure is not the one that compiled the artifact. */
   | 'preparation_runtime_identity_mismatch'
-  /** No trusted launch boundary, or one a preparation can never have attested. */
-  | 'preparation_launch_attestation_mismatch'
   /** The live tool set is not the set of model-visible names that were counted. */
   | 'preparation_tool_set_mismatch'
   /** The same tool names, but a different implementation-identity kind behind one of them. */
   | 'preparation_tool_implementation_kinds_mismatch'
-  /** The live launch directory, definition revisions, argv or identities differ from the counted ones. */
+  /** The live definition revisions, argv or identities differ from the counted ones. */
   | 'preparation_tool_binding_digest_mismatch'
   /** Same names and same kinds, but a different observed schema surface. */
   | 'preparation_observation_digest_mismatch'
@@ -148,8 +140,6 @@ export interface PreparedOfferAdmissionInput {
   readonly offeredAgentMemory: PreparedAgentMemoryMode;
   /** Current descriptor observation and attested helper pair; null only for `none`. */
   readonly memory: PreparedAgentMemoryState | null;
-  /** The one launch boundary this task resolved for every MCP child it will start. */
-  readonly launch: McpLaunchBinding | undefined;
   /** The live `tools/list` answer this task's own admission probe took. */
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>> | undefined;
   /** The one implementation identity per projected server this task resolved. */
@@ -265,29 +255,6 @@ export async function admitPreparedOffer(
     );
   }
 
-  // --- the launch boundary ----------------------------------------------
-  // The directory itself has no durable counterpart and is compared through
-  // `toolBindingDigest` below. The LAUNCHER half does have one, structurally: a
-  // preparation resolves the direct-cwd boundary the pi lane uses and never
-  // attests a launcher (`prepared-tool-surface.ts`'s `resolveLaunch`), so a
-  // task that resolved a launcher-wrapped boundary is running a different
-  // launch mechanism than the one that was counted — and saying so by name
-  // beats reporting it as an opaque digest difference.
-  if (input.launch === undefined) {
-    return decline(
-      'preparation_launch_attestation_mismatch',
-      'this task proved no trusted MCP launch boundary, and a preparation is counted under one',
-    );
-  }
-  if (input.launch.launcher !== undefined) {
-    return decline(
-      'preparation_launch_attestation_mismatch',
-      'this task resolved a launcher-wrapped MCP launch boundary, and a preparation attests the direct'
-      + ' boundary the prepared runtime launches its servers in',
-    );
-  }
-  const launch = mcpLaunchAttestation(input.launch);
-
   if (input.observation === undefined || input.implementations === undefined) {
     return decline(
       'preparation_tool_set_mismatch',
@@ -301,7 +268,6 @@ export async function admitPreparedOffer(
     memory: input.memory,
     observation: input.observation,
     runtimeIdentity,
-    launch,
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     implementations: input.implementations,
   });
@@ -343,13 +309,11 @@ export async function admitPreparedOffer(
     );
   }
 
-  // The launch directory, the toolset definition revisions, the argv and the
-  // per-server identities — the facts that need no spawn, in the digest that
+  // The toolset definition revisions, the argv and the per-server identities — the facts that need no spawn, in the digest that
   // was frozen over them.
   const liveToolBindingDigest = preparedToolBindingDigest({
     agentMemory: binding.agentMemory,
     memoryImplementation: input.memory?.implementation ?? null,
-    launch,
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     servers: [...input.servers]
       .sort((left, right) => compareNames(left.serverName, right.serverName))
@@ -364,7 +328,7 @@ export async function admitPreparedOffer(
   if (liveToolBindingDigest !== summary.toolBindingDigest) {
     return decline(
       'preparation_tool_binding_digest_mismatch',
-      'the launch directory, toolset definition revisions, server argv or implementation identities this task'
+      'the toolset definition revisions, server argv or implementation identities this task'
       + ' resolved are not the ones the named preparation bound',
     );
   }
@@ -406,7 +370,6 @@ export async function admitPreparedOffer(
       memory: input.memory,
       toolBindingDigest: summary.toolBindingDigest,
       observationDigest: summary.observationDigest,
-      launch: input.launch,
       toolImplementations: input.implementations,
       toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     }),

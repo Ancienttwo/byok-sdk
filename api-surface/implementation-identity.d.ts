@@ -154,7 +154,6 @@ export interface ExternalCliDescendantLaunchV2 {
 export declare function parseExternalCliDescendantLaunch(value: unknown): ExternalCliDescendantLaunchV2 | undefined;
 // ==== @byok-sdk/implementation-identity dist/identity.d.ts ====
 import { type DescendantSpawnExpectationV1, type DescendantSpawnActualV1 } from './descendant-launch';
-import type { McpLaunchAttestation } from './launch-attestation';
 import type { OfficialExternalCliAdapter, OfficialExternalCliInstallV2 } from './external-cli';
 /**
  * The ONE authority for "which implementation backs this tool", and the only
@@ -488,7 +487,6 @@ export type ToolImplementationLocatorV1 = {
     }>;
     readonly command: string;
     readonly args: readonly string[];
-    readonly launch: McpLaunchAttestation;
 } | {
     readonly subject: Extract<ToolImplementationSubjectV1, {
         kind: 'runtime';
@@ -496,7 +494,6 @@ export type ToolImplementationLocatorV1 = {
     readonly runtimeEntry: RuntimeEntryV1;
     readonly command?: never;
     readonly args?: never;
-    readonly launch?: never;
 } | {
     readonly subject: Extract<ToolImplementationSubjectV1, {
         kind: 'sdk-helper';
@@ -504,14 +501,12 @@ export type ToolImplementationLocatorV1 = {
     readonly entry: SdkHelperEntryV1;
     readonly command?: never;
     readonly args?: never;
-    readonly launch?: never;
 } | {
     readonly subject: Extract<ToolImplementationSubjectV1, {
         kind: 'official-external-cli';
     }>;
     readonly command?: never;
     readonly args?: never;
-    readonly launch?: never;
 };
 /**
  * The install record a resolver returns, which is an attested identity MINUS
@@ -622,10 +617,9 @@ export interface ToolImplementationStatEntry extends ToolImplementationStatTuple
     readonly isSymbolicLink: boolean;
 }
 /**
- * The `node:fs` reads this module makes, as one injectable triple — the same
- * seam, for the same reason, as `LaunchCwdShellStat` in
- * `./trusted-launch-cwd.ts`: the checks below require a ROOT-OWNED file, and a
- * non-root test process cannot create one. Tests wrap the real implementation
+ * The `node:fs` reads this module makes, as one injectable triple: the checks
+ * below require a ROOT-OWNED file, and a non-root test process cannot create
+ * one. Tests wrap the real implementation
  * and override ownership alone, so the digest, the size and the mtime under
  * test are still read off a real file on disk.
  *
@@ -901,28 +895,9 @@ export {};
 // ==== @byok-sdk/implementation-identity dist/index.d.ts ====
 export * from './identity';
 export * from './environment';
-export type { McpLaunchAttestation, ResolvedMcpLaunchCwdLauncher } from './launch-attestation';
 export * from './spawn-binding';
 export * from './descendant-launch';
 export * from './external-cli';
-// ==== @byok-sdk/implementation-identity dist/launch-attestation.d.ts ====
-export type ResolvedMcpLaunchCwdLauncher = 
-/** POSIX: `interpreter` is the realpath of the system shell, `script` is the client-owned shell bootstrap. */
-{
-    readonly kind: 'shell';
-    readonly interpreter: string;
-    readonly script: string;
-}
-/** win32: `interpreter` is a plain-Node executable, `script` is this package's `bin/byok-launch-cwd.mjs`. */
- | {
-    readonly kind: 'node';
-    readonly interpreter: string;
-    readonly script: string;
-};
-export interface McpLaunchAttestation {
-    readonly launchCwd: string;
-    readonly launcher: ResolvedMcpLaunchCwdLauncher | null;
-}
 // ==== @byok-sdk/implementation-identity dist/spawn-binding.d.ts ====
 import { type SdkHelperEntryV1, type ToolImplementationAttestedV1, type ToolImplementationFsProbe, type ToolImplementationIdentityV1 } from './identity';
 export { KEYS_PI_INHERITED_ENV_NAMES, KEYS_PI_WINDOWS_ENV_NAMES } from './environment';

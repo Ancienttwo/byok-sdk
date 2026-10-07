@@ -17,7 +17,6 @@ import {
   qualifiedMcpToolName,
   type McpToolsetServerObservation,
 } from '../mcp';
-import { trustedCwd } from './fixtures/launch-cwd';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 
@@ -175,10 +174,8 @@ describe('PiAdapter against the fake-pi fixture', () => {
         modelId: 'gpt-5.2',
       },
     };
-    const session = await startAdapter(adapter,
-      task,
-      await makeCtx({ ...process.env, OPENAI_API_KEY: 'sk-sentinel' }),
-    );
+    const ctx = await makeCtx({ ...process.env, OPENAI_API_KEY: 'sk-sentinel' });
+    const session = await startAdapter(adapter, task, ctx);
     openSessions.push(session);
 
     expect(calls).toHaveLength(1);
@@ -195,7 +192,8 @@ describe('PiAdapter against the fake-pi fixture', () => {
       '--model',
       'gpt-5.2',
       '--runtime-entry', 'pi-rpc',
-      '--pi-cwd', await trustedCwd(),
+      // The Pi process starts in the session cwd, as in OAR.
+      '--pi-cwd', await fs.realpath(ctx.workspaceDir),
       '--pi-fixed-args', '[]',
       '--launch-binding', expect.any(String),
       '--pi-config-digest', expect.stringMatching(/^[0-9a-f]{64}$/),
@@ -244,7 +242,8 @@ describe('PiAdapter against the fake-pi fixture', () => {
       },
     };
 
-    const session = await startAdapter(adapter, task, await makeCtx());
+    const ctx = await makeCtx();
+    const session = await startAdapter(adapter, task, ctx);
     openSessions.push(session);
 
     expect(calls).toEqual([{
@@ -263,7 +262,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
         '--model',
         'gpt-5.2',
         '--runtime-entry', 'pi-rpc',
-        '--pi-cwd', await trustedCwd(),
+        '--pi-cwd', await fs.realpath(ctx.workspaceDir),
         '--pi-fixed-args', '[]',
         '--launch-binding', expect.any(String),
       '--pi-config-digest', expect.stringMatching(/^[0-9a-f]{64}$/),
@@ -459,11 +458,11 @@ describe('PiAdapter against the fake-pi fixture', () => {
     await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/No API key found/);
   });
 
-  it('carries the trusted launch directory for a task whose only MCP server is a reserved SDK helper', async () => {
+  it('carries the session cwd for a task whose only MCP server is a reserved SDK helper', async () => {
     // The reserved helpers (memory, messaging) are MCP server children like
     // any projected toolset server, and pi's own extension opens them from
-    // this config — so the boundary has to be in the file even when the
-    // device projected no host toolset at all.
+    // this config — so the cwd has to be in the file even when the device
+    // projected no host toolset at all.
     const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
     const spawnFn = ((_command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
       calls.push({ args: [...args], env: options?.env ?? {} });
@@ -485,8 +484,8 @@ describe('PiAdapter against the fake-pi fixture', () => {
       mcpServers: { byokagentmemory: { command: '/opt/byok-agent-memory-mcp' } },
       // `mcp-extension.ts` refuses to open any server without this and passes
       // it straight to `spawn` as the child's cwd (`pi-mcp-launch-cwd.test.ts`
-      // reads it back out of a real child).
-      launchCwd: await trustedCwd(),
+      // reads it back out of a real child). It is the session cwd, as in OAR.
+      launchCwd: ctx.workspaceDir,
     });
 
     await session.close();
@@ -531,9 +530,9 @@ describe('PiAdapter against the fake-pi fixture', () => {
       },
       observation: observationOf({ docs: ['search_docs'] }),
       // pi's own extension opens these servers, so the operator's
-      // command/args are untouched and the trusted directory travels beside
-      // them — it reaches `spawn` as `cwd`, not as a launcher wrapper.
-      launchCwd: await trustedCwd(),
+      // command/args are untouched and the session cwd travels beside them —
+      // it reaches `spawn` as `cwd`.
+      launchCwd: ctx.workspaceDir,
     });
 
     await session.close();

@@ -5,7 +5,6 @@ import { createReadStream, lstatSync, realpathSync, type Stats } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES, loaderEnvInjections } from './environment';
-import type { McpLaunchAttestation } from './launch-attestation';
 import type { OfficialExternalCliAdapter, OfficialExternalCliInstallV2 } from './external-cli';
 
 /**
@@ -386,24 +385,20 @@ export type ToolImplementationLocatorV1 = {
   readonly subject: Extract<ToolImplementationSubjectV1, { kind: 'mcp-server' }>;
   readonly command: string;
   readonly args: readonly string[];
-  readonly launch: McpLaunchAttestation;
 } | {
   readonly subject: Extract<ToolImplementationSubjectV1, { kind: 'runtime' }>;
   readonly runtimeEntry: RuntimeEntryV1;
   readonly command?: never;
   readonly args?: never;
-  readonly launch?: never;
 } | {
   readonly subject: Extract<ToolImplementationSubjectV1, { kind: 'sdk-helper' }>;
   readonly entry: SdkHelperEntryV1;
   readonly command?: never;
   readonly args?: never;
-  readonly launch?: never;
 } | {
   readonly subject: Extract<ToolImplementationSubjectV1, { kind: 'official-external-cli' }>;
   readonly command?: never;
   readonly args?: never;
-  readonly launch?: never;
 };
 
 /**
@@ -591,10 +586,9 @@ export interface ToolImplementationStatEntry extends ToolImplementationStatTuple
 }
 
 /**
- * The `node:fs` reads this module makes, as one injectable triple — the same
- * seam, for the same reason, as `LaunchCwdShellStat` in
- * `./trusted-launch-cwd.ts`: the checks below require a ROOT-OWNED file, and a
- * non-root test process cannot create one. Tests wrap the real implementation
+ * The `node:fs` reads this module makes, as one injectable triple: the checks
+ * below require a ROOT-OWNED file, and a non-root test process cannot create
+ * one. Tests wrap the real implementation
  * and override ownership alone, so the digest, the size and the mtime under
  * test are still read off a real file on disk.
  *

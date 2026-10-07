@@ -39,7 +39,6 @@ import {
 } from '../adapters/pi/prepared-prompt-frame';
 import { RPC_MAX_FRAME_BYTES } from '../util/rpc-frame';
 import { loaderEnvInjections } from '../daemon/environment';
-import type { McpLaunchAttestation } from '../daemon/trusted-launch-cwd';
 import {
   McpServerPool,
   parseMcpServerSpec,
@@ -487,20 +486,6 @@ function admitPreparedProviderProjection(
   });
 }
 
-function parseLaunch(value: unknown): McpLaunchAttestation {
-  if (!isPlainObject(value)) fail('launch must be an object');
-  const launchCwd = requireString(value.launchCwd, 'launch.launchCwd');
-  if (!isAbsolute(launchCwd)) fail('launch.launchCwd must be an absolute path');
-  const launcher = value.launcher;
-  if (launcher !== null && !isPlainObject(launcher)) fail('launch.launcher must be an object or null');
-  return Object.freeze({
-    launchCwd,
-    launcher: launcher === null
-      ? null
-      : Object.freeze({ ...launcher }) as McpLaunchAttestation['launcher'],
-  });
-}
-
 /** What the pi adapter writes for exactly one prepared operation. */
 interface PreparedLaunchConfig {
   readonly binding: ImplementationSpawnBindingV1;
@@ -511,7 +496,6 @@ interface PreparedLaunchConfig {
   readonly toolBindingDigest: string;
   readonly observationDigest: string;
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
-  readonly launch: McpLaunchAttestation;
   readonly agentMemory: PreparedAgentMemoryMode;
   readonly memory: PreparedAgentMemoryState | null;
   /** Private execution helper configuration, kept outside the Host MCP map. */
@@ -527,7 +511,7 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
     fail(`${configPath} could not be read as JSON: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
   if (!isPlainObject(parsed)) fail('the prepared launch configuration must be an object');
-  const keys = ['format','version','binding','descendantPlan','credentialSource','cwd','expected','toolBindingDigest','observationDigest','toolsetDefinitionRevisions','launch','agentMemory','memory','memoryCall','mcp'];
+  const keys = ['format','version','binding','descendantPlan','credentialSource','cwd','expected','toolBindingDigest','observationDigest','toolsetDefinitionRevisions','agentMemory','memory','memoryCall','mcp'];
   if (Object.keys(parsed).length !== keys.length || !keys.every(key => Object.hasOwn(parsed, key))) fail('prepared config has missing or unknown keys');
   if (parsed.format !== CONFIG_FORMAT) fail(`the prepared launch configuration must declare format ${CONFIG_FORMAT}`);
   if (parsed.version !== CONFIG_VERSION) fail(`the prepared launch configuration must declare version ${CONFIG_VERSION}`);
@@ -580,7 +564,6 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
     toolBindingDigest: requireString(parsed.toolBindingDigest, 'toolBindingDigest'),
     observationDigest: requireString(parsed.observationDigest, 'observationDigest'),
     toolsetDefinitionRevisions: requireStringRecord(parsed.toolsetDefinitionRevisions, 'toolsetDefinitionRevisions'),
-    launch: parseLaunch(parsed.launch),
     agentMemory: memoryMode.data,
     memory,
     memoryCall,
@@ -681,10 +664,9 @@ function parseArgs(argv: readonly string[]): string {
 }
 
 export async function runPiPreparedHost(argv: readonly string[]): Promise<void> {
-  // The same assertion `bin/byok-launch-cwd.mjs` makes, for the same reason and
-  // at the same kind of boundary: these take effect before this file's first
-  // statement, so this process cannot sanitize them for itself — it can only
-  // refuse to establish a prepared session under them.
+  // These take effect before this file's first statement, so this process
+  // cannot sanitize them for itself. It can only refuse to establish a
+  // prepared session under them: its own spawn binding is measured.
   if (process.execArgv.length > 0) {
     fail(`refusing to launch with a non-empty interpreter argv: ${process.execArgv.join(' ')}`);
   }
@@ -724,7 +706,6 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
     observation: config.mcp.observation,
     toolsetDefinitionRevisions: config.toolsetDefinitionRevisions,
     servers: projectedServerBindings(config.mcp),
-    launch: config.launch,
     toolImplementations: config.mcp.toolImplementations,
     runtimeIdentity,
     expectedToolBindingDigest: config.toolBindingDigest,

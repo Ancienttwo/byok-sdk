@@ -11,7 +11,6 @@ import { probeMcpServer } from '../daemon/mcp-tools-probe';
 import { createPreparedToolSurfaceAssembler } from '../daemon/prepared-tool-surface';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import * as identity from '../daemon/tool-implementation-identity';
-import * as launchBoundary from '../daemon/trusted-launch-cwd';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/fix-mcp-observation-deadline.mjs', import.meta.url));
 const ENV = { PATH: process.env.PATH ?? '' };
@@ -49,9 +48,6 @@ describe('S18-2: observation-wide deadline', () => {
     if (route === 'ordinary') {
       await expect(probeMcpServer('fixture', f.server, { env: ENV, timeoutMs })).rejects.toThrow(/timed out|deadline/iu);
     } else {
-      // Isolate observation timing from the host's separate trusted-directory
-      // prerequisite. This inert child performs no tool or filesystem work.
-      vi.spyOn(launchBoundary, 'resolveTrustedLaunchCwd').mockResolvedValue({ kind: 'resolved', dir: roots.at(-1)! });
       const assembler = createPreparedToolSurfaceAssembler({
         runtimeEnv: () => ENV,
         toolsetRegistry: new McpToolsetRegistry({ test: { mcpServers: { fixture: f.server } } }),

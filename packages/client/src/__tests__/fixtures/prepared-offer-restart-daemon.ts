@@ -16,7 +16,6 @@ import {
 } from '../../daemon/input-preparation-store';
 import { SUPPORTED_PREPARED_COMPILER_VERSION } from '../../adapters/pi/input-preparation';
 import { fingerprintPreparedToolSurface } from '../../daemon/prepared-tool-surface';
-import { mcpLaunchAttestation } from '../../daemon/trusted-launch-cwd';
 import {
   realToolImplementationFsProbe,
   resolveToolImplementationIdentity,
@@ -38,7 +37,6 @@ import {
 import type { McpToolsetConfig, RuntimeCapabilities, RuntimeInstallationObservationContext } from '../../types';
 import { StubRuntimeAdapter } from './stub-adapter';
 import { observationOf } from './mcp-observation';
-import { trustedCwd } from './launch-cwd';
 
 /**
  * One daemon LIFETIME of the prepared-offer lane, as its own operating-system
@@ -202,15 +200,12 @@ const toolsets: ReadonlyMap<string, McpToolsetConfig> = new Map([
 ]);
 const toolsetDefinitionRevisions = (): ReadonlyMap<string, string> => new Map([[TOOLSET_ID, TOOLSET_REVISION]]);
 
-const launchBinding = { cwd: await trustedCwd() } as const;
-const attestation = mcpLaunchAttestation(launchBinding);
 const implementation = await resolveToolImplementationIdentity(
   authority,
   {
     subject: { kind: 'mcp-server', toolsetId: TOOLSET_ID, serverName: SERVER_NAME },
     command: config.serverCommand,
     args: ['--stdio'],
-    launch: attestation,
   },
   LANE_ENV,
   rootOwnedProbe(),
@@ -367,14 +362,12 @@ async function seed(requestId: string, agentId: string): Promise<Record<string, 
     observation,
     agentMemory: 'none',
     runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
-    launch: attestation,
     toolsetDefinitionRevisions: { [TOOLSET_ID]: TOOLSET_REVISION },
     implementations,
   });
   if (!fingerprinted.ok) throw new Error(`fixture surface refused: ${fingerprinted.detail}`);
   const toolBindingDigest = preparedToolBindingDigest({
     agentMemory: 'none', memoryImplementation: null,
-    launch: attestation,
     toolsetDefinitionRevisions: { [TOOLSET_ID]: TOOLSET_REVISION },
     servers: [{
       serverName: SERVER_NAME,

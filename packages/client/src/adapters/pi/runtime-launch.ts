@@ -12,7 +12,6 @@ import {
 import {
   decideRuntimeLaunch, resolveRuntimeImplementation, type RuntimeLaunchDecisionV1, type RuntimeLaunchKindV1,
 } from '../../daemon/tool-implementation-identity';
-import { resolveTrustedLaunchCwd } from '../../daemon/trusted-launch-cwd';
 import { RuntimeExecutionFailure } from '../../runtime-failure';
 import { resolvePiRuntimeIdentity } from './resolve-bin';
 import { createRuntimeDescendantPlan, requiredRuntimePlanKinds, type RuntimeDescendantPlanV2 } from './runtime-descendant-plan';
@@ -32,6 +31,22 @@ export interface PiRuntimeLaunchResources {
 
 function failure(reason: string): RuntimeExecutionFailure {
   return new RuntimeExecutionFailure({ phase: 'start', category: 'authority', retry: 'non-retryable', reason });
+}
+
+/**
+ * The real path of the session cwd. The daemon can resolve a launch before it
+ * creates a new workspace directory, so a missing tail keeps its own names
+ * under the real path of its nearest existing parent.
+ */
+async function realSessionPath(target: string): Promise<string> {
+  const absolute = path.resolve(target);
+  try {
+    return await fs.realpath(absolute);
+  } catch (error) {
+    const parent = path.dirname(absolute);
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || parent === absolute) throw error;
+    return path.join(await realSessionPath(parent), path.basename(absolute));
+  }
 }
 
 export async function resolvePiRuntimeLaunch(options: {
@@ -100,11 +115,12 @@ export async function resolvePiRuntimeLaunch(options: {
         fixedArgv: description.fixedArgv, cwd: description.processCwd, envCommitments: description.directoryValues });
     } else {
       const dev = options.resolveDevInvocation();
-      const cwd = await resolveTrustedLaunchCwd();
-      if (cwd.kind !== 'resolved') throw failure(`Pi process cwd unavailable: ${cwd.reason}`);
+      // The Pi process starts in the session cwd, as in OAR. The host compares
+      // this value with its own `process.cwd()`, which is a real path.
       binding = Object.freeze({ format: 'byok.implementation-spawn', version: 1, identity,
         command: dev.command, ...(dev.entry === undefined ? {} : { entry: dev.entry }),
-        fixedArgv: Object.freeze([]), cwd: cwd.dir, envCommitments: Object.freeze(directoryValues) });
+        fixedArgv: Object.freeze([]), cwd: await realSessionPath(options.sessionCwd),
+        envCommitments: Object.freeze(directoryValues) });
     }
     let descendantPlan: RuntimeDescendantPlanV2 | null = null;
     if (declaration.kind === 'attested') {

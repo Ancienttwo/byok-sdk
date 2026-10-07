@@ -35,7 +35,6 @@ import { admitPreparedOffer } from '../daemon/prepared-offer-admission';
 import { preparedMemoryProjection, type PreparedAgentMemoryState } from '../daemon/prepared-agent-memory';
 import * as preparedAgentMemory from '../daemon/prepared-agent-memory';
 import * as agentMemory from '../daemon/agent-memory';
-import { mcpLaunchAttestation } from '../daemon/trusted-launch-cwd';
 import {
   realToolImplementationFsProbe,
   resolveToolImplementationIdentity,
@@ -60,7 +59,6 @@ import {
 import type { McpToolsetConfig, RuntimeCapabilities, RuntimeInstallationObservationContext } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { observationOf } from './fixtures/mcp-observation';
-import { trustedCwd } from './fixtures/launch-cwd';
 import { validatePreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
 import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../bin/agent-memory-mcp-server';
 import { AGENT_MEMORY_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
@@ -71,8 +69,8 @@ import { AGENT_MEMORY_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
  * compute with.
  *
  * Nothing about the counted record is faked into agreement: the fixture below
- * builds it the way a preparation builds it — same launch attestation, same
- * resolved implementation identity, same `fingerprintPreparedToolSurface`, same
+ * builds it the way a preparation builds it — same resolved implementation
+ * identity, same `fingerprintPreparedToolSurface`, same
  * `preparedToolBindingDigest` — and every mismatch case perturbs exactly ONE of
  * those inputs. A test that hard-coded the digests would pass forever after a
  * formula change, which is the one thing this lane cannot afford.
@@ -288,7 +286,7 @@ function artifact(recordId: string): InputPreparationArtifact {
 
 /**
  * Build the durable record a preparation would have written on THIS machine,
- * for THIS toolset, under THIS launch boundary.
+ * for THIS toolset.
  *
  * `summaryOverrides` is how every mismatch case below perturbs exactly one
  * compared item: the record is otherwise identical to what the admission will
@@ -332,15 +330,12 @@ async function lane(options: {
 
   // Resolved through the production resolver, with the production fs probe
   // seam — the same call `TaskRunner.handleOffer` makes for this same server.
-  const launch = { cwd: await trustedCwd() } as const;
-  const attestation = mcpLaunchAttestation(launch);
   const implementation = await resolveToolImplementationIdentity(
     authority,
     {
       subject: { kind: 'mcp-server', toolsetId: TOOLSET_ID, serverName: SERVER_NAME },
       command: serverCommand,
       args: ['--stdio'],
-      launch: attestation,
     },
     LANE_ENV,
     rootOwnedProbe(),
@@ -354,7 +349,6 @@ async function lane(options: {
     memory: null,
     observation,
     runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
-    launch: attestation,
     toolsetDefinitionRevisions: { [TOOLSET_ID]: revision },
     implementations,
   });
@@ -363,7 +357,6 @@ async function lane(options: {
   const toolBindingDigest = preparedToolBindingDigest({
     agentMemory: 'none',
     memoryImplementation: null,
-    launch: attestation,
     toolsetDefinitionRevisions: { [TOOLSET_ID]: revision },
     servers: [{
       serverName: SERVER_NAME,
@@ -519,12 +512,10 @@ async function memoryOnlyRecord(): Promise<{
     retryHorizonMs: 60 * 60 * 1000,
   });
   await store.open();
-  const launch = { cwd: await trustedCwd() } as const;
-  const attestation = mcpLaunchAttestation(launch);
   const memoryProjection = preparedMemoryProjection('read', MEMORY, inputPreparationRuntimeIdentityString(RUNTIME));
   const fingerprinted = await fingerprintPreparedToolSurface({
     agentMemory: 'read', memory: MEMORY, observation: {},
-    runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME), launch: attestation,
+    runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
     toolsetDefinitionRevisions: {}, implementations: {},
   });
   if (!fingerprinted.ok) throw new Error(fingerprinted.message);
@@ -538,7 +529,7 @@ async function memoryOnlyRecord(): Promise<{
     requestBytes: 33, projectionBytes: 19, projection: PROJECTION, residual: [...RESIDUAL],
     observationDigest: fingerprinted.fingerprint.observationDigest,
     toolBindingDigest: preparedToolBindingDigest({
-      agentMemory: 'read', memoryImplementation: MEMORY.implementation, launch: attestation,
+      agentMemory: 'read', memoryImplementation: MEMORY.implementation,
       toolsetDefinitionRevisions: {}, servers: [],
     }),
     toolImplementationKinds: memoryProjection.toolImplementationKinds,
@@ -553,8 +544,6 @@ async function memoryOnlyRecord(): Promise<{
 
 /** A sealed record whose tool surface is empty: no Agent memory, no Host MCP toolsets. */
 async function toollessRecord(options: {
-  /** A launch directory other than this machine's trusted one. */
-  readonly launchCwd?: string;
   /** Digests counted elsewhere (the real daemon assembler) instead of by this fixture. */
   readonly counted?: { readonly toolBindingDigest: string; readonly observationDigest: string };
 } = {}): Promise<{
@@ -567,11 +556,9 @@ async function toollessRecord(options: {
     retryHorizonMs: 60 * 60 * 1000,
   });
   await store.open();
-  const launch = { cwd: options.launchCwd ?? await trustedCwd() } as const;
-  const attestation = mcpLaunchAttestation(launch);
   const fingerprinted = await fingerprintPreparedToolSurface({
     agentMemory: 'none', memory: null, observation: {},
-    runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME), launch: attestation,
+    runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
     toolsetDefinitionRevisions: {}, implementations: {},
   });
   if (!fingerprinted.ok) throw new Error(fingerprinted.message);
@@ -585,7 +572,7 @@ async function toollessRecord(options: {
     requestBytes: 33, projectionBytes: 19, projection: PROJECTION, residual: [...RESIDUAL],
     observationDigest: options.counted?.observationDigest ?? fingerprinted.fingerprint.observationDigest,
     toolBindingDigest: options.counted?.toolBindingDigest ?? preparedToolBindingDigest({
-      agentMemory: 'none', memoryImplementation: null, launch: attestation,
+      agentMemory: 'none', memoryImplementation: null,
       toolsetDefinitionRevisions: {}, servers: [],
     }),
     toolImplementationKinds: fingerprinted.fingerprint.toolImplementationKinds,
@@ -676,9 +663,6 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     expect(start.preparation.agentMemory).toBe('none');
     expect(start.preparation.toolImplementations).toEqual({});
     expect(start.preparation.toolsetDefinitionRevisions).toEqual({});
-    // The launch boundary is still proven and bound; it comes only from the trusted resolver.
-    expect(start.input.mcpLaunch).toEqual({ cwd: await trustedCwd() });
-    expect(start.preparation.launch).toEqual({ cwd: await trustedCwd() });
 
     const session = adapter.sessions[0]!;
     session.emit({ type: 'progress', text: JSON.stringify(document) });
@@ -741,7 +725,6 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
       profileRevision: AGENT_REF.profileRevision,
     });
     expect(launched).not.toHaveProperty('permissionMode');
-    expect(launched.launch).toEqual({ cwd: await trustedCwd() });
     expect(launched.toolImplementations).toEqual(built.implementations);
 
     await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-prepared-ok', seq: 2 }));
@@ -754,12 +737,10 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
       retryHorizonMs: 60 * 60 * 1000,
     });
     await store.open();
-    const launch = { cwd: await trustedCwd() } as const;
-    const attestation = mcpLaunchAttestation(launch);
     const memoryProjection = preparedMemoryProjection('read', MEMORY, inputPreparationRuntimeIdentityString(RUNTIME));
     const fingerprinted = await fingerprintPreparedToolSurface({
       agentMemory: 'read', memory: MEMORY, observation: {},
-      runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME), launch: attestation,
+      runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
       toolsetDefinitionRevisions: {}, implementations: {},
     });
     if (!fingerprinted.ok) throw new Error(fingerprinted.message);
@@ -776,7 +757,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
       requestBytes: 33, projectionBytes: 19, projection: PROJECTION, residual: [...RESIDUAL],
       observationDigest: fingerprinted.fingerprint.observationDigest,
       toolBindingDigest: preparedToolBindingDigest({
-        agentMemory: 'read', memoryImplementation: MEMORY.implementation, launch: attestation,
+        agentMemory: 'read', memoryImplementation: MEMORY.implementation,
         toolsetDefinitionRevisions: {}, servers: [],
       }),
       toolImplementationKinds: memoryProjection.toolImplementationKinds,
@@ -797,7 +778,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
         reference: record.recordId, requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST,
       },
       agentRef: AGENT_REF, deviceId: DEVICE_ID, policyRevision: POLICY_REVISION, runtime: RUNTIME,
-      offeredAgentMemory: 'read', memory: MEMORY, launch,
+      offeredAgentMemory: 'read', memory: MEMORY,
       observation: {}, implementations: {}, servers: [], toolsetDefinitionRevisions: {}, nowMs: Date.now(),
     });
     if (!admitted.ok) throw new Error(`${admitted.reason}: ${admitted.detail}`);
@@ -1311,7 +1292,7 @@ describe('every compared item declines by its own name, with no claim and no pin
       },
     },
     {
-      name: 'a launch directory, definition revision, argv or identity the record did not bind',
+      name: 'a definition revision, argv or identity the record did not bind',
       reason: 'preparation_tool_binding_digest_mismatch',
       build: async () => {
         const built = await lane({ summaryOverrides: { toolBindingDigest: 'e'.repeat(64) } });
@@ -1391,33 +1372,6 @@ describe('every compared item declines by its own name, with no claim and no pin
     expect(built.store.get(built.recordId)?.pin).toBeUndefined();
     expect(adapter.preparedStartCalls).toHaveLength(0);
     expect(adapter.startCalls).toHaveLength(0);
-  });
-
-  it('declines a prepared offer whose task resolved a launcher-wrapped MCP boundary', async () => {
-    const built = await lane();
-    // A claude-shaped adapter: an external CLI spawns its servers through a
-    // launcher, and a preparation never attests one.
-    const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE, true, {
-      mcpServerLaunch: 'launcher-wrapped',
-    });
-    const sent: Envelope[] = [];
-    const runner = await makeRunner(built, adapter, sent);
-
-    await runner.handleEnvelope(createEnvelope(
-      'task.offer_prepared',
-      {
-        egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
-        runtime: 'claude',
-        agentRef: AGENT_REF,
-        agentMemory: 'none',
-        requiredToolsets: [TOOLSET_ID],
-        preparation: reference(built),
-      },
-      { taskId: 'task-launcher-wrapped', seq: 1 },
-    ));
-
-    expect(declineReason(sent)).toContain('preparation_launch_attestation_mismatch');
-    expect(built.store.get(built.recordId)?.pin).toBeUndefined();
   });
 });
 
@@ -1821,18 +1775,16 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
     const record = await toollessRecord({ counted: counted.surface });
     const stored = record.store.get(record.recordId);
     if (stored === undefined) throw new Error('tool-less record disappeared');
-    const launch = { cwd: await trustedCwd() } as const;
     const admitted = await admitPreparedOffer({
       record: stored, artifactPath: record.store.artifactPathOf(stored),
       offered: { reference: record.recordId, requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST },
       agentRef: AGENT_REF, deviceId: DEVICE_ID, policyRevision: POLICY_REVISION, runtime: RUNTIME,
-      offeredAgentMemory: 'none', memory: null, launch,
+      offeredAgentMemory: 'none', memory: null,
       observation: {}, implementations: {}, servers: [], toolsetDefinitionRevisions: {}, nowMs: Date.now(),
     });
     if (!admitted.ok) throw new Error(`${admitted.reason}: ${admitted.detail}`);
     expect(admitted.launch.agentMemory).toBe('none');
     expect(admitted.launch.memory).toBeNull();
-    expect(admitted.launch.launch).toEqual(launch);
     expect(Object.keys(admitted.launch.toolImplementations)).toEqual([]);
     expect(admitted.launch.toolsetDefinitionRevisions).toEqual({});
     // Admission recomputed both digests from live facts and matched the producer's.
@@ -1848,7 +1800,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
       record: stored, artifactPath: built.store.artifactPathOf(stored),
       offered: reference(built),
       agentRef: AGENT_REF, deviceId: DEVICE_ID, policyRevision: POLICY_REVISION, runtime: RUNTIME,
-      offeredAgentMemory: 'none', memory: null, launch: { cwd: await trustedCwd() },
+      offeredAgentMemory: 'none', memory: null,
       observation: undefined, implementations: built.implementations,
       servers: [{ serverName: SERVER_NAME, toolsetId: TOOLSET_ID, command: built.serverCommand, args: ['--stdio'] }],
       toolsetDefinitionRevisions: { [TOOLSET_ID]: TOOLSET_REVISION }, nowMs: Date.now(),
@@ -1889,38 +1841,6 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
     const wantsNone = await run(memoryRecord, (id) => toollessOffer(id, 'task-memory-record-wants-none', { agentMemory: 'none' }), { adapter: memoryAdapter });
     expect(declineReason(wantsNone.sent)).toBe('agent_memory_mismatch: the offered Agent memory selection differs from the named preparation');
     expectNothingCommitted(wantsNone.sent, memoryAdapter, memoryRecord);
-  });
-
-  it('declines non-retryably, before any pin, when no launch directory can be proven', async () => {
-    const record = await toollessRecord();
-    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
-    const { sent, pin } = await run(record, (id) => toollessOffer(id, 'task-toolless-no-launch-dir'), {
-      adapter,
-      extra: { mcpLaunchCwd: { dir: path.join(os.tmpdir(), 'byok-no-such-launch-dir-for-toolless') } },
-    });
-    expect(declineReason(sent)).toContain('MCP toolset launch directory unavailable');
-    expectNothingCommitted(sent, adapter, record);
-    expect(pin).not.toHaveBeenCalled();
-  });
-
-  it('declines a launcher-wrapped runtime as preparation_launch_attestation_mismatch', async () => {
-    const record = await toollessRecord();
-    const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, ALL_MODES, true, {
-      mcpServerLaunch: 'launcher-wrapped',
-    });
-    const { sent, pin } = await run(record, (id) => toollessOffer(id, 'task-toolless-launcher-wrapped', { runtime: 'claude' }), { adapter });
-    expect(declineReason(sent)).toContain('preparation_launch_attestation_mismatch');
-    expectNothingCommitted(sent, adapter, record);
-    expect(pin).not.toHaveBeenCalled();
-  });
-
-  it('declines a record bound to another launch directory as preparation_tool_binding_digest_mismatch', async () => {
-    const record = await toollessRecord({ launchCwd: '/byok-another-launch-directory' });
-    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
-    const { sent, pin } = await run(record, (id) => toollessOffer(id, 'task-toolless-other-launch-dir'), { adapter });
-    expect(declineReason(sent)).toContain('preparation_tool_binding_digest_mismatch');
-    expectNothingCommitted(sent, adapter, record);
-    expect(pin).not.toHaveBeenCalled();
   });
 
   it('is rejected by the protocol schema when an offer names an empty requiredToolsets', () => {

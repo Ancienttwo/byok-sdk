@@ -408,15 +408,15 @@ describe('remote input preparation: in-process, never the control socket', () =>
     const harness = await makeHarness();
     const first = await harness.handle(payload());
 
-    // What a `toolsets.reload`, a replaced launch directory or a re-measured
-    // implementation looks like to the replay path: the spawn-free binding
+    // What a `toolsets.reload` or a re-measured implementation looks like to
+    // the replay path: the spawn-free binding
     // digest no longer matches the one the frozen artifact recorded.
     harness.toolSurface.toolBindingDigest = 'binding-digest-2';
     const replayed = await harness.handle(payload());
 
     expect(replayed).toEqual(first);
     // Reporting history does not re-observe or re-count. Prepared execution
-    // admission remains responsible for refusing the changed launch binding.
+    // admission remains responsible for refusing the changed binding.
     expect(harness.toolSurface.assembleCalls).toHaveLength(1);
     expect(harness.counter.calls).toHaveLength(1);
   });
@@ -529,23 +529,6 @@ describe('remote input preparation: in-process, never the control socket', () =>
     if (completion.outcome !== 'rejected') throw new Error('unreachable');
     expect(completion.reason).toBe('toolsets_unobservable');
     expect(harness.compiler.calls).toHaveLength(0);
-  });
-
-  it('reports an unprovable launch boundary rather than observing in an unproven directory', async () => {
-    const toolSurface = recordingToolSurface();
-    toolSurface.refusal = {
-      ok: false,
-      code: 'launch_boundary_unavailable',
-      detail: 'launch_boundary_unavailable:platform_default_is_writable',
-      message: 'no non-writable MCP launch directory could be proven on this device',
-    };
-    const harness = await makeHarness({ toolSurface });
-    const completion = await harness.handle(payload());
-
-    if (completion.outcome !== 'rejected') throw new Error('unreachable');
-    expect(completion.reason).toBe('launch_boundary_unavailable');
-    expect(harness.compiler.calls).toHaveLength(0);
-    expect(harness.counter.calls).toHaveLength(0);
   });
 
   it('keeps the mailbox row when the completion itself cannot be recorded', async () => {

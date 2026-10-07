@@ -45,13 +45,6 @@ export interface McpToolsProbeOptions {
    */
   env: Readonly<Record<string, string>>;
   /**
-   * Working directory for the probed child — the same directory the runtime
-   * CLI is spawned in, so a server resolving relative paths sees what it will
-   * see for real. Omitted only when no such directory is resolved before
-   * admission.
-   */
-  cwd?: string;
-  /**
    * What this daemon established about the implementation behind this server
    * (`./tool-implementation-identity.ts`), forwarded to the shared MCP core so
    * the probe spawn re-measures an attested one before starting it.
@@ -81,7 +74,6 @@ export async function probeMcpServer(
   return observeMcpServer(serverName, server, {
     ...(options.label === undefined ? {} : { label: options.label }),
     env: options.env,
-    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     ...(options.implementation === undefined ? {} : { implementation: options.implementation }),
     timeoutMs: options.timeoutMs ?? MCP_TOOLS_PROBE_TIMEOUT_MS,
   });

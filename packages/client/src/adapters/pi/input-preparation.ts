@@ -12,7 +12,6 @@ import type {
   InputPreparationRuntimeIdentityV1,
 } from '../../input-preparation';
 import type { McpToolsetServerObservation } from '../../mcp/observation';
-import type { McpLaunchAttestation } from '../../daemon/trusted-launch-cwd';
 import {
   toolImplementationUnavailable,
   type ToolImplementationAttestedV1,
@@ -801,19 +800,6 @@ export interface McpToolFingerprintInput {
   /** The resolved native runtime identity string the binding already uses. */
   readonly runtimeIdentity: string;
   /**
-   * WHERE this tool's server is launched, and through what.
-   *
-   * Carried beside the toolset's `definitionRevision` rather than inside it
-   * (`daemon/toolset-registry.ts`): that digest is the operator's configured
-   * intent — the `command`/`args` they wrote and the classification they
-   * declared — and an SDK launcher upgrade is not a change to their
-   * configuration. Both are still bound here, so a launch directory or a
-   * launcher that changed between preparation and launch is drift and the
-   * frozen manifest is refused, without churning the operator's revision on
-   * every SDK release.
-   */
-  readonly launch: McpLaunchAttestation;
-  /**
    * What the daemon established about the implementation behind this server
    * (`daemon/tool-implementation-identity.ts`), bound WHOLE rather than as a
    * label: an attested identity carries the install path, the closure digest
@@ -835,7 +821,7 @@ export interface NativeToolFingerprintInput {
 
 export async function mcpToolObservationFingerprint(input: McpToolFingerprintInput): Promise<string> {
   return canonicalDigest({
-    v: 1,
+    v: 2,
     source: 'mcp',
     toolsetId: input.toolsetId,
     toolsetDefinitionRevision: input.toolsetDefinitionRevision,
@@ -845,7 +831,6 @@ export async function mcpToolObservationFingerprint(input: McpToolFingerprintInp
     toolName: input.toolName,
     toolSchemaDigest: await canonicalDigest(input.inputSchema),
     runtimeIdentity: input.runtimeIdentity,
-    launch: { launchCwd: input.launch.launchCwd, launcher: input.launch.launcher },
     implementationIdentity: input.implementation,
   });
 }
@@ -866,14 +851,6 @@ export interface ToolExecutorsRequest {
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
   /** `toolsetId` -> the registry's definition revision for it. Every observed toolset must appear. */
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
-  /**
-   * The launch boundary this task's MCP servers were observed under and will
-   * run under — `daemon/trusted-launch-cwd.ts`'s
-   * {@link McpLaunchAttestation}. Required, not optional: a manifest frozen
-   * without it would validate a launch in any directory, which is the exact
-   * fact it exists to pin.
-   */
-  readonly launch: McpLaunchAttestation;
   /**
    * `serverName` -> the implementation identity this daemon resolved for it,
    * once, before anything was spawned. Every observed server must appear;
@@ -946,7 +923,6 @@ export async function buildToolExecutorsFromObservation(
       toolName: tool.toolName,
       inputSchema: tool.inputSchema,
       runtimeIdentity: request.runtimeIdentity,
-      launch: request.launch,
       implementation,
     });
   }

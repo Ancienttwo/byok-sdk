@@ -26,7 +26,6 @@ import { observeMcpServer, type McpToolsetServerObservation } from '../mcp';
 import type { McpToolsetConfig, RuntimeCapabilities } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { observationOf } from './fixtures/mcp-observation';
-import { trustedCwd } from './fixtures/launch-cwd';
 
 /**
  * The two production spawn points of one task's MCP toolset servers, and the
@@ -191,10 +190,9 @@ describe('one resolve per server reaches both spawn points', () => {
           command: '/opt/salesko/bin/mcp',
           args: ['--stdio'],
         });
-        expect(input.launch.launchCwd).toBe(await trustedCwd());
         // The locator is the whole of what a host is asked. It carries no
         // environment, and a resolver that wanted one could not have it.
-        expect(Object.keys(input).sort()).toEqual(['args', 'command', 'launch', 'subject']);
+        expect(Object.keys(input).sort()).toEqual(['args', 'command', 'subject']);
         return {
           kind: 'attested',
           authority: 'host-install-record',
@@ -491,7 +489,7 @@ async function loadExtension(
     mcpEnv,
     mcpServers: { salesko: { command: process.execPath, args: [script, '{}'] } },
     observation,
-    launchCwd: await trustedCwd(),
+    launchCwd: process.cwd(),
     ...(toolImplementations === undefined ? {} : { toolImplementations }),
   }));
   process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;

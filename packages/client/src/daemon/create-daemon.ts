@@ -9,7 +9,6 @@ import {
 } from '@byok-sdk/core';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { statSync } from 'node:fs';
 import {
   createEnvelope,
   decodeEnvelope,
@@ -187,7 +186,6 @@ import {
 import { createPreparedToolSurfaceAssembler } from './prepared-tool-surface';
 import { buildRuntimeEnv } from './environment';
 import { resolveAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
-import type { McpLaunchCwdConfig } from './trusted-launch-cwd';
 import { preflightAgentMessageMcp } from './agent-message-mcp-preflight';
 import { resolveAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
 import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
@@ -667,26 +665,6 @@ export interface DaemonConfig {
    * method for intents; the only entry is the mailbox notice.
    */
   agentMemoryIntents?: AgentMemoryIntentTransport;
-  /**
-   * Operator input to the MCP toolset launch boundary
-   * (`./trusted-launch-cwd.ts`), forwarded verbatim to
-   * `TaskRunnerDeps.mcpLaunchCwd`.
-   *
-   * Absent means the platform default directory and — only when this process
-   * is provably plain Node — `process.execPath` as the launcher interpreter.
-   * Neither default is assumed: both are proven per offer, and an offer whose
-   * boundary this daemon cannot prove is declined non-retryably rather than
-   * started without one.
-   *
-   * A PRESENT section is validated here, at construction, the same discipline
-   * `deviceAssertion` and `inputPreparation` follow: a non-absolute `dir`, or a
-   * `launcherInterpreter` that is not an existing regular file, is a
-   * construction error rather than a per-offer decline nobody reads. What
-   * cannot be decided here is deliberately left to the resolver: whether the
-   * directory is still non-writable is a fact about the filesystem NOW, so it
-   * is proven once per offer and never cached.
-   */
-  mcpLaunchCwd?: McpLaunchCwdConfig;
   /**
    * The host's install-record authority for MCP toolset server
    * implementations (`./tool-implementation-identity.ts`), forwarded verbatim
@@ -1308,47 +1286,6 @@ function resolveDeviceAssertionTtlMs(config: DeviceAssertionConfig | undefined):
   return ttlMs;
 }
 
-/**
- * Validates `DaemonConfig.mcpLaunchCwd` — see that field's own doc comment for
- * why this is a construction error and what is deliberately NOT checked here.
- *
- * `launcherInterpreter` is stat'ed (following symlinks: a packaged Node is
- * routinely a symlink into a versioned prefix) and required to be a regular
- * file. An attested interpreter that does not exist would otherwise surface as
- * a spawn failure inside the first task that needed a launcher-wrapped
- * runtime, long after the operator could connect it to what they configured.
- */
-function validateMcpLaunchCwd(config: McpLaunchCwdConfig | undefined): McpLaunchCwdConfig | undefined {
-  if (config === undefined) return undefined;
-  if (config.dir !== undefined && (!path.isAbsolute(config.dir) || /[\u0000\r\n]/u.test(config.dir))) {
-    throw new Error(
-      `DaemonConfig.mcpLaunchCwd.dir must be an absolute directory path — got ${JSON.stringify(config.dir)}. Omit the section to use the platform default (\`/\` on POSIX, %SystemRoot% on Windows).`,
-    );
-  }
-  const interpreter = config.launcherInterpreter;
-  if (interpreter !== undefined) {
-    if (!path.isAbsolute(interpreter) || /[\u0000\r\n]/u.test(interpreter)) {
-      throw new Error(
-        `DaemonConfig.mcpLaunchCwd.launcherInterpreter must be an absolute executable path — got ${JSON.stringify(interpreter)}`,
-      );
-    }
-    let stats;
-    try {
-      stats = statSync(interpreter);
-    } catch {
-      throw new Error(
-        `DaemonConfig.mcpLaunchCwd.launcherInterpreter ${JSON.stringify(interpreter)} does not exist`,
-      );
-    }
-    if (!stats.isFile()) {
-      throw new Error(
-        `DaemonConfig.mcpLaunchCwd.launcherInterpreter ${JSON.stringify(interpreter)} is not a regular file`,
-      );
-    }
-  }
-  return config;
-}
-
 export function createDaemonWithAdapters(
   config: DaemonConfig,
   adapters: RuntimeAdapter[],
@@ -1376,6 +1313,9 @@ export function buildDaemonWithAdapters(
   }
   if (config.agentEgress !== undefined && Object.hasOwn(config.agentEgress, 'sanitizer')) {
     throw new Error('DaemonConfig.agentEgress.sanitizer was removed: Agent egress goes to the Host as is');
+  }
+  if (Object.hasOwn(config, 'mcpLaunchCwd')) {
+    throw new Error('DaemonConfig.mcpLaunchCwd was removed: MCP servers start in the session cwd, as the agent runtime does');
   }
   if (config.providerProvisioning !== undefined && typeof config.providerProvisioning !== 'function') {
     throw new Error('DaemonConfig.providerProvisioning must be a handler function when present');
@@ -1508,7 +1448,6 @@ export function buildDaemonWithAdapters(
   // Resolved into a `Set` (exact membership, no ordering, no pattern) and a
   // number here, once, so the handler below cannot read a different allowlist
   // or a different TTL than the one that was validated.
-  const mcpLaunchCwd = validateMcpLaunchCwd(config.mcpLaunchCwd);
   const deviceAssertionAudiences = resolveDeviceAssertionAudiences(config.deviceAssertion);
   const deviceAssertionTtlMs = resolveDeviceAssertionTtlMs(config.deviceAssertion);
   /**
@@ -1542,17 +1481,17 @@ export function buildDaemonWithAdapters(
   const inputPreparationLimits =
     config.inputPreparation === undefined ? undefined : validateInputPreparationLimits(config.inputPreparation.limits);
   /**
-   * The ONE prepared-tool-surface entry, bound to this daemon's registry,
-   * launch-cwd configuration and implementation authority
+   * The ONE prepared-tool-surface entry, bound to this daemon's registry and
+   * implementation authority
    * (`./prepared-tool-surface.ts`).
    *
    * It replaces the remote lane's former `observeRequiredToolsets`, which
    * probed with a label, a timeout and an environment and nothing else — no
-   * trusted launch directory and no implementation identity. There is
-   * deliberately no second path left: both the local `input_preparation.prepare`
-   * control call and the remote `agent.input.preparation` envelope reach this
-   * assembler through `InputPreparationService.prepare`, so a preparation's
-   * fingerprints and an offer's admission bind the same launch boundary.
+   * implementation identity. There is deliberately no second path left: both
+   * the local `input_preparation.prepare` control call and the remote
+   * `agent.input.preparation` envelope reach this assembler through
+   * `InputPreparationService.prepare`, so a preparation's fingerprints and an
+   * offer's admission bind the same facts.
    *
    * The runtime environment is resolved PER CALL, exactly as the offer path
    * builds it — a value captured at construction would miss a later change.
@@ -1561,7 +1500,6 @@ export function buildDaemonWithAdapters(
   const preparedToolSurface = createPreparedToolSurfaceAssembler({
     memoryAvailable: () => isAgentMemorySecureFilesystemAvailable(config.agentMemoryFilesystem !== undefined),
     toolsetRegistry,
-    ...(mcpLaunchCwd === undefined ? {} : { mcpLaunchCwd }),
     runtimeEnv: preparationRuntimeEnv,
     ...(config.toolImplementationAuthority === undefined
       ? {}
@@ -2360,10 +2298,6 @@ export function buildDaemonWithAdapters(
             ),
           },
         }),
-      // The operator's launch-boundary input, already validated above. Passed
-      // through unchanged: the daemon holds no second opinion about which
-      // directory is trusted — `resolveTrustedLaunchCwd` proves it per offer.
-      ...(mcpLaunchCwd === undefined ? {} : { mcpLaunchCwd }),
       ...(config.toolImplementationAuthority === undefined
         ? {}
         : { toolImplementationAuthority: config.toolImplementationAuthority }),

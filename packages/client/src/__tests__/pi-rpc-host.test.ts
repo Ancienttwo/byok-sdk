@@ -179,6 +179,55 @@ describe('SDK ordinary Pi RPC entry', () => {
     }
   }, 25_000);
 
+  // D8: every lane pre-trusts the session cwd, as in OAR. The key lane runs
+  // the same host with the per-launch projection as its agent dir and a
+  // separate session dir. The host starts in the session cwd.
+  it.each(['user agent dir', 'BYOK key projection'] as const)('loads a project .pi extension from the session cwd in the %s lane', async (lane) => {
+    const f = fixture();
+    mkdirSync(join(f.cwd, '.pi', 'extensions'), { recursive: true });
+    writeFileSync(join(f.cwd, '.pi', 'extensions', 'project-probe.ts'),
+      'export default function (pi) { pi.registerCommand("project-probe", { description: "project extension probe", handler: async () => {} }); }\n');
+    const dirs: Record<string, string> = lane === 'user agent dir'
+      ? { PI_CODING_AGENT_DIR: join(f.root, 'agent') }
+      : { PI_CODING_AGENT_DIR: join(f.root, 'projection'), PI_CODING_AGENT_SESSION_DIR: join(f.root, 'key-sessions') };
+    for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true });
+    const serialized = serializePiHostConfig({ ...f.config, binding: { ...f.config.binding, cwd: f.cwd, envCommitments: dirs } });
+    writeFileSync(f.configPath, serialized.bytes);
+    const child = spawn(bun, [f.entry, `--config-digest=${serialized.digest}`, '--config', f.configPath, '--mode', 'rpc', '--provider', 'anthropic', '--model', 'claude-sonnet-4-5'], {
+      cwd: f.cwd, env: { ...f.env, ...dirs }, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.on('data', (data) => { stderr += data; });
+    try {
+      const response = await new Promise<Record<string, any>>((accept, reject) => {
+        let output = '';
+        const timeout = setTimeout(() => reject(new Error(`RPC timed out: ${stderr}`)), 15_000);
+        child.on('error', reject);
+        child.on('exit', (code) => { clearTimeout(timeout); reject(new Error(`exit ${code}: ${stderr}`)); });
+        child.stdout.on('data', (data) => {
+          output += data;
+          for (;;) {
+            const newline = output.indexOf('\n');
+            if (newline < 0) break;
+            const line = output.slice(0, newline); output = output.slice(newline + 1);
+            try {
+              const frame = JSON.parse(line);
+              if (frame.id === 'commands') { clearTimeout(timeout); accept(frame); }
+            } catch { reject(new Error(`non-RPC stdout: ${line}`)); }
+          }
+        });
+        child.stdin.write(JSON.stringify({ id: 'commands', type: 'get_commands' }) + '\n');
+      });
+      expect(response.success).toBe(true);
+      const commands = (response.data.commands as Array<{ name: string; source: string }>).map(({ name, source }) => ({ name, source }));
+      expect(commands).toContainEqual({ name: 'project-probe', source: 'extension' });
+      expect(stderr).not.toContain('Failed to load extension');
+    } finally {
+      const exited = new Promise<void>((done) => child.once('exit', () => done()));
+      if (child.exitCode === null) { child.kill('SIGTERM'); await exited; }
+    }
+  }, 25_000);
+
   it.each(['cwd','binding'] as const)('rejects changed config %s bytes before creating a native session', (field) => {
     const f = fixture();
     const changed = field==='cwd' ? {...f.config,cwd:f.cwd+'-changed'} : {...f.config,binding:{...f.config.binding,cwd:f.sealed+'-changed'}};

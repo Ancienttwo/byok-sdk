@@ -14,7 +14,6 @@ import * as runtimeStart from '../daemon/runtime-start';
 import { RuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../runtime-failure';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { trustedCwd } from './fixtures/launch-cwd';
 
 const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))));
@@ -497,17 +496,11 @@ describe('required Agent message completion gate', () => {
     // The helper is proved under the conditions it will actually run in: the
     // exact server config, the environment this Pi task's MCP servers get
     // (the runtime env through the Pi MCP projection; never `process.env` —
-    // `BYOK_*` is hard-denied there), and the Agent home as cwd.
-    const [preflightServer, preflightEnv, preflightCwd] = helperPreflight.mock.calls[0]!;
+    // `BYOK_*` is hard-denied there).
+    const [preflightServer, preflightEnv] = helperPreflight.mock.calls[0]!;
     expect(preflightServer).toEqual(messageMcp);
     expect(preflightEnv).toEqual(projectPiMcpEnvironment(adapter.startCalls[0]!.ctx.env));
     expect(Object.keys(preflightEnv!)).not.toContain('BYOK_STORE_DIR');
-    // The preflight spawns an MCP server, so it runs in the SAME trusted
-    // launch directory every other MCP server child of this task runs in —
-    // NOT the Agent home / workspace dir, which the agent itself can write and
-    // from which a compiled server binary would read `bunfig.toml` preload.
-    expect(preflightCwd).toBe(await trustedCwd());
-    expect(preflightCwd).not.toBe(adapter.startCalls[0]?.ctx.workspaceDir);
     expect(messageMcp).toMatchObject({
       command: process.execPath,
       args: ['/sdk/byok-agent-message-mcp.js'],

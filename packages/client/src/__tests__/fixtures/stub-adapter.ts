@@ -179,7 +179,6 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
       env: NodeJS.ProcessEnv;
       mcpServers?: RuntimeOperationStartInput['mcpServers'];
       mcpToolsetTools?: RuntimeOperationStartInput['mcpToolsetTools'];
-      mcpLaunch?: RuntimeOperationStartInput['mcpLaunch'];
       mcpToolImplementations?: RuntimeOperationStartInput['mcpToolImplementations'];
       gitWorkspace?: { workspaceId: string; baseline?: string };
       approvalChannel?: RuntimeOperationStartInput['approvalChannel'];
@@ -224,13 +223,6 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
     detectResult: RuntimeDetectResult = { kind: 'available', version: '0.0.0' },
     capabilities: RuntimeCapabilities = DEFAULT_STUB_CAPABILITIES,
     requiresMcpToolsetToolObservation = true,
-    /**
-     * The descriptor declaration that drives the daemon's MCP launch
-     * boundary: HOW this adapter's servers reach the trusted directory
-     * (`mcpServerLaunch`). Omitted everywhere except the tests that pin that
-     * boundary, so the default stub stays the "spawns its own servers" shape.
-     */
-    launchDeclarations: Pick<RuntimeAdapterDescriptor, 'mcpServerLaunch'> = {},
   ) {
     this.detectResult = detectResult;
     this.descriptor = freezeRuntimeAdapterDescriptor({
@@ -238,9 +230,6 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
       supportsDispatchSelection: true,
       requiresMcpToolsetToolObservation,
       capabilities,
-      ...(launchDeclarations.mcpServerLaunch === undefined
-        ? {}
-        : { mcpServerLaunch: launchDeclarations.mcpServerLaunch }),
     });
   }
 
@@ -296,7 +285,6 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
         env: startInput.env,
         ...(startInput.mcpServers === undefined ? {} : { mcpServers: startInput.mcpServers }),
         ...(startInput.mcpToolsetTools === undefined ? {} : { mcpToolsetTools: startInput.mcpToolsetTools }),
-        ...(startInput.mcpLaunch === undefined ? {} : { mcpLaunch: startInput.mcpLaunch }),
         ...(startInput.mcpToolImplementations === undefined
           ? {}
           : { mcpToolImplementations: startInput.mcpToolImplementations }),

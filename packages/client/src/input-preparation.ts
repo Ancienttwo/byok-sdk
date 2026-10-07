@@ -46,7 +46,6 @@ import type { PreparedAgentMemoryImplementation, PreparedAgentMemoryState } from
 
 import { createHash } from 'node:crypto';
 import { INPUT_PREPARATION_WIRE_VERSION, type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
-import type { McpLaunchAttestation } from './daemon/trusted-launch-cwd';
 import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 
 // ---------------------------------------------------------------------------
@@ -959,15 +958,15 @@ export interface InputPreparationArtifactSummaryV1 {
   readonly residual: readonly InputPreparationResidualKeyV1[];
   /**
    * Digest of everything the device OBSERVED for this preparation — the
-   * projected tools, their executor fingerprints, the launch attestation and
-   * the implementation identities. A later consumer re-observes and compares
+   * projected tools, their executor fingerprints and the implementation
+   * identities. A later consumer re-observes and compares
    * this one value rather than re-deriving a manifest.
    */
   readonly observationDigest: string;
   /**
    * Digest of the subset of those facts that can be re-derived WITHOUT
-   * spawning a server: the launch attestation, the toolset definition
-   * revisions, the configured argv and the implementation identities. This is
+   * spawning a server: the toolset definition revisions, the configured argv
+   * and the implementation identities. This is
    * what a replay of an already-recorded `requestId` compares against, because
    * re-probing to detect drift would create the second executor fact the
    * idempotency key exists to prevent.
@@ -1195,12 +1194,6 @@ export const INPUT_PREPARATION_ERROR_CODES = [
    */
   'toolsets_unobservable',
   /**
-   * No non-writable launch directory (or no trusted launcher) could be proven
-   * for this preparation's servers, so nothing was spawned. The specific
-   * `TrustedLaunchCwdUnavailableReason` travels in the record's `detail`.
-   */
-  'launch_boundary_unavailable',
-  /**
    * A repeat of an already-recorded `requestId` arrived after the facts its
    * executor fingerprints were frozen against changed. The recorded receipt is
    * not re-derived and no server is re-probed.
@@ -1260,22 +1253,20 @@ export interface PreparedToolBindingServerDigestInputV1 {
 export interface PreparedToolBindingDigestInputV1 {
   readonly agentMemory: PreparedAgentMemoryMode;
   readonly memoryImplementation: PreparedAgentMemoryImplementation | null;
-  readonly launch: McpLaunchAttestation;
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
   /** Canonically ordered by server name; the canonical JSON preserves array order. */
   readonly servers: readonly PreparedToolBindingServerDigestInputV1[];
 }
 
 /**
- * The spawn-free half: the launch attestation, the definition revisions, the
- * configured argv and the implementation identities.
+ * The spawn-free half: the definition revisions, the configured argv and the
+ * implementation identities.
  */
 export function preparedToolBindingDigest(input: PreparedToolBindingDigestInputV1): string {
   return inputPreparationDigest({
-    v: 2,
+    v: 3,
     agentMemory: input.agentMemory,
     memoryImplementation: input.memoryImplementation,
-    launch: { launchCwd: input.launch.launchCwd, launcher: input.launch.launcher },
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     servers: input.servers.map((entry) => ({
       serverName: entry.serverName,
@@ -1290,7 +1281,6 @@ export function preparedToolBindingDigest(input: PreparedToolBindingDigestInputV
 export interface PreparedToolSurfaceDigestInputV1 {
   readonly agentMemory: PreparedAgentMemoryMode;
   readonly memory: PreparedAgentMemoryState | null;
-  readonly launch: McpLaunchAttestation;
   readonly runtimeIdentity: string;
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
   readonly tools: readonly InputPreparationToolV1[];
@@ -1298,13 +1288,12 @@ export interface PreparedToolSurfaceDigestInputV1 {
   readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
 }
 
-/** The whole observed surface: the schemas, the executors, the launch and the identities. */
+/** The whole observed surface: the schemas, the executors and the identities. */
 export function preparedToolSurfaceObservationDigest(input: PreparedToolSurfaceDigestInputV1): string {
   return inputPreparationDigest({
-    v: 2,
+    v: 3,
     agentMemory: input.agentMemory,
     memory: input.memory,
-    launch: { launchCwd: input.launch.launchCwd, launcher: input.launch.launcher },
     runtimeIdentity: input.runtimeIdentity,
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     tools: input.tools.map((tool) => ({

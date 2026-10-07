@@ -9,7 +9,6 @@ import {
 import type { McpToolsetServerObservation } from '../../mcp/observation';
 import { McpAuthorityError } from '../../mcp/authority-error';
 import { projectMcpTools, qualifiedMcpToolName, type McpToolProjection } from '../../mcp/projection';
-import type { McpLaunchAttestation } from '../../daemon/trusted-launch-cwd';
 import type { ToolImplementationIdentityV1 } from '../../daemon/tool-implementation-identity';
 import { buildToolExecutorsFromObservation, InputPreparationCompileError } from './input-preparation';
 import { createPiMcpTools, type McpToolCallHost, type PiMcpToolDefinition } from './mcp-tools';
@@ -95,7 +94,6 @@ export interface PreparedPiToolSurfaceInput {
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
   /** Canonically ordered by server name, exactly as the preparation ordered them. */
   readonly servers: readonly PreparedPiServerBinding[];
-  readonly launch: McpLaunchAttestation;
   readonly toolImplementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
   /** The verified installed native closure identity string. */
   readonly runtimeIdentity: string;
@@ -184,7 +182,6 @@ export async function assemblePreparedPiToolSurface(
     ({ toolExecutors } = await buildToolExecutorsFromObservation({
       observation: input.observation,
       toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
-      launch: input.launch,
       implementations: input.toolImplementations,
       // Empty for the same reason the preparation's is.
       nativeTools: [],
@@ -231,14 +228,13 @@ export async function assemblePreparedPiToolSurface(
   const toolBindingDigest = preparedToolBindingDigest({
     agentMemory: input.agentMemory,
     memoryImplementation: input.memory?.implementation ?? null,
-    launch: input.launch,
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     servers: bindingServers,
   });
   if (toolBindingDigest !== input.expectedToolBindingDigest) {
     return refuse(
       'tool_binding_drift',
-      'the launch boundary, toolset revisions, configured argv or implementation identities of this device no longer'
+      'the toolset revisions, configured argv or implementation identities of this device no longer'
       + ' match the ones the preparation froze',
     );
   }
@@ -246,7 +242,6 @@ export async function assemblePreparedPiToolSurface(
   const observationDigest = preparedToolSurfaceObservationDigest({
     agentMemory: input.agentMemory,
     memory: input.memory,
-    launch: input.launch,
     runtimeIdentity: input.runtimeIdentity,
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     tools,

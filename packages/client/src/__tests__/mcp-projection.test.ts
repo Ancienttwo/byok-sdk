@@ -19,12 +19,7 @@ import {
   type ToolImplementationIdentityV1,
 } from '../daemon/tool-implementation-identity';
 import { BYOK_PI_MCP_CONFIG_PATH } from '../adapters/pi/mcp-config';
-import { trustedCwd } from './fixtures/launch-cwd';
 
-const LAUNCH = {
-  launchCwd: '/',
-  launcher: { kind: 'node', interpreter: '/usr/bin/node', script: '/pkg/bin/byok-launch-cwd.mjs' },
-} as const;
 
 /**
  * What this SDK's DEFAULT produces for every server: no configured
@@ -142,7 +137,7 @@ async function registeredByRealExtension(
   const dir = await tempDir();
   const configPath = path.join(dir, 'mcp-config.json');
   const mcpServers = Object.fromEntries(Object.keys(observation).map((name) => [name, serverSpec()]));
-  await fs.writeFile(configPath, JSON.stringify({ mcpEnv: ENV, mcpServers, observation, launchCwd: await trustedCwd() }));
+  await fs.writeFile(configPath, JSON.stringify({ mcpEnv: ENV, mcpServers, observation, launchCwd: process.cwd() }));
   process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
 
   const definitions: Array<{ name: string; description: string; parameters: unknown }> = [];
@@ -205,7 +200,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
       mcpEnv: ENV,
       mcpServers: { byokagentteam: serverSpec() },
       observation: {},
-      launchCwd: await trustedCwd(),
+      launchCwd: process.cwd(),
     }));
     process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
 
@@ -237,7 +232,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
         byokagentteam: serverSpec(),
       },
       observation,
-      launchCwd: await trustedCwd(),
+      launchCwd: process.cwd(),
     }));
     process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
 
@@ -269,7 +264,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
       mcpEnv: ENV,
       mcpServers: { byokagentteam: serverSpec(), byokagentmessage: serverSpec() },
       observation: {},
-      launchCwd: await trustedCwd(),
+      launchCwd: process.cwd(),
     }));
     process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
 
@@ -292,7 +287,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
       mcpEnv: ENV,
       mcpServers: { salesko: serverSpec() },
       observation: {},
-      launchCwd: await trustedCwd(),
+      launchCwd: process.cwd(),
     }));
     process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
     const extension = await import('../adapters/pi/mcp-extension');
@@ -315,7 +310,7 @@ describe('MCP projection — executor fingerprints', () => {
       observation,
       toolsetDefinitionRevisions: REVISIONS,
       nativeTools: [{ name: 'read', parameters: { type: 'object' } }],
-      runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
+      runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
     });
     expect(Object.keys(toolExecutors)).toEqual([
       'read',
@@ -332,7 +327,7 @@ describe('MCP projection — executor fingerprints', () => {
       observation,
       toolsetDefinitionRevisions: REVISIONS,
       nativeTools: [],
-      runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
+      runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
     });
     expect((await build()).toolExecutors).toEqual((await build()).toolExecutors);
   });
@@ -362,53 +357,19 @@ describe('MCP projection — executor fingerprints', () => {
   ])('changes when %s changes', async (_label, mutate, revisions) => {
     const observation = await realObservation();
     const base = await buildToolExecutorsFromObservation({
-      observation, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
+      observation, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
     });
     const after = await buildToolExecutorsFromObservation({
-      observation: mutate(observation), toolsetDefinitionRevisions: revisions, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
+      observation: mutate(observation), toolsetDefinitionRevisions: revisions, nativeTools: [], runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
     });
     expect(after.toolExecutors['mcp__salesko__find_leads'])
       .not.toBe(base.toolExecutors['mcp__salesko__find_leads']);
   });
 
-  it('changes when the launch directory or the launcher changes, and the operator revision does not', async () => {
-    // The launch boundary is bound as its OWN fact, beside the toolset's
-    // `definitionRevision` rather than inside it. A server started in a
-    // different directory, or reached through a different launcher, is not the
-    // same executor — so a manifest frozen under one must not validate under
-    // the other. The operator's configured `{command, args}` revision is
-    // untouched by any of it, so an SDK launcher upgrade never churns the
-    // device configuration's own digest.
-    const observation = await realObservation();
-    const base = await buildToolExecutorsFromObservation({
-      observation, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
-    });
-    const movedCwd = await buildToolExecutorsFromObservation({
-      observation, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
-      launch: { ...LAUNCH, launchCwd: '/opt/byok/releases/1.2.3-abcdef' },
-    });
-    const newLauncher = await buildToolExecutorsFromObservation({
-      observation, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
-      launch: { ...LAUNCH, launcher: { kind: 'node', interpreter: '/usr/local/bin/node', script: LAUNCH.launcher.script } },
-    });
-    const noLauncher = await buildToolExecutorsFromObservation({
-      observation, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
-      launch: { launchCwd: LAUNCH.launchCwd, launcher: null },
-    });
-    const key = 'mcp__salesko__find_leads';
-    const fingerprints = [base, movedCwd, newLauncher, noLauncher].map((r) => r.toolExecutors[key]);
-    expect(new Set(fingerprints).size).toBe(4);
-    // Same toolset revisions throughout: the operator changed nothing.
-    expect(REVISIONS).toEqual({
-      'salesko.read.v1': `sha256:${'1'.repeat(64)}`,
-      'salesko.propose.v1': `sha256:${'2'.repeat(64)}`,
-    });
-  });
-
   it('does NOT change when a schema is re-serialized with its keys in another order', async () => {
     const observation = await realObservation();
     const base = await buildToolExecutorsFromObservation({
-      observation, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
+      observation, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
     });
     const reordered = {
       ...observation,
@@ -428,7 +389,7 @@ describe('MCP projection — executor fingerprints', () => {
       },
     };
     const after = await buildToolExecutorsFromObservation({
-      observation: reordered, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
+      observation: reordered, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
     });
     expect(after.toolExecutors).toEqual(base.toolExecutors);
   });
@@ -445,7 +406,7 @@ describe('MCP projection — executor fingerprints', () => {
         toolsetDefinitionRevisions: REVISIONS,
         nativeTools: [],
         runtimeIdentity: RUNTIME,
-        launch: LAUNCH,
+       
         implementations,
       })).toolExecutors['mcp__salesko__find_leads'];
 
@@ -465,7 +426,7 @@ describe('MCP projection — executor fingerprints', () => {
         closureDigest: 'a'.repeat(64),
         closureKind: 'artifact',
         launchArgv: ['mcp', 'serve'],
-        launchCwd: LAUNCH.launchCwd,
+        launchCwd: '/',
         launchEnvNamesDigest: 'b'.repeat(64),
         loaderEnvValuesDigest: 'c'.repeat(64),
         installStat: { dev: 1, ino: 2, size: 3, mtimeMs: 4, mode: 0o100555, uid: 0, gid: 0 },
@@ -484,7 +445,7 @@ describe('MCP projection — executor fingerprints', () => {
       toolsetDefinitionRevisions: REVISIONS,
       nativeTools: [],
       runtimeIdentity: RUNTIME,
-      launch: LAUNCH,
+     
       implementations: { salesko: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
     })).rejects.toThrow(/has no resolved implementation identity/u);
   });
@@ -494,7 +455,7 @@ describe('MCP projection — executor fingerprints', () => {
       observation: await realObservation(),
       toolsetDefinitionRevisions: { 'salesko.read.v1': REVISIONS['salesko.read.v1'] },
       nativeTools: [],
-      runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
+      runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
     })).rejects.toThrow(/no definition revision/u);
   });
 });
@@ -523,8 +484,7 @@ describe.each([
       observation: await collidingObservation(),
       toolsetDefinitionRevisions: Object.fromEntries(pairs.map(([server]) => [server!, `revision-${server}`])),
       // Consumed only after the projection below rejects the collision, so the
-      // tested refusal is reached before either fixture fact is read.
-      launch: { launchCwd: '/', launcher: null },
+      // tested refusal is reached before the fixture fact is read.
       implementations: {},
       nativeTools: [],
       runtimeIdentity: 'fixture-runtime',

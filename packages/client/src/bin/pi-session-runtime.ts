@@ -39,8 +39,11 @@ export async function runPiSessionRuntime(options: {
   const sessionManager = await openPiRpcSession(options.cwd, options.session, options.sessionDir ?? initialSettings.getSessionDir(), options.reject);
   const createRuntime: CreateAgentSessionRuntimeFactory = async ({ cwd, sessionManager, sessionStartEvent }) => {
     if (cwd !== options.cwd || sessionManager.getCwd() !== options.cwd) options.reject('session replacement cannot change authorized cwd');
+    // The session cwd is pre-trusted, as in OAR: project `.pi` settings and
+    // extensions load in every lane, the BYOK key lane too.
     const services = await createAgentSessionServices({
       cwd: options.cwd, agentDir, modelRuntimeSignal: AbortSignal.timeout(15_000),
+      settingsManager: SettingsManager.create(options.cwd, agentDir, { projectTrusted: true }),
       resourceLoaderOptions: options.resourceLoaderOptions,
     });
     const errors = [

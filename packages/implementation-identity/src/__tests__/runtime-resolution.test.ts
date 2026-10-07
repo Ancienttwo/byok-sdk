@@ -68,8 +68,7 @@ describe('M0 runtime-only wrapper cutover', () => {
     expect(JSON.stringify(vector.responseAfter)).toBe(vector.responseJsonAfter);
     expect(vector.responseJsonBefore).toBe(vector.responseJsonAfter);
     const locator: McpImplementationLocatorV1 = { subject: vector.requestSubject,
-      command: vector.responseBefore.installPath, args: vector.responseBefore.launchArgv,
-      launch: { launchCwd: vector.responseBefore.launchCwd, launcher: null } };
+      command: vector.responseBefore.installPath, args: vector.responseBefore.launchArgv };
     const before = await resolveToolImplementationIdentity({ resolve: async () => vector.responseBefore }, locator, env, probeFor(vector.responseBefore));
     const after = await resolveToolImplementationIdentity({ resolve: async () => vector.responseAfter }, locator, env, probeFor(vector.responseAfter));
     expect(before.kind).toBe('attested');

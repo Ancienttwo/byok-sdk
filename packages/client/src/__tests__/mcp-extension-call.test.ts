@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { observeMcpServer, type McpToolsetServerObservation } from '../mcp';
 import { BYOK_PI_MCP_CONFIG_PATH } from '../adapters/pi/mcp-config';
-import { trustedCwd } from './fixtures/launch-cwd';
 
 /**
  * The Pi MCP extension's CALL path, end to end against a real stdio server.
@@ -88,7 +87,7 @@ async function loadExtension(
     mcpServers: { salesko: serverSpec({ ...serverConfig, recordTo }) },
     observation,
     permissionMode,
-    launchCwd: await trustedCwd(),
+    launchCwd: dir,
   }));
   process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
 

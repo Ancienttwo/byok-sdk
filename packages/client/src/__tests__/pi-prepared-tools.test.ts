@@ -17,7 +17,6 @@ import {
   TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED,
   type ToolImplementationIdentityV1,
 } from '../daemon/tool-implementation-identity';
-import type { McpLaunchAttestation } from '../daemon/trusted-launch-cwd';
 import {
   assemblePreparedPiToolSurface,
   type PreparedPiServerBinding,
@@ -30,8 +29,8 @@ import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../bin/agent-m
 
 /**
  * The launch half of a prepared tool surface
- * (`adapters/pi/prepared-tools.ts`), driven against the REAL daemon assembler,
- * a REAL MCP server child and the REAL launch boundary of this machine.
+ * (`adapters/pi/prepared-tools.ts`), driven against the REAL daemon assembler
+ * and a REAL MCP server child.
  *
  * The properties, stated as properties:
  *
@@ -69,7 +68,6 @@ function registry(): McpToolsetRegistry {
 interface DeviceFacts {
   readonly counted: PreparedToolSurface;
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
-  readonly launch: McpLaunchAttestation;
   readonly servers: readonly PreparedPiServerBinding[];
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
   readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
@@ -94,11 +92,9 @@ async function deviceFacts(): Promise<DeviceFacts> {
   });
   if (!assembled.ok) throw new Error(`the daemon refused to assemble the counted surface: ${assembled.detail}`);
 
-  const launch = assembled.surface.launch;
   const observed = await probeMcpServer('teamserver', fixtureServer(), {
     label: 'MCP toolset server "teamserver"',
     env: { PATH: process.env.PATH ?? '' },
-    cwd: launch.launchCwd,
     timeoutMs: 10_000,
   });
   const observation = Object.freeze({
@@ -108,7 +104,6 @@ async function deviceFacts(): Promise<DeviceFacts> {
   return {
     counted: assembled.surface,
     observation,
-    launch,
     servers: [{ serverName: 'teamserver', toolsetId: 'team', command: server.command, args: server.args }],
     toolsetDefinitionRevisions: assembled.surface.toolsetDefinitionRevisions,
     implementations: Object.freeze({ teamserver: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED }),
@@ -125,7 +120,6 @@ function launchInput(
     observation: facts.observation,
     toolsetDefinitionRevisions: facts.toolsetDefinitionRevisions,
     servers: facts.servers,
-    launch: facts.launch,
     toolImplementations: facts.implementations,
     runtimeIdentity: RUNTIME_IDENTITY,
     expectedToolBindingDigest: facts.counted.toolBindingDigest,
@@ -211,20 +205,19 @@ describe('the prepared pi tool surface', () => {
   }, 30_000);
 
   it('assembles memory-only read with a runtime-worker call, without a Host MCP identity', async () => {
-    const launch = { launchCwd: '/', launcher: null } as McpLaunchAttestation;
     const memoryProjection = preparedMemoryProjection('read', MEMORY, RUNTIME_IDENTITY);
     const expectedToolBindingDigest = preparedToolBindingDigest({
-      agentMemory: 'read', memoryImplementation: MEMORY.implementation, launch,
+      agentMemory: 'read', memoryImplementation: MEMORY.implementation,
       toolsetDefinitionRevisions: {}, servers: [],
     });
     const expectedObservationDigest = preparedToolSurfaceObservationDigest({
-      agentMemory: 'read', memory: MEMORY, launch, runtimeIdentity: RUNTIME_IDENTITY,
+      agentMemory: 'read', memory: MEMORY, runtimeIdentity: RUNTIME_IDENTITY,
       toolsetDefinitionRevisions: {}, tools: memoryProjection.tools, toolExecutors: memoryProjection.toolExecutors, implementations: {},
     });
     const memoryCall = { call: vi.fn(async () => ({ content: [{ type: 'text' as const, text: '{"path":"MEMORY.md"}' }] })) };
     const surface = await assemblePreparedPiToolSurface({
       agentMemory: 'read', memory: MEMORY,
-      observation: {}, toolsetDefinitionRevisions: {}, servers: [], launch, toolImplementations: {}, runtimeIdentity: RUNTIME_IDENTITY,
+      observation: {}, toolsetDefinitionRevisions: {}, servers: [], toolImplementations: {}, runtimeIdentity: RUNTIME_IDENTITY,
       expectedToolBindingDigest, expectedObservationDigest, host: UNUSED_HOST, memoryCall,
     });
     if (!surface.ok) throw new Error(`${surface.code}: ${surface.message}`);
@@ -235,14 +228,13 @@ describe('the prepared pi tool surface', () => {
   });
 
   it('refuses a sealed memory descriptor that drifted after preparation', async () => {
-    const launch = { launchCwd: '/', launcher: null } as McpLaunchAttestation;
     const original = preparedMemoryProjection('read', MEMORY, RUNTIME_IDENTITY);
     const expectedToolBindingDigest = preparedToolBindingDigest({
-      agentMemory: 'read', memoryImplementation: MEMORY.implementation, launch,
+      agentMemory: 'read', memoryImplementation: MEMORY.implementation,
       toolsetDefinitionRevisions: {}, servers: [],
     });
     const expectedObservationDigest = preparedToolSurfaceObservationDigest({
-      agentMemory: 'read', memory: MEMORY, launch, runtimeIdentity: RUNTIME_IDENTITY,
+      agentMemory: 'read', memory: MEMORY, runtimeIdentity: RUNTIME_IDENTITY,
       toolsetDefinitionRevisions: {}, tools: original.tools, toolExecutors: original.toolExecutors, implementations: {},
     });
     const drifted = {
@@ -255,7 +247,7 @@ describe('the prepared pi tool surface', () => {
     const memoryCall = { call: vi.fn(async () => ({ content: [] })) };
     const surface = await assemblePreparedPiToolSurface({
       agentMemory: 'read', memory: drifted,
-      observation: {}, toolsetDefinitionRevisions: {}, servers: [], launch, toolImplementations: {}, runtimeIdentity: RUNTIME_IDENTITY,
+      observation: {}, toolsetDefinitionRevisions: {}, servers: [], toolImplementations: {}, runtimeIdentity: RUNTIME_IDENTITY,
       expectedToolBindingDigest, expectedObservationDigest, host: UNUSED_HOST, memoryCall,
     });
     expect(surface.ok).toBe(false);
@@ -293,7 +285,7 @@ describe('a tool-less prepared surface (requiredToolsets [] and agentMemory none
     return {
       agentMemory: 'none', memory: null,
       observation: {}, toolsetDefinitionRevisions: counted.toolsetDefinitionRevisions, servers: [],
-      launch: counted.launch, toolImplementations: {}, runtimeIdentity: RUNTIME_IDENTITY,
+      toolImplementations: {}, runtimeIdentity: RUNTIME_IDENTITY,
       expectedToolBindingDigest: counted.toolBindingDigest, expectedObservationDigest: counted.observationDigest,
       host: UNUSED_HOST, ...overrides,
     };
@@ -318,13 +310,8 @@ describe('a tool-less prepared surface (requiredToolsets [] and agentMemory none
     expect(surface.observationDigest).toBe(counted.observationDigest);
   }, 30_000);
 
-  it('still refuses a launch whose facts moved: another launch directory, an unnamed toolset revision, memory state', async () => {
+  it('still refuses a launch whose facts moved: an unnamed toolset revision, memory state', async () => {
     const counted = await countedFor(twoToolsetRegistry(), []);
-    const moved = await assemblePreparedPiToolSurface(toollessInput(counted, {
-      launch: { ...counted.launch, launchCwd: `${counted.launch.launchCwd}/elsewhere` },
-    }));
-    expect(moved).toMatchObject({ ok: false, code: 'tool_binding_drift' });
-
     // Binding every configured toolset, not the record's, is a different surface.
     const wide = await assemblePreparedPiToolSurface(toollessInput(counted, {
       toolsetDefinitionRevisions: { unrelated: `sha256:${'7'.repeat(64)}` },
@@ -347,7 +334,6 @@ describe('a tool-less prepared surface (requiredToolsets [] and agentMemory none
       toolsetDefinitionRevisions: counted.toolsetDefinitionRevisions,
       expectedToolBindingDigest: counted.toolBindingDigest,
       expectedObservationDigest: counted.observationDigest,
-      launch: counted.launch,
     }));
     if (!surface.ok) throw new Error(`${surface.code}: ${surface.message}`);
     expect(surface.toolBindingDigest).toBe(counted.toolBindingDigest);

@@ -29,7 +29,6 @@ import {
 import { sealRuntimeOperationManifest } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { startPreparedOperation } from './fixtures/prepared-operation';
-import { trustedCwd } from './fixtures/launch-cwd';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
@@ -813,7 +812,9 @@ describe('SDK-owned Agent home contract', () => {
       const cwd = await makeRoot();
       const observedCwds: Array<string | URL | undefined> = [];
       const piSessionCwds: string[] = [];
-      const expectedProcessCwd = runtime === 'pi' ? await trustedCwd() : cwd;
+      // Every runtime process starts in the session cwd, as in OAR. Pi binds it
+      // as a real path, because its host compares it with `process.cwd()`.
+      const expectedProcessCwd = runtime === 'pi' ? await fs.realpath(cwd) : cwd;
       const spawnFn = ((command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
         observedCwds.push(options?.cwd);
         if (runtime === 'pi') {
@@ -839,11 +840,8 @@ describe('SDK-owned Agent home contract', () => {
       );
       await session.close();
       expect(observedCwds.length).toBeGreaterThan(0);
-      // docs/spec.md: Runtime launch descriptions sealed asset set; P2
-      // separates trusted process cwd from the manifest-owned session cwd.
       expect(observedCwds.every((observed) => observed === expectedProcessCwd)).toBe(true);
       if (runtime === 'pi') {
-        expect(expectedProcessCwd).not.toBe(cwd);
         expect(piSessionCwds).toHaveLength(observedCwds.length);
         expect(piSessionCwds.every((observed) => observed === cwd)).toBe(true);
       }

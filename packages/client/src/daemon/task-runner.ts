@@ -87,13 +87,6 @@ import type { TaskQueueWatermark } from './control-protocol';
 import { DEFAULT_MAX_INLINE_EVENT_BYTES, spillOversizedEvent } from './event-spill';
 import { buildRuntimeEnv } from './environment';
 import {
-  mcpLaunchAttestation,
-  resolveMcpLaunchCwdLauncher,
-  resolveTrustedLaunchCwd,
-  type McpLaunchBinding,
-  type McpLaunchCwdConfig,
-} from './trusted-launch-cwd';
-import {
   resolveToolImplementationIdentity,
   type ToolImplementationAuthority,
   type ToolImplementationFsProbe,
@@ -484,15 +477,6 @@ export interface TaskRunnerDeps {
     readonly toolsetDefinitionRevisions: () => ReadonlyMap<string, string>;
   };
   /**
-   * Operator input to the MCP toolset launch boundary
-   * (`./trusted-launch-cwd.ts`). Unset means the platform default directory
-   * and — only when this process is provably plain Node — `process.execPath`
-   * as the launcher interpreter. Neither default is assumed: both are proven
-   * at admission, and an offer that needs a boundary this daemon cannot prove
-   * is declined non-retryably instead of being started without one.
-   */
-  mcpLaunchCwd?: McpLaunchCwdConfig;
-  /**
    * The host's install-record authority for MCP toolset server
    * implementations (`./tool-implementation-identity.ts`).
    *
@@ -713,13 +697,12 @@ export interface TaskRunnerDeps {
   /**
    * Production pre-runtime executability/handshake gate for the exact message
    * helper config. `env` is the same child environment the runtime
-   * gets (`buildRuntimeEnv`), and `cwd` the same working directory, so the
-   * helper is proved under the conditions it will actually run in.
+   * gets (`buildRuntimeEnv`), so the helper is proved under the environment
+   * it will actually run in.
    */
   agentMessageMcpPreflight?: (
     server: Readonly<McpStdioServerConfig>,
     env: Readonly<Record<string, string>>,
-    cwd?: string,
   ) => Promise<void>;
   /**
    * Override the `initialize` + `tools/list` observation of a projected
@@ -2280,79 +2263,6 @@ export class TaskRunner {
       // projected server on every offer.
       const needsToolsetObservation = resolvedMcp?.ok === true
         && pick.descriptor.requiresMcpToolsetToolObservation === true;
-      // The one launch boundary for every MCP server child of this task —
-      // the admission probe here and, via `startInput.mcpLaunch`, every
-      // adapter spawn below. It is resolved ONCE, so the directory the daemon
-      // observed a server in is the directory the runtime runs it in.
-      //
-      // It is NOT the Agent home, which is what it used to be. A
-      // `bun --compile` server binary executes `$cwd/bunfig.toml` `preload`
-      // before its own code, and the Agent home is writable by the very agent
-      // the server is serving — see `./trusted-launch-cwd.ts`. The RUNTIME
-      // CLI keeps the manifest cwd; only its MCP server children move.
-      //
-      // The binding covers EVERY MCP server this task will generate, whatever
-      // its origin — not only the host toolsets the device projects. The
-      // reserved SDK helpers (agent message, agent memory) are the same kind
-      // of child process, launched by the same CLI, from the same inherited
-      // cwd; a task whose only MCP server is one of those used to reach
-      // `start()` with no binding at all and have it written unwrapped.
-      //
-      // The predicate lives HERE, once, computed from the same inputs the
-      // adapters themselves branch on: the projected toolsets and the
-      // reserved helpers this daemon adds to `taskMcpServers`. A task that
-      // generates NO MCP server resolves no binding and is never declined for
-      // one.
-      // `taskMcpServers` already carries the projected host toolsets and the
-      // agent-message helper; the agent-memory helper is added below, after
-      // the binding it needs has been resolved.
-      const generatesAnMcpServer = Object.keys(taskMcpServers ?? {}).length > 0
-        || requiresAgentMemoryMcp
-        || preparedMemorySelected
-        // A prepared digest always binds a launch attestation, even when the
-        // record counts no server at all (a tool-less record), so a prepared
-        // offer always needs the trusted launch directory proven here. The
-        // value still comes only from `resolveTrustedLaunchCwd`, never from the
-        // offer, the record or the Host.
-        || preparation !== undefined;
-      const probesAnMcpServer = needsToolsetObservation
-        || (preparation === undefined && messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined);
-      let mcpLaunch: McpLaunchBinding | undefined;
-      if (probesAnMcpServer || generatesAnMcpServer) {
-        const trusted = await resolveTrustedLaunchCwd(this.deps.mcpLaunchCwd);
-        if (trusted.kind === 'unavailable') {
-          // Non-retryable: nothing about re-offering this task changes which
-          // directories this uid can write. The reason names the exact
-          // condition so an operator can fix it (configure an immutable
-          // directory, or stop running the daemon as root) rather than
-          // discovering a silently unprotected launch later.
-          decline(`MCP toolset launch directory unavailable: ${trusted.reason}`, false);
-          return;
-        }
-        // Only the adapters that declare `launcher-wrapped` pay for a
-        // launcher. An adapter that spawns its own servers (pi) passes the
-        // directory to `spawn` and needs nothing else, and an adapter that
-        // declares nothing is treated the same way — the SDK cannot make a
-        // third-party adapter use a launcher by declining here, and the three
-        // bundled adapters all state their mode explicitly.
-        let launcher: McpLaunchBinding['launcher'];
-        if (pick.descriptor.mcpServerLaunch === 'launcher-wrapped') {
-          const resolvedLauncher = resolveMcpLaunchCwdLauncher(this.deps.mcpLaunchCwd);
-          if (resolvedLauncher.kind === 'unavailable') {
-            decline(
-              `MCP toolset launch directory unavailable: ${resolvedLauncher.reason}`,
-              false,
-            );
-            return;
-          }
-          launcher = resolvedLauncher;
-        }
-        mcpLaunch = Object.freeze({
-          cwd: trusted.dir,
-          ...(launcher === undefined ? {} : { launcher }),
-        });
-      }
-      const probeCwd = mcpLaunch?.cwd;
       // The ONE implementation identity this task carries per projected
       // toolset server, resolved HERE and consumed by both spawn points:
       // the admission probe immediately below, and — through
@@ -2369,8 +2279,7 @@ export class TaskRunner {
       // nothing about them. What does refuse is the re-measurement at spawn,
       // and only for a server that WAS attested.
       let mcpToolImplementations: Readonly<Record<string, ToolImplementationIdentityV1>> | undefined;
-      if (resolvedMcp?.ok === true && mcpLaunch !== undefined) {
-        const launch = mcpLaunchAttestation(mcpLaunch);
+      if (resolvedMcp?.ok === true) {
         const identities: Record<string, ToolImplementationIdentityV1> = {};
         for (const [serverName, server] of Object.entries(resolvedMcp.servers)) {
           const toolsetId = resolvedMcp.toolsetIdByServer.get(serverName);
@@ -2381,7 +2290,6 @@ export class TaskRunner {
               subject: { kind: 'mcp-server', toolsetId, serverName },
               command: server.command,
               args: Object.freeze([...(server.args ?? [])]),
-              launch,
             },
             // The environment fact is the SDK's, never the resolver's: this is
             // the exact object the admission probe below spawns with and the
@@ -2395,7 +2303,7 @@ export class TaskRunner {
       }
       if (preparation === undefined && messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined) {
         try {
-          await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, mcpEnv, probeCwd);
+          await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, mcpEnv);
         } catch (error) {
           decline(`required Agent message helper preflight failed: ${errorMessage(error)}`, false);
           return;
@@ -2440,7 +2348,6 @@ export class TaskRunner {
             label: `MCP toolset server "${serverName}"`,
             timeoutMs: MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
             env: mcpEnv,
-            ...(probeCwd === undefined ? {} : { cwd: probeCwd }),
             // Spawn point one. An attested server is re-measured before this
             // child starts; a failure raises `McpAuthorityError`, which the
             // decline below already treats as permanent.
@@ -2685,13 +2592,13 @@ export class TaskRunner {
         }
         let memory: PreparedAgentMemoryState | null = null;
         if (agentMemory !== 'none') {
-          if (mcpLaunch === undefined || !isAgentMemorySecureFilesystemAvailable(this.deps.agentMemoryFilesystemHelperBin !== undefined)) {
+          if (!isAgentMemorySecureFilesystemAvailable(this.deps.agentMemoryFilesystemHelperBin !== undefined)) {
             declineMemory('unsupported_input: agent_memory_unavailable');
             return;
           }
           let implementation: PreparedAgentMemoryImplementation;
           try {
-            implementation = await resolvePreparedMemoryImplementation(this.deps.toolImplementationAuthority, mcpEnv, mcpLaunchAttestation(mcpLaunch), this.deps.toolImplementationFsProbe);
+            implementation = await resolvePreparedMemoryImplementation(this.deps.toolImplementationAuthority, mcpEnv, this.deps.toolImplementationFsProbe);
           } catch {
             declineMemory('unsupported_input: agent_memory_implementation_unproven');
             return;
@@ -2733,7 +2640,6 @@ export class TaskRunner {
           deviceId: this.deps.deviceId,
           policyRevision: lane.policyRevision,
           runtime: lane.runtime,
-          launch: mcpLaunch,
           // No projected server (memory-only or tool-less) means an empty
           // observation, not a missing one; a missing one with servers still
           // present stays a fail-closed decline in admission.
@@ -2969,7 +2875,6 @@ export class TaskRunner {
         env,
         ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
         ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
-        ...(mcpLaunch === undefined ? {} : { mcpLaunch }),
         ...(mcpToolImplementations === undefined ? {} : { mcpToolImplementations }),
         approvalChannel: {
           taskId,

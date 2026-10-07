@@ -9,7 +9,6 @@ import type {
   TaskOfferPayload,
 } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation';
-import type { McpLaunchBinding } from './daemon/trusted-launch-cwd';
 import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 import type { AgentRef } from './agent-home';
 import type { McpToolsetServerObservation } from './mcp/observation';
@@ -22,13 +21,6 @@ export type {
 } from './mcp/observation';
 export type { AgentEgressPolicy } from '@byok-sdk/protocol';
 
-export type {
-  LaunchCwdRejection,
-  McpLaunchBinding,
-  McpLaunchCwdConfig,
-  TrustedLaunchCwd,
-  TrustedLaunchCwdUnavailableReason,
-} from './daemon/trusted-launch-cwd';
 
 export interface GitWorkspaceConfig {
   mode: 'local-checkpoints';
@@ -59,7 +51,7 @@ export interface RuntimeDetectionAdvisory {
 }
 
 export type RuntimeDetectionRefusalReason = ToolImplementationUnavailableReasonV1
-  | 'installation_observation_unsupported' | 'native_identity_mismatch' | 'launch_cwd_unavailable'
+  | 'installation_observation_unsupported' | 'native_identity_mismatch'
   | 'app_server_unavailable';
 
 /** Explicit scope, never a launch environment or task/lane-selection authority. */
@@ -239,32 +231,6 @@ export interface RuntimeAdapterDescriptor {
    * never makes an offer wait on one it has no use for.
    */
   readonly requiresMcpToolsetToolObservation?: boolean;
-  /**
-   * HOW this adapter's MCP toolset server children get the trusted launch
-   * working directory (`daemon/trusted-launch-cwd.ts`).
-   *
-   * `'direct-cwd'` — the adapter spawns the servers itself and passes the
-   * directory to `spawn` (pi: its SDK-owned extension opens each server from
-   * the task-scoped config the adapter writes).
-   *
-   * `'launcher-wrapped'` — an external CLI spawns the servers from a
-   * configuration format with no per-server cwd field (claude's `mcpServers`
-   * JSON, codex's `-c mcp_servers.*`), so the adapter must rewrite each
-   * server's `command`/`args` through this package's
-   * `bin/byok-launch-cwd.mjs`.
-   *
-   * Optional, including for an adapter declaring `capabilities.mcpToolsets`.
-   * `TaskRunner` resolves the trusted directory for every such task and hands
-   * it to the adapter, but it resolves a LAUNCHER only for
-   * `'launcher-wrapped'`; a host platform where no launcher is available then
-   * declines the offer non-retryably. An adapter that declares nothing is
-   * admitted with no launcher, exactly like `'direct-cwd'`, and is itself
-   * responsible for starting its MCP server children in the trusted
-   * directory it was handed: the SDK cannot make a third-party adapter launch
-   * through a launcher by declining here. The three bundled adapters all
-   * declare their mode explicitly.
-   */
-  readonly mcpServerLaunch?: 'direct-cwd' | 'launcher-wrapped';
 }
 
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
@@ -413,8 +379,6 @@ export interface RuntimePreparedLaunchV1 {
   readonly expected: RuntimePreparedLaunchExpectationV1;
   readonly toolBindingDigest: string;
   readonly observationDigest: string;
-  /** The same trusted launch boundary the preparation observed every server under. */
-  readonly launch: McpLaunchBinding;
   /** The implementation identity the preparation resolved per projected server. */
   readonly toolImplementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
   /** `toolsetId` -> the registry definition revision the preparation bound. */
@@ -443,16 +407,6 @@ interface RuntimeOperationStartBase {
   readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
   /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
   readonly mcpToolsetTools?: McpToolsetToolObservation;
-  /**
-   * The proven-non-writable directory every MCP toolset server child of this
-   * task is launched in, plus the launcher an external CLI needs to reach it.
-   *
-   * Resolved ONCE per offer by `TaskRunner` (`daemon/trusted-launch-cwd.ts`)
-   * and carried here so every spawn site of one task agrees on one directory.
-   * Present whenever `mcpServers` is; an adapter that finds MCP servers
-   * without it must refuse rather than fall back to its own cwd.
-   */
-  readonly mcpLaunch?: McpLaunchBinding;
   /**
    * What this daemon established about the implementation behind each
    * projected toolset server, keyed by projected server name
@@ -531,7 +485,6 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
     id: descriptor.id,
     supportsDispatchSelection: descriptor.supportsDispatchSelection === true,
     requiresMcpToolsetToolObservation: descriptor.requiresMcpToolsetToolObservation === true,
-    ...(descriptor.mcpServerLaunch === undefined ? {} : { mcpServerLaunch: descriptor.mcpServerLaunch }),
     capabilities: Object.freeze({
       ...(descriptor.capabilities.durablePi === undefined ? {} : { durablePi: descriptor.capabilities.durablePi === true }),
       ...(descriptor.capabilities.nativeInteractions === undefined ? {} : {

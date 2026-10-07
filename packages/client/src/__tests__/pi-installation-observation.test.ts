@@ -98,7 +98,7 @@ it('does not treat matching synthetic bytes as real owner evidence without the u
   const f = await fixture('compiled-executable', false);
   expect(await f.adapter.detectInstallation(f.context)).toEqual({ kind: 'refused', reason: 'install_record_mismatch' });
 });
-it.each(['installPath', 'prefix', 'manifestRevision', 'compilerVersion', 'upstreamCommit', 'cwd'] as const)('refuses changed %s with no dev fallback', async field => {
+it.each(['installPath', 'prefix', 'manifestRevision', 'compilerVersion', 'upstreamCommit'] as const)('refuses changed %s with no dev fallback', async field => {
   const f = await fixture(); f.resolve.mockImplementation(async locator => {
     if (!('runtimeEntry' in locator)) throw new Error('subject');
     let record = { ...f.record, launchArgv: ['__byok_sdk_helper', locator.runtimeEntry] };
@@ -107,11 +107,10 @@ it.each(['installPath', 'prefix', 'manifestRevision', 'compilerVersion', 'upstre
     if (field === 'manifestRevision' && locator.runtimeEntry === 'pi-prepared') record.manifestRevision += '-other';
     if (field === 'compilerVersion') record.nativeProvenance = { ...record.nativeProvenance!, compilerVersion: 999 };
     if (field === 'upstreamCommit') record.nativeProvenance = { ...record.nativeProvenance!, upstreamCommit: 'e'.repeat(40) };
-    if (field === 'cwd') record.launchCwd = f.root; // real current-uid directory is observed unsafe, no wx needed
     return runtimeRecordFixture(record);
   });
   expect(await f.adapter.detectInstallation(f.context)).toEqual({ kind: 'refused', reason:
-    field === 'cwd' ? 'launch_cwd_unavailable' : field === 'compilerVersion' || field === 'upstreamCommit' ? 'native_identity_mismatch' : 'install_record_mismatch' });
+    field === 'compilerVersion' || field === 'upstreamCommit' ? 'native_identity_mismatch' : 'install_record_mismatch' });
   expect(f.resolveBin).not.toHaveBeenCalled();
 });
 it('closes the physical read window after the second entry, without caching for prepare', async () => {

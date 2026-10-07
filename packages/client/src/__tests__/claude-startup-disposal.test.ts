@@ -8,14 +8,12 @@ import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runti
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 
 const tree = vi.hoisted(() => ({ adopt: vi.fn(async () => {}), dispose: vi.fn(async () => {}), terminate: vi.fn(async () => {}) }));
-const wrapping = vi.hoisted(() => ({ wrap: vi.fn((server: unknown) => server) }));
 vi.mock('../adapters/process-tree', () => ({
   adoptOwnedProcessTree: tree.adopt, disposeOwnedProcessTree: tree.dispose,
   requestOwnedProcessTreeTermination: tree.terminate, withOwnedProcessTree: (options: unknown) => options,
 }));
-// This suite isolates ownership after admission. Filesystem and launcher effects
-// are inert doubles; no native launcher guard or real directory is changed.
-vi.mock('../daemon/trusted-launch-cwd', () => ({ wrapMcpServerWithLaunchCwd: wrapping.wrap }));
+// This suite isolates ownership after admission. Filesystem effects are inert
+// doubles; no real directory is changed.
 
 const configDir = '/inert-fixture/task-owned-mcp';
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
@@ -45,7 +43,6 @@ function resources(): PreparedOperationResources {
   return {
     workspaceDir: '/inert-workspace', env: {},
     mcpServers: { byokagentmessage: { command: '/inert-mcp' } },
-    mcpLaunch: { cwd: '/inert-launch', launcher: { kind: 'shell', interpreter: '/bin/sh', script: 'inert' } },
   };
 }
 function start(spawnFn: SpawnFn, overrides: Partial<PreparedOperationResources> = {}) {
@@ -151,14 +148,13 @@ describe('Claude failed-start resource ownership', () => {
     expect(fs.rm).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['binding', 'wrapper', 'write'] as const)('cleans allocated config on pre-spawn %s failure', async phase => {
+  it('cleans allocated config on pre-spawn write failure', async () => {
     const fixture = childFixture();
     const original = new Error('pre-spawn failure');
-    if (phase === 'wrapper') wrapping.wrap.mockImplementationOnce(() => { throw original; });
-    if (phase === 'write') vi.mocked(fs.writeFile).mockRejectedValueOnce(original);
-    const failure = await start(fixture.spawnFn, phase === 'binding' ? { mcpLaunch: null } : {}).catch(error => error);
+    vi.mocked(fs.writeFile).mockRejectedValueOnce(original);
+    const failure = await start(fixture.spawnFn).catch(error => error);
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    if (phase !== 'binding') expect(containsCause(failure, original)).toBe(true);
+    expect(containsCause(failure, original)).toBe(true);
     expect(fixture.spawnFn).not.toHaveBeenCalled();
     expect(fs.rm).toHaveBeenCalledWith(configDir, { recursive: true, force: true });
   });

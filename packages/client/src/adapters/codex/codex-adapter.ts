@@ -27,10 +27,6 @@ import {
   resolveSdkReservedHelperBin,
   type SdkHelperHostConfig,
 } from '../../sdk-reserved-helper-host';
-import {
-  wrapMcpServerWithLaunchCwd,
-  type McpLaunchBinding,
-} from '../../daemon/trusted-launch-cwd';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import {
@@ -76,7 +72,6 @@ export class CodexAdapter implements RuntimeAdapter {
   get descriptor() { return freezeRuntimeAdapterDescriptor({
     id: 'codex',
     supportsDispatchSelection: true,
-    mcpServerLaunch: 'launcher-wrapped',
     capabilities: {
       steer: true,
       resume: true,
@@ -185,7 +180,6 @@ export class CodexAdapter implements RuntimeAdapter {
       input.mcpServers,
       env,
       this.options.sdkHelperHost,
-      input.mcpLaunch,
     );
     const spawned = createOwnedLineProcessSpawn({
       spawnFn: this.options.spawnFn,
@@ -499,55 +493,17 @@ function codexMcpConfigArgs(
   servers: RuntimeOperationStartInput['mcpServers'],
   env: NodeJS.ProcessEnv,
   helperHost: SdkHelperHostConfig | undefined,
-  launch?: McpLaunchBinding,
 ): string[] {
   if (servers === undefined || Object.keys(servers).length === 0) return [];
-  // Codex spawns every server itself from these `-c` overrides, and
-  // `mcp_servers.*` has no cwd field — the child would inherit the CLI's cwd,
-  // which for an Agent task is the Agent home the agent writes by design, and
-  // from which a `bun --compile` server binary runs `bunfig.toml` `preload`
-  // before its own code. The `mcp-env` helper that unseals each server's
-  // environment is therefore itself launched through this package's
-  // `bin/byok-launch-cwd.mjs`, which chdirs into the daemon's
-  // proven-non-writable directory before exec'ing it; the real server inherits
-  // that directory from the helper. The CLI's own cwd is unchanged.
-  if (launch?.launcher === undefined) {
-    throw new RuntimeExecutionFailure({
-      phase: 'start',
-      category: 'authority',
-      retry: 'non-retryable',
-      reason:
-        'prepared codex operation received MCP servers without a trusted launch directory',
-    });
-  }
-  const launchBinding = { cwd: launch.cwd, launcher: launch.launcher };
+  // Codex spawns every server itself from these `-c` overrides, in its own
+  // cwd: the session workspace or the Agent home, as in OAR.
   const args: string[] = []; // app-server 0.160.0 has no ignore-user-config flag.
   for (const [name, server] of Object.entries(servers).sort(([left], [right]) =>
     left.localeCompare(right),
   )) {
     const key = `BYOK_MCP_PAYLOAD_${randomBytes(16).toString('hex').toUpperCase()}`;
     env[key] = JSON.stringify(server);
-    let helper;
-    try {
-      helper = wrapMcpServerWithLaunchCwd(
-        resolveSdkReservedHelperBin('mcp-env', helperHost),
-        launchBinding,
-      );
-    } catch (cause) {
-      // Same reason as the claude adapter: a `launch_cwd_*` refusal is this
-      // adapter's own pre-spawn refusal and must arrive typed, or TaskRunner
-      // projects it as a generic `runtime adapter contract violation during
-      // start` and the operator never sees which rule refused.
-      throw new RuntimeExecutionFailure(
-        {
-          phase: 'start',
-          category: 'authority',
-          retry: 'non-retryable',
-          reason: `prepared codex operation cannot launch an MCP server in the trusted launch directory: ${cause instanceof Error ? cause.message : 'launch_cwd_target_refused'}`,
-        },
-        { cause },
-      );
-    }
+    const helper = resolveSdkReservedHelperBin('mcp-env', helperHost);
     args.push(
       '-c',
       `mcp_servers.${name}.command=${JSON.stringify(helper.command)}`,

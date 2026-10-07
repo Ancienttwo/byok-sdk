@@ -154,8 +154,8 @@ describe('SDK-reserved helper host composition', () => {
    * configuration (`toolset-registry.ts`), but the reserved helpers never pass
    * through it — they are built here. Pinning the same property at the source
    * keeps the two from drifting apart silently: a helper resolved to a bare
-   * name would reach a launcher-wrapped runtime as a PATH lookup performed
-   * after the chdir, which is exactly what the registry rule exists to prevent.
+   * name would reach the runtime as a PATH lookup, which is exactly what the
+   * registry rule exists to prevent.
    */
   it('builds every reserved helper command absolute by construction, in both host modes', () => {
     for (const kind of ['agent-message-mcp', 'agent-memory-mcp', 'agent-memory-describe', 'agent-team-mcp', 'mcp-env'] as const) {

@@ -34,7 +34,6 @@ import { PiAdapter, type PiAdapterOptions } from '../adapters/pi/pi-adapter';
 import { PREPARED_PROJECTION_COMPARED_MODEL_FIELDS } from '../bin/pi-prepared-host';
 import { resolveInstalledPiRuntimeIdentity, createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
 import { canonicalPreparedValue } from '../adapters/pi/prepared-request';
-import { trustedLaunchBinding } from './fixtures/launch-cwd';
 import { parsePiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import {
   toolImplementationLaunchEnvNamesDigest, toolImplementationLoaderEnvValuesDigest,
@@ -61,7 +60,7 @@ async function nativeDigest(value: unknown): Promise<string> {
 /**
  * The SDK-owned prepared launch entry (`bin/byok-pi-prepared.ts`), driven
  * end to end: the REAL pi adapter, the REAL shipped bin, the REAL official session,
- * a REAL MCP server child in the REAL launch boundary of this machine, and a
+ * a REAL MCP server child in the session cwd, and a
  * REAL provider endpoint this suite runs and reads the request bytes off.
  *
  * Nothing about the pi adapter or its SDK-owned host is stubbed:
@@ -83,7 +82,7 @@ async function nativeDigest(value: unknown): Promise<string> {
  *   reports the same session id the admission did.
  * - A sealed `sessionRef` and a prepared reference are refused together.
  * - An MCP tool call made by the prepared session reaches a real server child,
- *   started in the trusted launch directory, through the shared pool.
+ *   started in the session cwd, through the shared pool.
  */
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/mcp-fixture-server.mjs', import.meta.url));
@@ -205,7 +204,6 @@ interface Prepared {
   readonly preparation: RuntimePreparedLaunchV1;
   readonly mcpServers: Readonly<Record<string, { command: string; args: string[] }>>;
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
-  readonly launchCwd: string;
   readonly childEnv: Record<string, string>;
   readonly recordPath: string;
   /** The toolset ids this preparation named; empty for a tool-less record. */
@@ -247,7 +245,6 @@ async function prepareOnThisDevice(
       mcpServers: { teamserver: server },
     },
   });
-  const launchBinding = await trustedLaunchBinding();
   const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
   const runtimeIdentity =
     `${compiler.runtime.packageName}@${compiler.runtime.packageVersion}`
@@ -267,7 +264,6 @@ async function prepareOnThisDevice(
   const observed = toolless ? undefined : await probeMcpServer('teamserver', server, {
     label: 'MCP toolset server "teamserver"',
     env: { PATH: process.env.PATH ?? '' },
-    cwd: surface.launch.launchCwd,
     timeoutMs: 10_000,
   });
   const observation: Readonly<Record<string, McpToolsetServerObservation>> = Object.freeze(
@@ -324,7 +320,6 @@ async function prepareOnThisDevice(
     artifactPath,
     requestBody: compiled.requestBody,
     recordPath,
-    launchCwd: launchBinding.cwd,
     mcpServers: toolless ? {} : { teamserver: server },
     observation,
     requiredToolsets,
@@ -348,7 +343,6 @@ async function prepareOnThisDevice(
       },
       toolBindingDigest: surface.toolBindingDigest,
       observationDigest: surface.observationDigest,
-      launch: { cwd: surface.launch.launchCwd },
       toolImplementations: toolless ? {} : { teamserver: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
       toolsetDefinitionRevisions: surface.toolsetDefinitionRevisions,
     },
@@ -417,7 +411,6 @@ async function startPrepared(
       env: prepared.childEnv,
       mcpServers: prepared.mcpServers,
       mcpToolsetTools: prepared.observation,
-      mcpLaunch: { cwd: prepared.launchCwd },
       mcpToolImplementations: prepared.requiredToolsets.length === 0 ? {} : { teamserver: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
       preparation: overrides.preparation ?? prepared.preparation,
     });
@@ -658,7 +651,7 @@ describe('the prepared pi launch entry', () => {
     expect(endpoint.bodies).toHaveLength(0);
   }, 60_000);
 
-  it('reaches a real MCP server child in the trusted launch directory', async () => {
+  it('reaches a real MCP server child in the session cwd', async () => {
     const endpoint = await providerEndpoint();
     let turn = 0;
     endpoint.respond = (_req, res) => {
@@ -704,10 +697,10 @@ describe('the prepared pi launch entry', () => {
       .map((line) => JSON.parse(line) as Record<string, unknown>);
     // The preparation probe and the prepared session's own call are separate
     // spawns; the LAST start entry is the session's, and it started in the
-    // proven directory rather than in the agent home.
+    // session cwd, as in OAR.
     const starts = recorded.filter((entry) => entry.event === 'start');
     expect(starts.length).toBeGreaterThanOrEqual(2);
-    expect(starts.at(-1)?.cwd).toBe(prepared.launchCwd);
+    expect(starts.at(-1)?.cwd).toBe(await fs.realpath(prepared.workspaceDir));
     // The SDK's own Pi control variables never reach a toolset server child.
     expect(starts.at(-1)?.byokEnv).toEqual([]);
     expect(recorded.some((entry) => entry.method === 'tools/call')).toBe(true);

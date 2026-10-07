@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
@@ -11,7 +12,6 @@ import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { createPiInputPreparationCompiler, resolveInstalledPiRuntimeIdentity } from '../adapters/pi/input-preparation';
 import { inputPreparationRuntimeIdentityString } from '../input-preparation';
 import { preparedCompileRequest } from './fixtures/prepared-compile-snapshot';
-import { trustedCwd } from './fixtures/launch-cwd';
 
 describe('memory-only preparation through the real descriptor process and compiler', () => {
   it('counts precisely the selected memory schemas with no task credentials or Host MCP server', async () => {
@@ -28,7 +28,8 @@ describe('memory-only preparation through the real descriptor process and compil
     // its own runtime parser; the identity subject here remains SDK helper.
     const installPath = await fs.realpath(fileURLToPath(new URL('../../dist/bin/byok-pi-prepared.js', import.meta.url)));
     const interpreter = await fs.realpath(process.execPath);
-    const launchCwd = await trustedCwd();
+    // An existing directory the attested helper record names as its own cwd.
+    const launchCwd = path.parse(installPath).root;
     const closureDigest = await probe.digest(installPath);
     const interpreterDigest = await probe.digest(interpreter);
     const authority: ToolImplementationAuthority = {

@@ -255,11 +255,11 @@ describe('S11-F1 authoritative preparation completion replay', () => {
     const assemble = h.toolSurface.assemble.bind(h.toolSurface);
     h.toolSurface.assemble = async input => {
       await assemble(input);
-      return { ok: false, code: 'launch_boundary_unavailable', detail: 'assembly_failed', message: 'fixture refusal' };
+      return { ok: false, code: 'toolsets_unobservable', detail: 'assembly_failed', message: 'fixture refusal' };
     };
     await expect(h.handle()).rejects.toThrow('transport failed');
     const committed = await h.completionBody();
-    expect(h.puts[0]).toMatchObject({ outcome: 'rejected', reason: 'launch_boundary_unavailable' });
+    expect(h.puts[0]).toMatchObject({ outcome: 'rejected', reason: 'toolsets_unobservable' });
     await h.restart();
     await expect(h.handle()).resolves.toEqual(JSON.parse(committed!));
     expect(h.puts).toHaveLength(1);

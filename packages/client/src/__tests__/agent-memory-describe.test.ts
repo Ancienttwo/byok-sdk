@@ -4,13 +4,11 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
 import { observePreparedMemory, resolvePreparedMemoryImplementation } from '../daemon/prepared-agent-memory';
-import { mcpLaunchAttestation } from '../daemon/trusted-launch-cwd';
 import {
   realToolImplementationFsProbe,
   type ToolImplementationAuthority,
   type ToolImplementationFsProbe,
 } from '../daemon/tool-implementation-identity';
-import { trustedCwd } from './fixtures/launch-cwd';
 import {
   AGENT_MEMORY_MCP_SERVER_INFO,
   AGENT_MEMORY_TOOLS,
@@ -163,7 +161,7 @@ async function hangingDescriptor(stage: 'initialize' | 'tools/list') {
   ].join('\n'));
   await fs.chmod(script, 0o755);
   const closureDigest = await realToolImplementationFsProbe.digest(script);
-  const launchCwd = await trustedCwd();
+  const launchCwd = path.dirname(script);
   const authority: ToolImplementationAuthority = {
     resolve: async (locator) => ({
       kind: 'attested',
@@ -180,7 +178,7 @@ async function hangingDescriptor(stage: 'initialize' | 'tools/list') {
   const env = Object.freeze({});
   const probe = rootOwnedProbe();
   const implementation = await resolvePreparedMemoryImplementation(
-    authority, env, mcpLaunchAttestation({ cwd: launchCwd }), probe,
+    authority, env, probe,
   );
   return { implementation, env, probe, pidFile, listedFile };
 }
