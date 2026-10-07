@@ -140,6 +140,23 @@ describe('unconnected OAR Codex adapter', () => {
     expect((await pending).response.body).toEqual({ kind: 'rejected', code: 'runtime_exited', reason: 'app-server killed' });
   });
 
+  it('keeps a failed settlement inside the server-request deadline timer and rejects the pending control', async () => {
+    vi.useFakeTimers();
+    const fake = fakeServer();
+    let armed = false;
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, { cwd: '/workspace', env: { HOME: '/home' } }, 1_000, {
+      onRecord: record => { if (armed && record.kind === 'response') throw new Error('consumer failed'); },
+    });
+    vi.mocked(fake.child.write).mockImplementationOnce(() => {});
+    const pending = session.prompt('in flight').catch(error => error);
+    fake.child.writeAcknowledged = () => new Promise(() => {});
+    armed = true;
+    fake.frame({ id: 'late', method: 'item/commandExecution/requestApproval', params: {} });
+    await expect(vi.advanceTimersByTimeAsync(1_000)).resolves.not.toThrow();
+    expect(fake.child.kill).toHaveBeenCalled();
+    expect((await pending).message).toBe('consumer failed');
+  });
+
   it('keeps raw failed-turn reason without classifying it', () => {
     const { commands } = projection.foldCodexNotification(projection.initialCodexProjection('root'), 'turn/completed', { threadId: 'root', turn: { status: 'quota exceeded' } });
     expect(commands[0]).toMatchObject({ kind: 'frame', body: { events: [{ kind: 'turn_ended', outcome: { kind: 'failed', reason: 'quota exceeded' } }] } });

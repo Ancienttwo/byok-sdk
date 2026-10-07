@@ -264,8 +264,11 @@ export async function codexSession(
       try { kernel.respond(request.id, body); } catch { client.kill(); }
     };
     const timer = setTimeout(() => {
-      finish({ kind: "rejected", code: "error", reason: `codex ${method} response deadline exceeded` });
-      client.kill();
+      // BYOK change: The deadline timer never throws. A failed settlement already rejected its control.
+      try {
+        finish({ kind: "rejected", code: "error", reason: `codex ${method} response deadline exceeded` });
+        client.kill();
+      } catch { /* surfaced by the rejected control */ }
     }, serverRequestTimeoutMs);
     const failed = (error: unknown): void => {
       finish({ kind: "rejected", code: "error", reason: error instanceof Error ? error.message : String(error) });

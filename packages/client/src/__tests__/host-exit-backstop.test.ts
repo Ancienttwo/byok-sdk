@@ -63,7 +63,7 @@ async function waitGone(pids: number[], timeoutMs: number): Promise<number[]> {
   }
 }
 
-async function runHelper(adopt: '0' | '1'): Promise<HelperReceipt> {
+async function runHelper(adopt: '0' | '1', detachGrandchild: '0' | '1' = '0'): Promise<HelperReceipt> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-host-exit-'));
   try {
     const { stdout } = await execFileAsync(process.execPath, [
@@ -71,7 +71,8 @@ async function runHelper(adopt: '0' | '1'): Promise<HelperReceipt> {
       HELPER,
       path.join(dir, 'tree.json'),
       adopt,
-    ]);
+      detachGrandchild,
+    ], detachGrandchild === '1' ? { env: {} } : {});
     return JSON.parse(stdout.trim()) as HelperReceipt;
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
@@ -102,6 +103,14 @@ describe('host-exit backstop (real process readback)', () => {
 
     expect(receipt.rootPid).toBeGreaterThan(0);
     expect(receipt.grandchildPid).toBeGreaterThan(0);
+    const live = await waitGone([receipt.rootPid, receipt.grandchildPid], 5_000);
+    reap([receipt.rootPid, receipt.grandchildPid]);
+    expect(live).toEqual([]);
+  });
+
+  it.skipIf(process.platform === 'win32')('also kills a grandchild that left the owned process group (setsid)', async () => {
+    const receipt = await runHelper('1', '1');
+
     const live = await waitGone([receipt.rootPid, receipt.grandchildPid], 5_000);
     reap([receipt.rootPid, receipt.grandchildPid]);
     expect(live).toEqual([]);

@@ -817,7 +817,9 @@ there is nothing here to enforce.
 
 Both enforcement mechanisms above are DAEMON-SIDE only — a `setTimeout` and
 an in-process byte counter, not a kernel/cgroup/rlimit-level ceiling. Bundled
-runtime disposal owns the full subprocess tree and escalates TERM to KILL, but
+runtime disposal owns the full subprocess tree and escalates TERM to KILL; on
+POSIX it also kills descendants that left the runtime's process group, but never
+the host or its group, and a pid only while its start time matches. Still,
 a kernel-level uninterruptible process or OS authority failure can still make
 the receipt reject. In that case active/Git ownership remains held and the
 failure is locally visible; it is never treated as successful cleanup. Treat

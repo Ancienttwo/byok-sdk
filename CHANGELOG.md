@@ -24,9 +24,17 @@
   `runtime_exited`, not `runtime_refused`. Error replies keep the redacted
   native error. The `CodexAdapter` default interrupt deadline (1 s) ends the
   session before the 10 s fallback, so adapter events do not change.
-  Known gap: on POSIX, SDK runtime disposal does not end a descendant that
-  left the runtime's process group (OAR 0.36.1 does). See
-  `docs/notes/2026-10-08-oar-0.37.0-upgrade.md`.
+  See `docs/notes/2026-10-08-oar-0.37.0-upgrade.md`.
+
+- **Fixed (client)** — on POSIX, runtime disposal and the host-exit sweep now
+  also end the descendants that left the runtime's process group (for
+  example, a tool started in a session of its own), as OAR 0.36.1 does. The
+  SDK reads the process table before TERM and again before KILL, signals a
+  pid only while its start time matches, and never signals the host or its
+  group. `close()` resolves only after those descendants are gone. Windows
+  is unchanged. The code is OAR's `shared/executable/process-tree.ts`,
+  vendored with upstream bytes. The Codex server-request deadline timer no
+  longer throws when a settlement fails.
 
 - **Docs** — record the minimal-guardrails decision as
   [ADR-037](docs/architecture/adr-2026-10-07-minimal-guardrails.md). It

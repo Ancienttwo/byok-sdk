@@ -9,7 +9,7 @@
 // running and nothing disposed. The registered `exit` listener is the only
 // thing that can reap it.
 //
-// argv: <receiptFile> <adopt 0|1>
+// argv: <receiptFile> <adopt 0|1> [detachGrandchild 0|1]
 //
 // Run with `node --import ./ts-source-resolve-hook.mjs`, which is what lets a
 // plain Node process import the `.ts` module under test.
@@ -20,14 +20,14 @@ import { fileURLToPath } from 'node:url';
 import { adoptOwnedProcessTree, withOwnedProcessTree } from '../../adapters/process-tree.ts';
 
 const DESCENDANT_FIXTURE = fileURLToPath(new URL('./process-tree-descendant.mjs', import.meta.url));
-const [receiptFile, adopt] = process.argv.slice(2);
+const [receiptFile, adopt, detachGrandchild = '0'] = process.argv.slice(2);
 
 // `withOwnedProcessTree` is what makes the child a POSIX process-group leader,
 // i.e. exactly the topology the backstop's single group signal relies on.
 // `stdio: 'ignore'` is required, not incidental: an inherited pipe would be
 // held open by the surviving tree in the unadopted control run, and the test's
 // own `execFile` would never see this process's output close.
-const child = spawn(process.execPath, [DESCENDANT_FIXTURE, receiptFile, '0', '0', ''], withOwnedProcessTree({
+const child = spawn(process.execPath, [DESCENDANT_FIXTURE, receiptFile, '0', '0', '', detachGrandchild], withOwnedProcessTree({
   stdio: 'ignore',
 }));
 

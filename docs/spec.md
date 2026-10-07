@@ -902,7 +902,10 @@ typed `RuntimeDisposalFailure` with closed stage `signal`, `quiescence`, or
 `cleanup` and an audit-safe reason. It carries no retry disposition.
 
 Bundled adapters create an owned POSIX process group and terminate the group
-with TERM-to-KILL escalation; Windows uses `taskkill /T /F`. TaskRunner records
+with TERM-to-KILL escalation; Windows uses `taskkill /T /F`. On POSIX, disposal
+and the host-exit sweep also SIGKILL the descendants that left the group, read
+from the process table before TERM and before KILL and checked by start time,
+as OAR 0.37.0 does. TaskRunner records
 the semantic terminal once, but retains its active entry and Git workspace
 lease until close succeeds. A failed attempt emits local
 `runtime-disposal-failed` evidence and may be retried by shutdown without
