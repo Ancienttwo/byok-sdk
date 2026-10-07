@@ -108,7 +108,8 @@ export type { AccessTokenClaims, DeviceRecord, PairingCodeInfo, TenantId, TokenS
 export { createHmacTokenSigner } from '@byok-sdk/cloud';
 /** Cutoffs and result of {@link ByokServer.mailbox.collectRetired}, owned by `@byok-sdk/core`. */
 export type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
-export { SqliteUnavailableError } from './sqlite-support';
+export { SqliteSchemaError, SqliteUnavailableError } from './sqlite-support';
+export type { SqliteSchemaErrorCode } from './sqlite-support';
 export type { RateLimiterOptions } from './rate-limiter';
 export { DEFAULT_TASK_EVENT_BUFFER_LIMIT, DEFAULT_TASK_EVENT_RETENTION_MS } from './relay';
 /** Page size `tasks.list()` uses when the caller names none. */
@@ -559,6 +560,26 @@ export declare function closeSqliteDatabaseAfterInitializationFailure(db: Databa
  */
 export declare class SqliteUnavailableError extends Error {
     constructor(cause: unknown);
+}
+/**
+ * Why a SQLite file was refused at open, so a host can tell the user what to do
+ * without parsing the message:
+ * - `SQLITE_SCHEMA_UNSUPPORTED`: the stored version is not this build's and no
+ *   matching `migration` selector was given (an older file needs one; a newer
+ *   file needs a newer build).
+ * - `SQLITE_MIGRATION_REFUSED`: the selected migration would lose durable
+ *   authority; preserve the file for reconciliation.
+ * - `SQLITE_SCHEMA_INVALID`: the file contradicts its declared BYOK schema or
+ *   is not a BYOK database.
+ */
+export type SqliteSchemaErrorCode = 'SQLITE_SCHEMA_UNSUPPORTED' | 'SQLITE_MIGRATION_REFUSED' | 'SQLITE_SCHEMA_INVALID';
+export declare class SqliteSchemaError extends Error {
+    readonly code: SqliteSchemaErrorCode;
+    /** The stored `schema_version`; `undefined` when the file has none. */
+    readonly foundVersion: string | undefined;
+    /** The schema version this build writes. */
+    readonly requiredVersion: string;
+    constructor(code: SqliteSchemaErrorCode, message: string, foundVersion: string | undefined, requiredVersion: string, options?: ErrorOptions);
 }
 /**
  * Whether `nodeVersion` (a `major.minor.patch` string shaped like

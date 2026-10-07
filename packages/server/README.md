@@ -59,6 +59,16 @@ explicit adoption. An already-open old writer is not stopped by the version fenc
 Preserve rejected databases for separate reconciliation; do not delete history,
 reset cursors or edit version markers to make adoption pass.
 
+Every refusal at open is a `SqliteSchemaError` with `foundVersion` and
+`requiredVersion`, so a host can check the file at startup and branch on `code`:
+
+- `SQLITE_SCHEMA_UNSUPPORTED`: the file needs an explicit `migration` selector
+  (older version) or a newer build (newer version).
+- `SQLITE_MIGRATION_REFUSED`: the selected migration would lose history;
+  preserve the file.
+- `SQLITE_SCHEMA_INVALID`: the file contradicts its declared schema or is not a
+  BYOK database.
+
 ```ts
 const server = createByokServer({
   productId,
