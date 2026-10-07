@@ -48,12 +48,12 @@ import { CodexProjection, type CodexRecord } from './projection';
 import { AsyncQueue } from '../../util/async-queue';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
 import { mapPermissionPolicyToCodexArgs } from './permission-mapping';
+import { isQualifiedCodexVersion, QUALIFIED_CODEX_VERSION } from './codex-version';
 import { withoutProviderCredentials } from '../provider-credential-environment';
 
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5000;
 const RESERVED_MCP_POLICY_PROBE_TIMEOUT_MS = 5000;
-const PINNED_CODEX_VERSION = '0.160.0';
 export interface CodexAdapterOptions {
   sdkHelperHost?: SdkHelperHostConfig;
   resolveBin?: () => ResolvedBin;
@@ -64,7 +64,7 @@ export interface CodexAdapterOptions {
   nativeInteractions?: NativeInteractionHostOptions;
 }
 
-/** Codex app-server is experimental. Only the qualified 0.160.0 binary is admitted; no exec compatibility path. */
+/** Codex app-server is experimental and has no exec compatibility path. Version policy: `codex-version.ts`. */
 export class CodexAdapter implements RuntimeAdapter {
   get descriptor() { return freezeRuntimeAdapterDescriptor({
     id: 'codex',
@@ -101,8 +101,6 @@ export class CodexAdapter implements RuntimeAdapter {
       const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS);
       if (version.kind !== 'available') return version;
       const text = version.stdout.trim() || version.stderr.trim();
-      if (text !== `codex-cli ${PINNED_CODEX_VERSION}`)
-        return { kind: 'refused', reason: 'runtime_version_unsupported' };
       try {
         await execFileAsync(command, ['app-server', '--help'], {
           timeout: DETECT_TIMEOUT_MS,
@@ -121,7 +119,14 @@ export class CodexAdapter implements RuntimeAdapter {
           auth.stdout + '\n' + auth.stderr,
         );
       } catch {}
-      return { kind: 'available', version: text, authPresent };
+      return {
+        kind: 'available',
+        version: text,
+        authPresent,
+        ...(!isQualifiedCodexVersion(text)
+          ? { advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: QUALIFIED_CODEX_VERSION } as const }
+          : {}),
+      };
     } catch (error) {
       return classifyDetectError(error);
     }

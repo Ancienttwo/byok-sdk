@@ -133,10 +133,13 @@ never a configured value, never a wildcard — are what each adapter grants:
   `confirm`; `plan` never pre-grants because it promises not to execute a call.
 - Codex: `mcp_servers.<server>.enabled_tools` plus
   `mcp_servers.<server>.tools.<tool>.approval_mode="approve"` for exactly
-  those tools. Codex requires exactly 0.160.0 with app-server support and uses
+  those tools. Codex is qualified against 0.160.0, needs app-server support and uses
   `danger-full-access`/YOLO with `approval_policy=never`. Only `auto` is supported;
   `readonly`, `network:false`, and nonempty built-in allow/deny lists are rejected.
-  Detection refuses unavailable app-server or unsupported runtime versions.
+  Detection refuses an unavailable app-server. It never refuses a version: an
+  auto-updated Codex is admitted with a `runtime_version_unqualified` advisory,
+  shown by `byok-agent runtimes`. A Codex that does not read back the exact MCP
+  tool allowlist is refused at prepare, before spawn.
 
 A projected server that cannot start, or that lists no tools, is declined
 pre-claim and retryably, rather than claimed and handed a toolset the model can
@@ -528,8 +531,8 @@ Write an absolute-path JSON file with mode `0600` (its contexts are bearer secre
 byok-agent team relay dev --bindings /absolute/private-bindings.json --codex-bin /absolute/codex --max-notifications 2 --config /absolute/agent.json
 ```
 
-POSIX only; the executable must report `codex-cli 0.160.0`, the qualified native
-queue version. Endpoints must be explicit loopback `ws://127.0.0.1:<port>` /
+POSIX only. `codex-cli 0.160.0` is the qualified native queue version; another
+version prints a warning and continues. Endpoints must be explicit loopback `ws://127.0.0.1:<port>` /
 `ws://[::1]:<port>` or `unix:///absolute/socket`. No remote server discovery. Loopback app-server queue endpoints trust local
 processes; the relay does not add authentication to the native Codex endpoint.
 Keep the foreground command open and enter `pause`, `resume`, `status`, or `stop`;

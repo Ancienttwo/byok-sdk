@@ -10,6 +10,7 @@ export type {
   RuntimeOperationStartInput,
   RuntimeCapabilities,
   RuntimeDetectResult,
+  RuntimeDetectionAdvisory,
   RuntimeDetectionRefusalReason,
   RuntimeInstallationObservationContext,
   Session,

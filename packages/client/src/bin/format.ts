@@ -242,6 +242,7 @@ export function formatRuntimeLines(runtimes: readonly ProbedRuntime[]): string[]
     const parts = [
       'present',
       r.version ? `version=${r.version}` : undefined,
+      r.qualifiedVersion !== undefined ? `warning=unqualified-version(qualified=${r.qualifiedVersion})` : undefined,
       r.authPresent !== undefined ? `authPresent=${r.authPresent}` : undefined,
       `capabilities=${caps.length ? caps.join(',') : '(none)'}`,
       `modes=${r.permissionModes.length ? r.permissionModes.join(',') : '(none)'}`,

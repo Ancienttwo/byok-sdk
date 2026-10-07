@@ -16,6 +16,16 @@
 
 ## Unreleased
 
+- **Changed (client)** — Codex detection no longer pins `codex-cli 0.160.0`.
+  As in OAR, the version is read, never gated: Codex updates itself, so any
+  other version is admitted with
+  `advisory: { reason: 'runtime_version_unqualified', qualifiedVersion }` on the
+  `available` result. The daemon logs a warning and `byok-agent runtimes` shows
+  it. Native contracts stay probed: app-server presence at detect, and the exact
+  MCP tool allowlist readback at prepare, before spawn. Remove the
+  `runtime_version_unsupported` refusal reason. `team relay` only warns. New
+  exported type: `RuntimeDetectionAdvisory`.
+
 - **Changed (client)** — update the private OAR source from 0.20.3 to 0.25.0
   (`a800aa00ba9c754c88ba25f84a6981e757b0f19f`). Add the upstream
   `tool_call_input` contract. Keep BYOK process ownership and native request policy.

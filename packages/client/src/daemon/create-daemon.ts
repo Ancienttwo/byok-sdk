@@ -1069,6 +1069,9 @@ async function detectRuntimes(adapters: RuntimeAdapter[], authority: ToolImpleme
   const harnesses: HarnessInfo[] = [];
   for (const { adapter, detected } of detections) {
     if (detected.kind !== 'available') continue;
+    if (detected.advisory !== undefined) {
+      console.warn(`[byok/client] ${adapter.descriptor.id} ${detected.version ?? '(unknown version)'} is not the qualified ${detected.advisory.qualifiedVersion}; continuing`);
+    }
     if (!isRuntimeId(adapter.descriptor.id)) {
       harnesses.push({ id: HarnessIdSchema.parse(adapter.descriptor.id),
         ...(detected.version === undefined ? {} : { version: detected.version }),

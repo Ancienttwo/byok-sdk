@@ -236,6 +236,15 @@ describe('bin/format: formatRuntimeLines', () => {
     ]);
   });
 
+  it('renders an unqualified-version warning', () => {
+    const runtimes: ProbedRuntime[] = [
+      { id: 'codex', present: true, outcome: 'available', version: 'codex-cli 0.161.0', qualifiedVersion: '0.160.0', steer: true, resume: true, permissionModes: ['auto'] },
+    ];
+    expect(formatRuntimeLines(runtimes)).toEqual([
+      'codex: present version=codex-cli 0.161.0 warning=unqualified-version(qualified=0.160.0) capabilities=steer,resume modes=auto',
+    ]);
+  });
+
   it('renders (none) for capabilities/modes when both are empty', () => {
     const runtimes: ProbedRuntime[] = [{ id: 'codex', present: true, outcome: 'available', steer: false, resume: false, permissionModes: [] }];
     expect(formatRuntimeLines(runtimes)).toEqual(['codex: present capabilities=(none) modes=(none)']);
