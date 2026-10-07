@@ -519,8 +519,8 @@ continuation cannot complete successfully. AgentSession retry and provider retry
 stream has an at-most-once fetch and forbids redirects. Tool-result continuations
 are not pre-frozen and never replay the first D: their accepted risk remains
 Errata 1 E4.4, covered by post-response overflow detection, an event and an alert.
-The existing usage-before-body, typed overflow/usage_unavailable, pre-pin checks,
-and egress sanitization remain mandatory.
+The existing usage-before-body, typed overflow/usage_unavailable and pre-pin
+checks remain mandatory.
 
 The host registers no uncounted native tool, no message tool, and loads no device
 extensions, skills, context files or prompt templates. Its resource loader loads
@@ -623,8 +623,8 @@ progress into the final reply. Overflow or missing/unreadable usage fails before
 any body can be published. At turn end it checks usage first, extracts any selected
 result document, appends and publishes its immutable draft, and waits for the exact
 accepted disposition before `task.complete` with `preparedObservation`. Activity
-and terminal envelopes pass through the same strict egress sanitizer as fresh
-Agent egress offers. The message tool never enters D.
+and terminal envelopes go to the Host as is, as for fresh Agent egress offers.
+The message tool never enters D.
 
 **Prepared Agent memory (scoped v8 cut).**
 [Prepared Agent Memory Contract](researches/2026-09-28-prepared-agent-memory-contract.md)
@@ -1936,11 +1936,10 @@ Cloud orchestration does not make the runtime cloud-hosted: provider access,
 tool execution, runtime-native transcript, credential custody, and opaque
 Agent-home contents remain local authorities. Recursive mirroring is never
 authorized. The additive Agent egress path consumes one exact, revisioned
-`AgentEgressPolicy`: activity defaults to metadata/status latest-value
-projection; contentful trajectory requires explicit host selection plus the
-`agent-egress-policy` capability. Every outbound envelope passes the same
-fail-closed sanitizer boundary before long-poll encoding. A rejected or
-throwing sanitizer emits no original bytes.
+`AgentEgressPolicy`. The policy sets transport limits and the content-read
+surfaces. Agent events, results and artifacts go to the Host as the runtime
+produced them. The SDK does not filter, redact or omit them (owner decision
+D4, 2026-10-07, following OAR "nothing gated, nothing dropped").
 
 The tenant used by Agent egress and hosted local journaling is not editable
 host configuration. Pairing projects the required opaque non-secret tenant
@@ -2385,7 +2384,7 @@ status, is not evidence of mailbox delivery or physical Agent-home release.
 
 ### Explicit internal result projection under Agent egress
 
-A strict fresh Agent task may select `terminalProjection: { mode: 'result-document', contract }` without user `messageEgress`. Under metadata-status, that frozen task selection authorizes the extracted document as a separate internal result; terminal summary and activity stay metadata-only. The daemon must preserve the selected document through outbound projection rather than silently deliver document-less success. An unselected document is not authorized by its presence in a payload. Existing extractor validation, server capability gates and configured Host sanitizer remain applicable. This is an execution/result primitive: Host owns SummaryJob, coverage/version CAS, budgets and scheduling; schema support alone is not native-runtime or tool-isolation acceptance. On the prepared lane the same primitive runs with zero tools (a tool-less record, an offer that omits `requiredToolsets`, no `messageEgress`); the extractor and the server `result-document` capability remain required.
+A strict fresh Agent task may select `terminalProjection: { mode: 'result-document', contract }` without user `messageEgress`. That frozen task selection makes the extracted document a separate internal result. The daemon must not deliver document-less success. Existing extractor validation and server capability gates remain applicable. This is an execution/result primitive: Host owns SummaryJob, coverage/version CAS, budgets and scheduling; schema support alone is not native-runtime or tool-isolation acceptance. On the prepared lane the same primitive runs with zero tools (a tool-less record, an offer that omits `requiredToolsets`, no `messageEgress`); the extractor and the server `result-document` capability remain required.
 
 ### Recurring Host composition requirements
 

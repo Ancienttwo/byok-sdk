@@ -393,9 +393,9 @@ so consume it from the workspace until the release that ships it.
 projection. The host selects one exact policy revision. The daemon obtains its
 tenant binding only from the authenticated pair response persisted in the
 atomic local `DeviceRecord`; there is no `agentEgress.tenantId` setting and no
-Profile/config, deviceId, or access-token fallback. Omitting contentful mode
-keeps runtime activity metadata/status-only; enabling it is an explicit product
-decision and requires the server capability. Reliable events are fsynced under
+Profile/config, deviceId, or access-token fallback. Runtime activity, results
+and artifacts go to the Host as is; the SDK does not filter, redact or omit
+them. Reliable events are fsynced under
 the canonical Agent home and retire only after an exact ack.
 
 Hosts that need cold setup or diagnostic state use
@@ -460,7 +460,7 @@ createDaemon({
   agentEgress: {
     policy: {
       policyRevision: 'salesko-agent-egress-r1',
-      activity: { mode: 'metadata-status', delivery: 'latest-value' },
+      activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 256 * 1024 },
       reliable: {
         maxPendingEventsPerAgent: 256,
         maxPendingBytesPerAgent: 4 * 1024 * 1024,

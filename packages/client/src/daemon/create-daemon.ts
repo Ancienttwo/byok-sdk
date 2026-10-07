@@ -173,7 +173,6 @@ import {
 } from './progress-batcher';
 import { AgentEgressController, type AgentEgressReliableAppendResult } from './agent-egress-controller';
 import { resolveAgentEgressPolicy, type AgentEgressStatus } from './agent-egress-policy';
-import { sanitizeEgressEnvelope, type AgentEgressSanitizer } from './agent-egress-sanitizer';
 import type { AgentContentReceiptWithoutReliableIdentity, AgentReliableEgressRecord } from './agent-egress-spool';
 import { AgentContentAuditStore } from './agent-content-audit-store';
 import { AgentHomeProjectionCompletionClient } from './agent-home-projection-client';
@@ -735,8 +734,6 @@ export interface InputPreparationDaemonConfig {
 export interface AgentEgressConfig {
   /** Exact policy the daemon is willing to consume from an Agent offer. */
   policy: AgentEgressPolicy;
-  /** Named redaction hook for explicit contentful trajectory only. */
-  sanitizer?: AgentEgressSanitizer;
   /**
    * Device-local additions required to make one server-selected transfer
    * policy executable. These values only supplement `policy.transfers`: a
@@ -1377,6 +1374,9 @@ export function buildDaemonWithAdapters(
   if (Object.hasOwn(config, 'permissionDefaults')) {
     throw new Error('DaemonConfig.permissionDefaults was removed: the local agent\'s own permission settings apply');
   }
+  if (config.agentEgress !== undefined && Object.hasOwn(config.agentEgress, 'sanitizer')) {
+    throw new Error('DaemonConfig.agentEgress.sanitizer was removed: Agent egress goes to the Host as is');
+  }
   if (config.providerProvisioning !== undefined && typeof config.providerProvisioning !== 'function') {
     throw new Error('DaemonConfig.providerProvisioning must be a handler function when present');
   }
@@ -1480,12 +1480,12 @@ export function buildDaemonWithAdapters(
   const agentHomeAttemptLimit = config.maxConcurrentMutableSessionsPerAgentHome
     ?? DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME;
   const egressPolicy = resolveAgentEgressPolicy(config.agentEgress?.policy);
-  const egressBatcherOptions: ProgressBatcherOptions | undefined = egressPolicy.activity.mode === 'contentful-trajectory'
-    ? {
+  const egressBatcherOptions: ProgressBatcherOptions | undefined = config.agentEgress === undefined
+    ? config.progressBatch
+    : {
         ...config.progressBatch,
         flushIntervalMs: Math.min(config.progressBatch?.flushIntervalMs ?? 250, egressPolicy.activity.maxCoalesceMs),
-      }
-    : config.progressBatch;
+      };
 
   // Same up-front discipline as `maxTaskOutputBytes` above: the presence
   // cadence is pure config, so a band violation is a construction error rather
@@ -1649,7 +1649,6 @@ export function buildDaemonWithAdapters(
   // this with the exact loaded DeviceRecord binding before it accepts work.
   let agentEgress = new AgentEgressController({
     policy: egressPolicy,
-    ...(config.agentEgress?.sanitizer === undefined ? {} : { sanitizer: config.agentEgress.sanitizer }),
   });
   const gitWorkspaceManager = config.gitWorkspace ? overrides.gitWorkspace?.manager ?? new GitWorkspaceManager(config.workspaceRoot, { ownerId: stableGitWorkspaceOwnerId(storeDir, config.productId) }) : undefined;
   const gitWorkspaceStore = config.gitWorkspace ? overrides.gitWorkspace?.store ?? new GitWorkspaceStore(storeDir) : undefined;
@@ -1969,10 +1968,7 @@ export function buildDaemonWithAdapters(
         // deactivate it before the new record can be followed by shutdown
         // terminal/progress activity.
         agentEgress.deactivate();
-        agentEgress = new AgentEgressController({
-          policy: egressPolicy,
-          ...(config.agentEgress.sanitizer === undefined ? {} : { sanitizer: config.agentEgress.sanitizer }),
-        });
+        agentEgress = new AgentEgressController({ policy: egressPolicy });
       }
       if (wasRunning) {
         // The pair response has replaced device.json, so the running daemon's
@@ -2092,7 +2088,6 @@ export function buildDaemonWithAdapters(
       agentEgress = new AgentEgressController({
         policy: egressPolicy,
         tenantId: record.tenantId,
-        ...(config.agentEgress.sanitizer === undefined ? {} : { sanitizer: config.agentEgress.sanitizer }),
       });
     }
     // Capability publication happens only after this SDK-owned preflight has
@@ -2276,7 +2271,7 @@ export function buildDaemonWithAdapters(
 
     // The journal owns terminal bytes; the transport owns one delivery queue.
     // A local write failure must never bypass durability and send different truth.
-    const sendSanitizedEnvelope: TaskRunnerDeps['send'] = (envelope) => {
+    const sendEnvelope: TaskRunnerDeps['send'] = (envelope) => {
       const terminalKind = terminalKindOf(envelope.type);
       if (!activeJournal || !journalIdentity || terminalKind === undefined || envelope.task_id === undefined) {
         observer.handleOutboundEnvelope(envelope);
@@ -2325,26 +2320,6 @@ export function buildDaemonWithAdapters(
           // recovery; the oversized result itself is never silently dropped.
         }
       });
-    };
-    const sendEnvelope: TaskRunnerDeps['send'] = (candidate) => {
-      // The egress policy is additive and applies only to a running
-      // Agent egress offer, including task.offer_prepared. Plain Agent-home
-      // offers retain their exact established task.* wire semantics.
-      if (candidate.task_id === undefined || runner?.usesAgentEgress(candidate.task_id) !== true) {
-        sendSanitizedEnvelope(candidate);
-        return;
-      }
-      const sanitized = sanitizeEgressEnvelope(candidate, egressPolicy, config.agentEgress?.sanitizer, {
-        resultDocumentSelected: runner.selectsResultDocument(candidate.task_id),
-      });
-      if (!sanitized.ok) {
-        // Fail closed at the single outbound boundary. In particular, a
-        // throwing sanitizer does not leave original candidate bytes on the
-        // WS/long-poll queue as a fallback.
-        agentEgress.noteTransportDrop(sanitized.reason);
-        return;
-      }
-      sendSanitizedEnvelope(sanitized.envelope);
     };
 
     const deps: TaskRunnerDeps = {
@@ -4113,15 +4088,7 @@ export function buildDaemonWithAdapters(
             sessionRef: record.sessionRef,
           },
         );
-    // The payload's optional host redaction already ran before append/hash;
-    // this second SDK boundary pass validates the frozen envelope without
-    // invoking a non-idempotent host sanitizer a second time.
-    const sanitized = sanitizeEgressEnvelope(envelope, egressPolicy, undefined, { lane: 'reliable' });
-    if (!sanitized.ok) {
-      agentEgress.noteTransportDrop(sanitized.reason, record.agentRef);
-      return;
-    }
-    connection.send(sanitized.envelope);
+    connection.send(envelope);
   }
 
   async function publishReliableAgentEgress(input: AgentReliableEgressInput): Promise<AgentEgressReliableAppendResult> {

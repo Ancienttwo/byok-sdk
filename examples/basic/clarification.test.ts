@@ -12,7 +12,7 @@ import { SqliteClarificationStore } from './clarification-store';
 import { ClarificationHost, CLARIFICATION_CONTRACT, extractClarification, parseClarification, type QuestionBinding } from './clarification';
 
 const policy: AgentEgressPolicy = {
-  policyRevision: 'clarification-v1', activity: { mode: 'metadata-status', delivery: 'latest-value' },
+  policyRevision: 'clarification-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
   reliable: { maxPendingEventsPerAgent: 16, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 16384 },
   transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
 };

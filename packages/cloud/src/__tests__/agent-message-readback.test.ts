@@ -21,7 +21,7 @@ describe('Host exact Agent message disposition readback', () => {
       payload: {
         instruction: 'reply', agentRef,
         egressPolicy: {
-          policyRevision: 'policy-v1', activity: { mode: 'metadata-status', delivery: 'latest-value' },
+          policyRevision: 'policy-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
           reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
           transfers: { workspace: { maxBytes: 512, allowedMimeTypes: ['text/plain'] as string[] }, transcript: 'disabled', artifact: 'disabled' },
         },

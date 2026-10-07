@@ -308,7 +308,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `agentRef?` | Task ends in error |
 | `task.cancelled` | D→S | **required** | optional | `reason?`, `agentRef?` | Task ends `Cancelled` (server- or daemon-initiated) |
 | `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2) — gated on the `approval_resolved` capability flag |
-| `agent.egress.reliable` | D→S | optional | optional | exact Agent/session/policy identity, stable `eventId`/`cursor`, sanitized payload hash and byte count | A locally fsynced reliable event is sent or retried |
+| `agent.egress.reliable` | D→S | optional | optional | exact Agent/session/policy identity, stable `eventId`/`cursor`, payload hash and byte count | A locally fsynced reliable event is sent or retried |
 | `agent.content.receipt` | D→S | optional | optional | exact request/actor/Agent/session/runtime/cwd/policy/target/MIME/decode identity; allowed includes hash/size/BlobRef, denied includes zero bytes and typed reason | Local content policy and audit completed |
 
 ### 2.0 Prepared Executions
@@ -343,7 +343,7 @@ read/read-write ACL, checked again by the daemon. Their message body is
 daemon-authored from final Pi text at turn end, after usage validation and selected
 result-document extraction. Missing/unreadable usage or context overflow fails
 before publish. The outbox waits for exact `accepted` before emitting `task.complete`
-with `preparedObservation`; outbound activity/terminal envelopes are sanitized.
+with `preparedObservation`; outbound activity/terminal envelopes go to the Host as is.
 Selected memory schemas and executors enter D and its existing admission comparisons;
 the memory selection is compared explicitly as well. The message tool stays outside D. Pi `{mode:'auto',allowTools:[]}` means zero native tools on both lanes;
 fresh offers retain their observed MCP and reserved grants. Prepared native policy failures
@@ -383,10 +383,9 @@ Host-facing APIs mirror those two wire facts. Hosted cloud exposes
 `dispatchFreshAgentEgress`; the existing resume dispatch rejects a missing
 `sessionRef` instead of selecting the fresh message.
 
-The policy has one exact `policyRevision`. Activity is either
-`metadata-status`/`latest-value`, or explicit
-`contentful-trajectory`/`latest-value` with positive coalesce and event-byte
-bounds. Reliable quotas are positive and independently bound per Agent and
+The policy has one exact `policyRevision`. Activity is `latest-value` with
+positive coalesce and event-byte bounds. The daemon sends Agent events as the
+runtime produced them. It does not filter, redact or omit them. Reliable quotas are positive and independently bound per Agent and
 authenticated tenant. Workspace, transcript and artifact transfers are each
 `disabled` or carry an explicit MIME/byte policy; no surface inherits another
 surface's capability.
@@ -1436,13 +1435,6 @@ just an object. Producing it is product glue: a daemon supplies
 the product's JSON, or returns `undefined` for "no structured result this
 time".
 
-For strict Agent egress under `metadata-status`, an explicit frozen
-`terminalProjection.mode:'result-document'` authorizes the extracted document
-as a separate product result. The daemon preserves that document through the
-outbound sanitizer while hiding terminal summary and activity content.
-Unselected documents remain suppressed. The configured Host sanitizer still
-applies; this selection does not authorize full trajectory disclosure.
-
 Strict Agent offers may additionally carry an offer-scoped
 `terminalProjection`. `{mode:'none'}` explicitly bypasses the host extractor;
 `{mode:'result-document', contract}` requires the extractor to return one
@@ -2335,11 +2327,8 @@ absent. The task is not failed over it: the runtime's own transcript still
 holds the content, and losing a real result to a telemetry problem would be
 the worse trade.
 
-**Egress.** A `BlobRef` is a readable locator for tool content, so a
-metadata-status Agent egress projection (§2.1) carries no `spill` at all —
-`metadataStatusEvent` rebuilds each event from SDK-authored literals, and the
-descriptor's byte counts would leak the payload's size even without the
-locator.
+**Egress.** Agent egress (§2.1) forwards `spill` as is, like every other
+event field.
 
 Additive-minor: an optional field on two existing variants, no
 `PROTOCOL_VERSION` bump — the freeze golden (`golden/v1.frozen.json`) is

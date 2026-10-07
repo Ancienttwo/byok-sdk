@@ -166,7 +166,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
           sessionRef: 'session-egress-1',
           egressPolicy: {
             policyRevision: 'egress-policy-r1',
-            activity: { mode: 'metadata-status', delivery: 'latest-value' },
+            activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
             reliable: {
               maxPendingEventsPerAgent: 10,
               maxPendingBytesPerAgent: 4096,
@@ -197,7 +197,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
           agentRef: { agentId: 'agent-egress', profileRevision: 'profile-egress-r1' },
           egressPolicy: {
             policyRevision: 'egress-policy-r1',
-            activity: { mode: 'metadata-status', delivery: 'latest-value' },
+            activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
             reliable: {
               maxPendingEventsPerAgent: 10,
               maxPendingBytesPerAgent: 4096,
@@ -224,7 +224,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
         type,
         {
           agentMemory: 'none',
-          egressPolicy: { policyRevision: 'metadata-status-v1', activity: { mode: 'metadata-status', delivery: 'latest-value' }, reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4194304, maxPendingBytesPerTenant: 16777216 }, transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },
+          egressPolicy: { policyRevision: 'default-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 }, reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4194304, maxPendingBytesPerTenant: 16777216 }, transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },
           runtime: 'pi',
           agentRef: { agentId: 'agent-prepared', profileRevision: 'profile-prepared-r1' },
           requiredToolsets: ['team'],

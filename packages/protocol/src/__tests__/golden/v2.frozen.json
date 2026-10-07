@@ -1499,56 +1499,29 @@
               "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
             },
             "activity": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "mode": {
-                      "type": "string",
-                      "const": "metadata-status"
-                    },
-                    "delivery": {
-                      "type": "string",
-                      "const": "latest-value"
-                    }
-                  },
-                  "required": [
-                    "mode",
-                    "delivery"
-                  ],
-                  "additionalProperties": false
+              "type": "object",
+              "properties": {
+                "delivery": {
+                  "type": "string",
+                  "const": "latest-value"
                 },
-                {
-                  "type": "object",
-                  "properties": {
-                    "mode": {
-                      "type": "string",
-                      "const": "contentful-trajectory"
-                    },
-                    "delivery": {
-                      "type": "string",
-                      "const": "latest-value"
-                    },
-                    "maxCoalesceMs": {
-                      "type": "integer",
-                      "exclusiveMinimum": 0,
-                      "maximum": 2147483647
-                    },
-                    "maxEventBytes": {
-                      "type": "integer",
-                      "exclusiveMinimum": 0,
-                      "maximum": 2147483647
-                    }
-                  },
-                  "required": [
-                    "mode",
-                    "delivery",
-                    "maxCoalesceMs",
-                    "maxEventBytes"
-                  ],
-                  "additionalProperties": false
+                "maxCoalesceMs": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 2147483647
+                },
+                "maxEventBytes": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 2147483647
                 }
-              ]
+              },
+              "required": [
+                "delivery",
+                "maxCoalesceMs",
+                "maxEventBytes"
+              ],
+              "additionalProperties": false
             },
             "reliable": {
               "type": "object",
@@ -2038,56 +2011,29 @@
               "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
             },
             "activity": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "mode": {
-                      "type": "string",
-                      "const": "metadata-status"
-                    },
-                    "delivery": {
-                      "type": "string",
-                      "const": "latest-value"
-                    }
-                  },
-                  "required": [
-                    "mode",
-                    "delivery"
-                  ],
-                  "additionalProperties": false
+              "type": "object",
+              "properties": {
+                "delivery": {
+                  "type": "string",
+                  "const": "latest-value"
                 },
-                {
-                  "type": "object",
-                  "properties": {
-                    "mode": {
-                      "type": "string",
-                      "const": "contentful-trajectory"
-                    },
-                    "delivery": {
-                      "type": "string",
-                      "const": "latest-value"
-                    },
-                    "maxCoalesceMs": {
-                      "type": "integer",
-                      "exclusiveMinimum": 0,
-                      "maximum": 2147483647
-                    },
-                    "maxEventBytes": {
-                      "type": "integer",
-                      "exclusiveMinimum": 0,
-                      "maximum": 2147483647
-                    }
-                  },
-                  "required": [
-                    "mode",
-                    "delivery",
-                    "maxCoalesceMs",
-                    "maxEventBytes"
-                  ],
-                  "additionalProperties": false
+                "maxCoalesceMs": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 2147483647
+                },
+                "maxEventBytes": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 2147483647
                 }
-              ]
+              },
+              "required": [
+                "delivery",
+                "maxCoalesceMs",
+                "maxEventBytes"
+              ],
+              "additionalProperties": false
             },
             "reliable": {
               "type": "object",
@@ -2566,56 +2512,29 @@
               "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
             },
             "activity": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "mode": {
-                      "type": "string",
-                      "const": "metadata-status"
-                    },
-                    "delivery": {
-                      "type": "string",
-                      "const": "latest-value"
-                    }
-                  },
-                  "required": [
-                    "mode",
-                    "delivery"
-                  ],
-                  "additionalProperties": false
+              "type": "object",
+              "properties": {
+                "delivery": {
+                  "type": "string",
+                  "const": "latest-value"
                 },
-                {
-                  "type": "object",
-                  "properties": {
-                    "mode": {
-                      "type": "string",
-                      "const": "contentful-trajectory"
-                    },
-                    "delivery": {
-                      "type": "string",
-                      "const": "latest-value"
-                    },
-                    "maxCoalesceMs": {
-                      "type": "integer",
-                      "exclusiveMinimum": 0,
-                      "maximum": 2147483647
-                    },
-                    "maxEventBytes": {
-                      "type": "integer",
-                      "exclusiveMinimum": 0,
-                      "maximum": 2147483647
-                    }
-                  },
-                  "required": [
-                    "mode",
-                    "delivery",
-                    "maxCoalesceMs",
-                    "maxEventBytes"
-                  ],
-                  "additionalProperties": false
+                "maxCoalesceMs": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 2147483647
+                },
+                "maxEventBytes": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 2147483647
                 }
-              ]
+              },
+              "required": [
+                "delivery",
+                "maxCoalesceMs",
+                "maxEventBytes"
+              ],
+              "additionalProperties": false
             },
             "reliable": {
               "type": "object",
@@ -6919,56 +6838,29 @@
                     "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
                   },
                   "activity": {
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "const": "metadata-status"
-                          },
-                          "delivery": {
-                            "type": "string",
-                            "const": "latest-value"
-                          }
-                        },
-                        "required": [
-                          "mode",
-                          "delivery"
-                        ],
-                        "additionalProperties": false
+                    "type": "object",
+                    "properties": {
+                      "delivery": {
+                        "type": "string",
+                        "const": "latest-value"
                       },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "const": "contentful-trajectory"
-                          },
-                          "delivery": {
-                            "type": "string",
-                            "const": "latest-value"
-                          },
-                          "maxCoalesceMs": {
-                            "type": "integer",
-                            "exclusiveMinimum": 0,
-                            "maximum": 2147483647
-                          },
-                          "maxEventBytes": {
-                            "type": "integer",
-                            "exclusiveMinimum": 0,
-                            "maximum": 2147483647
-                          }
-                        },
-                        "required": [
-                          "mode",
-                          "delivery",
-                          "maxCoalesceMs",
-                          "maxEventBytes"
-                        ],
-                        "additionalProperties": false
+                      "maxCoalesceMs": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 2147483647
+                      },
+                      "maxEventBytes": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 2147483647
                       }
-                    ]
+                    },
+                    "required": [
+                      "delivery",
+                      "maxCoalesceMs",
+                      "maxEventBytes"
+                    ],
+                    "additionalProperties": false
                   },
                   "reliable": {
                     "type": "object",
@@ -7503,56 +7395,29 @@
                     "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
                   },
                   "activity": {
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "const": "metadata-status"
-                          },
-                          "delivery": {
-                            "type": "string",
-                            "const": "latest-value"
-                          }
-                        },
-                        "required": [
-                          "mode",
-                          "delivery"
-                        ],
-                        "additionalProperties": false
+                    "type": "object",
+                    "properties": {
+                      "delivery": {
+                        "type": "string",
+                        "const": "latest-value"
                       },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "const": "contentful-trajectory"
-                          },
-                          "delivery": {
-                            "type": "string",
-                            "const": "latest-value"
-                          },
-                          "maxCoalesceMs": {
-                            "type": "integer",
-                            "exclusiveMinimum": 0,
-                            "maximum": 2147483647
-                          },
-                          "maxEventBytes": {
-                            "type": "integer",
-                            "exclusiveMinimum": 0,
-                            "maximum": 2147483647
-                          }
-                        },
-                        "required": [
-                          "mode",
-                          "delivery",
-                          "maxCoalesceMs",
-                          "maxEventBytes"
-                        ],
-                        "additionalProperties": false
+                      "maxCoalesceMs": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 2147483647
+                      },
+                      "maxEventBytes": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 2147483647
                       }
-                    ]
+                    },
+                    "required": [
+                      "delivery",
+                      "maxCoalesceMs",
+                      "maxEventBytes"
+                    ],
+                    "additionalProperties": false
                   },
                   "reliable": {
                     "type": "object",
@@ -8076,56 +7941,29 @@
                     "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
                   },
                   "activity": {
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "const": "metadata-status"
-                          },
-                          "delivery": {
-                            "type": "string",
-                            "const": "latest-value"
-                          }
-                        },
-                        "required": [
-                          "mode",
-                          "delivery"
-                        ],
-                        "additionalProperties": false
+                    "type": "object",
+                    "properties": {
+                      "delivery": {
+                        "type": "string",
+                        "const": "latest-value"
                       },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "const": "contentful-trajectory"
-                          },
-                          "delivery": {
-                            "type": "string",
-                            "const": "latest-value"
-                          },
-                          "maxCoalesceMs": {
-                            "type": "integer",
-                            "exclusiveMinimum": 0,
-                            "maximum": 2147483647
-                          },
-                          "maxEventBytes": {
-                            "type": "integer",
-                            "exclusiveMinimum": 0,
-                            "maximum": 2147483647
-                          }
-                        },
-                        "required": [
-                          "mode",
-                          "delivery",
-                          "maxCoalesceMs",
-                          "maxEventBytes"
-                        ],
-                        "additionalProperties": false
+                      "maxCoalesceMs": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 2147483647
+                      },
+                      "maxEventBytes": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 2147483647
                       }
-                    ]
+                    },
+                    "required": [
+                      "delivery",
+                      "maxCoalesceMs",
+                      "maxEventBytes"
+                    ],
+                    "additionalProperties": false
                   },
                   "reliable": {
                     "type": "object",
@@ -14469,56 +14307,29 @@
                             "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
                           },
                           "activity": {
-                            "oneOf": [
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "mode": {
-                                    "type": "string",
-                                    "const": "metadata-status"
-                                  },
-                                  "delivery": {
-                                    "type": "string",
-                                    "const": "latest-value"
-                                  }
-                                },
-                                "required": [
-                                  "mode",
-                                  "delivery"
-                                ],
-                                "additionalProperties": false
+                            "type": "object",
+                            "properties": {
+                              "delivery": {
+                                "type": "string",
+                                "const": "latest-value"
                               },
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "mode": {
-                                    "type": "string",
-                                    "const": "contentful-trajectory"
-                                  },
-                                  "delivery": {
-                                    "type": "string",
-                                    "const": "latest-value"
-                                  },
-                                  "maxCoalesceMs": {
-                                    "type": "integer",
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 2147483647
-                                  },
-                                  "maxEventBytes": {
-                                    "type": "integer",
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 2147483647
-                                  }
-                                },
-                                "required": [
-                                  "mode",
-                                  "delivery",
-                                  "maxCoalesceMs",
-                                  "maxEventBytes"
-                                ],
-                                "additionalProperties": false
+                              "maxCoalesceMs": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 2147483647
+                              },
+                              "maxEventBytes": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 2147483647
                               }
-                            ]
+                            },
+                            "required": [
+                              "delivery",
+                              "maxCoalesceMs",
+                              "maxEventBytes"
+                            ],
+                            "additionalProperties": false
                           },
                           "reliable": {
                             "type": "object",
@@ -15053,56 +14864,29 @@
                             "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
                           },
                           "activity": {
-                            "oneOf": [
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "mode": {
-                                    "type": "string",
-                                    "const": "metadata-status"
-                                  },
-                                  "delivery": {
-                                    "type": "string",
-                                    "const": "latest-value"
-                                  }
-                                },
-                                "required": [
-                                  "mode",
-                                  "delivery"
-                                ],
-                                "additionalProperties": false
+                            "type": "object",
+                            "properties": {
+                              "delivery": {
+                                "type": "string",
+                                "const": "latest-value"
                               },
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "mode": {
-                                    "type": "string",
-                                    "const": "contentful-trajectory"
-                                  },
-                                  "delivery": {
-                                    "type": "string",
-                                    "const": "latest-value"
-                                  },
-                                  "maxCoalesceMs": {
-                                    "type": "integer",
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 2147483647
-                                  },
-                                  "maxEventBytes": {
-                                    "type": "integer",
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 2147483647
-                                  }
-                                },
-                                "required": [
-                                  "mode",
-                                  "delivery",
-                                  "maxCoalesceMs",
-                                  "maxEventBytes"
-                                ],
-                                "additionalProperties": false
+                              "maxCoalesceMs": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 2147483647
+                              },
+                              "maxEventBytes": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 2147483647
                               }
-                            ]
+                            },
+                            "required": [
+                              "delivery",
+                              "maxCoalesceMs",
+                              "maxEventBytes"
+                            ],
+                            "additionalProperties": false
                           },
                           "reliable": {
                             "type": "object",
@@ -15626,56 +15410,29 @@
                             "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
                           },
                           "activity": {
-                            "oneOf": [
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "mode": {
-                                    "type": "string",
-                                    "const": "metadata-status"
-                                  },
-                                  "delivery": {
-                                    "type": "string",
-                                    "const": "latest-value"
-                                  }
-                                },
-                                "required": [
-                                  "mode",
-                                  "delivery"
-                                ],
-                                "additionalProperties": false
+                            "type": "object",
+                            "properties": {
+                              "delivery": {
+                                "type": "string",
+                                "const": "latest-value"
                               },
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "mode": {
-                                    "type": "string",
-                                    "const": "contentful-trajectory"
-                                  },
-                                  "delivery": {
-                                    "type": "string",
-                                    "const": "latest-value"
-                                  },
-                                  "maxCoalesceMs": {
-                                    "type": "integer",
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 2147483647
-                                  },
-                                  "maxEventBytes": {
-                                    "type": "integer",
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 2147483647
-                                  }
-                                },
-                                "required": [
-                                  "mode",
-                                  "delivery",
-                                  "maxCoalesceMs",
-                                  "maxEventBytes"
-                                ],
-                                "additionalProperties": false
+                              "maxCoalesceMs": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 2147483647
+                              },
+                              "maxEventBytes": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 2147483647
                               }
-                            ]
+                            },
+                            "required": [
+                              "delivery",
+                              "maxCoalesceMs",
+                              "maxEventBytes"
+                            ],
+                            "additionalProperties": false
                           },
                           "reliable": {
                             "type": "object",
@@ -21070,56 +20827,29 @@
                             "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
                           },
                           "activity": {
-                            "oneOf": [
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "mode": {
-                                    "type": "string",
-                                    "const": "metadata-status"
-                                  },
-                                  "delivery": {
-                                    "type": "string",
-                                    "const": "latest-value"
-                                  }
-                                },
-                                "required": [
-                                  "mode",
-                                  "delivery"
-                                ],
-                                "additionalProperties": false
+                            "type": "object",
+                            "properties": {
+                              "delivery": {
+                                "type": "string",
+                                "const": "latest-value"
                               },
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "mode": {
-                                    "type": "string",
-                                    "const": "contentful-trajectory"
-                                  },
-                                  "delivery": {
-                                    "type": "string",
-                                    "const": "latest-value"
-                                  },
-                                  "maxCoalesceMs": {
-                                    "type": "integer",
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 2147483647
-                                  },
-                                  "maxEventBytes": {
-                                    "type": "integer",
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 2147483647
-                                  }
-                                },
-                                "required": [
-                                  "mode",
-                                  "delivery",
-                                  "maxCoalesceMs",
-                                  "maxEventBytes"
-                                ],
-                                "additionalProperties": false
+                              "maxCoalesceMs": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 2147483647
+                              },
+                              "maxEventBytes": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 2147483647
                               }
-                            ]
+                            },
+                            "required": [
+                              "delivery",
+                              "maxCoalesceMs",
+                              "maxEventBytes"
+                            ],
+                            "additionalProperties": false
                           },
                           "reliable": {
                             "type": "object",
@@ -21654,56 +21384,29 @@
                             "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
                           },
                           "activity": {
-                            "oneOf": [
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "mode": {
-                                    "type": "string",
-                                    "const": "metadata-status"
-                                  },
-                                  "delivery": {
-                                    "type": "string",
-                                    "const": "latest-value"
-                                  }
-                                },
-                                "required": [
-                                  "mode",
-                                  "delivery"
-                                ],
-                                "additionalProperties": false
+                            "type": "object",
+                            "properties": {
+                              "delivery": {
+                                "type": "string",
+                                "const": "latest-value"
                               },
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "mode": {
-                                    "type": "string",
-                                    "const": "contentful-trajectory"
-                                  },
-                                  "delivery": {
-                                    "type": "string",
-                                    "const": "latest-value"
-                                  },
-                                  "maxCoalesceMs": {
-                                    "type": "integer",
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 2147483647
-                                  },
-                                  "maxEventBytes": {
-                                    "type": "integer",
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 2147483647
-                                  }
-                                },
-                                "required": [
-                                  "mode",
-                                  "delivery",
-                                  "maxCoalesceMs",
-                                  "maxEventBytes"
-                                ],
-                                "additionalProperties": false
+                              "maxCoalesceMs": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 2147483647
+                              },
+                              "maxEventBytes": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 2147483647
                               }
-                            ]
+                            },
+                            "required": [
+                              "delivery",
+                              "maxCoalesceMs",
+                              "maxEventBytes"
+                            ],
+                            "additionalProperties": false
                           },
                           "reliable": {
                             "type": "object",
@@ -22227,56 +21930,29 @@
                             "pattern": "^[^\\u0000-\\u001f\\u007f\\r\\n]+$"
                           },
                           "activity": {
-                            "oneOf": [
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "mode": {
-                                    "type": "string",
-                                    "const": "metadata-status"
-                                  },
-                                  "delivery": {
-                                    "type": "string",
-                                    "const": "latest-value"
-                                  }
-                                },
-                                "required": [
-                                  "mode",
-                                  "delivery"
-                                ],
-                                "additionalProperties": false
+                            "type": "object",
+                            "properties": {
+                              "delivery": {
+                                "type": "string",
+                                "const": "latest-value"
                               },
-                              {
-                                "type": "object",
-                                "properties": {
-                                  "mode": {
-                                    "type": "string",
-                                    "const": "contentful-trajectory"
-                                  },
-                                  "delivery": {
-                                    "type": "string",
-                                    "const": "latest-value"
-                                  },
-                                  "maxCoalesceMs": {
-                                    "type": "integer",
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 2147483647
-                                  },
-                                  "maxEventBytes": {
-                                    "type": "integer",
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 2147483647
-                                  }
-                                },
-                                "required": [
-                                  "mode",
-                                  "delivery",
-                                  "maxCoalesceMs",
-                                  "maxEventBytes"
-                                ],
-                                "additionalProperties": false
+                              "maxCoalesceMs": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 2147483647
+                              },
+                              "maxEventBytes": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 2147483647
                               }
-                            ]
+                            },
+                            "required": [
+                              "delivery",
+                              "maxCoalesceMs",
+                              "maxEventBytes"
+                            ],
+                            "additionalProperties": false
                           },
                           "reliable": {
                             "type": "object",

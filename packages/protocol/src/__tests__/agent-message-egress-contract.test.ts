@@ -12,7 +12,7 @@ import {
 const agentRef = { agentId: '11111111-1111-4111-8111-111111111111', profileRevision: '7' } as const;
 const egressPolicy = {
   policyRevision: 'p1',
-  activity: { mode: 'metadata-status', delivery: 'latest-value' },
+  activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
   reliable: { maxPendingEventsPerAgent: 8, maxPendingBytesPerAgent: 262144, maxPendingBytesPerTenant: 524288 },
   transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
 } as const;

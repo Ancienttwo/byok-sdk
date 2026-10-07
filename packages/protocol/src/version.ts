@@ -17,6 +17,9 @@ export const MAILBOX_READ_AHEAD_CAPABILITY = 'mailbox-read-ahead';
  * capability `permissionModes` and the input-preparation `permissionMode`.
  * Sessions run without an SDK permission gate; each local agent keeps its
  * own guardrails. A v1 envelope is rejected; there is no v1 reader.
+ * v2 also removed the egress policy's `metadata-status` activity mode, its
+ * `activity.mode` field and the `sanitizer_rejected` drop reason. Agent
+ * egress goes to the Host as the runtime produced it.
  *
  * IMPORTANT: changing this constant, or changing/removing/retyping any
  * already-frozen schema in this package, requires a DELIBERATE update to the

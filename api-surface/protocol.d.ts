@@ -42,15 +42,16 @@ export declare const ContentReadPolicySchema: z.ZodObject<{
     allowedMimeTypes: z.ZodArray<z.ZodString>;
 }, z.core.$strict>;
 export type ContentReadPolicy = z.infer<typeof ContentReadPolicySchema>;
-export declare const AgentEgressActivityPolicySchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
-    mode: z.ZodLiteral<"metadata-status">;
-    delivery: z.ZodLiteral<"latest-value">;
-}, z.core.$strict>, z.ZodObject<{
-    mode: z.ZodLiteral<"contentful-trajectory">;
+/**
+ * The latest-value activity lane. Agent events go to the Host as the runtime
+ * produced them; these limits only bound transport (coalesce window and one
+ * event's byte size).
+ */
+export declare const AgentEgressActivityPolicySchema: z.ZodObject<{
     delivery: z.ZodLiteral<"latest-value">;
     maxCoalesceMs: z.ZodNumber;
     maxEventBytes: z.ZodNumber;
-}, z.core.$strict>], "mode">;
+}, z.core.$strict>;
 export type AgentEgressActivityPolicy = z.infer<typeof AgentEgressActivityPolicySchema>;
 export declare const AgentReliableQuotaPolicySchema: z.ZodObject<{
     maxPendingEventsPerAgent: z.ZodNumber;
@@ -59,21 +60,18 @@ export declare const AgentReliableQuotaPolicySchema: z.ZodObject<{
 }, z.core.$strict>;
 export type AgentReliableQuotaPolicy = z.infer<typeof AgentReliableQuotaPolicySchema>;
 /**
- * The only consumable policy shape for Agent egress.  Missing/unknown policy
- * is intentionally not represented as a default: callers must select a
- * revision and all three content surfaces independently.
+ * The only consumable policy shape for Agent egress. It selects transport
+ * limits and the Host content-read surfaces. It does not filter, redact or
+ * omit Agent egress content. Callers must select a revision and all three
+ * content-read surfaces independently.
  */
 export declare const AgentEgressPolicySchema: z.ZodObject<{
     policyRevision: z.ZodString;
-    activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-        mode: z.ZodLiteral<"metadata-status">;
-        delivery: z.ZodLiteral<"latest-value">;
-    }, z.core.$strict>, z.ZodObject<{
-        mode: z.ZodLiteral<"contentful-trajectory">;
+    activity: z.ZodObject<{
         delivery: z.ZodLiteral<"latest-value">;
         maxCoalesceMs: z.ZodNumber;
         maxEventBytes: z.ZodNumber;
-    }, z.core.$strict>], "mode">;
+    }, z.core.$strict>;
     reliable: z.ZodObject<{
         maxPendingEventsPerAgent: z.ZodNumber;
         maxPendingBytesPerAgent: z.ZodNumber;
@@ -111,7 +109,6 @@ export declare const AgentEgressDropReasonSchema: z.ZodEnum<{
     invalid_envelope: "invalid_envelope";
     policy_denied: "policy_denied";
     quota_exceeded: "quota_exceeded";
-    sanitizer_rejected: "sanitizer_rejected";
 }>;
 export type AgentEgressDropReason = z.infer<typeof AgentEgressDropReasonSchema>;
 export declare const AgentContentReadSurfaceSchema: z.ZodEnum<{
@@ -1857,15 +1854,11 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         sessionRef: z.ZodString;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
-            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                mode: z.ZodLiteral<"metadata-status">;
-                delivery: z.ZodLiteral<"latest-value">;
-            }, z.core.$strict>, z.ZodObject<{
-                mode: z.ZodLiteral<"contentful-trajectory">;
+            activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
                 maxCoalesceMs: z.ZodNumber;
                 maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>], "mode">;
+            }, z.core.$strict>;
             reliable: z.ZodObject<{
                 maxPendingEventsPerAgent: z.ZodNumber;
                 maxPendingBytesPerAgent: z.ZodNumber;
@@ -1963,15 +1956,11 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }, z.core.$strip>>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
-            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                mode: z.ZodLiteral<"metadata-status">;
-                delivery: z.ZodLiteral<"latest-value">;
-            }, z.core.$strict>, z.ZodObject<{
-                mode: z.ZodLiteral<"contentful-trajectory">;
+            activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
                 maxCoalesceMs: z.ZodNumber;
                 maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>], "mode">;
+            }, z.core.$strict>;
             reliable: z.ZodObject<{
                 maxPendingEventsPerAgent: z.ZodNumber;
                 maxPendingBytesPerAgent: z.ZodNumber;
@@ -2070,15 +2059,11 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
-            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                mode: z.ZodLiteral<"metadata-status">;
-                delivery: z.ZodLiteral<"latest-value">;
-            }, z.core.$strict>, z.ZodObject<{
-                mode: z.ZodLiteral<"contentful-trajectory">;
+            activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
                 maxCoalesceMs: z.ZodNumber;
                 maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>], "mode">;
+            }, z.core.$strict>;
             reliable: z.ZodObject<{
                 maxPendingEventsPerAgent: z.ZodNumber;
                 maxPendingBytesPerAgent: z.ZodNumber;
@@ -3324,15 +3309,11 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
             sessionRef: z.ZodString;
             egressPolicy: z.ZodObject<{
                 policyRevision: z.ZodString;
-                activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                    mode: z.ZodLiteral<"metadata-status">;
-                    delivery: z.ZodLiteral<"latest-value">;
-                }, z.core.$strict>, z.ZodObject<{
-                    mode: z.ZodLiteral<"contentful-trajectory">;
+                activity: z.ZodObject<{
                     delivery: z.ZodLiteral<"latest-value">;
                     maxCoalesceMs: z.ZodNumber;
                     maxEventBytes: z.ZodNumber;
-                }, z.core.$strict>], "mode">;
+                }, z.core.$strict>;
                 reliable: z.ZodObject<{
                     maxPendingEventsPerAgent: z.ZodNumber;
                     maxPendingBytesPerAgent: z.ZodNumber;
@@ -3430,15 +3411,11 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
             }, z.core.$strip>>;
             egressPolicy: z.ZodObject<{
                 policyRevision: z.ZodString;
-                activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                    mode: z.ZodLiteral<"metadata-status">;
-                    delivery: z.ZodLiteral<"latest-value">;
-                }, z.core.$strict>, z.ZodObject<{
-                    mode: z.ZodLiteral<"contentful-trajectory">;
+                activity: z.ZodObject<{
                     delivery: z.ZodLiteral<"latest-value">;
                     maxCoalesceMs: z.ZodNumber;
                     maxEventBytes: z.ZodNumber;
-                }, z.core.$strict>], "mode">;
+                }, z.core.$strict>;
                 reliable: z.ZodObject<{
                     maxPendingEventsPerAgent: z.ZodNumber;
                     maxPendingBytesPerAgent: z.ZodNumber;
@@ -3537,15 +3514,11 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
             }>;
             egressPolicy: z.ZodObject<{
                 policyRevision: z.ZodString;
-                activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                    mode: z.ZodLiteral<"metadata-status">;
-                    delivery: z.ZodLiteral<"latest-value">;
-                }, z.core.$strict>, z.ZodObject<{
-                    mode: z.ZodLiteral<"contentful-trajectory">;
+                activity: z.ZodObject<{
                     delivery: z.ZodLiteral<"latest-value">;
                     maxCoalesceMs: z.ZodNumber;
                     maxEventBytes: z.ZodNumber;
-                }, z.core.$strict>], "mode">;
+                }, z.core.$strict>;
                 reliable: z.ZodObject<{
                     maxPendingEventsPerAgent: z.ZodNumber;
                     maxPendingBytesPerAgent: z.ZodNumber;
@@ -4663,15 +4636,11 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
             sessionRef: z.ZodString;
             egressPolicy: z.ZodObject<{
                 policyRevision: z.ZodString;
-                activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                    mode: z.ZodLiteral<"metadata-status">;
-                    delivery: z.ZodLiteral<"latest-value">;
-                }, z.core.$strict>, z.ZodObject<{
-                    mode: z.ZodLiteral<"contentful-trajectory">;
+                activity: z.ZodObject<{
                     delivery: z.ZodLiteral<"latest-value">;
                     maxCoalesceMs: z.ZodNumber;
                     maxEventBytes: z.ZodNumber;
-                }, z.core.$strict>], "mode">;
+                }, z.core.$strict>;
                 reliable: z.ZodObject<{
                     maxPendingEventsPerAgent: z.ZodNumber;
                     maxPendingBytesPerAgent: z.ZodNumber;
@@ -4769,15 +4738,11 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
             }, z.core.$strip>>;
             egressPolicy: z.ZodObject<{
                 policyRevision: z.ZodString;
-                activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                    mode: z.ZodLiteral<"metadata-status">;
-                    delivery: z.ZodLiteral<"latest-value">;
-                }, z.core.$strict>, z.ZodObject<{
-                    mode: z.ZodLiteral<"contentful-trajectory">;
+                activity: z.ZodObject<{
                     delivery: z.ZodLiteral<"latest-value">;
                     maxCoalesceMs: z.ZodNumber;
                     maxEventBytes: z.ZodNumber;
-                }, z.core.$strict>], "mode">;
+                }, z.core.$strict>;
                 reliable: z.ZodObject<{
                     maxPendingEventsPerAgent: z.ZodNumber;
                     maxPendingBytesPerAgent: z.ZodNumber;
@@ -4876,15 +4841,11 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
             }>;
             egressPolicy: z.ZodObject<{
                 policyRevision: z.ZodString;
-                activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                    mode: z.ZodLiteral<"metadata-status">;
-                    delivery: z.ZodLiteral<"latest-value">;
-                }, z.core.$strict>, z.ZodObject<{
-                    mode: z.ZodLiteral<"contentful-trajectory">;
+                activity: z.ZodObject<{
                     delivery: z.ZodLiteral<"latest-value">;
                     maxCoalesceMs: z.ZodNumber;
                     maxEventBytes: z.ZodNumber;
-                }, z.core.$strict>], "mode">;
+                }, z.core.$strict>;
                 reliable: z.ZodObject<{
                     maxPendingEventsPerAgent: z.ZodNumber;
                     maxPendingBytesPerAgent: z.ZodNumber;
@@ -7587,15 +7548,11 @@ export declare const TaskOfferForAgentWithEgressPayloadSchema: z.ZodObject<{
     sessionRef: z.ZodString;
     egressPolicy: z.ZodObject<{
         policyRevision: z.ZodString;
-        activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-            mode: z.ZodLiteral<"metadata-status">;
-            delivery: z.ZodLiteral<"latest-value">;
-        }, z.core.$strict>, z.ZodObject<{
-            mode: z.ZodLiteral<"contentful-trajectory">;
+        activity: z.ZodObject<{
             delivery: z.ZodLiteral<"latest-value">;
             maxCoalesceMs: z.ZodNumber;
             maxEventBytes: z.ZodNumber;
-        }, z.core.$strict>], "mode">;
+        }, z.core.$strict>;
         reliable: z.ZodObject<{
             maxPendingEventsPerAgent: z.ZodNumber;
             maxPendingBytesPerAgent: z.ZodNumber;
@@ -7692,15 +7649,11 @@ export declare const TaskOfferForAgentWithEgressFreshPayloadSchema: z.ZodObject<
     }, z.core.$strip>>;
     egressPolicy: z.ZodObject<{
         policyRevision: z.ZodString;
-        activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-            mode: z.ZodLiteral<"metadata-status">;
-            delivery: z.ZodLiteral<"latest-value">;
-        }, z.core.$strict>, z.ZodObject<{
-            mode: z.ZodLiteral<"contentful-trajectory">;
+        activity: z.ZodObject<{
             delivery: z.ZodLiteral<"latest-value">;
             maxCoalesceMs: z.ZodNumber;
             maxEventBytes: z.ZodNumber;
-        }, z.core.$strict>], "mode">;
+        }, z.core.$strict>;
         reliable: z.ZodObject<{
             maxPendingEventsPerAgent: z.ZodNumber;
             maxPendingBytesPerAgent: z.ZodNumber;
@@ -7812,15 +7765,11 @@ export declare const TaskOfferPreparedPayloadSchema: z.ZodObject<{
     }>;
     egressPolicy: z.ZodObject<{
         policyRevision: z.ZodString;
-        activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-            mode: z.ZodLiteral<"metadata-status">;
-            delivery: z.ZodLiteral<"latest-value">;
-        }, z.core.$strict>, z.ZodObject<{
-            mode: z.ZodLiteral<"contentful-trajectory">;
+        activity: z.ZodObject<{
             delivery: z.ZodLiteral<"latest-value">;
             maxCoalesceMs: z.ZodNumber;
             maxEventBytes: z.ZodNumber;
-        }, z.core.$strict>], "mode">;
+        }, z.core.$strict>;
         reliable: z.ZodObject<{
             maxPendingEventsPerAgent: z.ZodNumber;
             maxPendingBytesPerAgent: z.ZodNumber;
@@ -7852,7 +7801,7 @@ export declare const TaskOfferPreparedPayloadSchema: z.ZodObject<{
     }, z.core.$strict>>;
 }, z.core.$strict>;
 export type TaskOfferPreparedPayload = z.infer<typeof TaskOfferPreparedPayloadSchema>;
-/** Daemon -> cloud: one durable reliable-lane item after local sanitization. */
+/** Daemon -> cloud: one durable reliable-lane item, forwarded as the Agent produced it. */
 export declare const AgentEgressReliablePayloadSchema: z.ZodObject<{
     agentRef: z.ZodObject<{
         agentId: z.ZodString;
@@ -9071,15 +9020,11 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
         sessionRef: z.ZodString;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
-            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                mode: z.ZodLiteral<"metadata-status">;
-                delivery: z.ZodLiteral<"latest-value">;
-            }, z.core.$strict>, z.ZodObject<{
-                mode: z.ZodLiteral<"contentful-trajectory">;
+            activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
                 maxCoalesceMs: z.ZodNumber;
                 maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>], "mode">;
+            }, z.core.$strict>;
             reliable: z.ZodObject<{
                 maxPendingEventsPerAgent: z.ZodNumber;
                 maxPendingBytesPerAgent: z.ZodNumber;
@@ -9169,15 +9114,11 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
         }, z.core.$strip>>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
-            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                mode: z.ZodLiteral<"metadata-status">;
-                delivery: z.ZodLiteral<"latest-value">;
-            }, z.core.$strict>, z.ZodObject<{
-                mode: z.ZodLiteral<"contentful-trajectory">;
+            activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
                 maxCoalesceMs: z.ZodNumber;
                 maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>], "mode">;
+            }, z.core.$strict>;
             reliable: z.ZodObject<{
                 maxPendingEventsPerAgent: z.ZodNumber;
                 maxPendingBytesPerAgent: z.ZodNumber;
@@ -9268,15 +9209,11 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
         }>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
-            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                mode: z.ZodLiteral<"metadata-status">;
-                delivery: z.ZodLiteral<"latest-value">;
-            }, z.core.$strict>, z.ZodObject<{
-                mode: z.ZodLiteral<"contentful-trajectory">;
+            activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
                 maxCoalesceMs: z.ZodNumber;
                 maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>], "mode">;
+            }, z.core.$strict>;
             reliable: z.ZodObject<{
                 maxPendingEventsPerAgent: z.ZodNumber;
                 maxPendingBytesPerAgent: z.ZodNumber;
@@ -9531,15 +9468,11 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         sessionRef: z.ZodString;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
-            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                mode: z.ZodLiteral<"metadata-status">;
-                delivery: z.ZodLiteral<"latest-value">;
-            }, z.core.$strict>, z.ZodObject<{
-                mode: z.ZodLiteral<"contentful-trajectory">;
+            activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
                 maxCoalesceMs: z.ZodNumber;
                 maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>], "mode">;
+            }, z.core.$strict>;
             reliable: z.ZodObject<{
                 maxPendingEventsPerAgent: z.ZodNumber;
                 maxPendingBytesPerAgent: z.ZodNumber;
@@ -9629,15 +9562,11 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         }, z.core.$strip>>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
-            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                mode: z.ZodLiteral<"metadata-status">;
-                delivery: z.ZodLiteral<"latest-value">;
-            }, z.core.$strict>, z.ZodObject<{
-                mode: z.ZodLiteral<"contentful-trajectory">;
+            activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
                 maxCoalesceMs: z.ZodNumber;
                 maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>], "mode">;
+            }, z.core.$strict>;
             reliable: z.ZodObject<{
                 maxPendingEventsPerAgent: z.ZodNumber;
                 maxPendingBytesPerAgent: z.ZodNumber;
@@ -9728,15 +9657,11 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         }>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
-            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                mode: z.ZodLiteral<"metadata-status">;
-                delivery: z.ZodLiteral<"latest-value">;
-            }, z.core.$strict>, z.ZodObject<{
-                mode: z.ZodLiteral<"contentful-trajectory">;
+            activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
                 maxCoalesceMs: z.ZodNumber;
                 maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>], "mode">;
+            }, z.core.$strict>;
             reliable: z.ZodObject<{
                 maxPendingEventsPerAgent: z.ZodNumber;
                 maxPendingBytesPerAgent: z.ZodNumber;
@@ -10891,6 +10816,9 @@ export declare const MAILBOX_READ_AHEAD_CAPABILITY = "mailbox-read-ahead";
  * capability `permissionModes` and the input-preparation `permissionMode`.
  * Sessions run without an SDK permission gate; each local agent keeps its
  * own guardrails. A v1 envelope is rejected; there is no v1 reader.
+ * v2 also removed the egress policy's `metadata-status` activity mode, its
+ * `activity.mode` field and the `sanitizer_rejected` drop reason. Agent
+ * egress goes to the Host as the runtime produced it.
  *
  * IMPORTANT: changing this constant, or changing/removing/retyping any
  * already-frozen schema in this package, requires a DELIBERATE update to the

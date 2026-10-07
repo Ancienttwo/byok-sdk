@@ -139,8 +139,9 @@ owned and opaque. In particular, `artifacts` is not an SDK schema or a required
 directory. See [the host local-storage contract](docs/host-local-storage-layout.md).
 
 The Agent egress contract adds one consumed `AgentEgressPolicy`.
-Metadata/status activity is the safe default; contentful trajectory is an
-explicit capability-gated opt-in. Reliable evidence is fsynced under the
+Agent egress goes to the Host as the runtime produced it. The SDK does not
+filter, redact or omit it; the policy sets only transport limits and the
+content-read surfaces. Reliable evidence is fsynced under the
 canonical Agent home and retried with stable cursors until an exact ack, while
 latest-value activity remains replaceable and reports typed drop reasons.
 The daemon's tenant binding comes only from the authenticated pair response

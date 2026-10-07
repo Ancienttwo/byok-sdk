@@ -16,7 +16,7 @@ const AGENT_REF = { agentId: 'agent-server-egress', profileRevision: 'profile-se
 const CONTENT_HASH = 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const POLICY: AgentEgressPolicy = {
   policyRevision: 'server-policy-r1',
-  activity: { mode: 'metadata-status' as const, delivery: 'latest-value' as const },
+  activity: { delivery: 'latest-value' as const, maxCoalesceMs: 250, maxEventBytes: 262144 },
   reliable: {
     maxPendingEventsPerAgent: 10,
     maxPendingBytesPerAgent: 4096,

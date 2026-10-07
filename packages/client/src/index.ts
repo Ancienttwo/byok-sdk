@@ -224,7 +224,6 @@ export type {
   AgentEgressLaneStatus,
   AgentEgressStatus,
 } from './daemon/agent-egress-policy';
-export type { AgentEgressSanitizer, AgentEgressSanitizerContext } from './daemon/agent-egress-sanitizer';
 export {
   AGENT_CONTENT_READ_CAPABILITIES,
   AGENT_CONTENT_READ_CAPABILITY_WORKSPACE,

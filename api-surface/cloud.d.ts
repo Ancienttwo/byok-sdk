@@ -2186,15 +2186,11 @@ export declare const RecurringExecutionInputSchema: z.ZodObject<{
         }, z.core.$strip>>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
-            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                mode: z.ZodLiteral<"metadata-status">;
-                delivery: z.ZodLiteral<"latest-value">;
-            }, z.core.$strict>, z.ZodObject<{
-                mode: z.ZodLiteral<"contentful-trajectory">;
+            activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
                 maxCoalesceMs: z.ZodNumber;
                 maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>], "mode">;
+            }, z.core.$strict>;
             reliable: z.ZodObject<{
                 maxPendingEventsPerAgent: z.ZodNumber;
                 maxPendingBytesPerAgent: z.ZodNumber;

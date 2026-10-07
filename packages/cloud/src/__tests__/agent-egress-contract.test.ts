@@ -15,7 +15,7 @@ const AGENT_REF = { agentId: 'agent-egress', profileRevision: 'profile-egress' }
 const OTHER_AGENT_REF = { agentId: 'agent-egress-other', profileRevision: 'profile-egress' } as const;
 const POLICY: AgentEgressPolicy = {
   policyRevision: 'policy-r1',
-  activity: { mode: 'metadata-status' as const, delivery: 'latest-value' as const },
+  activity: { delivery: 'latest-value' as const, maxCoalesceMs: 250, maxEventBytes: 262144 },
   reliable: {
     maxPendingEventsPerAgent: 10,
     maxPendingBytesPerAgent: 4096,

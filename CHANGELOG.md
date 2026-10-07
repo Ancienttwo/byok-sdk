@@ -16,6 +16,28 @@
 
 ## Unreleased
 
+- **Breaking (protocol, client)** — Agent egress goes to the Host as is, as
+  in OAR ("nothing gated, nothing dropped").
+  Plan: `plans/plan-20261007-1340-minimal-guardrails.md` (slice 3, D4).
+  - Protocol v2 (unreleased, goldens amended, no second bump): the egress
+    policy `activity` is now `{ delivery: 'latest-value', maxCoalesceMs,
+    maxEventBytes }`. The `mode` field, the `metadata-status` mode and the
+    `sanitizer_rejected` drop reason are removed.
+  - Client: remove the egress sanitizer, the metadata/status projection and
+    the default content omission. Activity events, terminal summaries, failure
+    reasons, result documents, reliable payloads and runtime artifacts go to
+    the Host unchanged. Remove the `agent-egress-policy` capability check on
+    activity.
+  - Remove `AgentEgressConfig.sanitizer` and the exported
+    `AgentEgressSanitizer` and `AgentEgressSanitizerContext` types.
+    `createDaemon` throws when `agentEgress.sanitizer` is set.
+  - `DEFAULT_AGENT_EGRESS_POLICY` revision is `default-v1`, with
+    `maxCoalesceMs: 250` and `maxEventBytes: 262144`.
+  - A reliable payload that is not valid JSON or is larger than 256 KiB is
+    refused with `invalid_envelope` before the spool appends it.
+  - Kept: the reliable spool, quotas and backpressure, latest-value
+    coalescing, the Host content-read gate and audit-log redaction.
+
 - **Breaking (client)** — runtimes inherit the user's own agent configuration.
   Plan: `plans/plan-20261007-1340-minimal-guardrails.md` (slice 2).
   - Environment: every task child gets the full daemon environment, as in OAR.

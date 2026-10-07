@@ -5,7 +5,6 @@ import * as preparationRuntime from '../adapters/pi/input-preparation-runtime';
 import * as implementationIdentity from '../daemon/tool-implementation-identity';
 import * as mcpProbe from '../daemon/mcp-tools-probe';
 import { mapPiMessageToAgentEvent } from '../adapters/pi/events';
-import { sanitizeEgressEnvelope } from '../daemon/agent-egress-sanitizer';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -1693,7 +1692,6 @@ describe('prepared daemon-authored message egress', () => {
     const taskId = `prepared-message-${configured}`;
     await runner.handleEnvelope(preparedOffer(taskId, reference(built), 1, { messageEgress }));
     expect(declineReasonOrNone(sent)).toBeUndefined();
-    expect(runner.usesAgentEgress(taskId)).toBe(true);
     expect(adapter.preparedStartCalls).toHaveLength(1);
     expect(Object.keys(adapter.preparedStartCalls[0]!.input.mcpServers ?? {})).toEqual([SERVER_NAME]);
     expect(preflight).not.toHaveBeenCalled();
@@ -1725,8 +1723,6 @@ describe('prepared daemon-authored message egress', () => {
     await vi.waitFor(() => expect(sent.some(e => e.type === 'task.complete')).toBe(true));
     const completed = sent.find(e => e.type === 'task.complete');
     expect(completed?.payload).toMatchObject({ preparedObservation: { requestDigest: REQUEST_DIGEST, initialPromptTokens: 1200, maxPromptTokens: 1200 } });
-    const sanitized = sanitizeEgressEnvelope(completed!, DEFAULT_AGENT_EGRESS_POLICY, undefined);
-    expect(sanitized).toMatchObject({ ok: true, envelope: { payload: { summary: '[content omitted]', preparedObservation: { requestDigest: REQUEST_DIGEST } } } });
     await runner.shutdownActiveTasks('test complete');
   });
 
@@ -1986,10 +1982,10 @@ function declineReasonOrNone(sent: readonly Envelope[]): string | undefined {
 }
 
 
-it('the real daemon sanitizes prepared terminal envelopes before transport', async () => {
+it('the real daemon sends prepared Agent egress to the Host as the runtime produced it', async () => {
   // Synthetic preparation authority only: reuse the durable ready record and
-  // its measured tool identity. Runner, daemon routing, sanitizer and transport
-  // all execute normally; this is not a physical installation attestation test.
+  // its measured tool identity. Runner, daemon routing and transport all
+  // execute normally; this is not a physical installation attestation test.
   const built = await lane({ registryRevision: true, bindingOverrides: { deviceId: 'device-1' } });
   const server = await TestServer.start();
   const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
@@ -1999,12 +1995,11 @@ it('the real daemon sanitizes prepared terminal envelopes before transport', asy
   });
   vi.spyOn(implementationIdentity, 'resolveToolImplementationIdentity').mockImplementation(async () => built.implementations[SERVER_NAME]!);
   vi.spyOn(mcpProbe, 'probeMcpServer').mockImplementation(async () => built.observation[SERVER_NAME]!);
-  const sanitizer = vi.fn((value: unknown, _context: { envelopeType?: string }) => value);
   const daemon = createDaemonWithAdapters({
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Prepared egress', productId: 'prepared-egress-transport',
     serverUrl: server.url, storeDir: built.storeDir, workspaceRoot: await tempDir('prepared-wire-workspace-'),
     agentHome: { hostStorageRoot: await tempDir('prepared-wire-home-') },
-    agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY, sanitizer },
+    agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
     mcpToolsets: Object.fromEntries(built.toolsets),
     inputPreparation: {
       limits: { revision: POLICY_REVISION, maxRequestBytes: 256000, maxArtifactBytes: 200000,
@@ -2026,13 +2021,17 @@ it('the real daemon sanitizes prepared terminal envelopes before transport', asy
     const taskId = 'prepared-wire-task';
     server.send(preparedOffer(taskId, reference(built), server.nextSeq()));
     await server.waitFor(e => e.type === 'task.started' && e.task_id === taskId);
+    // Each event is awaited on the wire before the next one: the latest-value
+    // lane keeps only the newest event of one batch.
+    const toolUse = { type: 'tool_use', tool: '/private/path/tool', input: { argv: ['--synthetic-secret=prepared'] } } as const;
+    adapter.sessions[0]!.emit(toolUse);
+    const progressed = await server.waitFor(e => e.type === 'task.progress' && e.task_id === taskId);
+    expect(progressed.payload).toMatchObject({ events: [toolUse] });
     adapter.sessions[0]!.emit({ type: 'progress', text: 'private prepared reply' });
     adapter.sessions[0]!.emit({ type: 'usage', inputTokens: 1200, outputTokens: 10 });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     const completed = await server.waitFor(e => e.type === 'task.complete' && e.task_id === taskId);
-    expect(completed.payload).toMatchObject({ summary: '[content omitted]', preparedObservation: { requestDigest: REQUEST_DIGEST, initialPromptTokens: 1200, maxPromptTokens: 1200 } });
-    expect(sanitizer.mock.calls.some(([, context]) => (context as { envelopeType: string }).envelopeType === 'task.complete')).toBe(true);
-    expect(JSON.stringify(server.received)).not.toContain('private prepared reply');
+    expect(completed.payload).toMatchObject({ summary: 'private prepared reply', preparedObservation: { requestDigest: REQUEST_DIGEST, initialPromptTokens: 1200, maxPromptTokens: 1200 } });
   } finally {
     await daemon.stop(); await server.close(); vi.restoreAllMocks();
   }

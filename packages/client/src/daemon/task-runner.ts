@@ -518,7 +518,7 @@ export interface TaskRunnerDeps {
   maxConcurrentMutableSessionsPerAgentHome?: number;
   /** Exact host-selected policy accepted by `task.offer_for_agent_with_egress`. */
   agentEgressPolicy?: Readonly<AgentEgressPolicy>;
-  /** Always-present projection/sanitizer consumer; it defaults to metadata-only. */
+  /** Latest-value activity lane and reliable spool for Agent egress offers. */
   agentEgress?: AgentEgressController;
   /** Durable exact-match Agent session handoff authority. */
   agentSessionHandoffs?: AgentSessionHandoffStore;
@@ -1451,20 +1451,6 @@ export class TaskRunner {
 
   get activeTaskCount(): number {
     return this.tasks.size + this.startupOwners.size;
-  }
-
-  /**
-   * Transport-boundary classification for the currently active task. Legacy
-   * tasks and plain Agent-home offers are deliberately false: the additive
-   * egress contract must never reclassify their existing wire semantics.
-   */
-  usesAgentEgress(taskId: string): boolean {
-    return this.tasks.get(taskId)?.egressEnabled === true;
-  }
-
-  /** Frozen offer authority for the outbound result-document lane. */
-  selectsResultDocument(taskId: string): boolean {
-    return this.tasks.get(taskId)?.terminalProjection?.mode === 'result-document';
   }
 
   /** M5 batch-3 (workstream 2): effective `maxTaskOutputBytes` cap for this daemon — see {@link DEFAULT_MAX_TASK_OUTPUT_BYTES}'s own doc comment. */
@@ -3125,7 +3111,6 @@ export class TaskRunner {
                   agentRef: active.agentRef,
                   taskId,
                   events,
-                  serverCapabilities: this.deps.getServerCapabilities?.() ?? [],
                 }) ?? []
               : events;
             if (projected.length > 0) this.deps.send(createEnvelope('task.progress', { seq, events: [...projected] }, { taskId, seq }));
@@ -3953,17 +3938,7 @@ export class TaskRunner {
           active.summaryParts.push(event.text);
           active.finalTextParts.push(event.text);
         }
-        if (event.type === 'artifact') {
-          if (active.agentRef !== undefined && this.deps.agentEgress !== undefined) {
-            // A runtime artifact is content, not activity metadata. Strict
-            // Agent egress never uploads it through the legacy blob path;
-            // only the separately capability-gated artifact-read contract
-            // may authorize a content transfer.
-            this.deps.agentEgress.noteTransportDrop('policy_denied', active.agentRef);
-          } else {
-            await this.sendArtifact(active, event.name, event.contentType);
-          }
-        }
+        if (event.type === 'artifact') await this.sendArtifact(active, event.name, event.contentType);
         active.batcher.push(event);
       }
       // The events iterable ended without either an explicit turn_end or a

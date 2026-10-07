@@ -30,10 +30,13 @@ export interface AgentEgressStatus {
   reliable: AgentEgressLaneStatus;
 }
 
-/** Safe policy selected only when the host has not opted into content. */
+/**
+ * Policy used when the host configures no Agent egress. Activity goes to the
+ * Host as the runtime produced it; the limits only bound transport.
+ */
 export const DEFAULT_AGENT_EGRESS_POLICY: Readonly<AgentEgressPolicy> = Object.freeze({
-  policyRevision: 'metadata-status-v1',
-  activity: Object.freeze({ mode: 'metadata-status', delivery: 'latest-value' }),
+  policyRevision: 'default-v1',
+  activity: Object.freeze({ delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 256 * 1024 }),
   reliable: Object.freeze({
     maxPendingEventsPerAgent: 256,
     maxPendingBytesPerAgent: 4 * 1024 * 1024,
@@ -62,34 +65,6 @@ export function resolveAgentEgressPolicy(policy: AgentEgressPolicy | undefined):
     reliable: Object.freeze({ ...parsed.data.reliable }),
     transfers: Object.freeze({ ...parsed.data.transfers }),
   });
-}
-
-/**
- * Default activity projection. Every retained string is SDK-authored; no
- * runtime trajectory, tool, prompt, environment, argv, path, or credential
- * value survives this transformation.
- *
- * Each case CONSTRUCTS a fresh event from SDK-authored literals rather than
- * editing the incoming one, which is what makes the guarantee total rather
- * than a list of fields someone remembered to strip. `spill` on
- * `tool_use`/`tool_result` is covered by exactly that: a `BlobRef` is a
- * readable locator for the omitted tool payload — content, not metadata — so
- * it never survives a metadata-status projection, and neither do the byte
- * counts that would leak the payload's size.
- */
-export function metadataStatusEvent(event: AgentEvent): AgentEvent {
-  switch (event.type) {
-    case 'progress': return { type: 'progress', text: '[content omitted]' };
-    case 'tool_use': return { type: 'tool_use', tool: '[tool omitted]' };
-    case 'tool_result': return event.isError === undefined
-      ? { type: 'tool_result', tool: '[tool omitted]' }
-      : { type: 'tool_result', tool: '[tool omitted]', isError: event.isError };
-    case 'artifact': return { type: 'artifact', name: '[artifact omitted]', contentType: 'application/octet-stream' };
-    case 'needs_approval': return { type: 'needs_approval', summary: '[approval pending]' };
-    case 'error': return { type: 'error', message: '[runtime error]' };
-    case 'usage':
-    case 'turn_end': return { ...event };
-  }
 }
 
 const encoder = new TextEncoder();

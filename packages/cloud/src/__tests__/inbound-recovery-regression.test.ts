@@ -198,7 +198,7 @@ describe('inbound lifecycle recovery', () => {
         sessionRef: 'recovery-session',
         egressPolicy: {
           policyRevision: 'recovery-policy',
-          activity: { mode: 'metadata-status', delivery: 'latest-value' },
+          activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
           reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
           transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
         },

@@ -1488,22 +1488,19 @@ export declare class AgentContentReadPolicyEngine {
     private appendReceipt;
 }
 // ==== @byok-sdk/client dist/daemon/agent-egress-controller.d.ts ====
-import type { AgentEvent } from '@byok-sdk/protocol';
+import { type AgentEvent } from '@byok-sdk/protocol';
 import type { AgentRef } from '../agent-home';
 import { type AgentEgressDropReason, type AgentEgressDropReceipt, type AgentEgressPolicy, type AgentEgressStatus } from './agent-egress-policy';
 import { type AgentReliableAck, type AgentContentReceiptWithoutReliableIdentity, type AgentReliableEgressRecord } from './agent-egress-spool';
-import { type AgentEgressSanitizer } from './agent-egress-sanitizer';
 export interface AgentEgressControllerOptions {
     readonly policy: Readonly<AgentEgressPolicy>;
     /** Authenticated tenant identity, never accepted from an egress event. */
     readonly tenantId?: string;
-    readonly sanitizer?: AgentEgressSanitizer;
 }
 export interface AgentEgressProgressInput {
     readonly agentRef?: AgentRef;
     readonly taskId: string;
     readonly events: readonly AgentEvent[];
-    readonly serverCapabilities: readonly string[];
 }
 export interface AgentEgressReliableInput {
     readonly homeDir: string;
@@ -1549,7 +1546,10 @@ export declare class AgentEgressController {
     status(): AgentEgressStatus;
     dropReceipts(): readonly AgentEgressDropReceipt[];
     noteTransportDrop(reason: AgentEgressDropReason, agentRef?: AgentRef): void;
-    /** Project before TaskRunner builds a `task.progress` envelope. */
+    /**
+     * Coalesce to the latest value before TaskRunner builds a `task.progress`
+     * envelope. Events go to the Host as the runtime produced them.
+     */
     projectLatestValue(input: AgentEgressProgressInput): readonly AgentEvent[];
     appendReliable(input: AgentEgressReliableInput): Promise<AgentEgressReliableAppendResult>;
     /**
@@ -1594,69 +1594,17 @@ export interface AgentEgressStatus {
     latestValue: AgentEgressLaneStatus;
     reliable: AgentEgressLaneStatus;
 }
-/** Safe policy selected only when the host has not opted into content. */
+/**
+ * Policy used when the host configures no Agent egress. Activity goes to the
+ * Host as the runtime produced it; the limits only bound transport.
+ */
 export declare const DEFAULT_AGENT_EGRESS_POLICY: Readonly<AgentEgressPolicy>;
 export declare class AgentEgressPolicyError extends Error {
     constructor(message: string);
 }
 /** Resolve/validate once at construction; unknown policy shapes never become an implicit default. */
 export declare function resolveAgentEgressPolicy(policy: AgentEgressPolicy | undefined): Readonly<AgentEgressPolicy>;
-/**
- * Default activity projection. Every retained string is SDK-authored; no
- * runtime trajectory, tool, prompt, environment, argv, path, or credential
- * value survives this transformation.
- *
- * Each case CONSTRUCTS a fresh event from SDK-authored literals rather than
- * editing the incoming one, which is what makes the guarantee total rather
- * than a list of fields someone remembered to strip. `spill` on
- * `tool_use`/`tool_result` is covered by exactly that: a `BlobRef` is a
- * readable locator for the omitted tool payload — content, not metadata — so
- * it never survives a metadata-status projection, and neither do the byte
- * counts that would leak the payload's size.
- */
-export declare function metadataStatusEvent(event: AgentEvent): AgentEvent;
 export declare function eventBytes(event: AgentEvent): number;
-// ==== @byok-sdk/client dist/daemon/agent-egress-sanitizer.d.ts ====
-import { type Envelope } from '@byok-sdk/protocol';
-import { type AgentEgressDropReason, type AgentEgressPolicy } from './agent-egress-policy';
-export interface AgentEgressSanitizerContext {
-    readonly lane: 'latest-value' | 'reliable';
-    readonly policyRevision: string;
-    readonly envelopeType?: string;
-    readonly agentId?: string;
-    readonly tenantId?: string;
-}
-/**
- * Optional named host redaction hook for an explicitly contentful policy.
- * It receives the SDK-projected value, never a second raw wire
- * representation. Throwing/refusing drops the event; callers never receive
- * an original-payload fallback.
- */
-export type AgentEgressSanitizer = (value: unknown, context: AgentEgressSanitizerContext) => unknown;
-export declare class AgentEgressSanitizationError extends Error {
-    readonly reason: AgentEgressDropReason;
-    constructor(message: string, reason?: AgentEgressDropReason);
-}
-export type SanitizedEnvelope = Readonly<{
-    ok: true;
-    envelope: Envelope;
-}> | Readonly<{
-    ok: false;
-    reason: AgentEgressDropReason;
-}>;
-/**
- * The one envelope-boundary sanitizer used before either transport sees an
- * envelope. It parses the final value through the frozen protocol so a
- * broken custom sanitizer also fails locally, before WS bytes or long-poll
- * JSON can be created.
- */
-export declare function sanitizeEgressEnvelope(envelope: Envelope, policy: Readonly<AgentEgressPolicy>, sanitizer: AgentEgressSanitizer | undefined, context?: Omit<AgentEgressSanitizerContext, 'lane' | 'policyRevision' | 'envelopeType'> & {
-    lane?: 'latest-value' | 'reliable';
-    /** Set only from the active task's frozen terminalProjection, never payload inference. */
-    resultDocumentSelected?: boolean;
-}): SanitizedEnvelope;
-/** Sanitizes a reliable payload before it is hashed/appended, never after. */
-export declare function sanitizeReliablePayload(payload: unknown, policy: Readonly<AgentEgressPolicy>, sanitizer: AgentEgressSanitizer | undefined, context?: Omit<AgentEgressSanitizerContext, 'lane' | 'policyRevision'>): unknown;
 // ==== @byok-sdk/client dist/daemon/agent-egress-spool.d.ts ====
 import { type AgentContentReceiptPayload } from '@byok-sdk/protocol';
 import type { AgentRef } from '../agent-home';
@@ -3604,7 +3552,6 @@ import { type ResultDocumentExtractor } from './task-runner';
 import { type ProgressBatcherOptions } from './progress-batcher';
 import { type AgentEgressReliableAppendResult } from './agent-egress-controller';
 import { type AgentEgressStatus } from './agent-egress-policy';
-import { type AgentEgressSanitizer } from './agent-egress-sanitizer';
 import { type ProviderProvisioningHandler } from './provider-provisioning';
 import type { McpLaunchCwdConfig } from './trusted-launch-cwd';
 import { type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
@@ -4111,8 +4058,6 @@ export interface InputPreparationDaemonConfig {
 export interface AgentEgressConfig {
     /** Exact policy the daemon is willing to consume from an Agent offer. */
     policy: AgentEgressPolicy;
-    /** Named redaction hook for explicit contentful trajectory only. */
-    sanitizer?: AgentEgressSanitizer;
     /**
      * Device-local additions required to make one server-selected transfer
      * policy executable. These values only supplement `policy.transfers`: a
@@ -7906,7 +7851,7 @@ export interface TaskRunnerDeps {
     maxConcurrentMutableSessionsPerAgentHome?: number;
     /** Exact host-selected policy accepted by `task.offer_for_agent_with_egress`. */
     agentEgressPolicy?: Readonly<AgentEgressPolicy>;
-    /** Always-present projection/sanitizer consumer; it defaults to metadata-only. */
+    /** Latest-value activity lane and reliable spool for Agent egress offers. */
     agentEgress?: AgentEgressController;
     /** Durable exact-match Agent session handoff authority. */
     agentSessionHandoffs?: AgentSessionHandoffStore;
@@ -8344,14 +8289,6 @@ export declare class TaskRunner {
     private stoppingOffers;
     constructor(deps: TaskRunnerDeps);
     get activeTaskCount(): number;
-    /**
-     * Transport-boundary classification for the currently active task. Legacy
-     * tasks and plain Agent-home offers are deliberately false: the additive
-     * egress contract must never reclassify their existing wire semantics.
-     */
-    usesAgentEgress(taskId: string): boolean;
-    /** Frozen offer authority for the outbound result-document lane. */
-    selectsResultDocument(taskId: string): boolean;
     /** M5 batch-3 (workstream 2): effective `maxTaskOutputBytes` cap for this daemon — see {@link DEFAULT_MAX_TASK_OUTPUT_BYTES}'s own doc comment. */
     private get maxTaskOutputBytes();
     /** Effective per-event inline ceiling for this daemon — see `DaemonConfig.maxInlineEventBytes`. */
@@ -10083,7 +10020,6 @@ export { AgentMemoryError, AgentMemoryRevisionConflictError, isAgentMemorySecure
 export type { AgentMemoryFilesystemHelperConfig } from './daemon/agent-memory-filesystem';
 export type { AgentMemoryFile, AgentMemorySnapshot, AgentMemoryRedactor, AgentMemoryProjectionGrant, AgentMemoryProjectionPort, AgentMemoryHostedProjection, } from './daemon/agent-memory';
 export type { AgentEgressDropReceipt, AgentEgressLaneStatus, AgentEgressStatus, } from './daemon/agent-egress-policy';
-export type { AgentEgressSanitizer, AgentEgressSanitizerContext } from './daemon/agent-egress-sanitizer';
 export { AGENT_CONTENT_READ_CAPABILITIES, AGENT_CONTENT_READ_CAPABILITY_WORKSPACE, AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT, AGENT_CONTENT_READ_CAPABILITY_ARTIFACT, } from './daemon/agent-content-read';
 export type { AgentContentReadSurface, AgentContentReadDecision, AgentContentReadReason, AgentContentReadRoot, AgentContentReadPolicy, AgentContentReadPolicySelection, AgentContentReadRequest, AgentContentReadResult, AgentContentReadAllowed, AgentContentReadDenied, AgentContentSessionIdentity, AgentContentAuditReceipt, } from './daemon/agent-content-read';
 export { McpToolsetRevisionConflictError, McpToolsetDefinitionRevisionConflictError, } from './daemon/toolset-registry';

@@ -94,6 +94,10 @@ running, and must not set up a second guardrail layer.
 - D5. MCP `tools/list` probe: keep for Pi only.
 - D6. Prepared lane: keep the feature; remove its attestation bindings.
 - D7. Attestation: remove the whole stack.
+- D8. Pi cwd trust: follow OAR. Every Pi lane, the BYOK key lane too,
+  pre-trusts the session cwd, so project `.pi/extensions` load. Under
+  YOLO the agent can already read the projected key, so extension
+  isolation does not protect it. Done in slice 4.
 
 ## Docs to change
 
@@ -115,7 +119,8 @@ running, and must not set up a second guardrail layer.
    `noSkills`; Codex `codexSandbox` config (D1); full environment (D2); no
    key stripping for Claude/Codex (D3); MCP probe for Pi only (D5).
 3. Agent egress: records go to the Host as is (D4).
-4. Remove trusted launch cwd and the MCP launcher wrapper.
+4. Remove trusted launch cwd and the MCP launcher wrapper. Pre-trust the
+   Pi session cwd (D8).
 5. Remove attestation, Pi installation measurement, custody and external-CLI
    custody (D7); simplify the prepared lane (D6).
 6. Docs and a decision record that reverses `sdk-architecture.md` §9.2.

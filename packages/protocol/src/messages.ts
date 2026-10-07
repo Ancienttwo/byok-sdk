@@ -416,11 +416,11 @@ const EGRESS_SAFE_VALUE = z
   .json()
   .refine(
     (value) => new TextEncoder().encode(JSON.stringify(value)).byteLength <= 256 * 1024,
-    'sanitized egress payload exceeds 256KiB',
+    'egress payload exceeds 256KiB',
   );
 const EGRESS_SESSION_REF = z.string().min(1).max(512);
 
-/** Daemon -> cloud: one durable reliable-lane item after local sanitization. */
+/** Daemon -> cloud: one durable reliable-lane item, forwarded as the Agent produced it. */
 export const AgentEgressReliablePayloadSchema = z
   .object({
     agentRef: AgentRefSchema,
