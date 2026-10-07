@@ -138,8 +138,8 @@ Sessions run YOLO and each tool call follows the agent's own guardrails:
 - Claude: the selected servers go into a task-scoped `--mcp-config`, next to
   the user's own MCP configuration. Claude starts with
   `--dangerously-skip-permissions`.
-- Codex: the selected servers go in as `-c mcp_servers.<server>.*` overrides,
-  next to the user's `config.toml`. Codex is qualified against 0.160.0, needs
+- Codex: the selected servers go in the `thread/start` or `thread/resume`
+  config (`mcp_servers`, as OAR `mcpServers`), next to the user's `config.toml`. Codex is qualified against 0.160.0, needs
   app-server support and uses `approval_policy=never` with sandbox
   `danger-full-access` by default (`DaemonConfig.codexSandbox`). Detection
   refuses an unavailable app-server. It never refuses a version: an

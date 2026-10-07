@@ -23,6 +23,23 @@
   YOLO launch, inherited user config and protocol v2.
   Plan: `plans/plan-20261007-1340-minimal-guardrails.md` (slice 6).
 
+- **Breaking (client)** — Codex task MCP servers go to Codex in the
+  `thread/start` or `thread/resume` config, as OAR `SessionOptions.mcpServers`.
+  A user `config.toml` entry with the same name can no longer disable a task
+  server (`enabled = true`), and Codex error text is redacted. Remove the
+  `mcp-env` helper: `SdkReservedHelperKind` loses `'mcp-env'`, and
+  `CodexAdapterOptions` loses `sdkHelperHost`.
+
+- **Fixed (client)** — Pi disposal gives the user's extensions up to 10 s to
+  finish their `session_shutdown` hooks before SIGKILL, as OAR does. The old
+  750 ms grace cut an async hook short.
+
+- **Changed (client)** — update the private OAR source from 0.29.0 to 0.33.1
+  (`e1f9177`). The Codex source gains OAR's session `mcpServers` thread
+  config and MCP credential redaction of error text. No behavior changes
+  in this step: the adapter does not pass `mcpServers` yet, and BYOK usage
+  events read native frames, so the 0.30 resume baseline does not change them.
+
 - **Breaking (protocol, client, keys)** — remove the attestation stack. The SDK
   no longer attests tool or runtime executables. Pi starts from the installed
   SDK package, or re-enters a single-file product through `sdkHelperHost`.

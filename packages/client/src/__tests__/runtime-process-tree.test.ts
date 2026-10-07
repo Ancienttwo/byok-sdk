@@ -83,7 +83,8 @@ describe('bundled runtime process-tree disposal', () => {
     } finally {
       reapAll(allPids(receipt));
     }
-  });
+    // Pi gives shutdown hooks a 10 s SIGTERM grace before SIGKILL.
+  }, 20_000);
 
   it('Pi close resolves only after its real root, descendant and grandchild are all gone', async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-process-tree-'));

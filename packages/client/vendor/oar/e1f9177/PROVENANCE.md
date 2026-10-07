@@ -1,8 +1,8 @@
-# OAR f1a2b88 private runtime fork
+# OAR e1f9177 private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.29.0, fixed commit `f1a2b88eb63e47de8197514e9329642e2d0ae02c`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.33.1, fixed commit `e1f91770a7edbaf4521f570345f2e8d0c998d238`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
-`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 23 source files plus LICENSE. Seventeen source files keep upstream bytes. Six source files contain BYOK changes. The six added files are imports of the selected contracts and Codex fold. No Cursor, ACP, CLI, arena, executable manager or branded resources are included.
+`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 26 source files plus LICENSE. Nineteen source files keep upstream bytes. Seven source files contain BYOK changes. The six added files are imports of the selected contracts and Codex fold. No Cursor, ACP, CLI, arena, executable manager or branded resources are included.
 
 ## BYOK S1 changes
 
@@ -113,3 +113,19 @@ Four paths changed upstream, and the change adds one new dependency.
 The other 19 selected paths have the same upstream bytes.
 The six maintained source deltas stay in place. Their change notices name the new base.
 The upstream version policy matches the BYOK adapter: sessions read the runtime version and do not gate on it.
+
+## 0.29.0 → 0.33.1 re-vendor
+
+The new base is tag v0.33.1, commit `e1f91770a7edbaf4521f570345f2e8d0c998d238`.
+Seven selected paths changed upstream. Three new dependencies enter the inventory.
+
+- `contracts/records.ts`, `contracts/session.ts` and `shared/token-totals.ts` keep upstream bytes. Token totals count from when the Session opened.
+- `contracts/session-options.ts` and `runtimes/codex/token-usage.ts` are new and keep upstream bytes.
+- `shared/mcp-servers.ts` is new. Its one BYOK change sorts the spread copy instead of `toSorted`, for the SDK ES2022 library.
+- `runtimes/codex/open.ts` takes the upstream `mcpServers` thread config and redactor. The BYOK approval policy option stays.
+- `runtimes/codex/session.ts` builds the open request before the owned spawn, as upstream does, and passes the redactor to the client. The BYOK deltas stay.
+- `runtimes/codex/app-server-client.ts` takes the `redact` process option. It redacts error replies and the caller-owned exit error, which holds the stderr tail.
+- `runtimes/codex/projection.ts` takes the upstream resume baseline. The BYOK failure-classification delta stays.
+
+The BYOK event projection reads native frames, so the resume baseline does not change BYOK usage events.
+The other 16 selected paths have the same upstream bytes.

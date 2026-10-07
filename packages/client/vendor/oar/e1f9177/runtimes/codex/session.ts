@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR f1a2b88 for injected processes, native-first recording, bounded request refusal and caller-selected sandbox (Apache-2.0).
+// BYOK change: Modified from OAR e1f9177 for injected processes, native-first recording, bounded request refusal and caller-selected sandbox (Apache-2.0).
 import type { AvailableInstallation } from "../../contracts/installation.js"; // BYOK change: direct type-only contract import.
 import { randomUUID } from "node:crypto";
 import type {
@@ -39,6 +39,8 @@ import { openThread, rpcControl, type RpcControlPlan } from "./rpc-control.js";
  *   accepted/rejected response, the outcome is turn/completed.
  * - every notification is one frame (verbatim params); notifications
  *   of other threads are child-session records; collab items link them.
+ * - token totals count from when this Session opened: after a resume, the
+ *   thread total codex re-reports before the first turn is subtracted.
  * - BYOK change: server requests go to an explicit caller-owned native interaction handler, or are declined/rejected immediately when absent.
  * - reachability (exited / disposed) is the kernel's, read off the stream;
  *   the adapter holds no liveness flag (record-stream.md, "Reachability").
@@ -88,6 +90,10 @@ export async function codexSession(
   if (installation.via !== "executable") {
     throw new Error("The codex session adapter needs an executable installation");
   }
+  // Threads persist so a later SessionOptions.resume can reattach; the thread
+  // id is the runtime-native identity and becomes Session.id (open.ts builds
+  // the request, and refuses what it cannot build before anything starts).
+  const { method: openMethod, params: openParams, redact } = codexThreadOpen(options);
   // BYOK change: Explicit environment and caller sandbox; ambient OAR_CODEX_SANDBOX is ignored.
   if (options.env === undefined) throw new Error("codex session requires an explicit filtered environment");
   // YOLO default (repo policy 2026-08-24): bypass the sandbox too, not just
@@ -99,7 +105,9 @@ export async function codexSession(
   if (!Number.isFinite(serverRequestTimeoutMs) || serverRequestTimeoutMs <= 0 || serverRequestTimeoutMs > 2_147_483_647) {
     throw new Error("codex server request timeout must be positive, finite and at most 2147483647ms");
   }
-  const client = startAppServerClient(spawnLineProcess, installation.command, options.env, configOverrides, options.cwd);
+  // Every error the client reports goes through the redactor first: the
+  // open's config carries the session's MCP credentials to codex.
+  const client = startAppServerClient(spawnLineProcess, installation.command, options.env, configOverrides, options.cwd, undefined, { redact });
   // BYOK change: Ownership/adoption must settle before the first protocol write.
   try {
     await client.spawned;
@@ -112,10 +120,6 @@ export async function codexSession(
     throw error;
   }
   client.notify("initialized", {});
-  // Threads persist so a later SessionOptions.resume can reattach; the thread
-  // id is the runtime-native identity and becomes Session.id (open.ts builds
-  // the request).
-  const { method: openMethod, params: openParams } = codexThreadOpen(options);
   // The open event is marked at the reply's wire position AS the reply line
   // is read (onSettled → client.mark), not after this await: a frame codex
   // wrote in the same chunk right after the reply (thread/started) would
@@ -157,7 +161,9 @@ export async function codexSession(
     active: null,
     spontaneous: false,
     codexTurnId: null,
-    projection: initialCodexProjection(threadId),
+    // A resume awaits codex's re-report of the thread's total so far: the
+    // baseline this Session's token totals count from (projection.ts, #169).
+    projection: initialCodexProjection(threadId, openMethod),
   };
   const busy = (): boolean => state.active !== null || state.spontaneous;
   let disposeRequest: RequestRecord | null = null;

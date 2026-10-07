@@ -1,6 +1,5 @@
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions';
 import { CodexNativeInteractions } from './native-interactions';
-import { randomBytes } from 'node:crypto';
 import { execFile, type spawn as nodeSpawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
@@ -23,10 +22,6 @@ import {
   RuntimeStartupDisposalFailure,
   isRuntimeExecutionFailure,
 } from '../../runtime-failure';
-import {
-  resolveSdkReservedHelperBin,
-  type SdkHelperHostConfig,
-} from '../../sdk-reserved-helper-host';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import {
@@ -52,7 +47,6 @@ export function assertCodexSandboxSetting(value: unknown, label: string): assert
 }
 
 export interface CodexAdapterOptions {
-  sdkHelperHost?: SdkHelperHostConfig;
   /**
    * Codex sandbox for every session, as OAR's `OAR_CODEX_SANDBOX`. Default
    * `danger-full-access`: no human answers an approval prompt, so a sandbox
@@ -174,13 +168,8 @@ export class CodexAdapter implements RuntimeAdapter {
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('codex manifest has no sealed cwd');
     const workspace = await fs.realpath(cwd);
-    // A copy: the task-owned MCP transport payloads are added below.
-    const env = { ...input.env };
-    const configArgs = codexMcpConfigArgs(
-      input.mcpServers,
-      env,
-      this.options.sdkHelperHost,
-    );
+    // As OAR: the servers go in the thread/start or thread/resume config.
+    const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
     const spawned = createOwnedLineProcessSpawn({
       spawnFn: this.options.spawnFn,
     });
@@ -195,7 +184,7 @@ export class CodexAdapter implements RuntimeAdapter {
     try {
       const raw = await codexSession(
         (bin, args, options) => {
-          const child = spawned(bin, [...args, ...configArgs], options);
+          const child = spawned(bin, args, options);
           session.own(child);
           void child.exited.then(
             () => session.exited(),
@@ -206,10 +195,11 @@ export class CodexAdapter implements RuntimeAdapter {
         { kind: 'available', via: 'executable', command },
         {
           cwd,
-          env: env as Record<string, string>,
+          env: input.env as Record<string, string>,
           ...(model === undefined ? {} : { model }),
           ...(this.options.nativeInteractions === undefined ? {} : { approvalPolicy: "on-request" as const }),
           sandboxMode: this.options.sandbox ?? 'danger-full-access',
+          ...(mcpServers.length === 0 ? {} : { mcpServers }),
           ...(input.manifest.sessionRef === undefined
             ? {}
             : { resume: input.manifest.sessionRef }),
@@ -487,36 +477,4 @@ function subscriptionModel(
       'codex cannot execute this runtime selection',
     );
   return selection.modelId;
-}
-
-function codexMcpConfigArgs(
-  servers: RuntimeOperationStartInput['mcpServers'],
-  env: NodeJS.ProcessEnv,
-  helperHost: SdkHelperHostConfig | undefined,
-): string[] {
-  if (servers === undefined || Object.keys(servers).length === 0) return [];
-  // Codex spawns every server itself from these `-c` overrides, in its own
-  // cwd: the session workspace or the Agent home, as in OAR.
-  const args: string[] = []; // app-server 0.160.0 has no ignore-user-config flag.
-  for (const [name, server] of Object.entries(servers).sort(([left], [right]) =>
-    left.localeCompare(right),
-  )) {
-    const key = `BYOK_MCP_PAYLOAD_${randomBytes(16).toString('hex').toUpperCase()}`;
-    env[key] = JSON.stringify(server);
-    const helper = resolveSdkReservedHelperBin('mcp-env', helperHost);
-    args.push(
-      '-c',
-      `mcp_servers.${name}.command=${JSON.stringify(helper.command)}`,
-    );
-    args.push(
-      '-c',
-      `mcp_servers.${name}.args=${JSON.stringify([...(helper.args ?? [])])}`,
-    );
-    args.push(
-      '-c',
-      `mcp_servers.${name}.env.BYOK_MCP_ENV_KEY=${JSON.stringify(key)}`,
-    );
-    args.push('-c', `mcp_servers.${name}.env_vars=${JSON.stringify([key])}`);
-  }
-  return args;
 }

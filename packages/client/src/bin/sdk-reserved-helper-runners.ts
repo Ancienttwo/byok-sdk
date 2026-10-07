@@ -1,4 +1,3 @@
-import { runMcpEnvLauncher } from './mcp-env-launcher';
 import type { Readable } from 'node:stream';
 import { connectControlClient, type ControlClient } from './control-client';
 import { serveAgentMessageMcpOverStdio, type AgentMessageMcpDeps } from './agent-message-mcp-server';
@@ -111,9 +110,6 @@ export async function runSdkReservedHelper(kind: SdkReservedHelperKind, argv: re
       return;
     case 'pi-prepared':
       await (await import('#byok-pi-runtime-host')).runPiPreparedHost(argv, 'bundled');
-      return;
-    case 'mcp-env':
-      await runMcpEnvLauncher();
       return;
     case 'agent-message-mcp':
       await runAgentMessageMcp();

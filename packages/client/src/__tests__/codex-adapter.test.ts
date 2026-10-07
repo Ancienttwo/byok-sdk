@@ -429,11 +429,13 @@ describe('Codex persistent app-server adapter', () => {
       'interactive approval',
     );
   });
-  it('reserved MCP server args and sealed env remain present across follow-up turns', async () => {
+  it('passes reserved MCP servers in the thread config, never in argv or the process env', async () => {
     const captured: string[][] = [];
     const envs: NodeJS.ProcessEnv[] = [];
+    const receipt = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-mcp-')), 'frames.jsonl');
     const resources = await ctx({
       FAKE_CODEX_MCP_TOOL_CALL: 'byokagentmessage/send_agent_message',
+      FAKE_CODEX_RPC_RECEIPT: receipt,
     });
     resources.mcpServers = {
       byokagentmessage: {
@@ -460,13 +462,13 @@ describe('Codex persistent app-server adapter', () => {
     await s.followUp(task);
     await turn(s);
     expect(captured).toHaveLength(1);
-    expect(captured[0]!.some((arg) => arg.startsWith('mcp_servers.byokagentmessage.command='))).toBe(true);
+    const frames = (await fs.readFile(receipt, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { method?: string; params?: { config?: { mcp_servers?: unknown } } });
+    expect(frames.find((frame) => frame.method === 'thread/start')?.params?.config?.mcp_servers).toEqual({
+      byokagentmessage: { command: '/fixture/server', args: [], env: { SERVER_ONLY: 'secret' }, enabled: true },
+    });
     // No per-tool grant or per-tool approval mode is projected.
-    expect(captured[0]!.some((arg) => arg.includes('enabled_tools') || arg.includes('approval_mode'))).toBe(false);
-    expect(
-      Object.keys(envs[0]!).some((k) => k.startsWith('BYOK_MCP_PAYLOAD_')),
-    ).toBe(true);
-    expect(envs[0]).not.toHaveProperty('SERVER_ONLY');
+    expect(captured[0]!.some((arg) => arg.includes('mcp_servers') || arg.includes('enabled_tools') || arg.includes('approval_mode'))).toBe(false);
+    expect(Object.values(envs[0]!).some((value) => value?.includes('secret'))).toBe(false);
   });
   it('projected MCP toolsets reach the runtime without a per-tool grant', async () => {
     const resources = await ctx({ FAKE_CODEX_MCP_TOOL_CALL: 'host/echo' });

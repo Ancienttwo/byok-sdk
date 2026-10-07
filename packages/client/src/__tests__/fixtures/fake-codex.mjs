@@ -230,6 +230,10 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   }
   if (method === 'thread/start' || method === 'thread/resume') {
     if (process.env.FAKE_CODEX_HANG_BEFORE_THREAD === '1') return;
+    // Session MCP servers arrive in the open's config; codex merges them into
+    // the user's own config field by field.
+    for (const [name, server] of Object.entries(params.config?.mcp_servers ?? {}))
+      config[`mcp_servers.${name}.command`] = JSON.stringify(server.command);
     if (method === 'thread/resume' && params.threadId !== threadId) {
       send({
         id,

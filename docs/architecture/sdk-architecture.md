@@ -593,7 +593,7 @@ adapter-only build/import surface。
 | mid-turn steer | yes | no，未实现 | yes，turn/steer；真实消费未验证 |
 | launch permission（ADR-037） | 预信任 session cwd；继承 agentDir、extensions、skills | `--dangerously-skip-permissions`；继承 `~/.claude` | `approvalPolicy: never`；sandbox 由 `codexSandbox` 决定（默认 `danger-full-access`，`inherit` 时 `config.toml` 生效） |
 | confirm/approval | no | no；native-interaction opt-in 是独立的本地 seam | no；native-interaction opt-in 是独立的本地 seam |
-| task-scoped host MCP toolsets | yes，daemon 观测 `tools/list` 后注册 | yes，task `--mcp-config`；用户 MCP 配置同时加载 | yes，`-c mcp_servers.*`；用户 `config.toml` 同时生效 |
+| task-scoped host MCP toolsets | yes，daemon 观测 `tools/list` 后注册 | yes，task `--mcp-config`；用户 MCP 配置同时加载 | yes，`thread/start` config 的 `mcp_servers`；用户 `config.toml` 同时生效 |
 | usage event | provider counters + estimate context | provider counters + modelUsage window | cumulative cost deltas + last context |
 
 SDK 不再向 adapter 下发 permission policy（ADR-037）。各 runtime 的 guardrail 由用户自己的 agent 配置决定。adapter 仍然拒绝它无法执行的 offer 字段（例如 `limits.maxTokens`），不丢弃，也不近似。

@@ -490,7 +490,8 @@ creating the task. A hosted caller uses `enqueueToolsetOffer()` and must route
 only to a device it knows is toolset-capable. All three bundled runtimes
 advertise `mcpToolsets`. Claude gets the selected local stdio servers in one
 task-scoped `--mcp-config`, and the user's own MCP configuration also loads;
-Codex gets them as `-c mcp_servers.*` overrides; Pi starts them from its
+Codex gets them in the `thread/start` or `thread/resume` config
+(`mcp_servers`); Pi starts them from its
 task-scoped pool.
 
 **`TaskOfferPayload.workspaceHint` is RESERVED — currently ignored end to
@@ -2068,7 +2069,7 @@ real binary observations from fixture proofs and still-unverified behavior.
 | `resume` | yes | yes | yes |
 | `steer` (mid-turn injection) | yes | no — stdin injection is not implemented as steering | yes — app-server turn/steer; actual text consumption remains unverified |
 | launch permission | pre-trusted session cwd; user's agentDir, extensions and skills load | `--dangerously-skip-permissions`; user's `~/.claude` applies | `approvalPolicy: never`; sandbox per `codexSandbox` (default `danger-full-access`) |
-| task-scoped host MCP toolsets | supported — daemon `tools/list` observation | supported — task `--mcp-config`, user MCP config also loads | supported — `-c mcp_servers.*`, user `config.toml` also applies |
+| task-scoped host MCP toolsets | supported — daemon `tools/list` observation | supported — task `--mcp-config`, user MCP config also loads | supported — `thread/start` config `mcp_servers`, user `config.toml` also applies |
 | `interactive-approval` | no (RESERVED, §5.1) | no¹ | no |
 | `usage` fields filled | provider cost counters plus estimated context occupancy/window | provider input/cache/output and modelUsage window | cumulative cost deltas plus last occupancy/window |
 
