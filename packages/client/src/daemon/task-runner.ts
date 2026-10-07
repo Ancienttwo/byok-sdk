@@ -448,8 +448,6 @@ export interface TaskRunnerDeps {
    * through.
    */
   runtimePreference?: RuntimeId[];
-  /** M5: see `DaemonConfig.runtimeEnvironment`'s own doc comment (`create-daemon.ts`) — the per-device, per-runtime env-allowlist override `handleOffer` merges into `buildRuntimeEnv`'s `locallyAllowedNames`. */
-  runtimeEnvironment?: Record<string, { allow?: string[] }>;
   /** Reads the daemon's current validated device-local registry once per offer. */
   getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>;
   /**
@@ -714,7 +712,7 @@ export interface TaskRunnerDeps {
   agentMessageMcpBin?: Readonly<ResolvedAgentMessageMcpBin>;
   /**
    * Production pre-runtime executability/handshake gate for the exact message
-   * helper config. `env` is the same allowlisted child environment the runtime
+   * helper config. `env` is the same child environment the runtime
    * gets (`buildRuntimeEnv`), and `cwd` the same working directory, so the
    * helper is proved under the conditions it will actually run in.
    */
@@ -2268,17 +2266,11 @@ export class TaskRunner {
         decline('server does not support the selected custom harness identity', false);
         return;
       }
-      // The environment EVERY child process of this task receives. Computed
-      // here, before admission, because the admission-time MCP probes below
-      // spawn host-configured commands too: handing them `process.env` would
-      // make the probe the one path where the daemon's own ambient
-      // credentials reach a server the runtime path itself filters out (see
-      // `./environment.ts`). One computation, one allowlist, both phases.
-      const env = buildRuntimeEnv({
-        ambient: process.env,
-        requirements: pick.descriptor.environmentRequirements,
-        locallyAllowedNames: this.deps.runtimeEnvironment?.[pick.descriptor.id]?.allow,
-      });
+      // The environment EVERY child process of this task receives: the
+      // daemon's own, minus the hard deny (`./environment.ts`). Computed here,
+      // before admission, so the admission-time MCP probes below see exactly
+      // what the runtime path sees. One computation, both phases.
+      const env = buildRuntimeEnv({ ambient: process.env });
       const mcpEnv = pick.descriptor.id === 'pi' ? projectPiMcpEnvironment(env) : env;
       if (resolvedMcp?.ok && agentRef !== undefined && this.deps.prepareHostTaskContext) {
         await this.deps.prepareHostTaskContext(taskId, blobAbort.signal);

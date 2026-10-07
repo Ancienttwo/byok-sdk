@@ -164,10 +164,7 @@ const MODEL: InputPreparationModelV1 = {
   maxTokens: 8_192,
 };
 
-const LANE_ENV: Readonly<Record<string, string>> = Object.freeze(buildRuntimeEnv({
-  ambient: process.env,
-  requirements: { credentialNames: [] },
-}));
+const LANE_ENV: Readonly<Record<string, string>> = Object.freeze(buildRuntimeEnv({ ambient: process.env }));
 
 const unusedBlobClient: BlobResolver = {
   resolveInstruction: async () => { throw new Error('not used'); },

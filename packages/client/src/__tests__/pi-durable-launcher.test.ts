@@ -66,7 +66,7 @@ async function fixture(respond: (res: import('node:http').ServerResponse, ordina
   const offer = { instruction: 'Host authority input\nHost context second line', dispatchSelection: selection };
   const prepared = await adapter.prepare({ offer } as never);
   if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
-  const env = buildRuntimeEnv({ ambient: process.env, requirements: { credentialNames: [] } });
+  const env = buildRuntimeEnv({ ambient: process.env });
   const launch = await prepared.operation.resolveRuntimeLaunch!({ kind: 'instruction', cwd: home, env, projectionRoot: path.join(store,'projections') });
   const manifest = sealRuntimeOperationManifest({ taskId: 'task', runtimeId: 'pi', descriptor: adapter.descriptor, dispatchSelection: selection, requiredToolsetIds: [], cwd: home, workspace: { workspaceDir: home }, agentRef: { agentId: 'agent', profileRevision: 'revision' }, lease: { leaseId: 'lease', canonicalHome: home }, forwardedEnvironmentNames: Object.keys(env) });
   const journal: string[] = [];

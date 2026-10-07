@@ -20,7 +20,6 @@ import {
 import { wrapMcpServerWithLaunchCwd } from '../../daemon/trusted-launch-cwd';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../../runtime-failure';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
-import { withoutProviderCredentials } from '../provider-credential-environment';
 import { createClaudeControlChannel } from './control-channel';
 import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES } from './native-interactions';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions';
@@ -132,7 +131,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
         mcpToolsets: true,
         ...(this.nativeOptions === undefined ? {} : { nativeInteractions: CLAUDE_NATIVE_INTERACTION_CAPABILITIES }),
       },
-      environmentRequirements: { credentialNames: [] },
     });
   }
 
@@ -279,13 +277,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
         }
         throwIfCancelled();
         await fs.writeFile(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });
-        mcpArgs.push(
-          '--mcp-config',
-          mcpConfigPath,
-          // The generated file is the complete task-scoped MCP authority.
-          // Never merge ambient user/project MCP configuration into it.
-          '--strict-mcp-config',
-        );
+        // Added to the user's own MCP configuration, not in place of it: the
+        // user's settings, deny rules and hooks still load, as in OAR.
+        mcpArgs.push('--mcp-config', mcpConfigPath);
       }
 
       const resumeSessionId = startInput.manifest.sessionRef;
@@ -352,7 +346,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
           command: bin.command,
           args,
           cwd: manifestCwd,
-          env: withoutProviderCredentials(startInput.env),
+          env: startInput.env,
           spawnFn: this.options.spawnFn,
           control: native === undefined ? control : {
             bind: write => { control.bind(write); native.bind(write); },

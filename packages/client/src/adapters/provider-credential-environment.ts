@@ -3,8 +3,7 @@ export { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '@byok-sdk/implementation-ide
 
 /**
  * Provider credential names that the daemon may explicitly admit for the
- * legacy direct-Pi path. Subscription runtimes and the BYOK custody launcher
- * must not inherit them.
+ * legacy direct-Pi path. The Pi BYOK custody launcher must not inherit them.
  *
  * This list contains names only. Credential values remain owned by the
  * caller's environment or by the separate keys launcher.

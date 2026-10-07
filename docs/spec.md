@@ -1539,8 +1539,8 @@ does not decide is whether the directory is still outside this uid's control:
 that is a fact about the filesystem now, so it is proven once per offer and
 never cached.
 
-Loader environment variables are denied absolutely, above every allowlist layer
-including the operator's own `runtimeEnvironment.<id>.allow`. `NODE_OPTIONS`,
+Loader environment variables are denied absolutely in every child environment
+the daemon builds. `NODE_OPTIONS`,
 `NODE_REPL_EXTERNAL_MODULE`, `NODE_PATH`, `BUN_*`, `DYLD_*` and `LD_*` change how
 an interpreter loads code before the launcher's first statement; `ENV`,
 `BASH_ENV`, `SHELLOPTS`, `BASHOPTS`, `CDPATH` and `PS4` do the same to the shell
@@ -1612,12 +1612,11 @@ The authority split is deliberate and total:
   list of the SDK-minted lifecycle names that actually reach a gated child
   (`BYOK_HOST_TOOLSET_CONTEXT`, `BYOK_STORE_DIR`, `BYOK_PRODUCT_ID`), and the
   provider-credential names stripped at
-  subscription and BYOK-custody boundaries by the existing credential-custody
-  authority. The shared finite inventory includes Codex's `CODEX_API_KEY` and
-  `CODEX_ACCESS_TOKEN`, matches credential case aliases, and is applied before
-  top-level Codex spawn even when the operator explicitly allows those names.
-  Platform discovery and locally allowed non-credential config (including
-  `CODEX_HOME`) remain; the SDK does not inspect or change CLI-owned auth stores.
+  the Pi BYOK-custody boundary by the existing credential-custody authority.
+  The shared finite inventory matches credential case aliases. Claude and Codex
+  inherit the full daemon environment, provider keys included, minus
+  `CLAUDECODE`, `BYOK_*` and loader names; the SDK does not inspect or change
+  CLI-owned auth stores.
   So one identity survives both spawn points without binding a
   difference the SDK made on purpose. It is NOT a `BYOK_*` prefix exemption:
   the prefix is not intrinsically inert, so any other name wearing this SDK's
@@ -1801,8 +1800,9 @@ definition clears it. The SDK does not probe commands or infer readiness from
 executable presence.
 
 Claude is the sole bundled runtime supported in this slice. Its selected local
-servers are projected into one task-scoped `--mcp-config` under
-`--strict-mcp-config`. Claude rejects `confirm` and does not inject an
+servers are projected into one task-scoped `--mcp-config`. The user's own
+Claude MCP configuration, settings, deny rules and hooks also load. Claude
+rejects `confirm` and does not inject an
 approval MCP server. Claude, not the daemon, owns the resulting task-scoped MCP
 subprocess lifetime. Therefore these registry status primitives are not a
 long-lived connector supervisor and do not independently observe a crash or
@@ -2628,8 +2628,10 @@ gated: Codex updates itself, so any other version is admitted with a
 `runtime_version_unqualified` advisory. Native contracts are probed instead
 (app-server presence, exact MCP tool allowlist readback). Opt-in opens/resumes with `on-request` and
 requires native policy readback before a session is exposed; ordinary default
-mode remains `never`. The existing danger-full-access sandbox is unchanged,
-so confirm policy remains unsupported. Only command/file approval requests and
+mode remains `never`. The sandbox is `danger-full-access` by default, as in
+OAR. `DaemonConfig.codexSandbox` selects `read-only` or `workspace-write`, or
+`inherit` to pass no sandbox override so the user's own `config.toml` applies.
+Only command/file approval requests and
 `item/tool/requestUserInput` are mapped. Allow-once maps to `accept`, session
 scope to `acceptForSession`, denial to `decline` and cancellation to `cancel`.
 Structured questions keep native question IDs and answer arrays. User-input

@@ -24,10 +24,9 @@ import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 
 /**
- * M5 acceptance: `TaskRunner` no longer builds `TaskContext.env` from
- * `process.env` verbatim (see `daemon/environment.ts`'s own doc comment) —
- * it builds a per-runtime allowlist from whichever adapter `pickAdapter`
- * selected. These tests drive the THREE REAL bundled adapters (against
+ * `TaskRunner` hands every runtime the daemon's full environment minus the
+ * hard deny (`CLAUDECODE`, `BYOK_*`, loader names — see
+ * `daemon/environment.ts`), as OAR does. These tests drive the THREE REAL bundled adapters (against
  * their existing fake-CLI fixtures — mirrors `pi-adapter.test.ts`/
  * `claude-adapter.test.ts`/`codex-adapter.test.ts`'s own `resolveBin`
  * override) through a directly-constructed `TaskRunner` (mirrors
@@ -75,7 +74,7 @@ interface Harness {
   cancelAll(): Promise<void>;
 }
 
-async function makeHarness(runtimeEnvironment?: Record<string, { allow?: string[] }>): Promise<Harness> {
+async function makeHarness(): Promise<Harness> {
   const captured: Record<RuntimeId, { env?: NodeJS.ProcessEnv }> = { pi: {}, claude: {}, codex: {} };
 
   const piAdapter = new PiAdapter({
@@ -104,7 +103,6 @@ async function makeHarness(runtimeEnvironment?: Record<string, { allow?: string[
     approvalRegistry: new ApprovalRegistry(),
     storeDir: 'unused-store-dir',
     productId: 'unused-product-id',
-    runtimeEnvironment,
   };
   const runner = new TaskRunner(deps);
 
@@ -150,19 +148,19 @@ async function withEnv<T>(vars: Record<string, string>, fn: () => Promise<T>): P
   }
 }
 
-describe('TaskRunner environment allowlist (M5): real pi/claude/codex adapters via a spying spawnFn', () => {
-  it.each(['runtime', 'subscription'] as const)('strips explicitly allowed Codex credentials in the real %s child while preserving measured config', async (lane) => {
+describe('TaskRunner environment inheritance: real pi/claude/codex adapters via a spying spawnFn', () => {
+  it.each(['runtime', 'subscription'] as const)('passes user config and provider keys to the real Codex %s child and drops CLAUDECODE, BYOK_* and loader names', async (lane) => {
     const home = await tmpDir('byok-codex-env-home-');
     const receiptPath = path.join(home, 'env-receipt.json');
-    // Explicit literals ensure the guard also fails when the shared inventory is incomplete.
+    // Explicit literals ensure the check also fails when the shared inventory is incomplete.
     const credentialNames = [...new Set(['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_ACCESS_TOKEN', ...PROVIDER_CREDENTIAL_ENV_DENY_NAMES])];
     const refusedNames = [
-      ...credentialNames, 'BYOK_UNKNOWN', 'BYOK_SDK_CUSTODY_LAUNCH_RECORD',
+      'CLAUDECODE', 'BYOK_UNKNOWN', 'BYOK_SDK_CUSTODY_LAUNCH_RECORD',
       'BYOK_SDK_CUSTODY_PARENT_DEPTH', 'BYOK_SDK_CUSTODY_RUNNER_CONFIG',
       'NODE_OPTIONS', 'BUN_ENV_SENTINEL', 'DYLD_ENV_SENTINEL', 'LD_ENV_SENTINEL',
     ];
     const vars = {
-      ...Object.fromEntries(refusedNames.map((name) => [name, 'synthetic-sentinel'])),
+      ...Object.fromEntries([...credentialNames, ...refusedNames].map((name) => [name, 'synthetic-sentinel'])),
       // Detection probes still inherit parent env; this option is inert there.
       NODE_OPTIONS: '--no-warnings',
       // macOS can synthesize this name inside Node after spawn. Supply the
@@ -175,17 +173,12 @@ describe('TaskRunner environment allowlist (M5): real pi/claude/codex adapters v
     };
     try {
       await withEnv(vars, async () => {
-        const allow = [...Object.keys(vars), 'PATH'];
-        const measured = buildRuntimeEnv({
-          ambient: process.env,
-          requirements: new CodexAdapter().descriptor.environmentRequirements,
-          locallyAllowedNames: allow,
-        });
+        const measured = buildRuntimeEnv({ ambient: process.env });
         // These are the same shared projections used by admission measurement.
         // Digest values do not affect the names digest, and are not loader inputs.
         process.env.FAKE_CODEX_ENV_NAMES_DIGEST = toolImplementationLaunchEnvNamesDigest(measured);
         process.env.FAKE_CODEX_ENV_LOADER_DIGEST = toolImplementationLoaderEnvValuesDigest(measured);
-        const harness = await makeHarness({ codex: { allow } });
+        const harness = await makeHarness();
         try {
           await harness.offer('codex', `task-codex-env-${lane}`, lane === 'subscription'
             ? { lane: 'subscription', runtimeId: 'codex', providerId: null, modelId: 'gpt-5' }
@@ -203,11 +196,11 @@ describe('TaskRunner environment allowlist (M5): real pi/claude/codex adapters v
           expect(toolImplementationLaunchEnvNamesDigest(spawnEnv as Record<string, string>) === process.env.FAKE_CODEX_ENV_NAMES_DIGEST).toBe(true);
           for (const name of refusedNames) {
             expect(receipt.present[name] === true, name).toBe(false);
-            expect(Object.hasOwn(harness.captured.codex.env ?? {}, name), name).toBe(false);
+            expect(Object.hasOwn(spawnEnv, name), name).toBe(false);
           }
-          for (const name of ['PATH', 'HOME', 'USER', 'CODEX_HOME', 'MY_ALLOWED_CONFIG']) {
+          for (const name of ['PATH', 'HOME', 'USER', 'CODEX_HOME', 'MY_ALLOWED_CONFIG', ...credentialNames]) {
             expect(receipt.present[name], name).toBe(true);
-            expect(harness.captured.codex.env?.[name] === process.env[name], name).toBe(true);
+            expect(spawnEnv[name] === process.env[name], name).toBe(true);
           }
           expect(receipt.configMatches).toBe(true);
           expect(receipt.authDiscoveryMatches).toBe(true);
@@ -222,90 +215,39 @@ describe('TaskRunner environment allowlist (M5): real pi/claude/codex adapters v
     }
   });
 
-  it('hides unrelated secrets (AWS/DB/GitHub) from all three runtimes, while pi still sees its own known provider credential and claude/codex do not', async () => {
+  it('passes an arbitrary user variable and provider keys to all three runtimes, and drops CLAUDECODE and BYOK_*', async () => {
     await withEnv(
       {
-        AWS_SECRET_ACCESS_KEY: 'sentinel-aws-secret',
-        DATABASE_URL: 'postgres://sentinel-leak',
-        GITHUB_TOKEN: 'sentinel-gh-token',
-        OPENAI_API_KEY: 'sentinel-openai-key', // a real entry in pi's KNOWN_PROVIDER_ENV_VARS
+        MY_TEAM_SETTING: 'from-the-user-shell',
+        ANTHROPIC_API_KEY: 'sentinel-anthropic-key',
+        OPENAI_API_KEY: 'sentinel-openai-key',
+        CLAUDECODE: '1',
+        BYOK_ANYTHING: 'must-never-leak',
       },
       async () => {
         const harness = await makeHarness();
         try {
-          await harness.offer('pi', 'task-pi-secrets');
-          await harness.offer('claude', 'task-claude-secrets');
-          await harness.offer('codex', 'task-codex-secrets');
+          await harness.offer('pi', 'task-pi-env');
+          await harness.offer('claude', 'task-claude-env');
+          await harness.offer('codex', 'task-codex-env');
 
           expect(harness.sent.some((e) => e.type === 'task.fail')).toBe(false);
 
           for (const id of ['pi', 'claude', 'codex'] as const) {
             const env = harness.captured[id].env;
             expect(env, `${id} spawn should have received an env`).toBeDefined();
-            expect(env?.AWS_SECRET_ACCESS_KEY).toBeUndefined();
-            expect(env?.DATABASE_URL).toBeUndefined();
-            expect(env?.GITHUB_TOKEN).toBeUndefined();
+            expect(env?.PATH, id).toBe(process.env.PATH);
+            expect(env?.HOME, id).toBe(process.env.HOME);
+            expect(env?.MY_TEAM_SETTING, id).toBe('from-the-user-shell');
+            expect(env?.ANTHROPIC_API_KEY, id).toBe('sentinel-anthropic-key');
+            expect(env?.OPENAI_API_KEY, id).toBe('sentinel-openai-key');
+            expect(env?.CLAUDECODE, id).toBeUndefined();
+            expect(env?.BYOK_ANYTHING, id).toBeUndefined();
           }
-
-          // pi authenticates via provider env vars — this one MUST keep flowing.
-          expect(harness.captured.pi.env?.OPENAI_API_KEY).toBe('sentinel-openai-key');
-          // claude/codex declare no credential env vars (deliberate ToS posture).
-          expect(harness.captured.claude.env?.OPENAI_API_KEY).toBeUndefined();
-          expect(harness.captured.codex.env?.OPENAI_API_KEY).toBeUndefined();
         } finally {
           await harness.cancelAll();
         }
       },
     );
-  });
-
-  it('hard-denies BYOK_* everywhere, even when a runtime explicitly lists it in its own local runtimeEnvironment.<id>.allow', async () => {
-    await withEnv({ BYOK_ANYTHING: 'must-never-leak' }, async () => {
-      const harness = await makeHarness({
-        pi: { allow: ['BYOK_ANYTHING'] },
-        claude: { allow: ['BYOK_ANYTHING'] },
-        codex: { allow: ['BYOK_ANYTHING'] },
-      });
-      try {
-        await harness.offer('pi', 'task-pi-byok');
-        await harness.offer('claude', 'task-claude-byok');
-        await harness.offer('codex', 'task-codex-byok');
-
-        expect(harness.sent.some((e) => e.type === 'task.fail')).toBe(false);
-
-        for (const id of ['pi', 'claude', 'codex'] as const) {
-          const env = harness.captured[id].env;
-          expect(env, `${id} spawn should have received an env`).toBeDefined();
-          expect(env?.BYOK_ANYTHING).toBeUndefined();
-        }
-      } finally {
-        await harness.cancelAll();
-      }
-    });
-  });
-
-  it('always includes PATH/HOME for every runtime, and honors a runtimeEnvironment.claude.allow entry for claude only', async () => {
-    await withEnv({ MY_CUSTOM_CLAUDE_ONLY_VAR: 'hello-claude' }, async () => {
-      const harness = await makeHarness({ claude: { allow: ['MY_CUSTOM_CLAUDE_ONLY_VAR'] } });
-      try {
-        await harness.offer('pi', 'task-pi-base');
-        await harness.offer('claude', 'task-claude-base');
-        await harness.offer('codex', 'task-codex-base');
-
-        expect(harness.sent.some((e) => e.type === 'task.fail')).toBe(false);
-
-        for (const id of ['pi', 'claude', 'codex'] as const) {
-          const env = harness.captured[id].env;
-          expect(env?.PATH).toBe(process.env.PATH);
-          expect(env?.HOME).toBe(process.env.HOME);
-        }
-
-        expect(harness.captured.claude.env?.MY_CUSTOM_CLAUDE_ONLY_VAR).toBe('hello-claude');
-        expect(harness.captured.pi.env?.MY_CUSTOM_CLAUDE_ONLY_VAR).toBeUndefined();
-        expect(harness.captured.codex.env?.MY_CUSTOM_CLAUDE_ONLY_VAR).toBeUndefined();
-      } finally {
-        await harness.cancelAll();
-      }
-    });
   });
 });

@@ -108,7 +108,6 @@ describe('support bundle privacy and bounds', () => {
           resume: false,
           approvalInteractive: false,
         },
-        environmentRequirements: { credentialNames: [] },
       }),
       detect: async () => ({ kind: 'available', version: `SENTINEL_RUNTIME_VERSION\n${'x'.repeat(10_000)}`, authPresent: true }),
       prepare: async () => ({ kind: 'reject', reason: 'not used', retryable: false }),

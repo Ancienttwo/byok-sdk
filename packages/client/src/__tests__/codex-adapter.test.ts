@@ -96,9 +96,6 @@ describe('Codex persistent app-server adapter', () => {
     });
     // Codex reads MCP tools itself; the daemon takes no tools/list observation for it.
     expect(adapter().descriptor.requiresMcpToolsetToolObservation).not.toBe(true);
-    expect(
-      adapter().descriptor.environmentRequirements.credentialNames,
-    ).toEqual([]);
   });
   it.each(['codex-cli 0.161.0', 'codex-cli 1.0.0', 'codex-cli 0.159.1', 'codex-cli 0.160.0-alpha.1', 'codex 0.161.0'])('detect admits unqualified version %j with an advisory, never a refusal', async (output) => {
     vi.stubEnv('FAKE_CODEX_VERSION', output);

@@ -41,12 +41,28 @@ import { CodexProjection, type CodexRecord } from './projection';
 import { AsyncQueue } from '../../util/async-queue';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
 import { isQualifiedCodexVersion, QUALIFIED_CODEX_VERSION } from './codex-version';
-import { withoutProviderCredentials } from '../provider-credential-environment';
 
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5000;
+/** A Codex `sandbox_mode`, or `inherit` to pass no override so the user's `config.toml` applies. */
+export type CodexSandboxSetting = 'read-only' | 'workspace-write' | 'danger-full-access' | 'inherit';
+const CODEX_SANDBOX_SETTINGS: readonly string[] = ['read-only', 'workspace-write', 'danger-full-access', 'inherit'];
+
+/** Throws a TypeError unless `value` is a {@link CodexSandboxSetting}. */
+export function assertCodexSandboxSetting(value: unknown, label: string): asserts value is CodexSandboxSetting {
+  if (typeof value !== 'string' || !CODEX_SANDBOX_SETTINGS.includes(value)) {
+    throw new TypeError(`${label} must be one of ${CODEX_SANDBOX_SETTINGS.join(', ')}`);
+  }
+}
+
 export interface CodexAdapterOptions {
   sdkHelperHost?: SdkHelperHostConfig;
+  /**
+   * Codex sandbox for every session, as OAR's `OAR_CODEX_SANDBOX`. Default
+   * `danger-full-access`: no human answers an approval prompt, so a sandbox
+   * denial is a stalled task. `inherit` lets the user's own `config.toml` win.
+   */
+  sandbox?: CodexSandboxSetting;
   resolveBin?: () => ResolvedBin;
   spawnFn?: typeof nodeSpawn;
   maxRetainedBytes?: number;
@@ -68,9 +84,9 @@ export class CodexAdapter implements RuntimeAdapter {
       ...(this.options.nativeInteractions === undefined ? {} : { nativeInteractions: { approvalDecisions: ['allow-once', 'allow-session', 'deny', 'cancel'] as const, structuredQuestions: true } }),
       mcpToolsets: true,
     },
-    environmentRequirements: { credentialNames: [] },
   }); }
   constructor(private readonly options: CodexAdapterOptions = {}) {
+    if (options.sandbox !== undefined) assertCodexSandboxSetting(options.sandbox, 'CodexAdapterOptions.sandbox');
     this.options = { ...options, ...(options.nativeInteractions === undefined ? {} : { nativeInteractions: snapshotNativeInteractionHostOptions(options.nativeInteractions) }) };
     if (
       !Number.isSafeInteger(options.maxRetainedBytes ?? 16 * 1024 * 1024) ||
@@ -163,9 +179,8 @@ export class CodexAdapter implements RuntimeAdapter {
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('codex manifest has no sealed cwd');
     const workspace = await fs.realpath(cwd);
-    // Operator allow cannot opt this subscription runtime into env credentials.
-    // Strip before adding the task-owned MCP transport payloads, never ambient env.
-    const env = withoutProviderCredentials(input.env);
+    // A copy: the task-owned MCP transport payloads are added below.
+    const env = { ...input.env };
     const configArgs = codexMcpConfigArgs(
       input.mcpServers,
       env,
@@ -200,6 +215,7 @@ export class CodexAdapter implements RuntimeAdapter {
           env: env as Record<string, string>,
           ...(model === undefined ? {} : { model }),
           ...(this.options.nativeInteractions === undefined ? {} : { approvalPolicy: "on-request" as const }),
+          sandboxMode: this.options.sandbox ?? 'danger-full-access',
           ...(input.manifest.sessionRef === undefined
             ? {}
             : { resume: input.manifest.sessionRef }),

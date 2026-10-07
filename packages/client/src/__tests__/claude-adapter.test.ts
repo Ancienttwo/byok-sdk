@@ -121,11 +121,6 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(adapter.descriptor.requiresMcpToolsetToolObservation).not.toBe(true);
   });
 
-  it('descriptor declares no credential env vars (M5 — deliberate ToS posture: env-based API key passthrough for claude is a separate, pending product decision)', () => {
-    const adapter = fakeClaudeAdapter();
-    expect(adapter.descriptor.environmentRequirements).toEqual({ credentialNames: [] });
-  });
-
   it('start() drives the canned prompt sequence into normalized AgentEvents (Bash tool_use/tool_result, progress, turn_end)', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx();
@@ -167,12 +162,11 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
           modelId: 'opus',
         },
       },
-      await makeCtx({ ...process.env, OPENAI_API_KEY: 'sk-sentinel' }),
+      await makeCtx(),
     );
     openSessions.push(session);
     expect(calls[0]?.args).toContain('--model');
     expect(calls[0]?.args[calls[0].args.indexOf('--model') + 1]).toBe('opus');
-    expect(calls[0]?.env.OPENAI_API_KEY).toBeUndefined();
     await expect(session.followUp({
       instruction: 'switch model',
       dispatchSelection: {
@@ -272,7 +266,6 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     openSessions.push(session);
     const args = spawnCalls[0]?.args ?? [];
     expect(args).toContain('--mcp-config');
-    expect(args).toContain('--strict-mcp-config');
     expect(args).not.toContain('--permission-prompt-tool');
     // No per-tool grant: the ordinary launch skips permission prompts, so the
     // projected MCP tools need no `--allowedTools` list. The observation never

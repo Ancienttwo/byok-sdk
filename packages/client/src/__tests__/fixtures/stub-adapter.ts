@@ -238,7 +238,6 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
       supportsDispatchSelection: true,
       requiresMcpToolsetToolObservation,
       capabilities,
-      environmentRequirements: { credentialNames: [] },
       ...(launchDeclarations.mcpServerLaunch === undefined
         ? {}
         : { mcpServerLaunch: launchDeclarations.mcpServerLaunch }),

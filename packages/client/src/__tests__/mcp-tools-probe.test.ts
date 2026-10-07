@@ -43,9 +43,9 @@ function fixtureServer(config: FixtureConfig): McpStdioServerConfig {
   return { command: process.execPath, args: [PROBE_FIXTURE, JSON.stringify(config)] };
 }
 
-/** The allowlisted environment the real runtime child of a task would receive. */
+/** The environment the real runtime child of a task would receive. */
 function runtimeEnv(): Record<string, string> {
-  return buildRuntimeEnv({ ambient: process.env, requirements: { credentialNames: [] } });
+  return buildRuntimeEnv({ ambient: process.env });
 }
 
 async function probe(
@@ -139,29 +139,25 @@ describe('probeMcpServerTools — observed tool names', () => {
 });
 
 describe('probeMcpServerTools — spawned child', () => {
-  it('never hands the daemon\'s own ambient credentials to the probed server', async () => {
+  it('never hands this SDK\'s own BYOK_* control-plane variables to the probed server', async () => {
     const root = await tmpRoot();
     const dumpEnvTo = path.join(root, 'env.json');
     const restore = { ...process.env };
     process.env.BYOK_SECRET = 'control-plane-secret';
-    process.env.AWS_SECRET_ACCESS_KEY = 'daemon-deployment-secret';
     try {
       await probe(fixtureServer({ tools: [{ name: 'echo' }], dumpEnvTo }));
     } finally {
       delete process.env.BYOK_SECRET;
-      delete process.env.AWS_SECRET_ACCESS_KEY;
       Object.assign(process.env, restore);
     }
     const childEnv = JSON.parse(await fs.readFile(dumpEnvTo, 'utf8')) as Record<string, string>;
     expect(childEnv).not.toHaveProperty('BYOK_SECRET');
-    expect(childEnv).not.toHaveProperty('AWS_SECRET_ACCESS_KEY');
     expect(JSON.stringify(childEnv)).not.toContain('control-plane-secret');
-    expect(JSON.stringify(childEnv)).not.toContain('daemon-deployment-secret');
-    // The platform baseline still arrives, or the server could not run at all.
+    // The rest of the runtime environment still arrives.
     expect(childEnv.PATH).toBe(process.env.PATH);
   });
 
-  it('layers an SDK-reserved server\'s own env over the allowlisted base', async () => {
+  it('layers an SDK-reserved server\'s own env over the runtime base', async () => {
     const root = await tmpRoot();
     const dumpEnvTo = path.join(root, 'env.json');
     const server = fixtureServer({ tools: [{ name: 'echo' }], dumpEnvTo });

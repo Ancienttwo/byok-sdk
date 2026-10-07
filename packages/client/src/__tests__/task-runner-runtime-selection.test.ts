@@ -157,7 +157,6 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
           resume: true,
           approvalInteractive: false,
         },
-        environmentRequirements: { credentialNames: ['OPENAI_API_KEY'] },
       };
       const starts: RuntimeOperationStartInput[] = [];
       const sessions: StubSession[] = [];
@@ -169,7 +168,6 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
         async prepare(input) {
           expect(input.descriptor).not.toBe(sourceDescriptor);
           sourceDescriptor.capabilities.steer = false;
-          sourceDescriptor.environmentRequirements.credentialNames = [];
           return {
             kind: 'prepared',
             operation: {
@@ -198,7 +196,6 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
         expect(Object.isFrozen(starts[0]?.manifest)).toBe(true);
         expect(Object.isFrozen(starts[0]?.manifest.descriptor)).toBe(true);
         expect(starts[0]?.manifest.descriptor.capabilities.steer).toBe(true);
-        expect(starts[0]?.manifest.descriptor.environmentRequirements.credentialNames).toEqual(['OPENAI_API_KEY']);
         expect(starts[0]?.manifest.forwardedEnvironmentNames).toContain('OPENAI_API_KEY');
         expect(starts[0]?.env.OPENAI_API_KEY).toBe('descriptor-snapshot-secret');
         expect(JSON.stringify(starts[0]?.manifest)).not.toContain('descriptor-snapshot-secret');

@@ -129,7 +129,6 @@ class RelayingAdapter implements RuntimeAdapter {
     id: 'claude',
     supportsDispatchSelection: false,
     capabilities: { steer: false, resume: true, approvalInteractive: true },
-    environmentRequirements: { credentialNames: [] },
   });
   readonly sessions: RelayingSession[] = [];
 

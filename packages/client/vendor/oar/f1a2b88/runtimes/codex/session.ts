@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR f1a2b88 for injected processes, native-first recording and bounded request refusal (Apache-2.0).
+// BYOK change: Modified from OAR f1a2b88 for injected processes, native-first recording, bounded request refusal and caller-selected sandbox (Apache-2.0).
 import type { AvailableInstallation } from "../../contracts/installation.js"; // BYOK change: direct type-only contract import.
 import { randomUUID } from "node:crypto";
 import type {
@@ -68,7 +68,11 @@ export interface CodexAdapterSession extends AdapterSession {
 export async function codexSession(
   spawnLineProcess: SpawnLineProcess,
   installation: AvailableInstallation,
-  options: SessionOptions & { readonly approvalPolicy?: "never" | "on-request" }, // BYOK change: explicit local interactive opt-in.
+  options: SessionOptions & {
+    readonly approvalPolicy?: "never" | "on-request"; // BYOK change: explicit local interactive opt-in.
+    // BYOK change: the caller passes OAR_CODEX_SANDBOX semantics explicitly.
+    readonly sandboxMode?: "read-only" | "workspace-write" | "danger-full-access" | "inherit";
+  },
   serverRequestTimeoutMs = 1_000,
   hooks: { // BYOK change: required record delivery and retention are injected before registration/replay.
     readonly onReady?: (threadId: string) => void;
@@ -84,12 +88,18 @@ export async function codexSession(
   if (installation.via !== "executable") {
     throw new Error("The codex session adapter needs an executable installation");
   }
-  // BYOK change: Explicit environment and fixed YOLO config; ambient OAR_CODEX_SANDBOX is ignored.
+  // BYOK change: Explicit environment and caller sandbox; ambient OAR_CODEX_SANDBOX is ignored.
   if (options.env === undefined) throw new Error("codex session requires an explicit filtered environment");
+  // YOLO default (repo policy 2026-08-24): bypass the sandbox too, not just
+  // approvals. Injected as a launch -c override because that is the only seam
+  // that governs codex's exec tool. "inherit" skips the override, so the
+  // user's own config wins.
+  const sandboxMode = options.sandboxMode ?? "danger-full-access";
+  const configOverrides: Record<string, string> = sandboxMode === "inherit" ? {} : { sandbox_mode: `"${sandboxMode}"` };
   if (!Number.isFinite(serverRequestTimeoutMs) || serverRequestTimeoutMs <= 0 || serverRequestTimeoutMs > 2_147_483_647) {
     throw new Error("codex server request timeout must be positive, finite and at most 2147483647ms");
   }
-  const client = startAppServerClient(spawnLineProcess, installation.command, options.env, { sandbox_mode: '"danger-full-access"' }, options.cwd);
+  const client = startAppServerClient(spawnLineProcess, installation.command, options.env, configOverrides, options.cwd);
   // BYOK change: Ownership/adoption must settle before the first protocol write.
   try {
     await client.spawned;

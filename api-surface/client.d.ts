@@ -345,8 +345,18 @@ import { type spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
 import { type ResolvedBin } from './resolve-bin';
+/** A Codex `sandbox_mode`, or `inherit` to pass no override so the user's `config.toml` applies. */
+export type CodexSandboxSetting = 'read-only' | 'workspace-write' | 'danger-full-access' | 'inherit';
+/** Throws a TypeError unless `value` is a {@link CodexSandboxSetting}. */
+export declare function assertCodexSandboxSetting(value: unknown, label: string): asserts value is CodexSandboxSetting;
 export interface CodexAdapterOptions {
     sdkHelperHost?: SdkHelperHostConfig;
+    /**
+     * Codex sandbox for every session, as OAR's `OAR_CODEX_SANDBOX`. Default
+     * `danger-full-access`: no human answers an approval prompt, so a sandbox
+     * denial is a stalled task. `inherit` lets the user's own `config.toml` win.
+     */
+    sandbox?: CodexSandboxSetting;
     resolveBin?: () => ResolvedBin;
     spawnFn?: typeof nodeSpawn;
     maxRetainedBytes?: number;
@@ -390,7 +400,6 @@ export interface ResolvedBin {
 export declare function resolveCodexBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, } from '../types';
-export type { RuntimeEnvironmentRequirements } from '../daemon/environment';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 export type { RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeExecutionFailureInput, RuntimeFailureCategory, RuntimeFailurePhase, RuntimeRetryDisposition, } from '../runtime-failure';
 export { PiAdapter } from './pi/pi-adapter';
@@ -399,7 +408,7 @@ export { PI_PACKAGE_NAME } from './pi/resolve-bin';
 export { ClaudeAdapter } from './claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './claude/claude-adapter';
 export { CodexAdapter } from './codex/codex-adapter';
-export type { CodexAdapterOptions } from './codex/codex-adapter';
+export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-adapter';
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
 export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from '../native-interactions';
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
@@ -3580,6 +3589,7 @@ import type { RuntimeAdapter, GitWorkspaceConfig, McpToolsetConfig, McpToolsetOb
 import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agent-home';
 import type { AgentRef } from '../agent-home';
 import { type LocalAgentReleaseIdentity } from '../release-identity';
+import { type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
 import { type InputPreparationAuthorityResolver, type InputPreparationCounterAdapter, type InputPreparationLimitsPolicyV1 } from '../input-preparation';
 import type { ToolImplementationAuthority } from './tool-implementation-identity';
 import { type OperationalHealthSnapshot } from './operational-health';
@@ -3812,19 +3822,12 @@ export interface DaemonConfig {
     /** Optional white-label branding — see `DaemonBranding`. Carried through verbatim to `status().branding`. */
     branding?: DaemonBranding;
     /**
-     * M5: per-device, per-runtime escape hatch into the environment allowlist
-     * `task-runner.ts` builds each task's spawn environment from
-     * (`daemon/environment.ts`'s `buildRuntimeEnv`) — keyed by runtime id
-     * (`'pi' | 'claude' | 'codex'`, though not typed that narrowly here since
-     * an id with no matching adapter is simply never looked up). `allow`
-     * entries are exact variable names or `*`-suffixed prefixes, merged in
-     * alongside that runtime adapter's own declared
-     * `descriptor.environmentRequirements` — this can never override the hard
-     * `BYOK_*` deny (see `environment.ts`'s own doc comment).
+     * Codex sandbox for the bundled Codex adapter that `createDaemon` builds,
+     * as OAR's `OAR_CODEX_SANDBOX`. Default `danger-full-access`. `inherit`
+     * passes no sandbox override, so the user's own `config.toml` applies.
+     * `createDaemon` throws a TypeError for any other value.
      */
-    runtimeEnvironment?: Record<string, {
-        allow?: string[];
-    }>;
+    codexSandbox?: CodexSandboxSetting;
     /**
      * Device-local registry behind wire-level `requiredToolsets` ids. Only
      * logical ids cross the SaaS wire; MCP executable definitions stay here.
@@ -4608,104 +4611,6 @@ export interface HostDeviceProofSigner extends DeviceProofSigner {
  */
 export declare function createStoredDeviceProofSigner(options: CreateStoredDeviceProofSignerOptions): HostDeviceProofSigner;
 export {};
-// ==== @byok-sdk/client dist/daemon/environment.d.ts ====
-export { LOADER_ENV_DENY_PATTERNS, loaderEnvInjections } from '@byok-sdk/implementation-identity';
-/**
- * M5: per-runtime environment allowlist for spawned agent child processes.
- *
- * Before this module existed, `task-runner.ts` built every task's
- * `RuntimeOperationStartInput.env` as `process.env` verbatim — the daemon's OWN full
- * environment, unfiltered, handed to whichever runtime CLI (`pi`/`claude`/
- * `codex`) `pickAdapter` selected. Any credential-shaped variable sitting in
- * the daemon's own environment for a completely unrelated reason (an
- * `AWS_SECRET_ACCESS_KEY`, `DATABASE_URL`, `GITHUB_TOKEN` set for the
- * daemon's OWN deployment, nothing to do with any coding-agent runtime) was
- * therefore inherited by every single spawned agent process — a
- * credential-leak gap, not a deliberate design choice.
- *
- * {@link buildRuntimeEnv} replaces that blanket passthrough with an explicit
- * allowlist, built fresh per task from three layers:
- *
- * 1. A small, always-included platform baseline ({@link BASE_PLATFORM_ALLOWLIST}
- *    / {@link WINDOWS_BASE_ALLOWLIST}) — the bare minimum any CLI needs to
- *    resolve its own binaries/libraries, find a home/temp directory, and
- *    behave sanely in a non-interactive shell.
- * 2. Whatever ADDITIONAL names the *specific* runtime adapter about to be
- *    spawned declares it actually needs
- *    (`RuntimeAdapter.descriptor.environmentRequirements` — see
- *    `../types.ts`). A descriptor that declares no names gets the platform
- *    baseline only; descriptors are required and frozen before claim.
- * 3. A per-device, per-runtime operator override (`DaemonConfig
- *    .runtimeEnvironment` — see `create-daemon.ts`) — a local escape hatch
- *    for a product/operator that knows it needs one more variable forwarded
- *    to one specific runtime on this one device.
- *
- * One hard, unconditional deny always wins over all three layers above,
- * including the operator's own override: `BYOK_*`, this SDK's own
- * control-plane variables, must never reach a spawned agent process — see
- * {@link HARD_DENY_PATTERNS}.
- *
- * Every name in every list may be an exact match or a `*`-suffixed prefix
- * (e.g. `'LC_*'` matches `LC_ALL`, `LC_CTYPE`, ...).
- */
-/**
- * What one runtime adapter declares it needs beyond the always-included
- * platform baseline. Declared in the required frozen
- * `RuntimeAdapter.descriptor.environmentRequirements` (`../types.ts`).
- */
-export interface RuntimeEnvironmentRequirements {
-    /**
-     * Extra non-secret, config-discovery-shaped variable names this runtime's
-     * own CLI reads (e.g. a `<RUNTIME>_CONFIG_DIR`-style override) — anything
-     * that isn't itself a credential. Optional: most adapters need nothing
-     * beyond the platform baseline.
-     */
-    baseNames?: readonly string[];
-    /**
-     * Credential/auth variable names this runtime's own CLI reads to
-     * authenticate (e.g. a provider API key). Kept as its own field (distinct
-     * from `baseNames`) so a product's own security review can reason about
-     * "what credential-shaped names does this runtime get" as a single,
-     * explicit list per adapter — see e.g. the pi adapter's
-     * `KNOWN_PROVIDER_ENV_VARS`.
-     */
-    credentialNames?: readonly string[];
-}
-/** Inputs to {@link buildRuntimeEnv}. */
-export interface BuildRuntimeEnvOptions {
-    /**
-     * The daemon's own ambient environment (normally `process.env`). Never
-     * mutated — every returned variable is copied into a fresh object.
-     */
-    ambient: NodeJS.ProcessEnv;
-    /**
-     * The selected runtime adapter's own declared requirements —
-     * `undefined` means "platform baseline only" for this helper. The public
-     * RuntimeAdapter descriptor always supplies this object before TaskRunner
-     * invokes the helper.
-     */
-    requirements?: RuntimeEnvironmentRequirements;
-    /**
-     * This device's own operator-configured escape hatch for this one runtime
-     * (`DaemonConfig.runtimeEnvironment?.[adapterId]?.allow`) — merged in like
-     * any other allowlist entry, still subject to the hard deny below.
-     */
-    locallyAllowedNames?: readonly string[];
-    /**
-     * Test seam: which platform's extra base vars to include
-     * ({@link WINDOWS_BASE_ALLOWLIST} vs none) — defaults to `process.platform`
-     * so callers never have to think about it, while still letting a test
-     * exercise the win32 branch deterministically on any host OS.
-     */
-    platform?: NodeJS.Platform;
-}
-/**
- * Build the environment one specific runtime's spawned child process should
- * actually receive — a fresh object, never `options.ambient` itself and
- * never mutated in place. See this module's own doc comment for the full
- * allow/deny model.
- */
-export declare function buildRuntimeEnv(options: BuildRuntimeEnvOptions): Record<string, string>;
 // ==== @byok-sdk/client dist/daemon/git-workspace-store.d.ts ====
 import type { GitErrorCategory, GitWorkspaceObservation } from './git-workspace';
 export type GitWorkspacePhase = 'preparing' | 'active' | 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'salvage';
@@ -6566,12 +6471,10 @@ export interface McpToolsProbeOptions {
     /**
      * The exact base environment the RUNTIME child of this task receives
      * (`buildRuntimeEnv`, `./environment.ts`) — never `process.env`. The probe
-     * spawns a host-configured command, so it must not become the one place the
-     * daemon's own ambient credentials (an `AWS_SECRET_ACCESS_KEY` or
-     * `DATABASE_URL` set for the daemon's own deployment, this SDK's own
-     * `BYOK_*` control-plane variables) reach a server the real runtime path
-     * would have filtered out. Required, deliberately: a caller that forgets it
-     * fails to compile rather than silently reinstating the blanket passthrough.
+     * spawns a host-configured command, so it must not become the one place
+     * this SDK's own `BYOK_*` control-plane variables reach a server the real
+     * runtime path would have filtered out. Required, deliberately: a caller
+     * that forgets it fails to compile rather than passing `process.env`.
      */
     env: Readonly<Record<string, string>>;
     /**
@@ -7933,10 +7836,6 @@ export interface TaskRunnerDeps {
      * through.
      */
     runtimePreference?: RuntimeId[];
-    /** M5: see `DaemonConfig.runtimeEnvironment`'s own doc comment (`create-daemon.ts`) — the per-device, per-runtime env-allowlist override `handleOffer` merges into `buildRuntimeEnv`'s `locallyAllowedNames`. */
-    runtimeEnvironment?: Record<string, {
-        allow?: string[];
-    }>;
     /** Reads the daemon's current validated device-local registry once per offer. */
     getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>;
     /**
@@ -8209,7 +8108,7 @@ export interface TaskRunnerDeps {
     agentMessageMcpBin?: Readonly<ResolvedAgentMessageMcpBin>;
     /**
      * Production pre-runtime executability/handshake gate for the exact message
-     * helper config. `env` is the same allowlisted child environment the runtime
+     * helper config. `env` is the same child environment the runtime
      * gets (`buildRuntimeEnv`), and `cwd` the same working directory, so the
      * helper is proved under the conditions it will actually run in.
      */
@@ -10162,7 +10061,6 @@ export type { AgentHomeResolution, AgentHomeProjection, AgentHomeProjectionInput
 export { localStateRelocation, LocalStateRelocationError, LocalStateRelocationBusyError, LocalStateRelocationIntegrityError, } from './local-state-relocation';
 export type { LocalStateRelocationInput, LocalStateRelocationLease, } from './local-state-relocation';
 export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDescriptor, sealRuntimeOperationManifest } from './types';
-export type { RuntimeEnvironmentRequirements } from './daemon/environment';
 export { resolveLocalAgentReleaseIdentity } from './release-identity';
 export type { LocalAgentReleaseIdentity } from './release-identity';
 export { BYOK_SDK_HELPER_SUBCOMMAND, resolveSdkReservedHelperBin, runSdkReservedHelperCommand, } from './sdk-reserved-helper-host';
@@ -10283,7 +10181,7 @@ export type { PiAdapterOptions, PiByokLauncherConfig } from './adapters/pi/pi-ad
 export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin';
 export { ClaudeAdapter } from './adapters/claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
-export { CodexAdapter, type CodexAdapterOptions } from './adapters/codex/codex-adapter';
+export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
 export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from './diagnostics/device-doctor';
 export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, } from './diagnostics/device-doctor';
 export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions';
@@ -12151,8 +12049,8 @@ export interface McpStdioClientOptions {
     /**
      * The exact base environment the RUNTIME child of this task receives
      * (`buildRuntimeEnv`) — never `process.env`. Required, deliberately: a
-     * caller that forgets it fails to compile rather than silently reinstating
-     * a blanket passthrough of the daemon's own credentials.
+     * caller that forgets it fails to compile rather than passing this SDK's
+     * own `BYOK_*` control-plane variables.
      */
     readonly env: Readonly<Record<string, string>>;
     /** Working directory for the child — the same one the runtime CLI is spawned in. */
@@ -12621,7 +12519,6 @@ import type { ToolImplementationAuthority, ToolImplementationUnavailableReasonV1
 import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation';
-import type { RuntimeEnvironmentRequirements } from './daemon/environment';
 import type { McpLaunchBinding } from './daemon/trusted-launch-cwd';
 import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 import type { AgentRef } from './agent-home';
@@ -12629,7 +12526,6 @@ import type { McpToolsetServerObservation } from './mcp/observation';
 export type { AgentRef } from './agent-home';
 export type { McpServerObservation, McpToolDescriptor, McpToolsetServerObservation, } from './mcp/observation';
 export type { AgentEgressPolicy } from '@byok-sdk/protocol';
-export type { RuntimeEnvironmentRequirements } from './daemon/environment';
 export type { LaunchCwdRejection, McpLaunchBinding, McpLaunchCwdConfig, TrustedLaunchCwd, TrustedLaunchCwdUnavailableReason, } from './daemon/trusted-launch-cwd';
 export interface GitWorkspaceConfig {
     mode: 'local-checkpoints';
@@ -12804,13 +12700,11 @@ export interface Session {
  * Immutable runtime facts shared by discovery and one prepared operation.
  *
  * The SDK snapshots this value before each offer and never consults adapter
- * capability authority again during admission, claim, environment projection,
- * or start. Credential declarations are names only, never values.
+ * capability authority again during admission, claim or start.
  */
 export interface RuntimeAdapterDescriptor {
     readonly id: string;
     readonly capabilities: RuntimeCapabilities;
-    readonly environmentRequirements: RuntimeEnvironmentRequirements;
     /** Explicit opt-in to authoritative `task.offer.dispatchSelection` semantics. */
     readonly supportsDispatchSelection: boolean;
     /**

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import type { SpawnFn } from '../adapters/claude/process-client';
-import { CodexAdapter } from '../adapters/codex/codex-adapter';
+import { CodexAdapter, type CodexAdapterOptions } from '../adapters/codex/codex-adapter';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import type { Session } from '../types';
@@ -20,7 +20,9 @@ import { TestServer } from './fixtures/test-server';
  * Minimal guardrails: no PermissionPolicy reaches a runtime. Each bundled
  * adapter launches without a permission mode or a per-tool grant, and still
  * projects the task's MCP servers. The daemon accepts an offer that carries
- * no policy.
+ * no policy. Each adapter inherits the user's own agent configuration: Claude
+ * MCP config, Pi extensions and skills, and (with `inherit`) the Codex
+ * sandbox.
  */
 
 const FAKE_CLAUDE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
@@ -76,7 +78,7 @@ describe('Claude launch', () => {
     expect(args).not.toContain('--allowedTools');
     expect(args).not.toContain('--permission-prompt-tool');
     expect(args).toContain('--mcp-config');
-    expect(args).toContain('--strict-mcp-config');
+    expect(args).not.toContain('--strict-mcp-config');
   });
 
   it('keeps the native interaction launch on the stdio prompt tool, without the skip flag', async () => {
@@ -129,6 +131,48 @@ describe('Codex launch', () => {
   });
 });
 
+describe('Codex sandbox', () => {
+  async function launchArgs(sandbox: CodexAdapterOptions['sandbox']): Promise<string[]> {
+    const argv: string[][] = [];
+    const adapter = new CodexAdapter({
+      resolveBin: () => ({ command: FAKE_CODEX, source: 'path' }),
+      ...(sandbox === undefined ? {} : { sandbox }),
+      spawnFn: ((command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
+        argv.push([...args]);
+        return realSpawn(command, args, options);
+      }) as typeof realSpawn,
+    });
+    const session = await startPreparedOperation(adapter, { instruction: 'hello' }, {
+      workspaceDir: await tempDir('byok-minimal-guardrails-codex-sandbox-'),
+      env: { PATH: process.env.PATH, HOME: os.homedir() },
+    });
+    sessions.push(session);
+    await drainTurn(session);
+    return argv[0] ?? [];
+  }
+
+  it.each([
+    [undefined, 'sandbox_mode="danger-full-access"'],
+    ['danger-full-access', 'sandbox_mode="danger-full-access"'],
+    ['workspace-write', 'sandbox_mode="workspace-write"'],
+    ['read-only', 'sandbox_mode="read-only"'],
+  ] as const)('passes sandbox %s to app-server as %s', async (sandbox, expected) => {
+    const args = await launchArgs(sandbox);
+    expect(args.filter((arg) => arg.startsWith('sandbox_mode='))).toEqual([expected]);
+    expect(args[args.indexOf(expected) - 1]).toBe('-c');
+  });
+
+  it('passes no sandbox override for inherit, so the user config.toml applies', async () => {
+    const args = await launchArgs('inherit');
+    expect(args).toContain('app-server');
+    expect(args.some((arg) => arg.startsWith('sandbox_mode='))).toBe(false);
+  });
+
+  it('refuses an unknown sandbox value at construction', () => {
+    expect(() => new CodexAdapter({ sandbox: 'yolo' as never })).toThrow(TypeError);
+  });
+});
+
 describe('Pi launch', () => {
   it('passes no tool selection flags and writes a v3 launch config without policy', async () => {
     const argv: string[][] = [];
@@ -147,7 +191,7 @@ describe('Pi launch', () => {
 
     const args = argv[0] ?? [];
     expect(args).toContain('--mode');
-    for (const flag of ['--tools', '--exclude-tools', '--no-tools']) expect(args).not.toContain(flag);
+    for (const flag of ['--tools', '--exclude-tools', '--no-tools', '--no-skills', '--no-extensions']) expect(args).not.toContain(flag);
     const config = JSON.parse(await fs.readFile(args[args.indexOf('--config') + 1]!, 'utf8')) as Record<string, unknown> & { mcp: Record<string, unknown> };
     expect(config).toMatchObject({ format: 'byok.pi.rpc-launch', version: 3 });
     expect(config).not.toHaveProperty('policy');

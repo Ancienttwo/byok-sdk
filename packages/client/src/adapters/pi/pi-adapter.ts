@@ -207,11 +207,10 @@ export class PiAdapter implements RuntimeAdapter {
       mcpToolsets: true,
       approvalInteractive: false,
     },
-    environmentRequirements: { credentialNames: PROVIDER_CREDENTIAL_ENV_NAMES },
   });
 
   constructor(private readonly options: PiAdapterOptions = {}) {
-    if (options.durablePi !== undefined) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, capabilities: { ...this.descriptor.capabilities, durablePi: true, steer: false, resume: false }, environmentRequirements: { credentialNames: [] } });
+    if (options.durablePi !== undefined) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, capabilities: { ...this.descriptor.capabilities, durablePi: true, steer: false, resume: false } });
     validatePiByokLauncherConfig(options.byokLauncher);
   }
 
@@ -525,7 +524,7 @@ export class PiAdapter implements RuntimeAdapter {
               reason: 'pi task-scoped MCP configuration could not be created',
             }, { cause });
           }
-          const piArgs = ['--config', hostConfigPath, '--mode', 'rpc', '--no-skills',
+          const piArgs = ['--config', hostConfigPath, '--mode', 'rpc',
             ...(resumeSessionId === undefined ? [] : ['--session', resumeSessionId])];
           const launch = runtimeLaunch.binding;
           const targetArgs = [...(launch.entry === undefined ? [] : [launch.entry]), ...launch.fixedArgv, `--config-digest=${hostConfigDigest}`, ...piArgs];

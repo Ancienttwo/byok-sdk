@@ -117,8 +117,8 @@
       "path": "runtimes/codex/session.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/session.ts",
       "upstreamSha256": "0694bbdb890914ee54482a0663bbd69e2865509ec3b9ab2fa13d3ef2be871173",
-      "vendoredSha256": "3fb078bef9018d11efd9c25619cc8e63ed636d3563ec580c15406e1b97b5341e",
-      "delta": "BYOK S2a: injected spawn and explicit filtered env; fixed YOLO sandbox; raw AdapterSession without sealSession/input-images; native-first frame capture with visible fold failure/kill; bounded server request decline/reject using 0.159.2 response schemas; ES2022 deferred Promise. S2b: explicit body.origin=byok-native; inject required consumer/budget before registration. Re-vendor: remove capabilities.steer; refine optional generic steer to a required Codex method; no withdraw or derived deliver. Native interactions: explicit on-request policy with readback, opt-in caller-owned request lifecycle, one-shot typed replies and local cancellation records; no fallback allow or persistence. Native replies await acknowledged stdin writes under bounded ownership."
+      "vendoredSha256": "2b8306d8bd9dd2c6f2d853690e34d1a862dd92d96e63d4844ec1562b626ab5e0",
+      "delta": "BYOK S2a: injected spawn and explicit filtered env; caller-selected sandbox (danger-full-access default, inherit passes no override); raw AdapterSession without sealSession/input-images; native-first frame capture with visible fold failure/kill; bounded server request decline/reject using 0.159.2 response schemas; ES2022 deferred Promise. S2b: explicit body.origin=byok-native; inject required consumer/budget before registration. Re-vendor: remove capabilities.steer; refine optional generic steer to a required Codex method; no withdraw or derived deliver. Native interactions: explicit on-request policy with readback, opt-in caller-owned request lifecycle, one-shot typed replies and local cancellation records; no fallback allow or persistence. Native replies await acknowledged stdin writes under bounded ownership."
     },
     {
       "path": "runtimes/codex/tasks.ts",

@@ -80,7 +80,18 @@ absolute keychain file. The client projects it as the launcher's reserved
 or widen the Pi child environment.
 
 Claude Code and Codex remain user-installed runtimes and use their own login
-state. Hosts that only need runtime detection/composition can import the
+state. Each runtime child inherits the daemon environment, provider API keys
+included. The daemon removes only `CLAUDECODE`, its own `BYOK_*` names and
+loader injection names. Claude loads the user's own MCP configuration,
+settings, deny rules and hooks. The SDK adds its task servers with
+`--mcp-config`. Ordinary Pi loads the user's own extensions and skills from
+its agent directory.
+Codex runs with sandbox `danger-full-access` by default. Set
+`DaemonConfig.codexSandbox` to `read-only` or `workspace-write` for a stricter
+mode, or to `inherit` to apply the user's own `config.toml`. Any other value
+makes `createDaemon` throw a `TypeError`.
+
+Hosts that only need runtime detection/composition can import the
 transport-free adapter surface:
 
 ```ts
@@ -134,7 +145,8 @@ never a configured value, never a wildcard — are what each adapter grants:
 - Codex: `mcp_servers.<server>.enabled_tools` plus
   `mcp_servers.<server>.tools.<tool>.approval_mode="approve"` for exactly
   those tools. Codex is qualified against 0.160.0, needs app-server support and uses
-  `danger-full-access`/YOLO with `approval_policy=never`. Only `auto` is supported;
+  `approval_policy=never` with sandbox `danger-full-access` by default
+  (`DaemonConfig.codexSandbox`). Only `auto` is supported;
   `readonly`, `network:false`, and nonempty built-in allow/deny lists are rejected.
   Detection refuses an unavailable app-server. It never refuses a version: an
   auto-updated Codex is admitted with a `runtime_version_unqualified` advisory,

@@ -70,13 +70,10 @@ export function parsePiRpcHostArgs(
   const owned = extractPiConfigDigest(argv, reject);
   argv = owned.args;
   const values = new Map<string, string>();
-  const flags = new Set<string>();
   const valued = new Set(['--config', '--mode', '--session', '--provider', '--model', '--thinking']);
-  const boolean = new Set(['--no-skills', '--no-extensions']);
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i]!;
-    if (values.has(flag) || flags.has(flag)) reject(`duplicate argument ${flag}`);
-    if (boolean.has(flag)) { flags.add(flag); continue; }
+    if (values.has(flag)) reject(`duplicate argument ${flag}`);
     if (!valued.has(flag)) reject(`unsupported argument ${flag}`);
     const value = argv[++i];
     if (!value || value.startsWith('--')) reject(`${flag} requires a value`);
@@ -111,8 +108,9 @@ export async function runPiRpcHost(argv: readonly string[]): Promise<void> {
   await runPiSessionRuntime({
     cwd: config.cwd, session: args.session,
     provider: args.provider, model: args.model, thinking: args.thinking,
+    // The user's own Pi extensions and skills load beside the SDK's own, as in
+    // OAR: the SDK does not presume how the user configures Pi.
     resourceLoaderOptions: {
-      noExtensions: true, noSkills: true,
       extensionFactories: [webExtension, createByokMcpExtension(config.mcp), subagentsExtension, todoExtension],
     },
     initialModel: 'required', label: 'byok-pi-rpc', reject: fail,

@@ -141,7 +141,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
     },
     sessionWorkspaces: new SessionWorkspaceStore(path.join(dir, 'sessions')), approvalRegistry: new ApprovalRegistry(),
     localAgentRelease: Object.freeze({ version: '0.24.0-rc.1' }),
-    runtimeEnvironment: { [runtime]: { allow: ['T1_*'] } }, shutdownInterruptTimeoutMs: 100,
+    shutdownInterruptTimeoutMs: 100,
     ...overrides,
   });
   const taskId = 'native-task';
@@ -310,7 +310,7 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
     const daemon = createDaemonWithAdapters({
       productName: 'T1 cancellation integration', productId: 't1-native-host', serverUrl: server.url,
       workspaceRoot: path.join(c.dir, 'host-workspace'), storeDir: path.join(c.dir, 'host-store'),
-      localAgentRelease: { version: '0.24.0-rc.1' }, runtimeEnvironment: { [runtime]: { allow: ['T1_*'] } },
+      localAgentRelease: { version: '0.24.0-rc.1' },
     }, [c.adapter]);
     try {
       await daemon.pair('pairing-code'); await daemon.start();

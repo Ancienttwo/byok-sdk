@@ -255,11 +255,6 @@ try {
       storeDir,
       runtimeAllowlist: runtimes,
       runtimePreference: runtimes,
-      runtimeEnvironment: {
-        claude: { allow: ['FAKE_CLAUDE_PROCESS_TREE_FILE', 'FAKE_CLAUDE_HANG_AFTER_TOOL'] },
-        codex: { allow: ['FAKE_CODEX_PROCESS_TREE_FILE', 'FAKE_CODEX_HANG'] },
-        pi: { allow: ['FAKE_PI_PROCESS_TREE_FILE', 'FAKE_PI_HANG_AFTER_TOOL'] },
-      },
       shutdownGraceMs: 2_000,
     },
     adapters,

@@ -12,7 +12,7 @@ import {
   type AttestedOfficialExternalCliV2, type ExternalCliDescendantLaunchV2, type PiDescendantLaunchV2,
   type ToolImplementationFsProbe,
 } from '@byok-sdk/implementation-identity';
-import { buildRuntimeEnv } from '../daemon/environment';
+import { buildAllowlistedEnv } from '../daemon/environment';
 import { claimCapSlot, countSlotFiles, safeKeySegment } from './custody-dispatcher';
 import { CustodyDispatchRefusalError } from './external-cli-admission';
 import { custodyExternalInstallations, EXTERNAL_INSTALLATIONS_METADATA_KEY, validateCustodyExternalInstallations, verifiedCustodyRunner } from './external-cli-authority';
@@ -47,7 +47,7 @@ export function buildOfficialExternalCliEnvironment(
   environment?: { readonly allowlist: readonly string[]; readonly values?: Readonly<Record<string,string>> },
   installation?: AttestedOfficialExternalCliV2,
 ): Record<string,string> {
-  const baseline = buildRuntimeEnv({ ambient });
+  const baseline = buildAllowlistedEnv({ ambient });
   const wanted = environment?.allowlist ?? Object.keys(baseline);
   const result: Record<string,string> = {};
   for (const name of wanted) {

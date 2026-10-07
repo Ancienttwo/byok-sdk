@@ -203,7 +203,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
       '--config', expect.any(String),
       '--mode',
       'rpc',
-      '--no-skills',
     ]);
     expect(JSON.stringify(calls[0])).not.toContain('sk-sentinel');
     expect(calls[0]?.env.OPENAI_API_KEY).toBeUndefined();
@@ -272,7 +271,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
         '--config', expect.any(String),
         '--mode',
         'rpc',
-        '--no-skills',
       ],
     }]);
   });
@@ -520,7 +518,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
       '--config', expect.any(String),
       '--mode',
       'rpc',
-      '--no-skills',
     ]);
     const configPath = calls[0]?.args[calls[0]!.args.indexOf('--config') + 1];
     expect(typeof configPath).toBe('string');
@@ -656,25 +653,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
       // S0/H-002: pi has no needs_approval notion at all
       // (`PiSession.resolveApproval` throws unconditionally).
       approvalInteractive: false,
-    });
-  });
-
-  it('descriptor declares the known provider credential env vars — the same single source of truth detect() uses', () => {
-    const adapter = fakePiAdapter();
-    expect(adapter.descriptor.environmentRequirements).toEqual({
-      credentialNames: [
-        'ANTHROPIC_API_KEY',
-        'ANTHROPIC_OAUTH_TOKEN',
-        'OPENAI_API_KEY',
-        'GEMINI_API_KEY',
-        'AZURE_OPENAI_API_KEY',
-        'DEEPSEEK_API_KEY',
-        'GROQ_API_KEY',
-        'MISTRAL_API_KEY',
-        'OPENROUTER_API_KEY',
-        'XAI_API_KEY',
-        'ZAI_API_KEY',
-      ],
     });
   });
 });

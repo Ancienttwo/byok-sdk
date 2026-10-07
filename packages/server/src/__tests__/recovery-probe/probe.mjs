@@ -78,8 +78,7 @@ async function child(stage, root) {
   };
   const adapter = {
     descriptor: freezeRuntimeAdapterDescriptor({ id: 'pi', supportsDispatchSelection: true, requiresMcpToolsetToolObservation: false,
-      capabilities: { steer: false, resume: false, approvalInteractive: false, mcpToolsets: false },
-      environmentRequirements: { credentialNames: [] } }),
+      capabilities: { steer: false, resume: false, approvalInteractive: false, mcpToolsets: false } }),
     async detect() { return { kind: 'available', version: 'attribution-fixture-1' }; },
     async prepare() { return { kind: 'prepared', operation: { async start(input) {
       const taskId = input.manifest.taskId;

@@ -168,8 +168,8 @@ export interface McpStdioClientOptions {
   /**
    * The exact base environment the RUNTIME child of this task receives
    * (`buildRuntimeEnv`) — never `process.env`. Required, deliberately: a
-   * caller that forgets it fails to compile rather than silently reinstating
-   * a blanket passthrough of the daemon's own credentials.
+   * caller that forgets it fails to compile rather than passing this SDK's
+   * own `BYOK_*` control-plane variables.
    */
   readonly env: Readonly<Record<string, string>>;
   /** Working directory for the child — the same one the runtime CLI is spawned in. */

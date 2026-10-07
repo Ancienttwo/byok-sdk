@@ -22,6 +22,7 @@ export declare function codexSession(
     resume?: string;
     model?: string;
     approvalPolicy?: "never" | "on-request";
+    sandboxMode?: "read-only" | "workspace-write" | "danger-full-access" | "inherit";
   },
   timeout?: number,
   hooks?: {

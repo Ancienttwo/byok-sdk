@@ -63,7 +63,7 @@ import {
 } from '../release-identity';
 import { PiAdapter, validatePiByokLauncherConfig } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
-import { CodexAdapter } from '../adapters/codex/codex-adapter';
+import { assertCodexSandboxSetting, CodexAdapter, type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
 import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
 import { AuthManager } from './auth-manager';
 import { BlobClient } from './blob-client';
@@ -449,17 +449,12 @@ export interface DaemonConfig {
   /** Optional white-label branding — see `DaemonBranding`. Carried through verbatim to `status().branding`. */
   branding?: DaemonBranding;
   /**
-   * M5: per-device, per-runtime escape hatch into the environment allowlist
-   * `task-runner.ts` builds each task's spawn environment from
-   * (`daemon/environment.ts`'s `buildRuntimeEnv`) — keyed by runtime id
-   * (`'pi' | 'claude' | 'codex'`, though not typed that narrowly here since
-   * an id with no matching adapter is simply never looked up). `allow`
-   * entries are exact variable names or `*`-suffixed prefixes, merged in
-   * alongside that runtime adapter's own declared
-   * `descriptor.environmentRequirements` — this can never override the hard
-   * `BYOK_*` deny (see `environment.ts`'s own doc comment).
+   * Codex sandbox for the bundled Codex adapter that `createDaemon` builds,
+   * as OAR's `OAR_CODEX_SANDBOX`. Default `danger-full-access`. `inherit`
+   * passes no sandbox override, so the user's own `config.toml` applies.
+   * `createDaemon` throws a TypeError for any other value.
    */
-  runtimeEnvironment?: Record<string, { allow?: string[] }>;
+  codexSandbox?: CodexSandboxSetting;
   /**
    * Device-local registry behind wire-level `requiredToolsets` ids. Only
    * logical ids cross the SaaS wire; MCP executable definitions stay here.
@@ -1243,7 +1238,7 @@ function buildAdapter(id: RuntimeId, config: DaemonConfig): RuntimeAdapter {
     case 'claude':
       return new ClaudeAdapter();
     case 'codex':
-      return new CodexAdapter({ sdkHelperHost: config.sdkHelperHost });
+      return new CodexAdapter({ sdkHelperHost: config.sdkHelperHost, ...(config.codexSandbox === undefined ? {} : { sandbox: config.codexSandbox }) });
   }
 }
 
@@ -1559,22 +1554,10 @@ export function buildDaemonWithAdapters(
    * assembler through `InputPreparationService.prepare`, so a preparation's
    * fingerprints and an offer's admission bind the same launch boundary.
    *
-   * The runtime environment is resolved PER CALL, from the pi descriptor and
-   * `config.runtimeEnvironment`, exactly as the offer path builds it — a value
-   * captured at construction would shadow a later configuration reload.
+   * The runtime environment is resolved PER CALL, exactly as the offer path
+   * builds it — a value captured at construction would miss a later change.
    */
-  const preparationRuntimeEnv = () => {
-    const piDescriptor = adapters.find((adapter) => adapter.descriptor.id === 'pi')?.descriptor;
-    return buildRuntimeEnv({
-      ambient: process.env,
-      ...(piDescriptor?.environmentRequirements === undefined
-        ? {}
-        : { requirements: piDescriptor.environmentRequirements }),
-      ...(config.runtimeEnvironment?.pi?.allow === undefined
-        ? {}
-        : { locallyAllowedNames: config.runtimeEnvironment.pi.allow }),
-    });
-  };
+  const preparationRuntimeEnv = () => buildRuntimeEnv({ ambient: process.env });
   const preparedToolSurface = createPreparedToolSurfaceAssembler({
     memoryAvailable: () => isAgentMemorySecureFilesystemAvailable(config.agentMemoryFilesystem !== undefined),
     toolsetRegistry,
@@ -2376,8 +2359,6 @@ export function buildDaemonWithAdapters(
       maxConcurrentMutableSessionsPerAgentHome: agentHomeAttemptLimit,
       ...(agentSessionHandoffs === undefined ? {} : { agentSessionHandoffs }),
       deviceId: record.deviceId,
-      // M5: see `DaemonConfig.runtimeEnvironment`'s own doc comment above.
-      runtimeEnvironment: config.runtimeEnvironment,
       getMcpToolsets: () => toolsetRegistry.snapshot().toolsets,
       // The prepared-Execution lane, present only on a daemon whose input
       // preparation service actually constructed — which is also the only
@@ -4287,5 +4268,6 @@ export function buildDaemonWithAdapters(
  * in-house runtime, test stubs) use `createDaemonWithAdapters` directly.
  */
 export function createDaemon(config: DaemonConfig): Daemon {
+  if (config.codexSandbox !== undefined) assertCodexSandboxSetting(config.codexSandbox, 'DaemonConfig.codexSandbox');
   return createDaemonWithAdapters(config, buildDefaultAdapters(config));
 }

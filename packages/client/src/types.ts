@@ -9,7 +9,6 @@ import type {
   TaskOfferPayload,
 } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation';
-import type { RuntimeEnvironmentRequirements } from './daemon/environment';
 import type { McpLaunchBinding } from './daemon/trusted-launch-cwd';
 import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 import type { AgentRef } from './agent-home';
@@ -23,7 +22,6 @@ export type {
 } from './mcp/observation';
 export type { AgentEgressPolicy } from '@byok-sdk/protocol';
 
-export type { RuntimeEnvironmentRequirements } from './daemon/environment';
 export type {
   LaunchCwdRejection,
   McpLaunchBinding,
@@ -219,13 +217,11 @@ export interface Session {
  * Immutable runtime facts shared by discovery and one prepared operation.
  *
  * The SDK snapshots this value before each offer and never consults adapter
- * capability authority again during admission, claim, environment projection,
- * or start. Credential declarations are names only, never values.
+ * capability authority again during admission, claim or start.
  */
 export interface RuntimeAdapterDescriptor {
   readonly id: string;
   readonly capabilities: RuntimeCapabilities;
-  readonly environmentRequirements: RuntimeEnvironmentRequirements;
   /** Explicit opt-in to authoritative `task.offer.dispatchSelection` semantics. */
   readonly supportsDispatchSelection: boolean;
   /**
@@ -529,14 +525,8 @@ export interface RuntimeAdapter {
   prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
 }
 
-function frozenStrings(values: readonly string[] | undefined): readonly string[] | undefined {
-  return values === undefined ? undefined : Object.freeze([...values]);
-}
-
 /** Copy then deeply freeze descriptor authority so callers cannot retain a mutable source reference. */
 export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescriptor): RuntimeAdapterDescriptor {
-  const baseNames = frozenStrings(descriptor.environmentRequirements.baseNames);
-  const credentialNames = frozenStrings(descriptor.environmentRequirements.credentialNames);
   return Object.freeze({
     id: descriptor.id,
     supportsDispatchSelection: descriptor.supportsDispatchSelection === true,
@@ -554,14 +544,6 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
       resume: descriptor.capabilities.resume === true,
       approvalInteractive: descriptor.capabilities.approvalInteractive === true,
       ...(descriptor.capabilities.mcpToolsets === undefined ? {} : { mcpToolsets: descriptor.capabilities.mcpToolsets === true }),
-    }),
-    environmentRequirements: Object.freeze({
-      ...(baseNames === undefined
-        ? {}
-        : { baseNames }),
-      ...(credentialNames === undefined
-        ? {}
-        : { credentialNames }),
     }),
   });
 }

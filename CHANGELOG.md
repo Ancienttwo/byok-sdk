@@ -16,6 +16,28 @@
 
 ## Unreleased
 
+- **Breaking (client)** — runtimes inherit the user's own agent configuration.
+  Plan: `plans/plan-20261007-1340-minimal-guardrails.md` (slice 2).
+  - Environment: every task child gets the full daemon environment, as in OAR.
+    The daemon removes only `CLAUDECODE`, its own `BYOK_*` names and loader
+    injection names. Claude and Codex keep provider API keys. The Pi BYOK lane
+    keeps its key custody.
+  - Remove `RuntimeAdapterDescriptor.environmentRequirements`, the exported
+    `RuntimeEnvironmentRequirements` type and `DaemonConfig.runtimeEnvironment`.
+    Custom adapters delete the `environmentRequirements` field.
+  - Claude: remove `--strict-mcp-config`. The user's own MCP configuration,
+    settings, deny rules and hooks load. The SDK still passes its task servers
+    with `--mcp-config`.
+  - Pi: the ordinary RPC host loads the user's extensions and skills. The
+    adapter no longer passes `--no-skills`, and the host refuses
+    `--no-skills` and `--no-extensions` as unsupported arguments.
+  - Codex: new `DaemonConfig.codexSandbox` and `CodexAdapterOptions.sandbox`
+    (`read-only` | `workspace-write` | `danger-full-access` | `inherit`),
+    as OAR's `OAR_CODEX_SANDBOX`. The default stays `danger-full-access`.
+    `inherit` passes no `sandbox_mode` override, so the user's `config.toml`
+    applies. A bad value throws a `TypeError` at `createDaemon` or at adapter
+    construction. New exported type: `CodexSandboxSetting`.
+
 - **Changed (client)** — update the private OAR source from 0.25.0 to 0.29.0
   (`f1a2b88eb63e47de8197514e9329642e2d0ae02c`). Codex usage records now carry
   optional `cacheRead` and `cacheWrite` token parts. Add `shared/token-totals.ts`

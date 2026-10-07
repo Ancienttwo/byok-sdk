@@ -111,7 +111,6 @@ export type {
   LocalStateRelocationLease,
 } from './local-state-relocation';
 export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDescriptor, sealRuntimeOperationManifest } from './types';
-export type { RuntimeEnvironmentRequirements } from './daemon/environment';
 export { resolveLocalAgentReleaseIdentity } from './release-identity';
 export type { LocalAgentReleaseIdentity } from './release-identity';
 export {
@@ -585,7 +584,7 @@ export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin';
 export { ClaudeAdapter } from './adapters/claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
 
-export { CodexAdapter, type CodexAdapterOptions } from './adapters/codex/codex-adapter';
+export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
 
 export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from './diagnostics/device-doctor';
 export type {

@@ -98,7 +98,7 @@ describe('SDK ordinary Pi RPC entry', () => {
 
   it('starts all inline factories under sealed process cwd with explicit config and native RPC', async () => {
     const f = fixture();
-    const child = spawn(bun, [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc', '--no-extensions', '--no-skills', '--provider', 'anthropic', '--model', 'claude-sonnet-4-5', '--thinking', 'high'], {
+    const child = spawn(bun, [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc', '--provider', 'anthropic', '--model', 'claude-sonnet-4-5', '--thinking', 'high'], {
       cwd: f.sealed, env: f.env, stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stderr = '';
@@ -127,6 +127,51 @@ describe('SDK ordinary Pi RPC entry', () => {
       expect(response.data.sessionId).toEqual(expect.any(String));
       expect(response.data.model.id).toBe('claude-sonnet-4-5');
       expect(response.data.thinkingLevel).toBe('high');
+      expect(stderr).not.toContain('Failed to load extension');
+    } finally {
+      const exited = new Promise<void>((done) => child.once('exit', () => done()));
+      if (child.exitCode === null) { child.kill('SIGTERM'); await exited; }
+    }
+  }, 25_000);
+
+  it('loads the user\'s own Pi extensions and skills from the agent dir beside the SDK factories', async () => {
+    const f = fixture();
+    const agentDir = join(f.root, 'agent');
+    mkdirSync(join(agentDir, 'extensions'), { recursive: true });
+    mkdirSync(join(agentDir, 'skills', 'user-skill'), { recursive: true });
+    writeFileSync(join(agentDir, 'extensions', 'user-probe.ts'),
+      'export default function (pi) { pi.registerCommand("user-probe", { description: "user extension probe", handler: async () => {} }); }\n');
+    writeFileSync(join(agentDir, 'skills', 'user-skill', 'SKILL.md'),
+      '---\nname: user-skill\ndescription: A user skill the SDK must not hide.\n---\n\nUse this skill in tests only.\n');
+    const child = spawn(bun, [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc', '--provider', 'anthropic', '--model', 'claude-sonnet-4-5'], {
+      cwd: f.sealed, env: f.env, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.on('data', (data) => { stderr += data; });
+    try {
+      const response = await new Promise<Record<string, any>>((accept, reject) => {
+        let output = '';
+        const timeout = setTimeout(() => reject(new Error(`RPC timed out: ${stderr}`)), 15_000);
+        child.on('error', reject);
+        child.on('exit', (code) => { clearTimeout(timeout); reject(new Error(`exit ${code}: ${stderr}`)); });
+        child.stdout.on('data', (data) => {
+          output += data;
+          for (;;) {
+            const newline = output.indexOf('\n');
+            if (newline < 0) break;
+            const line = output.slice(0, newline); output = output.slice(newline + 1);
+            try {
+              const frame = JSON.parse(line);
+              if (frame.id === 'commands') { clearTimeout(timeout); accept(frame); }
+            } catch { reject(new Error(`non-RPC stdout: ${line}`)); }
+          }
+        });
+        child.stdin.write(JSON.stringify({ id: 'commands', type: 'get_commands' }) + '\n');
+      });
+      expect(response.success).toBe(true);
+      const commands = (response.data.commands as Array<{ name: string; source: string }>).map(({ name, source }) => ({ name, source }));
+      expect(commands).toContainEqual({ name: 'user-probe', source: 'extension' });
+      expect(commands).toContainEqual({ name: 'skill:user-skill', source: 'skill' });
       expect(stderr).not.toContain('Failed to load extension');
     } finally {
       const exited = new Promise<void>((done) => child.once('exit', () => done()));
@@ -181,7 +226,7 @@ describe('SDK ordinary Pi RPC entry', () => {
 
   it('starts RPC with the reserved Agent-message server projected', async () => {
     const f = messageFixture();
-    const child = spawn(bun, [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc', '--no-extensions', '--no-skills', '--provider', 'anthropic', '--model', 'claude-sonnet-4-5', '--thinking', 'high'], {
+    const child = spawn(bun, [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc', '--provider', 'anthropic', '--model', 'claude-sonnet-4-5', '--thinking', 'high'], {
       cwd: f.sealed, env: f.env, stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stderr = '';

@@ -196,7 +196,6 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
           resume: false,
           approvalInteractive: false,
         },
-        environmentRequirements: { credentialNames: [] },
       }),
       async detect() {
         return { kind: 'available' };

@@ -293,7 +293,6 @@ describe('the launch environment digests survive the Pi lane transformations', (
         OPENAI_API_KEY: 'sk-oai-x',
         BYOK_DAEMON_SECRET: 'never-inherited',
       },
-      requirements: { credentialNames: ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'] },
     });
     // Non-vacuous: the credentials really are in the value the daemon measured.
     expect(daemonEnv.ANTHROPIC_API_KEY).toBe('sk-ant-x');

@@ -286,7 +286,6 @@ describe('SDK-owned Agent home contract', () => {
         id: 'pi',
         supportsDispatchSelection: false,
         capabilities: { steer: false, resume: true, approvalInteractive: false },
-        environmentRequirements: {},
       },
       requiredToolsetIds: [],
       agentRef: ref('one', 'profile-1'),

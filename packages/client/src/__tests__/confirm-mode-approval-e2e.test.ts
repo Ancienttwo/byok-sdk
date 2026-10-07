@@ -82,7 +82,6 @@ class ApprovalAwareAdapter implements RuntimeAdapter {
     id: 'confirm-stub',
     supportsDispatchSelection: false,
     capabilities: { steer: false, resume: true, approvalInteractive: true },
-    environmentRequirements: { credentialNames: [] },
   });
   readonly sessions: ApprovalAwareSession[] = [];
 

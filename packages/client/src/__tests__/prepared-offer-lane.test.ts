@@ -112,19 +112,14 @@ const ENVELOPE_DIGEST = 'envelope-digest-1';
 
 /**
  * The environment `TaskRunner.handleOffer` builds for this task, recomputed
- * here from the same three inputs (`daemon/task-runner.ts`'s own
- * `buildRuntimeEnv` call) — the stub adapter declares no environment
- * requirements and this lane wires no local override.
+ * here with the same call (`daemon/task-runner.ts`'s own `buildRuntimeEnv`).
  *
  * It has to be the SAME value: an implementation identity binds the
  * environment the SDK measured it against, so a fixture that resolved against
  * a different one would recompute a different binding digest at admission and
  * every case below would decline for the fixture's reason instead of its own.
  */
-const LANE_ENV: Readonly<Record<string, string>> = Object.freeze(buildRuntimeEnv({
-  ambient: process.env,
-  requirements: { credentialNames: [] },
-}));
+const LANE_ENV: Readonly<Record<string, string>> = Object.freeze(buildRuntimeEnv({ ambient: process.env }));
 const TOOL_MANIFEST_DIGEST = 'tool-manifest-digest-1';
 const POLICY_REVISION = 'limits-policy-r1';
 const TOOLSET_ID = 'team';

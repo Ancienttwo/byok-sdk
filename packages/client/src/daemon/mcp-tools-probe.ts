@@ -38,12 +38,10 @@ export interface McpToolsProbeOptions {
   /**
    * The exact base environment the RUNTIME child of this task receives
    * (`buildRuntimeEnv`, `./environment.ts`) — never `process.env`. The probe
-   * spawns a host-configured command, so it must not become the one place the
-   * daemon's own ambient credentials (an `AWS_SECRET_ACCESS_KEY` or
-   * `DATABASE_URL` set for the daemon's own deployment, this SDK's own
-   * `BYOK_*` control-plane variables) reach a server the real runtime path
-   * would have filtered out. Required, deliberately: a caller that forgets it
-   * fails to compile rather than silently reinstating the blanket passthrough.
+   * spawns a host-configured command, so it must not become the one place
+   * this SDK's own `BYOK_*` control-plane variables reach a server the real
+   * runtime path would have filtered out. Required, deliberately: a caller
+   * that forgets it fails to compile rather than passing `process.env`.
    */
   env: Readonly<Record<string, string>>;
   /**

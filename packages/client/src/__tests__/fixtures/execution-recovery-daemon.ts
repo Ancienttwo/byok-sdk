@@ -111,7 +111,6 @@ class ControlledAdapter implements RuntimeAdapter {
       approvalInteractive: false,
       mcpToolsets: true,
     },
-    environmentRequirements: { credentialNames: [] },
   });
 
   async detect() {

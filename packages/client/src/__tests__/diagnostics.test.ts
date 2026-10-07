@@ -280,7 +280,6 @@ describe('diagnostics collector', () => {
         id: 'hanging',
         supportsDispatchSelection: false,
         capabilities: { steer: false, resume: false, approvalInteractive: false },
-        environmentRequirements: { credentialNames: [] },
       }),
       detect: () => new Promise(() => undefined),
       prepare: async () => ({ kind: 'reject', reason: 'not used', retryable: false }),
