@@ -932,11 +932,12 @@ failure if restoration itself fails.
 
 ### Codex MCP input transport and local I/O bounds (#164–#166)
 
-Codex argv contains the prompt marker `-` and nonsecret MCP channel names; the
-prompt is delivered via stdin and EOF. Original per-server MCP command/args/env
-are carried by independent environment payloads into the SDK `mcp-env` helper,
-which removes all sealed channel variables before starting the selected server.
-This removes secret values from Codex argv and SDK launcher diagnostics. It does
+Codex argv contains no MCP configuration. As in OAR, per-server MCP
+command/args/env go to Codex in the `thread/start` or `thread/resume` config
+(`mcp_servers`) over stdin, and Codex starts each server itself. Error text
+that Codex reports for the session passes a redactor that replaces each `env`
+value with `[redacted]`. This keeps secret values out of Codex argv, the Codex
+process environment and SDK diagnostics. It does
 not claim process environment secrecy against the same OS principal, or conceal
 arguments authored by an MCP server configuration from that server's own process.
 Codex's CLI-owned auth state is unchanged; explicitly allowed CODEX_HOME is

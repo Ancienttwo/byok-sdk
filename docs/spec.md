@@ -1899,9 +1899,11 @@ bytes are not durable evidence: a crash during a failed journal write cannot
 promise exact-result recovery.
 
 Codex prompts use documented stdin `-` with EOF, including resumed turns. Each
-MCP server receives a separate environment payload through `env_vars` and the
-SDK reserved `mcp-env` helper; original command/args/env values are absent from
-Codex argv. Helpers resolve from the same `dist/bin` for package root, adapters
+MCP server goes to Codex in the `thread/start` or `thread/resume` config
+(`mcp_servers`), as in OAR. Codex starts each server with its allowlisted
+environment plus the entry's `env`. Server command/args/env values are absent
+from Codex argv and the Codex process environment, and Codex error text passes
+a redactor that replaces each `env` value with `[redacted]`. Helpers resolve from the same `dist/bin` for package root, adapters
 and official CLI bundles; release pack smoke runs actual MCP calls through all
 three installed entries. This preserves per-server values for colliding environment names
 without changing Codex auth or user configuration. Raw stdout frames are bounded

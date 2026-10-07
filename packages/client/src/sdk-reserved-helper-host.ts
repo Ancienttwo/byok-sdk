@@ -4,7 +4,7 @@ import { runSdkReservedHelper } from './bin/sdk-reserved-helper-runners';
 
 export const BYOK_SDK_HELPER_SUBCOMMAND = '__byok_sdk_helper';
 
-export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'agent-team-mcp' | 'mcp-env' | 'pi-rpc' | 'pi-prepared' | 'pi-durable';
+export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'agent-team-mcp' | 'pi-rpc' | 'pi-prepared' | 'pi-durable';
 
 export interface SdkHelperHostConfig {
   /**
@@ -30,7 +30,6 @@ const DIST_SCRIPT_BY_KIND: Readonly<Record<SdkReservedHelperKind, string>> = Obj
   'agent-memory-mcp': 'byok-agent-memory-mcp.js',
   'agent-memory-describe': 'byok-agent-memory-describe.js',
   'agent-team-mcp': 'byok-agent-team-mcp.js',
-  'mcp-env': 'byok-mcp-env.js',
   'pi-rpc': 'byok-pi-rpc.js',
   'pi-prepared': 'byok-pi-prepared.js',
   'pi-durable': 'byok-pi-durable.js',
@@ -77,7 +76,7 @@ export function resolveSdkReservedHelperBin(
 }
 
 function isHelperKind(value: string | undefined): value is SdkReservedHelperKind {
-  return value === 'agent-message-mcp' || value === 'agent-memory-mcp' || value === 'agent-memory-describe' || value === 'agent-team-mcp' || value === 'mcp-env' || value === 'pi-rpc' || value === 'pi-prepared' || value === 'pi-durable';
+  return value === 'agent-message-mcp' || value === 'agent-memory-mcp' || value === 'agent-memory-describe' || value === 'agent-team-mcp' || value === 'pi-rpc' || value === 'pi-prepared' || value === 'pi-durable';
 }
 
 /**

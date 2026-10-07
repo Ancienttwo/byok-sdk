@@ -343,14 +343,12 @@ export declare function resolveClaudeBin(): ResolvedBin;
 import { type NativeInteractionHostOptions } from '../../native-interactions';
 import { type spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
-import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
 import { type ResolvedBin } from './resolve-bin';
 /** A Codex `sandbox_mode`, or `inherit` to pass no override so the user's `config.toml` applies. */
 export type CodexSandboxSetting = 'read-only' | 'workspace-write' | 'danger-full-access' | 'inherit';
 /** Throws a TypeError unless `value` is a {@link CodexSandboxSetting}. */
 export declare function assertCodexSandboxSetting(value: unknown, label: string): asserts value is CodexSandboxSetting;
 export interface CodexAdapterOptions {
-    sdkHelperHost?: SdkHelperHostConfig;
     /**
      * Codex sandbox for every session, as OAR's `OAR_CODEX_SANDBOX`. Default
      * `danger-full-access`: no human answers an approval prompt, so a sandbox
@@ -11803,7 +11801,7 @@ export declare class RuntimeStartupDisposalFailure extends Error {
 export declare function isRuntimeStartupDisposalFailure(value: unknown): value is RuntimeStartupDisposalFailure;
 // ==== @byok-sdk/client dist/sdk-reserved-helper-host.d.ts ====
 export declare const BYOK_SDK_HELPER_SUBCOMMAND = "__byok_sdk_helper";
-export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'agent-team-mcp' | 'mcp-env' | 'pi-rpc' | 'pi-prepared' | 'pi-durable';
+export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'agent-team-mcp' | 'pi-rpc' | 'pi-prepared' | 'pi-durable';
 export interface SdkHelperHostConfig {
     /**
      * Run SDK-reserved helpers by re-entering the product's single-file/SEA

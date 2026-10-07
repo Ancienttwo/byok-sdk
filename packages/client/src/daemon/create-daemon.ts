@@ -1195,7 +1195,7 @@ function buildAdapter(id: RuntimeId, config: DaemonConfig): RuntimeAdapter {
     case 'claude':
       return new ClaudeAdapter();
     case 'codex':
-      return new CodexAdapter({ sdkHelperHost: config.sdkHelperHost, ...(config.codexSandbox === undefined ? {} : { sandbox: config.codexSandbox }) });
+      return new CodexAdapter(config.codexSandbox === undefined ? {} : { sandbox: config.codexSandbox });
   }
 }
 

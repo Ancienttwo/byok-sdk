@@ -105,7 +105,7 @@ describe('Claude launch', () => {
 });
 
 describe('Codex launch', () => {
-  it('projects MCP servers without a per-tool grant and starts the thread with approvalPolicy never', async () => {
+  it('passes MCP servers in the thread config without a per-tool grant and starts the thread with approvalPolicy never', async () => {
     const argv: string[][] = [];
     const receiptDir = await tempDir('byok-minimal-guardrails-codex-');
     const receipt = path.join(receiptDir, 'frames.jsonl');
@@ -123,11 +123,13 @@ describe('Codex launch', () => {
     await drainTurn(session);
 
     const args = argv[0] ?? [];
-    expect(args.some((arg) => arg.startsWith('mcp_servers.salesko.command='))).toBe(true);
+    expect(args.some((arg) => arg.includes('mcp_servers'))).toBe(false);
     expect(args.some((arg) => arg.includes('enabled_tools'))).toBe(false);
     expect(args.some((arg) => arg.includes('approval_mode'))).toBe(false);
-    const frames = (await fs.readFile(receipt, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { method?: string; params?: { approvalPolicy?: string } });
-    expect(frames.find((frame) => frame.method === 'thread/start')?.params?.approvalPolicy).toBe('never');
+    const frames = (await fs.readFile(receipt, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { method?: string; params?: { approvalPolicy?: string; config?: { mcp_servers?: Record<string, unknown> } } });
+    const start = frames.find((frame) => frame.method === 'thread/start')?.params;
+    expect(start?.approvalPolicy).toBe('never');
+    expect(Object.keys(start?.config?.mcp_servers ?? {})).toContain('salesko');
   });
 });
 

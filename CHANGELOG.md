@@ -16,6 +16,13 @@
 
 ## Unreleased
 
+- **Breaking (client)** — Codex task MCP servers go to Codex in the
+  `thread/start` or `thread/resume` config, as OAR `SessionOptions.mcpServers`.
+  A user `config.toml` entry with the same name can no longer disable a task
+  server (`enabled = true`), and Codex error text is redacted. Remove the
+  `mcp-env` helper: `SdkReservedHelperKind` loses `'mcp-env'`, and
+  `CodexAdapterOptions` loses `sdkHelperHost`.
+
 - **Fixed (client)** — Pi disposal gives the user's extensions up to 10 s to
   finish their `session_shutdown` hooks before SIGKILL, as OAR does. The old
   750 ms grace cut an async hook short.
