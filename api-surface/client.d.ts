@@ -10373,9 +10373,9 @@ export type InputPreparationStateV1 = 'reserved' | 'counting' | 'prepared' | 'ca
  * `ready` answers exactly one question — CAN THIS PREPARATION BE CONSUMED —
  * and it is deliberately not Host budget admission. A ready receipt says the
  * artifact is intact, its projection is content-complete, every residual key
- * is ruled by an applicable Host accounting policy, D is text only, every
- * executor identity is attested, and — only when a counter is configured —
- * that count is provider-authoritative and covered. It says nothing about
+ * is ruled by an applicable Host accounting policy, D is text only, and —
+ * only when a counter is configured — that count is provider-authoritative
+ * and covered. It says nothing about
  * whether the Host's budget allows the spend; the Host rules
  * `requestBytes + C + max_tokens <= window` itself.
  *

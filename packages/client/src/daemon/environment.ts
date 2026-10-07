@@ -50,7 +50,7 @@ export interface BuildAllowlistedEnvOptions {
  * list: an agent CLI spawned behind a corporate proxy
  * with none of these forwarded silently loses all outbound network access —
  * a materially worse default than forwarding a proxy URL. See
- * docs/security.md's environment-allowlist section for the accepted
+ * docs/security.md's "Proxy variables pass through" paragraph for the accepted
  * trade-off this implies (a proxy URL may itself embed proxy credentials).
  */
 const BASE_PLATFORM_ALLOWLIST: readonly string[] = [

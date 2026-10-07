@@ -121,8 +121,14 @@ versions stay on npm; see
   a deterministic, React-free Live Activity Timeline view model. Browser auth,
   redaction, transport, and presentation remain host responsibilities.
 
-Both profiles share the frozen v1 protocol, tenant isolation, durable device
-proof, truth CAS, explicit capabilities, and fail-closed policy handling.
+Both profiles share the frozen v2 protocol, tenant isolation, durable device
+proof, truth CAS, and explicit capabilities.
+
+Sessions run YOLO in the user-specified workspace. The user's own Claude Code,
+Codex and Pi configuration and guardrails apply; the SDK keeps only the
+invariants it owns. See
+[ADR-037](docs/architecture/adr-2026-10-07-minimal-guardrails.md) and
+[the security model](docs/security.md).
 
 ## Agent-first local homes and egress
 

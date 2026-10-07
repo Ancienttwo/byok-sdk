@@ -27,7 +27,7 @@ const host = new ClarificationHost(tenantScopedByokServer, store, () => Date.now
 ```
 
 The caller supplies the existing explicit `BotTarget` (deviceId, AgentRef,
-runtime, permission policy, matching egressPolicy and optional requiredToolsets).
+runtime, matching egressPolicy and optional requiredToolsets).
 No internal SDK imports or SDK export changes are required. Model output must
 be JSON matching the `clarification-step.v1` contract. `checkpoint` is a bounded
 opaque string for context, not a script. Model questionId is informational;

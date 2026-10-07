@@ -66,11 +66,6 @@ Normal Node/Bun source hosts omit `sdkHelperHost` and continue to use the
 package's installed helper scripts. A required-message offer performs an exact
 stdio MCP initialize/tools-list handshake before adapter preparation; an
 unwired or unstartable single-file helper is declined before runtime execution.
-For Codex 0.149+, the adapter additionally proves the native per-MCP-tool
-approval contract before claim, then approves only the SDK-reserved
-`byokagentmessage/send_agent_message` tool. The global Codex
-`approval_policy=never` remains pinned and every other MCP/tool retains the
-normal non-interactive fail-closed posture.
 
 Pi is a required exact npm dependency and runs as an external Node subprocess.
 For an authoritative BYOK `dispatchSelection`, configure `piByokLauncher` with
@@ -112,7 +107,7 @@ after the adapter-owned process tree and task resources are gone, or rejects
 with `RuntimeDisposalFailure`. The daemon keeps active/Git ownership after a
 rejection and never rewrites the task's already-established terminal result.
 
-Claude tasks can select operator-owned local stdio MCP servers by logical id.
+Claude, Codex and Pi tasks can select operator-owned local stdio MCP servers by logical id.
 The toolset selector carries no MCP command or connector credential:
 
 ```ts
@@ -136,33 +131,27 @@ createDaemon({
 The map accepts only `command` and `args`; put OAuth tokens, cookies, and other
 secrets behind the local MCP process's own credential broker.
 
-A projected toolset must also be *callable*. Claude auto-denies an ungranted
-`mcp__<server>__<tool>` call under `--permission-mode default` and `acceptEdits`.
-Codex app-server uses exact `enabled_tools`; under YOLO, lack of per-tool
-preapproval alone is not a verified denial boundary. Before an
-adapter is asked to admit a toolset offer, the daemon starts each projected
-server and reads that server's own `tools/list` answer. Those observed names —
-never a configured value, never a wildcard — are what each adapter grants:
+The SDK grants no per-tool permission
+([ADR-037](../../docs/architecture/adr-2026-10-07-minimal-guardrails.md)).
+Sessions run YOLO and each tool call follows the agent's own guardrails:
 
-- Claude: `--allowedTools mcp__<server>__<tool>,…` under `readonly` and
-  `auto`, alongside the unchanged `--tools` (so `readonly` with
-  `allowTools: []` still runs with every built-in disabled). Claude rejects
-  `confirm`; `plan` never pre-grants because it promises not to execute a call.
-- Codex: `mcp_servers.<server>.enabled_tools` plus
-  `mcp_servers.<server>.tools.<tool>.approval_mode="approve"` for exactly
-  those tools. Codex is qualified against 0.160.0, needs app-server support and uses
-  `approval_policy=never` with sandbox `danger-full-access` by default
-  (`DaemonConfig.codexSandbox`). Only `auto` is supported;
-  `readonly`, `network:false`, and nonempty built-in allow/deny lists are rejected.
-  Detection refuses an unavailable app-server. It never refuses a version: an
-  auto-updated Codex is admitted with a `runtime_version_unqualified` advisory,
-  shown by `byok-agent runtimes`. A Codex that does not read back the exact MCP
-  tool allowlist is refused at prepare, before spawn.
+- Claude: the selected servers go into a task-scoped `--mcp-config`, next to
+  the user's own MCP configuration. Claude starts with
+  `--dangerously-skip-permissions`.
+- Codex: the selected servers go in as `-c mcp_servers.<server>.*` overrides,
+  next to the user's `config.toml`. Codex is qualified against 0.160.0, needs
+  app-server support and uses `approval_policy=never` with sandbox
+  `danger-full-access` by default (`DaemonConfig.codexSandbox`). Detection
+  refuses an unavailable app-server. It never refuses a version: an
+  auto-updated Codex is admitted with a `runtime_version_unqualified`
+  advisory, shown by `byok-agent runtimes`.
+- Pi: before admission, the daemon starts each projected server and reads its
+  own `tools/list` answer. Pi registers one tool per observed tool.
 
-A projected server that cannot start, or that lists no tools, is declined
-pre-claim and retryably, rather than claimed and handed a toolset the model can
-list but never call. A server that answers with a tool name that cannot be
-expressed as a runtime grant is declined permanently (`retryable: false`), with
+For Pi, a projected server that cannot start, or that lists no tools, is
+declined pre-claim and retryably, rather than claimed and handed a toolset the
+model can list but never call. A server that answers with a tool name that
+cannot be registered is declined permanently (`retryable: false`), with
 the server and the offending tool named in the decline.
 
 The daemon derives one sorted `configuredToolsets` snapshot from this

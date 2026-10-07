@@ -5,21 +5,27 @@ the M1-2 (server) and M1-3 (client) implementers — the schemas in
 `packages/protocol/src/` are authoritative; this document explains the rules
 those schemas encode and why.
 
-Status: wire version `v:1`, **FROZEN**. The pi, claude, and codex runtime
+Status: wire version `v:2`, **FROZEN**. The pi, claude, and codex runtime
 adapters have all exercised the wire (M2); every M1/M2 protocol gap identified
 along the way has been closed in place. From this point forward, this
 document and the schemas in `packages/protocol/src/` describe a closed
 contract — see "Freeze rule" immediately below for exactly what "frozen"
 does and doesn't allow.
 
-Only wire major `1` is currently supported. Every envelope must carry that
-major even when its message type and payload happen to match a v1 shape. Schema
+Only wire major `2` is currently supported. v2 removed the task offer's
+`policy` (`PermissionPolicy`), the runtime capability `permissionModes`, the
+input-preparation `permissionMode`, the egress `metadata-status` activity mode
+and the `sanitizer_rejected` drop reason
+([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)). There is no v1
+reader: upgrade the server and the client together, and drain v1 mailbox rows
+first. Every envelope must carry major `2` even when its message type and
+payload happen to match a v1 shape. Schema
 decode rejects another major with `EnvelopeValidationError`; the HTTP messages
 boundary rejects the invalid batch before admission, and the exported cloud
 inbound gate returns `rejected` before reserving the envelope identity. Client
 long-poll keeps an unsupported executable envelope's cursor unacknowledged.
-This enforces the existing supported set; it does not add v2 or reinterpret v2
-as v1. Package/application SemVer remains unrelated to wire admission.
+This enforces the existing supported set; it does not reinterpret a v1
+envelope as v2. Package/application SemVer remains unrelated to wire admission.
 
 > Current transport (WP3B Step 4b): the daemon uses authenticated long-poll
 > HTTP only. `GET /byok/events` receives server envelopes and
@@ -28,7 +34,7 @@ as v1. Package/application SemVer remains unrelated to wire admission.
 
 ## Freeze rule
 
-**Additive-minor-only after freeze.** `PROTOCOL_VERSION` stays `1`. Any of the
+**Additive-minor-only after freeze.** `PROTOCOL_VERSION` is `2`. Any of the
 following is non-breaking and may be added without a version bump, ever:
 
 - A new OPTIONAL field on an existing payload or the envelope.
@@ -37,12 +43,18 @@ following is non-breaking and may be added without a version bump, ever:
 - A new capability flag (`CAPABILITY_FLAGS`, or a new key inside
   `RuntimeInfo.capabilities`).
 
+**History note.** The "Landed additive minor" entries in this document, and
+other sections that say a change landed with "no `PROTOCOL_VERSION` bump" or
+name the `v1.*` golden files, record additive changes made under v1. v2 kept
+every one of those shapes; only the fields listed in the status note above were
+removed. The current goldens are `v2.frozen.json` and `v2.envelopes.ndjson`.
+
 **Exception:** the "new optional field is always non-breaking" bullet above
-does not apply to `PermissionPolicySchema` or the `instruction` blob-ref shape
-(`{ blobRef: BlobRef }`) — see the asymmetry below. Both are built with zod's
-`.strict()`, not the default strip-unknown-keys behavior every other schema in
-this bullet list gets, so adding a field to either is itself a breaking
-change requiring a version bump, by design.
+does not apply to the `instruction` blob-ref shape (`{ blobRef: BlobRef }`)
+or to the strict offer and control payloads — see the asymmetry below. They
+are built with zod's `.strict()`, not the default strip-unknown-keys behavior
+every other schema in this bullet list gets, so adding a field to one is
+itself a breaking change requiring a version bump, by design.
 
 **What IS breaking, and requires a `v` bump instead:** changing an existing
 field's type, removing a field, making an optional field required (or vice
@@ -56,8 +68,8 @@ new major version, full stop.
 extends the earlier official-Pi exception to input-preparation v8. The strict
 preparation request, receipt binding and `task.offer_prepared` require explicit
 `agentMemory: 'none' | 'read' | 'read-write'`. `INPUT_PREPARATION_WIRE_VERSION` and
-record schema are 8; admission requires `agent-input-preparation-v8`. The outer
-envelope remains v1. Binding and observation digests use domain v2. This is a paired
+record schema were 8 at that cut; admission requires `agent-input-preparation-v8`. The outer
+envelope was then v1 (it is v2 now). Binding and observation digests use domain v2. This is a paired
 upgrade, with no old reader, mode default or dual token. Drain pre-cut preparation
 requests and prepared Executions first. The exception does not change unrelated
 strict messages; downstream deployment is separate from this source cut.
@@ -69,9 +81,8 @@ observability fields and events retain the tolerance described below. **Server s
 protocol version common to its own supported set and the daemon's
 `conn.hello.protocolVersions[]` list, and must continue accepting the
 immediately-prior major version so a fleet of daemons can roll forward
-without a hard cutover. (`v:1` is the only version that exists today, so this
-is currently a no-op in practice — it becomes load-bearing the day `v:2`
-ships.)
+without a hard cutover. (The v1 → v2 cut deliberately has no N-1 reader:
+the server accepts only `v:2`, so server and client upgrade together.)
 
 **The observability-vs-control asymmetry.** Unknown is TOLERATED for
 observability data, but FAIL-CLOSED for control/security data:
@@ -81,38 +92,24 @@ observability data, but FAIL-CLOSED for control/security data:
   of failing the whole batch (`AgentEventOrUnknownSchema`,
   `agent-event.ts` — see `isKnownAgentEvent`/`partitionAgentEvents` for how a
   consumer is expected to skip it). An unrecognized capability flag string
-  (`CAPABILITY_FLAGS`, or an entry inside `conn.hello.capabilities[]` /
-  `RuntimeInfo.capabilities.permissionModes[]`) is likewise just ignored, not
-  rejected. An unknown top-level envelope field is stripped, not rejected
+  (`CAPABILITY_FLAGS`, or an entry inside `conn.hello.capabilities[]`) is
+  likewise just ignored, not rejected. An unknown top-level envelope field is stripped, not rejected
   (§1). This tolerance exists because this data only ever informs a UI or a
   log line — silently ignoring what you don't understand yet is safe.
-- **Fail-closed (control/security):** `instruction` and `policy`
-  (`PermissionPolicySchema`) reject any shape they don't recognize outright —
-  there is no passthrough-unknown fallback for either, unlike
-  `AgentEventSchema`. A payload that would grant, deny, or otherwise change
-  what a runtime is authorized to do must never be silently
-  reinterpreted-as-something-safe or dropped-and-ignored; it must fail
-  validation loudly. This is the same fail-closed posture every runtime
-  adapter already applies to a policy shape it can't honor (§11.1) — the
-  wire-schema level and the adapter level agree on it end to end.
+- **Fail-closed (control/security):** `instruction` rejects any shape it
+  doesn't recognize outright — there is no passthrough-unknown fallback,
+  unlike `AgentEventSchema`. A payload that would change what a runtime is
+  asked to do must never be silently reinterpreted or dropped-and-ignored; it
+  must fail validation loudly.
 
-  Concretely, `PermissionPolicySchema` and the `instruction` blob-ref variant
-  (`{ blobRef: BlobRef }`) are both built with zod's `.strict()`, rather than
-  the default strip-unknown-keys behavior every other payload schema in this
-  document gets: an unrecognized field on an otherwise well-formed policy or
-  blob-ref instruction is REJECTED outright, not silently discarded. Plain
-  `z.object()` — what every non-control payload uses — would have accepted a
-  policy or instruction carrying a field it didn't recognize and quietly
-  dropped that field from the parsed result, which is precisely the
-  silent-widening-or-narrowing failure mode this asymmetry exists to rule
-  out for control/security data: a stripped constraint is indistinguishable
-  from a constraint that was never sent. **Consequence:** adding a new field
-  to either schema post-freeze is therefore a BREAKING change requiring a
-  `PROTOCOL_VERSION` bump — the one explicit exception to "a new optional
-  field is always non-breaking" noted above. This is intentional: a new
-  security/control constraint must force a conscious version bump so an
-  unupgraded peer can never silently ignore it, the same way every other
-  field on these two schemas already can't be silently ignored.
+  Concretely, the `instruction` blob-ref variant (`{ blobRef: BlobRef }`) and
+  the strict offer payloads are built with zod's `.strict()`, rather than the
+  default strip-unknown-keys behavior: an unrecognized field is REJECTED
+  outright, not silently discarded. A strict offer that still carries the
+  removed `policy` is therefore rejected, not stripped. **Consequence:**
+  adding a new field to one of these schemas post-freeze is a BREAKING change
+  requiring a `PROTOCOL_VERSION` bump — the one explicit exception to "a new
+  optional field is always non-breaking" noted above.
 
 This asymmetry is enforced by the freeze-guard regression test
 (`packages/protocol/src/__tests__/freeze-guard.test.ts`), not just documented
@@ -283,12 +280,12 @@ append/send; receipt and ack are delivery facts, not session authority.
 |---|---|---|---|---|---|
 | `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]`, `deviceId`, `productId`, `clientVersion?`, `runtimes?`, `configuredToolsets?`, `cursor?` | First message on an authenticated long-poll session (including after reconnect) |
 | `conn.ack` | S→D | optional | **required** | `protocolVersion`, `capabilities[]`, `serverTime` | Historical handshake acknowledgement; current long-poll uses response metadata |
-| `task.offer` | S→D | **required** | **required** | `instruction`, `policy`, `runtime?`, `dispatchSelection?` (additive — see below), `sessionRef?`, `workspaceHint?` (reserved — see note below), `limits?` | `dispatch()` targets a device |
+| `task.offer` | S→D | **required** | **required** | `instruction`, `runtime?`, `dispatchSelection?` (additive — see below), `sessionRef?`, `workspaceHint?` (reserved — see note below), `limits?` | `dispatch()` targets a device |
 | `task.offer_with_toolsets` | S→D | **required** | **required** | All `task.offer` fields plus `requiredToolsets` (1–16 logical ids) | A toolset-aware host targets a capable device |
-| `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `policy`, `agentRef`, `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
+| `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `agentRef`, `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
 | `task.offer_for_agent_with_egress` | S→D | **required** | **required** | All strict Agent fields plus required `sessionRef` and exact `egressPolicy` | An Agent dispatch targets a daemon that consumed the revisioned egress contract |
 | `task.offer_for_agent_with_egress_fresh` | S→D | **required** | **required** | All strict Agent fields plus exact `egressPolicy`, with no `sessionRef` | A fresh Agent dispatch targets a daemon advertising `agent-egress-fresh-session` |
-| `task.offer_prepared` | S→D | **required** | **required** | `policy`, `agentRef`, `egressPolicy`, `messageEgress?`, `preparation` (`reference`, `requestDigest`, `artifactDigest?`), `runtime?`, `dispatchSelection?`, `requiredToolsets?`, `terminalProjection?`, `limits?` — and deliberately NO `instruction` and NO `sessionRef` | An already-counted preparation is dispatched to the device that counted it |
+| `task.offer_prepared` | S→D | **required** | **required** | `agentRef`, `agentMemory`, `egressPolicy`, `messageEgress?`, `preparation` (`reference`, `requestDigest`, `artifactDigest?`), `runtime?`, `dispatchSelection?`, `requiredToolsets?`, `terminalProjection?`, `limits?` — and deliberately NO `instruction` and NO `sessionRef` | An already-counted preparation is dispatched to the device that counted it |
 | `agent.egress.ack` | S→D | optional | **required** | exact `agentRef`, `sessionRef`, `policyRevision`, `eventId`, `cursor`, `receiptId` | Cloud durably recorded one reliable Agent event |
 | `agent.content.read` | S→D | optional | **required** | `requestId`, surface, actor, exact Agent/session/runtime/cwd, policy revision, relative target, MIME, decode mode, bounded policy | An independently authorized explicit content read is requested |
 | `agent.home.projection` | S→D | forbidden | **required** | exact `requestId`, AgentRef/profile revision, SHA-256 projection identity, bounded opaque JSON | A durable task-free projection targets one exact capable device |
@@ -315,14 +312,16 @@ append/send; receipt and ack are delivery facts, not session authority.
 
 `task.offer_prepared` is strict control data. In long-poll, unknown executable
 message types and unknown strict payload keys both freeze the cursor. Enqueue
-requires `agent-home-contract`, `agent-input-preparation-v8`, `agent-egress-policy`,
+requires `agent-home-contract`, `agent-input-preparation-v9`, `agent-egress-policy`,
 `agent-egress-reliable-ack` and `agent-egress-fresh-session`; when `messageEgress` is
 present it also requires `agent-message-egress`. These gates run before allocating
 any task or mailbox row. The host-only `agentMessageContext` is recorded with the
 immutable message requirement and is never sent to the daemon.
 
 The v8 cut retains Host-owned `prompt.systemPrompt`, official closure identity and
-envelope v4, and requires record v8 plus explicit `agentMemory`. Memory-only
+envelope v4, and requires explicit `agentMemory`. The v9 cut (ADR-037) removes
+`permissionMode`, replaces `toolImplementationKinds` with `toolNames` and removes
+`executor_identity_unproven`; the device record is version 10. Memory-only
 preparation accepts empty requiredToolsets; the corresponding offer omits that field.
 From 0.24.0 the same holds with `agentMemory: 'none'`: a tool-less preparation (empty
 requiredToolsets, no memory) is admitted and launched with zero tools, and its offer
@@ -337,7 +336,7 @@ parsing and stalls its mailbox. Paired upgrade alone does not repair that old
 payload; operator handling is required if the drain was skipped.
 
 Prepared offers inject no message tool. Selected SDK memory tools are counted and
-sealed using their own descriptor and attested implementation identities; they are
+sealed using their own descriptor; the SDK does not attest them (ADR-037). They are
 not Host MCP toolsets. After pin and claim, a private task token carries the sealed
 read/read-write ACL, checked again by the daemon. Their message body is
 daemon-authored from final Pi text at turn end, after usage validation and selected
@@ -345,9 +344,8 @@ result-document extraction. Missing/unreadable usage or context overflow fails
 before publish. The outbox waits for exact `accepted` before emitting `task.complete`
 with `preparedObservation`; outbound activity/terminal envelopes go to the Host as is.
 Selected memory schemas and executors enter D and its existing admission comparisons;
-the memory selection is compared explicitly as well. The message tool stays outside D. Pi `{mode:'auto',allowTools:[]}` means zero native tools on both lanes;
-fresh offers retain their observed MCP and reserved grants. Prepared native policy failures
-are refused before pin. Host MCP toolsets may be empty only when selected memory
+the memory selection is compared explicitly as well. The message tool stays outside D.
+A prepared session launches no native tool. Host MCP toolsets may be empty only when selected memory
 tools make the combined surface nonempty; with `agentMemory:'none'` they remain required.
 
 It carries no `instruction`: the user request is already inside the frozen
@@ -489,11 +487,11 @@ may skip an unknown additive message, but it cannot silently strip a new field
 and run the instruction without its required tools. The self-hosted server
 therefore requires the live connection's `toolset-selection` capability before
 creating the task. A hosted caller uses `enqueueToolsetOffer()` and must route
-only to a device it knows is toolset-capable. Claude is currently the sole
-bundled runtime that advertises `mcpToolsets`; the daemon projects the selected
-local stdio servers into one task-scoped `--mcp-config` and always supplies
-`--strict-mcp-config`. Confirm mode's internal approval server is merged into
-that same file. Pi and Codex decline these offers fail-closed.
+only to a device it knows is toolset-capable. All three bundled runtimes
+advertise `mcpToolsets`. Claude gets the selected local stdio servers in one
+task-scoped `--mcp-config`, and the user's own MCP configuration also loads;
+Codex gets them as `-c mcp_servers.*` overrides; Pi starts them from its
+task-scoped pool.
 
 **`TaskOfferPayload.workspaceHint` is RESERVED — currently ignored end to
 end.** The field exists on the wire (`TaskOfferPayloadSchema`,
@@ -877,7 +875,7 @@ the server finally learn which adapter it picked, recorded separately as
 ### 3.2 Declined vs. Failed (M1 gap #5)
 
 `task.decline` lets a daemon fail-closed a pre-claim offer (no compatible
-runtime, policy exceeds this device's ceiling, unsupported instruction shape,
+runtime, a requirement the selected runtime cannot honor, unsupported instruction shape,
 etc.) instead of silently dropping it or being forced to claim first just to
 have somewhere to report failure.
 
@@ -996,15 +994,15 @@ session without re-deriving these rules.
 `task.await_approval`, `task.approve`/`task.reject`, and
 `Session.resolveApproval` — is present in the frozen v1 wire.** It
 is retained for third-party adapters and the shared daemon approval controls.
-None of the bundled adapters currently supports `confirm`: Claude's ADR-015
-approval MCP path has been removed, and Claude, Pi and Codex fail closed.
-`Session.resolveApproval` rejects for these adapters. The `PermissionMode`
-enum, `needs_approval` event and approval messages remain unchanged.
+None of the bundled adapters emits `needs_approval`: ordinary sessions run
+YOLO ([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)).
+`Session.resolveApproval` rejects for these adapters. The `needs_approval`
+event and approval messages remain unchanged; v2 removed the `PermissionMode`
+enum with the offer `policy`.
 
 The connection-level `interactive-approval` capability flag stays RESERVED.
-Per-runtime routing uses `RuntimeInfo.capabilities.permissionModes` and
-`approvalInteractive`; all bundled adapters currently report
-`approvalInteractive: false` and omit `confirm` from permissionModes.
+Per-runtime routing uses `RuntimeInfo.capabilities.approvalInteractive`; all
+bundled adapters currently report `approvalInteractive: false`.
 
 ### 5.2 `task.approval_resolved` — explicit local-resolution report (additive minor)
 
@@ -2044,57 +2042,24 @@ closing this out.
 
 ## 11. Runtime capabilities (M2)
 
-### 11.1 Tool names are runtime-specific opaque identifiers
+### 11.1 No SDK permission policy (v2)
 
-`PermissionPolicy.allowTools`/`denyTools` (`permission.ts`) are plain
-`string[]` — deliberately not a shared, normalized vocabulary across
-runtimes. A tool name is meaningful only in the context of a specific target
-`runtime` (`TaskOfferPayload.runtime`):
+v2 removed `PermissionPolicy` (`permission.ts`): there is no offered mode,
+`allowTools`/`denyTools`, `network` or `workspaceRoot` any more
+([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)). Sessions run
+YOLO in the user-specified workspace. Each local agent applies its own
+guardrails and the user's own configuration: Claude `~/.claude`, Codex
+`config.toml` (sandbox per `DaemonConfig.codexSandbox`), Pi agentDir and
+extensions.
 
-- **pi**: lowercase built-in names (`read`, `bash`, `edit`, `write`, `grep`,
-  `find`, `ls`, ...).
-- **claude**: Capitalized built-in names (`Read`, `Write`, `Edit`, `Bash`,
-  `Glob`, `Grep`, ...) — a completely different naming convention from pi's,
-  not a coincidence of casing.
-- **codex**: the app-server adapter supports YOLO `auto` only. Nonempty
-  built-in `allowTools`/`denyTools` are rejected; exact task MCP `enabled_tools`
-  is a separate grant surface.
-
-A server/embedder constructing a `PermissionPolicy` must already know which
-`runtime` it's targeting before choosing tool names — `'read'` is pi's Read
-tool and not a recognized name to claude (whose equivalent is `'Read'`), and
-codex recognizes no per-tool name whatsoever.
-
-**Rule: a runtime that cannot honor a per-tool or permission-mode
-restriction it was offered MUST decline it fail-closed — reject the policy,
-refuse to start — never silently widen or approximate it.** Every bundled
-adapter's `permission-mapping.ts` follows this uniformly, not just for tool
-names:
-
-- `confirm` mode is rejected by all bundled adapters (§5.1). Claude no longer
-  includes the ADR-015 approval MCP path.
-- `plan` mode is rejected by pi and codex (neither has a plan-only,
-  no-execute mode); claude supports it, with a documented residual (§11.2).
-- `denyTools` is rejected by codex outright (no subtractive mechanism), and
-  by claude outside of `readonly` mode (claude's only trustworthy
-  tool-restriction mechanism, `--tools`, REPLACES the active set rather than
-  subtracting from it, and claude's own default active tool set isn't
-  reliably known ahead of time — see `claude/permission-mapping.ts`). pi
-  resolves `denyTools` to an equivalent allowlist in-process instead, since
-  pi's default active tool set is fixed and known from its installed source.
-- `network: false` is rejected by all bundled adapters. Codex app-server
-  uses `danger-full-access`; `network: true` requires no additional restriction.
-
-None of these are bugs to "fix" post-freeze — they are the accurate, honest
-capability boundary of each real CLI as empirically found, and the
-fail-closed posture is what makes a wrong assumption about a runtime's
-abilities a loud rejection instead of a silent, unenforced policy.
+**Rule: a runtime that cannot honor a field it was offered MUST refuse it —
+decline the offer, refuse to start — never silently drop or approximate it.**
+`limits.maxTokens`, which no bundled adapter counts, is the current example.
 
 ### 11.2 Per-runtime capability matrix
 
 Source of truth: each adapter's own `capabilities()` (`packages/client/src/
-adapters/*/`) plus the empirical findings in each adapter's and its sibling
-`permission-mapping.ts`'s doc comments. Capability tests establish the
+adapters/*/`) plus the empirical findings in each adapter's doc comments. Capability tests establish the
 implementation contract; the OAR assessment's implementation section separates
 real binary observations from fixture proofs and still-unverified behavior.
 
@@ -2102,36 +2067,10 @@ real binary observations from fixture proofs and still-unverified behavior.
 |---|---|---|---|
 | `resume` | yes | yes | yes |
 | `steer` (mid-turn injection) | yes | no — stdin injection is not implemented as steering | yes — app-server turn/steer; actual text consumption remains unverified |
-| `permissionModes` | `auto`, `readonly` | `auto`, `readonly`, `plan` | `auto` |
-| `confirm` mode | rejected, fail-closed (no approval gate) | rejected, fail-closed (private approval MCP path removed) | rejected, fail-closed (YOLO-only adapter) |
-| `plan` mode | rejected (no plan-only mode without a custom extension) | **supported** — see the residual below | rejected (no plan-only mode) |
-| `allowTools` | supported | supported (via the replacive `--tools`) | rejected always (no per-tool surface) |
-| `denyTools` | supported (resolved to an equivalent allowlist in-process) | supported only within `readonly`'s own allowlist-intersection; rejected fail-closed otherwise | rejected always |
-| task-scoped host MCP toolsets | supported | supported — strict MCP config | supported — exact enabled_tools grants; ambient MCP exclusion unverified |
-| `network: false` | rejected, fail-closed (no sandbox) | rejected, fail-closed (no sandbox for the Bash tool) | rejected, fail-closed (danger-full-access) |
-| `network: true` | supported (nothing to enforce) | supported (nothing to enforce) | supported (nothing to enforce) |
+| launch permission | pre-trusted session cwd; user's agentDir, extensions and skills load | `--dangerously-skip-permissions`; user's `~/.claude` applies | `approvalPolicy: never`; sandbox per `codexSandbox` (default `danger-full-access`) |
+| task-scoped host MCP toolsets | supported — daemon `tools/list` observation | supported — task `--mcp-config`, user MCP config also loads | supported — `-c mcp_servers.*`, user `config.toml` also applies |
 | `interactive-approval` | no (RESERVED, §5.1) | no¹ | no |
 | `usage` fields filled | provider cost counters plus estimated context occupancy/window | provider input/cache/output and modelUsage window | cumulative cost deltas plus last occupancy/window |
-
-**Claude `plan` mode residual (accepted for v1):** claude's `--permission-mode
-plan` never executes the requested mutating tool call against its real
-target — confirmed, the model writes a plan document and stops — but it
-writes that plan file to `~/.claude/plans/<slug>.md`, **the real user's home
-directory, OUTSIDE `ctx.workspaceDir`**, unconditionally, regardless of cwd.
-This is a genuine, confirmed workspace-confinement gap specific to plan
-mode's own bookkeeping — the path is fixed and owned by Claude Code itself,
-not attacker/model-directed, and no destructive action runs against the
-actual task target. It is accepted as a v1 residual rather than made to fail
-closed, because refusing would make an entire policy mode whose name and
-semantics match this protocol's own `plan` mode completely unusable over a
-relatively minor, fixed-path side effect. **A SaaS embedder that needs strict
-workspace confinement can simply choose not to route `policy.mode: 'plan'`
-tasks to a `claude`-capable device** — nothing in the protocol forces plan
-mode to be offered.
-
-**Claude `confirm` mode:** rejected before runtime side effects. The private
-ADR-015 approval MCP path and helper bin have been removed. The shared daemon
-approval channel and wire remain available to other adapters.
 
 ¹ The connection-level `interactive-approval` flag remains reserved. All
 bundled runtimes declare `approvalInteractive: false`; a future adapter must
@@ -2220,16 +2159,12 @@ deletion.
 `capabilities` object (`RuntimeCapabilitiesSchema`):
 
 ```
-{ steer?, resume?, approvalInteractive?, permissionModes?: string[] }
+{ steer?, resume?, approvalInteractive?, mcpToolsets? }
 ```
 
 Every field is independently optional — an older daemon omits `capabilities`
 entirely; a daemon that only partially detected a runtime's abilities may
-omit individual fields. `permissionModes` is deliberately a bare `string[]`
-(not `z.enum(PERMISSION_MODES)`): it is the runtime's own self-reported
-observability data, not a control/security field, so per the freeze rule's
-asymmetry (top of this document) it tolerates a mode string this schema
-doesn't enumerate yet rather than rejecting the whole `conn.hello`.
+omit individual fields. v2 removed `permissionModes`.
 Unrecognized KEYS inside `capabilities` itself, by contrast, are silently
 stripped — a closed, typed shape a consumer can rely on; only the recognized
 fields round-trip.
@@ -2423,23 +2358,22 @@ real evidence:
    > previously compared separate socket-frame and long-poll implementations.
    > That dual-transport comparison is retained only in archived research;
    > the current contract above has one long-poll path.
-3. **Unknown fields on control/security-class schemas
-   (`PermissionPolicySchema`, the `instruction` blob-ref variant) are
-   REJECTED, fail-closed** — already established by `freeze-guard.test.ts`;
+3. **Unknown fields on control/security-class schemas (the `instruction`
+   blob-ref variant, the strict offer payloads) are REJECTED, fail-closed** — already established by `freeze-guard.test.ts`;
    `version-negotiation-drill.test.ts` additionally routes both cases
    through the real end-to-end `decodeEnvelope` entrypoint (not just the
    isolated payload schema) to close the loop.
-4. **Handshake version negotiation: a daemon advertising an overlapping set
-   (e.g. `[1, 2]`) agrees on `1`; a disjoint set (e.g. `[2, 3]`) gets a
-   clean, typed failure, not a hang.** The schema half (`conn.hello` accepts
+4. **Handshake version negotiation: a daemon advertising a set that contains
+   the server's single `PROTOCOL_VERSION` (today `2`) agrees on it; a set
+   without it (e.g. `[1]`) gets a clean, typed failure, not a hang.** The schema half (`conn.hello` accepts
    either shape; `conn.ack` can only ever express one resolved version) is in
    `version-negotiation-drill.test.ts`. The negotiated version is selected at
    long-poll admission by checking whether the daemon advertises the server's
    single `PROTOCOL_VERSION`; a disjoint set is rejected before any task
    message is accepted. The real integration test exercises the rejection
    path and a timeout race, so incompatibility is observable rather than a
-   hanging request. The "highest common version across an N/N-1 range" policy
-   remains future work until a real `v:2` exists.
+   hanging request. The v1 → v2 cut has no N-1 reader, so the "highest common
+   version across an N/N-1 range" policy remains future work.
 
 **Adjacent honest note (gatekeeper advisory, docs-only, no code change): an
 interrupted HTTP poll is not an at-most-once claim.** Rate limiting, network

@@ -16,6 +16,13 @@
 
 ## Unreleased
 
+- **Docs** — record the minimal-guardrails decision as
+  [ADR-037](docs/architecture/adr-2026-10-07-minimal-guardrails.md). It
+  supersedes `sdk-architecture.md` §9.2 "Permission bypass: REJECTED". The
+  spec, protocol, security, isolation-matrix and README docs now describe the
+  YOLO launch, inherited user config and protocol v2.
+  Plan: `plans/plan-20261007-1340-minimal-guardrails.md` (slice 6).
+
 - **Breaking (protocol, client, keys)** — remove the attestation stack. The SDK
   no longer attests tool or runtime executables. Pi starts from the installed
   SDK package, or re-enters a single-file product through `sdkHelperHost`.

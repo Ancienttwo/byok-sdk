@@ -100,12 +100,12 @@ preservation, not actual vendor grant lifetime or sandbox behavior.
 
 ## Remaining live-Host release gate (NOT RUN)
 
-The current SDK Codex adapter supports only `mode: auto` and retains
-`danger-full-access` even with `approvalPolicy: on-request`. It refuses readonly,
-`network:false`, and nonempty built-in tool allow/deny policies. Native callbacks
+The current SDK Codex adapter keeps the sandbox that `DaemonConfig.codexSandbox`
+selects (default `danger-full-access`) even with `approvalPolicy: on-request`.
+The offer carries no permission policy (ADR-037). Native callbacks
 are therefore **not mandatory per-tool confirmation or confinement**. This
-example does not weaken those checks, introduce a restricted-launcher shim, or
-provide a live command that silently accepts broad authority.
+example does not introduce a restricted-launcher shim or provide a live command
+that silently accepts broad authority.
 
 Before live wiring or a live acceptance run, an owner must explicitly choose
 whether to accept that existing authority model for an isolated runtime/account

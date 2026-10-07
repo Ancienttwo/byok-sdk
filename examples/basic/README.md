@@ -179,7 +179,7 @@ zai/glm-5.2-highspeed  (1M context,     131K max output)
 The byok-sdk `PiAdapter` never passes `--model`/`--provider` on pi's command
 line (`pi-adapter.ts` only adds `--mode rpc`, an optional fail-closed
 `--session <ref>`, plus
-permission-mapping flags) — so GLM has to be pi's own **default** model, set
+its host `--config`) — so GLM has to be pi's own **default** model, set
 once, rather than something byok selects per task:
 
 1. **API key** — the installed pi's env-var-to-provider map
@@ -244,21 +244,17 @@ all absent):
 `pi-adapter.ts` includes `ZAI_API_KEY` in its presence-only `authPresent`
 probe, so a configured GLM runtime is reflected in the example's runtime chip.
 
-## Policy mode
+## Permission mode
 
-The dispatch form only asks for an instruction + runtime (per the M0 spec);
-`server.ts` always dispatches with `policy: { mode: 'auto' }`. M0's pi
-adapter cannot express `confirm`/`plan` (no built-in per-call approval gate —
-see `packages/client/src/adapters/pi/permission-mapping.ts`), and
-`byok.dispatch()`'s own default policy is the safer `confirm` — so a demo
-that dispatched with the SDK default would fail-closed on every single run.
-`auto` is this example's deliberate choice, not the SDK's.
+The dispatch form only asks for an instruction + runtime. The offer carries no
+permission policy: sessions run YOLO and the user's own agent configuration
+applies ([ADR-037](../../docs/architecture/adr-2026-10-07-minimal-guardrails.md)).
 
 ## Debugging a stuck task
 
 If a dispatched task never claims, check the daemon's stdout for a
 `task.fail` reason — most likely a corrupt/missing required pi install, an
-explicit sidecar path that cannot execute, or an unsupported policy.
+explicit sidecar path that cannot execute, or an unsupported offer field.
 `byok-agent start` logs daemon status every 5s.
 
 ## Goal and btw Host integration

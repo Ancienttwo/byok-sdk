@@ -34,8 +34,7 @@ import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
  *   applicability, never budget arithmetic.
  * - `ready` means "the preparation can be consumed": the artifact is intact and
  *   unexpired, its projection is content-complete, its residual keys are ruled
- *   by an applicable Host accounting policy, D is text only, and every
- *   executor identity is attested. A counter is OPTIONAL: when one is
+ *   by an applicable Host accounting policy, D is text only. A counter is OPTIONAL: when one is
  *   configured its evidence must be provider-authoritative and covered, and
  *   when none is configured no count is required at all — the size evidence is
  *   {@link InputPreparationArtifactSummaryV1.requestBytes}, the exact byte
@@ -1055,9 +1054,9 @@ export type InputPreparationStateV1 = 'reserved' | 'counting' | 'prepared' | 'ca
  * `ready` answers exactly one question — CAN THIS PREPARATION BE CONSUMED —
  * and it is deliberately not Host budget admission. A ready receipt says the
  * artifact is intact, its projection is content-complete, every residual key
- * is ruled by an applicable Host accounting policy, D is text only, every
- * executor identity is attested, and — only when a counter is configured —
- * that count is provider-authoritative and covered. It says nothing about
+ * is ruled by an applicable Host accounting policy, D is text only, and —
+ * only when a counter is configured — that count is provider-authoritative
+ * and covered. It says nothing about
  * whether the Host's budget allows the spend; the Host rules
  * `requestBytes + C + max_tokens <= window` itself.
  *
