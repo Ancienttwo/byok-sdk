@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR a800aa0 for injected processes, native-first recording and bounded request refusal (Apache-2.0).
+// BYOK change: Modified from OAR f1a2b88 for injected processes, native-first recording and bounded request refusal (Apache-2.0).
 import type { AvailableInstallation } from "../../contracts/installation.js"; // BYOK change: direct type-only contract import.
 import { randomUUID } from "node:crypto";
 import type {

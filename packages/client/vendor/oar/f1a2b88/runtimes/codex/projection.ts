@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR a800aa0 to retain failure reasons without regex classification (Apache-2.0).
+// BYOK change: Modified from OAR f1a2b88 to retain failure reasons without regex classification (Apache-2.0).
 import type {
   FrameBody,
   RuntimeEventBody,
@@ -7,6 +7,7 @@ import type {
 } from "../../contracts/session.js";
 // BYOK change: Failure classification belongs to BYOK typed failure authority.
 import { asNumber, asRecord, type JsonRecord } from "../../shared/json.js";
+import { cacheParts } from "../../shared/token-totals.js";
 import { codexItemExitCode, codexItemInput, codexToolContent } from "./item-detail.js";
 import { codexReasoningContent } from "./reasoning.js";
 import { aboutOwnChild, codexTaskViews, withStartedChild, type SubagentThreads } from "./tasks.js";
@@ -145,7 +146,13 @@ function usageViews(params: JsonRecord): RuntimeEventBody[] {
   }
   const input = asNumber(total.inputTokens);
   const output = asNumber(total.outputTokens);
-  const tokens = input === null || output === null ? {} : { tokens: { input, output } };
+  // `inputTokens` already counts the cache reads and writes; `cachedInputTokens`
+  // and `cacheWriteInputTokens` are those parts (codex-api sse/responses.rs at
+  // 4f39251a fills them from the Responses API's `input_tokens_details`
+  // `cached_tokens` / `cache_write_tokens`). A build without the write field
+  // reports no `cacheWrite`.
+  const cache = cacheParts(total, { read: "cachedInputTokens", write: "cacheWriteInputTokens" });
+  const tokens = input === null || output === null ? {} : { tokens: { input, output, ...cache } };
   const last = asRecord(tokenUsage?.last);
   if (last === null) {
     return [{ kind: "usage", usage: { context: { tokens: input, contextWindow: null, percent: null }, ...tokens } }];
