@@ -1,4 +1,5 @@
 import { serializePiHostConfig } from '../adapters/pi/runtime-host-binding';
+import { PiRpcClient } from '../adapters/pi/rpc-client';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, realpathSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -176,6 +177,24 @@ describe('SDK ordinary Pi RPC entry', () => {
       if (child.exitCode === null) { child.kill('SIGTERM'); await exited; }
     }
   }, 25_000);
+
+  it('lets a user extension finish an async session_shutdown hook on dispose, as OAR', async () => {
+    const f = fixture();
+    const marker = join(f.root, 'shutdown-done');
+    mkdirSync(join(f.root, 'agent', 'extensions'), { recursive: true });
+    writeFileSync(join(f.root, 'agent', 'extensions', 'slow-shutdown.ts'),
+      `import { writeFileSync } from 'node:fs';\nexport default function (pi) { pi.on('session_shutdown', async () => { await new Promise((done) => setTimeout(done, 2000)); writeFileSync(${JSON.stringify(marker)}, 'done'); }); }\n`);
+    const client = new PiRpcClient({
+      command: bun, args: [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc', '--provider', 'anthropic', '--model', 'claude-sonnet-4-5'],
+      cwd: f.sealed, env: f.env,
+    });
+    try {
+      expect((await client.send({ type: 'get_commands' })).success).toBe(true);
+    } finally {
+      await client.dispose();
+    }
+    expect(existsSync(marker)).toBe(true);
+  }, 30_000);
 
   // D8: every lane pre-trusts the session cwd, as in OAR. The key lane runs
   // the same host with the per-launch projection as its agent dir and a

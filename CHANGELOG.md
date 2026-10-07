@@ -16,6 +16,10 @@
 
 ## Unreleased
 
+- **Fixed (client)** — Pi disposal gives the user's extensions up to 10 s to
+  finish their `session_shutdown` hooks before SIGKILL, as OAR does. The old
+  750 ms grace cut an async hook short.
+
 - **Changed (client)** — update the private OAR source from 0.29.0 to 0.33.1
   (`e1f9177`). The Codex source gains OAR's session `mcpServers` thread
   config and MCP credential redaction of error text. No behavior changes
