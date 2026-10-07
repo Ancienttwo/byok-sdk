@@ -16,6 +16,31 @@
 
 ## Unreleased
 
+- **Fixed (client)** — importing `@byok-sdk/client` no longer runs a CLI when a
+  host bundles it into one file (#291). The print custody entry had a module-init
+  `import.meta.main` guard; in a single-file bundle that flag is true for every
+  inlined module, so loading the bundle ran the entry and exited 1. Remove the
+  retired WP3 `PI_SUBAGENT_PI_BINARY` preset transport (shebang, argv template
+  gate, CLI guard) that only one historical test still drove. The production
+  `__byok_sdk_helper pi-subagent-print` path does not change. Hosts can remove a
+  `define: { "import.meta.main": "false" }` workaround.
+
+- **Security (client)** — update the `undici` pin from 8.9.0 to 8.11.2 (#293).
+  8.9.0 is in the range of ten advisories, two of them high
+  (GHSA-w293-vg96-wgc3, GHSA-rfgv-xxqx-mfg5); 8.10.2 fixes all of them.
+
+- **Added (keys)** — `requestTimeoutMs` on `OpenAiCompatibleChatClient` and
+  `AnthropicMessagesClient` (#290). It sets the total request deadline, body read
+  included; the default stays `PROVIDER_TIMEOUT_MS` (15 s). Long non-streaming
+  generations can now finish. `fetchWithProviderGuards` takes an optional
+  `timeoutMs`. `checkProviderKey` does not change.
+
+- **Added (server)** — every SQLite open refusal is now a `SqliteSchemaError` with
+  `code` (`SQLITE_SCHEMA_UNSUPPORTED`, `SQLITE_MIGRATION_REFUSED`,
+  `SQLITE_SCHEMA_INVALID`), `foundVersion` and `requiredVersion` (#292). Hosts can
+  check a stale `server.sqlite` at startup without parsing the message. The
+  messages do not change.
+
 - **Changed (client)** — update the private OAR source from 0.20.3 to 0.25.0
   (`a800aa00ba9c754c88ba25f84a6981e757b0f19f`). Add the upstream
   `tool_call_input` contract. Keep BYOK process ownership and native request policy.
