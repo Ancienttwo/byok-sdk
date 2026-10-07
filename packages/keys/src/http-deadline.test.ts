@@ -68,6 +68,28 @@ describe('provider total round-trip deadline', () => {
     expect(body.cancel).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
   });
+  it.each([false, true])('honors a client requestTimeoutMs longer than the default (anthropic=%s)', async anthropic => {
+    vi.useFakeTimers();
+    const body = stalled();
+    const requestTimeoutMs = 60_000;
+    const options = { profile: profile(anthropic), secret: 'inert-fixture', requestTimeoutMs, fetchImpl: async () => body.response };
+    const operation = anthropic
+      ? new AnthropicMessagesClient(options).createMessage({ messages: [], max_tokens: 1 })
+      : new OpenAiCompatibleChatClient(options).createChatCompletion({ messages: [] });
+    const result = outcome(operation);
+    await vi.advanceTimersByTimeAsync(PROVIDER_TIMEOUT_MS);
+    expect(result()).toBe('pending');
+    expect(body.cancel).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(requestTimeoutMs - PROVIDER_TIMEOUT_MS);
+    expect(result()).toMatchObject({ code: 'PROVIDER_REQUEST_TIMEOUT' });
+    expect(body.cancel).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 31])('rejects requestTimeoutMs %s at construction', requestTimeoutMs => {
+    const options = { profile: profile(), secret: 'inert-fixture', requestTimeoutMs };
+    expect(() => new OpenAiCompatibleChatClient(options)).toThrow(RangeError);
+    expect(() => new AnthropicMessagesClient({ ...options, profile: profile(true) })).toThrow(RangeError);
+  });
   it('key check expires while reading and never accepts a late valid body', async () => {
     vi.useFakeTimers();
     const body = stalled();

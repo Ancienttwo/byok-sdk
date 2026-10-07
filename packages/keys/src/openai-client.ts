@@ -4,6 +4,7 @@ import {
   modelApiUrl,
   modelMessageText,
   objectValue,
+  providerRequestTimeoutMs,
   readModelProviderResponse,
   type ProviderFetch,
 } from './http';
@@ -37,6 +38,11 @@ export interface ModelProviderClientOptions {
   fetchImpl?: ProviderFetch;
   profile: unknown;
   secret?: string;
+  /**
+   * Total deadline for each request, body read included. Defaults to
+   * `PROVIDER_TIMEOUT_MS`; raise it for long non-streaming generations.
+   */
+  requestTimeoutMs?: number;
 }
 
 /**
@@ -56,9 +62,11 @@ export class OpenAiCompatibleChatClient {
   readonly #fetch: ProviderFetch;
   readonly #profile: ModelProviderProfile;
   readonly #secret: string | undefined;
+  readonly #requestTimeoutMs: number;
 
   constructor(options: ModelProviderClientOptions) {
     this.#fetch = options.fetchImpl ?? ((input, init) => fetch(input, init));
+    this.#requestTimeoutMs = providerRequestTimeoutMs(options.requestTimeoutMs);
     this.#profile = parseModelProviderProfile(options.profile);
     this.#secret = requiredProviderSecret(this.#profile, options.secret);
     this.model = this.#profile.model;
@@ -80,6 +88,7 @@ export class OpenAiCompatibleChatClient {
         redirect: 'error',
       },
       signal,
+      this.#requestTimeoutMs,
     );
     const payload = objectValue(await readModelProviderResponse(response));
     if (payload === undefined) {

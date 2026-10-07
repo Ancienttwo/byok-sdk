@@ -453,19 +453,25 @@ export declare function providerHeaders(profile: ProviderAuthProfile, secret: st
 export type ProviderFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 /** Response body ceiling, ported from `providers.ts:106`. */
 export declare const PROVIDER_RESPONSE_MAX_BYTES: number;
-/** Per-request timeout, ported from `providers.ts:107`. */
+/**
+ * Default total request deadline, ported from `providers.ts:107`. Clients
+ * accept `requestTimeoutMs` because long non-streaming generations exceed it.
+ */
 export declare const PROVIDER_TIMEOUT_MS = 15000;
+/** Validate a total request deadline: a whole number of milliseconds a timer can hold. */
+export declare function providerRequestTimeoutMs(value?: number): number;
 /**
  * Issue a provider request under the source's guards
  * (`providers.ts:1711-1743`): the URL is re-validated immediately before the
  * call, the caller's abort signal is chained, and an internal timeout aborts
  * with a distinguishable reason so a timeout maps to
- * `PROVIDER_REQUEST_TIMEOUT` rather than a bare `AbortError`. The returned
+ * `PROVIDER_REQUEST_TIMEOUT` rather than a bare `AbortError`. `timeoutMs`
+ * bounds the whole round trip, body reads included. The returned
  * response owns the guarded body: consume or cancel it to release the guard;
  * otherwise the original deadline cancels it. Neither headers nor body reads
  * depend on the injected transport honoring its abort signal.
  */
-export declare function fetchWithProviderGuards(fetchImpl: ProviderFetch, url: string, init: RequestInit, signal: AbortSignal): Promise<Response>;
+export declare function fetchWithProviderGuards(fetchImpl: ProviderFetch, url: string, init: RequestInit, signal: AbortSignal, timeoutMs?: number): Promise<Response>;
 /**
  * Read a JSON body with a size ceiling (`providers.ts:1825-1851`). The
  * `content-length` check is an early exit. Count actual transport body bytes
@@ -618,6 +624,11 @@ export interface ModelProviderClientOptions {
     fetchImpl?: ProviderFetch;
     profile: unknown;
     secret?: string;
+    /**
+     * Total deadline for each request, body read included. Defaults to
+     * `PROVIDER_TIMEOUT_MS`; raise it for long non-streaming generations.
+     */
+    requestTimeoutMs?: number;
 }
 /**
  * Transport for OpenAI-compatible chat/completions providers, ported from

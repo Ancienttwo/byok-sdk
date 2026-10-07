@@ -4,6 +4,7 @@ import {
   modelApiUrl,
   modelMessageText,
   objectValue,
+  providerRequestTimeoutMs,
   readModelProviderResponse,
   type ProviderFetch,
 } from './http';
@@ -48,9 +49,11 @@ export class AnthropicMessagesClient {
   readonly #fetch: ProviderFetch;
   readonly #profile: ModelProviderProfile;
   readonly #secret: string;
+  readonly #requestTimeoutMs: number;
 
   constructor(options: ModelProviderClientOptions) {
     this.#fetch = options.fetchImpl ?? ((input, init) => fetch(input, init));
+    this.#requestTimeoutMs = providerRequestTimeoutMs(options.requestTimeoutMs);
     this.#profile = parseModelProviderProfile(options.profile);
     if (this.#profile.adapter !== 'anthropic') {
       throw new ByokKeysError(
@@ -81,6 +84,7 @@ export class AnthropicMessagesClient {
         redirect: 'error',
       },
       signal,
+      this.#requestTimeoutMs,
     );
     const payload = objectValue(await readModelProviderResponse(response));
     if (payload === undefined) {

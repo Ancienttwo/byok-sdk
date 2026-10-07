@@ -268,9 +268,9 @@ whatever `index.ts` re-exports; nothing here is reachable by deep import.
 | `provider-profile.ts` | zod schema plus exact credential-free revision/hash binding for the model provider profile |
 | `headers.ts` | `providerHeaders()` and fail-closed `requiredProviderSecret()` |
 | `url.ts` | `normalizeProviderUrl()` with the HTTPS / loopback / private-network guard |
-| `http.ts` | Shared transport guards: injectable `fetch`, timeout, bounded JSON, HTTP error classification |
-| `openai-client.ts` | `OpenAiCompatibleChatClient` — chat/completions, injected `fetchImpl` |
-| `anthropic-client.ts` | `AnthropicMessagesClient` — Messages API, injected `fetchImpl` |
+| `http.ts` | Shared transport guards: injectable `fetch`, total request deadline (default `PROVIDER_TIMEOUT_MS`, 15 s), bounded JSON, HTTP error classification |
+| `openai-client.ts` | `OpenAiCompatibleChatClient` — chat/completions, injected `fetchImpl`, `requestTimeoutMs` for long non-streaming generations |
+| `anthropic-client.ts` | `AnthropicMessagesClient` — Messages API, injected `fetchImpl`, `requestTimeoutMs` for long non-streaming generations |
 | `secret-store.ts` | The `SecretStore` contract one credential entry is read and written through, plus the shared value/encoding guards |
 | `secret-name.ts` | Runtime validation of secret entry names and namespaces, including the dot exclusion that stops one scope from spelling out another's storage key |
 | `secret-scope.ts` | `SecretScope` and the envelope-scoped store that partitions a credential store by account and workspace |
