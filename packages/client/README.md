@@ -57,6 +57,11 @@ const daemon = createDaemon({
 });
 ```
 
+Pi uses the same re-entry: each Pi launch starts
+`<executable> [<entry>] __byok_sdk_helper <pi-rpc|pi-prepared|pi-durable>`.
+Set `PI_PACKAGE_DIR` to the product's Pi asset root; a Bun-compiled executable
+may keep those assets beside itself instead.
+
 Normal Node/Bun source hosts omit `sdkHelperHost` and continue to use the
 package's installed helper scripts. A required-message offer performs an exact
 stdio MCP initialize/tools-list handshake before adapter preparation; an
@@ -81,8 +86,9 @@ or widen the Pi child environment.
 
 Claude Code and Codex remain user-installed runtimes and use their own login
 state. Each runtime child inherits the daemon environment, provider API keys
-included. The daemon removes only `CLAUDECODE`, its own `BYOK_*` names and
-loader injection names. Claude loads the user's own MCP configuration,
+included. The daemon removes only `CLAUDECODE` and its own `BYOK_*` names.
+Loader names such as `NODE_OPTIONS` reach the child as the user set them.
+Claude loads the user's own MCP configuration,
 settings, deny rules and hooks. The SDK adds its task servers with
 `--mcp-config`. Ordinary Pi loads the user's own extensions and skills from
 its agent directory.

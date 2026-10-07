@@ -102,7 +102,6 @@
       },
       "dependencies": {
         "@byok-sdk/core": "workspace:*",
-        "@byok-sdk/implementation-identity": "workspace:*",
         "@byok-sdk/protocol": "workspace:*",
         "@earendil-works/chord": "1.0.4",
         "@earendil-works/pi-agent-core": "1.0.4",
@@ -198,10 +197,6 @@
         "@hpke/core": "1.9.0",
       },
     },
-    "packages/implementation-identity": {
-      "name": "@byok-sdk/implementation-identity",
-      "version": "0.24.0",
-    },
     "packages/keys": {
       "name": "@byok-sdk/keys",
       "version": "0.9.0",
@@ -210,7 +205,6 @@
       },
       "dependencies": {
         "@byok-sdk/core": "workspace:*",
-        "@byok-sdk/implementation-identity": "workspace:*",
         "zod": "^4.4.3",
       },
     },
@@ -327,8 +321,6 @@
     "@byok-sdk/example-packaging": ["@byok-sdk/example-packaging@workspace:examples/packaging"],
 
     "@byok-sdk/example-salesko-connector-broker": ["@byok-sdk/example-salesko-connector-broker@workspace:examples/salesko-connector-broker"],
-
-    "@byok-sdk/implementation-identity": ["@byok-sdk/implementation-identity@workspace:packages/implementation-identity"],
 
     "@byok-sdk/keys": ["@byok-sdk/keys@workspace:packages/keys"],
 

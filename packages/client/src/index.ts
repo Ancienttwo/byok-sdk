@@ -12,7 +12,6 @@ export type {
   RuntimeDetectResult,
   RuntimeDetectionAdvisory,
   RuntimeDetectionRefusalReason,
-  RuntimeInstallationObservationContext,
   Session,
   GitWorkspaceConfig,
   McpStdioServerConfig,
@@ -24,33 +23,6 @@ export type {
   McpToolsetReloadReceipt,
   AgentEgressPolicy,
 } from './types';
-/**
- * The host install-record authority this SDK declares and never implements
- * (`daemon/tool-implementation-identity.ts`). A daemon constructed without one
- * resolves every tool implementation identity to `resolver_unconfigured`.
- *
- * `parseToolImplementationIdentity` is deliberately NOT exported: it is the
- * only function that turns a parsed value into an attested identity, and its
- * one caller is this package's own task-scoped configuration reader.
- */
-export type {
-  RuntimeEntryV1,
-  RuntimeDescendantPolicyV1,
-  RuntimeDescendantEdgeV1,
-  RuntimeImplementationRecordV1,
-  RuntimeImplementationResolutionV1,
-  ToolImplementationAttestedV1,
-  ToolImplementationAuthority,
-  ToolImplementationIdentityV1,
-  ToolImplementationInstallRecordV1,
-  ToolImplementationInterpreterV1,
-  ToolImplementationLocatorV1,
-  ToolImplementationResolutionV1,
-  ToolImplementationStatTupleV1,
-  ToolImplementationUnavailableReasonV1,
-  ToolImplementationUnavailableV1,
-} from '@byok-sdk/implementation-identity';
-export { ToolImplementationReverifyError } from '@byok-sdk/implementation-identity';
 export type { AgentRef } from './agent-home';
 export {
   AgentHomeError,

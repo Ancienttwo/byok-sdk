@@ -1,5 +1,5 @@
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
-import { resolvePreparedMemoryImplementation, observePreparedMemory, preparedMemoryProjection, type PreparedAgentMemoryImplementation, type PreparedAgentMemoryState } from './prepared-agent-memory';
+import { observePreparedMemory, preparedMemoryProjection, type PreparedAgentMemoryHelper, type PreparedAgentMemoryState } from './prepared-agent-memory';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import {
   preparedToolBindingDigest,
@@ -14,24 +14,9 @@ import { buildToolExecutorsFromObservation, InputPreparationCompileError } from 
 import { McpAuthorityError } from '../mcp/client';
 import { MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from './mcp-tools-probe';
 import type { McpToolsetRegistry } from './toolset-registry';
-import {
-  resolveToolImplementationIdentity,
-  type ToolImplementationAuthority,
-  type ToolImplementationFsProbe,
-  type ToolImplementationIdentityV1,
-} from './tool-implementation-identity';
 
 /**
  * The ONE place a prepared input's tool surface is assembled.
- *
- * Before this module there were two answers to "what tools does this device
- * have, and who executes them": `TaskRunner.handleOffer`, which resolved one
- * implementation identity per projected server and probed each server under
- * it; and the remote preparation lane, which probed with a label, a timeout and
- * an environment and nothing else. The second one produced executor
- * fingerprints under no implementation claim at all — so a fingerprint frozen
- * by a preparation and a fingerprint frozen at admission could disagree for
- * reasons neither side recorded.
  *
  * This module is the single entry both preparation paths — the local
  * `input_preparation.prepare` control call and the remote
@@ -41,16 +26,14 @@ import {
  *
  * Two stages, split by whether they SPAWN anything:
  *
- * 1. {@link resolvePreparedToolBinding} — registry snapshot and one
- *    implementation identity per projected server. It reads configuration and the filesystem; it starts no child.
+ * 1. {@link resolvePreparedToolBinding} — registry snapshot and the
+ *    configured argv per projected server. It reads configuration; it starts no child.
  *    Its {@link PreparedToolBinding.toolBindingDigest} is what a replay of an
  *    already-recorded `requestId` is compared against, because re-probing to
  *    detect drift would be exactly the second executor fact the durable
  *    idempotency key exists to prevent.
  * 2. {@link assemblePreparedToolSurface} — the probe, the projection and the
- *    fingerprints. It calls stage 1 first and passes the
- *    resolved identity into every probe, so the shared pre-spawn gate in
- *    `mcp/client.ts` re-measures an attested server before its child starts.
+ *    fingerprints. It calls stage 1 first.
  *
  * Fail-closed, and by VALUE rather than by exception: every refusal is a
  * `{ ok: false, code, detail }` the service maps straight onto a typed
@@ -85,27 +68,19 @@ export interface PreparedToolServerBinding {
   readonly toolsetId: string;
   /** Exactly `{command, args}` — the same reduction `TaskRunner` projects. */
   readonly server: Readonly<McpStdioServerConfig>;
-  readonly implementation: ToolImplementationIdentityV1;
 }
 
 /** Stage 1: everything that is knowable without starting a server. */
 export interface PreparedToolBinding {
-  readonly memoryImplementation: PreparedAgentMemoryImplementation | null;
+  readonly agentMemory: PreparedAgentMemoryMode;
   readonly requiredToolsets: readonly string[];
   /** `toolsetId` -> the registry's definition revision. Every named toolset appears. */
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
   /** Canonically ordered by server name. */
   readonly servers: readonly PreparedToolServerBinding[];
-  /** Digest over the definition revisions, the argv and the identities. */
+  /** Digest over the definition revisions and the argv. */
   readonly toolBindingDigest: string;
-  /**
-   * The exact environment object every identity above was measured against,
-   * carried forward so stage 2 spawns with the object stage 1 measured rather
-   * than with a second `deps.runtimeEnv()` answer. Asking twice is how a
-   * preparation measures one environment and starts its probe children in
-   * another — `launch_env_drift` at the spawn gate, for a difference nobody
-   * introduced on purpose.
-   */
+  /** The exact environment stage 2 starts its probe children with, read once. */
   readonly launchEnv: Readonly<Record<string, string>>;
 }
 
@@ -114,11 +89,11 @@ export interface PreparedToolSurface {
   readonly memory: PreparedAgentMemoryState | null;
   readonly tools: readonly InputPreparationToolV1[];
   readonly toolExecutors: Readonly<Record<string, string>>;
-  /** Digest over the tools, the executors and the identities. */
+  /** Digest over the tools and the executors. */
   readonly observationDigest: string;
   readonly toolBindingDigest: string;
-  /** Model-visible tool name -> `attested` | `unavailable:<reason>`. */
-  readonly toolImplementationKinds: Readonly<Record<string, string>>;
+  /** The counted model-visible tool names, sorted byte-wise. */
+  readonly toolNames: readonly string[];
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
 }
 
@@ -134,9 +109,8 @@ export type PreparedToolSurfaceResult =
  * The seam `input-preparation-service.ts` depends on.
  *
  * Declared as an interface the daemon implements once, so the service never
- * reaches the toolset registry or the implementation
- * authority itself — and so a test can hand it an assembler that counts its own
- * probes.
+ * reaches the toolset registry itself — and so a test can hand it an assembler
+ * that counts its own probes.
  */
 export interface PreparedToolSurfaceAssembler {
   /** Stage 1 only. Starts no server. */
@@ -158,6 +132,8 @@ export interface PreparedToolSurfaceInput {
 
 export interface PreparedToolSurfaceDeps {
   readonly memoryAvailable?: () => boolean;
+  /** The SDK Agent-memory descriptor helper. Absent means prepared memory is unavailable. */
+  readonly agentMemoryDescribe?: PreparedAgentMemoryHelper;
   readonly toolsetRegistry: Pick<McpToolsetRegistry, 'snapshot' | 'status'>;
   /**
    * The exact base environment a RUNTIME child of a task receives
@@ -166,10 +142,6 @@ export interface PreparedToolSurfaceDeps {
    * construction.
    */
   readonly runtimeEnv: () => Readonly<Record<string, string>>;
-  /** `DaemonConfig.toolImplementationAuthority`. Absent means every identity is `resolver_unconfigured`. */
-  readonly toolImplementationAuthority?: ToolImplementationAuthority;
-  /** Test seam only; production passes nothing and the real `node:fs` probe is used. */
-  readonly toolImplementationFsProbe?: ToolImplementationFsProbe;
   /** Test seam only, the same one `TaskRunnerDeps.mcpToolsetToolsProbe` is. */
   readonly probe?: typeof probeMcpServer;
   readonly probeTimeoutMs?: number;
@@ -240,70 +212,37 @@ export async function resolvePreparedToolBinding(
     }
   }
   // No servers AND no memory is a valid counted manifest: a tool-less record.
-
-  // Resolved ONCE per server, here, and consumed by the probe spawn below.
-  // Resolution never refuses: this SDK ships no resolver, so the unconfigured
-  // answer is `resolver_unconfigured` for every server and the preparation
-  // still completes — it simply proves nothing about them, and the receipt
-  // says so. What refuses is the re-measurement at spawn, and only for a
-  // server that WAS attested.
-  const resolved: PreparedToolServerBinding[] = [];
-  // The exact environment the stage-2 probe spawns each server with, taken
-  // ONCE and carried on the binding as `launchEnv`: the identity binds the
-  // environment this SDK hands to `spawn`, so a second `deps.runtimeEnv()`
-  // call could measure one value and spawn with another.
-  const launchEnv = projectPiMcpEnvironment(deps.runtimeEnv());
-  let memoryImplementation: PreparedAgentMemoryImplementation | null = null;
-  if (input.agentMemory !== 'none') {
-    if (deps.memoryAvailable?.() !== true) return refuse('unsupported_input', 'agent_memory_unavailable', 'secure Agent memory is unavailable');
-    try { memoryImplementation = await resolvePreparedMemoryImplementation(deps.toolImplementationAuthority, launchEnv, deps.toolImplementationFsProbe); }
-    catch (error) { return refuse('unsupported_input', 'agent_memory_implementation_unproven', errorMessage(error)); }
+  if (input.agentMemory !== 'none' && (deps.memoryAvailable?.() !== true || deps.agentMemoryDescribe === undefined)) {
+    return refuse('unsupported_input', 'agent_memory_unavailable', 'secure Agent memory is unavailable');
   }
-
-  for (const serverName of [...servers.keys()].sort(compareServerNames)) {
+  const resolved: PreparedToolServerBinding[] = [...servers.keys()].sort(compareServerNames).map((serverName) => {
     const entry = servers.get(serverName)!;
-    const implementation = await resolveToolImplementationIdentity(
-      deps.toolImplementationAuthority,
-      {
-        subject: { kind: 'mcp-server', toolsetId: entry.toolsetId, serverName },
-        command: entry.server.command,
-        args: Object.freeze([...(entry.server.args ?? [])]),
-      },
-      launchEnv,
-      deps.toolImplementationFsProbe,
-    );
-    resolved.push(Object.freeze({
-      serverName,
-      toolsetId: entry.toolsetId,
-      server: entry.server,
-      implementation,
-    }));
-  }
+    return Object.freeze({ serverName, toolsetId: entry.toolsetId, server: entry.server });
+  });
 
   // The formula itself lives in `../input-preparation.ts`, because the prepared
   // LAUNCH entry recomputes this same digest to decide whether the device still
   // matches the artifact (`adapters/pi/prepared-tools.ts`).
   const toolBindingDigest = preparedToolBindingDigest({
-    agentMemory: input.agentMemory, memoryImplementation,
+    agentMemory: input.agentMemory,
     toolsetDefinitionRevisions,
     servers: resolved.map((entry) => ({
       serverName: entry.serverName,
       toolsetId: entry.toolsetId,
       command: entry.server.command,
       args: [...(entry.server.args ?? [])],
-      implementation: entry.implementation,
     })),
   });
 
   return Object.freeze({
     ok: true as const,
     binding: Object.freeze({
+      agentMemory: input.agentMemory,
       requiredToolsets: Object.freeze([...input.requiredToolsets]),
-      memoryImplementation,
       toolsetDefinitionRevisions: Object.freeze(toolsetDefinitionRevisions),
       servers: Object.freeze(resolved),
       toolBindingDigest,
-      launchEnv,
+      launchEnv: projectPiMcpEnvironment(deps.runtimeEnv()),
     }),
   });
 }
@@ -317,10 +256,6 @@ function compareServerNames(left: string, right: string): number {
 // Stage 2 — the one assembly entry
 // ---------------------------------------------------------------------------
 
-function implementationKind(identity: ToolImplementationIdentityV1): string {
-  return identity.kind === 'attested' ? 'attested' : `unavailable:${identity.reason}`;
-}
-
 /** Assemble the frozen tool surface one preparation is compiled and counted over. */
 export async function assemblePreparedToolSurface(
   deps: PreparedToolSurfaceDeps,
@@ -331,10 +266,6 @@ export async function assemblePreparedToolSurface(
   const binding = bound.binding;
 
   const probe = deps.probe ?? probeMcpServer;
-  // The environment stage 1 MEASURED the identities against, not a fresh
-  // `deps.runtimeEnv()` answer: the identity binds the object handed to
-  // `spawn`, so asking again here could measure one value and spawn with
-  // another.
   const env = binding.launchEnv;
   const timeoutMs = deps.probeTimeoutMs ?? MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS;
   // All servers concurrently under one shared deadline, the same budget
@@ -346,10 +277,6 @@ export async function assemblePreparedToolSurface(
       label: `MCP toolset server "${entry.serverName}"`,
       timeoutMs,
       env,
-      // The implementation identity resolved above. `mcp/client.ts`'s connect
-      // gate re-measures an attested one before this child starts; a failure
-      // is an `McpAuthorityError`.
-      implementation: entry.implementation,
     });
     if (observation.tools.length === 0) {
       throw new McpAuthorityError(`MCP toolset server "${entry.serverName}" reported no tools`);
@@ -372,12 +299,9 @@ export async function assemblePreparedToolSurface(
   }
   const observation = Object.freeze(observed);
 
-  const implementations: Record<string, ToolImplementationIdentityV1> = {};
-  for (const entry of binding.servers) implementations[entry.serverName] = entry.implementation;
-
   let memory: PreparedAgentMemoryState | null = null;
-  if (binding.memoryImplementation !== null) {
-    try { memory = await observePreparedMemory(binding.memoryImplementation, env, undefined, deps.toolImplementationFsProbe); }
+  if (binding.agentMemory !== 'none') {
+    try { memory = await observePreparedMemory(deps.agentMemoryDescribe!, env); }
     catch (error) { return refuse('toolsets_unobservable', 'agent_memory_descriptor_unobservable', errorMessage(error)); }
   }
   const fingerprinted = await fingerprintPreparedToolSurface({
@@ -385,7 +309,6 @@ export async function assemblePreparedToolSurface(
     observation,
     runtimeIdentity: input.runtimeIdentity,
     toolsetDefinitionRevisions: binding.toolsetDefinitionRevisions,
-    implementations: Object.freeze(implementations),
   });
   if (!fingerprinted.ok) return fingerprinted;
 
@@ -397,7 +320,7 @@ export async function assemblePreparedToolSurface(
       toolExecutors: fingerprinted.fingerprint.toolExecutors,
       observationDigest: fingerprinted.fingerprint.observationDigest,
       toolBindingDigest: binding.toolBindingDigest,
-      toolImplementationKinds: fingerprinted.fingerprint.toolImplementationKinds,
+      toolNames: fingerprinted.fingerprint.toolNames,
       toolsetDefinitionRevisions: binding.toolsetDefinitionRevisions,
     }),
   });
@@ -416,7 +339,6 @@ export interface PreparedToolSurfaceFingerprintInput {
   /** The resolved native runtime identity string every fingerprint binds. */
   readonly runtimeIdentity: string;
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
-  readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
 }
 
 /** The projection of one observation, plus the digest over it. */
@@ -424,8 +346,8 @@ export interface PreparedToolSurfaceFingerprint {
   readonly tools: readonly InputPreparationToolV1[];
   readonly toolExecutors: Readonly<Record<string, string>>;
   readonly observationDigest: string;
-  /** Model-visible tool name -> `attested` | `unavailable:<reason>`. */
-  readonly toolImplementationKinds: Readonly<Record<string, string>>;
+  /** The model-visible tool names, sorted byte-wise. */
+  readonly toolNames: readonly string[];
 }
 
 export type PreparedToolSurfaceFingerprintResult =
@@ -478,7 +400,6 @@ export async function fingerprintPreparedToolSurface(
     ({ toolExecutors } = await buildToolExecutorsFromObservation({
       observation: input.observation,
       toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
-      implementations: input.implementations,
       // The prepared Main set is MCP tools only: a task-free preparation has
       // no workspace to resolve Pi's own built-ins against, and the prepared
       // launch registers the same MCP-only set (`adapters/pi/prepared-tools.ts`).
@@ -492,27 +413,18 @@ export async function fingerprintPreparedToolSurface(
     return refuse('unsupported_input', 'tool_surface_unfingerprintable', errorMessage(cause));
   }
 
-  const toolImplementationKinds: Record<string, string> = {};
-  for (const tool of projected) {
-    const identity = input.implementations[tool.serverName];
-    toolImplementationKinds[qualifiedMcpToolName(tool.serverName, tool.toolName)] =
-      identity === undefined ? 'unavailable:implementation_identity_unattested' : implementationKind(identity);
-  }
-
   const memoryProjection = preparedMemoryProjection(input.agentMemory, input.memory, input.runtimeIdentity);
   for (const tool of memoryProjection.tools) {
     if (tools.some(existing => existing.name === tool.name)) return refuse('unsupported_input', 'tool_name_collision', 'memory tool name collision');
     tools.push(tool);
   }
   toolExecutors = Object.freeze({...toolExecutors, ...memoryProjection.toolExecutors});
-  Object.assign(toolImplementationKinds, memoryProjection.toolImplementationKinds);
   const observationDigest = preparedToolSurfaceObservationDigest({
     agentMemory: input.agentMemory, memory: input.memory,
     runtimeIdentity: input.runtimeIdentity,
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     tools,
     toolExecutors,
-    implementations: input.implementations,
   });
 
   return Object.freeze({
@@ -521,7 +433,7 @@ export async function fingerprintPreparedToolSurface(
       tools: Object.freeze(tools),
       toolExecutors,
       observationDigest,
-      toolImplementationKinds: Object.freeze(toolImplementationKinds),
+      toolNames: Object.freeze(tools.map((tool) => tool.name).sort(compareServerNames)),
     }),
   });
 }

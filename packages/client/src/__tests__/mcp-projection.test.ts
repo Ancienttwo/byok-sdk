@@ -13,24 +13,8 @@ import {
 } from '../mcp';
 import { createPiMcpTools } from '../adapters/pi/mcp-tools';
 import { buildToolExecutorsFromObservation } from '../adapters/pi/input-preparation';
-import {
-  TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED,
-  toolImplementationUnavailable,
-  type ToolImplementationIdentityV1,
-} from '../daemon/tool-implementation-identity';
 import { BYOK_PI_MCP_CONFIG_PATH } from '../adapters/pi/mcp-config';
 
-
-/**
- * What this SDK's DEFAULT produces for every server: no configured
- * `toolImplementationAuthority`, so nothing is attested. It is a real value
- * the fingerprint binds, not a placeholder — see the attested case below,
- * which must fingerprint differently.
- */
-const IMPLEMENTATIONS: Readonly<Record<string, ToolImplementationIdentityV1>> = Object.freeze({
-  salesko: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED,
-  salesko_proposals: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED,
-});
 
 /**
  * The single-projection property: the ordinary Pi extension and the core must
@@ -310,7 +294,7 @@ describe('MCP projection — executor fingerprints', () => {
       observation,
       toolsetDefinitionRevisions: REVISIONS,
       nativeTools: [{ name: 'read', parameters: { type: 'object' } }],
-      runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
+      runtimeIdentity: RUNTIME,
     });
     expect(Object.keys(toolExecutors)).toEqual([
       'read',
@@ -327,7 +311,7 @@ describe('MCP projection — executor fingerprints', () => {
       observation,
       toolsetDefinitionRevisions: REVISIONS,
       nativeTools: [],
-      runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
+      runtimeIdentity: RUNTIME,
     });
     expect((await build()).toolExecutors).toEqual((await build()).toolExecutors);
   });
@@ -357,10 +341,10 @@ describe('MCP projection — executor fingerprints', () => {
   ])('changes when %s changes', async (_label, mutate, revisions) => {
     const observation = await realObservation();
     const base = await buildToolExecutorsFromObservation({
-      observation, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
+      observation, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
     });
     const after = await buildToolExecutorsFromObservation({
-      observation: mutate(observation), toolsetDefinitionRevisions: revisions, nativeTools: [], runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
+      observation: mutate(observation), toolsetDefinitionRevisions: revisions, nativeTools: [], runtimeIdentity: RUNTIME,
     });
     expect(after.toolExecutors['mcp__salesko__find_leads'])
       .not.toBe(base.toolExecutors['mcp__salesko__find_leads']);
@@ -369,7 +353,7 @@ describe('MCP projection — executor fingerprints', () => {
   it('does NOT change when a schema is re-serialized with its keys in another order', async () => {
     const observation = await realObservation();
     const base = await buildToolExecutorsFromObservation({
-      observation, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
+      observation, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
     });
     const reordered = {
       ...observation,
@@ -389,65 +373,9 @@ describe('MCP projection — executor fingerprints', () => {
       },
     };
     const after = await buildToolExecutorsFromObservation({
-      observation: reordered, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
+      observation: reordered, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
     });
     expect(after.toolExecutors).toEqual(base.toolExecutors);
-  });
-
-  it('fingerprints an attested implementation differently from an unattested one', async () => {
-    // The property: an implementation identity is a fingerprint INPUT, not a
-    // label beside it. A tool whose implementation is proven is not the same
-    // tool as one whose implementation was merely assumed, so nothing frozen
-    // under the weaker claim may validate under the stronger one.
-    const observation = await realObservation();
-    const build = async (implementations: Readonly<Record<string, ToolImplementationIdentityV1>>) =>
-      (await buildToolExecutorsFromObservation({
-        observation,
-        toolsetDefinitionRevisions: REVISIONS,
-        nativeTools: [],
-        runtimeIdentity: RUNTIME,
-       
-        implementations,
-      })).toolExecutors['mcp__salesko__find_leads'];
-
-    const unconfigured = await build(IMPLEMENTATIONS);
-    const unattested = await build({
-      ...IMPLEMENTATIONS,
-      salesko: toolImplementationUnavailable('implementation_identity_unattested'),
-    });
-    const attested = await build({
-      ...IMPLEMENTATIONS,
-      salesko: {
-        kind: 'attested',
-        authority: 'host-install-record',
-        manifestRevision: 'host-r1',
-        form: 'compiled-executable',
-        installPath: '/opt/byok/releases/1.2.3/salesko-agent',
-        closureDigest: 'a'.repeat(64),
-        closureKind: 'artifact',
-        launchArgv: ['mcp', 'serve'],
-        launchCwd: '/',
-        launchEnvNamesDigest: 'b'.repeat(64),
-        loaderEnvValuesDigest: 'c'.repeat(64),
-        installStat: { dev: 1, ino: 2, size: 3, mtimeMs: 4, mode: 0o100555, uid: 0, gid: 0 },
-      },
-    });
-
-    expect(new Set([unconfigured, unattested, attested]).size).toBe(3);
-  });
-
-  it('refuses to fingerprint a server whose implementation identity was never resolved', async () => {
-    // "Nobody resolved this" and "the resolver said unavailable" are different
-    // facts, and only the second one is a fingerprint input. An absent entry is
-    // therefore a refusal rather than an assumed absence.
-    await expect(buildToolExecutorsFromObservation({
-      observation: await realObservation(),
-      toolsetDefinitionRevisions: REVISIONS,
-      nativeTools: [],
-      runtimeIdentity: RUNTIME,
-     
-      implementations: { salesko: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
-    })).rejects.toThrow(/has no resolved implementation identity/u);
   });
 
   it('refuses to fingerprint a toolset with no definition revision', async () => {
@@ -455,7 +383,7 @@ describe('MCP projection — executor fingerprints', () => {
       observation: await realObservation(),
       toolsetDefinitionRevisions: { 'salesko.read.v1': REVISIONS['salesko.read.v1'] },
       nativeTools: [],
-      runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
+      runtimeIdentity: RUNTIME,
     })).rejects.toThrow(/no definition revision/u);
   });
 });
@@ -483,9 +411,6 @@ describe.each([
     await expect(buildToolExecutorsFromObservation({
       observation: await collidingObservation(),
       toolsetDefinitionRevisions: Object.fromEntries(pairs.map(([server]) => [server!, `revision-${server}`])),
-      // Consumed only after the projection below rejects the collision, so the
-      // tested refusal is reached before the fixture fact is read.
-      implementations: {},
       nativeTools: [],
       runtimeIdentity: 'fixture-runtime',
     })).rejects.toThrow(`duplicate MCP runtime tool name "${name}"`);

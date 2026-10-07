@@ -80,15 +80,3 @@ export function verifyOfficialPiClosure(from) {
   }
   return { provenance: OFFICIAL_PI_PROVENANCE, roots: [...roots].map(([root, name]) => ({ root, name })) };
 }
-
-export function assertOfficialPiProvenance(value) {
-  if (!value || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify(Object.keys(OFFICIAL_PI_PROVENANCE).sort())
-    || Object.entries(OFFICIAL_PI_PROVENANCE).some(([key, expected]) => value[key] !== expected)) {
-    throw new Error('official Pi provenance differs from the verified release closure');
-  }
-}
-
-export function assertOfficialPiManifest(bytes) {
-  const expected = coding.files.find(file => file.path === "package.json");
-  if (bytes.length !== expected.bytes || digest(bytes) !== expected.sha256) throw new Error("official Pi manifest differs from verified tarball");
-}

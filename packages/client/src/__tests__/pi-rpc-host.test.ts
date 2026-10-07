@@ -40,17 +40,15 @@ function fixture() {
   const entry = join(root, 'host-entry.ts');
   writeFileSync(entry, `import {runPiRpcHost} from ${JSON.stringify(resolve(import.meta.dirname, '../../dist/bin/pi-runtime-host.js'))}; runPiRpcHost(process.argv.slice(2)).catch(error=>{console.error(String(error));process.exit(1)});`);
   const command = spawnSync(bun, ['--print', 'process.execPath'], {encoding:'utf8'}).stdout.trim();
-  const binding = {format:'byok.implementation-spawn',version:1,identity:{kind:'unavailable',reason:'resolver_unconfigured'},
-    command,entry,fixedArgv:[],cwd:sealed,envCommitments:{PI_CODING_AGENT_DIR:join(root,'agent')}};
-  const config = { binding, format: 'byok.pi.rpc-launch', version: 3, descendantPlan: null, cwd,
-    mcp: { mcpEnv: {}, mcpServers: {}, observation: {}, toolImplementations: {} } };
+  const config = { format: 'byok.pi.rpc-launch', version: 4, cwd,
+    mcp: { mcpEnv: {}, mcpServers: {}, observation: {} } };
   const configPath = join(root, 'config.json');
   const serialized=serializePiHostConfig(config);
   writeFileSync(configPath, serialized.bytes);
   const env = { HOME: root, PATH: process.env.PATH!, PI_CODING_AGENT_DIR: join(root, 'agent'),
     // Deliberately invalid old control authorities must never be consulted.
     BYOK_PI_MCP_CONFIG_PATH: '/does/not/exist', BYOK_PI_PERMISSION_MODE: 'invalid' };
-  return { root, cwd, sealed, configPath, config, env, entry, digest:serialized.digest };
+  return { root, cwd, sealed, configPath, config, env, entry, command, digest:serialized.digest };
 }
 function evaluate(body: string) {
   const result = spawnSync(bun, ['--eval', `import * as host from ${JSON.stringify(host)}; ${body}`], {
@@ -69,12 +67,12 @@ describe('SDK ordinary Pi RPC entry', () => {
       for (const argv of [[], ['--config','relative','--mode','rpc'], ['--config','/x','--mode','rpc','--extension','/x'], ['--config','/x','--mode','rpc','--config','/y'], ['--config','/x','--mode','rpc','--thinking','bogus']]) {
         try { host.parsePiRpcHostArgs(['--config-digest='+'a'.repeat(64),...argv]); rejected.push(false); } catch { rejected.push(true); }
       }
-      for (const cfg of [{...base, version:1}, {...base, version:2}, {...base, cwd:'relative'}, {...base, extra:true}, {...base, policy:{mode:'auto'}}]) {
+      for (const cfg of [{...base, version:1}, {...base, version:3}, {...base, cwd:'relative'}, {...base, extra:true}, {...base, policy:{mode:'auto'}}, {...base, binding:{}}, {...base, descendantPlan:null}]) {
         try { host.parsePiRpcHostConfig(cfg); rejected.push(false); } catch { rejected.push(true); }
       }
       console.log(JSON.stringify(rejected));
     `);
-    expect(result).toEqual(Array(10).fill(true));
+    expect(result).toEqual(Array(12).fill(true));
   });
 
   it('resumes only an exact native session id and rejects a mismatched header cwd', () => {
@@ -191,9 +189,7 @@ describe('SDK ordinary Pi RPC entry', () => {
       ? { PI_CODING_AGENT_DIR: join(f.root, 'agent') }
       : { PI_CODING_AGENT_DIR: join(f.root, 'projection'), PI_CODING_AGENT_SESSION_DIR: join(f.root, 'key-sessions') };
     for (const dir of Object.values(dirs)) mkdirSync(dir, { recursive: true });
-    const serialized = serializePiHostConfig({ ...f.config, binding: { ...f.config.binding, cwd: f.cwd, envCommitments: dirs } });
-    writeFileSync(f.configPath, serialized.bytes);
-    const child = spawn(bun, [f.entry, `--config-digest=${serialized.digest}`, '--config', f.configPath, '--mode', 'rpc', '--provider', 'anthropic', '--model', 'claude-sonnet-4-5'], {
+    const child = spawn(bun, [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc', '--provider', 'anthropic', '--model', 'claude-sonnet-4-5'], {
       cwd: f.cwd, env: { ...f.env, ...dirs }, stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stderr = '';
@@ -228,9 +224,9 @@ describe('SDK ordinary Pi RPC entry', () => {
     }
   }, 25_000);
 
-  it.each(['cwd','binding'] as const)('rejects changed config %s bytes before creating a native session', (field) => {
+  it.each(['cwd','mcp'] as const)('rejects changed config %s bytes before creating a native session', (field) => {
     const f = fixture();
-    const changed = field==='cwd' ? {...f.config,cwd:f.cwd+'-changed'} : {...f.config,binding:{...f.config.binding,cwd:f.sealed+'-changed'}};
+    const changed = field==='cwd' ? {...f.config,cwd:f.cwd+'-changed'} : {...f.config,mcp:{...f.config.mcp,mcpEnv:{CHANGED:'1'}}};
     writeFileSync(f.configPath,JSON.stringify(changed));
     const result = spawnSync(bun,[f.entry,`--config-digest=${f.digest}`,'--config',f.configPath,'--mode','rpc'],
       {cwd:f.sealed,env:f.env,encoding:'utf8',timeout:15_000});
@@ -262,10 +258,10 @@ describe('SDK ordinary Pi RPC entry', () => {
       mcp: {
         mcpEnv: { BYOK_NATIVE_MESSAGE_RECEIPT: join(f.root, 'native-message-receipt.json') },
         mcpServers: { byokagentmessage: {
-          command: f.config.binding.command,
+          command: f.command,
           args: [resolve(import.meta.dirname, 'fixtures/native-agent-message-mcp.mjs')],
         } },
-        observation: {}, toolImplementations: {}, launchCwd: f.cwd,
+        observation: {}, launchCwd: f.cwd,
       },
     };
     const serialized = serializePiHostConfig(config);

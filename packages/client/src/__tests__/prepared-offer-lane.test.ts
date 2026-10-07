@@ -1,9 +1,8 @@
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import { TestServer } from './fixtures/test-server';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
-import * as preparationRuntime from '../adapters/pi/input-preparation-runtime';
-import * as implementationIdentity from '../daemon/tool-implementation-identity';
 import * as mcpProbe from '../daemon/mcp-tools-probe';
+import * as piInputPreparation from '../adapters/pi/input-preparation';
 import { mapPiMessageToAgentEvent } from '../adapters/pi/events';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { promises as fs } from 'node:fs';
@@ -35,13 +34,6 @@ import { admitPreparedOffer } from '../daemon/prepared-offer-admission';
 import { preparedMemoryProjection, type PreparedAgentMemoryState } from '../daemon/prepared-agent-memory';
 import * as preparedAgentMemory from '../daemon/prepared-agent-memory';
 import * as agentMemory from '../daemon/agent-memory';
-import {
-  realToolImplementationFsProbe,
-  resolveToolImplementationIdentity,
-  type ToolImplementationAuthority,
-  type ToolImplementationFsProbe,
-  type ToolImplementationIdentityV1,
-} from '../daemon/tool-implementation-identity';
 import { createInputPreparationService } from '../daemon/input-preparation-service';
 import {
   INPUT_PREPARATION_ARTIFACT_FORMAT,
@@ -56,7 +48,7 @@ import {
   type InputPreparationModelV1,
   type InputPreparationRuntimeIdentityV1,
 } from '../input-preparation';
-import type { McpToolsetConfig, RuntimeCapabilities, RuntimeInstallationObservationContext } from '../types';
+import type { McpToolsetConfig, RuntimeCapabilities } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { observationOf } from './fixtures/mcp-observation';
 import { validatePreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
@@ -69,8 +61,8 @@ import { AGENT_MEMORY_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
  * compute with.
  *
  * Nothing about the counted record is faked into agreement: the fixture below
- * builds it the way a preparation builds it — same resolved implementation
- * identity, same `fingerprintPreparedToolSurface`, same
+ * builds it the way a preparation builds it — same
+ * `fingerprintPreparedToolSurface`, same
  * `preparedToolBindingDigest` — and every mismatch case perturbs exactly ONE of
  * those inputs. A test that hard-coded the digests would pass forever after a
  * formula change, which is the one thing this lane cannot afford.
@@ -107,16 +99,6 @@ const REQUEST_ID = 'prep-request-1';
 const REQUEST_DIGEST = 'request-digest-1';
 const ENVELOPE_DIGEST = 'envelope-digest-1';
 
-/**
- * The environment `TaskRunner.handleOffer` builds for this task, recomputed
- * here with the same call (`daemon/task-runner.ts`'s own `buildRuntimeEnv`).
- *
- * It has to be the SAME value: an implementation identity binds the
- * environment the SDK measured it against, so a fixture that resolved against
- * a different one would recompute a different binding digest at admission and
- * every case below would decline for the fixture's reason instead of its own.
- */
-const LANE_ENV: Readonly<Record<string, string>> = Object.freeze(buildRuntimeEnv({ ambient: process.env }));
 const TOOL_MANIFEST_DIGEST = 'tool-manifest-digest-1';
 const POLICY_REVISION = 'limits-policy-r1';
 const TOOLSET_ID = 'team';
@@ -124,10 +106,6 @@ const SERVER_NAME = 'teamserver';
 const TOOLSET_REVISION = 'team-definition-r1';
 
 const MEMORY: PreparedAgentMemoryState = {
-  implementation: {
-    descriptor: { kind: 'attested', authority: 'host-install-record', manifestRevision: 'memory-descriptor', form: 'compiled-executable', installPath: '/memory-descriptor', closureDigest: '1'.repeat(64), closureKind: 'artifact', launchArgv: ['__byok_sdk_helper', 'agent-memory-describe'], launchCwd: '/', launchEnvNamesDigest: '2'.repeat(64), loaderEnvValuesDigest: '3'.repeat(64), installStat: { dev: 1, ino: 1, size: 1, mtimeMs: 1, mode: 0o100555, uid: 0, gid: 0 } } as never,
-    execution: { kind: 'attested', authority: 'host-install-record', manifestRevision: 'memory-execution', form: 'compiled-executable', installPath: '/memory-execution', closureDigest: '4'.repeat(64), closureKind: 'artifact', launchArgv: ['__byok_sdk_helper', 'agent-memory-mcp'], launchCwd: '/', launchEnvNamesDigest: '5'.repeat(64), loaderEnvValuesDigest: '6'.repeat(64), installStat: { dev: 1, ino: 2, size: 1, mtimeMs: 1, mode: 0o100555, uid: 0, gid: 0 } } as never,
-  },
   observation: validatePreparedAgentMemoryObservation({
     serverInfo: AGENT_MEMORY_MCP_SERVER_INFO,
     protocolVersion: '2025-03-26',
@@ -205,6 +183,13 @@ const MODEL: InputPreparationModelV1 = {
   maxTokens: 8_192,
 };
 
+/** The SDK memory helpers and an external secure-fs helper, as a memory-capable daemon configures them. */
+const MEMORY_BINS = {
+  agentMemoryFilesystemHelperBin: '/external/proved-agent-memory-helper',
+  agentMemoryMcpBin: { command: '/sdk/agent-memory-mcp', args: [] },
+  agentMemoryDescribeBin: { command: '/sdk/agent-memory-describe', args: [] },
+} as const;
+
 const dirs: string[] = [];
 
 async function tempDir(prefix: string): Promise<string> {
@@ -219,33 +204,13 @@ afterEach(async () => {
   ));
 });
 
-/**
- * The ownership seam the identity resolver requires, exactly as
- * `tool-implementation-spawn-gate.test.ts` uses it: only `uid`/`mode` are
- * overridden, so the digest, size and mtime under test are still read off a
- * real file. A non-root test process cannot create a root-owned file, and an
- * unattested identity can never produce a READY record.
- */
-function rootOwnedProbe(): ToolImplementationFsProbe {
-  return {
-    async lstat(target) {
-      const real = await realToolImplementationFsProbe.lstat(target);
-      return { ...real, uid: 0, mode: real.mode & ~0o222 };
-    },
-    realpath: (target) => realToolImplementationFsProbe.realpath(target),
-    digest: (target) => realToolImplementationFsProbe.digest(target),
-  };
-}
-
 interface Lane {
   readonly store: InputPreparationStore;
   /** The daemon store directory the record log lives under, so a restart can be reconstructed over it. */
   readonly storeDir: string;
   readonly recordId: string;
   readonly observation: ReturnType<typeof observationOf>;
-  readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
   readonly toolsets: ReadonlyMap<string, McpToolsetConfig>;
-  readonly authority: ToolImplementationAuthority;
   readonly serverCommand: string;
   readonly toolsetDefinitionRevisions: () => ReadonlyMap<string, string>;
 }
@@ -301,23 +266,6 @@ async function lane(options: {
 } = {}): Promise<Lane> {
   const serverCommand = path.join(await tempDir('byok-prepared-bin-'), 'teamserver');
   await fs.writeFile(serverCommand, '#!/bin/sh\nexec true\n');
-  const closureDigest = await realToolImplementationFsProbe.digest(serverCommand);
-  // An install RECORD: the stat tuples and the two launch-environment digests
-  // are deliberately absent, because those are the facts the SDK measures
-  // itself rather than accepting from a host.
-  const authority: ToolImplementationAuthority = {
-    resolve: async () => ({
-      kind: 'attested',
-      authority: 'host-install-record',
-      manifestRevision: 'team@2026.9.1',
-      form: 'compiled-executable',
-      installPath: serverCommand,
-      closureDigest,
-      closureKind: 'artifact',
-      launchArgv: ['--stdio'],
-      launchCwd: '/',
-    } as never),
-  };
 
   const toolsets: ReadonlyMap<string, McpToolsetConfig> = new Map([
     [TOOLSET_ID, { mcpServers: { [SERVER_NAME]: { command: serverCommand, args: ['--stdio'] } } }],
@@ -328,21 +276,6 @@ async function lane(options: {
   const toolsetDefinitionRevisions = (): ReadonlyMap<string, string> =>
     new Map([[TOOLSET_ID, revision]]);
 
-  // Resolved through the production resolver, with the production fs probe
-  // seam — the same call `TaskRunner.handleOffer` makes for this same server.
-  const implementation = await resolveToolImplementationIdentity(
-    authority,
-    {
-      subject: { kind: 'mcp-server', toolsetId: TOOLSET_ID, serverName: SERVER_NAME },
-      command: serverCommand,
-      args: ['--stdio'],
-    },
-    LANE_ENV,
-    rootOwnedProbe(),
-  );
-  expect(implementation.kind).toBe('attested');
-  const implementations = Object.freeze({ [SERVER_NAME]: implementation });
-
   const observation = observationOf({ [SERVER_NAME]: ['echo'] }, { toolsetId: TOOLSET_ID });
   const fingerprinted = await fingerprintPreparedToolSurface({
     agentMemory: 'none',
@@ -350,20 +283,17 @@ async function lane(options: {
     observation,
     runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
     toolsetDefinitionRevisions: { [TOOLSET_ID]: revision },
-    implementations,
   });
   if (!fingerprinted.ok) throw new Error(`fixture surface refused: ${fingerprinted.detail}: ${fingerprinted.message}`);
 
   const toolBindingDigest = preparedToolBindingDigest({
     agentMemory: 'none',
-    memoryImplementation: null,
     toolsetDefinitionRevisions: { [TOOLSET_ID]: revision },
     servers: [{
       serverName: SERVER_NAME,
       toolsetId: TOOLSET_ID,
       command: serverCommand,
       args: ['--stdio'],
-      implementation,
     }],
   });
 
@@ -380,7 +310,7 @@ async function lane(options: {
     residual: [...RESIDUAL],
     observationDigest: fingerprinted.fingerprint.observationDigest,
     toolBindingDigest,
-    toolImplementationKinds: fingerprinted.fingerprint.toolImplementationKinds,
+    toolNames: [...fingerprinted.fingerprint.toolNames],
     ...options.summaryOverrides,
   };
 
@@ -415,9 +345,7 @@ async function lane(options: {
     storeDir,
     recordId: reserved.record.recordId,
     observation,
-    implementations,
     toolsets,
-    authority,
     serverCommand,
     toolsetDefinitionRevisions,
   };
@@ -425,15 +353,6 @@ async function lane(options: {
 
 async function makeRunner(built: Lane, adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partial<TaskRunnerDeps> = {}): Promise<TaskRunner> {
   const storeDir = await tempDir('byok-prepared-runner-store-');
-  // This local fake models a configured complete runtime, not physical attestation.
-  if (adapter.descriptor.id === 'pi') Object.assign(adapter, {
-    detectInstallation: async (context: RuntimeInstallationObservationContext) => {
-      expect(Object.keys(context).sort()).toEqual(['authority', 'scope']);
-      expect(context.authority).toBe(Object.hasOwn(extra, 'toolImplementationAuthority') ? extra.toolImplementationAuthority : built.authority);
-      expect(context.scope).toBe('enabled-top-level');
-      return { kind: 'available' as const };
-    },
-  });
   return new TaskRunner({
     adapters: [adapter],
     workspaceRoot: await tempDir('byok-prepared-workspace-'),
@@ -448,8 +367,6 @@ async function makeRunner(built: Lane, adapter: StubRuntimeAdapter, sent: Envelo
     agentHome: new AgentHomeManager({ hostStorageRoot: await tempDir('byok-prepared-home-') }),
     agentSessionHandoffs: new AgentSessionHandoffStore(),
     getMcpToolsets: () => built.toolsets,
-    toolImplementationAuthority: built.authority,
-    toolImplementationFsProbe: rootOwnedProbe(),
     mcpToolsetToolsProbe: async (serverName) => built.observation[serverName]!,
     inputPreparationLane: {
       store: built.store,
@@ -516,7 +433,7 @@ async function memoryOnlyRecord(): Promise<{
   const fingerprinted = await fingerprintPreparedToolSurface({
     agentMemory: 'read', memory: MEMORY, observation: {},
     runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
-    toolsetDefinitionRevisions: {}, implementations: {},
+    toolsetDefinitionRevisions: {},
   });
   if (!fingerprinted.ok) throw new Error(fingerprinted.message);
   const reserved = await store.reserve({
@@ -529,10 +446,10 @@ async function memoryOnlyRecord(): Promise<{
     requestBytes: 33, projectionBytes: 19, projection: PROJECTION, residual: [...RESIDUAL],
     observationDigest: fingerprinted.fingerprint.observationDigest,
     toolBindingDigest: preparedToolBindingDigest({
-      agentMemory: 'read', memoryImplementation: MEMORY.implementation,
+      agentMemory: 'read',
       toolsetDefinitionRevisions: {}, servers: [],
     }),
-    toolImplementationKinds: memoryProjection.toolImplementationKinds,
+    toolNames: memoryProjection.tools.map((tool) => tool.name).sort(),
   };
   await store.commitCounterReservation({
     recordId: reserved.record.recordId, artifact: artifact(reserved.record.recordId), summary,
@@ -559,7 +476,7 @@ async function toollessRecord(options: {
   const fingerprinted = await fingerprintPreparedToolSurface({
     agentMemory: 'none', memory: null, observation: {},
     runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
-    toolsetDefinitionRevisions: {}, implementations: {},
+    toolsetDefinitionRevisions: {},
   });
   if (!fingerprinted.ok) throw new Error(fingerprinted.message);
   const reserved = await store.reserve({
@@ -572,10 +489,10 @@ async function toollessRecord(options: {
     requestBytes: 33, projectionBytes: 19, projection: PROJECTION, residual: [...RESIDUAL],
     observationDigest: options.counted?.observationDigest ?? fingerprinted.fingerprint.observationDigest,
     toolBindingDigest: options.counted?.toolBindingDigest ?? preparedToolBindingDigest({
-      agentMemory: 'none', memoryImplementation: null,
+      agentMemory: 'none',
       toolsetDefinitionRevisions: {}, servers: [],
     }),
-    toolImplementationKinds: fingerprinted.fingerprint.toolImplementationKinds,
+    toolNames: [...fingerprinted.fingerprint.toolNames],
   };
   await store.commitCounterReservation({
     recordId: reserved.record.recordId, artifact: artifact(reserved.record.recordId), summary,
@@ -661,7 +578,6 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     expect(Object.keys(start.input.mcpServers ?? {})).toEqual([]);
     expect(start.input.mcpToolsetTools).toBeUndefined();
     expect(start.preparation.agentMemory).toBe('none');
-    expect(start.preparation.toolImplementations).toEqual({});
     expect(start.preparation.toolsetDefinitionRevisions).toEqual({});
 
     const session = adapter.sessions[0]!;
@@ -725,7 +641,6 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
       profileRevision: AGENT_REF.profileRevision,
     });
     expect(launched).not.toHaveProperty('permissionMode');
-    expect(launched.toolImplementations).toEqual(built.implementations);
 
     await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-prepared-ok', seq: 2 }));
   });
@@ -741,7 +656,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     const fingerprinted = await fingerprintPreparedToolSurface({
       agentMemory: 'read', memory: MEMORY, observation: {},
       runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
-      toolsetDefinitionRevisions: {}, implementations: {},
+      toolsetDefinitionRevisions: {},
     });
     if (!fingerprinted.ok) throw new Error(fingerprinted.message);
     const reserved = await store.reserve({
@@ -757,10 +672,10 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
       requestBytes: 33, projectionBytes: 19, projection: PROJECTION, residual: [...RESIDUAL],
       observationDigest: fingerprinted.fingerprint.observationDigest,
       toolBindingDigest: preparedToolBindingDigest({
-        agentMemory: 'read', memoryImplementation: MEMORY.implementation,
+        agentMemory: 'read',
         toolsetDefinitionRevisions: {}, servers: [],
       }),
-      toolImplementationKinds: memoryProjection.toolImplementationKinds,
+      toolNames: memoryProjection.tools.map((tool) => tool.name).sort(),
     };
     await store.commitCounterReservation({
       recordId: reserved.record.recordId,
@@ -779,12 +694,11 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
       },
       agentRef: AGENT_REF, deviceId: DEVICE_ID, policyRevision: POLICY_REVISION, runtime: RUNTIME,
       offeredAgentMemory: 'read', memory: MEMORY,
-      observation: {}, implementations: {}, servers: [], toolsetDefinitionRevisions: {}, nowMs: Date.now(),
+      observation: {}, servers: [], toolsetDefinitionRevisions: {}, nowMs: Date.now(),
     });
     if (!admitted.ok) throw new Error(`${admitted.reason}: ${admitted.detail}`);
     expect(admitted.launch.agentMemory).toBe('read');
     expect(admitted.launch.memory).toBe(MEMORY);
-    expect(Object.keys(admitted.launch.toolImplementations)).toEqual([]);
   });
 
   it('pins and claims a memory-only record before minting its task context, and an occupied pin mints none', async () => {
@@ -793,10 +707,8 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
     const sent: Envelope[] = [];
     const observedEnvs: Readonly<Record<string, string>>[] = [];
-    const resolve = vi.spyOn(preparedAgentMemory, 'resolvePreparedMemoryImplementation')
-      .mockResolvedValue(MEMORY.implementation);
     const observe = vi.spyOn(preparedAgentMemory, 'observePreparedMemory')
-      .mockImplementation(async (_implementation, env) => {
+      .mockImplementation(async (_describe, env) => {
         observedEnvs.push(env);
         return MEMORY;
       });
@@ -811,7 +723,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     };
     try {
       runner = await makeRunner(support, adapter, sent, {
-        agentMemoryFilesystemHelperBin: '/external/proved-agent-memory-helper',
+        ...MEMORY_BINS,
         inputPreparationLane: preparationLane,
         beforeClaim: async () => {
           expect((runner as unknown as { memoryContextByToken: Map<string, unknown> }).memoryContextByToken.size).toBe(0);
@@ -843,7 +755,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
       const loserAdapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
       const loserSent: Envelope[] = [];
       const loser = await makeRunner(support, loserAdapter, loserSent, {
-        agentMemoryFilesystemHelperBin: '/external/proved-agent-memory-helper',
+        ...MEMORY_BINS,
         inputPreparationLane: preparationLane,
       });
       await loser.handleEnvelope(offer('task-memory-only-loser', 2));
@@ -852,7 +764,6 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
       expect((loser as unknown as { memoryContextByToken: Map<string, unknown> }).memoryContextByToken.size).toBe(0);
       await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-memory-only-winner', seq: 3 }));
     } finally {
-      resolve.mockRestore();
       observe.mockRestore();
     }
   });
@@ -1264,35 +1175,14 @@ describe('every compared item declines by its own name, with no claim and no pin
       build: async () => {
         const built = await lane({
           summaryOverrides: {
-            toolImplementationKinds: { [`mcp__${SERVER_NAME}__echo`]: 'attested', [`mcp__${SERVER_NAME}__vanished`]: 'attested' },
+            toolNames: [`mcp__${SERVER_NAME}__echo`, `mcp__${SERVER_NAME}__vanished`],
           },
         });
         return { built, offered: reference(built) };
       },
     },
     {
-      // This item can only drift on the LIVE side, and that is a fact about the
-      // contract rather than a limitation of the fixture: a record whose counted
-      // kind is anything but `attested` is already unready, so readiness answers
-      // first. The real case is a server whose implementation WAS attested when
-      // it was counted and cannot be attested now — a replaced binary, a
-      // resolver that no longer answers — which is exactly what a host authority
-      // that throws produces.
-      name: 'a counted tool whose implementation can no longer be attested',
-      reason: 'preparation_tool_implementation_kinds_mismatch',
-      build: async () => {
-        const built = await lane();
-        return {
-          built,
-          offered: reference(built),
-          runnerOverrides: {
-            toolImplementationAuthority: { resolve: async () => { throw new Error('the install record is gone'); } },
-          },
-        };
-      },
-    },
-    {
-      name: 'a definition revision, argv or identity the record did not bind',
+      name: 'a definition revision or argv the record did not bind',
       reason: 'preparation_tool_binding_digest_mismatch',
       build: async () => {
         const built = await lane({ summaryOverrides: { toolBindingDigest: 'e'.repeat(64) } });
@@ -1378,7 +1268,7 @@ describe('every compared item declines by its own name, with no claim and no pin
 describe('prepared Agent memory admission declines with its exact typed reason', () => {
   /** Every mode the policy cases need, so an earlier capability gate cannot answer for them. */
   const ALL_MODES: RuntimeCapabilities = { ...MCP_CAPABLE };
-  const MEMORY_HELPER = { agentMemoryFilesystemHelperBin: '/external/proved-agent-memory-helper' } as const;
+  const MEMORY_HELPER = MEMORY_BINS;
 
   function nothingCommitted(sent: readonly Envelope[], adapter: StubRuntimeAdapter, runner: TaskRunner): void {
     expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(0);
@@ -1462,25 +1352,21 @@ describe('prepared Agent memory admission declines with its exact typed reason',
     // alone does not make the platform unavailable on every OS: force the
     // single platform gate closed instead.
     const available = vi.spyOn(agentMemory, 'isAgentMemorySecureFilesystemAvailable').mockReturnValue(false);
-    const resolve = vi.spyOn(preparedAgentMemory, 'resolvePreparedMemoryImplementation');
     const observe = vi.spyOn(preparedAgentMemory, 'observePreparedMemory');
     try {
       const fixture = await memoryOnlyRunner();
       await fixture.runner.handleEnvelope(fixture.offer('task-memory-unavailable'));
       expect(declineReason(fixture.sent)).toBe('unsupported_input: agent_memory_unavailable');
       expect(available).toHaveBeenCalled();
-      expect(resolve).not.toHaveBeenCalled();
       expect(observe).not.toHaveBeenCalled();
       nothingCommitted(fixture.sent, fixture.adapter, fixture.runner);
     } finally {
       available.mockRestore();
-      resolve.mockRestore();
       observe.mockRestore();
     }
   });
 
   it('declines a failed descriptor probe as toolsets_unobservable: agent_memory_descriptor_unobservable, never echoing transport text', async () => {
-    const resolve = vi.spyOn(preparedAgentMemory, 'resolvePreparedMemoryImplementation').mockResolvedValue(MEMORY.implementation);
     const observe = vi.spyOn(preparedAgentMemory, 'observePreparedMemory')
       .mockRejectedValue(new Error('MCP server exited before the exchange completed: /private/secret/path'));
     try {
@@ -1490,18 +1376,13 @@ describe('prepared Agent memory admission declines with its exact typed reason',
       expect(fixture.memoryRecord.store.get(fixture.memoryRecord.recordId)?.pin).toBeUndefined();
       nothingCommitted(fixture.sent, fixture.adapter, fixture.runner);
     } finally {
-      resolve.mockRestore();
       observe.mockRestore();
     }
   });
 
   it.each([
-    ['the execution helper identity', { ...MEMORY, implementation: { ...MEMORY.implementation, execution: { ...MEMORY.implementation.execution, closureDigest: '7'.repeat(64) } } }, 'preparation_tool_binding_digest_mismatch'],
-    ['the descriptor helper identity', { ...MEMORY, implementation: { ...MEMORY.implementation, descriptor: { ...MEMORY.implementation.descriptor, closureDigest: '8'.repeat(64) } } }, 'preparation_tool_binding_digest_mismatch'],
     ['the observed descriptor', { ...MEMORY, observation: { ...MEMORY.observation, protocolVersion: '2025-06-18' } }, 'preparation_observation_digest_mismatch'],
   ] as const)('declines drift in %s at offer admission before pin, with no claim and no token', async (_label, drifted, reason) => {
-    const resolve = vi.spyOn(preparedAgentMemory, 'resolvePreparedMemoryImplementation')
-      .mockResolvedValue(drifted.implementation as PreparedAgentMemoryState['implementation']);
     const observe = vi.spyOn(preparedAgentMemory, 'observePreparedMemory').mockResolvedValue(drifted as PreparedAgentMemoryState);
     try {
       const fixture = await memoryOnlyRunner();
@@ -1510,13 +1391,11 @@ describe('prepared Agent memory admission declines with its exact typed reason',
       expect(fixture.memoryRecord.store.get(fixture.memoryRecord.recordId)?.pin).toBeUndefined();
       nothingCommitted(fixture.sent, fixture.adapter, fixture.runner);
     } finally {
-      resolve.mockRestore();
       observe.mockRestore();
     }
   });
 
   it('revokes the minted memory token and emits one truthful task.fail when the post-claim launch fails', async () => {
-    const resolve = vi.spyOn(preparedAgentMemory, 'resolvePreparedMemoryImplementation').mockResolvedValue(MEMORY.implementation);
     const observe = vi.spyOn(preparedAgentMemory, 'observePreparedMemory').mockResolvedValue(MEMORY);
     try {
       const fixture = await memoryOnlyRunner();
@@ -1538,15 +1417,13 @@ describe('prepared Agent memory admission declines with its exact typed reason',
       expect(fixture.sent.some((envelope) => envelope.type === 'task.complete')).toBe(false);
       await vi.waitFor(() => expect(fixture.memoryRecord.store.get(fixture.memoryRecord.recordId)?.pin).toBeUndefined());
     } finally {
-      resolve.mockRestore();
       observe.mockRestore();
     }
   });
 
   it('turns a post-claim memory binding failure into a truthful task.fail instead of a raw throw', async () => {
-    const resolve = vi.spyOn(preparedAgentMemory, 'resolvePreparedMemoryImplementation').mockResolvedValue(MEMORY.implementation);
     const observe = vi.spyOn(preparedAgentMemory, 'observePreparedMemory').mockResolvedValue(MEMORY);
-    const bind = vi.spyOn(preparedAgentMemory, 'memorySpawnBinding').mockImplementation(() => {
+    const bind = vi.spyOn(TaskRunner.prototype as unknown as { withAgentMemoryMcp: () => never }, 'withAgentMemoryMcp').mockImplementation(() => {
       throw new Error('agent_memory_launch_invalid');
     });
     try {
@@ -1565,7 +1442,6 @@ describe('prepared Agent memory admission declines with its exact typed reason',
       expect((fixture.runner as unknown as { memoryContextByToken: Map<string, unknown> }).memoryContextByToken.size).toBe(0);
       await vi.waitFor(() => expect(fixture.memoryRecord.store.get(fixture.memoryRecord.recordId)?.pin).toBeUndefined());
     } finally {
-      resolve.mockRestore();
       observe.mockRestore();
       bind.mockRestore();
     }
@@ -1780,12 +1656,11 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
       offered: { reference: record.recordId, requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST },
       agentRef: AGENT_REF, deviceId: DEVICE_ID, policyRevision: POLICY_REVISION, runtime: RUNTIME,
       offeredAgentMemory: 'none', memory: null,
-      observation: {}, implementations: {}, servers: [], toolsetDefinitionRevisions: {}, nowMs: Date.now(),
+      observation: {}, servers: [], toolsetDefinitionRevisions: {}, nowMs: Date.now(),
     });
     if (!admitted.ok) throw new Error(`${admitted.reason}: ${admitted.detail}`);
     expect(admitted.launch.agentMemory).toBe('none');
     expect(admitted.launch.memory).toBeNull();
-    expect(Object.keys(admitted.launch.toolImplementations)).toEqual([]);
     expect(admitted.launch.toolsetDefinitionRevisions).toEqual({});
     // Admission recomputed both digests from live facts and matched the producer's.
     expect(admitted.launch.toolBindingDigest).toBe(counted.surface.toolBindingDigest);
@@ -1801,7 +1676,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
       offered: reference(built),
       agentRef: AGENT_REF, deviceId: DEVICE_ID, policyRevision: POLICY_REVISION, runtime: RUNTIME,
       offeredAgentMemory: 'none', memory: null,
-      observation: undefined, implementations: built.implementations,
+      observation: undefined,
       servers: [{ serverName: SERVER_NAME, toolsetId: TOOLSET_ID, command: built.serverCommand, args: ['--stdio'] }],
       toolsetDefinitionRevisions: { [TOOLSET_ID]: TOOLSET_REVISION }, nowMs: Date.now(),
     });
@@ -1903,17 +1778,14 @@ function declineReasonOrNone(sent: readonly Envelope[]): string | undefined {
 
 
 it('the real daemon sends prepared Agent egress to the Host as the runtime produced it', async () => {
-  // Synthetic preparation authority only: reuse the durable ready record and
-  // its measured tool identity. Runner, daemon routing and transport all
-  // execute normally; this is not a physical installation attestation test.
+  // Synthetic preparation authority only: reuse the durable ready record.
+  // Runner, daemon routing and transport all execute normally.
   const built = await lane({ registryRevision: true, bindingOverrides: { deviceId: 'device-1' } });
   const server = await TestServer.start();
   const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
-  Object.assign(adapter, { detectInstallation: async () => ({ kind: 'available' }) });
-  vi.spyOn(preparationRuntime, 'resolvePiInputPreparationCompiler').mockResolvedValue({
+  vi.spyOn(piInputPreparation, 'createPiInputPreparationCompiler').mockReturnValue({
     runtime: RUNTIME, compile: async () => { throw new Error('fixture is already prepared'); },
-  });
-  vi.spyOn(implementationIdentity, 'resolveToolImplementationIdentity').mockImplementation(async () => built.implementations[SERVER_NAME]!);
+  } as never);
   vi.spyOn(mcpProbe, 'probeMcpServer').mockImplementation(async () => built.observation[SERVER_NAME]!);
   const daemon = createDaemonWithAdapters({
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Prepared egress', productId: 'prepared-egress-transport',

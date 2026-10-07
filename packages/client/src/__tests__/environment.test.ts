@@ -214,7 +214,7 @@ describe('buildRuntimeEnv', () => {
     expect(buildRuntimeEnv({ ambient: env, platform: 'darwin' })).toEqual(env);
   });
 
-  it('drops CLAUDECODE, every BYOK_* name and the loader injection names', () => {
+  it('drops CLAUDECODE and every BYOK_* name and keeps the loader names', () => {
     const result = buildRuntimeEnv({
       ambient: ambient({
         PATH: '/usr/bin',
@@ -227,7 +227,12 @@ describe('buildRuntimeEnv', () => {
       }),
       platform: 'linux',
     });
-    expect(result).toEqual({ PATH: '/usr/bin' });
+    expect(result).toEqual({
+      PATH: '/usr/bin',
+      NODE_OPTIONS: '--require /tmp/x.js',
+      LD_PRELOAD: '/tmp/x.so',
+      DYLD_INSERT_LIBRARIES: '/tmp/x.dylib',
+    });
   });
 
   it('F1: drops mixed-case CLAUDECODE and BYOK_* names on win32 and keeps OS-cased names', () => {

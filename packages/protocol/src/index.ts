@@ -211,7 +211,6 @@ export {
   InputPreparationResidualValueClassSchema,
   InputPreparationResidualKeySchema,
   InputPreparationProjectionSchema,
-  InputPreparationToolImplementationKindSchema,
   InputPreparationArtifactSummarySchema,
   InputPreparationBindingSchema,
   InputPreparationReceiptSummarySchema,

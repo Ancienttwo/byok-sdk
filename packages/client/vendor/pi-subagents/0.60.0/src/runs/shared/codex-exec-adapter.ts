@@ -2,7 +2,6 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseExternalCliJsonlEvent, type ExternalCliParser, type ExternalCliParserProgress, type ExternalCliParserTerminal } from "./external-cli-runner.ts";
 import type { ExternalCliPreflightSpec } from "./external-cli-preflight.ts";
-import { OFFICIAL_CODEX_RESTRICTIONS } from "../../../../../../src/custody/external-cli-custody.ts";
 
 const MAX_FINAL_MESSAGE_BYTES = 1024 * 1024;
 const MAX_EVENT_TYPE_LENGTH = 128;
@@ -14,6 +13,8 @@ export const CODEX_EXEC_ENV_ALLOWLIST = [
 	"HOME",
 	"USERPROFILE",
 	"CODEX_HOME",
+	"CODEX_API_KEY",
+	"OPENAI_API_KEY",
 	"HTTP_PROXY",
 	"HTTPS_PROXY",
 	"NO_PROXY",
@@ -91,6 +92,7 @@ export function resolveCodexExecLaunch(input: {
 } {
 	const writer = input.adapter === CODEX_EXEC_WRITER_ADAPTER_ID;
 	const finalMessagePath = path.join(input.asyncDir, `external-${input.stepIndex}.final-message.txt`);
+	fs.rmSync(finalMessagePath, { force: true });
 	const prefix = [...(input.commandPrefixArgs ?? [])];
 	const args = [
 		...prefix,
@@ -102,7 +104,7 @@ export function resolveCodexExecLaunch(input: {
 		"--ignore-rules",
 		"--skip-git-repo-check",
 		"-s", writer ? "workspace-write" : "read-only",
-		...OFFICIAL_CODEX_RESTRICTIONS.flatMap(value => ["-c", value]),
+		"-c", 'approval_policy="never"',
 		"--output-last-message", finalMessagePath,
 		"-",
 	];

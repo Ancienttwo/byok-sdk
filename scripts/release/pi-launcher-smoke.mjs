@@ -163,7 +163,6 @@ createInterface({ input: process.stdin }).on('line', line => {
         }],
       },
     },
-    toolImplementations: {},
     // The extension refuses to open any server without it. It is the session
     // cwd, as in OAR.
     launchCwd: dir,
@@ -301,7 +300,7 @@ await runtime.dispose();
   try {
     {
       await assert.rejects(captureDirect,/pi runtime process could not be spawned/);
-      assert.equal(directInvocation.command,directRuntime.binding.command);
+      assert.equal(directInvocation.command,directRuntime.command);
       assert.deepEqual(directInvocation.args.slice(0,1),[sdkPiEntry]);
       assert.equal(directInvocation.options.cwd,dir);
       assert.equal(directInvocation.options.shell,undefined);
@@ -423,14 +422,11 @@ await runtime.dispose();
       await assert.rejects(keysPrepared.operation.start({kind:'instruction',mcpEnv:mcpTaskConfig.mcpEnv,manifest,instruction:'Never sent',env:keysRuntime.env,runtimeLaunch:keysRuntime,
         mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation}),/pi runtime process could not be spawned/);
       const option=(name)=>keysInvocation.args[keysInvocation.args.indexOf(name)+1];
-      assert.deepEqual(JSON.parse(option('--launch-binding')),keysRuntime.binding);
       assert.equal(option('--pi-cwd'),dir);
-      assert.deepEqual(JSON.parse(option('--pi-fixed-args')),keysRuntime.binding.fixedArgv);
+      assert.equal(option('--pi-projection-dir'),keysRuntime.projectionDir);
       assert.equal(option('--pi-entry'),sdkPiEntry);
       assert.equal(keysInvocation.options.cwd,dir);
       assert.equal(keysInvocation.options.env.ZAI_API_KEY,undefined);
-      assert.equal(keysInvocation.options.env.UNRELATED_CANARY,undefined);
-      assert.equal(keysInvocation.options.env.BYOK_PI_MCP_CONFIG_PATH,undefined);
       const configPath=option('--config');
       await mkdir(path.dirname(configPath),{recursive:true}); await writeFile(configPath,keysConfigBytes);
       await rm(reservedServerCwdMarker,{force:true});

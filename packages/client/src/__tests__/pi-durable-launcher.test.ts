@@ -50,9 +50,9 @@ async function fixture(respond: (res: import('node:http').ServerResponse, ordina
     spawnFn: ((_cmd, args, options) => {
       const parsed = parsePiProviderLauncherOptions(args as string[]); expect(parsed.runtimeEntry).toBe('pi-durable');
       const delegated = buildPiPreparedArgs(parsed.piArgs);
-      const env = buildPiProviderChildEnvironment({ ambient: options!.env!, binding: parsed.launchBinding!, sessionDir: parsed.sessionDir, secret: undefined });
+      const env = buildPiProviderChildEnvironment({ ambient: options!.env!, projectionDir: parsed.piProjectionDir!, sessionDir: parsed.sessionDir, secret: undefined });
       writeFileSync(path.join(env.PI_CODING_AGENT_DIR!, 'models.json'), JSON.stringify(buildPiProviderProjection(profile, parsed.runtimeEntry)), { mode: 0o600 });
-      const child = nativeSpawn(parsed.piBin, [...(parsed.piEntry ? [parsed.piEntry] : []), ...parsed.piFixedArgs!, `--config-digest=${parsed.piConfigDigest}`, ...delegated], { ...options, env, cwd: parsed.piCwd!, stdio: ['pipe','pipe','pipe','ipc'], serialization: 'json' } as never);
+      const child = nativeSpawn(parsed.piBin, [...(parsed.piEntry ? [parsed.piEntry] : []), `--config-digest=${parsed.piConfigDigest}`, ...delegated], { ...options, env, cwd: parsed.piCwd!, stdio: ['pipe','pipe','pipe','ipc'], serialization: 'json' } as never);
       expect(env.PI_PROVIDER_API_KEY).toBeUndefined();
       expect(JSON.stringify(env)).not.toContain('DURABLE_PROVIDER_SENTINEL');
       child.once('message', value => {
@@ -100,16 +100,28 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     expect(f.bodies.join('')).not.toContain('DURABLE_PROVIDER_SENTINEL');
     expect(f.journal).toEqual(['tool-intent:0', 'tool-committed:0']);
   });
-  it.each(['read','write','edit'])('real %s rejects an @ outside path before file access', async name => {
+  // The SDK adds no workspace containment: a structured file tool reaches a
+  // path outside the workspace, as the local agent itself would.
+  it.each(['read','write','edit'])('real %s reaches an @ path outside the workspace', async name => {
     const dir = await mkdtemp(path.join(os.tmpdir(),'byok-path-outside-')); roots.push(dir);
-    const outside = path.join(dir,'outside.txt'); await writeFile(outside,'ORIGINAL_DENIED_DATA\nPRIVATE_FILE_ONLY_MARKER');
-    const f = await fixture((res,n) => { if (n === 1) tool(res,`@${outside}`,name); else finish(res,'denied'); });
+    const outside = path.join(dir,'outside.txt'); await writeFile(outside,'ORIGINAL_DENIED_DATA\nOUTSIDE_FILE_MARKER');
+    const f = await fixture((res,n) => { if (n === 1) tool(res,`@${outside}`,name); else finish(res,'reached'); });
     const events:AgentEvent[] = []; for await (const event of f.session.events) events.push(event);
     const result = events.find(event => event.type === 'tool_result');
     expect(result?.type).toBe('tool_result'); if (result?.type !== 'tool_result') throw new Error('result missing');
-    expect(result.isError).toBe(true); expect(JSON.stringify(result.output)).toContain('structured tool path');
-    expect(await readFile(outside,'utf8')).toBe('ORIGINAL_DENIED_DATA\nPRIVATE_FILE_ONLY_MARKER');
-    expect(f.bodies.join('')).not.toContain('PRIVATE_FILE_ONLY_MARKER');
+    expect(result.isError).toBe(false);
+    if (name === 'read') expect(JSON.stringify(result.output)).toContain('OUTSIDE_FILE_MARKER');
+    else expect(await readFile(outside,'utf8')).toContain('CHANGED');
+  });
+  // The durable replica store stays private to the SDK.
+  it.each(['read','write','edit'])('real %s rejects a path inside the durable replica store before file access', async name => {
+    let target = '';
+    const f = await fixture((res,n,_body,paths) => { target = path.join(paths.store,'durable','probe.txt'); if (n === 1) tool(res,target,name); else finish(res,'denied'); });
+    const events:AgentEvent[] = []; for await (const event of f.session.events) events.push(event);
+    const result = events.find(event => event.type === 'tool_result');
+    expect(result?.type).toBe('tool_result'); if (result?.type !== 'tool_result') throw new Error('result missing');
+    expect(result.isError).toBe(true); expect(JSON.stringify(result.output)).toContain('structured tool path inside replica store');
+    await expect(readFile(target,'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
   it('credential never enters the real worker initial environment, including OS process introspection from bash', async () => {
     const command = process.platform === 'darwin' ? 'ps eww -p "$PPID"' : process.platform === 'linux' ? 'cat /proc/$PPID/environ' : 'env';
@@ -185,7 +197,7 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     let home='';let intents=0;
     const f=await fixture((res,n,_body,paths)=>{home=paths.home;if(n!==1){finish(res,'denied');return;}
       const base={id:'race',object:'chat.completion.chunk',created:0,model:'test'};
-      const calls=[{name:'bash',args:{command:`sleep 0.1; ln -s ${JSON.stringify(paths.store)} race-link; printf ready > race-ready`}},{name:'write',args:{path:'race-link/forbidden.txt',content:'RACE_WRITE'}}];
+      const calls=[{name:'bash',args:{command:`sleep 0.1; ln -s ${JSON.stringify(path.join(paths.store,"durable"))} race-link; printf ready > race-ready`}},{name:'write',args:{path:'race-link/forbidden.txt',content:'RACE_WRITE'}}];
       res.writeHead(200,{'content-type':'text/event-stream'});res.end([{...base,choices:[{index:0,delta:{role:'assistant',tool_calls:calls.map((call,index)=>({index,id:`race-${index}`,type:'function',function:{name:call.name,arguments:JSON.stringify(call.args)}}))},finish_reason:null}]},{...base,choices:[{index:0,delta:{},finish_reason:'tool_calls'}],usage:{prompt_tokens:3,completion_tokens:2,total_tokens:5}}].map(value=>`data: ${JSON.stringify(value)}\n\n`).join('')+'data: [DONE]\n\n');
     },{record:async kind=>{if(kind==='tool-intent'&&++intents===2)await vi.waitFor(async()=>expect(await readFile(path.join(home,'race-ready'),'utf8')).toBe('ready'),{timeout:4_000,interval:20});}});
     const events:AgentEvent[]=[];for await(const event of f.session.events)events.push(event);

@@ -16,6 +16,49 @@
 
 ## Unreleased
 
+- **Breaking (protocol, client, keys)** — remove the attestation stack. The SDK
+  no longer attests tool or runtime executables. Pi starts from the installed
+  SDK package, or re-enters a single-file product through `sdkHelperHost`.
+  Plan: `plans/plan-20261007-1340-minimal-guardrails.md` (slice 5, D6, D7).
+  - Remove the `@byok-sdk/implementation-identity` package. No later train
+    publishes it.
+  - Remove `DaemonConfig.toolImplementationAuthority`. `createDaemon` throws
+    when it is set.
+  - Client: remove the tool implementation identity exports (including the
+    `@byok-sdk/implementation-identity` re-export,
+    `ToolImplementationReverifyError`, `decideRuntimeLaunch`,
+    `deriveRuntimeLaunchDescription` and `RUNTIME_LAUNCH_KINDS`), the runtime
+    descendant plan, `RuntimeAdapter.detectInstallation`,
+    `RuntimeInstallationObservationContext`,
+    `RuntimePreparedLaunchV1.toolImplementations` and
+    `RuntimeOperationStartBase.mcpToolImplementations`.
+    `RuntimeDetectionRefusalReason` is now `app_server_unavailable` only.
+  - Remove the custody dispatcher and the external-CLI custody. Pi subagents
+    re-enter the SDK bundle through the helper host
+    (`pi-subagent-print`, `pi-subagent-runner`). The vendored subagents
+    extension keeps its own depth and concurrency limits.
+  - Remove the loader environment deny (`LOADER_ENV_DENY_PATTERNS`) and the
+    `descendant_loader_env_forbidden` refusal. `buildRuntimeEnv` removes only
+    `CLAUDECODE` and `BYOK_*`.
+  - Durable Pi lane: remove the workspace containment of the structured file
+    tools. The guard still denies the durable replica store and a `BYOK_*`
+    bash assignment.
+  - Prepared lane: keep the lane and remove its attestation bindings. The
+    artifact `toolImplementationKinds` becomes `toolNames`, and the readiness
+    reason `executor_identity_unproven` is removed. The unreleased wire
+    version 9 and protocol v2 are amended in place. The local record moves to
+    version 10, the Pi host configs to rpc 4, prepared 5 and durable 2. The
+    prepared Agent memory helpers are not attested.
+  - keys: the Pi launcher drops `--launch-binding` and takes
+    `--pi-projection-dir`. `--pi-fixed-args` is now only the single-file
+    re-entry prefix. `buildPiProviderChildEnvironment` takes `projectionDir`
+    and keeps an ambient `PI_PACKAGE_DIR`.
+  - Single-file products: `PiAdapter` takes `sdkHelperHost`, and
+    `createDaemon` passes `DaemonConfig.sdkHelperHost` to it. Every Pi lane
+    (rpc, prepared, durable, keys) re-enters the product executable with
+    `__byok_sdk_helper <pi-rpc|pi-prepared|pi-durable>`. Pi assets come from
+    `PI_PACKAGE_DIR`. The prepared runtime identity is the SDK pin.
+
 - **Breaking (protocol, client, implementation-identity)** — remove the
   trusted MCP launch cwd and the MCP launcher wrapper. The runtime and its MCP
   servers start in the session cwd (the workspace or the Agent home), as in

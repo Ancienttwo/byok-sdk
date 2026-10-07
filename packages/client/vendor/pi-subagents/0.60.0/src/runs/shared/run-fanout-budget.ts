@@ -211,7 +211,7 @@ function claimCount(directory: string): number {
 	catch (error) {
 		throw new Error(`Run fan-out claims directory is unreadable at '${claimsDir}': ${error instanceof Error ? error.message : String(error)}`);
 	}
-	return entries.filter((entry) => /^\d{6,}\.json$/.test(entry.name)).length;
+	return entries.filter((entry) => /^\d{6}\.json$/.test(entry.name)).length;
 }
 
 export function getRunFanoutBudgetSnapshot(descriptor: RunFanoutBudgetDescriptor): RunFanoutBudgetSnapshot {
@@ -227,6 +227,7 @@ function qualifyRunFanoutPaths(descriptor: RunFanoutBudgetDescriptor, paths: str
 
 function commitRunFanoutBatch<T>(descriptor: RunFanoutBudgetDescriptor, paths: string[], commit: (snapshot: RunFanoutBudgetSnapshot) => T): T {
 	const valid = validateRunFanoutBudgetDescriptor(descriptor);
+	if (paths.length === 0) return commit(getRunFanoutBudgetSnapshot(valid));
 	const qualified = qualifyRunFanoutPaths(valid, paths);
 	return withAdmissionLock(valid.directory, () => {
 		const before = getRunFanoutBudgetSnapshot(valid);

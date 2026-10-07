@@ -102,14 +102,15 @@ export async function runSdkReservedHelper(kind: SdkReservedHelperKind, argv: re
     throw new Error('SDK-reserved MCP helpers do not accept arguments');
   }
   switch (kind) {
+    // The reserved helper is the single-file re-entry, which bundles Pi.
     case 'pi-rpc':
-      await (await import('#byok-pi-runtime-host')).runPiRpcHost(argv);
+      await (await import('#byok-pi-runtime-host')).runPiRpcHost(argv, 'bundled');
       return;
     case 'pi-durable':
       await (await import('#byok-pi-runtime-host')).runPiDurableHost(argv);
       return;
     case 'pi-prepared':
-      await (await import('#byok-pi-runtime-host')).runPiPreparedHost(argv);
+      await (await import('#byok-pi-runtime-host')).runPiPreparedHost(argv, 'bundled');
       return;
     case 'mcp-env':
       await runMcpEnvLauncher();

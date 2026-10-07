@@ -84,7 +84,6 @@
     "@earendil-works/pi-coding-agent": "1.0.4",
     "@modelcontextprotocol/client": "2.0.0",
     "pi-web-access": "0.24.1",
-    "@byok-sdk/implementation-identity": "workspace:*",
     "@mozilla/readability": "0.6.0",
     "linkedom": "0.16.11",
     "p-limit": "6.2.0",

@@ -26421,17 +26421,13 @@
                       "maxLength": 512,
                       "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
-                    "toolImplementationKinds": {
-                      "type": "object",
-                      "propertyNames": {
+                    "toolNames": {
+                      "type": "array",
+                      "items": {
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 512,
                         "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-                      },
-                      "additionalProperties": {
-                        "type": "string",
-                        "pattern": "^(?:attested|unavailable:[a-z_]{1,64})$"
                       }
                     }
                   },
@@ -26445,7 +26441,7 @@
                     "residual",
                     "observationDigest",
                     "toolBindingDigest",
-                    "toolImplementationKinds"
+                    "toolNames"
                   ],
                   "additionalProperties": false
                 },
@@ -26621,7 +26617,6 @@
                       "residual_not_ruled",
                       "accounting_policy_missing",
                       "accounting_policy_inapplicable",
-                      "executor_identity_unproven",
                       "runtime_contract_superseded"
                     ]
                   }
@@ -27181,17 +27176,13 @@
                   "maxLength": 512,
                   "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
-                "toolImplementationKinds": {
-                  "type": "object",
-                  "propertyNames": {
+                "toolNames": {
+                  "type": "array",
+                  "items": {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 512,
                     "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-                  },
-                  "additionalProperties": {
-                    "type": "string",
-                    "pattern": "^(?:attested|unavailable:[a-z_]{1,64})$"
                   }
                 }
               },
@@ -27205,7 +27196,7 @@
                 "residual",
                 "observationDigest",
                 "toolBindingDigest",
-                "toolImplementationKinds"
+                "toolNames"
               ],
               "additionalProperties": false
             },
@@ -27381,7 +27372,6 @@
                   "residual_not_ruled",
                   "accounting_policy_missing",
                   "accounting_policy_inapplicable",
-                  "executor_identity_unproven",
                   "runtime_contract_superseded"
                 ]
               }

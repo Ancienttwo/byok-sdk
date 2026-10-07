@@ -30,13 +30,6 @@ export interface PreparedAgentMemorySelectedTool {
   readonly parameters: Readonly<Record<string, unknown>>;
 }
 
-export interface PreparedAgentMemoryImplementationDigests {
-  /** Attested descriptor-helper identity; never supplied by a Host request. */
-  readonly descriptor: string;
-  /** Attested execution-helper identity; never supplied by a Host request. */
-  readonly execution: string;
-}
-
 export function parsePreparedAgentMemoryMode(value: unknown): PreparedAgentMemoryMode {
   if (!PreparedAgentMemoryModeSchema.safeParse(value).success) throw new Error('prepared Agent memory mode must be none, read, or read-write');
   return value as PreparedAgentMemoryMode;
@@ -94,21 +87,17 @@ export function preparedAgentMemoryDescriptorDigest(observation: PreparedAgentMe
   return digest({ v: 1, serverInfo: observation.serverInfo, protocolVersion: observation.protocolVersion, tools: observation.tools });
 }
 
-/** Per-tool executor fingerprints bind the complete descriptor, selected mode, both attested helper identities, and runtime identity. */
+/** Per-tool executor fingerprints bind the complete descriptor, the selected mode and the runtime identity. */
 export function preparedAgentMemoryExecutorFingerprints(
   observation: PreparedAgentMemoryObservation,
   mode: PreparedAgentMemoryMode,
-  implementation: PreparedAgentMemoryImplementationDigests,
   runtimeIdentity: string,
 ): readonly string[] {
   parsePreparedAgentMemoryMode(mode);
-  if (implementation.descriptor.length === 0 || implementation.execution.length === 0 || runtimeIdentity.length === 0) {
-    throw new Error('prepared Agent memory executor identity is invalid');
-  }
+  if (runtimeIdentity.length === 0) throw new Error('prepared Agent memory executor identity is invalid');
   const descriptorDigest = preparedAgentMemoryDescriptorDigest(observation);
   return Object.freeze(preparedAgentMemoryTools(mode, observation).map((tool) => digest({
-    v: 1, mode, descriptorDigest, descriptorIdentity: implementation.descriptor,
-    executionIdentity: implementation.execution, runtimeIdentity, tool,
+    v: 2, mode, descriptorDigest, runtimeIdentity, tool,
   })));
 }
 

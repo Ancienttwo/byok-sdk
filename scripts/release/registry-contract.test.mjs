@@ -84,8 +84,8 @@ function mutateResponse(fixture, selector, change) {
   fixture.responses.set(selector, good(value));
 }
 
-test('the reviewed plan enumerates all ten packages and explicitly distinguishes the first publication', () => {
-  assert.equal(names.length, 10);
+test('the reviewed plan enumerates all nine packages and explicitly distinguishes the first publication', () => {
+  assert.equal(names.length, 9);
   assert.equal(validateRegistryExpectations(plan, names), plan);
   assert.deepEqual(plan.packages[fresh], { priorPublication: 'none', previousLatest: null });
   assert.equal(plan.packages[old].previousLatest, '0.23.0');
@@ -134,7 +134,7 @@ test('prerelease preflight accepts only declared package absence and exact old l
   const registry = mockRegistry(responses);
   const entries = names.map((name) => ({ name }));
   assert.doesNotThrow(() => assertPrereleaseRegistryBaseline(entries, plan, 'rc', registry));
-  assert.equal(registry.calls.length, 10);
+  assert.equal(registry.calls.length, 9);
   responses.set(old, failure('E404'));
   assert.throws(() => assertPrereleaseRegistryBaseline(entries, plan, 'rc', registry), /dist-tag ls.*failed/);
   responses.set(old, good({ latest: '0.23.1' }));
@@ -179,10 +179,10 @@ test('auth and transient errors also fail a declared first-publication preflight
   }
 });
 
-test('mixed old and first-publication RC readback verifies all ten exact artifacts and tags', () => {
+test('mixed old and first-publication RC readback verifies all nine exact artifacts and tags', () => {
   const f = fixture();
-  assert.equal(f.read().length, 10);
-  assert.equal(f.calls.length, 20);
+  assert.equal(f.read().length, 9);
+  assert.equal(f.calls.length, 18);
   assert.ok(f.calls.every((call) => call.allowNotFound === false));
   assert.ok(f.calls.some((call) => call.selector === fresh + '@' + rc));
   assert.ok(f.calls.some((call) => call.selector === '@byok-sdk/keys@' + keysRc));
@@ -247,7 +247,7 @@ test('wrong/missing RC tags and any accidental latest on the first publication f
 
 test('stable release readback requires exact latest for old and new packages, with independent keys version', () => {
   const f = fixture({ stable: true });
-  assert.equal(f.read().length, 10);
+  assert.equal(f.read().length, 9);
   mutateResponse(f, fresh, (v) => { delete v.latest; });
   assert.throws(f.read, /dist-tag latest/);
   assert.doesNotThrow(() => assertPrereleaseRegistryBaseline(names.map((name) => ({ name })), plan, undefined,
@@ -275,7 +275,7 @@ test('maintainer identity accepts exact npm object and string representations, n
   for (const maintainers of [[{ name: 'ancienttwo' }], ['ancienttwo'], ['ancienttwo <owner@example.test>']]) {
     const f = fixture();
     mutateResponse(f, fresh + '@' + rc, (v) => { v.maintainers = maintainers; });
-    assert.equal(f.read().length, 10);
+    assert.equal(f.read().length, 9);
   }
   for (const maintainers of [[{ name: 'not-ancienttwo' }], [{ name: 'ancienttwo-attacker' }],
     ['not-ancienttwo <owner@example.test>'], ['Someone <ancienttwo@example.test>'], ['ancienttwo attacker']]) {

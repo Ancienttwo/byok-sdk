@@ -20,6 +20,10 @@ export const MAILBOX_READ_AHEAD_CAPABILITY = 'mailbox-read-ahead';
  * v2 also removed the egress policy's `metadata-status` activity mode, its
  * `activity.mode` field and the `sanitizer_rejected` drop reason. Agent
  * egress goes to the Host as the runtime produced it.
+ * v2 also removed the input-preparation artifact's `toolImplementationKinds`
+ * and the readiness reason `executor_identity_unproven`. The SDK does not
+ * attest tool executables. The artifact names its counted tools in
+ * `toolNames`.
  *
  * IMPORTANT: changing this constant, or changing/removing/retyping any
  * already-frozen schema in this package, requires a DELIBERATE update to the

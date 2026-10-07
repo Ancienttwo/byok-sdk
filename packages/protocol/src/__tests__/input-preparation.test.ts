@@ -97,10 +97,10 @@ const RECEIPT = {
     residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
     observationDigest: 'sha256:observation',
     toolBindingDigest: 'sha256:binding',
-    toolImplementationKinds: { mcp__team__list: 'unavailable:resolver_unconfigured' },
+    toolNames: ['mcp__team__list'],
   },
   ready: false,
-  readinessReasons: ['accounting_policy_missing', 'executor_identity_unproven'],
+  readinessReasons: ['accounting_policy_missing'],
   artifactExpiresAt: '2026-01-01T01:00:00.000Z',
 } as const;
 
@@ -491,11 +491,14 @@ describe('bounded admission wire cut', () => {
 
   it('refuses the retired state, readiness names and counter kind rather than reading them forward', () => {
     expect(InputPreparationReceiptSummarySchema.safeParse({ ...RECEIPT, state: 'counted' }).success).toBe(false);
-    for (const retired of ['not_counted', 'counter_missing']) {
+    for (const retired of ['not_counted', 'counter_missing', 'executor_identity_unproven']) {
       expect(
         InputPreparationReceiptSummarySchema.safeParse({ ...RECEIPT, readinessReasons: [retired] }).success,
       ).toBe(false);
     }
+    expect(InputPreparationReceiptSummarySchema.safeParse({
+      ...RECEIPT, artifact: { ...RECEIPT.artifact, toolImplementationKinds: {} },
+    }).success).toBe(false);
     expect(InputPreparationReceiptSummarySchema.safeParse({ ...RECEIPT, counter: COUNTER }).success).toBe(true);
     for (const kind of ['count', 'bound']) {
       expect(

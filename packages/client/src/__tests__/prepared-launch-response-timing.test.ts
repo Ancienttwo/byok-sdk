@@ -110,7 +110,6 @@ async function prepareArtifact(cwd: string, artifactPath: string): Promise<Runti
     },
     toolBindingDigest: 'prepared-timing-tool-binding',
     observationDigest: 'prepared-timing-observation',
-    toolImplementations: {},
     toolsetDefinitionRevisions: {},
   };
 }

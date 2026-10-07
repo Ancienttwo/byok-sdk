@@ -139,7 +139,7 @@ async function prepareArtifact(home: string, artifactPath: string): Promise<Runt
     artifactPath,
     expected: { envelopeDigest: compiled.envelopeDigest, toolManifestDigest: compiled.toolManifestDigest, model, binding },
     toolBindingDigest: 'cwd-marker-tool-binding', observationDigest: 'cwd-marker-observation',
-    toolImplementations: {}, toolsetDefinitionRevisions: {},
+    toolsetDefinitionRevisions: {},
   };
 }
 

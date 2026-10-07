@@ -1,9 +1,6 @@
-import { TOOL_IMPLEMENTATION_UNAVAILABLE_REASONS, type ToolImplementationAuthority } from '@byok-sdk/implementation-identity';
 import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeAdapter, type RuntimeDetectionAdvisory, type RuntimeDetectResult, type RuntimeDetectionRefusalReason } from './types';
 
-const REFUSAL_REASONS: readonly RuntimeDetectionRefusalReason[] = Object.freeze([
-  ...TOOL_IMPLEMENTATION_UNAVAILABLE_REASONS, 'installation_observation_unsupported', 'native_identity_mismatch', 'app_server_unavailable',
-]);
+const REFUSAL_REASONS: readonly RuntimeDetectionRefusalReason[] = Object.freeze(['app_server_unavailable']);
 const MAX_VERSION_CHARS = 256;
 
 function isVersionText(value: unknown): value is string {
@@ -51,13 +48,7 @@ export function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult
   throw new TypeError('invalid runtime detection result');
 }
 
-/** Single routing author for daemon, selection and local diagnostics. Custom declarations are not attestation. */
-export async function observeRuntimeDetection(
-  adapter: RuntimeAdapter, authority: ToolImplementationAuthority | undefined, signal?: AbortSignal,
-): Promise<RuntimeDetectResult> {
-  if (adapter.descriptor.id === 'pi' && authority !== undefined) {
-    if (typeof adapter.detectInstallation !== 'function') return Object.freeze({ kind: 'refused', reason: 'installation_observation_unsupported' });
-    return validateRuntimeDetectResult(await adapter.detectInstallation({ authority, scope: 'enabled-top-level' }, signal));
-  }
+/** Single routing author for daemon, selection and local diagnostics. */
+export async function observeRuntimeDetection(adapter: RuntimeAdapter, signal?: AbortSignal): Promise<RuntimeDetectResult> {
   return validateRuntimeDetectResult(await adapter.detect(signal));
 }

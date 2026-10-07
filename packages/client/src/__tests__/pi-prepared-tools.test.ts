@@ -14,10 +14,6 @@ import {
   type PreparedToolSurface,
 } from '../daemon/prepared-tool-surface';
 import {
-  TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED,
-  type ToolImplementationIdentityV1,
-} from '../daemon/tool-implementation-identity';
-import {
   assemblePreparedPiToolSurface,
   type PreparedPiServerBinding,
   type PreparedPiToolSurfaceInput,
@@ -39,7 +35,7 @@ import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../bin/agent-m
  *   shared formula: if either side grew its own serializer, this case is the
  *   first thing that breaks.
  * - Anything the preparation bound that has since moved — a tool schema, a
- *   toolset definition revision, an implementation identity — refuses by name
+ *   toolset definition revision — refuses by name
  *   instead of launching a surface the artifact does not describe.
  */
 
@@ -70,7 +66,6 @@ interface DeviceFacts {
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
   readonly servers: readonly PreparedPiServerBinding[];
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
-  readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
 }
 
 /**
@@ -106,7 +101,6 @@ async function deviceFacts(): Promise<DeviceFacts> {
     observation,
     servers: [{ serverName: 'teamserver', toolsetId: 'team', command: server.command, args: server.args }],
     toolsetDefinitionRevisions: assembled.surface.toolsetDefinitionRevisions,
-    implementations: Object.freeze({ teamserver: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED }),
   };
 }
 
@@ -120,7 +114,6 @@ function launchInput(
     observation: facts.observation,
     toolsetDefinitionRevisions: facts.toolsetDefinitionRevisions,
     servers: facts.servers,
-    toolImplementations: facts.implementations,
     runtimeIdentity: RUNTIME_IDENTITY,
     expectedToolBindingDigest: facts.counted.toolBindingDigest,
     expectedObservationDigest: facts.counted.observationDigest,
@@ -130,10 +123,6 @@ function launchInput(
 }
 
 const MEMORY = {
-  implementation: {
-    descriptor: { kind: 'attested', authority: 'host-install-record', manifestRevision: 'descriptor', form: 'compiled-executable', installPath: '/descriptor', closureDigest: 'a'.repeat(64), closureKind: 'artifact', launchArgv: ['__byok_sdk_helper', 'agent-memory-describe'], launchCwd: '/', launchEnvNamesDigest: 'b'.repeat(64), loaderEnvValuesDigest: 'c'.repeat(64), installStat: { dev: 1, ino: 1, size: 1, mtimeMs: 1, mode: 0o100555, uid: 0, gid: 0 } },
-    execution: { kind: 'attested', authority: 'host-install-record', manifestRevision: 'execution', form: 'compiled-executable', installPath: '/execution', closureDigest: 'd'.repeat(64), closureKind: 'artifact', launchArgv: ['__byok_sdk_helper', 'agent-memory-mcp'], launchCwd: '/', launchEnvNamesDigest: 'e'.repeat(64), loaderEnvValuesDigest: 'f'.repeat(64), installStat: { dev: 1, ino: 2, size: 1, mtimeMs: 1, mode: 0o100555, uid: 0, gid: 0 } },
-  },
   observation: validatePreparedAgentMemoryObservation({
     serverInfo: AGENT_MEMORY_MCP_SERVER_INFO,
     protocolVersion: '2025-03-26',
@@ -189,35 +178,20 @@ describe('the prepared pi tool surface', () => {
     expect(surface.code).toBe('tool_binding_drift');
   }, 30_000);
 
-  it('refuses a projected server that arrives without its resolved implementation identity', async () => {
-    const facts = await deviceFacts();
-    const surface = await assemblePreparedPiToolSurface(
-      launchInput(facts, { toolImplementations: {} }),
-    );
-    expect(surface.ok).toBe(false);
-    if (surface.ok) return;
-    // Refused while the executor fingerprints are built, which is strictly
-    // earlier than the binding digest and names the server that is missing:
-    // "nobody resolved this" and "the resolver said unavailable" are different
-    // facts, and only the second one is a fingerprint input.
-    expect(surface.code).toBe('tool_surface_unfingerprintable');
-    expect(surface.message).toContain('teamserver');
-  }, 30_000);
-
   it('assembles memory-only read with a runtime-worker call, without a Host MCP identity', async () => {
     const memoryProjection = preparedMemoryProjection('read', MEMORY, RUNTIME_IDENTITY);
     const expectedToolBindingDigest = preparedToolBindingDigest({
-      agentMemory: 'read', memoryImplementation: MEMORY.implementation,
+      agentMemory: 'read',
       toolsetDefinitionRevisions: {}, servers: [],
     });
     const expectedObservationDigest = preparedToolSurfaceObservationDigest({
       agentMemory: 'read', memory: MEMORY, runtimeIdentity: RUNTIME_IDENTITY,
-      toolsetDefinitionRevisions: {}, tools: memoryProjection.tools, toolExecutors: memoryProjection.toolExecutors, implementations: {},
+      toolsetDefinitionRevisions: {}, tools: memoryProjection.tools, toolExecutors: memoryProjection.toolExecutors,
     });
     const memoryCall = { call: vi.fn(async () => ({ content: [{ type: 'text' as const, text: '{"path":"MEMORY.md"}' }] })) };
     const surface = await assemblePreparedPiToolSurface({
       agentMemory: 'read', memory: MEMORY,
-      observation: {}, toolsetDefinitionRevisions: {}, servers: [], toolImplementations: {}, runtimeIdentity: RUNTIME_IDENTITY,
+      observation: {}, toolsetDefinitionRevisions: {}, servers: [], runtimeIdentity: RUNTIME_IDENTITY,
       expectedToolBindingDigest, expectedObservationDigest, host: UNUSED_HOST, memoryCall,
     });
     if (!surface.ok) throw new Error(`${surface.code}: ${surface.message}`);
@@ -230,12 +204,12 @@ describe('the prepared pi tool surface', () => {
   it('refuses a sealed memory descriptor that drifted after preparation', async () => {
     const original = preparedMemoryProjection('read', MEMORY, RUNTIME_IDENTITY);
     const expectedToolBindingDigest = preparedToolBindingDigest({
-      agentMemory: 'read', memoryImplementation: MEMORY.implementation,
+      agentMemory: 'read',
       toolsetDefinitionRevisions: {}, servers: [],
     });
     const expectedObservationDigest = preparedToolSurfaceObservationDigest({
       agentMemory: 'read', memory: MEMORY, runtimeIdentity: RUNTIME_IDENTITY,
-      toolsetDefinitionRevisions: {}, tools: original.tools, toolExecutors: original.toolExecutors, implementations: {},
+      toolsetDefinitionRevisions: {}, tools: original.tools, toolExecutors: original.toolExecutors,
     });
     const drifted = {
       ...MEMORY,
@@ -247,7 +221,7 @@ describe('the prepared pi tool surface', () => {
     const memoryCall = { call: vi.fn(async () => ({ content: [] })) };
     const surface = await assemblePreparedPiToolSurface({
       agentMemory: 'read', memory: drifted,
-      observation: {}, toolsetDefinitionRevisions: {}, servers: [], toolImplementations: {}, runtimeIdentity: RUNTIME_IDENTITY,
+      observation: {}, toolsetDefinitionRevisions: {}, servers: [], runtimeIdentity: RUNTIME_IDENTITY,
       expectedToolBindingDigest, expectedObservationDigest, host: UNUSED_HOST, memoryCall,
     });
     expect(surface.ok).toBe(false);
@@ -285,17 +259,17 @@ describe('a tool-less prepared surface (requiredToolsets [] and agentMemory none
     return {
       agentMemory: 'none', memory: null,
       observation: {}, toolsetDefinitionRevisions: counted.toolsetDefinitionRevisions, servers: [],
-      toolImplementations: {}, runtimeIdentity: RUNTIME_IDENTITY,
+      runtimeIdentity: RUNTIME_IDENTITY,
       expectedToolBindingDigest: counted.toolBindingDigest, expectedObservationDigest: counted.observationDigest,
       host: UNUSED_HOST, ...overrides,
     };
   }
 
-  it('is counted with no tool, no revision and no implementation, beside a configured toolset', async () => {
+  it('is counted with no tool and no revision, beside a configured toolset', async () => {
     const counted = await countedFor(twoToolsetRegistry(), []);
     expect(counted.tools).toEqual([]);
     expect(counted.toolExecutors).toEqual({});
-    expect(counted.toolImplementationKinds).toEqual({});
+    expect(counted.toolNames).toEqual([]);
     expect(counted.toolsetDefinitionRevisions).toEqual({});
     expect(counted.memory).toBeNull();
   }, 30_000);

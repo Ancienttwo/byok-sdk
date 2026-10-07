@@ -21,16 +21,7 @@ function signalProcess(id: number, signal: NodeJS.Signals): SignalResult {
 	}
 }
 
-function activeProcessGroupMembers(processGroupId: number, observation?: "kernel-presence"): number[] | { diagnostic: string } {
-	if (observation === "kernel-presence") {
-		// Sixth-edge supervision must not spawn ps after the root fanout is full.
-		// Presence is conservative (including zombie-only groups); it is not enumeration.
-		try { process.kill(-processGroupId, 0); return [processGroupId]; }
-		catch (error) {
-			if ((error as NodeJS.ErrnoException).code === "ESRCH") return [];
-			return { diagnostic: diagnostic(error) };
-		}
-	}
+function activeProcessGroupMembers(processGroupId: number): number[] | { diagnostic: string } {
 	const result = spawnSync("ps", ["-axo", "pid=,pgid=,stat="], { encoding: "utf-8" });
 	if (result.error || result.status !== 0) {
 		return { diagnostic: result.error ? diagnostic(result.error) : (result.stderr.trim() || `ps exited with ${result.status}`) };
@@ -47,16 +38,15 @@ function activeProcessGroupMembers(processGroupId: number, observation?: "kernel
 async function waitUntilGroupTerminal(
 	processGroupId: number,
 	timeoutMs: number,
-	observation?: "kernel-presence",
 ): Promise<false | { state: "enumeration-failed" | "still-active"; diagnostic: string }> {
 	const deadline = Date.now() + timeoutMs;
 	while (true) {
-		const members = activeProcessGroupMembers(processGroupId, observation);
+		const members = activeProcessGroupMembers(processGroupId);
 		if (Array.isArray(members) && members.length === 0) return false;
 		const remaining = deadline - Date.now();
 		if (remaining <= 0) {
 			if (!Array.isArray(members)) return { state: "enumeration-failed", diagnostic: members.diagnostic };
-			return { state: "still-active", diagnostic: observation === "kernel-presence" ? `Process group ${processGroupId} remains present.` : `Process group ${processGroupId} still has active members: ${members.join(", ")}.` };
+			return { state: "still-active", diagnostic: `Process group ${processGroupId} still has active members: ${members.join(", ")}.` };
 		}
 		await new Promise<void>((resolve) => setTimeout(resolve, Math.min(VERIFY_INTERVAL_MS, remaining)));
 	}
@@ -74,7 +64,7 @@ export interface OwnedProcessTreeController {
 
 export function createOwnedProcessTreeController(
 	pid: number,
-	options: { termGraceMs?: number; killVerifyMs?: number; observation?: "kernel-presence" } = {},
+	options: { termGraceMs?: number; killVerifyMs?: number } = {},
 ): OwnedProcessTreeController {
 	let termination: Promise<ProcessTreeTerminalV1> | undefined;
 	const posixGroupOwned = process.platform !== "win32";
@@ -91,17 +81,17 @@ export function createOwnedProcessTreeController(
 			if (term !== "sent" && term !== "absent") {
 				return { state: "unknown", reason: "signal-failed", diagnostic: term.diagnostic };
 			}
-			const termExit = await waitUntilGroupTerminal(pid, options.termGraceMs ?? DEFAULT_TERM_GRACE_MS, options.observation);
+			const termExit = await waitUntilGroupTerminal(pid, options.termGraceMs ?? DEFAULT_TERM_GRACE_MS);
 			if (termExit === false) return observed(pid);
 
 			const kill = signalProcess(target, "SIGKILL");
 			if (kill !== "sent" && kill !== "absent") {
-				const members = activeProcessGroupMembers(pid, options.observation);
+				const members = activeProcessGroupMembers(pid);
 				if (!Array.isArray(members) || members.length > 0) {
 					return { state: "unknown", reason: "signal-failed", diagnostic: kill.diagnostic };
 				}
 			}
-			const killExit = await waitUntilGroupTerminal(pid, options.killVerifyMs ?? DEFAULT_KILL_VERIFY_MS, options.observation);
+			const killExit = await waitUntilGroupTerminal(pid, options.killVerifyMs ?? DEFAULT_KILL_VERIFY_MS);
 			if (killExit !== false) {
 				return { state: "unknown", reason: "verification-failed", diagnostic: killExit.diagnostic };
 			}

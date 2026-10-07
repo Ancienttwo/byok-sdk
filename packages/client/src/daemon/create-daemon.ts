@@ -131,10 +131,9 @@ import {
   type InputPreparationService,
 } from './input-preparation-service';
 import { InputPreparationUnsupportedRecordVersionError } from './input-preparation-store';
-import { resolvePiInputPreparationCompiler } from '../adapters/pi/input-preparation-runtime';
+import { createPiInputPreparationCompiler, resolveInstalledPiRuntimeIdentity, resolvePinnedPiRuntimeIdentity } from '../adapters/pi/input-preparation';
 import { decodeTeamMemberContext, encodeTeamMemberContext, LocalTeamWorkspace } from './team-workspace';
 import { McpToolsetRegistry, McpToolsetRevisionConflictError } from './toolset-registry';
-import type { ToolImplementationAuthority } from './tool-implementation-identity';
 import { ConnectionManager } from './connection-manager';
 import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
 import { OperationalHealthTracker, type OperationalHealthSnapshot } from './operational-health';
@@ -187,7 +186,7 @@ import { createPreparedToolSurfaceAssembler } from './prepared-tool-surface';
 import { buildRuntimeEnv } from './environment';
 import { resolveAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
 import { preflightAgentMessageMcp } from './agent-message-mcp-preflight';
-import { resolveAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
+import { resolveAgentMemoryDescribeBin, resolveAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
 import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 import {
   isAgentMemorySecureFilesystemAvailable,
@@ -665,23 +664,6 @@ export interface DaemonConfig {
    * method for intents; the only entry is the mailbox notice.
    */
   agentMemoryIntents?: AgentMemoryIntentTransport;
-  /**
-   * The host's install-record authority for MCP toolset server
-   * implementations (`./tool-implementation-identity.ts`), forwarded verbatim
-   * to `TaskRunnerDeps.toolImplementationAuthority`.
-   *
-   * This SDK ships NO resolver and NO default, and there is nothing to
-   * validate here: an absent section is the supported state, and it means
-   * every implementation identity this daemon resolves is
-   * `resolver_unconfigured`. An absolute path is not an attestation, so a
-   * daemon without this section proves nothing about which executable serves a
-   * tool call and says so rather than implying otherwise.
-   *
-   * What a PRESENT authority buys is the refusal: an install it attested is
-   * re-measured before every spawn of that server, and a spawn whose artifact
-   * no longer measures the same is declined non-retryably.
-   */
-  toolImplementationAuthority?: ToolImplementationAuthority;
 }
 
 /**
@@ -1008,8 +990,8 @@ function isRuntimeId(id: string): id is RuntimeId {
 }
 
 /** Runtimes actually detected as present on this device, typed per protocol §10 gap #4 (`ConnHelloPayload.runtimes`). Computed once at `start()` — re-probing on every reconnect would mean re-spawning each runtime's `--version` check for no real benefit within one daemon lifetime. */
-async function detectRuntimes(adapters: RuntimeAdapter[], authority: ToolImplementationAuthority | undefined): Promise<{ runtimes: RuntimeInfo[]; harnesses: HarnessInfo[] }> {
-  const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: await observeRuntimeDetection(adapter, authority) })));
+async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{ runtimes: RuntimeInfo[]; harnesses: HarnessInfo[] }> {
+  const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: await observeRuntimeDetection(adapter) })));
   const runtimes: RuntimeInfo[] = [];
   const harnesses: HarnessInfo[] = [];
   for (const { adapter, detected } of detections) {
@@ -1209,7 +1191,7 @@ const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['pi', 'claude', 'codex'];
 function buildAdapter(id: RuntimeId, config: DaemonConfig): RuntimeAdapter {
   switch (id) {
     case 'pi':
-      return new PiAdapter({ byokLauncher: config.piByokLauncher, ...(config.durablePi === true ? { durablePi: { replicaRoot: path.join(DeviceStore.resolveDir(config.productId, config.storeDir), 'durable') } } : {}) });
+      return new PiAdapter({ byokLauncher: config.piByokLauncher, ...(config.sdkHelperHost === undefined ? {} : { sdkHelperHost: config.sdkHelperHost }), ...(config.durablePi === true ? { durablePi: { replicaRoot: path.join(DeviceStore.resolveDir(config.productId, config.storeDir), 'durable') } } : {}) });
     case 'claude':
       return new ClaudeAdapter();
     case 'codex':
@@ -1317,6 +1299,9 @@ export function buildDaemonWithAdapters(
   if (Object.hasOwn(config, 'mcpLaunchCwd')) {
     throw new Error('DaemonConfig.mcpLaunchCwd was removed: MCP servers start in the session cwd, as the agent runtime does');
   }
+  if (Object.hasOwn(config, 'toolImplementationAuthority')) {
+    throw new Error('DaemonConfig.toolImplementationAuthority was removed: the SDK does not attest tool or runtime executables');
+  }
   if (config.providerProvisioning !== undefined && typeof config.providerProvisioning !== 'function') {
     throw new Error('DaemonConfig.providerProvisioning must be a handler function when present');
   }
@@ -1356,6 +1341,9 @@ export function buildDaemonWithAdapters(
   const agentMemoryMcpBin = config.agentHome === undefined
     ? undefined
     : resolveAgentMemoryMcpBin(externalAgentMemoryFilesystem, config.sdkHelperHost);
+  const agentMemoryDescribeBin = config.agentHome === undefined
+    ? undefined
+    : resolveAgentMemoryDescribeBin(externalAgentMemoryFilesystem, config.sdkHelperHost);
   const localAgentRelease = resolveLocalAgentReleaseIdentity(config.localAgentRelease);
   const toolsetRegistry = new McpToolsetRegistry(config.mcpToolsets);
   validatePiByokLauncherConfig(config.piByokLauncher);
@@ -1481,13 +1469,10 @@ export function buildDaemonWithAdapters(
   const inputPreparationLimits =
     config.inputPreparation === undefined ? undefined : validateInputPreparationLimits(config.inputPreparation.limits);
   /**
-   * The ONE prepared-tool-surface entry, bound to this daemon's registry and
-   * implementation authority
+   * The ONE prepared-tool-surface entry, bound to this daemon's registry
    * (`./prepared-tool-surface.ts`).
    *
-   * It replaces the remote lane's former `observeRequiredToolsets`, which
-   * probed with a label, a timeout and an environment and nothing else — no
-   * implementation identity. There is deliberately no second path left: both
+   * There is deliberately no second path: both
    * the local `input_preparation.prepare` control call and the remote
    * `agent.input.preparation` envelope reach this assembler through
    * `InputPreparationService.prepare`, so a preparation's fingerprints and an
@@ -1501,9 +1486,7 @@ export function buildDaemonWithAdapters(
     memoryAvailable: () => isAgentMemorySecureFilesystemAvailable(config.agentMemoryFilesystem !== undefined),
     toolsetRegistry,
     runtimeEnv: preparationRuntimeEnv,
-    ...(config.toolImplementationAuthority === undefined
-      ? {}
-      : { toolImplementationAuthority: config.toolImplementationAuthority }),
+    ...(agentMemoryDescribeBin === undefined ? {} : { agentMemoryDescribe: agentMemoryDescribeBin }),
   });
   let inputPreparationService: InputPreparationService | undefined;
   let inputPreparationInitialization: Promise<void> | undefined;
@@ -1522,10 +1505,9 @@ export function buildDaemonWithAdapters(
   function initializeInputPreparation(): Promise<void> {
     return inputPreparationInitialization ??= (async () => {
       if (config.inputPreparation === undefined || inputPreparationLimits === undefined) return;
-      const compiler = await resolvePiInputPreparationCompiler({
-        authority: config.toolImplementationAuthority,
-        env: preparationRuntimeEnv(), sessionCwd: config.workspaceRoot,
-      });
+      // A single-file product bundles Pi and has no installed package to read.
+      const compiler = createPiInputPreparationCompiler(config.sdkHelperHost === undefined
+        ? resolveInstalledPiRuntimeIdentity() : resolvePinnedPiRuntimeIdentity());
       inputPreparationService = createInputPreparationService({
         storeDir, limits: inputPreparationLimits,
         authorityResolver: config.inputPreparation.authorityResolver,
@@ -2106,7 +2088,7 @@ export function buildDaemonWithAdapters(
 
     blobLifecycleAbort = new AbortController();
     const [{ runtimes, harnesses }, blobClient] = await Promise.all([
-      detectRuntimes(adapters, config.toolImplementationAuthority),
+      detectRuntimes(adapters),
       Promise.resolve(new BlobClient(config.serverUrl, auth, { signal: blobLifecycleAbort.signal })),
     ]);
     // M3-2a: local runtime-detection result — computed once per `start()`,
@@ -2298,9 +2280,6 @@ export function buildDaemonWithAdapters(
             ),
           },
         }),
-      ...(config.toolImplementationAuthority === undefined
-        ? {}
-        : { toolImplementationAuthority: config.toolImplementationAuthority }),
       // M3-2a: `send` is already this file's OWN closure (not something
       // `TaskRunner` builds) — every `task.claim`/`task.started`/
       // `task.progress`/`task.artifact`/`task.await_approval`/
@@ -2369,6 +2348,7 @@ export function buildDaemonWithAdapters(
       // builds the exact `deps` object it did before this seam existed.
       ...(config.resultDocument ? { resultDocument: config.resultDocument } : {}),
       ...(agentMemoryMcpBin === undefined ? {} : { agentMemoryMcpBin }),
+      ...(agentMemoryDescribeBin === undefined ? {} : { agentMemoryDescribeBin }),
       ...(config.agentMemoryFilesystem === undefined ? {} : { agentMemoryFilesystemHelperBin: path.resolve(config.agentMemoryFilesystem.helperBin) }),
       ...(config.agentHome !== undefined && config.agentEgress !== undefined ? {
         agentMessageMcpBin: resolveAgentMessageMcpBin(config.sdkHelperHost),

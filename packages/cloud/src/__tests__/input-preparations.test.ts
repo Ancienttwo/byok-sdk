@@ -89,10 +89,10 @@ const RECEIPT: InputPreparationReceiptSummary = {
     residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
     observationDigest: 'sha256:observation',
     toolBindingDigest: 'sha256:binding',
-    toolImplementationKinds: { mcp__teamserver__list: 'unavailable:resolver_unconfigured' },
+    toolNames: ['mcp__teamserver__list'],
   },
   ready: false,
-  readinessReasons: ['accounting_policy_missing', 'executor_identity_unproven'],
+  readinessReasons: ['accounting_policy_missing'],
   artifactExpiresAt: '2026-01-01T01:00:00.000Z',
 };
 

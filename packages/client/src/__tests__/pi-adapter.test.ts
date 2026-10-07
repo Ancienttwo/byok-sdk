@@ -3,7 +3,7 @@ import { spawn as realSpawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
@@ -19,6 +19,8 @@ import {
 } from '../mcp';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
+/** A product Pi asset root that holds the SDK asset manifest: the built package assets. */
+const PRODUCT_ASSETS = fileURLToPath(new URL('../../dist/assets/', import.meta.url));
 
 function fakePiAdapter(): PiAdapter {
   return new PiAdapter({
@@ -52,6 +54,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
   const openSessions: Session[] = [];
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await Promise.all(openSessions.splice(0).map((s) => s.close()));
   });
 
@@ -194,8 +197,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
       '--runtime-entry', 'pi-rpc',
       // The Pi process starts in the session cwd, as in OAR.
       '--pi-cwd', await fs.realpath(ctx.workspaceDir),
-      '--pi-fixed-args', '[]',
-      '--launch-binding', expect.any(String),
+      '--pi-projection-dir', expect.any(String),
       '--pi-config-digest', expect.stringMatching(/^[0-9a-f]{64}$/),
       '--',
       '--config', expect.any(String),
@@ -263,8 +265,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
         'gpt-5.2',
         '--runtime-entry', 'pi-rpc',
         '--pi-cwd', await fs.realpath(ctx.workspaceDir),
-        '--pi-fixed-args', '[]',
-        '--launch-binding', expect.any(String),
+        '--pi-projection-dir', expect.any(String),
       '--pi-config-digest', expect.stringMatching(/^[0-9a-f]{64}$/),
         '--',
         '--config', expect.any(String),
@@ -272,6 +273,82 @@ describe('PiAdapter against the fake-pi fixture', () => {
         'rpc',
       ],
     }]);
+  });
+
+  // A single-file/SEA product re-enters its own executable for Pi, the same
+  // way it does for every other SDK-reserved helper. No installed Pi package
+  // is resolved.
+  it('re-enters the product executable through the reserved helper in the ordinary lane', async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const spawnFn = ((command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
+      calls.push({ command, args: [...args] });
+      return realSpawn(FIXTURE_PATH, args.slice(2), options);
+    }) as never;
+    const adapter = new PiAdapter({
+      resolveBin: () => { throw new Error('a single-file product resolves no installed Pi package'); },
+      spawnFn,
+      sdkHelperHost: { mode: 'self-executable' },
+    });
+    const ctx = await makeCtx({ ...process.env, PI_PACKAGE_DIR: PRODUCT_ASSETS });
+    const session = await startAdapter(adapter, baseTask, ctx);
+    openSessions.push(session);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.command).toBe(process.execPath);
+    expect(calls[0]?.args.slice(0, 3)).toEqual(['__byok_sdk_helper', 'pi-rpc', expect.stringMatching(/^--config-digest=[0-9a-f]{64}$/)]);
+    expect(calls[0]?.args.slice(3)).toEqual(['--config', expect.any(String), '--mode', 'rpc']);
+  });
+
+  it('re-enters the product executable through the reserved helper in the BYOK keys lane', async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const spawnFn = ((command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
+      calls.push({ command, args: [...args] });
+      return realSpawn(FIXTURE_PATH, args.slice(args.indexOf('--') + 1), options);
+    }) as never;
+    const adapter = new PiAdapter({
+      resolveBin: () => { throw new Error('a single-file product resolves no installed Pi package'); },
+      spawnFn,
+      sdkHelperHost: { mode: 'self-executable', executable: '/product/runtime', entry: '/product/release/sdk.js' },
+      byokLauncher: { command: '/opt/byok-pi-provider-launcher', profileDbPath: '/private/providers.sqlite', sessionDir: '/private/pi-sessions' },
+    });
+    const task: TaskOfferPayload = { ...baseTask, dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'gpt-5.2' } };
+    const ctx = await makeCtx({ ...process.env, PI_PACKAGE_DIR: PRODUCT_ASSETS });
+    const session = await startAdapter(adapter, task, ctx);
+    openSessions.push(session);
+    const args = calls[0]?.args ?? [];
+    expect(calls[0]?.command).toBe('/opt/byok-pi-provider-launcher');
+    expect(args.slice(0, 2)).toEqual(['--pi-bin', '/product/runtime']);
+    expect(args.slice(args.indexOf('--pi-entry'), args.indexOf('--pi-entry') + 4))
+      .toEqual(['--pi-entry', '/product/release/sdk.js', '--pi-fixed-args', JSON.stringify(['__byok_sdk_helper', 'pi-rpc'])]);
+  });
+
+  it('reports the bundled Pi pin for a single-file product without a version child', async () => {
+    const adapter = new PiAdapter({
+      resolveBin: () => { throw new Error('a single-file product resolves no installed Pi package'); },
+      sdkHelperHost: { mode: 'self-executable' },
+    });
+    vi.stubEnv('PI_PACKAGE_DIR', PRODUCT_ASSETS);
+    await expect(adapter.detect()).resolves.toMatchObject({ kind: 'available', version: resolvePiRuntimeIdentity().version });
+    expect(() => new PiAdapter({ sdkHelperHost: { mode: 'self-executable', executable: 'relative' } })).toThrow(/absolute executable path/);
+  });
+
+  // L3: an asset root without the SDK manifest is reported early, not as an
+  // opaque ENOENT inside the Pi child.
+  it('reports a single-file product without its Pi asset manifest as not-found and refuses its launch with the reason', async () => {
+    const bundle = new PiAdapter({ sdkHelperHost: { mode: 'self-executable', executable: process.execPath, entry: '/product/sdk.js' } });
+    vi.stubEnv('PI_PACKAGE_DIR', '');
+    await expect(bundle.detect()).resolves.toEqual({ kind: 'not-found' });
+    const empty = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-empty-pi-assets-'));
+    try {
+      vi.stubEnv('PI_PACKAGE_DIR', empty);
+      await expect(bundle.detect()).resolves.toEqual({ kind: 'not-found' });
+      const compiled = new PiAdapter({ sdkHelperHost: { mode: 'self-executable', executable: path.join(empty, 'product') } });
+      vi.stubEnv('PI_PACKAGE_DIR', '');
+      await expect(compiled.detect()).resolves.toEqual({ kind: 'not-found' });
+    } finally { await fs.rm(empty, { recursive: true, force: true }); }
+    const prepared = await bundle.prepare({ offer: { instruction: 'Never sent' }, descriptor: bundle.descriptor, requiredToolsetIds: [] });
+    if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
+    await expect(prepared.operation.resolveRuntimeLaunch!({ kind: 'instruction', cwd: os.tmpdir(), env: {}, projectionRoot: path.join(os.tmpdir(), 'byok-unused-projections') }))
+      .rejects.toMatchObject({ name: 'RuntimeExecutionFailure', phase: 'start', message: 'pi_bundled_assets_unavailable: an interpreter + bundle product must set PI_PACKAGE_DIR to its Pi asset root' });
   });
 
   it('validates the BYOK launcher at construction before prepare or spawn', () => {
@@ -301,7 +378,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     // copy of it would decide whether a prepared host or an rpc child is
     // parented — the same class of override as `--pi-bin` or `--provider`.
     for (const reserved of [
-      '--', '--pi-bin', '--pi-entry', '--pi-cwd', '--pi-fixed-args', '--launch-binding',
+      '--', '--pi-bin', '--pi-entry', '--pi-cwd', '--pi-projection-dir', '--pi-config-digest',
       '--runtime-entry', '--profile-db', '--session-dir', '--macos-keychain-path',
       '--secret-service-prefix', '--provider', '--model', '--profile-revision',
       '--profile-hash', '--required-capabilities', '--validate-only',

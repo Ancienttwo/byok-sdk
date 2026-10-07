@@ -5,12 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createEnvelope, type Envelope, type RuntimeId, type TaskOfferPayload } from '@byok-sdk/protocol';
-import {
-  PROVIDER_CREDENTIAL_ENV_DENY_NAMES,
-  toolImplementationLaunchEnvNamesDigest,
-  toolImplementationLoaderEnvValuesDigest,
-} from '@byok-sdk/implementation-identity';
-import { buildRuntimeEnv } from '../daemon/environment';
+import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import type { SpawnFn as PiSpawnFn } from '../adapters/pi/rpc-client';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
@@ -25,7 +20,7 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 
 /**
  * `TaskRunner` hands every runtime the daemon's full environment minus the
- * hard deny (`CLAUDECODE`, `BYOK_*`, loader names — see
+ * hard deny (`CLAUDECODE`, `BYOK_*` — see
  * `daemon/environment.ts`), as OAR does. These tests drive the THREE REAL bundled adapters (against
  * their existing fake-CLI fixtures — mirrors `pi-adapter.test.ts`/
  * `claude-adapter.test.ts`/`codex-adapter.test.ts`'s own `resolveBin`
@@ -149,19 +144,17 @@ async function withEnv<T>(vars: Record<string, string>, fn: () => Promise<T>): P
 }
 
 describe('TaskRunner environment inheritance: real pi/claude/codex adapters via a spying spawnFn', () => {
-  it.each(['runtime', 'subscription'] as const)('passes user config and provider keys to the real Codex %s child and drops CLAUDECODE, BYOK_* and loader names', async (lane) => {
+  it.each(['runtime', 'subscription'] as const)('passes user config, provider keys and loader names to the real Codex %s child and drops CLAUDECODE and BYOK_*', async (lane) => {
     const home = await tmpDir('byok-codex-env-home-');
     const receiptPath = path.join(home, 'env-receipt.json');
     // Explicit literals ensure the check also fails when the shared inventory is incomplete.
     const credentialNames = [...new Set(['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_ACCESS_TOKEN', ...PROVIDER_CREDENTIAL_ENV_DENY_NAMES])];
-    const refusedNames = [
-      'CLAUDECODE', 'BYOK_UNKNOWN', 'BYOK_SDK_CUSTODY_LAUNCH_RECORD',
-      'BYOK_SDK_CUSTODY_PARENT_DEPTH', 'BYOK_SDK_CUSTODY_RUNNER_CONFIG',
-      'NODE_OPTIONS', 'BUN_ENV_SENTINEL', 'DYLD_ENV_SENTINEL', 'LD_ENV_SENTINEL',
-    ];
+    const refusedNames = ['CLAUDECODE', 'BYOK_UNKNOWN', 'BYOK_SDK_CUSTODY_LAUNCH_RECORD'];
+    // The SDK no longer denies loader names: the user's own environment wins, as in OAR.
+    const loaderNames = ['NODE_OPTIONS', 'BUN_ENV_SENTINEL', 'DYLD_ENV_SENTINEL', 'LD_ENV_SENTINEL'];
     const vars = {
-      ...Object.fromEntries([...credentialNames, ...refusedNames].map((name) => [name, 'synthetic-sentinel'])),
-      // Detection probes still inherit parent env; this option is inert there.
+      ...Object.fromEntries([...credentialNames, ...refusedNames, ...loaderNames].map((name) => [name, 'synthetic-sentinel'])),
+      // The fake Codex child is a Node script; this option is inert there.
       NODE_OPTIONS: '--no-warnings',
       // macOS can synthesize this name inside Node after spawn. Supply the
       // platform config explicitly so the child's names remain measurable.
@@ -169,15 +162,9 @@ describe('TaskRunner environment inheritance: real pi/claude/codex adapters via 
       HOME: home, CODEX_HOME: home, USER: 'synthetic-user',
       MY_ALLOWED_CONFIG: 'synthetic-config',
       FAKE_CODEX_ENV_RECEIPT: receiptPath,
-      FAKE_CODEX_ENV_NAMES_DIGEST: '', FAKE_CODEX_ENV_LOADER_DIGEST: '',
     };
     try {
       await withEnv(vars, async () => {
-        const measured = buildRuntimeEnv({ ambient: process.env });
-        // These are the same shared projections used by admission measurement.
-        // Digest values do not affect the names digest, and are not loader inputs.
-        process.env.FAKE_CODEX_ENV_NAMES_DIGEST = toolImplementationLaunchEnvNamesDigest(measured);
-        process.env.FAKE_CODEX_ENV_LOADER_DIGEST = toolImplementationLoaderEnvValuesDigest(measured);
         const harness = await makeHarness();
         try {
           await harness.offer('codex', `task-codex-env-${lane}`, lane === 'subscription'
@@ -189,23 +176,22 @@ describe('TaskRunner environment inheritance: real pi/claude/codex adapters via 
             present: Record<string, boolean>;
             configMatches: boolean;
             authDiscoveryMatches: boolean;
-            namesDigestMatches: boolean;
-            loaderDigestMatches: boolean;
           };
           const spawnEnv = harness.captured.codex.env ?? {};
-          expect(toolImplementationLaunchEnvNamesDigest(spawnEnv as Record<string, string>) === process.env.FAKE_CODEX_ENV_NAMES_DIGEST).toBe(true);
           for (const name of refusedNames) {
             expect(receipt.present[name] === true, name).toBe(false);
             expect(Object.hasOwn(spawnEnv, name), name).toBe(false);
           }
-          for (const name of ['PATH', 'HOME', 'USER', 'CODEX_HOME', 'MY_ALLOWED_CONFIG', ...credentialNames]) {
-            expect(receipt.present[name], name).toBe(true);
+          for (const name of ['PATH', 'HOME', 'USER', 'CODEX_HOME', 'MY_ALLOWED_CONFIG', ...credentialNames, ...loaderNames]) {
             expect(spawnEnv[name] === process.env[name], name).toBe(true);
+            // macOS dyld removes DYLD_* when the child execs through a
+            // protected binary such as /usr/bin/env, so only the spawn
+            // environment the SDK handed over can show it there.
+            if (process.platform === 'darwin' && name.startsWith('DYLD_')) continue;
+            expect(receipt.present[name], name).toBe(true);
           }
           expect(receipt.configMatches).toBe(true);
           expect(receipt.authDiscoveryMatches).toBe(true);
-          expect(receipt.namesDigestMatches).toBe(true);
-          expect(receipt.loaderDigestMatches).toBe(true);
         } finally {
           await harness.cancelAll();
         }

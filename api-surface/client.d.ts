@@ -412,9 +412,9 @@ export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-ada
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
 export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from '../native-interactions';
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
-import type { RuntimeInstallationObservationContext } from '../../types';
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
+import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
 import { type ResolvedBin } from './resolve-bin';
 import { type SpawnFn } from './rpc-client';
 /**
@@ -439,6 +439,12 @@ export interface PiAdapterOptions {
      * and transparently proxies the pinned Pi RPC process.
      */
     byokLauncher?: PiByokLauncherConfig;
+    /**
+     * Re-enter the product's single-file/SEA executable for every Pi launch,
+     * as `<executable> [<entry>] __byok_sdk_helper <pi-rpc|pi-prepared|pi-durable>`.
+     * The product bundles Pi, so no installed Pi package is resolved.
+     */
+    sdkHelperHost?: SdkHelperHostConfig;
     /** Admission-time exact local profile check. Tests may replace the process boundary. */
     validateProviderProfileBinding?: (binding: ProviderProfileBinding, launcher: PiByokLauncherConfig) => Promise<void>;
 }
@@ -456,7 +462,6 @@ export declare class PiAdapter implements RuntimeAdapter {
     private readonly options;
     readonly descriptor: import("..").RuntimeAdapterDescriptor;
     constructor(options?: PiAdapterOptions);
-    detectInstallation(context: RuntimeInstallationObservationContext, signal?: AbortSignal): Promise<RuntimeDetectResult>;
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private resolveBin;
@@ -679,65 +684,59 @@ export declare class PiRpcClient {
     private buildExitError;
     private onClosed;
 }
-// ==== @byok-sdk/client dist/adapters/pi/runtime-descendant-plan.d.ts ====
-import type { AttestedOfficialExternalCliV2 } from '@byok-sdk/implementation-identity';
-import { type ImplementationSpawnBindingV1, type RuntimeDescendantEdgeV1, type RuntimeDescendantPolicyV1, type RuntimeEntryV1 } from '@byok-sdk/implementation-identity';
-export interface RuntimeDescendantDeclarationV1 {
-    readonly descendantPolicy: RuntimeDescendantPolicyV1;
-    readonly edges: readonly RuntimeDescendantEdgeV1[];
-}
-export interface RuntimeDescendantTemplateV1 {
-    readonly kind: RuntimeEntryV1;
-    readonly template: ImplementationSpawnBindingV1;
-    readonly templateDigest: string;
-}
-export interface RuntimeDescendantPlanV2 {
-    readonly format: 'byok.runtime-launch-plan';
-    readonly version: 2;
-    readonly selfKind: RuntimeEntryV1;
-    readonly policy: RuntimeDescendantPolicyV1;
-    readonly edges: readonly RuntimeDescendantEdgeV1[];
-    readonly templates: readonly RuntimeDescendantTemplateV1[];
-    readonly externalCliInstallations: readonly AttestedOfficialExternalCliV2[];
-}
-/** The finite type closure is independent of instance depth/budget admission. */
-export declare function requiredRuntimePlanKinds(selfKind: RuntimeEntryV1, policy: RuntimeDescendantPolicyV1, edges: readonly RuntimeDescendantEdgeV1[]): readonly RuntimeEntryV1[];
-export declare function runtimeRecordCommonFields<T extends {
-    readonly launchArgv: readonly string[];
-}>(record: T): Omit<T, 'launchArgv'>;
-/** Validate raw template bytes before any V1 parser projection changes member order. */
-export declare function parseRuntimeDescendantPlan(value: unknown, selfKind: RuntimeEntryV1, selfBinding: ImplementationSpawnBindingV1, expectedDeclaration?: RuntimeDescendantDeclarationV1): RuntimeDescendantPlanV2 | null;
-/** Assemble already measured rows; this helper never resolves or measures Host records. */
-export declare function createRuntimeDescendantPlan(selfKind: RuntimeEntryV1, selfBinding: ImplementationSpawnBindingV1, declaration?: RuntimeDescendantDeclarationV1, templates?: readonly Pick<RuntimeDescendantTemplateV1, 'kind' | 'template'>[], externalCliInstallations?: readonly AttestedOfficialExternalCliV2[]): RuntimeDescendantPlanV2 | null;
 // ==== @byok-sdk/client dist/adapters/pi/runtime-launch.d.ts ====
-import { type ImplementationSpawnBindingV1, type ToolImplementationAuthority, type ResolvedRuntimeImplementationV1 } from '@byok-sdk/implementation-identity';
-import { type RuntimeLaunchDecisionV1, type RuntimeLaunchKindV1 } from '../../daemon/tool-implementation-identity';
-import { type RuntimeDescendantPlanV2 } from './runtime-descendant-plan';
+/** The SDK-owned Pi entry a launch starts. */
+export type PiRuntimeLaunchKind = 'pi-rpc' | 'pi-prepared' | 'pi-durable';
 export interface PiRuntimeLaunchResources {
-    readonly kind: RuntimeLaunchKindV1;
-    readonly declaration: ResolvedRuntimeImplementationV1;
-    readonly decision: RuntimeLaunchDecisionV1;
-    readonly binding: ImplementationSpawnBindingV1;
-    readonly descendantPlan: RuntimeDescendantPlanV2 | null;
+    readonly kind: PiRuntimeLaunchKind;
+    /** The interpreter, or the executable itself. */
+    readonly command: string;
+    /** The script the interpreter runs. Absent for an executable. */
+    readonly entry?: string;
+    /**
+     * The fixed argv after the entry. A single-file product re-enters itself
+     * with `__byok_sdk_helper <kind>`; the installed package needs none.
+     */
+    readonly fixedArgs: readonly string[];
+    /** The real path of the session cwd. The Pi process starts in it, as in OAR. */
+    readonly cwd: string;
     readonly env: Readonly<Record<string, string>>;
     readonly sessionCwd: string;
     readonly credentialSource: 'pi-auth-store' | 'keys-profile';
+    /**
+     * The fresh 0700 directory the keys launcher writes the provider projection
+     * into. Present exactly when `credentialSource` is `keys-profile`.
+     */
+    readonly projectionDir?: string;
     /** A single client-owned cleanup authority, idempotent across declined/start/terminal paths. */
     release(): Promise<void>;
 }
 export declare function resolvePiRuntimeLaunch(options: {
-    authority?: ToolImplementationAuthority;
-    kind: RuntimeLaunchKindV1;
+    kind: PiRuntimeLaunchKind;
     sessionCwd: string;
     env: Readonly<Record<string, string | undefined>>;
     projectionRoot: string;
     keysSessionDir?: string;
-    /** Evaluated only after an explicitly unconfigured authority decision. */
-    resolveDevInvocation: () => {
+    /** The SDK Pi entry for this kind. */
+    resolveInvocation: () => {
         command: string;
         entry?: string;
+        fixedArgs?: readonly string[];
     };
 }): Promise<PiRuntimeLaunchResources>;
+/**
+ * The spawn command of one Pi host launch. Without a launcher the host starts
+ * directly. With one, the keys launcher starts the host and writes the
+ * provider projection into the launch's projection directory.
+ */
+export declare function piLaunchCommand(launch: PiRuntimeLaunchResources, runtimeEntry: 'pi-rpc' | 'pi-prepared' | 'pi-durable', configDigest: string, hostArgs: readonly string[], launcher: {
+    readonly command: string;
+    readonly args: readonly string[];
+    readonly profileArgs: readonly string[];
+} | undefined): {
+    command: string;
+    args: string[];
+};
 // ==== @byok-sdk/client dist/agent-home.d.ts ====
 import { type AgentHomeProjectionOutcome, type AgentHomeProjectionPayload, type AgentRef } from '@byok-sdk/protocol';
 export type { AgentRef } from '@byok-sdk/protocol';
@@ -1125,12 +1124,6 @@ export interface PreparedAgentMemorySelectedTool {
     readonly description: string;
     readonly parameters: Readonly<Record<string, unknown>>;
 }
-export interface PreparedAgentMemoryImplementationDigests {
-    /** Attested descriptor-helper identity; never supplied by a Host request. */
-    readonly descriptor: string;
-    /** Attested execution-helper identity; never supplied by a Host request. */
-    readonly execution: string;
-}
 export declare function parsePreparedAgentMemoryMode(value: unknown): PreparedAgentMemoryMode;
 export declare function preparedAgentMemoryModeAllowsOperation(mode: PreparedAgentMemoryMode, operation: AgentMemoryOperation): boolean;
 export declare function preparedAgentMemoryModeWithinCeiling(requested: PreparedAgentMemoryMode, ceiling: PreparedAgentMemoryMode): boolean;
@@ -1139,8 +1132,8 @@ export declare function preparedAgentMemoryToolNames(mode: PreparedAgentMemoryMo
 export declare function validatePreparedAgentMemoryObservation(value: unknown): PreparedAgentMemoryObservation;
 export declare function preparedAgentMemoryTools(mode: PreparedAgentMemoryMode, observation: PreparedAgentMemoryObservation): readonly PreparedAgentMemorySelectedTool[];
 export declare function preparedAgentMemoryDescriptorDigest(observation: PreparedAgentMemoryObservation): string;
-/** Per-tool executor fingerprints bind the complete descriptor, selected mode, both attested helper identities, and runtime identity. */
-export declare function preparedAgentMemoryExecutorFingerprints(observation: PreparedAgentMemoryObservation, mode: PreparedAgentMemoryMode, implementation: PreparedAgentMemoryImplementationDigests, runtimeIdentity: string): readonly string[];
+/** Per-tool executor fingerprints bind the complete descriptor, the selected mode and the runtime identity. */
+export declare function preparedAgentMemoryExecutorFingerprints(observation: PreparedAgentMemoryObservation, mode: PreparedAgentMemoryMode, runtimeIdentity: string): readonly string[];
 /** The sole canonical serialization used by descriptor validation and both memory digests. */
 export declare function canonicalPreparedAgentMemoryJson(value: unknown): string;
 // ==== @byok-sdk/client dist/assertion-client/index.d.ts ====
@@ -3539,7 +3532,6 @@ import type { AgentRef } from '../agent-home';
 import { type LocalAgentReleaseIdentity } from '../release-identity';
 import { type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
 import { type InputPreparationAuthorityResolver, type InputPreparationCounterAdapter, type InputPreparationLimitsPolicyV1 } from '../input-preparation';
-import type { ToolImplementationAuthority } from './tool-implementation-identity';
 import { type OperationalHealthSnapshot } from './operational-health';
 import { type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
 import { GitWorkspaceManager } from './git-workspace';
@@ -3992,23 +3984,6 @@ export interface DaemonConfig {
      * method for intents; the only entry is the mailbox notice.
      */
     agentMemoryIntents?: AgentMemoryIntentTransport;
-    /**
-     * The host's install-record authority for MCP toolset server
-     * implementations (`./tool-implementation-identity.ts`), forwarded verbatim
-     * to `TaskRunnerDeps.toolImplementationAuthority`.
-     *
-     * This SDK ships NO resolver and NO default, and there is nothing to
-     * validate here: an absent section is the supported state, and it means
-     * every implementation identity this daemon resolves is
-     * `resolver_unconfigured`. An absolute path is not an attestation, so a
-     * daemon without this section proves nothing about which executable serves a
-     * tool call and says so rather than implying otherwise.
-     *
-     * What a PRESENT authority buys is the refusal: an install it attested is
-     * re-measured before every spawn of that server, and a spawn whose artifact
-     * no longer measures the same is declined non-retryably.
-     */
-    toolImplementationAuthority?: ToolImplementationAuthority;
 }
 /**
  * The local preparation surface. The limits policy and the authority are
@@ -4964,11 +4939,16 @@ import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INP
  * version-8 record digests a field this build no longer has; retire it with
  * `byok-agent retire-input-preparation` instead of reading it forward.
  *
+ * 10 is the first version without tool implementation identities: the
+ * attestation stack left the SDK, so the artifact summary names tools, not
+ * implementation kinds, and the digests carry no identity. A version-9 record
+ * digests fields this build no longer has; retire it the same way.
+ *
  * A record at any other version is refused — see
  * {@link InputPreparationUnsupportedRecordVersionError}. There is no
  * compatibility read.
  */
-export declare const INPUT_PREPARATION_RECORD_VERSION = 9;
+export declare const INPUT_PREPARATION_RECORD_VERSION = 10;
 /** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
 export interface InputPreparationRecordKey {
     readonly scopeId: string;
@@ -6362,7 +6342,6 @@ export declare function createStatfsFreeBytesProvider(dir: string): () => Promis
 import type { McpStdioServerConfig } from '../types';
 import { McpAuthorityError } from '../mcp/client';
 import { type McpServerObservation } from '../mcp/observation';
-import type { ToolImplementationIdentityV1 } from './tool-implementation-identity';
 /**
  * The daemon's admission-time use of the shared MCP core (`../mcp/`).
  *
@@ -6401,17 +6380,6 @@ export interface McpToolsProbeOptions {
      * that forgets it fails to compile rather than passing `process.env`.
      */
     env: Readonly<Record<string, string>>;
-    /**
-     * What this daemon established about the implementation behind this server
-     * (`./tool-implementation-identity.ts`), forwarded to the shared MCP core so
-     * the probe spawn re-measures an attested one before starting it.
-     *
-     * Absent means nothing was claimed. The core refuses the spawn rather than
-     * demoting the claim, so a probe of an attested server that no longer
-     * measures the same fails with an {@link McpAuthorityError} and the task
-     * declines permanently.
-     */
-    implementation?: ToolImplementationIdentityV1;
 }
 /**
  * Observe one projected toolset server: start it, complete `initialize` +
@@ -7009,29 +6977,21 @@ export declare function inspectOperationalHealthFile(storeDir: string): Promise<
 export { inspectOperationalHealthHandle };
 // ==== @byok-sdk/client dist/daemon/prepared-agent-memory.d.ts ====
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
-import { type ToolImplementationAuthority, type ToolImplementationAttestedV1, type ToolImplementationFsProbe, type SdkHelperSpawnBindingV1 } from '@byok-sdk/implementation-identity';
 import { type PreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
-export interface PreparedAgentMemoryImplementation {
-    readonly descriptor: ToolImplementationAttestedV1;
-    readonly execution: ToolImplementationAttestedV1;
+/** The SDK-owned Agent-memory helper launch (`resolveSdkReservedHelperBin`). */
+export interface PreparedAgentMemoryHelper {
+    readonly command: string;
+    readonly args: readonly string[];
 }
+/** The task-free descriptor observation a preparation is counted over. */
 export interface PreparedAgentMemoryState {
-    readonly implementation: PreparedAgentMemoryImplementation;
     readonly observation: PreparedAgentMemoryObservation;
 }
-export declare function resolvePreparedMemoryImplementation(authority: ToolImplementationAuthority | undefined, env: Readonly<Record<string, string>>, probe?: ToolImplementationFsProbe): Promise<PreparedAgentMemoryImplementation>;
-export declare function memorySpawnBinding(identity: ToolImplementationAttestedV1, entry: 'agent-memory-describe' | 'agent-memory-mcp', mode: PreparedAgentMemoryMode): SdkHelperSpawnBindingV1;
-export declare function memoryServer(binding: SdkHelperSpawnBindingV1): {
-    command: string;
-    args: string[];
-};
-export declare function observePreparedMemory(implementation: PreparedAgentMemoryImplementation, env: Readonly<Record<string, string>>, signal?: AbortSignal, probe?: ToolImplementationFsProbe): Promise<PreparedAgentMemoryState>;
+/** Spawn the task-free descriptor helper and read its tools/list answer. */
+export declare function observePreparedMemory(describe: PreparedAgentMemoryHelper, env: Readonly<Record<string, string>>, signal?: AbortSignal): Promise<PreparedAgentMemoryState>;
 export declare function preparedMemoryProjection(mode: PreparedAgentMemoryMode, memory: PreparedAgentMemoryState | null, runtimeIdentity: string): {
     tools: readonly import("../agent-memory/prepared-capability").PreparedAgentMemorySelectedTool[];
     toolExecutors: {
-        [k: string]: string;
-    };
-    toolImplementationKinds: {
         [k: string]: string;
     };
 };
@@ -7157,6 +7117,8 @@ export interface ResolvedAgentMemoryMcpBin {
 }
 /** Resolve the SDK-owned stdio Agent-memory MCP helper shipped beside the client bundle. */
 export declare function resolveAgentMemoryMcpBin(externalHelperConfigured?: boolean, host?: SdkHelperHostConfig): ResolvedAgentMemoryMcpBin | undefined;
+/** Resolve the SDK-owned task-free Agent-memory descriptor helper a preparation observes. */
+export declare function resolveAgentMemoryDescribeBin(externalHelperConfigured?: boolean, host?: SdkHelperHostConfig): ResolvedAgentMemoryMcpBin | undefined;
 // ==== @byok-sdk/client dist/daemon/resolve-agent-message-mcp-bin.d.ts ====
 import { type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 export interface ResolvedAgentMessageMcpBin {
@@ -7531,7 +7493,6 @@ import { type RuntimeDisposalStage } from '../runtime-failure';
 import { type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals';
 import type { BlobResolver } from './blob-client';
 import type { TaskQueueWatermark } from './control-protocol';
-import { type ToolImplementationAuthority, type ToolImplementationFsProbe } from './tool-implementation-identity';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import { type ProgressBatcherOptions } from './progress-batcher';
 import type { SessionWorkspaceStore } from './session-workspace-store';
@@ -7786,18 +7747,6 @@ export interface TaskRunnerDeps {
         /** `toolsetId` -> definition revision, from one registry read per call. */
         readonly toolsetDefinitionRevisions: () => ReadonlyMap<string, string>;
     };
-    /**
-     * The host's install-record authority for MCP toolset server
-     * implementations (`./tool-implementation-identity.ts`).
-     *
-     * Unset means EVERY implementation identity resolves to
-     * `resolver_unconfigured` — this SDK ships no resolver and no default. It is
-     * not a degradation: an unconfigured daemon simply proves nothing about its
-     * executors and says so, and no spawn is refused for a claim nobody made.
-     */
-    toolImplementationAuthority?: ToolImplementationAuthority;
-    /** Test seam for the implementation measurement; see {@link ToolImplementationFsProbe}. */
-    toolImplementationFsProbe?: ToolImplementationFsProbe;
     workspaceRoot: string;
     /** Strict Agent offer authority. Absent means legacy offers never resolve an Agent home. */
     agentHome?: AgentHomeManager;
@@ -8030,6 +7979,8 @@ export interface TaskRunnerDeps {
     mcpToolsetToolsProbe?: (serverName: string, server: Readonly<McpStdioServerConfig>, options: McpToolsProbeOptions) => Promise<McpServerObservation>;
     /** SDK-owned MCP helper injected only into strict Agent tasks. */
     agentMemoryMcpBin?: Readonly<ResolvedAgentMemoryMcpBin>;
+    /** SDK-owned task-free Agent-memory descriptor helper a preparation observes. */
+    agentMemoryDescribeBin?: Readonly<ResolvedAgentMemoryMcpBin>;
     /** Explicit external secure-fs helper. No PATH discovery or bundled native addon exists. */
     agentMemoryFilesystemHelperBin?: string;
     /** Optional local-to-hosted redacted projection port. Omission is zero-network. */
@@ -9142,182 +9093,6 @@ export declare class LocalTeamWorkspace {
 }
 /** The longer name is useful at composition sites; both names denote one authority. */
 export { LocalTeamWorkspace as LocalTeamWorkspaceService };
-// ==== @byok-sdk/client dist/daemon/tool-implementation-identity.d.ts ====
-import type { RuntimeIdV1, ToolImplementationAttestedV1, ToolImplementationIdentityV1, ToolImplementationUnavailableReasonV1 } from '@byok-sdk/implementation-identity';
-export * from '@byok-sdk/implementation-identity';
-/**
- * WHICH logical entry of the runtime a launch addresses.
- *
- * Two, and they are the two this SDK owns: the ordinary rpc lane and the
- * prepared lane. Both start through the reserved-helper entry shape
- * `<interpreter> <entry> __byok_sdk_helper <kind> …`, so the kind is the only
- * thing that differs between them and it is bound, not passed as text.
- */
-export type RuntimeLaunchKindV1 = 'pi-rpc' | 'pi-prepared' | 'pi-durable';
-export declare const RUNTIME_LAUNCH_KINDS: readonly RuntimeLaunchKindV1[];
-/**
- * The environment NAMES a runtime launch description commits a value for.
- *
- * Exactly one today: `PI_PACKAGE_DIR`, which probe p3 measured to be the
- * runtime's single read point for its own package layout (`config.js:313`) and
- * which probe p5 measured to be a hard startup dependency in the interpreted
- * layout. The description points it at {@link RuntimeLaunchDescriptionV1.assetRoot}
- * — the release's own asset directory — so the runtime reads the measured,
- * read-only theme JSON rather than whatever a writable projection directory
- * happens to contain.
- *
- * This is a commitment of NAMES, not values: it says which variables the launch
- * description is the authority for, so a consumer that sets one of them from
- * anywhere else is visibly wrong rather than quietly last-write-wins.
- */
-export declare const RUNTIME_LAUNCH_ENV_COMMITMENT_NAMES: readonly string[];
-/**
- * The ONE description of how a runtime child starts. Strict, immutable, and
- * derived from nothing but an attested install record plus the exact pin this
- * build of the SDK declares.
- *
- * Every field exists because the alternative was a value discovered at launch
- * time from something writable:
- *
- * - `command` / `entry` — the interpreter and the sealed bundle, taken from the
- *   attested identity itself, never rebuilt from a package shape, a resolved
- *   bin or `import.meta.resolve`. The object that was checked is the object
- *   that is spawned.
- * - `fixedArgv` — the reserved-helper prefix for {@link kind}, bound separately
- *   from task flags.
- * - `processCwd` — the SEALED launch cwd, which is the child's `process.cwd()`.
- *   It is not the Agent home. A writable process cwd executes `bunfig.toml`
- *   preload and `.env` before any JavaScript inside the entry can check
- *   anything, and probe p4 measured that a `photon_rs_bg.wasm` planted in it is
- *   opened and instantiated for real.
- * - `sessionCwd` — the Agent home, passed to the runtime EXPLICITLY. Probe p2
- *   measured that every tool resolves against the session cwd rather than the
- *   process cwd, so the two decouple safely; this field is what makes the split
- *   a stated contract instead of an inherited accident.
- * - `assetRoot` — the release's own asset directory, and the value the launch
- *   commits `PI_PACKAGE_DIR` to.
- * - `envCommitments` — see {@link RUNTIME_LAUNCH_ENV_COMMITMENT_NAMES}.
- *
- * This description includes the session cwd and explicitly bound per-launch directory values.
- * What it deliberately does NOT carry: task flags, model selection, session ids,
- * or credential values. Task arguments remain the consumer's responsibility
- * after the fixed prefix. The description digest binds this launch, including
- * its explicit session cwd and controlled directory values.
- */
-export interface RuntimeLaunchDescriptionV1 {
-    readonly runtimeId: RuntimeIdV1;
-    readonly kind: RuntimeLaunchKindV1;
-    readonly credentialSource: 'pi-auth-store' | 'keys-profile';
-    readonly directoryValues: Readonly<Record<string, string>>;
-    /** The interpreter's path, or the compiled artifact's. */
-    readonly command: string;
-    /** The sealed bundle the interpreter runs. Present iff the form is `interpreter+bundle`. */
-    readonly entry?: string;
-    readonly fixedArgv: readonly string[];
-    readonly processCwd: string;
-    readonly sessionCwd: string;
-    readonly assetRoot: string;
-    readonly envCommitments: readonly string[];
-}
-/** The per-launch inputs a description cannot derive from the record alone. */
-export interface RuntimeLaunchInputV1 {
-    readonly runtimeId: RuntimeIdV1;
-    readonly kind: RuntimeLaunchKindV1;
-    readonly credentialSource?: 'pi-auth-store' | 'keys-profile';
-    readonly directoryValues?: Readonly<Record<string, string>>;
-    /**
-     * The Agent home this task runs in, passed to the runtime explicitly. It is
-     * NOT the process cwd and must not be: that is the whole split.
-     */
-    readonly sessionCwd: string;
-    /**
-     * The exact pin this build of the SDK declares — `adapters/pi/resolve-bin.ts`'s
-     * `resolvePiRuntimeIdentity()`. Passed in rather than read here so this module
-     * performs no package resolution of its own: the identity authority reads the
-     * filesystem to MEASURE, never to discover.
-     */
-    readonly pin: {
-        readonly name: string;
-        readonly version: string;
-    };
-}
-/**
- * The canonical digest of one description, for binding.
- *
- * Taken over the description alone, with the keys inserted in sorted order so
- * the hashed bytes are a function of the content. It is what a consumer carries
- * from the moment the launch was decided to the moment the child is spawned:
- * the attested identity already binds the interpreter, the bundle, the sealed
- * assets, the asset root, the fixed argv (as the record's own `launchArgv`) and
- * the process cwd, and this digest additionally binds the per-launch session
- * cwd and the resolved kind — the two facts an identity cannot carry without
- * becoming a different identity for every task.
- */
-export declare function runtimeLaunchDescriptionDigest(description: RuntimeLaunchDescriptionV1): string;
-/**
- * Turn one attested identity into the description of the child it starts, or
- * say why it cannot.
- *
- * Every refusal below is `install_record_mismatch`, and for one reason: each is
- * the record failing to describe a launch this SDK can perform, not a file that
- * changed or a resolver that declined. There is no repair path and no default —
- * a missing asset root, a missing fork provenance, an argv prefix the host chose
- * for itself, or a sealed cwd that is the Agent home are all records that cannot
- * be launched, and a description invented over the top of one would be this SDK
- * attesting its own guess.
- */
-export declare function deriveRuntimeLaunchDescription(identity: ToolImplementationAttestedV1, input: RuntimeLaunchInputV1): RuntimeLaunchDescriptionV1 | 'install_record_mismatch';
-/**
- * Why a runtime launch was declined. Every unavailable reason EXCEPT
- * `resolver_unconfigured`, which is not a decline at all — see
- * {@link RuntimeLaunchDecisionV1}.
- */
-export type RuntimeLaunchDeclineReasonV1 = Exclude<ToolImplementationUnavailableReasonV1, 'resolver_unconfigured'>;
-/**
- * What a consumer is allowed to do with a runtime subject, as three cases that
- * cannot be confused for one another.
- *
- * The runtime subject is STRICTER than the MCP subject, and this type is where
- * that asymmetry is stated (§77 ruling 3). An MCP server whose implementation
- * is unproven still runs and the receipt says it is unproven; a RUNTIME whose
- * implementation is unproven does not run at all, because it is the process the
- * whole task executes inside and an unattested one makes every downstream
- * attestation decorative.
- *
- * - `attested` — the description and the identity it came from. The consumer
- *   spawns exactly this, after re-measuring.
- * - `unconfigured` — no {@link ToolImplementationAuthority} is wired in. This
- *   SDK ships no resolver, so it is the default state and it is the DEV path:
- *   the launch proceeds unattested, exactly as it does today. It is a separate
- *   arm rather than a decline reason so a consumer cannot decline the dev path
- *   by reading `kind` alone.
- * - `declined` — an authority IS configured and the runtime is not attested.
- *   The consumer refuses the task. It is a separate arm rather than a reason on
- *   `unconfigured` so a consumer cannot let a configured-but-unattested runtime
- *   through by reading `kind` alone either. The distinction is carried by the
- *   TYPE because it is the one distinction that decides whether credentials
- *   reach a child.
- */
-export type RuntimeLaunchDecisionV1 = {
-    readonly kind: 'attested';
-    readonly description: RuntimeLaunchDescriptionV1;
-    readonly identity: ToolImplementationAttestedV1;
-} | {
-    readonly kind: 'unconfigured';
-    readonly reason: 'resolver_unconfigured';
-} | {
-    readonly kind: 'declined';
-    readonly reason: RuntimeLaunchDeclineReasonV1;
-};
-/**
- * Decide one runtime launch from an already-resolved identity.
- *
- * Pure: it measures nothing and reads nothing. The measurement happened in
- * {@link resolveToolImplementationIdentity}, and it happens AGAIN in
- * {@link reverifyToolImplementationIdentity} immediately before the child is
- * spawned. This function only says which of the three cases the consumer is in.
- */
-export declare function decideRuntimeLaunch(identity: ToolImplementationIdentityV1, input: RuntimeLaunchInputV1): RuntimeLaunchDecisionV1;
 // ==== @byok-sdk/client dist/daemon/toolset-registry.d.ts ====
 import { type ToolsetId } from '@byok-sdk/protocol';
 import type { McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types';
@@ -9649,18 +9424,7 @@ export type OperationalHealthFixResult = {
     sizeBytes: number;
 };
 // ==== @byok-sdk/client dist/index.d.ts ====
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, RuntimeInstallationObservationContext, Session, GitWorkspaceConfig, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
-/**
- * The host install-record authority this SDK declares and never implements
- * (`daemon/tool-implementation-identity.ts`). A daemon constructed without one
- * resolves every tool implementation identity to `resolver_unconfigured`.
- *
- * `parseToolImplementationIdentity` is deliberately NOT exported: it is the
- * only function that turns a parsed value into an attested identity, and its
- * one caller is this package's own task-scoped configuration reader.
- */
-export type { RuntimeEntryV1, RuntimeDescendantPolicyV1, RuntimeDescendantEdgeV1, RuntimeImplementationRecordV1, RuntimeImplementationResolutionV1, ToolImplementationAttestedV1, ToolImplementationAuthority, ToolImplementationIdentityV1, ToolImplementationInstallRecordV1, ToolImplementationInterpreterV1, ToolImplementationLocatorV1, ToolImplementationResolutionV1, ToolImplementationStatTupleV1, ToolImplementationUnavailableReasonV1, ToolImplementationUnavailableV1, } from '@byok-sdk/implementation-identity';
-export { ToolImplementationReverifyError } from '@byok-sdk/implementation-identity';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, Session, GitWorkspaceConfig, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
 export type { AgentRef } from './agent-home';
 export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjection, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home';
 export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store';
@@ -9796,9 +9560,8 @@ export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, Expor
 export { NativeInteractionController, NativeInteractionError } from './native-interactions';
 export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from './native-interactions';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
-import type { PreparedAgentMemoryImplementation, PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
+import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import { type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
-import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 /** Wire format tag for a preparation request. One strict shape, one version. */
 export declare const INPUT_PREPARATION_REQUEST_FORMAT = "byok.input-preparation.request";
 /** Wire format tag for a preparation receipt. */
@@ -9841,6 +9604,10 @@ export declare const INPUT_PREPARATION_ARTIFACT_FORMAT = "byok.input-preparation
  * Version 9 REMOVED `permissionMode` from the request and the binding, with the
  * task offer's permission policy (protocol v2). A preparation counts every
  * observed MCP tool; there is no mode to filter for or to compare.
+ * Version 9 also replaced the artifact's `toolImplementationKinds` with
+ * `toolNames` and removed the readiness reason `executor_identity_unproven`:
+ * the SDK does not attest tool executables. Version 9 is not released yet, so
+ * this change amends it.
  *
  * The number itself is owned by `@byok-sdk/protocol`'s
  * `INPUT_PREPARATION_WIRE_VERSION`, because the device capability token
@@ -10516,26 +10283,20 @@ export interface InputPreparationArtifactSummaryV1 {
     readonly residual: readonly InputPreparationResidualKeyV1[];
     /**
      * Digest of everything the device OBSERVED for this preparation — the
-     * projected tools, their executor fingerprints and the implementation
-     * identities. A later consumer re-observes and compares
-     * this one value rather than re-deriving a manifest.
+     * projected tools and their executor fingerprints. A later consumer
+     * re-observes and compares this one value rather than re-deriving a manifest.
      */
     readonly observationDigest: string;
     /**
      * Digest of the subset of those facts that can be re-derived WITHOUT
-     * spawning a server: the toolset definition revisions, the configured argv
-     * and the implementation identities. This is
-     * what a replay of an already-recorded `requestId` compares against, because
-     * re-probing to detect drift would create the second executor fact the
-     * idempotency key exists to prevent.
+     * spawning a server: the toolset definition revisions and the configured
+     * argv. This is what a replay of an already-recorded `requestId` compares
+     * against, because re-probing to detect drift would create the second
+     * executor fact the idempotency key exists to prevent.
      */
     readonly toolBindingDigest: string;
-    /**
-     * Per model-visible tool name: `attested`, or `unavailable:<reason>`. The
-     * evidence behind `executor_identity_unproven`, so a reader is not asked to
-     * take that readiness reason on trust.
-     */
-    readonly toolImplementationKinds: Readonly<Record<string, string>>;
+    /** The counted model-visible tool names, sorted byte-wise. */
+    readonly toolNames: readonly string[];
 }
 /** The immutable binding a receipt carries and a later consumer must re-present. */
 export interface InputPreparationBindingV1 {
@@ -10640,7 +10401,7 @@ export type InputPreparationStateV1 = 'reserved' | 'counting' | 'prepared' | 'ca
  *   classification table is evidence about a request this build cannot
  *   re-derive.
  */
-export type InputPreparationReadinessReasonV1 = 'not_prepared' | 'counter_interrupted' | 'cancelled' | 'failed' | 'artifact_expired' | 'counter_authority_not_production' | 'counter_coverage_incomplete' | 'request_content_not_text' | 'projection_unknown' | 'residual_not_ruled' | 'accounting_policy_missing' | 'accounting_policy_inapplicable' | 'executor_identity_unproven' | 'runtime_contract_superseded';
+export type InputPreparationReadinessReasonV1 = 'not_prepared' | 'counter_interrupted' | 'cancelled' | 'failed' | 'artifact_expired' | 'counter_authority_not_production' | 'counter_coverage_incomplete' | 'request_content_not_text' | 'projection_unknown' | 'residual_not_ruled' | 'accounting_policy_missing' | 'accounting_policy_inapplicable' | 'runtime_contract_superseded';
 /**
  * The scoped reference plus readiness evidence one preparation answers with.
  *
@@ -10759,19 +10520,14 @@ export interface PreparedToolBindingServerDigestInputV1 {
     readonly toolsetId: string;
     readonly command: string;
     readonly args: readonly string[];
-    readonly implementation: ToolImplementationIdentityV1;
 }
 export interface PreparedToolBindingDigestInputV1 {
     readonly agentMemory: PreparedAgentMemoryMode;
-    readonly memoryImplementation: PreparedAgentMemoryImplementation | null;
     readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
     /** Canonically ordered by server name; the canonical JSON preserves array order. */
     readonly servers: readonly PreparedToolBindingServerDigestInputV1[];
 }
-/**
- * The spawn-free half: the definition revisions, the configured argv and the
- * implementation identities.
- */
+/** The spawn-free half: the definition revisions and the configured argv. */
 export declare function preparedToolBindingDigest(input: PreparedToolBindingDigestInputV1): string;
 export interface PreparedToolSurfaceDigestInputV1 {
     readonly agentMemory: PreparedAgentMemoryMode;
@@ -10780,9 +10536,8 @@ export interface PreparedToolSurfaceDigestInputV1 {
     readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
     readonly tools: readonly InputPreparationToolV1[];
     readonly toolExecutors: Readonly<Record<string, string>>;
-    readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
 }
-/** The whole observed surface: the schemas, the executors and the identities. */
+/** The whole observed surface: the schemas and the executors. */
 export declare function preparedToolSurfaceObservationDigest(input: PreparedToolSurfaceDigestInputV1): string;
 // ==== @byok-sdk/client dist/lifecycle/create-service-lifecycle.d.ts ====
 import { type LaunchdDeps } from './launchd';
@@ -11571,8 +11326,6 @@ export declare class McpAuthorityError extends Error {
     });
 }
 // ==== @byok-sdk/client dist/mcp/client.d.ts ====
-import { type SdkHelperSpawnBindingV1 } from '@byok-sdk/implementation-identity';
-import { type ToolImplementationFsProbe, type ToolImplementationIdentityV1 } from '../daemon/tool-implementation-identity';
 import { type CallToolResult, type Tool } from '@modelcontextprotocol/client';
 import { McpAuthorityError } from './authority-error';
 export { McpAuthorityError };
@@ -11641,7 +11394,6 @@ export interface McpStdioServerSpec {
     readonly env?: Readonly<Record<string, string>>;
 }
 export interface McpStdioClientOptions {
-    readonly sdkHelperBinding?: SdkHelperSpawnBindingV1;
     /** Prefix on every error message, so a failure names the thing that failed. */
     readonly label?: string;
     /**
@@ -11657,24 +11409,6 @@ export interface McpStdioClientOptions {
     readonly timeoutMs?: number;
     /** Opt-in lifetime stdout cap; see {@link MCP_OBSERVATION_MAX_STDOUT_BYTES}. */
     readonly maxStdoutBytes?: number;
-    /**
-     * What this SDK has established about the implementation behind the command
-     * below (`../daemon/tool-implementation-identity.ts`).
-     *
-     * Every spawn of an ATTESTED server re-measures it first — see
-     * {@link McpStdioClient.connect}. This is the one choke point both spawn
-     * points share: the daemon's admission probe and the Pi extension's pool
-     * both build their child through this class, so neither can start an
-     * attested server that no longer measures the way it was attested.
-     *
-     * Absent, or `unavailable`, means no claim was made about this server and
-     * there is nothing to re-measure. It never means "assume it is fine": the
-     * receipt that carried such an identity already says the implementation is
-     * unproven.
-     */
-    readonly implementation?: ToolImplementationIdentityV1;
-    /** Test seam, forwarded verbatim; see {@link ToolImplementationFsProbe}. */
-    readonly implementationFsProbe?: ToolImplementationFsProbe;
 }
 /**
  * One connected stdio MCP server.
@@ -11702,20 +11436,6 @@ export declare class McpStdioClient {
      * guards spawn and every outgoing frame; the signal still cancels protocol
      * waits. Per-request timeouts remain unchanged. Observations supply both;
      * long-lived call clients normally omit the absolute deadline.
-     *
-     * An attested implementation is re-measured BEFORE the spawn, every time:
-     * the artifact, the interpreter of an `interpreter+bundle`, and the
-     * environment this child is about to be handed. Resolve and launch are two
-     * different moments, and an identity established at the first one asserts
-     * nothing about the second — so the check runs here rather than being cached
-     * with the identity.
-     *
-     * A failure is a refusal, not a downgrade: the connection is never opened
-     * with the identity quietly demoted to `unavailable`, because a server that
-     * was attested and no longer measures the same is a server that changed
-     * under a claim somebody relied on. It surfaces as {@link McpAuthorityError}
-     * so the daemon declines the offer permanently — re-offering spawns the same
-     * changed file and reaches the same verdict.
      */
     connect(signal?: AbortSignal, deadline?: number): Promise<void>;
     private checkDeadline;
@@ -12113,11 +11833,9 @@ export declare function runSdkReservedHelperCommand(argv?: readonly string[]): P
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
-import type { ToolImplementationAuthority, ToolImplementationUnavailableReasonV1 } from '@byok-sdk/implementation-identity';
 import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation';
-import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 import type { AgentRef } from './agent-home';
 import type { McpToolsetServerObservation } from './mcp/observation';
 export type { AgentRef } from './agent-home';
@@ -12154,16 +11872,7 @@ export interface RuntimeDetectionAdvisory {
     readonly reason: 'runtime_version_unqualified';
     readonly qualifiedVersion: string;
 }
-export type RuntimeDetectionRefusalReason = ToolImplementationUnavailableReasonV1 | 'installation_observation_unsupported' | 'native_identity_mismatch' | 'app_server_unavailable';
-/** Explicit scope, never a launch environment or task/lane-selection authority. */
-export type RuntimeInstallationObservationContext = {
-    readonly authority: ToolImplementationAuthority;
-} & ({
-    readonly scope: 'entry';
-    readonly runtimeEntry: 'pi-rpc' | 'pi-prepared' | 'pi-durable';
-} | {
-    readonly scope: 'enabled-top-level';
-});
+export type RuntimeDetectionRefusalReason = 'app_server_unavailable';
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
     /** Local native interaction support only; omission is unsupported. Not the remote boolean approval lane. */
@@ -12457,8 +12166,6 @@ export interface RuntimePreparedLaunchV1 {
     readonly expected: RuntimePreparedLaunchExpectationV1;
     readonly toolBindingDigest: string;
     readonly observationDigest: string;
-    /** The implementation identity the preparation resolved per projected server. */
-    readonly toolImplementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
     /** `toolsetId` -> the registry definition revision the preparation bound. */
     readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
 }
@@ -12485,18 +12192,6 @@ interface RuntimeOperationStartBase {
     readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
     /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
     readonly mcpToolsetTools?: McpToolsetToolObservation;
-    /**
-     * What this daemon established about the implementation behind each
-     * projected toolset server, keyed by projected server name
-     * (`daemon/tool-implementation-identity.ts`).
-     *
-     * Resolved ONCE per offer by `TaskRunner`, alongside the launch binding
-     * above and for the same reason: the admission probe and every adapter spawn
-     * of one task must be talking about the same install. An adapter that spawns
-     * toolset servers itself carries these values to its spawn point unchanged;
-     * it never resolves its own.
-     */
-    readonly mcpToolImplementations?: Readonly<Record<string, ToolImplementationIdentityV1>>;
     /** Optional, adapter-agnostic out-of-band approval channel. */
     readonly approvalChannel?: ApprovalChannel;
 }
@@ -12535,7 +12230,6 @@ export interface PreparedRuntimeOperation {
         cwd: string;
         env: Readonly<Record<string, string | undefined>>;
         projectionRoot: string;
-        authority?: ToolImplementationAuthority;
     }): Promise<PiRuntimeLaunchResources>;
     start(input: RuntimeOperationStartInput): Promise<Session>;
 }
@@ -12548,8 +12242,6 @@ export interface RuntimeAdapter {
     readonly descriptor: RuntimeAdapterDescriptor;
     /** Readiness probing must not mutate an Agent home or allocate execution ownership. */
     detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
-    /** Configured local installation observation. Absence refuses; it never falls back to detect. */
-    detectInstallation?(context: RuntimeInstallationObservationContext, signal?: AbortSignal): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
 }
 /** Copy then deeply freeze descriptor authority so callers cannot retain a mutable source reference. */

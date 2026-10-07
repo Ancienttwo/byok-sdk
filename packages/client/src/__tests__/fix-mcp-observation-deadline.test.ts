@@ -10,7 +10,6 @@ import { McpStdioClient, McpTransportError } from '../mcp/client';
 import { probeMcpServer } from '../daemon/mcp-tools-probe';
 import { createPreparedToolSurfaceAssembler } from '../daemon/prepared-tool-surface';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
-import * as identity from '../daemon/tool-implementation-identity';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/fix-mcp-observation-deadline.mjs', import.meta.url));
 const ENV = { PATH: process.env.PATH ?? '' };
@@ -127,18 +126,8 @@ describe('S18-2: observation-wide deadline', () => {
 
   it('does not spawn for an already-aborted caller', async () => {
     const f = await fixture();
-    const verification = vi.spyOn(identity, 'assertToolImplementationBeforeSpawn');
     const signal = AbortSignal.abort(new Error('already cancelled'));
     await expect(observeMcpServer('fixture', f.server, { env: ENV, signal })).rejects.toThrow(/already cancelled/);
-    expect(await f.events()).toEqual([]);
-    expect(verification).not.toHaveBeenCalled();
-  });
-
-  it('refuses a spawn after verification passes the deadline before the timer callback runs', async () => {
-    const f = await fixture();
-    const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
-    vi.spyOn(identity, 'assertToolImplementationBeforeSpawn').mockImplementation(async () => { clock.mockReturnValue(2_000); });
-    await expect(observeMcpServer('fixture', f.server, { env: ENV, timeoutMs: 1_000 })).rejects.toThrow(/timed out|deadline/iu);
     expect(await f.events()).toEqual([]);
   });
 
@@ -169,23 +158,19 @@ describe('S18-2: observation-wide deadline', () => {
     await expectExited(f);
   });
 
-  it.each([NaN, Infinity, -Infinity])('rejects a non-finite absolute deadline (%s) before verification or spawn', async (deadline) => {
+  it.each([NaN, Infinity, -Infinity])('rejects a non-finite absolute deadline (%s) before spawn', async (deadline) => {
     const f = await fixture();
-    const verification = vi.spyOn(identity, 'assertToolImplementationBeforeSpawn');
     const client = new McpStdioClient(f.server, { env: ENV });
     try { await expect(client.connect(undefined, deadline)).rejects.toBeInstanceOf(RangeError); }
     finally { await client.close(); }
-    expect(verification).not.toHaveBeenCalled();
     expect(await f.events()).toEqual([]);
   });
 
   it('rejects an already-expired absolute deadline without spawning', async () => {
     const f = await fixture();
-    const verification = vi.spyOn(identity, 'assertToolImplementationBeforeSpawn');
     const client = new McpStdioClient(f.server, { env: ENV });
     try { await expect(client.connect(undefined, performance.now() - 1)).rejects.toBeInstanceOf(McpTransportError); }
     finally { await client.close(); }
-    expect(verification).not.toHaveBeenCalled();
     expect(await f.events()).toEqual([]);
   });
 

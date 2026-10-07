@@ -5790,7 +5790,7 @@ export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminated
             }, z.core.$strict>>;
             observationDigest: z.ZodString;
             toolBindingDigest: z.ZodString;
-            toolImplementationKinds: z.ZodRecord<z.ZodString, z.ZodString>;
+            toolNames: z.ZodArray<z.ZodString>;
         }, z.core.$strict>>;
         counter: z.ZodOptional<z.ZodObject<{
             method: z.ZodString;
@@ -5830,7 +5830,6 @@ export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminated
             counter_authority_not_production: "counter_authority_not_production";
             counter_coverage_incomplete: "counter_coverage_incomplete";
             counter_interrupted: "counter_interrupted";
-            executor_identity_unproven: "executor_identity_unproven";
             failed: "failed";
             not_prepared: "not_prepared";
             projection_unknown: "projection_unknown";
@@ -5983,7 +5982,7 @@ export declare const InputPreparationReadbackSchema: z.ZodObject<{
             }, z.core.$strict>>;
             observationDigest: z.ZodString;
             toolBindingDigest: z.ZodString;
-            toolImplementationKinds: z.ZodRecord<z.ZodString, z.ZodString>;
+            toolNames: z.ZodArray<z.ZodString>;
         }, z.core.$strict>>;
         counter: z.ZodOptional<z.ZodObject<{
             method: z.ZodString;
@@ -6023,7 +6022,6 @@ export declare const InputPreparationReadbackSchema: z.ZodObject<{
             counter_authority_not_production: "counter_authority_not_production";
             counter_coverage_incomplete: "counter_coverage_incomplete";
             counter_interrupted: "counter_interrupted";
-            executor_identity_unproven: "executor_identity_unproven";
             failed: "failed";
             not_prepared: "not_prepared";
             projection_unknown: "projection_unknown";
@@ -6213,7 +6211,7 @@ export { AgentEgressPolicySchema, AgentEgressActivityPolicySchema, AgentReliable
 export type { AgentEgressPolicy, AgentEgressActivityPolicy, AgentReliableQuotaPolicy, ContentReadPolicy, AgentEgressLane, AgentEgressDropReason, AgentMessageContentType, AgentMessageEgressRequirement, AgentMessageServerContext, AgentContentReadSurface, AgentContentActorKind, AgentContentActor, AgentContentDecodeAs, AgentContentReadDecision, AgentContentReadDenialReason, } from './agent-egress';
 export { AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_MAX_BYTES, AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM, AgentHomeProjectionProfileRevisionSchema, AgentHomeProjectionHashSchema, AgentHomeProjectionOutcomeSchema, AgentHomeProjectionValueSchema, } from './agent-home-projection';
 export type { AgentHomeProjectionProfileRevision, AgentHomeProjectionHash, AgentHomeProjectionOutcome, AgentHomeProjectionValue, } from './agent-home-projection';
-export { AGENT_INPUT_PREPARATION_CAPABILITY, INPUT_PREPARATION_WIRE_VERSION, InputPreparationContentHashSchema, InputPreparationPolicyRevisionSchema, InputPreparationProfileIdSchema, InputPreparationSourceSchema, InputPreparationModelCostSchema, InputPreparationModelSchema, InputPreparationOptionsSchema, InputPreparationSelectionSchema, InputPreparationPromptSnapshotSchema, InputPreparationUserMessageSchema, InputPreparationHostCanonicalAssistantMessageSchema, InputPreparationMessageSchema, InputPreparationContextDocumentSchema, InputPreparationStateSchema, InputPreparationReadinessReasonSchema, InputPreparationRuntimeIdentitySchema, InputPreparationCounterTargetSchema, InputPreparationAccountingPolicyRefSchema, InputPreparationCounterProviderEvidenceSchema, InputPreparationCounterEvidenceSchema, InputPreparationResidualValueClassSchema, InputPreparationResidualKeySchema, InputPreparationProjectionSchema, InputPreparationToolImplementationKindSchema, InputPreparationArtifactSummarySchema, InputPreparationBindingSchema, InputPreparationReceiptSummarySchema, InputPreparationReferenceSchema, InputPreparationOfferBindingSchema, InputPreparationRejectionReasonSchema, } from './input-preparation';
+export { AGENT_INPUT_PREPARATION_CAPABILITY, INPUT_PREPARATION_WIRE_VERSION, InputPreparationContentHashSchema, InputPreparationPolicyRevisionSchema, InputPreparationProfileIdSchema, InputPreparationSourceSchema, InputPreparationModelCostSchema, InputPreparationModelSchema, InputPreparationOptionsSchema, InputPreparationSelectionSchema, InputPreparationPromptSnapshotSchema, InputPreparationUserMessageSchema, InputPreparationHostCanonicalAssistantMessageSchema, InputPreparationMessageSchema, InputPreparationContextDocumentSchema, InputPreparationStateSchema, InputPreparationReadinessReasonSchema, InputPreparationRuntimeIdentitySchema, InputPreparationCounterTargetSchema, InputPreparationAccountingPolicyRefSchema, InputPreparationCounterProviderEvidenceSchema, InputPreparationCounterEvidenceSchema, InputPreparationResidualValueClassSchema, InputPreparationResidualKeySchema, InputPreparationProjectionSchema, InputPreparationArtifactSummarySchema, InputPreparationBindingSchema, InputPreparationReceiptSummarySchema, InputPreparationReferenceSchema, InputPreparationOfferBindingSchema, InputPreparationRejectionReasonSchema, } from './input-preparation';
 export type { InputPreparationSource, InputPreparationModel, InputPreparationOptions, InputPreparationSelection, InputPreparationMessage, InputPreparationContextDocument, InputPreparationState, InputPreparationReadinessReason, InputPreparationAccountingPolicyRef, InputPreparationResidualValueClass, InputPreparationRuntimeIdentity, InputPreparationReceiptSummary, InputPreparationOfferBinding, InputPreparationRejectionReason, } from './input-preparation';
 export { AGENT_MEMORY_PROJECTION_CAPABILITY, AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES, AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE, AgentMemoryProjectionGrantRefSchema, AgentMemoryProjectionSessionRefSchema, AgentMemoryProjectionWriterEpochSchema, AgentMemoryProjectionSourceSeqSchema, AgentMemoryProjectionSnapshotSchema, AgentMemoryProjectionMeteringReceiptSchema, AgentMemoryProjectionMutationSchema, AgentMemoryProjectionReceiptSchema, AgentMemoryProjectionEraseResultSchema, agentMemoryProjectionBase64UrlByteLength, } from './agent-memory-projection';
 export type { AgentMemoryProjectionGrantRef, AgentMemoryProjectionSessionRef, AgentMemoryProjectionWriterEpoch, AgentMemoryProjectionSourceSeq, AgentMemoryProjectionSnapshot, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionEraseResult, } from './agent-memory-projection';
@@ -6618,7 +6616,7 @@ export type InputPreparationState = z.infer<typeof InputPreparationStateSchema>;
  * `ready` means the preparation CAN BE CONSUMED — the artifact is intact and
  * unexpired, the native compiler's projection is content-complete, every
  * residual key is ruled by an applicable Host accounting policy, D is text
- * only, every executor identity is attested, and — only when the device has an
+ * only, and — only when the device has an
  * optional counter configured — that count is provider-authoritative and
  * covered. No count is required: the size evidence is
  * `artifact.requestBytes`, the exact byte length of the frozen D. It is
@@ -6634,7 +6632,6 @@ export declare const InputPreparationReadinessReasonSchema: z.ZodEnum<{
     counter_authority_not_production: "counter_authority_not_production";
     counter_coverage_incomplete: "counter_coverage_incomplete";
     counter_interrupted: "counter_interrupted";
-    executor_identity_unproven: "executor_identity_unproven";
     failed: "failed";
     not_prepared: "not_prepared";
     projection_unknown: "projection_unknown";
@@ -6748,16 +6745,6 @@ export declare const InputPreparationCounterEvidenceSchema: z.ZodObject<{
     completedAt: z.ZodISODateTime;
 }, z.core.$strict>;
 /**
- * What the device established about the implementation behind ONE
- * model-visible tool: `attested`, or `unavailable:<reason>` naming which of
- * the SDK's closed unavailable reasons applies.
- *
- * A kind, never the identity itself: an install path, a closure digest or a
- * stat tuple is device-local filesystem detail, and a receipt discloses
- * identity facts, not the machine's layout.
- */
-export declare const InputPreparationToolImplementationKindSchema: z.ZodString;
-/**
  * What the native compiler proved about ONE top-level key of D that lies
  * outside P(D).
  *
@@ -6819,19 +6806,16 @@ export declare const InputPreparationProjectionSchema: z.ZodObject<{
  * launch checkable rather than assumed:
  *
  * - `observationDigest` binds everything the device OBSERVED — the projected
- *   tools, their executor fingerprints and the implementation identities —
- *   so a launch whose live observation differs is
- *   a different manifest, whatever the schemas say.
+ *   tools and their executor fingerprints — so a launch whose live
+ *   observation differs is a different manifest, whatever the schemas say.
  * - `toolBindingDigest` binds only the facts that can be re-derived WITHOUT
- *   spawning a server: the toolset definition revisions and the
- *   implementation identities. It is what a replay of an
- *   already-recorded requestId compares against, because re-probing to detect
- *   drift would be the second executor fact the idempotency key exists to
- *   prevent.
- * - `toolImplementationKinds` states, per model-visible tool name, whether the
- *   implementation behind it was attested. It is the evidence behind
- *   `executor_identity_unproven`, so a reader does not have to take that
- *   readiness reason on trust.
+ *   spawning a server: the toolset definition revisions and the configured
+ *   argv. It is what a replay of an already-recorded requestId compares
+ *   against, because re-probing to detect drift would be the second executor
+ *   fact the idempotency key exists to prevent.
+ * - `toolNames` lists the counted model-visible tool names, sorted. A launch
+ *   that registers a different set can name the tool that appeared or
+ *   vanished.
  */
 export declare const InputPreparationArtifactSummarySchema: z.ZodObject<{
     requestDigest: z.ZodString;
@@ -6862,7 +6846,7 @@ export declare const InputPreparationArtifactSummarySchema: z.ZodObject<{
     }, z.core.$strict>>;
     observationDigest: z.ZodString;
     toolBindingDigest: z.ZodString;
-    toolImplementationKinds: z.ZodRecord<z.ZodString, z.ZodString>;
+    toolNames: z.ZodArray<z.ZodString>;
 }, z.core.$strict>;
 /** The immutable binding a receipt carries and a later consumer must re-present. */
 export declare const InputPreparationBindingSchema: z.ZodObject<{
@@ -6995,7 +6979,7 @@ export declare const InputPreparationReceiptSummarySchema: z.ZodObject<{
         }, z.core.$strict>>;
         observationDigest: z.ZodString;
         toolBindingDigest: z.ZodString;
-        toolImplementationKinds: z.ZodRecord<z.ZodString, z.ZodString>;
+        toolNames: z.ZodArray<z.ZodString>;
     }, z.core.$strict>>;
     counter: z.ZodOptional<z.ZodObject<{
         method: z.ZodString;
@@ -7035,7 +7019,6 @@ export declare const InputPreparationReceiptSummarySchema: z.ZodObject<{
         counter_authority_not_production: "counter_authority_not_production";
         counter_coverage_incomplete: "counter_coverage_incomplete";
         counter_interrupted: "counter_interrupted";
-        executor_identity_unproven: "executor_identity_unproven";
         failed: "failed";
         not_prepared: "not_prepared";
         projection_unknown: "projection_unknown";
@@ -10816,6 +10799,10 @@ export declare const MAILBOX_READ_AHEAD_CAPABILITY = "mailbox-read-ahead";
  * v2 also removed the egress policy's `metadata-status` activity mode, its
  * `activity.mode` field and the `sanitizer_rejected` drop reason. Agent
  * egress goes to the Host as the runtime produced it.
+ * v2 also removed the input-preparation artifact's `toolImplementationKinds`
+ * and the readiness reason `executor_identity_unproven`. The SDK does not
+ * attest tool executables. The artifact names its counted tools in
+ * `toolNames`.
  *
  * IMPORTANT: changing this constant, or changing/removing/retyping any
  * already-frozen schema in this package, requires a DELIBERATE update to the

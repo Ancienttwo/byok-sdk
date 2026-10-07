@@ -8,7 +8,6 @@ import {
 import type { RuntimePreparedLaunchV1 } from '../types';
 import type { McpToolsetServerObservation } from '../mcp/observation';
 import { fingerprintPreparedToolSurface } from './prepared-tool-surface';
-import type { ToolImplementationIdentityV1 } from './tool-implementation-identity';
 import type { InputPreparationRecord } from './input-preparation-store';
 import { inputPreparationReadinessReasons } from './input-preparation-service';
 import type { PreparedAgentMemoryState } from './prepared-agent-memory';
@@ -31,19 +30,16 @@ import type { PreparedAgentMemoryState } from './prepared-agent-memory';
  * - The binding answers device, Agent, profile revision, policy revision,
  *   runtime identity and request digest DIRECTLY. Those are
  *   compared as values.
- * - The artifact summary answers the envelope digest, the tool implementation
- *   kinds (which are keyed by model-visible tool NAME, so they also answer the
- *   counted tool SET), and the two surface digests.
+ * - The artifact summary answers the envelope digest, the counted tool names
+ *   and the two surface digests.
  * - Nothing durable carries the toolset definition revisions or the observed
  *   schemas as values — they exist only inside `toolBindingDigest` and
  *   `observationDigest`. So the definition revisions are compared through
  *   `toolBindingDigest`, and the schemas through `observationDigest`.
  *
  * WHERE the live values come from: this daemon's OWN admission of this offer —
- * the one implementation identity per server it resolved, and the `tools/list`
- * observation its admission probe took. Nothing is re-resolved here. A second
- * resolution would be a second opinion about the same install, and the two
- * could disagree without anything noticing.
+ * the servers it projected and the `tools/list` observation its admission
+ * probe took. Nothing is re-probed here.
  *
  * The live surface digests are produced by
  * {@link fingerprintPreparedToolSurface} and {@link preparedToolBindingDigest} —
@@ -84,11 +80,9 @@ export type PreparedOfferDeclineReason =
   | 'preparation_runtime_identity_mismatch'
   /** The live tool set is not the set of model-visible names that were counted. */
   | 'preparation_tool_set_mismatch'
-  /** The same tool names, but a different implementation-identity kind behind one of them. */
-  | 'preparation_tool_implementation_kinds_mismatch'
-  /** The live definition revisions, argv or identities differ from the counted ones. */
+  /** The live definition revisions or argv differ from the counted ones. */
   | 'preparation_tool_binding_digest_mismatch'
-  /** Same names and same kinds, but a different observed schema surface. */
+  /** Same names, but a different observed schema surface. */
   | 'preparation_observation_digest_mismatch'
   /** The live observation could not be projected or fingerprinted at all. */
   | 'preparation_tool_surface_unfingerprintable'
@@ -138,12 +132,10 @@ export interface PreparedOfferAdmissionInput {
   readonly runtime: InputPreparationRuntimeIdentityV1;
   /** The exact SDK memory selection re-presented by this prepared offer. */
   readonly offeredAgentMemory: PreparedAgentMemoryMode;
-  /** Current descriptor observation and attested helper pair; null only for `none`. */
+  /** The current descriptor observation; null only for `none`. */
   readonly memory: PreparedAgentMemoryState | null;
   /** The live `tools/list` answer this task's own admission probe took. */
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>> | undefined;
-  /** The one implementation identity per projected server this task resolved. */
-  readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>> | undefined;
   /** The projected servers, as this task resolved them from its registry. */
   readonly servers: readonly PreparedOfferServerProjection[];
   /** `toolsetId` -> definition revision, from the same registry read. */
@@ -255,7 +247,7 @@ export async function admitPreparedOffer(
     );
   }
 
-  if (input.observation === undefined || input.implementations === undefined) {
+  if (input.observation === undefined) {
     return decline(
       'preparation_tool_set_mismatch',
       'this task projected no observed MCP toolset servers, and the named preparation counted a manifest of them',
@@ -269,7 +261,6 @@ export async function admitPreparedOffer(
     observation: input.observation,
     runtimeIdentity,
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
-    implementations: input.implementations,
   });
   if (!fingerprinted.ok) {
     return decline(
@@ -280,10 +271,9 @@ export async function admitPreparedOffer(
   const live = fingerprinted.fingerprint;
 
   // Names first, by name, because a decline can then say WHICH tool appeared or
-  // vanished. `toolImplementationKinds` is keyed by model-visible tool name, so
-  // it is the counted set's own durable spelling — no second list is needed.
-  const countedNames = Object.keys(summary.toolImplementationKinds).sort(compareNames);
-  const liveNames = live.tools.map((tool) => tool.name).sort(compareNames);
+  // vanished.
+  const countedNames = [...summary.toolNames].sort(compareNames);
+  const liveNames = [...live.toolNames];
   if (countedNames.length !== liveNames.length || countedNames.some((name, index) => name !== liveNames[index])) {
     const added = liveNames.filter((name) => !countedNames.includes(name));
     const missing = countedNames.filter((name) => !liveNames.includes(name));
@@ -295,25 +285,10 @@ export async function admitPreparedOffer(
     );
   }
 
-  // Same names, so the kinds are comparable per name: a tool whose
-  // implementation was attested when it was counted and is unattested now is a
-  // weaker manifest than the one these tokens paid for.
-  const driftedKinds = countedNames.filter(
-    (name) => summary.toolImplementationKinds[name] !== live.toolImplementationKinds[name],
-  );
-  if (driftedKinds.length > 0) {
-    return decline(
-      'preparation_tool_implementation_kinds_mismatch',
-      'the implementation identity behind a counted tool is not the kind it was counted with:'
-      + ` ${quoted(driftedKinds)}`,
-    );
-  }
-
-  // The toolset definition revisions, the argv and the per-server identities — the facts that need no spawn, in the digest that
-  // was frozen over them.
+  // The toolset definition revisions and the argv — the facts that need no
+  // spawn, in the digest that was frozen over them.
   const liveToolBindingDigest = preparedToolBindingDigest({
     agentMemory: binding.agentMemory,
-    memoryImplementation: input.memory?.implementation ?? null,
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     servers: [...input.servers]
       .sort((left, right) => compareNames(left.serverName, right.serverName))
@@ -322,14 +297,13 @@ export async function admitPreparedOffer(
         toolsetId: entry.toolsetId,
         command: entry.command,
         args: [...entry.args],
-        implementation: input.implementations![entry.serverName]!,
       })),
   });
   if (liveToolBindingDigest !== summary.toolBindingDigest) {
     return decline(
       'preparation_tool_binding_digest_mismatch',
-      'the toolset definition revisions, server argv or implementation identities this task'
-      + ' resolved are not the ones the named preparation bound',
+      'the toolset definition revisions or server argv this task resolved are not the ones the named'
+      + ' preparation bound',
     );
   }
 
@@ -370,7 +344,6 @@ export async function admitPreparedOffer(
       memory: input.memory,
       toolBindingDigest: summary.toolBindingDigest,
       observationDigest: summary.observationDigest,
-      toolImplementations: input.implementations,
       toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     }),
   });

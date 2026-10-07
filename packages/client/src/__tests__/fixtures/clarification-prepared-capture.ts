@@ -16,7 +16,6 @@ import { bindMcpToolsetServerObservation, type McpToolsetServerObservation } fro
 import { probeMcpServer } from '../../daemon/mcp-tools-probe';
 import { McpToolsetRegistry } from '../../daemon/toolset-registry';
 import { createPreparedToolSurfaceAssembler } from '../../daemon/prepared-tool-surface';
-import { TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED } from '../../daemon/tool-implementation-identity';
 import { PiAdapter } from '../../adapters/pi/pi-adapter';
 import { resolveInstalledPiRuntimeIdentity, createPiInputPreparationCompiler } from '../../adapters/pi/input-preparation';
 import { projectPiMcpEnvironment } from '../../adapters/pi/mcp-environment';
@@ -266,7 +265,6 @@ export async function prepareOnThisDevice(endpoint: ProviderEndpoint, input: {
       },
       toolBindingDigest: surface.toolBindingDigest,
       observationDigest: surface.observationDigest,
-      toolImplementations: { teamserver: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
       toolsetDefinitionRevisions: surface.toolsetDefinitionRevisions,
     },
   };
@@ -309,7 +307,6 @@ export async function startPrepared(prepared: Prepared, overrides: { taskId: str
       env: prepared.childEnv,
       mcpServers: prepared.mcpServers,
       mcpToolsetTools: prepared.observation,
-      mcpToolImplementations: { teamserver: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
       preparation: overrides.preparation ?? prepared.preparation,
     });
     sessions.push(session);

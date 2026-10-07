@@ -1,4 +1,4 @@
-import { resolvePreparedMemoryImplementation, observePreparedMemory, memorySpawnBinding, memoryServer, type PreparedAgentMemoryImplementation, type PreparedAgentMemoryState } from './prepared-agent-memory';
+import { observePreparedMemory, type PreparedAgentMemoryState } from './prepared-agent-memory';
 import { InputPreparationRequestError } from './input-preparation-service';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import type { PiRuntimeLaunchResources } from '../adapters/pi/runtime-launch';
@@ -86,12 +86,6 @@ import type { BlobResolver } from './blob-client';
 import type { TaskQueueWatermark } from './control-protocol';
 import { DEFAULT_MAX_INLINE_EVENT_BYTES, spillOversizedEvent } from './event-spill';
 import { buildRuntimeEnv } from './environment';
-import {
-  resolveToolImplementationIdentity,
-  type ToolImplementationAuthority,
-  type ToolImplementationFsProbe,
-  type ToolImplementationIdentityV1,
-} from './tool-implementation-identity';
 import { toRuntimeInfoCapabilities } from './runtime-capabilities';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import {
@@ -476,18 +470,6 @@ export interface TaskRunnerDeps {
     /** `toolsetId` -> definition revision, from one registry read per call. */
     readonly toolsetDefinitionRevisions: () => ReadonlyMap<string, string>;
   };
-  /**
-   * The host's install-record authority for MCP toolset server
-   * implementations (`./tool-implementation-identity.ts`).
-   *
-   * Unset means EVERY implementation identity resolves to
-   * `resolver_unconfigured` — this SDK ships no resolver and no default. It is
-   * not a degradation: an unconfigured daemon simply proves nothing about its
-   * executors and says so, and no spawn is refused for a claim nobody made.
-   */
-  toolImplementationAuthority?: ToolImplementationAuthority;
-  /** Test seam for the implementation measurement; see {@link ToolImplementationFsProbe}. */
-  toolImplementationFsProbe?: ToolImplementationFsProbe;
   workspaceRoot: string;
   /** Strict Agent offer authority. Absent means legacy offers never resolve an Agent home. */
   agentHome?: AgentHomeManager;
@@ -719,6 +701,8 @@ export interface TaskRunnerDeps {
   ) => Promise<McpServerObservation>;
   /** SDK-owned MCP helper injected only into strict Agent tasks. */
   agentMemoryMcpBin?: Readonly<ResolvedAgentMemoryMcpBin>;
+  /** SDK-owned task-free Agent-memory descriptor helper a preparation observes. */
+  agentMemoryDescribeBin?: Readonly<ResolvedAgentMemoryMcpBin>;
   /** Explicit external secure-fs helper. No PATH discovery or bundled native addon exists. */
   agentMemoryFilesystemHelperBin?: string;
   /** Optional local-to-hosted redacted projection port. Omission is zero-network. */
@@ -2263,44 +2247,6 @@ export class TaskRunner {
       // projected server on every offer.
       const needsToolsetObservation = resolvedMcp?.ok === true
         && pick.descriptor.requiresMcpToolsetToolObservation === true;
-      // The ONE implementation identity this task carries per projected
-      // toolset server, resolved HERE and consumed by both spawn points:
-      // the admission probe immediately below, and — through
-      // `startInput.mcpToolImplementations` and the task-scoped MCP config the
-      // pi adapter writes — the extension's server pool inside the runtime
-      // child. Resolving it once is the point. A second resolve at launch
-      // would be a second opinion about the same install, and the two could
-      // disagree without anything noticing; one value, measured again at each
-      // spawn, cannot.
-      //
-      // Resolution NEVER declines the offer. This SDK ships no resolver, so
-      // the unconfigured answer is `resolver_unconfigured` for every server,
-      // and a task whose executors are unproven still runs — it simply proves
-      // nothing about them. What does refuse is the re-measurement at spawn,
-      // and only for a server that WAS attested.
-      let mcpToolImplementations: Readonly<Record<string, ToolImplementationIdentityV1>> | undefined;
-      if (resolvedMcp?.ok === true) {
-        const identities: Record<string, ToolImplementationIdentityV1> = {};
-        for (const [serverName, server] of Object.entries(resolvedMcp.servers)) {
-          const toolsetId = resolvedMcp.toolsetIdByServer.get(serverName);
-          if (toolsetId === undefined) continue;
-          identities[serverName] = await resolveToolImplementationIdentity(
-            this.deps.toolImplementationAuthority,
-            {
-              subject: { kind: 'mcp-server', toolsetId, serverName },
-              command: server.command,
-              args: Object.freeze([...(server.args ?? [])]),
-            },
-            // The environment fact is the SDK's, never the resolver's: this is
-            // the exact object the admission probe below spawns with and the
-            // one serialized for the MCP pool. Pi runtime custody has its
-            // own environment; the locator carries no environment at all.
-            mcpEnv,
-            this.deps.toolImplementationFsProbe,
-          );
-        }
-        mcpToolImplementations = Object.freeze(identities);
-      }
       if (preparation === undefined && messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined) {
         try {
           await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, mcpEnv);
@@ -2343,15 +2289,10 @@ export class TaskRunner {
         const probe = this.deps.mcpToolsetToolsProbe ?? probeMcpServer;
         const entries = Object.entries(resolvedMcp!.servers);
         const settled = await Promise.allSettled(entries.map(async ([serverName, server]) => {
-          const implementation = mcpToolImplementations?.[serverName];
           const observation = await probe(serverName, server, {
             label: `MCP toolset server "${serverName}"`,
             timeoutMs: MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
             env: mcpEnv,
-            // Spawn point one. An attested server is re-measured before this
-            // child starts; a failure raises `McpAuthorityError`, which the
-            // decline below already treats as permanent.
-            ...(implementation === undefined ? {} : { implementation }),
           });
           if (observation.tools.length === 0) throw new Error('tools/list reported no tools');
           // The toolset id is the registry's fact about this server, joined
@@ -2511,7 +2452,6 @@ export class TaskRunner {
           runtimeLaunch = await prepared.operation.resolveRuntimeLaunch({
             kind: preparation === undefined ? 'instruction' : 'prepared', cwd: workspaceDir, env,
             projectionRoot: path.join(this.deps.storeDir, 'runtime-projections'),
-            authority: this.deps.toolImplementationAuthority,
           });
         } catch (error) {
           if (!admissionWithdrawn()) decline(`runtime launch admission failed: ${errorMessage(error)}`, false);
@@ -2592,19 +2532,14 @@ export class TaskRunner {
         }
         let memory: PreparedAgentMemoryState | null = null;
         if (agentMemory !== 'none') {
-          if (!isAgentMemorySecureFilesystemAvailable(this.deps.agentMemoryFilesystemHelperBin !== undefined)) {
+          const describe = this.deps.agentMemoryDescribeBin;
+          if (describe === undefined || this.deps.agentMemoryMcpBin === undefined
+            || !isAgentMemorySecureFilesystemAvailable(this.deps.agentMemoryFilesystemHelperBin !== undefined)) {
             declineMemory('unsupported_input: agent_memory_unavailable');
             return;
           }
-          let implementation: PreparedAgentMemoryImplementation;
           try {
-            implementation = await resolvePreparedMemoryImplementation(this.deps.toolImplementationAuthority, mcpEnv, this.deps.toolImplementationFsProbe);
-          } catch {
-            declineMemory('unsupported_input: agent_memory_implementation_unproven');
-            return;
-          }
-          try {
-            memory = await observePreparedMemory(implementation, mcpEnv, blobAbort.signal, this.deps.toolImplementationFsProbe);
+            memory = await observePreparedMemory(describe, mcpEnv, blobAbort.signal);
           } catch {
             declineMemory('toolsets_unobservable: agent_memory_descriptor_unobservable');
             return;
@@ -2644,7 +2579,6 @@ export class TaskRunner {
           // observation, not a missing one; a missing one with servers still
           // present stays a fail-closed decline in admission.
           observation: mcpToolsetTools ?? (preparedMemorySelected || servers.length === 0 ? {} : undefined),
-          implementations: mcpToolImplementations ?? (preparedMemorySelected || servers.length === 0 ? {} : undefined),
           servers,
           toolsetDefinitionRevisions: Object.freeze(revisions),
           nowMs: Date.now(),
@@ -2824,10 +2758,9 @@ export class TaskRunner {
         // throw that strands the claimed task. The finally below revokes any
         // context token minted for it and releases the pin.
         try {
-          const memory = preparedLaunch.memory;
-          if (memory === null || agentRef === undefined) throw new Error('sealed Agent memory execution state missing');
-          const binding = memorySpawnBinding(memory.implementation.execution, 'agent-memory-mcp', preparedLaunch.agentMemory);
-          taskMcpServers = this.withAgentMemoryMcp(taskMcpServers, taskId, agentRef, preparedLaunch.agentMemory, memoryServer(binding));
+          const helper = this.deps.agentMemoryMcpBin;
+          if (preparedLaunch.memory === null || agentRef === undefined || helper === undefined) throw new Error('prepared Agent memory execution state missing');
+          taskMcpServers = this.withAgentMemoryMcp(taskMcpServers, taskId, agentRef, preparedLaunch.agentMemory, helper);
         } catch {
           const reason = 'agent_memory_unavailable: the sealed Agent memory helper could not be bound for launch';
           await this.updateGitPhaseBestEffort(gitWorkspaceId, 'failed');
@@ -2875,7 +2808,6 @@ export class TaskRunner {
         env,
         ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
         ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
-        ...(mcpToolImplementations === undefined ? {} : { mcpToolImplementations }),
         approvalChannel: {
           taskId,
           storeDir: this.deps.storeDir,
@@ -5245,7 +5177,7 @@ export class TaskRunner {
           retryable: false,
         };
       }
-      const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, this.deps.toolImplementationAuthority, signal), signal);
+      const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
       if (detected.kind !== 'available') {
         return {
           ok: false,
@@ -5265,7 +5197,7 @@ export class TaskRunner {
     for (const adapter of candidates) {
       const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
       if (requiresMcpToolsets && !adapterSupportsMcpToolsets(descriptor)) continue;
-      const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, this.deps.toolImplementationAuthority, signal), signal);
+      const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
       if (detected.kind === 'available') return { ok: true, adapter, descriptor };
     }
     return {

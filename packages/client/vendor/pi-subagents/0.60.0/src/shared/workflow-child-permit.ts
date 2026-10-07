@@ -7,7 +7,6 @@ export interface WorkflowChildPermitInput {
 	agent: string;
 	launchContractDigest: string;
 	context: "fresh" | "fork";
-	runner?: "pi" | "official-external-cli";
 }
 
 export interface WorkflowChildPermitLaunch {
@@ -16,7 +15,7 @@ export interface WorkflowChildPermitLaunch {
 	agent: string;
 	launchContractDigest: string;
 	context: "fresh" | "fork";
-	runner: "pi" | "official-external-cli";
+	runner: "pi";
 }
 
 export interface WorkflowChildPermitContext {
@@ -69,7 +68,7 @@ export function createWorkflowChildPermit(input: WorkflowChildPermitInput): Work
 			agent: input.agent,
 			launchContractDigest: required(input.launchContractDigest, "launchContractDigest"),
 			context: input.context,
-			runner: input.runner ?? "pi",
+			runner: "pi",
 		}),
 		state: "available",
 	};
@@ -106,7 +105,7 @@ export function consumeWorkflowChildPermit(permit: WorkflowChildPermit, launch: 
 	record.state = "consumed";
 	if (record.childKey !== launch.childKey) return "Workflow child permit child key mismatch.";
 	if (record.agent !== launch.agent) return "Workflow child permit agent mismatch.";
-	if (launch.runner !== "pi" && launch.runner !== "official-external-cli") return "Workflow child permit runner is unsupported.";
+	if (launch.runner !== "pi") return "Workflow child permit supports native Pi children only.";
 	if (record.expectedProjectionDigest !== projectionDigest(launch)) return "Workflow child permit does not match the final launch projection.";
 	return undefined;
 }

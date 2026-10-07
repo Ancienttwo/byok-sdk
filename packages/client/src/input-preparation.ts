@@ -1,4 +1,4 @@
-import type { PreparedAgentMemoryImplementation, PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
+import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 /**
  * B-P2 local primitive — public types for the task-free runtime input
  * preparation surface (`docs/researches/runtime-input-preparation-contract.md`
@@ -46,7 +46,6 @@ import type { PreparedAgentMemoryImplementation, PreparedAgentMemoryState } from
 
 import { createHash } from 'node:crypto';
 import { INPUT_PREPARATION_WIRE_VERSION, type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
-import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 
 // ---------------------------------------------------------------------------
 // Format identifiers
@@ -94,6 +93,10 @@ export const INPUT_PREPARATION_ARTIFACT_FORMAT = 'byok.input-preparation.artifac
  * Version 9 REMOVED `permissionMode` from the request and the binding, with the
  * task offer's permission policy (protocol v2). A preparation counts every
  * observed MCP tool; there is no mode to filter for or to compare.
+ * Version 9 also replaced the artifact's `toolImplementationKinds` with
+ * `toolNames` and removed the readiness reason `executor_identity_unproven`:
+ * the SDK does not attest tool executables. Version 9 is not released yet, so
+ * this change amends it.
  *
  * The number itself is owned by `@byok-sdk/protocol`'s
  * `INPUT_PREPARATION_WIRE_VERSION`, because the device capability token
@@ -958,26 +961,20 @@ export interface InputPreparationArtifactSummaryV1 {
   readonly residual: readonly InputPreparationResidualKeyV1[];
   /**
    * Digest of everything the device OBSERVED for this preparation — the
-   * projected tools, their executor fingerprints and the implementation
-   * identities. A later consumer re-observes and compares
-   * this one value rather than re-deriving a manifest.
+   * projected tools and their executor fingerprints. A later consumer
+   * re-observes and compares this one value rather than re-deriving a manifest.
    */
   readonly observationDigest: string;
   /**
    * Digest of the subset of those facts that can be re-derived WITHOUT
-   * spawning a server: the toolset definition revisions, the configured argv
-   * and the implementation identities. This is
-   * what a replay of an already-recorded `requestId` compares against, because
-   * re-probing to detect drift would create the second executor fact the
-   * idempotency key exists to prevent.
+   * spawning a server: the toolset definition revisions and the configured
+   * argv. This is what a replay of an already-recorded `requestId` compares
+   * against, because re-probing to detect drift would create the second
+   * executor fact the idempotency key exists to prevent.
    */
   readonly toolBindingDigest: string;
-  /**
-   * Per model-visible tool name: `attested`, or `unavailable:<reason>`. The
-   * evidence behind `executor_identity_unproven`, so a reader is not asked to
-   * take that readiness reason on trust.
-   */
-  readonly toolImplementationKinds: Readonly<Record<string, string>>;
+  /** The counted model-visible tool names, sorted byte-wise. */
+  readonly toolNames: readonly string[];
 }
 
 /** The immutable binding a receipt carries and a later consumer must re-present. */
@@ -1099,7 +1096,6 @@ export type InputPreparationReadinessReasonV1 =
   | 'residual_not_ruled'
   | 'accounting_policy_missing'
   | 'accounting_policy_inapplicable'
-  | 'executor_identity_unproven'
   | 'runtime_contract_superseded';
 
 /**
@@ -1247,33 +1243,26 @@ export interface PreparedToolBindingServerDigestInputV1 {
   readonly toolsetId: string;
   readonly command: string;
   readonly args: readonly string[];
-  readonly implementation: ToolImplementationIdentityV1;
 }
 
 export interface PreparedToolBindingDigestInputV1 {
   readonly agentMemory: PreparedAgentMemoryMode;
-  readonly memoryImplementation: PreparedAgentMemoryImplementation | null;
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
   /** Canonically ordered by server name; the canonical JSON preserves array order. */
   readonly servers: readonly PreparedToolBindingServerDigestInputV1[];
 }
 
-/**
- * The spawn-free half: the definition revisions, the configured argv and the
- * implementation identities.
- */
+/** The spawn-free half: the definition revisions and the configured argv. */
 export function preparedToolBindingDigest(input: PreparedToolBindingDigestInputV1): string {
   return inputPreparationDigest({
-    v: 3,
+    v: 4,
     agentMemory: input.agentMemory,
-    memoryImplementation: input.memoryImplementation,
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     servers: input.servers.map((entry) => ({
       serverName: entry.serverName,
       toolsetId: entry.toolsetId,
       command: entry.command,
       args: [...entry.args],
-      implementation: entry.implementation,
     })),
   });
 }
@@ -1285,13 +1274,12 @@ export interface PreparedToolSurfaceDigestInputV1 {
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
   readonly tools: readonly InputPreparationToolV1[];
   readonly toolExecutors: Readonly<Record<string, string>>;
-  readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
 }
 
-/** The whole observed surface: the schemas, the executors and the identities. */
+/** The whole observed surface: the schemas and the executors. */
 export function preparedToolSurfaceObservationDigest(input: PreparedToolSurfaceDigestInputV1): string {
   return inputPreparationDigest({
-    v: 3,
+    v: 4,
     agentMemory: input.agentMemory,
     memory: input.memory,
     runtimeIdentity: input.runtimeIdentity,
@@ -1302,6 +1290,5 @@ export function preparedToolSurfaceObservationDigest(input: PreparedToolSurfaceD
       parametersDigest: inputPreparationDigest(tool.parameters),
     })),
     toolExecutors: input.toolExecutors,
-    implementations: input.implementations,
   });
 }

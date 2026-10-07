@@ -1,11 +1,6 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
-import {
-  assertImplementationSpawnBinding, parseImplementationSpawnBinding, projectKeysPiInheritedEnvironment,
-  type ImplementationSpawnBindingV1,
-} from '@byok-sdk/implementation-identity';
-
 import { runCommand, type CommandRunner } from './command-runner';
 import { configurationPendingError, withConfigurationLock } from './custody';
 import { ByokKeysError } from './errors';
@@ -28,9 +23,15 @@ export interface PiProviderLauncherOptions {
   piBin: string;
   /** Explicit script entry for the selected interpreter; never inferred from a filename. */
   piEntry?: string;
-  launchBinding?: ImplementationSpawnBindingV1;
+  /**
+   * The fixed argv after the entry. A single-file product re-enters itself
+   * with `__byok_sdk_helper <kind>`. Empty for the installed SDK package.
+   */
+  piFixedArgs: string[];
+  /** The cwd the Pi child starts in. Required for a launch. */
   piCwd?: string;
-  piFixedArgs?: readonly string[];
+  /** The client-owned empty 0700 directory the provider projection goes into. Required for a launch. */
+  piProjectionDir?: string;
   piConfigDigest?: string;
   /** Which of this launcher's two child grammars applies; never defaulted. */
   runtimeEntry: PiLauncherRuntimeEntry;
@@ -46,6 +47,19 @@ export interface PiProviderLauncherOptions {
   piArgs: string[];
 }
 
+/**
+ * `--pi-fixed-args`: the single-file re-entry prefix. Its only valid value is
+ * `["__byok_sdk_helper", <runtime entry>]`, for the parsed `--runtime-entry`.
+ */
+function parsePiFixedArgs(raw: string | undefined, runtimeEntry: PiLauncherRuntimeEntry): string[] {
+  if (raw === undefined) return [];
+  const expected = ['__byok_sdk_helper', runtimeEntry];
+  if (raw !== JSON.stringify(expected)) {
+    throw new Error(`--pi-fixed-args must be exactly ${JSON.stringify(expected)} for --runtime-entry ${runtimeEntry}`);
+  }
+  return expected;
+}
+
 export function parsePiProviderLauncherOptions(
   args: string[],
 ): PiProviderLauncherOptions {
@@ -56,9 +70,9 @@ export function parsePiProviderLauncherOptions(
   const allowedFlags = new Set([
     '--pi-bin',
     '--pi-entry',
-    '--launch-binding',
-    '--pi-cwd',
     '--pi-fixed-args',
+    '--pi-cwd',
+    '--pi-projection-dir',
     '--pi-config-digest',
     '--runtime-entry',
     '--profile-db',
@@ -167,30 +181,14 @@ export function parsePiProviderLauncherOptions(
   if (piEntry !== undefined && (!path.isAbsolute(piEntry) || /[\u0000\r\n]/u.test(piEntry))) {
     throw new Error('--pi-entry requires an absolute single-line path');
   }
-  let launchBinding: ImplementationSpawnBindingV1 | undefined;
+  const piFixedArgs = parsePiFixedArgs(values.get('--pi-fixed-args'), runtimeEntry);
   let piCwd: string | undefined;
-  let piFixedArgs: readonly string[] | undefined;
-  if (!validateOnly || ['--launch-binding', '--pi-cwd', '--pi-fixed-args'].some((flag) => values.has(flag))) {
-    let rawBinding: unknown;
-    let rawFixedArgs: unknown;
-    try { rawBinding = JSON.parse(required('--launch-binding')); }
-    catch { throw new Error('--launch-binding requires a valid JSON binding'); }
-    launchBinding = parseImplementationSpawnBinding(rawBinding);
-    if (launchBinding === undefined) throw new Error('invalid implementation spawn binding');
+  let piProjectionDir: string | undefined;
+  if (!validateOnly || ['--pi-cwd', '--pi-projection-dir'].some((flag) => values.has(flag))) {
     piCwd = required('--pi-cwd');
-    try { rawFixedArgs = JSON.parse(required('--pi-fixed-args')); }
-    catch { throw new Error('--pi-fixed-args requires a JSON array'); }
-    if (!Array.isArray(rawFixedArgs) || rawFixedArgs.some((arg) => typeof arg !== 'string')) {
-      throw new Error('--pi-fixed-args requires a JSON array of strings');
-    }
-    piFixedArgs = rawFixedArgs as string[];
-    if (launchBinding.command !== required('--pi-bin') || launchBinding.entry !== piEntry
-      || launchBinding.cwd !== piCwd || JSON.stringify(launchBinding.fixedArgv) !== JSON.stringify(piFixedArgs)) {
-      throw new Error('launcher arguments differ from implementation spawn binding');
-    }
-    if (launchBinding.envCommitments.PI_CODING_AGENT_SESSION_DIR !== sessionDir
-      || launchBinding.envCommitments.PI_CODING_AGENT_DIR === undefined) {
-      throw new Error('launcher session/projection directories must match binding commitments');
+    piProjectionDir = required('--pi-projection-dir');
+    if (!path.isAbsolute(piCwd) || !path.isAbsolute(piProjectionDir)) {
+      throw new Error('--pi-cwd and --pi-projection-dir require absolute paths');
     }
   }
   const piConfigDigest = values.get('--pi-config-digest');
@@ -203,9 +201,10 @@ export function parsePiProviderLauncherOptions(
   return {
     ...(piConfigDigest === undefined ? {} : { piConfigDigest }),
     ...(piEntry === undefined ? {} : { piEntry }),
+    piFixedArgs,
     runtimeEntry,
     piBin: required('--pi-bin'),
-    ...(launchBinding === undefined ? {} : { launchBinding, piCwd, piFixedArgs }),
+    ...(piCwd === undefined ? {} : { piCwd, piProjectionDir }),
     profileDbPath,
     profileRef: profileRef.data,
     modelId,
@@ -324,23 +323,50 @@ export async function assertProviderCustodyIdle(options: {
   });
 }
 
-/** The inherited inventory is shared with admission; controlled values come only from the binding. */
+/** Fixed names of the ambient environment the keys launcher passes to its Pi child. */
+export const KEYS_PI_INHERITED_ENV_NAMES = Object.freeze([
+  'PATH', 'HOME', 'USERPROFILE', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'TZ', 'TERM', 'SHELL',
+  // A single-file product that bundles Pi names its Pi asset root here.
+  'PI_PACKAGE_DIR',
+  'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy',
+] as const);
+/** The additional inherited names on win32. */
+export const KEYS_PI_WINDOWS_ENV_NAMES = Object.freeze([
+  'SystemRoot', 'COMSPEC', 'PATHEXT', 'windir', 'SYSTEMDRIVE', 'PROGRAMFILES', 'APPDATA', 'LOCALAPPDATA',
+] as const);
+
+/** The inherited part of the Pi child environment: the fixed names plus `LC_*` and `XDG_*`. */
+export function projectKeysPiInheritedEnvironment(
+  ambient: Readonly<Record<string, string | undefined>>,
+  platform: NodeJS.Platform = process.platform,
+): Record<string, string> {
+  const normalize = (name: string): string => platform === 'win32' ? name.toUpperCase() : name;
+  const names = new Set<string>([...KEYS_PI_INHERITED_ENV_NAMES, ...(platform === 'win32' ? KEYS_PI_WINDOWS_ENV_NAMES : [])].map(normalize));
+  const result: Record<string, string> = {};
+  for (const [name, value] of Object.entries(ambient)) {
+    if (value === undefined) continue;
+    const normalized = normalize(name);
+    if (names.has(normalized) || normalized.startsWith('LC_') || normalized.startsWith('XDG_')) result[name] = value;
+  }
+  return result;
+}
+
+/**
+ * The Pi child environment: the inherited names (with `PI_PACKAGE_DIR`), then
+ * the two Pi directories this launch owns, then the projected key. No ambient
+ * agent or session directory survives.
+ */
 export function buildPiProviderChildEnvironment(options: {
   ambient: NodeJS.ProcessEnv;
-  binding: ImplementationSpawnBindingV1;
+  projectionDir: string;
   sessionDir: string;
   secret: string | undefined;
   platform?: NodeJS.Platform;
 }): Record<string, string> {
-  const binding = parseImplementationSpawnBinding(options.binding);
-  if (binding === undefined) throw new Error('invalid implementation spawn binding');
-  if (binding.envCommitments.PI_CODING_AGENT_SESSION_DIR !== options.sessionDir
-    || binding.envCommitments.PI_CODING_AGENT_DIR === undefined) {
-    throw new Error('launcher session/projection directories must match binding commitments');
-  }
-  const result = {
+  const result: Record<string, string> = {
     ...projectKeysPiInheritedEnvironment(options.ambient, options.platform),
-    ...binding.envCommitments,
+    PI_CODING_AGENT_DIR: options.projectionDir,
+    PI_CODING_AGENT_SESSION_DIR: options.sessionDir,
   };
   if (options.secret !== undefined) result[PI_PROJECTED_KEY_ENV] = options.secret;
   return result;
@@ -418,9 +444,9 @@ export async function assertWindowsPiProjectionAcl(
 }
 
 /** Validate the client-owned empty directory before any credential access. */
-export async function assertPiProjectionDirectory(projectionDir: string, expectedDir: string): Promise<void> {
-  if (projectionDir !== expectedDir || !path.isAbsolute(projectionDir) || path.normalize(projectionDir) !== projectionDir) {
-    throw new Error('pi_projection_path_mismatch: Pi projection directory differs from committed path');
+export async function assertPiProjectionDirectory(projectionDir: string): Promise<void> {
+  if (!path.isAbsolute(projectionDir) || path.normalize(projectionDir) !== projectionDir) {
+    throw new Error('pi_projection_path_not_normal: Pi projection directory must be an absolute normalized path');
   }
   const stat = await fs.lstat(projectionDir);
   if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('pi_projection_not_directory_or_symlink: Pi projection path must be a non-symlink directory');
@@ -450,9 +476,10 @@ export async function startPiProvider(
   options: PiProviderLauncherOptions,
   dependencies: PiProviderLaunchDependencies,
 ): Promise<{ child: ChildProcess; cleanup: () => Promise<void> }> {
-  const binding = options.launchBinding;
-  if (options.validateOnly || binding === undefined || options.piCwd === undefined || options.piFixedArgs === undefined || !/^[0-9a-f]{64}$/u.test(options.piConfigDigest ?? '')) {
-    throw new Error('Pi launch requires an explicit spawn binding, cwd and fixed args');
+  const piCwd = options.piCwd;
+  const projectionDir = options.piProjectionDir;
+  if (options.validateOnly || piCwd === undefined || projectionDir === undefined || !/^[0-9a-f]{64}$/u.test(options.piConfigDigest ?? '')) {
+    throw new Error('Pi launch requires an explicit cwd, projection directory and config digest');
   }
   if (options.runtimeEntry === 'pi-durable' && process.platform === 'win32') throw new Error('durable Pi is unavailable on Windows until parent-death Job Object recovery is validated');
   const runtimeEntry = options.runtimeEntry;
@@ -460,21 +487,17 @@ export async function startPiProvider(
   const configDigest = options.piConfigDigest!;
   const projection = buildPiProviderProjection(profile, runtimeEntry);
   // The ONE place the two child grammars diverge. Everything after it —
-  // projection write, layout assertion, secret resolution, both spawn-binding
-  // assertions and the spawn itself — is shared, because custody does not
-  // depend on which entry consumes the projected provider.
+  // projection write, layout assertion, secret resolution and the spawn
+  // itself — is shared, because custody does not depend on which entry
+  // consumes the projected provider.
   const delegated = (runtimeEntry === 'pi-prepared' || durable)
     ? buildPiPreparedArgs(options.piArgs)
     : buildPiProviderArgs(profile, options.piArgs);
   const env = buildPiProviderChildEnvironment({
-    ambient: dependencies.ambient, binding, sessionDir: options.sessionDir, secret: undefined,
+    ambient: dependencies.ambient, projectionDir, sessionDir: options.sessionDir, secret: undefined,
   });
-  const actual = { command: options.piBin, entry: options.piEntry, fixedArgv: [...options.piFixedArgs], cwd: options.piCwd, env };
-  // Reject drift and invalid layout before opening custody. A second assertion
-  // below remeasures the actual credential-bearing env at the final boundary.
-  await assertImplementationSpawnBinding(binding, actual);
-  const projectionDir = env.PI_CODING_AGENT_DIR!;
-  await assertPiProjectionDirectory(projectionDir, binding.envCommitments.PI_CODING_AGENT_DIR!);
+  // Reject an invalid layout before opening custody.
+  await assertPiProjectionDirectory(projectionDir);
   await ensurePiSessionDirectory(options.sessionDir);
   const modelsPath = path.join(projectionDir, 'models.json');
   let created = false;
@@ -495,10 +518,9 @@ export async function startPiProvider(
       createSecretStore: dependencies.createSecretStore,
     });
     if (!durable && secret !== undefined) env[PI_PROJECTED_KEY_ENV] = secret;
-    const childArgs = [...(actual.entry === undefined ? [] : [actual.entry]), ...actual.fixedArgv, `--config-digest=${configDigest}`, ...delegated];
+    const childArgs = [...(options.piEntry === undefined ? [] : [options.piEntry]), ...options.piFixedArgs, `--config-digest=${configDigest}`, ...delegated];
     const spawnChild = dependencies.spawn ?? spawn;
-    await assertImplementationSpawnBinding(binding, actual);
-    const child = spawnChild(actual.command, childArgs, { env, cwd: actual.cwd,
+    const child = spawnChild(options.piBin, childArgs, { env, cwd: piCwd,
       stdio: durable ? ['inherit', 'inherit', 'inherit', 'ipc'] : 'inherit',
       ...(durable ? { serialization: 'json' as const } : {}),
     });

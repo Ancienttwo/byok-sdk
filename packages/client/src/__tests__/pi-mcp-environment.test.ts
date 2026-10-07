@@ -2,19 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {
-  CONTROLLED_PI_DIRECTORY_ENV_NAMES,
-  PROVIDER_CREDENTIAL_ENV_DENY_NAMES,
-  toolImplementationLaunchEnvNamesDigest,
-  toolImplementationLoaderEnvValuesDigest,
-} from '@byok-sdk/implementation-identity';
-import { parsePiMcpEnvironment, projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
+import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment';
+import { CONTROLLED_PI_DIRECTORY_ENV_NAMES, parsePiMcpEnvironment, projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { McpServerPool, parseTaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
 import { observeMcpServer } from '../mcp/observation';
 
 const fail = (message: string): never => { throw new Error(message); };
 const privateNames = [...PROVIDER_CREDENTIAL_ENV_DENY_NAMES, ...CONTROLLED_PI_DIRECTORY_ENV_NAMES, 'BYOK_PI_MCP_CONFIG_PATH'];
-const emptyConfig = { mcpServers: {}, observation: {}, toolImplementations: {} };
+const emptyConfig = { mcpServers: {}, observation: {} };
 afterEach(() => vi.unstubAllEnvs());
 
 describe('Pi MCP explicit environment boundary', () => {
@@ -46,19 +41,6 @@ describe('Pi MCP explicit environment boundary', () => {
     expect(projected.SERVER_TOKEN === ambient.SERVER_TOKEN).toBe(true);
     expect(Object.isFrozen(projected)).toBe(true);
     expect(Object.isFrozen(parsePiMcpEnvironment(projected))).toBe(true);
-  });
-
-  it('preserves fixed MCP identity digests when only provider credentials are removed', () => {
-    const existing = { HOME: '/fixed/home', PATH: '/fixed/bin', PYTHONPATH: '/fixed/modules',
-      ...Object.fromEntries(PROVIDER_CREDENTIAL_ENV_DENY_NAMES.map(name => [name, 'synthetic'])),
-    };
-    const projected = projectPiMcpEnvironment(existing);
-    // Existing MCP vector has no Pi directories; credential projection must not
-    // change its already admitted identity. Pin bytes, not just mutual equality.
-    for (const env of [existing, projected]) {
-      expect(toolImplementationLaunchEnvNamesDigest(env)).toBe('25d519fb877ee70689756a008b3aed9d1221f4ec89bdf103a06cf2f32200743d');
-      expect(toolImplementationLoaderEnvValuesDigest(env)).toBe('44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a');
-    }
   });
 
   it('real MCP child receives only daemon projection plus explicit server env despite polluted Pi ambient', async () => {

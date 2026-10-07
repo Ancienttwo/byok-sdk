@@ -1,23 +1,17 @@
-import { parseRuntimeDescendantPlan, type RuntimeDescendantPlanV2 } from '../adapters/pi/runtime-descendant-plan';
-import { extractPiConfigDigest, readPiHostConfig, requirePiHostBinding, verifyPiHostBinding } from '../adapters/pi/runtime-host-binding';
-import type { ImplementationSpawnBindingV1 } from '@byok-sdk/implementation-identity';
+import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { isAbsolute, resolve } from 'node:path';
 import type { CreateAgentSessionOptions } from '@earendil-works/pi-coding-agent';
 import { runPiSessionRuntime } from './pi-session-runtime';
 export { openPiRpcSession } from './pi-session-runtime';
 import { webExtension, subagentsExtension } from './pi-extension-factories.js';
-import { verifyTodoLocaleAssets } from '../adapters/pi/todo-locale-assets';
+import { bundledAssetRoot, verifyTodoLocaleAssets } from '../adapters/pi/todo-locale-assets';
 import { createByokMcpExtension } from '../adapters/pi/mcp-extension';
 import { parseTaskScopedMcpConfig, type TaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
-import { loaderEnvInjections } from '../daemon/tool-implementation-identity';
-import { configureCustodyRuntimePlan } from '../custody/external-cli-authority';
 
 export interface PiRpcHostConfig {
   readonly format: 'byok.pi.rpc-launch';
-  readonly version: 3;
-  readonly binding: ImplementationSpawnBindingV1;
-  readonly descendantPlan: RuntimeDescendantPlanV2 | null;
-  /** Authorized session cwd, independent of the sealed process cwd. */
+  readonly version: 4;
+  /** The session cwd. */
   readonly cwd: string;
   readonly mcp: TaskScopedMcpConfig;
 }
@@ -45,23 +39,16 @@ function failUsage(message: string): never {
 export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('config must be an object');
   const raw = value as Record<string, unknown>;
-  const keys = ['format', 'version', 'binding', 'descendantPlan', 'cwd', 'mcp'];
+  const keys = ['format', 'version', 'cwd', 'mcp'];
   if (Object.keys(raw).some((key) => !keys.includes(key)) || keys.some((key) => !(key in raw))) {
-    fail('config must contain exactly format, version, binding, descendantPlan, cwd, mcp');
+    fail('config must contain exactly format, version, cwd, mcp');
   }
-  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 3) fail('unsupported config format/version');
+  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 4) fail('unsupported config format/version');
   if (typeof raw.cwd !== 'string' || !isAbsolute(raw.cwd) || resolve(raw.cwd) !== raw.cwd) {
     fail('config.cwd must be a normalized absolute path');
   }
   const mcp = parseTaskScopedMcpConfig(raw.mcp, fail);
-  const binding = requirePiHostBinding(raw.binding);
-  let descendantPlan: RuntimeDescendantPlanV2 | null;
-  try {
-    descendantPlan = parseRuntimeDescendantPlan(raw.descendantPlan, 'pi-rpc', raw.binding as ImplementationSpawnBindingV1);
-  } catch (error) {
-    fail(error instanceof Error ? error.message : String(error));
-  }
-  return { format: 'byok.pi.rpc-launch', version: 3, binding, descendantPlan, cwd: raw.cwd, mcp };
+  return { format: 'byok.pi.rpc-launch', version: 4, cwd: raw.cwd, mcp };
 }
 
 export function parsePiRpcHostArgs(
@@ -94,15 +81,14 @@ export function parsePiRpcHostArgs(
   };
 }
 
-export async function runPiRpcHost(argv: readonly string[]): Promise<void> {
-  if (process.execArgv.length > 0) failUsage('refusing non-empty interpreter argv');
-  const injected = loaderEnvInjections(process.env);
-  if (injected.length > 0) failUsage(`refusing loader environment variables: ${injected.join(', ')}`);
+/**
+ * `packaging` is `bundled` when a single-file product re-enters through the
+ * SDK-reserved helper; its assets then live in its Pi asset root.
+ */
+export async function runPiRpcHost(argv: readonly string[], packaging: 'installed' | 'bundled' = 'installed'): Promise<void> {
   const args = parsePiRpcHostArgs(argv, failUsage);
   const config = parsePiRpcHostConfig(readPiHostConfig(args.configPath, args.configDigest));
-  await verifyPiHostBinding(config.binding, 'pi-rpc', failUsage);
-  configureCustodyRuntimePlan(config.descendantPlan);
-  const localeAnchor = verifyTodoLocaleAssets(config.binding);
+  const localeAnchor = packaging === 'bundled' ? verifyTodoLocaleAssets(bundledAssetRoot) : verifyTodoLocaleAssets();
   const { createTodoExtension } = await import('#byok-pi-todo-runtime');
   const todoExtension = createTodoExtension(localeAnchor);
   await runPiSessionRuntime({

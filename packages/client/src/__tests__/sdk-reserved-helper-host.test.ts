@@ -68,14 +68,15 @@ describe('SDK-reserved helper host composition', () => {
     const prepared = vi.spyOn(preparedHost, 'runPiPreparedHost').mockResolvedValue();
     const argv = ['--config', '/session with spaces/config.json', '--mode', 'rpc', '--no-skills'];
     await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-rpc', ...argv])).resolves.toBe(true);
-    expect(rpc).toHaveBeenCalledExactlyOnceWith(argv);
+    // The reserved helper is the single-file re-entry, so it also names the bundled packaging.
+    expect(rpc).toHaveBeenCalledExactlyOnceWith(argv, 'bundled');
     expect(prepared).not.toHaveBeenCalled();
     const preparedArgs = ['--config', '/session/prepared.json'];
     await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-prepared', ...preparedArgs])).resolves.toBe(true);
-    expect(prepared).toHaveBeenCalledExactlyOnceWith(preparedArgs);
+    expect(prepared).toHaveBeenCalledExactlyOnceWith(preparedArgs, 'bundled');
     // The callable entry owns its usage check, including a missing config.
     await runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-prepared']);
-    expect(prepared).toHaveBeenLastCalledWith([]);
+    expect(prepared).toHaveBeenLastCalledWith([], 'bundled');
   });
 
   it('retains exact MCP arity at both dispatch boundaries', async () => {
@@ -260,25 +261,37 @@ describe('SDK-reserved helper host composition', () => {
   });
 });
 
-// WP3 charge-once wiring (contract 20260917-1628) routed the print edge to
-// the single attested exec point (custody/pi-subagent-print-entry.ts
-// launchAttestedPiSubagentPrint); WP4 runner groundwork (contract
-// 20260917-2002) routes the runner edge the same way
-// (custody/pi-subagent-runner-entry.ts launchAttestedPiSubagentRunner),
-// reachable only through this direct `__byok_sdk_helper` argv shape — no
-// vendor spawn site is rerouted yet (the later five-edge cut, plan 1459).
-// Both branches refuse fail-closed when the parent custody commitments are
-// absent.
-it('routes pi-subagent-runner dispatch to the attested exec point, which refuses without the custody commitments', async () => {
-  delete process.env.BYOK_SDK_CUSTODY_PARENT_DEPTH;
-  delete process.env.BYOK_SDK_CUSTODY_LAUNCH_RECORD;
-  await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-subagent-runner'])).rejects.toThrow(
-    'BYOK_SDK_CUSTODY_PARENT_DEPTH missing');
+// A Pi subagent child re-enters the bundle through the helper host
+// (`subagents/spawn.ts`). The host routes the argv to the runtime-host payload
+// without a dispatcher or custody record.
+it('routes pi-subagent-runner to the runtime-host runner with exactly one config path', async () => {
+  const runner = vi.spyOn(rpcHost, 'runSubagentRunner').mockResolvedValue();
+  await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-subagent-runner', '/tmp/run config.json'])).resolves.toBe(true);
+  expect(runner).toHaveBeenCalledWith('/tmp/run config.json');
+  for (const argv of [[], ['/a.json', '/b.json']]) {
+    await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-subagent-runner', ...argv])).rejects.toThrow('invalid SDK-reserved helper command');
+  }
+  expect(runner).toHaveBeenCalledTimes(1);
 });
 
-it('routes pi-subagent-print dispatch to the attested exec point, which refuses without the custody commitments', async () => {
-  delete process.env.BYOK_SDK_CUSTODY_PARENT_DEPTH;
-  delete process.env.BYOK_SDK_CUSTODY_LAUNCH_RECORD;
-  await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-subagent-print'])).rejects.toThrow(
-    'BYOK_SDK_CUSTODY_PARENT_DEPTH missing');
+// A product exits once the helper call resolves (README seam), so the runner
+// branch must not resolve before the subagent run has finished.
+it('resolves pi-subagent-runner only after the runner work has finished', async () => {
+  let finish!: () => void;
+  const work = new Promise<void>((resolve) => { finish = resolve; });
+  vi.spyOn(rpcHost, 'runSubagentRunner').mockReturnValue(work);
+  let settled = false;
+  const call = runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-subagent-runner', '/tmp/run.json']).then((value) => { settled = true; return value; });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(settled).toBe(false);
+  finish();
+  await expect(call).resolves.toBe(true);
+});
+
+it('routes pi-subagent-print to the runtime-host print child with its tail argv and maps a failed exit', async () => {
+  const print = vi.spyOn(rpcHost, 'runSubagentPrint').mockResolvedValueOnce(0).mockResolvedValueOnce(2);
+  const tail = ['-p', '--model', 'provider/model', 'Reply with exactly "OK".'];
+  await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-subagent-print', ...tail])).resolves.toBe(true);
+  expect(print).toHaveBeenCalledWith(tail);
+  await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-subagent-print', ...tail])).rejects.toThrow('pi-subagent-print exited 2');
 });

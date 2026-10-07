@@ -85,26 +85,26 @@ describe('bin/runtime-probe: probeRuntimes', () => {
   it('a wrapper deadline stays timeout after a late typed refusal, without claiming cancellation', async () => {
     vi.useFakeTimers();
     try {
-      let settle!: (value: { kind: 'refused'; reason: 'install_record_mismatch' }) => void;
-      const adapter = Object.assign(new StubRuntimeAdapter('pi'), {
-        detectInstallation: vi.fn(() => new Promise<{ kind: 'refused'; reason: 'install_record_mismatch' }>(resolve => { settle = resolve; })),
+      let settle!: (value: { kind: 'refused'; reason: 'app_server_unavailable' }) => void;
+      const adapter = Object.assign(new StubRuntimeAdapter('codex'), {
+        detect: vi.fn(() => new Promise<{ kind: 'refused'; reason: 'app_server_unavailable' }>(resolve => { settle = resolve; })),
       });
-      const pending = probeRuntimes([adapter], { timeoutMs: 25, toolImplementationAuthority: { resolve: async () => ({ kind: 'unavailable', reason: 'resolver_unconfigured' }) } });
+      const pending = probeRuntimes([adapter], { timeoutMs: 25 });
       await vi.advanceTimersByTimeAsync(25);
       const result = await pending;
       expect(result[0]).toMatchObject({ outcome: 'timeout', present: false });
-      settle({ kind: 'refused', reason: 'install_record_mismatch' });
+      settle({ kind: 'refused', reason: 'app_server_unavailable' });
       await Promise.resolve();
       expect(result[0]).not.toHaveProperty('reason');
-      expect(adapter.detectInstallation).toHaveBeenCalledOnce();
+      expect(adapter.detect).toHaveBeenCalledOnce();
     } finally { vi.useRealTimers(); }
   });
 
   it('does not parse a custom error message into a trusted reason or expose it', async () => {
-    const adapter = Object.assign(new StubRuntimeAdapter('pi'), {
-      detectInstallation: async () => { throw new Error('install_record_mismatch /private/PRIVATE_SENTINEL credential=PRIVATE_SENTINEL'); },
+    const adapter = Object.assign(new StubRuntimeAdapter('codex'), {
+      detect: async () => { throw new Error('app_server_unavailable /private/PRIVATE_SENTINEL credential=PRIVATE_SENTINEL'); },
     });
-    const [result] = await probeRuntimes([adapter], { toolImplementationAuthority: { resolve: async () => ({ kind: 'unavailable', reason: 'resolver_unconfigured' }) } });
+    const [result] = await probeRuntimes([adapter]);
     expect(result).toMatchObject({ outcome: 'probe-failed', present: false });
     expect(result).not.toHaveProperty('reason');
     expect(JSON.stringify(result)).not.toContain('PRIVATE_SENTINEL');

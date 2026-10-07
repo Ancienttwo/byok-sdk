@@ -22,9 +22,9 @@ import path from 'node:path';
  *   that exact path. The helper must never scan on from a bad explicit path
  *   and silently run a substitute bun underneath the formal gate.
  *
- * The candidate list is the exact union of the lists the three suites carried
- * before this helper existed — pi-s2-bundle-resolution, pi-mcp-launch-cwd and
- * pi-runtime-launch-cwd all probed the same four candidates in this order. It
+ * The candidate list is the exact union of the lists the bun suites carried
+ * before this helper existed — pi-mcp-launch-cwd and pi-runtime-launch-cwd
+ * probed the same four candidates in this order. It
  * deliberately does NOT include `~/.bun/bin/bun`: that is setup-bun's
  * internal install default, not a location a developer is assumed to have,
  * and the CI formal gate names the real path explicitly through

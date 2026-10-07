@@ -1,25 +1,17 @@
-import { LOADER_ENV_DENY_PATTERNS } from '@byok-sdk/implementation-identity';
-export { LOADER_ENV_DENY_PATTERNS, loaderEnvInjections } from '@byok-sdk/implementation-identity';
-
 /**
  * The environment of every child process of a task: the runtime CLI and the
  * MCP servers the daemon probes for it.
  *
  * {@link buildRuntimeEnv} inherits the daemon's full environment, as OAR
  * does. The user's own agent reads its own configuration and credentials from
- * it. Only three groups of names are removed:
+ * it. Only two groups of names are removed:
  *
  * - `CLAUDECODE`: Claude Code sets it inside its own sessions. OAR removes
  *   it so that a child agent starts as its own top-level session.
  * - `BYOK_*`: this SDK's own control-plane variables (key custody).
- * - Loader injection names ({@link LOADER_ENV_DENY_PATTERNS}). The
- *   implementation attestation (measured spawn bindings, the Pi hosts' own
- *   binding check, descendant and external-CLI custody) depends on them
- *   being absent.
  *
- * {@link buildAllowlistedEnv} is the narrow form. Only the Pi custody lanes
- * use it: the durable Pi tool shell, the prepared Pi lane and the
- * external-CLI custody baseline.
+ * {@link buildAllowlistedEnv} is the narrow form. Only two Pi lanes use it:
+ * the durable Pi tool shell and the prepared Pi lane on the Pi auth store.
  *
  * Every name in every list may be an exact match or a `*`-suffixed prefix
  * (e.g. `'LC_*'` matches `LC_ALL`, `LC_CTYPE`, ...).
@@ -109,10 +101,6 @@ const WINDOWS_BASE_ALLOWLIST: readonly string[] = [
 const HARD_DENY_PATTERNS: readonly string[] = [
   'CLAUDECODE',
   'BYOK_*',
-  // Loader injection. These change how an interpreter LOADS code, before the
-  // first statement of whatever it was asked to run, so a measured
-  // implementation identity would no longer describe what runs.
-  ...LOADER_ENV_DENY_PATTERNS,
 ];
 
 /**
@@ -170,8 +158,8 @@ export function buildRuntimeEnv(
 }
 
 /**
- * The platform baseline plus `options.allow`, minus the hard deny. Only the
- * Pi custody lanes use it (see this module's own doc comment).
+ * The platform baseline plus `options.allow`, minus the hard deny. Only two
+ * Pi lanes use it (see this module's own doc comment).
  */
 export function buildAllowlistedEnv(options: BuildAllowlistedEnvOptions): Record<string, string> {
   const platform = options.platform ?? process.platform;

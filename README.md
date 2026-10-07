@@ -97,9 +97,9 @@ npm install --save-dev @cloudflare/workers-types
 
 The public candidate dispatch packages are `@byok-sdk/client`, `@byok-sdk/server`,
 `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`, `@byok-sdk/core`,
-`@byok-sdk/protocol`, and `@byok-sdk/ui-runtime`, all on the same train;
-`@byok-sdk/implementation-identity` follows the train as a support package that
-client and keys install for you. Starting with 0.21.0, the `byok-sdk` namespace
+`@byok-sdk/protocol`, and `@byok-sdk/ui-runtime`, all on the same train.
+`@byok-sdk/implementation-identity` is retired and no later train publishes it.
+Starting with 0.21.0, the `byok-sdk` namespace
 umbrella and `@byok-sdk/testkit` are no longer published. Their existing
 versions stay on npm; see
 [Packages no longer published](docs/releases/v0.21.0.md#packages-no-longer-published).

@@ -9,7 +9,6 @@ import { PiTeamSession } from '../bin/team-pi-session';
 import { serializePiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { PI_TEAM_OPERATOR_TOKEN } from '../bin/team-pi-operator-entry';
 import { runSdkReservedHelperCommand } from '../sdk-reserved-helper-host';
-import { RUNTIME_LAUNCH_KINDS } from '../daemon/tool-implementation-identity';
 import { runTeamPiRelayCommand } from '../bin/commands/team-pi-relay';
 
 const microtasks = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
@@ -32,7 +31,6 @@ async function fixture() {
 
 describe('Pi native interaction admission', () => {
   it('does not admit the operator entry through daemon runtime or reserved helper dispatch', async () => {
-    expect(RUNTIME_LAUNCH_KINDS).toEqual(['pi-rpc', 'pi-prepared']);
     expect(await runSdkReservedHelperCommand([PI_TEAM_OPERATOR_TOKEN])).toBe(false);
     await expect(runSdkReservedHelperCommand(['__byok_sdk_helper', PI_TEAM_OPERATOR_TOKEN])).rejects.toThrow('invalid SDK-reserved helper command');
   });

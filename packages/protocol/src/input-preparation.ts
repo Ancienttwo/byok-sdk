@@ -366,7 +366,7 @@ export type InputPreparationState = z.infer<typeof InputPreparationStateSchema>;
  * `ready` means the preparation CAN BE CONSUMED — the artifact is intact and
  * unexpired, the native compiler's projection is content-complete, every
  * residual key is ruled by an applicable Host accounting policy, D is text
- * only, every executor identity is attested, and — only when the device has an
+ * only, and — only when the device has an
  * optional counter configured — that count is provider-authoritative and
  * covered. No count is required: the size evidence is
  * `artifact.requestBytes`, the exact byte length of the frozen D. It is
@@ -399,7 +399,6 @@ export const InputPreparationReadinessReasonSchema = z.enum([
   'accounting_policy_missing',
   /** The named policy was ruled for a different runtime, endpoint or model. */
   'accounting_policy_inapplicable',
-  'executor_identity_unproven',
   /**
    * The record was prepared against a runtime contract this build no longer
    * speaks: its binding declares a prepared-compiler version other than the one
@@ -515,19 +514,6 @@ export const InputPreparationCounterEvidenceSchema = z
   .strict();
 
 /**
- * What the device established about the implementation behind ONE
- * model-visible tool: `attested`, or `unavailable:<reason>` naming which of
- * the SDK's closed unavailable reasons applies.
- *
- * A kind, never the identity itself: an install path, a closure digest or a
- * stat tuple is device-local filesystem detail, and a receipt discloses
- * identity facts, not the machine's layout.
- */
-export const InputPreparationToolImplementationKindSchema = z
-  .string()
-  .regex(/^(?:attested|unavailable:[a-z_]{1,64})$/u, 'a tool implementation kind is "attested" or "unavailable:<reason>"');
-
-/**
  * What the native compiler proved about ONE top-level key of D that lies
  * outside P(D).
  *
@@ -581,19 +567,16 @@ export const InputPreparationProjectionSchema = z
  * launch checkable rather than assumed:
  *
  * - `observationDigest` binds everything the device OBSERVED — the projected
- *   tools, their executor fingerprints and the implementation identities —
- *   so a launch whose live observation differs is
- *   a different manifest, whatever the schemas say.
+ *   tools and their executor fingerprints — so a launch whose live
+ *   observation differs is a different manifest, whatever the schemas say.
  * - `toolBindingDigest` binds only the facts that can be re-derived WITHOUT
- *   spawning a server: the toolset definition revisions and the
- *   implementation identities. It is what a replay of an
- *   already-recorded requestId compares against, because re-probing to detect
- *   drift would be the second executor fact the idempotency key exists to
- *   prevent.
- * - `toolImplementationKinds` states, per model-visible tool name, whether the
- *   implementation behind it was attested. It is the evidence behind
- *   `executor_identity_unproven`, so a reader does not have to take that
- *   readiness reason on trust.
+ *   spawning a server: the toolset definition revisions and the configured
+ *   argv. It is what a replay of an already-recorded requestId compares
+ *   against, because re-probing to detect drift would be the second executor
+ *   fact the idempotency key exists to prevent.
+ * - `toolNames` lists the counted model-visible tool names, sorted. A launch
+ *   that registers a different set can name the tool that appeared or
+ *   vanished.
  */
 export const InputPreparationArtifactSummarySchema = z
   .object({
@@ -612,7 +595,7 @@ export const InputPreparationArtifactSummarySchema = z
     residual: z.array(InputPreparationResidualKeySchema).max(64),
     observationDigest: OPAQUE_ID,
     toolBindingDigest: OPAQUE_ID,
-    toolImplementationKinds: z.record(OPAQUE_ID, InputPreparationToolImplementationKindSchema),
+    toolNames: z.array(OPAQUE_ID),
   })
   .strict();
 
@@ -745,7 +728,7 @@ export const InputPreparationRejectionReasonSchema = z.enum([
   /**
    * A repeat of an already-recorded `requestId` arrived after the facts its
    * executor fingerprints were frozen against changed — a toolset definition
-   * revision or an implementation identity that no longer measures the same. The recorded receipt is not re-derived and no
+   * revision or a configured server argv. The recorded receipt is not re-derived and no
    * server is re-probed; the repeat is refused so the caller mints a new
    * preparation instead of silently receiving one bound to stale evidence.
    */

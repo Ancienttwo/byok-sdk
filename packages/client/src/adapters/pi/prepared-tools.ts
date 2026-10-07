@@ -9,7 +9,6 @@ import {
 import type { McpToolsetServerObservation } from '../../mcp/observation';
 import { McpAuthorityError } from '../../mcp/authority-error';
 import { projectMcpTools, qualifiedMcpToolName, type McpToolProjection } from '../../mcp/projection';
-import type { ToolImplementationIdentityV1 } from '../../daemon/tool-implementation-identity';
 import { buildToolExecutorsFromObservation, InputPreparationCompileError } from './input-preparation';
 import { createPiMcpTools, type McpToolCallHost, type PiMcpToolDefinition } from './mcp-tools';
 import { preparedMemoryProjection, type PreparedAgentMemoryState } from '../../daemon/prepared-agent-memory';
@@ -86,7 +85,7 @@ export interface PreparedPiServerBinding {
 export interface PreparedPiToolSurfaceInput {
   /** Sealed SDK-owned memory selection; it is distinct from Host MCP toolsets. */
   readonly agentMemory: PreparedAgentMemoryMode;
-  /** Descriptor observation and attested helper pair counted with the artifact. */
+  /** The descriptor observation counted with the artifact. */
   readonly memory: PreparedAgentMemoryState | null;
   /** The daemon's frozen observation. */
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
@@ -94,7 +93,6 @@ export interface PreparedPiToolSurfaceInput {
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
   /** Canonically ordered by server name, exactly as the preparation ordered them. */
   readonly servers: readonly PreparedPiServerBinding[];
-  readonly toolImplementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
   /** The verified installed native closure identity string. */
   readonly runtimeIdentity: string;
   /** What the durable record says this preparation froze. */
@@ -182,7 +180,6 @@ export async function assemblePreparedPiToolSurface(
     ({ toolExecutors } = await buildToolExecutorsFromObservation({
       observation: input.observation,
       toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
-      implementations: input.toolImplementations,
       // Empty for the same reason the preparation's is.
       nativeTools: [],
       runtimeIdentity: input.runtimeIdentity,
@@ -203,39 +200,22 @@ export async function assemblePreparedPiToolSurface(
   }
   toolExecutors = Object.freeze({ ...toolExecutors, ...memoryProjection.toolExecutors });
 
-  // Every projected server must arrive with the identity the daemon resolved
-  // for it. A missing one is a refusal, never a substituted "unattested": those
-  // are different facts, and only one of them was ever digested.
-  const bindingServers: PreparedToolBindingServerDigestInputV1[] = [];
-  for (const server of input.servers) {
-    const implementation = input.toolImplementations[server.serverName];
-    if (implementation === undefined) {
-      return refuse(
-        'tool_binding_drift',
-        `MCP server ${JSON.stringify(server.serverName)} arrived without the implementation identity the preparation`
-        + ' bound for it',
-      );
-    }
-    bindingServers.push({
-      serverName: server.serverName,
-      toolsetId: server.toolsetId,
-      command: server.command,
-      args: server.args,
-      implementation,
-    });
-  }
+  const bindingServers: PreparedToolBindingServerDigestInputV1[] = input.servers.map((server) => ({
+    serverName: server.serverName,
+    toolsetId: server.toolsetId,
+    command: server.command,
+    args: server.args,
+  }));
 
   const toolBindingDigest = preparedToolBindingDigest({
     agentMemory: input.agentMemory,
-    memoryImplementation: input.memory?.implementation ?? null,
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     servers: bindingServers,
   });
   if (toolBindingDigest !== input.expectedToolBindingDigest) {
     return refuse(
       'tool_binding_drift',
-      'the toolset revisions, configured argv or implementation identities of this device no longer'
-      + ' match the ones the preparation froze',
+      'the toolset revisions or configured argv of this device no longer match the ones the preparation froze',
     );
   }
 
@@ -246,13 +226,11 @@ export async function assemblePreparedPiToolSurface(
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     tools,
     toolExecutors,
-    implementations: input.toolImplementations,
   });
   if (observationDigest !== input.expectedObservationDigest) {
     return refuse(
       'tool_observation_drift',
-      'the tool schemas, executor fingerprints or implementation identities observed for this launch differ from the'
-      + ' ones the preparation counted',
+      'the tool schemas or executor fingerprints observed for this launch differ from the ones the preparation counted',
     );
   }
 

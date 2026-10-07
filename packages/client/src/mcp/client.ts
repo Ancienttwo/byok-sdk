@@ -1,11 +1,4 @@
-import { assertSdkHelperSpawnBinding, type SdkHelperSpawnBindingV1 } from '@byok-sdk/implementation-identity';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import {
-  assertToolImplementationBeforeSpawn,
-  ToolImplementationReverifyError,
-  type ToolImplementationFsProbe,
-  type ToolImplementationIdentityV1,
-} from '../daemon/tool-implementation-identity';
 import {
   Client,
   ProtocolError,
@@ -162,7 +155,6 @@ export interface McpStdioServerSpec {
 }
 
 export interface McpStdioClientOptions {
-  readonly sdkHelperBinding?: SdkHelperSpawnBindingV1;
   /** Prefix on every error message, so a failure names the thing that failed. */
   readonly label?: string;
   /**
@@ -178,24 +170,6 @@ export interface McpStdioClientOptions {
   readonly timeoutMs?: number;
   /** Opt-in lifetime stdout cap; see {@link MCP_OBSERVATION_MAX_STDOUT_BYTES}. */
   readonly maxStdoutBytes?: number;
-  /**
-   * What this SDK has established about the implementation behind the command
-   * below (`../daemon/tool-implementation-identity.ts`).
-   *
-   * Every spawn of an ATTESTED server re-measures it first — see
-   * {@link McpStdioClient.connect}. This is the one choke point both spawn
-   * points share: the daemon's admission probe and the Pi extension's pool
-   * both build their child through this class, so neither can start an
-   * attested server that no longer measures the way it was attested.
-   *
-   * Absent, or `unavailable`, means no claim was made about this server and
-   * there is nothing to re-measure. It never means "assume it is fine": the
-   * receipt that carried such an identity already says the implementation is
-   * unproven.
-   */
-  readonly implementation?: ToolImplementationIdentityV1;
-  /** Test seam, forwarded verbatim; see {@link ToolImplementationFsProbe}. */
-  readonly implementationFsProbe?: ToolImplementationFsProbe;
 }
 
 /**
@@ -218,15 +192,7 @@ class BoundedStdioTransport implements Transport {
   private closing?: Promise<void>;
   private firstFailure?: Error;
 
-  /**
-   * The environment this transport will hand to `spawn`, resolved once in the
-   * constructor.
-   *
-   * Read by {@link McpStdioClient.connect}'s implementation gate before the
-   * child starts and by {@link start} when it starts it, so the environment
-   * that is re-measured is the environment that is spawned rather than a
-   * second object built the same way.
-   */
+  /** The environment this transport will hand to `spawn`, resolved once in the constructor. */
   readonly childEnv: Readonly<Record<string, string>>;
 
   constructor(
@@ -457,20 +423,6 @@ export class McpStdioClient {
    * guards spawn and every outgoing frame; the signal still cancels protocol
    * waits. Per-request timeouts remain unchanged. Observations supply both;
    * long-lived call clients normally omit the absolute deadline.
-   *
-   * An attested implementation is re-measured BEFORE the spawn, every time:
-   * the artifact, the interpreter of an `interpreter+bundle`, and the
-   * environment this child is about to be handed. Resolve and launch are two
-   * different moments, and an identity established at the first one asserts
-   * nothing about the second — so the check runs here rather than being cached
-   * with the identity.
-   *
-   * A failure is a refusal, not a downgrade: the connection is never opened
-   * with the identity quietly demoted to `unavailable`, because a server that
-   * was attested and no longer measures the same is a server that changed
-   * under a claim somebody relied on. It surfaces as {@link McpAuthorityError}
-   * so the daemon declines the offer permanently — re-offering spawns the same
-   * changed file and reaches the same verdict.
    */
   async connect(signal?: AbortSignal, deadline?: number): Promise<void> {
     if (this.connected) throw new Error(`${this.label} is already connected`);
@@ -481,30 +433,8 @@ export class McpStdioClient {
       }
       this.deadline = deadline;
       this.checkDeadline();
-      const binding = this.options.sdkHelperBinding;
-      if (binding !== undefined) {
-        const args = this.server.args ?? [];
-        await assertSdkHelperSpawnBinding(binding, {
-          command: this.server.command, ...(binding.entry === undefined ? {} : {entry: args[0]}),
-          fixedArgv: binding.entry === undefined ? args : args.slice(1),
-          cwd: this.options.cwd ?? '', env: this.transport.childEnv,
-        }, this.options.implementationFsProbe);
-      } else {
-      await assertToolImplementationBeforeSpawn(
-        this.label,
-        this.options.implementation,
-        // The environment the child is about to receive, not the one this
-        // client was configured with: `server.env` is layered on for
-        // SDK-reserved servers, and an identity binds what reaches the child.
-        this.transport.childEnv,
-        this.options.implementationFsProbe,
-      );
-      }
     } catch (cause) {
       await this.close();
-      if (cause instanceof ToolImplementationReverifyError) {
-        throw new McpAuthorityError(cause.message, { cause });
-      }
       throw cause;
     }
     try {

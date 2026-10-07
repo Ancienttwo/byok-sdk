@@ -101,11 +101,16 @@ import {
  * version-8 record digests a field this build no longer has; retire it with
  * `byok-agent retire-input-preparation` instead of reading it forward.
  *
+ * 10 is the first version without tool implementation identities: the
+ * attestation stack left the SDK, so the artifact summary names tools, not
+ * implementation kinds, and the digests carry no identity. A version-9 record
+ * digests fields this build no longer has; retire it the same way.
+ *
  * A record at any other version is refused — see
  * {@link InputPreparationUnsupportedRecordVersionError}. There is no
  * compatibility read.
  */
-export const INPUT_PREPARATION_RECORD_VERSION = 9;
+export const INPUT_PREPARATION_RECORD_VERSION = 10;
 
 /** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
 export interface InputPreparationRecordKey {

@@ -1,7 +1,6 @@
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
-import type { ToolImplementationAuthority, ToolImplementationUnavailableReasonV1 } from '@byok-sdk/implementation-identity';
 import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
 import type {
   AgentEgressPolicy,
@@ -9,7 +8,6 @@ import type {
   TaskOfferPayload,
 } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation';
-import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 import type { AgentRef } from './agent-home';
 import type { McpToolsetServerObservation } from './mcp/observation';
 
@@ -50,15 +48,7 @@ export interface RuntimeDetectionAdvisory {
   readonly qualifiedVersion: string;
 }
 
-export type RuntimeDetectionRefusalReason = ToolImplementationUnavailableReasonV1
-  | 'installation_observation_unsupported' | 'native_identity_mismatch'
-  | 'app_server_unavailable';
-
-/** Explicit scope, never a launch environment or task/lane-selection authority. */
-export type RuntimeInstallationObservationContext = { readonly authority: ToolImplementationAuthority } & (
-  | { readonly scope: 'entry'; readonly runtimeEntry: 'pi-rpc' | 'pi-prepared' | 'pi-durable' }
-  | { readonly scope: 'enabled-top-level' }
-);
+export type RuntimeDetectionRefusalReason = 'app_server_unavailable';
 
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
@@ -379,8 +369,6 @@ export interface RuntimePreparedLaunchV1 {
   readonly expected: RuntimePreparedLaunchExpectationV1;
   readonly toolBindingDigest: string;
   readonly observationDigest: string;
-  /** The implementation identity the preparation resolved per projected server. */
-  readonly toolImplementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
   /** `toolsetId` -> the registry definition revision the preparation bound. */
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
 }
@@ -407,18 +395,6 @@ interface RuntimeOperationStartBase {
   readonly mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
   /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
   readonly mcpToolsetTools?: McpToolsetToolObservation;
-  /**
-   * What this daemon established about the implementation behind each
-   * projected toolset server, keyed by projected server name
-   * (`daemon/tool-implementation-identity.ts`).
-   *
-   * Resolved ONCE per offer by `TaskRunner`, alongside the launch binding
-   * above and for the same reason: the admission probe and every adapter spawn
-   * of one task must be talking about the same install. An adapter that spawns
-   * toolset servers itself carries these values to its spawn point unchanged;
-   * it never resolves its own.
-   */
-  readonly mcpToolImplementations?: Readonly<Record<string, ToolImplementationIdentityV1>>;
   /** Optional, adapter-agnostic out-of-band approval channel. */
   readonly approvalChannel?: ApprovalChannel;
 }
@@ -460,7 +436,7 @@ export interface PreparedRuntimeOperation {
   /** Resource phase after workspace resolution and before claim; never reads a credential. */
   resolveRuntimeLaunch?(input: {
     kind: 'instruction' | 'prepared'; cwd: string; env: Readonly<Record<string, string | undefined>>;
-    projectionRoot: string; authority?: ToolImplementationAuthority;
+    projectionRoot: string;
   }): Promise<PiRuntimeLaunchResources>;
   start(input: RuntimeOperationStartInput): Promise<Session>;
 }
@@ -474,8 +450,6 @@ export interface RuntimeAdapter {
   readonly descriptor: RuntimeAdapterDescriptor;
   /** Readiness probing must not mutate an Agent home or allocate execution ownership. */
   detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
-  /** Configured local installation observation. Absence refuses; it never falls back to detect. */
-  detectInstallation?(context: RuntimeInstallationObservationContext, signal?: AbortSignal): Promise<RuntimeDetectResult>;
   prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
 }
 

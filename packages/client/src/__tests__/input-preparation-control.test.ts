@@ -219,34 +219,6 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     return { storeDir, config };
   }
 
-  it('awaits once-only configured runtime identity before exposing any control endpoint', async () => {
-    const storeDir = await tmpDir('byok-prep-init-store-');
-    const workspaceRoot = await tmpDir('byok-prep-init-ws-');
-    let entered!: () => void;
-    const resolving = new Promise<void>(resolve => { entered = resolve; });
-    let decline!: () => void;
-    const blocked = new Promise<void>(resolve => { decline = resolve; });
-    const resolve = vi.fn(async () => { entered(); await blocked; return { kind: 'unavailable', reason: 'implementation_identity_unattested' } as const; });
-    daemon = createDaemonWithAdapters({
-      localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-prep-init',
-      serverUrl: server.url, workspaceRoot, storeDir,
-      inputPreparation: { limits: LIMITS, authorityResolver, counter },
-      toolImplementationAuthority: { resolve }, serviceEnrollment: { enabled: true },
-    }, [new StubRuntimeAdapter('pi')]);
-    expect(resolve).not.toHaveBeenCalled(); // The public factory remains synchronous and side-effect free here.
-    const starting = daemon.start();
-    const rejected = expect(starting).rejects.toThrow('configured pi-prepared implementation unavailable');
-    await resolving;
-    const endpoint = await connectControlClient({ storeDir, productId: 'acme-prep-init' });
-    expect(endpoint.ok).toBe(false);
-    decline(); await rejected;
-    await expect(daemon.start()).rejects.toThrow('configured pi-prepared implementation unavailable');
-    expect(resolve).toHaveBeenCalledTimes(1);
-    expect(resolve).toHaveBeenCalledWith({ subject: { kind: 'runtime', runtimeId: 'pi' }, runtimeEntry: 'pi-prepared' });
-    expect((await connectControlClient({ storeDir, productId: 'acme-prep-init' })).ok).toBe(false);
-    expect(counter.calls).toEqual([]);
-  });
-
   it('declares only the versioned capability token, never the retired unversioned one', async () => {
     await start({ enabled: true, productId: 'acme-prep-token' });
     const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello');
@@ -373,22 +345,16 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     expect(receipt.binding.runtime.compilerVersion).toBe(4);
     // No permission mode is bound into a preparation.
     expect(receipt.binding).not.toHaveProperty('permissionMode');
-    // The tools were OBSERVED from the configured toolset, and every one of
-    // them carries the implementation kind this daemon resolved for it. This
-    // SDK ships no `toolImplementationAuthority`, so that is the unconfigured
-    // answer — stated as evidence rather than assumed.
-    expect(Object.keys(receipt.artifact?.toolImplementationKinds ?? {})).toEqual([
+    // The tools were OBSERVED from the configured toolset.
+    expect(receipt.artifact?.toolNames).toEqual([
       'mcp__teamserver__echo',
       'mcp__teamserver__find_leads',
     ]);
-    expect(new Set(Object.values(receipt.artifact?.toolImplementationKinds ?? {}))).toEqual(
-      new Set(['unavailable:resolver_unconfigured']),
-    );
     expect(receipt.artifact?.observationDigest).toMatch(/^[0-9a-f]{64}$/u);
     expect(receipt.artifact?.toolBindingDigest).toMatch(/^[0-9a-f]{64}$/u);
     expect(receipt.counter).toMatchObject({ authority: 'test_fixture', value: 4_242 });
 
-    // A fixture count, an unruled residual set and unattested executors can
+    // A fixture count and an unruled residual set can
     // never be ready. `projection_unknown` is absent on purpose: the compiler
     // DID prove a content-complete projection, so what is missing is the Host's
     // accounting ruling, which this request deliberately does not carry.
@@ -398,7 +364,6 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
         'accounting_policy_missing',
         'counter_authority_not_production',
         'counter_coverage_incomplete',
-        'executor_identity_unproven',
       ]),
     );
     expect(receipt.readinessReasons).not.toContain('projection_unknown');

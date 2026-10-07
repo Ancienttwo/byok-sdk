@@ -204,7 +204,7 @@ export function toInputPreparationReceiptSummary(
     binding: toWireBinding(receipt.binding),
     ...(receipt.artifact === undefined
       ? {}
-      : { artifact: { ...receipt.artifact, residual: receipt.artifact.residual.map((entry) => ({ ...entry })) } }),
+      : { artifact: { ...receipt.artifact, toolNames: [...receipt.artifact.toolNames], residual: receipt.artifact.residual.map((entry) => ({ ...entry })) } }),
     ...(receipt.counter === undefined ? {} : { counter: receipt.counter }),
     ready: receipt.ready,
     readinessReasons: [...receipt.readinessReasons],

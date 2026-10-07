@@ -1,12 +1,6 @@
 import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import {
-  realToolImplementationFsProbe,
-  type ToolImplementationFsProbe,
-  type ToolImplementationAuthority,
-} from '@byok-sdk/implementation-identity';
 import { createPreparedToolSurfaceAssembler } from '../daemon/prepared-tool-surface';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { createPiInputPreparationCompiler, resolveInstalledPiRuntimeIdentity } from '../adapters/pi/input-preparation';
@@ -15,40 +9,14 @@ import { preparedCompileRequest } from './fixtures/prepared-compile-snapshot';
 
 describe('memory-only preparation through the real descriptor process and compiler', () => {
   it('counts precisely the selected memory schemas with no task credentials or Host MCP server', async () => {
-    // Real artifact/interpreter bytes and stat tuples; ownership alone is the
-    // established test seam. This does not attest a production installation.
-    const probe: ToolImplementationFsProbe = {
-      ...realToolImplementationFsProbe,
-      async lstat(target) {
-        const stat = await realToolImplementationFsProbe.lstat(target);
-        return { ...stat, uid: 0, mode: stat.mode & ~0o222 };
-      },
-    };
     // The packaged host exposes the finite __byok_sdk_helper re-entry before
-    // its own runtime parser; the identity subject here remains SDK helper.
+    // its own runtime parser.
     const installPath = await fs.realpath(fileURLToPath(new URL('../../dist/bin/byok-pi-prepared.js', import.meta.url)));
-    const interpreter = await fs.realpath(process.execPath);
-    // An existing directory the attested helper record names as its own cwd.
-    const launchCwd = path.parse(installPath).root;
-    const closureDigest = await probe.digest(installPath);
-    const interpreterDigest = await probe.digest(interpreter);
-    const authority: ToolImplementationAuthority = {
-      async resolve(locator) {
-        if (locator.subject.kind !== 'sdk-helper' || !('entry' in locator)) throw new Error('memory-only must not resolve a Host MCP identity');
-        return {
-          kind: 'attested', authority: 'host-install-record', manifestRevision: 'memory-test',
-          form: 'interpreter+bundle', installPath, closureKind: 'artifact', closureDigest,
-          interpreter: { path: interpreter, digest: interpreterDigest, loadCommandsDigest: 'a'.repeat(64) },
-          launchArgv: ['__byok_sdk_helper', locator.entry!], launchCwd,
-        };
-      },
-    };
     const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
     const assembler = createPreparedToolSurfaceAssembler({
       toolsetRegistry: new McpToolsetRegistry({}),
       runtimeEnv: () => ({ PATH: '/usr/bin:/bin' }),
-      toolImplementationAuthority: authority,
-      toolImplementationFsProbe: probe,
+      agentMemoryDescribe: { command: process.execPath, args: [installPath, '__byok_sdk_helper', 'agent-memory-describe'] },
       memoryAvailable: () => true,
     });
     for (const mode of ['read', 'read-write'] as const) {

@@ -50,8 +50,10 @@ describe('durable parent recovery authority', () => {
     await symlink(store, path.join(home, 'alias'), 'junction');
     for (const name of ['read','write','edit']) for (const spelling of [
       `@${store}/file`, '@../private store/file', '@alias/file', `@${store.replace(/ /gu, '\u00A0')}/file`,
-      pathToFileURL(path.join(store,'file')).href, `@${pathToFileURL(path.join(store,'file')).href}`, '~', '~/outside',
+      pathToFileURL(path.join(store,'file')).href, `@${pathToFileURL(path.join(store,'file')).href}`,
     ]) expect(await durableToolDenial(name, {path:spelling}, home, store), `${name} ${spelling}`).toBeDefined();
+    // No workspace containment: a tilde path outside the replica store is reachable.
+    for (const spelling of ['~', '~/outside']) expect(await durableToolDenial('read', {path:spelling}, home, store), spelling).toBeUndefined();
     expect(await durableToolDenial('write', {path:'@inside\u00A0file'},home,store)).toBeUndefined();
     await symlink(store, path.join(home, 'quote\u2019file'), 'junction');
     await symlink(store, path.join(home, 'time\u202FAM.txt'), 'junction');
