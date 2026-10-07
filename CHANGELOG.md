@@ -16,6 +16,12 @@
 
 ## Unreleased
 
+- **Changed (client)** — update the private OAR source from 0.29.0 to 0.33.1
+  (`e1f9177`). The Codex source gains OAR's session `mcpServers` thread
+  config and MCP credential redaction of error text. No behavior changes
+  in this step: the adapter does not pass `mcpServers` yet, and BYOK usage
+  events read native frames, so the 0.30 resume baseline does not change them.
+
 - **Breaking (protocol, client, keys)** — remove the attestation stack. The SDK
   no longer attests tool or runtime executables. Pi starts from the installed
   SDK package, or re-enters a single-file product through `sdkHelperHost`.

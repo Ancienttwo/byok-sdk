@@ -67,8 +67,8 @@ export interface ResponseRecord extends RecordEnvelope {
 export type RawEvent = Frame | RequestRecord | ResponseRecord;
 
 /**
- * A frame body carries the runtime's frame verbatim plus oar's typed reading
- * of it. `native` is the source of truth; `events` is a projection for
+ * A frame body carries the runtime's frame, except documented credential-field
+ * redaction, plus oar's typed reading. `native` is the source of truth; `events` is a projection for
  * consumers that want the cross-runtime vocabulary without parsing five wire
  * formats. One frame is one record: a claude assistant message with a
  * thinking block, a text block and a tool_use block is ONE frame with three
@@ -78,7 +78,7 @@ export type RawEvent = Frame | RequestRecord | ResponseRecord;
 export interface FrameBody {
   /** Runtime-native discriminator: claude `type[/subtype]`, codex notification method, pi event type, ACP `sessionUpdate`. */
   readonly type: string;
-  /** The frame as the runtime sent it (JSON-safe). Never trimmed, never re-shaped. */
+  /** The frame as sent (JSON-safe), except documented credential-field redaction. Never otherwise trimmed or re-shaped. */
   readonly native: unknown;
   /** What oar read out of the frame, in frame order; empty when oar read nothing. Only runtime-said kinds appear here. */
   readonly events: readonly RuntimeEventBody[];
@@ -90,7 +90,7 @@ export type ReasoningContent =
   | { readonly kind: "empty" };
 
 /**
- * Token totals; always cumulative for the agent the record is attributed to.
+ * Token totals for the agent the record is attributed to, counted from when this Session opened.
  * `cacheRead` / `cacheWrite` are parts of `input`, accumulated like it and
  * each present only when the runtime reports it: a reported 0 is 0, an
  * unreported part is absent (never derived), a report without a part adds
@@ -108,10 +108,10 @@ export interface TokenTotals {
 
 /**
  * What a usage-bearing frame says. `context` is current context fullness as
- * the runtime reports it; `tokens` is the runtime's running total for this
- * record's `agentPath`, already resolved by the adapter (which runtime figure is
- * authoritative and how overlapping events deduplicate never crosses this
- * surface; see docs/spec/attribution.md, "usage: one constraint").
+ * the runtime reports it; `tokens` is the running total for this record's
+ * `agentPath` counted from when this Session opened, resolved by the adapter
+ * (the authoritative figure, deduplication and what a resumed runtime had
+ * already counted never cross this surface; docs/spec/attribution.md).
  */
 export interface UsageReport {
   readonly context?: ContextUsage;

@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR f1a2b88 to bound control RPCs and record timeout rejection (Apache-2.0).
+// BYOK change: Modified from OAR e1f9177 to bound control RPCs and record timeout rejection (Apache-2.0).
 import type {
   ControlResult,
   RequestBody,

@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR f1a2b88 to retain failure reasons without regex classification (Apache-2.0).
+// BYOK change: Modified from OAR e1f9177 to retain failure reasons without regex classification (Apache-2.0).
 import type {
   FrameBody,
   RuntimeEventBody,
@@ -6,11 +6,13 @@ import type {
   TurnOutcome,
 } from "../../contracts/session.js";
 // BYOK change: Failure classification belongs to BYOK typed failure authority.
-import { asNumber, asRecord, type JsonRecord } from "../../shared/json.js";
-import { cacheParts } from "../../shared/token-totals.js";
+import { asRecord, type JsonRecord } from "../../shared/json.js";
+import { noTokens } from "../../shared/token-totals.js";
 import { codexItemExitCode, codexItemInput, codexToolContent } from "./item-detail.js";
+import type { CodexOpenMethod } from "./open.js";
 import { codexReasoningContent } from "./reasoning.js";
 import { aboutOwnChild, codexTaskViews, withStartedChild, type SubagentThreads } from "./tasks.js";
+import { baselineTokens, codexUsageViews, initialTokenBaseline, nextTokenBaseline, type CodexTokenBaseline } from "./token-usage.js";
 
 /**
  * The codex notification → record projection as a PURE FOLD (see
@@ -56,10 +58,13 @@ export interface CodexProjectionState {
   readonly compacting: boolean;
   /** Subagent threads the stream reported starting: who started each, and its path. */
   readonly subagents: SubagentThreads;
+  /** Where the root thread's token totals count from: this Session's opening (token-usage.ts). */
+  readonly tokenBaseline: CodexTokenBaseline;
 }
 
-export function initialCodexProjection(rootThreadId: string): CodexProjectionState {
-  return { rootThreadId, lastErrorDetail: null, compacting: false, subagents: new Map() };
+/** The projection of a Session opened by `opened`: a resume awaits codex's re-reported token total. */
+export function initialCodexProjection(rootThreadId: string, opened: CodexOpenMethod = "thread/start"): CodexProjectionState {
+  return { rootThreadId, lastErrorDetail: null, compacting: false, subagents: new Map(), tokenBaseline: initialTokenBaseline(opened === "thread/resume") };
 }
 
 const COMPACTION_ITEM_TYPE = "contextCompaction";
@@ -120,49 +125,6 @@ function settleOutcome(state: CodexProjectionState, status: unknown): TurnOutcom
     return { kind: "failed", reason, failure: "unknown" }; // BYOK change: required contract sentinel, no classification.
   }
   return outcome;
-}
-
-/**
- * `tokenUsage.total` accumulates over every model call of the thread's life
- * (input 12.6k → 28.4k → 44.2k across three one-word turns, codex 0.154.0),
- * so it is the running spend, not what the context holds. `tokenUsage.last`
- * is the most recent model call, and `modelContextWindow` the window it fit
- * in; those two are the context reading. Codex's own occupancy figure is
- * `last.total_tokens` (`TokenUsage::tokens_in_context_window`, protocol.rs
- * at 4f39251a; the TUI's status card reads it off `last_token_usage`; its
- * percent also subtracts a 12k baseline). oar reads the same field,
- * `last.totalTokens`: the last call's input (cached tokens included) plus its
- * output, which is what the context holds once the reply is in, matching
- * the runtime's own reading rather than undercounting by the last output.
- * When `last` is absent (older builds) the occupancy is unknown: the
- * cumulative input stands in as `tokens` and the window and percent are
- * null: the cumulative total is never read against the window.
- */
-function usageViews(params: JsonRecord): RuntimeEventBody[] {
-  const tokenUsage = asRecord(params.tokenUsage);
-  const total = asRecord(tokenUsage?.total);
-  if (total === null) {
-    return [];
-  }
-  const input = asNumber(total.inputTokens);
-  const output = asNumber(total.outputTokens);
-  // `inputTokens` already counts the cache reads and writes; `cachedInputTokens`
-  // and `cacheWriteInputTokens` are those parts (codex-api sse/responses.rs at
-  // 4f39251a fills them from the Responses API's `input_tokens_details`
-  // `cached_tokens` / `cache_write_tokens`). A build without the write field
-  // reports no `cacheWrite`.
-  const cache = cacheParts(total, { read: "cachedInputTokens", write: "cacheWriteInputTokens" });
-  const tokens = input === null || output === null ? {} : { tokens: { input, output, ...cache } };
-  const last = asRecord(tokenUsage?.last);
-  if (last === null) {
-    return [{ kind: "usage", usage: { context: { tokens: input, contextWindow: null, percent: null }, ...tokens } }];
-  }
-  const contextTokens = asNumber(last.totalTokens);
-  const contextWindow = asNumber(tokenUsage?.modelContextWindow);
-  const percent = contextTokens === null || contextWindow === null || contextWindow <= 0
-    ? null
-    : Math.round((contextTokens / contextWindow) * 100);
-  return [{ kind: "usage", usage: { context: { tokens: contextTokens, contextWindow, percent }, ...tokens } }];
 }
 
 /**
@@ -250,7 +212,7 @@ function viewsFor(state: CodexProjectionState, reporter: string, method: string,
     case "turn/completed":
       return [{ kind: "turn_ended", outcome: settleOutcome(state, asRecord(params.turn)?.status) }];
     case "thread/tokenUsage/updated":
-      return usageViews(params);
+      return codexUsageViews(params, reporter === state.rootThreadId ? baselineTokens(state.tokenBaseline) : noTokens);
     case "thread/settings/updated":
       return settingsViews(params);
     default:
@@ -260,11 +222,14 @@ function viewsFor(state: CodexProjectionState, reporter: string, method: string,
 
 /** Fold one codex notification into the next state plus commands. */
 export function foldCodexNotification(
-  state: CodexProjectionState,
+  previous: CodexProjectionState,
   method: string,
   params: JsonRecord,
 ): { readonly state: CodexProjectionState; readonly commands: readonly ProjectionCommand[] } {
-  const threadId = typeof params.threadId === "string" ? params.threadId : state.rootThreadId;
+  const threadId = typeof params.threadId === "string" ? params.threadId : previous.rootThreadId;
+  // Before the views: a re-reported total is read against itself (zero).
+  const tokenBaseline = threadId === previous.rootThreadId ? nextTokenBaseline(previous.tokenBaseline, method, params) : previous.tokenBaseline;
+  const state = tokenBaseline === previous.tokenBaseline ? previous : { ...previous, tokenBaseline };
   const spanId = spanIdOf(params);
   const event: ProjectionCommand = {
     kind: "frame",

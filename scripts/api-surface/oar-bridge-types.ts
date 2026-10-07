@@ -1,9 +1,9 @@
 // Check source types across the private JS/declaration boundary.
 // The bridge exposes a smaller surface than the full OAR adapter.
 import type * as Bridge from '../../packages/client/src/runtime/codex-session-runtime.js';
-import type { codexSession as vendorSession, CodexAdapterSession } from '../../packages/client/vendor/oar/f1a2b88/runtimes/codex/session.js';
-import type { ControlResult, RawEvent } from '../../packages/client/vendor/oar/f1a2b88/contracts/session.js';
-import type { LineProcess, SpawnLineProcess } from '../../packages/client/vendor/oar/f1a2b88/runtimes/codex/app-server-client.js';
+import type { codexSession as vendorSession, CodexAdapterSession } from '../../packages/client/vendor/oar/e1f9177/runtimes/codex/session.js';
+import type { ControlResult, RawEvent } from '../../packages/client/vendor/oar/e1f9177/contracts/session.js';
+import type { LineProcess, SpawnLineProcess } from '../../packages/client/vendor/oar/e1f9177/runtimes/codex/app-server-client.js';
 import type { spawnOwnedLineProcess } from '../../packages/client/src/runtime/owned-line-process.js';
 import type { buildRuntimeEnv } from '../../packages/client/src/daemon/environment.js';
 import type { CodexProjection, CodexRecord } from '../../packages/client/src/adapters/codex/projection.js';

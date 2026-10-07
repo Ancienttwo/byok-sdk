@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR f1a2b88 for injected processes, bounded RPCs and server replies (Apache-2.0).
+// BYOK change: Modified from OAR e1f9177 for injected processes, bounded RPCs and server replies (Apache-2.0).
 // BYOK change: The caller owns process creation and must enforce bounded kill/exited semantics.
 export interface LineProcess {
   readonly spawned: Promise<void>;
@@ -28,6 +28,7 @@ export class RpcTimeoutError extends Error {
   }
 }
 import { asRecord, parseJson, type JsonRecord } from "../../shared/json.js";
+import { redactError } from "../../shared/mcp-servers.js";
 // BYOK change: Keep startup synchronous at the injected spawn seam; do not use the upstream queued-client wrapper.
 // BYOK change: Use caller-owned exitError diagnostics instead of shared/executable processFailure.
 
@@ -91,6 +92,12 @@ interface Pending {
   timer?: ReturnType<typeof setTimeout>; // BYOK change: cleared on every settlement path.
 }
 
+/** How the app-server process is handled. BYOK change: the caller's spawn owns stderr and the process tree, so only `redact` remains. */
+export interface AppServerProcessOptions {
+  /** Applied to the text of every error the client reports (codex's error message, the exit's stderr tail): a session's MCP credentials must never reach one. */
+  readonly redact?: (text: string) => string;
+}
+
 export function startAppServerClient(
   spawnLineProcess: SpawnLineProcess, // BYOK change: no second process manager.
   command: string,
@@ -98,6 +105,7 @@ export function startAppServerClient(
   configOverrides: Readonly<Record<string, string>> = {},
   cwd?: string,
   limits: AppServerLimits = {}, // BYOK change: conservative count defaults, configurable by the caller.
+  processOptions: AppServerProcessOptions = {},
 ): AppServerClient {
   // BYOK change: Reject invalid budgets before any process side effect.
   const maxHeld = limits.maxHeld ?? 256;
@@ -155,6 +163,7 @@ export function startAppServerClient(
     }
   };
   let nextId = 1;
+  const redact = processOptions.redact ?? ((text: string): string => text);
 
   child.onLine((line) => {
     if (terminalError !== null) return; // BYOK change: ignore frames after terminal failure.
@@ -184,7 +193,7 @@ export function startAppServerClient(
       clearTimeout(waiter?.timer); // BYOK change: response wins over the deadline.
       const error = asRecord(message.error);
       if (error !== null) {
-        const failure = new Error(typeof error.message === "string" ? error.message : "app-server error");
+        const failure = new Error(redact(typeof error.message === "string" ? error.message : "app-server error"));
         // BYOK change: Required settlement failure must reject the promise even after removal from pending.
         try { waiter?.settled({ kind: "error", error: failure }); }
         catch (error) { waiter?.reject(error instanceof Error ? error : new Error(String(error))); throw error; }
@@ -199,7 +208,8 @@ export function startAppServerClient(
     }
   });
   child.onExit(() => {
-    fail(child.exitError?.() ?? new Error("app-server exited"), false); // BYOK change: release timers, waiters and held frames on exit.
+    // BYOK change: release timers, waiters and held frames on exit; the bounded exit error carries the stderr tail, so it is redacted.
+    fail(redactError(child.exitError?.() ?? new Error("app-server exited"), redact) as Error, false);
   });
 
   return {

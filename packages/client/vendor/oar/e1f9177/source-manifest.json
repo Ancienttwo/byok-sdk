@@ -2,9 +2,9 @@
   "format": "byok.vendor-source",
   "version": 1,
   "package": "@botiverse/oar",
-  "packageVersion": "0.29.0",
+  "packageVersion": "0.33.1",
   "repository": "https://github.com/botiverse/oar",
-  "commit": "f1a2b88eb63e47de8197514e9329642e2d0ae02c",
+  "commit": "e1f91770a7edbaf4521f570345f2e8d0c998d238",
   "license": "Apache-2.0",
   "files": [
     {
@@ -46,14 +46,20 @@
     {
       "path": "contracts/records.ts",
       "sourcePath": "packages/oar/src/contracts/records.ts",
-      "upstreamSha256": "7907eb83069f4d2bb230a1e65278262187d86cbfb46c2383ed904ac7bb7a9000",
-      "vendoredSha256": "7907eb83069f4d2bb230a1e65278262187d86cbfb46c2383ed904ac7bb7a9000"
+      "upstreamSha256": "6d63a352089e303dd1673c50e10dc2fc5bf0a01dfbecdf30c1f13cca088ac546",
+      "vendoredSha256": "6d63a352089e303dd1673c50e10dc2fc5bf0a01dfbecdf30c1f13cca088ac546"
+    },
+    {
+      "path": "contracts/session-options.ts",
+      "sourcePath": "packages/oar/src/contracts/session-options.ts",
+      "upstreamSha256": "20e217799e2d8e2e97b8ff6800a34c2186fff3f5dbf0b5b59672c9fd9c21a275",
+      "vendoredSha256": "20e217799e2d8e2e97b8ff6800a34c2186fff3f5dbf0b5b59672c9fd9c21a275"
     },
     {
       "path": "contracts/session.ts",
       "sourcePath": "packages/oar/src/contracts/session.ts",
-      "upstreamSha256": "36d3e468f0f473faa1e18a3f3d63647b70bf6dc1eece8b6d996861a5aba8d838",
-      "vendoredSha256": "36d3e468f0f473faa1e18a3f3d63647b70bf6dc1eece8b6d996861a5aba8d838"
+      "upstreamSha256": "b0d59a87382c6f5ba75eafb73c3df0640e1ca9a0eff8f4d1264620ef762a8e86",
+      "vendoredSha256": "b0d59a87382c6f5ba75eafb73c3df0640e1ca9a0eff8f4d1264620ef762a8e86"
     },
     {
       "path": "contracts/status.ts",
@@ -76,9 +82,9 @@
     {
       "path": "runtimes/codex/app-server-client.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/app-server-client.ts",
-      "upstreamSha256": "5d7bf0505d86eb1526d9fa6755d704b818755f057b345823672fb3bfddcb90ce",
-      "vendoredSha256": "b423f351e1d05ddbf1e06e4183d039435659ffda3d6c30cb370f24c9c0d3f8ea",
-      "delta": "Inject caller-owned line-process spawn; pass explicit env unchanged; preserve server ids and support replies; default/per-request timeouts; bounded held and pending state with fatal overflow; release timers on settlement, failed write, exit and kill. S2b: settlement consumer errors reject already-dequeued waiters; no uncaught timer failure. Re-vendor: omit upstream home queue and executable diagnostics; preserve direct injected ownership and bounded exitError; retain handled spawned promise. Native replies await acknowledged stdin writes under bounded ownership."
+      "upstreamSha256": "f00dfe0636f159c8ff45a619d4ba42d505ae286fd972c89cc996174f24118022",
+      "vendoredSha256": "fe9aee5c6861413441f340b527c21dfc2da6feb740bc6747ca7621131557bd21",
+      "delta": "Inject caller-owned line-process spawn; pass explicit env unchanged; preserve server ids and support replies; default/per-request timeouts; bounded held and pending state with fatal overflow; release timers on settlement, failed write, exit and kill. S2b: settlement consumer errors reject already-dequeued waiters; no uncaught timer failure. Re-vendor: omit upstream home queue and executable diagnostics; preserve direct injected ownership and bounded exitError; retain handled spawned promise. Native replies await acknowledged stdin writes under bounded ownership. 0.33.1 re-vendor: MCP credential redaction of error and exit text through the caller-owned exitError."
     },
     {
       "path": "runtimes/codex/item-detail.ts",
@@ -89,15 +95,15 @@
     {
       "path": "runtimes/codex/open.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/open.ts",
-      "upstreamSha256": "9e5400d417a90e27451405a679fc6dea87cb8508d0e4aea26fc4bec184127a8a",
-      "vendoredSha256": "0fe79fedb0d977d6686ecead6574031a759c7209ef9fe7df09d25bc6ce382461",
+      "upstreamSha256": "0dcf1376be5baa8786a721829c770b4baa0749692680d9671ee3415ba438ba05",
+      "vendoredSha256": "253b4b03b4a2f8942dac816cc955142983cf35771fc8bd8e3b77aa4d913322a4",
       "delta": " Native interactions: explicit on-request policy with readback, opt-in caller-owned request lifecycle, one-shot typed replies and local cancellation records; no fallback allow or persistence. Native replies await acknowledged stdin writes under bounded ownership."
     },
     {
       "path": "runtimes/codex/projection.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/projection.ts",
-      "upstreamSha256": "30a54d397aabce3ebccc69eb694495c927e6cd392052ab92926b22cd54c9f544",
-      "vendoredSha256": "b7956e56338ade27711732bbc535185e635fe810632e7fe9663e9cfd7fa1c74d",
+      "upstreamSha256": "6ddfff80a823297f9b75070cfb132486a09d326c79359e43c2989141de64f4a1",
+      "vendoredSha256": "0121e5070cf0cf099a59cdbd997d866598bf5b0bcfa29326dd607e55e1c11aff",
       "delta": "BYOK S2a: remove regex failure classification, retain raw reason and required failure unknown sentinel."
     },
     {
@@ -110,21 +116,27 @@
       "path": "runtimes/codex/rpc-control.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/rpc-control.ts",
       "upstreamSha256": "16e1c120f2ac97f19dd6dac6f7342ecd03fbd3c38f16cbfe55833083afcd8127",
-      "vendoredSha256": "fbae46e1153e426af817e76c99fcf2a90a370548e197e395e7018ef00bfa1a06",
+      "vendoredSha256": "f502f3624f44418bde801ddfbd04fcac693eb89b30194c7531e8fe73ea6d8d8d",
       "delta": "Pass configurable control deadline (default 30000ms) and record typed RPC timeouts as rejected responses. Use an equivalent deferred Promise compatible with the SDK ES2022 lib. S2b: replace the redundant deferred response waiter with synchronous response capture to avoid hanging on required-consumer/budget failure."
     },
     {
       "path": "runtimes/codex/session.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/session.ts",
-      "upstreamSha256": "0694bbdb890914ee54482a0663bbd69e2865509ec3b9ab2fa13d3ef2be871173",
-      "vendoredSha256": "2b8306d8bd9dd2c6f2d853690e34d1a862dd92d96e63d4844ec1562b626ab5e0",
-      "delta": "BYOK S2a: injected spawn and explicit filtered env; caller-selected sandbox (danger-full-access default, inherit passes no override); raw AdapterSession without sealSession/input-images; native-first frame capture with visible fold failure/kill; bounded server request decline/reject using 0.159.2 response schemas; ES2022 deferred Promise. S2b: explicit body.origin=byok-native; inject required consumer/budget before registration. Re-vendor: remove capabilities.steer; refine optional generic steer to a required Codex method; no withdraw or derived deliver. Native interactions: explicit on-request policy with readback, opt-in caller-owned request lifecycle, one-shot typed replies and local cancellation records; no fallback allow or persistence. Native replies await acknowledged stdin writes under bounded ownership."
+      "upstreamSha256": "22fc0d991cf023c3b7d37898d7e64fe2ad766ed4c345badd78465229d9e40633",
+      "vendoredSha256": "d7d8c87e9bd4ef0b3a85d7ae76371e30df848c3f2ea8bc2d1449e9e7c7c7a82e",
+      "delta": "BYOK S2a: injected spawn and explicit filtered env; caller-selected sandbox (danger-full-access default, inherit passes no override); raw AdapterSession without sealSession/input-images; native-first frame capture with visible fold failure/kill; bounded server request decline/reject using 0.159.2 response schemas; ES2022 deferred Promise. S2b: explicit body.origin=byok-native; inject required consumer/budget before registration. Re-vendor: remove capabilities.steer; refine optional generic steer to a required Codex method; no withdraw or derived deliver. Native interactions: explicit on-request policy with readback, opt-in caller-owned request lifecycle, one-shot typed replies and local cancellation records; no fallback allow or persistence. Native replies await acknowledged stdin writes under bounded ownership. 0.33.1 re-vendor: build the open request before the owned spawn and pass its redactor to the client."
     },
     {
       "path": "runtimes/codex/tasks.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/tasks.ts",
       "upstreamSha256": "de56126d1fb0d6abc1a43c276270cd2350f66c61651998cec4d03c8d2cecb980",
       "vendoredSha256": "de56126d1fb0d6abc1a43c276270cd2350f66c61651998cec4d03c8d2cecb980"
+    },
+    {
+      "path": "runtimes/codex/token-usage.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/token-usage.ts",
+      "upstreamSha256": "bdb82c501900748b414d99d8d0c05d5e0abd28239c52d6e6e80a7848193de3d1",
+      "vendoredSha256": "bdb82c501900748b414d99d8d0c05d5e0abd28239c52d6e6e80a7848193de3d1"
     },
     {
       "path": "shared/instant.ts",
@@ -139,17 +151,24 @@
       "vendoredSha256": "14c655b29c9df8355fd8a396ff2e15420de6e9dce183e55f8ee7cf336e6626cb"
     },
     {
+      "path": "shared/mcp-servers.ts",
+      "sourcePath": "packages/oar/src/shared/mcp-servers.ts",
+      "upstreamSha256": "3195d4d01435cb28f64935aa9208e113bb248ecd3831ca2fa2f1f2d69f302a68",
+      "vendoredSha256": "049d6440bfbc6166a368fafcbc96c079b109316f86f7d20bae0033d139972bc0",
+      "delta": "ES2022 lib: sort the spread copy instead of toSorted."
+    },
+    {
       "path": "shared/session-kernel.ts",
       "sourcePath": "packages/oar/src/shared/session-kernel.ts",
       "upstreamSha256": "87c9c85cb8bf039cff3ac9c8e2e1ae3c88cbf39bc21d7d9313eff55c25eb561e",
-      "vendoredSha256": "4321d71070723ee012ca1053bdbfd77e215f4fb3a4f5c9d7c82579fc8d6bddcd",
+      "vendoredSha256": "0813b2e51ebcf122c6358cc9f67daa72dc9294ed2168197be287f6dd06e4aebb",
       "delta": "BYOK S2b: fatal serialized retained-record byte budget; required consumer runs after append outside best-effort observers."
     },
     {
       "path": "shared/token-totals.ts",
       "sourcePath": "packages/oar/src/shared/token-totals.ts",
-      "upstreamSha256": "bb1b1d1d89d7ddecfb8cb8885609cc589bf7049f009fe712a5f9ca0a62927375",
-      "vendoredSha256": "bb1b1d1d89d7ddecfb8cb8885609cc589bf7049f009fe712a5f9ca0a62927375"
+      "upstreamSha256": "ca1cb30f1960656ba72886d56cf93680a7216b1f7534a602f8b11d14e0a8ab68",
+      "vendoredSha256": "ca1cb30f1960656ba72886d56cf93680a7216b1f7534a602f8b11d14e0a8ab68"
     },
     {
       "path": "shared/tool-output.ts",
