@@ -57,6 +57,25 @@ export class SqliteUnavailableError extends Error {
   }
 }
 
+/**
+ * The stored BYOK schema version cannot be opened with this build and the
+ * selected explicit migration. A missing version row stays `undefined`;
+ * unknown stored values are preserved without coercion or inferred eligibility.
+ * This diagnostic does not cover I/O, malformed tables or migration failures.
+ */
+export class SqliteSchemaUnsupportedError extends Error {
+  readonly code = 'SQLITE_SCHEMA_UNSUPPORTED';
+
+  constructor(
+    readonly storedVersion: string | undefined,
+    readonly requiredVersion: string,
+  ) {
+    super(`Unsupported BYOK SQLite schema version ${JSON.stringify(storedVersion)}; ` +
+      `this build requires ${requiredVersion}. Stop all writers, back up the database and explicitly select migration: 'v1-to-v4' or 'v2-to-v4' for a receipt-free legacy database without task history, or 'v3-to-v4' for a database without ambiguous claimed identity. Target-v3 migration selectors are no longer supported.`);
+    this.name = 'SqliteSchemaUnsupportedError';
+  }
+}
+
 /** `node:sqlite`'s minimum Node.js version (https://nodejs.org/api/sqlite.html). */
 const MIN_NODE_MAJOR = 22;
 const MIN_NODE_MINOR = 5;

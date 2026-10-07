@@ -108,7 +108,7 @@ export type { AccessTokenClaims, DeviceRecord, PairingCodeInfo, TenantId, TokenS
 export { createHmacTokenSigner } from '@byok-sdk/cloud';
 /** Cutoffs and result of {@link ByokServer.mailbox.collectRetired}, owned by `@byok-sdk/core`. */
 export type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
-export { SqliteUnavailableError } from './sqlite-support';
+export { SqliteUnavailableError, SqliteSchemaUnsupportedError } from './sqlite-support';
 export type { RateLimiterOptions } from './rate-limiter';
 export { DEFAULT_TASK_EVENT_BUFFER_LIMIT, DEFAULT_TASK_EVENT_RETENTION_MS } from './relay';
 /** Page size `tasks.list()` uses when the caller names none. */
@@ -559,6 +559,18 @@ export declare function closeSqliteDatabaseAfterInitializationFailure(db: Databa
  */
 export declare class SqliteUnavailableError extends Error {
     constructor(cause: unknown);
+}
+/**
+ * The stored BYOK schema version cannot be opened with this build and the
+ * selected explicit migration. A missing version row stays `undefined`;
+ * unknown stored values are preserved without coercion or inferred eligibility.
+ * This diagnostic does not cover I/O, malformed tables or migration failures.
+ */
+export declare class SqliteSchemaUnsupportedError extends Error {
+    readonly storedVersion: string | undefined;
+    readonly requiredVersion: string;
+    readonly code = "SQLITE_SCHEMA_UNSUPPORTED";
+    constructor(storedVersion: string | undefined, requiredVersion: string);
 }
 /**
  * Whether `nodeVersion` (a `major.minor.patch` string shaped like

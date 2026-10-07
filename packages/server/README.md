@@ -59,6 +59,14 @@ explicit adoption. An already-open old writer is not stopped by the version fenc
 Preserve rejected databases for separate reconciliation; do not delete history,
 reset cursors or edit version markers to make adoption pass.
 
+An unsupported stored version or missing version row throws the exported
+`SqliteSchemaUnsupportedError`, with `code: 'SQLITE_SCHEMA_UNSUPPORTED'`,
+`storedVersion` (the original string, or `undefined` for a missing row) and
+`requiredVersion` (currently `'4'`). Hosts can use these fields for a migration
+diagnostic without parsing the message. This error does not authorize adoption;
+explicit selectors and eligibility checks still apply. I/O, malformed tables
+and migration failures retain their own errors.
+
 ```ts
 const server = createByokServer({
   productId,

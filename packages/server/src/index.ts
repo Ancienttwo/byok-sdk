@@ -104,7 +104,7 @@ export type { AccessTokenClaims, DeviceRecord, PairingCodeInfo, TenantId, TokenS
 export { createHmacTokenSigner } from '@byok-sdk/cloud';
 /** Cutoffs and result of {@link ByokServer.mailbox.collectRetired}, owned by `@byok-sdk/core`. */
 export type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
-export { SqliteUnavailableError } from './sqlite-support';
+export { SqliteUnavailableError, SqliteSchemaUnsupportedError } from './sqlite-support';
 export type { RateLimiterOptions } from './rate-limiter';
 export { DEFAULT_TASK_EVENT_BUFFER_LIMIT, DEFAULT_TASK_EVENT_RETENTION_MS } from './relay';
 

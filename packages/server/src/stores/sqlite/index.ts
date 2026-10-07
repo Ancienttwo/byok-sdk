@@ -57,6 +57,7 @@ import {
   closeSqliteDatabaseAfterInitializationFailure,
   openSqliteDatabase,
   secureSqliteFilePermissions,
+  SqliteSchemaUnsupportedError,
 } from '../../sqlite-support';
 
 const DEFAULT_MAILBOX_READ_LIMIT = 50;
@@ -196,8 +197,7 @@ class SqliteCoordinator {
           const version = this.db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'")
             .get() as { value: string } | undefined;
           if (version?.value !== SQLITE_SCHEMA_VERSION && !((version?.value === '1' && migration === 'v1-to-v4') || (version?.value === '2' && migration === 'v2-to-v4') || (version?.value === '3' && migration === 'v3-to-v4'))) {
-            throw new Error(`Unsupported BYOK SQLite schema version ${JSON.stringify(version?.value)}; ` +
-              `this build requires ${SQLITE_SCHEMA_VERSION}. Stop all writers, back up the database and explicitly select migration: 'v1-to-v4' or 'v2-to-v4' for a receipt-free legacy database without task history, or 'v3-to-v4' for a database without ambiguous claimed identity. Target-v3 migration selectors are no longer supported.`);
+            throw new SqliteSchemaUnsupportedError(version?.value, SQLITE_SCHEMA_VERSION);
           }
           // Do not silently recreate missing durable authorities in an existing file.
           for (const projection of [
