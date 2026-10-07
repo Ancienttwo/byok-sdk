@@ -18,27 +18,19 @@ for (let index = 0; index < argv.length; index++) {
     overrides.set(value.slice(0, equal), JSON.parse(value.slice(equal + 1)));
   }
 }
-const grantedTools = name => {
-  const enabled = overrides.get(`mcp_servers.${name}.enabled_tools`);
-  assert.deepEqual(enabled, ['echo']);
-  for (const tool of enabled) assert.equal(overrides.get(`mcp_servers.${name}.tools.${tool}.approval_mode`), 'approve');
-  return enabled;
-};
-if (argv[0] === 'mcp' && argv[1] === 'get') {
-  const name = argv[2];
-  console.log(JSON.stringify({ name, enabled: true, enabled_tools: grantedTools(name) }));
-  process.exit(0);
-}
 assert.equal(argv[0], 'app-server', 'fixture supports only app-server');
 assert.equal(argv[argv.indexOf('--listen') + 1], 'stdio://');
 assert.equal(overrides.get('sandbox_mode'), 'danger-full-access');
-grantedTools('echo');
+// Task MCP servers arrive in the thread/start or thread/resume config, as
+// OAR `mcpServers`, never in argv. No per-tool grant or approval mode.
+assert.ok(![...overrides.keys()].some(key => key.startsWith('mcp_servers')), 'MCP servers must not be in argv');
+let echoServer;
 
 async function callEcho() {
-  const prefix = 'mcp_servers.echo';
-  const env = { ...process.env, BYOK_MCP_ENV_KEY: overrides.get(`${prefix}.env.BYOK_MCP_ENV_KEY`) };
-  assert.ok(overrides.get(`${prefix}.env_vars`).includes(env.BYOK_MCP_ENV_KEY));
-  const child = spawn(overrides.get(`${prefix}.command`), overrides.get(`${prefix}.args`), { env, stdio: ['pipe', 'pipe', 'pipe'] });
+  assert.ok(echoServer, 'the open request carried no echo MCP server');
+  assert.equal(echoServer.enabled, true);
+  const env = { ...process.env, ...echoServer.env };
+  const child = spawn(echoServer.command, echoServer.args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
   let stderr = '';
   child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-4096); });
   const requests = new Map();
@@ -119,6 +111,9 @@ createInterface({ input: process.stdin }).on('line', line => {
   if (method === 'thread/start' || method === 'thread/resume') {
     assert.equal(params.approvalPolicy, 'never');
     if (method === 'thread/resume') assert.equal(params.threadId, threadId);
+    const servers = params.config?.mcp_servers ?? {};
+    assert.ok(Object.values(servers).every(server => server.enabled_tools === undefined && server.tools === undefined));
+    echoServer = servers.echo;
     opened = true;
     send({ jsonrpc: '2.0', id, result: { thread: { id: threadId }, model: params.model ?? 'packed-probe', reasoningEffort: null } }); return;
   }
