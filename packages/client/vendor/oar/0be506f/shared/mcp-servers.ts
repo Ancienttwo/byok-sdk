@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR e1f9177 for the SDK ES2022 lib (Apache-2.0).
+// BYOK change: Modified from OAR 0be506f for the SDK ES2022 lib (Apache-2.0).
 import type { McpServer } from "../contracts/session.js";
 
 /*

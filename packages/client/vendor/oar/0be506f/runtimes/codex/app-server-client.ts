@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR e1f9177 for injected processes, bounded RPCs and server replies (Apache-2.0).
+// BYOK change: Modified from OAR 0be506f for injected processes, bounded RPCs and server replies (Apache-2.0).
 // BYOK change: The caller owns process creation and must enforce bounded kill/exited semantics.
 export interface LineProcess {
   readonly spawned: Promise<void>;
@@ -40,7 +40,8 @@ import { redactError } from "../../shared/mcp-servers.js";
 /** How a request settled, delivered synchronously as the reply line is read. */
 export type RpcOutcome =
   | { readonly kind: "result"; readonly result: JsonRecord }
-  | { readonly kind: "error"; readonly error: Error };
+  | { readonly kind: "error"; readonly error: Error; readonly native?: JsonRecord }
+  | { readonly kind: "exited"; readonly error: Error };
 
 export interface AppServerHandlers {
   readonly onNotification: (method: string, params: JsonRecord) => void;
@@ -120,6 +121,7 @@ export function startAppServerClient(
   const child = spawnLineProcess(
     command,
     ["app-server", ...overrideArgs, "--listen", "stdio://"],
+    // BYOK change: upstream killTree is not passed. The caller-owned spawn owns tree termination.
     { ...(cwd === undefined ? {} : { cwd }), env }, // BYOK change: preserve filtered env verbatim.
   );
   // Session initialization observes spawn failures through its pending RPC.
@@ -134,9 +136,12 @@ export function startAppServerClient(
   let handlers: AppServerHandlers | null = null;
   // BYOK change: A sticky failure clears both budgets and rejects work even if kill has not exited yet.
   let terminalError: Error | null = null;
-  const fail = (error: Error, terminate: boolean): void => {
+  // BYOK change: An exit or a kill settles as upstream's exited outcome; a local budget failure stays an error.
+  let terminalOutcome: "error" | "exited" = "error";
+  const fail = (error: Error, terminate: boolean, outcome: "error" | "exited" = "error"): void => {
     if (terminalError !== null) return;
     terminalError = error;
+    terminalOutcome = outcome;
     held.length = 0;
     const waiters = [...pending.values()];
     pending.clear();
@@ -146,7 +151,7 @@ export function startAppServerClient(
       waiter.reject(error);
     }
     if (terminate) child.kill();
-    for (const waiter of waiters) waiter.settled({ kind: "error", error });
+    for (const waiter of waiters) waiter.settled({ kind: outcome, error });
   };
   const deliver = (delivery: (handlers: AppServerHandlers) => void): void => {
     // BYOK change: Overflow is visible and fatal; no silently dropped frames or marks.
@@ -194,8 +199,10 @@ export function startAppServerClient(
       const error = asRecord(message.error);
       if (error !== null) {
         const failure = new Error(redact(typeof error.message === "string" ? error.message : "app-server error"));
+        const redacted = JSON.stringify(error, (_key, value: unknown) => typeof value === "string" ? redact(value) : value);
+        const native = asRecord(parseJson(redacted));
         // BYOK change: Required settlement failure must reject the promise even after removal from pending.
-        try { waiter?.settled({ kind: "error", error: failure }); }
+        try { waiter?.settled({ kind: "error", error: failure, ...(native === null ? {} : { native }) }); }
         catch (error) { waiter?.reject(error instanceof Error ? error : new Error(String(error))); throw error; }
         waiter?.reject(failure);
       } else {
@@ -209,7 +216,8 @@ export function startAppServerClient(
   });
   child.onExit(() => {
     // BYOK change: release timers, waiters and held frames on exit; the bounded exit error carries the stderr tail, so it is redacted.
-    fail(redactError(child.exitError?.() ?? new Error("app-server exited"), redact) as Error, false);
+    // The owned transport reports the exit after stdout closed, so no reply can follow it.
+    fail(redactError(child.exitError?.() ?? new Error("app-server exited"), redact) as Error, false, "exited");
   });
 
   return {
@@ -224,7 +232,7 @@ export function startAppServerClient(
       }
       if (terminalError !== null) {
         const error = terminalError;
-        settled({ kind: "error", error });
+        settled({ kind: terminalOutcome, error });
         throw error;
       }
       const id = nextId;
@@ -286,7 +294,7 @@ export function startAppServerClient(
       child.onExit(handler);
     },
     kill() {
-      fail(new Error("app-server killed"), true); // BYOK change: do not await an exit to release pending state.
+      fail(new Error("app-server killed"), true, "exited"); // BYOK change: do not await an exit to release pending state.
     },
   };
 }
