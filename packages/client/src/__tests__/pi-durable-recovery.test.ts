@@ -12,15 +12,15 @@ describe('durable parent recovery authority', () => {
   it('Windows admission is refused before durable resources or custody can be opened', async () => {
     vi.spyOn(process,'platform','get').mockReturnValue('win32');
     const adapter=new PiAdapter({durablePi:{replicaRoot:'C:\\store\\durable'}});
-    const result=await adapter.prepare({policy:{mode:'auto'},offer:{}} as never);
+    const result=await adapter.prepare({offer:{}} as never);
     expect(result).toMatchObject({kind:'reject',retryable:false});if(result.kind==='reject')expect(result.reason).toContain('Windows');
   });
   it('feature defaults off and enabled adapter advertises only the capabilities it provides', async () => {
     expect(new PiAdapter().descriptor.capabilities.durablePi).toBeUndefined();
     const adapter = new PiAdapter({ durablePi: { replicaRoot: '/private/store/durable' } });
-    expect(adapter.descriptor.capabilities).toMatchObject({ durablePi: true, steer: false, resume: false, permissionModes: ['auto'] });
-    expect((await adapter.prepare({ policy: { mode: 'readonly' }, offer: {} } as never)).kind).toBe('reject');
-    expect((await adapter.prepare({ policy: { mode: 'auto', network: false }, offer: {} } as never)).kind).toBe('reject');
+    expect(adapter.descriptor.capabilities).toMatchObject({ durablePi: true, steer: false, resume: false });
+    expect((await adapter.prepare({ offer: {} } as never)).kind).toBe('reject');
+    expect((await adapter.prepare({ offer: {} } as never)).kind).toBe('reject');
   });
 
   it('commits respawn intent before returning permission and caps attempts at two', async () => {

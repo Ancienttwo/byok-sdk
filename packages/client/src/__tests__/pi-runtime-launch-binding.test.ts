@@ -51,8 +51,7 @@ describe('client runtime launch admission and resource binding', () => {
     const f = await fixture();
     const resolveBin = vi.fn(() => { throw new Error('dev executable resolution is forbidden'); });
     const adapter = new PiAdapter({resolveBin});
-    const policy = {mode:'auto' as const};
-    const prepared = await adapter.prepare({offer:{instruction:'Never sent',policy},policy,descriptor:adapter.descriptor,requiredToolsetIds:[]});
+    const prepared = await adapter.prepare({offer:{instruction:'Never sent'},descriptor:adapter.descriptor,requiredToolsetIds:[]});
     expect(prepared.kind).toBe('prepared');
     expect(resolveBin).not.toHaveBeenCalled();
     if (prepared.kind !== 'prepared') throw new Error(prepared.reason);

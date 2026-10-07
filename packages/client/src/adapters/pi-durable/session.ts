@@ -40,7 +40,7 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
   const serialized = serializePiHostConfig({ format: 'byok.pi.durable-launch', version: 1,
     binding: runtimeLaunch.binding, replica: binding, replicaRoot: options.replicaRoot,
     provider: `byok-sdk-${profileRef}`, model, instruction: input.instruction,
-    mcp: { mcpEnv: input.mcpEnv, mcpServers: input.mcpServers ?? {}, observation: input.mcpToolsetTools ?? {}, permissionMode: 'auto',
+    mcp: { mcpEnv: input.mcpEnv, mcpServers: input.mcpServers ?? {}, observation: input.mcpToolsetTools ?? {},
       ...(input.mcpLaunch?.cwd === undefined ? {} : { launchCwd: input.mcpLaunch.cwd }), toolImplementations: input.mcpToolImplementations ?? {} },
   });
   try { await fs.writeFile(configPath, serialized.bytes, { mode: 0o600 }); }

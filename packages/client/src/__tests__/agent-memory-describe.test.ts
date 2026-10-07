@@ -19,7 +19,6 @@ import {
 import {
   preparedAgentMemoryDescriptorDigest,
   preparedAgentMemoryExecutorFingerprints,
-  preparedAgentMemoryModeAllowedByPolicy,
   preparedAgentMemoryModeWithinCeiling,
   preparedAgentMemoryTools,
   validatePreparedAgentMemoryObservation,
@@ -57,9 +56,6 @@ describe('prepared Agent-memory descriptor', () => {
     expect(preparedAgentMemoryTools('read-write', observation).map((tool) => tool.name)).toEqual(['memory_recall', 'memory_save']);
     expect(preparedAgentMemoryModeWithinCeiling('read', 'read-write')).toBe(true);
     expect(preparedAgentMemoryModeWithinCeiling('read-write', 'read')).toBe(false);
-    expect(preparedAgentMemoryModeAllowedByPolicy('read', 'readonly')).toBe(true);
-    expect(preparedAgentMemoryModeAllowedByPolicy('read-write', 'readonly')).toBe(false);
-    expect(preparedAgentMemoryModeAllowedByPolicy('read', 'auto', ['memory_recall'])).toBe(false);
 
     const first = preparedAgentMemoryDescriptorDigest(observation);
     const fingerprints = preparedAgentMemoryExecutorFingerprints(observation, 'read-write', {

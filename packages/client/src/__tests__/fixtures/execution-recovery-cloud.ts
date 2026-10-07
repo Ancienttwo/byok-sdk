@@ -324,13 +324,12 @@ lines.on('line', (line) => {
       case 'enqueueOffer':
         return cloud.enqueueOffer(tenant, String(params.deviceId), {
           ...(params.taskId === undefined ? {} : { taskId: String(params.taskId) }),
-          payload: { instruction: String(params.instruction), policy: { mode: 'auto' }, ...(params.agentRef === undefined ? {} : { agentRef: params.agentRef }) },
+          payload: { instruction: String(params.instruction), ...(params.agentRef === undefined ? {} : { agentRef: params.agentRef }) },
         });
       case 'enqueueAgentOffer':
         return cloud.enqueueAgentOffer(tenant, String(params.deviceId), {
           payload: {
             instruction: String(params.instruction),
-            policy: { mode: 'auto' },
             agentRef: params.agentRef as { agentId: string; profileRevision: string },
           },
         });
@@ -338,7 +337,7 @@ lines.on('line', (line) => {
         return cloud.enqueueFreshAgentEgressOffer(tenant, String(params.deviceId), {
           agentMessageContext: { destinationBinding: 'fixture-conversation', freshnessCursor: 'fixture-turn' },
           payload: {
-            instruction: 'publish durable reply', policy: { mode: 'auto' }, runtime: 'pi',
+            instruction: 'publish durable reply', runtime: 'pi',
             agentRef: { agentId: 'agent-message', profileRevision: 'profile-v1' },
             egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
             messageEgress: { mode: 'required', contract: 'fixture.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },

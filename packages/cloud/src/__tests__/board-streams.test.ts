@@ -140,7 +140,7 @@ describe('board coordination surface', () => {
     await createBoardFixture(harness, 'projected');
     await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
       taskId: 'projected',
-      payload: { instruction: 'explicit instruction', policy: { mode: 'auto' } },
+      payload: { instruction: 'explicit instruction' },
     });
     await harness.json('/byok/board/projected/claim', jsonInit(device, { expectedStatus: 'todo' }));
 

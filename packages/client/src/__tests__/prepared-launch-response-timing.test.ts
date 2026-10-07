@@ -109,7 +109,6 @@ async function prepareArtifact(cwd: string, artifactPath: string, launchCwd: str
       model: MODEL,
       binding: { ...BINDING },
     },
-    permissionMode: 'auto',
     toolBindingDigest: 'prepared-timing-tool-binding',
     observationDigest: 'prepared-timing-observation',
     launch: { cwd: launchCwd },
@@ -144,10 +143,8 @@ async function startPrepared(refuse: boolean): Promise<{ close: () => Promise<vo
       );
     }) as unknown as SpawnFn,
   });
-  const policy = { mode: 'auto' as const };
   const prepared = await adapter.prepare({
-    offer: { instruction: 'summarise the repository', policy },
-    policy,
+    offer: { instruction: 'summarise the repository' },
     descriptor: adapter.descriptor,
     requiredToolsetIds: [],
   });
@@ -157,7 +154,6 @@ async function startPrepared(refuse: boolean): Promise<{ close: () => Promise<vo
     taskId: 'prepared-timing-task',
     runtimeId: 'pi',
     descriptor: adapter.descriptor,
-    policy,
     requiredToolsetIds: [],
     workspace: { workspaceDir: workspace },
     forwardedEnvironmentNames: Object.keys(env).sort(),

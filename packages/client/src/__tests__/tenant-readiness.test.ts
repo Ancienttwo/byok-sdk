@@ -28,7 +28,7 @@ describe('U3 first-hop presence identity', () => {
           id: 'pi',
           version: '1.0.0',
           authPresent: true,
-          capabilities: { steer: true, permissionModes: ['acceptEdits'] },
+          capabilities: { steer: true },
         },
       ],
     });

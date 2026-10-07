@@ -8,25 +8,27 @@ export const MAILBOX_READ_AHEAD_CAPABILITY = 'mailbox-read-ahead';
  * do not require a bump — servers negotiate the highest common version and
  * daemons/servers must ignore unknown fields and unknown message types.
  *
- * FROZEN v1 (end of M2 — see docs/protocol.md "Freeze rule"): the pi, claude,
- * and codex runtime adapters have all exercised the wire, and every M1/M2
- * protocol gap has been closed. `PROTOCOL_VERSION` stays `1` from here
- * forward; it does not bump for additive changes (new optional fields, new
- * message types, new `AgentEvent` variants, new capability flags) — only for
- * a breaking one (changing, removing, or retyping anything that already
- * exists).
+ * FROZEN (see docs/protocol.md "Freeze rule"): `PROTOCOL_VERSION` does not
+ * bump for additive changes (new optional fields, new message types, new
+ * `AgentEvent` variants, new capability flags) — only for a breaking one
+ * (changing, removing, or retyping anything that already exists).
+ *
+ * v2 removed the task offer's `policy` (`PermissionPolicy`), the runtime
+ * capability `permissionModes` and the input-preparation `permissionMode`.
+ * Sessions run without an SDK permission gate; each local agent keeps its
+ * own guardrails. A v1 envelope is rejected; there is no v1 reader.
  *
  * IMPORTANT: changing this constant, or changing/removing/retyping any
  * already-frozen schema in this package, requires a DELIBERATE update to the
- * committed golden fixtures in `src/__tests__/golden/` (`v1.frozen.json`,
- * `v1.envelopes.ndjson`) — see `src/__tests__/freeze-guard.test.ts`, which
+ * committed golden fixtures in `src/__tests__/golden/` (`v<N>.frozen.json`,
+ * `v<N>.envelopes.ndjson`) — see `src/__tests__/freeze-guard.test.ts`, which
  * fails loudly on exactly that kind of drift. A passing freeze-guard run
  * after such a change means either (a) the change was genuinely additive and
  * the golden was regenerated with justification, or (b) this constant was
  * bumped alongside a new golden generation for the new version — never a
  * silent edit to either file to make the test pass.
  */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /** Host declares that this device accepts only Agent-bound offer variants. */
 export const STRICT_AGENT_ONLY_CAPABILITY = 'strict-agent-only' as const;

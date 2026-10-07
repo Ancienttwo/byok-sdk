@@ -30,8 +30,8 @@ it.skipIf(process.platform === 'win32')('cancels a silent inert runtime and reta
     return child;
   }) as SpawnFn;
   const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: 'inert-node-fixture', source: 'path' }), spawnFn });
-  const offer = { instruction: 'hello', policy: { mode: 'auto' as const } };
-  const prepared = await adapter.prepare({ offer, policy: offer.policy, descriptor: adapter.descriptor, requiredToolsetIds: [] });
+  const offer = { instruction: 'hello' };
+  const prepared = await adapter.prepare({ offer, descriptor: adapter.descriptor, requiredToolsetIds: [] });
   if (prepared.kind !== 'prepared') throw new Error('unexpected fixture rejection');
   const controller = new AbortController();
   let failure: unknown;
@@ -39,7 +39,7 @@ it.skipIf(process.platform === 'win32')('cancels a silent inert runtime and reta
     const startup = prepared.operation.start({
       kind: 'instruction', instruction: 'hello', env: process.env, signal: controller.signal,
       manifest: sealRuntimeOperationManifest({ taskId: 'silent-fixture', runtimeId: 'claude', descriptor: adapter.descriptor,
-        policy: offer.policy, requiredToolsetIds: [], workspace: { workspaceDir }, forwardedEnvironmentNames: Object.keys(process.env) }),
+        requiredToolsetIds: [], workspace: { workspaceDir }, forwardedEnvironmentNames: Object.keys(process.env) }),
     });
     void startup.catch(error => { failure = error; });
     await expect.poll(async () => fs.access(receiptFile).then(() => true, () => false), { timeout: 3000 }).toBe(true);

@@ -95,7 +95,7 @@ try {
   const toolsMarker = path.join(dir, 'active-tools.json');
   const mcpConfigPath = path.join(dir, 'mcp.json');
   const custodyProbe = path.join(dir, 'custody-probe.mjs');
-  await writeFile(custodyProbe, `const names=['ZAI_API_KEY','UNRELATED_CANARY','BYOK_PI_MCP_CONFIG_PATH','BYOK_PI_PERMISSION_MODE']; process.stdout.write(JSON.stringify({cwd:process.cwd(),present:names.filter(name=>process.env[name]!==undefined)})+'\\n');`);
+  await writeFile(custodyProbe, `const names=['ZAI_API_KEY','UNRELATED_CANARY','BYOK_PI_MCP_CONFIG_PATH']; process.stdout.write(JSON.stringify({cwd:process.cwd(),present:names.filter(name=>process.env[name]!==undefined)})+'\\n');`);
   const toolsObserver = path.join(dir, 'tools-observer.mjs');
   const sdkMcpExtension = path.join(clientRoot, 'dist/adapters/pi/mcp-extension.js');
   const reservedServerCwdMarker = path.join(dir, 'reserved-server-cwd.txt');
@@ -190,15 +190,10 @@ createInterface({ input: process.stdin }).on('line', line => {
         tools: [{
           name: 'echo',
           description: 'Echo text back.',
-          // The operator's own read/mutation classification. Required under
-          // the `readonly` policy this smoke runs, which is what makes the
-          // tool registrable at all.
-          readOnly: true,
           inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false },
         }],
       },
     },
-    permissionMode: 'readonly',
     toolImplementations: {},
     // The daemon resolves this once per offer and the extension refuses to open
     // any server without it; the installed package must therefore honour it out
@@ -259,14 +254,13 @@ await runtime.dispose();
   const env = {
     PATH: process.env.PATH, HOME: isolatedHome, USERPROFILE: isolatedHome,
     ...(process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot, COMSPEC: process.env.COMSPEC, ProgramFiles: process.env.ProgramFiles } : {}),
-    BYOK_PI_MCP_CONFIG_PATH: mcpConfigPath, BYOK_PI_PERMISSION_MODE: 'readonly',
+    BYOK_PI_MCP_CONFIG_PATH: mcpConfigPath,
     ZAI_API_KEY: 'synthetic-must-not-forward', UNRELATED_CANARY: 'synthetic-must-not-forward',
   };
   // A missing launch-owned digest refusal proves Node loaded the installed SDK entry graph
   // before any native session, provider request or credential lookup can begin.
   const startupEnv = { ...env };
   delete startupEnv.BYOK_PI_MCP_CONFIG_PATH;
-  delete startupEnv.BYOK_PI_PERMISSION_MODE;
   const startup = spawnSync(process.execPath, [sdkPiEntry], {cwd:dir,env:startupEnv,encoding:'utf8',timeout:15_000});
   assert.equal(startup.status, 78, startup.stderr || String(startup.error));
   assert.match(startup.stderr, /^byok-pi-rpc: exactly one --config-digest=<sha256> is required\n$/);
@@ -321,13 +315,12 @@ await runtime.dispose();
   const detected = await adapter.detect();
   assert.equal(detected.kind,'available');
   assert.equal(detected.version,piManifest.version);
-  const policy = {mode:'readonly'};
   const directEnv = {...startupEnv,PI_CODING_AGENT_DIR:path.join(dir,'direct-agent')};
   delete directEnv.ZAI_API_KEY; delete directEnv.UNRELATED_CANARY;
   await mkdir(directEnv.PI_CODING_AGENT_DIR,{recursive:true});
   await writeFile(path.join(directEnv.PI_CODING_AGENT_DIR,'models.json'),JSON.stringify(buildPiProviderProjection(profile)));
   await writeFile(path.join(directEnv.PI_CODING_AGENT_DIR,'settings.json'),JSON.stringify({defaultProvider:'byok-sdk-packed-zai',defaultModel:profile.model}));
-  const prepared = await adapter.prepare({offer:{instruction:'Never sent',policy},policy,descriptor:adapter.descriptor,requiredToolsetIds:[],
+  const prepared = await adapter.prepare({offer:{instruction:'Never sent'},descriptor:adapter.descriptor,requiredToolsetIds:[],
     mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation});
   assert.equal(prepared.kind,'prepared');
   assert.equal(typeof prepared.operation.resolveRuntimeLaunch,'function');
@@ -335,7 +328,7 @@ await runtime.dispose();
   const captureDirect = async () => {
     directRuntime=await prepared.operation.resolveRuntimeLaunch({kind:'instruction',cwd:dir,env:directEnv,projectionRoot:path.join(dir,'direct-projections')});
     const manifest=sealRuntimeOperationManifest({taskId:'packed-direct-capture',runtimeId:'pi',descriptor:adapter.descriptor,
-      policy,requiredToolsetIds:[],workspace:{workspaceDir:dir},forwardedEnvironmentNames:Object.keys(directRuntime.env).sort()});
+      requiredToolsetIds:[],workspace:{workspaceDir:dir},forwardedEnvironmentNames:Object.keys(directRuntime.env).sort()});
     await prepared.operation.start({kind:'instruction',mcpEnv:mcpTaskConfig.mcpEnv,manifest,instruction:'Never sent',env:directRuntime.env,runtimeLaunch:directRuntime,
       mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation,
       ...(launchUnprovable?{}:{mcpLaunch:{cwd:trustedLaunch.dir}})});
@@ -466,15 +459,14 @@ await runtime.dispose();
         throw new Error('capture before prompt');
       },
     });
-    const keysPolicy={mode:'auto'}; // RPC custody probe is outside readonly-policy evidence.
     const selection={lane:'byok-profile',runtimeId:'pi',providerProfile:binding};
-    const keysPrepared=await keysAdapter.prepare({offer:{instruction:'Never sent',policy:keysPolicy,dispatchSelection:selection},policy:keysPolicy,
+    const keysPrepared=await keysAdapter.prepare({offer:{instruction:'Never sent',dispatchSelection:selection},
       descriptor:keysAdapter.descriptor,requiredToolsetIds:[],mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation});
     assert.equal(keysPrepared.kind,'prepared');
     const keysRuntime=await keysPrepared.operation.resolveRuntimeLaunch({kind:'instruction',cwd:dir,env,projectionRoot});
     try {
       const manifest=sealRuntimeOperationManifest({taskId:'packed-keys-capture',runtimeId:'pi',descriptor:keysAdapter.descriptor,
-        policy:keysPolicy,dispatchSelection:selection,requiredToolsetIds:[],workspace:{workspaceDir:dir},forwardedEnvironmentNames:Object.keys(keysRuntime.env).sort()});
+        dispatchSelection:selection,requiredToolsetIds:[],workspace:{workspaceDir:dir},forwardedEnvironmentNames:Object.keys(keysRuntime.env).sort()});
       await assert.rejects(keysPrepared.operation.start({kind:'instruction',mcpEnv:mcpTaskConfig.mcpEnv,manifest,instruction:'Never sent',env:keysRuntime.env,runtimeLaunch:keysRuntime,
         mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation,mcpLaunch:{cwd:trustedLaunch.dir}}),/pi runtime process could not be spawned/);
       const option=(name)=>keysInvocation.args[keysInvocation.args.indexOf(name)+1];
@@ -498,7 +490,7 @@ await runtime.dispose();
           // Deliberately challenge the real keys projection with extra ambient
           // names after the captured client boundary, without changing argv.
           ZAI_API_KEY:env.ZAI_API_KEY,UNRELATED_CANARY:env.UNRELATED_CANARY,
-          BYOK_PI_MCP_CONFIG_PATH:env.BYOK_PI_MCP_CONFIG_PATH,BYOK_PI_PERMISSION_MODE:env.BYOK_PI_PERMISSION_MODE,
+          BYOK_PI_MCP_CONFIG_PATH:env.BYOK_PI_MCP_CONFIG_PATH,
         }},custodyProbe,process.platform === 'win32' ? 120_000 : 30_000);
         assert.equal(state.model.provider,'byok-sdk-packed-zai');
         assert.equal(state.model.id,profile.model);
@@ -526,7 +518,7 @@ await runtime.dispose();
     assert.ok(!activeTools.includes('mcpScript'),'the retired mcpScript tool must not be registered');
     await access(path.join(clientRoot,'bin','byok-launch-cwd.mjs'));
     assert.equal(requests,0);
-    console.log(`[release-pack] keys -> installed SDK Pi${piManifest.version} host model/start, actual inherited-subprocess custody/session-cwd probe (auto policy), and real MCP handshake/cwd passed; sealed process cwd is the captured spawn input; LLM requests=0`);
+    console.log(`[release-pack] keys -> installed SDK Pi${piManifest.version} host model/start, actual inherited-subprocess custody/session-cwd probe, and real MCP handshake/cwd passed; sealed process cwd is the captured spawn input; LLM requests=0`);
     console.log('[release-pack] separate installed native MCP session active-tool assertions passed; active registry inside the keys-launched child is NOT observed');
   }
 } finally {

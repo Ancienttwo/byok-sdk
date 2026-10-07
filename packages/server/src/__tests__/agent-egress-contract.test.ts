@@ -71,7 +71,7 @@ describe('reference-server Agent egress contract', () => {
       'agent-message-egress', 'terminal-projection-selection', AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
     ], { agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
     const input = { taskId: 'recurring-embedded', deviceId: daemon.deviceId, payload: {
-      instruction: 'frozen context', runtime: 'codex' as const, policy: { mode: 'auto' as const }, agentRef: AGENT_REF,
+      instruction: 'frozen context', runtime: 'codex' as const, agentRef: AGENT_REF,
       egressPolicy: POLICY, messageEgress: { mode: 'required' as const, contract: 'conversation-turn/v1', contentType: 'text/markdown' as const, maxBytes: 1024 },
       terminalProjection: { mode: 'none' as const },
     }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn' } };

@@ -146,7 +146,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
   });
   const taskId = 'native-task';
   const offer = (limits?: { maxDurationMs: number }) => runner.handleEnvelope(createEnvelope('task.offer', {
-    instruction: 'observe native cancellation', runtime, policy: { mode: 'auto' }, limits,
+    instruction: 'observe native cancellation', runtime, limits,
   }, { taskId, seq: 1 }));
   const cancel = () => {
     timing.record('cancel.request');
@@ -314,7 +314,7 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
     }, [c.adapter]);
     try {
       await daemon.pair('pairing-code'); await daemon.start();
-      server.send(createEnvelope('task.offer', { instruction: 'Host cancellation', runtime, policy: { mode: 'auto' } },
+      server.send(createEnvelope('task.offer', { instruction: 'Host cancellation', runtime },
         { taskId: 'host-task', seq: server.nextSeq() }));
       await server.waitFor(event => event.type === 'task.progress' && event.task_id === 'host-task'
         && event.payload.events.some(event => event.type === 'tool_use'));

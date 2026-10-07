@@ -89,7 +89,7 @@ it.each(['explicit', 'automatic'] as const)('real TaskRunner %s selection uses i
   const daemon = createDaemonWithAdapters(cfg, [adapter]); daemons.push(daemon);
   await daemon.pair('pairing-code'); await daemon.start();
   expect(installed).toHaveBeenCalledTimes(1);
-  server.send(createEnvelope('task.offer', { instruction: 'no start', policy: { mode: 'auto' }, ...(mode === 'explicit' ? { runtime: 'pi' as const } : {}) },
+  server.send(createEnvelope('task.offer', { instruction: 'no start', ...(mode === 'explicit' ? { runtime: 'pi' as const } : {}) },
     { taskId: `refuse-${mode}`, seq: server.nextSeq() }));
   const declined = await server.waitFor(e => e.type === 'task.decline');
   expect(declined.payload).toMatchObject({ retryable: true }); // diagnostic reason does not rewrite task policy

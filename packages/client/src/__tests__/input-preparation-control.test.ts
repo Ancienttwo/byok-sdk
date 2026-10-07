@@ -160,7 +160,6 @@ function preparationRequest(overrides: Partial<InputPreparationRequestV1> = {}):
       prompt: { systemPrompt: 'be precise\nprefer small diffs' },
       messages: [{ role: 'user', content: 'summarise the repository', timestamp: 1_700_000_000_000 }],
     },
-    permissionMode: 'auto',
     agentMemory: 'none', requiredToolsets: ['team'],
     ...overrides,
   };
@@ -312,7 +311,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
 
     // An ordinary task still runs end to end.
     server.send(
-      createEnvelope('task.offer', { instruction: 'do work', policy: { mode: 'auto' } }, { taskId: 't-ordinary', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { instruction: 'do work' }, { taskId: 't-ordinary', seq: server.nextSeq() }),
     );
     await server.waitFor((envelope) => envelope.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -373,8 +372,8 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     expect(receipt.binding.runtime.packageName).toBe('@earendil-works/pi-coding-agent');
     expect(receipt.binding.runtime.upstreamCommit).toMatch(/^[0-9a-f]{40}$/u);
     expect(receipt.binding.runtime.compilerVersion).toBe(4);
-    // The mode the manifest was filtered for is recorded, not inferred.
-    expect(receipt.binding.permissionMode).toBe('auto');
+    // No permission mode is bound into a preparation.
+    expect(receipt.binding).not.toHaveProperty('permissionMode');
     // The tools were OBSERVED from the configured toolset, and every one of
     // them carries the implementation kind this daemon resolved for it. This
     // SDK ships no `toolImplementationAuthority`, so that is the unconfigured

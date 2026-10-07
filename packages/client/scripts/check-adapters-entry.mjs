@@ -86,7 +86,6 @@ for (const name of ['@earendil-works/pi-ai', '@earendil-works/pi-agent-core', '@
 }
 assert.equal(existsSync(new URL('../dist/adapters/pi/team-interaction-extension.js', import.meta.url)), true);
 assert.equal(existsSync(new URL('../dist/adapters/pi/mcp-extension.js', import.meta.url)), true);
-assert.equal(existsSync(new URL('../dist/adapters/pi/subagents-policy-extension.js', import.meta.url)), true);
 
 for (const relativePath of [adaptersExport.import, adaptersExport.types]) {
   assert.equal(existsSync(new URL(`..${relativePath.slice(1)}`, import.meta.url)), true, `${relativePath} is missing`);

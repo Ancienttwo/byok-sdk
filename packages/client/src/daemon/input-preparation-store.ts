@@ -96,11 +96,16 @@ import {
  * longer has, and nothing can honestly say whether its D was text only
  * without re-reading bytes the record never vouched for.
  *
+ * 9 is the first version without a permission mode: `PermissionPolicy` left
+ * the protocol, so the binding no longer carries `permissionMode`. A
+ * version-8 record digests a field this build no longer has; retire it with
+ * `byok-agent retire-input-preparation` instead of reading it forward.
+ *
  * A record at any other version is refused — see
  * {@link InputPreparationUnsupportedRecordVersionError}. There is no
  * compatibility read.
  */
-export const INPUT_PREPARATION_RECORD_VERSION = 8;
+export const INPUT_PREPARATION_RECORD_VERSION = 9;
 
 /** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
 export interface InputPreparationRecordKey {

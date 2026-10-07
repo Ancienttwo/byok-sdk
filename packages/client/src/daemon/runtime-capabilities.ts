@@ -4,7 +4,7 @@ import type { RuntimeCapabilities } from '../types';
 /**
  * Maps a frozen `RuntimeAdapterDescriptor`'s internal `capabilities` value
  * (`../types.ts`'s `RuntimeCapabilities` — `{steer, resume,
- * approvalInteractive, permissionModes}`, always-required fields) onto the
+ * approvalInteractive}`, always-required fields) onto the
  * wire's `RuntimeCapabilities` shape (`@byok-sdk/protocol` — the same field names,
  * but all-optional).
  *
@@ -32,6 +32,5 @@ export function toRuntimeInfoCapabilities(caps: RuntimeCapabilities): ProtocolRu
     resume: caps.resume,
     approvalInteractive: caps.approvalInteractive,
     ...(caps.mcpToolsets === undefined ? {} : { mcpToolsets: caps.mcpToolsets }),
-    permissionModes: [...caps.permissionModes],
   };
 }

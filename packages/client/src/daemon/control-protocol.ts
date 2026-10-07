@@ -1,7 +1,7 @@
 import { PreparedAgentMemoryModeSchema } from '@byok-sdk/protocol';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
-import { PERMISSION_MODES, type PermissionMode, type TaskState } from '@byok-sdk/protocol';
+import type { TaskState } from '@byok-sdk/protocol';
 import type { ApprovalDecision, PendingApproval } from './approvals';
 import type { StorageCategory } from './journal/journal';
 import type { StoragePressureState } from './journal/storage-policy';
@@ -1283,7 +1283,6 @@ export function parseInputPreparationRequestParams(value: unknown): InputPrepara
       'scope',
       'source',
       'selection',
-      'permissionMode',
       'agentMemory',
       'requiredToolsets',
       'snapshot',
@@ -1315,9 +1314,6 @@ export function parseInputPreparationRequestParams(value: unknown): InputPrepara
   const model = parseModel(value.selection.model);
   const options = parseOptions(value.selection.options);
   if (!model || !options) return badRequest('selection.model / selection.options are outside the accepted shape');
-  if (typeof value.permissionMode !== 'string' || !(PERMISSION_MODES as readonly string[]).includes(value.permissionMode)) {
-    return badRequest(`permissionMode must be one of ${PERMISSION_MODES.map((mode) => JSON.stringify(mode)).join(', ')}`);
-  }
   const memory = PreparedAgentMemoryModeSchema.safeParse(value.agentMemory);
   if (!memory.success) return badRequest('agentMemory must be none, read or read-write');
   const requiredToolsets = parseRequiredToolsets(value.requiredToolsets);
@@ -1345,7 +1341,6 @@ export function parseInputPreparationRequestParams(value: unknown): InputPrepara
       scope,
       source: { revision: value.source.revision, digest: value.source.digest },
       selection: { model, options },
-      permissionMode: value.permissionMode as PermissionMode,
       agentMemory: memory.data,
       requiredToolsets: Object.freeze(requiredToolsets),
       snapshot,

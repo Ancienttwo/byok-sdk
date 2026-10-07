@@ -40,7 +40,6 @@ describe('bin/runtime-probe: probeRuntimes', () => {
       // fixtures/stub-adapter.ts's `DEFAULT_STUB_CAPABILITIES` doc comment —
       // not modeled on the real pi adapter's own narrower declared set
       // (pi-adapter.test.ts pins that real set separately).
-      permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
     });
   });
 
@@ -55,7 +54,6 @@ describe('bin/runtime-probe: probeRuntimes', () => {
       authPresent: undefined,
       steer: true,
       resume: true,
-      permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
     });
   });
 

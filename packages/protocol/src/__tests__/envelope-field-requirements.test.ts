@@ -33,15 +33,14 @@ function minimalPayload(type: MessageType): unknown {
     case 'conn.ack':
       return { protocolVersion: 1, capabilities: [], serverTime: new Date().toISOString() };
     case 'task.offer':
-      return { instruction: 'do it', policy: { mode: 'auto' } };
+      return { instruction: 'do it' };
     case 'task.offer_with_toolsets':
-      return { instruction: 'find leads', policy: { mode: 'auto' }, requiredToolsets: ['salesko'] };
+      return { instruction: 'find leads', requiredToolsets: ['salesko'] };
     case 'task.offer_for_agent':
-      return { instruction: 'run for agent', policy: { mode: 'auto' }, agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } };
+      return { instruction: 'run for agent', agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } };
     case 'task.offer_for_agent_with_egress':
       return {
         instruction: 'run with an explicit egress policy',
-        policy: { mode: 'auto' },
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
         sessionRef: 'session-1',
         egressPolicy: {
@@ -58,7 +57,6 @@ function minimalPayload(type: MessageType): unknown {
     case 'task.offer_for_agent_with_egress_fresh':
       return {
         instruction: 'start with an explicit egress policy',
-        policy: { mode: 'auto' },
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
         egressPolicy: {
           policyRevision: 'policy-r1',
@@ -74,7 +72,6 @@ function minimalPayload(type: MessageType): unknown {
     case 'task.offer_prepared':
       return {
         agentMemory: 'none',
-        policy: { mode: 'auto', allowTools: [] },
         egressPolicy: { policyRevision: 'metadata-status-v1', activity: { mode: 'metadata-status', delivery: 'latest-value' }, reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4194304, maxPendingBytesPerTenant: 16777216 }, transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
         preparation: {
@@ -192,7 +189,6 @@ function minimalPayload(type: MessageType): unknown {
         deadlineAt: '2026-01-01T00:00:30.000Z',
         context: { inline: '{"prompt":{},"messages":[]}' },
         requiredToolsets: ['team'],
-        permissionMode: 'auto',
       };
     case 'provider.provisioning.available':
       return { requestId: '00000000-0000-4000-8000-000000000026' };
@@ -316,11 +312,11 @@ describe('createEnvelope: taskId/seq requiredness (finding F1)', () => {
    */
   function typeOnlyRejectedShapes(): void {
     // @ts-expect-error task.offer requires both taskId and seq — opts omitted entirely
-    createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } });
+    createEnvelope('task.offer', { instruction: 'x' });
     // @ts-expect-error task.offer requires taskId
-    createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { seq: 1 });
+    createEnvelope('task.offer', { instruction: 'x' }, { seq: 1 });
     // @ts-expect-error task.offer requires seq (server->daemon type)
-    createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'task-1' });
+    createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-1' });
     // @ts-expect-error task.claim requires taskId — every task.* type routes by it, daemon->server or not
     createEnvelope('task.claim', { deviceId: 'device-1' });
     // @ts-expect-error task.approve requires seq (server->daemon type), even though taskId alone would be enough for most task.* types
@@ -340,7 +336,7 @@ describe('createEnvelope: taskId/seq requiredness (finding F1)', () => {
   it('still refuses to hand back a malformed envelope at runtime if a caller bypasses the type system (e.g. `as any`)', () => {
     expect(() =>
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, {} as any),
+      createEnvelope('task.offer', { instruction: 'x' }, {} as any),
     ).toThrow(EnvelopeValidationError);
 
     expect(() =>
@@ -357,7 +353,7 @@ describe('createEnvelope: taskId/seq requiredness (finding F1)', () => {
     expect(() => {
       createEnvelope('conn.hello', { protocolVersions: [1], capabilities: [], deviceId: 'd', productId: 'p' }); // no opts at all
       createEnvelope('conn.ack', { protocolVersion: 1, capabilities: [], serverTime: new Date().toISOString() }, { seq: 1 });
-      createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 't', seq: 1 });
+      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 't', seq: 1 });
       createEnvelope('task.claim', { deviceId: 'd' }, { taskId: 't' }); // seq optional, may be omitted
       createEnvelope('task.claim', { deviceId: 'd' }, { taskId: 't', seq: 1 }); // seq optional, may also be supplied
     }).not.toThrow();

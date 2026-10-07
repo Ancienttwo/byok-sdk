@@ -45,7 +45,7 @@ describe('offer-scoped terminal projection selection', () => {
     const extract = vi.fn(() => { throw new Error('fallback extractor must not run'); });
     const { adapter, runner, sent } = await harness(extract);
     await runner.handleEnvelope(createEnvelope('task.offer_for_agent', {
-      instruction: 'research', policy: { mode: 'auto' }, runtime: 'pi',
+      instruction: 'research', runtime: 'pi',
       agentRef: { agentId: 'research-agent', profileRevision: '7' },
       terminalProjection: { mode: 'result-document', contract: 'example.research.v1' },
     }, { taskId: 'durable-document', seq: 1 }));
@@ -60,7 +60,7 @@ describe('offer-scoped terminal projection selection', () => {
     const { adapter, runner, sent } = await harness(extract);
     const document = vi.fn(() => ({ forbidden: true }));
     await runner.handleEnvelope(createEnvelope('task.offer_for_agent', {
-      instruction: 'research', policy: { mode: 'auto' }, runtime: 'pi',
+      instruction: 'research', runtime: 'pi',
       agentRef: { agentId: 'research-agent', profileRevision: '7' }, terminalProjection: { mode: 'none' },
     }, { taskId: 'durable-no-document', seq: 1 }));
     Object.assign(adapter.sessions[0]!, { resultDocument: document }); adapter.sessions[0]!.emit({ type: 'turn_end' });
@@ -76,7 +76,7 @@ describe('offer-scoped terminal projection selection', () => {
       return { kind: 'research-result' };
     });
     await runner.handleEnvelope(createEnvelope('task.offer_for_agent', {
-      instruction: 'research', policy: { mode: 'auto' }, runtime: 'pi',
+      instruction: 'research', runtime: 'pi',
       agentRef: { agentId: 'research-agent', profileRevision: '7' },
       terminalProjection: { mode: 'result-document', contract: 'example.research.v1' },
     }, { taskId: 'research-task', seq: 1 }));
@@ -95,7 +95,7 @@ describe('offer-scoped terminal projection selection', () => {
   it('fails closed when a required result contract produces no document', async () => {
     const { adapter, runner, sent } = await harness(() => undefined);
     await runner.handleEnvelope(createEnvelope('task.offer_for_agent', {
-      instruction: 'research', policy: { mode: 'auto' }, runtime: 'pi',
+      instruction: 'research', runtime: 'pi',
       agentRef: { agentId: 'research-agent', profileRevision: '7' },
       terminalProjection: { mode: 'result-document', contract: 'example.research.v1' },
     }, { taskId: 'research-missing', seq: 1 }));

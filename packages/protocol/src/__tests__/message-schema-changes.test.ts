@@ -88,7 +88,6 @@ describe('runtimes[].capabilities: per-runtime feature flags (pre-freeze additio
         steer: true,
         resume: true,
         approvalInteractive: false,
-        permissionModes: ['auto', 'confirm'],
       },
     });
     expect(result.success).toBe(true);
@@ -97,7 +96,6 @@ describe('runtimes[].capabilities: per-runtime feature flags (pre-freeze additio
         steer: true,
         resume: true,
         approvalInteractive: false,
-        permissionModes: ['auto', 'confirm'],
       });
     }
   });
@@ -118,17 +116,6 @@ describe('runtimes[].capabilities: per-runtime feature flags (pre-freeze additio
     expect(result.success).toBe(true);
     if (result.success) {
       expect('capabilities' in result.data).toBe(false);
-    }
-  });
-
-  it('permissionModes tolerates a mode string this schema does not enumerate (observability data, not control/security)', () => {
-    const result = RuntimeInfoSchema.safeParse({
-      id: 'claude',
-      capabilities: { permissionModes: ['auto', 'confirm', 'some-future-mode'] },
-    });
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.capabilities?.permissionModes).toEqual(['auto', 'confirm', 'some-future-mode']);
     }
   });
 
@@ -184,7 +171,6 @@ describe('task.claim.capabilities (additive-minor optional field)', () => {
         steer: true,
         resume: true,
         approvalInteractive: false,
-        permissionModes: ['auto', 'confirm'],
       },
     });
     expect(result.success).toBe(true);
@@ -193,7 +179,6 @@ describe('task.claim.capabilities (additive-minor optional field)', () => {
       steer: true,
       resume: true,
       approvalInteractive: false,
-      permissionModes: ['auto', 'confirm'],
     });
   });
 
@@ -269,7 +254,6 @@ describe('taskId placement: envelope task_id is the sole routing key (M1 gap #7)
     const result = TaskOfferPayloadSchema.safeParse({
       taskId: 'task-1', // M0 shape — payload-level duplicate, now meaningless
       instruction: 'do it',
-      policy: { mode: 'auto' },
     });
     expect(result.success).toBe(true);
     if (result.success) {
@@ -293,7 +277,7 @@ describe('taskId placement: envelope task_id is the sole routing key (M1 gap #7)
     // payload, and the envelope never sets task_id. M1 requires the envelope
     // field, so this must now be rejected rather than silently unroutable.
     const raw = {
-      v: 1,
+      v: 2,
       id: '11111111-1111-4111-8111-111111111111',
       ts: new Date().toISOString(),
       type: 'task.claim',

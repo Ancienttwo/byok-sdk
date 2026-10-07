@@ -4,7 +4,7 @@ import { TENANT_A, createHarness } from './support/harness';
 
 const input = {
   taskId: 'turn-execution-1', deviceId: 'device',
-  payload: { instruction: 'context plus current input', runtime: 'codex', policy: { mode: 'auto' },
+  payload: { instruction: 'context plus current input', runtime: 'codex',
     agentRef: { agentId: 'agent', profileRevision: 'revision' },
     egressPolicy: { policyRevision: 'policy', activity: { mode: 'metadata-status', delivery: 'latest-value' },
       reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },

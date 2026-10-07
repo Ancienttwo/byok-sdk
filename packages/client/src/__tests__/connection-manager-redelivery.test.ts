@@ -85,7 +85,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     const offerSeq = server.nextSeq();
     const offer = createEnvelope(
       'task.offer',
-      { instruction: 'x', policy: { mode: 'auto' } },
+      { instruction: 'x' },
       { taskId, seq: offerSeq },
     );
     server.send(offer);
@@ -137,7 +137,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     await connection.start();
     await connection.waitForConnection();
     const offers = [1, 2, 3].map(n => createEnvelope('task.offer', {
-      instruction: 'finite backlog', policy: { mode: 'auto' },
+      instruction: 'finite backlog',
     }, { taskId: String(n), seq: server.nextSeq() }));
     offers.forEach(offer => server.send(offer));
     await vi.waitFor(() => expect(attempts.size).toBe(3));
@@ -165,7 +165,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
       onEnvelope: async e => { if (e.type === 'task.offer') effect(); },
     });
     await connection.start(); await connection.waitForConnection();
-    const offer = createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'a', seq: server.nextSeq() });
+    const offer = createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'a', seq: server.nextSeq() });
     server.send(offer);
     await vi.waitFor(() => expect(effect).toHaveBeenCalledTimes(1));
     await vi.waitFor(() => expect(cursorStore.save).toHaveBeenCalledWith(server.url, record.deviceId, offer.seq));

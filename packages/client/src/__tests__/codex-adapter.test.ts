@@ -25,7 +25,6 @@ const sessions: Session[] = [];
 const dirs: string[] = [];
 const task: TaskOfferPayload = {
   instruction: 'hello',
-  policy: { mode: 'auto' },
 };
 function adapter(options: ConstructorParameters<typeof CodexAdapter>[0] = {}) {
   return new CodexAdapter({
@@ -43,7 +42,6 @@ async function ctx(
   return {
     workspaceDir,
     env: { PATH: process.env.PATH, HOME: os.homedir(), ...env },
-    policy: { mode: 'auto' },
   };
 }
 async function open(
@@ -95,8 +93,9 @@ describe('Codex persistent app-server adapter', () => {
       resume: true,
       approvalInteractive: false,
       mcpToolsets: true,
-      permissionModes: ['auto'],
     });
+    // Codex reads MCP tools itself; the daemon takes no tools/list observation for it.
+    expect(adapter().descriptor.requiresMcpToolsetToolObservation).not.toBe(true);
     expect(
       adapter().descriptor.environmentRequirements.credentialNames,
     ).toEqual([]);
@@ -120,44 +119,6 @@ describe('Codex persistent app-server adapter', () => {
       kind: 'refused',
       reason: 'app_server_unavailable',
     });
-  });
-  it.each([
-    { mode: 'readonly' },
-    { mode: 'confirm' },
-    { mode: 'plan' },
-    { mode: 'auto', network: false },
-    { mode: 'auto', allowTools: ['Bash'] },
-    { mode: 'auto', denyTools: ['Read'] },
-  ] satisfies NonNullable<TaskOfferPayload['policy']>[])(
-    'rejects effective policy before bin/spawn effects: %j',
-    async (policy) => {
-      const resolveBin = vi.fn(() => ({
-        command: fixture,
-        source: 'path' as const,
-      }));
-      const a = new CodexAdapter({ resolveBin });
-      const r = await a.prepare({
-        offer: { ...task, policy },
-        policy,
-        descriptor: a.descriptor,
-        requiredToolsetIds: [],
-      });
-      expect(r.kind).toBe('reject');
-      expect(resolveBin).not.toHaveBeenCalled();
-    },
-  );
-  it.each([undefined, true])('allows auto with network=%s', async (network) => {
-    const resources = await ctx();
-    resources.policy = {
-      mode: 'auto',
-      ...(network === undefined ? {} : { network }),
-    };
-    const s = await open(
-      adapter(),
-      { ...task, policy: resources.policy },
-      resources,
-    );
-    expect((await turn(s)).at(-1)?.type).toBe('turn_end');
   });
   it('opens a native thread and projects structured command/progress/usage before terminal', async () => {
     const s = await open();
@@ -295,12 +256,9 @@ describe('Codex persistent app-server adapter', () => {
     expect((await turn(s)).at(-1)?.type).toBe('turn_end');
     expect(starts).toBe(1);
   });
-  it('followUp rejects changed policy and blob-ref input without touching the open session', async () => {
+  it('followUp rejects blob-ref input without touching the open session', async () => {
     const s = await open();
     await turn(s);
-    await expect(
-      s.followUp({ ...task, policy: { mode: 'readonly' } }),
-    ).rejects.toThrow('policy');
     await expect(
       s.followUp({ ...task, instruction: { blobId: 'b' } as never }),
     ).rejects.toThrow('string');
@@ -474,7 +432,7 @@ describe('Codex persistent app-server adapter', () => {
       'interactive approval',
     );
   });
-  it('reserved MCP approval args and sealed env remain present across follow-up turns', async () => {
+  it('reserved MCP server args and sealed env remain present across follow-up turns', async () => {
     const captured: string[][] = [];
     const envs: NodeJS.ProcessEnv[] = [];
     const resources = await ctx({
@@ -505,18 +463,15 @@ describe('Codex persistent app-server adapter', () => {
     await s.followUp(task);
     await turn(s);
     expect(captured).toHaveLength(1);
-    expect(captured[0]).toContain(
-      'mcp_servers.byokagentmessage.enabled_tools=["send_agent_message"]',
-    );
-    expect(captured[0]).toContain(
-      'mcp_servers.byokagentmessage.tools.send_agent_message.approval_mode="approve"',
-    );
+    expect(captured[0]!.some((arg) => arg.startsWith('mcp_servers.byokagentmessage.command='))).toBe(true);
+    // No per-tool grant or per-tool approval mode is projected.
+    expect(captured[0]!.some((arg) => arg.includes('enabled_tools') || arg.includes('approval_mode'))).toBe(false);
     expect(
       Object.keys(envs[0]!).some((k) => k.startsWith('BYOK_MCP_PAYLOAD_')),
     ).toBe(true);
     expect(envs[0]).not.toHaveProperty('SERVER_ONLY');
   });
-  it('projected MCP toolsets use only the observed per-tool grant', async () => {
+  it('projected MCP toolsets reach the runtime without a per-tool grant', async () => {
     const resources = await ctx({ FAKE_CODEX_MCP_TOOL_CALL: 'host/echo' });
     resources.mcpServers = { host: { command: '/fixture/server' } };
     resources.mcpToolsetTools = observationOf({ host: ['echo'] });

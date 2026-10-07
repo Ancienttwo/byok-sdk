@@ -58,7 +58,7 @@ describe('S18-2: observation-wide deadline', () => {
         probeTimeoutMs: timeoutMs,
       });
       const result = await assembler.assemble({
-        agentMemory: 'none', requiredToolsets: ['test'], permissionMode: 'auto', runtimeIdentity: 'inert-runtime',
+        agentMemory: 'none', requiredToolsets: ['test'], runtimeIdentity: 'inert-runtime',
       });
       expect(result.ok).toBe(false);
       expect(JSON.stringify(result)).toMatch(/timed out|deadline/iu);

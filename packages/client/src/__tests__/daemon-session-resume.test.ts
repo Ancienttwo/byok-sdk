@@ -47,7 +47,7 @@ describe('session/workspace continuity across a daemon restart (finding #3)', ()
     await daemon.start();
 
     server.send(
-      createEnvelope('task.offer', { instruction: 'first task', policy: { mode: 'auto' } }, { taskId: 'task-A', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { instruction: 'first task' }, { taskId: 'task-A', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter1.sessions).toHaveLength(1));
@@ -79,7 +79,7 @@ describe('session/workspace continuity across a daemon restart (finding #3)', ()
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'follow-up task', policy: { mode: 'auto' }, sessionRef: sessionRefA },
+        { instruction: 'follow-up task', sessionRef: sessionRefA },
         { taskId: 'task-B', seq: server.nextSeq() },
       ),
     );
@@ -107,7 +107,7 @@ describe('session/workspace continuity across a daemon restart (finding #3)', ()
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'x', policy: { mode: 'auto' }, sessionRef: 'never-recorded-anywhere' },
+        { instruction: 'x', sessionRef: 'never-recorded-anywhere' },
         { taskId: 'task-C', seq: server.nextSeq() },
       ),
     );
@@ -141,7 +141,7 @@ describe('session/workspace continuity across a daemon restart (finding #3)', ()
     await daemon.start();
 
     server.send(
-      createEnvelope('task.offer', { instruction: 'first', policy: { mode: 'auto' } }, { taskId: 'task-1', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { instruction: 'first' }, { taskId: 'task-1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -154,7 +154,7 @@ describe('session/workspace continuity across a daemon restart (finding #3)', ()
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'second (resume)', policy: { mode: 'auto' }, sessionRef: sessionRef1 },
+        { instruction: 'second (resume)', sessionRef: sessionRef1 },
         { taskId: 'task-2', seq: server.nextSeq() },
       ),
     );
@@ -176,7 +176,7 @@ describe('session/workspace continuity across a daemon restart (finding #3)', ()
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'third (resume again)', policy: { mode: 'auto' }, sessionRef: sessionRef2 },
+        { instruction: 'third (resume again)', sessionRef: sessionRef2 },
         { taskId: 'task-3', seq: server.nextSeq() },
       ),
     );

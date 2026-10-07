@@ -695,7 +695,6 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       source: { revision: request.source.revision, digest: request.source.digest },
       target,
       policyRevision: limits.revision,
-      permissionMode: request.permissionMode,
       runtime: options.compiler.runtime,
       requestDigest,
       // Host authority, carried verbatim. Never defaulted: a preparation whose
@@ -759,7 +758,6 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       const assembled = await options.toolSurface.assemble({
         requiredToolsets: request.requiredToolsets,
         agentMemory: request.agentMemory,
-        permissionMode: request.permissionMode,
         runtimeIdentity: inputPreparationRuntimeIdentityString(options.compiler.runtime),
       });
       // Assembly owns any probes it started. Wait for their cleanup before

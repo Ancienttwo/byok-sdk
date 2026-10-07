@@ -28,7 +28,7 @@ export async function runPiTeamOperatorHost(argv: readonly string[]): Promise<vo
   for (const key of ['provider', 'model'] as const) if (typeof raw[key] !== 'string' || raw[key].length === 0) fail(`${key} must be non-empty`);
   if (!Array.isArray(raw.extensionPaths) || raw.extensionPaths.some(item => typeof item !== 'string' || !path.isAbsolute(item))) fail('extensionPaths must be absolute paths');
   const mcp = parseTaskScopedMcpConfig(raw.mcp, fail);
-  if (mcp.permissionMode !== 'auto' || Object.keys(mcp.observation).length !== 0) fail('operator MCP requires auto and empty host observation');
+  if (Object.keys(mcp.observation).length !== 0) fail('operator MCP requires an empty host observation');
   if (VERSION !== resolvePiRuntimeIdentity().version) fail('native version differs from the static SDK pin');
   await runPiSessionRuntime({
     cwd: raw.cwd as string, sessionDir: raw.sessionDir as string,

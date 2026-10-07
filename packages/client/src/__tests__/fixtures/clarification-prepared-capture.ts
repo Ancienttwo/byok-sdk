@@ -6,13 +6,13 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { PermissionPolicy, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { TaskOfferPayload } from '@byok-sdk/protocol';
 import { validateInputPreparationLimits, INPUT_PREPARATION_REQUEST_FORMAT, INPUT_PREPARATION_VERSION,
   type InputPreparationRequestV1, type InputPreparationReceiptV1, type InputPreparationCompiledPromptSnapshotV1,
   type InputPreparationModelV1 } from '../../input-preparation';
 import { createInputPreparationService, type InputPreparationService } from '../../daemon/input-preparation-service';
 import { sealRuntimeOperationManifest, type RuntimePreparedLaunchV1, type Session } from '../../types';
-import { classifyMcpToolsetServerObservation, type McpToolsetServerObservation } from '../../mcp/observation';
+import { bindMcpToolsetServerObservation, type McpToolsetServerObservation } from '../../mcp/observation';
 import { probeMcpServer } from '../../daemon/mcp-tools-probe';
 import { McpToolsetRegistry } from '../../daemon/toolset-registry';
 import { createPreparedToolSurfaceAssembler } from '../../daemon/prepared-tool-surface';
@@ -113,8 +113,6 @@ export async function providerEndpoint(): Promise<ProviderEndpoint> {
 // One real preparation, compiled by the native compiler
 // ---------------------------------------------------------------------------
 
-const POLICY: PermissionPolicy = { mode: 'auto', allowTools: [] };
-
 function model(baseUrl: string): InputPreparationModelV1 {
   return {
     id: 'glm-4.6',
@@ -170,7 +168,6 @@ export async function prepareOnThisDevice(endpoint: ProviderEndpoint, input: {
   const toolsets = new McpToolsetRegistry({
     [RUNTIME_IDENTITY_TOOLSET]: {
       mcpServers: { teamserver: server },
-      readOnlyTools: { teamserver: ['echo'] },
     },
   });
   const launchBinding = await trustedLaunchBinding();
@@ -185,7 +182,6 @@ export async function prepareOnThisDevice(endpoint: ProviderEndpoint, input: {
   }).assemble({
     agentMemory: 'none',
     requiredToolsets: [RUNTIME_IDENTITY_TOOLSET],
-    permissionMode: POLICY.mode,
     runtimeIdentity,
   });
   if (!assembled.ok) throw new Error(`the device refused to count this preparation: ${assembled.detail}`);
@@ -198,10 +194,7 @@ export async function prepareOnThisDevice(endpoint: ProviderEndpoint, input: {
     timeoutMs: 10_000,
   });
   const observation = Object.freeze({
-    teamserver: classifyMcpToolsetServerObservation(observed, {
-      toolsetId: RUNTIME_IDENTITY_TOOLSET,
-      readOnlyTools: ['echo'],
-    }),
+    teamserver: bindMcpToolsetServerObservation(observed, RUNTIME_IDENTITY_TOOLSET),
   });
 
   // The Host owns the WHOLE system message on official Pi: `customPrompt` is
@@ -226,7 +219,7 @@ export async function prepareOnThisDevice(endpoint: ProviderEndpoint, input: {
     source: { revision: input.sourceRevision,digest: createHash('sha256').update(input.message).digest('hex') },
     selection: { model: snapshot.model,options: { cacheRetention: 'none',maxTokens: 4096 } },
     snapshot: { prompt: snapshot.prompt,messages: [{ role: 'user',content: input.message,timestamp: 1_700_000_000_000 }] },
-    permissionMode: POLICY.mode,agentMemory: 'none',requiredToolsets: [RUNTIME_IDENTITY_TOOLSET] };
+    agentMemory: 'none',requiredToolsets: [RUNTIME_IDENTITY_TOOLSET] };
   const service = createInputPreparationService({ storeDir: input.storeDir,limits,
     compiler: { runtime: compiler.runtime,async compile(request) { compiled = await compiler.compile(request); return compiled; } },
     toolSurface: createPreparedToolSurfaceAssembler({ toolsetRegistry: toolsets,runtimeEnv: () => ({ PATH: process.env.PATH ?? '' }) }),
@@ -276,7 +269,6 @@ export async function prepareOnThisDevice(endpoint: ProviderEndpoint, input: {
         model: snapshot.model,
         binding,
       },
-      permissionMode: POLICY.mode,
       toolBindingDigest: surface.toolBindingDigest,
       observationDigest: surface.observationDigest,
       launch: { cwd: surface.launch.launchCwd },
@@ -292,11 +284,9 @@ export async function startPrepared(prepared: Prepared, overrides: { taskId: str
   const offer: TaskOfferPayload = {
     taskId: overrides.taskId,
     instruction: 'unused on the prepared lane',
-    policy: POLICY,
   } as unknown as TaskOfferPayload;
   const result = await adapter.prepare({
     offer,
-    policy: POLICY,
     descriptor: adapter.descriptor,
     requiredToolsetIds: [RUNTIME_IDENTITY_TOOLSET],
     mcpServers: prepared.mcpServers,
@@ -308,7 +298,6 @@ export async function startPrepared(prepared: Prepared, overrides: { taskId: str
     taskId: overrides.taskId,
     runtimeId: 'pi',
     descriptor: adapter.descriptor,
-    policy: POLICY,
     requiredToolsetIds: [RUNTIME_IDENTITY_TOOLSET],
     workspace: { workspaceDir: prepared.workspaceDir },
     forwardedEnvironmentNames: Object.keys(prepared.childEnv).sort(),

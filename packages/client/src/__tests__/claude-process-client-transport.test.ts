@@ -145,8 +145,8 @@ describe('Claude stdin transport failure ownership', () => {
     const disposal = deferred();
     tree.dispose.mockReturnValue(disposal.promise);
     const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: 'inert-fixture', source: 'path' }), spawnFn: fixture.spawnFn });
-    const start = observe(startPreparedOperation(adapter, { instruction: 'hello', policy: { mode: 'auto' } }, {
-      workspaceDir: process.cwd(), policy: { mode: 'auto' }, env: {},
+    const start = observe(startPreparedOperation(adapter, { instruction: 'hello' }, {
+      workspaceDir: process.cwd(), env: {},
     }));
     await flush();
     if (phase === 'init') fixture.child.stdin.destroy(fixture.error);
@@ -167,8 +167,8 @@ describe('Claude stdin transport failure ownership', () => {
     const disposal = deferred();
     tree.dispose.mockReturnValue(disposal.promise);
     const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: 'inert-fixture', source: 'path' }), spawnFn: fixture.spawnFn });
-    const start = observe(startPreparedOperation(adapter, { instruction: 'hello', policy: { mode: 'auto' } }, {
-      workspaceDir: process.cwd(), policy: { mode: 'auto' }, env: {},
+    const start = observe(startPreparedOperation(adapter, { instruction: 'hello' }, {
+      workspaceDir: process.cwd(), env: {},
     }));
     await flush();
     fixture.child.stdout.write('{"type":"system","subtype":"init","session_id":"early"}\n');
@@ -186,15 +186,15 @@ describe('Claude stdin transport failure ownership', () => {
   it('surfaces a follow-up EPIPE to both the writer and session events while close retains the disposal barrier', async () => {
     const fixture = fakeChild(false);
     const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: 'inert-fixture', source: 'path' }), spawnFn: fixture.spawnFn });
-    const start = startPreparedOperation(adapter, { instruction: 'hello', policy: { mode: 'auto' } }, {
-      workspaceDir: process.cwd(), policy: { mode: 'auto' }, env: {},
+    const start = startPreparedOperation(adapter, { instruction: 'hello' }, {
+      workspaceDir: process.cwd(), env: {},
     });
     await flush();
     fixture.child.stdout.write('{"type":"system","subtype":"init","session_id":"ready"}\n');
     const session = await start;
     const events = observe(session.events[Symbol.asyncIterator]().next());
     fixture.failWrites();
-    await expect(session.followUp({ instruction: 'next', policy: { mode: 'auto' } })).rejects.toMatchObject({
+    await expect(session.followUp({ instruction: 'next' })).rejects.toMatchObject({
       phase: 'run', cause: fixture.error,
     });
     await flush();
@@ -229,8 +229,8 @@ describe('Claude stdin transport failure ownership', () => {
     const failure = new Error('disposal not yet quiescent');
     tree.dispose.mockRejectedValueOnce(failure);
     const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: 'inert-fixture', source: 'path' }), spawnFn: fixture.spawnFn });
-    const start = observe(startPreparedOperation(adapter, { instruction: 'hello', policy: { mode: 'auto' } }, {
-      workspaceDir: process.cwd(), policy: { mode: 'auto' }, env: {},
+    const start = observe(startPreparedOperation(adapter, { instruction: 'hello' }, {
+      workspaceDir: process.cwd(), env: {},
     }));
     await flush(); await flush();
     expect(start.error).toBeInstanceOf(RuntimeStartupDisposalFailure);

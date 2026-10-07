@@ -6,11 +6,7 @@ import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import process from 'node:process';
 import {
-  PERMISSION_MODES,
-  PermissionPolicySchema,
   PreparedAgentMemoryModeSchema,
-  type PermissionMode,
-  type PermissionPolicy,
   type PreparedAgentMemoryMode,
 } from '@byok-sdk/protocol';
 import {
@@ -95,7 +91,7 @@ import {
  */
 
 const CONFIG_FORMAT = 'byok.pi.prepared-launch';
-const CONFIG_VERSION = 3;
+const CONFIG_VERSION = 4;
 /**
  * Where this process's provider credential comes from, and the ONE switch the
  * rest of this file branches on. Written by the adapter from
@@ -511,8 +507,6 @@ interface PreparedLaunchConfig {
   readonly descendantPlan: RuntimeDescendantPlanV2 | null;
   readonly credentialSource: CredentialSource;
   readonly cwd: string;
-  readonly policy: PermissionPolicy;
-  readonly countedPermissionMode: PermissionMode;
   readonly model: InputPreparationModelV1;
   readonly toolBindingDigest: string;
   readonly observationDigest: string;
@@ -533,23 +527,11 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
     fail(`${configPath} could not be read as JSON: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
   if (!isPlainObject(parsed)) fail('the prepared launch configuration must be an object');
-  const keys = ['format','version','binding','descendantPlan','credentialSource','cwd','policy','countedPermissionMode','expected','toolBindingDigest','observationDigest','toolsetDefinitionRevisions','launch','agentMemory','memory','memoryCall','mcp'];
+  const keys = ['format','version','binding','descendantPlan','credentialSource','cwd','expected','toolBindingDigest','observationDigest','toolsetDefinitionRevisions','launch','agentMemory','memory','memoryCall','mcp'];
   if (Object.keys(parsed).length !== keys.length || !keys.every(key => Object.hasOwn(parsed, key))) fail('prepared config has missing or unknown keys');
   if (parsed.format !== CONFIG_FORMAT) fail(`the prepared launch configuration must declare format ${CONFIG_FORMAT}`);
   if (parsed.version !== CONFIG_VERSION) fail(`the prepared launch configuration must declare version ${CONFIG_VERSION}`);
 
-  // Parsed with the protocol's own schema rather than by hand: this value is
-  // what decides the native tool selection, and a hand-rolled reader would be a
-  // second, laxer definition of a security-control shape that is `.strict()` on
-  // purpose.
-  const policyResult = PermissionPolicySchema.safeParse(parsed.policy);
-  if (!policyResult.success) fail(`policy is not a valid permission policy: ${policyResult.error.message}`);
-
-  const countedPermissionMode = parsed.countedPermissionMode;
-  if (typeof countedPermissionMode !== 'string'
-    || !(PERMISSION_MODES as readonly string[]).includes(countedPermissionMode)) {
-    fail(`countedPermissionMode must be one of [${PERMISSION_MODES.join(', ')}]`);
-  }
   if (!isPlainObject(parsed.expected)) fail('expected must be an object');
 
   const credentialSource = parsed.credentialSource;
@@ -561,13 +543,6 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
   if (!isAbsolute(cwd)) fail('cwd must be an absolute path');
 
   const mcp = parseTaskScopedMcpConfig(parsed.mcp, fail);
-  // One mode, stated once. The pool's own configuration carries it because the
-  // ordinary extension reads the same shape; a disagreement between the two
-  // copies would mean the registered set and the verified set were chosen under
-  // different policies.
-  if (mcp.permissionMode !== countedPermissionMode) {
-    fail('mcp.permissionMode disagrees with countedPermissionMode');
-  }
   const memoryMode = PreparedAgentMemoryModeSchema.safeParse(parsed.agentMemory);
   if (!memoryMode.success) fail('agentMemory is invalid: ' + memoryMode.error.message);
   let memory: PreparedAgentMemoryState | null;
@@ -601,8 +576,6 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
     binding, descendantPlan,
     credentialSource: credentialSource as CredentialSource,
     cwd,
-    policy: policyResult.data,
-    countedPermissionMode: countedPermissionMode as PermissionMode,
     model: parsePreparedExpectedModel(parsed.expected.model),
     toolBindingDigest: requireString(parsed.toolBindingDigest, 'toolBindingDigest'),
     observationDigest: requireString(parsed.observationDigest, 'observationDigest'),
@@ -746,8 +719,6 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
   }
   try {
   const surface = await assemblePreparedPiToolSurface({
-    policy: config.policy,
-    countedPermissionMode: config.countedPermissionMode,
     agentMemory: config.agentMemory,
     memory: config.memory,
     observation: config.mcp.observation,

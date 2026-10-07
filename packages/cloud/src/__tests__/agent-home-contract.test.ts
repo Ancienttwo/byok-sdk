@@ -20,7 +20,6 @@ function deviceStores(harness: CloudHarness, deviceId: string) {
 function agentPayload() {
   return {
     instruction: 'remember this Agent task',
-    policy: { mode: 'auto' as const },
     agentRef: AGENT_REF,
   };
 }
@@ -32,7 +31,7 @@ describe('hosted Agent-home contract', () => {
     await harness.core.presence.publish(TENANT_A, {
       deviceId: device.deviceId,
       level: 'online',
-      protocolVersions: [1],
+      protocolVersions: [2],
       configuredToolsets: ['agent-home-contract'],
       ttlMs: 60_000,
       minimumIntervalMs: 0,
@@ -188,7 +187,7 @@ describe('hosted Agent-home contract', () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const hello = createEnvelope('conn.hello', {
-      protocolVersions: [1],
+      protocolVersions: [2],
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
       deviceId: device.deviceId,
       productId: 'test-product',
@@ -220,7 +219,7 @@ describe('hosted Agent-home contract', () => {
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
     });
     const downgradedHello = createEnvelope('conn.hello', {
-      protocolVersions: [1],
+      protocolVersions: [2],
       capabilities: [],
       deviceId: device.deviceId,
       productId: 'test-product',
@@ -244,7 +243,7 @@ describe('hosted Agent-home contract', () => {
     const device = await harness.pairDevice(TENANT_A);
     const stores = deviceStores(harness, device.deviceId);
     const incompatibleHello = createEnvelope('conn.hello', {
-      protocolVersions: [2],
+      protocolVersions: [1],
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
       deviceId: device.deviceId,
       productId: 'test-product',

@@ -14,12 +14,19 @@ export interface ClaudeAdapterOptions {
     nativeInteractions?: NativeInteractionHostOptions;
 }
 /**
- * Claude Code stream-json adapter. Default headless permission behavior remains
- * unchanged. Explicit nativeInteractions opts into the Agent SDK stdio control
- * handshake and requests the CLI actually forwards to can_use_tool, including
+ * Claude Code stream-json adapter.
+ *
+ * An ordinary session runs with `--dangerously-skip-permissions`, as in OAR:
+ * in embedded use there is no human at an approval prompt, so a permission
+ * gate is a hang, not safety. Claude keeps its own guardrails (the user's
+ * `~/.claude` settings and deny rules).
+ *
+ * Explicit nativeInteractions opts into the Agent SDK stdio control handshake
+ * (`--permission-prompt-tool stdio`) instead of the skip flag: the local Host
+ * UI answers each request the CLI forwards to can_use_tool, including
  * AskUserQuestion. Existing allow rules may bypass that callback; this is not a
- * blanket all-tools confirmation policy. PermissionPolicy.confirm and remote
- * boolean approvals remain unsupported, as does mid-turn steering.
+ * blanket all-tools confirmation policy. Remote boolean approvals remain
+ * unsupported, as does mid-turn steering.
  */
 export declare class ClaudeAdapter implements RuntimeAdapter {
     private readonly options;
@@ -1118,8 +1125,6 @@ export interface PreparedAgentMemoryImplementationDigests {
 export declare function parsePreparedAgentMemoryMode(value: unknown): PreparedAgentMemoryMode;
 export declare function preparedAgentMemoryModeAllowsOperation(mode: PreparedAgentMemoryMode, operation: AgentMemoryOperation): boolean;
 export declare function preparedAgentMemoryModeWithinCeiling(requested: PreparedAgentMemoryMode, ceiling: PreparedAgentMemoryMode): boolean;
-/** `none` adds no memory restriction. Selected memory modes are only expressible under the approved policy matrix. */
-export declare function preparedAgentMemoryModeAllowedByPolicy(mode: PreparedAgentMemoryMode, policy: unknown, denyTools?: readonly string[]): boolean;
 export declare function preparedAgentMemoryToolNames(mode: PreparedAgentMemoryMode): readonly string[];
 /** Strict parser for the task-free SDK descriptor. Missing/unknown operation metadata fails closed. */
 export declare function validatePreparedAgentMemoryObservation(value: unknown): PreparedAgentMemoryObservation;
@@ -2966,7 +2971,7 @@ export declare class ConnectionManager {
     private enterRevoked;
 }
 // ==== @byok-sdk/client dist/daemon/control-protocol.d.ts ====
-import { type TaskState } from '@byok-sdk/protocol';
+import type { TaskState } from '@byok-sdk/protocol';
 import type { ApprovalDecision, PendingApproval } from './approvals';
 import type { StorageCategory } from './journal/journal';
 import type { StoragePressureState } from './journal/storage-policy';
@@ -3571,7 +3576,6 @@ export declare function parseInputPreparationLookupParams(value: unknown): Input
 export declare function parseInputPreparationCancelParams(value: unknown): InputPreparationCancelParamsV1 | undefined;
 // ==== @byok-sdk/client dist/daemon/create-daemon.d.ts ====
 import type { AgentEgressPolicy, RuntimeId } from '@byok-sdk/protocol';
-import type { PermissionPolicy } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, GitWorkspaceConfig, McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types';
 import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agent-home';
 import type { AgentRef } from '../agent-home';
@@ -3767,9 +3771,8 @@ export interface DaemonConfig {
      * M5 batch-3 (workstream 1): explicit auto-select priority order for
      * `TaskRunner.pickAdapter`'s no-explicit-runtime branch (`task-runner.ts`)
      * — tried in listed order; the first candidate that is both PRESENT
-     * (`adapter.detect()`) and CAPABLE (declares the offer's
-     * `PermissionPolicy.mode` in its own `descriptor.capabilities.permissionModes` —
-     * see `adapterSupportsMode`) wins. Unset defaults to
+     * (`adapter.detect()`) and CAPABLE (declares MCP toolset projection when
+     * the offer requires it) wins. Unset defaults to
      * `DEFAULT_RUNTIME_PREFERENCE` (`task-runner.ts`): `['claude', 'codex',
      * 'pi']` — pi LAST, deliberately.
      *
@@ -3794,29 +3797,6 @@ export interface DaemonConfig {
      * sequence among whatever that allowlist, if set, already let through.
      */
     runtimePreference?: RuntimeId[];
-    /**
-     * The device operator's configured policy CEILING — every `task.offer`'s
-     * own policy is merged against this and fail-closed-rejected if it asks
-     * for more latitude than this allows (`daemon/policy.ts`'s
-     * `computeEffectivePolicy`).
-     *
-     * M5 batch-3 (workstream 1): `workspaceRoot` set on THIS ceiling is still
-     * merged into the effective policy handed to an adapter as
-     * `ctx.policy.workspaceRoot` (`computeEffectivePolicy` is unchanged) — but
-     * no bundled adapter (pi/claude/codex) actually reads or enforces it;
-     * every adapter derives its real confinement from `ctx.workspaceDir` (the
-     * daemon-created per-task directory) instead — see docs/security.md's
-     * "Workspace confinement is a convention, not a sandbox" section. Setting
-     * it here is therefore silently inert rather than actively dangerous by
-     * itself (an OFFER independently asking for its OWN `workspaceRoot` is a
-     * separate, fail-closed-declined case — see `TaskRunner.handleOffer` —
-     * precisely because THAT looks like a live security control when it
-     * isn't). `start()` below logs a loud, one-time `console.warn` whenever
-     * this ceiling sets `workspaceRoot`, so an operator who configured it
-     * expecting real enforcement finds out immediately instead of trusting a
-     * control nothing honors.
-     */
-    permissionDefaults?: PermissionPolicy;
     storeDir?: string;
     /**
      * Opt-in host composition for a daemon launched under a different OS
@@ -5150,11 +5130,16 @@ import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_RECORD_FORMAT, INP
  * longer has, and nothing can honestly say whether its D was text only
  * without re-reading bytes the record never vouched for.
  *
+ * 9 is the first version without a permission mode: `PermissionPolicy` left
+ * the protocol, so the binding no longer carries `permissionMode`. A
+ * version-8 record digests a field this build no longer has; retire it with
+ * `byok-agent retire-input-preparation` instead of reading it forward.
+ *
  * A record at any other version is refused — see
  * {@link InputPreparationUnsupportedRecordVersionError}. There is no
  * compatibility read.
  */
-export declare const INPUT_PREPARATION_RECORD_VERSION = 8;
+export declare const INPUT_PREPARATION_RECORD_VERSION = 9;
 /** The durable idempotency key. Never a task id, and never caller-asserted: `scopeId` comes from the trusted authority grant. */
 export interface InputPreparationRecordKey {
     readonly scopeId: string;
@@ -7203,7 +7188,7 @@ declare function inspectOperationalHealthHandle(handle: Awaited<ReturnType<typeo
 export declare function inspectOperationalHealthFile(storeDir: string): Promise<OperationalHealthFileInspection>;
 export { inspectOperationalHealthHandle };
 // ==== @byok-sdk/client dist/daemon/prepared-agent-memory.d.ts ====
-import { type PreparedAgentMemoryMode, type PermissionPolicy } from '@byok-sdk/protocol';
+import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import { type ToolImplementationAuthority, type ToolImplementationAttestedV1, type ToolImplementationFsProbe, type SdkHelperSpawnBindingV1 } from '@byok-sdk/implementation-identity';
 import { type PreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
 import type { McpLaunchAttestation } from './trusted-launch-cwd';
@@ -7215,7 +7200,6 @@ export interface PreparedAgentMemoryState {
     readonly implementation: PreparedAgentMemoryImplementation;
     readonly observation: PreparedAgentMemoryObservation;
 }
-export declare function assertPreparedMemoryPolicy(mode: PreparedAgentMemoryMode, policy: PermissionPolicy): void;
 export declare function resolvePreparedMemoryImplementation(authority: ToolImplementationAuthority | undefined, env: Readonly<Record<string, string>>, launch: McpLaunchAttestation, probe?: ToolImplementationFsProbe): Promise<PreparedAgentMemoryImplementation>;
 export declare function memorySpawnBinding(identity: ToolImplementationAttestedV1, entry: 'agent-memory-describe' | 'agent-memory-mcp', mode: PreparedAgentMemoryMode): SdkHelperSpawnBindingV1;
 export declare function memoryServer(binding: SdkHelperSpawnBindingV1): {
@@ -7718,7 +7702,7 @@ export declare function readDeviceEnrollmentStatus(options: DeviceEnrollmentStat
  */
 export declare function readDeviceEnrollmentIdentity(options: DeviceEnrollmentStatusOptions): Promise<DeviceEnrollmentIdentityStatus>;
 // ==== @byok-sdk/client dist/daemon/task-runner.d.ts ====
-import { type AgentMessageContentType, type AgentEgressPolicy, type Envelope, type PermissionPolicy, type RuntimeId, type TerminalProjectionSelection, type TaskOfferPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferPreparedPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import { type AgentMessageContentType, type AgentEgressPolicy, type Envelope, type RuntimeId, type TerminalProjectionSelection, type TaskOfferPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferPreparedPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import { type McpStdioServerConfig, type McpToolsetConfig, type RuntimeAdapter } from '../types';
 import type { InputPreparationStore } from './input-preparation-store';
 import { type InputPreparationRuntimeIdentityV1, type InputPreparationBindingV1 } from '../input-preparation';
@@ -8009,7 +7993,6 @@ export interface TaskRunnerDeps {
     toolImplementationAuthority?: ToolImplementationAuthority;
     /** Test seam for the implementation measurement; see {@link ToolImplementationFsProbe}. */
     toolImplementationFsProbe?: ToolImplementationFsProbe;
-    permissionDefaults?: PermissionPolicy;
     workspaceRoot: string;
     /** Strict Agent offer authority. Absent means legacy offers never resolve an Agent home. */
     agentHome?: AgentHomeManager;
@@ -8292,8 +8275,8 @@ export type HostToolsetContextLookup = {
  * cancelled, plus approve/reject/cancel/steer handling.
  *
  * M1 rework (docs/protocol.md §3, §5, §10 — `packages/protocol` is frozen,
- * not editable here): pre-claim rejections (unknown/disallowed runtime,
- * policy exceeding this device's ceiling) now send `task.decline` and never
+ * not editable here): pre-claim rejections (unknown/disallowed runtime)
+ * now send `task.decline` and never
  * claim at all — `TASK_TRANSITIONS.Offered` gained a direct `-> Failed` edge
  * precisely so this no longer has to claim-then-fail. A successful claim is
  * followed by `task.started` only once the adapter session has actually
@@ -9128,30 +9111,23 @@ export declare class TaskRunner {
     /** `reuseDir`, when set (a known sessionRef's recorded workspace), is used verbatim instead of a fresh `workspaceRoot/<taskId>` directory — `mkdir recursive` is idempotent either way, so ensuring-exists is safe to do unconditionally. */
     private resolveWorkspaceDir;
     /**
-     * M5 batch-3 (workstream 1): selects which adapter runs this offer, now
-     * gated on both PRESENCE (`adapter.detect()`, as before) and CAPABILITY
-     * (`adapterSupportsMode` — can this adapter even express `policyMode`?
-     * new in this batch) — pre-claim, in both the explicit-runtime and
-     * auto-select branches.
+     * Selects which adapter runs this offer, gated on CAPABILITY (MCP toolset
+     * projection, when required) and PRESENCE (`adapter.detect()`) — pre-claim,
+     * in both the explicit-runtime and auto-select branches.
      *
-     * Explicit-runtime branch (`requestedRuntime` set): semantics otherwise
-     * unchanged from before this batch — allowlist and known-adapter checks
-     * first, THEN the new capability check, THEN presence. A capability
-     * mismatch here is a permanent characteristic of naming THIS runtime with
-     * THIS policy (e.g. pi never supports `confirm`, on any device, by
-     * design — `pi/permission-mapping.ts`) — `retryable: false`, the same
-     * class as "not in allowlist"/"unknown runtime" above it, since retrying
-     * this exact (runtime, mode) pair anywhere changes nothing.
+     * Explicit-runtime branch (`requestedRuntime` set): allowlist and
+     * known-adapter checks first, THEN the capability check, THEN presence. A
+     * capability mismatch here is a permanent characteristic of naming THIS
+     * runtime — `retryable: false`, the same class as "not in allowlist" /
+     * "unknown runtime" above it.
      *
      * Auto-select branch (`requestedRuntime` absent): candidates are ordered
      * by `runtimePreference` (default {@link DEFAULT_RUNTIME_PREFERENCE}) —
-     * see `orderByPreference` — then walked in that order; a candidate that
-     * can't express `policyMode` is skipped (not detected at all — capability
-     * is checked first, cheaper than a real subprocess probe) and the walk
-     * continues down the preference order, exactly as "skip non-supporting
-     * adapters and continue down the order" describes. If NOTHING eligible
-     * supports the mode, `retryable: true` — unlike the explicit branch, this
-     * is device-specific (which runtimes happen to be installed here), so a
+     * see `orderByPreference` — then walked in that order; a candidate without
+     * the required capability is skipped (not detected at all — capability is
+     * checked first, cheaper than a real subprocess probe). If NOTHING eligible
+     * is available, `retryable: true` — unlike the explicit branch, this is
+     * device-specific (which runtimes happen to be installed here), so a
      * different device's installed runtime set might satisfy it.
      */
     private pickAdapter;
@@ -10113,7 +10089,6 @@ export interface DiagnosticsSnapshot {
         authPresent?: boolean;
         steer: boolean;
         resume: boolean;
-        permissionModeCount: number;
     }>;
     control: {
         status: 'offline';
@@ -10317,7 +10292,7 @@ export { NativeInteractionController, NativeInteractionError } from './native-in
 export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from './native-interactions';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
 import type { PreparedAgentMemoryImplementation, PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
-import { type PermissionMode, type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
+import { type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { McpLaunchAttestation } from './daemon/trusted-launch-cwd';
 import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 /** Wire format tag for a preparation request. One strict shape, one version. */
@@ -10359,6 +10334,10 @@ export declare const INPUT_PREPARATION_ARTIFACT_FORMAT = "byok.input-preparation
  * Version 7 uses Host systemPrompt and the official Pi v4 envelope/identity.
  * The fourteen admission comparisons remain; old artifacts are not read forward.
  *
+ * Version 9 REMOVED `permissionMode` from the request and the binding, with the
+ * task offer's permission policy (protocol v2). A preparation counts every
+ * observed MCP tool; there is no mode to filter for or to compare.
+ *
  * The number itself is owned by `@byok-sdk/protocol`'s
  * `INPUT_PREPARATION_WIRE_VERSION`, because the device capability token
  * `agent-input-preparation-v<N>` is derived from it: the relay wire carries no
@@ -10372,7 +10351,7 @@ export declare const INPUT_PREPARATION_ARTIFACT_FORMAT = "byok.input-preparation
  * frozen under a claim this version cannot re-derive, and there is no honest
  * value to translate a prompt rendered by another renderer into.
  */
-export declare const INPUT_PREPARATION_VERSION: 8;
+export declare const INPUT_PREPARATION_VERSION: 9;
 /**
  * Key-sorted JSON, so two structurally equal values always produce the same
  * bytes and therefore the same digest. Field ORDER must never be able to turn
@@ -10674,11 +10653,6 @@ export interface InputPreparationCompiledSnapshotV1 extends Omit<InputPreparatio
  * could state either could have tokens counted against a manifest this device
  * never observed.
  *
- * `permissionMode` is DECLARED, never inferred. A preparation counts one
- * concrete manifest, and the manifest is the policy-filtered set for exactly
- * one mode (`mcp/projection.ts`'s `filterMcpObservationForPolicy`). The daemon
- * validates the value and pins it onto the binding; it grants nothing.
- *
  * There is no `runtimeIdentity`, `compilerVersion` or `policyIdentity` field:
  * those are derived from the verified installed artifact closure and the
  * daemon's own configured policy, never from caller text.
@@ -10693,8 +10667,6 @@ export interface InputPreparationRequestV1 {
     readonly scope: InputPreparationScopeClaimV1;
     readonly source: InputPreparationSourceV1;
     readonly selection: InputPreparationSelectionV1;
-    /** The mode the counted manifest is filtered for. */
-    readonly permissionMode: PermissionMode;
     /** Configured MCP toolset ids. The locator is the toolset id; MCP only. */
     readonly requiredToolsets: readonly string[];
     readonly snapshot: InputPreparationSnapshotV1;
@@ -11072,13 +11044,6 @@ export interface InputPreparationBindingV1 {
     readonly source: InputPreparationSourceV1;
     readonly target: InputPreparationCounterTargetV1;
     readonly policyRevision: string;
-    /**
-     * The mode the counted manifest was filtered for, recorded so a consumer can
-     * COMPARE it without re-deriving the request digest: an Execution offered
-     * under a different mode registers a different tool set than the one these
-     * tokens were counted for.
-     */
-    readonly permissionMode: PermissionMode;
     readonly runtime: InputPreparationRuntimeIdentityV1;
     /** Digest over the whole normalized request, scope and runtime identity. */
     readonly requestDigest: string;
@@ -11257,13 +11222,6 @@ export declare const INPUT_PREPARATION_ERROR_CODES: readonly ['input_preparation
  */
 'observation_drift', 
 /**
- * The declared `permissionMode` exceeds this device's configured ceiling.
- * Never narrowed to an admissible mode: a preparation counts one concrete
- * manifest, and quietly counting a smaller one answers a question nobody
- * asked.
- */
-'permission_mode_denied', 
-/**
  * The `prompt_prepared` frame this preparation would be launched with does
  * not fit one RPC frame the native runtime will accept
  * (`RPC_MAX_FRAME_BYTES`). The bound is the RUNTIME's, not the operator's, so
@@ -11318,41 +11276,15 @@ export interface PreparedToolBindingDigestInputV1 {
  * configured argv and the implementation identities.
  */
 export declare function preparedToolBindingDigest(input: PreparedToolBindingDigestInputV1): string;
-/**
- * The Pi-native half of a prepared Main tool set, bound to the ADMITTED policy
- * that selected it — not merely to the mode.
- *
- * `allowTools`/`denyTools` are what actually decide which built-ins a task gets
- * (`adapters/pi/permission-mapping.ts`), so a digest that bound only `mode`
- * would validate a launch whose native half is a different set from the one
- * that was counted.
- *
- * Absent while the native half is not countable: `daemon/prepared-tool-surface.ts`
- * assembles a preparation with no native tools at all, so there is no selection
- * to bind and the key is omitted rather than written as an empty one.
- */
-export interface PreparedNativeToolSelectionV1 {
-    /** Model-visible native tool names, in registration order. Never empty. */
-    readonly names: readonly string[];
-    /** The admitted policy that produced `names`, whole. */
-    readonly policy: {
-        readonly mode: PermissionMode;
-        readonly allowTools?: readonly string[];
-        readonly denyTools?: readonly string[];
-    };
-}
 export interface PreparedToolSurfaceDigestInputV1 {
     readonly agentMemory: PreparedAgentMemoryMode;
     readonly memory: PreparedAgentMemoryState | null;
     readonly launch: McpLaunchAttestation;
-    readonly permissionMode: PermissionMode;
     readonly runtimeIdentity: string;
     readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
     readonly tools: readonly InputPreparationToolV1[];
     readonly toolExecutors: Readonly<Record<string, string>>;
     readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
-    /** Omitted while the prepared native half stays empty; see the type above. */
-    readonly nativeSelection?: PreparedNativeToolSelectionV1;
 }
 /** The whole observed surface: the schemas, the executors, the launch and the identities. */
 export declare function preparedToolSurfaceObservationDigest(input: PreparedToolSurfaceDigestInputV1): string;
@@ -12335,18 +12267,15 @@ export declare class McpStdioClient {
 // ==== @byok-sdk/client dist/mcp/observation.d.ts ====
 import { type McpStdioClientOptions, type McpStdioServerSpec } from './client';
 /**
- * Tool names an adapter is allowed to pre-grant must be OBSERVED, never
- * configured: the daemon's own `mcpToolsets` config carries `command`/`args`
- * only (see `../daemon/toolset-registry.ts`), so the single authority for
- * "which tools does this server actually expose" is the server's own
- * `tools/list` answer.
+ * Tool names an adapter registers must be OBSERVED, never configured: the
+ * daemon's own `mcpToolsets` config carries `command`/`args` only (see
+ * `../daemon/toolset-registry.ts`), so the single authority for "which tools
+ * does this server actually expose" is the server's own `tools/list` answer.
  *
- * A name that survives this filter is about to be interpolated into runtime
- * CLI authority — `--allowedTools mcp__<server>__<tool>` for claude,
- * `mcp_servers.<server>.tools.<tool>.approval_mode` for codex, and the
- * registered Pi tool name for pi. A comma, a dot, a quote, or whitespace in a
- * tool name would forge additional grants or a different config key out of one
- * legitimate one.
+ * A name that survives this filter becomes a runtime tool name — the
+ * registered Pi tool name and the qualified `mcp__<server>__<tool>` name. A
+ * comma, a dot, a quote, or whitespace in a tool name would forge a different
+ * tool name out of one legitimate one.
  *
  * A server that reports ANY name outside this shape fails the whole
  * observation — it is rejected, and the task is declined permanently rather
@@ -12357,12 +12286,10 @@ import { type McpStdioClientOptions, type McpStdioServerSpec } from './client';
  */
 export declare const GRANTABLE_TOOL_NAME: RegExp;
 /**
- * The same rule for the SERVER half of the identifier, enforced at grant
- * resolution (`../adapters/mcp-tool-grants.ts`). A projected server name is
- * interpolated into `mcp__<server>__<tool>` for claude and into the flat TOML
- * key `mcp_servers.<server>.tools.<tool>.approval_mode` for codex: a `.` would
- * split that key into a different table, and a quote, comma, or space would
- * forge a second grant out of one.
+ * The same rule for the SERVER half of the identifier. A projected server name
+ * is interpolated into the runtime tool name `mcp__<server>__<tool>`
+ * (`./projection.ts`): a quote, comma, or space would forge a second name out
+ * of one.
  */
 export declare const GRANTABLE_MCP_SERVER_NAME: RegExp;
 /** One tool exactly as its server described it. The model-visible truth, unedited. */
@@ -12385,61 +12312,20 @@ export interface McpServerObservation {
     readonly tools: readonly McpToolDescriptor[];
 }
 /**
- * One observed tool plus the operator's classification of it.
+ * One observed server together with the toolset it was projected from.
  *
- * `readOnly` comes from device toolset configuration
- * (`McpToolsetConfig.readOnlyTools`) and from nowhere else — never from the
- * tool's name, its description, its schema, or the server's own
- * `annotations.readOnlyHint`, which is a self-assessment rather than a
- * security authority. The field is deliberately three-state:
- *
- * - `true`  — the device config lists this `(server, tool)` as read-only.
- * - `false` — the config classifies this tool's TOOLSET but not this tool, so
- *             it counts as a mutation tool. That is the fail-closed default: a
- *             tool an operator forgot to classify is never granted under a
- *             restricted policy.
- * - absent  — the toolset carries no classification at all. Not "it mutates"
- *             but "nobody said", which is why it stays distinguishable: a
- *             non-`auto` policy is then refused outright instead of silently
- *             resolving to an empty toolset.
+ * The toolset id is the daemon's fact, not the server's, so it is attached
+ * here rather than inside {@link McpServerObservation}: the core observes
+ * servers and knows nothing about the registry. Carrying it ON the entry
+ * instead of in a parallel `serverName -> toolsetId` map is deliberate — two
+ * structures that must agree are two structures that can disagree, and the
+ * projection's ordering is derived from it.
  */
-export interface McpClassifiedToolDescriptor extends McpToolDescriptor {
-    readonly readOnly?: boolean;
-}
-/**
- * One observed server together with the toolset it was projected from and the
- * operator classification of each of its tools.
- *
- * Both additions are the daemon's facts, not the server's, so they are
- * attached here rather than inside {@link McpServerObservation}: the core
- * observes servers and knows nothing about the registry. Carrying them ON the
- * entry instead of in parallel `serverName -> …` maps is deliberate — two
- * structures that must agree are two structures that can disagree, and both
- * the projection's ordering and its policy filter are derived from these.
- */
-export interface McpToolsetServerObservation extends Omit<McpServerObservation, 'tools'> {
+export interface McpToolsetServerObservation extends McpServerObservation {
     readonly toolsetId: string;
-    /** Ordered by tool name, code unit. */
-    readonly tools: readonly McpClassifiedToolDescriptor[];
 }
-/**
- * Join one raw server observation to the daemon facts about it: which toolset
- * projected it, and which of its tools the device's operator declared
- * read-only.
- *
- * `readOnlyTools` is `null` when the toolset declares no classification at
- * all — every tool then comes back unclassified, and a non-`auto` policy fails
- * later rather than being resolved into "nothing is read-only" here. A
- * declared name the server does not expose is a STALE configuration and is
- * rejected: the operator classified a tool that no longer exists, so the rest
- * of the declaration cannot be trusted to describe this server either. It
- * throws {@link McpAuthorityError} for the same reason an ungrantable tool
- * name does — the answer will not change on a retry.
- */
-export declare function classifyMcpToolsetServerObservation(observation: McpServerObservation, binding: {
-    readonly toolsetId: string;
-    readonly readOnlyTools: readonly string[] | null;
-}): McpToolsetServerObservation;
+/** Join one raw server observation to the toolset that projected it. */
+export declare function bindMcpToolsetServerObservation(observation: McpServerObservation, toolsetId: string): McpToolsetServerObservation;
 export interface ObserveMcpServerOptions extends Omit<McpStdioClientOptions, 'maxStdoutBytes'> {
     /** Total initialize + tools/list budget, including every page; cleanup is awaited separately. */
     readonly timeoutMs?: number;
@@ -12733,7 +12619,7 @@ import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import type { ToolImplementationAuthority, ToolImplementationUnavailableReasonV1 } from '@byok-sdk/implementation-identity';
 import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
-import type { AgentEvent, PermissionMode, PermissionPolicy, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation';
 import type { RuntimeEnvironmentRequirements } from './daemon/environment';
 import type { McpLaunchBinding } from './daemon/trusted-launch-cwd';
@@ -12814,8 +12700,6 @@ export interface RuntimeCapabilities {
      * it cannot back.
      */
     readonly approvalInteractive: boolean;
-    /** Subset of {@link PermissionPolicy}'s `mode` values this adapter can express without widening. */
-    readonly permissionModes: readonly string[];
 }
 /** One local stdio MCP server definition. Remote task payloads can never supply this shape. */
 export interface McpStdioServerConfig {
@@ -12827,34 +12711,6 @@ export interface McpStdioServerConfig {
 /** A logical group of local MCP servers selectable by a wire-level toolset id. */
 export interface McpToolsetConfig {
     mcpServers: Readonly<Record<string, McpStdioServerConfig>>;
-    /**
-     * The operator's own read/mutation classification of this toolset's tools,
-     * per `(server, tool)`. It is what makes a permission mode other than `auto`
-     * expressible for a toolset task at all.
-     *
-     * The device configuration owner declares it and nothing else may. A
-     * server's own `annotations.readOnlyHint` is that server's self-assessment
-     * rather than a security authority, and a tool's name, description or schema
-     * is not evidence of anything — inferring the classification from any of
-     * them would be exactly the heuristic that makes a permission boundary
-     * meaningless.
-     *
-     * Two fail-closed defaults follow, both enforced by
-     * `filterMcpObservationForPolicy` (`mcp/projection.ts`): a tool the server
-     * exposes that this declaration omits is treated as a MUTATION tool, and a
-     * toolset carrying no declaration at all cannot run under a non-`auto`
-     * policy — the refusal names the missing classification rather than quietly
-     * running with every tool enabled.
-     *
-     * The registry validates it strictly (every server named here must be
-     * defined in `mcpServers`, every tool name must be grantable, no
-     * duplicates), the daemon cross-checks it against each server's own
-     * `tools/list` answer before admission (a classified tool the server does not
-     * expose is a stale config and is rejected), and it is folded into the
-     * toolset's `definitionRevision` — so changing a classification changes the
-     * toolset revision and therefore every executor fingerprint derived from it.
-     */
-    readOnlyTools?: Readonly<Record<string, readonly string[]>>;
 }
 /** Lifecycle facts a device host may explicitly report for one configured toolset. */
 export type McpToolsetLifecycleState = 'installed' | 'unauthorized' | 'starting' | 'ready' | 'degraded' | 'crashed' | 'incompatible';
@@ -12961,20 +12817,15 @@ export interface RuntimeAdapterDescriptor {
      * Whether this adapter actually CONSUMES
      * {@link RuntimeAdapterPrepareInput.mcpToolsetTools} — i.e. whether it
      * needs the daemon to observe each projected toolset server before
-     * admission, because it binds those tools into the runtime's own surface:
-     * claude's `--allowedTools`, codex's `enabled_tools` + per-tool
-     * `approval_mode`, and pi's per-tool registration of the observed schemas.
+     * admission, because it registers those tools itself: pi registers one tool
+     * per observed MCP tool with the server's own schema. Claude and Codex
+     * attach the MCP servers and let the runtime list the tools itself, so they
+     * declare nothing.
      *
      * The daemon uses this, and only this, to decide whether to pay for the
      * pre-admission `tools/list` observation of every projected server
      * (`daemon/mcp-tools-probe.ts`). An adapter that consumes no observation
      * never makes an offer wait on one it has no use for.
-     *
-     * Omission is fail-closed in the direction that matters: no observation
-     * means no names and no schemas, and an adapter that does consume the
-     * observation rejects a projected server it has neither for
-     * (`adapters/mcp-tool-grants.ts`). A grant is never widened by a missing
-     * declaration.
      */
     readonly requiresMcpToolsetToolObservation?: boolean;
     /**
@@ -13003,31 +12854,12 @@ export interface RuntimeAdapterDescriptor {
      * declare their mode explicitly.
      */
     readonly mcpServerLaunch?: 'direct-cwd' | 'launcher-wrapped';
-    /**
-     * Whether this adapter GENERATES a reserved approval MCP server of its own
-     * when it is started under `policy.mode: 'confirm'`. This is an extension
-     * seam for custom adapters; none of the bundled adapters declares it.
-     *
-     * Such a server exists nowhere in the daemon's projected `mcpServers` map,
-     * so the daemon cannot see it by counting that map — but it is an MCP
-     * server child of the task like any other, and it must start in the same
-     * proven-non-writable launch directory (`daemon/trusted-launch-cwd.ts`).
-     * `TaskRunner` therefore resolves the launch binding for a `confirm`-mode
-     * task on an adapter that declares this, even when the task projects no
-     * host toolset and needs no reserved helper at all.
-     *
-     * Omission means "generates none": an adapter that generates one and does
-     * not declare it would receive no binding and its own fail-closed guard
-     * refuses the start rather than launching the server unwrapped.
-     */
-    readonly generatesApprovalMcpServer?: boolean;
 }
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
 export interface RuntimeAdapterPrepareInput {
     /** Admission cancellation; late pure results are discarded and never started. */
     signal?: AbortSignal;
     offer: TaskOfferPayload;
-    policy: PermissionPolicy;
     descriptor: RuntimeAdapterDescriptor;
     requiredToolsetIds: readonly string[];
     /** Locally resolved MCP authority; available for pure admission validation only. */
@@ -13048,15 +12880,9 @@ export interface RuntimeAdapterPrepareInput {
  * tool no runtime is ever told about.
  *
  * It carries FULL descriptors — name, description and the server's own
- * `inputSchema` — plus the server identity and negotiated protocol version,
- * because the three runtimes need different parts of the same fact and only
- * one of them can be authoritative. claude and codex pre-grant by name; pi
- * registers one tool per MCP tool with the real schema; the prepared launch
- * path binds the schema digest into a frozen tool manifest. The names-only
- * view every grant resolver uses is DERIVED from this
- * (`mcp/projection.ts`'s `mcpToolsetToolNames`), never carried alongside it —
- * a separately transported name list would be a second authority free to
- * disagree with the schemas the model was actually shown.
+ * `inputSchema` — plus the server identity and negotiated protocol version.
+ * pi registers one tool per MCP tool with the real schema; the prepared launch
+ * path binds the schema digest into a frozen tool manifest.
  */
 export type McpToolsetToolObservation = Readonly<Record<string, McpToolsetServerObservation>>;
 /** A permanent or currently-unavailable pre-claim admission rejection. */
@@ -13083,7 +12909,6 @@ export interface RuntimeOperationManifest {
     /** Selected runtime id; lane/provider/model, when present, live only in `dispatchSelection`. */
     readonly runtimeId: string;
     readonly descriptor: RuntimeAdapterDescriptor;
-    readonly policy: PermissionPolicy;
     readonly requiredToolsetIds: readonly string[];
     /** The credential-free runtime/lane/provider/model authority for this operation. */
     readonly dispatchSelection?: TaskOfferPayload['dispatchSelection'];
@@ -13151,11 +12976,6 @@ export interface RuntimePreparedLaunchExpectationV1 {
  * There is no `instruction` here and no way to supply one: the user request is
  * already inside the frozen envelope, and a prepared run that accepted a
  * separate instruction would have two answers to what it is about to send.
- *
- * The admitted permission POLICY is not repeated — it is
- * `RuntimeOperationManifest.policy`, already sealed. Only the mode the manifest
- * was COUNTED for is carried, so the adapter can refuse a manifest admitted
- * under a different mode instead of discovering the divergence as tool drift.
  */
 export interface RuntimePreparedLaunchV1 {
     readonly agentMemory: PreparedAgentMemoryMode;
@@ -13171,8 +12991,6 @@ export interface RuntimePreparedLaunchV1 {
      */
     readonly artifactPath: string;
     readonly expected: RuntimePreparedLaunchExpectationV1;
-    /** The mode `daemon/prepared-tool-surface.ts` filtered the counted manifest for. */
-    readonly permissionMode: PermissionMode;
     readonly toolBindingDigest: string;
     readonly observationDigest: string;
     /** The same trusted launch boundary the preparation observed every server under. */

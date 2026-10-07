@@ -21,9 +21,8 @@ import { resolveMcpLaunchCwdLauncher } from '../daemon/trusted-launch-cwd';
  *
  * `TaskRunner` used to resolve the launch binding only when the task probed a
  * server or projected one from the toolset registry. A task whose only MCP
- * server is generated later — the reserved approval server a `confirm`-mode
- * adapter adds itself, or the reserved agent-memory helper the daemon adds
- * after admission — reached `start()` with no binding at all, and claude
+ * server is generated later — the reserved agent-memory helper the daemon
+ * adds after admission — reached `start()` with no binding at all, and claude
  * wrote those servers unwrapped: they inherited the CLI's manifest cwd, which
  * for an Agent task is the Agent-writable home a compiled server binary reads
  * `bunfig.toml` `preload` from.
@@ -37,7 +36,6 @@ const CONFIRM_CAPABLE: RuntimeCapabilities = {
   resume: true,
   approvalInteractive: true,
   mcpToolsets: true,
-  permissionModes: ['auto', 'confirm'],
 };
 
 const unusedBlobClient: BlobResolver = {
@@ -58,11 +56,10 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-/** Custom external-CLI adapter that generates its own approval server; shipped Claude no longer does. */
+/** Claude-shaped stub: an external CLI whose MCP servers are launcher-wrapped. */
 function claudeShaped(id = 'claude'): StubRuntimeAdapter {
   return new StubRuntimeAdapter(id, { kind: 'available' }, CONFIRM_CAPABLE, true, {
     mcpServerLaunch: 'launcher-wrapped',
-    generatesApprovalMcpServer: true,
   });
 }
 
@@ -87,71 +84,6 @@ async function makeRunner(
 }
 
 describe('TaskRunner MCP launch binding — every generated server, not only host toolsets', () => {
-  it('binds a confirm-mode task with no toolsets at all: the approval server the adapter generates gets the trusted directory and a launcher', async () => {
-    const adapter = claudeShaped();
-    const sent: Envelope[] = [];
-    const runner = await makeRunner([adapter], sent);
-
-    await runner.handleEnvelope(createEnvelope(
-      'task.offer',
-      { instruction: 'x', policy: { mode: 'confirm' }, runtime: 'claude' },
-      { taskId: 'task-confirm-binding', seq: 1 },
-    ));
-
-    expect(sent.some((envelope) => envelope.type === 'task.decline')).toBe(false);
-    expect(adapter.startCalls).toHaveLength(1);
-    // No projected server, so nothing in `mcpServers` — and still a binding,
-    // because the adapter itself will generate one.
-    expect(adapter.startCalls[0]?.ctx.mcpServers).toBeUndefined();
-    const launcher = resolveMcpLaunchCwdLauncher();
-    if (launcher.kind === 'unavailable') throw new Error('no launcher on this machine');
-    expect(adapter.startCalls[0]?.ctx.mcpLaunch).toEqual({
-      cwd: await trustedCwd(),
-      launcher,
-    });
-
-    await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-confirm-binding', seq: 2 }));
-  });
-
-  it('declines a confirm-mode task non-retryably, before any spawn, when no trusted launcher exists for this host', async () => {
-    // The one host shape that has no trusted launcher: Windows, where the
-    // launcher needs a real Node host, running a compiled-Bun daemon whose
-    // `process.execPath` would read `$cwd/bunfig.toml` `preload` itself.
-    // Declining is the only fail-closed answer — the alternative is starting
-    // the approval server in the Agent's own writable home.
-    //
-    // `SystemRoot` is supplied so the DIRECTORY half resolves on this machine
-    // and the decline can only come from the launcher half. (`/` is root-owned
-    // and unwritable here exactly as `%SystemRoot%` is on a real Windows host.)
-    const realPlatform = process.platform;
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-    Object.defineProperty(process.versions, 'bun', { value: '1.2.0', configurable: true });
-    const realSystemRoot = process.env.SystemRoot;
-    process.env.SystemRoot = '/';
-    try {
-      const adapter = claudeShaped();
-      const sent: Envelope[] = [];
-      const runner = await makeRunner([adapter], sent);
-
-      await runner.handleEnvelope(createEnvelope(
-        'task.offer',
-        { instruction: 'x', policy: { mode: 'confirm' }, runtime: 'claude' },
-        { taskId: 'task-confirm-no-launcher', seq: 1 },
-      ));
-
-      const decline = sent.find((envelope) => envelope.type === 'task.decline');
-      expect(decline?.payload).toMatchObject({ retryable: false });
-      expect(JSON.stringify(decline)).toContain('launch_cwd_launcher_unavailable');
-      expect(sent.some((envelope) => envelope.type === 'task.claim')).toBe(false);
-      expect(adapter.startCalls).toHaveLength(0);
-    } finally {
-      Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
-      delete (process.versions as Record<string, unknown>).bun;
-      if (realSystemRoot === undefined) delete process.env.SystemRoot;
-      else process.env.SystemRoot = realSystemRoot;
-    }
-  });
-
   it('admits a task that generates no MCP server at all, on every adapter shape, with no binding resolved', async () => {
     const shapes = [
       { runtime: 'claude' as const, adapter: claudeShaped() },
@@ -171,7 +103,7 @@ describe('TaskRunner MCP launch binding — every generated server, not only hos
 
       await runner.handleEnvelope(createEnvelope(
         'task.offer',
-        { instruction: 'x', policy: { mode: 'auto' }, runtime },
+        { instruction: 'x', runtime },
         { taskId, seq: 1 },
       ));
 
@@ -203,7 +135,6 @@ describe('TaskRunner MCP launch binding — every generated server, not only hos
       'task.offer_for_agent',
       {
         instruction: 'x',
-        policy: { mode: 'auto' },
         runtime: 'claude',
         agentRef: { agentId: 'agent-launch-binding', profileRevision: 'profile-1' },
       },

@@ -24,20 +24,6 @@ if (argv[0] === 'login') {
   );
   process.exit(process.env.FAKE_CODEX_LOGGED_IN === '0' ? 1 : 0);
 }
-if (argv[0] === 'mcp' && argv[1] === 'get') {
-  const name = argv[2];
-  let enabled_tools = [];
-  // An older Codex that ignores the per-server tool configuration reads back none.
-  if (process.env.FAKE_CODEX_IGNORES_MCP_TOOL_CONFIG !== '1') {
-    try {
-      enabled_tools = JSON.parse(
-        config[`mcp_servers.${name}.enabled_tools`] ?? '[]',
-      );
-    } catch {}
-  }
-  console.log(JSON.stringify({ name, enabled: true, enabled_tools }));
-  process.exit(0);
-}
 if (!argv.includes('app-server')) {
   console.error('fixture requires app-server; exec is removed');
   process.exit(2);
@@ -163,10 +149,11 @@ async function runTurn(id, input) {
   }
   if (process.env.FAKE_CODEX_MCP_TOOL_CALL) {
     const [server, tool] = process.env.FAKE_CODEX_MCP_TOOL_CALL.split('/');
-    const enabled = JSON.parse(
-      config[`mcp_servers.${server}.enabled_tools`] ?? '[]',
-    );
-    if (!enabled.includes(tool)) {
+    // Real Codex enables every tool of a configured server unless the user's
+    // own config narrows it with enabled_tools.
+    const configured = config[`mcp_servers.${server}.enabled_tools`];
+    if (config[`mcp_servers.${server}.command`] === undefined
+      || (configured !== undefined && !JSON.parse(configured).includes(tool))) {
       notify('error', {
         threadId,
         error: { message: 'MCP tool requires approval' },

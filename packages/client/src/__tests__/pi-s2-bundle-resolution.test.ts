@@ -10,14 +10,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import type { PermissionPolicy } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { getDocsPath, getExamplesPath, getReadmePath } from '@earendil-works/pi-coding-agent';
 import { assemblePreparedPiToolSurface } from '../adapters/pi/prepared-tools';
 import { resolveInstalledPiRuntimeIdentity, createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
 import { createPreparedToolSurfaceAssembler } from '../daemon/prepared-tool-surface';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
-import { classifyMcpToolsetServerObservation, observeMcpServer } from '../mcp/observation';
+import { bindMcpToolsetServerObservation, observeMcpServer } from '../mcp/observation';
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
 import { TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED } from '../daemon/tool-implementation-identity';
 import { trustedCwd } from './fixtures/launch-cwd';
@@ -26,7 +25,6 @@ import { resolveBunBin } from './support/test-bun-bin';
 const execFileAsync = promisify(execFile);
 const BUN_BIN = resolveBunBin();
 const CLIENT_DIST = fileURLToPath(new URL('../../dist/index.js', import.meta.url));
-const POLICY: PermissionPolicy = { mode: 'readonly', allowTools: [] };
 
 /**
  * The bootstrap is a Salesko-style SDK consumer, not a copy of resolution code.
@@ -68,7 +66,7 @@ if (process.argv[2] !== 'capture' && process.argv[2] !== 'capture-untrusted') {
       capture={command,args,options,configPath,configBytes,config:JSON.parse(configBytes)};
       throw new Error('S2_CAPTURE_BEFORE_PROMPT');
     }});
-    const prepared=await adapter.prepare({offer:{instruction:'Never sent',policy:input.policy},policy:input.policy,
+    const prepared=await adapter.prepare({offer:{instruction:'Never sent'},
       descriptor:adapter.descriptor,requiredToolsetIds:[],mcpServers:input.mcpServers,mcpToolsetTools:input.observation});
     if(prepared.kind!=='prepared') throw new Error(prepared.reason);
     stage='resolve';
@@ -76,7 +74,7 @@ if (process.argv[2] !== 'capture' && process.argv[2] !== 'capture-untrusted') {
       projectionRoot:input.projectionRoot,authority:{resolve:async locator=>{resolveCalls.push(locator);return input.record;}}});
     stage='start';
     const manifest=sdk.sealRuntimeOperationManifest({...(input.kind==='prepared'?{agentMemory:'none'}:{}),taskId:'s2-'+input.kind,runtimeId:'pi',descriptor:adapter.descriptor,
-      policy:input.policy,requiredToolsetIds:[],workspace:{workspaceDir:input.cwd},forwardedEnvironmentNames:Object.keys(runtime.env).sort()});
+      requiredToolsetIds:[],workspace:{workspaceDir:input.cwd},forwardedEnvironmentNames:Object.keys(runtime.env).sort()});
     await prepared.operation.start({kind:input.kind,...(input.kind==='prepared'?{preparation:input.preparation}:{instruction:'Never sent'}),
       manifest,runtimeLaunch:runtime,env:runtime.env,mcpEnv:input.mcpEnv,mcpServers:input.mcpServers,
       mcpToolsetTools:input.observation,mcpLaunch:input.launch,mcpToolImplementations:input.implementations});
@@ -181,16 +179,16 @@ async function preparedFixture(root: string, cwd: string, env: Record<string, st
   const script = path.join(root, 'mcp-fixture-server.mjs');
   await fs.copyFile(fileURLToPath(new URL('./fixtures/mcp-fixture-server.mjs', import.meta.url)), script);
   const server = { command: process.execPath, args: [script, '{}'] };
-  const registry = new McpToolsetRegistry({ 's2.echo.v1': { mcpServers: { fixture: server }, readOnlyTools: { fixture: ['echo'] } } });
+  const registry = new McpToolsetRegistry({ 's2.echo.v1': { mcpServers: { fixture: server } } });
   const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
   const runtimeIdentity = `${compiler.runtime.packageName}@${compiler.runtime.packageVersion}+${compiler.runtime.closureDigest}.compiler-${compiler.runtime.compilerVersion}`;
   const assembled = await createPreparedToolSurfaceAssembler({ toolsetRegistry: registry, runtimeEnv: () => env })
-    .assemble({ agentMemory: 'none', requiredToolsets: ['s2.echo.v1'], permissionMode: POLICY.mode, runtimeIdentity });
+    .assemble({ agentMemory: 'none', requiredToolsets: ['s2.echo.v1'], runtimeIdentity });
   if (!assembled.ok) throw new Error(`fixture assembly failed: ${assembled.detail}`);
   const surface = assembled.surface;
   const observed = await observeMcpServer('fixture', server, { env, cwd: surface.launch.launchCwd, timeoutMs: 15_000 });
-  const observation = { fixture: classifyMcpToolsetServerObservation(observed, { toolsetId: 's2.echo.v1', readOnlyTools: ['echo'] }) };
-  const validation = await assemblePreparedPiToolSurface({ agentMemory: 'none', memory: null, policy: POLICY, countedPermissionMode: POLICY.mode,
+  const observation = { fixture: bindMcpToolsetServerObservation(observed, 's2.echo.v1') };
+  const validation = await assemblePreparedPiToolSurface({ agentMemory: 'none', memory: null,
     observation, toolsetDefinitionRevisions: surface.toolsetDefinitionRevisions,
     servers: [{ serverName: 'fixture', toolsetId: 's2.echo.v1', command: server.command, args: server.args }],
     launch: surface.launch, toolImplementations: { fixture: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED }, runtimeIdentity,
@@ -216,7 +214,7 @@ async function preparedFixture(root: string, cwd: string, env: Record<string, st
     implementations: { fixture: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED }, launch: { cwd: surface.launch.launchCwd },
     preparation: { agentMemory: 'none', memory: null, reference: { scopeId: 's2', agentRef: 's2', requestId: 's2', recordId: 's2-record' }, artifactPath,
       expected: { envelopeDigest: compiled.envelopeDigest, toolManifestDigest: compiled.toolManifestDigest, model, binding },
-      permissionMode: POLICY.mode, toolBindingDigest: surface.toolBindingDigest, observationDigest: surface.observationDigest,
+      toolBindingDigest: surface.toolBindingDigest, observationDigest: surface.observationDigest,
       launch: { cwd: surface.launch.launchCwd }, toolImplementations: { fixture: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
       toolsetDefinitionRevisions: surface.toolsetDefinitionRevisions }, cwd };
 }
@@ -308,7 +306,7 @@ describe('Pi launch path — S2 release containment', () => {
             nativeProvenance: { packageName: fixture.runtime.packageName, packageVersion: fixture.runtime.packageVersion,
               tarballIntegrity: fixture.runtime.tarballIntegrity, provenanceDigest: fixture.runtime.provenanceDigest, closureDigest: fixture.runtime.closureDigest, upstreamCommit: fixture.runtime.upstreamCommit,
               compilerVersion: fixture.runtime.compilerVersion } };
-          await fs.writeFile(inputPath, JSON.stringify({ ...fixture, release, policy: POLICY, kind, env, mcpEnv: { PATH: env.PATH },
+          await fs.writeFile(inputPath, JSON.stringify({ ...fixture, release, kind, env, mcpEnv: { PATH: env.PATH },
             record: runtimeRecordFixture(record as never), projectionRoot: path.join(runDir, 'projections'), report: reportPath }));
           // With the fixture ownership seam OFF, the real product must reject
           // this non-root-owned artifact before final spawn. Not an installer test.

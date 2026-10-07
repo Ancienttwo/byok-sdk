@@ -51,7 +51,6 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
               steer: true,
               resume: true,
               approvalInteractive: false,
-              permissionModes: ['auto', 'confirm', 'plan'],
             },
           },
           // Older/partial-detection shape: capabilities omitted entirely.
@@ -88,7 +87,6 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
         type,
         {
           instruction: 'refactor the widget module',
-          policy: { mode: 'auto', workspaceRoot: '/home/user/project' },
           runtime: 'claude',
           workspaceHint: '/home/user/project',
           limits: { maxDurationMs: 60_000, maxTokens: 100_000 },
@@ -113,7 +111,6 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
               contentType: 'text/markdown',
             },
           },
-          policy: { mode: 'confirm' },
         },
         { taskId: 'task-2', seq: 2 },
       ),
@@ -129,7 +126,6 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
         type,
         {
           instruction: 'find qualified leads',
-          policy: { mode: 'auto' },
           runtime: 'claude',
           requiredToolsets: ['salesko'],
         },
@@ -147,7 +143,6 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
         type,
         {
           instruction: 'continue durable Agent work',
-          policy: { mode: 'auto' },
           runtime: 'pi',
           agentRef: { agentId: 'agent-1', profileRevision: 'profile-r7' },
           sessionRef: 'session-agent-1',
@@ -166,7 +161,6 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
         type,
         {
           instruction: 'continue typed egress Agent work',
-          policy: { mode: 'auto' },
           runtime: 'pi',
           agentRef: { agentId: 'agent-egress', profileRevision: 'profile-egress-r1' },
           sessionRef: 'session-egress-1',
@@ -199,7 +193,6 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
         type,
         {
           instruction: 'start typed egress Agent work',
-          policy: { mode: 'auto' },
           runtime: 'pi',
           agentRef: { agentId: 'agent-egress', profileRevision: 'profile-egress-r1' },
           egressPolicy: {
@@ -231,7 +224,6 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
         type,
         {
           agentMemory: 'none',
-          policy: { mode: 'auto', allowTools: [] },
           egressPolicy: { policyRevision: 'metadata-status-v1', activity: { mode: 'metadata-status', delivery: 'latest-value' }, reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4194304, maxPendingBytesPerTenant: 16777216 }, transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },
           runtime: 'pi',
           agentRef: { agentId: 'agent-prepared', profileRevision: 'profile-prepared-r1' },
@@ -393,7 +385,6 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
           deadlineAt: '2026-01-01T00:01:00.000Z',
           context: { inline: '{"prompt":{},"messages":[]}' },
           requiredToolsets: ['team'],
-          permissionMode: 'readonly',
         },
         { seq: 9 },
       ),
@@ -641,7 +632,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
 describe('createEnvelope defaults', () => {
   it('fills v, id, ts when not supplied', () => {
     const envelope = createEnvelope('task.steer', { text: 'hi' }, { taskId: 'task-1', seq: 1 });
-    expect(envelope.v).toBe(1);
+    expect(envelope.v).toBe(2);
     expect(envelope.id).toMatch(UUID_RE);
     expect(() => new Date(envelope.ts).toISOString()).not.toThrow();
     expect(Number.isNaN(new Date(envelope.ts).getTime())).toBe(false);
@@ -651,7 +642,7 @@ describe('createEnvelope defaults', () => {
     const envelope = createEnvelope(
       'task.steer',
       { text: 'hi' },
-      { v: 1, id: '11111111-1111-4111-8111-111111111111', ts: '2026-07-16T00:00:00.000Z', taskId: 'task-1', seq: 7 },
+      { v: 2, id: '11111111-1111-4111-8111-111111111111', ts: '2026-07-16T00:00:00.000Z', taskId: 'task-1', seq: 7 },
     );
     expect(envelope.id).toBe('11111111-1111-4111-8111-111111111111');
     expect(envelope.ts).toBe('2026-07-16T00:00:00.000Z');

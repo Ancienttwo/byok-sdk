@@ -125,7 +125,7 @@ describe('additive-minor: task.complete.document projection', () => {
     // this codec can put an over-cap document on the wire, so that is exactly
     // what this test has to imitate.
     const oversized = {
-      v: 1,
+      v: 2,
       id: '00000000-0000-4000-8000-0000000000f1',
       ts: new Date().toISOString(),
       type: 'task.complete',

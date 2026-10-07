@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { AgentEgressContentHashSchema } from './agent-egress';
-import { PERMISSION_MODES } from './permission';
 
 /**
  * Remote authenticated runtime input preparation — the wire half of
@@ -26,7 +25,7 @@ import { PERMISSION_MODES } from './permission';
  * 3. Every shape here is `.strict()`. This is control data: an unrecognized
  *    field must be REJECTED, not silently stripped, per docs/protocol.md's
  *    freeze-rule asymmetry. Adding a field post-freeze is therefore a
- *    breaking change, exactly like `PermissionPolicySchema`.
+ *    breaking change.
  */
 
 /**
@@ -40,7 +39,7 @@ import { PERMISSION_MODES } from './permission';
  * below. See `INPUT_PREPARATION_VERSION` in the client for what each version
  * changed.
  */
-export const INPUT_PREPARATION_WIRE_VERSION = 8 as const;
+export const INPUT_PREPARATION_WIRE_VERSION = 9 as const;
 
 /**
  * Capability required before a task-free remote input preparation — or a
@@ -106,22 +105,6 @@ export const InputPreparationPolicyRevisionSchema = OPAQUE_ID;
  * anything is compiled.
  */
 export const InputPreparationProfileIdSchema = OPAQUE_ID;
-
-/**
- * The permission mode a preparation is compiled FOR.
- *
- * It is the same closed set every task policy uses (`permission.ts`'s
- * `PERMISSION_MODES`), spelled here as its own schema because a preparation
- * carries a mode without carrying a policy: there is no task, no grant and no
- * approval seam on this wire. The mode selects which tools the device's own
- * observation projects into the counted manifest, and nothing else.
- *
- * Declared by the requester rather than inferred by the device: a device that
- * guessed would be counting a manifest the requester never asked for, and a
- * device that defaulted would silently count the widest one.
- */
-export const InputPreparationPermissionModeSchema = z.enum(PERMISSION_MODES);
-export type InputPreparationPermissionMode = z.infer<typeof InputPreparationPermissionModeSchema>;
 
 /** Explicit prepared SDK memory selection; never defaulted. */
 export const PreparedAgentMemoryModeSchema = z.enum(['none', 'read', 'read-write']);
@@ -645,14 +628,6 @@ export const InputPreparationBindingSchema = z
     source: InputPreparationSourceSchema,
     target: InputPreparationCounterTargetSchema,
     policyRevision: OPAQUE_ID,
-    /**
-     * The mode the counted manifest was filtered for. Recorded on the binding
-     * rather than only inside the request digest so a consumer can COMPARE it
-     * without re-deriving the digest: an Execution offered under a different
-     * mode is an Execution whose registered tool set differs from the one
-     * these tokens were counted for.
-     */
-    permissionMode: InputPreparationPermissionModeSchema,
     runtime: InputPreparationRuntimeIdentitySchema,
     requestDigest: OPAQUE_ID,
     /**
@@ -784,14 +759,6 @@ export const InputPreparationRejectionReasonSchema = z.enum([
    * preparation instead of silently receiving one bound to stale evidence.
    */
   'observation_drift',
-  /**
-   * The declared `permissionMode` is not one this device admits: it exceeds
-   * the operator's configured ceiling. The requester's declaration is INTENT,
-   * not authorization — it goes through the same merge that admits a task
-   * offer's `policy.mode` — and an unadmitted mode refuses rather than being
-   * silently narrowed to one the device would allow.
-   */
-  'permission_mode_denied',
   /**
    * The device compiled the input, then found that the `prompt_prepared` frame
    * the runtime would have to be handed exceeds the single-frame byte cap that

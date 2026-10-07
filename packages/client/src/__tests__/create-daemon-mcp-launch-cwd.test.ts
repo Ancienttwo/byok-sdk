@@ -29,7 +29,6 @@ const TOOLSET_CAPABLE: RuntimeCapabilities = {
   resume: true,
   approvalInteractive: false,
   mcpToolsets: true,
-  permissionModes: ['auto'],
 };
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -138,7 +137,7 @@ describe('createDaemon MCP launch boundary: the configured directory reaches the
     server.send(
       createEnvelope(
         'task.offer_with_toolsets',
-        { instruction: 'x', policy: { mode: 'auto' }, runtime: 'pi', requiredToolsets: ['salesko'] },
+        { instruction: 'x', runtime: 'pi', requiredToolsets: ['salesko'] },
         { taskId, seq: server.nextSeq() },
       ),
     );

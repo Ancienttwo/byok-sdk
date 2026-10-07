@@ -72,7 +72,7 @@ describe('TaskRunner: cancel arriving during the offer-processing window (findin
     const taskId = 'task-cancel-terminal-race';
     await runner.handleEnvelope(createEnvelope(
       'task.offer',
-      { instruction: 'cancel me', policy: { mode: 'auto' } },
+      { instruction: 'cancel me' },
       { taskId, seq: 1 },
     ));
     const session = adapter.sessions[0]!;
@@ -98,7 +98,7 @@ describe('TaskRunner: cancel arriving during the offer-processing window (findin
     const taskId = 'task-race-window';
     const offerEnvelope = createEnvelope(
       'task.offer',
-      { instruction: 'race the cancel', policy: { mode: 'auto' } },
+      { instruction: 'race the cancel' },
       { taskId, seq: 1 },
     );
     const cancelEnvelope = createEnvelope('task.cancel', { reason: 'cancel during start()' }, { taskId, seq: 2 });
@@ -141,7 +141,7 @@ describe('TaskRunner: cancel arriving during the offer-processing window (findin
     await runner.handleEnvelope(
       createEnvelope(
         'task.offer',
-        { instruction: 'too late', policy: { mode: 'auto' } },
+        { instruction: 'too late' },
         { taskId, seq: 2 },
       ),
     );

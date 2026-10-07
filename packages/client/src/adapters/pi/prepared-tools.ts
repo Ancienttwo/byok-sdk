@@ -1,19 +1,18 @@
-import type { PermissionMode, PermissionPolicy, PreparedAgentMemoryMode } from '@byok-sdk/protocol';
+import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { CallToolResult } from '@modelcontextprotocol/client';
 import {
   preparedToolBindingDigest,
   preparedToolSurfaceObservationDigest,
   type InputPreparationToolV1,
-  type PreparedNativeToolSelectionV1,
   type PreparedToolBindingServerDigestInputV1,
 } from '../../input-preparation';
 import type { McpToolsetServerObservation } from '../../mcp/observation';
-import { filterMcpObservationForPolicy, projectMcpTools, qualifiedMcpToolName } from '../../mcp/projection';
+import { McpAuthorityError } from '../../mcp/authority-error';
+import { projectMcpTools, qualifiedMcpToolName, type McpToolProjection } from '../../mcp/projection';
 import type { McpLaunchAttestation } from '../../daemon/trusted-launch-cwd';
 import type { ToolImplementationIdentityV1 } from '../../daemon/tool-implementation-identity';
 import { buildToolExecutorsFromObservation, InputPreparationCompileError } from './input-preparation';
 import { createPiMcpTools, type McpToolCallHost, type PiMcpToolDefinition } from './mcp-tools';
-import { resolvePiNativeToolSelection } from './permission-mapping';
 import { preparedMemoryProjection, type PreparedAgentMemoryState } from '../../daemon/prepared-agent-memory';
 import { preparedAgentMemoryTools } from '../../agent-memory/prepared-capability';
 
@@ -29,32 +28,17 @@ import { preparedAgentMemoryTools } from '../../agent-memory/prepared-capability
  *
  * Nothing here observes a server. The daemon's frozen observation travels in
  * the task-scoped configuration exactly as it does for the ordinary extension,
- * the policy filter and the projection come from the shared core, and the Pi
+ * the projection comes from the shared core, and the Pi
  * tool shapes come from `./mcp-tools.ts` — the same function the ordinary
  * extension registers from. An entry allowed to re-derive its own tool set
  * would make "the prepared session sees what was counted" a coincidence.
  *
- * ## The native half is PARTIAL, and this is the launch side of that
+ * ## The prepared Main tool set holds MCP tools only
  *
- * Q1 fixes the prepared Main tool set as "policy-filtered native tools + MCP
- * toolset tools". `daemon/prepared-tool-surface.ts` still assembles a
- * preparation with `nativeTools: []`, because a task-free preparation has no
- * workspace and no descriptor to resolve a runtime policy from. The counted
- * manifest therefore contains the MCP half only.
- *
- * The native API is NOT the limitation: `createAgentSession({ tools, customTools })`
- * (`./prepared-session.ts`) would accept Pi's own built-ins beside the MCP tools.
- * What is missing is on this side: nothing counted them, so registering them
- * here would send the model a tool the artifact's frozen manifest does not
- * contain, and the prepared session refuses the whole run with
- * `prepared_registry_drift`.
- *
- * So the selection is resolved for real, from the WHOLE admitted policy rather
- * than from its mode ({@link resolvePiNativeToolSelection}), and a non-empty
- * result is REFUSED by name instead of being quietly dropped. When the
- * preparation side gains the runtime policy input, the same selection and the
- * policy that produced it are bound into the observation digest through
- * {@link PreparedNativeToolSelectionV1}, and only the refusal below goes away.
+ * `daemon/prepared-tool-surface.ts` assembles a preparation with
+ * `nativeTools: []`: a task-free preparation has no workspace to resolve Pi's
+ * own built-ins against. The launch therefore registers the MCP half only, and
+ * the session refuses any other tool as `prepared_registry_drift`.
  */
 
 /** One authorized tool: the name and executor identity the manifest binds, and its Pi tool definition. */
@@ -66,13 +50,7 @@ export interface PreparedPiAuthorizedTool {
 }
 
 export type PreparedPiToolSurfaceRefusalCode =
-  /** The admitted policy is one the pi runtime cannot express at all. */
-  | 'policy_inexpressible'
-  /** The admitted policy selects Pi-native tools, which no preparation counts yet. */
-  | 'native_tools_uncounted'
-  /** The policy mode differs from the mode the manifest was counted for. */
-  | 'permission_mode_mismatch'
-  /** The observation cannot be filtered or fingerprinted at all. */
+  /** The observation cannot be projected or fingerprinted at all. */
   | 'tool_surface_unfingerprintable'
   /** The spawn-free launch facts no longer match the ones the preparation froze. */
   | 'tool_binding_drift'
@@ -107,15 +85,11 @@ export interface PreparedPiServerBinding {
 }
 
 export interface PreparedPiToolSurfaceInput {
-  /** The manifest's sealed policy, whole. Native selection reads all of it, not just the mode. */
-  readonly policy: PermissionPolicy;
-  /** The mode `daemon/prepared-tool-surface.ts` filtered the counted manifest for. */
-  readonly countedPermissionMode: PermissionMode;
   /** Sealed SDK-owned memory selection; it is distinct from Host MCP toolsets. */
   readonly agentMemory: PreparedAgentMemoryMode;
   /** Descriptor observation and attested helper pair counted with the artifact. */
   readonly memory: PreparedAgentMemoryState | null;
-  /** The daemon's frozen observation, unfiltered. The policy is applied here. */
+  /** The daemon's frozen observation. */
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
   /** `toolsetId` -> the registry definition revision the preparation bound. */
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
@@ -172,62 +146,6 @@ function refuse(code: PreparedPiToolSurfaceRefusalCode, message: string): Prepar
   return Object.freeze({ ok: false as const, code, message });
 }
 
-export interface PreparedPiNativeSelection {
-  readonly ok: true;
-  /** Absent when the admitted policy selects no native tool at all. */
-  readonly selection: PreparedNativeToolSelectionV1 | undefined;
-}
-
-/**
- * Resolve the Pi-native half of a prepared Main tool set from the whole
- * admitted policy.
- *
- * Exported so the refusal below and a future countable native half read the
- * same selection, and so a test can pin that `allowTools`/`denyTools` — not
- * just `mode` — decide it.
- */
-export function preparedNativeToolSelection(
-  policy: PermissionPolicy,
-): PreparedPiNativeSelection | PreparedPiToolSurfaceRefusal {
-  const resolved = resolvePiNativeToolSelection(policy);
-  if (!resolved.ok) {
-    return refuse('policy_inexpressible', resolved.reason);
-  }
-  if (resolved.names.length === 0) return Object.freeze({ ok: true as const, selection: undefined });
-  return Object.freeze({
-    ok: true as const,
-    selection: Object.freeze({
-      names: Object.freeze([...resolved.names]),
-      policy: Object.freeze({
-        mode: policy.mode,
-        ...(policy.allowTools === undefined ? {} : { allowTools: Object.freeze([...policy.allowTools]) }),
-        ...(policy.denyTools === undefined ? {} : { denyTools: Object.freeze([...policy.denyTools]) }),
-      }),
-    }),
-  });
-}
-
-/** Admission and launch share the same refusal before a preparation can be consumed. */
-export function validatePreparedPiNativeToolPolicy(
-  policy: PermissionPolicy,
-): { readonly ok: true } | PreparedPiToolSurfaceRefusal {
-  const native = preparedNativeToolSelection(policy);
-  if (!native.ok) return native;
-  const selection = native.selection;
-  if (selection !== undefined) {
-    // See the module comment: the session would take these tools, but no
-    // preparation counted them, so registering them is guaranteed drift.
-    return refuse(
-      'native_tools_uncounted',
-      `the admitted policy selects the pi-native tools [${selection.names.join(', ')}], and no preparation counts a`
-      + ' native tool set yet (daemon/prepared-tool-surface.ts assembles `nativeTools: []`); a prepared launch is'
-      + ' only assembled for a policy whose native half is empty',
-    );
-  }
-
-  return { ok: true };
-}
-
 /**
  * Assemble the authorized tool closure for one prepared launch, or refuse.
  *
@@ -238,16 +156,6 @@ export function validatePreparedPiNativeToolPolicy(
 export async function assemblePreparedPiToolSurface(
   input: PreparedPiToolSurfaceInput,
 ): Promise<PreparedPiToolSurfaceResult> {
-  // The counted manifest is the policy-filtered set for exactly ONE mode. A
-  // task admitted under a different mode registers a different set, so it is
-  // refused here rather than discovered later as tool drift with no explanation.
-  if (input.policy.mode !== input.countedPermissionMode) {
-    return refuse(
-      'permission_mode_mismatch',
-      `this operation was admitted under permission mode ${JSON.stringify(input.policy.mode)} but its prepared`
-      + ` manifest was counted for ${JSON.stringify(input.countedPermissionMode)}`,
-    );
-  }
   if (input.agentMemory === 'none' ? input.memory !== null : input.memory === null) {
     return refuse('tool_surface_unfingerprintable', 'the prepared Agent memory selection has no matching sealed descriptor state');
   }
@@ -255,15 +163,15 @@ export async function assemblePreparedPiToolSurface(
     return refuse('tool_surface_unfingerprintable', 'the prepared Agent memory selection has no execution helper dispatch');
   }
 
-  const native = validatePreparedPiNativeToolPolicy(input.policy);
-  if (!native.ok) return native;
-
-  const allowed = filterMcpObservationForPolicy(input.observation, input.countedPermissionMode);
-  if (!allowed.ok) return refuse('tool_surface_unfingerprintable', allowed.reason);
-
   // The SAME projection, in the SAME order, that the preparation counted and
   // that the ordinary extension registers.
-  const projected = projectMcpTools(allowed.observation);
+  let projected: readonly McpToolProjection[];
+  try {
+    projected = projectMcpTools(input.observation);
+  } catch (error) {
+    if (error instanceof McpAuthorityError) return refuse('tool_surface_unfingerprintable', error.message);
+    throw error;
+  }
 
   const tools: InputPreparationToolV1[] = projected.map((tool) => ({
     name: qualifiedMcpToolName(tool.serverName, tool.toolName),
@@ -275,12 +183,10 @@ export async function assemblePreparedPiToolSurface(
   try {
     ({ toolExecutors } = await buildToolExecutorsFromObservation({
       observation: input.observation,
-      permissionMode: input.countedPermissionMode,
       toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
       launch: input.launch,
       implementations: input.toolImplementations,
-      // Empty for the same reason the preparation's is; the refusal above is
-      // what keeps the two from disagreeing silently.
+      // Empty for the same reason the preparation's is.
       nativeTools: [],
       runtimeIdentity: input.runtimeIdentity,
     }));
@@ -341,7 +247,6 @@ export async function assemblePreparedPiToolSurface(
     agentMemory: input.agentMemory,
     memory: input.memory,
     launch: input.launch,
-    permissionMode: input.countedPermissionMode,
     runtimeIdentity: input.runtimeIdentity,
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     tools,

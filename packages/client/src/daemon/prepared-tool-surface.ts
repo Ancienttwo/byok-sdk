@@ -1,7 +1,6 @@
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
-import { assertPreparedMemoryPolicy, resolvePreparedMemoryImplementation, observePreparedMemory, preparedMemoryProjection, type PreparedAgentMemoryImplementation, type PreparedAgentMemoryState } from './prepared-agent-memory';
+import { resolvePreparedMemoryImplementation, observePreparedMemory, preparedMemoryProjection, type PreparedAgentMemoryImplementation, type PreparedAgentMemoryState } from './prepared-agent-memory';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
-import type { PermissionMode, PermissionPolicy } from '@byok-sdk/protocol';
 import {
   preparedToolBindingDigest,
   preparedToolSurfaceObservationDigest,
@@ -9,11 +8,10 @@ import {
 } from '../input-preparation';
 import type { McpStdioServerConfig } from '../types';
 import type { McpToolsetServerObservation } from '../mcp/observation';
-import { classifyMcpToolsetServerObservation } from '../mcp/observation';
-import { filterMcpObservationForPolicy, projectMcpTools, qualifiedMcpToolName } from '../mcp/projection';
+import { bindMcpToolsetServerObservation } from '../mcp/observation';
+import { projectMcpTools, qualifiedMcpToolName, type McpToolProjection } from '../mcp/projection';
 import { buildToolExecutorsFromObservation, InputPreparationCompileError } from '../adapters/pi/input-preparation';
 import { McpAuthorityError } from '../mcp/client';
-import { computeEffectivePolicy } from './policy';
 import { MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS, probeMcpServer } from './mcp-tools-probe';
 import type { McpToolsetRegistry } from './toolset-registry';
 import {
@@ -59,8 +57,8 @@ import {
  *    already-recorded `requestId` is compared against, because re-probing to
  *    detect drift would be exactly the second executor fact the durable
  *    idempotency key exists to prevent.
- * 2. {@link assemblePreparedToolSurface} — the probe, the policy filter, the
- *    projection and the fingerprints. It calls stage 1 first and passes the
+ * 2. {@link assemblePreparedToolSurface} — the probe, the projection and the
+ *    fingerprints. It calls stage 1 first and passes the
  *    resolved identity into every probe, so the shared pre-spawn gate in
  *    `mcp/client.ts` re-measures an attested server before its child starts.
  *
@@ -79,8 +77,6 @@ import {
 export type PreparedToolSurfaceRefusalCode =
   /** A named toolset is not configured here, or its servers collide. */
   | 'unsupported_input'
-  /** The declared permission mode exceeds this device's configured ceiling. */
-  | 'permission_mode_denied'
   /** No non-writable launch directory / trusted launcher could be proven. */
   | 'launch_boundary_unavailable'
   /** A required server could not be observed, or its answer is ungrantable. */
@@ -103,13 +99,6 @@ export interface PreparedToolServerBinding {
   readonly toolsetId: string;
   /** Exactly `{command, args}` — the same reduction `TaskRunner` projects. */
   readonly server: Readonly<McpStdioServerConfig>;
-  /**
-   * The operator's read/mutation classification for this server, or `null`
-   * when its toolset declares none at all. A server whose toolset classifies
-   * OTHER servers gets an empty list: the declaration exists and grants this
-   * server nothing, which is a different fact from "nobody classified it".
-   */
-  readonly readOnlyTools: readonly string[] | null;
   readonly implementation: ToolImplementationIdentityV1;
 }
 
@@ -175,7 +164,6 @@ export interface PreparedToolSurfaceAssembler {
 export interface PreparedToolSurfaceInput {
   readonly agentMemory: PreparedAgentMemoryMode;
   readonly requiredToolsets: readonly string[];
-  readonly permissionMode: PermissionMode;
   /** The resolved native runtime identity string every fingerprint binds. */
   readonly runtimeIdentity: string;
 }
@@ -196,14 +184,6 @@ export interface PreparedToolSurfaceDeps {
    * construction.
    */
   readonly runtimeEnv: () => Readonly<Record<string, string>>;
-  /**
-   * `DaemonConfig.permissionDefaults` — the operator's policy ceiling, the
-   * SAME value `TaskRunner.handleOffer` merges a task offer's `policy` against
-   * (`task-runner.ts`'s `computeEffectivePolicy(payload.policy, ...)` call).
-   * Absent means no ceiling is configured and every mode is admissible, which
-   * is exactly what an offer means by it.
-   */
-  readonly permissionCeiling?: PermissionPolicy;
   /** `DaemonConfig.toolImplementationAuthority`. Absent means every identity is `resolver_unconfigured`. */
   readonly toolImplementationAuthority?: ToolImplementationAuthority;
   /** Test seam only; production passes nothing and the real `node:fs` probe is used. */
@@ -270,7 +250,6 @@ export async function resolvePreparedToolBinding(
   const servers = new Map<string, {
     toolsetId: string;
     server: Readonly<McpStdioServerConfig>;
-    readOnlyTools: readonly string[] | null;
   }>();
   for (const toolsetId of input.requiredToolsets) {
     const toolset = snapshot.toolsets.get(toolsetId);
@@ -300,7 +279,6 @@ export async function resolvePreparedToolBinding(
           command: server.command,
           ...(server.args === undefined ? {} : { args: Object.freeze([...server.args]) }),
         }),
-        readOnlyTools: toolset.readOnlyTools === undefined ? null : toolset.readOnlyTools[serverName] ?? [],
       });
     }
   }
@@ -347,7 +325,6 @@ export async function resolvePreparedToolBinding(
       serverName,
       toolsetId: entry.toolsetId,
       server: entry.server,
-      readOnlyTools: entry.readOnlyTools === null ? null : Object.freeze([...entry.readOnlyTools]),
       implementation,
     }));
   }
@@ -395,52 +372,11 @@ function implementationKind(identity: ToolImplementationIdentityV1): string {
   return identity.kind === 'attested' ? 'attested' : `unavailable:${identity.reason}`;
 }
 
-/**
- * Assemble the frozen tool surface one preparation is compiled and counted
- * over.
- *
- * The policy filter runs BEFORE the projection, not only before the
- * fingerprints: the tools the model is shown and the executors the manifest
- * binds must be the same set, and projecting the unfiltered observation while
- * fingerprinting the filtered one is how a manifest ends up narrower than the
- * schemas that were counted.
- */
+/** Assemble the frozen tool surface one preparation is compiled and counted over. */
 export async function assemblePreparedToolSurface(
   deps: PreparedToolSurfaceDeps,
   input: PreparedToolSurfaceInput,
 ): Promise<PreparedToolSurfaceResult> {
-  // ADMISSION, before anything else — before a directory is probed for
-  // writability and long before a server is started.
-  //
-  // The requester's `permissionMode` is INTENT. Turning it into an admitted
-  // mode is the same merge a task offer goes through (`./policy.ts`'s
-  // `computeEffectivePolicy`, which `TaskRunner.handleOffer` calls with the
-  // very same `permissionDefaults` ceiling), so a preparation cannot be
-  // counted for a mode this device would refuse to run. Parsing the enum is
-  // not admission; a device that accepted any well-formed mode would be
-  // counting manifests it has no authority to produce.
-  //
-  // A refused mode is REFUSED, never narrowed: a preparation counts one
-  // concrete manifest, and silently counting the ceiling's narrower one would
-  // answer a question nobody asked while looking like success.
-  const admitted = computeEffectivePolicy({ mode: input.permissionMode }, deps.permissionCeiling);
-  if (!admitted.ok) {
-    return refuse('permission_mode_denied', 'permission_mode_denied', admitted.reason ?? 'the declared permission mode is not admissible on this device');
-  }
-  if (admitted.policy.mode !== input.permissionMode) {
-    // `computeEffectivePolicy` does not lower a mode today; this is the guard
-    // that keeps a future merge from turning a refusal into a downgrade
-    // nobody notices.
-    return refuse(
-      'permission_mode_denied',
-      'permission_mode_downgrade_refused',
-      `this device admitted mode ${JSON.stringify(admitted.policy.mode)} for a preparation declared as`
-        + ` ${JSON.stringify(input.permissionMode)}; a preparation is never counted for a mode it did not declare`,
-    );
-  }
-
-  try { assertPreparedMemoryPolicy(input.agentMemory, admitted.policy); }
-  catch (error) { return refuse('permission_mode_denied', 'agent_memory_policy_conflict', errorMessage(error)); }
   const bound = await resolvePreparedToolBinding(deps, input);
   if (!bound.ok) return bound;
   const binding = bound.binding;
@@ -470,13 +406,7 @@ export async function assemblePreparedToolSurface(
     if (observation.tools.length === 0) {
       throw new McpAuthorityError(`MCP toolset server "${entry.serverName}" reported no tools`);
     }
-    return [
-      entry.serverName,
-      classifyMcpToolsetServerObservation(observation, {
-        toolsetId: entry.toolsetId,
-        readOnlyTools: entry.readOnlyTools,
-      }),
-    ] as const;
+    return [entry.serverName, bindMcpToolsetServerObservation(observation, entry.toolsetId)] as const;
   }));
 
   const observed: Record<string, McpToolsetServerObservation> = {};
@@ -505,7 +435,6 @@ export async function assemblePreparedToolSurface(
   const fingerprinted = await fingerprintPreparedToolSurface({
     agentMemory: input.agentMemory, memory,
     observation,
-    permissionMode: input.permissionMode,
     runtimeIdentity: input.runtimeIdentity,
     launch: binding.launch,
     toolsetDefinitionRevisions: binding.toolsetDefinitionRevisions,
@@ -536,9 +465,8 @@ export async function assemblePreparedToolSurface(
 export interface PreparedToolSurfaceFingerprintInput {
   readonly agentMemory: PreparedAgentMemoryMode;
   readonly memory: PreparedAgentMemoryState | null;
-  /** The live, already-classified `tools/list` answer for exactly the projected servers. */
+  /** The live `tools/list` answer for exactly the projected servers. */
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
-  readonly permissionMode: PermissionMode;
   /** The resolved native runtime identity string every fingerprint binds. */
   readonly runtimeIdentity: string;
   readonly launch: McpLaunchAttestation;
@@ -546,7 +474,7 @@ export interface PreparedToolSurfaceFingerprintInput {
   readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
 }
 
-/** The policy-filtered projection of one observation, plus the digest over it. */
+/** The projection of one observation, plus the digest over it. */
 export interface PreparedToolSurfaceFingerprint {
   readonly tools: readonly InputPreparationToolV1[];
   readonly toolExecutors: Readonly<Record<string, string>>;
@@ -571,23 +499,20 @@ export type PreparedToolSurfaceFingerprintResult =
  * launch-side reimplementation would be a second definition of the counted
  * manifest, and the two could drift for a whole release without anything
  * noticing — which is precisely the class of bug the digests exist to catch.
- *
- * The policy filter runs BEFORE the projection, not only before the
- * fingerprints: the tools the model is shown and the executors the manifest
- * binds must be the same set, and projecting the unfiltered observation while
- * fingerprinting the filtered one is how a manifest ends up narrower than the
- * schemas that were counted.
  */
 export async function fingerprintPreparedToolSurface(
   input: PreparedToolSurfaceFingerprintInput,
 ): Promise<PreparedToolSurfaceFingerprintResult> {
-  // One policy resolution, reused for every half below.
-  const allowed = filterMcpObservationForPolicy(input.observation, input.permissionMode);
-  if (!allowed.ok) {
-    return refuse('unsupported_input', 'permission_mode_policy_inexpressible', allowed.reason);
+  // One projection, reused for every half below.
+  let projected: readonly McpToolProjection[];
+  try {
+    projected = projectMcpTools(input.observation);
+  } catch (error) {
+    if (error instanceof McpAuthorityError) return refuse('unsupported_input', 'tool_surface_unfingerprintable', error.message);
+    throw error;
   }
 
-  const tools: InputPreparationToolV1[] = projectMcpTools(allowed.observation).map((tool) => ({
+  const tools: InputPreparationToolV1[] = projected.map((tool) => ({
     name: qualifiedMcpToolName(tool.serverName, tool.toolName),
     description: tool.description,
     // No `?? {}` fallback: `mcp/observation.ts`'s `validateTool` already
@@ -607,19 +532,12 @@ export async function fingerprintPreparedToolSurface(
   try {
     ({ toolExecutors } = await buildToolExecutorsFromObservation({
       observation: input.observation,
-      permissionMode: input.permissionMode,
       toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
       launch: input.launch,
       implementations: input.implementations,
-      // PARTIAL — the prepared NATIVE tool set is not connected to preparation
-      // yet. Pi's own tools are selected by a runtime policy that is resolved
-      // from a task's workspace and descriptor, and a task-free preparation has
-      // neither; inventing one here would put a tool in the counted manifest
-      // that no authority admitted. The final Main set (Q1 = policy-filtered
-      // native + MCP) therefore remains the runtime's decision, and a
-      // preparation counts the MCP half only. Removing this limit means giving
-      // this entry the runtime policy input — and changing the test that pins
-      // this state.
+      // The prepared Main set is MCP tools only: a task-free preparation has
+      // no workspace to resolve Pi's own built-ins against, and the prepared
+      // launch registers the same MCP-only set (`adapters/pi/prepared-tools.ts`).
       nativeTools: [],
       runtimeIdentity: input.runtimeIdentity,
     }));
@@ -631,7 +549,7 @@ export async function fingerprintPreparedToolSurface(
   }
 
   const toolImplementationKinds: Record<string, string> = {};
-  for (const tool of projectMcpTools(allowed.observation)) {
+  for (const tool of projected) {
     const identity = input.implementations[tool.serverName];
     toolImplementationKinds[qualifiedMcpToolName(tool.serverName, tool.toolName)] =
       identity === undefined ? 'unavailable:implementation_identity_unattested' : implementationKind(identity);
@@ -647,16 +565,11 @@ export async function fingerprintPreparedToolSurface(
   const observationDigest = preparedToolSurfaceObservationDigest({
     agentMemory: input.agentMemory, memory: input.memory,
     launch: input.launch,
-    permissionMode: input.permissionMode,
     runtimeIdentity: input.runtimeIdentity,
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     tools,
     toolExecutors,
     implementations: input.implementations,
-    // PARTIAL, for the same reason `nativeTools: []` above is: this entry
-    // assembles no native half, so there is no admitted policy selection to
-    // bind. The day the native half becomes countable here, the selection and
-    // the policy that produced it are bound by passing `nativeSelection`.
   });
 
   return Object.freeze({

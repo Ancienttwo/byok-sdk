@@ -43,14 +43,14 @@ function childFixture() {
 }
 function resources(): PreparedOperationResources {
   return {
-    workspaceDir: '/inert-workspace', policy: { mode: 'auto' }, env: {},
+    workspaceDir: '/inert-workspace', env: {},
     mcpServers: { byokagentmessage: { command: '/inert-mcp' } },
     mcpLaunch: { cwd: '/inert-launch', launcher: { kind: 'shell', interpreter: '/bin/sh', script: 'inert' } },
   };
 }
 function start(spawnFn: SpawnFn, overrides: Partial<PreparedOperationResources> = {}) {
   const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: 'inert-claude', source: 'path' }), spawnFn });
-  return startPreparedOperation(adapter, { instruction: 'hello', policy: { mode: 'auto' }, sessionRef: 'requested-session' }, { ...resources(), ...overrides });
+  return startPreparedOperation(adapter, { instruction: 'hello', sessionRef: 'requested-session' }, { ...resources(), ...overrides });
 }
 
 beforeEach(() => {

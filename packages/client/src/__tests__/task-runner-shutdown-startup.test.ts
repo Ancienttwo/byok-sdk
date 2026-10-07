@@ -25,7 +25,7 @@ describe('TaskRunner shutdown admission/start ownership barrier', () => {
       approvalRegistry: new ApprovalRegistry(), storeDir: dir, productId: 'shutdown-start',
     });
     const offered = runner.handleEnvelope(createEnvelope('task.offer', {
-      instruction: 'blocked startup', policy: { mode: 'auto' },
+      instruction: 'blocked startup',
     }, { taskId: 'starting-task', seq: 1 }));
     try {
       await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));

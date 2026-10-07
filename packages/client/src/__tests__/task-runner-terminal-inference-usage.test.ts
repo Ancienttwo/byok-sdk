@@ -52,7 +52,6 @@ async function startTask(runner: TaskRunner, taskId: string, runtime: 'pi' | 'cl
       'task.offer',
       {
         instruction: 'observe terminal usage',
-        policy: { mode: 'auto' },
         runtime,
         // This requested selection must NOT become provider/model terminal
         // telemetry. The adapter did not observe either fact.
@@ -182,7 +181,7 @@ describe('TaskRunner terminal inference usage projection', () => {
       const taskId = 'terminal-composition-release-identity';
       server.send(createEnvelope(
         'task.offer',
-        { instruction: 'finish', policy: { mode: 'auto' }, runtime: 'codex' },
+        { instruction: 'finish', runtime: 'codex' },
         { taskId, seq: server.nextSeq() },
       ));
       await server.waitFor((event) => event.type === 'task.started' && event.task_id === taskId);

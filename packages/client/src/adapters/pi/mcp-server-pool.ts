@@ -1,12 +1,10 @@
 import { parsePiMcpEnvironment } from './mcp-environment';
 import { isAbsolute } from 'node:path';
-import { PERMISSION_MODES, type PermissionMode } from '@byok-sdk/protocol';
 import type { CallToolResult } from '@modelcontextprotocol/client';
 import { McpAuthorityError, McpStdioClient, type McpStdioServerSpec } from '../../mcp/client';
 import {
   diffMcpObservation,
   GRANTABLE_TOOL_NAME,
-  type McpClassifiedToolDescriptor,
   type McpServerObservation,
   type McpToolDescriptor,
   type McpToolsetServerObservation,
@@ -29,15 +27,15 @@ import {
  * "which child executed this tool call", and the prepared lane freezes an
  * executor identity per tool precisely so that question has exactly one.
  *
- * Everything in this file is parsing and process lifecycle. The policy filter,
- * the projection and the registered tool shapes stay in the shared core
+ * Everything in this file is parsing and process lifecycle. The projection and
+ * the registered tool shapes stay in the shared core
  * (`../../mcp/`) and in `./mcp-tools.ts`.
  */
 
 /**
  * The SDK's own Pi control variables, by name shape. Every variable the adapter
  * sets on the Pi child to address this SDK's entries
- * (`BYOK_PI_MCP_CONFIG_PATH`, `BYOK_PI_PERMISSION_MODE`) matches it, so a new
+ * (`BYOK_PI_MCP_CONFIG_PATH`) matches it, so a new
  * one is stripped from MCP server children by existing.
  */
 const BYOK_PI_CONTROL_ENV_PREFIX = /^BYOK_PI_/u;
@@ -65,14 +63,10 @@ export interface TaskScopedMcpConfig {
   readonly mcpEnv: Readonly<Record<string, string>>;
   readonly mcpServers: Readonly<Record<string, McpStdioServerSpec>>;
   /**
-   * Everything the daemon observed, classification included — NOT the subset
-   * the policy allows. Registration narrows it; drift verification does not,
-   * because a server that grew a tool since admission has drifted whether or
-   * not the model would have been shown that tool.
+   * Everything the daemon observed. A server that grew a tool since admission
+   * has drifted.
    */
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
-  /** This task's permission mode, applied to the observation by the shared core. */
-  readonly permissionMode: PermissionMode;
   /**
    * The working directory every server below is spawned in — the one the
    * daemon proved this uid cannot write and probed each server in
@@ -121,7 +115,7 @@ export function parseMcpServerSpec(name: string, raw: unknown, fail: McpConfigFa
   });
 }
 
-export function parseMcpTool(server: string, raw: unknown, fail: McpConfigFailure): McpClassifiedToolDescriptor {
+export function parseMcpTool(server: string, raw: unknown, fail: McpConfigFailure): McpToolDescriptor {
   if (!isPlainObject(raw) || typeof raw.name !== 'string' || !GRANTABLE_TOOL_NAME.test(raw.name)) {
     fail(`observation.${server} carries a tool without a grantable name`);
   }
@@ -130,19 +124,10 @@ export function parseMcpTool(server: string, raw: unknown, fail: McpConfigFailur
     fail(`observation.${server}.${name} has a non-string description`);
   }
   if (!isPlainObject(raw.inputSchema)) fail(`observation.${server}.${name} has no object inputSchema`);
-  // Present on every tool of a classified toolset and on none of an
-  // unclassified one. A non-boolean is refused rather than coerced: this field
-  // decides what a restricted policy may call, and a truthy string would widen
-  // the very boundary it describes. Live `tools/list` answers carry no
-  // classification at all — the server is not the authority on it.
-  if (raw.readOnly !== undefined && typeof raw.readOnly !== 'boolean') {
-    fail(`observation.${server}.${name} has a non-boolean readOnly classification`);
-  }
   return Object.freeze({
     name,
     description: (raw.description as string | undefined) ?? '',
     inputSchema: raw.inputSchema,
-    ...(raw.readOnly === undefined ? {} : { readOnly: raw.readOnly as boolean }),
   });
 }
 
@@ -179,14 +164,6 @@ export function parseTaskScopedMcpConfig(parsed: unknown, fail: McpConfigFailure
   catch (error) { fail(error instanceof Error ? error.message : String(error)); }
   if (!isPlainObject(parsed.mcpServers)) fail('the task-scoped configuration must contain an mcpServers object');
   if (!isPlainObject(parsed.observation)) fail('the task-scoped configuration must contain an observation object');
-  // Validated against the protocol's own enumeration, not merely "a non-empty
-  // string": this value decides policy in the shared core, and an unrecognized
-  // one would otherwise reach `filterMcpObservationForPolicy` as a mode nobody
-  // wrote a rule for.
-  if (typeof parsed.permissionMode !== 'string'
-    || !(PERMISSION_MODES as readonly string[]).includes(parsed.permissionMode)) {
-    fail(`the task-scoped configuration must contain a permissionMode of [${PERMISSION_MODES.join(', ')}]`);
-  }
   const mcpServers: Record<string, McpStdioServerSpec> = {};
   for (const [name, raw] of Object.entries(parsed.mcpServers)) mcpServers[name] = parseMcpServerSpec(name, raw, fail);
   const observation: Record<string, McpToolsetServerObservation> = {};
@@ -232,7 +209,6 @@ export function parseTaskScopedMcpConfig(parsed: unknown, fail: McpConfigFailure
     mcpEnv,
     mcpServers: Object.freeze(mcpServers),
     observation: Object.freeze(observation),
-    permissionMode: parsed.permissionMode as PermissionMode,
     toolImplementations: Object.freeze(toolImplementations),
     ...(typeof launchCwd === 'string' ? { launchCwd } : {}),
   });

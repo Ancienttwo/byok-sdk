@@ -45,7 +45,6 @@ function request(overrides: Partial<InputPreparationRequestV1> = {}): InputPrepa
       prompt: { systemPrompt: 'Host framing' },
       messages: [{ role: 'user', content: 'hello', timestamp: 1_700_000_000_000 }],
     },
-    permissionMode: 'auto',
     agentMemory: 'none', requiredToolsets: ['team'],
     ...overrides,
   };

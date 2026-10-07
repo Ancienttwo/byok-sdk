@@ -127,7 +127,6 @@ function payload(overrides: Record<string, unknown> = {}): AgentInputPreparation
     deadlineAt: new Date(Date.now() + 60_000).toISOString(),
     context: { inline: CONTEXT_JSON },
     agentMemory: 'none', requiredToolsets: ['team'],
-    permissionMode: 'auto',
     ...overrides,
   });
 }
@@ -310,7 +309,7 @@ describe('remote input preparation: in-process, never the control socket', () =>
     // `requiredToolsets` and `permissionMode` through, and the tools that reach
     // the compiler are exactly what the one assembly entry answered with.
     expect(harness.toolSurface.assembleCalls).toEqual([
-      { agentMemory: 'none', requiredToolsets: ['team'], permissionMode: 'auto', runtimeIdentity: expect.any(String) },
+      { agentMemory: 'none', requiredToolsets: ['team'], runtimeIdentity: expect.any(String) },
     ]);
     const compiled = harness.compiler.calls[0]!;
     expect(compiled.snapshot.tools.map((tool) => tool.name)).toEqual([
@@ -368,18 +367,6 @@ describe('remote input preparation: in-process, never the control socket', () =>
 
     expect(completion.outcome).toBe('rejected');
     expect(harness.compiler.calls).toEqual([]);
-  });
-
-  it('carries the declared permission mode through to the assembly and onto the binding', async () => {
-    // The mode is the requester's declaration; the device validates and pins it
-    // rather than inferring one. Two modes are two different manifests, so they
-    // are two different preparations.
-    const harness = await makeHarness();
-    const completion = await harness.handle(payload({ permissionMode: 'readonly' }));
-    if (completion.outcome !== 'prepared') throw new Error('unreachable');
-
-    expect(harness.toolSurface.assembleCalls[0]?.permissionMode).toBe('readonly');
-    expect(completion.receipt.binding.permissionMode).toBe('readonly');
   });
 
   it('reports a resolver refusal as a rejection, with no artifact and no compile', async () => {

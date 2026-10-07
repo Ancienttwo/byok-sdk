@@ -88,9 +88,9 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
   it('long-poll (a): a batch [known, unknown-type, known] processes both known entries in order, never fails the whole batch, and keeps the cursor before unknown executable work', async () => {
     const { record, cursorStore, received } = await startLongPollOnly('byok-unknown-type-lp-mixed-store-');
 
-    const before = createEnvelope('task.offer', { instruction: 'before', policy: { mode: 'auto' } }, { taskId: 'known-before', seq: 1 });
+    const before = createEnvelope('task.offer', { instruction: 'before' }, { taskId: 'known-before', seq: 1 });
     const unknown = {
-      v: 1,
+      v: 2,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff01',
       ts: new Date().toISOString(),
       type: 'task.brand_new_future_type',
@@ -98,7 +98,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       seq: 2,
       payload: {},
     };
-    const after = createEnvelope('task.offer', { instruction: 'after', policy: { mode: 'auto' } }, { taskId: 'known-after', seq: 3 });
+    const after = createEnvelope('task.offer', { instruction: 'after' }, { taskId: 'known-after', seq: 3 });
 
     server.pushLongPollEvent(before);
     server.pushRawLongPollEvent(unknown);
@@ -119,7 +119,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // the cursor forward) must STILL advance the durable cursor past it —
     // this is what `ConnectionManager.noteSkippedSeq` exists for.
     const trailingUnknown = {
-      v: 1,
+      v: 2,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff02',
       ts: new Date().toISOString(),
       type: 'task.another_future_type',
@@ -152,12 +152,12 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // and the cursor moves past it so the mailbox does not stall.
     const { received } = await startLongPollOnly('byok-unknown-type-prepared-store-');
 
-    const before = createEnvelope('task.offer', { instruction: 'before', policy: { mode: 'auto' } }, { taskId: 'prepared-before', seq: 1 });
-    const after = createEnvelope('task.offer', { instruction: 'after', policy: { mode: 'auto' } }, { taskId: 'prepared-after', seq: 3 });
+    const before = createEnvelope('task.offer', { instruction: 'before' }, { taskId: 'prepared-before', seq: 1 });
+    const after = createEnvelope('task.offer', { instruction: 'after' }, { taskId: 'prepared-after', seq: 3 });
 
     server.pushLongPollEvent(before);
     server.pushRawLongPollEvent({
-      v: 1,
+      v: 2,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff10',
       ts: new Date().toISOString(),
       // The one edit that makes this build's registry answer the way an older
@@ -166,7 +166,6 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       task_id: 'prepared-task-from-the-future',
       seq: 2,
       payload: {
-        policy: { mode: 'auto' },
         agentRef: { agentId: 'agent-1', profileRevision: 'profile-r1' },
         requiredToolsets: ['team'],
         preparation: { reference: 'prep-record-1', requestDigest: 'request-digest-1' },
@@ -195,7 +194,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // malformed (not just unrecognized) entry is never silently acknowledged.
     const { record, cursorStore, received } = await startLongPollOnly('byok-unknown-type-lp-malformed-store-');
 
-    const before = createEnvelope('task.offer', { instruction: 'before', policy: { mode: 'auto' } }, { taskId: 'known-before-2', seq: 1 });
+    const before = createEnvelope('task.offer', { instruction: 'before' }, { taskId: 'known-before-2', seq: 1 });
     server.pushLongPollEvent(before);
 
     await vi.waitFor(() => {
@@ -210,7 +209,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // unmasked by some later, unrelated envelope's own independent
     // success advancing the cursor past it anyway.
     const malformed = {
-      v: 1,
+      v: 2,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff03',
       ts: new Date().toISOString(),
       type: 'task.offer', // a RECOGNIZED type ...
@@ -235,7 +234,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // normally and the cursor finally advances past it.
     const corrected = createEnvelope(
       'task.offer',
-      { instruction: 'corrected', policy: { mode: 'auto' } },
+      { instruction: 'corrected' },
       { taskId: 'malformed-task', seq: 2 },
     );
     server.pushLongPollEvent(corrected);
@@ -260,12 +259,12 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // successfully-processed LATER envelope in the very same batch.
     const { record, cursorStore, received } = await startLongPollOnly('byok-r1-stall-store-');
 
-    const before = createEnvelope('task.offer', { instruction: 'before', policy: { mode: 'auto' } }, { taskId: 'r1-before', seq: 1 });
+    const before = createEnvelope('task.offer', { instruction: 'before' }, { taskId: 'r1-before', seq: 1 });
     server.pushLongPollEvent(before);
     await vi.waitFor(async () => expect(await cursorStore.load(server.url, record.deviceId)).toBe(1));
 
     const bad = {
-      v: 1,
+      v: 2,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff50',
       ts: new Date().toISOString(),
       type: 'task.offer', // recognized type ...
@@ -275,7 +274,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     };
     const validAfter = createEnvelope(
       'task.offer',
-      { instruction: 'after', policy: { mode: 'auto' } },
+      { instruction: 'after' },
       { taskId: 'r1-valid-3', seq: 3 },
     );
     // Pushed together, synchronously, so both land in the SAME poll
@@ -326,12 +325,12 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // as-is rather than inventing a second, divergent recovery path.
     const { record, cursorStore, received } = await startLongPollOnly('byok-r1-unstall-store-');
 
-    const before = createEnvelope('task.offer', { instruction: 'before', policy: { mode: 'auto' } }, { taskId: 'r1b-before', seq: 1 });
+    const before = createEnvelope('task.offer', { instruction: 'before' }, { taskId: 'r1b-before', seq: 1 });
     server.pushLongPollEvent(before);
     await vi.waitFor(async () => expect(await cursorStore.load(server.url, record.deviceId)).toBe(1));
 
     const bad = {
-      v: 1,
+      v: 2,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff51',
       ts: new Date().toISOString(),
       type: 'task.offer',
@@ -341,7 +340,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     };
     const validAfter = createEnvelope(
       'task.offer',
-      { instruction: 'after', policy: { mode: 'auto' } },
+      { instruction: 'after' },
       { taskId: 'r1b-valid-3', seq: 3 },
     );
     server.pushRawLongPollEvent(bad);
@@ -354,7 +353,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     // advances through the already-successful tail at 3.
     const corrected = createEnvelope(
       'task.offer',
-      { instruction: 'corrected', policy: { mode: 'auto' } },
+      { instruction: 'corrected' },
       { taskId: 'r1b-bad', seq: 2 },
     );
     server.pushLongPollEvent(corrected);
@@ -367,7 +366,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     expect(await cursorStore.load(server.url, record.deviceId)).toBe(3);
     expect(received).toHaveLength(3);
 
-    const fresh = createEnvelope('task.offer', { instruction: 'fresh', policy: { mode: 'auto' } }, { taskId: 'r1b-fresh-4', seq: 4 });
+    const fresh = createEnvelope('task.offer', { instruction: 'fresh' }, { taskId: 'r1b-fresh-4', seq: 4 });
     server.pushLongPollEvent(fresh);
     await vi.waitFor(() => expect(received.some((e) => e.task_id === 'r1b-fresh-4')).toBe(true));
     await vi.waitFor(async () => expect(await cursorStore.load(server.url, record.deviceId)).toBe(4));
@@ -378,7 +377,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const poison = {
-      v: 1,
+      v: 2,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff52',
       ts: new Date().toISOString(),
       type: 'task.offer',
@@ -414,13 +413,13 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
 
   it('persistent unknown executable work blocks acknowledgement across a later known message', async () => {
     const { record, cursorStore, received } = await startLongPollOnly('byok-unknown-type-lp-recover-store-');
-    const poison = { v: 1, id: 'ffffffff-ffff-4fff-8fff-fffffffffffe', ts: new Date().toISOString(),
+    const poison = { v: 2, id: 'ffffffff-ffff-4fff-8fff-fffffffffffe', ts: new Date().toISOString(),
       type: 'agent.future_executable', task_id: 'task-future-1', seq: 1, payload: {} };
     server.pushRawLongPollEvent(poison);
     await new Promise((resolve) => setTimeout(resolve, 80));
     expect(received).toEqual([]);
     expect(await cursorStore.load(server.url, record.deviceId)).toBeUndefined();
-    server.pushLongPollEvent(createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'known', seq: 2 }));
+    server.pushLongPollEvent(createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'known', seq: 2 }));
     await vi.waitFor(() => expect(received.some((e) => e.task_id === 'known')).toBe(true));
     expect(await cursorStore.load(server.url, record.deviceId)).toBe(0);
     server.pushRawLongPollEvent(poison);
@@ -475,11 +474,11 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
 
     const realSeq1 = createEnvelope(
       'task.offer',
-      { instruction: 'x', policy: { mode: 'auto' } },
+      { instruction: 'x' },
       { taskId: 'critical-seq1', seq: 1 },
     );
     const unknownSeq2 = {
-      v: 1,
+      v: 2,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff10',
       ts: new Date().toISOString(),
       type: 'task.brand_new_future_type',
@@ -535,7 +534,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     const { record, cursorStore } = await startLongPollOnly('byok-skip-conn-class-store-');
 
     const connLike = {
-      v: 1,
+      v: 2,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff20',
       ts: new Date().toISOString(),
       type: 'conn.some_future_type',
@@ -549,7 +548,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     expect(await cursorStore.load(server.url, record.deviceId)).toBeUndefined();
 
     const taskLike = {
-      v: 1,
+      v: 2,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff21',
       ts: new Date().toISOString(),
       type: 'task.some_future_type',

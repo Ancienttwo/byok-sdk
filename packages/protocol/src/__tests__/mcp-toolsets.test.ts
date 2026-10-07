@@ -16,7 +16,6 @@ describe('task.offer_with_toolsets additive control message', () => {
       'task.offer_with_toolsets',
       {
         instruction: 'find qualified leads',
-        policy: { mode: 'auto' },
         runtime: 'claude',
         requiredToolsets: ['salesko', 'crm.readonly'],
       },
@@ -29,7 +28,7 @@ describe('task.offer_with_toolsets additive control message', () => {
   });
 
   it('rejects duplicate, malformed, empty, and oversized logical id sets', () => {
-    const base = { instruction: 'x', policy: { mode: 'auto' as const } };
+    const base = { instruction: 'x' };
     expect(TaskOfferWithToolsetsPayloadSchema.safeParse({ ...base, requiredToolsets: [] }).success).toBe(false);
     expect(
       TaskOfferWithToolsetsPayloadSchema.safeParse({ ...base, requiredToolsets: ['salesko', 'salesko'] }).success,
@@ -46,7 +45,6 @@ describe('task.offer_with_toolsets additive control message', () => {
   it('is strict control data and cannot carry a remote MCP executable definition', () => {
     const result = MESSAGE_PAYLOAD_SCHEMAS['task.offer_with_toolsets'].safeParse({
       instruction: 'x',
-      policy: { mode: 'auto' },
       requiredToolsets: ['salesko'],
       mcpServers: { salesko: { command: '/tmp/untrusted' } },
     });
@@ -56,7 +54,6 @@ describe('task.offer_with_toolsets additive control message', () => {
   it('does not widen legacy task.offer with a silently stripped toolset field', () => {
     const parsed = TaskOfferPayloadSchema.parse({
       instruction: 'x',
-      policy: { mode: 'auto' },
       requiredToolsets: ['salesko'],
     });
     expect('requiredToolsets' in parsed).toBe(false);

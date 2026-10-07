@@ -19,7 +19,7 @@ describe('Host exact Agent message disposition readback', () => {
     const input = {
       taskId,
       payload: {
-        instruction: 'reply', policy: { mode: 'auto' }, agentRef,
+        instruction: 'reply', agentRef,
         egressPolicy: {
           policyRevision: 'policy-v1', activity: { mode: 'metadata-status', delivery: 'latest-value' },
           reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },

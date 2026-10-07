@@ -49,7 +49,6 @@ const MCP_CAPABLE: RuntimeCapabilities = {
   resume: true,
   approvalInteractive: true,
   mcpToolsets: true,
-  permissionModes: ['auto', 'confirm'],
 };
 
 const unusedBlobClient: BlobResolver = {
@@ -172,7 +171,7 @@ const TOOLSETS: ReadonlyMap<string, McpToolsetConfig> = new Map([
 async function offer(runner: TaskRunner, taskId: string): Promise<void> {
   await runner.handleEnvelope(createEnvelope(
     'task.offer_with_toolsets',
-    { instruction: 'x', policy: { mode: 'auto' }, runtime: 'claude', requiredToolsets: ['salesko'] },
+    { instruction: 'x', runtime: 'claude', requiredToolsets: ['salesko'] },
     { taskId, seq: 1 },
   ));
 }
@@ -493,7 +492,6 @@ async function loadExtension(
     mcpEnv,
     mcpServers: { salesko: { command: process.execPath, args: [script, '{}'] } },
     observation,
-    permissionMode: 'auto',
     launchCwd: await trustedCwd(),
     ...(toolImplementations === undefined ? {} : { toolImplementations }),
   }));

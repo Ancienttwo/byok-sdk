@@ -134,10 +134,10 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres offer delivery composition', () => {
       });
 
       const first = await cloud.enqueueOffer(OFFER_TENANT, 'device-offer-sequence', {
-        payload: { instruction: 'prove the sequence boundary', policy: { mode: 'auto' } },
+        payload: { instruction: 'prove the sequence boundary' },
       });
       const second = await cloud.enqueueOffer(OFFER_TENANT, 'device-offer-sequence', {
-        payload: { instruction: 'prove the next sequence too', policy: { mode: 'auto' } },
+        payload: { instruction: 'prove the next sequence too' },
       });
       const page = await core.mailbox.readAfter(OFFER_TENANT, {
         deviceId: 'device-offer-sequence',

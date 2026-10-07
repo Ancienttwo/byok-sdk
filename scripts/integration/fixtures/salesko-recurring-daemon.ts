@@ -11,7 +11,7 @@ const config = JSON.parse(await readFile(process.argv[2]!, 'utf8')) as {
 };
 const { createDaemonWithAdapters } = await import(pathToFileURL(Bun.resolveSync('@byok-sdk/client', config.installRoot)).href);
 const adapter = new StubRuntimeAdapter('claude', { kind: 'available', version: 'synthetic-recovery' },
-  { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true, permissionModes: ['auto', 'readonly', 'confirm', 'plan'] }, false);
+  { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true }, false);
 let preparations = 0;
 const prepare = adapter.prepare.bind(adapter);
 adapter.prepare = async input => { preparations++; return prepare(input); };

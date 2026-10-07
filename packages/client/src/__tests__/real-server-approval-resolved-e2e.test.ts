@@ -83,7 +83,6 @@ describe('M4 (additive-minor) end-to-end: local CLI approve -> task.approval_res
 
     const handle = await real.byok.dispatch({
       instruction: 'do a thing that needs approval',
-      policy: { mode: 'confirm' },
     });
     const taskId = handle.taskId;
 

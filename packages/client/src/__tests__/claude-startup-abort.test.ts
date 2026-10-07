@@ -43,14 +43,14 @@ function fixture(holdWrite = false, onSpawn?: () => void) {
 }
 async function operation(spawnFn: SpawnFn, signal?: AbortSignal, withMcp = false) {
   const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: 'inert-fixture', source: 'path' }), spawnFn });
-  const offer = { instruction: 'hello', policy: { mode: 'auto' as const } };
+  const offer = { instruction: 'hello' };
   const mcp = withMcp ? { mcpServers: { byokagentmessage: { command: '/inert-mcp' } } } : {};
-  const prepared = await adapter.prepare({ offer, policy: offer.policy, descriptor: adapter.descriptor, requiredToolsetIds: [], ...mcp });
+  const prepared = await adapter.prepare({ offer, descriptor: adapter.descriptor, requiredToolsetIds: [], ...mcp });
   if (prepared.kind !== 'prepared') throw new Error('unexpected fixture admission rejection');
   const input: RuntimeOperationStartInput = {
     kind: 'instruction', instruction: 'hello', env: {}, ...(signal ? { signal } : {}), ...mcp,
     manifest: sealRuntimeOperationManifest({ taskId: 'abort-fixture', runtimeId: 'claude', descriptor: adapter.descriptor,
-      policy: offer.policy, requiredToolsetIds: [], workspace: { workspaceDir: '/inert-workspace' }, forwardedEnvironmentNames: [] }),
+      requiredToolsetIds: [], workspace: { workspaceDir: '/inert-workspace' }, forwardedEnvironmentNames: [] }),
   };
   return { start: () => prepared.operation.start(input), prepared: prepared.operation, input };
 }

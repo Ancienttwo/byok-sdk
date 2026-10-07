@@ -45,7 +45,7 @@ import type { PreparedAgentMemoryImplementation, PreparedAgentMemoryState } from
  */
 
 import { createHash } from 'node:crypto';
-import { INPUT_PREPARATION_WIRE_VERSION, type PermissionMode, type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
+import { INPUT_PREPARATION_WIRE_VERSION, type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { McpLaunchAttestation } from './daemon/trusted-launch-cwd';
 import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
 
@@ -91,6 +91,10 @@ export const INPUT_PREPARATION_ARTIFACT_FORMAT = 'byok.input-preparation.artifac
  *
  * Version 7 uses Host systemPrompt and the official Pi v4 envelope/identity.
  * The fourteen admission comparisons remain; old artifacts are not read forward.
+ *
+ * Version 9 REMOVED `permissionMode` from the request and the binding, with the
+ * task offer's permission policy (protocol v2). A preparation counts every
+ * observed MCP tool; there is no mode to filter for or to compare.
  *
  * The number itself is owned by `@byok-sdk/protocol`'s
  * `INPUT_PREPARATION_WIRE_VERSION`, because the device capability token
@@ -485,11 +489,6 @@ export interface InputPreparationCompiledSnapshotV1 extends Omit<InputPreparatio
  * could state either could have tokens counted against a manifest this device
  * never observed.
  *
- * `permissionMode` is DECLARED, never inferred. A preparation counts one
- * concrete manifest, and the manifest is the policy-filtered set for exactly
- * one mode (`mcp/projection.ts`'s `filterMcpObservationForPolicy`). The daemon
- * validates the value and pins it onto the binding; it grants nothing.
- *
  * There is no `runtimeIdentity`, `compilerVersion` or `policyIdentity` field:
  * those are derived from the verified installed artifact closure and the
  * daemon's own configured policy, never from caller text.
@@ -504,8 +503,6 @@ export interface InputPreparationRequestV1 {
   readonly scope: InputPreparationScopeClaimV1;
   readonly source: InputPreparationSourceV1;
   readonly selection: InputPreparationSelectionV1;
-  /** The mode the counted manifest is filtered for. */
-  readonly permissionMode: PermissionMode;
   /** Configured MCP toolset ids. The locator is the toolset id; MCP only. */
   readonly requiredToolsets: readonly string[];
   readonly snapshot: InputPreparationSnapshotV1;
@@ -995,13 +992,6 @@ export interface InputPreparationBindingV1 {
   readonly source: InputPreparationSourceV1;
   readonly target: InputPreparationCounterTargetV1;
   readonly policyRevision: string;
-  /**
-   * The mode the counted manifest was filtered for, recorded so a consumer can
-   * COMPARE it without re-deriving the request digest: an Execution offered
-   * under a different mode registers a different tool set than the one these
-   * tokens were counted for.
-   */
-  readonly permissionMode: PermissionMode;
   readonly runtime: InputPreparationRuntimeIdentityV1;
   /** Digest over the whole normalized request, scope and runtime identity. */
   readonly requestDigest: string;
@@ -1217,13 +1207,6 @@ export const INPUT_PREPARATION_ERROR_CODES = [
    */
   'observation_drift',
   /**
-   * The declared `permissionMode` exceeds this device's configured ceiling.
-   * Never narrowed to an admissible mode: a preparation counts one concrete
-   * manifest, and quietly counting a smaller one answers a question nobody
-   * asked.
-   */
-  'permission_mode_denied',
-  /**
    * The `prompt_prepared` frame this preparation would be launched with does
    * not fit one RPC frame the native runtime will accept
    * (`RPC_MAX_FRAME_BYTES`). The bound is the RUNTIME's, not the operator's, so
@@ -1304,42 +1287,15 @@ export function preparedToolBindingDigest(input: PreparedToolBindingDigestInputV
   });
 }
 
-/**
- * The Pi-native half of a prepared Main tool set, bound to the ADMITTED policy
- * that selected it — not merely to the mode.
- *
- * `allowTools`/`denyTools` are what actually decide which built-ins a task gets
- * (`adapters/pi/permission-mapping.ts`), so a digest that bound only `mode`
- * would validate a launch whose native half is a different set from the one
- * that was counted.
- *
- * Absent while the native half is not countable: `daemon/prepared-tool-surface.ts`
- * assembles a preparation with no native tools at all, so there is no selection
- * to bind and the key is omitted rather than written as an empty one.
- */
-export interface PreparedNativeToolSelectionV1 {
-  /** Model-visible native tool names, in registration order. Never empty. */
-  readonly names: readonly string[];
-  /** The admitted policy that produced `names`, whole. */
-  readonly policy: {
-    readonly mode: PermissionMode;
-    readonly allowTools?: readonly string[];
-    readonly denyTools?: readonly string[];
-  };
-}
-
 export interface PreparedToolSurfaceDigestInputV1 {
   readonly agentMemory: PreparedAgentMemoryMode;
   readonly memory: PreparedAgentMemoryState | null;
   readonly launch: McpLaunchAttestation;
-  readonly permissionMode: PermissionMode;
   readonly runtimeIdentity: string;
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
   readonly tools: readonly InputPreparationToolV1[];
   readonly toolExecutors: Readonly<Record<string, string>>;
   readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
-  /** Omitted while the prepared native half stays empty; see the type above. */
-  readonly nativeSelection?: PreparedNativeToolSelectionV1;
 }
 
 /** The whole observed surface: the schemas, the executors, the launch and the identities. */
@@ -1349,7 +1305,6 @@ export function preparedToolSurfaceObservationDigest(input: PreparedToolSurfaceD
     agentMemory: input.agentMemory,
     memory: input.memory,
     launch: { launchCwd: input.launch.launchCwd, launcher: input.launch.launcher },
-    permissionMode: input.permissionMode,
     runtimeIdentity: input.runtimeIdentity,
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     tools: input.tools.map((tool) => ({
@@ -1359,22 +1314,5 @@ export function preparedToolSurfaceObservationDigest(input: PreparedToolSurfaceD
     })),
     toolExecutors: input.toolExecutors,
     implementations: input.implementations,
-    // `canonicalInputPreparationJson` drops an `undefined` value, so a surface
-    // with no native half digests to exactly the bytes it did before this key
-    // existed.
-    nativeSelection: input.nativeSelection === undefined
-      ? undefined
-      : {
-        names: [...input.nativeSelection.names],
-        policy: {
-          mode: input.nativeSelection.policy.mode,
-          allowTools: input.nativeSelection.policy.allowTools === undefined
-            ? undefined
-            : [...input.nativeSelection.policy.allowTools],
-          denyTools: input.nativeSelection.policy.denyTools === undefined
-            ? undefined
-            : [...input.nativeSelection.policy.denyTools],
-        },
-      },
   });
 }

@@ -676,7 +676,6 @@ export async function collectDiagnostics(
     ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
     steer: runtime.steer,
     resume: runtime.resume,
-    permissionModeCount: runtime.permissionModes.length,
   }));
 
   let control: DiagnosticsSnapshot['control'];

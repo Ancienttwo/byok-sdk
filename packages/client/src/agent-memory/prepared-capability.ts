@@ -37,8 +37,6 @@ export interface PreparedAgentMemoryImplementationDigests {
   readonly execution: string;
 }
 
-const POLICIES = new Set(['auto', 'readonly', 'confirm', 'plan']);
-
 export function parsePreparedAgentMemoryMode(value: unknown): PreparedAgentMemoryMode {
   if (!PreparedAgentMemoryModeSchema.safeParse(value).success) throw new Error('prepared Agent memory mode must be none, read, or read-write');
   return value as PreparedAgentMemoryMode;
@@ -51,15 +49,6 @@ export function preparedAgentMemoryModeAllowsOperation(mode: PreparedAgentMemory
 export function preparedAgentMemoryModeWithinCeiling(requested: PreparedAgentMemoryMode, ceiling: PreparedAgentMemoryMode): boolean {
   const rank: Record<PreparedAgentMemoryMode, number> = { none: 0, read: 1, 'read-write': 2 };
   return rank[requested] <= rank[ceiling];
-}
-
-/** `none` adds no memory restriction. Selected memory modes are only expressible under the approved policy matrix. */
-export function preparedAgentMemoryModeAllowedByPolicy(mode: PreparedAgentMemoryMode, policy: unknown, denyTools: readonly string[] = []): boolean {
-  if (!POLICIES.has(typeof policy === 'string' ? policy : '')) return false;
-  if (mode === 'none') return true;
-  if (mode === 'read' && policy !== 'auto' && policy !== 'readonly') return false;
-  if (mode === 'read-write' && policy !== 'auto') return false;
-  return preparedAgentMemoryToolNames(mode).every((name) => !denyTools.includes(name));
 }
 
 export function preparedAgentMemoryToolNames(mode: PreparedAgentMemoryMode): readonly string[] {

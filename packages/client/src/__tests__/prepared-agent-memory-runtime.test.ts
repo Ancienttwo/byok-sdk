@@ -177,10 +177,8 @@ describe('prepared Agent memory runtime configuration', () => {
         return spawn(command, [TIMING_HOST, ...args.slice(1)], options);
       }) as unknown as SpawnFn,
     });
-    const policy = { mode: 'auto' as const, allowTools: [] };
     const prepared = await adapter.prepare({
-      offer: { instruction: 'recall the current memory', policy },
-      policy,
+      offer: { instruction: 'recall the current memory' },
       descriptor: adapter.descriptor,
       requiredToolsetIds: [],
     });
@@ -200,7 +198,6 @@ describe('prepared Agent memory runtime configuration', () => {
           policyIdentity: 'policy', profileRevision: 'profile',
         },
       },
-      permissionMode: 'auto',
       toolBindingDigest: 'memory-tool-binding',
       observationDigest: 'memory-observation',
       launch: { cwd: launchCwd },
@@ -212,7 +209,6 @@ describe('prepared Agent memory runtime configuration', () => {
       taskId: 'prepared-memory-runtime-task',
       runtimeId: 'pi',
       descriptor: adapter.descriptor,
-      policy,
       requiredToolsetIds: [],
       workspace: { workspaceDir: workspace },
       forwardedEnvironmentNames: [],

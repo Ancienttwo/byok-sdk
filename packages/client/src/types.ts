@@ -6,8 +6,6 @@ import type { PiRuntimeLaunchResources } from './adapters/pi/runtime-launch';
 import type {
   AgentEgressPolicy,
   AgentEvent,
-  PermissionMode,
-  PermissionPolicy,
   TaskOfferPayload,
 } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation';
@@ -100,8 +98,6 @@ export interface RuntimeCapabilities {
    * it cannot back.
    */
   readonly approvalInteractive: boolean;
-  /** Subset of {@link PermissionPolicy}'s `mode` values this adapter can express without widening. */
-  readonly permissionModes: readonly string[];
 }
 
 /** One local stdio MCP server definition. Remote task payloads can never supply this shape. */
@@ -115,34 +111,6 @@ export interface McpStdioServerConfig {
 /** A logical group of local MCP servers selectable by a wire-level toolset id. */
 export interface McpToolsetConfig {
   mcpServers: Readonly<Record<string, McpStdioServerConfig>>;
-  /**
-   * The operator's own read/mutation classification of this toolset's tools,
-   * per `(server, tool)`. It is what makes a permission mode other than `auto`
-   * expressible for a toolset task at all.
-   *
-   * The device configuration owner declares it and nothing else may. A
-   * server's own `annotations.readOnlyHint` is that server's self-assessment
-   * rather than a security authority, and a tool's name, description or schema
-   * is not evidence of anything — inferring the classification from any of
-   * them would be exactly the heuristic that makes a permission boundary
-   * meaningless.
-   *
-   * Two fail-closed defaults follow, both enforced by
-   * `filterMcpObservationForPolicy` (`mcp/projection.ts`): a tool the server
-   * exposes that this declaration omits is treated as a MUTATION tool, and a
-   * toolset carrying no declaration at all cannot run under a non-`auto`
-   * policy — the refusal names the missing classification rather than quietly
-   * running with every tool enabled.
-   *
-   * The registry validates it strictly (every server named here must be
-   * defined in `mcpServers`, every tool name must be grantable, no
-   * duplicates), the daemon cross-checks it against each server's own
-   * `tools/list` answer before admission (a classified tool the server does not
-   * expose is a stale config and is rejected), and it is folded into the
-   * toolset's `definitionRevision` — so changing a classification changes the
-   * toolset revision and therefore every executor fingerprint derived from it.
-   */
-  readOnlyTools?: Readonly<Record<string, readonly string[]>>;
 }
 
 /** Lifecycle facts a device host may explicitly report for one configured toolset. */
@@ -264,20 +232,15 @@ export interface RuntimeAdapterDescriptor {
    * Whether this adapter actually CONSUMES
    * {@link RuntimeAdapterPrepareInput.mcpToolsetTools} — i.e. whether it
    * needs the daemon to observe each projected toolset server before
-   * admission, because it binds those tools into the runtime's own surface:
-   * claude's `--allowedTools`, codex's `enabled_tools` + per-tool
-   * `approval_mode`, and pi's per-tool registration of the observed schemas.
+   * admission, because it registers those tools itself: pi registers one tool
+   * per observed MCP tool with the server's own schema. Claude and Codex
+   * attach the MCP servers and let the runtime list the tools itself, so they
+   * declare nothing.
    *
    * The daemon uses this, and only this, to decide whether to pay for the
    * pre-admission `tools/list` observation of every projected server
    * (`daemon/mcp-tools-probe.ts`). An adapter that consumes no observation
    * never makes an offer wait on one it has no use for.
-   *
-   * Omission is fail-closed in the direction that matters: no observation
-   * means no names and no schemas, and an adapter that does consume the
-   * observation rejects a projected server it has neither for
-   * (`adapters/mcp-tool-grants.ts`). A grant is never widened by a missing
-   * declaration.
    */
   readonly requiresMcpToolsetToolObservation?: boolean;
   /**
@@ -306,24 +269,6 @@ export interface RuntimeAdapterDescriptor {
    * declare their mode explicitly.
    */
   readonly mcpServerLaunch?: 'direct-cwd' | 'launcher-wrapped';
-  /**
-   * Whether this adapter GENERATES a reserved approval MCP server of its own
-   * when it is started under `policy.mode: 'confirm'`. This is an extension
-   * seam for custom adapters; none of the bundled adapters declares it.
-   *
-   * Such a server exists nowhere in the daemon's projected `mcpServers` map,
-   * so the daemon cannot see it by counting that map — but it is an MCP
-   * server child of the task like any other, and it must start in the same
-   * proven-non-writable launch directory (`daemon/trusted-launch-cwd.ts`).
-   * `TaskRunner` therefore resolves the launch binding for a `confirm`-mode
-   * task on an adapter that declares this, even when the task projects no
-   * host toolset and needs no reserved helper at all.
-   *
-   * Omission means "generates none": an adapter that generates one and does
-   * not declare it would receive no binding and its own fail-closed guard
-   * refuses the start rather than launching the server unwrapped.
-   */
-  readonly generatesApprovalMcpServer?: boolean;
 }
 
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
@@ -331,7 +276,6 @@ export interface RuntimeAdapterPrepareInput {
   /** Admission cancellation; late pure results are discarded and never started. */
   signal?: AbortSignal;
   offer: TaskOfferPayload;
-  policy: PermissionPolicy;
   descriptor: RuntimeAdapterDescriptor;
   requiredToolsetIds: readonly string[];
   /** Locally resolved MCP authority; available for pure admission validation only. */
@@ -353,15 +297,9 @@ export interface RuntimeAdapterPrepareInput {
  * tool no runtime is ever told about.
  *
  * It carries FULL descriptors — name, description and the server's own
- * `inputSchema` — plus the server identity and negotiated protocol version,
- * because the three runtimes need different parts of the same fact and only
- * one of them can be authoritative. claude and codex pre-grant by name; pi
- * registers one tool per MCP tool with the real schema; the prepared launch
- * path binds the schema digest into a frozen tool manifest. The names-only
- * view every grant resolver uses is DERIVED from this
- * (`mcp/projection.ts`'s `mcpToolsetToolNames`), never carried alongside it —
- * a separately transported name list would be a second authority free to
- * disagree with the schemas the model was actually shown.
+ * `inputSchema` — plus the server identity and negotiated protocol version.
+ * pi registers one tool per MCP tool with the real schema; the prepared launch
+ * path binds the schema digest into a frozen tool manifest.
  */
 export type McpToolsetToolObservation = Readonly<Record<string, McpToolsetServerObservation>>;
 
@@ -392,7 +330,6 @@ export interface RuntimeOperationManifest {
   /** Selected runtime id; lane/provider/model, when present, live only in `dispatchSelection`. */
   readonly runtimeId: string;
   readonly descriptor: RuntimeAdapterDescriptor;
-  readonly policy: PermissionPolicy;
   readonly requiredToolsetIds: readonly string[];
   /** The credential-free runtime/lane/provider/model authority for this operation. */
   readonly dispatchSelection?: TaskOfferPayload['dispatchSelection'];
@@ -463,11 +400,6 @@ export interface RuntimePreparedLaunchExpectationV1 {
  * There is no `instruction` here and no way to supply one: the user request is
  * already inside the frozen envelope, and a prepared run that accepted a
  * separate instruction would have two answers to what it is about to send.
- *
- * The admitted permission POLICY is not repeated — it is
- * `RuntimeOperationManifest.policy`, already sealed. Only the mode the manifest
- * was COUNTED for is carried, so the adapter can refuse a manifest admitted
- * under a different mode instead of discovering the divergence as tool drift.
  */
 export interface RuntimePreparedLaunchV1 {
   readonly agentMemory: PreparedAgentMemoryMode;
@@ -483,8 +415,6 @@ export interface RuntimePreparedLaunchV1 {
    */
   readonly artifactPath: string;
   readonly expected: RuntimePreparedLaunchExpectationV1;
-  /** The mode `daemon/prepared-tool-surface.ts` filtered the counted manifest for. */
-  readonly permissionMode: PermissionMode;
   readonly toolBindingDigest: string;
   readonly observationDigest: string;
   /** The same trusted launch boundary the preparation observed every server under. */
@@ -603,18 +533,6 @@ function frozenStrings(values: readonly string[] | undefined): readonly string[]
   return values === undefined ? undefined : Object.freeze([...values]);
 }
 
-function frozenPolicy(policy: PermissionPolicy): PermissionPolicy {
-  const allowTools = policy.allowTools === undefined ? undefined : Object.freeze([...policy.allowTools]) as unknown as string[];
-  const denyTools = policy.denyTools === undefined ? undefined : Object.freeze([...policy.denyTools]) as unknown as string[];
-  return Object.freeze({
-    mode: policy.mode,
-    ...(allowTools === undefined ? {} : { allowTools }),
-    ...(denyTools === undefined ? {} : { denyTools }),
-    ...(policy.workspaceRoot === undefined ? {} : { workspaceRoot: policy.workspaceRoot }),
-    ...(policy.network === undefined ? {} : { network: policy.network }),
-  });
-}
-
 /** Copy then deeply freeze descriptor authority so callers cannot retain a mutable source reference. */
 export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescriptor): RuntimeAdapterDescriptor {
   const baseNames = frozenStrings(descriptor.environmentRequirements.baseNames);
@@ -624,9 +542,6 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
     supportsDispatchSelection: descriptor.supportsDispatchSelection === true,
     requiresMcpToolsetToolObservation: descriptor.requiresMcpToolsetToolObservation === true,
     ...(descriptor.mcpServerLaunch === undefined ? {} : { mcpServerLaunch: descriptor.mcpServerLaunch }),
-    ...(descriptor.generatesApprovalMcpServer === undefined
-      ? {}
-      : { generatesApprovalMcpServer: descriptor.generatesApprovalMcpServer === true }),
     capabilities: Object.freeze({
       ...(descriptor.capabilities.durablePi === undefined ? {} : { durablePi: descriptor.capabilities.durablePi === true }),
       ...(descriptor.capabilities.nativeInteractions === undefined ? {} : {
@@ -639,7 +554,6 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
       resume: descriptor.capabilities.resume === true,
       approvalInteractive: descriptor.capabilities.approvalInteractive === true,
       ...(descriptor.capabilities.mcpToolsets === undefined ? {} : { mcpToolsets: descriptor.capabilities.mcpToolsets === true }),
-      permissionModes: Object.freeze([...descriptor.capabilities.permissionModes]),
     }),
     environmentRequirements: Object.freeze({
       ...(baseNames === undefined
@@ -672,7 +586,6 @@ export function sealRuntimeOperationManifest(manifest: RuntimeOperationManifest)
     taskId: manifest.taskId,
     runtimeId: manifest.runtimeId,
     descriptor: freezeRuntimeAdapterDescriptor(manifest.descriptor),
-    policy: frozenPolicy(manifest.policy),
     requiredToolsetIds: Object.freeze([...manifest.requiredToolsetIds]),
     ...(dispatchSelection === undefined ? {} : { dispatchSelection }),
     ...(manifest.sessionRef === undefined ? {} : { sessionRef: manifest.sessionRef }),

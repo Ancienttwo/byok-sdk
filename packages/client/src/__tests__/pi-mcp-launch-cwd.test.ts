@@ -64,7 +64,6 @@ async function callThroughExtension(
     mcpEnv: ENV,
     mcpServers: { salesko: server },
     observation: { salesko: { ...observed, toolsetId: 'salesko.read.v1' } },
-    permissionMode: 'auto',
     ...(launchCwd === undefined ? {} : { launchCwd }),
   }));
   process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;

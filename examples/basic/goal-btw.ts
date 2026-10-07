@@ -11,7 +11,6 @@ export const GOAL_RESULT_CONTRACT = 'host-goal-step-v1';
 export const BTW_RESULT_CONTRACT = 'host-btw-answer-v1';
 export type BotTarget = Pick<FreshAgentEgressDispatchInput, 'deviceId' | 'agentRef' | 'egressPolicy'> & {
   runtime: 'pi' | 'claude' | 'codex';
-  policy: NonNullable<FreshAgentEgressDispatchInput['policy']>;
   requiredToolsets?: FreshAgentEgressDispatchInput['requiredToolsets'];
 };
 type Input = BotTarget & { taskId: string; instruction: string; terminalProjection: NonNullable<FreshAgentEgressDispatchInput['terminalProjection']> };
@@ -44,8 +43,8 @@ function safeTime(value: number): void {
 function validateTarget(target: BotTarget): void {
   nonempty(target.deviceId, 'deviceId'); nonempty(target.agentRef?.agentId, 'agentId');
   nonempty(target.agentRef?.profileRevision, 'profileRevision');
-  if (!['pi', 'claude', 'codex'].includes(target.runtime) || !target.policy || !target.egressPolicy) throw new Error('Select an explicit runtime, policy and egress policy');
-  const keys = ['deviceId', 'agentRef', 'egressPolicy', 'runtime', 'policy', 'requiredToolsets'];
+  if (!['pi', 'claude', 'codex'].includes(target.runtime) || !target.egressPolicy) throw new Error('Select an explicit runtime and egress policy');
+  const keys = ['deviceId', 'agentRef', 'egressPolicy', 'runtime', 'requiredToolsets'];
   if (Object.keys(target).some(key => !keys.includes(key))) throw new Error('Target contains undeclared execution authority');
 }
 function canonical(value: unknown): string {
@@ -119,7 +118,7 @@ export class GoalBtwHost {
       if (projection?.mode !== 'result-document' || projection.contract !== contract) throw new Error('Invalid reserved result authority');
       if (value.kind === 'goal') {
         if (canonical(target) !== canonical(value.target)) throw new Error('Reserved execution widened its Host binding');
-      } else if (target.policy.mode !== 'readonly' || target.agentRef.agentId === value.mainAgentId
+      } else if (target.agentRef.agentId === value.mainAgentId
         || value.destination === value.mainDestination || input.taskId === value.mainTaskId) {
         throw new Error('Reserved execution widened its Host binding');
       }
@@ -280,7 +279,6 @@ export class GoalBtwHost {
     const main = await this.server.tasks.attempt(input.mainTaskId);
     if (!main?.agentRef || main.status !== 'running' || main.cancellation) throw new Error('The main task is not running');
     if (input.target.agentRef.agentId === main.agentRef.agentId) throw new Error('btw requires a different Agent home, not a different profileRevision');
-    if (input.target.policy.mode !== 'readonly') throw new Error('btw requires explicit readonly policy');
     if (input.destination === input.mainDestination || input.taskId === input.mainTaskId) throw new Error('btw requires an independent task and destination');
     const execution: Input = { ...input.target, taskId: input.taskId,
       instruction: `Host-selected main-thread snapshot (${input.snapshotRevision}):\n${input.snapshot}\n\nSide question:\n${input.question}\n\nAnswer independently. Do not change or steer the main task. Return only JSON {"contract":"${BTW_RESULT_CONTRACT}","answer":"your answer"}.`,

@@ -245,7 +245,6 @@ export function formatRuntimeLines(runtimes: readonly ProbedRuntime[]): string[]
       r.qualifiedVersion !== undefined ? `warning=unqualified-version(qualified=${r.qualifiedVersion})` : undefined,
       r.authPresent !== undefined ? `authPresent=${r.authPresent}` : undefined,
       `capabilities=${caps.length ? caps.join(',') : '(none)'}`,
-      `modes=${r.permissionModes.length ? r.permissionModes.join(',') : '(none)'}`,
     ].filter((part): part is string => Boolean(part));
     return `${r.id}: ${parts.join(' ')}`;
   });

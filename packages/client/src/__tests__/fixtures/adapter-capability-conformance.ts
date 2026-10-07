@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent } from '@byok-sdk/protocol';
 import { SteerUnsupportedError, type RuntimeAdapter, type Session } from '../../types';
 
 /**
@@ -18,14 +18,12 @@ export interface AdapterCapabilityFixture {
   }): Promise<Session>;
   assertResumeReceipt(): Promise<void>;
   assertSteerReceipt(text: string): Promise<void>;
-  assertNoRuntimeInvocation(): void;
   dispose(): Promise<void>;
 }
 
 export interface AdapterCapabilityQualification {
   readonly id: string;
   readonly steer: boolean;
-  readonly permissionModes: readonly string[];
   create(): Promise<AdapterCapabilityFixture>;
 }
 
@@ -52,8 +50,8 @@ export function runAdapterCapabilityConformance(qualification: AdapterCapability
         resume: true,
         steer: qualification.steer,
         approvalInteractive: false,
-        permissionModes: qualification.permissionModes,
       });
+      expect(fixture.adapter.descriptor.capabilities).not.toHaveProperty('permissionModes');
       expect(Object.isFrozen(fixture.adapter.descriptor)).toBe(true);
       expect(Object.isFrozen(fixture.adapter.descriptor.capabilities)).toBe(true);
     });
@@ -80,7 +78,7 @@ export function runAdapterCapabilityConformance(qualification: AdapterCapability
       const session = await fixture.start();
       const firstRef = session.sessionRef;
       await collectAdapterTurn(session);
-      await session.followUp({ instruction: 'second turn', policy: { mode: 'auto' } });
+      await session.followUp({ instruction: 'second turn' });
       expect((await collectAdapterTurn(session)).at(-1)).toEqual({ type: 'turn_end' });
       expect(session.sessionRef).toBe(firstRef);
     });
@@ -111,17 +109,6 @@ export function runAdapterCapabilityConformance(qualification: AdapterCapability
       await collectAdapterTurn(session);
     });
 
-    it('rejects confirm policy before invoking a runtime', async () => {
-      const policy: TaskOfferPayload['policy'] = { mode: 'confirm' };
-      const result = await fixture.adapter.prepare({
-        offer: { instruction: 'must not start', policy },
-        policy,
-        descriptor: fixture.adapter.descriptor,
-        requiredToolsetIds: [],
-      });
-      expect(result).toMatchObject({ kind: 'reject' });
-      fixture.assertNoRuntimeInvocation();
-    });
 
     it.each([true, false])('rejects legacy approval resolution (%s) without claiming recovery', async (approved) => {
       const session = await fixture.start();

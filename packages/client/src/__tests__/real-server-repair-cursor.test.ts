@@ -59,7 +59,7 @@ describe('re-pair does not inherit a stale cursor from the previous device (find
 
     // Advance this device's cursor well past 1 so a later "did it inherit
     // this?" check is unambiguous — dispatch a task through claim/complete.
-    const handleA = await real.byok.dispatch({ instruction: 'first device task', policy: { mode: 'auto' } });
+    const handleA = await real.byok.dispatch({ instruction: 'first device task' });
     await waitForTaskEvent(handleA, (e) => e.kind === 'state' && e.state === 'Claimed');
     await vi.waitFor(() => expect(adapterA.sessions).toHaveLength(1));
     adapterA.sessions[0]!.emit({ type: 'turn_end' });
@@ -89,7 +89,7 @@ describe('re-pair does not inherit a stale cursor from the previous device (find
     // The new device's own server-side mailbox starts fresh (nextSeq=1), so
     // its very first task.offer gets a LOW seq — exactly what the bug would
     // drop if this daemon had inherited device A's (higher) stale cursor.
-    const handleB = await real.byok.dispatch({ instruction: 'second device task', policy: { mode: 'auto' } });
+    const handleB = await real.byok.dispatch({ instruction: 'second device task' });
     await waitForTaskEvent(handleB, (e) => e.kind === 'state' && e.state === 'Claimed');
     await vi.waitFor(() => expect(adapterB.sessions).toHaveLength(1));
     adapterB.sessions[0]!.emit({ type: 'turn_end' });

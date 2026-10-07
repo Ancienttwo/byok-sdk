@@ -87,7 +87,7 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
 
   it('backs off by retryDelayMs on the VERY SAME cycle a validation-failed entry is first discovered — no full-RTT-speed hot loop', async () => {
     const badKnownType = {
-      v: 1,
+      v: 2,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff30',
       ts: new Date().toISOString(),
       type: 'task.offer', // recognized type ...
@@ -96,13 +96,13 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
       payload: {}, // ... but missing required fields -> EnvelopeValidationError
     };
     const validEnvelope = {
-      v: 1,
+      v: 2,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff31',
       ts: new Date().toISOString(),
       type: 'task.offer',
       task_id: 'good-task',
       seq: 3,
-      payload: { instruction: 'do it', policy: { mode: 'auto' } },
+      payload: { instruction: 'do it' },
     };
 
     // Every poll returns the SAME [bad, valid] batch — matches the server's
@@ -157,7 +157,7 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
 
   it('unknown executable messages back off without acknowledging their sequence', async () => {
     const unknownType = {
-      v: 1,
+      v: 2,
       id: 'ffffffff-ffff-4fff-8fff-ffffffffff32',
       ts: new Date().toISOString(),
       type: 'task.some_future_type',

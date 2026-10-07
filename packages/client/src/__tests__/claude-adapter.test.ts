@@ -36,7 +36,7 @@ async function takeTurn(session: Session): Promise<AgentEvent[]> {
 
 async function makeCtx(env: NodeJS.ProcessEnv = process.env): Promise<PreparedOperationResources> {
   const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-adapter-test-'));
-  return { workspaceDir, policy: { mode: 'auto' }, env };
+  return { workspaceDir, env };
 }
 
 async function startAdapter(adapter: ClaudeAdapter, task: TaskOfferPayload, resources: PreparedOperationResources): Promise<Session> {
@@ -45,7 +45,6 @@ async function startAdapter(adapter: ClaudeAdapter, task: TaskOfferPayload, reso
 
 const baseTask: TaskOfferPayload = {
   instruction: 'say hi',
-  policy: { mode: 'auto' },
 };
 
 describe('ClaudeAdapter against the fake-claude fixture', () => {
@@ -117,17 +116,9 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       resume: true,
       approvalInteractive: false,
       mcpToolsets: true,
-      permissionModes: ['auto', 'readonly', 'plan'],
     });
-  });
-
-  it('rejects confirm in prepare before bin resolution, spawn or helper side effects', async () => {
-    const resolveBin = vi.fn(() => ({ command: FIXTURE_PATH, source: 'path' as const }));
-    const adapter = new ClaudeAdapter({ resolveBin });
-    const ctx = await makeCtx();
-    ctx.policy = { mode: 'confirm' };
-    await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/confirm/i);
-    expect(resolveBin).not.toHaveBeenCalled();
+    // Claude reads MCP tools itself; the daemon takes no tools/list observation for it.
+    expect(adapter.descriptor.requiresMcpToolsetToolObservation).not.toBe(true);
   });
 
   it('descriptor declares no credential env vars (M5 — deliberate ToS posture: env-based API key passthrough for claude is a separate, pending product decision)', () => {
@@ -184,7 +175,6 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(calls[0]?.env.OPENAI_API_KEY).toBeUndefined();
     await expect(session.followUp({
       instruction: 'switch model',
-      policy: { mode: 'auto' },
       dispatchSelection: {
         lane: 'subscription',
         runtimeId: 'claude',
@@ -284,11 +274,11 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(args).toContain('--mcp-config');
     expect(args).toContain('--strict-mcp-config');
     expect(args).not.toContain('--permission-prompt-tool');
-    // The projected server's observed tool is pre-granted (real claude
-    // auto-denies an ungranted MCP tool), and nothing else is. The
-    // observation itself never enters the generated config file, which stays
-    // exactly the MCP authority claude understands.
-    expect(args[args.indexOf('--allowedTools') + 1]).toBe('mcp__salesko__find_leads');
+    // No per-tool grant: the ordinary launch skips permission prompts, so the
+    // projected MCP tools need no `--allowedTools` list. The observation never
+    // enters the generated config file either.
+    expect(args).toContain('--dangerously-skip-permissions');
+    expect(args).not.toContain('--allowedTools');
     const configPath = args[args.indexOf('--mcp-config') + 1];
     if (typeof configPath !== 'string') throw new Error('missing mcp config path');
     // claude spawns this server itself and `mcpServers` has no cwd field, so
@@ -342,7 +332,6 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     };
     await expect(adapter.prepare({
       offer: task,
-      policy: task.policy,
       descriptor: adapter.descriptor,
       requiredToolsetIds: [],
     })).resolves.toMatchObject({ kind: 'prepared' });
@@ -454,7 +443,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(firstTurn[3]).toEqual({ type: 'usage', inputTokens: 15, cachedInputTokens: 0, outputTokens: 20 });
     expect(firstTurn[4]).toEqual({ type: 'turn_end' });
 
-    await session.followUp({ instruction: 'say bye', policy: { mode: 'auto' } });
+    await session.followUp({ instruction: 'say bye' });
 
     const secondTurn = await takeEvents(session, 5);
     expect(secondTurn).toEqual([
@@ -476,7 +465,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     await takeEvents(session, 5); // drain the full turn, including the trailing usage + turn_end
 
     await expect(
-      session.followUp({ instruction: { blobRef: { blobId: 'b', contentHash: 'sha256:x', size: 1, contentType: 'text/plain' } }, policy: { mode: 'auto' } }),
+      session.followUp({ instruction: { blobRef: { blobId: 'b', contentHash: 'sha256:x', size: 1, contentType: 'text/plain' } } }),
     ).rejects.toThrow(/only supports string instructions/);
   });
 

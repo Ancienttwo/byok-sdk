@@ -89,7 +89,7 @@ describe('a lost/failed long-poll POST is retried with the identical batch, exac
       return originalFetch(input, init);
     }) as typeof globalThis.fetch;
 
-    const handle = await real.byok.dispatch({ instruction: 'needs a human to say go', policy: { mode: 'confirm' } });
+    const handle = await real.byok.dispatch({ instruction: 'needs a human to say go' });
 
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));

@@ -353,7 +353,7 @@ describe('authenticated enrollment tenant projection', () => {
     expect(appended).toMatchObject({ ok: true, record: { tenantId: 'tenant-daemon' } });
 
     const sequence = server.nextSeq();
-    server.send(createEnvelope('task.offer', { instruction: 'journal identity', policy: { mode: 'auto' } }, {
+    server.send(createEnvelope('task.offer', { instruction: 'journal identity' }, {
       taskId: 'enrollment-journal-task',
       seq: sequence,
     }));

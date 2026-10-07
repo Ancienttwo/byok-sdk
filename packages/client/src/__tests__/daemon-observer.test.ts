@@ -93,7 +93,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'do the thing', policy: { mode: 'auto' } },
+        { instruction: 'do the thing' },
         { taskId: 'task-seq-1', seq: server.nextSeq() },
       ),
     );
@@ -124,11 +124,8 @@ describe('daemon local observability (DaemonObserver)', () => {
   });
 
   it('a pre-claim task.decline maps to a `failed` DaemonEvent with preClaim:true (protocol\'s Offered -> Failed convention), and tasks() reflects declined:true', async () => {
-    // Exercises decline via the permission-ceiling path, exactly like
-    // daemon-task-loop.test.ts's own decline coverage: a `runtime` field
-    // constrained to a real RuntimeId ('stub' would fail createEnvelope's
-    // own schema validation before the offer is even sent) isn't needed to
-    // trigger a decline.
+    // Exercises a non-retryable pre-claim decline: a custom harness id
+    // combined with a built-in runtime selection is refused before claim.
     const adapter = new StubRuntimeAdapter();
     const workspaceRoot = await tmpDir('byok-observer-workspace-');
     const storeDir = await tmpDir('byok-observer-store-');
@@ -139,7 +136,6 @@ describe('daemon local observability (DaemonObserver)', () => {
         serverUrl: server.url,
         workspaceRoot,
         storeDir,
-        permissionDefaults: { mode: 'readonly' },
       },
       [adapter],
     );
@@ -152,7 +148,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'do something risky', policy: { mode: 'auto' } },
+        { instruction: 'do something risky', harnessId: 'acme-harness', runtime: 'claude' },
         { taskId: 'task-decline-1', seq: server.nextSeq() },
       ),
     );
@@ -177,7 +173,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'do work', policy: { mode: 'auto' } },
+        { instruction: 'do work' },
         { taskId: 'task-list-1', seq: server.nextSeq() },
       ),
     );
@@ -242,7 +238,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'x', policy: { mode: 'auto' } },
+        { instruction: 'x' },
         { taskId: 'task-unsub-1', seq: server.nextSeq() },
       ),
     );
@@ -257,7 +253,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'y', policy: { mode: 'auto' } },
+        { instruction: 'y' },
         { taskId: 'task-unsub-2', seq: server.nextSeq() },
       ),
     );
@@ -284,7 +280,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'x', policy: { mode: 'auto' } },
+        { instruction: 'x' },
         { taskId: 'task-throw-1', seq: server.nextSeq() },
       ),
     );
@@ -324,7 +320,7 @@ describe('daemon local observability (DaemonObserver)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { instruction: 'x', policy: { mode: 'auto' } },
+          { instruction: 'x' },
           { taskId: 'task-async-throw-1', seq: server.nextSeq() },
         ),
       );
@@ -363,7 +359,7 @@ describe('daemon local observability (DaemonObserver)', () => {
       const total = MAX_TRACKED_TASKS * 2;
       for (let i = 0; i < total; i++) {
         observer.handleInboundEnvelope(
-          createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: `t-${i}`, seq: i + 1 }),
+          createEnvelope('task.offer', { instruction: 'x' }, { taskId: `t-${i}`, seq: i + 1 }),
         );
       }
 
@@ -387,7 +383,7 @@ describe('daemon local observability (DaemonObserver)', () => {
         observer.handleInboundEnvelope(
           createEnvelope(
             'task.offer',
-            { instruction: 'run it', policy: { mode: 'auto' }, runtime: 'claude' },
+            { instruction: 'run it', runtime: 'claude' },
             { taskId: 'task-runtime-1', seq: 1 },
           ),
         );
@@ -477,7 +473,7 @@ describe('daemon local observability (DaemonObserver)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { instruction: 'needs a human', policy: { mode: 'auto' } },
+          { instruction: 'needs a human' },
           { taskId: 'task-approve-local-1', seq: server.nextSeq() },
         ),
       );
@@ -497,7 +493,7 @@ describe('daemon local observability (DaemonObserver)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { instruction: 'needs a human', policy: { mode: 'auto' } },
+          { instruction: 'needs a human' },
           { taskId: 'task-reject-local-1', seq: server.nextSeq() },
         ),
       );

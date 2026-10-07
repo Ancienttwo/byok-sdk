@@ -55,7 +55,7 @@ async function makeRunner(
 
 async function offerAndActivate(runner: TaskRunner, taskId: string): Promise<void> {
   await runner.handleEnvelope(
-    createEnvelope('task.offer', { instruction: 'do work', policy: { mode: 'confirm' } }, { taskId, seq: 1 }),
+    createEnvelope('task.offer', { instruction: 'do work' }, { taskId, seq: 1 }),
   );
 }
 

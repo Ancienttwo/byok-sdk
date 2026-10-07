@@ -279,7 +279,7 @@ describe('diagnostics collector', () => {
       descriptor: freezeRuntimeAdapterDescriptor({
         id: 'hanging',
         supportsDispatchSelection: false,
-        capabilities: { steer: false, resume: false, approvalInteractive: false, permissionModes: [] },
+        capabilities: { steer: false, resume: false, approvalInteractive: false },
         environmentRequirements: { credentialNames: [] },
       }),
       detect: () => new Promise(() => undefined),

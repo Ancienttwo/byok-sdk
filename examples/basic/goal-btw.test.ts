@@ -22,8 +22,8 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
   let deviceId: string; let now: number; let dbPath: string;
   let extraStores: SqliteGoalBtwStore[];
   const accepted: (outcome: unknown) => boolean = () => true; // Fixture acceptance, not a production semantic proof.
-  const target = (agentId = 'main-agent', mode: 'auto' | 'readonly' = 'auto'): BotTarget => ({
-    deviceId, agentRef: { agentId, profileRevision: '1' }, runtime: 'pi', policy: { mode }, egressPolicy: policy,
+  const target = (agentId = 'main-agent'): BotTarget => ({
+    deviceId, agentRef: { agentId, profileRevision: '1' }, runtime: 'pi', egressPolicy: policy,
   });
   function newGoal(id = 'goal', budget = 3, deadline = now + 10_000, agent = 'main-agent') {
     return host.startGoal({ id, objective: 'Complete the approved task', target: target(agent), maxSteps: budget, deadline });
@@ -42,7 +42,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
   }
   async function side(id = 'side', taskId = 'side-1', mainTaskId = 'step-1') {
     const reserved = await host.reserveBtw({ id, taskId, mainTaskId, mainDestination: 'main-thread', destination: `btw:${id}`,
-      snapshotRevision: 'prefix-v1', snapshot: 'Only the Host-selected prefix', question: 'Explain the API', target: target('side-agent', 'readonly') });
+      snapshotRevision: 'prefix-v1', snapshot: 'Only the Host-selected prefix', question: 'Explain the API', target: target('side-agent') });
     const sent = await host.sendBtw(id, reserved.revision); await running(taskId); return sent;
   }
   beforeEach(async () => {
@@ -94,7 +94,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
     await startStep(); const main = host.goal('goal'); const sent = await side();
     expect((await byok.tasks.attempt('step-1'))?.status).toBe('running');
     const starts = adapter.starts.length;
-    await byok.dispatchFreshAgentEgress({ ...target('main-agent', 'readonly'), taskId: 'same-home-side', instruction: 'side question',
+    await byok.dispatchFreshAgentEgress({ ...target('main-agent'), taskId: 'same-home-side', instruction: 'side question',
       terminalProjection: { mode: 'result-document', contract: BTW_RESULT_CONTRACT } });
     await terminal('same-home-side');
     expect((await byok.tasks.deviceTerminal('same-home-side'))?.envelope).toMatchObject({ type: 'task.decline', payload: { reason: 'agent home busy: 1 active attempt(s)' } });
@@ -104,17 +104,15 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
     expect((await host.reconcileBtw('side', sent.revision)).value).toMatchObject({ status: 'complete', answer: 'An independent answer', destination: 'btw:side' });
     expect(host.goal('goal')).toEqual(main);
     expect((await byok.tasks.attempt('step-1'))?.status).toBe('running');
-    expect(adapter.starts.find(s => s.manifest.taskId === 'side-1')?.manifest.policy.mode).toBe('readonly');
     expect(adapter.starts[0]!.manifest.workspace.workspaceDir).not.toBe(adapter.starts[1]!.manifest.workspace.workspaceDir);
     expect(adapter.sessions.get('step-1')!.steered).toBe(0);
   });
 
-  it('refuses a profile-only different home and non-readonly or shared-destination btw', async () => {
+  it('refuses a profile-only different home and shared-destination btw', async () => {
     await startStep();
     const base = { id: 'bad', taskId: 'bad-task', mainTaskId: 'step-1', mainDestination: 'main', destination: 'side',
-      snapshotRevision: '1', snapshot: '', question: 'question', target: target('side-agent', 'readonly') };
-    await expect(host.reserveBtw({ ...base, target: { ...target('main-agent', 'readonly'), agentRef: { agentId: 'main-agent', profileRevision: '2' } } })).rejects.toThrow('different Agent home');
-    await expect(host.reserveBtw({ ...base, target: target('side-agent') })).rejects.toThrow('readonly');
+      snapshotRevision: '1', snapshot: '', question: 'question', target: target('side-agent') };
+    await expect(host.reserveBtw({ ...base, target: { ...target('main-agent'), agentRef: { agentId: 'main-agent', profileRevision: '2' } } })).rejects.toThrow('different Agent home');
     await expect(host.reserveBtw({ ...base, destination: 'main' })).rejects.toThrow('independent');
     expect(adapter.starts).toHaveLength(1); expect(await byok.tasks.offer('bad-task')).toBeUndefined();
   });
@@ -317,7 +315,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
 
   it('btw cannot reserve against a main task that is not running', async () => {
     const input = { id: 'not-running', taskId: 'side-not-running', mainTaskId: 'missing-main', mainDestination: 'main', destination: 'side',
-      snapshotRevision: '1', snapshot: '', question: 'question', target: target('side-agent', 'readonly') };
+      snapshotRevision: '1', snapshot: '', question: 'question', target: target('side-agent') };
     await expect(host.reserveBtw(input)).rejects.toThrow('main task is not running');
     const sent = await startStep(); await host.cancelGoal('goal', sent.revision);
     await expect(host.reserveBtw({ ...input, mainTaskId: 'step-1' })).rejects.toThrow('main task is not running');

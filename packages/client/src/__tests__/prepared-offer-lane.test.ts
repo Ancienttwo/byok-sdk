@@ -96,7 +96,6 @@ const MCP_CAPABLE: RuntimeCapabilities = {
   resume: true,
   approvalInteractive: true,
   mcpToolsets: true,
-  permissionModes: ['auto', 'confirm'],
 };
 
 const unusedBlobClient: BlobResolver = {
@@ -270,7 +269,6 @@ function binding(overrides: Partial<InputPreparationBindingV1> = {}): InputPrepa
     source: { revision: 'source-r1', digest: 'source-digest-1' },
     target: { endpoint: MODEL.baseUrl, modelId: MODEL.id },
     policyRevision: POLICY_REVISION,
-    permissionMode: 'auto',
     runtime: RUNTIME,
     requestDigest: REQUEST_DIGEST,
     accountingPolicyRef: ACCOUNTING_POLICY_REF,
@@ -361,7 +359,6 @@ async function lane(options: {
     agentMemory: 'none',
     memory: null,
     observation,
-    permissionMode: 'auto',
     runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
     launch: attestation,
     toolsetDefinitionRevisions: { [TOOLSET_ID]: revision },
@@ -490,7 +487,6 @@ function preparedOffer(
     'task.offer_prepared',
     {
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
-      policy: { mode: 'auto', allowTools: [] },
       runtime: 'pi',
       agentRef: AGENT_REF,
       preparation,
@@ -533,7 +529,7 @@ async function memoryOnlyRecord(): Promise<{
   const attestation = mcpLaunchAttestation(launch);
   const memoryProjection = preparedMemoryProjection('read', MEMORY, inputPreparationRuntimeIdentityString(RUNTIME));
   const fingerprinted = await fingerprintPreparedToolSurface({
-    agentMemory: 'read', memory: MEMORY, observation: {}, permissionMode: 'auto',
+    agentMemory: 'read', memory: MEMORY, observation: {},
     runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME), launch: attestation,
     toolsetDefinitionRevisions: {}, implementations: {},
   });
@@ -563,7 +559,6 @@ async function memoryOnlyRecord(): Promise<{
 
 /** A sealed record whose tool surface is empty: no Agent memory, no Host MCP toolsets. */
 async function toollessRecord(options: {
-  readonly permissionMode?: 'auto' | 'confirm' | 'readonly' | 'plan';
   /** A launch directory other than this machine's trusted one. */
   readonly launchCwd?: string;
   /** Digests counted elsewhere (the real daemon assembler) instead of by this fixture. */
@@ -572,7 +567,6 @@ async function toollessRecord(options: {
   readonly store: InputPreparationStore;
   readonly recordId: string;
 }> {
-  const permissionMode = options.permissionMode ?? 'auto';
   const store = new InputPreparationStore({
     storeDir: await tempDir('byok-prepared-toolless-runner-store-'),
     retentionMs: 60 * 60 * 1000,
@@ -582,14 +576,14 @@ async function toollessRecord(options: {
   const launch = { cwd: options.launchCwd ?? await trustedCwd() } as const;
   const attestation = mcpLaunchAttestation(launch);
   const fingerprinted = await fingerprintPreparedToolSurface({
-    agentMemory: 'none', memory: null, observation: {}, permissionMode,
+    agentMemory: 'none', memory: null, observation: {},
     runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME), launch: attestation,
     toolsetDefinitionRevisions: {}, implementations: {},
   });
   if (!fingerprinted.ok) throw new Error(fingerprinted.message);
   const reserved = await store.reserve({
     key: { scopeId: SCOPE_ID, agentRef: AGENT_REF.agentId, requestId: 'toolless-request' },
-    requestDigest: REQUEST_DIGEST, binding: binding({ permissionMode }), model: MODEL, maxInFlight: 8,
+    requestDigest: REQUEST_DIGEST, binding: binding(), model: MODEL, maxInFlight: 8,
   });
   if (reserved.kind !== 'created') throw new Error('toolless record was not created');
   const summary: InputPreparationArtifactSummaryV1 = {
@@ -752,7 +746,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
       policyIdentity: POLICY_REVISION,
       profileRevision: AGENT_REF.profileRevision,
     });
-    expect(launched.permissionMode).toBe('auto');
+    expect(launched).not.toHaveProperty('permissionMode');
     expect(launched.launch).toEqual({ cwd: await trustedCwd() });
     expect(launched.toolImplementations).toEqual(built.implementations);
 
@@ -770,7 +764,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     const attestation = mcpLaunchAttestation(launch);
     const memoryProjection = preparedMemoryProjection('read', MEMORY, inputPreparationRuntimeIdentityString(RUNTIME));
     const fingerprinted = await fingerprintPreparedToolSurface({
-      agentMemory: 'read', memory: MEMORY, observation: {}, permissionMode: 'auto',
+      agentMemory: 'read', memory: MEMORY, observation: {},
       runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME), launch: attestation,
       toolsetDefinitionRevisions: {}, implementations: {},
     });
@@ -809,7 +803,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
         reference: record.recordId, requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST,
       },
       agentRef: AGENT_REF, deviceId: DEVICE_ID, policyRevision: POLICY_REVISION, runtime: RUNTIME,
-      admittedMode: 'auto', offeredAgentMemory: 'read', memory: MEMORY, launch,
+      offeredAgentMemory: 'read', memory: MEMORY, launch,
       observation: {}, implementations: {}, servers: [], toolsetDefinitionRevisions: {}, nowMs: Date.now(),
     });
     if (!admitted.ok) throw new Error(`${admitted.reason}: ${admitted.detail}`);
@@ -1270,14 +1264,6 @@ describe('every compared item declines by its own name, with no claim and no pin
       },
     },
     {
-      name: 'a manifest filtered for a mode this offer was not admitted under',
-      reason: 'preparation_permission_mode_mismatch',
-      build: async () => {
-        const built = await lane({ bindingOverrides: { permissionMode: 'confirm' } });
-        return { built, offered: reference(built) };
-      },
-    },
-    {
       name: 'an artifact compiled against a native closure this device no longer has',
       reason: 'preparation_runtime_identity_mismatch',
       build: async () => {
@@ -1427,7 +1413,6 @@ describe('every compared item declines by its own name, with no claim and no pin
       'task.offer_prepared',
       {
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
-      policy: { mode: 'auto', allowTools: [] },
         runtime: 'claude',
         agentRef: AGENT_REF,
         agentMemory: 'none',
@@ -1444,7 +1429,7 @@ describe('every compared item declines by its own name, with no claim and no pin
 
 describe('prepared Agent memory admission declines with its exact typed reason', () => {
   /** Every mode the policy cases need, so an earlier capability gate cannot answer for them. */
-  const ALL_MODES: RuntimeCapabilities = { ...MCP_CAPABLE, permissionModes: ['auto', 'confirm', 'readonly', 'plan'] };
+  const ALL_MODES: RuntimeCapabilities = { ...MCP_CAPABLE };
   const MEMORY_HELPER = { agentMemoryFilesystemHelperBin: '/external/proved-agent-memory-helper' } as const;
 
   function nothingCommitted(sent: readonly Envelope[], adapter: StubRuntimeAdapter, runner: TaskRunner): void {
@@ -1475,24 +1460,6 @@ describe('prepared Agent memory admission declines with its exact typed reason',
     }, seq, { agentMemory: 'read', requiredToolsets: undefined });
     return { memoryRecord, adapter, sent, runner, offer };
   }
-
-  it.each<[string, 'read' | 'read-write', NonNullable<TaskOfferPreparedPayload['policy']>]>([
-    ['readonly with read-write', 'read-write', { mode: 'readonly' }],
-    ['confirm', 'read', { mode: 'confirm' }],
-    ['plan', 'read', { mode: 'plan' }],
-    ['a selected denyTools name', 'read', { mode: 'auto', allowTools: [], denyTools: ['memory_recall'] }],
-  ])('declines %s as permission_mode_denied: agent_memory_policy_conflict before pin', async (_label, agentMemory, policy) => {
-    const built = await lane({ bindingOverrides: { agentMemory, permissionMode: policy.mode } });
-    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
-    const sent: Envelope[] = [];
-    const runner = await makeRunner(built, adapter, sent, MEMORY_HELPER);
-
-    await runner.handleEnvelope(preparedOffer('task-memory-policy', reference(built), 1, { agentMemory, policy }));
-
-    expect(declineReason(sent)).toBe('permission_mode_denied: agent_memory_policy_conflict');
-    expect(built.store.get(built.recordId)?.pin).toBeUndefined();
-    nothingCommitted(sent, adapter, runner);
-  });
 
   it('declines a lowered local ceiling as scope_denied: agent_memory_denied through the real service authority', async () => {
     let ceiling: 'none' | 'read' | 'read-write' = 'read';
@@ -1668,7 +1635,6 @@ describe('ordinary offers are untouched by the prepared lane', () => {
       'task.offer_for_agent',
       {
         instruction: 'an ordinary instruction',
-        policy: { mode: 'auto' },
         runtime: 'pi',
         agentRef: AGENT_REF,
         requiredToolsets: [TOOLSET_ID],
@@ -1786,28 +1752,10 @@ describe('prepared daemon-authored message egress', () => {
     await runner.shutdownActiveTasks('test complete');
   });
 
-  it.each([
-    [{ mode: 'auto' }, 'policy_inexpressible'],
-    [{ mode: 'auto', allowTools: ['read'] }, 'native_tools_uncounted'],
-    [{ mode: 'auto', allowTools: [], network: false }, 'policy_inexpressible'],
-  ] as const)('refuses native policy %j before pin or claim', async (policy, reason) => {
-    const built = await lane();
-    const pin = vi.spyOn(built.store, 'pin');
-    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
-    const sent: Envelope[] = [];
-    const runner = await makeRunner(built, adapter, sent);
-    await runner.handleEnvelope(preparedOffer('native-refused', reference(built), 1, { policy: { mode: policy.mode, ...('allowTools' in policy ? { allowTools: [...policy.allowTools] } : {}), ...('network' in policy ? { network: policy.network } : {}) } }));
-    expect(declineReason(sent)).toContain(reason);
-    expect(pin).not.toHaveBeenCalled();
-    expect(built.store.get(built.recordId)?.pin).toBeUndefined();
-    expect(sent.some(e => e.type === 'task.claim')).toBe(false);
-    expect(adapter.preparedStartCalls).toHaveLength(0);
-    await runner.shutdownActiveTasks('test complete');
-  });
 });
 
 describe('a tool-less prepared record (requiredToolsets [], agentMemory none, the offer omits requiredToolsets)', () => {
-  const ALL_MODES: RuntimeCapabilities = { ...MCP_CAPABLE, permissionModes: ['auto', 'confirm', 'readonly', 'plan'] };
+  const ALL_MODES: RuntimeCapabilities = { ...MCP_CAPABLE };
   const selector = { mode: 'result-document' as const, contract: 'test.internal-summary.v1' };
   const document = { schemaVersion: 'test.internal-summary.v1', text: 'Frozen input summary.' };
 
@@ -1875,7 +1823,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
       }),
       runtimeEnv: () => ({ PATH: process.env.PATH ?? '' }),
     }).assemble({
-      agentMemory: 'none', requiredToolsets: [], permissionMode: 'auto',
+      agentMemory: 'none', requiredToolsets: [],
       runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
     });
     if (!counted.ok) throw new Error(`${counted.code}: ${counted.detail}`);
@@ -1887,7 +1835,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
       record: stored, artifactPath: record.store.artifactPathOf(stored),
       offered: { reference: record.recordId, requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST },
       agentRef: AGENT_REF, deviceId: DEVICE_ID, policyRevision: POLICY_REVISION, runtime: RUNTIME,
-      admittedMode: 'auto', offeredAgentMemory: 'none', memory: null, launch,
+      offeredAgentMemory: 'none', memory: null, launch,
       observation: {}, implementations: {}, servers: [], toolsetDefinitionRevisions: {}, nowMs: Date.now(),
     });
     if (!admitted.ok) throw new Error(`${admitted.reason}: ${admitted.detail}`);
@@ -1909,7 +1857,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
       record: stored, artifactPath: built.store.artifactPathOf(stored),
       offered: reference(built),
       agentRef: AGENT_REF, deviceId: DEVICE_ID, policyRevision: POLICY_REVISION, runtime: RUNTIME,
-      admittedMode: 'auto', offeredAgentMemory: 'none', memory: null, launch: { cwd: await trustedCwd() },
+      offeredAgentMemory: 'none', memory: null, launch: { cwd: await trustedCwd() },
       observation: undefined, implementations: built.implementations,
       servers: [{ serverName: SERVER_NAME, toolsetId: TOOLSET_ID, command: built.serverCommand, args: ['--stdio'] }],
       toolsetDefinitionRevisions: { [TOOLSET_ID]: TOOLSET_REVISION }, nowMs: Date.now(),
@@ -1952,20 +1900,6 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
     expectNothingCommitted(wantsNone.sent, memoryAdapter, memoryRecord);
   });
 
-  it.each([
-    ['auto without allowTools', 'auto', { mode: 'auto' }, 'policy_inexpressible'],
-    ['auto allowing a native tool', 'auto', { mode: 'auto', allowTools: ['read'] }, 'native_tools_uncounted'],
-    ['readonly', 'readonly', { mode: 'readonly' }, 'native_tools_uncounted'],
-    ['readonly allowing a native tool', 'readonly', { mode: 'readonly', allowTools: ['read'] }, 'native_tools_uncounted'],
-  ] as const)('refuses the native policy %s on a tool-less record before pin or claim', async (_name, mode, policy, reason) => {
-    const record = await toollessRecord({ permissionMode: mode });
-    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
-    const { sent, pin } = await run(record, (id) => toollessOffer(id, `task-toolless-${reason}`, { policy: { ...policy } as never }), { adapter });
-    expect(declineReason(sent)).toContain(reason);
-    expectNothingCommitted(sent, adapter, record);
-    expect(pin).not.toHaveBeenCalled();
-  });
-
   it('declines non-retryably, before any pin, when no launch directory can be proven', async () => {
     const record = await toollessRecord();
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
@@ -2000,7 +1934,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
 
   it('is rejected by the protocol schema when an offer names an empty requiredToolsets', () => {
     const parsed = TaskOfferPreparedPayloadSchema.safeParse({
-      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, policy: { mode: 'auto', allowTools: [] }, runtime: 'pi',
+      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, runtime: 'pi',
       agentRef: AGENT_REF, preparation: { reference: 'r', requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST },
       agentMemory: 'none', requiredToolsets: [], terminalProjection: selector, taskId: 'schema-check',
     });

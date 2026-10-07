@@ -55,7 +55,7 @@ function payload(overrides: Record<string, unknown> = {}): Record<string, unknow
     deadlineAt: '2026-01-01T00:01:00.000Z',
     context: { inline: '{"prompt":{},"messages":[]}' },
     requiredToolsets: ['team'],
-    agentMemory: 'none', permissionMode: 'auto',
+    agentMemory: 'none',
     ...overrides,
   };
 }
@@ -69,7 +69,7 @@ const BINDING = {
   source: SOURCE,
   target: { endpoint: 'https://provider.example/v1', modelId: 'model-1' },
   policyRevision: 'limits-r1',
-  agentMemory: 'none', permissionMode: 'auto',
+  agentMemory: 'none',
   runtime: {
     packageName: '@byok-sdk/pi-coding-agent',
     packageVersion: '0.85.1001',
@@ -154,7 +154,6 @@ describe('agent.input.preparation envelope', () => {
       'agentRef',
       'context',
       'deadlineAt',
-      'permissionMode',
       'policyRevision',
       'profileId',
       'requestId',
@@ -543,7 +542,7 @@ describe('input preparation capability and routes', () => {
     // version field: a device and a cloud on different versions never admit
     // each other's preparations. The retired unversioned token is gone.
     expect(AGENT_INPUT_PREPARATION_CAPABILITY).toBe(`agent-input-preparation-v${INPUT_PREPARATION_WIRE_VERSION}`);
-    expect(AGENT_INPUT_PREPARATION_CAPABILITY).toBe('agent-input-preparation-v8');
+    expect(AGENT_INPUT_PREPARATION_CAPABILITY).toBe('agent-input-preparation-v9');
     expect(CAPABILITY_FLAGS as readonly string[]).not.toContain('agent-input-preparation');
     expect(BYOK_INPUT_PREPARATION_COMPLETION_ROUTE).toBe('/byok/input-preparations/:requestId/completion');
     expect(BYOK_INPUT_PREPARATION_STATUS_ROUTE).toBe('/byok/input-preparations/:requestId');

@@ -138,7 +138,7 @@ export async function startRealCloud(opts: StartRealCloudOptions): Promise<RealC
         tenant,
         createPairingCode: () => cloud.createPairingCode(tenant, { productId: opts.productId }),
         enqueueOffer: (deviceId, instruction) =>
-          cloud.enqueueOffer(tenant, deviceId, { payload: { instruction, policy: { mode: 'auto' } } }),
+          cloud.enqueueOffer(tenant, deviceId, { payload: { instruction } }),
         enqueueToolsetOffer: (deviceId, payload) =>
           cloud.enqueueToolsetOffer(tenant, deviceId, { payload }),
         enqueueAgentOffer: (deviceId, payload) =>

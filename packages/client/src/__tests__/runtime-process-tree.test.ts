@@ -63,11 +63,10 @@ describe('bundled runtime process-tree disposal', () => {
   it('escalates a TERM-resistant POSIX process group before resolving close', async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-process-tree-escalation-'));
     const receiptFile = path.join(workspaceDir, 'process-tree.json');
-    const offer: TaskOfferPayload = { instruction: 'stay alive', policy: { mode: 'auto' } };
+    const offer: TaskOfferPayload = { instruction: 'stay alive' };
     const adapter = new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'package' }) });
     const session = await startPreparedOperation(adapter, offer, {
       workspaceDir,
-      policy: offer.policy,
       env: {
         ...process.env,
         FAKE_PI_PROCESS_TREE_FILE: receiptFile,
@@ -89,11 +88,10 @@ describe('bundled runtime process-tree disposal', () => {
   it('Pi close resolves only after its real root, descendant and grandchild are all gone', async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-process-tree-'));
     const receiptFile = path.join(workspaceDir, 'process-tree.json');
-    const offer: TaskOfferPayload = { instruction: 'stay alive', policy: { mode: 'auto' } };
+    const offer: TaskOfferPayload = { instruction: 'stay alive' };
     const adapter = new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'package' }) });
     const session = await startPreparedOperation(adapter, offer, {
       workspaceDir,
-      policy: offer.policy,
       env: { ...process.env, FAKE_PI_PROCESS_TREE_FILE: receiptFile },
     });
     const receipt = await readReceipt(receiptFile);
@@ -117,11 +115,10 @@ describe('bundled runtime process-tree disposal', () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-process-tree-escape-'));
     const receiptFile = path.join(workspaceDir, 'process-tree.json');
     const escapeLog = path.join(workspaceDir, 'escapees.log');
-    const offer: TaskOfferPayload = { instruction: 'stay alive', policy: { mode: 'auto' } };
+    const offer: TaskOfferPayload = { instruction: 'stay alive' };
     const adapter = new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'package' }) });
     const session = await startPreparedOperation(adapter, offer, {
       workspaceDir,
-      policy: offer.policy,
       env: {
         ...process.env,
         FAKE_PI_PROCESS_TREE_FILE: receiptFile,
@@ -176,10 +173,9 @@ describe('bundled runtime process-tree disposal', () => {
   ])('$runtime close resolves only after its real root, descendant and grandchild are all gone', async ({ runtime, adapter, env }) => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), `byok-${runtime.toLowerCase()}-process-tree-`));
     const receiptFile = path.join(workspaceDir, 'process-tree.json');
-    const offer: TaskOfferPayload = { instruction: 'stay alive', policy: { mode: 'auto' } };
+    const offer: TaskOfferPayload = { instruction: 'stay alive' };
     const session = await startPreparedOperation(adapter(), offer, {
       workspaceDir,
-      policy: offer.policy,
       env: { ...process.env, ...env(receiptFile) },
     });
     const receipt = await readReceipt(receiptFile);

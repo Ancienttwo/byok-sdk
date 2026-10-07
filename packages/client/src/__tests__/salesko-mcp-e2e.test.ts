@@ -61,7 +61,6 @@ describe('Salesko fake connector MCP end to end', () => {
         'task.offer_with_toolsets',
         {
           instruction: 'salesko:find-leads',
-          policy: { mode: 'auto' },
           runtime: 'claude',
           requiredToolsets: ['salesko'],
         },

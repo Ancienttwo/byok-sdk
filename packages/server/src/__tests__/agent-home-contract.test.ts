@@ -82,7 +82,7 @@ describe('agent-home-contract reference server', () => {
     const { code } = await started.byok.pairing.createPairingCode(testPairingClaims(PRODUCT_ID));
     const daemon = await pairFakeDaemon(started.baseUrl, code);
     const hello = createEnvelope('conn.hello', {
-      protocolVersions: [1],
+      protocolVersions: [2],
       capabilities: ['agent-home-contract'],
       deviceId: daemon.deviceId,
       productId: PRODUCT_ID,

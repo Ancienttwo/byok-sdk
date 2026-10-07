@@ -13,7 +13,7 @@ import { createSqliteEmbeddedStores } from '../stores/sqlite';
 const tenant = tenantId('receipts');
 const other = tenantId('other');
 const deviceId = 'device-receipts';
-const payload = { instruction: 'original', runtime: 'claude', policy: { mode: 'auto' } } as const;
+const payload = { instruction: 'original', runtime: 'claude' } as const;
 
 describe('SQLite receipt recovery', () => {
   const roots: string[] = [];
@@ -56,7 +56,7 @@ describe('SQLite receipt recovery', () => {
         'terminal-projection-selection', 'agent-egress-fresh-session',
       ] });
       const execution = RecurringExecutionInputSchema.parse({ taskId, deviceId, payload: {
-        instruction: 'reply', runtime: 'codex', agentRef, policy: { mode: 'auto' },
+        instruction: 'reply', runtime: 'codex', agentRef,
         egressPolicy: { policyRevision: 'policy-v1', activity: { mode: 'metadata-status', delivery: 'latest-value' },
           reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
           transfers: { workspace: { maxBytes: 512, allowedMimeTypes: ['text/plain'] }, transcript: 'disabled', artifact: 'disabled' } },

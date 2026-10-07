@@ -56,7 +56,6 @@ describe('DispatchSelectionSchema', () => {
   it('is carried by task.offer without widening its strict nested shape', () => {
     const result = TaskOfferPayloadSchema.safeParse({
       instruction: 'hello',
-      policy: { mode: 'auto' },
       dispatchSelection: {
         lane: 'byok',
         runtimeId: 'pi',

@@ -1,4 +1,4 @@
-import type { AgentRef, InputPreparationOfferBinding, PermissionMode, PreparedAgentMemoryMode } from '@byok-sdk/protocol';
+import type { AgentRef, InputPreparationOfferBinding, PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import {
   inputPreparationDigest,
   inputPreparationRuntimeIdentityString,
@@ -30,7 +30,7 @@ import type { PreparedAgentMemoryState } from './prepared-agent-memory';
  * decides the shape of this file:
  *
  * - The binding answers device, Agent, profile revision, policy revision,
- *   permission mode, runtime identity and request digest DIRECTLY. Those are
+ *   runtime identity and request digest DIRECTLY. Those are
  *   compared as values.
  * - The artifact summary answers the envelope digest, the tool implementation
  *   kinds (which are keyed by model-visible tool NAME, so they also answer the
@@ -45,7 +45,7 @@ import type { PreparedAgentMemoryState } from './prepared-agent-memory';
  *   schemas through `observationDigest`.
  *
  * WHERE the live values come from: this daemon's OWN admission of this offer —
- * the merged policy, the one trusted launch binding it resolved, the one
+ * the one trusted launch binding it resolved, the one
  * implementation identity per server it resolved, and the `tools/list`
  * observation its admission probe took. Nothing is re-resolved here. A second
  * resolution would be a second opinion about the same install, and the two
@@ -84,8 +84,6 @@ export type PreparedOfferDeclineReason =
   | 'preparation_request_digest_mismatch'
   /** The Host re-presented an envelope digest the record's artifact does not carry. */
   | 'preparation_artifact_digest_mismatch'
-  /** This offer was ADMITTED under a mode the manifest was not filtered for. */
-  | 'preparation_permission_mode_mismatch'
   /** The Host re-presented a memory mode that differs from the durable binding. */
   | 'agent_memory_mismatch'
   /** The installed native closure is not the one that compiled the artifact. */
@@ -146,8 +144,6 @@ export interface PreparedOfferAdmissionInput {
   readonly policyRevision: string;
   /** The VERIFIED installed runtime/compiler identity this daemon would compile with today. */
   readonly runtime: InputPreparationRuntimeIdentityV1;
-  /** The mode this offer was ADMITTED under — the merged policy's, not the offer's request. */
-  readonly admittedMode: PermissionMode;
   /** The exact SDK memory selection re-presented by this prepared offer. */
   readonly offeredAgentMemory: PreparedAgentMemoryMode;
   /** Current descriptor observation and attested helper pair; null only for `none`. */
@@ -253,13 +249,6 @@ export async function admitPreparedOffer(
       'this offer re-presents an envelope digest the named preparation does not carry',
     );
   }
-  if (binding.permissionMode !== input.admittedMode) {
-    return decline(
-      'preparation_permission_mode_mismatch',
-      `the named preparation counted a manifest filtered for mode ${JSON.stringify(binding.permissionMode)},`
-      + ` and this offer was admitted under ${JSON.stringify(input.admittedMode)}`,
-    );
-  }
   if (binding.agentMemory !== input.offeredAgentMemory
     || (binding.agentMemory === 'none' ? input.memory !== null : input.memory === null)) {
     return decline(
@@ -311,7 +300,6 @@ export async function admitPreparedOffer(
     agentMemory: binding.agentMemory,
     memory: input.memory,
     observation: input.observation,
-    permissionMode: input.admittedMode,
     runtimeIdentity,
     launch,
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
@@ -414,7 +402,6 @@ export async function admitPreparedOffer(
           profileRevision: binding.profileRevision,
         }),
       }),
-      permissionMode: binding.permissionMode,
       agentMemory: binding.agentMemory,
       memory: input.memory,
       toolBindingDigest: summary.toolBindingDigest,

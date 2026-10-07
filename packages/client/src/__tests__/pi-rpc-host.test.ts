@@ -42,8 +42,8 @@ function fixture() {
   const command = spawnSync(bun, ['--print', 'process.execPath'], {encoding:'utf8'}).stdout.trim();
   const binding = {format:'byok.implementation-spawn',version:1,identity:{kind:'unavailable',reason:'resolver_unconfigured'},
     command,entry,fixedArgv:[],cwd:sealed,envCommitments:{PI_CODING_AGENT_DIR:join(root,'agent')}};
-  const config = { binding, format: 'byok.pi.rpc-launch', version: 2, descendantPlan: null, cwd, policy: { mode: 'auto' },
-    mcp: { mcpEnv: {}, mcpServers: {}, observation: {}, toolImplementations: {}, permissionMode: 'auto' } };
+  const config = { binding, format: 'byok.pi.rpc-launch', version: 3, descendantPlan: null, cwd,
+    mcp: { mcpEnv: {}, mcpServers: {}, observation: {}, toolImplementations: {} } };
   const configPath = join(root, 'config.json');
   const serialized=serializePiHostConfig(config);
   writeFileSync(configPath, serialized.bytes);
@@ -69,12 +69,12 @@ describe('SDK ordinary Pi RPC entry', () => {
       for (const argv of [[], ['--config','relative','--mode','rpc'], ['--config','/x','--mode','rpc','--extension','/x'], ['--config','/x','--mode','rpc','--config','/y'], ['--config','/x','--mode','rpc','--thinking','bogus']]) {
         try { host.parsePiRpcHostArgs(['--config-digest='+'a'.repeat(64),...argv]); rejected.push(false); } catch { rejected.push(true); }
       }
-      for (const cfg of [{...base, version:1}, {...base, cwd:'relative'}, {...base, extra:true}, {...base, policy:{mode:'readonly'}}]) {
+      for (const cfg of [{...base, version:1}, {...base, version:2}, {...base, cwd:'relative'}, {...base, extra:true}, {...base, policy:{mode:'auto'}}]) {
         try { host.parsePiRpcHostConfig(cfg); rejected.push(false); } catch { rejected.push(true); }
       }
       console.log(JSON.stringify(rejected));
     `);
-    expect(result).toEqual(Array(9).fill(true));
+    expect(result).toEqual(Array(10).fill(true));
   });
 
   it('resumes only an exact native session id and rejects a mismatched header cwd', () => {
@@ -146,35 +146,32 @@ describe('SDK ordinary Pi RPC entry', () => {
     expect(existsSync(join(f.root,'agent','sessions'))).toBe(false);
   });
 
-  it('refuses tool projection drift before starting RPC', () => {
+  it.each([['--tools', 'bash'], ['--exclude-tools', 'bash'], ['--no-tools']])('rejects the delegated tool flag %s before starting RPC', (...flag) => {
     const f = fixture();
-    const result = spawnSync(bun, [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc', '--tools', 'bash'], {
+    const result = spawnSync(bun, [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc', ...flag], {
       cwd:f.sealed, env:f.env, encoding:'utf8', timeout:15_000,
     });
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('delegated tool flags differ from policy');
+    expect(result.status).toBe(78);
+    expect(result.stderr).toContain(`unsupported argument ${flag[0]}`);
     expect(result.stdout).toBe('');
   });
 
   // The config the pi adapter writes for an offer whose server projection
-  // carries the SDK-reserved Agent-message server (#180): readonly policy,
-  // permissionMode to match, launchCwd because any projected server requires
-  // one, and the server pointed at the native-message fixture, which answers
-  // the live session_start observe with exactly `send_agent_message`. The
-  // drift gate must derive the reserved bare name from THIS config's server
-  // projection — policy alone can no longer reproduce the delegated flags.
+  // carries the SDK-reserved Agent-message server (#180): launchCwd because
+  // any projected server requires one, and the server pointed at the
+  // native-message fixture, which answers the live session_start observe with
+  // exactly `send_agent_message`.
   function messageFixture() {
     const f = fixture();
     const config = {
       ...f.config,
-      policy: { mode: 'readonly' },
       mcp: {
         mcpEnv: { BYOK_NATIVE_MESSAGE_RECEIPT: join(f.root, 'native-message-receipt.json') },
         mcpServers: { byokagentmessage: {
           command: f.config.binding.command,
           args: [resolve(import.meta.dirname, 'fixtures/native-agent-message-mcp.mjs')],
         } },
-        observation: {}, toolImplementations: {}, permissionMode: 'readonly', launchCwd: f.cwd,
+        observation: {}, toolImplementations: {}, launchCwd: f.cwd,
       },
     };
     const serialized = serializePiHostConfig(config);
@@ -182,20 +179,9 @@ describe('SDK ordinary Pi RPC entry', () => {
     return { ...f, config, digest: serialized.digest };
   }
 
-  it('refuses delegated tool flags that omit the reserved Agent-message grant the config projects', () => {
+  it('starts RPC with the reserved Agent-message server projected', async () => {
     const f = messageFixture();
-    const result = spawnSync(bun, [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc',
-      '--tools', 'read,grep,find,ls,subagent,todo'], {
-      cwd:f.sealed, env:f.env, encoding:'utf8', timeout:15_000,
-    });
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('delegated tool flags differ from policy');
-    expect(result.stdout).toBe('');
-  });
-
-  it('starts RPC when the delegated tool flags carry the reserved Agent-message grant', async () => {
-    const f = messageFixture();
-    const child = spawn(bun, [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc', '--no-extensions', '--no-skills', '--provider', 'anthropic', '--model', 'claude-sonnet-4-5', '--thinking', 'high', '--tools', 'read,grep,find,ls,subagent,todo,send_agent_message'], {
+    const child = spawn(bun, [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc', '--no-extensions', '--no-skills', '--provider', 'anthropic', '--model', 'claude-sonnet-4-5', '--thinking', 'high'], {
       cwd: f.sealed, env: f.env, stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stderr = '';
@@ -221,7 +207,6 @@ describe('SDK ordinary Pi RPC entry', () => {
         child.stdin.write(JSON.stringify({ id:'state', type:'get_state' }) + '\n');
       });
       expect(response.success).toBe(true);
-      expect(stderr).not.toContain('delegated tool flags differ from policy');
       expect(stderr).not.toContain('Failed to load extension');
     } finally {
       const exited = new Promise<void>((done) => child.once('exit', () => done()));

@@ -48,7 +48,7 @@ import type { InputPreparationCompletionClient } from './input-preparation-compl
  *    never from the payload. A sender that could name them could bind a
  *    preparation to a device it does not own.
  * 2. Tools and tool-executor identities are LOCAL observations. The payload
- *    names required toolsets and a permission mode; the daemon's ONE prepared
+ *    names required toolsets; the daemon's ONE prepared
  *    tool-surface entry (`./prepared-tool-surface.ts`, reached through
  *    `InputPreparationService.prepare`) resolves the launch boundary, resolves
  *    an implementation identity per server, probes them itself and
@@ -259,7 +259,7 @@ async function resolveContextDocument(
  *
  * It is a projection, not an assembly: every field is either copied from the
  * payload or read off this device's authenticated record. Nothing about tools
- * is decided here — `requiredToolsets` and `permissionMode` travel through to
+ * is decided here — `requiredToolsets` travels through to
  * the service, which reaches the one assembly entry. That is what makes "the
  * remote lane cannot state a tool schema or an executor" a structural fact
  * about this file rather than a rule it has to remember.
@@ -284,7 +284,6 @@ async function buildRequest(
     },
     source: payload.source,
     selection: payload.selection,
-    permissionMode: payload.permissionMode,
     agentMemory: payload.agentMemory,
     requiredToolsets: Object.freeze([...payload.requiredToolsets]),
     snapshot: { prompt: context.prompt, messages: context.messages },

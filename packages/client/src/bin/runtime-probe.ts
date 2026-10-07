@@ -16,8 +16,6 @@ const ALL_RUNTIME_IDS = ['pi', 'claude', 'codex'] as const;
 export const RUNTIME_PROBE_TIMEOUT_MS = 5_000;
 const MAX_RUNTIME_ID_CHARS = 128;
 const MAX_RUNTIME_VERSION_CHARS = 256;
-const MAX_PERMISSION_MODES = 32;
-const MAX_PERMISSION_MODE_CHARS = 64;
 
 function boundedSingleLine(value: string, maxChars: number): string {
   return value.replace(/[\r\n\t]/g, ' ').slice(0, maxChars);
@@ -76,7 +74,6 @@ export interface ProbedRuntime {
   authPresent?: boolean;
   steer: boolean;
   resume: boolean;
-  permissionModes: string[];
 }
 
 /**
@@ -95,15 +92,11 @@ export async function probeRuntimes(
       let id = 'unavailable';
       let steer = false;
       let resume = false;
-      let permissionModes: string[] = [];
       try {
         id = boundedSingleLine(adapter.descriptor.id, MAX_RUNTIME_ID_CHARS);
         const caps = adapter.descriptor.capabilities;
         steer = caps.steer === true;
         resume = caps.resume === true;
-        permissionModes = caps.permissionModes
-          .slice(0, MAX_PERMISSION_MODES)
-          .map((mode) => boundedSingleLine(mode, MAX_PERMISSION_MODE_CHARS));
         const detected = await detectWithTimeout(adapter, timeoutMs, options.toolImplementationAuthority);
         return {
           id,
@@ -119,10 +112,9 @@ export async function probeRuntimes(
           ...(detected.kind === 'available' && typeof detected.authPresent === 'boolean' ? { authPresent: detected.authPresent } : {}),
           steer,
           resume,
-          permissionModes,
         };
       } catch (error) {
-        return { id, present: false, outcome: error instanceof RuntimeProbeTimeout ? 'timeout' : 'probe-failed', steer, resume, permissionModes };
+        return { id, present: false, outcome: error instanceof RuntimeProbeTimeout ? 'timeout' : 'probe-failed', steer, resume };
       }
     }),
   );

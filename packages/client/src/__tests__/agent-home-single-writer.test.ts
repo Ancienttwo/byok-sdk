@@ -105,7 +105,6 @@ describe('canonical Agent home single writer (WP0)', () => {
   ): Envelope {
     return createEnvelope('task.offer_for_agent', {
       instruction: `work for ${agentId}`,
-      policy: { mode: 'auto' },
       agentRef: { agentId, profileRevision: 'r1' },
       ...(runtime === undefined ? {} : { runtime }),
     }, { taskId, seq: server.nextSeq() });

@@ -16,14 +16,13 @@ import { trustedLaunchBinding } from './launch-cwd';
 /** Test-only resources passed to a prepared operation after admission. */
 export interface PreparedOperationResources {
   workspaceDir: string;
-  policy: TaskOfferPayload['policy'];
   env: NodeJS.ProcessEnv;
   mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
   /** Stands in for the daemon's `tools/list` observation; required whenever `mcpServers` carries a non-reserved server. */
   mcpToolsetTools?: McpToolsetToolObservation;
   /**
    * A DIFFERENT observation handed to `start()` than the one `prepare()` was
-   * admitted with — the grant-drift case an adapter must refuse. Omitted
+   * admitted with — the drift case an adapter must refuse. Omitted
    * everywhere except those tests, where `mcpToolsetTools` stays the admitted
    * authority and this is the swapped-in one.
    */
@@ -48,7 +47,6 @@ export async function startPreparedOperation(
 ): Promise<Session> {
   const prepared = await adapter.prepare({
     offer,
-    policy: resources.policy,
     descriptor: adapter.descriptor,
     requiredToolsetIds: [],
     ...(resources.mcpServers === undefined ? {} : { mcpServers: resources.mcpServers }),
@@ -60,7 +58,6 @@ export async function startPreparedOperation(
     taskId: 'adapter-unit-test',
     runtimeId: adapter.descriptor.id,
     descriptor: adapter.descriptor,
-    policy: resources.policy,
     requiredToolsetIds: [],
     ...(offer.dispatchSelection === undefined ? {} : { dispatchSelection: offer.dispatchSelection }),
     ...(offer.sessionRef === undefined ? {} : { sessionRef: offer.sessionRef }),
@@ -73,15 +70,11 @@ export async function startPreparedOperation(
     forwardedEnvironmentNames: Object.keys(resources.env).sort(),
   });
   // Mirrors `TaskRunner`'s own predicate: the daemon resolves the binding for
-  // every task that will GENERATE an MCP server, which includes an adapter
-  // that generates a reserved approval server of its own under
-  // `policy.mode: 'confirm'` even when the daemon projects no server at all.
-  const generatesApprovalMcp = resources.policy.mode === 'confirm'
-    && adapter.descriptor.generatesApprovalMcpServer === true;
+  // every task that will GENERATE an MCP server.
   const mcpLaunch = resources.mcpLaunch === null
     ? undefined
     : resources.mcpLaunch
-      ?? (resources.mcpServers === undefined && !generatesApprovalMcp ? undefined : await trustedLaunchBinding());
+      ?? (resources.mcpServers === undefined ? undefined : await trustedLaunchBinding());
   const runtimeLaunch = await prepared.operation.resolveRuntimeLaunch?.({
     kind: 'instruction', cwd: resources.workspaceDir, env: resources.env,
     projectionRoot: path.join(os.tmpdir(), 'byok-adapter-test-runtime-projections'),

@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { observeMcpServer, type McpToolsetServerObservation } from '../mcp';
 import { BYOK_PI_MCP_CONFIG_PATH } from '../adapters/pi/mcp-config';
-import { BYOK_PI_PERMISSION_MODE } from '../adapters/pi/subagents-policy-config';
 import { trustedCwd } from './fixtures/launch-cwd';
 
 /**
@@ -25,23 +24,14 @@ const ENV = { PATH: process.env.PATH ?? '' } as const;
 
 const dirs: string[] = [];
 let configPathBefore: string | undefined;
-let permissionModeBefore: string | undefined;
 
 beforeEach(() => {
   configPathBefore = process.env[BYOK_PI_MCP_CONFIG_PATH];
-  permissionModeBefore = process.env[BYOK_PI_PERMISSION_MODE];
-  // The Pi child really carries this variable — `pi-adapter.ts` puts it in the
-  // runtime env next to the config path — so the assertion that a host toolset
-  // server never sees it is only worth anything with the variable actually
-  // present in the process the extension runs in.
-  process.env[BYOK_PI_PERMISSION_MODE] = 'auto';
 });
 
 afterEach(async () => {
   if (configPathBefore === undefined) delete process.env[BYOK_PI_MCP_CONFIG_PATH];
   else process.env[BYOK_PI_MCP_CONFIG_PATH] = configPathBefore;
-  if (permissionModeBefore === undefined) delete process.env[BYOK_PI_PERMISSION_MODE];
-  else process.env[BYOK_PI_PERMISSION_MODE] = permissionModeBefore;
   await Promise.all(dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
@@ -159,9 +149,7 @@ describe('Pi MCP extension — the call path', () => {
     // Non-vacuous: this process really does carry the variable the child must
     // not see, because that is how the extension found its own config.
     expect(process.env[BYOK_PI_MCP_CONFIG_PATH]).toBeTruthy();
-    expect(process.env[BYOK_PI_PERMISSION_MODE]).toBeTruthy();
     expect(start?.byokEnv).not.toContain(BYOK_PI_MCP_CONFIG_PATH);
-    expect(start?.byokEnv).not.toContain(BYOK_PI_PERMISSION_MODE);
 
     const pid = start?.pid as number;
     expect(alive(pid)).toBe(true);

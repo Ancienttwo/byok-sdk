@@ -32,7 +32,6 @@ const CONTENT_HASH = 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 function egressOfferPayload() {
   return {
     instruction: 'run with egress policy',
-    policy: { mode: 'auto' as const },
     agentRef: AGENT_REF,
     sessionRef: 'session-egress',
     egressPolicy: POLICY,
@@ -42,7 +41,6 @@ function egressOfferPayload() {
 function freshEgressOfferPayload() {
   return {
     instruction: 'start a fresh runtime with egress policy',
-    policy: { mode: 'auto' as const },
     agentRef: AGENT_REF,
     egressPolicy: POLICY,
   };

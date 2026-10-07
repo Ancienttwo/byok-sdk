@@ -281,7 +281,6 @@ describe('control-protocol: input_preparation param gates', () => {
         messages: [{ role: 'user', content: 'hello', timestamp: 1 }],
       },
       agentMemory: 'none',
-      permissionMode: 'auto',
       requiredToolsets: ['team'],
     };
   }
@@ -292,7 +291,6 @@ describe('control-protocol: input_preparation param gates', () => {
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) throw new Error('unreachable');
     expect(parsed.request.requestId).toBe('prep-1');
-    expect(parsed.request.permissionMode).toBe('auto');
     expect(parsed.request.requiredToolsets).toEqual(['team']);
     // A copy, not the caller's own arrays/objects.
     expect(parsed.request.snapshot.prompt).not.toBe((raw.snapshot as { prompt: unknown }).prompt);
@@ -360,10 +358,9 @@ describe('control-protocol: input_preparation param gates', () => {
     ['multimodal message content', (r: Record<string, unknown>) => ({ ...r, snapshot: { ...(r.snapshot as object), messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }], timestamp: 1 }] } })],
     ['no messages at all', (r: Record<string, unknown>) => ({ ...r, snapshot: { ...(r.snapshot as object), messages: [] } })],
     ['an unknown snapshot field', (r: Record<string, unknown>) => ({ ...r, snapshot: { ...(r.snapshot as object), toolExecutors: {} } })],
-    ['a permission mode outside the closed set', (r: Record<string, unknown>) => ({ ...r, permissionMode: 'yolo' })],
+    ['a removed permissionMode field', (r: Record<string, unknown>) => ({ ...r, permissionMode: 'auto' })],
     ['a missing memory selection', (r: Record<string, unknown>) => { const { agentMemory: _mode, ...rest } = r; return rest; }],
     ['an unknown memory selection', (r: Record<string, unknown>) => ({ ...r, agentMemory: 'all' })],
-    ['a missing permission mode', (r: Record<string, unknown>) => { const { permissionMode: _mode, ...rest } = r; return rest; }],
     ['a duplicate toolset id', (r: Record<string, unknown>) => ({ ...r, requiredToolsets: ['team', 'team'] })],
     ['a non-string toolset id', (r: Record<string, unknown>) => ({ ...r, requiredToolsets: [7] })],
     ['an empty requestId', (r: Record<string, unknown>) => ({ ...r, requestId: '' })],

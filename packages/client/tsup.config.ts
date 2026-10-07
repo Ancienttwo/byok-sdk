@@ -14,7 +14,6 @@ export default defineConfig({
     'src/mcp-server/index.ts',
     'src/adapters/pi/mcp-extension.ts',
     'src/adapters/pi/team-interaction-extension.ts',
-    'src/adapters/pi/subagents-policy-extension.ts',
     'src/bin/byok-agent.ts',
     'src/bin/byok-pi-prepared.ts',
     'src/bin/byok-pi-durable.ts',

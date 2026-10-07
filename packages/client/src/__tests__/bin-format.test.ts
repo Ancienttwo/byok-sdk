@@ -223,31 +223,31 @@ describe('bin/format: formatRuntimeLines', () => {
   });
 
   it('renders an absent runtime minimally', () => {
-    const runtimes: ProbedRuntime[] = [{ id: 'claude', present: false, outcome: 'not-found', steer: true, resume: true, permissionModes: ['auto'] }];
+    const runtimes: ProbedRuntime[] = [{ id: 'claude', present: false, outcome: 'not-found', steer: true, resume: true }];
     expect(formatRuntimeLines(runtimes)).toEqual(['claude: not-found']);
   });
 
   it('renders a present runtime with full detail', () => {
     const runtimes: ProbedRuntime[] = [
-      { id: 'pi', present: true, outcome: 'available', version: '1.2.3', authPresent: true, steer: true, resume: true, permissionModes: ['auto', 'readonly'] },
+      { id: 'pi', present: true, outcome: 'available', version: '1.2.3', authPresent: true, steer: true, resume: true },
     ];
     expect(formatRuntimeLines(runtimes)).toEqual([
-      'pi: present version=1.2.3 authPresent=true capabilities=steer,resume modes=auto,readonly',
+      'pi: present version=1.2.3 authPresent=true capabilities=steer,resume',
     ]);
   });
 
   it('renders an unqualified-version warning', () => {
     const runtimes: ProbedRuntime[] = [
-      { id: 'codex', present: true, outcome: 'available', version: 'codex-cli 0.161.0', qualifiedVersion: '0.160.0', steer: true, resume: true, permissionModes: ['auto'] },
+      { id: 'codex', present: true, outcome: 'available', version: 'codex-cli 0.161.0', qualifiedVersion: '0.160.0', steer: true, resume: true },
     ];
     expect(formatRuntimeLines(runtimes)).toEqual([
-      'codex: present version=codex-cli 0.161.0 warning=unqualified-version(qualified=0.160.0) capabilities=steer,resume modes=auto',
+      'codex: present version=codex-cli 0.161.0 warning=unqualified-version(qualified=0.160.0) capabilities=steer,resume',
     ]);
   });
 
-  it('renders (none) for capabilities/modes when both are empty', () => {
-    const runtimes: ProbedRuntime[] = [{ id: 'codex', present: true, outcome: 'available', steer: false, resume: false, permissionModes: [] }];
-    expect(formatRuntimeLines(runtimes)).toEqual(['codex: present capabilities=(none) modes=(none)']);
+  it('renders (none) for capabilities when they are empty', () => {
+    const runtimes: ProbedRuntime[] = [{ id: 'codex', present: true, outcome: 'available', steer: false, resume: false }];
+    expect(formatRuntimeLines(runtimes)).toEqual(['codex: present capabilities=(none)']);
   });
 });
 
@@ -303,8 +303,8 @@ describe('bin/format: formatStatusLines', () => {
     const lines = formatStatusLines(
       baseView({
         runtimes: [
-          { id: 'pi', present: true, outcome: 'available', steer: true, resume: true, permissionModes: [] },
-          { id: 'claude', present: false, outcome: 'not-found', steer: true, resume: true, permissionModes: [] },
+          { id: 'pi', present: true, outcome: 'available', steer: true, resume: true },
+          { id: 'claude', present: false, outcome: 'not-found', steer: true, resume: true },
         ],
       }),
     );
@@ -334,7 +334,7 @@ describe('bin/format: formatStatusLines', () => {
         paired: true,
         deviceId: 'dev-1',
         connection: { state: 'open', ts: 'T' },
-        runtimes: [{ id: 'pi', present: true, outcome: 'available', version: '1.0', authPresent: true, steer: true, resume: true, permissionModes: ['auto'] }],
+        runtimes: [{ id: 'pi', present: true, outcome: 'available', version: '1.0', authPresent: true, steer: true, resume: true }],
       }),
     );
     for (const line of lines) expect(line).not.toMatch(ANSI_ESCAPE_RE);

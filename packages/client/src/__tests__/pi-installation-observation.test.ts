@@ -77,8 +77,7 @@ it.each(['instruction', 'prepared'] as const)('does not lend successful observat
   const f = await fixture();
   expect(await f.adapter.detectInstallation(f.context)).toEqual({ kind: 'available', version: f.native.packageVersion });
   await fs.chmod(f.artifact, 0o755); await fs.writeFile(f.artifact, 'replacement bytes'); await fs.chmod(f.artifact, 0o555);
-  const policy = { mode: 'auto' as const };
-  const prepared = await f.adapter.prepare({ offer: { instruction: 'never starts', policy }, policy, descriptor: f.adapter.descriptor, requiredToolsetIds: [] });
+  const prepared = await f.adapter.prepare({ offer: { instruction: 'never starts' }, descriptor: f.adapter.descriptor, requiredToolsetIds: [] });
   if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
   await expect(prepared.operation.resolveRuntimeLaunch!({ kind, cwd: f.root, env: {}, projectionRoot: path.join(f.root, 'unused'), authority: f.authority }))
     .rejects.toThrow('runtime implementation unavailable: install_record_mismatch');

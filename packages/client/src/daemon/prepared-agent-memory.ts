@@ -1,8 +1,8 @@
-import { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode, type PermissionPolicy } from '@byok-sdk/protocol';
+import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import { resolveSdkHelperImplementation, sdkHelperLaunch, parseToolImplementationIdentity, type ToolImplementationAuthority, type ToolImplementationAttestedV1, type ToolImplementationFsProbe, type SdkHelperSpawnBindingV1 } from '@byok-sdk/implementation-identity';
 import { McpStdioClient, MCP_OBSERVATION_MAX_STDOUT_BYTES } from '../mcp/client';
 import { inputPreparationDigest } from '../input-preparation';
-import { preparedAgentMemoryModeAllowedByPolicy, validatePreparedAgentMemoryObservation, preparedAgentMemoryTools, preparedAgentMemoryExecutorFingerprints, type PreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
+import { validatePreparedAgentMemoryObservation, preparedAgentMemoryTools, preparedAgentMemoryExecutorFingerprints, type PreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
 import type { McpLaunchAttestation } from './trusted-launch-cwd';
 
 export interface PreparedAgentMemoryImplementation {
@@ -12,10 +12,6 @@ export interface PreparedAgentMemoryImplementation {
 export interface PreparedAgentMemoryState {
   readonly implementation: PreparedAgentMemoryImplementation;
   readonly observation: PreparedAgentMemoryObservation;
-}
-export function assertPreparedMemoryPolicy(mode: PreparedAgentMemoryMode, policy: PermissionPolicy): void {
-  if (!PreparedAgentMemoryModeSchema.safeParse(mode).success) throw new Error('agent_memory_selection_invalid');
-  if (!preparedAgentMemoryModeAllowedByPolicy(mode, policy.mode, policy.denyTools)) throw new Error('agent_memory_policy_conflict');
 }
 export async function resolvePreparedMemoryImplementation(authority: ToolImplementationAuthority | undefined, env: Readonly<Record<string,string>>, launch: McpLaunchAttestation, probe?: ToolImplementationFsProbe): Promise<PreparedAgentMemoryImplementation> {
   const descriptor = await resolveSdkHelperImplementation(authority, { subject: {kind:'sdk-helper',helperId:'agent-memory'}, entry:'agent-memory-describe' }, env, probe);

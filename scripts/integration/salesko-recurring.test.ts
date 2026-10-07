@@ -152,7 +152,7 @@ for (const disposal of ['delayed', 'failed'] as const) test(`Salesko + installed
   const baseUrl = `http://127.0.0.1:${http.port}`;
   const dispatcher = new ByokPrivateAgentChatDispatcher({ baseUrl, datasetScope: MemoryDatasetScope, researchToken: token });
   const adapter = new StubRuntimeAdapter('claude', { kind: 'available', version: 'synthetic-test' },
-    { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true, permissionModes: ['auto', 'readonly', 'confirm', 'plan'] }, false);
+    { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true }, false);
   let preparations = 0;
   const prepare = adapter.prepare.bind(adapter);
   adapter.prepare = async input => { preparations++; return prepare(input); };
@@ -327,7 +327,7 @@ for (const ending of ['cancel', 'fail'] as const) test(`Salesko + installed Task
     },
   });
   const adapter = new StubRuntimeAdapter('claude', { kind: 'available', version: 'synthetic-test' },
-    { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true, permissionModes: ['auto', 'readonly', 'confirm', 'plan'] }, false);
+    { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true }, false);
   const productId = 'salesko-accepted-ending-fixture';
   const daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-ending-test' }, productName: 'ending fixture', productId,
     serverUrl: baseUrl, workspaceRoot: join(localRoot, 'workspace'), storeDir: join(localRoot, 'store'),
@@ -731,7 +731,7 @@ test('Salesko observes first held reply after consumer configuration loss', asyn
   const baseUrl = `http://127.0.0.1:${http.port}`;
   const dispatcher = new ByokPrivateAgentChatDispatcher({ baseUrl, datasetScope: MemoryDatasetScope, researchToken: token, fetchImpl: fetch });
   const adapter = new StubRuntimeAdapter('claude', { kind: 'available', version: 'synthetic-held' },
-    { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true, permissionModes: ['auto', 'readonly', 'confirm', 'plan'] }, false);
+    { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true }, false);
   const productId = 'held-observation-fixture';
   const daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-held-test' }, productName: 'held fixture', productId,
     serverUrl: baseUrl, workspaceRoot: join(localRoot, 'workspace'), storeDir: join(localRoot, 'store'),

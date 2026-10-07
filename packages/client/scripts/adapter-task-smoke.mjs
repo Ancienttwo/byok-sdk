@@ -296,7 +296,6 @@ try {
         providerId: 'openai',
         modelId: 'gpt-5.2',
       },
-      policy: { mode: 'auto' },
     }),
     'Pi BYOK missing-launcher dispatch',
   );
@@ -319,7 +318,7 @@ try {
 
   for (const runtime of runtimes) {
     const handle = await withTimeout(
-      byok.dispatch({ deviceId, instruction: `adapter task smoke: ${runtime}`, runtime, policy: { mode: 'auto' } }),
+      byok.dispatch({ deviceId, instruction: `adapter task smoke: ${runtime}`, runtime }),
       `${runtime} dispatch`,
     );
     const taskEventsPromise = collectTaskEvents(handle);
@@ -369,7 +368,7 @@ try {
     process.env[envNames.hang] = '1';
     try {
       const handle = await withTimeout(
-        byok.dispatch({ deviceId, instruction: `adapter lifecycle smoke: ${runtime}`, runtime, policy: { mode: 'auto' } }),
+        byok.dispatch({ deviceId, instruction: `adapter lifecycle smoke: ${runtime}`, runtime }),
         `${runtime} lifecycle dispatch`,
       );
       await waitFor(

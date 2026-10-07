@@ -52,7 +52,7 @@ describe('memory-only preparation through the real descriptor process and compil
     });
     for (const mode of ['read', 'read-write'] as const) {
       const result = await assembler.assemble({
-        agentMemory: mode, requiredToolsets: [], permissionMode: 'auto',
+        agentMemory: mode, requiredToolsets: [],
         runtimeIdentity: inputPreparationRuntimeIdentityString(compiler.runtime),
       });
       if (!result.ok) throw new Error(`${result.code}: ${result.message}`);

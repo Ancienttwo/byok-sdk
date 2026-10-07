@@ -32,10 +32,10 @@ describe('long-poll lifecycle (protocol §8)', () => {
     await daemon.pair('code');
     await daemon.start();
     try {
-      server.pushLongPollEvent(createEnvelope('task.offer', { instruction: 'blocked', runtime: 'codex', policy: { mode: 'auto' } },
+      server.pushLongPollEvent(createEnvelope('task.offer', { instruction: 'blocked', runtime: 'codex' },
         { taskId: 'slow-start', seq: server.nextSeq() }));
       await server.waitFor(e => e.type === 'task.claim');
-      server.pushLongPollEvent(createEnvelope('task.offer', { instruction: 'independent', runtime: 'pi', policy: { mode: 'auto' } },
+      server.pushLongPollEvent(createEnvelope('task.offer', { instruction: 'independent', runtime: 'pi' },
         { taskId: 'other-start', seq: server.nextSeq() }));
       await vi.waitFor(() => expect(other.sessions).toHaveLength(1));
       server.pushLongPollEvent(createEnvelope('task.cancel', { reason: 'remote' },
@@ -75,7 +75,7 @@ describe('long-poll lifecycle (protocol §8)', () => {
     server.pushLongPollEvent(
       createEnvelope(
         'task.offer',
-        { instruction: 'do the thing', policy: { mode: 'auto' } },
+        { instruction: 'do the thing' },
         { taskId: 'task-long-poll-1', seq: offerSeq },
       ),
     );
@@ -98,7 +98,7 @@ describe('long-poll lifecycle (protocol §8)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'do another thing', policy: { mode: 'auto' } },
+        { instruction: 'do another thing' },
         { taskId: 'task-recovered-1', seq: secondSeq },
       ),
     );

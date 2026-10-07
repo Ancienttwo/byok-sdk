@@ -1,5 +1,5 @@
 {
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "capabilityFlags": [
     "steer",
     "blob-upload",
@@ -20,19 +20,13 @@
     "agent-content-transcript-read",
     "agent-content-artifact-read",
     "agent-home-projection",
-    "agent-input-preparation-v8",
+    "agent-input-preparation-v9",
     "terminal-projection-selection",
     "host-mcp-task-context",
     "custom-harness",
     "mailbox-read-ahead",
     "provider-provisioning.v1",
     "agent-memory-intent.v1"
-  ],
-  "permissionModes": [
-    "auto",
-    "confirm",
-    "readonly",
-    "plan"
   ],
   "taskStates": [
     "Offered",
@@ -344,12 +338,6 @@
                   },
                   "mcpToolsets": {
                     "type": "boolean"
-                  },
-                  "permissionModes": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
                   }
                 },
                 "additionalProperties": false
@@ -392,12 +380,6 @@
                   },
                   "mcpToolsets": {
                     "type": "boolean"
-                  },
-                  "permissionModes": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
                   }
                 },
                 "additionalProperties": false
@@ -511,42 +493,6 @@
               "additionalProperties": false
             }
           ]
-        },
-        "policy": {
-          "type": "object",
-          "properties": {
-            "mode": {
-              "type": "string",
-              "enum": [
-                "auto",
-                "confirm",
-                "readonly",
-                "plan"
-              ]
-            },
-            "allowTools": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "denyTools": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "workspaceRoot": {
-              "type": "string"
-            },
-            "network": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "mode"
-          ],
-          "additionalProperties": false
         },
         "runtime": {
           "type": "string",
@@ -716,8 +662,7 @@
         }
       },
       "required": [
-        "instruction",
-        "policy"
+        "instruction"
       ],
       "additionalProperties": false
     },
@@ -770,42 +715,6 @@
               "additionalProperties": false
             }
           ]
-        },
-        "policy": {
-          "type": "object",
-          "properties": {
-            "mode": {
-              "type": "string",
-              "enum": [
-                "auto",
-                "confirm",
-                "readonly",
-                "plan"
-              ]
-            },
-            "allowTools": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "denyTools": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "workspaceRoot": {
-              "type": "string"
-            },
-            "network": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "mode"
-          ],
-          "additionalProperties": false
         },
         "runtime": {
           "type": "string",
@@ -987,7 +896,6 @@
       },
       "required": [
         "instruction",
-        "policy",
         "requiredToolsets"
       ],
       "additionalProperties": false
@@ -1041,42 +949,6 @@
               "additionalProperties": false
             }
           ]
-        },
-        "policy": {
-          "type": "object",
-          "properties": {
-            "mode": {
-              "type": "string",
-              "enum": [
-                "auto",
-                "confirm",
-                "readonly",
-                "plan"
-              ]
-            },
-            "allowTools": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "denyTools": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "workspaceRoot": {
-              "type": "string"
-            },
-            "network": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "mode"
-          ],
-          "additionalProperties": false
         },
         "agentRef": {
           "type": "object",
@@ -1321,7 +1193,6 @@
       },
       "required": [
         "instruction",
-        "policy",
         "agentRef"
       ],
       "additionalProperties": false
@@ -1375,42 +1246,6 @@
               "additionalProperties": false
             }
           ]
-        },
-        "policy": {
-          "type": "object",
-          "properties": {
-            "mode": {
-              "type": "string",
-              "enum": [
-                "auto",
-                "confirm",
-                "readonly",
-                "plan"
-              ]
-            },
-            "allowTools": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "denyTools": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "workspaceRoot": {
-              "type": "string"
-            },
-            "network": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "mode"
-          ],
-          "additionalProperties": false
         },
         "agentRef": {
           "type": "object",
@@ -1900,7 +1735,6 @@
       },
       "required": [
         "instruction",
-        "policy",
         "agentRef",
         "sessionRef",
         "egressPolicy"
@@ -1956,42 +1790,6 @@
               "additionalProperties": false
             }
           ]
-        },
-        "policy": {
-          "type": "object",
-          "properties": {
-            "mode": {
-              "type": "string",
-              "enum": [
-                "auto",
-                "confirm",
-                "readonly",
-                "plan"
-              ]
-            },
-            "allowTools": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "denyTools": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "workspaceRoot": {
-              "type": "string"
-            },
-            "network": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "mode"
-          ],
-          "additionalProperties": false
         },
         "agentRef": {
           "type": "object",
@@ -2476,7 +2274,6 @@
       },
       "required": [
         "instruction",
-        "policy",
         "agentRef",
         "egressPolicy"
       ],
@@ -2486,42 +2283,6 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "policy": {
-          "type": "object",
-          "properties": {
-            "mode": {
-              "type": "string",
-              "enum": [
-                "auto",
-                "confirm",
-                "readonly",
-                "plan"
-              ]
-            },
-            "allowTools": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "denyTools": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "workspaceRoot": {
-              "type": "string"
-            },
-            "network": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "mode"
-          ],
-          "additionalProperties": false
-        },
         "agentRef": {
           "type": "object",
           "properties": {
@@ -3040,7 +2801,6 @@
         }
       },
       "required": [
-        "policy",
         "agentRef",
         "preparation",
         "agentMemory",
@@ -4494,15 +4254,6 @@
             "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
           }
         },
-        "permissionMode": {
-          "type": "string",
-          "enum": [
-            "auto",
-            "confirm",
-            "readonly",
-            "plan"
-          ]
-        },
         "accountingPolicyRef": {
           "type": "object",
           "properties": {
@@ -4570,8 +4321,7 @@
         "selection",
         "deadlineAt",
         "context",
-        "requiredToolsets",
-        "permissionMode"
+        "requiredToolsets"
       ],
       "additionalProperties": false
     },
@@ -4746,12 +4496,6 @@
             },
             "mcpToolsets": {
               "type": "boolean"
-            },
-            "permissionModes": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
             }
           },
           "additionalProperties": false
@@ -5792,12 +5536,6 @@
                         },
                         "mcpToolsets": {
                           "type": "boolean"
-                        },
-                        "permissionModes": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          }
                         }
                       },
                       "additionalProperties": false
@@ -5840,12 +5578,6 @@
                         },
                         "mcpToolsets": {
                           "type": "boolean"
-                        },
-                        "permissionModes": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          }
                         }
                       },
                       "additionalProperties": false
@@ -6047,42 +5779,6 @@
                   }
                 ]
               },
-              "policy": {
-                "type": "object",
-                "properties": {
-                  "mode": {
-                    "type": "string",
-                    "enum": [
-                      "auto",
-                      "confirm",
-                      "readonly",
-                      "plan"
-                    ]
-                  },
-                  "allowTools": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "denyTools": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "workspaceRoot": {
-                    "type": "string"
-                  },
-                  "network": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "mode"
-                ],
-                "additionalProperties": false
-              },
               "runtime": {
                 "type": "string",
                 "enum": [
@@ -6251,8 +5947,7 @@
               }
             },
             "required": [
-              "instruction",
-              "policy"
+              "instruction"
             ],
             "additionalProperties": false
           }
@@ -6350,42 +6045,6 @@
                     "additionalProperties": false
                   }
                 ]
-              },
-              "policy": {
-                "type": "object",
-                "properties": {
-                  "mode": {
-                    "type": "string",
-                    "enum": [
-                      "auto",
-                      "confirm",
-                      "readonly",
-                      "plan"
-                    ]
-                  },
-                  "allowTools": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "denyTools": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "workspaceRoot": {
-                    "type": "string"
-                  },
-                  "network": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "mode"
-                ],
-                "additionalProperties": false
               },
               "runtime": {
                 "type": "string",
@@ -6567,7 +6226,6 @@
             },
             "required": [
               "instruction",
-              "policy",
               "requiredToolsets"
             ],
             "additionalProperties": false
@@ -6666,42 +6324,6 @@
                     "additionalProperties": false
                   }
                 ]
-              },
-              "policy": {
-                "type": "object",
-                "properties": {
-                  "mode": {
-                    "type": "string",
-                    "enum": [
-                      "auto",
-                      "confirm",
-                      "readonly",
-                      "plan"
-                    ]
-                  },
-                  "allowTools": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "denyTools": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "workspaceRoot": {
-                    "type": "string"
-                  },
-                  "network": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "mode"
-                ],
-                "additionalProperties": false
               },
               "agentRef": {
                 "type": "object",
@@ -6946,7 +6568,6 @@
             },
             "required": [
               "instruction",
-              "policy",
               "agentRef"
             ],
             "additionalProperties": false
@@ -7045,42 +6666,6 @@
                     "additionalProperties": false
                   }
                 ]
-              },
-              "policy": {
-                "type": "object",
-                "properties": {
-                  "mode": {
-                    "type": "string",
-                    "enum": [
-                      "auto",
-                      "confirm",
-                      "readonly",
-                      "plan"
-                    ]
-                  },
-                  "allowTools": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "denyTools": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "workspaceRoot": {
-                    "type": "string"
-                  },
-                  "network": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "mode"
-                ],
-                "additionalProperties": false
               },
               "agentRef": {
                 "type": "object",
@@ -7570,7 +7155,6 @@
             },
             "required": [
               "instruction",
-              "policy",
               "agentRef",
               "sessionRef",
               "egressPolicy"
@@ -7671,42 +7255,6 @@
                     "additionalProperties": false
                   }
                 ]
-              },
-              "policy": {
-                "type": "object",
-                "properties": {
-                  "mode": {
-                    "type": "string",
-                    "enum": [
-                      "auto",
-                      "confirm",
-                      "readonly",
-                      "plan"
-                    ]
-                  },
-                  "allowTools": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "denyTools": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "workspaceRoot": {
-                    "type": "string"
-                  },
-                  "network": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "mode"
-                ],
-                "additionalProperties": false
               },
               "agentRef": {
                 "type": "object",
@@ -8191,7 +7739,6 @@
             },
             "required": [
               "instruction",
-              "policy",
               "agentRef",
               "egressPolicy"
             ],
@@ -8246,42 +7793,6 @@
           "payload": {
             "type": "object",
             "properties": {
-              "policy": {
-                "type": "object",
-                "properties": {
-                  "mode": {
-                    "type": "string",
-                    "enum": [
-                      "auto",
-                      "confirm",
-                      "readonly",
-                      "plan"
-                    ]
-                  },
-                  "allowTools": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "denyTools": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "workspaceRoot": {
-                    "type": "string"
-                  },
-                  "network": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "mode"
-                ],
-                "additionalProperties": false
-              },
               "agentRef": {
                 "type": "object",
                 "properties": {
@@ -8800,7 +8311,6 @@
               }
             },
             "required": [
-              "policy",
               "agentRef",
               "preparation",
               "agentMemory",
@@ -9858,15 +9368,6 @@
                   "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
                 }
               },
-              "permissionMode": {
-                "type": "string",
-                "enum": [
-                  "auto",
-                  "confirm",
-                  "readonly",
-                  "plan"
-                ]
-              },
               "accountingPolicyRef": {
                 "type": "object",
                 "properties": {
@@ -9934,8 +9435,7 @@
               "selection",
               "deadlineAt",
               "context",
-              "requiredToolsets",
-              "permissionMode"
+              "requiredToolsets"
             ],
             "additionalProperties": false
           }
@@ -10420,12 +9920,6 @@
                   },
                   "mcpToolsets": {
                     "type": "boolean"
-                  },
-                  "permissionModes": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
                   }
                 },
                 "additionalProperties": false
@@ -13191,43 +12685,6 @@
       }
     ]
   },
-  "permissionPolicySchema": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "type": "object",
-    "properties": {
-      "mode": {
-        "type": "string",
-        "enum": [
-          "auto",
-          "confirm",
-          "readonly",
-          "plan"
-        ]
-      },
-      "allowTools": {
-        "type": "array",
-        "items": {
-          "type": "string"
-        }
-      },
-      "denyTools": {
-        "type": "array",
-        "items": {
-          "type": "string"
-        }
-      },
-      "workspaceRoot": {
-        "type": "string"
-      },
-      "network": {
-        "type": "boolean"
-      }
-    },
-    "required": [
-      "mode"
-    ],
-    "additionalProperties": false
-  },
   "blobRefSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
@@ -13629,12 +13086,6 @@
                                 },
                                 "mcpToolsets": {
                                   "type": "boolean"
-                                },
-                                "permissionModes": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string"
-                                  }
                                 }
                               },
                               "additionalProperties": false
@@ -13677,12 +13128,6 @@
                                 },
                                 "mcpToolsets": {
                                   "type": "boolean"
-                                },
-                                "permissionModes": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string"
-                                  }
                                 }
                               },
                               "additionalProperties": false
@@ -13884,42 +13329,6 @@
                           }
                         ]
                       },
-                      "policy": {
-                        "type": "object",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "enum": [
-                              "auto",
-                              "confirm",
-                              "readonly",
-                              "plan"
-                            ]
-                          },
-                          "allowTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "denyTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "workspaceRoot": {
-                            "type": "string"
-                          },
-                          "network": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "mode"
-                        ],
-                        "additionalProperties": false
-                      },
                       "runtime": {
                         "type": "string",
                         "enum": [
@@ -14088,8 +13497,7 @@
                       }
                     },
                     "required": [
-                      "instruction",
-                      "policy"
+                      "instruction"
                     ],
                     "additionalProperties": false
                   }
@@ -14187,42 +13595,6 @@
                             "additionalProperties": false
                           }
                         ]
-                      },
-                      "policy": {
-                        "type": "object",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "enum": [
-                              "auto",
-                              "confirm",
-                              "readonly",
-                              "plan"
-                            ]
-                          },
-                          "allowTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "denyTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "workspaceRoot": {
-                            "type": "string"
-                          },
-                          "network": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "mode"
-                        ],
-                        "additionalProperties": false
                       },
                       "runtime": {
                         "type": "string",
@@ -14404,7 +13776,6 @@
                     },
                     "required": [
                       "instruction",
-                      "policy",
                       "requiredToolsets"
                     ],
                     "additionalProperties": false
@@ -14503,42 +13874,6 @@
                             "additionalProperties": false
                           }
                         ]
-                      },
-                      "policy": {
-                        "type": "object",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "enum": [
-                              "auto",
-                              "confirm",
-                              "readonly",
-                              "plan"
-                            ]
-                          },
-                          "allowTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "denyTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "workspaceRoot": {
-                            "type": "string"
-                          },
-                          "network": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "mode"
-                        ],
-                        "additionalProperties": false
                       },
                       "agentRef": {
                         "type": "object",
@@ -14783,7 +14118,6 @@
                     },
                     "required": [
                       "instruction",
-                      "policy",
                       "agentRef"
                     ],
                     "additionalProperties": false
@@ -14882,42 +14216,6 @@
                             "additionalProperties": false
                           }
                         ]
-                      },
-                      "policy": {
-                        "type": "object",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "enum": [
-                              "auto",
-                              "confirm",
-                              "readonly",
-                              "plan"
-                            ]
-                          },
-                          "allowTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "denyTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "workspaceRoot": {
-                            "type": "string"
-                          },
-                          "network": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "mode"
-                        ],
-                        "additionalProperties": false
                       },
                       "agentRef": {
                         "type": "object",
@@ -15407,7 +14705,6 @@
                     },
                     "required": [
                       "instruction",
-                      "policy",
                       "agentRef",
                       "sessionRef",
                       "egressPolicy"
@@ -15508,42 +14805,6 @@
                             "additionalProperties": false
                           }
                         ]
-                      },
-                      "policy": {
-                        "type": "object",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "enum": [
-                              "auto",
-                              "confirm",
-                              "readonly",
-                              "plan"
-                            ]
-                          },
-                          "allowTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "denyTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "workspaceRoot": {
-                            "type": "string"
-                          },
-                          "network": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "mode"
-                        ],
-                        "additionalProperties": false
                       },
                       "agentRef": {
                         "type": "object",
@@ -16028,7 +15289,6 @@
                     },
                     "required": [
                       "instruction",
-                      "policy",
                       "agentRef",
                       "egressPolicy"
                     ],
@@ -16083,42 +15343,6 @@
                   "payload": {
                     "type": "object",
                     "properties": {
-                      "policy": {
-                        "type": "object",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "enum": [
-                              "auto",
-                              "confirm",
-                              "readonly",
-                              "plan"
-                            ]
-                          },
-                          "allowTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "denyTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "workspaceRoot": {
-                            "type": "string"
-                          },
-                          "network": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "mode"
-                        ],
-                        "additionalProperties": false
-                      },
                       "agentRef": {
                         "type": "object",
                         "properties": {
@@ -16637,7 +15861,6 @@
                       }
                     },
                     "required": [
-                      "policy",
                       "agentRef",
                       "preparation",
                       "agentMemory",
@@ -17695,15 +16918,6 @@
                           "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
                         }
                       },
-                      "permissionMode": {
-                        "type": "string",
-                        "enum": [
-                          "auto",
-                          "confirm",
-                          "readonly",
-                          "plan"
-                        ]
-                      },
                       "accountingPolicyRef": {
                         "type": "object",
                         "properties": {
@@ -17771,8 +16985,7 @@
                       "selection",
                       "deadlineAt",
                       "context",
-                      "requiredToolsets",
-                      "permissionMode"
+                      "requiredToolsets"
                     ],
                     "additionalProperties": false
                   }
@@ -18257,12 +17470,6 @@
                           },
                           "mcpToolsets": {
                             "type": "boolean"
-                          },
-                          "permissionModes": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
                           }
                         },
                         "additionalProperties": false
@@ -20480,12 +19687,6 @@
                                 },
                                 "mcpToolsets": {
                                   "type": "boolean"
-                                },
-                                "permissionModes": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string"
-                                  }
                                 }
                               },
                               "additionalProperties": false
@@ -20528,12 +19729,6 @@
                                 },
                                 "mcpToolsets": {
                                   "type": "boolean"
-                                },
-                                "permissionModes": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "string"
-                                  }
                                 }
                               },
                               "additionalProperties": false
@@ -20735,42 +19930,6 @@
                           }
                         ]
                       },
-                      "policy": {
-                        "type": "object",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "enum": [
-                              "auto",
-                              "confirm",
-                              "readonly",
-                              "plan"
-                            ]
-                          },
-                          "allowTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "denyTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "workspaceRoot": {
-                            "type": "string"
-                          },
-                          "network": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "mode"
-                        ],
-                        "additionalProperties": false
-                      },
                       "runtime": {
                         "type": "string",
                         "enum": [
@@ -20939,8 +20098,7 @@
                       }
                     },
                     "required": [
-                      "instruction",
-                      "policy"
+                      "instruction"
                     ],
                     "additionalProperties": false
                   }
@@ -21038,42 +20196,6 @@
                             "additionalProperties": false
                           }
                         ]
-                      },
-                      "policy": {
-                        "type": "object",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "enum": [
-                              "auto",
-                              "confirm",
-                              "readonly",
-                              "plan"
-                            ]
-                          },
-                          "allowTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "denyTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "workspaceRoot": {
-                            "type": "string"
-                          },
-                          "network": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "mode"
-                        ],
-                        "additionalProperties": false
                       },
                       "runtime": {
                         "type": "string",
@@ -21255,7 +20377,6 @@
                     },
                     "required": [
                       "instruction",
-                      "policy",
                       "requiredToolsets"
                     ],
                     "additionalProperties": false
@@ -21354,42 +20475,6 @@
                             "additionalProperties": false
                           }
                         ]
-                      },
-                      "policy": {
-                        "type": "object",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "enum": [
-                              "auto",
-                              "confirm",
-                              "readonly",
-                              "plan"
-                            ]
-                          },
-                          "allowTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "denyTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "workspaceRoot": {
-                            "type": "string"
-                          },
-                          "network": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "mode"
-                        ],
-                        "additionalProperties": false
                       },
                       "agentRef": {
                         "type": "object",
@@ -21634,7 +20719,6 @@
                     },
                     "required": [
                       "instruction",
-                      "policy",
                       "agentRef"
                     ],
                     "additionalProperties": false
@@ -21733,42 +20817,6 @@
                             "additionalProperties": false
                           }
                         ]
-                      },
-                      "policy": {
-                        "type": "object",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "enum": [
-                              "auto",
-                              "confirm",
-                              "readonly",
-                              "plan"
-                            ]
-                          },
-                          "allowTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "denyTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "workspaceRoot": {
-                            "type": "string"
-                          },
-                          "network": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "mode"
-                        ],
-                        "additionalProperties": false
                       },
                       "agentRef": {
                         "type": "object",
@@ -22258,7 +21306,6 @@
                     },
                     "required": [
                       "instruction",
-                      "policy",
                       "agentRef",
                       "sessionRef",
                       "egressPolicy"
@@ -22359,42 +21406,6 @@
                             "additionalProperties": false
                           }
                         ]
-                      },
-                      "policy": {
-                        "type": "object",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "enum": [
-                              "auto",
-                              "confirm",
-                              "readonly",
-                              "plan"
-                            ]
-                          },
-                          "allowTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "denyTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "workspaceRoot": {
-                            "type": "string"
-                          },
-                          "network": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "mode"
-                        ],
-                        "additionalProperties": false
                       },
                       "agentRef": {
                         "type": "object",
@@ -22879,7 +21890,6 @@
                     },
                     "required": [
                       "instruction",
-                      "policy",
                       "agentRef",
                       "egressPolicy"
                     ],
@@ -22934,42 +21944,6 @@
                   "payload": {
                     "type": "object",
                     "properties": {
-                      "policy": {
-                        "type": "object",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "enum": [
-                              "auto",
-                              "confirm",
-                              "readonly",
-                              "plan"
-                            ]
-                          },
-                          "allowTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "denyTools": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "workspaceRoot": {
-                            "type": "string"
-                          },
-                          "network": {
-                            "type": "boolean"
-                          }
-                        },
-                        "required": [
-                          "mode"
-                        ],
-                        "additionalProperties": false
-                      },
                       "agentRef": {
                         "type": "object",
                         "properties": {
@@ -23488,7 +22462,6 @@
                       }
                     },
                     "required": [
-                      "policy",
                       "agentRef",
                       "preparation",
                       "agentMemory",
@@ -24546,15 +23519,6 @@
                           "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
                         }
                       },
-                      "permissionMode": {
-                        "type": "string",
-                        "enum": [
-                          "auto",
-                          "confirm",
-                          "readonly",
-                          "plan"
-                        ]
-                      },
                       "accountingPolicyRef": {
                         "type": "object",
                         "properties": {
@@ -24622,8 +23586,7 @@
                       "selection",
                       "deadlineAt",
                       "context",
-                      "requiredToolsets",
-                      "permissionMode"
+                      "requiredToolsets"
                     ],
                     "additionalProperties": false
                   }
@@ -25108,12 +24071,6 @@
                           },
                           "mcpToolsets": {
                             "type": "boolean"
-                          },
-                          "permissionModes": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
                           }
                         },
                         "additionalProperties": false
@@ -27544,15 +26501,6 @@
                       "maxLength": 512,
                       "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                     },
-                    "permissionMode": {
-                      "type": "string",
-                      "enum": [
-                        "auto",
-                        "confirm",
-                        "readonly",
-                        "plan"
-                      ]
-                    },
                     "runtime": {
                       "type": "object",
                       "properties": {
@@ -27690,7 +26638,6 @@
                     "source",
                     "target",
                     "policyRevision",
-                    "permissionMode",
                     "runtime",
                     "requestDigest"
                   ],
@@ -28112,7 +27059,6 @@
                 "deadline_elapsed",
                 "launch_boundary_unavailable",
                 "observation_drift",
-                "permission_mode_denied",
                 "rpc_frame_too_large",
                 "input_preparation_record_log_unsupported"
               ]
@@ -28316,15 +27262,6 @@
                   "maxLength": 512,
                   "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
                 },
-                "permissionMode": {
-                  "type": "string",
-                  "enum": [
-                    "auto",
-                    "confirm",
-                    "readonly",
-                    "plan"
-                  ]
-                },
                 "runtime": {
                   "type": "object",
                   "properties": {
@@ -28462,7 +27399,6 @@
                 "source",
                 "target",
                 "policyRevision",
-                "permissionMode",
                 "runtime",
                 "requestDigest"
               ],
@@ -28820,7 +27756,6 @@
             "deadline_elapsed",
             "launch_boundary_unavailable",
             "observation_drift",
-            "permission_mode_denied",
             "rpc_frame_too_large",
             "input_preparation_record_log_unsupported"
           ]

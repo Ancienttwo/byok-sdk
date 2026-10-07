@@ -13,7 +13,6 @@ import path, { isAbsolute } from 'node:path';
 import { promisify } from 'node:util';
 import type {
   AgentEvent,
-  PermissionPolicy,
   ProviderProfileBinding,
   TaskOfferPayload,
 } from '@byok-sdk/protocol';
@@ -31,7 +30,9 @@ import {
   type RuntimePreparedLaunchV1,
   type Session,
 } from '../../types';
-import { AGENT_MEMORY_MCP_SERVER_NAME } from '../../sdk-reserved-mcp';
+import { AGENT_MEMORY_MCP_SERVER_NAME, isReservedMcpServerName } from '../../sdk-reserved-mcp';
+import { McpAuthorityError } from '../../mcp/authority-error';
+import { projectMcpTools, qualifiedMcpToolName } from '../../mcp/projection';
 import {
   inputPreparationDigest,
   INPUT_PREPARATION_ARTIFACT_FORMAT,
@@ -40,10 +41,8 @@ import {
 import { mcpLaunchAttestation, type McpLaunchBinding } from '../../daemon/trusted-launch-cwd';
 import type { ToolImplementationIdentityV1 } from '../../daemon/tool-implementation-identity';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, isRuntimeExecutionFailure } from '../../runtime-failure';
-import { grantFingerprint, resolveMcpToolsetGrants, resolveReservedMcpToolGrants } from '../mcp-tool-grants';
 import { clientPackageRoot } from './client-manifest';
 import { resolvePiBin, type ResolvedBin } from './resolve-bin';
-import { mapPermissionPolicyToPiArgs } from './permission-mapping';
 import { mapPiContextUsage, mapPiMessageToAgentEvent, ROUTINE_PI_EVENT_TYPES } from './events';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client';
 import { abortPiRpcAndSettle } from './interrupt-settlement';
@@ -198,7 +197,8 @@ export class PiAdapter implements RuntimeAdapter {
     // because the retired `pi-mcp-adapter` exposed a single `mcp` proxy and
     // discovered the tools behind it itself — which kept the schemas out of
     // the model's first request and left the extension, not the daemon, as the
-    // authority on what a toolset contains.
+    // authority on what a toolset contains. Claude and Codex list the tools
+    // themselves, so pi is the one bundled adapter that needs this.
     requiresMcpToolsetToolObservation: true,
     mcpServerLaunch: 'direct-cwd',
     capabilities: {
@@ -206,13 +206,12 @@ export class PiAdapter implements RuntimeAdapter {
       resume: true,
       mcpToolsets: true,
       approvalInteractive: false,
-      permissionModes: ['auto', 'readonly'],
     },
     environmentRequirements: { credentialNames: PROVIDER_CREDENTIAL_ENV_NAMES },
   });
 
   constructor(private readonly options: PiAdapterOptions = {}) {
-    if (options.durablePi !== undefined) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, capabilities: { ...this.descriptor.capabilities, durablePi: true, steer: false, resume: false, permissionModes: ['auto'] }, environmentRequirements: { credentialNames: [] } });
+    if (options.durablePi !== undefined) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, capabilities: { ...this.descriptor.capabilities, durablePi: true, steer: false, resume: false }, environmentRequirements: { credentialNames: [] } });
     validatePiByokLauncherConfig(options.byokLauncher);
   }
 
@@ -238,52 +237,22 @@ export class PiAdapter implements RuntimeAdapter {
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     if (this.options.durablePi !== undefined && process.platform === 'win32') return { kind: 'reject', reason: 'durable Pi is unavailable on Windows until parent-death Job Object recovery is validated', retryable: false };
-    if (this.options.durablePi !== undefined && (input.policy.mode !== 'auto' || input.policy.network === false || input.policy.allowTools !== undefined || input.policy.denyTools !== undefined || input.offer.dispatchSelection === undefined)) {
-      return { kind: 'reject', reason: 'durable Pi requires YOLO ordinary BYOK selection', retryable: false };
+    if (this.options.durablePi !== undefined && input.offer.dispatchSelection === undefined) {
+      return { kind: 'reject', reason: 'durable Pi requires an ordinary BYOK selection', retryable: false };
     }
-    // The policy mapping runs FIRST: a mode pi cannot express at all is a
-    // refusal about the mode, and resolving toolset grants before it would
-    // answer that task with a toolset-shaped reason instead. The reserved
-    // grants ride the SAME mapping rather than a lane of their own: pi's
-    // expression of a reserved grant is the granted bare name inside the
-    // `--tools` allowlist (see permission-mapping.ts — pi's registry drops
-    // extension tools the allowlist does not name, and the extension
-    // registers the reserved helpers under exactly those names), so a
-    // `messageEgress` offer that projects byokagentmessage is authorized
-    // here the way codex and claude authorize it, from the same table
-    // (#180). Resolved once, at admission, like every other grant this
-    // adapter freezes into mapping.args.
-    const policyMapping = mapPermissionPolicyToPiArgs(input.policy, resolveReservedMcpToolGrants(input.mcpServers));
-    if (!policyMapping.ok) {
-      return { kind: 'reject', reason: policyMapping.reason ?? 'policy rejected by pi adapter', retryable: false };
-    }
-    // Fail closed BEFORE anything is spawned, on the same resolution claude
-    // and codex use. pi does not interpolate these names into a CLI grant —
-    // it registers one tool per observed tool — but it reads exactly the same
-    // authority: `./mcp-extension.ts` refuses at extension load when a
-    // projected server has no daemon observation, and `../../mcp/projection.ts`
-    // refuses a server name outside `GRANTABLE_MCP_SERVER_NAME`. Discovering
-    // that inside the Pi child means a claimed task dying at session start
-    // with a message only the child's stderr carries, so the check runs here
-    // instead, and declines non-retryably like its siblings.
-    // Per-tool registration also makes the task's permission mode decidable
-    // per tool: the same resolution applies the operator's
-    // `McpToolsetConfig.readOnlyTools` classification, so a task under a
-    // narrowing mode is admitted with exactly the read-only tools the device
-    // declared, and an unclassified toolset is refused by name here rather
-    // than running with everything enabled.
-    const toolsetGrants = resolveMcpToolsetGrants(input.mcpServers, input.mcpToolsetTools, input.policy.mode);
-    if (!toolsetGrants.ok) {
+    // Fail closed BEFORE anything is spawned. pi registers one tool per
+    // observed MCP tool, so a projected server with no daemon observation, or
+    // an observation it cannot turn into unique runtime tool names, is refused
+    // here rather than discovered inside the Pi child at session start, where
+    // only the child's stderr would carry the reason.
+    const admittedTools = piMcpToolNames(input.mcpServers, input.mcpToolsetTools);
+    if (!admittedTools.ok) {
       return {
         kind: 'reject',
-        reason: `pi adapter cannot register projected MCP toolset tools: ${toolsetGrants.reason}`,
+        reason: `pi adapter cannot register projected MCP toolset tools: ${admittedTools.reason}`,
         retryable: false,
       };
     }
-
-    const mapping = mapPermissionPolicyToPiArgs(
-      input.policy, resolveReservedMcpToolGrants(input.mcpServers), toolsetGrants.grants,
-    );
 
     // Inline factories are owned by the SDK entry; no runtime extension path resolution here.
     // Session/workspace continuity:
@@ -428,19 +397,15 @@ export class PiAdapter implements RuntimeAdapter {
               reason: 'prepared pi operation received a manifest without a sealed cwd',
             });
           }
-          // The toolset grant this operation was ADMITTED with was resolved
-          // from the prepare() input; the resources handed to start() are a
-          // separate object. pi does not bake the grant into a CLI argument —
-          // it writes the servers plus the daemon's observation into the
-          // task-scoped MCP config the extension registers from — so without
-          // this comparison a caller could swap in different MCP authority
-          // (or a different tool observation) between admission and start and
-          // the child would register the swapped set. Same fail-closed
-          // re-check `claude-adapter.ts` makes, on the same fingerprint, and
-          // it runs BEFORE the task config is written so nothing of the
-          // swapped authority ever reaches disk.
-          const startGrants = resolveMcpToolsetGrants(startInput.mcpServers, startInput.mcpToolsetTools, input.policy.mode);
-          if (!startGrants.ok || grantFingerprint(startGrants.grants) !== grantFingerprint(toolsetGrants.grants)) {
+          // The tool set this operation was ADMITTED with was resolved from the
+          // prepare() input; the resources handed to start() are a separate
+          // object. pi writes the servers plus the daemon's observation into
+          // the task-scoped MCP config the extension registers from, so without
+          // this comparison a caller could swap in a different tool observation
+          // between admission and start and the child would register the
+          // swapped set. It runs BEFORE the task config is written.
+          const startTools = piMcpToolNames(startInput.mcpServers, startInput.mcpToolsetTools);
+          if (!startTools.ok || startTools.names !== admittedTools.names) {
             throw new RuntimeExecutionFailure({
               phase: 'start', category: 'authority', retry: 'non-retryable',
               reason: 'prepared pi operation received different MCP toolset tool authority than it was admitted with',
@@ -448,7 +413,7 @@ export class PiAdapter implements RuntimeAdapter {
           }
           // The prepared lane diverges here, AFTER every authority check both
           // lanes share: the same sealed selection, the same sealed cwd and the
-          // same MCP grant fingerprint. What it does not share is the CLI —
+          // same registered MCP tool set. What it does not share is the CLI —
           // `pi --mode rpc` can never consume a prepared request, so this branch
           // launches the SDK-owned in-process host instead
           // (`../../bin/byok-pi-prepared.ts`).
@@ -462,7 +427,6 @@ export class PiAdapter implements RuntimeAdapter {
               runtimeLaunch,
               mcpEnv,
               preparation: startInput.preparation,
-              policy: input.policy,
               manifest: startInput.manifest,
               manifestCwd,
               manifestSelection,
@@ -525,29 +489,14 @@ export class PiAdapter implements RuntimeAdapter {
             // its own, so the tools the model is shown are the tools this task
             // was admitted with.
             //
-            // The FULL observation is written, classification included, and
-            // the task's permission mode alongside it. The extension needs
-            // both: it registers only the tools the mode allows (running the
-            // same `filterMcpObservationForPolicy` this adapter just ran), but
-            // it verifies a connected server against everything written here,
-            // so a frozen list already narrowed by policy would read every
-            // excluded tool back as a newly added one.
-            //
-            // What is written is the START observation, so the prepare->start
-            // window is deliberately unfingerprinted for the tools a narrowing
-            // mode excludes: those tools are unreachable in this session, so a
-            // mutation tool appearing in that window changes nothing the model
-            // can call. Everything that IS reachable still trips the
-            // fingerprint compared above — a read-only tool added, removed, or
-            // reclassified between prepare and start changes the grant set and
-            // the operation is refused.
+            // What is written is the START observation, already compared
+            // above with the one this operation was admitted with.
             await fs.writeFile(
               mcpConfigPath,
               JSON.stringify({
                 mcpEnv,
                 mcpServers: taskMcpServers,
                 observation: startInput.mcpToolsetTools ?? {},
-                permissionMode: input.policy.mode,
                 ...(mcpLaunchCwd === undefined ? {} : { launchCwd: mcpLaunchCwd }),
                 // The daemon resolved these once, at admission, alongside the
                 // launch directory (`daemon/tool-implementation-identity.ts`).
@@ -564,8 +513,8 @@ export class PiAdapter implements RuntimeAdapter {
             hostConfigPath = path.join(mcpConfigDir!, 'rpc-launch.json');
             const serialized = serializePiHostConfig({
               binding: runtimeLaunch.binding, descendantPlan: runtimeLaunch.descendantPlan,
-              format: 'byok.pi.rpc-launch', version: 2, cwd: runtimeLaunch.sessionCwd,
-              mcp: JSON.parse(await fs.readFile(mcpConfigPath, 'utf8')), policy: input.policy,
+              format: 'byok.pi.rpc-launch', version: 3, cwd: runtimeLaunch.sessionCwd,
+              mcp: JSON.parse(await fs.readFile(mcpConfigPath, 'utf8')),
             });
             hostConfigDigest = serialized.digest;
             await fs.writeFile(hostConfigPath, serialized.bytes, { mode: 0o600 });
@@ -577,7 +526,7 @@ export class PiAdapter implements RuntimeAdapter {
             }, { cause });
           }
           const piArgs = ['--config', hostConfigPath, '--mode', 'rpc', '--no-skills',
-            ...(resumeSessionId === undefined ? [] : ['--session', resumeSessionId]), ...mapping.args];
+            ...(resumeSessionId === undefined ? [] : ['--session', resumeSessionId])];
           const launch = runtimeLaunch.binding;
           const targetArgs = [...(launch.entry === undefined ? [] : [launch.entry]), ...launch.fixedArgv, `--config-digest=${hostConfigDigest}`, ...piArgs];
           let launchCommand = launch.command;
@@ -657,6 +606,37 @@ export class PiAdapter implements RuntimeAdapter {
 }
 
 /**
+ * The qualified MCP tool names pi registers for one task, as one comparable
+ * string, or the reason the observation cannot be registered.
+ *
+ * Every projected host toolset server must arrive with a daemon observation,
+ * and the observation may name no server the task was not given. SDK-reserved
+ * helpers carry their own fixed tools and are never observed.
+ */
+function piMcpToolNames(
+  servers: Readonly<Record<string, McpStdioServerConfig>> | undefined,
+  observation: McpToolsetToolObservation | undefined,
+): { readonly ok: true; readonly names: string } | { readonly ok: false; readonly reason: string } {
+  const projected = Object.keys(servers ?? {}).filter((name) => !isReservedMcpServerName(name)).sort();
+  const observed = observation ?? {};
+  const unexpected = Object.keys(observed).filter((name) => !projected.includes(name)).sort();
+  if (unexpected.length > 0) {
+    return { ok: false, reason: `observed MCP server(s) [${unexpected.join(', ')}] are not projected for this task` };
+  }
+  const missing = projected.filter((name) => (observed[name]?.tools.length ?? 0) === 0);
+  if (missing.length > 0) {
+    return { ok: false, reason: `no tools/list observation for projected MCP toolset server(s) [${missing.join(', ')}]` };
+  }
+  try {
+    const names = projectMcpTools(observed).map((tool) => qualifiedMcpToolName(tool.serverName, tool.toolName));
+    return { ok: true, names: names.join('\n') };
+  } catch (error) {
+    if (error instanceof McpAuthorityError) return { ok: false, reason: error.message };
+    throw error;
+  }
+}
+
+/**
  * Everything one prepared pi launch needs, after both lanes' shared authority
  * checks have already passed.
  */
@@ -664,8 +644,6 @@ interface PreparedPiLaunchInput {
   readonly mcpEnv: Readonly<Record<string, string>>;
   readonly runtimeLaunch: PiRuntimeLaunchResources;
   readonly preparation: RuntimePreparedLaunchV1;
-  /** The policy this operation was ADMITTED under, whole. */
-  readonly policy: PermissionPolicy;
   readonly manifest: RuntimeOperationManifest;
   readonly manifestCwd: string;
   readonly manifestSelection: TaskOfferPayload['dispatchSelection'];
@@ -793,11 +771,6 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
       + ' together',
     );
   }
-  if (input.policy.mode !== preparation.permissionMode) {
-    throw authorityFailure(
-      'prepared pi operation was admitted under a permission mode its counted manifest was not filtered for',
-    );
-  }
   if (input.manifest.agentMemory !== preparation.agentMemory) {
     throw authorityFailure('prepared pi operation received a manifest whose Agent memory selection differs from its sealed preparation');
   }
@@ -849,7 +822,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
         binding: input.runtimeLaunch.binding,
         descendantPlan: input.runtimeLaunch.descendantPlan,
         format: 'byok.pi.prepared-launch',
-        version: 3,
+        version: 4,
         // The host's single branch switch. It is not a second opinion about
         // the launch: it is `resolvePiRuntimeLaunch`'s own decision carried to
         // the process that must act on it, and it travels inside the
@@ -857,8 +830,6 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
         // could be given separately.
         credentialSource,
         cwd: input.manifestCwd,
-        policy: input.policy,
-        countedPermissionMode: preparation.permissionMode,
         expected: { model: preparation.expected.model },
         toolBindingDigest: preparation.toolBindingDigest,
         observationDigest: preparation.observationDigest,
@@ -874,7 +845,6 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
           mcpEnv: input.mcpEnv,
           mcpServers: memoryServer.hostServers,
           observation: input.mcpToolsetTools ?? {},
-          permissionMode: preparation.permissionMode,
           launchCwd: mcpLaunch.cwd,
           toolImplementations,
         },
@@ -1256,7 +1226,7 @@ class PiSession implements Session {
   }
 
   async resolveApproval(): Promise<void> {
-    // pi has no built-in per-call approval gate (see permission-mapping.ts)
+    // pi has no built-in per-call approval gate
     // and never emits `needs_approval` in M0/M1, so this should be
     // unreachable in practice. Kept as an explicit, descriptive failure
     // rather than a silent no-op so a future caller (or a misbehaving

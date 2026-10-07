@@ -137,7 +137,6 @@ const MCP_CAPABLE: RuntimeCapabilities = {
   resume: true,
   approvalInteractive: true,
   mcpToolsets: true,
-  permissionModes: ['auto', 'confirm'],
 };
 
 /** Synthetic fixture identity: never resolved from the installed fork. */
@@ -341,7 +340,7 @@ function binding(agentId: string): InputPreparationBindingV1 {
     source: { revision: 'source-r1', digest: 'source-digest-1' },
     target: { endpoint: MODEL.baseUrl, modelId: MODEL.id },
     policyRevision: POLICY_REVISION,
-    agentMemory: 'none', permissionMode: 'auto',
+    agentMemory: 'none',
     runtime: RUNTIME,
     requestDigest: REQUEST_DIGEST,
     accountingPolicyRef: ACCOUNTING_POLICY_REF,
@@ -369,7 +368,7 @@ async function seed(requestId: string, agentId: string): Promise<Record<string, 
   const fingerprinted = await fingerprintPreparedToolSurface({
     memory: null,
     observation,
-    agentMemory: 'none', permissionMode: 'auto',
+    agentMemory: 'none',
     runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
     launch: attestation,
     toolsetDefinitionRevisions: { [TOOLSET_ID]: TOOLSET_REVISION },
@@ -438,7 +437,6 @@ function preparedOffer(
     'task.offer_prepared',
     {
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
-      policy: { mode: 'auto', allowTools: [] },
       runtime: 'pi',
       agentRef: agentRefOf(agentId),
       requiredToolsets: [TOOLSET_ID],

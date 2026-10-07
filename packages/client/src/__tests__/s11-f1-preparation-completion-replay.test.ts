@@ -73,7 +73,6 @@ function payload(overrides: Record<string, unknown> = {}): AgentInputPreparation
     deadlineAt: new Date(Date.now() + 60_000).toISOString(),
     context: { inline: CONTEXT_JSON },
     agentMemory: 'none', requiredToolsets: ['team'],
-    permissionMode: 'auto',
     ...overrides,
   });
 }
@@ -287,7 +286,7 @@ describe('S11-F1 authoritative preparation completion replay', () => {
     // Feed the production delivery/cursor path without starting a live transport.
     const delivery = connection as unknown as { deliver: (e: ReturnType<typeof createEnvelope>) => boolean; processingChain: Promise<void> };
     const envelope = createEnvelope('agent.input.preparation', h.request, { seq: 1 });
-    const tail = createEnvelope('task.offer', { instruction: 'tail', policy: { mode: 'auto' } }, { seq: 2, taskId: 'tail' });
+    const tail = createEnvelope('task.offer', { instruction: 'tail' }, { seq: 2, taskId: 'tail' });
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     delivery.deliver(envelope);
     await delivery.processingChain;

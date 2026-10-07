@@ -110,7 +110,6 @@ function registryWith(recordTo?: string): McpToolsetRegistry {
       mcpServers: {
         teamserver: fixtureServer(recordTo === undefined ? {} : { recordTo }),
       },
-      readOnlyTools: { teamserver: ['echo'] },
     },
   });
 }
@@ -268,7 +267,6 @@ function localRequest(overrides: Partial<InputPreparationRequestV1> = {}): Input
       },
       options: { cacheRetention: 'none', maxTokens: 4_096 },
     },
-    permissionMode: 'auto',
     agentMemory: 'none', requiredToolsets: ['team'],
     snapshot: JSON.parse(CONTEXT_JSON) as InputPreparationRequestV1['snapshot'],
     ...overrides,
@@ -287,7 +285,6 @@ function remotePayload(overrides: Record<string, unknown> = {}): AgentInputPrepa
     deadlineAt: new Date(Date.now() + 60_000).toISOString(),
     context: { inline: CONTEXT_JSON },
     agentMemory: 'none', requiredToolsets: ['team'],
-    permissionMode: 'auto',
     ...overrides,
   });
 }
@@ -396,7 +393,6 @@ describe('a preparation observes inside the proven launch boundary', () => {
 
     const result = await assembler(registryWith(recordTo)).assemble({
       agentMemory: 'none', requiredToolsets: ['team'],
-      permissionMode: 'auto',
       runtimeIdentity: RUNTIME_IDENTITY,
     });
     expect(result.ok).toBe(true);
@@ -487,7 +483,7 @@ describe('a tampered install refuses the preparation before it is fingerprinted'
         spawns.push(serverName);
         return probeMcpServer(serverName, server, options);
       },
-    }).assemble({ agentMemory: 'none', requiredToolsets: ['team'], permissionMode: 'auto', runtimeIdentity: RUNTIME_IDENTITY });
+    }).assemble({ agentMemory: 'none', requiredToolsets: ['team'], runtimeIdentity: RUNTIME_IDENTITY });
 
     // Resolution itself refuses to promote the record past the measurement, so
     // the identity that reaches the probe is `unavailable` rather than a claim
@@ -531,7 +527,7 @@ describe('a tampered install refuses the preparation before it is fingerprinted'
         await fs.writeFile(artifact, 'replaced between resolve and spawn\n');
         return probeMcpServer(serverName, server, options);
       },
-    }).assemble({ agentMemory: 'none', requiredToolsets: ['team'], permissionMode: 'auto', runtimeIdentity: RUNTIME_IDENTITY });
+    }).assemble({ agentMemory: 'none', requiredToolsets: ['team'], runtimeIdentity: RUNTIME_IDENTITY });
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('unreachable');
@@ -596,7 +592,7 @@ describe('a tampered install refuses the preparation before it is fingerprinted'
         );
         return probeMcpServer(serverName, server, withoutIdentity);
       },
-    }).assemble({ agentMemory: 'none', requiredToolsets: ['team'], permissionMode: 'auto', runtimeIdentity: RUNTIME_IDENTITY });
+    }).assemble({ agentMemory: 'none', requiredToolsets: ['team'], runtimeIdentity: RUNTIME_IDENTITY });
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error('unreachable');
@@ -670,7 +666,6 @@ describe('one requestId, one observation', () => {
       {
         team: {
           mcpServers: { teamserver: fixtureServer({ protocolVersion: '2025-06-18' }) },
-          readOnlyTools: { teamserver: ['echo'] },
         },
       },
       registry.snapshot().revision,
@@ -682,58 +677,15 @@ describe('one requestId, one observation', () => {
   });
 });
 
-describe('the declared permission mode is intent, admitted by the device', () => {
-  it('refuses a mode above the operator ceiling instead of narrowing it', async () => {
-    // The same merge a task offer goes through (`daemon/policy.ts`'s
-    // `computeEffectivePolicy`, which `TaskRunner.handleOffer` calls with this
-    // exact ceiling). Parsing the enum is not admission.
-    const spawns: string[] = [];
-    const result = await assembler(registryWith(), {
-      permissionCeiling: { mode: 'readonly' },
-      probe: async (serverName, server, options) => {
-        spawns.push(serverName);
-        return probeMcpServer(serverName, server, options);
-      },
-    }).assemble({ agentMemory: 'none', requiredToolsets: ['team'], permissionMode: 'auto', runtimeIdentity: RUNTIME_IDENTITY });
-
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('unreachable');
-    expect(result.code).toBe('permission_mode_denied');
-    // Never a downgrade to the ceiling's mode, and never a spawn: an
-    // unadmitted preparation observes nothing.
-    expect(spawns).toEqual([]);
-  });
-
-  it('filters the manifest through the operator classification the admitted mode requires', async () => {
-    // `readonly` narrows, and it narrows through the ONE policy filter the
-    // ordinary extension registers through. The fixture toolset classifies
-    // exactly one of its two tools read-only.
-    const result = await assembler(registryWith(), { permissionCeiling: { mode: 'readonly' } }).assemble({
-      agentMemory: 'none', requiredToolsets: ['team'],
-      permissionMode: 'readonly',
-      runtimeIdentity: RUNTIME_IDENTITY,
-    });
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error('unreachable');
-
-    expect(result.surface.tools.map((tool) => tool.name)).toEqual(['mcp__teamserver__echo']);
-    // The schemas the model is shown and the executors the manifest binds are
-    // the same set — the filter runs once, before both.
-    expect(Object.keys(result.surface.toolExecutors)).toEqual(['mcp__teamserver__echo']);
-    expect(Object.keys(result.surface.toolImplementationKinds)).toEqual(['mcp__teamserver__echo']);
-  });
-});
-
 describe('the native tool set is PARTIAL and pinned as such', () => {
   it('compiles the observed MCP half only, and says so', async () => {
     // PARTIAL — the prepared NATIVE tool set is not connected to preparation.
-    // Pi's own tools are selected by a runtime policy a task-free preparation
+    // Pi's own tools are selected by the runtime, which a task-free preparation
     // never resolves, so the entry passes `nativeTools: []`; the final Main set
-    // (Q1 = policy-filtered native + MCP) stays the runtime's decision.
+    // (Q1 = native + MCP) stays the runtime's decision.
     // Removing that limit must change this test.
     const result = await assembler(registryWith()).assemble({
       agentMemory: 'none', requiredToolsets: ['team'],
-      permissionMode: 'auto',
       runtimeIdentity: RUNTIME_IDENTITY,
     });
     expect(result.ok).toBe(true);
@@ -795,7 +747,7 @@ function memoryAssembler(authority: ToolImplementationAuthority, memoryAvailable
   });
 }
 
-const MEMORY_ONLY = { agentMemory: 'read', requiredToolsets: [], permissionMode: 'auto', runtimeIdentity: RUNTIME_IDENTITY } as const;
+const MEMORY_ONLY = { agentMemory: 'read', requiredToolsets: [], runtimeIdentity: RUNTIME_IDENTITY } as const;
 
 describe('prepared Agent memory refuses a preparation by its typed C5 code', () => {
   it('refuses an unavailable secure platform as unsupported_input / agent_memory_unavailable before any helper is resolved', async () => {
@@ -872,7 +824,7 @@ describe('a memory preparation replay never probes the descriptor again', () => 
 });
 
 describe('a tool-less preparation (requiredToolsets [] and agentMemory none)', () => {
-  const TOOLLESS = { agentMemory: 'none', requiredToolsets: [], permissionMode: 'auto', runtimeIdentity: RUNTIME_IDENTITY } as const;
+  const TOOLLESS = { agentMemory: 'none', requiredToolsets: [], runtimeIdentity: RUNTIME_IDENTITY } as const;
 
   it('is counted with an empty manifest, the proven launch boundary, and no server probed', async () => {
     const spawns: string[] = [];
@@ -927,7 +879,7 @@ describe('a tool-less preparation (requiredToolsets [] and agentMemory none)', (
     // The operator changes a toolset this record never named: same requestId,
     // and the replay is still the same answer from the same record.
     registry.reload(
-      { team: { mcpServers: { teamserver: fixtureServer({ protocolVersion: '2025-06-18' }) }, readOnlyTools: { teamserver: ['echo'] } } },
+      { team: { mcpServers: { teamserver: fixtureServer({ protocolVersion: '2025-06-18' }) } } },
       registry.snapshot().revision,
     );
     expect(await service.prepare(request)).toEqual(first);

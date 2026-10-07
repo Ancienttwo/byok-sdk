@@ -80,7 +80,6 @@ describe('Agent egress typed wire contract', () => {
       'task.offer_for_agent_with_egress',
       {
         instruction: 'strict Agent egress offer',
-        policy: { mode: 'auto' },
         agentRef: AGENT_REF,
         sessionRef: 'session-protocol',
         egressPolicy: POLICY,
@@ -108,7 +107,6 @@ describe('Agent egress typed wire contract', () => {
       'task.offer_for_agent_with_egress_fresh',
       {
         instruction: 'start typed egress Agent work',
-        policy: { mode: 'auto' },
         agentRef: AGENT_REF,
         egressPolicy: POLICY,
       },
@@ -121,7 +119,6 @@ describe('Agent egress typed wire contract', () => {
         'task.offer_for_agent_with_egress',
         {
           instruction: 'resume typed egress Agent work',
-          policy: { mode: 'auto' },
           agentRef: AGENT_REF,
           egressPolicy: POLICY,
         } as never,
@@ -133,7 +130,6 @@ describe('Agent egress typed wire contract', () => {
         'task.offer_for_agent_with_egress_fresh',
         {
           instruction: 'fresh typed egress Agent work',
-          policy: { mode: 'auto' },
           agentRef: AGENT_REF,
           sessionRef: 'forbidden-prestart-session',
           egressPolicy: POLICY,

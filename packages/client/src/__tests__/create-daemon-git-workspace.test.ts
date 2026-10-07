@@ -189,7 +189,7 @@ describe('daemon Git workspace startup/local-event boundary', () => {
 
     server.send(createEnvelope(
       'task.offer',
-      { instruction: 'perform local work', policy: { mode: 'auto' } },
+      { instruction: 'perform local work' },
       { taskId: 'git-event-task', seq: server.nextSeq() },
     ));
     await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === 'git-event-task');

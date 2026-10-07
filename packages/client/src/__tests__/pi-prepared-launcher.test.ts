@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { PermissionPolicy, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   getDocsPath,
   getExamplesPath,
@@ -25,7 +25,7 @@ import {
   type RuntimePreparedLaunchV1,
   type Session,
 } from '../types';
-import { classifyMcpToolsetServerObservation, type McpToolsetServerObservation } from '../mcp/observation';
+import { bindMcpToolsetServerObservation, type McpToolsetServerObservation } from '../mcp/observation';
 import { probeMcpServer } from '../daemon/mcp-tools-probe';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { createPreparedToolSurfaceAssembler } from '../daemon/prepared-tool-surface';
@@ -175,8 +175,6 @@ async function providerEndpoint(): Promise<ProviderEndpoint> {
 // One real preparation, compiled by the native compiler
 // ---------------------------------------------------------------------------
 
-const POLICY: PermissionPolicy = { mode: 'auto', allowTools: [] };
-
 function model(baseUrl: string): InputPreparationModelV1 {
   return {
     id: 'glm-4.6',
@@ -247,7 +245,6 @@ async function prepareOnThisDevice(
   const toolsets = new McpToolsetRegistry({
     [RUNTIME_IDENTITY_TOOLSET]: {
       mcpServers: { teamserver: server },
-      readOnlyTools: { teamserver: ['echo'] },
     },
   });
   const launchBinding = await trustedLaunchBinding();
@@ -262,7 +259,6 @@ async function prepareOnThisDevice(
   }).assemble({
     agentMemory: 'none',
     requiredToolsets,
-    permissionMode: POLICY.mode,
     runtimeIdentity,
   });
   if (!assembled.ok) throw new Error(`the device refused to count this preparation: ${assembled.detail}`);
@@ -278,10 +274,7 @@ async function prepareOnThisDevice(
     observed === undefined
       ? {}
       : {
-        teamserver: classifyMcpToolsetServerObservation(observed, {
-          toolsetId: RUNTIME_IDENTITY_TOOLSET,
-          readOnlyTools: ['echo'],
-        }),
+        teamserver: bindMcpToolsetServerObservation(observed, RUNTIME_IDENTITY_TOOLSET),
       } as Record<string, McpToolsetServerObservation>,
   );
 
@@ -353,7 +346,6 @@ async function prepareOnThisDevice(
         model: snapshot.model,
         binding: BINDING,
       },
-      permissionMode: POLICY.mode,
       toolBindingDigest: surface.toolBindingDigest,
       observationDigest: surface.observationDigest,
       launch: { cwd: surface.launch.launchCwd },
@@ -390,12 +382,10 @@ async function startPrepared(
   const offer: TaskOfferPayload = {
     taskId: 'prepared-launch-test',
     instruction: 'unused on the prepared lane',
-    policy: POLICY,
     ...(byok === undefined ? {} : { dispatchSelection: byok.selection }),
   } as unknown as TaskOfferPayload;
   const result = await adapter.prepare({
     offer,
-    policy: POLICY,
     descriptor: adapter.descriptor,
     requiredToolsetIds: [...prepared.requiredToolsets],
     mcpServers: prepared.mcpServers,
@@ -407,7 +397,6 @@ async function startPrepared(
     taskId: 'prepared-launch-test',
     runtimeId: 'pi',
     descriptor: adapter.descriptor,
-    policy: POLICY,
     requiredToolsetIds: [...prepared.requiredToolsets],
     ...(byok === undefined ? {} : { dispatchSelection: byok.selection }),
     ...(overrides.sessionRef === undefined ? {} : { sessionRef: overrides.sessionRef }),

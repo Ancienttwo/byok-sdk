@@ -79,7 +79,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     // `POST /byok/messages` response, not by an enqueued envelope.
     expect(offerEnvelope.seq).toBe(1);
     expect(offerEnvelope.payload.instruction).toBe('say hello');
-    expect(offerEnvelope.payload.policy).toEqual({ mode: 'confirm' }); // M0 fail-closed default
+    expect('policy' in offerEnvelope.payload).toBe(false); // v2: the offer carries no permission policy
 
     await claimAndStart(started.byok, daemon, handle);
     await sendOne(

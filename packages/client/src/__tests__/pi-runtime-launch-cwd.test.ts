@@ -192,7 +192,7 @@ async function prepareArtifact(home: string, artifactPath: string, launchCwd: st
     reference: { scopeId: 'cwd-scope', agentRef: 'cwd-agent', requestId: 'cwd-preparation', recordId },
     artifactPath,
     expected: { envelopeDigest: compiled.envelopeDigest, toolManifestDigest: compiled.toolManifestDigest, model, binding },
-    permissionMode: 'auto', toolBindingDigest: 'cwd-marker-tool-binding', observationDigest: 'cwd-marker-observation',
+    toolBindingDigest: 'cwd-marker-tool-binding', observationDigest: 'cwd-marker-observation',
     launch: { cwd: launchCwd }, toolImplementations: {}, toolsetDefinitionRevisions: {},
   };
 }
@@ -219,13 +219,12 @@ async function launchThroughAdapter(lane: 'ordinary' | 'prepared', home: string)
       return spawn(command, args, options);
     }) as unknown as SpawnFn,
   });
-  const policy = { mode: 'auto' as const };
-  const offer = { instruction: 'report cwd', policy };
-  const prepared = await adapter.prepare({ offer, policy, descriptor: adapter.descriptor, requiredToolsetIds: [] });
+  const offer = { instruction: 'report cwd' };
+  const prepared = await adapter.prepare({ offer, descriptor: adapter.descriptor, requiredToolsetIds: [] });
   if (prepared.kind === 'reject') throw new Error(prepared.reason);
   const manifest = sealRuntimeOperationManifest({
     agentMemory: 'none',
-    taskId: 'cwd-marker-task', runtimeId: 'pi', descriptor: adapter.descriptor, policy,
+    taskId: 'cwd-marker-task', runtimeId: 'pi', descriptor: adapter.descriptor,
     requiredToolsetIds: [], workspace: { workspaceDir: home }, forwardedEnvironmentNames: Object.keys(env).sort(),
   });
   const cwd = await trustedCwd();

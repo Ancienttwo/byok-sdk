@@ -107,7 +107,6 @@ describe('support bundle privacy and bounds', () => {
           steer: true,
           resume: false,
           approvalInteractive: false,
-          permissionModes: ['SENTINEL_PERMISSION_MODE'],
         },
         environmentRequirements: { credentialNames: [] },
       }),
@@ -125,9 +124,8 @@ describe('support bundle privacy and bounds', () => {
     });
     expect(serialized).not.toContain('SENTINEL_RUNTIME_ID');
     expect(serialized).not.toContain('SENTINEL_RUNTIME_VERSION');
-    expect(serialized).not.toContain('SENTINEL_PERMISSION_MODE');
     expect(doctorLines.join('\n')).not.toContain('SENTINEL_RUNTIME');
-    expect(bundle.runtimes).toMatchObject([{ present: true, versionPresent: true, permissionModeCount: 1 }]);
+    expect(bundle.runtimes).toMatchObject([{ present: true, versionPresent: true }]);
     expect(serialized.length).toBeLessThan(64 * 1024);
   });
 

@@ -103,7 +103,7 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
     server.pushLongPollEvent(
       createEnvelope(
         'task.offer',
-        { instruction: 'prove capability ordering', policy: { mode: 'auto' } },
+        { instruction: 'prove capability ordering' },
         { taskId: 'task-capability-order', seq: 1 },
       ),
     );

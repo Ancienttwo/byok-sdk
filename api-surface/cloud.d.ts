@@ -836,7 +836,7 @@ export declare const CLOUD_CAPABILITIES: {
      * DEVICE's only way to discharge a mailbox row this same deployment handed
      * it — withholding it would strand the device's redelivery cursor rather
      * than degrade a feature. For the same reason the completion route asserts
-     * no DEVICE capability either: the device-level `agent-input-preparation-v8`
+     * no DEVICE capability either: the device-level `agent-input-preparation-v9`
      * flag gates ADMISSION (`enqueueInputPreparation`) and nothing else, so an
      * unconfigured device is refused a row instead of being handed one whose
      * only honest answer — `input_preparation_unconfigured` — it could not then
@@ -1202,7 +1202,7 @@ export interface ByokCloud {
      * Host control plane: enqueue an offer for an already-counted preparation.
      *
      * Admission requires the device to durably advertise both the Agent-home
-     * contract and `agent-input-preparation-v8` — the second because only a device
+     * contract and `agent-input-preparation-v9` — the second because only a device
      * that can prepare holds the durable record this offer names. A device that
      * advertises neither never receives the message, and a device whose protocol
      * build predates the type skips it whole rather than running it as an
@@ -2137,18 +2137,6 @@ export declare const RecurringExecutionInputSchema: z.ZodObject<{
                 url: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
         }, z.core.$strict>]>;
-        policy: z.ZodObject<{
-            mode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
-            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            workspaceRoot: z.ZodOptional<z.ZodString>;
-            network: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strict>;
         agentRef: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;

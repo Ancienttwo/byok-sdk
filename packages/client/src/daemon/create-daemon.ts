@@ -40,7 +40,6 @@ import type {
   RuntimeId,
   RuntimeInfo,
 } from '@byok-sdk/protocol';
-import type { PermissionPolicy } from '@byok-sdk/protocol';
 import type {
   RuntimeAdapter,
   GitWorkspaceConfig,
@@ -411,9 +410,8 @@ export interface DaemonConfig {
    * M5 batch-3 (workstream 1): explicit auto-select priority order for
    * `TaskRunner.pickAdapter`'s no-explicit-runtime branch (`task-runner.ts`)
    * — tried in listed order; the first candidate that is both PRESENT
-   * (`adapter.detect()`) and CAPABLE (declares the offer's
-   * `PermissionPolicy.mode` in its own `descriptor.capabilities.permissionModes` —
-   * see `adapterSupportsMode`) wins. Unset defaults to
+   * (`adapter.detect()`) and CAPABLE (declares MCP toolset projection when
+   * the offer requires it) wins. Unset defaults to
    * `DEFAULT_RUNTIME_PREFERENCE` (`task-runner.ts`): `['claude', 'codex',
    * 'pi']` — pi LAST, deliberately.
    *
@@ -438,29 +436,6 @@ export interface DaemonConfig {
    * sequence among whatever that allowlist, if set, already let through.
    */
   runtimePreference?: RuntimeId[];
-  /**
-   * The device operator's configured policy CEILING — every `task.offer`'s
-   * own policy is merged against this and fail-closed-rejected if it asks
-   * for more latitude than this allows (`daemon/policy.ts`'s
-   * `computeEffectivePolicy`).
-   *
-   * M5 batch-3 (workstream 1): `workspaceRoot` set on THIS ceiling is still
-   * merged into the effective policy handed to an adapter as
-   * `ctx.policy.workspaceRoot` (`computeEffectivePolicy` is unchanged) — but
-   * no bundled adapter (pi/claude/codex) actually reads or enforces it;
-   * every adapter derives its real confinement from `ctx.workspaceDir` (the
-   * daemon-created per-task directory) instead — see docs/security.md's
-   * "Workspace confinement is a convention, not a sandbox" section. Setting
-   * it here is therefore silently inert rather than actively dangerous by
-   * itself (an OFFER independently asking for its OWN `workspaceRoot` is a
-   * separate, fail-closed-declined case — see `TaskRunner.handleOffer` —
-   * precisely because THAT looks like a live security control when it
-   * isn't). `start()` below logs a loud, one-time `console.warn` whenever
-   * this ceiling sets `workspaceRoot`, so an operator who configured it
-   * expecting real enforcement finds out immediately instead of trusting a
-   * control nothing honors.
-   */
-  permissionDefaults?: PermissionPolicy;
   storeDir?: string;
   /**
    * Opt-in host composition for a daemon launched under a different OS
@@ -1404,6 +1379,9 @@ export function buildDaemonWithAdapters(
   overrides: DaemonOverrides = {},
   assertionProbe?: AssertionIssueProbe,
 ): Daemon {
+  if (Object.hasOwn(config, 'permissionDefaults')) {
+    throw new Error('DaemonConfig.permissionDefaults was removed: the local agent\'s own permission settings apply');
+  }
   if (config.providerProvisioning !== undefined && typeof config.providerProvisioning !== 'function') {
     throw new Error('DaemonConfig.providerProvisioning must be a handler function when present');
   }
@@ -1602,7 +1580,6 @@ export function buildDaemonWithAdapters(
     toolsetRegistry,
     ...(mcpLaunchCwd === undefined ? {} : { mcpLaunchCwd }),
     runtimeEnv: preparationRuntimeEnv,
-    ...(config.permissionDefaults === undefined ? {} : { permissionCeiling: config.permissionDefaults }),
     ...(config.toolImplementationAuthority === undefined
       ? {}
       : { toolImplementationAuthority: config.toolImplementationAuthority }),
@@ -2144,21 +2121,6 @@ export function buildDaemonWithAdapters(
     }
     fleetJitter = createFleetJitter(config.productId, record.deviceId);
 
-    // M5 batch-3 (workstream 1): see `DaemonConfig.permissionDefaults`'s own
-    // doc comment above — a configured ceiling `workspaceRoot` is merged
-    // into every task's effective policy but enforced by no bundled adapter.
-    // Logged once per `start()` (not per task, not per offer) — same
-    // operator-facing, non-fatal `console.warn` convention `checkServerUrl`'s
-    // `dangerouslyAllowInsecureRemote` warning above already uses in this
-    // file. This is purely a LOCAL-ceiling warning: an OFFER independently
-    // asking for its own `workspaceRoot` is a different, fail-closed-declined
-    // case handled by `TaskRunner.handleOffer`, not here.
-    if (config.permissionDefaults?.workspaceRoot !== undefined) {
-      console.warn(
-        `[byok/client] WARNING: permissionDefaults.workspaceRoot ("${config.permissionDefaults.workspaceRoot}") is configured, but no bundled runtime adapter (pi/claude/codex) enforces PermissionPolicy.workspaceRoot — every adapter confines a task to ctx.workspaceDir instead. This ceiling value has no enforcement effect; see docs/security.md's "Workspace confinement is a convention, not a sandbox" section.`,
-      );
-    }
-
     const journalIdentity: JournalIdentity | undefined = activeJournal
       ? { tenantId: record.tenantId, productId: config.productId, deviceId: record.deviceId }
       : undefined;
@@ -2287,7 +2249,7 @@ export function buildDaemonWithAdapters(
      * That completion is ACCEPTED by cloud: the completion route asserts no
      * device capability (`cloud.ts`'s `completeInputPreparationFromStores`),
      * precisely so this rejection is recordable by a device that never
-     * advertised `agent-input-preparation-v8`. The flag remains the admission
+     * advertised `agent-input-preparation-v9`. The flag remains the admission
      * gate on `enqueueInputPreparation`.
      *
      * The handler takes the service directly, so a preparation runs IN-PROCESS.
@@ -2407,7 +2369,6 @@ export function buildDaemonWithAdapters(
       runtimeAllowlist: config.runtimeAllowlist,
       // M5 batch-3: see `DaemonConfig.runtimePreference`'s own doc comment above.
       runtimePreference: config.runtimePreference,
-      permissionDefaults: config.permissionDefaults,
       workspaceRoot: config.workspaceRoot,
       ...(agentHomeManager === undefined ? {} : { agentHome: agentHomeManager }),
       ...(config.strictAgentOnly === true ? { strictAgentOnly: true } : {}),
@@ -2420,7 +2381,7 @@ export function buildDaemonWithAdapters(
       getMcpToolsets: () => toolsetRegistry.snapshot().toolsets,
       // The prepared-Execution lane, present only on a daemon whose input
       // preparation service actually constructed — which is also the only
-      // daemon that advertises `agent-input-preparation-v8` and can hold a record
+      // daemon that advertises `agent-input-preparation-v9` and can hold a record
       // a `task.offer_prepared` could name. The three device facts travel with
       // the store because this file already owns them: re-deriving the
       // installed runtime identity or the operator's policy revision inside the

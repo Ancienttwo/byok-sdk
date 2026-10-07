@@ -39,7 +39,6 @@ async function admitMessageEgress(harness: CloudHarness, deviceId: string, agent
     taskId: `issue-task-${crypto.randomUUID()}`,
     payload: {
       instruction: 'send one message',
-      policy: { mode: 'auto' },
       agentRef,
       sessionRef: 'issue-session',
       egressPolicy: {

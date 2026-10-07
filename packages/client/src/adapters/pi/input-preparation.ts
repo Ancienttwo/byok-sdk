@@ -2,7 +2,6 @@ import { OFFICIAL_PI_PROVENANCE, verifyOfficialPiClosure, assertOfficialPiProven
 import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import type { PermissionMode } from '@byok-sdk/protocol';
 import type {
   InputPreparationCompiledPromptSnapshotV1,
   InputPreparationCompiledSnapshotV1,
@@ -19,7 +18,8 @@ import {
   type ToolImplementationAttestedV1,
   type ToolImplementationIdentityV1,
 } from '../../daemon/tool-implementation-identity';
-import { filterMcpObservationForPolicy, projectMcpTools, qualifiedMcpToolName } from '../../mcp/projection';
+import { McpAuthorityError } from '../../mcp/authority-error';
+import { projectMcpTools, qualifiedMcpToolName, type McpToolProjection } from '../../mcp/projection';
 import { PI_PACKAGE_NAME, resolvePiRuntimeIdentity, type PiRuntimeIdentity } from './resolve-bin';
 import {
   buildPreparedTranscriptMessages,
@@ -862,16 +862,8 @@ export async function nativeToolObservationFingerprint(input: NativeToolFingerpr
 }
 
 export interface ToolExecutorsRequest {
-  /** The daemon's frozen observation, keyed by projected server name. Unfiltered: the policy is applied here. */
+  /** The daemon's frozen observation, keyed by projected server name. */
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
-  /**
-   * The task's permission mode. Required, and applied to the observation
-   * before anything is fingerprinted, so a frozen manifest cannot bind an
-   * executor for a tool the prepared session would never register. A caller
-   * that had to remember to filter first is a caller that eventually forgets,
-   * and the failure would be a manifest quietly wider than the session.
-   */
-  readonly permissionMode: PermissionMode;
   /** `toolsetId` -> the registry's definition revision for it. Every observed toolset must appear. */
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
   /**
@@ -890,7 +882,7 @@ export interface ToolExecutorsRequest {
    * different facts and only the second one is a fingerprint input.
    */
   readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
-  /** Pi's own tools, already filtered by policy, in the order they are registered. */
+  /** Pi's own tools, in the order they are registered. */
   readonly nativeTools: readonly { readonly name: string; readonly parameters: unknown }[];
   readonly runtimeIdentity: string;
 }
@@ -921,13 +913,17 @@ export async function buildToolExecutorsFromObservation(
       runtimeIdentity: request.runtimeIdentity,
     });
   }
-  // Same filter, same core, same answer as the ordinary extension's
-  // registration and as every adapter's grant: the manifest is frozen over
-  // exactly the tools a prepared session will register.
-  const allowed = filterMcpObservationForPolicy(request.observation, request.permissionMode);
-  if (!allowed.ok) throw new InputPreparationCompileError(allowed.reason);
-  for (const tool of projectMcpTools(allowed.observation)) {
-    const server = allowed.observation[tool.serverName]!;
+  // Same core, same answer as the ordinary extension's registration: the
+  // manifest is frozen over exactly the tools a prepared session will register.
+  let projected: readonly McpToolProjection[];
+  try {
+    projected = projectMcpTools(request.observation);
+  } catch (error) {
+    if (error instanceof McpAuthorityError) throw new InputPreparationCompileError(error.message);
+    throw error;
+  }
+  for (const tool of projected) {
+    const server = request.observation[tool.serverName]!;
     const toolsetDefinitionRevision = request.toolsetDefinitionRevisions[tool.toolsetId];
     if (toolsetDefinitionRevision === undefined) {
       throw new InputPreparationCompileError(

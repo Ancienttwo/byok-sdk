@@ -14,7 +14,7 @@ import { observeMcpServer } from '../mcp/observation';
 
 const fail = (message: string): never => { throw new Error(message); };
 const privateNames = [...PROVIDER_CREDENTIAL_ENV_DENY_NAMES, ...CONTROLLED_PI_DIRECTORY_ENV_NAMES, 'BYOK_PI_MCP_CONFIG_PATH'];
-const emptyConfig = { mcpServers: {}, observation: {}, permissionMode: 'auto', toolImplementations: {} };
+const emptyConfig = { mcpServers: {}, observation: {}, toolImplementations: {} };
 afterEach(() => vi.unstubAllEnvs());
 
 describe('Pi MCP explicit environment boundary', () => {

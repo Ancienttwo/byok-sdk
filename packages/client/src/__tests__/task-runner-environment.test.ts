@@ -118,7 +118,7 @@ async function makeHarness(runtimeEnvironment?: Record<string, { allow?: string[
     // capture below is always populated by the time this call returns —
     // no polling/`vi.waitFor` needed, unlike the full daemon-level tests.
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'say hi', policy: { mode: 'auto' }, runtime, ...(dispatchSelection === undefined ? {} : { dispatchSelection }) }, { taskId, seq: seq++ }),
+      createEnvelope('task.offer', { instruction: 'say hi', runtime, ...(dispatchSelection === undefined ? {} : { dispatchSelection }) }, { taskId, seq: seq++ }),
     );
   }
 

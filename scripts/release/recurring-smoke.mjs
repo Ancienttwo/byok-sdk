@@ -152,7 +152,7 @@ async function pairCapableDevice(composition, tenant, deviceName) {
 function recurringInput(taskId, deviceId, instruction, agentRef = { agentId: 'packed-agent', profileRevision: 'profile' }) {
   return RecurringExecutionInputSchema.parse({
     taskId, deviceId,
-    payload: { instruction, runtime: 'codex', policy: { mode: 'auto' },
+    payload: { instruction, runtime: 'codex',
       agentRef,
       egressPolicy: { policyRevision: 'policy', activity: { mode: 'metadata-status', delivery: 'latest-value' },
         reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
