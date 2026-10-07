@@ -104,10 +104,9 @@ export async function runSdkReservedHelperCommand(
     return true;
   }
   if (argv[1] === 'pi-subagent-print') {
-    // The print bootstrap edge routes to the single attested exec point. The
-    // print preset entry (`custody/pi-subagent-print-entry.ts`) is the other
-    // caller: both transports converge on `launchAttestedPiSubagentPrint`,
-    // and every custody gate inside is fail-closed.
+    // The print bootstrap edge routes to the single attested exec point
+    // (`custody/pi-subagent-print-entry.ts` launchAttestedPiSubagentPrint);
+    // every custody gate inside is fail-closed.
     const exitCode = await runAttestedPiSubagentPrintFromEnvironment(process.env);
     if (exitCode !== 0) throw new Error(`attested pi-subagent-print exec exited ${exitCode}`);
     return true;

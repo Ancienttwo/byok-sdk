@@ -1,17 +1,15 @@
-#!/usr/bin/env bun
 /**
  * WP4 print direct-connect entry (`pi-subagent-print` helper re-entry).
  *
- * The WP3 transport is gone: the vendored `getPiSpawnCommand` chain and its
- * `PI_SUBAGENT_PI_BINARY` env seam are deleted from the vendored tree. Every
- * physical print child is now minted by the custody dispatcher
+ * Every physical print child is minted by the custody dispatcher
  * (`custody/custody-dispatcher.ts` — the only mint and dispatch authority),
  * which spawns the helper direct-connect shape `node <bundle>
  * __byok_sdk_helper pi-subagent-print`; the SDK-reserved helper host routes
- * that argv to `runAttestedPiSubagentPrintFromEnvironment` here. The
- * argv-template-gated preset flow (`runPiSubagentPrintEntry`) remains as the
- * secondary transport for the store-package seam probe; both converge on the
- * single attested exec point `launchAttestedPiSubagentPrint`.
+ * that argv to `runAttestedPiSubagentPrintFromEnvironment` here. The WP3
+ * `PI_SUBAGENT_PI_BINARY` seam and its argv-template-gated preset entry are
+ * retired, so this module has no shebang and no direct-execution main: it is
+ * only ever imported, never executed as a script, and importing it has no
+ * side effect (a module-init CLI guard here ran inside every consumer bundle).
  *
  * Depth authority is the SDK frozen counting table alone (owner ruling
  * 2026-09-17): the runner->print bootstrap edge charges zero, so the print
@@ -29,14 +27,9 @@
  * running process (the dispatcher always mints this shape) the
  * spawned-liveness sidecar is claimed and the delegated payload runs
  * in-process; any other template execs the attested target. Every gate is
- * fail-closed: a missing commitment, a non-integer commitment, an argv
- * mismatch, an unreadable record or any validation refusal exits nonzero
- * without execing anything. There is no fallback path.
- *
- * WP4 (contract 20260917-2002) extracted the commitment core shared with the
- * runner entry into `custody-commitments.ts`; this module re-exports the
- * moved names under their original print-entry spellings so the existing
- * import surface (tests included) keeps working unchanged.
+ * fail-closed: a missing commitment, a non-integer commitment, an
+ * unreadable record or any validation refusal refuses without execing
+ * anything. There is no fallback path.
  */
 import { activateVerifiedCustodyParent } from './external-cli-authority';
 import { spawn as nodeSpawn } from 'node:child_process';
@@ -57,45 +50,8 @@ import {
 import { claimSpawnedLaunchLiveness } from './custody-dispatcher';
 import { isSelfReentrySpawn } from './custody-self-reentry';
 
-// Moved to the shared custody commitment core; re-exported under the original
-// print-entry spellings so existing imports of this module keep working.
-export {
-  BYOK_SDK_CUSTODY_LAUNCH_RECORD_ENV,
-  BYOK_SDK_CUSTODY_PARENT_DEPTH_ENV,
-  parseCustodyParentDepthCommitment,
-  loadCustodyLaunchRecord,
-} from './custody-commitments';
-export { PiSubagentCustodyRefusalError as PiSubagentPrintRefusalError } from './custody-commitments';
-export { deriveCustodyExpectation as derivePrintExpectation } from './custody-commitments';
-
-/**
- * The registered pi-style argv template of the vendor's print invocation
- * (`buildPiArgs` base args for print mode). The vendor's exact tail is
- * environment-dependent (session, prompt and task files), so the gate pins
- * the stable prefix positionally and refuses any other shape.
- */
-export const PRINT_ENTRY_REGISTERED_ARGV_TEMPLATE: readonly string[] = Object.freeze(['--mode', 'json', '-p']);
-
 /** Frozen counting table: the runner->print bootstrap edge charges zero. */
 const PRINT_ENTRY_BOOTSTRAP_CHARGE = 0;
-
-/** Bitwise argv-template gate against the registered pi-style prefix. */
-export function assertPrintEntryArgvTemplate(argv: readonly string[]): void {
-  const template = PRINT_ENTRY_REGISTERED_ARGV_TEMPLATE;
-  if (argv.length < template.length) {
-    refusal(`argv template mismatch: expected the ${JSON.stringify([...template])} prefix, got ${argv.length} argument(s)`);
-  }
-  for (const [index, expected] of template.entries()) {
-    if (argv[index] !== expected) {
-      refusal(`argv template mismatch at position ${index}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(argv[index])}`);
-    }
-  }
-  for (const argument of argv) {
-    if (argument.length === 0 || /[\u0000\r\n]/u.test(argument)) {
-      refusal('argv template mismatch: empty or control-bearing argument');
-    }
-  }
-}
 
 /**
  * Project the attested exec environment to EXACTLY the record's declared
@@ -161,8 +117,7 @@ export interface AttestedPiSubagentPrintLaunchInput {
  * target immediately before the exec, and only then execs it — or, when the
  * validated template IS this process (the dispatcher's helper re-entry
  * shape), claims the spawned-liveness sidecar and runs the payload
- * in-process. Both transport shapes funnel here: this slice's env-seam preset
- * entry and WP4's fixedArgv direct connect.
+ * in-process.
  */
 export async function launchAttestedPiSubagentPrint(input: AttestedPiSubagentPrintLaunchInput): Promise<number> {
   const { parentDepth, observedEnv } = input;
@@ -213,7 +168,7 @@ function defaultAttestedExec(command: string, args: readonly string[], options: 
   });
 }
 
-/** Dispatcher entry: the helper host's print branch (direct argv shape, no pi-style gate). */
+/** Dispatcher entry: the helper host's print branch (direct argv shape). */
 export async function runAttestedPiSubagentPrintFromEnvironment(env: Readonly<Record<string, string | undefined>>): Promise<number> {
   const parentDepth = parseCustodyParentDepthCommitment(env);
   const launch = loadCustodyLaunchRecord(env);
@@ -233,33 +188,3 @@ export async function runAttestedPiSubagentPrintFromEnvironment(env: Readonly<Re
     },
   });
 }
-
-/** Full env-seam preset entry flow: argv template gate first, then the attested launch. */
-export async function runPiSubagentPrintEntry(argv: readonly string[], env: Readonly<Record<string, string | undefined>>): Promise<number> {
-  assertPrintEntryArgvTemplate(argv);
-  return runAttestedPiSubagentPrintFromEnvironment(env);
-}
-
-/**
- * CLI self-execution guard. `import.meta.main` is the only safe signal here:
- * a `process.argv[1]`/`import.meta.url` realpath comparison collapses once
- * this module is bundled into a host artifact (the bundler rewrites
- * `import.meta.url` to the bundle's own path, so every consumer bundle would
- * execute the CLI flow). Bun sets `main` on the shebang-executed entry file
- * and leaves it false for statically imported modules, in bundles and in
- * test imports alike.
- */
-function isDirectExecution(): boolean {
-  return (import.meta as { main?: boolean }).main === true;
-}
-
-async function main(): Promise<number> {
-  try {
-    return await runPiSubagentPrintEntry(process.argv.slice(2), process.env);
-  } catch (error) {
-    process.stderr.write(`byok custody refusal: ${(error as Error).message}\n`);
-    return 1;
-  }
-}
-
-if (isDirectExecution()) void main().then((code) => process.exit(code));
