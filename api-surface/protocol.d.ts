@@ -6233,34 +6233,7 @@ export type { TaskOfferType } from './messages';
 export type { HarnessId, HarnessInfo } from './messages';
 export { CUSTOM_HARNESS_CAPABILITY } from './version';
 export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation';
-// ==== @byok-sdk/protocol dist/input-preparation.d.ts ====
-import { z } from 'zod';
-/**
- * Remote authenticated runtime input preparation — the wire half of
- * `docs/researches/runtime-input-preparation-contract.md` §19 (channel shape)
- * and the C07 G4 design decision §17 B.
- *
- * This module owns ONLY the leaf shapes. The server -> device payload lives in
- * `messages.ts` beside every other message payload (so the one inline byte
- * bound `MAX_INLINE_BYTES` stays a single module-local authority), and the two
- * authenticated HTTP bodies live in `http-api.ts`.
- *
- * Three structural rules this surface exists to hold:
- *
- * 1. The request carries NO tools, NO tool executors and NO runtime identity.
- *    Those are LOCAL observations: only the device can honestly say which MCP
- *    toolsets it has, what schemas their servers publish, and which native
- *    package closure is installed. A Host that could state them would be
- *    stating an identity it cannot verify.
- * 2. The receipt summary discloses identities, digests, sizes, counter
- *    evidence and readiness — never D, never P(D), never the snapshot. A
- *    digest proves content identity; it is not a disclosure channel and not a
- *    bearer token (§10.3.4).
- * 3. Every shape here is `.strict()`. This is control data: an unrecognized
- *    field must be REJECTED, not silently stripped, per docs/protocol.md's
- *    freeze-rule asymmetry. Adding a field post-freeze is therefore a
- *    breaking change.
- */
+// ==== @byok-sdk/protocol dist/input-preparation-version.d.ts ====
 /**
  * The ONE version of the input-preparation contract, shared by this relay wire
  * (the `agent.input.preparation` payload and the completion receipt summary)
@@ -6273,6 +6246,9 @@ import { z } from 'zod';
  * changed.
  */
 export declare const INPUT_PREPARATION_WIRE_VERSION: 9;
+// ==== @byok-sdk/protocol dist/input-preparation.d.ts ====
+import { z } from 'zod';
+export { INPUT_PREPARATION_WIRE_VERSION } from './input-preparation-version';
 /**
  * Capability required before a task-free remote input preparation — or a
  * prepared Execution — is admitted: `agent-input-preparation-v<N>`, where

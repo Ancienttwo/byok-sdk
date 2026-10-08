@@ -48,6 +48,8 @@ const cleanups: (() => Promise<void>)[] = [];
 
 afterEach(async () => {
   while (cleanups.length > 0) await cleanups.pop()?.();
+  // OS credentials belong to the product, not to each removed temp directory.
+  await new DeviceStore(os.tmpdir(), undefined, PRODUCT).credentials.clear();
 });
 
 async function tmpDir(prefix: string): Promise<string> {

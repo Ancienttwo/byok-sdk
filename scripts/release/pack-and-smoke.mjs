@@ -386,7 +386,10 @@ try {
         `import { tmpdir } from 'node:os';\n` +
         `import path from 'node:path';\n` +
         `const require = createRequire(import.meta.url);\n` +
-        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/client/agent-memory','@byok-sdk/client/assertion-client','@byok-sdk/client/mcp-server','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/cloud-dataplane/runtime','@byok-sdk/ui-runtime','@byok-sdk/keys']) await import(name);\n` +
+        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/protocol/input-preparation-version','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/client/agent-memory','@byok-sdk/client/assertion-client','@byok-sdk/client/mcp-server','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/cloud-dataplane/runtime','@byok-sdk/ui-runtime','@byok-sdk/keys']) await import(name);\n` +
+        `const { buildRuntimeEnv } = await import('@byok-sdk/client/adapters');\n` +
+        `assert.deepEqual(buildRuntimeEnv({ ambient: { CLAUDECODE: '1', BYOK_TEST: 'secret', NODE_OPTIONS: '--trace-warnings' } }), { NODE_OPTIONS: '--trace-warnings' });\n` +
+        `assert.equal((await import('@byok-sdk/protocol/input-preparation-version')).INPUT_PREPARATION_WIRE_VERSION, (await import('@byok-sdk/protocol')).INPUT_PREPARATION_WIRE_VERSION);\n` +
         `const { AgentHomeBusyError, AgentHomeManager } = await import('@byok-sdk/client');\n` +
         `const parallelRoot = mkdtempSync(path.join(tmpdir(), 'byok-packed-agent-session-'));\n` +
         `try {\n` +

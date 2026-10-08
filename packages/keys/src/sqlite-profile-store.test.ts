@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -230,6 +230,26 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
     // ordinary file the fixture can delete.
     rmSync(databasePath, { force: true });
     expect(existsSync(databasePath)).toBe(false);
+  });
+
+  it.each(['DELETE', 'WAL'])('preserves all bytes and tables of a rejected %s legacy database', (journal) => {
+    const legacy = openSqliteDatabase(databasePath);
+    legacy.exec(`PRAGMA journal_mode = ${journal}`);
+    legacy.exec(PRE_CATALOG_SCHEMA);
+    legacy.exec("INSERT INTO provider_profile VALUES ('openai', 'openai', 'model', 'openai_compatible', 'OpenAI', 'https://api.openai.com/v1', 'bearer', 'gpt-5.2', '[]', 1, '2026-08-05', '2026-08-05')");
+    const schema = legacy.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY name').all();
+    const rows = legacy.prepare('SELECT * FROM provider_profile').all();
+    legacy.close();
+    const bytes = readFileSync(databasePath);
+    const mode = statSync(databasePath).mode;
+    expectSchemaStale(() => new SqliteProviderProfileStore({ path: databasePath }));
+    expect(readFileSync(databasePath)).toEqual(bytes);
+    expect(statSync(databasePath).mode).toBe(mode);
+    const reader = openSqliteDatabase(databasePath, { readOnly: true });
+    expect(reader.prepare('SELECT type, name, sql FROM sqlite_master ORDER BY name').all()).toEqual(schema);
+    expect(reader.prepare('SELECT * FROM provider_profile').all()).toEqual(rows);
+    reader.close();
+    expect(existsSync(`${databasePath}.config-lock`)).toBe(false);
   });
 
   it('reopens a store this version created without a false stale-schema alarm', async () => {

@@ -409,6 +409,7 @@ export { CodexAdapter } from './codex/codex-adapter';
 export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-adapter';
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
 export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from '../native-interactions';
+export { buildRuntimeEnv } from '../daemon/environment';
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
@@ -3762,6 +3763,8 @@ export interface DaemonConfig {
      * as OAR's `OAR_CODEX_SANDBOX`. Default `danger-full-access`. `inherit`
      * passes no sandbox override, so the user's own `config.toml` applies.
      * `createDaemon` throws a TypeError for any other value.
+     * `createDaemonWithAdapters` rejects this key, even when undefined.
+     * Configure the injected CodexAdapter with its own sandbox option.
      */
     codexSandbox?: CodexSandboxSetting;
     /**
@@ -4508,6 +4511,56 @@ export interface HostDeviceProofSigner extends DeviceProofSigner {
  */
 export declare function createStoredDeviceProofSigner(options: CreateStoredDeviceProofSignerOptions): HostDeviceProofSigner;
 export {};
+// ==== @byok-sdk/client dist/daemon/environment.d.ts ====
+/**
+ * The environment of every child process of a task: the runtime CLI and the
+ * MCP servers the daemon probes for it.
+ *
+ * {@link buildRuntimeEnv} inherits the daemon's full environment, as OAR
+ * does. The user's own agent reads its own configuration and credentials from
+ * it. Only two groups of names are removed:
+ *
+ * - `CLAUDECODE`: Claude Code sets it inside its own sessions. OAR removes
+ *   it so that a child agent starts as its own top-level session.
+ * - `BYOK_*`: this SDK's own control-plane variables (key custody).
+ *
+ * {@link buildAllowlistedEnv} is the narrow form. Only two Pi lanes use it:
+ * the durable Pi tool shell and the prepared Pi lane on the Pi auth store.
+ *
+ * Every name in every list may be an exact match or a `*`-suffixed prefix
+ * (e.g. `'LC_*'` matches `LC_ALL`, `LC_CTYPE`, ...).
+ */
+/** Inputs to {@link buildAllowlistedEnv}. */
+export interface BuildAllowlistedEnvOptions {
+    /**
+     * The ambient environment (normally `process.env`). Never mutated — every
+     * returned variable is copied into a fresh object.
+     */
+    ambient: NodeJS.ProcessEnv;
+    /** Names admitted beyond the platform baseline, still subject to the hard deny. */
+    allow?: readonly string[];
+    /**
+     * Test seam: which platform's extra base vars to include
+     * ({@link WINDOWS_BASE_ALLOWLIST} vs none) — defaults to `process.platform`
+     * so callers never have to think about it, while still letting a test
+     * exercise the win32 branch deterministically on any host OS.
+     */
+    platform?: NodeJS.Platform;
+}
+/**
+ * The environment every child process of a task receives: the full ambient
+ * environment minus the hard deny. A fresh object; `ambient` is never
+ * mutated.
+ */
+export declare function buildRuntimeEnv(options: {
+    ambient: NodeJS.ProcessEnv;
+    platform?: NodeJS.Platform;
+}): Record<string, string>;
+/**
+ * The platform baseline plus `options.allow`, minus the hard deny. Only two
+ * Pi lanes use it (see this module's own doc comment).
+ */
+export declare function buildAllowlistedEnv(options: BuildAllowlistedEnvOptions): Record<string, string>;
 // ==== @byok-sdk/client dist/daemon/git-workspace-store.d.ts ====
 import type { GitErrorCategory, GitWorkspaceObservation } from './git-workspace';
 export type GitWorkspacePhase = 'preparing' | 'active' | 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'salvage';
@@ -9559,7 +9612,7 @@ export { NativeInteractionController, NativeInteractionError } from './native-in
 export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from './native-interactions';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
-import { type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
+import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 /** Wire format tag for a preparation request. One strict shape, one version. */
 export declare const INPUT_PREPARATION_REQUEST_FORMAT = "byok.input-preparation.request";
 /** Wire format tag for a preparation receipt. */

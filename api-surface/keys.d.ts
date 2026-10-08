@@ -1740,7 +1740,10 @@ export declare function isSqliteAvailable(): boolean;
  * skips every filesystem step, which is how the shared contract suite exercises
  * the SQLite code path without leaving anything on disk.
  */
-export declare function openSqliteDatabase(path: string, options?: DatabaseSyncOptions, faults?: SqliteOpenFaultSeam): DatabaseSync;
+export declare function openSqliteDatabase(path: string, options?: DatabaseSyncOptions & {
+    /** Validate existing authority before persistent pragmas or caller DDL. */
+    validateSchema?: (database: DatabaseSync) => void;
+}, faults?: SqliteOpenFaultSeam): DatabaseSync;
 /**
  * Restrict `databasePath` and its WAL/SHM siblings to owner-only read/write.
  *

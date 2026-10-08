@@ -1,8 +1,26 @@
 # Changelog
 
-## 0.25.0-rc.1 / @byok-sdk/keys 0.10.0-rc.1 — 2026-10-09 (prepared; not published)
+## Unreleased
 
-Release candidate for 0.25.0, to be published under the npm dist-tag `rc`;
+- Client test credential stores now use the same product identity as OS stores.
+  Changing `storeDir` keeps pairing. Use unpair or a new `productId` to reset it.
+- `createDaemonWithAdapters` rejects `codexSandbox`. Set the injected adapter's
+  `sandbox` option directly. The default-adapter path still accepts this option.
+- `@byok-sdk/client/adapters` exports `buildRuntimeEnv` for direct hosts.
+- The embedded SQLite server refuses unsupported pending mailbox wire majors
+  at startup with `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`. Historical acknowledged
+  and expired messages do not block startup.
+- Keys checks existing profile DDL before WAL setup or schema writes. Rejected
+  legacy profile stores keep their original bytes and tables.
+- Adapters read the preparation version from the schema-free
+  `@byok-sdk/protocol/input-preparation-version` entry. They no longer retain Zod just for a constant. The Node 24 ESM
+  bundle of Claude, Codex, and Pi adapters decreases from 922,759 to 295,741
+  bytes with esbuild 0.27.7, without minification.
+
+
+## 0.25.0-rc.1 / @byok-sdk/keys 0.10.0-rc.1 — 2026-10-09 (published on npm)
+
+Release candidate for 0.25.0, published under the npm dist-tag `rc`;
 `latest` stays 0.24.0 / keys 0.9.0. It carries the minimal-guardrails cut
 (ADR-037) with protocol v2, the official Pi 1.1.0 runtime and the private OAR
 0.44.0 source.
@@ -247,8 +265,8 @@ Release candidate for 0.25.0, to be published under the npm dist-tag `rc`;
 - **Breaking (client)** — runtimes inherit the user's own agent configuration.
   Plan: `plans/plan-20261007-1340-minimal-guardrails.md` (slice 2).
   - Environment: every task child gets the full daemon environment, as in OAR.
-    The daemon removes only `CLAUDECODE`, its own `BYOK_*` names and loader
-    injection names. Claude and Codex keep provider API keys. The Pi BYOK lane
+    The daemon removes only `CLAUDECODE` and its own `BYOK_*` names. Loader
+    variables (`NODE_OPTIONS`, `LD_*`, `DYLD_*`) are inherited. Claude and Codex keep provider API keys. The Pi BYOK lane
     keeps its key custody.
   - Remove `RuntimeAdapterDescriptor.environmentRequirements`, the exported
     `RuntimeEnvironmentRequirements` type and `DaemonConfig.runtimeEnvironment`.

@@ -51,7 +51,7 @@ import {
   type TaskCancellationRequest,
   type TaskCancellationStore,
 } from '@byok-sdk/cloud';
-import { byokBlobContentPath, type RuntimeCapabilities, type RuntimeId } from '@byok-sdk/protocol';
+import { PROTOCOL_VERSION, byokBlobContentPath, type RuntimeCapabilities, type RuntimeId } from '@byok-sdk/protocol';
 import type { DatabaseSync } from 'node:sqlite';
 import {
   closeSqliteDatabaseAfterInitializationFailure,
@@ -272,6 +272,17 @@ class SqliteCoordinator {
           column.name !== expectedColumns[index] || column.type !== 'TEXT' || column.notnull !== 1 ||
           column.pk !== (index < 2 ? index + 1 : 0))) {
           throw schemaError('SQLITE_SCHEMA_INVALID', 'Invalid BYOK SQLite request receipt schema');
+        }
+        // Schema v4 spans the wire-major cut. A pending old envelope must be
+        // refused before routes can repeatedly fail to decode the same row.
+        for (const row of this.db.prepare("SELECT body FROM mailbox_message WHERE state = 'pending'").iterate()) {
+          let envelope: unknown;
+          try { envelope = JSON.parse(row.body as string); } catch { envelope = undefined; }
+          if (typeof envelope !== 'object' || envelope === null ||
+              !('v' in envelope) || envelope.v !== PROTOCOL_VERSION) {
+            throw schemaError('SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED',
+              `Pending mailbox rows do not use protocol v${PROTOCOL_VERSION}; preserve the database and drain with the previous SDK before upgrading, or use a new state directory and enrollment`);
+          }
         }
         this.db.exec('COMMIT');
       } catch (error) {

@@ -203,7 +203,7 @@ export class DeviceStore {
     if (productId === undefined) {
       this.credentials = new InMemoryDeviceCredentialStore();
     } else if (process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE === '1') {
-      const key = `${path.resolve(storeDir)}\0${productId}`;
+      const key = productId;
       let credentials = DeviceStore.testCredentials.get(key);
       if (credentials === undefined) {
         credentials = new InMemoryDeviceCredentialStore();
