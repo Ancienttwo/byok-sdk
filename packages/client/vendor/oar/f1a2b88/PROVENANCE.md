@@ -1,8 +1,8 @@
-# OAR a800aa0 private runtime fork
+# OAR f1a2b88 private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.25.0, fixed commit `a800aa00ba9c754c88ba25f84a6981e757b0f19f`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.29.0, fixed commit `f1a2b88eb63e47de8197514e9329642e2d0ae02c`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
-`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 22 source files plus LICENSE. Sixteen source files keep upstream bytes. Six source files contain BYOK changes. The six added files are imports of the selected contracts and Codex fold. No Cursor, ACP, CLI, arena, executable manager or branded resources are included.
+`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 23 source files plus LICENSE. Seventeen source files keep upstream bytes. Six source files contain BYOK changes. The six added files are imports of the selected contracts and Codex fold. No Cursor, ACP, CLI, arena, executable manager or branded resources are included.
 
 ## BYOK S1 changes
 
@@ -97,3 +97,19 @@ The other 20 selected paths have the same upstream bytes.
 The six maintained source deltas stay in place. Their change notices name the new base.
 The selected inventory, raw session bridge and native interaction policy stay the same.
 No upstream npm dependencies or other runtimes enter the SDK.
+
+## 0.25.0 → 0.29.0 re-vendor
+
+The new base is tag v0.29.0, commit `f1a2b88eb63e47de8197514e9329642e2d0ae02c`.
+All 23 selected upstream paths were compared against the prior base.
+Four paths changed upstream, and the change adds one new dependency.
+
+- `contracts/records.ts` adds optional `cacheRead` and `cacheWrite` parts to `TokenTotals`. This file keeps upstream bytes.
+- `contracts/installation.ts` adds optional `ExecutableInstallation.shadowed`. This file keeps upstream bytes.
+- `contracts/account-usage.ts` adds a comment. This file keeps upstream bytes.
+- `runtimes/codex/projection.ts` reports the Codex cache token parts through `cacheParts`. The upstream hunk applies cleanly. The BYOK failure-classification delta stays.
+- `shared/token-totals.ts` is new in the inventory because `projection.ts` imports it. It keeps upstream bytes.
+
+The other 19 selected paths have the same upstream bytes.
+The six maintained source deltas stay in place. Their change notices name the new base.
+The upstream version policy matches the BYOK adapter: sessions read the runtime version and do not gate on it.

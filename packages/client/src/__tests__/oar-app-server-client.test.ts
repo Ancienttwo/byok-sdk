@@ -5,9 +5,9 @@ import path from 'node:path';
 import {
   startAppServerClient, RpcTimeoutError,
   type LineProcess, type SpawnLineProcess, type AppServerLimits,
-} from '../../vendor/oar/a800aa0/runtimes/codex/app-server-client.js';
-import { rpcControl } from '../../vendor/oar/a800aa0/runtimes/codex/rpc-control.js';
-import { createSessionKernel } from '../../vendor/oar/a800aa0/shared/session-kernel.js';
+} from '../../vendor/oar/f1a2b88/runtimes/codex/app-server-client.js';
+import { rpcControl } from '../../vendor/oar/f1a2b88/runtimes/codex/rpc-control.js';
+import { createSessionKernel } from '../../vendor/oar/f1a2b88/shared/session-kernel.js';
 
 function fakeProcess() {
   const lines: Array<(line: string) => void> = [];
@@ -201,7 +201,7 @@ describe('OAR injected app-server client', () => {
 });
 
 it('accounts for every vendored file and the six maintained runtime source deltas', () => {
-  const root = path.resolve(import.meta.dirname, '../../vendor/oar/a800aa0');
+  const root = path.resolve(import.meta.dirname, '../../vendor/oar/f1a2b88');
   const manifest = JSON.parse(readFileSync(path.join(root, 'source-manifest.json'), 'utf8')) as {
     files: Array<{ path: string; sourcePath: string; upstreamSha256: string; vendoredSha256: string; delta?: string }>;
   };

@@ -16,6 +16,12 @@
 
 ## Unreleased
 
+- **Changed (client)** — update the private OAR source from 0.25.0 to 0.29.0
+  (`f1a2b88eb63e47de8197514e9329642e2d0ae02c`). Codex usage records now carry
+  optional `cacheRead` and `cacheWrite` token parts. Add `shared/token-totals.ts`
+  to the inventory. Keep the six BYOK-maintained source deltas. See
+  [the upgrade note](docs/notes/2026-10-07-oar-0.29-upgrade.md).
+
 - **Changed (client)** — Codex detection no longer pins `codex-cli 0.160.0`.
   As in OAR, the version is read, never gated: Codex updates itself, so any
   other version is admitted with
