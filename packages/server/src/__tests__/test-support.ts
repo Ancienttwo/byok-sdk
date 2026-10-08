@@ -74,7 +74,7 @@ export async function stopServer(server: HttpServer): Promise<void> {
  */
 export const PI_RUNTIME_INFO: RuntimeInfo = {
   id: 'pi',
-  capabilities: { steer: true, resume: true, approvalInteractive: false, permissionModes: ['auto', 'readonly'] },
+  capabilities: { steer: true, resume: true, approvalInteractive: false },
 };
 
 export const CLAUDE_RUNTIME_INFO: RuntimeInfo = {
@@ -83,13 +83,12 @@ export const CLAUDE_RUNTIME_INFO: RuntimeInfo = {
     steer: false,
     resume: true,
     approvalInteractive: true,
-    permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
   },
 };
 
 export const CODEX_RUNTIME_INFO: RuntimeInfo = {
   id: 'codex',
-  capabilities: { steer: false, resume: true, approvalInteractive: false, permissionModes: ['auto', 'readonly'] },
+  capabilities: { steer: false, resume: true, approvalInteractive: false },
 };
 
 /**

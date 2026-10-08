@@ -209,6 +209,9 @@ export class PiRpcClient {
       waitClosed: () => this.closedPromise,
       isClosed: () => this.closed,
       label: 'pi',
+      // On SIGTERM, Pi's RPC mode awaits the extensions' `session_shutdown`
+      // hooks; give them OAR's 10 s budget before SIGKILL.
+      termGraceMs: 10_000,
     };
   }
 

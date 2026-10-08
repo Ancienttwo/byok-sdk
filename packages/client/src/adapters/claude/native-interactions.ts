@@ -53,7 +53,7 @@ export class ClaudeNativeInteractionBridge {
   private accepting = false;
   private ended = false;
 
-  constructor(private readonly options: NativeInteractionOptions, expectedSessionRef?: string, private readonly toolAllowed: (name: string) => boolean = () => true) {
+  constructor(private readonly options: NativeInteractionOptions, expectedSessionRef?: string) {
     this.sessionRef = expectedSessionRef;
     this.controller = new NativeInteractionController({
       ...options,
@@ -123,7 +123,6 @@ export class ClaudeNativeInteractionBridge {
     if (!record(request) || request.subtype !== 'can_use_tool' || !text(request.tool_name) || !record(request.input)
       || (request.tool_use_id !== undefined && !text(request.tool_use_id))
       || Buffer.byteLength(JSON.stringify(request)) > 64 * 1024) invalid();
-    if (!this.toolAllowed(request.tool_name)) throw new NativeInteractionError('invalid_request', 'Claude native tool request exceeds the sealed task tool authority');
     const originalInput = request.input;
     const questions = request.tool_name === 'AskUserQuestion' ? parseQuestions(originalInput) : undefined;
     const native = {

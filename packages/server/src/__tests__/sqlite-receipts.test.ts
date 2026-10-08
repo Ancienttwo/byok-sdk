@@ -13,7 +13,7 @@ import { createSqliteEmbeddedStores } from '../stores/sqlite';
 const tenant = tenantId('receipts');
 const other = tenantId('other');
 const deviceId = 'device-receipts';
-const payload = { instruction: 'original', runtime: 'claude', policy: { mode: 'auto' } } as const;
+const payload = { instruction: 'original', runtime: 'claude' } as const;
 
 describe('SQLite receipt recovery', () => {
   const roots: string[] = [];
@@ -56,8 +56,8 @@ describe('SQLite receipt recovery', () => {
         'terminal-projection-selection', 'agent-egress-fresh-session',
       ] });
       const execution = RecurringExecutionInputSchema.parse({ taskId, deviceId, payload: {
-        instruction: 'reply', runtime: 'codex', agentRef, policy: { mode: 'auto' },
-        egressPolicy: { policyRevision: 'policy-v1', activity: { mode: 'metadata-status', delivery: 'latest-value' },
+        instruction: 'reply', runtime: 'codex', agentRef,
+        egressPolicy: { policyRevision: 'policy-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
           reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
           transfers: { workspace: { maxBytes: 512, allowedMimeTypes: ['text/plain'] }, transcript: 'disabled', artifact: 'disabled' } },
         messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },

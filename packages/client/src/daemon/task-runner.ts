@@ -1,6 +1,5 @@
-import { assertPreparedMemoryPolicy, resolvePreparedMemoryImplementation, observePreparedMemory, memorySpawnBinding, memoryServer, type PreparedAgentMemoryImplementation, type PreparedAgentMemoryState } from './prepared-agent-memory';
+import { observePreparedMemory, type PreparedAgentMemoryState } from './prepared-agent-memory';
 import { InputPreparationRequestError } from './input-preparation-service';
-import { validatePreparedPiNativeToolPolicy } from '../adapters/pi/prepared-tools';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import type { PiRuntimeLaunchResources } from '../adapters/pi/runtime-launch';
 import { awaitAdmission } from './admission-wait';
@@ -28,8 +27,6 @@ import {
   type BlobRef,
   type Envelope,
   type PreparedAgentMemoryMode,
-  type PermissionMode,
-  type PermissionPolicy,
   type ResultDocumentCheck,
   type RuntimeId,
   type TerminalInferenceUsage,
@@ -89,20 +86,6 @@ import type { BlobResolver } from './blob-client';
 import type { TaskQueueWatermark } from './control-protocol';
 import { DEFAULT_MAX_INLINE_EVENT_BYTES, spillOversizedEvent } from './event-spill';
 import { buildRuntimeEnv } from './environment';
-import { computeEffectivePolicy } from './policy';
-import {
-  mcpLaunchAttestation,
-  resolveMcpLaunchCwdLauncher,
-  resolveTrustedLaunchCwd,
-  type McpLaunchBinding,
-  type McpLaunchCwdConfig,
-} from './trusted-launch-cwd';
-import {
-  resolveToolImplementationIdentity,
-  type ToolImplementationAuthority,
-  type ToolImplementationFsProbe,
-  type ToolImplementationIdentityV1,
-} from './tool-implementation-identity';
 import { toRuntimeInfoCapabilities } from './runtime-capabilities';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import {
@@ -124,7 +107,7 @@ import {
   type McpToolsProbeOptions,
 } from './mcp-tools-probe';
 import {
-  classifyMcpToolsetServerObservation,
+  bindMcpToolsetServerObservation,
   type McpServerObservation,
   type McpToolsetServerObservation,
 } from '../mcp/observation';
@@ -452,8 +435,6 @@ export interface TaskRunnerDeps {
    * through.
    */
   runtimePreference?: RuntimeId[];
-  /** M5: see `DaemonConfig.runtimeEnvironment`'s own doc comment (`create-daemon.ts`) — the per-device, per-runtime env-allowlist override `handleOffer` merges into `buildRuntimeEnv`'s `locallyAllowedNames`. */
-  runtimeEnvironment?: Record<string, { allow?: string[] }>;
   /** Reads the daemon's current validated device-local registry once per offer. */
   getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>;
   /**
@@ -489,28 +470,6 @@ export interface TaskRunnerDeps {
     /** `toolsetId` -> definition revision, from one registry read per call. */
     readonly toolsetDefinitionRevisions: () => ReadonlyMap<string, string>;
   };
-  /**
-   * Operator input to the MCP toolset launch boundary
-   * (`./trusted-launch-cwd.ts`). Unset means the platform default directory
-   * and — only when this process is provably plain Node — `process.execPath`
-   * as the launcher interpreter. Neither default is assumed: both are proven
-   * at admission, and an offer that needs a boundary this daemon cannot prove
-   * is declined non-retryably instead of being started without one.
-   */
-  mcpLaunchCwd?: McpLaunchCwdConfig;
-  /**
-   * The host's install-record authority for MCP toolset server
-   * implementations (`./tool-implementation-identity.ts`).
-   *
-   * Unset means EVERY implementation identity resolves to
-   * `resolver_unconfigured` — this SDK ships no resolver and no default. It is
-   * not a degradation: an unconfigured daemon simply proves nothing about its
-   * executors and says so, and no spawn is refused for a claim nobody made.
-   */
-  toolImplementationAuthority?: ToolImplementationAuthority;
-  /** Test seam for the implementation measurement; see {@link ToolImplementationFsProbe}. */
-  toolImplementationFsProbe?: ToolImplementationFsProbe;
-  permissionDefaults?: PermissionPolicy;
   workspaceRoot: string;
   /** Strict Agent offer authority. Absent means legacy offers never resolve an Agent home. */
   agentHome?: AgentHomeManager;
@@ -525,7 +484,7 @@ export interface TaskRunnerDeps {
   maxConcurrentMutableSessionsPerAgentHome?: number;
   /** Exact host-selected policy accepted by `task.offer_for_agent_with_egress`. */
   agentEgressPolicy?: Readonly<AgentEgressPolicy>;
-  /** Always-present projection/sanitizer consumer; it defaults to metadata-only. */
+  /** Latest-value activity lane and reliable spool for Agent egress offers. */
   agentEgress?: AgentEgressController;
   /** Durable exact-match Agent session handoff authority. */
   agentSessionHandoffs?: AgentSessionHandoffStore;
@@ -719,14 +678,13 @@ export interface TaskRunnerDeps {
   agentMessageMcpBin?: Readonly<ResolvedAgentMessageMcpBin>;
   /**
    * Production pre-runtime executability/handshake gate for the exact message
-   * helper config. `env` is the same allowlisted child environment the runtime
-   * gets (`buildRuntimeEnv`), and `cwd` the same working directory, so the
-   * helper is proved under the conditions it will actually run in.
+   * helper config. `env` is the same child environment the runtime
+   * gets (`buildRuntimeEnv`), so the helper is proved under the environment
+   * it will actually run in.
    */
   agentMessageMcpPreflight?: (
     server: Readonly<McpStdioServerConfig>,
     env: Readonly<Record<string, string>>,
-    cwd?: string,
   ) => Promise<void>;
   /**
    * Override the `initialize` + `tools/list` observation of a projected
@@ -743,6 +701,8 @@ export interface TaskRunnerDeps {
   ) => Promise<McpServerObservation>;
   /** SDK-owned MCP helper injected only into strict Agent tasks. */
   agentMemoryMcpBin?: Readonly<ResolvedAgentMemoryMcpBin>;
+  /** SDK-owned task-free Agent-memory descriptor helper a preparation observes. */
+  agentMemoryDescribeBin?: Readonly<ResolvedAgentMemoryMcpBin>;
   /** Explicit external secure-fs helper. No PATH discovery or bundled native addon exists. */
   agentMemoryFilesystemHelperBin?: string;
   /** Optional local-to-hosted redacted projection port. Omission is zero-network. */
@@ -953,23 +913,6 @@ const DEFAULT_RUNTIME_PREFERENCE: readonly RuntimeId[] = ['claude', 'codex', 'pi
 function orderByPreference(candidates: readonly RuntimeAdapter[], preference: readonly string[]): RuntimeAdapter[] {
   const rank = new Map(preference.map((id, index) => [id, index]));
   return [...candidates].sort((a, b) => (rank.get(a.descriptor.id) ?? preference.length) - (rank.get(b.descriptor.id) ?? preference.length));
-}
-
-/**
- * M5 batch-3 (workstream 1): whether `adapter` can express `mode` AT ALL —
- * consults the exact same `RuntimeCapabilities.permissionModes` already
- * reported on the wire (`create-daemon.ts`'s `toRuntimeInfoCapabilities`)
- * rather than instantiating or probing anything new. A pure, synchronous,
- * zero-I/O check — deliberately consulted BEFORE `adapter.detect()` in
- * `pickAdapter` below, so a structurally-incapable candidate never pays for
- * a real subprocess probe it could never have won anyway.
- *
- * This is a pre-claim structural gate. Per-offer semantic validation belongs
- * to the required side-effect-free `prepare()` step below; no policy mismatch
- * may wait for a post-claim process start.
- */
-function adapterSupportsMode(descriptor: RuntimeAdapterDescriptor, mode: PermissionMode): boolean {
-  return descriptor.capabilities.permissionModes.includes(mode);
 }
 
 function adapterSupportsMcpToolsets(descriptor: RuntimeAdapterDescriptor): boolean {
@@ -1303,8 +1246,8 @@ function observeTerminalUsage(active: ActiveTask, event: Extract<AgentEvent, { t
  * cancelled, plus approve/reject/cancel/steer handling.
  *
  * M1 rework (docs/protocol.md §3, §5, §10 — `packages/protocol` is frozen,
- * not editable here): pre-claim rejections (unknown/disallowed runtime,
- * policy exceeding this device's ceiling) now send `task.decline` and never
+ * not editable here): pre-claim rejections (unknown/disallowed runtime)
+ * now send `task.decline` and never
  * claim at all — `TASK_TRANSITIONS.Offered` gained a direct `-> Failed` edge
  * precisely so this no longer has to claim-then-fail. A successful claim is
  * followed by `task.started` only once the adapter session has actually
@@ -1475,20 +1418,6 @@ export class TaskRunner {
 
   get activeTaskCount(): number {
     return this.tasks.size + this.startupOwners.size;
-  }
-
-  /**
-   * Transport-boundary classification for the currently active task. Legacy
-   * tasks and plain Agent-home offers are deliberately false: the additive
-   * egress contract must never reclassify their existing wire semantics.
-   */
-  usesAgentEgress(taskId: string): boolean {
-    return this.tasks.get(taskId)?.egressEnabled === true;
-  }
-
-  /** Frozen offer authority for the outbound result-document lane. */
-  selectsResultDocument(taskId: string): boolean {
-    return this.tasks.get(taskId)?.terminalProjection?.mode === 'result-document';
   }
 
   /** M5 batch-3 (workstream 2): effective `maxTaskOutputBytes` cap for this daemon — see {@link DEFAULT_MAX_TASK_OUTPUT_BYTES}'s own doc comment. */
@@ -2237,33 +2166,6 @@ export class TaskRunner {
         return;
       }
 
-      // M5 batch-3 (workstream 1): `policy.workspaceRoot` IS merged into the
-      // effective policy handed to the adapter (`computeEffectivePolicy`,
-      // policy.ts) as `ctx.policy.workspaceRoot` — but no bundled adapter
-      // actually reads or enforces it; every adapter derives its real
-      // confinement from `ctx.workspaceDir` (the daemon-created per-task
-      // directory) instead (see docs/security.md's "Workspace confinement is
-      // a convention, not a sandbox" section). An OFFER that asks for this
-      // control is asking for something that looks live but isn't — decline
-      // it fail-closed rather than silently accept an unenforced security
-      // constraint. Deliberately checks the RAW offer's own
-      // `payload.policy.workspaceRoot`, never the merged/effective policy:
-      // `computeEffectivePolicy` falls back to the device's configured
-      // CEILING's `workspaceRoot` when the offer itself didn't set one
-      // (policy.ts), and that ceiling-only case is a separate, operator-owned
-      // decision handled by a one-time startup warning instead (see
-      // `create-daemon.ts`'s `start()`) — checking the effective value here
-      // would incorrectly decline every single offer once an operator
-      // configures ANY ceiling workspaceRoot, not just the ones that actually
-      // asked for one.
-      if (payload.policy.workspaceRoot !== undefined) {
-        decline(
-          'offer policy requests workspaceRoot, which no bundled runtime adapter enforces — declining fail-closed rather than silently accepting an unenforced security control',
-          true,
-        );
-        return;
-      }
-
       if (
         payload.dispatchSelection !== undefined &&
         payload.runtime !== undefined &&
@@ -2291,12 +2193,6 @@ export class TaskRunner {
         return;
       }
 
-      const decision = computeEffectivePolicy(payload.policy, this.deps.permissionDefaults);
-      if (!decision.ok) {
-        decline(decision.reason ?? 'policy rejected', false);
-        return;
-      }
-
       const offered = withoutRequiredToolsets(payload);
       const requestedRuntime = payload.harnessId ?? payload.dispatchSelection?.runtimeId ?? payload.runtime;
       const requiresAgentMemoryMcp = preparation === undefined && agentRef !== undefined
@@ -2306,7 +2202,6 @@ export class TaskRunner {
       try {
         pick = await this.pickAdapter(
           requestedRuntime,
-          payload.policy.mode,
           requiredToolsets !== undefined || (preparation === undefined && messageRequirement !== undefined) || requiresAgentMemoryMcp || preparedMemorySelected,
           blobAbort.signal,
         );
@@ -2324,17 +2219,11 @@ export class TaskRunner {
         decline('server does not support the selected custom harness identity', false);
         return;
       }
-      // The environment EVERY child process of this task receives. Computed
-      // here, before admission, because the admission-time MCP probes below
-      // spawn host-configured commands too: handing them `process.env` would
-      // make the probe the one path where the daemon's own ambient
-      // credentials reach a server the runtime path itself filters out (see
-      // `./environment.ts`). One computation, one allowlist, both phases.
-      const env = buildRuntimeEnv({
-        ambient: process.env,
-        requirements: pick.descriptor.environmentRequirements,
-        locallyAllowedNames: this.deps.runtimeEnvironment?.[pick.descriptor.id]?.allow,
-      });
+      // The environment EVERY child process of this task receives: the
+      // daemon's own, minus the hard deny (`./environment.ts`). Computed here,
+      // before admission, so the admission-time MCP probes below see exactly
+      // what the runtime path sees. One computation, both phases.
+      const env = buildRuntimeEnv({ ambient: process.env });
       const mcpEnv = pick.descriptor.id === 'pi' ? projectPiMcpEnvironment(env) : env;
       if (resolvedMcp?.ok && agentRef !== undefined && this.deps.prepareHostTaskContext) {
         await this.deps.prepareHostTaskContext(taskId, blobAbort.signal);
@@ -2351,136 +2240,16 @@ export class TaskRunner {
       if (preparation === undefined) {
         taskMcpServers = this.withAgentMessageMcp(taskMcpServers, taskId, messageRequirement);
       }
-      // Only the adapters that pre-grant projected toolset tools need the
-      // daemon's `tools/list` observation (see
+      // Only the adapters that register projected toolset tools themselves
+      // need the daemon's `tools/list` observation (see
       // `RuntimeAdapterDescriptor.requiresMcpToolsetToolObservation`). An
-      // adapter that grants them itself must not pay a probe per projected
-      // server on every offer.
+      // adapter whose runtime lists the tools itself must not pay a probe per
+      // projected server on every offer.
       const needsToolsetObservation = resolvedMcp?.ok === true
         && pick.descriptor.requiresMcpToolsetToolObservation === true;
-      // The one launch boundary for every MCP server child of this task —
-      // the admission probe here and, via `startInput.mcpLaunch`, every
-      // adapter spawn below. It is resolved ONCE, so the directory the daemon
-      // observed a server in is the directory the runtime runs it in.
-      //
-      // It is NOT the Agent home, which is what it used to be. A
-      // `bun --compile` server binary executes `$cwd/bunfig.toml` `preload`
-      // before its own code, and the Agent home is writable by the very agent
-      // the server is serving — see `./trusted-launch-cwd.ts`. The RUNTIME
-      // CLI keeps the manifest cwd; only its MCP server children move.
-      //
-      // The binding covers EVERY MCP server this task will generate, whatever
-      // its origin — not only the host toolsets the device projects. The
-      // reserved SDK helpers (agent message, agent memory) and any reserved
-      // approval server a custom adapter declares under
-      // `policy.mode: 'confirm'` are the same kind of child process, launched
-      // by the same CLI, from the same inherited cwd; a task whose only MCP
-      // server is one of those used to reach `start()` with no binding at all
-      // and have it written unwrapped.
-      //
-      // The predicate lives HERE, once, computed from the same inputs the
-      // adapters themselves branch on: the projected toolsets, the reserved
-      // helpers this daemon adds to `taskMcpServers`, and the descriptor's
-      // own declaration that it generates a reserved approval MCP server
-      // (`RuntimeAdapterDescriptor.generatesApprovalMcpServer`) paired with
-      // the effective mode that makes it do so. A task that generates NO MCP
-      // server resolves no binding and is never declined for one.
-      const generatesApprovalMcp = decision.policy.mode === 'confirm'
-        && pick.descriptor.generatesApprovalMcpServer === true;
-      // `taskMcpServers` already carries the projected host toolsets and the
-      // agent-message helper; the agent-memory helper is added below, after
-      // the binding it needs has been resolved.
-      const generatesAnMcpServer = Object.keys(taskMcpServers ?? {}).length > 0
-        || requiresAgentMemoryMcp
-        || preparedMemorySelected
-        // A prepared digest always binds a launch attestation, even when the
-        // record counts no server at all (a tool-less record), so a prepared
-        // offer always needs the trusted launch directory proven here. The
-        // value still comes only from `resolveTrustedLaunchCwd`, never from the
-        // offer, the record or the Host.
-        || preparation !== undefined
-        || generatesApprovalMcp;
-      const probesAnMcpServer = needsToolsetObservation
-        || (preparation === undefined && messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined);
-      let mcpLaunch: McpLaunchBinding | undefined;
-      if (probesAnMcpServer || generatesAnMcpServer) {
-        const trusted = await resolveTrustedLaunchCwd(this.deps.mcpLaunchCwd);
-        if (trusted.kind === 'unavailable') {
-          // Non-retryable: nothing about re-offering this task changes which
-          // directories this uid can write. The reason names the exact
-          // condition so an operator can fix it (configure an immutable
-          // directory, or stop running the daemon as root) rather than
-          // discovering a silently unprotected launch later.
-          decline(`MCP toolset launch directory unavailable: ${trusted.reason}`, false);
-          return;
-        }
-        // Only the adapters that declare `launcher-wrapped` pay for a
-        // launcher. An adapter that spawns its own servers (pi) passes the
-        // directory to `spawn` and needs nothing else, and an adapter that
-        // declares nothing is treated the same way — the SDK cannot make a
-        // third-party adapter use a launcher by declining here, and the three
-        // bundled adapters all state their mode explicitly.
-        let launcher: McpLaunchBinding['launcher'];
-        if (pick.descriptor.mcpServerLaunch === 'launcher-wrapped') {
-          const resolvedLauncher = resolveMcpLaunchCwdLauncher(this.deps.mcpLaunchCwd);
-          if (resolvedLauncher.kind === 'unavailable') {
-            decline(
-              `MCP toolset launch directory unavailable: ${resolvedLauncher.reason}`,
-              false,
-            );
-            return;
-          }
-          launcher = resolvedLauncher;
-        }
-        mcpLaunch = Object.freeze({
-          cwd: trusted.dir,
-          ...(launcher === undefined ? {} : { launcher }),
-        });
-      }
-      const probeCwd = mcpLaunch?.cwd;
-      // The ONE implementation identity this task carries per projected
-      // toolset server, resolved HERE and consumed by both spawn points:
-      // the admission probe immediately below, and — through
-      // `startInput.mcpToolImplementations` and the task-scoped MCP config the
-      // pi adapter writes — the extension's server pool inside the runtime
-      // child. Resolving it once is the point. A second resolve at launch
-      // would be a second opinion about the same install, and the two could
-      // disagree without anything noticing; one value, measured again at each
-      // spawn, cannot.
-      //
-      // Resolution NEVER declines the offer. This SDK ships no resolver, so
-      // the unconfigured answer is `resolver_unconfigured` for every server,
-      // and a task whose executors are unproven still runs — it simply proves
-      // nothing about them. What does refuse is the re-measurement at spawn,
-      // and only for a server that WAS attested.
-      let mcpToolImplementations: Readonly<Record<string, ToolImplementationIdentityV1>> | undefined;
-      if (resolvedMcp?.ok === true && mcpLaunch !== undefined) {
-        const launch = mcpLaunchAttestation(mcpLaunch);
-        const identities: Record<string, ToolImplementationIdentityV1> = {};
-        for (const [serverName, server] of Object.entries(resolvedMcp.servers)) {
-          const toolsetId = resolvedMcp.toolsetIdByServer.get(serverName);
-          if (toolsetId === undefined) continue;
-          identities[serverName] = await resolveToolImplementationIdentity(
-            this.deps.toolImplementationAuthority,
-            {
-              subject: { kind: 'mcp-server', toolsetId, serverName },
-              command: server.command,
-              args: Object.freeze([...(server.args ?? [])]),
-              launch,
-            },
-            // The environment fact is the SDK's, never the resolver's: this is
-            // the exact object the admission probe below spawns with and the
-            // one serialized for the MCP pool. Pi runtime custody has its
-            // own environment; the locator carries no environment at all.
-            mcpEnv,
-            this.deps.toolImplementationFsProbe,
-          );
-        }
-        mcpToolImplementations = Object.freeze(identities);
-      }
       if (preparation === undefined && messageRequirement !== undefined && this.deps.agentMessageMcpPreflight !== undefined) {
         try {
-          await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, mcpEnv, probeCwd);
+          await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, mcpEnv);
         } catch (error) {
           decline(`required Agent message helper preflight failed: ${errorMessage(error)}`, false);
           return;
@@ -2520,31 +2289,20 @@ export class TaskRunner {
         const probe = this.deps.mcpToolsetToolsProbe ?? probeMcpServer;
         const entries = Object.entries(resolvedMcp!.servers);
         const settled = await Promise.allSettled(entries.map(async ([serverName, server]) => {
-          const implementation = mcpToolImplementations?.[serverName];
           const observation = await probe(serverName, server, {
             label: `MCP toolset server "${serverName}"`,
             timeoutMs: MCP_TOOLSET_PROBE_ADMISSION_TIMEOUT_MS,
             env: mcpEnv,
-            ...(probeCwd === undefined ? {} : { cwd: probeCwd }),
-            // Spawn point one. An attested server is re-measured before this
-            // child starts; a failure raises `McpAuthorityError`, which the
-            // decline below already treats as permanent.
-            ...(implementation === undefined ? {} : { implementation }),
           });
           if (observation.tools.length === 0) throw new Error('tools/list reported no tools');
-          // The toolset id and the operator's read/mutation classification are
-          // the registry's facts about this server, joined on here so the
-          // adapter receives one self-describing record instead of an
-          // observation plus parallel maps that could disagree with it. The
-          // join is also where a STALE classification is caught: the config
-          // names the tools, the server says which exist, and a declared tool
-          // this server does not expose declines the task permanently.
+          // The toolset id is the registry's fact about this server, joined
+          // on here so the adapter receives one self-describing record instead
+          // of an observation plus a parallel map that could disagree with it.
           const toolsetId = resolvedMcp!.toolsetIdByServer.get(serverName);
-          const readOnlyTools = resolvedMcp!.readOnlyToolsByServer.get(serverName);
-          if (toolsetId === undefined || readOnlyTools === undefined) {
+          if (toolsetId === undefined) {
             throw new Error('observed a server that belongs to no projected toolset');
           }
-          return classifyMcpToolsetServerObservation(observation, { toolsetId, readOnlyTools });
+          return bindMcpToolsetServerObservation(observation, toolsetId);
         }));
         const observed: Record<string, McpToolsetServerObservation> = {};
         let failure: { serverName: string; error: unknown } | undefined;
@@ -2568,7 +2326,6 @@ export class TaskRunner {
         prepared = await awaitAdmission(() => pick.adapter.prepare({
           signal: blobAbort.signal,
           offer: offered,
-          policy: decision.policy,
           descriptor: pick.descriptor,
           requiredToolsetIds: requiredToolsets ?? [],
           ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
@@ -2695,7 +2452,6 @@ export class TaskRunner {
           runtimeLaunch = await prepared.operation.resolveRuntimeLaunch({
             kind: preparation === undefined ? 'instruction' : 'prepared', cwd: workspaceDir, env,
             projectionRoot: path.join(this.deps.storeDir, 'runtime-projections'),
-            authority: this.deps.toolImplementationAuthority,
           });
         } catch (error) {
           if (!admissionWithdrawn()) decline(`runtime launch admission failed: ${errorMessage(error)}`, false);
@@ -2712,7 +2468,6 @@ export class TaskRunner {
         taskId,
         runtimeId: pick.descriptor.id,
         descriptor: pick.descriptor,
-        policy: decision.policy,
         requiredToolsetIds: requiredToolsets ?? [],
         ...(offered.dispatchSelection === undefined ? {} : { dispatchSelection: offered.dispatchSelection }),
         ...(sessionRef === undefined || (known === undefined && agentBinding === undefined)
@@ -2768,12 +2523,6 @@ export class TaskRunner {
           return;
         }
         try {
-          assertPreparedMemoryPolicy(agentMemory, decision.policy);
-        } catch {
-          declineMemory('permission_mode_denied: agent_memory_policy_conflict');
-          return;
-        }
-        try {
           await lane.authorizeAgentMemory(record.binding);
         } catch (error) {
           declineMemory(error instanceof InputPreparationRequestError
@@ -2783,19 +2532,14 @@ export class TaskRunner {
         }
         let memory: PreparedAgentMemoryState | null = null;
         if (agentMemory !== 'none') {
-          if (mcpLaunch === undefined || !isAgentMemorySecureFilesystemAvailable(this.deps.agentMemoryFilesystemHelperBin !== undefined)) {
+          const describe = this.deps.agentMemoryDescribeBin;
+          if (describe === undefined || this.deps.agentMemoryMcpBin === undefined
+            || !isAgentMemorySecureFilesystemAvailable(this.deps.agentMemoryFilesystemHelperBin !== undefined)) {
             declineMemory('unsupported_input: agent_memory_unavailable');
             return;
           }
-          let implementation: PreparedAgentMemoryImplementation;
           try {
-            implementation = await resolvePreparedMemoryImplementation(this.deps.toolImplementationAuthority, mcpEnv, mcpLaunchAttestation(mcpLaunch), this.deps.toolImplementationFsProbe);
-          } catch {
-            declineMemory('unsupported_input: agent_memory_implementation_unproven');
-            return;
-          }
-          try {
-            memory = await observePreparedMemory(implementation, mcpEnv, blobAbort.signal, this.deps.toolImplementationFsProbe);
+            memory = await observePreparedMemory(describe, mcpEnv, blobAbort.signal);
           } catch {
             declineMemory('toolsets_unobservable: agent_memory_descriptor_unobservable');
             return;
@@ -2831,16 +2575,10 @@ export class TaskRunner {
           deviceId: this.deps.deviceId,
           policyRevision: lane.policyRevision,
           runtime: lane.runtime,
-          // The ADMITTED mode, not the offered one: a manifest is the
-          // policy-filtered set for exactly one mode, and the mode this device
-          // merged the offer down to is the mode it will actually run.
-          admittedMode: decision.policy.mode,
-          launch: mcpLaunch,
           // No projected server (memory-only or tool-less) means an empty
           // observation, not a missing one; a missing one with servers still
           // present stays a fail-closed decline in admission.
           observation: mcpToolsetTools ?? (preparedMemorySelected || servers.length === 0 ? {} : undefined),
-          implementations: mcpToolImplementations ?? (preparedMemorySelected || servers.length === 0 ? {} : undefined),
           servers,
           toolsetDefinitionRevisions: Object.freeze(revisions),
           nowMs: Date.now(),
@@ -2852,12 +2590,6 @@ export class TaskRunner {
           // prepared failure never permits sending a DIFFERENT input under the
           // same accounting.
           decline(`${admitted.reason}: ${admitted.detail}`, false);
-          return;
-        }
-        const nativePolicy = validatePreparedPiNativeToolPolicy(decision.policy);
-        if (!nativePolicy.ok) {
-          gitLease?.release();
-          decline(`${nativePolicy.code}: ${nativePolicy.message}`, false);
           return;
         }
         let pinned: Awaited<ReturnType<InputPreparationStore['pin']>>;
@@ -3026,10 +2758,9 @@ export class TaskRunner {
         // throw that strands the claimed task. The finally below revokes any
         // context token minted for it and releases the pin.
         try {
-          const memory = preparedLaunch.memory;
-          if (memory === null || agentRef === undefined) throw new Error('sealed Agent memory execution state missing');
-          const binding = memorySpawnBinding(memory.implementation.execution, 'agent-memory-mcp', preparedLaunch.agentMemory);
-          taskMcpServers = this.withAgentMemoryMcp(taskMcpServers, taskId, agentRef, preparedLaunch.agentMemory, memoryServer(binding));
+          const helper = this.deps.agentMemoryMcpBin;
+          if (preparedLaunch.memory === null || agentRef === undefined || helper === undefined) throw new Error('prepared Agent memory execution state missing');
+          taskMcpServers = this.withAgentMemoryMcp(taskMcpServers, taskId, agentRef, preparedLaunch.agentMemory, helper);
         } catch {
           const reason = 'agent_memory_unavailable: the sealed Agent memory helper could not be bound for launch';
           await this.updateGitPhaseBestEffort(gitWorkspaceId, 'failed');
@@ -3077,8 +2808,6 @@ export class TaskRunner {
         env,
         ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
         ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
-        ...(mcpLaunch === undefined ? {} : { mcpLaunch }),
-        ...(mcpToolImplementations === undefined ? {} : { mcpToolImplementations }),
         approvalChannel: {
           taskId,
           storeDir: this.deps.storeDir,
@@ -3219,7 +2948,6 @@ export class TaskRunner {
                   agentRef: active.agentRef,
                   taskId,
                   events,
-                  serverCapabilities: this.deps.getServerCapabilities?.() ?? [],
                 }) ?? []
               : events;
             if (projected.length > 0) this.deps.send(createEnvelope('task.progress', { seq, events: [...projected] }, { taskId, seq }));
@@ -3718,14 +3446,6 @@ export class TaskRunner {
         ok: true;
         servers: Readonly<Record<string, McpStdioServerConfig>>;
         toolsetIdByServer: ReadonlyMap<string, string>;
-        /**
-         * Per server: the tool names its toolset declared read-only, or `null`
-         * when that toolset declares no classification at all. A server whose
-         * toolset classifies OTHER servers gets an empty list, not `null` —
-         * the declaration exists, it simply grants this server nothing, which
-         * is a different fact from "nobody classified this toolset".
-         */
-        readOnlyToolsByServer: ReadonlyMap<string, readonly string[] | null>;
       }
     | { ok: false; reason: string } {
     const registry = this.deps.getMcpToolsets?.();
@@ -3734,7 +3454,6 @@ export class TaskRunner {
     }
     const servers = Object.create(null) as Record<string, McpStdioServerConfig>;
     const toolsetIdByServer = new Map<string, string>();
-    const readOnlyToolsByServer = new Map<string, readonly string[] | null>();
     for (const toolsetId of requiredToolsets) {
       const toolset = registry.get(toolsetId);
       if (!toolset) {
@@ -3752,16 +3471,12 @@ export class TaskRunner {
           ...(server.args ? { args: Object.freeze([...server.args]) } : {}),
         });
         toolsetIdByServer.set(serverName, toolsetId);
-        readOnlyToolsByServer.set(
-          serverName,
-          toolset.readOnlyTools === undefined ? null : toolset.readOnlyTools[serverName] ?? [],
-        );
       }
     }
     if (Object.keys(servers).length === 0) {
       return { ok: false, reason: 'required MCP toolsets resolved to no servers; refusing to run without tools' };
     }
-    return { ok: true, servers: Object.freeze(servers), toolsetIdByServer, readOnlyToolsByServer };
+    return { ok: true, servers: Object.freeze(servers), toolsetIdByServer };
   }
 
   private async pump(active: ActiveTask): Promise<void> {
@@ -4060,17 +3775,7 @@ export class TaskRunner {
           active.summaryParts.push(event.text);
           active.finalTextParts.push(event.text);
         }
-        if (event.type === 'artifact') {
-          if (active.agentRef !== undefined && this.deps.agentEgress !== undefined) {
-            // A runtime artifact is content, not activity metadata. Strict
-            // Agent egress never uploads it through the legacy blob path;
-            // only the separately capability-gated artifact-read contract
-            // may authorize a content transfer.
-            this.deps.agentEgress.noteTransportDrop('policy_denied', active.agentRef);
-          } else {
-            await this.sendArtifact(active, event.name, event.contentType);
-          }
-        }
+        if (event.type === 'artifact') await this.sendArtifact(active, event.name, event.contentType);
         active.batcher.push(event);
       }
       // The events iterable ended without either an explicit turn_end or a
@@ -5426,35 +5131,27 @@ export class TaskRunner {
   }
 
   /**
-   * M5 batch-3 (workstream 1): selects which adapter runs this offer, now
-   * gated on both PRESENCE (`adapter.detect()`, as before) and CAPABILITY
-   * (`adapterSupportsMode` — can this adapter even express `policyMode`?
-   * new in this batch) — pre-claim, in both the explicit-runtime and
-   * auto-select branches.
+   * Selects which adapter runs this offer, gated on CAPABILITY (MCP toolset
+   * projection, when required) and PRESENCE (`adapter.detect()`) — pre-claim,
+   * in both the explicit-runtime and auto-select branches.
    *
-   * Explicit-runtime branch (`requestedRuntime` set): semantics otherwise
-   * unchanged from before this batch — allowlist and known-adapter checks
-   * first, THEN the new capability check, THEN presence. A capability
-   * mismatch here is a permanent characteristic of naming THIS runtime with
-   * THIS policy (e.g. pi never supports `confirm`, on any device, by
-   * design — `pi/permission-mapping.ts`) — `retryable: false`, the same
-   * class as "not in allowlist"/"unknown runtime" above it, since retrying
-   * this exact (runtime, mode) pair anywhere changes nothing.
+   * Explicit-runtime branch (`requestedRuntime` set): allowlist and
+   * known-adapter checks first, THEN the capability check, THEN presence. A
+   * capability mismatch here is a permanent characteristic of naming THIS
+   * runtime — `retryable: false`, the same class as "not in allowlist" /
+   * "unknown runtime" above it.
    *
    * Auto-select branch (`requestedRuntime` absent): candidates are ordered
    * by `runtimePreference` (default {@link DEFAULT_RUNTIME_PREFERENCE}) —
-   * see `orderByPreference` — then walked in that order; a candidate that
-   * can't express `policyMode` is skipped (not detected at all — capability
-   * is checked first, cheaper than a real subprocess probe) and the walk
-   * continues down the preference order, exactly as "skip non-supporting
-   * adapters and continue down the order" describes. If NOTHING eligible
-   * supports the mode, `retryable: true` — unlike the explicit branch, this
-   * is device-specific (which runtimes happen to be installed here), so a
+   * see `orderByPreference` — then walked in that order; a candidate without
+   * the required capability is skipped (not detected at all — capability is
+   * checked first, cheaper than a real subprocess probe). If NOTHING eligible
+   * is available, `retryable: true` — unlike the explicit branch, this is
+   * device-specific (which runtimes happen to be installed here), so a
    * different device's installed runtime set might satisfy it.
    */
   private async pickAdapter(
     requestedRuntime: string | undefined,
-    policyMode: PermissionMode,
     requiresMcpToolsets: boolean,
     signal: AbortSignal,
   ): Promise<PickResult> {
@@ -5473,13 +5170,6 @@ export class TaskRunner {
         return { ok: false, reason: `unknown runtime "${requestedRuntime}"`, retryable: false };
       }
       const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
-      if (!adapterSupportsMode(descriptor, policyMode)) {
-        return {
-          ok: false,
-          reason: `runtime "${requestedRuntime}" cannot express permission mode "${policyMode}"`,
-          retryable: false,
-        };
-      }
       if (requiresMcpToolsets && !adapterSupportsMcpToolsets(descriptor)) {
         return {
           ok: false,
@@ -5487,7 +5177,7 @@ export class TaskRunner {
           retryable: false,
         };
       }
-      const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, this.deps.toolImplementationAuthority, signal), signal);
+      const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
       if (detected.kind !== 'available') {
         return {
           ok: false,
@@ -5506,16 +5196,15 @@ export class TaskRunner {
     const candidates = orderByPreference(eligible, this.deps.runtimePreference ?? DEFAULT_RUNTIME_PREFERENCE);
     for (const adapter of candidates) {
       const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
-      if (!adapterSupportsMode(descriptor, policyMode)) continue;
       if (requiresMcpToolsets && !adapterSupportsMcpToolsets(descriptor)) continue;
-      const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, this.deps.toolImplementationAuthority, signal), signal);
+      const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
       if (detected.kind === 'available') return { ok: true, adapter, descriptor };
     }
     return {
       ok: false,
       reason: requiresMcpToolsets
-        ? `no available runtime on this device can express permission mode "${policyMode}" with required MCP toolsets`
-        : `no available runtime on this device can express permission mode "${policyMode}"`,
+        ? 'no available runtime on this device can project required MCP toolsets'
+        : 'no available runtime on this device',
       retryable: true,
     };
   }

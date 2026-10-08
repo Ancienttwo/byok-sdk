@@ -22,6 +22,12 @@ export declare function codexSession(
     resume?: string;
     model?: string;
     approvalPolicy?: "never" | "on-request";
+    sandboxMode?: "read-only" | "workspace-write" | "danger-full-access" | "inherit";
+    /** OAR SessionOptions.mcpServers: the thread/start or thread/resume `mcp_servers` config. */
+    mcpServers?: readonly (
+      | { readonly name: string; readonly command: string; readonly args?: readonly string[]; readonly env?: Readonly<Record<string, string>> }
+      | { readonly name: string; readonly type: "http"; readonly url: string; readonly headers?: Readonly<Record<string, string>> }
+    )[];
   },
   timeout?: number,
   hooks?: {

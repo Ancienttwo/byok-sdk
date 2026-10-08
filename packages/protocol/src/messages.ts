@@ -1,7 +1,6 @@
 import { PreparedAgentMemoryModeSchema } from './input-preparation';
 import { z } from 'zod';
 import { BlobRefSchema } from './blob';
-import { PermissionPolicySchema } from './permission';
 import { AgentEventOrUnknownSchema } from './agent-event';
 import {
   AgentContentActorSchema,
@@ -29,7 +28,6 @@ import {
   InputPreparationArtifactSummarySchema,
   InputPreparationContentHashSchema,
   InputPreparationOfferBindingSchema,
-  InputPreparationPermissionModeSchema,
   InputPreparationPolicyRevisionSchema,
   InputPreparationProfileIdSchema,
   InputPreparationSelectionSchema,
@@ -68,16 +66,6 @@ export const ProtocolVersionNumberSchema = z
  * end-to-end — older daemons omit `capabilities` entirely — and every field
  * inside it is itself optional, since detection can be partial.
  *
- * Per-tool allow/deny lists are deliberately NOT included here (noise).
- * `permissionModes` mirrors `PERMISSION_MODES` (`permission.ts`) but is kept
- * as a bare `string[]` rather than `z.enum(PERMISSION_MODES)`: this is a
- * runtime's self-reported observability data, not a control/security field,
- * so — per the freeze rule (tolerate unknown for observability, fail closed
- * for control/security; see `agent-event.ts`'s unknown-variant tolerance for
- * the same asymmetry applied to `task.progress` events) — it stays tolerant
- * of a mode string a newer runtime might report that this schema doesn't
- * enumerate yet, rather than rejecting the whole `conn.hello`.
- *
  * Unrecognized keys inside `capabilities` itself, by contrast, are silently
  * stripped (zod's default object behavior — same as every other payload
  * schema in this file) rather than passed through: this is a closed, typed
@@ -90,7 +78,6 @@ export const RuntimeCapabilitiesSchema = z.object({
   approvalInteractive: z.boolean().optional(),
   /** Whether this runtime can project a locally configured MCP toolset into one task. */
   mcpToolsets: z.boolean().optional(),
-  permissionModes: z.array(z.string()).optional(),
 });
 export type RuntimeCapabilities = z.infer<typeof RuntimeCapabilitiesSchema>;
 
@@ -241,8 +228,8 @@ export type ConnAckPayload = z.infer<typeof ConnAckPayloadSchema>;
 
 /**
  * The out-of-band-reference form of `TaskOfferPayload.instruction` (the
- * alternative to an inlined string). `.strict()`: like `PermissionPolicySchema`
- * (`permission.ts`), this is control data — it's the task instruction itself,
+ * alternative to an inlined string). `.strict()`: this is control data — it's
+ * the task instruction itself,
  * the thing that authorizes what work gets done — so per the freeze rule's
  * observability-vs-control asymmetry (docs/protocol.md "Freeze rule") an
  * unrecognized field here must be REJECTED, not silently stripped the way an
@@ -252,7 +239,7 @@ export type ConnAckPayload = z.infer<typeof ConnAckPayloadSchema>;
  * exactly the kind of silent reinterpretation the freeze rule forbids for
  * control/security payloads. Consequence: adding a field to this shape
  * post-freeze is a BREAKING change (version bump required), not the usual
- * non-breaking additive-optional-field case — same as `PermissionPolicySchema`.
+ * non-breaking additive-optional-field case.
  */
 const InstructionBlobRefSchema = z.object({ blobRef: BlobRefSchema }).strict();
 
@@ -304,7 +291,6 @@ export type DispatchSelection = z.infer<typeof DispatchSelectionSchema>;
  */
 export const TaskOfferPayloadSchema = z.object({
   instruction: z.union([z.string(), InstructionBlobRefSchema]),
-  policy: PermissionPolicySchema,
   runtime: RuntimeIdSchema.optional(),
   harnessId: HarnessIdSchema.optional(),
   dispatchSelection: DispatchSelectionSchema.optional(),
@@ -348,7 +334,6 @@ export type TaskOfferWithToolsetsPayload = z.infer<typeof TaskOfferWithToolsetsP
 export const TaskOfferForAgentPayloadSchema = z
   .object({
     instruction: z.union([z.string(), InstructionBlobRefSchema]),
-    policy: PermissionPolicySchema,
     agentRef: AgentRefSchema,
     requiredToolsets: RequiredToolsetsSchema.optional(),
     runtime: RuntimeIdSchema.optional(),
@@ -431,11 +416,11 @@ const EGRESS_SAFE_VALUE = z
   .json()
   .refine(
     (value) => new TextEncoder().encode(JSON.stringify(value)).byteLength <= 256 * 1024,
-    'sanitized egress payload exceeds 256KiB',
+    'egress payload exceeds 256KiB',
   );
 const EGRESS_SESSION_REF = z.string().min(1).max(512);
 
-/** Daemon -> cloud: one durable reliable-lane item after local sanitization. */
+/** Daemon -> cloud: one durable reliable-lane item, forwarded as the Agent produced it. */
 export const AgentEgressReliablePayloadSchema = z
   .object({
     agentRef: AgentRefSchema,
@@ -692,14 +677,6 @@ const InputPreparationBlobContextSchema = z
  * `deadlineAt` may only ever be TIGHTENED locally: the device clamps to
  * `min(deadlineAt - now, limits.preparationDeadlineMs)`, so a generous Host
  * deadline cannot enlarge a configured local bound.
- *
- * `permissionMode` is DECLARED by the requester and validated by the device;
- * the device never infers it. A preparation counts tokens for one concrete
- * tool manifest, and that manifest is the policy-filtered set for exactly one
- * mode (`mcp/projection.ts`'s `filterMcpObservationForPolicy`) — so a
- * preparation whose mode is unstated is a count of a manifest nobody named.
- * The device applies the declared mode to its own observation and records it
- * in the artifact binding; it is not a grant, and it authorizes nothing.
  */
 export const AgentInputPreparationPayloadSchema = z
   .object({
@@ -713,7 +690,6 @@ export const AgentInputPreparationPayloadSchema = z
     deadlineAt: z.iso.datetime({ offset: true }),
     context: z.union([InputPreparationInlineContextSchema, InputPreparationBlobContextSchema]),
     requiredToolsets: z.array(ToolsetIdSchema).max(16).superRefine((ids, ctx) => rejectDuplicateToolsets(ids, ctx, 'required')),
-    permissionMode: InputPreparationPermissionModeSchema,
     /**
      * The Host's accounting ruling for this preparation, carried verbatim onto
      * the receipt's binding. Optional and defaulted NOWHERE: a payload that
@@ -857,8 +833,7 @@ export type TaskStartedPayload = z.infer<typeof TaskStartedPayloadSchema>;
 
 /**
  * daemon -> server: decline an offer *before* claiming it (M1 gap #5) — e.g.
- * no compatible/available runtime, or the offered policy exceeds this
- * device's ceiling. Fail-closed rejections must use this instead of silently
+ * no compatible/available runtime. Fail-closed rejections must use this instead of silently
  * dropping the offer.
  *
  * Decision (see docs/protocol.md "Declined vs. Failed" for the full

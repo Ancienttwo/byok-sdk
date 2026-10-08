@@ -12,7 +12,6 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import * as mutationGate from '../daemon/path-mutation-gate';
-import * as launchCwd from '../daemon/trusted-launch-cwd';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 const roots: string[] = [];
@@ -51,7 +50,7 @@ async function cancellationFixture(overrides: Partial<TaskRunnerDeps> = {}) {
     const storeDir = await temporary('byok-publish-cancel-store-');
     const hostStorageRoot = await temporary('byok-publish-cancel-home-');
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
-      steer: false, resume: true, approvalInteractive: false, mcpToolsets: true, permissionModes: ['auto'],
+      steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
     const deps: TaskRunnerDeps = {
       adapters: [adapter], workspaceRoot: await temporary('byok-publish-cancel-workspace-'),
@@ -79,16 +78,12 @@ const TASK = 'active-revoke-task';
 
 async function activeFixture(unsent: boolean, overrides: Partial<TaskRunnerDeps> = {}) {
   const h = await cancellationFixture(overrides);
-  // This fixture never spawns MCP/runtime processes. Only its admission-time
-  // launch-directory dependency is injected; restore it before settlement.
-  const originalResolver = launchCwd.resolveTrustedLaunchCwd;
-  const launch = vi.spyOn(launchCwd, 'resolveTrustedLaunchCwd').mockResolvedValue({ kind: 'resolved', dir: await temporary('byok-inert-launch-') });
-  try { await h.runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-    instruction: 'reply', policy: { mode: 'auto' }, runtime: 'pi', agentRef: AGENT,
+  // This fixture never spawns MCP/runtime processes.
+  await h.runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+    instruction: 'reply', runtime: 'pi', agentRef: AGENT,
     egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
-  }, { taskId: TASK, seq: 1 })); } finally { launch.mockRestore(); }
-  expect(launchCwd.resolveTrustedLaunchCwd).toBe(originalResolver);
+  }, { taskId: TASK, seq: 1 }));
   expect(h.runner.activeTaskCount, JSON.stringify(h.sent)).toBe(1);
   expect(h.sent.filter(e => e.type === 'task.started')).toHaveLength(1);
   const ctx = h.adapter.startCalls[0]!.ctx;
@@ -311,7 +306,7 @@ it('S10-F1 preserves cancellation selected during the durable startup handoff', 
     const result = await record(...args); recorded.resolve(); await gate.promise; return result;
   });
   const offering = h.runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-    instruction: 'no message contract', policy: { mode: 'auto' }, runtime: 'pi', agentRef: AGENT,
+    instruction: 'no message contract', runtime: 'pi', agentRef: AGENT,
     egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
   }, { taskId: TASK, seq: 1 }));
   try {

@@ -1,4 +1,4 @@
-import type { PreparedAgentMemoryImplementation, PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
+import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 /**
  * B-P2 local primitive — public types for the task-free runtime input
  * preparation surface (`docs/researches/runtime-input-preparation-contract.md`
@@ -34,8 +34,7 @@ import type { PreparedAgentMemoryImplementation, PreparedAgentMemoryState } from
  *   applicability, never budget arithmetic.
  * - `ready` means "the preparation can be consumed": the artifact is intact and
  *   unexpired, its projection is content-complete, its residual keys are ruled
- *   by an applicable Host accounting policy, D is text only, and every
- *   executor identity is attested. A counter is OPTIONAL: when one is
+ *   by an applicable Host accounting policy, D is text only. A counter is OPTIONAL: when one is
  *   configured its evidence must be provider-authoritative and covered, and
  *   when none is configured no count is required at all — the size evidence is
  *   {@link InputPreparationArtifactSummaryV1.requestBytes}, the exact byte
@@ -45,9 +44,7 @@ import type { PreparedAgentMemoryImplementation, PreparedAgentMemoryState } from
  */
 
 import { createHash } from 'node:crypto';
-import { INPUT_PREPARATION_WIRE_VERSION, type PermissionMode, type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
-import type { McpLaunchAttestation } from './daemon/trusted-launch-cwd';
-import type { ToolImplementationIdentityV1 } from './daemon/tool-implementation-identity';
+import { INPUT_PREPARATION_WIRE_VERSION, type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 
 // ---------------------------------------------------------------------------
 // Format identifiers
@@ -91,6 +88,14 @@ export const INPUT_PREPARATION_ARTIFACT_FORMAT = 'byok.input-preparation.artifac
  *
  * Version 7 uses Host systemPrompt and the official Pi v4 envelope/identity.
  * The fourteen admission comparisons remain; old artifacts are not read forward.
+ *
+ * Version 9 REMOVED `permissionMode` from the request and the binding, with the
+ * task offer's permission policy (protocol v2). A preparation counts every
+ * observed MCP tool; there is no mode to filter for or to compare.
+ * Version 9 also replaced the artifact's `toolImplementationKinds` with
+ * `toolNames` and removed the readiness reason `executor_identity_unproven`:
+ * the SDK does not attest tool executables. Version 9 is not released yet, so
+ * this change amends it.
  *
  * The number itself is owned by `@byok-sdk/protocol`'s
  * `INPUT_PREPARATION_WIRE_VERSION`, because the device capability token
@@ -485,11 +490,6 @@ export interface InputPreparationCompiledSnapshotV1 extends Omit<InputPreparatio
  * could state either could have tokens counted against a manifest this device
  * never observed.
  *
- * `permissionMode` is DECLARED, never inferred. A preparation counts one
- * concrete manifest, and the manifest is the policy-filtered set for exactly
- * one mode (`mcp/projection.ts`'s `filterMcpObservationForPolicy`). The daemon
- * validates the value and pins it onto the binding; it grants nothing.
- *
  * There is no `runtimeIdentity`, `compilerVersion` or `policyIdentity` field:
  * those are derived from the verified installed artifact closure and the
  * daemon's own configured policy, never from caller text.
@@ -504,8 +504,6 @@ export interface InputPreparationRequestV1 {
   readonly scope: InputPreparationScopeClaimV1;
   readonly source: InputPreparationSourceV1;
   readonly selection: InputPreparationSelectionV1;
-  /** The mode the counted manifest is filtered for. */
-  readonly permissionMode: PermissionMode;
   /** Configured MCP toolset ids. The locator is the toolset id; MCP only. */
   readonly requiredToolsets: readonly string[];
   readonly snapshot: InputPreparationSnapshotV1;
@@ -962,26 +960,20 @@ export interface InputPreparationArtifactSummaryV1 {
   readonly residual: readonly InputPreparationResidualKeyV1[];
   /**
    * Digest of everything the device OBSERVED for this preparation — the
-   * projected tools, their executor fingerprints, the launch attestation and
-   * the implementation identities. A later consumer re-observes and compares
-   * this one value rather than re-deriving a manifest.
+   * projected tools and their executor fingerprints. A later consumer
+   * re-observes and compares this one value rather than re-deriving a manifest.
    */
   readonly observationDigest: string;
   /**
    * Digest of the subset of those facts that can be re-derived WITHOUT
-   * spawning a server: the launch attestation, the toolset definition
-   * revisions, the configured argv and the implementation identities. This is
-   * what a replay of an already-recorded `requestId` compares against, because
-   * re-probing to detect drift would create the second executor fact the
-   * idempotency key exists to prevent.
+   * spawning a server: the toolset definition revisions and the configured
+   * argv. This is what a replay of an already-recorded `requestId` compares
+   * against, because re-probing to detect drift would create the second
+   * executor fact the idempotency key exists to prevent.
    */
   readonly toolBindingDigest: string;
-  /**
-   * Per model-visible tool name: `attested`, or `unavailable:<reason>`. The
-   * evidence behind `executor_identity_unproven`, so a reader is not asked to
-   * take that readiness reason on trust.
-   */
-  readonly toolImplementationKinds: Readonly<Record<string, string>>;
+  /** The counted model-visible tool names, sorted byte-wise. */
+  readonly toolNames: readonly string[];
 }
 
 /** The immutable binding a receipt carries and a later consumer must re-present. */
@@ -995,13 +987,6 @@ export interface InputPreparationBindingV1 {
   readonly source: InputPreparationSourceV1;
   readonly target: InputPreparationCounterTargetV1;
   readonly policyRevision: string;
-  /**
-   * The mode the counted manifest was filtered for, recorded so a consumer can
-   * COMPARE it without re-deriving the request digest: an Execution offered
-   * under a different mode registers a different tool set than the one these
-   * tokens were counted for.
-   */
-  readonly permissionMode: PermissionMode;
   readonly runtime: InputPreparationRuntimeIdentityV1;
   /** Digest over the whole normalized request, scope and runtime identity. */
   readonly requestDigest: string;
@@ -1069,9 +1054,9 @@ export type InputPreparationStateV1 = 'reserved' | 'counting' | 'prepared' | 'ca
  * `ready` answers exactly one question — CAN THIS PREPARATION BE CONSUMED —
  * and it is deliberately not Host budget admission. A ready receipt says the
  * artifact is intact, its projection is content-complete, every residual key
- * is ruled by an applicable Host accounting policy, D is text only, every
- * executor identity is attested, and — only when a counter is configured —
- * that count is provider-authoritative and covered. It says nothing about
+ * is ruled by an applicable Host accounting policy, D is text only, and —
+ * only when a counter is configured — that count is provider-authoritative
+ * and covered. It says nothing about
  * whether the Host's budget allows the spend; the Host rules
  * `requestBytes + C + max_tokens <= window` itself.
  *
@@ -1110,7 +1095,6 @@ export type InputPreparationReadinessReasonV1 =
   | 'residual_not_ruled'
   | 'accounting_policy_missing'
   | 'accounting_policy_inapplicable'
-  | 'executor_identity_unproven'
   | 'runtime_contract_superseded';
 
 /**
@@ -1205,24 +1189,11 @@ export const INPUT_PREPARATION_ERROR_CODES = [
    */
   'toolsets_unobservable',
   /**
-   * No non-writable launch directory (or no trusted launcher) could be proven
-   * for this preparation's servers, so nothing was spawned. The specific
-   * `TrustedLaunchCwdUnavailableReason` travels in the record's `detail`.
-   */
-  'launch_boundary_unavailable',
-  /**
    * A repeat of an already-recorded `requestId` arrived after the facts its
    * executor fingerprints were frozen against changed. The recorded receipt is
    * not re-derived and no server is re-probed.
    */
   'observation_drift',
-  /**
-   * The declared `permissionMode` exceeds this device's configured ceiling.
-   * Never narrowed to an admissible mode: a preparation counts one concrete
-   * manifest, and quietly counting a smaller one answers a question nobody
-   * asked.
-   */
-  'permission_mode_denied',
   /**
    * The `prompt_prepared` frame this preparation would be launched with does
    * not fit one RPC frame the native runtime will accept
@@ -1271,85 +1242,45 @@ export interface PreparedToolBindingServerDigestInputV1 {
   readonly toolsetId: string;
   readonly command: string;
   readonly args: readonly string[];
-  readonly implementation: ToolImplementationIdentityV1;
 }
 
 export interface PreparedToolBindingDigestInputV1 {
   readonly agentMemory: PreparedAgentMemoryMode;
-  readonly memoryImplementation: PreparedAgentMemoryImplementation | null;
-  readonly launch: McpLaunchAttestation;
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
   /** Canonically ordered by server name; the canonical JSON preserves array order. */
   readonly servers: readonly PreparedToolBindingServerDigestInputV1[];
 }
 
-/**
- * The spawn-free half: the launch attestation, the definition revisions, the
- * configured argv and the implementation identities.
- */
+/** The spawn-free half: the definition revisions and the configured argv. */
 export function preparedToolBindingDigest(input: PreparedToolBindingDigestInputV1): string {
   return inputPreparationDigest({
-    v: 2,
+    v: 4,
     agentMemory: input.agentMemory,
-    memoryImplementation: input.memoryImplementation,
-    launch: { launchCwd: input.launch.launchCwd, launcher: input.launch.launcher },
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     servers: input.servers.map((entry) => ({
       serverName: entry.serverName,
       toolsetId: entry.toolsetId,
       command: entry.command,
       args: [...entry.args],
-      implementation: entry.implementation,
     })),
   });
-}
-
-/**
- * The Pi-native half of a prepared Main tool set, bound to the ADMITTED policy
- * that selected it — not merely to the mode.
- *
- * `allowTools`/`denyTools` are what actually decide which built-ins a task gets
- * (`adapters/pi/permission-mapping.ts`), so a digest that bound only `mode`
- * would validate a launch whose native half is a different set from the one
- * that was counted.
- *
- * Absent while the native half is not countable: `daemon/prepared-tool-surface.ts`
- * assembles a preparation with no native tools at all, so there is no selection
- * to bind and the key is omitted rather than written as an empty one.
- */
-export interface PreparedNativeToolSelectionV1 {
-  /** Model-visible native tool names, in registration order. Never empty. */
-  readonly names: readonly string[];
-  /** The admitted policy that produced `names`, whole. */
-  readonly policy: {
-    readonly mode: PermissionMode;
-    readonly allowTools?: readonly string[];
-    readonly denyTools?: readonly string[];
-  };
 }
 
 export interface PreparedToolSurfaceDigestInputV1 {
   readonly agentMemory: PreparedAgentMemoryMode;
   readonly memory: PreparedAgentMemoryState | null;
-  readonly launch: McpLaunchAttestation;
-  readonly permissionMode: PermissionMode;
   readonly runtimeIdentity: string;
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
   readonly tools: readonly InputPreparationToolV1[];
   readonly toolExecutors: Readonly<Record<string, string>>;
-  readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
-  /** Omitted while the prepared native half stays empty; see the type above. */
-  readonly nativeSelection?: PreparedNativeToolSelectionV1;
 }
 
-/** The whole observed surface: the schemas, the executors, the launch and the identities. */
+/** The whole observed surface: the schemas and the executors. */
 export function preparedToolSurfaceObservationDigest(input: PreparedToolSurfaceDigestInputV1): string {
   return inputPreparationDigest({
-    v: 2,
+    v: 4,
     agentMemory: input.agentMemory,
     memory: input.memory,
-    launch: { launchCwd: input.launch.launchCwd, launcher: input.launch.launcher },
-    permissionMode: input.permissionMode,
     runtimeIdentity: input.runtimeIdentity,
     toolsetDefinitionRevisions: input.toolsetDefinitionRevisions,
     tools: input.tools.map((tool) => ({
@@ -1358,23 +1289,5 @@ export function preparedToolSurfaceObservationDigest(input: PreparedToolSurfaceD
       parametersDigest: inputPreparationDigest(tool.parameters),
     })),
     toolExecutors: input.toolExecutors,
-    implementations: input.implementations,
-    // `canonicalInputPreparationJson` drops an `undefined` value, so a surface
-    // with no native half digests to exactly the bytes it did before this key
-    // existed.
-    nativeSelection: input.nativeSelection === undefined
-      ? undefined
-      : {
-        names: [...input.nativeSelection.names],
-        policy: {
-          mode: input.nativeSelection.policy.mode,
-          allowTools: input.nativeSelection.policy.allowTools === undefined
-            ? undefined
-            : [...input.nativeSelection.policy.allowTools],
-          denyTools: input.nativeSelection.policy.denyTools === undefined
-            ? undefined
-            : [...input.nativeSelection.policy.denyTools],
-        },
-      },
   });
 }

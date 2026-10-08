@@ -133,7 +133,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     daemon = built.daemon;
 
     server.send(
-      createEnvelope('task.offer', { instruction: 'long task', policy: { mode: 'auto' } }, { taskId: 't1', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { instruction: 'long task' }, { taskId: 't1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -179,7 +179,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     daemon = built.daemon;
     server.send(createEnvelope(
       'task.offer',
-      { instruction: 'long task', policy: { mode: 'auto' } },
+      { instruction: 'long task' },
       { taskId: 't-disposal-barrier', seq: server.nextSeq() },
     ));
     await server.waitFor((event) => event.type === 'task.started');
@@ -212,7 +212,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     daemon = built.daemon;
 
     server.send(
-      createEnvelope('task.offer', { instruction: 'long task', policy: { mode: 'auto' } }, { taskId: 't-idem', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { instruction: 'long task' }, { taskId: 't-idem', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -246,7 +246,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     daemon = built.daemon;
 
     server.send(
-      createEnvelope('task.offer', { instruction: 'long task', policy: { mode: 'auto' } }, { taskId: 't-double', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { instruction: 'long task' }, { taskId: 't-double', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -311,7 +311,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     await daemon.pair('pairing-code');
     await daemon.start();
     server.send(
-      createEnvelope('task.offer', { instruction: 'late writer', policy: { mode: 'auto' } }, { taskId: 't-late', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { instruction: 'late writer' }, { taskId: 't-late', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await waitFor(() => expect(adapter.sessions).toHaveLength(1));

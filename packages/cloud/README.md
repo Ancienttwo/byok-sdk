@@ -33,7 +33,6 @@ await cloud.enqueueToolsetOffer(tenantId, deviceId, {
   payload: {
     instruction: 'Research the account and prepare the next sales action.',
     runtime: 'claude',
-    policy: { mode: 'auto' },
     requiredToolsets: ['salesko.prospecting'],
   },
 });

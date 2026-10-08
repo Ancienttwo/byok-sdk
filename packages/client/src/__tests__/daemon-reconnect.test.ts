@@ -34,7 +34,7 @@ async function tmpDir(prefix: string): Promise<string> {
 
     const offerSeq = server.nextSeq();
     server.send(
-      createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'task-A', seq: offerSeq }),
+      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-A', seq: offerSeq }),
     );
     await server.waitFor((e) => e.type === 'task.claim');
 
@@ -70,7 +70,7 @@ async function tmpDir(prefix: string): Promise<string> {
 
     const firstSeq = server.nextSeq();
     server.send(
-      createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'task-A', seq: firstSeq }),
+      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-A', seq: firstSeq }),
     );
     await server.waitFor((e) => e.type === 'task.claim' && e.task_id === 'task-A');
 
@@ -81,7 +81,7 @@ async function tmpDir(prefix: string): Promise<string> {
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'x', policy: { mode: 'auto' } },
+        { instruction: 'x' },
         { taskId: 'task-A-redelivered', seq: firstSeq },
       ),
     );
@@ -90,7 +90,7 @@ async function tmpDir(prefix: string): Promise<string> {
     // must go through exactly as usual.
     const secondSeq = server.nextSeq();
     server.send(
-      createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'task-B', seq: secondSeq }),
+      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-B', seq: secondSeq }),
     );
     await server.waitFor((e) => e.type === 'task.claim' && e.task_id === 'task-B');
 

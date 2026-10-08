@@ -12,7 +12,6 @@ import type {
   AgentRef,
   BlobRef,
   DispatchSelection,
-  PermissionPolicy,
   RuntimeCapabilities,
   RuntimeId,
   RuntimeInfo,
@@ -149,7 +148,6 @@ export interface DispatchInput {
   dispatchSelection?: DispatchSelection;
   runtime?: RuntimeId;
   harnessId?: string;
-  policy?: PermissionPolicy;
   deviceId?: string;
   sessionRef?: string;
   /** Logical device-local MCP toolsets required for this task; never executable definitions. */
@@ -309,8 +307,8 @@ export interface MachineInfo {
  * `@byok-sdk/cloud`) on every call — never a mirrored record this package
  * maintains alongside it.
  *
- * Deliberately smaller than it used to be: `instruction`, `runtime`, `policy`
- * and `requiredToolsets` were DISPATCH INPUT the host already holds and the
+ * Deliberately smaller than it used to be: `instruction`, `runtime` and
+ * `requiredToolsets` were DISPATCH INPUT the host already holds and the
  * kernel does not persist (ADR-028 — an attempt records ownership and
  * disposition, not the request that produced it). A host that wants them back
  * keeps its own map keyed by `taskId`; this snapshot never re-derives them.

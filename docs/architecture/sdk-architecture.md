@@ -108,7 +108,7 @@ flowchart LR
 
 ### 1.2 Monorepo 与依赖图
 
-仓库以 Bun 1.4.2 管理 workspace 与 lockfile，Node `>=24.15.0` 仍是 dispatch/runtime authority。当前有十五个 workspace package：九个 public npm manifest（七个 dispatch ownership package、随 train 发布的 support package `@byok-sdk/implementation-identity`、独立版本的 `@byok-sdk/keys`）、四个 private examples，以及两个只供测试使用的 private package：`@byok-sdk/conformance` 与只被 conformance 消费的 device simulator `@byok-sdk/testkit`。ADR-035 保留有独立 Node/Hono 部署职责的 `@byok-sdk/server`，并退出无独立能力的 `byok-sdk` umbrella：0.21.0 删除 `packages/sdk`，同一 release 把 `@byok-sdk/testkit` 转为 private，public artifacts 由 11 降为 9。`check:release-graph` 要求 `packages/` 下除这九个之外的 manifest 全部 private，并拒绝 `byok-sdk` 重新出现。npm registry tarball 仍由 isolated npm install + Node import smoke 验证；下图画当前 runtime、release 与 test-only edges。
+仓库以 Bun 1.4.2 管理 workspace 与 lockfile，Node `>=24.15.0` 仍是 dispatch/runtime authority。当前有十六个 workspace package：九个 public npm manifest（八个随 train 发布的 package 与独立版本的 `@byok-sdk/keys`；support package `@byok-sdk/implementation-identity` 已按 ADR-037 退役，见 `check:release-graph` 的 `retiredPublicNames`）、五个 private examples，以及两个只供测试使用的 private package：`@byok-sdk/conformance` 与只被 conformance 消费的 device simulator `@byok-sdk/testkit`。ADR-035 保留有独立 Node/Hono 部署职责的 `@byok-sdk/server`，并退出无独立能力的 `byok-sdk` umbrella：0.21.0 删除 `packages/sdk`，同一 release 把 `@byok-sdk/testkit` 转为 private，public artifacts 由 11 降为 9。`check:release-graph` 要求 `packages/` 下除这九个之外的 manifest 全部 private，并拒绝 `byok-sdk` 重新出现。npm registry tarball 仍由 isolated npm install + Node import smoke 验证；下图画当前 runtime、release 与 test-only edges。
 
 ```mermaid
 flowchart LR
@@ -211,7 +211,6 @@ flowchart TB
   Envelope(["envelope.ts<br/>direction-aware union"]):::schema
   Codec(["codec.ts<br/>parse / encode / decode / create"]):::core
   Events(["agent-event.ts<br/>8 known + unknown tolerance"]):::schema
-  Policy(["permission.ts<br/>strict security schema"]):::safety
   Blob(["blob.ts<br/>sha256 content address"]):::schema
   State(["task-state.ts<br/>7-state transitions"]):::safety
   HTTP(["http-api.ts<br/>pair/auth/blob/poll/post schemas"]):::schema
@@ -220,7 +219,6 @@ flowchart TB
 
   Version --> Envelope
   Events --> Messages
-  Policy --> Messages
   Blob --> Messages
   Messages --> Envelope
   Envelope --> Codec
@@ -235,12 +233,11 @@ flowchart TB
 
 | 文件 | 主要 exports / 功能 |
 | --- | --- |
-| `version.ts` | `PROTOCOL_VERSION = 1`、`CAPABILITY_FLAGS` |
+| `version.ts` | `PROTOCOL_VERSION = 2`、`CAPABILITY_FLAGS` |
 | `messages.ts` | runtime info、18 个 payload schemas、direction type lists、`MESSAGE_PAYLOAD_SCHEMAS` 单一来源 |
 | `envelope.ts` | discriminated union；所有 `task.*` 必须有 `task_id`，server→daemon 必须有 envelope `seq` |
 | `codec.ts` | `parseMessage`、`decodeEnvelope`、`encodeEnvelope`、`createEnvelope` |
 | `agent-event.ts` | 8 个已知 event、unknown wrapper、`isKnownAgentEvent`、`partitionAgentEvents` |
-| `permission.ts` | `auto/confirm/readonly/plan` 与 `.strict()` policy schema |
 | `task-state.ts` | 7 态、合法转移表、`canTransition` |
 | `blob.ts` | `sha256:<64hex>` 内容地址 |
 | `http-api.ts` | pair/challenge/token/blob/events/messages DTO；消息 POST batch 上限 256 |
@@ -260,8 +257,9 @@ flowchart TB
 `task.offer_with_toolsets` 是单独的 additive 消息，其
 `requiredToolsets` 只携带逻辑 id。daemon 在 claim 前用本机
 `mcpToolsets` 解析全部 id；缺失、server name 冲突或 runtime 不支持
-都 fail-closed decline。目前只有 Claude 支持，且以 task-scoped
-`--mcp-config --strict-mcp-config` 启动本地 stdio server。toolset control shape
+都 fail-closed decline。三个 bundled runtime 都声明 `mcpToolsets`。Claude 以
+task-scoped `--mcp-config` 加入这些 stdio server，用户自己的 MCP 配置也会加载
+（ADR-037）。toolset control shape
 不存在 command、env、header、token 或 cookie 字段；任意 instruction 文本不在此
 保护之内，host 不得将凭证写入其中，connector 凭证仍由本地 broker 管理。
 
@@ -302,14 +300,14 @@ stateDiagram-v2
 
 ### 2.4 Freeze 与兼容边界
 
-- wire `v1` 已冻结，freeze 由两道门禁分别执行，不是一句"golden 不漂移"：
-  - **wire corpus**（`packages/protocol/src/__tests__/golden/v1.envelopes.ndjson`）byte-for-byte 冻结，任何 diff 都是回归。
-  - **schema fingerprint**（`packages/protocol/src/__tests__/golden/v1.frozen.json`）只能经显式批准的 additive amendment 更新；历史上已发生一次：`ac92acb` 加入 additive 的 `task.claim.capabilities`。
+- wire `v2` 已冻结。ADR-037 删除 offer 的 `PermissionPolicy`、runtime capability `permissionModes` 与 input-preparation `permissionMode`，因此 `PROTOCOL_VERSION` 由 1 升到 2，没有 v1 reader。freeze 由两道门禁分别执行，不是一句"golden 不漂移"：
+  - **wire corpus**（`packages/protocol/src/__tests__/golden/v2.envelopes.ndjson`）byte-for-byte 冻结，任何 diff 都是回归。
+  - **schema fingerprint**（`packages/protocol/src/__tests__/golden/v2.frozen.json`）只能经显式批准的 additive amendment 更新；v1 时期发生过一次：`ac92acb` 加入 additive 的 `task.claim.capabilities`。
 - breaking shape change 必须升 major，不允许靠改 fingerprint 就地放行。
 - 普通 optional field、新 message type、新 `AgentEvent`、新 capability flag 可 additive 增加。
-- 例外：`PermissionPolicySchema` 与 instruction blob-ref 是 `.strict()` control/security shape；增加字段本身就是 breaking。
+- 例外：instruction blob-ref 与 strict offer payload 是 `.strict()` control shape；增加字段本身就是 breaking。
 - observability unknown 可忽略；control/security unknown 必须 fail-closed。
-- server 支持 N 与 N-1 major。当前只有 v1，所以该能力目前是 no-op。
+- server 只接受当前 major（v2）。v1 envelope 被拒绝；没有 N-1 reader，所以 server 与 client 必须一起升级。
 
 ## 3. `@byok-sdk/server`：`@byok-sdk/cloud` domain kernel 的 self-hosted façade
 
@@ -572,8 +570,8 @@ adapter-only build/import surface。
 | `auth-manager.ts` / `device-keys.ts` / `http-client.ts` | pair、challenge/token renew、Ed25519 key、401 revocation |
 | `connection-manager.ts` | 单一 client outbox、long-poll ack/cursor、chunking、shutdown drain |
 | `long-poll-transport.ts` | authenticated HTTP poll/post、cursor retry/backoff 与 cancellation |
-| `task-runner.ts` | offer admission、runtime selection、policy、workspace、Session event pump、approval/cancel/steer、resource limits |
-| `policy.ts` / `environment.ts` | device ceiling 合并、per-runtime env allowlist、`BYOK_*` hard deny |
+| `task-runner.ts` | offer admission、runtime selection、workspace、Session event pump、approval/cancel/steer、resource limits |
+| `environment.ts` | runtime env：继承完整 daemon 环境，只移除 `CLAUDECODE` 与 `BYOK_*`；durable Pi tool shell 与 prepared Pi lane 使用窄 allowlist |
 | `progress-batcher.ts` | normalized `AgentEvent` 批次与 task-level sequence |
 | `approvals.ts` | bounded pending approval registry、first resolution wins |
 | `control-server.ts` / `control-protocol.ts` | HMAC mutual auth、local RPC、endpoint/token derivation |
@@ -593,16 +591,14 @@ adapter-only build/import surface。
 | session model | 长驻 RPC | 长驻 stream-json process | 长驻 app-server，thread/start 或 thread/resume |
 | resume | yes | yes | yes |
 | mid-turn steer | yes | no，未实现 | yes，turn/steer；真实消费未验证 |
-| permission modes | `auto`,`readonly` | `auto`,`readonly`,`plan` | `auto` |
-| confirm/approval | no，fail-closed | no，私有审批路径已删除 | no，fail-closed |
-| task-scoped host MCP toolsets | yes | yes，strict MCP config | yes，exact enabled_tools；ambient MCP 排除未验证 |
-| allow/deny tools | 支持 | 条件支持 | 不支持，相关 policy fail-closed |
-| network control | `network:false` 拒绝 | `network:false` 拒绝 | `network:false` 拒绝，danger-full-access |
+| launch permission（ADR-037） | 预信任 session cwd；继承 agentDir、extensions、skills | `--dangerously-skip-permissions`；继承 `~/.claude` | `approvalPolicy: never`；sandbox 由 `codexSandbox` 决定（默认 `danger-full-access`，`inherit` 时 `config.toml` 生效） |
+| confirm/approval | no | no；native-interaction opt-in 是独立的本地 seam | no；native-interaction opt-in 是独立的本地 seam |
+| task-scoped host MCP toolsets | yes，daemon 观测 `tools/list` 后注册 | yes，task `--mcp-config`；用户 MCP 配置同时加载 | yes，`thread/start` config 的 `mcp_servers`；用户 `config.toml` 同时生效 |
 | usage event | provider counters + estimate context | provider counters + modelUsage window | cumulative cost deltas + last context |
 
-Runtime policy 不做跨 runtime 的语义翻译：tool name 是 runtime-local vocabulary。adapter 无法精确表达 policy 时必须 decline，不能选择“接近的”参数继续执行。
+SDK 不再向 adapter 下发 permission policy（ADR-037）。各 runtime 的 guardrail 由用户自己的 agent 配置决定。adapter 仍然拒绝它无法执行的 offer 字段（例如 `limits.maxTokens`），不丢弃，也不近似。
 
-原先已确认的 capability honesty gap（`approvalInteractive` 对所有 adapter 硬编码 `false`）**已收口**：client `RuntimeCapabilities` 的 `approvalInteractive` 是 required 字段，由各 adapter frozen descriptor 自己声明（当前三家均为 `false`，Claude confirm 已删除），wire `RuntimeInfo.capabilities` 从 descriptor 纯 passthrough，`create-daemon.ts` 里那张硬编码表已删除。`approvalInteractive` 与 `permissionModes` 来自同一 descriptor snapshot，因而结构上一致；connection flag `interactive-approval` 仍是 reserved，无人 advertise、无人消费，不作为路由信号。
+原先已确认的 capability honesty gap（`approvalInteractive` 对所有 adapter 硬编码 `false`）**已收口**：client `RuntimeCapabilities` 的 `approvalInteractive` 是 required 字段，由各 adapter frozen descriptor 自己声明（当前三家均为 `false`，Claude confirm 已删除），wire `RuntimeInfo.capabilities` 从 descriptor 纯 passthrough，`create-daemon.ts` 里那张硬编码表已删除。`approvalInteractive` 来自同一 descriptor snapshot；connection flag `interactive-approval` 仍是 reserved，无人 advertise、无人消费，不作为路由信号。
 
 #### 三层 capability 模型
 
@@ -611,8 +607,8 @@ capability 至少要分三层才能表达准确。三层现在都已接线：
 | 层 | 语义 | 消费者 | 状态 |
 | --- | --- | --- | --- |
 | device capabilities | 这台设备装了哪些 adapter | 连接握手、派工前的设备筛选 | 已实现、已接线 |
-| runtime capabilities | 某个 adapter 能精确表达哪些 policy | 派工时的 runtime 选择 | 已实现、已接线（S0 起为 adapter 实际能力，不再硬编码） |
-| task capabilities | 本 task 的 claimed runtime 与 effective policy 落定后，还剩哪些操作可执行 | `task.steer` 等 task 级控制面 | 已实现、已接线（claim 时快照 + steer gate） |
+| runtime capabilities | 某个 adapter 支持哪些操作（steer、resume、MCP toolsets 等） | 派工时的 runtime 选择 | 已实现、已接线（S0 起为 adapter 实际能力，不再硬编码） |
+| task capabilities | 本 task 的 claimed runtime 落定后，还剩哪些操作可执行 | `task.steer` 等 task 级控制面 | 已实现、已接线（claim 时快照 + steer gate） |
 
 connection-level 的“至少一个 adapter 支持 steer”不能代表任意 running task 支持 steer，所以第三层不读任何连接级数据，而读 claim 时落在 task record 上的 `claimedRuntimeCapabilities` 快照（§3.3），其唯一来源是 `task.claim.capabilities`。gate 的输入必须与它裁决的对象同生命周期：claim 正是建立 task↔runtime 绑定的那条消息；long-poll 重连也不会改写该快照。快照而非实时查询同样是刻意的：设备重连换了一套 adapter，也不能追溯改变一个 running task 的可 steer 性。
 
@@ -764,25 +760,9 @@ flowchart LR
 
 `@byok-sdk/keys` 不是 daemon 进程内的 runtime credential source，且仍没有任何 `client/server/protocol` import edge。BYOK Pi 的组合点是显式配置的 launcher executable：`byok-profile` offer 只传 opaque profile ref、exact revision/hash、model、required capabilities 与非秘密路径；launcher 在 claim 前只读验证，spawn 前再次验证后才读取 profile/keychain、生成 process-scoped projection 并启动 Pi。这个进程边界保留 dependency graph 的零边，也让 dispatch 进程无法取得 key value。
 
-### 7.3 Shared Node implementation measurement
+### 7.3 Shared Node implementation measurement（已删除）
 
-Installed Pi observation uses `measureRuntimeInstallation` and
-`reverifyRuntimeInstallation`, sharing the private physical core with existing
-launch resolve/reverify. Its distinct result has record/stat facts but no
-environment digests, so it cannot satisfy the spawn identity contract. The
-launch consumer alone supplies real environment measurement at the original
-assets → env → interpreter point. Existing MCP and launch result ordering is
-retained. Client owns native-manifest comparison, enabled top-level scope,
-read-only cwd observation and finite result projection. It shares native
-manifest verification with host startup; neither Host nor diagnostics writes
-another pin/version authority. Read-only detection does not prove ACL safety,
-credentials, recursive readiness, or later execution admission.
-
-`@byok-sdk/implementation-identity` owns install-record parsing, artifact/interpreter/assets measurement, fixed environment measurement projection, resolve/reverify and the final pre-spawn assertion. Its shipped code uses only Node fs/crypto/path; it does not import client, keys, server, protocol or Pi. `@byok-sdk/core` remains Node-free. Client and keys depend on the same package; client re-exports its existing public identity names without changing their shapes.
-
-Client retains runtime launch descriptions and decisions, native-pin expectations, daemon environment allowlist/stripping actions and reserved helper hosting. The shared package owns only the fixed credential-name measurement exclusion inventory and loader-name classification; client applies policy using those definitions. Credential values never enter the shared measurement API. Keys still owns OS custody and the credential-bearing child process. Measurement extraction alone does not implement the keys/Pi runtime final-spawn wiring; that is the subsequent P2 slice.
-
-The support package follows the aligned SDK train. Client and keys use workspace dependencies resolved to an identical exact version in packed manifests. Release graph/pack gates reject missing, ranged, optional or mismatched edges. It must publish before its consumers; keys' next artifact is coupled to that train as with its existing core edge. Since 0.21.0 the aligned train is eight manifests and the published set is nine packages; the `byok-sdk` umbrella is retired and `@byok-sdk/testkit` is private.
+ADR-037 删除了 implementation measurement 与 attestation。`@byok-sdk/implementation-identity` 已退役，后续 train 不再发布它。SDK 不再对 runtime 或 tool 可执行文件做测量、reverify 或 pre-spawn assertion。Pi 从已安装的 SDK package 启动，或通过 `sdkHelperHost` 重新进入单文件产品。keys 仍拥有 OS custody 与持有 credential 的 child process。
 
 ## 8. P2：端到端数据流
 
@@ -834,7 +814,7 @@ sequenceDiagram
   Cloud->>Store: create Offered attempt
   Cloud-->>CM: task.offer with device seq
   CM->>TR: handle envelope FIFO
-  TR->>TR: dedup, policy, limits, frozen descriptor, toolset preflight
+  TR->>TR: dedup, limits, frozen descriptor, toolset preflight
   TR->>AD: prepare offer with frozen descriptor (no side effects)
   alt pre-claim incompatibility
     TR-->>Cloud: task.decline retryable or not
@@ -869,7 +849,7 @@ sequenceDiagram
 
 关键 ownership 变化：SaaS 通过 server façade 创建 task；cloud kernel 持有
 durable attempt、mailbox 与 terminal authority；TaskRunner 决定是否能安全执行；
-adapter 只拿 effective policy 与 daemon-owned workspace；runtime process 产生原始
+adapter 只拿 sealed manifest 与 daemon-owned workspace；runtime process 产生原始
 事件；adapter 同时拥有 native event normalization 与 execution-failure
 classification；TaskRunner 只把显式 retry disposition 投影到既有 `task.fail` wire；
 cloud 只接受 owner device 的 daemon→server envelopes。
@@ -919,11 +899,11 @@ flowchart TB
   SaaS(["SaaS proposer<br/>potentially malicious"]):::untrusted
   Wire(["TLS gate + bearer auth<br/>schema + ownership + rate limit"]):::gate
   Daemon(["Local daemon<br/>execution authority"]):::trust
-  Policy(["effective PermissionPolicy<br/>fail-closed adapter mapping"]):::gate
+  Policy(["YOLO launch<br/>user agent config applies (ADR-037)"]):::gate
   Runtime(["Official runtime CLI<br/>same OS user privilege"]):::untrusted
   Control(["HMAC local control socket"]):::local
   Store[("0700/0600 or Windows DACL<br/>device key, token, ledgers")]:::local
-  Env(["per-runtime env allowlist<br/>BYOK_* hard deny"]):::gate
+  Env(["full env inherited<br/>CLAUDECODE + BYOK_* removed"]):::gate
   Workspace(["daemon-owned directory<br/>convention, not sandbox"]):::untrusted
 
   SaaS --> Wire --> Daemon
@@ -939,7 +919,7 @@ flowchart TB
 | --- | --- | --- |
 | device auth | pairing single-use、Ed25519 nonce proof、bearer claims、revoke | 同一 OS user 读取本地 `device.json` |
 | transport gate | remote plaintext 默认拒绝；HTTPS 默认路径（本地开发可用 loopback HTTP） | SDK 自己提供 TLS termination |
-| policy | device ceiling 合并；adapter 无法表达则 decline | kernel-level sandbox 或强制 filesystem confinement |
+| agent guardrail | YOLO launch；用户 agent 自身配置（sandbox、deny rules、MCP、extensions）生效；Codex sandbox 由 `codexSandbox` 选择 | SDK 层的 filesystem、network 或 tool 限制；kernel-level sandbox |
 | runtime credentials | subscription login store 与 BYOK key 都不由 dispatch daemon 读取；authoritative BYOK 走独立 launcher | 同一 OS user 无法调试/观察 launcher 或 Pi child process |
 | control socket | mutual HMAC、endpoint permission/DACL、method pre-auth unreachable | 同一 user 且能读 token 的恶意进程 |
 | audit/observer | 只记录 task id、event type、tool/runtime name、counts/sizes | 保存完整 tool input/output 作为审计证据 |
@@ -956,14 +936,14 @@ dispatch daemon 当前的 credential 边界由六条构成，前五条是已实�
 - 不读取 runtime 自己的 login store；
 - 不把 host/server token 注入 runtime 子进程；
 - 不 import `@byok-sdk/keys`（package graph 的零边，§1.2）；
-- task environment 走 per-runtime allowlist，`BYOK_*` hard deny；subscription 与 BYOK-launcher spawn 额外移除 provider credential env names；
+- task environment 继承完整 daemon 环境，只移除 `CLAUDECODE` 与 `BYOK_*`（ADR-037 D2/D3）。daemon 环境里已有的 provider key 会原样传给 Claude/Codex child；这不是 SDK 读取或保管 key。BYOK launcher 为 Pi child 重建窄环境；
 - credential-isolation audit 是 release gate，不是可选检查。
 
 **当前 BYOK 设计**：不引入 loopback credential proxy。每次 dispatch 启动一个无 listener 的 custody launcher；projection 目录私有且 process-scoped，Pi child env 从封闭 platform/proxy baseline 加唯一 resolved key 重建，不继承 launcher 的 ambient secrets；key 只在 launcher 内存与 Pi child env 中短暂存在，缺 profile/model/keychain/key 任一条件都在 Pi 网络请求前 fail closed。默认承诺仍是“dispatch daemon 不持有任何 runtime credential”。
 
-### 9.2 Permission bypass：REJECTED
+### 9.2 Permission bypass：SUPERSEDED（ADR-037）
 
-外部产品常见的 runtime bypass / yolo flag 在本项目属**明确拒绝**。BYOK 的安全边界同时保护本机与 SaaS 两侧权限，而 API scope 不能替代 filesystem/tool permission——前者管"能调哪个接口"，后者管"能碰哪个文件"。任何"为了迁就某个 runtime 而自动附加跳过核准参数"的改动一律 REJECTED，除非另立新产品模式，并配套独立的安全模型、包边界与用户明示同意。这条是 §4.4 "adapter 无法表达 policy 时必须 decline"的同一条约束在发布面的投影。
+本节原先拒绝 runtime bypass / yolo flag。[ADR-037](adr-2026-10-07-minimal-guardrails.md) 于 2026-10-07 取代了它。Session 现在在用户指定的 workspace 中以 YOLO 运行。用户 agent 自己的 guardrail 与配置生效。SDK 只保留它拥有、而 agent 看不到的不变量（见 ADR-037 Consequences）。
 
 ### 9.3 更新链的信任根（目标设计，宿主产品责任）
 
@@ -1422,7 +1402,7 @@ Agent。Protocol v1 保持冻结，Agent lifecycle 只能进入新 control-plane
 
 Agent local/cloud projection 使用 additive capability 和 distinct wire
 messages，不把 fleet placement 写进 task schema。`agent-egress-policy` 绑定
-metadata-default/content-opt-in policy；reliable Agent evidence 在本地 Agent
+传输上限与 content-read surface；Agent 事件原样发给 Host（ADR-037 D4）；reliable Agent evidence 在本地 Agent
 home fsync 后以 stable cursor 重试并由 exact ack 退休，latest-value activity
 保持可替换。Workspace、transcript、artifact read 各自 capability-gated，内容
 经 explicit root/MIME/size policy 与本地 audit 后只通过 authenticated BlobRef
@@ -1943,7 +1923,7 @@ SaaS 侧策划的声明式内容（agentskills.io 兼容的 `SKILL.md` + 静态�
 | credential proxy | **deferred** | BYOK dispatch plane 当前不持有 runtime credentials；引入会改变 credential-isolation claim |
 | computer supervisor/updater 独立层 | **宿主产品责任 / deferred** | SDK 既定边界是 OS supervisor + host-owned release/update |
 | hash-only updater trust | **拒绝照抄** | upgrade manifest 与 binary 同源不能形成独立签名信任根 |
-| runtime bypass/yolo flags | **拒绝** | 会推翻 BYOK fail-closed PermissionPolicy 约束 |
+| runtime bypass/yolo flags | **采纳**（ADR-037） | 用户 agent 自身 guardrail 生效；无人值守 session 中的审批 gate 只会挂起 |
 
 三处 authority 必须写清，否则这张表会把外部证据的强度说高：
 
@@ -2033,7 +2013,7 @@ S7-a 落 operational health/crash authority；S7-b 已把它与 runtime/control/
 
 ### 14.4 必须保持的不变量
 
-1. protocol freeze 走双门禁：wire corpus（`v1.envelopes.ndjson`）byte-for-byte 冻结；schema fingerprint（`v1.frozen.json`）只能经显式批准的 additive amendment 更新（历史上一次：`ac92acb`，additive `task.claim.capabilities`）。breaking shape 必须升 major。
+1. protocol freeze 走双门禁：wire corpus（`v2.envelopes.ndjson`）byte-for-byte 冻结；schema fingerprint（`v2.frozen.json`）只能经显式批准的 additive amendment 更新（v1 时期一次：`ac92acb`，additive `task.claim.capabilities`）。breaking shape 必须升 major（ADR-037 的 v1 → v2 即是一例）。
 2. `keys` 与 dispatch/platform dependency graph 保持所规定的零边。
 3. unknown observability 可忽略；unknown control/security fail-closed。
 4. device/server/task ownership 每次 crossing 都验证，不靠调用者自律。
@@ -2042,7 +2022,7 @@ S7-a 落 operational health/crash authority；S7-b 已把它与 runtime/control/
 7. memory conflict 不由 cloud 语义 merge。
 8. board claim/status 使用 CAS；不做 silent last-write-wins。
 9. workspace/Git state 不驱动 protocol task transition。
-10. runtime adapter 不把不支持的 policy 翻译成近似语义。
+10. runtime adapter 拒绝它无法执行的 offer 字段，不丢弃也不近似；offer 不再携带 permission policy（ADR-037）。
 11. hosted production 的 mailbox ack authority 使用 SQLite（或同等 contract），不能退回未证明 durable 的普通文件。（已实现 S3b：`node:sqlite` 缺席时构造抛 `JournalUnavailableError`，不降级）
 12. `committedBytes + reservedBytes` 不得超过有效 entitlement；所有直接上传先做 reservation。
 13. quota 满只拒绝新的 durable write，不自动删除用户 durable truth。
@@ -2163,11 +2143,11 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-008 | terminal immutable；memory/profile 用 revision CAS | Accepted |
 | ADR-009 | cloud 不做语义推导（摘要、合并、相关性排序） | Accepted |
 | ADR-010 | 能力用 `/capabilities` 声明，不做 status code 嗅探 | Accepted |
-| ADR-011 | runtime policy 必须精确表达，否则 fail-closed | Accepted |
+| ADR-011 | runtime policy 必须精确表达，否则 fail-closed | Superseded by ADR-037（offer 不再携带 permission policy） |
 | ADR-012 | key plane 与 dispatch/platform 之间保持零依赖边 | Accepted |
 | ADR-013 | credential proxy | Deferred，仅在出现 managed agent credential 需求时触发（§9.1） |
 | ADR-014 | updater 与 supervisor 归宿主产品所有 | Accepted |
-| ADR-015 | runtime permission bypass / yolo flag | durablePi lane Accepted（owner 2026-10-02，默认关、YOLO-only 准入）；既有 runtimes 沿原合同，不能默默放宽 policy |
+| ADR-015 | runtime permission bypass / yolo flag | Superseded by ADR-037（2026-10-07：全部 runtime 以 YOLO 运行，用户 agent 自身 guardrail 生效） |
 | ADR-016 | memory delta chain | Deferred，snapshot > 1 MiB 或 CAS 冲突率偏高时触发 |
 | ADR-017 | `TaskStore` 改 async | Deferred，self-hosted 需要远端 async SQL 时触发 |
 | ADR-018 | live / cold migration | Deferred，出现跨设备 workspace 迁移需求时触发 |
@@ -2189,6 +2169,7 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-034 | legacy `task.offer*` / `strictAgentOnly` / 旧 gitWorkspace authority / ambient 选设备在一次 v2 cutover 中删除，无双读双写 | Accepted，Supersedes ADR-002（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-035 | 保留 `@byok-sdk/server` 的 self-hosted Node/Hono deployment boundary；无独立能力的 `byok-sdk` umbrella 在另行批准的 breaking cutover 中退出，public artifacts 由 10 降为 9 | Accepted；implemented in 0.21.0（umbrella 删除，同 release `@byok-sdk/testkit` 转 private，public artifacts 实际由 11 降为 9；详见 `adr-2026-09-05-public-package-topology.md`） |
 | ADR-036 | 云端 Generic Agent：Bot 模式每次唤醒 = 新执行（方案 A）；云端模型 key 只由平台持有、BYOK 永远只在本地（每请求 key / 信封加密托管作废）；云端不支持官方 CLI / Keychain / 本地文件 / stdio MCP；云端工具 / 作业调用基于 Durable Objects；byok-sdk 拥有云端 backend，Aiphabee 为首个消费方；Aiphabee chat Workflow 直接替换（无并行 / flag / shadow）；DO 同时承载工具与长作业且保持最简；云端只读数据工具与 skill 加载器 `replay:'safe'`（冻结清单），本地全 unsafe | Accepted（2026-10-03，decided by Aimpact）；未实现，切片未放行（详见 `adr-2026-10-03-cloud-generic-agent.md`） |
+| ADR-037 | 最小 guardrail：删除 `PermissionPolicy`（protocol v2）、MCP readonly/grants、strict MCP、env allowlist 与 key 剥离、egress sanitizer、trusted launch cwd、attestation 与 custody；session 在用户指定 workspace 中以 YOLO 运行，继承用户 agent 配置；SDK 只保留自有不变量 | Accepted（owner 2026-10-07）；implemented in slices 1–5（详见 `adr-2026-10-07-minimal-guardrails.md`） |
 
 - Completed workstream evidence: `tasks/workstreams/root/20260904-sdk-root.md`
 
@@ -2237,7 +2218,7 @@ boundary over existing storage, with no wire/session/home ownership change.
 
 ## Official Pi preparation and identity (0.22.0 draft)
 
-The daemon owns source/scope admission and observed MCP tool/executor identity. Its
+The daemon owns source/scope admission and the observed MCP tool surface. Its
 lazy compiler entry calls official pi-ai streamSimple with real baseUrl, placeholder
 key and a terminating capture fetch; no Session or local prompt renderer is created.
 The Host supplies the complete systemPrompt. Envelope v4 binds the captured body D,
@@ -2251,6 +2232,6 @@ precede message egress. Sentinel history never enters SessionManager or the arti
 
 A single checked official eight-package closure inventory supplies build, native
 identity and release/registry guards. Tarball integrity, signed provenance, exact
-versions and installed-file digests replace fork markers. Encapsulated launch uses
-the measured sealed artifact plus declared assets, without external package lookup.
-M4 recursion/custody acceptance and M5 provider C measurements remain separate gates.
+versions and installed-file digests replace fork markers. ADR-037 removed launch
+attestation: Pi starts from the installed SDK package, or re-enters a single-file
+product through `sdkHelperHost`. M5 provider C measurements remain a separate gate.

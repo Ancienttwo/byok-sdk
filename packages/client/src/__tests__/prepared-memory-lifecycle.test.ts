@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 import { TaskRunner } from '../daemon/task-runner';
-import { assertPreparedMemoryPolicy } from '../daemon/prepared-agent-memory';
 
 // Exercise the public IPC handlers and their real active-task identity gate.
 // Only the filesystem boundary is replaced: denial must occur before it.
@@ -46,14 +45,5 @@ describe('prepared memory authority at the daemon IPC boundary', () => {
     fixture.active.session.sessionRef = 'replacement-session';
     await expect(fixture.subject.saveAgentMemory({ contextToken: fixture.token, ...write })).rejects.toThrow('exact active task identity');
     expect(fixture.filesystem).not.toHaveBeenCalled();
-  });
-
-  it('enforces the policy matrix and selected bare memory denyTools', () => {
-    expect(() => assertPreparedMemoryPolicy('read', { mode: 'readonly' })).not.toThrow();
-    expect(() => assertPreparedMemoryPolicy('read-write', { mode: 'readonly' })).toThrow('policy_conflict');
-    expect(() => assertPreparedMemoryPolicy('read', { mode: 'confirm' })).toThrow('policy_conflict');
-    expect(() => assertPreparedMemoryPolicy('read', { mode: 'plan' })).toThrow('policy_conflict');
-    expect(() => assertPreparedMemoryPolicy('read', { mode: 'auto', denyTools: ['memory_recall'] })).toThrow('policy_conflict');
-    expect(() => assertPreparedMemoryPolicy('read', { mode: 'auto', denyTools: ['memory_save'] })).not.toThrow();
   });
 });

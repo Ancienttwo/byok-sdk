@@ -245,7 +245,7 @@ describe('Issues #112/#114/#115/#116/#117/#118/#120 reference-server regressions
       sessionRef: 'session-issues',
       egressPolicy: {
         policyRevision: 'policy-r1',
-        activity: { mode: 'metadata-status', delivery: 'latest-value' },
+        activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
         reliable: { maxPendingEventsPerAgent: 1, maxPendingBytesPerAgent: 1024, maxPendingBytesPerTenant: 1024 },
         transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
       },

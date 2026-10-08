@@ -127,7 +127,6 @@ function payload(overrides: Record<string, unknown> = {}): AgentInputPreparation
     deadlineAt: new Date(Date.now() + 60_000).toISOString(),
     context: { inline: CONTEXT_JSON },
     agentMemory: 'none', requiredToolsets: ['team'],
-    permissionMode: 'auto',
     ...overrides,
   });
 }
@@ -310,7 +309,7 @@ describe('remote input preparation: in-process, never the control socket', () =>
     // `requiredToolsets` and `permissionMode` through, and the tools that reach
     // the compiler are exactly what the one assembly entry answered with.
     expect(harness.toolSurface.assembleCalls).toEqual([
-      { agentMemory: 'none', requiredToolsets: ['team'], permissionMode: 'auto', runtimeIdentity: expect.any(String) },
+      { agentMemory: 'none', requiredToolsets: ['team'], runtimeIdentity: expect.any(String) },
     ]);
     const compiled = harness.compiler.calls[0]!;
     expect(compiled.snapshot.tools.map((tool) => tool.name)).toEqual([
@@ -370,18 +369,6 @@ describe('remote input preparation: in-process, never the control socket', () =>
     expect(harness.compiler.calls).toEqual([]);
   });
 
-  it('carries the declared permission mode through to the assembly and onto the binding', async () => {
-    // The mode is the requester's declaration; the device validates and pins it
-    // rather than inferring one. Two modes are two different manifests, so they
-    // are two different preparations.
-    const harness = await makeHarness();
-    const completion = await harness.handle(payload({ permissionMode: 'readonly' }));
-    if (completion.outcome !== 'prepared') throw new Error('unreachable');
-
-    expect(harness.toolSurface.assembleCalls[0]?.permissionMode).toBe('readonly');
-    expect(completion.receipt.binding.permissionMode).toBe('readonly');
-  });
-
   it('reports a resolver refusal as a rejection, with no artifact and no compile', async () => {
     const harness = await makeHarness({
       authorityResolver: {
@@ -421,15 +408,15 @@ describe('remote input preparation: in-process, never the control socket', () =>
     const harness = await makeHarness();
     const first = await harness.handle(payload());
 
-    // What a `toolsets.reload`, a replaced launch directory or a re-measured
-    // implementation looks like to the replay path: the spawn-free binding
+    // What a `toolsets.reload` or a re-measured implementation looks like to
+    // the replay path: the spawn-free binding
     // digest no longer matches the one the frozen artifact recorded.
     harness.toolSurface.toolBindingDigest = 'binding-digest-2';
     const replayed = await harness.handle(payload());
 
     expect(replayed).toEqual(first);
     // Reporting history does not re-observe or re-count. Prepared execution
-    // admission remains responsible for refusing the changed launch binding.
+    // admission remains responsible for refusing the changed binding.
     expect(harness.toolSurface.assembleCalls).toHaveLength(1);
     expect(harness.counter.calls).toHaveLength(1);
   });
@@ -542,23 +529,6 @@ describe('remote input preparation: in-process, never the control socket', () =>
     if (completion.outcome !== 'rejected') throw new Error('unreachable');
     expect(completion.reason).toBe('toolsets_unobservable');
     expect(harness.compiler.calls).toHaveLength(0);
-  });
-
-  it('reports an unprovable launch boundary rather than observing in an unproven directory', async () => {
-    const toolSurface = recordingToolSurface();
-    toolSurface.refusal = {
-      ok: false,
-      code: 'launch_boundary_unavailable',
-      detail: 'launch_boundary_unavailable:platform_default_is_writable',
-      message: 'no non-writable MCP launch directory could be proven on this device',
-    };
-    const harness = await makeHarness({ toolSurface });
-    const completion = await harness.handle(payload());
-
-    if (completion.outcome !== 'rejected') throw new Error('unreachable');
-    expect(completion.reason).toBe('launch_boundary_unavailable');
-    expect(harness.compiler.calls).toHaveLength(0);
-    expect(harness.counter.calls).toHaveLength(0);
   });
 
   it('keeps the mailbox row when the completion itself cannot be recorded', async () => {

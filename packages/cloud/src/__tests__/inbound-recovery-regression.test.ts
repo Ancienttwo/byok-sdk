@@ -49,7 +49,7 @@ describe('inbound lifecycle recovery', () => {
       deviceId: device.deviceId,
       productId: 'test-product',
       clientVersion: '0.0.0-test',
-      protocolVersions: [1],
+      protocolVersions: [2],
       runtimes: [],
       capabilities: ['recovered-capability'],
     });
@@ -194,12 +194,11 @@ describe('inbound lifecycle recovery', () => {
       taskId: 'task-agent-message-recovery',
       payload: {
         instruction: 'send one message',
-        policy: { mode: 'auto' },
         agentRef,
         sessionRef: 'recovery-session',
         egressPolicy: {
           policyRevision: 'recovery-policy',
-          activity: { mode: 'metadata-status', delivery: 'latest-value' },
+          activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
           reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
           transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
         },

@@ -5,8 +5,6 @@ import { describe, expect, it } from 'vitest';
 import {
   PROTOCOL_VERSION,
   CAPABILITY_FLAGS,
-  PERMISSION_MODES,
-  PermissionPolicySchema,
   TASK_STATES,
   TASK_TRANSITIONS,
   MESSAGE_TYPES,
@@ -52,7 +50,7 @@ import {
 } from '../index';
 
 /**
- * FREEZE GUARD — the regression net for the frozen v1 wire (docs/protocol.md
+ * FREEZE GUARD — the regression net for the frozen wire (docs/protocol.md
  * "Freeze rule"). This file is the one committed place that pins down
  * "everything that must never silently change" and gives every diff a
  * concrete, actionable verdict: an additive/optional change regenerates the
@@ -65,12 +63,12 @@ import {
  * Three independent nets live in this one file:
  *
  *   1. A schema fingerprint snapshot (`buildFrozenSnapshot`) compared against
- *      the committed `golden/v1.frozen.json` — catches ANY structural change
+ *      the committed `golden/v2.frozen.json` — catches ANY structural change
  *      to a frozen schema, however small.
- *   2. A golden NDJSON envelope corpus (`golden/v1.envelopes.ndjson`, one
+ *   2. A golden NDJSON envelope corpus (`golden/v2.envelopes.ndjson`, one
  *      canonical line per message type) that must keep `decodeEnvelope`-
  *      parsing forever — the actual regression net: real historical wire
- *      bytes a v1 peer already sent, re-played against today's code. Beyond
+ *      bytes a v2 peer already sent, re-played against today's code. Beyond
  *      "does it still parse", each decoded envelope is also asserted to
  *      deep-equal the ORIGINAL committed JSON field-for-field — parsing
  *      successfully isn't enough if a schema silently dropped or renamed an
@@ -78,9 +76,9 @@ import {
  *   3. Explicit behavior assertions for the freeze rule's own asymmetry:
  *      unknown is TOLERATED for observability data, FAIL-CLOSED for
  *      control/security data (see docs/protocol.md) — including that an
- *      unrecognized field on an otherwise well-formed `policy` or
- *      `instruction` blob-ref is rejected outright (`.strict()`), not
- *      silently stripped the way every other payload's unknown field is.
+ *      unrecognized field on an otherwise well-formed `instruction` blob-ref
+ *      is rejected outright (`.strict()`), not silently stripped the way
+ *      every other payload's unknown field is.
  *
  * Plus a dual-source cross-check between envelope.ts's `envelopeShape()`
  * calls and codec.ts's `EnvelopeShapeOptions`/`CreateEnvelopeOptions<T>` —
@@ -88,11 +86,11 @@ import {
  * `task_id`/`seq` requiredness rule (see codec.ts's own doc comment); a
  * second dual-authority check between agent-event.ts's hand-maintained
  * `KNOWN_AGENT_EVENT_TYPES` and `AgentEventSchema`'s own variant `type`
- * literals; and a standalone `PROTOCOL_VERSION === 1` pin.
+ * literals; and a standalone `PROTOCOL_VERSION === 2` pin.
  */
 
 const goldenDir = fileURLToPath(new URL('./golden/', import.meta.url));
-const frozenGoldenPath = `${goldenDir}v1.frozen.json`;
+const frozenGoldenPath = `${goldenDir}v2.frozen.json`;
 
 // ---------------------------------------------------------------------------
 // Part 1 — schema fingerprint snapshot
@@ -112,7 +110,7 @@ const frozenGoldenPath = `${goldenDir}v1.frozen.json`;
  *     error, not a vague downstream symptom.
  *
  * It's also folded into the golden fingerprint snapshot (Part 1) so a
- * diff against `golden/v1.frozen.json` surfaces a requiredness change too.
+ * diff against `golden/v2.frozen.json` surfaces a requiredness change too.
  */
 function codecRequirednessMatrix(): CodecRequirednessMatrix {
   return {
@@ -257,7 +255,7 @@ type CodecRequirednessMatrix = {
   };
 };
 
-/** Builds the current schema fingerprint fresh from the live schemas — compared against the committed `golden/v1.frozen.json`. */
+/** Builds the current schema fingerprint fresh from the live schemas — compared against the committed `golden/v2.frozen.json`. */
 function buildFrozenSnapshot() {
   const payloadSchemas: Record<string, unknown> = {};
   for (const type of MESSAGE_TYPES) {
@@ -280,7 +278,6 @@ function buildFrozenSnapshot() {
   return {
     protocolVersion: PROTOCOL_VERSION,
     capabilityFlags: [...CAPABILITY_FLAGS],
-    permissionModes: [...PERMISSION_MODES],
     taskStates: [...TASK_STATES],
     taskTransitions: TASK_TRANSITIONS,
     messageTypes: [...MESSAGE_TYPES],
@@ -294,7 +291,6 @@ function buildFrozenSnapshot() {
     envelopeSchema: z.toJSONSchema(EnvelopeSchema),
     agentEventSchema: z.toJSONSchema(AgentEventSchema),
     agentEventOrUnknownSchema: z.toJSONSchema(AgentEventOrUnknownSchema),
-    permissionPolicySchema: z.toJSONSchema(PermissionPolicySchema),
     blobRefSchema: z.toJSONSchema(BlobRefSchema),
     httpApiSchemas: {
       pairRequest: z.toJSONSchema(PairRequestSchema),
@@ -333,10 +329,10 @@ if (process.env['BYOK_PROTOCOL_UPDATE_GOLDEN'] === '1') {
 }
 
 const FREEZE_DIFF_MESSAGE =
-  'v1 frozen schema fingerprint drifted from golden/v1.frozen.json. If this diff is purely additive (a new optional field, a new message type, a new AgentEvent variant, a new capability flag), regenerate the golden and say so — with justification — in the commit message. If it changes, removes, or retypes anything that already existed, that is a breaking change and needs a PROTOCOL_VERSION bump instead, per docs/protocol.md "Freeze rule" — do not just regenerate the golden to make this pass.';
+  'v2 frozen schema fingerprint drifted from golden/v2.frozen.json. If this diff is purely additive (a new optional field, a new message type, a new AgentEvent variant, a new capability flag), regenerate the golden and say so — with justification — in the commit message. If it changes, removes, or retypes anything that already existed, that is a breaking change and needs a PROTOCOL_VERSION bump instead, per docs/protocol.md "Freeze rule" — do not just regenerate the golden to make this pass.';
 
-describe('freeze guard: v1 schema fingerprint snapshot', () => {
-  it('matches the committed golden/v1.frozen.json exactly', () => {
+describe('freeze guard: v2 schema fingerprint snapshot', () => {
+  it('matches the committed golden/v2.frozen.json exactly', () => {
     const fresh = buildFrozenSnapshot();
     const golden = JSON.parse(readFileSync(frozenGoldenPath, 'utf8'));
     expect(fresh, FREEZE_DIFF_MESSAGE).toEqual(golden);
@@ -348,11 +344,11 @@ describe('freeze guard: v1 schema fingerprint snapshot', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Part 2 — v1 golden envelope corpus: real wire bytes that must keep parsing
+// Part 2 — v2 golden envelope corpus: real wire bytes that must keep parsing
 // ---------------------------------------------------------------------------
 
-describe('freeze guard: v1 golden envelope corpus (golden/v1.envelopes.ndjson)', () => {
-  const raw = readFileSync(`${goldenDir}v1.envelopes.ndjson`, 'utf8');
+describe('freeze guard: v2 golden envelope corpus (golden/v2.envelopes.ndjson)', () => {
+  const raw = readFileSync(`${goldenDir}v2.envelopes.ndjson`, 'utf8');
   const lines = raw.split('\n').filter((line) => line.length > 0);
 
   it('has exactly one committed line per message type', () => {
@@ -384,9 +380,9 @@ describe('freeze guard: v1 golden envelope corpus (golden/v1.envelopes.ndjson)',
     // silently drops (or renames) an optional field, `decodeEnvelope` strips
     // it on the way in, so decode -> encode -> decode stays internally
     // consistent and the round-trip check above stays green — even though a
-    // real v1 peer that sent this exact committed line just had a field it
+    // real v2 peer that sent this exact committed line just had a field it
     // relied on vanish. The committed raw JSON — not the schema's own
-    // output — is the source of truth for "what a v1 peer actually put on
+    // output — is the source of truth for "what a v2 peer actually put on
     // the wire", so comparing the decoded value against it (not just against
     // itself, re-encoded) is what actually catches that regression.
     for (const line of lines) {
@@ -405,7 +401,7 @@ describe('freeze guard: v1 golden envelope corpus (golden/v1.envelopes.ndjson)',
 describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)', () => {
   it('an unrecognized message type throws UnknownMessageTypeError — distinctly skippable from a validation failure', () => {
     const raw = {
-      v: 1,
+      v: PROTOCOL_VERSION,
       id: '00000000-0000-4000-8000-000000000101',
       ts: '2026-01-01T00:00:00.000Z',
       type: 'task.some_future_type',
@@ -461,30 +457,8 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
   it('an unknown `instruction` shape is REJECTED, fail-closed (control/security data, not observability)', () => {
     const result = MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse({
       instruction: { someFutureShape: true }, // neither a plain string nor { blobRef }
-      policy: { mode: 'auto' },
     });
     expect(result.success).toBe(false);
-  });
-
-  it('an unknown `policy.mode` is REJECTED, fail-closed (control/security data, not observability)', () => {
-    const result = PermissionPolicySchema.safeParse({ mode: 'some-future-mode' });
-    expect(result.success).toBe(false);
-  });
-
-  it('an unknown field on an otherwise well-formed `policy` is REJECTED, fail-closed (`.strict()` — unlike a plain `z.object()`, an unrecognized key is a validation error, not a silent strip)', () => {
-    const result = PermissionPolicySchema.safeParse({ mode: 'auto', futureConstraint: 'x' });
-    expect(result.success).toBe(false);
-  });
-
-  it('a well-formed policy with only known fields still parses successfully (the `.strict()` above rejects unknown keys, not known ones)', () => {
-    const result = PermissionPolicySchema.safeParse({
-      mode: 'auto',
-      allowTools: ['bash'],
-      denyTools: ['rm'],
-      workspaceRoot: '/tmp/ws',
-      network: false,
-    });
-    expect(result.success).toBe(true);
   });
 
   it('an unknown field alongside an otherwise well-formed `instruction.blobRef` is REJECTED, fail-closed (same `.strict()` asymmetry applied to the blob-ref instruction variant)', () => {
@@ -498,9 +472,40 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
         },
         futureControlField: 'from a hypothetical future variant',
       },
-      policy: { mode: 'auto' },
     });
     expect(result.success).toBe(false);
+  });
+
+  it('a v1 envelope is REJECTED: v2 removed `policy`, and there is no v1 reader', () => {
+    const envelope = createEnvelope('task.started', {}, { taskId: 'task-1' });
+    expect(() => parseMessage({ ...envelope, v: 1 })).toThrow(EnvelopeValidationError);
+  });
+
+  it.each([
+    'task.offer_with_toolsets',
+    'task.offer_for_agent',
+    'task.offer_for_agent_with_egress',
+    'task.offer_for_agent_with_egress_fresh',
+    'task.offer_prepared',
+  ] as const)('a strict %s that still carries the removed `policy` is REJECTED, not stripped', (type) => {
+    const payload = minimalPayloadForProbe(type) as Record<string, unknown>;
+    expect(MESSAGE_PAYLOAD_SCHEMAS[type].safeParse(payload).success).toBe(true);
+    const removedPolicy = { mode: 'auto' };
+    const withPolicy = { ...payload, policy: removedPolicy };
+    expect(MESSAGE_PAYLOAD_SCHEMAS[type].safeParse(withPolicy).success).toBe(false);
+    const raw = { v: PROTOCOL_VERSION, id: '00000000-0000-4000-8000-000000000102', ts: '2026-01-01T00:00:00.000Z', type, task_id: 'task-1', seq: 1, payload: withPolicy };
+    expect(() => parseMessage(raw)).toThrow(EnvelopeValidationError);
+  });
+
+  it('a task.offer without `policy` is accepted', () => {
+    expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse({ instruction: 'do it' }).success).toBe(true);
+  });
+
+  it('an agent.input.preparation that still carries the removed `permissionMode` is REJECTED (strict)', () => {
+    const payload = minimalPayloadForProbe('agent.input.preparation') as Record<string, unknown>;
+    expect(MESSAGE_PAYLOAD_SCHEMAS['agent.input.preparation'].safeParse(payload).success).toBe(true);
+    const removedMode = 'auto';
+    expect(MESSAGE_PAYLOAD_SCHEMAS['agent.input.preparation'].safeParse({ ...payload, permissionMode: removedMode }).success).toBe(false);
   });
 
   it('a task.* envelope missing task_id is still rejected, even with every other field present', () => {
@@ -519,24 +524,23 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
 function minimalPayloadForProbe(type: MessageType): unknown {
   switch (type) {
     case 'conn.hello':
-      return { protocolVersions: [1], capabilities: [], deviceId: 'device-1', productId: 'acme-agent' };
+      return { protocolVersions: [PROTOCOL_VERSION], capabilities: [], deviceId: 'device-1', productId: 'acme-agent' };
     case 'conn.ack':
-      return { protocolVersion: 1, capabilities: [], serverTime: '2026-01-01T00:00:00.000Z' };
+      return { protocolVersion: PROTOCOL_VERSION, capabilities: [], serverTime: '2026-01-01T00:00:00.000Z' };
     case 'task.offer':
-      return { instruction: 'do it', policy: { mode: 'auto' } };
+      return { instruction: 'do it' };
     case 'task.offer_with_toolsets':
-      return { instruction: 'find leads', policy: { mode: 'auto' }, requiredToolsets: ['salesko'] };
+      return { instruction: 'find leads', requiredToolsets: ['salesko'] };
     case 'task.offer_for_agent':
-      return { instruction: 'run for agent', policy: { mode: 'auto' }, agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } };
+      return { instruction: 'run for agent', agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' } };
     case 'task.offer_for_agent_with_egress':
       return {
         instruction: 'run with egress',
-        policy: { mode: 'auto' },
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
         sessionRef: 'session-1',
         egressPolicy: {
           policyRevision: 'policy-r1',
-          activity: { mode: 'metadata-status', delivery: 'latest-value' },
+          activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
           reliable: {
             maxPendingEventsPerAgent: 1,
             maxPendingBytesPerAgent: 1,
@@ -548,11 +552,10 @@ function minimalPayloadForProbe(type: MessageType): unknown {
     case 'task.offer_for_agent_with_egress_fresh':
       return {
         instruction: 'start with egress',
-        policy: { mode: 'auto' },
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
         egressPolicy: {
           policyRevision: 'policy-r1',
-          activity: { mode: 'metadata-status', delivery: 'latest-value' },
+          activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
           reliable: {
             maxPendingEventsPerAgent: 1,
             maxPendingBytesPerAgent: 1,
@@ -564,8 +567,7 @@ function minimalPayloadForProbe(type: MessageType): unknown {
     case 'task.offer_prepared':
       return {
         agentMemory: 'none',
-        policy: { mode: 'auto', allowTools: [] },
-        egressPolicy: { policyRevision: 'metadata-status-v1', activity: { mode: 'metadata-status', delivery: 'latest-value' }, reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4194304, maxPendingBytesPerTenant: 16777216 }, transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },
+        egressPolicy: { policyRevision: 'default-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 }, reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4194304, maxPendingBytesPerTenant: 16777216 }, transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },
         agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
         preparation: {
           reference: 'prep-record-1',
@@ -682,7 +684,6 @@ function minimalPayloadForProbe(type: MessageType): unknown {
         deadlineAt: '2026-01-01T00:00:30.000Z',
         context: { inline: '{"prompt":{},"messages":[]}' },
         requiredToolsets: ['team'],
-        permissionMode: 'auto',
       };
     case 'provider.provisioning.available':
       return { requestId: '00000000-0000-4000-8000-000000000026' };
@@ -726,7 +727,7 @@ function minimalPayloadForProbe(type: MessageType): unknown {
 /** A fully-populated (task_id + seq both present) envelope for `type` — used to isolate one field's requiredness at a time by stripping just that field and re-checking `EnvelopeSchema.safeParse`. */
 function fullEnvelopeFor(type: MessageType): Record<string, unknown> {
   const envelope: Record<string, unknown> = {
-    v: 1,
+    v: PROTOCOL_VERSION,
     id: '00000000-0000-4000-8000-000000000099',
     ts: '2026-01-01T00:00:00.000Z',
     type,
@@ -787,8 +788,8 @@ describe('freeze guard: dual-source cross-check (envelope.ts vs. codec.ts)', () 
 // ---------------------------------------------------------------------------
 
 describe('freeze guard: PROTOCOL_VERSION is pinned', () => {
-  it('PROTOCOL_VERSION === 1 — a version bump must be a deliberate, visible edit, made alongside a golden update (see version.ts)', () => {
-    expect(PROTOCOL_VERSION).toBe(1);
+  it('PROTOCOL_VERSION === 2 — a version bump must be a deliberate, visible edit, made alongside a golden update (see version.ts)', () => {
+    expect(PROTOCOL_VERSION).toBe(2);
   });
 });
 

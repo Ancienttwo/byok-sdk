@@ -12,7 +12,7 @@ import { SqliteClarificationStore } from './clarification-store';
 import { ClarificationHost, CLARIFICATION_CONTRACT, extractClarification, parseClarification, type QuestionBinding } from './clarification';
 
 const policy: AgentEgressPolicy = {
-  policyRevision: 'clarification-v1', activity: { mode: 'metadata-status', delivery: 'latest-value' },
+  policyRevision: 'clarification-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
   reliable: { maxPendingEventsPerAgent: 16, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 16384 },
   transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
 };
@@ -28,7 +28,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
   let fixtureUrl: string; let closeHttp: () => Promise<void>; let store: SqliteClarificationStore; let host: ClarificationHost;
   let extraStores: SqliteClarificationStore[];
   const principal = { tenantId: 'tenant-a',userId: 'user-a' };
-  const target = (agentId = 'agent-a'): BotTarget => ({ deviceId,agentRef: { agentId,profileRevision: '1' },runtime: 'pi',policy: { mode: 'readonly' },egressPolicy: policy });
+  const target = (agentId = 'agent-a'): BotTarget => ({ deviceId,agentRef: { agentId,profileRevision: '1' },runtime: 'pi',egressPolicy: policy });
   const start = (id = 'run', taskId = 'step-1', agentId = 'agent-a', budget = 3) => host.start({ id,sessionId: 'conversation-a',respondentId: 'user-a',destination: 'thread-a',target: target(agentId),
     contextRevision: 'context-1',context: 'Frozen product context',objective: 'Export approved scope',maxExecutions: budget,deadline: now + 10_000,questionTtlMs: 1000 },taskId);
   const row = () => host.run('run');

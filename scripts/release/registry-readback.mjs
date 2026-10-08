@@ -1,5 +1,4 @@
 import { assertFrozenRegistryExpectations, npmView, readRegistryExpectations, readRegistryMetadata } from './registry-contract.mjs';
-import { assertImplementationIdentityDependency } from './implementation-identity-edges.mjs';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,7 +29,6 @@ if (typeof keysVersion !== 'string' || !exactReleaseVersion.test(keysVersion)) {
 }
 const packages = [
   '@byok-sdk/core',
-  '@byok-sdk/implementation-identity',
   '@byok-sdk/protocol',
   '@byok-sdk/server',
   '@byok-sdk/cloud',
@@ -265,8 +263,6 @@ try {
   const lockedPiClosure = readLockedPiClosure(readFileSync(path.join(repoRoot, 'bun.lock'), 'utf8'), piRuntime);
   assertInstalledPiRuntime(smokeDir, piRuntime, lockedPiClosure, 'registry-readback', npmInvocation);
   const keysManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'keys', 'package.json'), 'utf8'));
-  assertImplementationIdentityDependency(clientManifest, expectedVersion);
-  assertImplementationIdentityDependency(keysManifest, expectedVersion);
   if (keysManifest.dependencies?.['@byok-sdk/core'] !== expectedVersion || keysManifest.dependencies?.['@byok-sdk/core'] === 'workspace:*') {
     throw new Error(`registry keys manifest must declare core ${expectedVersion} directly`);
   }

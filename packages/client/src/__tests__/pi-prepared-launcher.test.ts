@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { PermissionPolicy, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   getDocsPath,
   getExamplesPath,
@@ -25,20 +25,15 @@ import {
   type RuntimePreparedLaunchV1,
   type Session,
 } from '../types';
-import { classifyMcpToolsetServerObservation, type McpToolsetServerObservation } from '../mcp/observation';
+import { bindMcpToolsetServerObservation, type McpToolsetServerObservation } from '../mcp/observation';
 import { probeMcpServer } from '../daemon/mcp-tools-probe';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { createPreparedToolSurfaceAssembler } from '../daemon/prepared-tool-surface';
-import { TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED } from '../daemon/tool-implementation-identity';
 import { PiAdapter, type PiAdapterOptions } from '../adapters/pi/pi-adapter';
 import { PREPARED_PROJECTION_COMPARED_MODEL_FIELDS } from '../bin/pi-prepared-host';
 import { resolveInstalledPiRuntimeIdentity, createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
 import { canonicalPreparedValue } from '../adapters/pi/prepared-request';
-import { trustedLaunchBinding } from './fixtures/launch-cwd';
 import { parsePiMcpEnvironment } from '../adapters/pi/mcp-environment';
-import {
-  toolImplementationLaunchEnvNamesDigest, toolImplementationLoaderEnvValuesDigest,
-} from '@byok-sdk/implementation-identity';
 import { parseModelProviderProfile, type ModelProviderProfile } from '../../../keys/src/provider-profile';
 import { buildPiPreparedArgs, buildPiProviderProjection } from '../../../keys/src/pi-provider-projection';
 import {
@@ -61,7 +56,7 @@ async function nativeDigest(value: unknown): Promise<string> {
 /**
  * The SDK-owned prepared launch entry (`bin/byok-pi-prepared.ts`), driven
  * end to end: the REAL pi adapter, the REAL shipped bin, the REAL official session,
- * a REAL MCP server child in the REAL launch boundary of this machine, and a
+ * a REAL MCP server child in the session cwd, and a
  * REAL provider endpoint this suite runs and reads the request bytes off.
  *
  * Nothing about the pi adapter or its SDK-owned host is stubbed:
@@ -83,7 +78,7 @@ async function nativeDigest(value: unknown): Promise<string> {
  *   reports the same session id the admission did.
  * - A sealed `sessionRef` and a prepared reference are refused together.
  * - An MCP tool call made by the prepared session reaches a real server child,
- *   started in the trusted launch directory, through the shared pool.
+ *   started in the session cwd, through the shared pool.
  */
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/mcp-fixture-server.mjs', import.meta.url));
@@ -175,8 +170,6 @@ async function providerEndpoint(): Promise<ProviderEndpoint> {
 // One real preparation, compiled by the native compiler
 // ---------------------------------------------------------------------------
 
-const POLICY: PermissionPolicy = { mode: 'auto', allowTools: [] };
-
 function model(baseUrl: string): InputPreparationModelV1 {
   return {
     id: 'glm-4.6',
@@ -207,7 +200,6 @@ interface Prepared {
   readonly preparation: RuntimePreparedLaunchV1;
   readonly mcpServers: Readonly<Record<string, { command: string; args: string[] }>>;
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
-  readonly launchCwd: string;
   readonly childEnv: Record<string, string>;
   readonly recordPath: string;
   /** The toolset ids this preparation named; empty for a tool-less record. */
@@ -247,10 +239,8 @@ async function prepareOnThisDevice(
   const toolsets = new McpToolsetRegistry({
     [RUNTIME_IDENTITY_TOOLSET]: {
       mcpServers: { teamserver: server },
-      readOnlyTools: { teamserver: ['echo'] },
     },
   });
-  const launchBinding = await trustedLaunchBinding();
   const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
   const runtimeIdentity =
     `${compiler.runtime.packageName}@${compiler.runtime.packageVersion}`
@@ -262,7 +252,6 @@ async function prepareOnThisDevice(
   }).assemble({
     agentMemory: 'none',
     requiredToolsets,
-    permissionMode: POLICY.mode,
     runtimeIdentity,
   });
   if (!assembled.ok) throw new Error(`the device refused to count this preparation: ${assembled.detail}`);
@@ -271,17 +260,13 @@ async function prepareOnThisDevice(
   const observed = toolless ? undefined : await probeMcpServer('teamserver', server, {
     label: 'MCP toolset server "teamserver"',
     env: { PATH: process.env.PATH ?? '' },
-    cwd: surface.launch.launchCwd,
     timeoutMs: 10_000,
   });
   const observation: Readonly<Record<string, McpToolsetServerObservation>> = Object.freeze(
     observed === undefined
       ? {}
       : {
-        teamserver: classifyMcpToolsetServerObservation(observed, {
-          toolsetId: RUNTIME_IDENTITY_TOOLSET,
-          readOnlyTools: ['echo'],
-        }),
+        teamserver: bindMcpToolsetServerObservation(observed, RUNTIME_IDENTITY_TOOLSET),
       } as Record<string, McpToolsetServerObservation>,
   );
 
@@ -331,7 +316,6 @@ async function prepareOnThisDevice(
     artifactPath,
     requestBody: compiled.requestBody,
     recordPath,
-    launchCwd: launchBinding.cwd,
     mcpServers: toolless ? {} : { teamserver: server },
     observation,
     requiredToolsets,
@@ -353,11 +337,8 @@ async function prepareOnThisDevice(
         model: snapshot.model,
         binding: BINDING,
       },
-      permissionMode: POLICY.mode,
       toolBindingDigest: surface.toolBindingDigest,
       observationDigest: surface.observationDigest,
-      launch: { cwd: surface.launch.launchCwd },
-      toolImplementations: toolless ? {} : { teamserver: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
       toolsetDefinitionRevisions: surface.toolsetDefinitionRevisions,
     },
   };
@@ -368,7 +349,7 @@ interface StartOverrides {
   sessionRef?: string;
   spawnFn?: PiAdapterOptions['spawnFn'];
   /** Receives the resolved launch so a case can assert its projection lifecycle. */
-  captureLaunch?: (resources: { env: Readonly<Record<string, string>>; release: () => Promise<void> }) => void;
+  captureLaunch?: (resources: { projectionDir?: string; release: () => Promise<void> }) => void;
   /** Everything a BYOK-profile prepared launch adds, and nothing else. */
   byok?: {
     selection: NonNullable<TaskOfferPayload['dispatchSelection']>;
@@ -390,12 +371,10 @@ async function startPrepared(
   const offer: TaskOfferPayload = {
     taskId: 'prepared-launch-test',
     instruction: 'unused on the prepared lane',
-    policy: POLICY,
     ...(byok === undefined ? {} : { dispatchSelection: byok.selection }),
   } as unknown as TaskOfferPayload;
   const result = await adapter.prepare({
     offer,
-    policy: POLICY,
     descriptor: adapter.descriptor,
     requiredToolsetIds: [...prepared.requiredToolsets],
     mcpServers: prepared.mcpServers,
@@ -407,7 +386,6 @@ async function startPrepared(
     taskId: 'prepared-launch-test',
     runtimeId: 'pi',
     descriptor: adapter.descriptor,
-    policy: POLICY,
     requiredToolsetIds: [...prepared.requiredToolsets],
     ...(byok === undefined ? {} : { dispatchSelection: byok.selection }),
     ...(overrides.sessionRef === undefined ? {} : { sessionRef: overrides.sessionRef }),
@@ -428,8 +406,6 @@ async function startPrepared(
       env: prepared.childEnv,
       mcpServers: prepared.mcpServers,
       mcpToolsetTools: prepared.observation,
-      mcpLaunch: { cwd: prepared.launchCwd },
-      mcpToolImplementations: prepared.requiredToolsets.length === 0 ? {} : { teamserver: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
       preparation: overrides.preparation ?? prepared.preparation,
     });
     sessions.push(session);
@@ -469,7 +445,6 @@ describe('the prepared pi launch entry', () => {
     const prepared = await prepareOnThisDevice(endpoint, () => {}, { toolless: true });
     expect(prepared.requiredToolsets).toEqual([]);
     expect(prepared.preparation.toolsetDefinitionRevisions).toEqual({});
-    expect(prepared.preparation.toolImplementations).toEqual({});
     const session = await startPrepared(prepared);
 
     for await (const event of session.events) {
@@ -669,7 +644,7 @@ describe('the prepared pi launch entry', () => {
     expect(endpoint.bodies).toHaveLength(0);
   }, 60_000);
 
-  it('reaches a real MCP server child in the trusted launch directory', async () => {
+  it('reaches a real MCP server child in the session cwd', async () => {
     const endpoint = await providerEndpoint();
     let turn = 0;
     endpoint.respond = (_req, res) => {
@@ -715,10 +690,10 @@ describe('the prepared pi launch entry', () => {
       .map((line) => JSON.parse(line) as Record<string, unknown>);
     // The preparation probe and the prepared session's own call are separate
     // spawns; the LAST start entry is the session's, and it started in the
-    // proven directory rather than in the agent home.
+    // session cwd, as in OAR.
     const starts = recorded.filter((entry) => entry.event === 'start');
     expect(starts.length).toBeGreaterThanOrEqual(2);
-    expect(starts.at(-1)?.cwd).toBe(prepared.launchCwd);
+    expect(starts.at(-1)?.cwd).toBe(await fs.realpath(prepared.workspaceDir));
     // The SDK's own Pi control variables never reach a toolset server child.
     expect(starts.at(-1)?.byokEnv).toEqual([]);
     expect(recorded.some((entry) => entry.method === 'tools/call')).toBe(true);
@@ -862,9 +837,9 @@ interface LauncherRecord {
  * `buildPiPreparedArgs`, `buildPiProviderProjection` and
  * `buildPiProviderChildEnvironment` are the REAL ones, composed in the order
  * `startPiProvider` composes them. What is left out is `startPiProvider`'s
- * async half — the two spawn-binding assertions, the projection-directory
- * layout assertion and the SecretStore read — because `PiRpcClient` hands a
- * spawn function that must return a child synchronously. Those four are
+ * async half — the projection-directory layout assertion and the SecretStore
+ * read — because `PiRpcClient` hands a spawn function that must return a
+ * child synchronously. Those two are
  * covered directly, against the real code, in
  * `packages/keys/src/pi-provider-launcher-core.test.ts`; what this stand-in
  * exists for is everything ABOVE and BELOW the launcher: the argv the adapter
@@ -887,7 +862,7 @@ function launcherSpawn(options: {
     const delegated = buildPiPreparedArgs(parsed.piArgs);
     const env = buildPiProviderChildEnvironment({
       ambient: spawnOptions.env as NodeJS.ProcessEnv,
-      binding: parsed.launchBinding!,
+      projectionDir: parsed.piProjectionDir!,
       sessionDir: parsed.sessionDir,
       secret: options.secret,
     });
@@ -902,7 +877,6 @@ function launcherSpawn(options: {
     record.configBytes = readFileSync(delegated[1]!, 'utf8');
     const childArgs = [
       ...(parsed.piEntry === undefined ? [] : [parsed.piEntry]),
-      ...parsed.piFixedArgs!,
       `--config-digest=${parsed.piConfigDigest}`,
       ...delegated,
     ];
@@ -959,8 +933,8 @@ describe('the prepared pi launch entry under a BYOK profile', () => {
     const args = record.launcherArgs!;
     const separator = args.indexOf('--');
     expect(args.slice(separator + 1)).toEqual(['--config', expect.any(String)]);
-    // The SAME six binding flags the rpc lane passes, plus the entry.
-    for (const flag of ['--pi-bin', '--pi-entry', '--pi-cwd', '--pi-fixed-args', '--launch-binding', '--pi-config-digest']) {
+    // The SAME launch flags the rpc lane passes, plus the entry.
+    for (const flag of ['--pi-bin', '--pi-entry', '--pi-cwd', '--pi-projection-dir', '--pi-config-digest']) {
       expect(args.slice(0, separator)).toContain(flag);
     }
     expect(record.options!.runtimeEntry).toBe('pi-prepared');
@@ -1011,15 +985,8 @@ describe('the prepared pi launch entry under a BYOK profile', () => {
     const projection = await fs.readFile(path.join(record.projectionDir!, 'models.json'), 'utf8');
     expect(projection).toContain('$PI_PROVIDER_API_KEY');
     expect(projection).not.toContain(SYNTHETIC_SECRET);
-    // The one place it does exist is the child environment, and that name is
-    // projected out of every identity digest.
+    // The one place it does exist is the child environment.
     expect(record.childEnv!.PI_PROVIDER_API_KEY).toBe(SYNTHETIC_SECRET);
-    const withoutKey = { ...record.childEnv! };
-    delete withoutKey.PI_PROVIDER_API_KEY;
-    expect(toolImplementationLaunchEnvNamesDigest(record.childEnv!))
-      .toBe(toolImplementationLaunchEnvNamesDigest(withoutKey));
-    expect(toolImplementationLoaderEnvValuesDigest(record.childEnv!))
-      .toBe(toolImplementationLoaderEnvValuesDigest(withoutKey));
     // And no MCP descendant may inherit it.
     expect(projectPiMcpEnvironment(record.childEnv!).PI_PROVIDER_API_KEY).toBeUndefined();
     expect(() => parsePiMcpEnvironment({ PI_PROVIDER_API_KEY: SYNTHETIC_SECRET }))
@@ -1093,14 +1060,14 @@ describe('the prepared pi launch entry under a BYOK profile', () => {
     expect(captured!.command).toBe(process.execPath);
     expect(captured!.args.at(-2)).toBe('--config');
     expect(captured!.args).not.toContain('--runtime-entry');
-    expect(captured!.args).not.toContain('--launch-binding');
+    expect(captured!.args).not.toContain('--pi-projection-dir');
     expect(JSON.parse(captured!.config).credentialSource).toBe('pi-auth-store');
   }, 60_000);
 
   it('gives each launch its own projection directory and removes it on release', async () => {
     const endpoint = await providerEndpoint();
     const f = await byokFixture(endpoint);
-    const launched: { env: Readonly<Record<string, string>>; release: () => Promise<void> }[] = [];
+    const launched: { projectionDir?: string; release: () => Promise<void> }[] = [];
     const records = [new Array<string>(), new Array<string>()].map((logs) => ({ logs } as LauncherRecord));
     const sessionsStarted = await Promise.all(records.map((record) => startPrepared(f.prepared, {
       spawnFn: launcherSpawn({ profile: f.profile, record, secret: SYNTHETIC_SECRET }),
@@ -1108,7 +1075,7 @@ describe('the prepared pi launch entry under a BYOK profile', () => {
       captureLaunch: (resources) => { launched.push(resources); },
     })));
     expect(sessionsStarted).toHaveLength(2);
-    const dirs2 = launched.map((entry) => entry.env.PI_CODING_AGENT_DIR!);
+    const dirs2 = launched.map((entry) => entry.projectionDir!);
     expect(new Set(dirs2).size).toBe(2);
     expect(new Set(records.map((record) => record.projectionDir)).size).toBe(2);
     for (const dir of dirs2) expect(await fs.readdir(dir)).toContain('models.json');
@@ -1117,14 +1084,14 @@ describe('the prepared pi launch entry under a BYOK profile', () => {
 
     // The refusal path releases the same way: the caller owns one cleanup
     // authority whether the child ran, refused, or died.
-    const refused: { env: Readonly<Record<string, string>>; release: () => Promise<void> }[] = [];
+    const refused: { projectionDir?: string; release: () => Promise<void> }[] = [];
     const record: LauncherRecord = { logs: [] };
     await expect(startPrepared(f.prepared, {
       spawnFn: launcherSpawn({ profile: f.profile, record }),
       byok: { selection: f.selection, launcher: f.launcher, projectionRoot: f.projectionRoot },
       captureLaunch: (resources) => { refused.push(resources); },
     })).rejects.toThrow(/prepared_provider_credential_unavailable/u);
-    await expect(fs.lstat(refused[0]!.env.PI_CODING_AGENT_DIR!)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.lstat(refused[0]!.projectionDir!)).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await fs.readdir(f.projectionRoot)).toEqual([]);
   }, 90_000);
 });

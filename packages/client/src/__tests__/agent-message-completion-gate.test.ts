@@ -12,8 +12,8 @@ import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import * as runtimeStart from '../daemon/runtime-start';
 import { RuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../runtime-failure';
+import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { trustedCwd } from './fixtures/launch-cwd';
 
 const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))));
@@ -29,7 +29,7 @@ async function cancellationFixture() {
     const storeDir = await temporary('byok-publish-cancel-store-');
     const hostStorageRoot = await temporary('byok-publish-cancel-home-');
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
-      steer: false, resume: true, approvalInteractive: false, mcpToolsets: true, permissionModes: ['auto'],
+      steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
     const deps: TaskRunnerDeps = {
       adapters: [adapter], workspaceRoot: await temporary('byok-publish-cancel-workspace-'),
@@ -50,7 +50,7 @@ describe('required Agent message completion gate', () => {
     const { runner, adapter, sent, deps } = await cancellationFixture();
     const taskId = 'cancel-publish-task';
     await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-      instruction: 'reply', policy: { mode: 'auto' }, runtime: 'pi',
+      instruction: 'reply', runtime: 'pi',
       agentRef: { agentId: 'cancel-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId, seq: 1 }));
@@ -98,7 +98,7 @@ describe('required Agent message completion gate', () => {
       const releaseStart = adapter.blockStart();
       const taskId = `pre-active-${index}`;
       const offer = runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-        instruction: 'reply', policy: { mode: 'auto' }, runtime: 'pi',
+        instruction: 'reply', runtime: 'pi',
         agentRef: { agentId: 'pre-active-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
       }, { taskId, seq: index * 2 + 1 }));
@@ -160,7 +160,7 @@ describe('required Agent message completion gate', () => {
     });
     const taskId = `revoke-failure-${mode}`;
     const offer = runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-      instruction: 'reply', policy: { mode: 'auto' }, runtime: 'pi',
+      instruction: 'reply', runtime: 'pi',
       agentRef: { agentId: 'revoke-failure-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId, seq: 1 }));
@@ -207,7 +207,7 @@ describe('required Agent message completion gate', () => {
     const releaseStart = adapter.blockStart();
     const taskId = 'startup-cancel-message';
     const offer = runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-      instruction: 'reply', policy: { mode: 'auto' }, runtime: 'pi',
+      instruction: 'reply', runtime: 'pi',
       agentRef: { agentId: 'startup-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId, seq: 1 }));
@@ -244,7 +244,7 @@ describe('required Agent message completion gate', () => {
     const { runner, adapter, sent } = await cancellationFixture();
     const taskId = 'activation-sync-cancel';
     await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-      instruction: 'reply', policy: { mode: 'auto' }, runtime: 'pi',
+      instruction: 'reply', runtime: 'pi',
       agentRef: { agentId: 'sync-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId, seq: 1 }));
@@ -285,7 +285,7 @@ describe('required Agent message completion gate', () => {
   it('ordinary failure preserves admission recovery for a message already handed to transport', async () => {
     const { runner, adapter } = await cancellationFixture();
     await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-      instruction: 'reply', policy: { mode: 'auto' }, runtime: 'pi',
+      instruction: 'reply', runtime: 'pi',
       agentRef: { agentId: 'failure-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId: 'failure-after-send', seq: 1 }));
@@ -344,7 +344,7 @@ describe('required Agent message completion gate', () => {
       const storeDir = await temporary('byok-refusal-store-');
       const hostStorageRoot = await temporary('byok-refusal-home-');
       const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
-        steer: false, resume: true, approvalInteractive: false, mcpToolsets: true, permissionModes: ['auto'],
+        steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
       });
       const runner = new TaskRunner({
         adapters: [adapter], workspaceRoot: await temporary('byok-refusal-workspace-'),
@@ -360,7 +360,7 @@ describe('required Agent message completion gate', () => {
       const taskId = 'refused-task';
       const agentRef = { agentId: 'refused-agent', profileRevision: '1' };
       await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-        instruction: 'reply', policy: { mode: 'auto' }, runtime: 'pi', agentRef,
+        instruction: 'reply', runtime: 'pi', agentRef,
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
       }, { taskId, seq: 1 }));
@@ -433,7 +433,6 @@ describe('required Agent message completion gate', () => {
     const hostStorageRoot = await temporary('byok-message-preflight-home-');
     const adapter = new StubRuntimeAdapter('codex', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
-      permissionModes: ['auto'],
     });
     const runner = new TaskRunner({
       adapters: [adapter], workspaceRoot: await temporary('byok-message-preflight-workspace-'),
@@ -448,7 +447,7 @@ describe('required Agent message completion gate', () => {
       agentMessageMcpPreflight: async () => { throw new Error('unknown command'); },
     });
     await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-      instruction: 'send one reply', policy: { mode: 'auto' }, runtime: 'codex',
+      instruction: 'send one reply', runtime: 'codex',
       agentRef: { agentId: 'agent-message', profileRevision: 'profile-r1' },
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
@@ -466,7 +465,6 @@ describe('required Agent message completion gate', () => {
     const hostStorageRoot = await temporary('byok-message-home-');
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
-      permissionModes: ['auto'],
     });
     const researchExtractor = vi.fn(() => {
       throw new Error('message-only output is not a research document');
@@ -488,7 +486,7 @@ describe('required Agent message completion gate', () => {
     const taskId = 'message-task';
     const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
     await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-      instruction: 'send one reply', policy: { mode: 'auto' }, runtime: 'pi', agentRef,
+      instruction: 'send one reply', runtime: 'pi', agentRef,
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
     }, { taskId, seq: 1 }));
@@ -496,19 +494,13 @@ describe('required Agent message completion gate', () => {
     const messageMcp = adapter.startCalls[0]?.ctx.mcpServers?.byokagentmessage;
     expect(helperPreflight).toHaveBeenCalledOnce();
     // The helper is proved under the conditions it will actually run in: the
-    // exact server config, the same allowlisted child environment the runtime
-    // gets (never `process.env` — `BYOK_*` is hard-denied there), and the
-    // Agent home as cwd.
-    const [preflightServer, preflightEnv, preflightCwd] = helperPreflight.mock.calls[0]!;
+    // exact server config, the environment this Pi task's MCP servers get
+    // (the runtime env through the Pi MCP projection; never `process.env` —
+    // `BYOK_*` is hard-denied there).
+    const [preflightServer, preflightEnv] = helperPreflight.mock.calls[0]!;
     expect(preflightServer).toEqual(messageMcp);
-    expect(preflightEnv).toEqual(adapter.startCalls[0]?.ctx.env);
+    expect(preflightEnv).toEqual(projectPiMcpEnvironment(adapter.startCalls[0]!.ctx.env));
     expect(Object.keys(preflightEnv!)).not.toContain('BYOK_STORE_DIR');
-    // The preflight spawns an MCP server, so it runs in the SAME trusted
-    // launch directory every other MCP server child of this task runs in —
-    // NOT the Agent home / workspace dir, which the agent itself can write and
-    // from which a compiled server binary would read `bunfig.toml` preload.
-    expect(preflightCwd).toBe(await trustedCwd());
-    expect(preflightCwd).not.toBe(adapter.startCalls[0]?.ctx.workspaceDir);
     expect(messageMcp).toMatchObject({
       command: process.execPath,
       args: ['/sdk/byok-agent-message-mcp.js'],
@@ -554,7 +546,7 @@ describe('required Agent message completion gate', () => {
 
     const refusedTaskId = 'message-task-refused';
     await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-      instruction: 'send one refused reply', policy: { mode: 'auto' }, runtime: 'pi', agentRef,
+      instruction: 'send one refused reply', runtime: 'pi', agentRef,
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
     }, { taskId: refusedTaskId, seq: 4 }));
@@ -597,7 +589,6 @@ describe('required Agent message completion gate', () => {
     const hostStorageRoot = await temporary('byok-message-auto-home-');
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
-      permissionModes: ['auto'],
     });
     const runner = new TaskRunner({
       adapters: [adapter], workspaceRoot: await temporary('byok-message-auto-workspace-'),
@@ -613,7 +604,7 @@ describe('required Agent message completion gate', () => {
     const taskId = 'message-task-auto';
     const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
     await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-      instruction: 'send one reply', policy: { mode: 'auto' }, runtime: 'pi', agentRef,
+      instruction: 'send one reply', runtime: 'pi', agentRef,
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
     }, { taskId, seq: 1 }));
@@ -641,7 +632,6 @@ describe('required Agent message completion gate', () => {
     const hostStorageRoot = await temporary('byok-message-empty-home-');
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
-      permissionModes: ['auto'],
     });
     const runner = new TaskRunner({
       adapters: [adapter], workspaceRoot: await temporary('byok-message-empty-workspace-'),
@@ -657,7 +647,7 @@ describe('required Agent message completion gate', () => {
     const taskId = 'message-task-empty';
     const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
     await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-      instruction: 'send one reply', policy: { mode: 'auto' }, runtime: 'pi', agentRef,
+      instruction: 'send one reply', runtime: 'pi', agentRef,
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
     }, { taskId, seq: 1 }));
@@ -677,7 +667,6 @@ describe('required Agent message completion gate', () => {
     const hostStorageRoot = await temporary('byok-message-cap-home-');
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
-      permissionModes: ['auto'],
     });
     const runner = new TaskRunner({
       adapters: [adapter], workspaceRoot: await temporary('byok-message-cap-workspace-'),
@@ -693,7 +682,7 @@ describe('required Agent message completion gate', () => {
     const taskId = 'message-task-cap';
     const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
     await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-      instruction: 'send one reply', policy: { mode: 'auto' }, runtime: 'pi', agentRef,
+      instruction: 'send one reply', runtime: 'pi', agentRef,
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 8 },
     }, { taskId, seq: 1 }));
@@ -723,7 +712,6 @@ describe('required Agent message completion gate', () => {
     const hostStorageRoot = await temporary(`byok-${prefix}-home-`);
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
-      permissionModes: ['auto'],
     });
     const runner = new TaskRunner({
       adapters: [adapter], workspaceRoot: await temporary(`byok-${prefix}-workspace-`),
@@ -738,7 +726,7 @@ describe('required Agent message completion gate', () => {
     });
     const agentRef = { agentId: 'agent-message', profileRevision: 'profile-r1' } as const;
     await runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-      instruction: 'send one reply', policy: { mode: 'auto' }, runtime: 'pi', agentRef,
+      instruction: 'send one reply', runtime: 'pi', agentRef,
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
     }, { taskId, seq: 1 }));

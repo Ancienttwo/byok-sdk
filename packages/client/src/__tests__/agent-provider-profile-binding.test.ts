@@ -24,14 +24,12 @@ function prepareInput(): RuntimeAdapterPrepareInput {
   return {
     offer: {
       instruction: 'inspect image',
-      policy: { mode: 'auto' },
       dispatchSelection: {
         lane: 'byok-profile',
         runtimeId: 'pi',
         providerProfile: binding,
       },
     },
-    policy: { mode: 'auto' },
     descriptor: new PiAdapter().descriptor,
     requiredToolsetIds: [],
   };
@@ -110,7 +108,6 @@ describe('Agent provider profile binding admission', () => {
       const taskId = 'task-stale-provider-profile';
       server.send(createEnvelope('task.offer', {
         instruction: 'inspect image',
-        policy: { mode: 'auto' },
         dispatchSelection: {
           lane: 'byok-profile',
           runtimeId: 'pi',

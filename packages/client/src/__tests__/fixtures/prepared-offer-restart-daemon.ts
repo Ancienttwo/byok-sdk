@@ -1,5 +1,4 @@
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../../daemon/agent-egress-policy';
-import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
@@ -16,13 +15,6 @@ import {
 } from '../../daemon/input-preparation-store';
 import { SUPPORTED_PREPARED_COMPILER_VERSION } from '../../adapters/pi/input-preparation';
 import { fingerprintPreparedToolSurface } from '../../daemon/prepared-tool-surface';
-import { mcpLaunchAttestation } from '../../daemon/trusted-launch-cwd';
-import {
-  realToolImplementationFsProbe,
-  resolveToolImplementationIdentity,
-  type ToolImplementationAuthority,
-  type ToolImplementationFsProbe,
-} from '../../daemon/tool-implementation-identity';
 import {
   INPUT_PREPARATION_ARTIFACT_FORMAT,
   INPUT_PREPARATION_VERSION,
@@ -35,10 +27,9 @@ import {
   type InputPreparationPinV1,
   type InputPreparationRuntimeIdentityV1,
 } from '../../input-preparation';
-import type { McpToolsetConfig, RuntimeCapabilities, RuntimeInstallationObservationContext } from '../../types';
+import type { McpToolsetConfig, RuntimeCapabilities } from '../../types';
 import { StubRuntimeAdapter } from './stub-adapter';
 import { observationOf } from './mcp-observation';
-import { trustedCwd } from './launch-cwd';
 
 /**
  * One daemon LIFETIME of the prepared-offer lane, as its own operating-system
@@ -62,29 +53,15 @@ import { trustedCwd } from './launch-cwd';
  * `preparedToolBindingDigest` calls the admission recomputes with, so nothing
  * is faked into agreement and a formula change breaks this file too).
  *
- * The two deliberate test seams, both of which a real daemon does not need:
+ * The one deliberate test seam, which a real daemon does not need:
  *
- * - `rootOwnedProbe` — an `attested` implementation identity requires a
- *   root-owned, non-writable file (`tool-implementation-identity.ts`), which a
- *   non-root test process cannot create. Only `uid`/`mode` are overridden; the
- *   digest, size and mtime are still measured off the real file on disk, so
- *   both processes measure the same thing.
  * - the lane's `open` latch — a once-only `store.open()`, which is the shape
- *   `create-daemon.ts:2288` wires from `InputPreparationService.open` (replay,
- *   then a reconcile that is a no-op for a `counted` record). The real blocker
- *   to building the whole service through `createDaemonWithAdapters` is the
- *   seam above, not convenience: `DaemonConfig` exposes
- *   `toolImplementationAuthority` (`create-daemon.ts:684`) and NO
- *   `toolImplementationFsProbe` — that override exists only on
- *   `TaskRunnerDeps` (`task-runner.ts:423`) — so `rootOwnedProbe` could not be
- *   injected, and `input-preparation-service.ts:214`
- *   (`.some((kind) => kind !== 'attested')`) would then hold every record this
- *   non-root process can produce unready. Constructing `TaskRunner` directly is
- *   what makes an `attested` record reachable at all, and it does not change
- *   what this file measures: whether the FIRST read on a brand-new process
- *   finds the record a killed process pinned. The cost is that
- *   `create-daemon.ts:2288` and `InputPreparationService.open` are NOT
- *   exercised by this fixture.
+ *   `create-daemon.ts` wires from `InputPreparationService.open` (replay, then
+ *   a reconcile that is a no-op for a `counted` record). Constructing
+ *   `TaskRunner` directly does not change what this file measures: whether the
+ *   FIRST read on a brand-new process finds the record a killed process
+ *   pinned. The cost is that `create-daemon.ts` and
+ *   `InputPreparationService.open` are NOT exercised by this fixture.
  */
 
 interface Config {
@@ -94,7 +71,7 @@ interface Config {
   readonly runnerStoreDir: string;
   readonly workspaceRoot: string;
   readonly agentHomeDir: string;
-  /** The MCP toolset server file the test created; both lifetimes measure this same path. */
+  /** The MCP toolset server file the test created; both lifetimes name this same path. */
   readonly serverCommand: string;
 }
 
@@ -137,7 +114,6 @@ const MCP_CAPABLE: RuntimeCapabilities = {
   resume: true,
   approvalInteractive: true,
   mcpToolsets: true,
-  permissionModes: ['auto', 'confirm'],
 };
 
 /** Synthetic fixture identity: never resolved from the installed fork. */
@@ -165,40 +141,11 @@ const MODEL: InputPreparationModelV1 = {
   maxTokens: 8_192,
 };
 
-const LANE_ENV: Readonly<Record<string, string>> = Object.freeze(buildRuntimeEnv({
-  ambient: process.env,
-  requirements: { credentialNames: [] },
-}));
+const LANE_ENV: Readonly<Record<string, string>> = Object.freeze(buildRuntimeEnv({ ambient: process.env }));
 
 const unusedBlobClient: BlobResolver = {
   resolveInstruction: async () => { throw new Error('not used'); },
   uploadArtifact: async () => { throw new Error('not used'); },
-};
-
-/** Ownership seam only: digest, size and mtime are still measured off the real file. */
-function rootOwnedProbe(): ToolImplementationFsProbe {
-  return {
-    async lstat(target) {
-      const real = await realToolImplementationFsProbe.lstat(target);
-      return { ...real, uid: 0, mode: real.mode & ~0o222 };
-    },
-    realpath: (target) => realToolImplementationFsProbe.realpath(target),
-    digest: (target) => realToolImplementationFsProbe.digest(target),
-  };
-}
-
-const authority: ToolImplementationAuthority = {
-  resolve: async () => ({
-    kind: 'attested',
-    authority: 'host-install-record',
-    manifestRevision: 'team@2026.9.1',
-    form: 'compiled-executable',
-    installPath: config.serverCommand,
-    closureDigest: await realToolImplementationFsProbe.digest(config.serverCommand),
-    closureKind: 'artifact',
-    launchArgv: ['--stdio'],
-    launchCwd: '/',
-  } as never),
 };
 
 const toolsets: ReadonlyMap<string, McpToolsetConfig> = new Map([
@@ -206,23 +153,6 @@ const toolsets: ReadonlyMap<string, McpToolsetConfig> = new Map([
 ]);
 const toolsetDefinitionRevisions = (): ReadonlyMap<string, string> => new Map([[TOOLSET_ID, TOOLSET_REVISION]]);
 
-const launchBinding = { cwd: await trustedCwd() } as const;
-const attestation = mcpLaunchAttestation(launchBinding);
-const implementation = await resolveToolImplementationIdentity(
-  authority,
-  {
-    subject: { kind: 'mcp-server', toolsetId: TOOLSET_ID, serverName: SERVER_NAME },
-    command: config.serverCommand,
-    args: ['--stdio'],
-    launch: attestation,
-  },
-  LANE_ENV,
-  rootOwnedProbe(),
-);
-if (implementation.kind !== 'attested') {
-  throw new Error(`fixture could not attest the toolset server implementation: ${JSON.stringify(implementation)}`);
-}
-const implementations = Object.freeze({ [SERVER_NAME]: implementation });
 const observation = observationOf({ [SERVER_NAME]: ['echo'] }, { toolsetId: TOOLSET_ID });
 
 const store = new InputPreparationStore({
@@ -243,15 +173,7 @@ const ensureOpen = (): Promise<void> => (opening ??= (async () => {
   await store.open();
 })());
 
-const adapter = Object.assign(new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE), {
-  // Same explicit fake readiness as this fixture's old probe, never a measurement claim.
-  detectInstallation: async (context: RuntimeInstallationObservationContext) => {
-    assert.deepEqual(Object.keys(context).sort(), ['authority', 'scope']);
-    assert.equal(context.authority, authority);
-    assert.equal(context.scope, 'enabled-top-level');
-    return { kind: 'available' as const };
-  },
-});
+const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
 const sent: Envelope[] = [];
 
 await fs.mkdir(config.runnerStoreDir, { recursive: true });
@@ -279,8 +201,6 @@ const runner = new TaskRunner({
   }),
   agentSessionHandoffs: new AgentSessionHandoffStore(),
   getMcpToolsets: () => toolsets,
-  toolImplementationAuthority: authority,
-  toolImplementationFsProbe: rootOwnedProbe(),
   mcpToolsetToolsProbe: async (serverName) => observation[serverName]!,
   inputPreparationLane: {
     store,
@@ -341,7 +261,7 @@ function binding(agentId: string): InputPreparationBindingV1 {
     source: { revision: 'source-r1', digest: 'source-digest-1' },
     target: { endpoint: MODEL.baseUrl, modelId: MODEL.id },
     policyRevision: POLICY_REVISION,
-    agentMemory: 'none', permissionMode: 'auto',
+    agentMemory: 'none',
     runtime: RUNTIME,
     requestDigest: REQUEST_DIGEST,
     accountingPolicyRef: ACCOUNTING_POLICY_REF,
@@ -369,23 +289,19 @@ async function seed(requestId: string, agentId: string): Promise<Record<string, 
   const fingerprinted = await fingerprintPreparedToolSurface({
     memory: null,
     observation,
-    agentMemory: 'none', permissionMode: 'auto',
+    agentMemory: 'none',
     runtimeIdentity: inputPreparationRuntimeIdentityString(RUNTIME),
-    launch: attestation,
     toolsetDefinitionRevisions: { [TOOLSET_ID]: TOOLSET_REVISION },
-    implementations,
   });
   if (!fingerprinted.ok) throw new Error(`fixture surface refused: ${fingerprinted.detail}`);
   const toolBindingDigest = preparedToolBindingDigest({
-    agentMemory: 'none', memoryImplementation: null,
-    launch: attestation,
+    agentMemory: 'none',
     toolsetDefinitionRevisions: { [TOOLSET_ID]: TOOLSET_REVISION },
     servers: [{
       serverName: SERVER_NAME,
       toolsetId: TOOLSET_ID,
       command: config.serverCommand,
       args: ['--stdio'],
-      implementation,
     }],
   });
 
@@ -410,7 +326,7 @@ async function seed(requestId: string, agentId: string): Promise<Record<string, 
       residual: [...RESIDUAL],
       observationDigest: fingerprinted.fingerprint.observationDigest,
       toolBindingDigest,
-      toolImplementationKinds: fingerprinted.fingerprint.toolImplementationKinds,
+      toolNames: [...fingerprinted.fingerprint.toolNames],
     },
     requestContentTextOnly: true,
     bounds: { maxScopeAggregateBytes: 10_000_000, maxCounterCallsPerScope: 4 },
@@ -438,7 +354,6 @@ function preparedOffer(
     'task.offer_prepared',
     {
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
-      policy: { mode: 'auto', allowTools: [] },
       runtime: 'pi',
       agentRef: agentRefOf(agentId),
       requiredToolsets: [TOOLSET_ID],

@@ -22,26 +22,22 @@ export interface RecordingToolSurface extends PreparedToolSurfaceAssembler {
   readonly bindingCalls: { readonly requiredToolsets: readonly string[] }[];
   /**
    * The spawn-free binding digest this stand-in answers with. Mutable so a
-   * test can simulate what a `toolsets.reload` or a re-measured implementation
-   * does between a preparation and its replay.
+   * test can simulate what a `toolsets.reload` does between a preparation and
+   * its replay.
    */
   toolBindingDigest: string;
-  /** Per-tool implementation kinds the artifact summary records. */
-  toolImplementationKinds: Record<string, string>;
   /** When set, both methods answer this refusal instead of a surface. */
   refusal: PreparedToolSurfaceRefusal | undefined;
 }
 
 export function recordingToolSurface(
-  options: { readonly toolNames?: readonly string[]; readonly attested?: boolean } = {},
+  options: { readonly toolNames?: readonly string[] } = {},
 ): RecordingToolSurface {
   const toolNames = options.toolNames ?? ['mcp__teamserver__list', 'mcp__teamserver__post'];
-  const kind = options.attested === true ? 'attested' : 'unavailable:resolver_unconfigured';
   const state: RecordingToolSurface = {
     assembleCalls: [],
     bindingCalls: [],
     toolBindingDigest: 'binding-digest-1',
-    toolImplementationKinds: Object.fromEntries(toolNames.map((name) => [name, kind])),
     refusal: undefined,
     async resolveBinding(input): Promise<PreparedToolBindingResult> {
       state.bindingCalls.push({ requiredToolsets: [...input.requiredToolsets] });
@@ -49,9 +45,8 @@ export function recordingToolSurface(
       return {
         ok: true,
         binding: {
-          memoryImplementation: null,
+          agentMemory: input.agentMemory,
           requiredToolsets: [...input.requiredToolsets],
-          launch: { launchCwd: '/', launcher: null },
           toolsetDefinitionRevisions: Object.fromEntries(
             input.requiredToolsets.map((id) => [id, `sha256:${'9'.repeat(64)}`]),
           ),
@@ -76,8 +71,7 @@ export function recordingToolSurface(
           toolExecutors: Object.fromEntries(toolNames.map((name, index) => [name, `${index}`.repeat(64).slice(0, 64)])),
           observationDigest: 'observation-digest-1',
           toolBindingDigest: state.toolBindingDigest,
-          launch: { launchCwd: '/', launcher: null },
-          toolImplementationKinds: { ...state.toolImplementationKinds },
+          toolNames: [...toolNames].sort(),
           toolsetDefinitionRevisions: Object.fromEntries(
             input.requiredToolsets.map((id) => [id, `sha256:${'9'.repeat(64)}`]),
           ),

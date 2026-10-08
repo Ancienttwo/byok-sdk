@@ -1,13 +1,10 @@
 #!/usr/bin/env node
 /**
  * A one-tool stdio MCP server standing in for a host-configured toolset
- * server, used by `scripts/claude-toolset-permission-smoke.mjs`.
+ * server, used by `scripts/packed-cli-mcp-smoke.mjs` and the probe tests.
  *
  * It writes an audit line for every request it receives, so a smoke can prove
- * the distinction that matters: an ungranted runtime reaches `tools/list` and
- * never `tools/call`. Adapted from the downstream Gate 0 probe that first
- * demonstrated the defect (salesko
- * `apps/local-agent/scripts/gate0-probe-mcp-server.mjs`).
+ * which MCP methods a runtime actually reached.
  *
  * Hand-rolled JSON-RPC over newline-delimited JSON on purpose: an MCP SDK
  * dependency for one test fixture would be a hidden dependency this package

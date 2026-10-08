@@ -26,7 +26,7 @@
  *                  (resource links, audio, `structuredContent`, empty content)
  *                  that no correct echo server would ever return
  *   recordTo       append every received method (and cancellation) as JSONL here,
- *                  preceded by one `{ event: 'start', pid, byokEnv, cwd, preloaded }`
+ *                  preceded by one `{ event: 'start', pid, byokEnv, cwd }`
  *                  entry so a test can prove the child is gone, see which BYOK_*
  *                  variables reached it, and read back the directory it started in
  */
@@ -64,16 +64,13 @@ function record(entry) {
 
 // The very first line: the child's own pid, so a test can prove the pool
 // actually reaped it; the BYOK_* variables it was spawned with, so a test can
-// prove the SDK's own control variables were stripped before the spawn; the
-// directory it actually started in; and whether a `bunfig.toml` `preload` in
-// that directory got to run first (`launch-cwd` sets a global there, and a bun
-// interpreter reads `$cwd/bunfig.toml` before any of this file executes).
+// prove the SDK's own control variables were stripped before the spawn; and
+// the directory it actually started in.
 record({
   event: 'start',
   pid: process.pid,
   byokEnv: Object.keys(process.env).filter((name) => name.startsWith('BYOK_')).sort(),
   cwd: process.cwd(),
-  preloaded: globalThis.__BYOK_LAUNCH_CWD_PRELOADED__ === true,
 });
 
 function send(message) {

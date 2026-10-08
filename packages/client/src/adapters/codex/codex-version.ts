@@ -2,7 +2,7 @@
  * Codex CLI version policy, as in OAR: read the version, never gate on it. The
  * local Codex updates itself, so a version other than the one this SDK was
  * qualified against is an advisory. Native contracts the adapter depends on
- * are probed directly (app-server presence, MCP tool allowlist readback).
+ * are probed directly (app-server presence).
  */
 export const QUALIFIED_CODEX_VERSION = '0.160.0';
 

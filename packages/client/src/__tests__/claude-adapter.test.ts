@@ -11,7 +11,6 @@ import { SteerUnsupportedError, type Session } from '../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 import { observationOf } from './fixtures/mcp-observation';
-import { launchArgvPrefix, trustedLaunchBinding } from './fixtures/launch-cwd';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 
@@ -36,7 +35,7 @@ async function takeTurn(session: Session): Promise<AgentEvent[]> {
 
 async function makeCtx(env: NodeJS.ProcessEnv = process.env): Promise<PreparedOperationResources> {
   const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-adapter-test-'));
-  return { workspaceDir, policy: { mode: 'auto' }, env };
+  return { workspaceDir, env };
 }
 
 async function startAdapter(adapter: ClaudeAdapter, task: TaskOfferPayload, resources: PreparedOperationResources): Promise<Session> {
@@ -45,7 +44,6 @@ async function startAdapter(adapter: ClaudeAdapter, task: TaskOfferPayload, reso
 
 const baseTask: TaskOfferPayload = {
   instruction: 'say hi',
-  policy: { mode: 'auto' },
 };
 
 describe('ClaudeAdapter against the fake-claude fixture', () => {
@@ -117,22 +115,9 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       resume: true,
       approvalInteractive: false,
       mcpToolsets: true,
-      permissionModes: ['auto', 'readonly', 'plan'],
     });
-  });
-
-  it('rejects confirm in prepare before bin resolution, spawn or helper side effects', async () => {
-    const resolveBin = vi.fn(() => ({ command: FIXTURE_PATH, source: 'path' as const }));
-    const adapter = new ClaudeAdapter({ resolveBin });
-    const ctx = await makeCtx();
-    ctx.policy = { mode: 'confirm' };
-    await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/confirm/i);
-    expect(resolveBin).not.toHaveBeenCalled();
-  });
-
-  it('descriptor declares no credential env vars (M5 — deliberate ToS posture: env-based API key passthrough for claude is a separate, pending product decision)', () => {
-    const adapter = fakeClaudeAdapter();
-    expect(adapter.descriptor.environmentRequirements).toEqual({ credentialNames: [] });
+    // Claude reads MCP tools itself; the daemon takes no tools/list observation for it.
+    expect(adapter.descriptor.requiresMcpToolsetToolObservation).not.toBe(true);
   });
 
   it('start() drives the canned prompt sequence into normalized AgentEvents (Bash tool_use/tool_result, progress, turn_end)', async () => {
@@ -176,15 +161,13 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
           modelId: 'opus',
         },
       },
-      await makeCtx({ ...process.env, OPENAI_API_KEY: 'sk-sentinel' }),
+      await makeCtx(),
     );
     openSessions.push(session);
     expect(calls[0]?.args).toContain('--model');
     expect(calls[0]?.args[calls[0].args.indexOf('--model') + 1]).toBe('opus');
-    expect(calls[0]?.env.OPENAI_API_KEY).toBeUndefined();
     await expect(session.followUp({
       instruction: 'switch model',
-      policy: { mode: 'auto' },
       dispatchSelection: {
         lane: 'subscription',
         runtimeId: 'claude',
@@ -282,26 +265,21 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     openSessions.push(session);
     const args = spawnCalls[0]?.args ?? [];
     expect(args).toContain('--mcp-config');
-    expect(args).toContain('--strict-mcp-config');
     expect(args).not.toContain('--permission-prompt-tool');
-    // The projected server's observed tool is pre-granted (real claude
-    // auto-denies an ungranted MCP tool), and nothing else is. The
-    // observation itself never enters the generated config file, which stays
-    // exactly the MCP authority claude understands.
-    expect(args[args.indexOf('--allowedTools') + 1]).toBe('mcp__salesko__find_leads');
+    // No per-tool grant: the ordinary launch skips permission prompts, so the
+    // projected MCP tools need no `--allowedTools` list. The observation never
+    // enters the generated config file either.
+    expect(args).toContain('--dangerously-skip-permissions');
+    expect(args).not.toContain('--allowedTools');
     const configPath = args[args.indexOf('--mcp-config') + 1];
     if (typeof configPath !== 'string') throw new Error('missing mcp config path');
-    // claude spawns this server itself and `mcpServers` has no cwd field, so
-    // the operator's command/args are reached through the SDK's launcher,
-    // which chdirs into the daemon's proven-non-writable directory first. The
-    // operator's own argv is preserved position-for-position after it, and the
-    // task-scoped env is untouched.
-    const launch = await trustedLaunchBinding();
+    // claude spawns this server itself, in its own cwd, as in OAR. The
+    // operator's command/args and the task-scoped env reach it unchanged.
     expect(JSON.parse(await fs.readFile(configPath, 'utf8'))).toEqual({
       mcpServers: {
         salesko: {
-          command: launch.launcher!.interpreter,
-          args: [...launchArgvPrefix(launch), process.execPath, '/opt/salesko/fake-mcp.mjs'],
+          command: process.execPath,
+          args: ['/opt/salesko/fake-mcp.mjs'],
           env: { BYOK_AGENT_MESSAGE_CONTEXT: 'sealed-context' },
         },
       },
@@ -312,28 +290,6 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     await expect(fs.access(configPath)).rejects.toThrow();
   });
 
-  it('refuses a toolset server whose command is a bare name with the launcher rule that rejected it, before any spawn', async () => {
-    const spawnFn = vi.fn();
-    const adapter = new ClaudeAdapter({
-      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
-      spawnFn: spawnFn as unknown as SpawnFn,
-    });
-    const ctx = await makeCtx();
-    // A PATH lookup performed after the chdir is not the identity the binding
-    // attested, so the launcher wrapper refuses it. The refusal must reach
-    // TaskRunner as this adapter's own typed start failure: an untyped throw
-    // is projected as a generic adapter contract violation, which hides the
-    // rule that refused and leaves the operator with nothing to fix.
-    ctx.mcpServers = { salesko: { command: 'npx', args: ['@salesko/mcp'] } };
-    ctx.mcpToolsetTools = observationOf({ salesko: ['find_leads'] });
-
-    const failure = await startAdapter(adapter, baseTask, ctx).catch((error: unknown) => error);
-    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toMatchObject({ phase: 'start', retry: 'non-retryable' });
-    expect((failure as RuntimeExecutionFailure).message).toMatch(/launch_cwd_target_command_not_absolute/u);
-    expect(spawnFn).not.toHaveBeenCalled();
-  });
-
   it('prepares a valid blob-ref without fetching it; TaskRunner resolves its string after claim', async () => {
     const adapter = fakeClaudeAdapter();
     const task: TaskOfferPayload = {
@@ -342,7 +298,6 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     };
     await expect(adapter.prepare({
       offer: task,
-      policy: task.policy,
       descriptor: adapter.descriptor,
       requiredToolsetIds: [],
     })).resolves.toMatchObject({ kind: 'prepared' });
@@ -454,7 +409,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(firstTurn[3]).toEqual({ type: 'usage', inputTokens: 15, cachedInputTokens: 0, outputTokens: 20 });
     expect(firstTurn[4]).toEqual({ type: 'turn_end' });
 
-    await session.followUp({ instruction: 'say bye', policy: { mode: 'auto' } });
+    await session.followUp({ instruction: 'say bye' });
 
     const secondTurn = await takeEvents(session, 5);
     expect(secondTurn).toEqual([
@@ -476,7 +431,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     await takeEvents(session, 5); // drain the full turn, including the trailing usage + turn_end
 
     await expect(
-      session.followUp({ instruction: { blobRef: { blobId: 'b', contentHash: 'sha256:x', size: 1, contentType: 'text/plain' } }, policy: { mode: 'auto' } }),
+      session.followUp({ instruction: { blobRef: { blobId: 'b', contentHash: 'sha256:x', size: 1, contentType: 'text/plain' } } }),
     ).rejects.toThrow(/only supports string instructions/);
   });
 

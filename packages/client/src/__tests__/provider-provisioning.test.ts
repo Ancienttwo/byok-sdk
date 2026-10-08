@@ -375,7 +375,7 @@ describe('createDaemon providerProvisioning seam', () => {
       // payload fails validation, the handler never runs and the cursor freezes.
       const poisonedSeq = server.nextSeq();
       server.pushRawLongPollEvent({
-        v: 1,
+        v: 2,
         id: '30000000-0000-4000-8000-0000000000ff',
         ts: '2026-09-28T05:00:00.000Z',
         type: 'provider.provisioning.available',

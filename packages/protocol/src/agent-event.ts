@@ -161,7 +161,7 @@ export const KNOWN_AGENT_EVENT_TYPES: readonly string[] = (
  * combines this with {@link AgentEventSchema} for real use.
  *
  * Deliberately asymmetric with envelope-level control/security fields
- * (`instruction`, `policy` — see `messages.ts`/`permission.ts`), which stay
+ * (`instruction` — see `messages.ts`), which stay
  * fail-closed on unknown shapes with no equivalent widening: this tolerance
  * applies only to observability data (agent progress events), never to
  * control/security surfaces. That asymmetry is the freeze rule.

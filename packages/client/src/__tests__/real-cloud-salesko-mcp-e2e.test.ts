@@ -43,19 +43,11 @@ describe('hosted Salesko MCP toolset over the real cloud transport', () => {
         storeDir: await tmpDir('byok-hosted-salesko-mcp-store-'),
         runtimeAllowlist: ['claude'],
         runtimePreference: ['claude'],
-        // Disable every built-in Claude tool. MCP tools remain separately
-        // projected from the task-scoped strict config.
-        permissionDefaults: { mode: 'readonly', allowTools: [] },
         mcpToolsets: {
           'salesko.connectors': {
             mcpServers: {
               salesko: { command: process.execPath, args: [SALESKO_MCP_FIXTURE] },
             },
-            // The device operator's own classification. Without it a
-            // `readonly` toolset task is refused as an inexpressible policy:
-            // nothing else on this device can say which of a server's tools
-            // merely read.
-            readOnlyTools: { salesko: ['find_leads'] },
           },
         },
       },
@@ -84,7 +76,6 @@ describe('hosted Salesko MCP toolset over the real cloud transport', () => {
 
     const offer = await cloud.enqueueToolsetOffer(device.deviceId, {
       instruction: 'salesko:find-leads',
-      policy: { mode: 'readonly', allowTools: [] },
       runtime: 'claude',
       requiredToolsets: ['salesko.connectors'],
     });

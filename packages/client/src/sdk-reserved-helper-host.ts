@@ -1,12 +1,10 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runSdkReservedHelper } from './bin/sdk-reserved-helper-runners';
-import { runAttestedPiSubagentPrintFromEnvironment } from './custody/pi-subagent-print-entry';
-import { runAttestedPiSubagentRunnerFromEnvironment } from './custody/pi-subagent-runner-entry';
 
 export const BYOK_SDK_HELPER_SUBCOMMAND = '__byok_sdk_helper';
 
-export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'agent-team-mcp' | 'mcp-env' | 'pi-rpc' | 'pi-prepared' | 'pi-durable';
+export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'agent-team-mcp' | 'pi-rpc' | 'pi-prepared' | 'pi-durable';
 
 export interface SdkHelperHostConfig {
   /**
@@ -32,7 +30,6 @@ const DIST_SCRIPT_BY_KIND: Readonly<Record<SdkReservedHelperKind, string>> = Obj
   'agent-memory-mcp': 'byok-agent-memory-mcp.js',
   'agent-memory-describe': 'byok-agent-memory-describe.js',
   'agent-team-mcp': 'byok-agent-team-mcp.js',
-  'mcp-env': 'byok-mcp-env.js',
   'pi-rpc': 'byok-pi-rpc.js',
   'pi-prepared': 'byok-pi-prepared.js',
   'pi-durable': 'byok-pi-durable.js',
@@ -79,7 +76,7 @@ export function resolveSdkReservedHelperBin(
 }
 
 function isHelperKind(value: string | undefined): value is SdkReservedHelperKind {
-  return value === 'agent-message-mcp' || value === 'agent-memory-mcp' || value === 'agent-memory-describe' || value === 'agent-team-mcp' || value === 'mcp-env' || value === 'pi-rpc' || value === 'pi-prepared' || value === 'pi-durable';
+  return value === 'agent-message-mcp' || value === 'agent-memory-mcp' || value === 'agent-memory-describe' || value === 'agent-team-mcp' || value === 'pi-rpc' || value === 'pi-prepared' || value === 'pi-durable';
 }
 
 /**
@@ -92,24 +89,20 @@ export async function runSdkReservedHelperCommand(
 ): Promise<boolean> {
   if (argv[0] !== BYOK_SDK_HELPER_SUBCOMMAND) return false;
   if (argv[1] === 'pi-subagent-runner') {
-    // The runner bootstrap edge routes to the single attested exec point.
-    // This is the direct-connect re-entry shape (`__byok_sdk_helper
-    // pi-subagent-runner`): the vendor's runner spawn sites are rerouted to
-    // the custody dispatcher (the five-edge cut has landed), so the minted
-    // runner children re-enter the bundle through this branch. Every custody
-    // gate inside (`custody/pi-subagent-runner-entry.ts`
-    // launchAttestedPiSubagentRunner) is fail-closed.
-    const exitCode = await runAttestedPiSubagentRunnerFromEnvironment(process.env);
-    if (exitCode !== 0) throw new Error(`attested pi-subagent-runner exec exited ${exitCode}`);
+    // A Pi subagent runner child (`subagents/spawn.ts`). The tail is the
+    // runner config path. The runtime host is an external-dynamic import so
+    // the library root never loads the vendored runner closure.
+    if (argv.length !== 3) throw new Error('invalid SDK-reserved helper command');
+    const host = await import('#byok-pi-runtime-host');
+    await host.runSubagentRunner(argv[2]!);
     return true;
   }
   if (argv[1] === 'pi-subagent-print') {
-    // The print bootstrap edge routes to the single attested exec point. The
-    // print preset entry (`custody/pi-subagent-print-entry.ts`) is the other
-    // caller: both transports converge on `launchAttestedPiSubagentPrint`,
-    // and every custody gate inside is fail-closed.
-    const exitCode = await runAttestedPiSubagentPrintFromEnvironment(process.env);
-    if (exitCode !== 0) throw new Error(`attested pi-subagent-print exec exited ${exitCode}`);
+    // A Pi subagent print child (`subagents/spawn.ts`). The tail is the
+    // vendor's pi-style print argv.
+    const host = await import('#byok-pi-runtime-host');
+    const exitCode = await host.runSubagentPrint(argv.slice(2));
+    if (exitCode !== 0) throw new Error(`pi-subagent-print exited ${exitCode}`);
     return true;
   }
   if (!isHelperKind(argv[1]) || (argv[1] !== 'pi-rpc' && argv[1] !== 'pi-prepared' && argv[1] !== 'pi-durable' && argv.length !== 2)) {

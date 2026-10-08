@@ -1,4 +1,9 @@
-import { CONTROLLED_PI_DIRECTORY_ENV_NAMES, PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '@byok-sdk/implementation-identity';
+import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../provider-credential-environment';
+
+/** The Pi directory selectors. The Pi launch sets them; MCP servers never inherit them. */
+export const CONTROLLED_PI_DIRECTORY_ENV_NAMES = Object.freeze([
+  'PI_PACKAGE_DIR', 'PI_CODING_AGENT_DIR', 'PI_CODING_AGENT_SESSION_DIR',
+] as const);
 
 const PRIVATE_PI_NAMES = new Set<string>([...CONTROLLED_PI_DIRECTORY_ENV_NAMES, ...PROVIDER_CREDENTIAL_ENV_DENY_NAMES]);
 function privateName(name: string): boolean {

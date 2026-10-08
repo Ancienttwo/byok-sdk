@@ -129,16 +129,6 @@ describe('M4 Phase 4 version-negotiation drill', () => {
   });
 
   describe('item 3: unknown fields on control/security-class schemas are REJECTED, fail-closed (already established in freeze-guard.test.ts — restated here through the real end-to-end decode entrypoint)', () => {
-    it('a task.offer with an unrecognized field on an otherwise well-formed `policy`, decoded through the REAL wire entrypoint (decodeEnvelope), is rejected', () => {
-      const envelope = createEnvelope('task.offer', { instruction: 'do it', policy: { mode: 'auto' } }, { taskId: 'task-1', seq: 1 });
-      const withFutureConstraint = {
-        ...envelope,
-        payload: { ...envelope.payload, policy: { ...envelope.payload.policy, futureConstraint: 'x' } },
-      };
-      const wireLine = `${JSON.stringify(withFutureConstraint)}\n`;
-      expect(() => decodeEnvelope(wireLine)).toThrow();
-    });
-
     it('a task.offer with an unrecognized field alongside an otherwise well-formed `instruction.blobRef`, decoded through the REAL wire entrypoint, is rejected', () => {
       const envelope = createEnvelope(
         'task.offer',
@@ -146,7 +136,6 @@ describe('M4 Phase 4 version-negotiation drill', () => {
           instruction: {
             blobRef: { blobId: 'blob-1', contentHash: `sha256:${'a'.repeat(64)}`, size: 10, contentType: 'text/plain' },
           },
-          policy: { mode: 'auto' },
         },
         { taskId: 'task-1', seq: 1 },
       );
@@ -161,8 +150,8 @@ describe('M4 Phase 4 version-negotiation drill', () => {
       expect(() => decodeEnvelope(wireLine)).toThrow();
     });
 
-    it('sanity: the identical policy WITHOUT the unknown field still decodes fine through the same real entrypoint (isolates the rejection to the unknown field, not something else in the fixture)', () => {
-      const envelope = createEnvelope('task.offer', { instruction: 'do it', policy: { mode: 'auto' } }, { taskId: 'task-1', seq: 1 });
+    it('sanity: the identical offer WITHOUT the unknown field still decodes fine through the same real entrypoint (isolates the rejection to the unknown field, not something else in the fixture)', () => {
+      const envelope = createEnvelope('task.offer', { instruction: 'do it' }, { taskId: 'task-1', seq: 1 });
       const wireLine = `${JSON.stringify(envelope)}\n`;
       expect(() => decodeEnvelope(wireLine)).not.toThrow();
     });

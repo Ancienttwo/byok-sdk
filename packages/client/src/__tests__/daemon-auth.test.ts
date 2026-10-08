@@ -565,8 +565,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
         descriptor: Object.freeze({
           id: 'pi',
           supportsDispatchSelection: true,
-          capabilities: Object.freeze({ steer: true, resume: true, approvalInteractive: false, permissionModes: Object.freeze(['auto', 'confirm', 'deny']) }),
-          environmentRequirements: Object.freeze({ credentialNames: Object.freeze([]) }),
+          capabilities: Object.freeze({ steer: true, resume: true, approvalInteractive: false }),
         }),
         detect: async () => ({ kind: 'available', version: 'test', authPresent: true }),
         prepare: async () => ({ kind: 'prepared', operation: { start: async () => { throw new Error('not used'); } } }),
@@ -646,8 +645,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
         descriptor: Object.freeze({
           id: 'pi',
           supportsDispatchSelection: true,
-          capabilities: Object.freeze({ steer: true, resume: true, approvalInteractive: false, permissionModes: Object.freeze(['auto', 'confirm', 'deny']) }),
-          environmentRequirements: Object.freeze({ credentialNames: Object.freeze([]) }),
+          capabilities: Object.freeze({ steer: true, resume: true, approvalInteractive: false }),
         }),
         detect: async () => ({ kind: 'available', version: 'test', authPresent: true }),
         prepare: async () => ({ kind: 'prepared', operation: { start: async () => { throw new Error('not used'); } } }),

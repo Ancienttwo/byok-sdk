@@ -1,89 +1,76 @@
-import { describe, expect, it } from 'vitest';
-import { createEnvelope, encodeEnvelope, type AgentEgressPolicy } from '@byok-sdk/protocol';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import type { AgentEgressPolicy, AgentEvent } from '@byok-sdk/protocol';
 import { AgentEgressController } from '../daemon/agent-egress-controller';
 import {
   DEFAULT_AGENT_EGRESS_POLICY,
   AgentEgressPolicyError,
   resolveAgentEgressPolicy,
 } from '../daemon/agent-egress-policy';
-import { sanitizeEgressEnvelope } from '../daemon/agent-egress-sanitizer';
+import { createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
+import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 const agentRef = { agentId: 'agent-egress-policy', profileRevision: 'r1' };
+const roots: string[] = [];
 
-describe('Agent egress policy and sanitizer', () => {
-  it.each([false, true])('keeps only an explicitly selected result document (selected=%s)', (selected) => {
-    const document = { kind: 'internal-summary', text: 'authorized result' };
-    const envelope = createEnvelope('task.complete', {
-      summary: 'private trajectory', sessionRef: 'native-selected-result', document,
-    }, { taskId: 'selected-result' });
-    const result = sanitizeEgressEnvelope(envelope, DEFAULT_AGENT_EGRESS_POLICY, undefined,
-      { resultDocumentSelected: selected });
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error('valid result rejected');
-    expect(result.envelope.payload).toMatchObject({ summary: '[content omitted]' });
-    if (selected) expect(result.envelope.payload).toHaveProperty('document', document);
-    else expect(result.envelope.payload).not.toHaveProperty('document');
-    expect(encodeEnvelope(result.envelope)).not.toContain('private trajectory');
-  });
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
 
-  it('removes trajectory/tool/prompt/environment/argv/path/credential bytes before either wire encoding', () => {
-    const secret = 'trajectory SECRET=do-not-send /private/path --argv dangerous';
-    const envelope = createEnvelope('task.progress', {
-      seq: 1,
-      events: [
-        { type: 'progress', text: secret },
-        { type: 'tool_use', tool: '/private/path/tool', input: { prompt: secret, env: { SECRET: secret }, argv: [secret] } },
-        { type: 'tool_result', tool: '/private/path/tool', output: { credential: secret } },
-      ],
-    }, { taskId: 'task-egress-policy', seq: 1 });
+// Synthetic content of every kind the removed sanitizer used to replace or drop.
+const TRAJECTORY = 'trajectory SECRET=synthetic-value /private/path --argv synthetic';
+const SPILL = {
+  field: 'output' as const,
+  totalBytes: 3_145_728,
+  omittedBytes: 3_145_700,
+  contentType: 'application/json' as const,
+  blob: {
+    blobId: 'blob_spilled_tool_output',
+    contentHash: `sha256:${'c'.repeat(64)}`,
+    size: 3_145_728,
+    contentType: 'application/json',
+  },
+};
+const RUNTIME_EVENTS: readonly AgentEvent[] = [
+  { type: 'progress', text: TRAJECTORY },
+  { type: 'tool_use', tool: '/private/path/tool', input: { prompt: TRAJECTORY, env: { SECRET: TRAJECTORY }, argv: [TRAJECTORY] } },
+  { type: 'tool_result', tool: 'bash', isError: false, output: { preview: { head: 'HEAD-BYTES', tail: 'TAIL-BYTES' } }, spill: SPILL },
+  { type: 'artifact', name: 'report.md', contentType: 'text/markdown' },
+  { type: 'needs_approval', summary: TRAJECTORY },
+  { type: 'error', message: TRAJECTORY },
+];
 
-    const sanitized = sanitizeEgressEnvelope(envelope, DEFAULT_AGENT_EGRESS_POLICY, undefined);
-    expect(sanitized.ok).toBe(true);
-    if (!sanitized.ok) return;
-    // WS uses `encodeEnvelope`; long-poll serializes the same frozen envelope
-    // inside its JSON request. Both views must contain zero original bytes.
-    const wsWire = encodeEnvelope(sanitized.envelope);
-    const longPollWire = JSON.stringify({ messages: [sanitized.envelope] });
-    for (const wire of [wsWire, longPollWire]) {
-      expect(wire).not.toContain(secret);
-      expect(wire).not.toContain('/private/path/tool');
-      expect(wire).not.toContain('credential');
-      expect(wire).toContain('[content omitted]');
+describe('Agent egress goes to the Host as is', () => {
+  it('forwards each runtime event unchanged through the latest-value lane', () => {
+    const controller = new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY, tenantId: 'tenant-egress' });
+    for (const event of RUNTIME_EVENTS) {
+      expect(controller.projectLatestValue({ agentRef, taskId: 'task-as-is', events: [event] })).toEqual([event]);
     }
+    expect(controller.status().latestValue.dropped).toBe(0);
   });
 
-  it('fails closed when the configured sanitizer throws and never returns the raw envelope', () => {
-    const envelope = createEnvelope('task.progress', {
-      seq: 1,
-      events: [{ type: 'progress', text: 'raw-only-if-bug' }],
-    }, { taskId: 'task-sanitizer-throws', seq: 1 });
-    const sanitized = sanitizeEgressEnvelope(envelope, {
-      ...DEFAULT_AGENT_EGRESS_POLICY,
-      activity: { mode: 'contentful-trajectory', delivery: 'latest-value', maxCoalesceMs: 100, maxEventBytes: 4096 },
-    }, () => { throw new Error('refuse'); });
-    expect(sanitized).toEqual({ ok: false, reason: 'sanitizer_rejected' });
+  it('appends a contentful reliable payload to the spool unchanged', async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), 'byok-egress-as-is-'));
+    roots.push(homeDir);
+    const controller = new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY, tenantId: 'tenant-egress' });
+    const payload = { text: TRAJECTORY, tool: { input: { argv: [TRAJECTORY] } }, status: 'running' };
+    const appended = await controller.appendReliable({ homeDir, agentRef, payload, sessionRef: 'session-as-is' });
+    expect(appended.ok).toBe(true);
+    if (!appended.ok) return;
+    expect(appended.record.payload).toEqual(payload);
   });
 
-  it('requires the exact negotiated policy capability before contentful trajectory can leave latest-value state', () => {
-    const policy: AgentEgressPolicy = {
-      ...DEFAULT_AGENT_EGRESS_POLICY,
-      policyRevision: 'contentful-r1',
-      activity: { mode: 'contentful-trajectory', delivery: 'latest-value', maxCoalesceMs: 100, maxEventBytes: 4096 },
-    };
-    const controller = new AgentEgressController({ policy, tenantId: 'tenant-egress' });
-    expect(controller.projectLatestValue({
-      agentRef,
-      taskId: 'task-contentful',
-      events: [{ type: 'progress', text: 'not-without-capability' }],
-      serverCapabilities: [],
-    })).toEqual([]);
-    expect(controller.projectLatestValue({
-      agentRef,
-      taskId: 'task-contentful',
-      events: [{ type: 'progress', text: 'explicit-and-capable' }],
-      serverCapabilities: ['agent-egress-policy'],
-    })).toEqual([{ type: 'progress', text: 'explicit-and-capable' }]);
-    expect(controller.status().latestValue.lastDropReason).toBe('capability_missing');
+  it('refuses a reliable payload that is not a valid wire value before the spool makes it durable', async () => {
+    const homeDir = await mkdtemp(path.join(os.tmpdir(), 'byok-egress-invalid-'));
+    roots.push(homeDir);
+    const controller = new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY, tenantId: 'tenant-egress' });
+    const appended = await controller.appendReliable({
+      homeDir, agentRef, payload: { text: 'x'.repeat(256 * 1024) }, sessionRef: 'session-invalid',
+    });
+    expect(appended).toEqual({ ok: false, reason: 'invalid_envelope' });
+    expect(controller.reliableRecords()).toEqual([]);
   });
 
   it('does not reclassify a legacy task that has no AgentRef into the Agent egress lane', () => {
@@ -92,63 +79,23 @@ describe('Agent egress policy and sanitizer', () => {
     expect(controller.projectLatestValue({
       taskId: 'legacy-task',
       events,
-      serverCapabilities: [],
     })).toEqual(events);
   });
 
-  it('never lets a spill descriptor (a readable blob locator) survive metadata-status projection', () => {
-    const blobId = 'blob_spilled_tool_output';
-    const spill = {
-      field: 'output' as const,
-      totalBytes: 3_145_728,
-      omittedBytes: 3_145_700,
-      contentType: 'application/json' as const,
-      blob: {
-        blobId,
-        contentHash: `sha256:${'c'.repeat(64)}`,
-        size: 3_145_728,
-        contentType: 'application/json',
-      },
-    };
-    const envelope = createEnvelope('task.progress', {
-      seq: 1,
-      events: [
-        { type: 'tool_result', tool: 'bash', isError: false, output: { preview: { head: 'HEAD-BYTES', tail: 'TAIL-BYTES' } }, spill },
-        { type: 'tool_use', tool: 'write_file', input: { preview: { head: 'IN-HEAD', tail: 'IN-TAIL' } }, spill: { ...spill, field: 'input' as const } },
-      ],
-    }, { taskId: 'task-egress-omission', seq: 1 });
-
-    const sanitized = sanitizeEgressEnvelope(envelope, DEFAULT_AGENT_EGRESS_POLICY, undefined);
-    expect(sanitized.ok).toBe(true);
-    if (!sanitized.ok) return;
-    const events = (sanitized.envelope.payload as { events: unknown[] }).events;
-    expect(events).toEqual([
-      { type: 'tool_result', tool: '[tool omitted]', isError: false },
-      { type: 'tool_use', tool: '[tool omitted]' },
-    ]);
-    for (const wire of [encodeEnvelope(sanitized.envelope), JSON.stringify({ messages: [sanitized.envelope] })]) {
-      expect(wire).not.toContain(blobId);
-      expect(wire).not.toContain('spill');
-      expect(wire).not.toContain('HEAD-BYTES');
-      expect(wire).not.toContain('3145728');
-    }
-
-    // Same guarantee through the controller's own latest-value projection.
-    const controller = new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY });
-    const projected = controller.projectLatestValue({
-      taskId: 'task-egress-omission',
-      agentRef,
-      events: [{ type: 'tool_result', tool: 'bash', output: { preview: { head: 'x', tail: 'y' } }, spill }],
-      serverCapabilities: ['agent-egress'],
-    });
-    expect(JSON.stringify(projected)).not.toContain('spill');
-    expect(JSON.stringify(projected)).not.toContain(blobId);
-  });
-
-  it('rejects malformed policy instead of silently selecting contentful semantics', () => {
+  it('rejects a malformed policy instead of selecting a default', () => {
     expect(() => resolveAgentEgressPolicy({
       ...DEFAULT_AGENT_EGRESS_POLICY,
-      activity: { mode: 'contentful-trajectory', delivery: 'latest-value', maxCoalesceMs: 0, maxEventBytes: 1 },
+      activity: { delivery: 'latest-value', maxCoalesceMs: 0, maxEventBytes: 1 },
     } as unknown as AgentEgressPolicy)).toThrow(AgentEgressPolicyError);
+  });
+
+  it('refuses the removed agentEgress.sanitizer key instead of ignoring it', () => {
+    const config = {
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product',
+      serverUrl: 'http://localhost:3000', workspaceRoot: '/tmp/byok-test-workspace',
+      agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY, sanitizer: (value: unknown) => value },
+    } as DaemonConfig;
+    expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter('claude', { kind: 'available' })]))
+      .toThrow('DaemonConfig.agentEgress.sanitizer was removed: Agent egress goes to the Host as is');
   });
 });

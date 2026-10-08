@@ -17,7 +17,6 @@
  *   silent      answer nothing at all, ever (drives the timeout path)
  *   floodBytes  emit at least this many bytes of unrelated stdout first
  *   dumpEnvTo   write the child's own process.env there as JSON
- *   dumpCwdTo   write the child's own process.cwd() there
  *   dumpPidTo   write the child's own pid there, before answering anything
  */
 import { writeFileSync } from 'node:fs';
@@ -26,7 +25,6 @@ import { createInterface } from 'node:readline';
 const config = JSON.parse(process.argv[2] ?? '{}');
 
 if (config.dumpEnvTo) writeFileSync(config.dumpEnvTo, JSON.stringify(process.env), 'utf8');
-if (config.dumpCwdTo) writeFileSync(config.dumpCwdTo, process.cwd(), 'utf8');
 if (config.dumpPidTo) writeFileSync(config.dumpPidTo, String(process.pid), 'utf8');
 
 // Keep the process alive even when nothing is expected of it, so a timeout is

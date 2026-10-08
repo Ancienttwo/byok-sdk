@@ -24,20 +24,6 @@ if (argv[0] === 'login') {
   );
   process.exit(process.env.FAKE_CODEX_LOGGED_IN === '0' ? 1 : 0);
 }
-if (argv[0] === 'mcp' && argv[1] === 'get') {
-  const name = argv[2];
-  let enabled_tools = [];
-  // An older Codex that ignores the per-server tool configuration reads back none.
-  if (process.env.FAKE_CODEX_IGNORES_MCP_TOOL_CONFIG !== '1') {
-    try {
-      enabled_tools = JSON.parse(
-        config[`mcp_servers.${name}.enabled_tools`] ?? '[]',
-      );
-    } catch {}
-  }
-  console.log(JSON.stringify({ name, enabled: true, enabled_tools }));
-  process.exit(0);
-}
 if (!argv.includes('app-server')) {
   console.error('fixture requires app-server; exec is removed');
   process.exit(2);
@@ -48,15 +34,11 @@ if (argv.includes('--help')) {
   process.exit(0);
 }
 if (process.env.FAKE_CODEX_ENV_RECEIPT) {
-  const { toolImplementationLaunchEnvNamesDigest, toolImplementationLoaderEnvValuesDigest } =
-    await import('@byok-sdk/implementation-identity');
   // Presence and comparisons only: never persist credential or ambient values.
   writeFileSync(process.env.FAKE_CODEX_ENV_RECEIPT, JSON.stringify({
     present: Object.fromEntries(Object.keys(process.env).map((name) => [name, true])),
     configMatches: process.env.MY_ALLOWED_CONFIG === 'synthetic-config',
     authDiscoveryMatches: process.env.HOME === process.env.CODEX_HOME && process.env.USER === 'synthetic-user',
-    namesDigestMatches: toolImplementationLaunchEnvNamesDigest(process.env) === process.env.FAKE_CODEX_ENV_NAMES_DIGEST,
-    loaderDigestMatches: toolImplementationLoaderEnvValuesDigest(process.env) === process.env.FAKE_CODEX_ENV_LOADER_DIGEST,
   }));
 }
 if (process.env.FAKE_CODEX_PROCESS_TREE_FILE)
@@ -163,10 +145,11 @@ async function runTurn(id, input) {
   }
   if (process.env.FAKE_CODEX_MCP_TOOL_CALL) {
     const [server, tool] = process.env.FAKE_CODEX_MCP_TOOL_CALL.split('/');
-    const enabled = JSON.parse(
-      config[`mcp_servers.${server}.enabled_tools`] ?? '[]',
-    );
-    if (!enabled.includes(tool)) {
+    // Real Codex enables every tool of a configured server unless the user's
+    // own config narrows it with enabled_tools.
+    const configured = config[`mcp_servers.${server}.enabled_tools`];
+    if (config[`mcp_servers.${server}.command`] === undefined
+      || (configured !== undefined && !JSON.parse(configured).includes(tool))) {
       notify('error', {
         threadId,
         error: { message: 'MCP tool requires approval' },
@@ -247,6 +230,10 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   }
   if (method === 'thread/start' || method === 'thread/resume') {
     if (process.env.FAKE_CODEX_HANG_BEFORE_THREAD === '1') return;
+    // Session MCP servers arrive in the open's config; codex merges them into
+    // the user's own config field by field.
+    for (const [name, server] of Object.entries(params.config?.mcp_servers ?? {}))
+      config[`mcp_servers.${name}.command`] = JSON.stringify(server.command);
     if (method === 'thread/resume' && params.threadId !== threadId) {
       send({
         id,

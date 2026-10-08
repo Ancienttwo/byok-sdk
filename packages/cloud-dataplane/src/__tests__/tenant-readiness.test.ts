@@ -50,7 +50,7 @@ if (POSTGRES_URL === undefined) {
           deviceId: 'readiness-active',
           level: 'working',
           clientVersion: '0.4.2',
-          protocolVersions: [1],
+          protocolVersions: [2],
           runtimes: [{ id: 'pi', version: '1.0.0', authPresent: true }],
           ttlMs: 60_000,
           minimumIntervalMs: 0,
@@ -104,7 +104,7 @@ if (POSTGRES_URL === undefined) {
 
         await expect(core.presence.read(TENANT_A, 'readiness-active')).resolves.toMatchObject({
           clientVersion: '0.4.2',
-          protocolVersions: [1],
+          protocolVersions: [2],
           runtimes: [{ id: 'pi', version: '1.0.0', authPresent: true }],
         });
         const readinessA = await devices.readiness(TENANT_A, core.presence);
@@ -131,7 +131,7 @@ if (POSTGRES_URL === undefined) {
             presence: {
               level: 'working',
               clientVersion: '0.4.2',
-              protocolVersions: [1],
+              protocolVersions: [2],
               runtimes: [{ id: 'pi', version: '1.0.0', authPresent: true }],
               observedAt: '2026-01-01T00:00:00.000Z',
               expiresAt: '2026-01-01T00:01:00.000Z',

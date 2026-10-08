@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
-import { type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { finished } from "node:stream/promises";
 import type { ExternalProcessStatus } from "../../shared/types.ts";
-import { type OwnedProcessTreeController } from "../background/owned-process-tree.ts";
+import { createOwnedProcessTreeController, type OwnedProcessTreeController } from "../background/owned-process-tree.ts";
+import { omitExtensionBindingsEnv } from "./extension-bindings.ts";
 import {
 	invalidateExternalCliPreflight,
+	preflightExternalCli,
 	type ExternalCliPreflightResult,
 	type ExternalCliPreflightSpec,
 } from "./external-cli-preflight.ts";
-
-import { currentExternalCliCustodyAuthority, nextExternalCliAttempt } from "../../../../../../src/custody/external-cli-custody.ts";
 
 const MAX_OUTPUT_TAIL_BYTES = 64 * 1024;
 const MAX_ERROR_TAIL_BYTES = 64 * 1024;
@@ -85,6 +85,21 @@ function narrowLimit(value: number | undefined, ceiling: number, label: string):
 	return value;
 }
 
+function externalEnvironment(allowlist: readonly string[] | undefined, values: Readonly<Record<string, string>> | undefined): NodeJS.ProcessEnv {
+	if (!allowlist) return omitExtensionBindingsEnv(process.env);
+	const allowed = new Set(allowlist);
+	const env: NodeJS.ProcessEnv = {};
+	for (const key of allowed) {
+		if (!key || key.includes("=") || key.includes("\0")) throw new Error(`Invalid external CLI environment key: ${JSON.stringify(key)}.`);
+		if (process.env[key] !== undefined) env[key] = process.env[key];
+	}
+	for (const [key, value] of Object.entries(values ?? {})) {
+		if (!allowed.has(key)) throw new Error(`External CLI environment value '${key}' is not in the adapter allowlist.`);
+		env[key] = value;
+	}
+	return omitExtensionBindingsEnv(env);
+}
+
 function createByteTail(maxBytes: number): { push(chunk: Buffer): void; text(): string } {
 	const chunks: Buffer[] = [];
 	let bytes = 0;
@@ -126,13 +141,16 @@ function classifyInvalidation(error: string): "auth" | "permission" | "launch" {
 	return "launch";
 }
 
-function terminateExternalProcessTree(_pid: number, controller: OwnedProcessTreeController): Promise<unknown> {
-  return controller.terminate();
+function terminateExternalProcessTree(pid: number, controller: OwnedProcessTreeController): Promise<unknown> {
+	if (process.platform !== "win32") return controller.terminate();
+	return new Promise((resolve) => {
+		const cleanup = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+		cleanup.once("error", () => { void controller.terminate().then(resolve); });
+		cleanup.once("close", () => { void controller.terminate().then(resolve); });
+	});
 }
 
-export async function runExternalCli(input: {
-	adapter?: string;
-	deadlineAt?: number;
+export function runExternalCli(input: {
 	command: string;
 	args?: string[];
 	cwd: string;
@@ -154,7 +172,7 @@ export async function runExternalCli(input: {
 	onParserProgress?: (progress: ExternalCliParserProgress) => void;
 	onStdout?: (chunk: Buffer) => void;
 	onStderr?: (chunk: Buffer) => void;
-}, authority = currentExternalCliCustodyAuthority()): Promise<ExternalCliRunResult> {
+}): Promise<ExternalCliRunResult> {
 	const limits = {
 		stdoutLogBytes: narrowLimit(input.limits?.stdoutLogBytes, MAX_RAW_LOG_BYTES, "stdoutLogBytes"),
 		stderrLogBytes: narrowLimit(input.limits?.stderrLogBytes, MAX_RAW_LOG_BYTES, "stderrLogBytes"),
@@ -162,21 +180,7 @@ export async function runExternalCli(input: {
 		parserStreamBytes: narrowLimit(input.limits?.parserStreamBytes, MAX_PARSER_STREAM_BYTES, "parserStreamBytes"),
 		parserOutputBytes: narrowLimit(input.limits?.parserOutputBytes, MAX_PARSER_OUTPUT_BYTES, "parserOutputBytes"),
 	};
-	const cancellation = new AbortController();
-	let pendingCancel: "timeout" | "stop" | undefined;
-	let activeCancel: ((reason: "timeout" | "stop") => void) | undefined;
-	const cancel = (reason: "timeout" | "stop") => { pendingCancel ??= reason; cancellation.abort(); activeCancel?.(reason); };
-	input.registerTimeout?.(() => cancel("timeout"));
-	input.registerStop?.(() => cancel("stop"));
-	let authorization;
-	try {
-	fs.mkdirSync(input.asyncDir, { recursive: true });
-	authorization = await authority.prepare({ command: input.command, args: input.args ?? [], cwd: input.cwd, prompt: input.prompt, adapter: input.adapter, asyncDir: input.asyncDir, environment: input.environment, ...nextExternalCliAttempt(input.asyncDir, input.stepIndex) }, {signal:cancellation.signal,deadlineAt:input.deadlineAt});
-	} catch (error) { input.registerTimeout?.(undefined); input.registerStop?.(undefined); throw error; }
-
-	const env = authorization.env;
 	return new Promise((resolve, reject) => {
-		void (async () => {
 		const startedAt = Date.now();
 		const stdoutPath = path.join(input.asyncDir, `external-${input.stepIndex}.stdout.log`);
 		const stderrPath = path.join(input.asyncDir, `external-${input.stepIndex}.stderr.log`);
@@ -190,7 +194,7 @@ export async function runExternalCli(input: {
 			if (input.promptFilePath && promptFileCreated) fs.rmSync(input.promptFilePath, { force: true });
 			for (const directory of createdDirectories.reverse()) fs.rmSync(directory, { recursive: true, force: true });
 		};
-
+		const env = externalEnvironment(input.environment?.allowlist, input.environment?.values);
 		let preflight: ExternalCliPreflightResult | undefined;
 		try {
 			for (const directory of input.temporaryDirectories ?? []) {
@@ -203,7 +207,7 @@ export async function runExternalCli(input: {
 				try { fs.writeFileSync(promptDescriptor, input.prompt, { encoding: "utf-8" }); }
 				finally { fs.closeSync(promptDescriptor); }
 			}
-			// SDK probes identity/auth in custody before this streaming lane; vendor preflight cannot spawn.
+			if (input.preflight) preflight = preflightExternalCli(input.command, input.preflight, env, input.cwd);
 		} catch (error) {
 			const endedAt = Date.now();
 			const externalProcess = { startedAt, endedAt, durationMs: endedAt - startedAt, exitCode: 1, processSignal: null, stdoutPath, stderrPath, ...(input.finalOutputPath ? { finalOutputPath: input.finalOutputPath } : {}) } satisfies ExternalProcessStatus;
@@ -323,12 +327,17 @@ export async function runExternalCli(input: {
 			}
 			appendPendingLine(chunk.subarray(start));
 		};
-		let child: ChildProcessWithoutNullStreams;
-		try { child = await authority.spawn(authorization, { command: input.command, args: input.args ?? [], cwd: input.cwd, prompt: input.prompt, env }); }
-		catch (error) { stdoutStream.end(); stderrStream.end(); await streamsFinished; cleanupTemporaryPaths(); reject(error); return; }
+		const child = spawn(preflight?.binaryPath ?? input.command, input.args ?? [], {
+			cwd: input.cwd,
+			env,
+			stdio: ["pipe", "pipe", "pipe"],
+			shell: false,
+			windowsHide: true,
+			detached: process.platform !== "win32",
+		}) as ChildProcessWithoutNullStreams;
 		if (typeof child.pid === "number") {
 			processPid = child.pid;
-			processTree = authority.processTreeFor(child);
+			processTree = createOwnedProcessTreeController(child.pid, { termGraceMs: 2_000 });
 		}
 		const initialProcess: ExternalProcessStatus = {
 			...(typeof child.pid === "number" ? { pid: child.pid } : {}),
@@ -349,8 +358,8 @@ export async function runExternalCli(input: {
 			input.onStderr?.(chunk);
 			stderrTail.push(chunk);
 		});
-		activeCancel = terminate;
-		if (pendingCancel) terminate(pendingCancel);
+		input.registerTimeout?.(() => terminate("timeout"));
+		input.registerStop?.(() => terminate("stop"));
 		child.stdin.on("error", () => {});
 		child.stdin.end(input.promptFilePath ? undefined : input.prompt);
 		let spawnError: Error | undefined;
@@ -374,7 +383,6 @@ export async function runExternalCli(input: {
 			void (async () => {
 				if (termination) await termination;
 				else if (processTree) await processTree.finishAfterWriterClose();
-				await authority.settled(child);
 				const endedAt = Date.now();
 				const externalProcess: ExternalProcessStatus = {
 					...initialProcess,
@@ -417,6 +425,5 @@ export async function runExternalCli(input: {
 				else resolve(result);
 			})();
 		});
-		})().catch(reject);
 	});
 }

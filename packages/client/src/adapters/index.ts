@@ -11,7 +11,6 @@ export type {
   RuntimeCapabilities,
   RuntimeDetectResult,
 } from '../types';
-export type { RuntimeEnvironmentRequirements } from '../daemon/environment';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 export type {
   RuntimeDisposalFailureInput,
@@ -30,7 +29,7 @@ export { ClaudeAdapter } from './claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './claude/claude-adapter';
 
 export { CodexAdapter } from './codex/codex-adapter';
-export type { CodexAdapterOptions } from './codex/codex-adapter';
+export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-adapter';
 
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
 export type {

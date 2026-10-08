@@ -192,7 +192,7 @@ describe('hosted journal integration (L-002)', () => {
       await recordTerminal(record);
     });
     const { adapter } = await startDaemon({ hostedJournal: { mode: 'sqlite' } }, journal);
-    server.send(createEnvelope('task.offer', { instruction: 'unique result', policy: { mode: 'auto' } },
+    server.send(createEnvelope('task.offer', { instruction: 'unique result' },
       { taskId: 'terminal-retry', seq: server.nextSeq() }));
     await server.waitFor(e => e.type === 'task.started');
     adapter.sessions[0]!.emit({ type: 'turn_end' });
@@ -219,7 +219,7 @@ describe('hosted journal integration (L-002)', () => {
     });
     const { adapter, storeDir, deviceId } = await startDaemon({ hostedJournal: { mode: 'sqlite' } }, journal);
     const seq = server.nextSeq();
-    const offer = createEnvelope('task.offer', { instruction: 'invalid limit', policy: { mode: 'auto' }, limits: { maxTokens: 1 } },
+    const offer = createEnvelope('task.offer', { instruction: 'invalid limit', limits: { maxTokens: 1 } },
       { taskId: 'decline-retry', seq });
     server.send(offer);
     await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(1));
@@ -237,7 +237,7 @@ describe('hosted journal integration (L-002)', () => {
       const { adapter, storeDir } = await startDaemon({});
 
       server.send(
-        createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'task-default-1', seq: server.nextSeq() }),
+        createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-default-1', seq: server.nextSeq() }),
       );
       await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-default-1');
       adapter.sessions[0]?.emit({ type: 'turn_end' });
@@ -293,7 +293,7 @@ describe('hosted journal integration (L-002)', () => {
 
       const release = journal.blockAppends();
       const seq = server.nextSeq();
-      server.send(createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'task-order-1', seq }));
+      server.send(createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-order-1', seq }));
 
       // The append has been ENTERED (so the journal is genuinely on the
       // inbound path, not merely constructed) and is now held open.
@@ -327,7 +327,7 @@ describe('hosted journal integration (L-002)', () => {
       const { adapter } = await startDaemon({ hostedJournal: { mode: 'sqlite' } }, journal);
 
       server.send(
-        createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'task-terminal-1', seq: server.nextSeq() }),
+        createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-terminal-1', seq: server.nextSeq() }),
       );
       await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-terminal-1');
       adapter.sessions[0]?.emit({ type: 'turn_end' });
@@ -356,7 +356,7 @@ describe('hosted journal integration (L-002)', () => {
         // recovery exists for.
         const storeDir = await tmpDir('byok-journal-recover-store-');
         const seeded = new SqliteLocalTaskJournal({ storeDir });
-        const bytes = encodeEnvelope(createEnvelope('task.offer', { instruction: 'recover', policy: { mode: 'auto' } }, { taskId: 'task-recover-1', seq: 7 }));
+        const bytes = encodeEnvelope(createEnvelope('task.offer', { instruction: 'recover' }, { taskId: 'task-recover-1', seq: 7 }));
         await seeded.appendEnvelope({
           identity: { tenantId: 'tenant-test', productId: 'test-product-journal', deviceId: 'device-1' },
           envelopeId: 'env-crashed',
@@ -453,7 +453,7 @@ async function makeRunner(
 }
 
 function offer(taskId: string): Envelope {
-  return createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId, seq: 1 });
+  return createEnvelope('task.offer', { instruction: 'x' }, { taskId, seq: 1 });
 }
 
 describe('TaskRunner.admissionGuard (L-002 seam)', () => {

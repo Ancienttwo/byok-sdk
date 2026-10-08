@@ -39,12 +39,11 @@ async function admitMessageEgress(harness: CloudHarness, deviceId: string, agent
     taskId: `issue-task-${crypto.randomUUID()}`,
     payload: {
       instruction: 'send one message',
-      policy: { mode: 'auto' },
       agentRef,
       sessionRef: 'issue-session',
       egressPolicy: {
         policyRevision: 'issue-policy',
-        activity: { mode: 'metadata-status', delivery: 'latest-value' },
+        activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
         reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
         transfers: {
           workspace: { maxBytes: 512, allowedMimeTypes: ['text/plain'] },

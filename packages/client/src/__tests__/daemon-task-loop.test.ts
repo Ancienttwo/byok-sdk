@@ -54,7 +54,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'do the thing', policy: { mode: 'auto' } },
+        { instruction: 'do the thing' },
         { taskId: 'task-1', seq: server.nextSeq() },
       ),
     );
@@ -101,7 +101,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'long running thing', policy: { mode: 'auto' } },
+        { instruction: 'long running thing' },
         { taskId: 'task-2', seq: server.nextSeq() },
       ),
     );
@@ -133,7 +133,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'buffer some progress then cancel', policy: { mode: 'auto' } },
+        { instruction: 'buffer some progress then cancel' },
         { taskId: 'task-cancel-buffered', seq: server.nextSeq() },
       ),
     );
@@ -164,7 +164,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'race me', policy: { mode: 'auto' } },
+        { instruction: 'race me' },
         { taskId: 'task-race', seq: server.nextSeq() },
       ),
     );
@@ -197,28 +197,6 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     ).toBe(false);
   });
 
-  it('declines (never claims) a task whose policy exceeds the device ceiling (M1 gap #5)', async () => {
-    const adapter = new StubRuntimeAdapter();
-    await setupDaemon(adapter, { permissionDefaults: { mode: 'readonly' } });
-
-    server.send(
-      createEnvelope(
-        'task.offer',
-        { instruction: 'do something risky', policy: { mode: 'auto' } },
-        { taskId: 'task-3', seq: server.nextSeq() },
-      ),
-    );
-
-    const decline = await server.waitFor((e) => e.type === 'task.decline');
-    expect(decline.payload).toMatchObject({ retryable: false });
-    expect((decline.payload as { reason: string }).reason).toMatch(/exceeds/i);
-
-    // Never claims a pre-claim rejection anymore — no more claim-then-fail.
-    expect(server.received.some((e) => e.type === 'task.claim' && e.task_id === 'task-3')).toBe(false);
-    expect(server.received.some((e) => e.type === 'task.fail' && e.task_id === 'task-3')).toBe(false);
-    expect(adapter.startCalls).toHaveLength(0);
-  });
-
   it('declines (never claims) an offer naming an unavailable runtime (M1 gap #5)', async () => {
     // `runtime` is constrained by the frozen protocol to 'pi'|'claude'|'codex'
     // (RuntimeIdSchema), so the stub must claim one of those ids to exercise
@@ -229,7 +207,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'x', policy: { mode: 'auto' }, runtime: 'pi' },
+        { instruction: 'x', runtime: 'pi' },
         { taskId: 'task-4', seq: server.nextSeq() },
       ),
     );
@@ -252,7 +230,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'x', policy: { mode: 'auto' } },
+        { instruction: 'x' },
         { taskId: 'task-6', seq: server.nextSeq() },
       ),
     );
@@ -273,7 +251,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'x', policy: { mode: 'auto' } },
+        { instruction: 'x' },
         { taskId: 'task-7', seq: server.nextSeq() },
       ),
     );
@@ -294,7 +272,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'x', policy: { mode: 'auto' } },
+        { instruction: 'x' },
         { taskId: 'task-5', seq: server.nextSeq() },
       ),
     );
@@ -315,7 +293,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { instruction: 'x', policy: { mode: 'auto' }, runtime: 'pi' },
+          { instruction: 'x', runtime: 'pi' },
           { taskId: 'task-runtime-explicit', seq: server.nextSeq() },
         ),
       );
@@ -331,7 +309,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { instruction: 'x', policy: { mode: 'auto' } }, // no `runtime` — daemon auto-selects
+          { instruction: 'x' }, // no `runtime` — daemon auto-selects
           { taskId: 'task-runtime-auto', seq: server.nextSeq() },
         ),
       );
@@ -351,7 +329,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { instruction: 'needs a human', policy: { mode: 'auto' } },
+          { instruction: 'needs a human' },
           { taskId, seq: server.nextSeq() },
         ),
       );

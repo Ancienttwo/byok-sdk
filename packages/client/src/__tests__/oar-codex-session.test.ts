@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { codexSession } from '../../vendor/oar/f1a2b88/runtimes/codex/session';
-import * as projection from '../../vendor/oar/f1a2b88/runtimes/codex/projection';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/f1a2b88/runtimes/codex/app-server-client';
+import { codexSession } from '../../vendor/oar/e1f9177/runtimes/codex/session';
+import * as projection from '../../vendor/oar/e1f9177/runtimes/codex/projection';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/e1f9177/runtimes/codex/app-server-client';
 
 function fakeServer() {
   let receive!: (line: string) => void;

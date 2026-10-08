@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { AgentEgressContentHashSchema } from './agent-egress';
-import { PERMISSION_MODES } from './permission';
 
 /**
  * Remote authenticated runtime input preparation — the wire half of
@@ -26,7 +25,7 @@ import { PERMISSION_MODES } from './permission';
  * 3. Every shape here is `.strict()`. This is control data: an unrecognized
  *    field must be REJECTED, not silently stripped, per docs/protocol.md's
  *    freeze-rule asymmetry. Adding a field post-freeze is therefore a
- *    breaking change, exactly like `PermissionPolicySchema`.
+ *    breaking change.
  */
 
 /**
@@ -40,7 +39,7 @@ import { PERMISSION_MODES } from './permission';
  * below. See `INPUT_PREPARATION_VERSION` in the client for what each version
  * changed.
  */
-export const INPUT_PREPARATION_WIRE_VERSION = 8 as const;
+export const INPUT_PREPARATION_WIRE_VERSION = 9 as const;
 
 /**
  * Capability required before a task-free remote input preparation — or a
@@ -106,22 +105,6 @@ export const InputPreparationPolicyRevisionSchema = OPAQUE_ID;
  * anything is compiled.
  */
 export const InputPreparationProfileIdSchema = OPAQUE_ID;
-
-/**
- * The permission mode a preparation is compiled FOR.
- *
- * It is the same closed set every task policy uses (`permission.ts`'s
- * `PERMISSION_MODES`), spelled here as its own schema because a preparation
- * carries a mode without carrying a policy: there is no task, no grant and no
- * approval seam on this wire. The mode selects which tools the device's own
- * observation projects into the counted manifest, and nothing else.
- *
- * Declared by the requester rather than inferred by the device: a device that
- * guessed would be counting a manifest the requester never asked for, and a
- * device that defaulted would silently count the widest one.
- */
-export const InputPreparationPermissionModeSchema = z.enum(PERMISSION_MODES);
-export type InputPreparationPermissionMode = z.infer<typeof InputPreparationPermissionModeSchema>;
 
 /** Explicit prepared SDK memory selection; never defaulted. */
 export const PreparedAgentMemoryModeSchema = z.enum(['none', 'read', 'read-write']);
@@ -383,7 +366,7 @@ export type InputPreparationState = z.infer<typeof InputPreparationStateSchema>;
  * `ready` means the preparation CAN BE CONSUMED — the artifact is intact and
  * unexpired, the native compiler's projection is content-complete, every
  * residual key is ruled by an applicable Host accounting policy, D is text
- * only, every executor identity is attested, and — only when the device has an
+ * only, and — only when the device has an
  * optional counter configured — that count is provider-authoritative and
  * covered. No count is required: the size evidence is
  * `artifact.requestBytes`, the exact byte length of the frozen D. It is
@@ -416,7 +399,6 @@ export const InputPreparationReadinessReasonSchema = z.enum([
   'accounting_policy_missing',
   /** The named policy was ruled for a different runtime, endpoint or model. */
   'accounting_policy_inapplicable',
-  'executor_identity_unproven',
   /**
    * The record was prepared against a runtime contract this build no longer
    * speaks: its binding declares a prepared-compiler version other than the one
@@ -532,19 +514,6 @@ export const InputPreparationCounterEvidenceSchema = z
   .strict();
 
 /**
- * What the device established about the implementation behind ONE
- * model-visible tool: `attested`, or `unavailable:<reason>` naming which of
- * the SDK's closed unavailable reasons applies.
- *
- * A kind, never the identity itself: an install path, a closure digest or a
- * stat tuple is device-local filesystem detail, and a receipt discloses
- * identity facts, not the machine's layout.
- */
-export const InputPreparationToolImplementationKindSchema = z
-  .string()
-  .regex(/^(?:attested|unavailable:[a-z_]{1,64})$/u, 'a tool implementation kind is "attested" or "unavailable:<reason>"');
-
-/**
  * What the native compiler proved about ONE top-level key of D that lies
  * outside P(D).
  *
@@ -598,19 +567,16 @@ export const InputPreparationProjectionSchema = z
  * launch checkable rather than assumed:
  *
  * - `observationDigest` binds everything the device OBSERVED — the projected
- *   tools, their executor fingerprints, the launch attestation and the
- *   implementation identities — so a launch whose live observation differs is
- *   a different manifest, whatever the schemas say.
+ *   tools and their executor fingerprints — so a launch whose live
+ *   observation differs is a different manifest, whatever the schemas say.
  * - `toolBindingDigest` binds only the facts that can be re-derived WITHOUT
- *   spawning a server: the launch attestation, the toolset definition
- *   revisions and the implementation identities. It is what a replay of an
- *   already-recorded requestId compares against, because re-probing to detect
- *   drift would be the second executor fact the idempotency key exists to
- *   prevent.
- * - `toolImplementationKinds` states, per model-visible tool name, whether the
- *   implementation behind it was attested. It is the evidence behind
- *   `executor_identity_unproven`, so a reader does not have to take that
- *   readiness reason on trust.
+ *   spawning a server: the toolset definition revisions and the configured
+ *   argv. It is what a replay of an already-recorded requestId compares
+ *   against, because re-probing to detect drift would be the second executor
+ *   fact the idempotency key exists to prevent.
+ * - `toolNames` lists the counted model-visible tool names, sorted. A launch
+ *   that registers a different set can name the tool that appeared or
+ *   vanished.
  */
 export const InputPreparationArtifactSummarySchema = z
   .object({
@@ -629,7 +595,7 @@ export const InputPreparationArtifactSummarySchema = z
     residual: z.array(InputPreparationResidualKeySchema).max(64),
     observationDigest: OPAQUE_ID,
     toolBindingDigest: OPAQUE_ID,
-    toolImplementationKinds: z.record(OPAQUE_ID, InputPreparationToolImplementationKindSchema),
+    toolNames: z.array(OPAQUE_ID),
   })
   .strict();
 
@@ -645,14 +611,6 @@ export const InputPreparationBindingSchema = z
     source: InputPreparationSourceSchema,
     target: InputPreparationCounterTargetSchema,
     policyRevision: OPAQUE_ID,
-    /**
-     * The mode the counted manifest was filtered for. Recorded on the binding
-     * rather than only inside the request digest so a consumer can COMPARE it
-     * without re-deriving the digest: an Execution offered under a different
-     * mode is an Execution whose registered tool set differs from the one
-     * these tokens were counted for.
-     */
-    permissionMode: InputPreparationPermissionModeSchema,
     runtime: InputPreparationRuntimeIdentitySchema,
     requestDigest: OPAQUE_ID,
     /**
@@ -768,30 +726,13 @@ export const InputPreparationRejectionReasonSchema = z.enum([
   'toolsets_unobservable',
   'deadline_elapsed',
   /**
-   * The device could not prove a non-writable launch directory (or a trusted
-   * launcher) for the MCP toolset servers this preparation names, so it
-   * refused rather than observing them in a directory the agent's own uid can
-   * write. The specific `TrustedLaunchCwdUnavailableReason` travels in the
-   * receipt's `detail`; it is not widened into a spawn.
-   */
-  'launch_boundary_unavailable',
-  /**
    * A repeat of an already-recorded `requestId` arrived after the facts its
    * executor fingerprints were frozen against changed — a toolset definition
-   * revision, the launch attestation, or an implementation identity that no
-   * longer measures the same. The recorded receipt is not re-derived and no
+   * revision or a configured server argv. The recorded receipt is not re-derived and no
    * server is re-probed; the repeat is refused so the caller mints a new
    * preparation instead of silently receiving one bound to stale evidence.
    */
   'observation_drift',
-  /**
-   * The declared `permissionMode` is not one this device admits: it exceeds
-   * the operator's configured ceiling. The requester's declaration is INTENT,
-   * not authorization — it goes through the same merge that admits a task
-   * offer's `policy.mode` — and an unadmitted mode refuses rather than being
-   * silently narrowed to one the device would allow.
-   */
-  'permission_mode_denied',
   /**
    * The device compiled the input, then found that the `prompt_prepared` frame
    * the runtime would have to be handed exceeds the single-frame byte cap that

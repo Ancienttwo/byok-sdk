@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { AgentEvent, PermissionMode, TaskOfferPayload } from '@byok-sdk/protocol';
+import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   PolicyUnsupportedError,
   SteerUnsupportedError,
@@ -13,26 +13,16 @@ import {
   type RuntimeDetectResult,
   type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult,
-  type McpStdioServerConfig,
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types';
-import { wrapMcpServerWithLaunchCwd } from '../../daemon/trusted-launch-cwd';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../../runtime-failure';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
-import { withoutProviderCredentials } from '../provider-credential-environment';
 import { createClaudeControlChannel } from './control-channel';
 import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES } from './native-interactions';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions';
-import { mapPermissionPolicyToClaudeArgs } from './permission-mapping';
 import { createToolUseCorrelation, mapClaudeMessageToAgentEvents, type ToolUseCorrelation } from './events';
 import { ClaudeProcessClient, type SpawnFn } from './process-client';
-import {
-  grantFingerprint,
-  resolveMcpToolsetGrants,
-  resolveReservedMcpToolGrants,
-  type McpToolsetGrant,
-} from '../mcp-tool-grants';
 
 
 const execFileAsync = promisify(execFile);
@@ -106,12 +96,19 @@ export interface ClaudeAdapterOptions {
 }
 
 /**
- * Claude Code stream-json adapter. Default headless permission behavior remains
- * unchanged. Explicit nativeInteractions opts into the Agent SDK stdio control
- * handshake and requests the CLI actually forwards to can_use_tool, including
+ * Claude Code stream-json adapter.
+ *
+ * An ordinary session runs with `--dangerously-skip-permissions`, as in OAR:
+ * in embedded use there is no human at an approval prompt, so a permission
+ * gate is a hang, not safety. Claude keeps its own guardrails (the user's
+ * `~/.claude` settings and deny rules).
+ *
+ * Explicit nativeInteractions opts into the Agent SDK stdio control handshake
+ * (`--permission-prompt-tool stdio`) instead of the skip flag: the local Host
+ * UI answers each request the CLI forwards to can_use_tool, including
  * AskUserQuestion. Existing allow rules may bypass that callback; this is not a
- * blanket all-tools confirmation policy. PermissionPolicy.confirm and remote
- * boolean approvals remain unsupported, as does mid-turn steering.
+ * blanket all-tools confirmation policy. Remote boolean approvals remain
+ * unsupported, as does mid-turn steering.
  */
 export class ClaudeAdapter implements RuntimeAdapter {
   readonly descriptor;
@@ -124,20 +121,13 @@ export class ClaudeAdapter implements RuntimeAdapter {
     this.descriptor = freezeRuntimeAdapterDescriptor({
       id: 'claude',
       supportsDispatchSelection: true,
-      // `--allowedTools mcp__<server>__<tool>` names each projected toolset
-      // tool explicitly, so this adapter cannot admit a projected server
-      // without the daemon's own `tools/list` observation of it.
-      requiresMcpToolsetToolObservation: true,
-      mcpServerLaunch: 'launcher-wrapped',
       capabilities: {
         steer: false,
         resume: true,
         approvalInteractive: false,
         mcpToolsets: true,
-        permissionModes: this.nativeOptions === undefined ? ['auto', 'readonly', 'plan'] : ['auto'],
         ...(this.nativeOptions === undefined ? {} : { nativeInteractions: CLAUDE_NATIVE_INTERACTION_CAPABILITIES }),
       },
-      environmentRequirements: { credentialNames: [] },
     });
   }
 
@@ -155,33 +145,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    if (this.nativeOptions !== undefined && input.policy.mode !== 'auto') return {
-      kind: 'reject', reason: 'Claude native interaction approvals require auto mode; they cannot override readonly, plan or confirm policy', retryable: false,
-    };
-    // Fail closed BEFORE the mapping: a projected toolset server whose tools
-    // were never observed cannot be granted, and an ungranted MCP tool is
-    // auto-denied by claude at call time (see permission-mapping.ts) — a
-    // pre-claim rejection is strictly better than a claimed task that
-    // discovers mid-turn that its only tools are unusable.
-    const toolsetGrants = resolveMcpToolsetGrants(input.mcpServers, input.mcpToolsetTools, input.policy.mode);
-    if (!toolsetGrants.ok) return { kind: 'reject', reason: `claude adapter cannot grant projected MCP toolset tools: ${toolsetGrants.reason}`, retryable: false };
-    // The whole reserved table, never a memory-only slice of it (codex
-    // consumes the same call unfiltered, `codex-adapter.ts`). The table is
-    // the single authority on which SDK-reserved servers this task projected
-    // may be called non-interactively, and claude auto-denies an MCP tool
-    // missing from `--allowedTools` (permission-mapping.ts) — so a filter
-    // here meant a `messageEgress` offer mounted `byokagentmessage` with a
-    // tool the model could list and never call (#180). Which MODES receive
-    // the grant is still the mapping's decision, made once for reserved and
-    // observed grants together. The approval channel stays out of the table
-    // itself (interactive-only), so nothing here can pre-grant a permission
-    // decision a human is supposed to make.
-    const reservedGrants = resolveReservedMcpToolGrants(input.mcpServers);
-    const mapping = mapPermissionPolicyToClaudeArgs(input.policy, [
-      ...reservedGrants,
-      ...toolsetGrants.grants,
-    ]);
-    if (!mapping.ok) return { kind: 'reject', reason: mapping.reason ?? 'policy rejected by claude adapter', retryable: false };
     let modelId: string | undefined;
     try {
       modelId = subscriptionModel(input.offer.dispatchSelection, 'claude');
@@ -197,19 +160,15 @@ export class ClaudeAdapter implements RuntimeAdapter {
     return {
       kind: 'prepared',
       operation: {
-        start: (startInput) => this.startPrepared(startInput, mapping, modelId, bin, toolsetGrants.grants, input.policy.mode),
+        start: (startInput) => this.startPrepared(startInput, modelId, bin),
       },
     };
   }
 
   private async startPrepared(
     startInput: RuntimeOperationStartInput,
-    initialMapping: ReturnType<typeof mapPermissionPolicyToClaudeArgs>,
     modelId: string | undefined,
     bin: ResolvedBin,
-    preparedGrants: readonly McpToolsetGrant[],
-    /** The mode the grants were resolved under; re-filtering with any other would compare two different policies. */
-    permissionMode: PermissionMode,
   ): Promise<Session> {
     const signal = startInput.signal;
     const cancellationFailure = () => new RuntimeExecutionFailure({
@@ -217,12 +176,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
       reason: 'claude runtime startup was cancelled',
     }, { cause: signal?.reason });
     if (signal?.aborted) throw cancellationFailure();
-    if (!initialMapping.ok) throw new RuntimeExecutionFailure({
-      phase: 'start',
-      category: 'authority',
-      retry: 'non-retryable',
-      reason: 'prepared claude permission mapping was invalid',
-    });
     // This adapter has no prepared-input lane: a frozen provider request is
     // compiled against the pi runtime's own verified closure, and claude cannot
     // be told to send someone else's bytes. Refused by name rather than
@@ -244,22 +197,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         reason: 'prepared claude operation requires a resolved string instruction',
       });
     }
-    // The `--allowedTools` grant baked into `initialMapping.args` was computed
-    // from the ADMISSION input; the resources handed to start() are a
-    // separate object. Comparing the two here keeps a caller from swapping in
-    // different MCP authority (or a different tool observation) after the
-    // grant that names it was already frozen — the same fail-closed
-    // re-check the model selection below gets.
-    const startGrants = resolveMcpToolsetGrants(startInput.mcpServers, startInput.mcpToolsetTools, permissionMode);
-    if (!startGrants.ok || grantFingerprint(startGrants.grants) !== grantFingerprint(preparedGrants)) {
-      throw new RuntimeExecutionFailure({
-        phase: 'start',
-        category: 'authority',
-        retry: 'non-retryable',
-        reason: 'prepared claude operation received different MCP toolset tool authority than it was admitted with',
-      });
-    }
-    const mapping = { ...initialMapping, args: [...initialMapping.args] };
+    const mcpArgs: string[] = [];
 
     // Generate only task-scoped host/reserved MCP config outside the operation workspace.
     let mcpConfigDir: string | undefined;
@@ -294,56 +232,13 @@ export class ClaudeAdapter implements RuntimeAdapter {
         await fs.chmod(mcpConfigDir, 0o700).catch(() => {});
         throwIfCancelled();
         const mcpConfigPath = path.join(mcpConfigDir, 'mcp-config.json');
-        const mcpServers: Record<string, unknown> = { ...taskMcpServers };
-        // The claude CLI spawns every server in this file itself, and
-        // `mcpServers` has no per-server cwd field — the child would inherit the
-        // CLI's cwd, which is the manifest cwd, which for an Agent task is the
-        // Agent home the agent writes by design. A `bun --compile` server binary
-        // runs `$cwd/bunfig.toml` `preload` before its own code, so every entry
-        // is rewritten through this package's `bin/byok-launch-cwd.mjs`, which
-        // chdirs into the daemon's proven-non-writable launch directory and
-        // execs the real command with its argv byte-identical.
-        //
-        // The CLI's OWN cwd is deliberately unchanged: session resume and
-        // relative path resolution depend on it (`agent-home-contract.test.ts`).
-        //
-        const launchBinding = startInput.mcpLaunch;
-        if (Object.keys(mcpServers).length > 0
-          && (launchBinding === undefined || launchBinding.launcher === undefined)) {
-          throw new RuntimeExecutionFailure({
-            phase: 'start', category: 'authority', retry: 'non-retryable',
-            reason: 'prepared claude operation received MCP servers without a trusted launch directory',
-          });
-        }
-        if (launchBinding?.launcher !== undefined) {
-          const wrapped = { cwd: launchBinding.cwd, launcher: launchBinding.launcher };
-          for (const [name, server] of Object.entries(mcpServers)) {
-            try {
-              mcpServers[name] = wrapMcpServerWithLaunchCwd(server as McpStdioServerConfig, wrapped);
-            } catch (cause) {
-              // A refusal from the launcher wrapper is this adapter's own
-              // pre-spawn refusal, exactly like the ones above, and must reach
-              // TaskRunner as one: an untyped throw is projected as a generic
-              // `runtime adapter contract violation during start`, which hides
-              // the `launch_cwd_*` reason the operator needs to fix their MCP
-              // server configuration.
-              throw new RuntimeExecutionFailure({
-                phase: 'start', category: 'authority', retry: 'non-retryable',
-                reason: `prepared claude operation cannot launch an MCP server in the trusted launch directory: ${cause instanceof Error ? cause.message : 'launch_cwd_target_refused'}`,
-              }, { cause });
-            }
-          }
-        }
+        // The claude CLI spawns these servers itself, in its own cwd: the
+        // session workspace or the Agent home, as in OAR.
         throwIfCancelled();
-        await fs.writeFile(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });
-        mapping.args = [
-          ...mapping.args,
-          '--mcp-config',
-          mcpConfigPath,
-          // The generated file is the complete task-scoped MCP authority.
-          // Never merge ambient user/project MCP configuration into it.
-          '--strict-mcp-config',
-        ];
+        await fs.writeFile(mcpConfigPath, JSON.stringify({ mcpServers: taskMcpServers }), { mode: 0o600 });
+        // Added to the user's own MCP configuration, not in place of it: the
+        // user's settings, deny rules and hooks still load, as in OAR.
+        mcpArgs.push('--mcp-config', mcpConfigPath);
       }
 
       const resumeSessionId = startInput.manifest.sessionRef;
@@ -386,8 +281,16 @@ export class ClaudeAdapter implements RuntimeAdapter {
         '--verbose',
         ...(manifestModelId ? ['--model', manifestModelId] : []),
         ...(resumeSessionId ? ['--resume', resumeSessionId] : []),
-        ...(this.nativeOptions === undefined ? [] : ['--permission-prompt-tool', 'stdio']),
-        ...mapping.args,
+        // YOLO by default, as in OAR (`runtimes/claude/session.ts`): no human
+        // sits at an approval prompt, so a permission gate is a hang, not
+        // safety. A Host that opted into native interactions answers each
+        // request in its own UI instead. Under `acceptEdits` with no
+        // per-tool grant, that includes every MCP tool call — the SDK's
+        // reserved memory and message tools too.
+        ...(this.nativeOptions === undefined
+          ? ['--dangerously-skip-permissions']
+          : ['--permission-prompt-tool', 'stdio', '--permission-mode', 'acceptEdits']),
+        ...mcpArgs,
       ];
 
       throwIfCancelled();
@@ -396,19 +299,13 @@ export class ClaudeAdapter implements RuntimeAdapter {
         ...this.nativeOptions,
         // The adapter, never the host callback, owns fatal process termination.
         onFatal: error => client?.abortStartup(error),
-      }, resumeSessionId, toolName => {
-        if (toolName.startsWith('mcp__')) {
-          const grants = [...preparedGrants, ...resolveReservedMcpToolGrants(startInput.mcpServers)];
-          return grants.some(grant => grant.tools.some(tool => toolName === `mcp__${grant.server}__${tool}`));
-        }
-        return startInput.manifest.policy.allowTools === undefined || startInput.manifest.policy.allowTools.includes(toolName);
-      });
+      }, resumeSessionId);
       try {
         client = new ClaudeProcessClient({
           command: bin.command,
           args,
           cwd: manifestCwd,
-          env: withoutProviderCredentials(startInput.env),
+          env: startInput.env,
           spawnFn: this.options.spawnFn,
           control: native === undefined ? control : {
             bind: write => { control.bind(write); native.bind(write); },

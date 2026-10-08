@@ -159,16 +159,12 @@ if (process.env.FAKE_CLAUDE_PROCESS_TREE_FILE && argv.includes('-p')) {
   });
 }
 
-// Real claude 2.1.251 auto-denies an MCP tool that is not named in
-// --allowedTools, under --permission-mode default AND under acceptEdits
-// (live-confirmed against a one-tool stdio echo server — see
-// adapters/claude/permission-mapping.ts). The grant check below mirrors that
-// exactly, so an adapter regression that stops emitting the grant fails a
-// test here instead of silently passing against a permissive fixture.
-function isMcpToolGranted(serverName, toolName) {
-  const index = argv.indexOf('--allowedTools');
-  if (index === -1 || argv[index + 1] === undefined) return false;
-  return argv[index + 1].split(',').includes(`mcp__${serverName}__${toolName}`);
+// Real claude auto-denies an MCP tool call under --permission-mode default
+// AND under acceptEdits; --dangerously-skip-permissions allows it. The check
+// below mirrors that, so an adapter regression that drops the YOLO flag fails
+// a test here instead of silently passing against a permissive fixture.
+function isMcpToolGranted() {
+  return argv.includes('--dangerously-skip-permissions');
 }
 
 async function callConfiguredMcpTool(serverName, toolName, toolArguments) {
@@ -176,7 +172,7 @@ async function callConfiguredMcpTool(serverName, toolName, toolArguments) {
   if (configIndex === -1 || !argv[configIndex + 1]) {
     throw new Error('fake claude was asked to call MCP without --mcp-config');
   }
-  if (!isMcpToolGranted(serverName, toolName)) {
+  if (!isMcpToolGranted()) {
     throw new Error(`Claude requested permissions to use mcp__${serverName}__${toolName}, but you haven't granted it yet.`);
   }
   const config = JSON.parse(readFileSync(argv[configIndex + 1], 'utf8'));
@@ -313,11 +309,11 @@ function runProbeOrTurnFlow() {
 
   // Exactly the flags packages/client/src/adapters/claude/claude-adapter.ts
   // can ever construct today — see the module doc comment above.
-  // M4 Phase 3: --permission-prompt-tool/--mcp-config/--strict-mcp-config
-  // added for `confirm` mode (see permission-mapping.ts's confirm-mode doc
-  // comment) — a regression here (a flag rename/removal on the adapter side
-  // with no matching update here) must fail a test via "unknown option",
-  // exactly like every other flag in this map.
+  // A regression here (a flag rename/removal on the adapter side with no
+  // matching update here, or a removed permission flag coming back) must
+  // fail a test via "unknown option", exactly like every other flag in this
+  // map. `--permission-mode` and `--permission-prompt-tool` are only the
+  // native-interactions opt-in path.
   const FLAG_TAKES_VALUE = {
     '-p': false,
     '--input-format': true,
@@ -325,11 +321,8 @@ function runProbeOrTurnFlow() {
     '--verbose': false,
     '--model': true,
     '--resume': true,
+    '--dangerously-skip-permissions': false,
     '--permission-mode': true,
-    '--tools': true,
-    // The projected-MCP-toolset permission pre-grant — never a built-in
-    // restriction (see adapters/claude/permission-mapping.ts).
-    '--allowedTools': true,
     '--permission-prompt-tool': true,
     '--mcp-config': true,
     '--strict-mcp-config': false,

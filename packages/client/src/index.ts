@@ -12,11 +12,8 @@ export type {
   RuntimeDetectResult,
   RuntimeDetectionAdvisory,
   RuntimeDetectionRefusalReason,
-  RuntimeInstallationObservationContext,
   Session,
   GitWorkspaceConfig,
-  McpLaunchBinding,
-  McpLaunchCwdConfig,
   McpStdioServerConfig,
   McpToolsetConfig,
   McpToolsetLifecycleState,
@@ -25,38 +22,7 @@ export type {
   McpToolsetRegistryStatus,
   McpToolsetReloadReceipt,
   AgentEgressPolicy,
-  LaunchCwdRejection,
-  TrustedLaunchCwd,
-  TrustedLaunchCwdUnavailableReason,
 } from './types';
-export { resolveMcpLaunchCwdLauncher, resolveTrustedLaunchCwd } from './daemon/trusted-launch-cwd';
-/**
- * The host install-record authority this SDK declares and never implements
- * (`daemon/tool-implementation-identity.ts`). A daemon constructed without one
- * resolves every tool implementation identity to `resolver_unconfigured`.
- *
- * `parseToolImplementationIdentity` is deliberately NOT exported: it is the
- * only function that turns a parsed value into an attested identity, and its
- * one caller is this package's own task-scoped configuration reader.
- */
-export type {
-  RuntimeEntryV1,
-  RuntimeDescendantPolicyV1,
-  RuntimeDescendantEdgeV1,
-  RuntimeImplementationRecordV1,
-  RuntimeImplementationResolutionV1,
-  ToolImplementationAttestedV1,
-  ToolImplementationAuthority,
-  ToolImplementationIdentityV1,
-  ToolImplementationInstallRecordV1,
-  ToolImplementationInterpreterV1,
-  ToolImplementationLocatorV1,
-  ToolImplementationResolutionV1,
-  ToolImplementationStatTupleV1,
-  ToolImplementationUnavailableReasonV1,
-  ToolImplementationUnavailableV1,
-} from '@byok-sdk/implementation-identity';
-export { ToolImplementationReverifyError } from '@byok-sdk/implementation-identity';
 export type { AgentRef } from './agent-home';
 export {
   AgentHomeError,
@@ -111,7 +77,6 @@ export type {
   LocalStateRelocationLease,
 } from './local-state-relocation';
 export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDescriptor, sealRuntimeOperationManifest } from './types';
-export type { RuntimeEnvironmentRequirements } from './daemon/environment';
 export { resolveLocalAgentReleaseIdentity } from './release-identity';
 export type { LocalAgentReleaseIdentity } from './release-identity';
 export {
@@ -225,7 +190,6 @@ export type {
   AgentEgressLaneStatus,
   AgentEgressStatus,
 } from './daemon/agent-egress-policy';
-export type { AgentEgressSanitizer, AgentEgressSanitizerContext } from './daemon/agent-egress-sanitizer';
 export {
   AGENT_CONTENT_READ_CAPABILITIES,
   AGENT_CONTENT_READ_CAPABILITY_WORKSPACE,
@@ -585,7 +549,7 @@ export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin';
 export { ClaudeAdapter } from './adapters/claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
 
-export { CodexAdapter, type CodexAdapterOptions } from './adapters/codex/codex-adapter';
+export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
 
 export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from './diagnostics/device-doctor';
 export type {

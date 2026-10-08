@@ -35,7 +35,6 @@ interface FixtureConfig {
   silent?: boolean;
   floodBytes?: number;
   dumpEnvTo?: string;
-  dumpCwdTo?: string;
   dumpPidTo?: string;
 }
 
@@ -43,20 +42,19 @@ function fixtureServer(config: FixtureConfig): McpStdioServerConfig {
   return { command: process.execPath, args: [PROBE_FIXTURE, JSON.stringify(config)] };
 }
 
-/** The allowlisted environment the real runtime child of a task would receive. */
+/** The environment the real runtime child of a task would receive. */
 function runtimeEnv(): Record<string, string> {
-  return buildRuntimeEnv({ ambient: process.env, requirements: { credentialNames: [] } });
+  return buildRuntimeEnv({ ambient: process.env });
 }
 
 async function probe(
   server: McpStdioServerConfig,
-  overrides: { timeoutMs?: number; cwd?: string; env?: Record<string, string> } = {},
+  overrides: { timeoutMs?: number; env?: Record<string, string> } = {},
 ): Promise<readonly string[]> {
   return probeMcpServerTools('probed_server', server, {
     label: 'probed server',
     timeoutMs: overrides.timeoutMs ?? 5_000,
     env: overrides.env ?? runtimeEnv(),
-    ...(overrides.cwd === undefined ? {} : { cwd: overrides.cwd }),
   });
 }
 
@@ -139,29 +137,25 @@ describe('probeMcpServerTools — observed tool names', () => {
 });
 
 describe('probeMcpServerTools — spawned child', () => {
-  it('never hands the daemon\'s own ambient credentials to the probed server', async () => {
+  it('never hands this SDK\'s own BYOK_* control-plane variables to the probed server', async () => {
     const root = await tmpRoot();
     const dumpEnvTo = path.join(root, 'env.json');
     const restore = { ...process.env };
     process.env.BYOK_SECRET = 'control-plane-secret';
-    process.env.AWS_SECRET_ACCESS_KEY = 'daemon-deployment-secret';
     try {
       await probe(fixtureServer({ tools: [{ name: 'echo' }], dumpEnvTo }));
     } finally {
       delete process.env.BYOK_SECRET;
-      delete process.env.AWS_SECRET_ACCESS_KEY;
       Object.assign(process.env, restore);
     }
     const childEnv = JSON.parse(await fs.readFile(dumpEnvTo, 'utf8')) as Record<string, string>;
     expect(childEnv).not.toHaveProperty('BYOK_SECRET');
-    expect(childEnv).not.toHaveProperty('AWS_SECRET_ACCESS_KEY');
     expect(JSON.stringify(childEnv)).not.toContain('control-plane-secret');
-    expect(JSON.stringify(childEnv)).not.toContain('daemon-deployment-secret');
-    // The platform baseline still arrives, or the server could not run at all.
+    // The rest of the runtime environment still arrives.
     expect(childEnv.PATH).toBe(process.env.PATH);
   });
 
-  it('layers an SDK-reserved server\'s own env over the allowlisted base', async () => {
+  it('layers an SDK-reserved server\'s own env over the runtime base', async () => {
     const root = await tmpRoot();
     const dumpEnvTo = path.join(root, 'env.json');
     const server = fixtureServer({ tools: [{ name: 'echo' }], dumpEnvTo });
@@ -171,13 +165,6 @@ describe('probeMcpServerTools — spawned child', () => {
     // task-scoped value the SDK deliberately hands one of its own reserved
     // helpers is layered on top, exactly as the runtime path layers it.
     expect(childEnv.BYOK_AGENT_MESSAGE_CONTEXT).toBe('context-token');
-  });
-
-  it('runs the server in the supplied working directory', async () => {
-    const root = await tmpRoot();
-    const dumpCwdTo = path.join(root, 'cwd.txt');
-    await probe(fixtureServer({ tools: [{ name: 'echo' }], dumpCwdTo }), { cwd: root });
-    expect(await fs.realpath(await fs.readFile(dumpCwdTo, 'utf8'))).toBe(await fs.realpath(root));
   });
 
   it('times out and leaves no lingering child behind', async () => {

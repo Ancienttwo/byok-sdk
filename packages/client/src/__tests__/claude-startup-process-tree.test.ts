@@ -35,8 +35,8 @@ describe('Claude rejected startup process-tree receipt', () => {
     const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: 'inert-node-fixture', source: 'path' }), spawnFn });
     try {
       const failure = await startPreparedOperation(adapter, {
-        instruction: 'hello', policy: { mode: 'auto' }, sessionRef: 'requested-session',
-      }, { workspaceDir, policy: { mode: 'auto' }, env: process.env }).catch(error => error);
+        instruction: 'hello', sessionRef: 'requested-session',
+      }, { workspaceDir, env: process.env }).catch(error => error);
       expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
       expect(failure).toMatchObject({ phase: 'start', category: 'authority' });
       const receipt = JSON.parse(await fs.readFile(receiptFile, 'utf8')) as { rootPid: number; descendantPid: number; grandchildPid: number };

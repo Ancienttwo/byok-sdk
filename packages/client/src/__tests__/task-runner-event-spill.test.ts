@@ -101,7 +101,7 @@ describe('TaskRunner: maxInlineEventBytes spill to the blob plane', () => {
     });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'task-spill', seq: 1 }),
+      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-spill', seq: 1 }),
     );
     const session = adapter.sessions[0];
     expect(session).toBeDefined();
@@ -160,7 +160,7 @@ describe('TaskRunner: maxInlineEventBytes spill to the blob plane', () => {
     });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'task-unstored', seq: 1 }),
+      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-unstored', seq: 1 }),
     );
     const session = adapter.sessions[0];
     session!.emit({ type: 'tool_use', tool: 'write_file', input: OUTPUT_300_KIB });
@@ -219,7 +219,7 @@ describe('TaskRunner: maxInlineEventBytes spill to the blob plane', () => {
     });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'task-locator', seq: 1 }),
+      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-locator', seq: 1 }),
     );
     const session = adapter.sessions[0];
     session!.emit({ type: 'tool_result', tool: 'bash', toolCallId: 'call-locator', output: OUTPUT_300_KIB });
@@ -250,7 +250,7 @@ describe('TaskRunner: maxInlineEventBytes spill to the blob plane', () => {
     const runner = await makeRunner(adapter, sent, client, { maxInlineEventBytes: 64 * 1024 });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'task-small', seq: 1 }),
+      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-small', seq: 1 }),
     );
     const session = adapter.sessions[0];
     const event: AgentEvent = { type: 'tool_result', tool: 'bash', toolCallId: 'c1', output: { stdout: 'ok' } };

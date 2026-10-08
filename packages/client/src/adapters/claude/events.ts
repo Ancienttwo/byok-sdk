@@ -115,7 +115,7 @@ export const ROUTINE_CLAUDE_SYSTEM_SUBTYPES: ReadonlySet<string> = new Set([
   'thinking_tokens',
 ]);
 
-/** Claude tool names whose successful `tool_result` may correspond to a file written into the task workspace — see `tryBuildArtifactEvent`. `Write` is fully empirically confirmed (real `tool_use_result.filePath`/`.type:"create"` shape captured live); `Edit`/`NotebookEdit` are included by the same reasoning/convention as `permission-mapping.ts`'s `Glob`/`Grep` note — not independently re-verified frame-by-frame here. */
+/** Claude tool names whose successful `tool_result` may correspond to a file written into the task workspace — see `tryBuildArtifactEvent`. `Write` is fully empirically confirmed (real `tool_use_result.filePath`/`.type:"create"` shape captured live); `Edit`/`NotebookEdit` are included by Claude Code's naming convention — not independently re-verified frame-by-frame here. */
 const FILE_WRITING_TOOLS: ReadonlySet<string> = new Set(['Write', 'Edit', 'NotebookEdit']);
 
 const EXTENSION_CONTENT_TYPES: Readonly<Record<string, string>> = {
@@ -284,7 +284,7 @@ function mapUser(msg: ClaudeStreamMessage, correlation: ToolUseCorrelation, opti
  * this is not just defensive coding, it is the concrete fix for a real,
  * confirmed case: `--permission-mode plan` writes its own plan document to
  * `~/.claude/plans/<slug>.md`, the user's actual home directory, regardless
- * of cwd (see `permission-mapping.ts`'s doc comment on that finding). That
+ * of cwd. That
  * path always resolves outside `workspaceDir` and must never be reported to
  * the daemon as this task's artifact.
  */

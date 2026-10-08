@@ -48,7 +48,7 @@ describe('logical MCP toolset dispatch', () => {
       runtimes: [
         {
           id: 'claude',
-          capabilities: { mcpToolsets: true, permissionModes: ['auto'] },
+          capabilities: { mcpToolsets: true },
         },
       ],
     });
@@ -56,7 +56,6 @@ describe('logical MCP toolset dispatch', () => {
     await started.byok.dispatch({
       instruction: 'find qualified leads',
       runtime: 'claude',
-      policy: { mode: 'auto' },
       requiredToolsets: ['salesko'],
     });
     const offer = await nextEnvelope(daemon);

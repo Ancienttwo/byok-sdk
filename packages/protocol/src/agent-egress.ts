@@ -75,22 +75,18 @@ export const ContentReadPolicySchema = z
   .strict();
 export type ContentReadPolicy = z.infer<typeof ContentReadPolicySchema>;
 
-export const AgentEgressActivityPolicySchema = z.discriminatedUnion('mode', [
-  z
-    .object({
-      mode: z.literal('metadata-status'),
-      delivery: z.literal('latest-value'),
-    })
-    .strict(),
-  z
-    .object({
-      mode: z.literal('contentful-trajectory'),
-      delivery: z.literal('latest-value'),
-      maxCoalesceMs: POSITIVE_LIMIT,
-      maxEventBytes: POSITIVE_LIMIT,
-    })
-    .strict(),
-]);
+/**
+ * The latest-value activity lane. Agent events go to the Host as the runtime
+ * produced them; these limits only bound transport (coalesce window and one
+ * event's byte size).
+ */
+export const AgentEgressActivityPolicySchema = z
+  .object({
+    delivery: z.literal('latest-value'),
+    maxCoalesceMs: POSITIVE_LIMIT,
+    maxEventBytes: POSITIVE_LIMIT,
+  })
+  .strict();
 export type AgentEgressActivityPolicy = z.infer<typeof AgentEgressActivityPolicySchema>;
 
 export const AgentReliableQuotaPolicySchema = z
@@ -103,9 +99,10 @@ export const AgentReliableQuotaPolicySchema = z
 export type AgentReliableQuotaPolicy = z.infer<typeof AgentReliableQuotaPolicySchema>;
 
 /**
- * The only consumable policy shape for Agent egress.  Missing/unknown policy
- * is intentionally not represented as a default: callers must select a
- * revision and all three content surfaces independently.
+ * The only consumable policy shape for Agent egress. It selects transport
+ * limits and the Host content-read surfaces. It does not filter, redact or
+ * omit Agent egress content. Callers must select a revision and all three
+ * content-read surfaces independently.
  */
 export const AgentEgressPolicySchema = z
   .object({
@@ -131,7 +128,6 @@ export type AgentEgressLane = z.infer<typeof AgentEgressLaneSchema>;
 export const AgentEgressDropReasonSchema = z.enum([
   'policy_denied',
   'capability_missing',
-  'sanitizer_rejected',
   'quota_exceeded',
   'backpressure',
   'coalesced',

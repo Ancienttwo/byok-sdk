@@ -2,7 +2,6 @@
   "schemaVersion": 1,
   "packages": {
     "@byok-sdk/core": { "priorPublication": "existing", "previousLatest": "0.23.0" },
-    "@byok-sdk/implementation-identity": { "priorPublication": "existing", "previousLatest": "0.23.0" },
     "@byok-sdk/protocol": { "priorPublication": "existing", "previousLatest": "0.23.0" },
     "@byok-sdk/server": { "priorPublication": "existing", "previousLatest": "0.23.0" },
     "@byok-sdk/cloud": { "priorPublication": "existing", "previousLatest": "0.23.0" },

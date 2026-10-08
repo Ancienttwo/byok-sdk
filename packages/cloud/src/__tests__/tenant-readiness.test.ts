@@ -23,14 +23,14 @@ describe('SDK-owned tenant readiness projection', () => {
       body: JSON.stringify({
         level: 'working',
         clientVersion: '0.4.2',
-        protocolVersions: [1],
+        protocolVersions: [2],
         runtimes: [{ id: 'pi', version: '1.0.0', authPresent: true }],
       }),
     });
     expect(presenceResponse.status).toBe(200);
     await expect(harness.core.presence.read(TENANT_A, active.deviceId)).resolves.toMatchObject({
       clientVersion: '0.4.2',
-      protocolVersions: [1],
+      protocolVersions: [2],
       runtimes: [{ id: 'pi', version: '1.0.0', authPresent: true }],
     });
     await harness.core.presence.publish(TENANT_A, {
@@ -98,7 +98,7 @@ describe('SDK-owned tenant readiness projection', () => {
           presence: {
             level: 'working',
             clientVersion: '0.4.2',
-            protocolVersions: [1],
+            protocolVersions: [2],
             runtimes: [{ id: 'pi', version: '1.0.0', authPresent: true }],
             observedAt: '2026-01-01T00:00:00.000Z',
             expiresAt: '2026-01-01T00:01:00.000Z',

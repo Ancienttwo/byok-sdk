@@ -103,7 +103,6 @@ function request(overrides: Partial<InputPreparationRequestV1> = {}): InputPrepa
       prompt: { systemPrompt: 'Host framing' },
       messages: [{ role: 'user', content: 'hello', timestamp: 1_700_000_000_000 }],
     },
-    permissionMode: 'auto',
     agentMemory: 'none', requiredToolsets: ['team'],
     ...overrides,
   };
@@ -628,13 +627,13 @@ describe('B-P2 service: readiness never reaches ready offline', () => {
 });
 
 describe('bounded admission: the counter is optional and byte evidence is the bound', () => {
-  /** Everything a ready receipt needs except the counter: a ruled policy and attested executors. */
+  /** Everything a ready receipt needs except the counter: a ruled policy. */
   async function readyCapable(counter: InputPreparationCounterAdapter | 'none', limits: InputPreparationLimitsPolicyV1 = LIMITS, compiler = stubCompiler()) {
     const service = await makeService({
       compiler,
       counter,
       limits,
-      toolSurface: recordingToolSurface({ attested: true }),
+      toolSurface: recordingToolSurface(),
     });
     const prepare = (requestId: string) => service.prepare(request({
       requestId,

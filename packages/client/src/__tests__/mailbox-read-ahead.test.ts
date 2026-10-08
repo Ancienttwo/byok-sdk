@@ -75,7 +75,7 @@ it('R5/R6: real paginated cancel retires never-returning prepare and permits sam
     if (!blocked) { blocked = true; await gate; }
     return prepare(input);
   });
-  const payload = (agentId: string) => ({ instruction: 'work', policy: { mode: 'auto' as const }, harnessId: 'acme-harness', agentRef: { agentId, profileRevision: 'r1' } });
+  const payload = (agentId: string) => ({ instruction: 'work', harnessId: 'acme-harness', agentRef: { agentId, profileRevision: 'r1' } });
   const a = await cloud.enqueueAgentOffer(device.deviceId, payload('a'));
   await vi.waitFor(() => expect(blocked).toBe(true));
   const b = await cloud.enqueueAgentOffer(device.deviceId, payload('b'));

@@ -93,7 +93,7 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
       expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
 
-    const handle = await real.byok.dispatch({ instruction: 'do it over long-poll', policy: { mode: 'auto' } });
+    const handle = await real.byok.dispatch({ instruction: 'do it over long-poll' });
 
     // Claim/started: proves the offer was received over GET /byok/events and
     // the daemon's outbound reply reached the server over POST /byok/messages
@@ -145,7 +145,6 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
       handle = await real.byok.dispatch({
         deviceId: record.deviceId,
         instruction: 'run in the durable Agent home over long-poll',
-        policy: { mode: 'auto' },
         agentRef: { agentId: 'agent-longpoll', profileRevision: 'profile-1' },
       });
       expect(handle).toBeDefined();

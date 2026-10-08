@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { CAPABILITY_FLAGS, PROTOCOL_VERSION, PROVIDER_PROFILE_BINDING_CAPABILITY } from '../index';
 
 describe('protocol version and capability flags', () => {
-  it('PROTOCOL_VERSION is 1', () => {
-    expect(PROTOCOL_VERSION).toBe(1);
+  it('PROTOCOL_VERSION is 2', () => {
+    expect(PROTOCOL_VERSION).toBe(2);
   });
 
   it('includes at least the steer and blob-upload capability flags', () => {

@@ -14,7 +14,7 @@ const tenant = tenantId('custom-harness');
 const deviceId = 'custom-device';
 const harnessId = 'acme-harness';
 const capabilities = { steer: true };
-const payload = { instruction: 'run custom adapter', policy: { mode: 'auto' } } as const;
+const payload = { instruction: 'run custom adapter' } as const;
 
 describe('SQLite custom-harness claim authority', () => {
   const roots: string[] = [];

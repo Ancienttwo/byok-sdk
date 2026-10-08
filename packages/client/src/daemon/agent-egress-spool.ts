@@ -451,10 +451,7 @@ export class AgentLatestValueState {
     | Readonly<{ accepted: false; reason: Extract<AgentEgressDropReason, 'quota_exceeded' | 'backpressure'> }> {
     const key = `${record.tenantId}\u0000${record.agentRef.agentId}\u0000${record.agentRef.profileRevision}`;
     const byteCount = eventBytes(record.event);
-    const eventLimit = policy.activity.mode === 'contentful-trajectory'
-      ? policy.activity.maxEventBytes
-      : Math.min(policy.reliable.maxPendingBytesPerAgent, 64 * 1024);
-    if (byteCount > eventLimit) return { accepted: false, reason: 'backpressure' };
+    if (byteCount > policy.activity.maxEventBytes) return { accepted: false, reason: 'backpressure' };
     const prior = this.recordsByAgent.get(key);
     const tenantRecords = [...this.recordsByAgent.values()].filter((entry) => entry.tenantId === record.tenantId);
     const tenantBytes = tenantRecords.reduce((total, entry) => total + entry.byteCount, 0) - (prior?.byteCount ?? 0);

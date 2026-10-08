@@ -660,7 +660,7 @@ export async function collectDiagnostics(
   const connectControl = options.connectControl ?? connectControlClient;
   const [device, probedRuntimes, health, journal, workspace, quarantine, controlConnection] = await Promise.all([
     inspectDevice(resolvedStoreDir),
-    probeRuntimes(adapters, { timeoutMs: options.runtimeProbeTimeoutMs, toolImplementationAuthority: config.toolImplementationAuthority }),
+    probeRuntimes(adapters, { timeoutMs: options.runtimeProbeTimeoutMs }),
     inspectOperationalHealthFile(resolvedStoreDir),
     inspectJournal(resolvedStoreDir),
     inspectWorkspace(config.workspaceRoot),
@@ -676,7 +676,6 @@ export async function collectDiagnostics(
     ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
     steer: runtime.steer,
     resume: runtime.resume,
-    permissionModeCount: runtime.permissionModes.length,
   }));
 
   let control: DiagnosticsSnapshot['control'];

@@ -62,7 +62,6 @@ describe('blob client (protocol §7)', () => {
               contentType: 'text/plain',
             },
           },
-          policy: { mode: 'auto' },
         },
         { taskId: 'task-blob-instr', seq: server.nextSeq() },
       ),
@@ -95,7 +94,6 @@ describe('blob client (protocol §7)', () => {
               contentType: 'text/plain',
             },
           },
-          policy: { mode: 'auto' },
           runtime: 'claude',
         },
         { taskId, seq: server.nextSeq() },
@@ -134,7 +132,6 @@ describe('blob client (protocol §7)', () => {
               contentType: 'text/plain',
             },
           },
-          policy: { mode: 'auto' },
         },
         { taskId: 'task-blob-missing', seq: server.nextSeq() },
       ),
@@ -166,7 +163,6 @@ describe('blob client (protocol §7)', () => {
               contentType: 'text/plain',
             },
           },
-          policy: { mode: 'auto' },
         },
         { taskId: 'task-blob-tampered', seq: server.nextSeq() },
       ),
@@ -184,7 +180,7 @@ describe('blob client (protocol §7)', () => {
     await setupDaemon(adapter);
 
     server.send(
-      createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'task-artifact-small', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-artifact-small', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -208,7 +204,7 @@ describe('blob client (protocol §7)', () => {
     await setupDaemon(adapter);
 
     server.send(
-      createEnvelope('task.offer', { instruction: 'x', policy: { mode: 'auto' } }, { taskId: 'task-artifact-big', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'task-artifact-big', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -255,7 +251,7 @@ describe('blob client (protocol §7)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { instruction: 'x', policy: { mode: 'auto' } },
+          { instruction: 'x' },
           { taskId: 'task-artifact-traversal', seq: server.nextSeq() },
         ),
       );
@@ -296,7 +292,7 @@ describe('blob client (protocol §7)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { instruction: 'x', policy: { mode: 'auto' } },
+          { instruction: 'x' },
           { taskId: 'task-artifact-absolute', seq: server.nextSeq() },
         ),
       );
@@ -336,7 +332,7 @@ describe('blob client (protocol §7)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { instruction: 'x', policy: { mode: 'auto' } },
+          { instruction: 'x' },
           { taskId: 'task-artifact-upload-fail', seq: server.nextSeq() },
         ),
       );
@@ -378,7 +374,7 @@ describe('blob client (protocol §7)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { instruction: 'x', policy: { mode: 'auto' } },
+          { instruction: 'x' },
           { taskId: 'task-artifact-regular-ok', seq: server.nextSeq() },
         ),
       );
@@ -423,7 +419,7 @@ describe('blob client (protocol §7)', () => {
         server.send(
           createEnvelope(
             'task.offer',
-            { instruction: 'x', policy: { mode: 'auto' } },
+            { instruction: 'x' },
             { taskId: 'task-artifact-symlink-outside', seq: server.nextSeq() },
           ),
         );
@@ -462,7 +458,7 @@ describe('blob client (protocol §7)', () => {
         server.send(
           createEnvelope(
             'task.offer',
-            { instruction: 'x', policy: { mode: 'auto' } },
+            { instruction: 'x' },
             { taskId: 'task-artifact-intermediate-symlink', seq: server.nextSeq() },
           ),
         );
@@ -521,7 +517,7 @@ describe('blob client (protocol §7)', () => {
         server.send(
           createEnvelope(
             'task.offer',
-            { instruction: 'x', policy: { mode: 'auto' } },
+            { instruction: 'x' },
             { taskId: 'task-artifact-toctou-swap', seq: server.nextSeq() },
           ),
         );

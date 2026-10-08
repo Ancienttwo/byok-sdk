@@ -27,7 +27,7 @@ const blobClient: BlobResolver = {
   uploadArtifact: async () => ({ blobId: 'blob', contentHash: `sha256:${'0'.repeat(64)}`, contentType: 'text/plain', size: 1 }),
 };
 function payload(instruction = 'do work', sessionRef?: string) {
-  return { instruction, policy: { mode: 'auto' as const }, ...(sessionRef ? { sessionRef } : {}) };
+  return { instruction, ...(sessionRef ? { sessionRef } : {}) };
 }
 function envelope(_name: string, taskId: string, p: ReturnType<typeof payload> | { reason?: string }): Envelope {
   const type = 'reason' in p ? 'task.cancel' : 'task.offer';
@@ -250,7 +250,7 @@ async function waitForAssertion(assertion: () => void, timeoutMs = 1_000, interv
       if (kind === 'blob') {
         const { deps } = await makeDeps({ enabled: true, adapter, sent });
         deps.blobClient.resolveInstruction = async () => { throw new Error('blob'); };
-        await new TaskRunner(deps).handleEnvelope(envelope(`task-${kind}`, `task-${kind}`, { instruction: { blobRef: { blobId: 'ref', contentHash: `sha256:${'0'.repeat(64)}`, contentType: 'text/plain', size: 1 } }, policy: { mode: 'auto' } } as never));
+        await new TaskRunner(deps).handleEnvelope(envelope(`task-${kind}`, `task-${kind}`, { instruction: { blobRef: { blobId: 'ref', contentHash: `sha256:${'0'.repeat(64)}`, contentType: 'text/plain', size: 1 } } } as never));
         expect(sent.some((e) => e.type === 'task.fail')).toBe(true);
         continue;
       }

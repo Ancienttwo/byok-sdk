@@ -13,11 +13,6 @@ export const PI_PROJECTED_KEY_ENV = 'PI_PROVIDER_API_KEY';
  * argv decides the grammar, so the flag is required at the parser rather than
  * defaulted — a client/keys version skew then fails closed instead of
  * silently launching a prepared host under the rpc grammar.
- *
- * `@byok-sdk/implementation-identity` declares four entries; the other two
- * (`pi-subagent-print`, `pi-subagent-runner`) are descendants the launcher
- * never parents, so restating the pair here is a narrowing, not a second
- * vocabulary.
  */
 export const PI_LAUNCHER_RUNTIME_ENTRIES = ['pi-rpc', 'pi-prepared', 'pi-durable'] as const;
 export type PiLauncherRuntimeEntry = (typeof PI_LAUNCHER_RUNTIME_ENTRIES)[number];

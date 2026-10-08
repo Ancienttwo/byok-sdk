@@ -21,6 +21,14 @@ describe('sealed factory build author and bounded compiler exclusion', () => {
     expect(sealed).not.toContain('Cannot load typebox/compile for structured output validation');
     expect(read('dist/bin/pi-runtime-host.js')).toContain('Cannot load typebox/compile for structured output validation');
   });
+  it('exports the same Pi entries as the ordinary host, subagent children included', () => {
+    // A single-file product that selects the sealed host re-enters it for
+    // pi-subagent-print and pi-subagent-runner through the reserved helper.
+    const sealed = read('dist/bin/pi-runtime-host-sealed.js');
+    for (const name of ['runPiRpcHost', 'runPiPreparedHost', 'runPiDurableHost', 'runSubagentPrint', 'runSubagentRunner']) {
+      expect(sealed).toMatch(new RegExp(`export \\{[^}]*\\b${name}\\b`, 'u'));
+    }
+  });
   it('ships a private dist mapping, no new public subpath or npm source runtime author', () => {
     const manifest = JSON.parse(read('package.json'));
     expect(manifest.imports['#byok-pi-runtime-host-sealed']).toEqual({types:'./dist/bin/pi-runtime-host-sealed.d.ts',default:'./dist/bin/pi-runtime-host-sealed.js'});
@@ -49,8 +57,8 @@ describe('sealed factory build author and bounded compiler exclusion', () => {
   it('binds every vendored byte to its explicit provenance delta', () => {
     const vendor = path.join(root,'vendor/pi-subagents/0.60.0');
     const manifest=JSON.parse(readFileSync(path.join(vendor,'source-manifest.json'),'utf8'));
-    // WP4 five-edge custody cut un-pruned 7 upstream files (the runner
-    // closure) into the vendored tree: 229 + 7 = 236.
+    // The subagent runner closure adds 7 upstream files to the vendored
+    // tree: 229 + 7 = 236.
     expect(manifest.files).toHaveLength(236);
     for(const row of manifest.files) {
       expect(sha(path.join(vendor,row.path)),row.path).toBe(row.vendoredSha256);

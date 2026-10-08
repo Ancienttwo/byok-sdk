@@ -314,7 +314,7 @@ describe('requestTaskAssertion', () => {
     const adapter = new StubRuntimeAdapter(
       'pi',
       { kind: 'available' },
-      { steer: false, resume: true, approvalInteractive: true, mcpToolsets: true, permissionModes: ['auto'] },
+      { steer: false, resume: true, approvalInteractive: true, mcpToolsets: true },
       false,
     );
     const config: DaemonConfig = {
@@ -338,7 +338,6 @@ describe('requestTaskAssertion', () => {
         'task.offer_for_agent',
         {
           instruction: 'qualify the inbound lead',
-          policy: { mode: 'auto' },
           runtime: 'pi',
           agentRef: { agentId: 'salesko-agent', profileRevision: 'profile-rev-1' },
           requiredToolsets: [TOOLSET],

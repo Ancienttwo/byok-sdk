@@ -23,7 +23,6 @@ const GRANT_REF = 'opaque-grant-memory';
 function agentPayload() {
   return {
     instruction: 'run an Agent memory task',
-    policy: { mode: 'auto' as const },
     agentRef: AGENT_REF,
   };
 }

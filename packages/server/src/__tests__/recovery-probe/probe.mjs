@@ -78,8 +78,7 @@ async function child(stage, root) {
   };
   const adapter = {
     descriptor: freezeRuntimeAdapterDescriptor({ id: 'pi', supportsDispatchSelection: true, requiresMcpToolsetToolObservation: false,
-      capabilities: { steer: false, resume: false, approvalInteractive: false, mcpToolsets: false, permissionModes: ['auto'] },
-      environmentRequirements: { credentialNames: [] } }),
+      capabilities: { steer: false, resume: false, approvalInteractive: false, mcpToolsets: false } }),
     async detect() { return { kind: 'available', version: 'attribution-fixture-1' }; },
     async prepare() { return { kind: 'prepared', operation: { async start(input) {
       const taskId = input.manifest.taskId;
@@ -98,7 +97,7 @@ async function child(stage, root) {
   const daemonConfig = { productId: config.productId, productName: 'BYOK attribution probe',
     localAgentRelease: { version: '0.0.0-attribution' }, serverUrl,
     storeDir: path.join(root, 'device'), workspaceRoot: path.join(root, 'workspace'),
-    allowedRuntimes: ['pi'], permissionDefaults: { mode: 'auto' },
+    allowedRuntimes: ['pi'],
     ...(config.journal ? { hostedJournal: { mode: 'sqlite' } } : {}) };
   let byok, http, daemon, diagnosticDeviceId;
   try {
@@ -177,7 +176,7 @@ async function child(stage, root) {
     await until(() => checked(async () => (await byok.machines.list()).some(machine => machine.deviceId === enrollment.deviceId && machine.connected)), 'connected (not recovery barrier)');
     const snap = () => observation(root, config, serverUrl, enrollment.deviceId);
     if (stage === 'first') {
-      const handle = await byok.dispatch({ deviceId: enrollment.deviceId, instruction: 'attribution fixture', runtime: 'pi', policy: { mode: 'auto' } });
+      const handle = await byok.dispatch({ deviceId: enrollment.deviceId, instruction: 'attribution fixture', runtime: 'pi' });
       taskA = handle.taskId;
       await log({ kind: 'dispatch', taskId: taskA, hostRequestId: config.hostRequestId, submission: 'A' });
       await until(() => checked(async () => {
@@ -214,7 +213,7 @@ async function child(stage, root) {
     await log({ kind: 'recovery-barrier', taskId: taskA, completedPolls, emptyPolls });
     let taskB;
     if (config.dispatchB) {
-      const handle = await byok.dispatch({ deviceId: enrollment.deviceId, instruction: 'attribution fixture', runtime: 'pi', policy: { mode: 'auto' } });
+      const handle = await byok.dispatch({ deviceId: enrollment.deviceId, instruction: 'attribution fixture', runtime: 'pi' });
       taskB = handle.taskId;
       await log({ kind: 'dispatch', taskId: taskB, hostRequestId: config.hostRequestId, submission: 'B' });
       assert.notEqual(taskB, taskA);

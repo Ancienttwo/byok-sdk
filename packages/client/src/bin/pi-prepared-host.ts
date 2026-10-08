@@ -1,16 +1,9 @@
-import { parseRuntimeDescendantPlan, type RuntimeDescendantPlanV2 } from '../adapters/pi/runtime-descendant-plan';
-import { extractPiConfigDigest, readPiHostConfig, requirePiHostBinding, verifyPiHostBinding } from '../adapters/pi/runtime-host-binding';
-import { configureCustodyRuntimePlan } from '../custody/external-cli-authority';
-import type { ImplementationSpawnBindingV1 } from '@byok-sdk/implementation-identity';
+import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import process from 'node:process';
 import {
-  PERMISSION_MODES,
-  PermissionPolicySchema,
   PreparedAgentMemoryModeSchema,
-  type PermissionMode,
-  type PermissionPolicy,
   type PreparedAgentMemoryMode,
 } from '@byok-sdk/protocol';
 import {
@@ -21,7 +14,7 @@ import {
   type AgentSessionServices,
 } from '@earendil-works/pi-coding-agent';
 import { inputPreparationRuntimeIdentityString, type InputPreparationModelV1 } from '../input-preparation';
-import { verifyPreparedPiInput, type PreparedPiInputV1 } from '../adapters/pi/input-preparation';
+import { resolveInstalledPiRuntimeIdentity, resolvePinnedPiRuntimeIdentity, verifyPreparedPiInput, type PreparedPiInputV1 } from '../adapters/pi/input-preparation';
 import {
   canonicalPreparedValue,
   PreparedSessionError,
@@ -42,8 +35,6 @@ import {
   type PreparedRunRefusalFrame,
 } from '../adapters/pi/prepared-prompt-frame';
 import { RPC_MAX_FRAME_BYTES } from '../util/rpc-frame';
-import { loaderEnvInjections } from '../daemon/environment';
-import type { McpLaunchAttestation } from '../daemon/trusted-launch-cwd';
 import {
   McpServerPool,
   parseMcpServerSpec,
@@ -60,8 +51,6 @@ import {
   validatePreparedAgentMemoryObservation,
 } from '../agent-memory/prepared-capability';
 import {
-  memoryServer,
-  memorySpawnBinding,
   parsePreparedMemoryState,
   type PreparedAgentMemoryState,
 } from '../daemon/prepared-agent-memory';
@@ -95,7 +84,7 @@ import {
  */
 
 const CONFIG_FORMAT = 'byok.pi.prepared-launch';
-const CONFIG_VERSION = 3;
+const CONFIG_VERSION = 5;
 /**
  * Where this process's provider credential comes from, and the ONE switch the
  * rest of this file branches on. Written by the adapter from
@@ -491,33 +480,14 @@ function admitPreparedProviderProjection(
   });
 }
 
-function parseLaunch(value: unknown): McpLaunchAttestation {
-  if (!isPlainObject(value)) fail('launch must be an object');
-  const launchCwd = requireString(value.launchCwd, 'launch.launchCwd');
-  if (!isAbsolute(launchCwd)) fail('launch.launchCwd must be an absolute path');
-  const launcher = value.launcher;
-  if (launcher !== null && !isPlainObject(launcher)) fail('launch.launcher must be an object or null');
-  return Object.freeze({
-    launchCwd,
-    launcher: launcher === null
-      ? null
-      : Object.freeze({ ...launcher }) as McpLaunchAttestation['launcher'],
-  });
-}
-
 /** What the pi adapter writes for exactly one prepared operation. */
 interface PreparedLaunchConfig {
-  readonly binding: ImplementationSpawnBindingV1;
-  readonly descendantPlan: RuntimeDescendantPlanV2 | null;
   readonly credentialSource: CredentialSource;
   readonly cwd: string;
-  readonly policy: PermissionPolicy;
-  readonly countedPermissionMode: PermissionMode;
   readonly model: InputPreparationModelV1;
   readonly toolBindingDigest: string;
   readonly observationDigest: string;
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
-  readonly launch: McpLaunchAttestation;
   readonly agentMemory: PreparedAgentMemoryMode;
   readonly memory: PreparedAgentMemoryState | null;
   /** Private execution helper configuration, kept outside the Host MCP map. */
@@ -533,23 +503,11 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
     fail(`${configPath} could not be read as JSON: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
   if (!isPlainObject(parsed)) fail('the prepared launch configuration must be an object');
-  const keys = ['format','version','binding','descendantPlan','credentialSource','cwd','policy','countedPermissionMode','expected','toolBindingDigest','observationDigest','toolsetDefinitionRevisions','launch','agentMemory','memory','memoryCall','mcp'];
+  const keys = ['format','version','credentialSource','cwd','expected','toolBindingDigest','observationDigest','toolsetDefinitionRevisions','agentMemory','memory','memoryCall','mcp'];
   if (Object.keys(parsed).length !== keys.length || !keys.every(key => Object.hasOwn(parsed, key))) fail('prepared config has missing or unknown keys');
   if (parsed.format !== CONFIG_FORMAT) fail(`the prepared launch configuration must declare format ${CONFIG_FORMAT}`);
   if (parsed.version !== CONFIG_VERSION) fail(`the prepared launch configuration must declare version ${CONFIG_VERSION}`);
 
-  // Parsed with the protocol's own schema rather than by hand: this value is
-  // what decides the native tool selection, and a hand-rolled reader would be a
-  // second, laxer definition of a security-control shape that is `.strict()` on
-  // purpose.
-  const policyResult = PermissionPolicySchema.safeParse(parsed.policy);
-  if (!policyResult.success) fail(`policy is not a valid permission policy: ${policyResult.error.message}`);
-
-  const countedPermissionMode = parsed.countedPermissionMode;
-  if (typeof countedPermissionMode !== 'string'
-    || !(PERMISSION_MODES as readonly string[]).includes(countedPermissionMode)) {
-    fail(`countedPermissionMode must be one of [${PERMISSION_MODES.join(', ')}]`);
-  }
   if (!isPlainObject(parsed.expected)) fail('expected must be an object');
 
   const credentialSource = parsed.credentialSource;
@@ -561,13 +519,6 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
   if (!isAbsolute(cwd)) fail('cwd must be an absolute path');
 
   const mcp = parseTaskScopedMcpConfig(parsed.mcp, fail);
-  // One mode, stated once. The pool's own configuration carries it because the
-  // ordinary extension reads the same shape; a disagreement between the two
-  // copies would mean the registered set and the verified set were chosen under
-  // different policies.
-  if (mcp.permissionMode !== countedPermissionMode) {
-    fail('mcp.permissionMode disagrees with countedPermissionMode');
-  }
   const memoryMode = PreparedAgentMemoryModeSchema.safeParse(parsed.agentMemory);
   if (!memoryMode.success) fail('agentMemory is invalid: ' + memoryMode.error.message);
   let memory: PreparedAgentMemoryState | null;
@@ -590,24 +541,13 @@ function loadConfig(configPath: string, digest: string): PreparedLaunchConfig {
     fail('agentMemory does not agree with its sealed memory state and private execution helper');
   }
 
-  const binding = requirePiHostBinding(parsed.binding);
-  let descendantPlan: RuntimeDescendantPlanV2 | null;
-  try {
-    descendantPlan = parseRuntimeDescendantPlan(parsed.descendantPlan, 'pi-prepared', parsed.binding as ImplementationSpawnBindingV1);
-  } catch (error) {
-    fail(error instanceof Error ? error.message : String(error));
-  }
   return Object.freeze({
-    binding, descendantPlan,
     credentialSource: credentialSource as CredentialSource,
     cwd,
-    policy: policyResult.data,
-    countedPermissionMode: countedPermissionMode as PermissionMode,
     model: parsePreparedExpectedModel(parsed.expected.model),
     toolBindingDigest: requireString(parsed.toolBindingDigest, 'toolBindingDigest'),
     observationDigest: requireString(parsed.observationDigest, 'observationDigest'),
     toolsetDefinitionRevisions: requireStringRecord(parsed.toolsetDefinitionRevisions, 'toolsetDefinitionRevisions'),
-    launch: parseLaunch(parsed.launch),
     agentMemory: memoryMode.data,
     memory,
     memoryCall,
@@ -625,27 +565,19 @@ interface PreparedMemoryCall {
 }
 
 /**
- * Re-measure and handshake the task-bound execution helper before model setup.
- * The helper descriptor must equal the sealed task-free descriptor exactly;
- * it is not added to the Host MCP pool or its observation map.
+ * Handshake the task-bound execution helper before model setup. The helper
+ * descriptor must equal the prepared task-free descriptor exactly. It is not
+ * added to the Host MCP pool or its observation map.
  */
 export async function openPreparedMemoryCall(config: PreparedLaunchConfig): Promise<PreparedMemoryCall | undefined> {
   if (config.agentMemory === 'none') return undefined;
   const memory = config.memory;
   const server = config.memoryCall;
-  if (memory === null || server === null) fail('selected Agent memory has no sealed execution helper');
-  const binding = memorySpawnBinding(memory.implementation.execution, 'agent-memory-mcp', config.agentMemory);
-  const expected = memoryServer(binding);
-  if (server.command !== expected.command
-    || (server.args ?? []).length !== (expected.args ?? []).length
-    || (server.args ?? []).some((arg, index) => arg !== expected.args?.[index])) {
-    fail('private Agent memory helper launch differs from its attested execution identity');
-  }
+  if (memory === null || server === null) fail('selected Agent memory has no execution helper');
   const client = new McpStdioClient(server, {
     label: 'prepared Agent memory helper',
     env: config.mcp.mcpEnv,
-    cwd: binding.cwd,
-    sdkHelperBinding: binding,
+    cwd: config.cwd,
     maxStdoutBytes: MCP_OBSERVATION_MAX_STDOUT_BYTES,
     timeoutMs: 10_000,
   });
@@ -707,37 +639,29 @@ function parseArgs(argv: readonly string[]): string {
   return configPath;
 }
 
-export async function runPiPreparedHost(argv: readonly string[]): Promise<void> {
-  // The same assertion `bin/byok-launch-cwd.mjs` makes, for the same reason and
-  // at the same kind of boundary: these take effect before this file's first
-  // statement, so this process cannot sanitize them for itself — it can only
-  // refuse to establish a prepared session under them.
-  if (process.execArgv.length > 0) {
-    fail(`refusing to launch with a non-empty interpreter argv: ${process.execArgv.join(' ')}`);
-  }
-  const injected = loaderEnvInjections(process.env);
-  if (injected.length > 0) {
-    fail(`refusing to launch with loader environment variables set: ${injected.join(', ')}`);
-  }
-
+/**
+ * `packaging` is `bundled` when a single-file product re-enters through the
+ * SDK-reserved helper (`sdkHelperHost`). It bundles Pi, so the runtime
+ * identity is the SDK pin, not an installed package.
+ */
+export async function runPiPreparedHost(argv: readonly string[], packaging: 'installed' | 'bundled' = 'installed'): Promise<void> {
   const owned = extractPiConfigDigest(argv, fail);
   const config = loadConfig(parseArgs(owned.args), owned.digest);
 
-  // Derived from the VERIFIED installed artifact closure, never from the
-  // configuration: a runtime identity a caller could state is a fingerprint
-  // input a caller could choose.
+  // Derived from the installed Pi package, never from the configuration: a
+  // runtime identity a caller could state is a fingerprint input a caller
+  // could choose.
   let runtimeIdentity: string;
   try {
-    runtimeIdentity = inputPreparationRuntimeIdentityString(await verifyPiHostBinding(config.binding, 'pi-prepared', fail));
-    configureCustodyRuntimePlan(config.descendantPlan);
+    runtimeIdentity = inputPreparationRuntimeIdentityString(packaging === 'bundled' ? resolvePinnedPiRuntimeIdentity() : resolveInstalledPiRuntimeIdentity());
   } catch (cause) {
-    fail(`the installed pi closure could not be verified: ${cause instanceof Error ? cause.message : String(cause)}`);
+    fail(`the installed pi runtime identity could not be resolved: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
 
   const pool = new McpServerPool(config.mcp, fail);
   let memoryCall: PreparedMemoryCall | undefined;
   try {
-    // This opens the attested execution helper and proves its raw
+    // This opens the execution helper and checks its raw
     // initialize/tools/list answer before a provider or model is constructed.
     memoryCall = await openPreparedMemoryCall(config);
   } catch (cause) {
@@ -746,15 +670,11 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
   }
   try {
   const surface = await assemblePreparedPiToolSurface({
-    policy: config.policy,
-    countedPermissionMode: config.countedPermissionMode,
     agentMemory: config.agentMemory,
     memory: config.memory,
     observation: config.mcp.observation,
     toolsetDefinitionRevisions: config.toolsetDefinitionRevisions,
     servers: projectedServerBindings(config.mcp),
-    launch: config.launch,
-    toolImplementations: config.mcp.toolImplementations,
     runtimeIdentity,
     expectedToolBindingDigest: config.toolBindingDigest,
     expectedObservationDigest: config.observationDigest,

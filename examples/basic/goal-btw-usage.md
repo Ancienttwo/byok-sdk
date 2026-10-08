@@ -20,7 +20,6 @@ const bot = new GoalBtwHost(byokServer, hostState, () => Date.now(),
 
 // On the device: configure the same egressPolicy selected in the target,
 // agentHome, and resultDocument: { extract: extractBotResult }.
-// readonly btw also requires a runtime that honestly declares readonly.
 const goal = bot.startGoal({
   id: hostGoalId, objective, target, maxSteps: 8, deadline: Date.now() + 600_000,
 });
@@ -37,7 +36,7 @@ const settled = await bot.reconcileGoal(hostGoalId, latest.revision);
 // and reserve a NEW taskId. waiting/blocked/paused never implicitly dispatch.
 ```
 
-`target` supplies exact deviceId, AgentRef, runtime, policy and egressPolicy;
+`target` supplies exact deviceId, AgentRef, runtime and egressPolicy;
 requiredToolsets may be selected explicitly. The example uses one internal
 result-document channel and no user messageEgress. Fresh result-document support
 must be advertised by both ends. The SDK still applies canonical-home admission:
@@ -97,14 +96,14 @@ const reservedSide = await bot.reserveBtw({
   id: sideId, taskId: sideTaskId, mainTaskId,
   mainDestination: 'conversation:main', destination: 'conversation:side',
   snapshotRevision: acceptedPrefixRevision, snapshot: selectedPrefix,
-  question, target: explicitDifferentAgentReadonlyTarget,
+  question, target: explicitDifferentAgentTarget,
 });
 await bot.sendBtw(sideId, reservedSide.revision);
 // Later: reconcileBtw(sideId, bot.btw(sideId).revision).
 ```
 
 The side target needs a **different agentId**, not merely a different profile
-revision; it has its own home and readonly policy. A side answer is exactly
+revision; it has its own home. A side answer is exactly
 `{"contract":"host-btw-answer-v1","answer":"..."}`. The returned Host record
 binds it to its independent destination. This helper never writes a transcript,
 steers main work, auto-merges an answer, or cancels the main task when a side is

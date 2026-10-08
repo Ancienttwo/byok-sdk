@@ -153,29 +153,20 @@ export class StubSession implements Session {
 
 /**
  * Default `capabilities()` result for a {@link StubRuntimeAdapter} that
- * doesn't override it — deliberately the MOST permissive set (all four
- * `PermissionMode`s), not any one real bundled adapter's actual declared
- * set. `StubRuntimeAdapter` is a generic, anonymous test double used all
- * over this suite for scenarios that have nothing to do with per-runtime
- * capability matching (e.g. the out-of-band approval flow, which is
- * `TaskRunner`-level and adapter-agnostic) — many of those pre-existing
- * tests offer `policy: { mode: 'confirm' }` against a bare
- * `new StubRuntimeAdapter()` and rely on it being accepted. Mirrors this
- * suite's own established convention for a "can do anything" double (see
- * e.g. `task-runner-approval.test.ts`'s `ChannelRoutingAdapter` /
- * `confirm-mode-approval-e2e.test.ts`'s `ApprovalAwareAdapter`, each a
- * hand-rolled adapter narrowed to `permissionModes: ['confirm']` for ITS
- * specific test). A test that specifically wants to simulate a
- * capability-RESTRICTED adapter (pi/codex-like: no `confirm`/`plan`) passes
- * an explicit `capabilities` override via the 3rd constructor param instead
- * of relying on this default.
+ * doesn't override it — deliberately the MOST permissive set, not any one
+ * real bundled adapter's actual declared set. `StubRuntimeAdapter` is a
+ * generic, anonymous test double used all over this suite for scenarios that
+ * have nothing to do with per-runtime capability matching (e.g. the
+ * out-of-band approval flow, which is `TaskRunner`-level and
+ * adapter-agnostic). A test that specifically wants to simulate a
+ * capability-RESTRICTED adapter passes an explicit `capabilities` override via
+ * the 3rd constructor param instead of relying on this default.
  */
 const DEFAULT_STUB_CAPABILITIES: RuntimeCapabilities = {
   steer: true,
   resume: true,
   approvalInteractive: true,
   mcpToolsets: true,
-  permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
 };
 
 /** In-memory RuntimeAdapter double: records every start() call and its resulting session. */
@@ -185,12 +176,9 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
     task: TaskOfferPayload;
     ctx: {
       workspaceDir: string;
-      policy: TaskOfferPayload['policy'];
       env: NodeJS.ProcessEnv;
       mcpServers?: RuntimeOperationStartInput['mcpServers'];
       mcpToolsetTools?: RuntimeOperationStartInput['mcpToolsetTools'];
-      mcpLaunch?: RuntimeOperationStartInput['mcpLaunch'];
-      mcpToolImplementations?: RuntimeOperationStartInput['mcpToolImplementations'];
       gitWorkspace?: { workspaceId: string; baseline?: string };
       approvalChannel?: RuntimeOperationStartInput['approvalChannel'];
     };
@@ -216,38 +204,24 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
   private startGate: Promise<void> | undefined;
 
   /**
-   * M5 batch-3 (workstream 1): `capabilities` is a new, optional 3rd
-   * constructor param — defaults to {@link DEFAULT_STUB_CAPABILITIES} (see
-   * its own doc comment for why that default is maximally permissive
-   * rather than modeled on any one real adapter). Lets a test simulate an
-   * adapter's real declared `permissionModes` (e.g. a confirm-capable,
-   * claude-like stub, or a pi/codex-like stub that can't express
-   * `confirm`/`plan`) for `TaskRunner.pickAdapter`'s capability-match gate
-   * without needing the real bundled adapters + fake-CLI fixtures.
+   * `capabilities` is an optional 3rd constructor param — defaults to
+   * {@link DEFAULT_STUB_CAPABILITIES} (see its own doc comment for why that
+   * default is maximally permissive rather than modeled on any one real
+   * adapter). Lets a test simulate an adapter's declared capabilities (for
+   * example no MCP toolset projection) for `TaskRunner.pickAdapter`'s
+   * capability gate without needing the real bundled adapters.
    *
    * `requiresMcpToolsetToolObservation` (4th param) defaults to `true` — the
-   * claude/codex shape, where the daemon must observe each projected server's
-   * tools before admission. Pass `false` for a pi-shaped stub that projects
-   * toolsets but grants their tools itself and must therefore never make an
-   * offer wait on a `tools/list` probe.
+   * pi shape, where the daemon must observe each projected server's tools
+   * before admission. Pass `false` for a stub whose runtime lists the tools
+   * itself and must therefore never make an offer wait on a `tools/list`
+   * probe.
    */
   constructor(
     id = 'pi',
     detectResult: RuntimeDetectResult = { kind: 'available', version: '0.0.0' },
     capabilities: RuntimeCapabilities = DEFAULT_STUB_CAPABILITIES,
     requiresMcpToolsetToolObservation = true,
-    /**
-     * The two descriptor declarations that drive the daemon's MCP launch
-     * boundary: HOW this adapter's servers reach the trusted directory
-     * (`mcpServerLaunch`) and whether it generates a reserved approval server
-     * of its own under `confirm` (`generatesApprovalMcpServer`). Omitted
-     * everywhere except the tests that pin that boundary, so the default stub
-     * stays the "spawns its own servers, generates none" shape.
-     */
-    launchDeclarations: Pick<
-      RuntimeAdapterDescriptor,
-      'mcpServerLaunch' | 'generatesApprovalMcpServer'
-    > = {},
   ) {
     this.detectResult = detectResult;
     this.descriptor = freezeRuntimeAdapterDescriptor({
@@ -255,13 +229,6 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
       supportsDispatchSelection: true,
       requiresMcpToolsetToolObservation,
       capabilities,
-      environmentRequirements: { credentialNames: [] },
-      ...(launchDeclarations.mcpServerLaunch === undefined
-        ? {}
-        : { mcpServerLaunch: launchDeclarations.mcpServerLaunch }),
-      ...(launchDeclarations.generatesApprovalMcpServer === undefined
-        ? {}
-        : { generatesApprovalMcpServer: launchDeclarations.generatesApprovalMcpServer }),
     });
   }
 
@@ -309,20 +276,14 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
     this.startCalls.push({
       task: {
         instruction: startInput.instruction,
-        policy: startInput.manifest.policy,
         ...(startInput.manifest.dispatchSelection === undefined ? {} : { dispatchSelection: startInput.manifest.dispatchSelection }),
         ...(startInput.manifest.sessionRef === undefined ? {} : { sessionRef: startInput.manifest.sessionRef }),
       },
       ctx: {
         workspaceDir: startInput.manifest.workspace.workspaceDir,
-        policy: startInput.manifest.policy,
         env: startInput.env,
         ...(startInput.mcpServers === undefined ? {} : { mcpServers: startInput.mcpServers }),
         ...(startInput.mcpToolsetTools === undefined ? {} : { mcpToolsetTools: startInput.mcpToolsetTools }),
-        ...(startInput.mcpLaunch === undefined ? {} : { mcpLaunch: startInput.mcpLaunch }),
-        ...(startInput.mcpToolImplementations === undefined
-          ? {}
-          : { mcpToolImplementations: startInput.mcpToolImplementations }),
         ...(startInput.manifest.workspace.workspaceId === undefined
           ? {}
           : { gitWorkspace: { workspaceId: startInput.manifest.workspace.workspaceId, baseline: startInput.manifest.workspace.baseline } }),

@@ -73,7 +73,6 @@ function payload(overrides: Record<string, unknown> = {}): AgentInputPreparation
     deadlineAt: new Date(Date.now() + 60_000).toISOString(),
     context: { inline: CONTEXT_JSON },
     agentMemory: 'none', requiredToolsets: ['team'],
-    permissionMode: 'auto',
     ...overrides,
   });
 }
@@ -256,11 +255,11 @@ describe('S11-F1 authoritative preparation completion replay', () => {
     const assemble = h.toolSurface.assemble.bind(h.toolSurface);
     h.toolSurface.assemble = async input => {
       await assemble(input);
-      return { ok: false, code: 'launch_boundary_unavailable', detail: 'assembly_failed', message: 'fixture refusal' };
+      return { ok: false, code: 'toolsets_unobservable', detail: 'assembly_failed', message: 'fixture refusal' };
     };
     await expect(h.handle()).rejects.toThrow('transport failed');
     const committed = await h.completionBody();
-    expect(h.puts[0]).toMatchObject({ outcome: 'rejected', reason: 'launch_boundary_unavailable' });
+    expect(h.puts[0]).toMatchObject({ outcome: 'rejected', reason: 'toolsets_unobservable' });
     await h.restart();
     await expect(h.handle()).resolves.toEqual(JSON.parse(committed!));
     expect(h.puts).toHaveLength(1);
@@ -287,7 +286,7 @@ describe('S11-F1 authoritative preparation completion replay', () => {
     // Feed the production delivery/cursor path without starting a live transport.
     const delivery = connection as unknown as { deliver: (e: ReturnType<typeof createEnvelope>) => boolean; processingChain: Promise<void> };
     const envelope = createEnvelope('agent.input.preparation', h.request, { seq: 1 });
-    const tail = createEnvelope('task.offer', { instruction: 'tail', policy: { mode: 'auto' } }, { seq: 2, taskId: 'tail' });
+    const tail = createEnvelope('task.offer', { instruction: 'tail' }, { seq: 2, taskId: 'tail' });
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     delivery.deliver(envelope);
     await delivery.processingChain;

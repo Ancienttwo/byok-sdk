@@ -3,7 +3,7 @@
 Scope: the BYOK SDK as built through WP3B Step 4b (device auth, long-poll-only
 transport,
 local control socket, shared approval controls, rate limiting, service
-lifecycle, runtime environment allowlists, plaintext transport gating, runtime
+lifecycle, runtime environment inheritance, plaintext transport gating, runtime
 selection, resource limits, and unified graceful shutdown). This is a threat
 model, not a compliance document — it states what each surface defends against,
 what it deliberately does not, and names the residual risk explicitly rather
@@ -31,13 +31,29 @@ validation errors include Base URLs or credential values.
   observes progress — it never runs code itself. The self-hosted server is a
   façade over the cloud domain kernel; the daemon remains the execution
   authority in this security model (the SaaS only ever proposes).
-- **The daemon, plus whatever `PermissionPolicy` the device owner's own
-  policy allows, is the authority.** Every runtime adapter maps an offered
-  policy to the real CLI's own flags and fails closed — rejects the task
-  outright — whenever it cannot honor what was asked, rather than silently
-  running with a looser effective policy (`docs/protocol.md` §11.1's
-  "Rule: a runtime that cannot honor a per-tool or permission-mode
-  restriction it was offered MUST decline it fail-closed").
+- **The user's own agent is the guardrail. The SDK adds no second layer.**
+  The SDK bridges the Host to the user's own local agents. Sessions run YOLO
+  in the user-specified workspace
+  ([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)): Claude
+  starts with `--dangerously-skip-permissions`, Codex with
+  `approvalPolicy: never`, and Pi pre-trusts the session cwd. The agent's own
+  configuration applies: Claude's `~/.claude` settings, deny rules, sandbox,
+  MCP servers and hooks; Codex's `config.toml`; Pi's agentDir, extensions and
+  skills. Codex runs with sandbox `danger-full-access` unless
+  `DaemonConfig.codexSandbox` selects `read-only`, `workspace-write`, or
+  `inherit` (the user's `config.toml` applies). An approval gate in an
+  unattended session is a hang, not safety. The offer carries no permission
+  policy; an adapter still refuses an offer field it cannot honor (for
+  example `limits.maxTokens`) instead of dropping it.
+- **The SDK keeps a gate only for an invariant it owns and the agent cannot
+  see.** These are: the toolset registry (the Host sends logical toolset ids;
+  commands and environment stay in the operator's local configuration); the
+  reserved SDK MCP names and helper preflight; the Host content-read gate;
+  the path-mutation gate, the Agent-home single-writer lease and the Git
+  workspace lease; process-tree / Job Object kill with duration and output
+  limits; audit-log redaction; and BYOK provider key custody (`BYOK_*`
+  environment deny, no provider key in the daemon, the Pi BYOK key
+  projection directory).
 - **The control socket and its token are a same-user boundary, not a
   cross-user one.** Anything running as the same OS user as the daemon
   can reach it (that's by design — it's how the operator's own CLI
@@ -57,7 +73,7 @@ no configured credential-custody launcher) is a `task.decline`, not a
 claim-then-fail path.
 
 After admission, the daemon seals one immutable `RuntimeOperationManifest`.
-It contains only task/runtime/policy/toolset/session/workspace selection metadata
+It contains only task/runtime/toolset/session/workspace selection metadata
 and forwarded environment names; it contains no environment values, API keys,
 tokens, or credential-storage contents. Claim capability projection,
 environment filtering, provider/model/lane selection, and prepared-operation
@@ -96,12 +112,15 @@ the daemon starts. Before claim, the daemon must resolve every requested id and
 prove that the selected toolsets have disjoint MCP server names; otherwise it
 declines without starting a runtime.
 
-Claude receives exactly the resolved local stdio servers in a task-scoped
-configuration under `--strict-mcp-config`. Confirm mode's internal approval
-server shares that closed configuration. Pi and Codex do not advertise this
-capability and decline toolset offers. This boundary prevents a SaaS task from
-turning tool selection into remote command or secret injection, but it is not
-an OS sandbox: the configured MCP subprocess still runs as the daemon's user.
+All three bundled runtimes accept toolset offers. Claude receives the resolved
+local stdio servers in a task-scoped `--mcp-config`; the user's own Claude MCP
+configuration also loads. Codex receives them in the `thread/start` or
+`thread/resume` config (`mcp_servers`), on top of the user's `config.toml`. Pi starts them from its task-scoped pool
+after the daemon's `tools/list` observation. The SDK grants no per-tool
+permission; each call follows the agent's own guardrails. This boundary
+prevents a SaaS task from turning tool selection into remote command or secret
+injection, but it is not an OS sandbox: the configured MCP subprocess still
+runs as the daemon's user.
 Connector OAuth, cookie custody, token refresh, domain policy, and data
 redaction remain responsibilities of a host-owned local credential broker.
 
@@ -176,7 +195,7 @@ To roll back operationally, remove `gitWorkspace` from the local configuration a
 | Audit log | `<storeDir>/audit.jsonl` (0600) | Daemon appends a **redacted** projection only — see below |
 | The user's own runtime credentials (`~/.claude`, `~/.codex`, `~/.pi` auth state) | The user's home directory, owned entirely by the installed `claude`/`codex`/`pi` CLI | **The daemon never reads, proxies, or forwards these** — see the credential-isolation rule below and `docs/security-review-m4.md` for the empirical audit |
 | BYOK model-provider key | macOS Keychain or Windows Credential Manager, owned by `@byok-sdk/keys` | Only `@byok-sdk/keys` provider clients or the separate `byok-pi-provider-launcher` read it. Profile metadata may use a tenant-bound `TruthStore`, but truth bodies, hashes, labels, status, protocol, server, cloud provider code, and the client daemon never receive the value. The launcher keeps its explicit read-only SQLite profile composition and injects the key only into the Pi child environment; `auth_mode: none` never constructs a keychain backend |
-| The daemon's own ambient environment (`process.env` — may hold secrets unrelated to any runtime: `AWS_SECRET_ACCESS_KEY`, `DATABASE_URL`, `GITHUB_TOKEN`, etc., set for the daemon's own deployment) | Whatever process/container/service manager launched the daemon | **M5: no longer forwarded to a spawned agent in full.** `task-runner.ts` builds each task's child-process environment from a per-runtime allowlist (`daemon/environment.ts`'s `buildRuntimeEnv`) instead of handing over `process.env` verbatim — see the env-allowlist paragraph below |
+| The daemon's own ambient environment (`process.env` — may hold secrets: provider API keys, `AWS_SECRET_ACCESS_KEY`, `DATABASE_URL`, `GITHUB_TOKEN`, etc.) | Whatever process/container/service manager launched the daemon | **Inherited by every task child, as in OAR (ADR-037 D2/D3).** `daemon/environment.ts`'s `buildRuntimeEnv` removes only `CLAUDECODE` and the SDK's own `BYOK_*` names — see the environment paragraph below |
 
 The audit log is itself worth calling out as a defended asset, not just a
 record: `packages/client/src/bin/audit-log.ts` deliberately never persists a
@@ -213,45 +232,29 @@ Presence checks remain limited to non-secret signals the CLI itself reports —
 report (`adapters/codex/codex-adapter.ts`), and pi's env-var-name-only check
 — never a file read of `~/.claude`, `~/.codex`, or `~/.pi`.
 
-**Environment allowlist (M5)**: the accurate framing for the daemon's own
-ambient environment (distinct from the on-disk credential storage above) is
-this — the daemon does not persist or transmit runtime credentials;
-environment-based credentials may be selectively inherited into the chosen
-local runtime process (per-runtime allowlist). Before M5, `task-runner.ts`
-handed every spawned adapter `process.env` verbatim: any credential-shaped
-variable in the daemon's own environment (set for the daemon's own
-deployment, unrelated to any runtime) was inherited by every task
-regardless of which runtime ran it. `daemon/environment.ts`'s
-`buildRuntimeEnv` replaces that with an explicit, per-runtime allowlist —
-a small always-included platform baseline (`PATH`/`HOME`/locale/etc), plus
-whichever credential/config variable names the SPECIFIC selected runtime
-adapter declares it actually needs (`RuntimeAdapter.descriptor.environmentRequirements`
-— e.g. a non-BYOK Pi offer's provider credential names, since Pi can
-authenticate via provider env vars; an authoritative BYOK selection strips
-those ambient names before invoking the credential launcher. Claude and Codex
-declare none and also strip those names at their spawn boundary, since these
-lanes rely on the CLI-managed login rather than inherited env credentials — env-based API-key
-passthrough for those two remains a separate, pending product decision),
-plus an optional per-device local override (`DaemonConfig.runtimeEnvironment`).
-For Claude and top-level Codex, that override cannot enable inheritance of the
-shared bounded credential inventory (`PROVIDER_CREDENTIAL_ENV_DENY_NAMES`),
-including `OPENAI_API_KEY`, `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, and the
-custody-only `PI_PROVIDER_API_KEY`. Credential names and their case aliases are
-excluded by the same policy in spawn stripping and identity measurement.
-`HOME`/`USER` and platform discovery variables remain available; a locally
-allowed `CODEX_HOME` or other non-credential configuration name is preserved.
-The SDK does not read or modify the CLI's login store or verify its auth mode.
-This SDK's own control-plane variables (`BYOK_*`) are hard-denied
-unconditionally, even against that local override — a spawned agent must
-never be able to observe the daemon's own internal wiring.
+**Environment inheritance (ADR-037 D2/D3)**: every task child — the runtime
+CLI and the MCP servers the daemon probes for it — gets the daemon's full
+environment, as in OAR. `daemon/environment.ts`'s `buildRuntimeEnv` removes
+only `CLAUDECODE` (so a child agent starts as its own top-level session) and
+this SDK's own control-plane variables (`BYOK_*`). Provider API keys, cloud
+credentials and loader variables such as `NODE_OPTIONS`, `LD_*` and `DYLD_*`
+reach the child as the user set them. Claude and Codex do not strip provider
+keys. The daemon does not read, persist or transmit these values; it passes
+the environment through. An operator who does not want a secret in agent
+children must not put it in the daemon's environment.
 
-**Proxy variables are part of the baseline, deliberately (M5, finding F3)**:
+Two Pi lanes use the narrow form `buildAllowlistedEnv`: the durable Pi tool
+shell and the prepared Pi lane. The `@byok-sdk/keys` launcher also rebuilds
+its Pi child environment from a closed list and the single resolved key (see
+the credential-isolation rule above). These are the BYOK key-custody lanes.
+
+**Proxy variables pass through, deliberately (M5, finding F3)**:
 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`/`ALL_PROXY`, plus their lowercase
 `http_proxy`-style variants (the conventional spelling most Unix tools
-actually check — some tools honor only one casing, some check both), pass
-through by default as part of the always-included platform baseline
-(`daemon/environment.ts`'s `BASE_PLATFORM_ALLOWLIST`), not gated behind any
-runtime adapter's own declared requirements. This is a deliberate
+actually check — some tools honor only one casing, some check both), reach
+every child: the full environment is inherited, and the narrow lanes keep
+them in their platform baseline (`daemon/environment.ts`'s
+`BASE_PLATFORM_ALLOWLIST`). This is a deliberate
 trade-off, not an oversight: stripping proxy configuration by default would
 silently break every agent CLI running behind a corporate proxy — no
 outbound network access at all, with no clear signal why — which is a worse
@@ -327,7 +330,7 @@ the cloud-kernel inbound gate).
 |---|---|---|
 | Remote network, no valid device credentials | Attempt connections, flood a device's inbound budget (isolated per-device — see `rate-limit.test.ts`'s isolation test) | Forge a JWT (HS256, server-held random secret — cloud `createHmacTokenSigner`); forge an Ed25519 device signature; reuse a device signature produced for a different purpose (S1: nonce signatures are domain-separated under `byok-nonce-v1\n`, and an unprefixed signature is rejected — cloud nonce verifier); replay a pairing code (single-use, ~10min TTL) or a challenge nonce (single-use, ~5min TTL, bound to `deviceId`) |
 | Holder of one tenant's valid device credentials | Everything that tenant's own devices can do | Reach another tenant's device on any surface (S1: cloud `DeviceRegistry` is keyed by `(tenantId, deviceId)`, so a mismatched tenant finds nothing rather than finding a row it then fails a check against); revoke or enumerate another tenant's devices (`devices.revoke(tenantId, deviceId)` — no naked deviceId lookup is exported); learn whether another tenant's device exists — unknown device, wrong tenant, product mismatch, and revoked all return the same `401` with the same body, so there is no existence oracle (`authenticateBearer`) |
-| Malicious or compromised SaaS | Offer any task/policy it wants; send `task.approve`/`task.reject`/`task.cancel` for tasks it itself offered (this is the wire's legitimate approve channel — see the approval-path section on why this isn't a privilege escalation) | Read the device's private key or forge its signature; force an adapter to run with a looser effective policy than offered (fail-closed mapping — `docs/protocol.md` §11.1); reach the daemon's local control socket or audit log (no network path to a Unix socket/named pipe) |
+| Malicious or compromised SaaS | Offer any task it wants; send `task.approve`/`task.reject`/`task.cancel` for tasks it itself offered (this is the wire's legitimate approve channel — see the approval-path section on why this isn't a privilege escalation) | Read the device's private key or forge its signature; change the user's own agent configuration or guardrails (local files the wire cannot reach); supply an MCP command or environment (the toolset selector carries logical ids only); reach the daemon's local control socket or audit log (no network path to a Unix socket/named pipe) |
 | Same-user local process | Read the non-secret `device.json` projection; invoke OS credential APIs subject to the user's OS credential-store policy | Bypass whatever access-control/prompt policy the selected OS credential provider enforces |
 | Other local user | — | Read `device.json` (0600), anything else under `storeDir` (0700), or the owning user's OS credential entry |
 
@@ -448,10 +451,11 @@ the wire (`packages/client/src/daemon/control-protocol.ts`,
 
 ### 3. Shared approval path
 
-Claude rejects `confirm` before runtime side effects. The ADR-015 approval MCP
-helper and `--permission-prompt-tool` integration have been removed. The
-adapter-agnostic daemon approval registry and control methods remain for
-runtimes that emit `needs_approval` or otherwise use the shared approval channel.
+Bundled adapters do not emit `needs_approval`: ordinary sessions run YOLO
+(ADR-037). The local native-interaction opt-in is a separate seam
+(`docs/spec.md`, "Local native interaction contract"). The adapter-agnostic
+daemon approval registry and control methods remain for runtimes that emit
+`needs_approval` or otherwise use the shared approval channel.
 
 - **Fail-closed timeout on the daemon side**: `TaskRunner.requestApproval`
   force-resolves as a rejection once `approvalTimeoutMs` elapses with no
@@ -718,20 +722,11 @@ explicitly.
   is killed before this sequence runs, the task failure can remain
   undelivered. The bounded completion event records that outcome rather than
   claiming delivery that did not happen.
-- **Claude `plan` mode writes outside `ctx.workspaceDir` by design.**
-  `~/.claude/plans/<slug>.md`, unconditionally, regardless of cwd — a
-  confirmed, accepted v1 residual (`docs/protocol.md` §11.2), not something
-  this SDK can suppress since the path is fixed inside claude itself. An
-  embedder needing strict workspace confinement should simply not route
-  `policy.mode: 'plan'` tasks to a claude-capable device.
-  `adapters/claude/events.ts` at least confirms a write outside
-  `workspaceDir` is never reported back as a task artifact.
-- **Codex app-server runs with full filesystem and network access.**
-  The 0.160.0 adapter supports `auto` only, rejects `readonly` and
-  `network:false`, and resumes through `thread/resume` on the owned app-server
-  process. This migration removes the old sandbox-based confinement claim.
-  Exact task MCP tool grants do not establish exclusion of ambient user MCP
-  configuration; that exclusion remains unverified.
+- **Agents run with the daemon user's full filesystem and network access.**
+  Sessions run YOLO (ADR-037). Claude and Pi have no SDK-applied sandbox;
+  Codex uses `danger-full-access` unless `DaemonConfig.codexSandbox` selects
+  another mode or `inherit`. Any further restriction comes from the user's own
+  agent configuration or from an OS boundary the Host supplies.
 - **Automated test coverage of the control socket's own file-mode bits is
   thinner than the tmpdir-fallback case.** `control-server.test.ts` has an
   explicit numeric-mode assertion (`0o700`) only for the tmpdir long-path
@@ -751,59 +746,30 @@ explicitly.
 ## Workspace confinement is a convention, not a sandbox
 
 None of the three bundled runtimes give this SDK a verified kernel-level
-sandbox to rely on as a hard boundary:
+sandbox to rely on as a hard boundary, and the SDK applies none
+([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)):
 
-- **pi** and **claude** both reject `network: false` fail-closed — not
-  because they enforce it, but because neither has a verified network
-  sandbox for its shell tool to enforce it *with* (`docs/protocol.md`
-  §11.2's capability matrix). Claude's own tool-restriction mechanism
-  (`--tools`/`--permission-mode`) is a prompt/tool-offer gate inside claude
-  itself, not OS-level confinement — and a permissive `--permission-mode`
-  (`acceptEdits`/`bypassPermissions`) was empirically confirmed to silently
-  ignore an `--allowedTools` restriction entirely
-  (`claude/permission-mapping.ts`'s central finding). The plan-mode residual
-  above is the concrete, confirmed instance of this: even claude's most
-  restrictive mode still writes one specific file outside the workspace.
-- **codex** uses app-server with `danger-full-access`. The adapter provides
-  no filesystem or network sandbox, and rejects `readonly`, `network:false`,
-  and nonempty built-in tool restrictions before runtime side effects.
-  Filtering its environment remains useful, but does not limit files the
-  same OS user can read.
+- **claude** starts with `--dangerously-skip-permissions`. Any sandbox, deny
+  rule or hook comes from the user's own `~/.claude` configuration.
+- **codex** uses app-server with `approvalPolicy: never` and sandbox
+  `danger-full-access` by default. `DaemonConfig.codexSandbox` can select
+  `read-only` or `workspace-write`, or `inherit` so the user's `config.toml`
+  applies. That sandbox is Codex's own mechanism, not one this SDK verifies.
+- **pi** pre-trusts the session cwd and loads the user's extensions and
+  skills. It has no sandbox.
 
 Practically: `ctx.workspaceDir` is a strong, working default — every
-adapter passes it as the task's cwd and, where the runtime supports it,
-restricts tools to operate within it — but it is a convention respected by
+adapter passes it as the task's cwd — but it is a convention respected by
 well-behaved tool implementations, not a chroot/container/seccomp boundary
 this SDK enforces or verifies independently. A SaaS embedder with a
 genuinely hostile or untrusted instruction source should not treat the
 workspace directory alone as sufficient isolation.
 
-The same honest framing applies to the M5 environment allowlist (see
-`buildRuntimeEnv`, above): filtering `process.env` down to a per-runtime
-allowlist prevents *accidental* environment spread — an unrelated secret
-sitting in the daemon's own environment no longer leaks into every spawned
-agent by default — it is not a sandbox either. Native execution is still
-native execution: an agent process spawned with `HOME` set (part of the
-always-included platform baseline) can still read any file under that
-`HOME` its own OS-level file permissions allow, exactly as any other
-process running as that same user could. The allowlist narrows what an
-agent inherits *as environment variables*; it says nothing about, and does
-not restrict, what the runtime's own tools can read from disk.
-
-**M5 batch-3: offers requesting `workspaceRoot` are declined until
-enforcement exists.** `PermissionPolicy.workspaceRoot` is real wire shape —
-it survives the offer/ceiling policy merge (`daemon/policy.ts`'s
-`computeEffectivePolicy`) and is handed to the selected adapter as
-`ctx.policy.workspaceRoot` — but, per the confinement-by-convention picture
-above, no bundled adapter reads or enforces that field; every adapter's real
-confinement comes from `ctx.workspaceDir` alone. A `task.offer` whose own
-policy sets `workspaceRoot` is therefore declined fail-closed, pre-claim
-(`TaskRunner.handleOffer`) rather than silently accepted as if it were a live
-control. A device operator's own configured ceiling
-(`DaemonConfig.permissionDefaults.workspaceRoot`) is a different, trusted-
-local-config case — it is not declined, but it does produce a loud one-time
-`console.warn` at daemon start, so the operator learns the value is inert
-instead of trusting it silently.
+Environment handling is not a sandbox either. Every task child inherits the
+daemon's environment except `CLAUDECODE` and `BYOK_*` (see above). Native
+execution is still native execution: an agent process can read any file its
+OS-level permissions allow, exactly as any other process running as that
+same user could.
 
 ## Runtime auto-selection: pi is the fallback, not the default
 
@@ -816,14 +782,13 @@ path. Two related fixes:
   happened to be constructed in — which, before this change, silently made
   pi the de-facto default whenever it was present, contradicting the product
   decision that pi is a fallback runtime, not the preferred one.
-- **Capability matching at admission.** Before claiming, the daemon now
-  checks whether the candidate adapter can even express the offer's
-  `PermissionPolicy.mode` (via that adapter's own declared
-  `descriptor.capabilities.permissionModes`) — pi and codex cannot express
-  `confirm`/`plan`; claude supports `plan` and rejects `confirm`. Auto-select skips a non-supporting candidate
-  and keeps walking the preference order; if nothing eligible supports the
-  mode, or an explicitly-requested runtime can't express it, the offer is
-  declined fail-closed, pre-claim. Previously this mismatch surfaced only
+- **Capability matching at admission.** Before claiming, the daemon checks
+  whether the candidate adapter supports what the offer needs (for example
+  `descriptor.capabilities.mcpToolsets` for a toolset or SDK-helper offer).
+  Auto-select skips a non-supporting candidate and keeps walking the
+  preference order; if nothing eligible supports it, or an
+  explicitly-requested runtime cannot, the offer is declined fail-closed,
+  pre-claim. Previously this mismatch surfaced only
   during side-effect-free `prepare()` — before the task is claimed — so an
   incapable adapter cannot consume a claim/fail round trip or displace a
   capable adapter that was available.
@@ -872,7 +837,7 @@ reads, proxies, or forwards any credential — the M5 pilot audit
 rule at `packages/client/src/types.ts:120-124`) is the evidence ledger for
 exactly that claim.
 
-The durable Pi lane (`byok-pi-durable`) is a custody-launched child under the same rule; it does not move credentials into the daemon. The launcher transfers the key to worker model memory over private one-shot JSON IPC bound to the config digest. It never puts the key in the durable child initial environment, argv, stdio RPC or replica. The worker closes IPC before tools/MCP construction; deleting process.env is not protection. Tool exec forces `inheritEnv: false` and an explicit allowlist. Both inherited env and OS env introspection are regression-tested. Replica storage is under SDK-private storeDir, disjoint from canonicalHome, and bound to AgentRef/taskId/leaseId; overlapping paths fail before spawn. The replica remains untrusted input. Structured read/write/edit paths are checked at beforeTool, and any round containing such a tool executes sequentially, including bash/MCP peers, to close the same-turn symlink/ACK race; YOLO bash is not a filesystem sandbox. An exclusive replica lock and confirmed child-tree disposal are required before lease release.
+The durable Pi lane (`byok-pi-durable`) is a custody-launched child under the same rule; it does not move credentials into the daemon. The launcher transfers the key to worker model memory over private one-shot JSON IPC bound to the config digest. It never puts the key in the durable child initial environment, argv, stdio RPC or replica. The worker closes IPC before tools/MCP construction; deleting process.env is not protection. Tool exec forces `inheritEnv: false` and an explicit allowlist. Both inherited env and OS env introspection are regression-tested. Replica storage is under SDK-private storeDir, disjoint from canonicalHome, and bound to AgentRef/taskId/leaseId; overlapping paths fail before spawn. The replica remains untrusted input. Structured read/write/edit paths are checked at beforeTool only against the durable replica store; there is no workspace containment (ADR-037). Any round containing such a tool executes sequentially, including bash/MCP peers, to close the same-turn symlink/ACK race; YOLO bash is not a filesystem sandbox. An exclusive replica lock and confirmed child-tree disposal are required before lease release.
 
 `@byok-sdk/keys` sits on the **other** side of that line. Its whole job *is* to
 hold a provider API key: it stores the user's own key in the OS credential
@@ -932,15 +897,16 @@ failure if restoration itself fails.
 
 ### Codex MCP input transport and local I/O bounds (#164–#166)
 
-Codex argv contains the prompt marker `-` and nonsecret MCP channel names; the
-prompt is delivered via stdin and EOF. Original per-server MCP command/args/env
-are carried by independent environment payloads into the SDK `mcp-env` helper,
-which removes all sealed channel variables before starting the selected server.
-This removes secret values from Codex argv and SDK launcher diagnostics. It does
+Codex argv contains no MCP configuration. As in OAR, per-server MCP
+command/args/env go to Codex in the `thread/start` or `thread/resume` config
+(`mcp_servers`) over stdin, and Codex starts each server itself. Error text
+that Codex reports for the session passes a redactor that replaces each `env`
+value with `[redacted]`. This keeps secret values out of Codex argv, the Codex
+process environment and SDK diagnostics. It does
 not claim process environment secrecy against the same OS principal, or conceal
 arguments authored by an MCP server configuration from that server's own process.
-Codex's CLI-owned auth state is unchanged; explicitly allowed CODEX_HOME is
-preserved, while ambient env credentials are excluded as described above.
+Codex's CLI-owned auth state is unchanged. Codex inherits the daemon
+environment, `CODEX_HOME` and provider keys included (ADR-037 D2/D3).
 
 Raw Codex JSONL is limited before parsing (1 MiB/frame, 4 MiB deferred frames),
 with bounded stderr retention (64 KiB and 20 lines). Legacy artifact uploads read

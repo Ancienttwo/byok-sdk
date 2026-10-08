@@ -186,7 +186,7 @@ describe('runtimeAllowlist enforcement regression (TaskRunner.pickAdapter, uncha
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'x', policy: { mode: 'auto' }, runtime: 'claude' },
+        { instruction: 'x', runtime: 'claude' },
         { taskId: 'task-disallowed', seq: server.nextSeq() },
       ),
     );

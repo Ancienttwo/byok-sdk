@@ -1,7 +1,6 @@
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertImplementationIdentityDependency } from './implementation-identity-edges.mjs';
 import { parseBunLock, parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER, readLockedPiClosure } from './pi-runtime-identity.mjs';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
@@ -16,8 +15,7 @@ const dispatchPackages = [
   ['packages/ui-runtime', '@byok-sdk/ui-runtime'],
 ];
 const keys = ['packages/keys', '@byok-sdk/keys'];
-const implementationIdentity = ['packages/implementation-identity', '@byok-sdk/implementation-identity'];
-const alignedPackages = [...dispatchPackages, implementationIdentity];
+const alignedPackages = [...dispatchPackages];
 // The published set is exactly these packages: the aligned train plus the
 // independently versioned keys. Every other workspace manifest under
 // packages/ must be private, because publish.mjs publishes every non-private
@@ -25,12 +23,14 @@ const alignedPackages = [...dispatchPackages, implementationIdentity];
 // (ADR-035: no empty umbrella, alias package or dual export) and
 // `@byok-sdk/testkit` is private, consumed only by the private conformance
 // suite; the check below rejects either one coming back as a public package.
+// `@byok-sdk/implementation-identity` is retired after 0.23.0: the SDK no
+// longer attests tool or runtime executables.
 const publicPackages = [...alignedPackages, keys];
 const privatePackages = [
   ['packages/conformance', '@byok-sdk/conformance'],
   ['packages/testkit', '@byok-sdk/testkit'],
 ];
-const retiredPublicNames = ['byok-sdk'];
+const retiredPublicNames = ['byok-sdk', '@byok-sdk/implementation-identity'];
 const errors = [];
 
 // @byok-sdk/client must install as pure JavaScript: a direct dependency that ships a prebuilt
@@ -303,8 +303,7 @@ for (const field of [...runtimeFields, 'devDependencies']) {
     if (
       dependency.startsWith('@byok-sdk/') &&
       dependency !== keys[1] &&
-      dependency !== '@byok-sdk/core' &&
-      dependency !== implementationIdentity[1]
+      dependency !== '@byok-sdk/core'
     ) {
       errors.push(`packages/keys/package.json: ${field} crosses into dispatch package ${dependency}`);
     }
@@ -318,20 +317,6 @@ if (Object.keys(keysManifest?.dependencies ?? {}).includes('@byok-sdk/core') ===
 }
 if (runtimeEdges(keysManifest ?? {}).includes('@byok-sdk/protocol')) {
   errors.push('packages/keys/package.json: keys must not depend on @byok-sdk/protocol');
-}
-
-// These consumers must resolve the same measurement semantics. Packed edges
-// are checked from the tarballs by the same guard, not inferred from workspace syntax.
-for (const consumer of ['@byok-sdk/client', '@byok-sdk/keys']) {
-  try {
-    assertImplementationIdentityDependency(manifests.get(consumer), 'workspace:*');
-  } catch (error) {
-    errors.push(error.message);
-  }
-}
-const identityManifest = manifests.get(implementationIdentity[1]);
-for (const dependency of runtimeEdges(identityManifest ?? {})) {
-  errors.push(`${implementationIdentity[1]}: measurement package must have no runtime dependency (${dependency})`);
 }
 
 const clientManifest = manifests.get('@byok-sdk/client');

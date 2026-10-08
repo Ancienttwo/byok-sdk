@@ -12,42 +12,42 @@ function storesFor(harness: ReturnType<typeof createHarness>, deviceId: string) 
 }
 
 describe('protocol-version admission at cloud lifecycle boundaries', () => {
-  it('rejects v:2 at the exported inbound gate before the claim lifecycle mutation', async () => {
+  it('rejects the retired v:1 at the exported inbound gate before the claim lifecycle mutation', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    const v2Claim = { ...createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId: offer.taskId }), v: 2 };
+    const v1Claim = { ...createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId: offer.taskId }), v: 1 };
 
-    await expect(handleInboundEnvelope(storesFor(harness, device.deviceId), device.deviceId, v2Claim)).resolves.toBe('rejected');
+    await expect(handleInboundEnvelope(storesFor(harness, device.deviceId), device.deviceId, v1Claim)).resolves.toBe('rejected');
     expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('offered');
     await expect(
-      handleInboundEnvelope(storesFor(harness, device.deviceId), device.deviceId, { ...v2Claim, v: 1 }),
+      handleInboundEnvelope(storesFor(harness, device.deviceId), device.deviceId, { ...v1Claim, v: 2 }),
     ).resolves.toBe('accepted');
     expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('claimed');
   });
 
-  it('rejects v:2 at POST /byok/messages before it can be acknowledged as accepted', async () => {
+  it('rejects the retired v:1 at POST /byok/messages before it can be acknowledged as accepted', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    const v2Claim = { ...createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId: offer.taskId }), v: 2 };
+    const v1Claim = { ...createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId: offer.taskId }), v: 1 };
 
     const response = await harness.request('/byok/messages', {
       method: 'POST',
       headers: { ...device.authorization, 'content-type': 'application/json' },
-      body: JSON.stringify({ messages: [v2Claim] }),
+      body: JSON.stringify({ messages: [v1Claim] }),
     });
     expect(response.status).toBe(400);
     expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('offered');
   });
 
-  it('keeps the supported v:1 claim path accepted', async () => {
+  it('keeps the supported v:2 claim path accepted', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    const v1Claim = createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId: offer.taskId });
+    const v2Claim = createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId: offer.taskId });
 
-    await expect(handleInboundEnvelope(storesFor(harness, device.deviceId), device.deviceId, v1Claim)).resolves.toBe('accepted');
+    await expect(handleInboundEnvelope(storesFor(harness, device.deviceId), device.deviceId, v2Claim)).resolves.toBe('accepted');
     expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('claimed');
   });
 });

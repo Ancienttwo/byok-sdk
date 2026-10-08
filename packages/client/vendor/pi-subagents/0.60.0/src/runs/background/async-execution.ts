@@ -19,13 +19,10 @@ import type { RunnerStep } from "../shared/parallel-utils.ts";
 import type { ContextMode } from "../shared/context-mode.ts";
 import { resolvePiPackageRoot } from "../shared/pi-spawn.ts";
 import { preflightLaunchCwd } from "../shared/launch-cwd.ts";
+// SDK delta: the runner child re-enters the SDK bundle through its helper host;
+// the jiti CLI resolution and its spawn are removed.
+import { resolvePiSubagentSpawn } from "../../../../../../src/subagents/spawn.ts";
 import { backgroundProcessOptions } from "../shared/background-process-options.ts";
-// WP4 custody reroute: the background runner child is minted and dispatched by
-// the SDK custody dispatcher (admission -> permit -> descendant record ->
-// helper direct-connect shape). The jiti CLI resolution and its spawn die with
-// this reroute; the runner payload re-enters this bundle in-process.
-import { dispatchCustodyPiSubagentSpawn } from "../../../../../../src/custody/custody-dispatcher.ts";
-import { consumeWorkflowChildPermit } from "../../shared/workflow-child-permit.ts";
 import { buildSkillInjection, normalizeSkillInput, resolveSkillsWithFallback } from "../../agents/skills.ts";
 import { buildAgentMemoryInjection } from "../../agents/agent-memory.ts";
 import { PI_CODING_AGENT_PACKAGE_ROOT_ENV, PROMPT_REDACTED, resolveChildCwd } from "../../shared/utils.ts";
@@ -309,9 +306,8 @@ export function formatAsyncStartedMessage(headline: string, interactive: boolean
 }
 
 /**
- * Async execution no longer depends on an external jiti CLI: the runner
- * payload re-enters this bundle through the SDK custody dispatcher's helper
- * direct-connect shape, so availability is structural, not discovered.
+ * Async execution needs no external jiti CLI: the runner re-enters the SDK
+ * bundle through its helper host, so availability is structural.
  */
 export function isAsyncAvailable(): boolean {
 	return true;
@@ -488,41 +484,7 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
 	const launchBarrierToken = hasRevivalLease ? undefined : runnerProcessInstanceId;
 	const launchConfig = { ...cfg, runnerProcessInstanceId, ...(launchBarrierToken ? { launchBarrierToken } : {}) };
 	writePrivateAtomicJson(cfgPath, launchConfig);
-	// WP4 custody reroute: the runner child is dispatched (admission, permit,
-	// descendant record, helper direct-connect shape) with the same written
-	// config the jiti spawn used to hand over; the config path travels as the
-	// BYOK_SDK_CUSTODY_RUNNER_CONFIG transport commitment.
-	let dispatched: ReturnType<typeof dispatchCustodyPiSubagentSpawn>;
-	try {
-		dispatched = dispatchCustodyPiSubagentSpawn({
-			child: "pi-subagent-runner",
-			cwd,
-			runnerConfigPath: cfgPath,
-			// The same env the jiti spawn projected: extension-binding knobs
-			// omitted, package root pinned. The dispatcher projects it onto the
-			// record's declared names; nothing is forwarded wholesale.
-			vendorEnv: {
-				...omitExtensionBindingsEnv(process.env),
-				...(piPackageRoot ? { [PI_CODING_AGENT_PACKAGE_ROOT_ENV]: piPackageRoot } : {}),
-			},
-			childKey: `async-runner:${suffix}`,
-			agent: "pi-subagent-runner",
-		});
-	} catch (dispatchError) {
-		return { error: dispatchError instanceof Error ? dispatchError.message : String(dispatchError) };
-	}
-	const permitLaunch = dispatched.permitLaunch;
-	const permitError = consumeWorkflowChildPermit(permitLaunch.permit, {
-		workflowRunId: permitLaunch.workflowRunId,
-		childKey: permitLaunch.childKey,
-		agent: permitLaunch.agent,
-		launchContractDigest: permitLaunch.launchContractDigest,
-		context: permitLaunch.context,
-		runner: "pi",
-	});
-	if (permitError) {
-		return { error: permitError };
-	}
+	const runnerSpawn = resolvePiSubagentSpawn("pi-subagent-runner", [cfgPath]);
 	const launchForStartup = launchConfig as typeof launchConfig & { asyncDir?: unknown; id?: unknown; sessionId?: unknown; completionOwnerId?: unknown; revivalLease?: unknown };
 	const launchAsyncDir = typeof launchForStartup.asyncDir === "string" ? launchForStartup.asyncDir : undefined;
 	const launchRunId = typeof launchForStartup.id === "string" ? launchForStartup.id : suffix;
@@ -548,11 +510,14 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
 			stdoutFd = fs.openSync(logPaths.stdoutPath, "a");
 			stderrFd = fs.openSync(logPaths.stderrPath, "a");
 		}
-		const proc = spawn(dispatched.command, dispatched.args, {
-			cwd: dispatched.cwd,
+		const proc = spawn(runnerSpawn.command, runnerSpawn.args, {
+			cwd,
 			...backgroundProcessOptions(),
 			stdio: ["ignore", stdoutFd ?? "ignore", stderrFd ?? "ignore"],
-			env: dispatched.env,
+			env: {
+				...omitExtensionBindingsEnv(process.env),
+				...(piPackageRoot ? { [PI_CODING_AGENT_PACKAGE_ROOT_ENV]: piPackageRoot } : {}),
+			},
 		});
 		closeFd(stdoutFd);
 		closeFd(stderrFd);

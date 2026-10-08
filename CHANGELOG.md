@@ -16,6 +16,147 @@
 
 ## Unreleased
 
+- **Docs** — record the minimal-guardrails decision as
+  [ADR-037](docs/architecture/adr-2026-10-07-minimal-guardrails.md). It
+  supersedes `sdk-architecture.md` §9.2 "Permission bypass: REJECTED". The
+  spec, protocol, security, isolation-matrix and README docs now describe the
+  YOLO launch, inherited user config and protocol v2.
+  Plan: `plans/plan-20261007-1340-minimal-guardrails.md` (slice 6).
+
+- **Breaking (client)** — Codex task MCP servers go to Codex in the
+  `thread/start` or `thread/resume` config, as OAR `SessionOptions.mcpServers`.
+  A user `config.toml` entry with the same name can no longer disable a task
+  server (`enabled = true`), and Codex error text is redacted. Remove the
+  `mcp-env` helper: `SdkReservedHelperKind` loses `'mcp-env'`, and
+  `CodexAdapterOptions` loses `sdkHelperHost`.
+
+- **Fixed (client)** — Pi disposal gives the user's extensions up to 10 s to
+  finish their `session_shutdown` hooks before SIGKILL, as OAR does. The old
+  750 ms grace cut an async hook short.
+
+- **Changed (client)** — update the private OAR source from 0.29.0 to 0.33.1
+  (`e1f9177`). The Codex source gains OAR's session `mcpServers` thread
+  config and MCP credential redaction of error text. No behavior changes
+  in this step: the adapter does not pass `mcpServers` yet, and BYOK usage
+  events read native frames, so the 0.30 resume baseline does not change them.
+
+- **Breaking (protocol, client, keys)** — remove the attestation stack. The SDK
+  no longer attests tool or runtime executables. Pi starts from the installed
+  SDK package, or re-enters a single-file product through `sdkHelperHost`.
+  Plan: `plans/plan-20261007-1340-minimal-guardrails.md` (slice 5, D6, D7).
+  - Remove the `@byok-sdk/implementation-identity` package. No later train
+    publishes it.
+  - Remove `DaemonConfig.toolImplementationAuthority`. `createDaemon` throws
+    when it is set.
+  - Client: remove the tool implementation identity exports (including the
+    `@byok-sdk/implementation-identity` re-export,
+    `ToolImplementationReverifyError`, `decideRuntimeLaunch`,
+    `deriveRuntimeLaunchDescription` and `RUNTIME_LAUNCH_KINDS`), the runtime
+    descendant plan, `RuntimeAdapter.detectInstallation`,
+    `RuntimeInstallationObservationContext`,
+    `RuntimePreparedLaunchV1.toolImplementations` and
+    `RuntimeOperationStartBase.mcpToolImplementations`.
+    `RuntimeDetectionRefusalReason` is now `app_server_unavailable` only.
+  - Remove the custody dispatcher and the external-CLI custody. Pi subagents
+    re-enter the SDK bundle through the helper host
+    (`pi-subagent-print`, `pi-subagent-runner`). The vendored subagents
+    extension keeps its own depth and concurrency limits.
+  - Remove the loader environment deny (`LOADER_ENV_DENY_PATTERNS`) and the
+    `descendant_loader_env_forbidden` refusal. `buildRuntimeEnv` removes only
+    `CLAUDECODE` and `BYOK_*`.
+  - Durable Pi lane: remove the workspace containment of the structured file
+    tools. The guard still denies the durable replica store and a `BYOK_*`
+    bash assignment.
+  - Prepared lane: keep the lane and remove its attestation bindings. The
+    artifact `toolImplementationKinds` becomes `toolNames`, and the readiness
+    reason `executor_identity_unproven` is removed. The unreleased wire
+    version 9 and protocol v2 are amended in place. The local record moves to
+    version 10, the Pi host configs to rpc 4, prepared 5 and durable 2. The
+    prepared Agent memory helpers are not attested.
+  - keys: the Pi launcher drops `--launch-binding` and takes
+    `--pi-projection-dir`. `--pi-fixed-args` is now only the single-file
+    re-entry prefix. `buildPiProviderChildEnvironment` takes `projectionDir`
+    and keeps an ambient `PI_PACKAGE_DIR`.
+  - Single-file products: `PiAdapter` takes `sdkHelperHost`, and
+    `createDaemon` passes `DaemonConfig.sdkHelperHost` to it. Every Pi lane
+    (rpc, prepared, durable, keys) re-enters the product executable with
+    `__byok_sdk_helper <pi-rpc|pi-prepared|pi-durable>`. Pi assets come from
+    `PI_PACKAGE_DIR`. The prepared runtime identity is the SDK pin.
+
+- **Breaking (protocol, client, implementation-identity)** — remove the
+  trusted MCP launch cwd and the MCP launcher wrapper. The runtime and its MCP
+  servers start in the session cwd (the workspace or the Agent home), as in
+  OAR. Pi pre-trusts the session cwd in every lane, so project
+  `.pi/extensions` load.
+  Plan: `plans/plan-20261007-1340-minimal-guardrails.md` (slice 4, D8).
+  - Client: remove `daemon/trusted-launch-cwd.ts` and `bin/byok-launch-cwd.mjs`.
+    The package no longer ships `bin/`. Remove the exports
+    `resolveTrustedLaunchCwd`, `resolveMcpLaunchCwdLauncher`, `McpLaunchBinding`,
+    `McpLaunchCwdConfig`, `LaunchCwdRejection`, `TrustedLaunchCwd` and
+    `TrustedLaunchCwdUnavailableReason`.
+  - Remove `DaemonConfig.mcpLaunchCwd`. `createDaemon` throws when it is set.
+  - Remove `RuntimeAdapterDescriptor.mcpServerLaunch`,
+    `RuntimeOperationStartBase.mcpLaunch`, `RuntimePreparedLaunchV1.launch` and
+    the `launch_cwd_unavailable` refusal reason. Claude and Codex get their
+    task servers unwrapped.
+  - Prepared lane: remove the launch attestation, the
+    `preparation_launch_attestation_mismatch` decline reason and the
+    `agent_memory_launch_mismatch` check. The prepared tool binding and surface
+    digests move to version 3, and the Pi MCP fingerprint to version 2. A
+    record prepared before this change declines with
+    `preparation_tool_binding_digest_mismatch`.
+  - Protocol v2 (unreleased, goldens amended, no second bump): remove the
+    `launch_boundary_unavailable` input-preparation error code.
+  - implementation-identity: remove `McpLaunchAttestation`,
+    `ResolvedMcpLaunchCwdLauncher` and the `launch` field of the mcp-server
+    locator.
+  - Kept: the loader environment deny. Implementation attestation still
+    depends on it. Slice 5 removes both.
+
+- **Breaking (protocol, client)** — Agent egress goes to the Host as is, as
+  in OAR ("nothing gated, nothing dropped").
+  Plan: `plans/plan-20261007-1340-minimal-guardrails.md` (slice 3, D4).
+  - Protocol v2 (unreleased, goldens amended, no second bump): the egress
+    policy `activity` is now `{ delivery: 'latest-value', maxCoalesceMs,
+    maxEventBytes }`. The `mode` field, the `metadata-status` mode and the
+    `sanitizer_rejected` drop reason are removed.
+  - Client: remove the egress sanitizer, the metadata/status projection and
+    the default content omission. Activity events, terminal summaries, failure
+    reasons, result documents, reliable payloads and runtime artifacts go to
+    the Host unchanged. Remove the `agent-egress-policy` capability check on
+    activity.
+  - Remove `AgentEgressConfig.sanitizer` and the exported
+    `AgentEgressSanitizer` and `AgentEgressSanitizerContext` types.
+    `createDaemon` throws when `agentEgress.sanitizer` is set.
+  - `DEFAULT_AGENT_EGRESS_POLICY` revision is `default-v1`, with
+    `maxCoalesceMs: 250` and `maxEventBytes: 262144`.
+  - A reliable payload that is not valid JSON or is larger than 256 KiB is
+    refused with `invalid_envelope` before the spool appends it.
+  - Kept: the reliable spool, quotas and backpressure, latest-value
+    coalescing, the Host content-read gate and audit-log redaction.
+
+- **Breaking (client)** — runtimes inherit the user's own agent configuration.
+  Plan: `plans/plan-20261007-1340-minimal-guardrails.md` (slice 2).
+  - Environment: every task child gets the full daemon environment, as in OAR.
+    The daemon removes only `CLAUDECODE`, its own `BYOK_*` names and loader
+    injection names. Claude and Codex keep provider API keys. The Pi BYOK lane
+    keeps its key custody.
+  - Remove `RuntimeAdapterDescriptor.environmentRequirements`, the exported
+    `RuntimeEnvironmentRequirements` type and `DaemonConfig.runtimeEnvironment`.
+    Custom adapters delete the `environmentRequirements` field.
+  - Claude: remove `--strict-mcp-config`. The user's own MCP configuration,
+    settings, deny rules and hooks load. The SDK still passes its task servers
+    with `--mcp-config`.
+  - Pi: the ordinary RPC host loads the user's extensions and skills. The
+    adapter no longer passes `--no-skills`, and the host refuses
+    `--no-skills` and `--no-extensions` as unsupported arguments.
+  - Codex: new `DaemonConfig.codexSandbox` and `CodexAdapterOptions.sandbox`
+    (`read-only` | `workspace-write` | `danger-full-access` | `inherit`),
+    as OAR's `OAR_CODEX_SANDBOX`. The default stays `danger-full-access`.
+    `inherit` passes no `sandbox_mode` override, so the user's `config.toml`
+    applies. A bad value throws a `TypeError` at `createDaemon` or at adapter
+    construction. New exported type: `CodexSandboxSetting`.
+
 - **Changed (client)** — update the private OAR source from 0.25.0 to 0.29.0
   (`f1a2b88eb63e47de8197514e9329642e2d0ae02c`). Codex usage records now carry
   optional `cacheRead` and `cacheWrite` token parts. Add `shared/token-totals.ts`

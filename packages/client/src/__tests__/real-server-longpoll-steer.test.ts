@@ -71,7 +71,7 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
 
     const machines = await real.byok.machines.list();
     expect(machines.find(m => m.deviceId === record.deviceId)?.harnesses).toEqual([expect.objectContaining({ id: 'acme-harness', version: '0.0.0' })]);
-    const handle = await real.byok.dispatch({ harnessId: 'acme-harness', instruction: 'run over long-poll', policy: { mode: 'auto' } });
+    const handle = await real.byok.dispatch({ harnessId: 'acme-harness', instruction: 'run over long-poll' });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const session = adapter.sessions[0]!;
@@ -88,7 +88,6 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
       resume: true,
       approvalInteractive: true,
       mcpToolsets: true,
-      permissionModes: adapter.descriptor.capabilities.permissionModes,
     });
 
     // The gate opens: no SteerRejectedError, and the envelope survives the
@@ -120,7 +119,6 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
       steer: false,
       resume: true,
       approvalInteractive: false,
-      permissionModes: ['auto', 'readonly'],
     });
 
     daemon = createDaemonWithAdapters(
@@ -141,7 +139,7 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
 
     const machines = await real.byok.machines.list();
     expect(machines.find(m => m.deviceId === record.deviceId)?.harnesses).toEqual([expect.objectContaining({ id: 'acme-harness', version: '0.0.0' })]);
-    const handle = await real.byok.dispatch({ harnessId: 'acme-harness', instruction: 'run over long-poll', policy: { mode: 'auto' } });
+    const handle = await real.byok.dispatch({ harnessId: 'acme-harness', instruction: 'run over long-poll' });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const session = adapter.sessions[0]!;

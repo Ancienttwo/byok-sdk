@@ -126,7 +126,7 @@ describe('TaskRunner: bounded finishedTaskIds/pendingCancelled (M3-B)', () => {
     const taskId = 'task-recent';
     const offer = createEnvelope(
       'task.offer',
-      { instruction: 'finish me', policy: { mode: 'auto' } },
+      { instruction: 'finish me' },
       { taskId, seq: 1 },
     );
     await runner.handleEnvelope(offer);
@@ -147,7 +147,7 @@ describe('TaskRunner: bounded finishedTaskIds/pendingCancelled (M3-B)', () => {
     // task.claim/task.complete.
     const redelivered = createEnvelope(
       'task.offer',
-      { instruction: 'finish me', policy: { mode: 'auto' } },
+      { instruction: 'finish me' },
       { taskId, seq: 2 },
     );
     await runner.handleEnvelope(redelivered);
@@ -176,7 +176,7 @@ describe('TaskRunner: bounded finishedTaskIds/pendingCancelled (M3-B)', () => {
     const taskId = 'task-race-window-bounded';
     const offerEnvelope = createEnvelope(
       'task.offer',
-      { instruction: 'race the cancel under a full map', policy: { mode: 'auto' } },
+      { instruction: 'race the cancel under a full map' },
       { taskId, seq: 1 },
     );
     const cancelEnvelope = createEnvelope(
@@ -228,7 +228,7 @@ describe('TaskRunner: bounded finishedTaskIds/pendingCancelled (M3-B)', () => {
     const taskId = 'task-A-in-flight';
     const offerEnvelope = createEnvelope(
       'task.offer',
-      { instruction: 'block me in adapter.start', policy: { mode: 'auto' } },
+      { instruction: 'block me in adapter.start' },
       { taskId, seq: 1 },
     );
     const offerPromise = runner.handleEnvelope(offerEnvelope);

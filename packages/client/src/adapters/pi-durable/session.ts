@@ -4,7 +4,7 @@ import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { RuntimeOperationInstructionStartInput, Session } from '../../types';
-import type { PiRuntimeLaunchResources } from '../pi/runtime-launch';
+import { piLaunchCommand, type PiRuntimeLaunchResources } from '../pi/runtime-launch';
 import type { PiByokLauncherConfig } from '../pi/pi-adapter';
 import { serializePiHostConfig } from '../pi/runtime-host-binding';
 import { PiRpcClient, type SpawnFn } from '../pi/rpc-client';
@@ -12,7 +12,6 @@ import { RuntimeExecutionFailure } from '../../runtime-failure';
 import { AsyncQueue } from '../../util/async-queue';
 import { admitReplica, resetReplica } from './replica';
 import { DurableRecovery } from './recovery';
-import { assertImplementationSpawnBinding } from '@byok-sdk/implementation-identity';
 
 export interface DurableStart {
   input: RuntimeOperationInstructionStartInput;
@@ -37,11 +36,11 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
   const configPath = path.join(configDir, 'config.json');
   const profileRef = selection.lane === 'byok-profile' ? selection.providerProfile.profileRef : selection.providerId;
   const model = selection.lane === 'byok-profile' ? selection.providerProfile.modelId : selection.modelId;
-  const serialized = serializePiHostConfig({ format: 'byok.pi.durable-launch', version: 1,
-    binding: runtimeLaunch.binding, replica: binding, replicaRoot: options.replicaRoot,
+  const serialized = serializePiHostConfig({ format: 'byok.pi.durable-launch', version: 2,
+    replica: binding, replicaRoot: options.replicaRoot,
     provider: `byok-sdk-${profileRef}`, model, instruction: input.instruction,
-    mcp: { mcpEnv: input.mcpEnv, mcpServers: input.mcpServers ?? {}, observation: input.mcpToolsetTools ?? {}, permissionMode: 'auto',
-      ...(input.mcpLaunch?.cwd === undefined ? {} : { launchCwd: input.mcpLaunch.cwd }), toolImplementations: input.mcpToolImplementations ?? {} },
+    mcp: { mcpEnv: input.mcpEnv, mcpServers: input.mcpServers ?? {}, observation: input.mcpToolsetTools ?? {},
+      launchCwd: binding.canonicalHome },
   });
   try { await fs.writeFile(configPath, serialized.bytes, { mode: 0o600 }); }
   catch (error) { await fs.rm(configDir, { recursive: true, force: true }); throw error; }
@@ -58,14 +57,11 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
   let disposal: Promise<void> | undefined;
   let pump: Promise<void> | undefined;
   const spawn = async (resume: boolean) => {
-    const launch = runtimeLaunch.binding;
-    await assertImplementationSpawnBinding(launch, { command: launch.command, ...(launch.entry === undefined ? {} : { entry: launch.entry }), fixedArgv: launch.fixedArgv, cwd: launch.cwd, env: runtimeLaunch.env });
     if (closing || !context.lifecycle.ownsLease()) throw new Error('durable lease ended before spawn');
-    const child = new PiRpcClient({ command: launcher.command,
-      args: [...(launcher.args ?? []), '--pi-bin', launch.command, ...options.launcherArgs, '--runtime-entry', 'pi-durable',
-        ...(launch.entry === undefined ? [] : ['--pi-entry', launch.entry]), '--pi-cwd', launch.cwd, '--pi-fixed-args', JSON.stringify(launch.fixedArgv),
-        '--launch-binding', JSON.stringify(launch), '--pi-config-digest', serialized.digest, '--', '--config', configPath],
-      cwd: launch.cwd, env: { ...runtimeLaunch.env }, spawnFn: options.spawnFn });
+    const launch = piLaunchCommand(runtimeLaunch, 'pi-durable', serialized.digest, ['--config', configPath],
+      { command: launcher.command, args: launcher.args ?? [], profileArgs: options.launcherArgs });
+    const child = new PiRpcClient({ command: launch.command, args: launch.args,
+      cwd: runtimeLaunch.cwd, env: { ...runtimeLaunch.env }, spawnFn: options.spawnFn });
     rpc = child;
     const receipt = await child.send({ type: 'start', resume, ...(resume ? { projectionDigest } : {}) });
     if (receipt.success !== true || typeof receipt.projectionDigest !== 'string' || !/^[0-9a-f]{64}$/u.test(receipt.projectionDigest) || (resume && receipt.projectionDigest !== projectionDigest)) throw new Error('durable worker refused start or changed provider projection');
