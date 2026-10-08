@@ -16,6 +16,17 @@
 
 ## Unreleased
 
+- **Changed (client)** — update the private OAR source from 0.37.0 to 0.44.0
+  (`98be973`). A Codex prompt or steer with empty text and no images is now
+  rejected with code `unsupported` before any RPC is sent. A Codex task with
+  an empty string instruction therefore fails to start. Before, the SDK sent
+  the empty text to codex. The raw Codex session records also change: a failed
+  turn is classified from codex's structured `codexErrorInfo` (for example
+  `quota` or `rate_limited`, with the HTTP status where codex gives it), and
+  an accepted steer that an interrupt drops is reported as `input_dropped`.
+  The SDK event projection reads native frames only, so its events do not
+  change. See `docs/notes/2026-10-09-oar-0.44.0-upgrade.md`.
+
 - **Fixed (client)** — a `task.cancel` (or a startup deadline or shutdown)
   that aborts a runtime start before the start returns no longer leaves the
   runtime quarantined. Codex and Pi do not read the abort signal, so their

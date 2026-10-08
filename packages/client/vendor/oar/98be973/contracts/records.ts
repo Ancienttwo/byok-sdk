@@ -1,3 +1,4 @@
+import type { CredentialProblem, FailureClass } from "./failure.js";
 import type { InputImage, InputOrigin } from "./input.js";
 import type { TaskEventBody } from "./tasks.js";
 import type { ToolOutputPart } from "./tool-output.js";
@@ -130,15 +131,16 @@ export interface UserMessage {
 
 /**
  * The runtime-said event kinds: what a Frame can carry. `text_delta` is at
- * the granularity the runtime emits (claude: a whole text block per frame;
- * pi and codex: token-sized pieces); `Session.events({ coalesceText })`
+ * the granularity the runtime emits (claude, pi and codex: streamed pieces); `Session.events({ coalesceText })`
  * merges consecutive pieces for consumers who want blocks.
  */
 export type RuntimeEventBody = UserMessage
+  /** The runtime discarded an input on interruption, established by its native marker or documented behavior. Returns ownership to the caller for resend; never inferred by a view from turn completion. */
+  | { readonly kind: "input_dropped"; readonly inputId: string; readonly reason: "turn_interrupted" }
   /** `messageId`: the runtime's id of the assistant message the text is part of (codex `agentMessage` item, claude API message), so two messages of one turn stay apart; absent when it names none (pi, cursor, ACP) and in older records. */
   | { readonly kind: "text_delta"; readonly text: string; readonly messageId?: string }
-  /** A reasoning output item; its lifecycle remains observable without readable contents. */
-  | { readonly kind: "reasoning"; readonly content: ReasoningContent }
+  /** A reasoning output item; its lifecycle remains observable without readable contents. `messageId` names the native message when provided, keeping streamed reasoning from distinct messages apart when coalescing. */
+  | { readonly kind: "reasoning"; readonly content: ReasoningContent; readonly messageId?: string }
   | {
       readonly kind: "tool_call_started";
       readonly callId: string;
@@ -243,7 +245,7 @@ export type RejectionCode =
   | "no_active_turn"
   /** withdraw: no held input with this `inputId` is waiting: it was already sent to the runtime, never queued in this session, or already withdrawn. Never answered `accepted` when the input may already have gone. */
   | "not_queued"
-  /** The runtime cannot do this control with these inputs: images where it takes none, or a format it does not read, images on a cursor steer. A control the runtime cannot do at all is an absent member (`Session.steer`), not a rejection. */
+  /** The runtime cannot do this control with these inputs: images where it takes none, or a format it does not read, images on a cursor steer, or empty text with no images. A control the runtime cannot do at all is an absent member (`Session.steer`), not a rejection. */
   | "unsupported"
   /** The stream already holds the process exit. */
   | "runtime_exited"
@@ -260,7 +262,7 @@ export type RejectionCode =
  * observes: its own answer to a runtime→app request, and the process exit.
  */
 export type ResponseBody =
-  /** The adapter (or runtime) took the action over. For prompt/steer/queue this is ONE deliberately weak promise: the caller's delivery obligation ENDS; do not resubmit. No guarantee it lands in the current turn, that the model attends to it, or that any business outcome happened; where input landed is the event stream's job. For withdraw it is a strong one: the held input was removed before it was sent, and the caller owns it again. `native` is the runtime's own acknowledgement when it gave one. */
+  /** The adapter (or runtime) took the action over. For prompt/steer/queue this is ONE deliberately weak promise: the caller's delivery obligation ENDS; do not resubmit, unless the stream later reports the input dropped (`input_dropped`, `ConversationInput.state` "dropped"), which hands it back. No guarantee it lands in the current turn, that the model attends to it, or that any business outcome happened; where input landed is the event stream's job. For withdraw it is a strong one: the held input was removed before it was sent, and the caller owns it again. `native` is the runtime's own acknowledgement when it gave one. */
   | { readonly kind: "accepted"; readonly native?: unknown }
   /** Not taken over; the caller still owns the input. `code` says why in one word; `reason` is the prose. */
   | { readonly kind: "rejected"; readonly code: RejectionCode; readonly reason: string; readonly native?: unknown }
@@ -269,20 +271,18 @@ export type ResponseBody =
   /** The runtime process exited, an outcome the runtime cannot say itself. Answers a `dispose` request when oar caused it; also recorded for an unrequested exit, pointing at no request. */
   | { readonly kind: "exited"; readonly code: number | null };
 
-/** Coarse failure classification so applications can react (re-login, back off, report a bug) without parsing vendor error prose. Best-effort: adapters map what the runtime reveals; "unknown" is an honest answer. */
-export type FailureClass =
-  | "auth"
-  | "quota"
-  | "invalid_request"
-  | "overloaded"
-  | "provider"
-  | "runtime_exited"
-  | "unknown";
-
 export type TurnOutcome =
   | { readonly kind: "completed" }
   | { readonly kind: "aborted" }
-  | { readonly kind: "failed"; readonly reason: string; readonly failure: FailureClass };
+  | {
+    readonly kind: "failed";
+    readonly reason: string;
+    readonly failure: FailureClass;
+    /** With `auth`, where the runtime says which. */
+    readonly credential?: CredentialProblem;
+    /** The provider's HTTP status, where the runtime reports one. */
+    readonly status?: number;
+  };
 
 /**
  * Current context fullness, borrowed from pi's shape because it already

@@ -1,4 +1,5 @@
-// BYOK change: Modified from OAR 0be506f for a required consumer and fatal retained-record byte budget (Apache-2.0).
+// BYOK change: Modified from OAR 98be973 for a required consumer and fatal retained-record byte budget (Apache-2.0).
+import { emptyInputRefusal } from "./control-input.js";
 import { randomUUID } from "node:crypto";
 import type {
   ControlResult,
@@ -45,7 +46,9 @@ export interface RecordAt {
  *   adapter decide, and records the accept/reject response; and the
  *   reachability rule: once the stream holds an `exited` response or a
  *   `dispose` request, control is rejected here without consulting the
- *   adapter (record-stream.md, "Reachability is read off the stream").
+ *   adapter (record-stream.md, "Reachability is read off the stream");
+ * - empty prompt/steer/queue input without images is recorded and refused
+ *   before the adapter is consulted (conversation.md, "Images").
  *
  * What is deliberately NOT here: any gate on facts. Nothing in the kernel
  * decides whether a runtime frame may enter the stream; control never
@@ -66,7 +69,8 @@ export interface SessionKernel {
    * A `toRuntime` control action: record the request, decide, record the
    * response. Exceptions from `decide` become a rejected response carrying the
    * message. When the stream already says the runtime is unreachable (see
-   * `unreachable()`), the request is rejected without consulting `decide`.
+   * `unreachable()`), or input is empty with no images, the request is
+   * rejected without consulting `decide`.
    */
   control(body: RequestBody, decide: (request: RequestRecord) => ResponseBody | Promise<ResponseBody>, at?: RecordAt): Promise<ControlResult>;
   /**
@@ -176,7 +180,7 @@ export function createSessionKernel(sessionId: string = randomUUID(), hooks: {
     async control(body, decide, at) {
       const blocked = unreachable();
       const issued = request("toRuntime", body, at);
-      const decided = blocked ?? await settle(decide, issued);
+      const decided = blocked ?? emptyInputRefusal(body) ?? await settle(decide, issued);
       return { request: issued, response: respond(issued.id, decided, at) };
     },
     unreachable,

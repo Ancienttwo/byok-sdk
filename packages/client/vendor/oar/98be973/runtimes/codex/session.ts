@@ -1,27 +1,24 @@
-// BYOK change: Modified from OAR 0be506f for injected processes, native-first recording, bounded request refusal and caller-selected sandbox (Apache-2.0).
+// BYOK change: Modified from OAR 98be973 for injected processes, native-first recording, bounded request refusal and caller-selected sandbox (Apache-2.0).
 /* oxlint-disable import/max-dependencies -- The adapter composes protocol, input and process-lifetime mechanisms. */
 import type { AvailableInstallation } from "../../contracts/installation.js"; // BYOK change: direct type-only contract import.
 import { randomUUID } from "node:crypto";
 import type {
   ControlResult,
-  InputImage,
   InputOptions,
   RequestRecord,
   AdapterSession,
   SessionOptions,
 } from "../../contracts/session.js";
 import { createAbortFallback } from "../../shared/abort-fallback.js";
+import { acceptCodexSteer, codexUserInput } from "./input-delivery.js";
 // BYOK change: Image admission is owned by the BYOK caller, not vendored filesystem helpers.
 import { asRecord, type JsonRecord } from "../../shared/json.js";
 // BYOK change: Return the raw adapter contract without best-effort observer projections.
 import { createSessionKernel } from "../../shared/session-kernel.js";
 import { startAppServerClient, type RpcOutcome, type SpawnLineProcess } from "./app-server-client.js";
 import { CODEX_SETTINGS_REPORT_MS, codexOpenReadback, codexResumeEffortRefusal, codexThreadOpen } from "./open.js";
-import {
-  foldCodexNotification,
-  initialCodexProjection,
-  type CodexProjectionState,
-} from "./projection.js";
+import { foldCodexNotification, initialCodexProjection, type CodexProjectionState } from "./projection.js";
+import { prepareCodexToolDenials } from "./tool-denials.js";
 import { openThread, rpcControl, type RpcControlPlan } from "./rpc-control.js";
 
 /*
@@ -32,10 +29,6 @@ import { openThread, rpcControl, type RpcControlPlan } from "./rpc-control.js";
  * Native mappings and live evidence: docs/runtimes/codex.md.
  * BYOK change: server requests go to an explicit caller-owned native interaction handler, or are declined/rejected immediately when absent.
  */
-
-/** codex's UserInput: the text, then each image as a `localImage` path codex reads itself (its own composer's order). */
-const userInput = (input: string, images: readonly InputImage[] = []): JsonRecord[] =>
-  [{ type: "text", text: input }, ...images.map((image) => ({ type: "localImage", path: image.path }))];
 
 interface CodexSessionState {
   /** The prompt request whose turn is running; null while idle or during a spontaneous turn. */
@@ -56,7 +49,9 @@ export interface CodexAdapterSession extends AdapterSession {
 export async function codexSession(
   spawnLineProcess: SpawnLineProcess,
   installation: AvailableInstallation,
-  options: SessionOptions & {
+  // BYOK change: the caller passes the complete filtered environment, so a value is never a null removal.
+  options: Omit<SessionOptions, "env"> & {
+    readonly env?: Readonly<Record<string, string>>;
     readonly approvalPolicy?: "never" | "on-request"; // BYOK change: explicit local interactive opt-in.
     // BYOK change: the caller passes OAR_CODEX_SANDBOX semantics explicitly.
     readonly sandboxMode?: "read-only" | "workspace-write" | "danger-full-access" | "inherit";
@@ -106,6 +101,7 @@ export async function codexSession(
     throw error;
   }
   client.notify("initialized", {});
+  const filteredOpenParams = await prepareCodexToolDenials(client, options, openParams);
   // The open event is marked at the reply's wire position AS the reply line
   // is read (onSettled → client.mark), not after this await: a frame codex
   // wrote in the same chunk right after the reply (thread/started) would
@@ -118,7 +114,7 @@ export async function codexSession(
     }
   };
   const started = await openThread(client, openMethod, async () => {
-    const reply = await client.request(openMethod, openParams, markOpen);
+    const reply = await client.request(openMethod, filteredOpenParams, markOpen);
     return reply;
   });
   const threadId = asRecord(started.thread)?.id;
@@ -343,7 +339,7 @@ export async function codexSession(
       return null;
     },
     method: "turn/start",
-    params: () => ({ threadId, input: userInput(input, inputOptions?.images), clientUserMessageId: inputOptions?.inputId }),
+    params: () => ({ threadId, input: codexUserInput(input, inputOptions?.images), clientUserMessageId: inputOptions?.inputId }),
     onReply: (reply) => {
       const turnId = asRecord(reply.turn)?.id;
       if (typeof turnId !== "string") {
@@ -358,20 +354,28 @@ export async function codexSession(
       return { kind: "rejected", code: "runtime_refused", reason: message };
     },
   });
-  const steerPlan = (input: string, inputOptions?: InputOptions): RpcControlPlan => ({
-    body: { kind: "steer", input, ...inputOptions },
-    gate: () => (!busy() || state.codexTurnId === null ? { kind: "rejected", code: "no_active_turn", reason: "not_steerable: no active turn" } : null /* BYOK change: caller owns image admission. */),
-    method: "turn/steer",
-    params: () => ({ threadId, input: userInput(input, inputOptions?.images), expectedTurnId: state.codexTurnId, clientUserMessageId: inputOptions?.inputId }),
-    onReply: (reply) => ({ kind: "accepted", native: reply }),
-    onError: (message) => ({ kind: "rejected", code: "runtime_refused", reason: `not_steerable: ${message}` }),
-  });
+  const steerPlan = (input: string, inputOptions?: InputOptions): RpcControlPlan => {
+    const expectedTurnId = state.codexTurnId;
+    return {
+      body: { kind: "steer", input, ...inputOptions },
+      gate: () => (!busy() || expectedTurnId === null ? { kind: "rejected", code: "no_active_turn", reason: "not_steerable: no active turn" } : null /* BYOK change: caller owns image admission. */),
+      method: "turn/steer",
+      params: () => ({ threadId, input: codexUserInput(input, inputOptions?.images), expectedTurnId, clientUserMessageId: inputOptions?.inputId }),
+      onReply: (reply) => {
+        if (expectedTurnId !== null && inputOptions?.inputId !== undefined) {
+          state.projection = { ...state.projection, inputs: acceptCodexSteer(state.projection.inputs, expectedTurnId, inputOptions.inputId) };
+        }
+        return { kind: "accepted", native: reply };
+      },
+      onError: (message) => ({ kind: "rejected", code: "runtime_refused", reason: `not_steerable: ${message}` }),
+    };
+  };
   // The reply carries the runtime's submission id; it is retained on the response.
   const queuePlan = (input: string, inputOptions?: InputOptions): RpcControlPlan => ({
     body: { kind: "queue", input, ...inputOptions },
     gate: () => null /* BYOK change: caller owns image admission. */,
     method: "thread/queue/add",
-    params: () => ({ threadId, input: userInput(input, inputOptions?.images), clientUserMessageId: inputOptions?.inputId ?? randomUUID() }),
+    params: () => ({ threadId, input: codexUserInput(input, inputOptions?.images), clientUserMessageId: inputOptions?.inputId ?? randomUUID() }),
     onReply: (reply) => ({ kind: "accepted", native: reply }),
     onError: (message) => ({ kind: "rejected", code: "runtime_refused", reason: message }),
   });

@@ -16,6 +16,7 @@ import type { AvailableInstallation } from "./installation.js";
 import type { SessionOptions } from "./session-options.js";
 
 export type { McpServer, SessionOptions } from "./session-options.js";
+export type { CredentialProblem, FailureClass } from "./failure.js";
 export type {
   ContextUsage,
   ControlAction,
@@ -23,7 +24,6 @@ export type {
   Cursor,
   Event,
   EventBody,
-  FailureClass,
   Frame,
   FrameBody,
   ReasoningContent,
@@ -58,11 +58,12 @@ export interface QueryResult<T> {
   readonly seq: number;
 }
 
+/** For prompt, steer and queue: empty text requires at least one image; otherwise rejected unsupported. Whitespace is not trimmed. */
 export interface InputOptions {
   /** UUID identifying one logical input across delivery attempts; generated when omitted. */
   readonly inputId?: string;
   /**
-   * Images that travel with the text, as the runtime's own image input (not a
+   * Images that travel with the input (text may be the empty string), as the runtime's own image input (not a
    * path in prose). Each is a file on this machine, read when the input is
    * delivered; the request record keeps the paths, never the bytes. Rejected
    * `unsupported` when `capabilities.images` is false.
@@ -178,6 +179,18 @@ export interface EventsOptions {
 }
 
 /**
+ * The host machine's memory a session's runtime takes: `rss` in bytes, summed
+ * over the runtime process, its process group and its descendants as one
+ * reading of the process table found them; `processes` is how many were
+ * counted. Observation only: it is not recorded, nothing is signalled, and no
+ * pid leaves oar (`dispose()` stays the only way to stop the process).
+ */
+export interface SessionResources {
+  readonly rss: number;
+  readonly processes: number;
+}
+
+/**
  * The SPI face: what an adapter actually builds. The API face extends it
  * with derivations sealSession computes over the stream.
  */
@@ -192,6 +205,7 @@ export interface AdapterSession {
   rawEvents(observer: RawEventObserver, cursor?: Cursor): Unsubscribe; // the stream itself, one record at a time. Side-tap: sync, never awaited; a throwing observer must not affect the run or other observers. With a cursor: replays every retained record after `afterSeq` synchronously, then continues live: no loss, no duplication.
   records(): readonly RawEvent[]; // every record this process observed, in seq order
   graph(): SessionGraph;
+  resources?(): Promise<SessionResources | null>; // the runtime's memory, read now (`SessionResources`); null once its process has exited, and on Windows (no reader yet). ABSENT where the runtime has no process of its own (pi, cursor: its memory is the host's).
   dispose(): Promise<void>; // records a dispose request, interrupts active work, releases the runtime, records the exit; idempotent. After an exit the stream already holds (the runtime died on its own), the request is answered `accepted` immediately; nothing is left to release. ALWAYS settles: a runtime process is stopped together with every process it started (on POSIX its process group, and its descendants that left the group), and killed outright when it ignores the stop past a grace period.
 }
 
@@ -223,7 +237,7 @@ export interface Session extends AdapterSession {
   /**
    * The root agent's status, folded from the stream (`reduceStatus`): idle,
    * or running since the prompt request (or the first event of an adopted
-   * turn). Invariant every adapter must keep: a prompt recorded while this
+   * turn). Invariant every adapter must keep: a valid prompt recorded while this
    * says `running` is rejected `busy`, and one recorded while it says `idle`
    * is never rejected `busy`. `awaitIdle` waits on it.
    */

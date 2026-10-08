@@ -1,11 +1,11 @@
-// BYOK change: Modified from OAR 0be506f to retain failure reasons without regex classification (Apache-2.0).
+import { foldCodexInputs, type CodexInputs } from "./input-delivery.js";
 import type {
   FrameBody,
   RuntimeEventBody,
   SessionEdge,
   TurnOutcome,
 } from "../../contracts/session.js";
-// BYOK change: Failure classification belongs to BYOK typed failure authority.
+import { codexFailure } from "./failure.js";
 import { asRecord, type JsonRecord } from "../../shared/json.js";
 import { noTokens } from "../../shared/token-totals.js";
 import { codexItemExitCode, codexItemInput, codexToolContent } from "./item-detail.js";
@@ -48,6 +48,8 @@ export type ProjectionCommand =
  */
 export interface CodexProjectionState {
   readonly rootThreadId: string;
+  /** Accepted steers and native echoes, keyed by the turn that owns them. */
+  readonly inputs: CodexInputs;
   readonly lastErrorDetail: string | null;
   /**
    * A root-thread compaction is open (its `contextCompaction` item started).
@@ -64,7 +66,7 @@ export interface CodexProjectionState {
 
 /** The projection of a Session opened by `opened`: a resume awaits codex's re-reported token total. */
 export function initialCodexProjection(rootThreadId: string, opened: CodexOpenMethod = "thread/start"): CodexProjectionState {
-  return { rootThreadId, lastErrorDetail: null, compacting: false, subagents: new Map(), tokenBaseline: initialTokenBaseline(opened === "thread/resume") };
+  return { inputs: new Map(), rootThreadId, lastErrorDetail: null, compacting: false, subagents: new Map(), tokenBaseline: initialTokenBaseline(opened === "thread/resume") };
 }
 
 const COMPACTION_ITEM_TYPE = "contextCompaction";
@@ -75,15 +77,18 @@ function isCompactionItem(params: JsonRecord): boolean {
 
 // The runtime's own status is the truth: an interrupt that landed reports
 // "interrupted"; one that lost the race to completion reports "completed".
-function outcomeFromStatus(status: unknown): TurnOutcome {
+// A failure is classified from the turn's own error (failure.ts).
+function outcomeFromTurn(state: CodexProjectionState, turn: JsonRecord | null): TurnOutcome {
+  const status = turn?.status;
   switch (status) {
     case "interrupted":
       return { kind: "aborted" };
     case "completed":
       return { kind: "completed" };
     default: {
-      const reason = typeof status === "string" ? status : "unknown";
-      return { kind: "failed", reason, failure: "unknown" }; // BYOK change: required contract sentinel, no classification.
+      const word = typeof status === "string" ? status : "unknown";
+      const reason = state.lastErrorDetail === null ? word : `${word}: ${state.lastErrorDetail}`;
+      return codexFailure(reason, turn?.error);
     }
   }
 }
@@ -116,15 +121,6 @@ function toolViews(method: string, item: JsonRecord | null): RuntimeEventBody[] 
     ...(result === undefined ? {} : { result }),
     ...(exitCode === undefined ? {} : { exitCode }),
   }];
-}
-
-function settleOutcome(state: CodexProjectionState, status: unknown): TurnOutcome {
-  const outcome = outcomeFromStatus(status);
-  if (outcome.kind === "failed" && state.lastErrorDetail !== null) {
-    const reason = `${outcome.reason}: ${state.lastErrorDetail}`;
-    return { kind: "failed", reason, failure: "unknown" }; // BYOK change: required contract sentinel, no classification.
-  }
-  return outcome;
 }
 
 /**
@@ -210,7 +206,7 @@ function viewsFor(state: CodexProjectionState, reporter: string, method: string,
       return toolViews(method, item);
     }
     case "turn/completed":
-      return [{ kind: "turn_ended", outcome: settleOutcome(state, asRecord(params.turn)?.status) }];
+      return [{ kind: "turn_ended", outcome: outcomeFromTurn(state, asRecord(params.turn)) }];
     case "thread/tokenUsage/updated":
       return codexUsageViews(params, reporter === state.rootThreadId ? baselineTokens(state.tokenBaseline) : noTokens);
     case "thread/settings/updated":
@@ -229,11 +225,12 @@ export function foldCodexNotification(
   const threadId = typeof params.threadId === "string" ? params.threadId : previous.rootThreadId;
   // Before the views: a re-reported total is read against itself (zero).
   const tokenBaseline = threadId === previous.rootThreadId ? nextTokenBaseline(previous.tokenBaseline, method, params) : previous.tokenBaseline;
-  const state = tokenBaseline === previous.tokenBaseline ? previous : { ...previous, tokenBaseline };
+  const input = threadId === previous.rootThreadId ? foldCodexInputs(previous.inputs, method, params) : { inputs: previous.inputs, events: [] };
+  const state = { ...previous, tokenBaseline, inputs: input.inputs };
   const spanId = spanIdOf(params);
   const event: ProjectionCommand = {
     kind: "frame",
-    body: { type: method, native: params, events: viewsFor(state, threadId, method, params) },
+    body: { type: method, native: params, events: [...input.events, ...viewsFor(state, threadId, method, params)] },
     ...(spanId === undefined ? {} : { spanId }),
     ...(threadId === state.rootThreadId ? {} : { sessionId: threadId }),
   };
