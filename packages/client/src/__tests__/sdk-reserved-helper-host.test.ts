@@ -68,15 +68,17 @@ describe('SDK-reserved helper host composition', () => {
     const prepared = vi.spyOn(preparedHost, 'runPiPreparedHost').mockResolvedValue();
     const argv = ['--config', '/session with spaces/config.json', '--mode', 'rpc', '--no-skills'];
     await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-rpc', ...argv])).resolves.toBe(true);
-    // The reserved helper is the single-file re-entry, so it also names the bundled packaging.
+    // The reserved helper is the single-file re-entry, so the rpc host also
+    // names the bundled packaging. The prepared host has no packaging: its
+    // runtime identity is always the SDK pin.
     expect(rpc).toHaveBeenCalledExactlyOnceWith(argv, 'bundled');
     expect(prepared).not.toHaveBeenCalled();
     const preparedArgs = ['--config', '/session/prepared.json'];
     await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-prepared', ...preparedArgs])).resolves.toBe(true);
-    expect(prepared).toHaveBeenCalledExactlyOnceWith(preparedArgs, 'bundled');
+    expect(prepared).toHaveBeenCalledExactlyOnceWith(preparedArgs);
     // The callable entry owns its usage check, including a missing config.
     await runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-prepared']);
-    expect(prepared).toHaveBeenLastCalledWith([], 'bundled');
+    expect(prepared).toHaveBeenLastCalledWith([]);
   });
 
   it('retains exact MCP arity at both dispatch boundaries', async () => {

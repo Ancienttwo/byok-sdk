@@ -131,7 +131,7 @@ import {
   type InputPreparationService,
 } from './input-preparation-service';
 import { InputPreparationUnsupportedRecordVersionError } from './input-preparation-store';
-import { createPiInputPreparationCompiler, resolveInstalledPiRuntimeIdentity, resolvePinnedPiRuntimeIdentity } from '../adapters/pi/input-preparation';
+import { createPiInputPreparationCompiler, resolvePinnedPiRuntimeIdentity } from '../adapters/pi/input-preparation';
 import { decodeTeamMemberContext, encodeTeamMemberContext, LocalTeamWorkspace } from './team-workspace';
 import { McpToolsetRegistry, McpToolsetRevisionConflictError } from './toolset-registry';
 import { ConnectionManager } from './connection-manager';
@@ -1460,10 +1460,10 @@ export function buildDaemonWithAdapters(
    *    malformed policy is a construction error (same rule as the presence
    *    cadence and the assertion allowlist); an ABSENT section leaves the whole
    *    surface off, and all three methods answer `input_preparation_unconfigured`.
-   * 2. The native compiler binds to the verified installed artifact closure. If
-   *    that closure cannot be verified the feature does not silently degrade to
-   *    a caller-supplied identity — it answers `runtime_identity_unavailable`
-   *    and compiles nothing.
+   * 2. The native compiler binds to the identity of the pinned official Pi
+   *    release. If the client pin does not name that release the feature does
+   *    not silently degrade to a caller-supplied identity — it answers
+   *    `runtime_identity_unavailable` and compiles nothing.
    * 3. The service itself, which owns the durable record log under `storeDir`.
    */
   const inputPreparationLimits =
@@ -1505,9 +1505,7 @@ export function buildDaemonWithAdapters(
   function initializeInputPreparation(): Promise<void> {
     return inputPreparationInitialization ??= (async () => {
       if (config.inputPreparation === undefined || inputPreparationLimits === undefined) return;
-      // A single-file product bundles Pi and has no installed package to read.
-      const compiler = createPiInputPreparationCompiler(config.sdkHelperHost === undefined
-        ? resolveInstalledPiRuntimeIdentity() : resolvePinnedPiRuntimeIdentity());
+      const compiler = createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity());
       inputPreparationService = createInputPreparationService({
         storeDir, limits: inputPreparationLimits,
         authorityResolver: config.inputPreparation.authorityResolver,

@@ -40,6 +40,27 @@
   check a stale `server.sqlite` at startup without parsing the message. The
   messages do not change.
 
+- **Fixed (client)** — on 2026-10-07 upstream published all nine
+  `@earendil-works/*` Pi packages at 1.1.0. The client pins pi-coding-agent,
+  pi-ai, pi-agent-core, pi-durable and chord at 1.0.4, but pi-codemode,
+  pi-mcp, pi-telemetry and pi-tui come in through upstream `^1.0.4` ranges. A
+  fresh npm install took 1.1.0 for these four, and the installed-closure hash
+  check refused it: the prepared lane failed with
+  `official Pi package identity mismatch`, and `check:release-pack` failed.
+  The SDK now reads the installed closure and does not gate it (ADR-037). The
+  prepared runtime identity comes from the client pin and the recorded
+  provenance, for npm installs and single-file products alike
+  (`resolveInstalledPiRuntimeIdentity` is removed). The release gates keep the
+  exact checks on the five direct pins and the fork check, and log the
+  installed version of the four indirect packages. The build no longer
+  re-hashes the installed closure. `official-pi-closure.json` drops its file
+  inventories (the published bundles lose about 0.5 MB each), so
+  `closureDigest` changes from `fb68a282…` to `3e2b04b5…`. The compiler
+  version stays 4. A preparation compiled before this change declines with
+  `preparation_runtime_identity_mismatch`; prepare it again. A Host
+  accounting ruling for the old runtime identity string is
+  `accounting_policy_inapplicable` until the Host rules the new string.
+
 - **Changed (client)** — update the private OAR source from 0.33.1 to 0.37.0
   (`0be506f`). The raw Codex session takes OAR's abort fallback: when codex
   neither refuses an interrupt nor ends the turn within 10 s, the abort is

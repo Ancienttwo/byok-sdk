@@ -14,7 +14,7 @@ import {
   type AgentSessionServices,
 } from '@earendil-works/pi-coding-agent';
 import { inputPreparationRuntimeIdentityString, type InputPreparationModelV1 } from '../input-preparation';
-import { resolveInstalledPiRuntimeIdentity, resolvePinnedPiRuntimeIdentity, verifyPreparedPiInput, type PreparedPiInputV1 } from '../adapters/pi/input-preparation';
+import { resolvePinnedPiRuntimeIdentity, verifyPreparedPiInput, type PreparedPiInputV1 } from '../adapters/pi/input-preparation';
 import {
   canonicalPreparedValue,
   PreparedSessionError,
@@ -63,7 +63,7 @@ import {
  * loop the CLI runs, so the adapter above it speaks one RPC protocol:
  *
  * 1. Everything that can fail before input arrives fails first, closed, with a
- *    stable reason on stderr: configuration, installed closure, tool surface,
+ *    stable reason on stderr: configuration, runtime identity, tool surface,
  *    provider projection and credential presence. The counted model's provider
  *    is registered with the byte gate as its `streamSimple`.
  * 2. The first stdin frame must be `prompt_prepared`. Its envelope is verified
@@ -639,23 +639,17 @@ function parseArgs(argv: readonly string[]): string {
   return configPath;
 }
 
-/**
- * `packaging` is `bundled` when a single-file product re-enters through the
- * SDK-reserved helper (`sdkHelperHost`). It bundles Pi, so the runtime
- * identity is the SDK pin, not an installed package.
- */
-export async function runPiPreparedHost(argv: readonly string[], packaging: 'installed' | 'bundled' = 'installed'): Promise<void> {
+export async function runPiPreparedHost(argv: readonly string[]): Promise<void> {
   const owned = extractPiConfigDigest(argv, fail);
   const config = loadConfig(parseArgs(owned.args), owned.digest);
 
-  // Derived from the installed Pi package, never from the configuration: a
-  // runtime identity a caller could state is a fingerprint input a caller
-  // could choose.
+  // Derived from the SDK's Pi pin, never from the configuration: a runtime
+  // identity a caller could state is a fingerprint input a caller could choose.
   let runtimeIdentity: string;
   try {
-    runtimeIdentity = inputPreparationRuntimeIdentityString(packaging === 'bundled' ? resolvePinnedPiRuntimeIdentity() : resolveInstalledPiRuntimeIdentity());
+    runtimeIdentity = inputPreparationRuntimeIdentityString(resolvePinnedPiRuntimeIdentity());
   } catch (cause) {
-    fail(`the installed pi runtime identity could not be resolved: ${cause instanceof Error ? cause.message : String(cause)}`);
+    fail(`the pinned pi runtime identity could not be resolved: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
 
   const pool = new McpServerPool(config.mcp, fail);

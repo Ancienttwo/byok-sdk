@@ -1,7 +1,6 @@
-import { OFFICIAL_PI_PACKAGES, verifyOfficialPiClosure } from '../adapters/pi/official-pi-installation.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -24,18 +23,12 @@ describe('required native export data assets',()=>{
     const root=mkdtempSync(path.join(os.tmpdir(),'pi-export-build-'));roots.push(root);
     const sourceDir=path.join(root,'src/adapters/pi'),scriptDir=path.join(root,'scripts');
     mkdirSync(sourceDir,{recursive:true});mkdirSync(scriptDir,{recursive:true});
-    for(const file of ['pi-export-asset-layout.json','pi-export-assets.source.json','official-pi-installation.mjs','official-pi-closure.json'])cpSync(path.resolve(import.meta.dirname,'../adapters/pi',file),path.join(sourceDir,file));
+    for(const file of ['pi-export-asset-layout.json','pi-export-assets.source.json'])cpSync(path.resolve(import.meta.dirname,'../adapters/pi',file),path.join(sourceDir,file));
     const script=path.join(scriptDir,'build-pi-export-assets.mjs');
     cpSync(path.resolve(import.meta.dirname,'../../scripts/build-pi-export-assets.mjs'),script);
     writeFileSync(path.join(root,'package.json'),JSON.stringify({byok:{piRuntimePin:source.packageVersion}}));
-    const installedRoots = verifyOfficialPiClosure(process.cwd()).roots;
-    for (const name of OFFICIAL_PI_PACKAGES) {
-      const installed = installedRoots.find(row => row.name === name);
-      expect(installed).toBeDefined();
-      const target = path.join(root,'node_modules',name); mkdirSync(path.dirname(target),{recursive:true});
-      cpSync(installed!.root,target,{recursive:true});
-    }
     const pinRoot=path.join(root,'node_modules/@earendil-works/pi-coding-agent');
+    mkdirSync(path.dirname(pinRoot),{recursive:true});cpSync(realpathSync(nativeRoot),pinRoot,{recursive:true});
     const run=()=>spawnSync(process.execPath,[script],{encoding:'utf8'});
     const built=run();expect(built.status,built.stderr).toBe(0);
     const output=path.join(root,'dist/assets/pi-export-html');
@@ -47,6 +40,6 @@ describe('required native export data assets',()=>{
     }
     const file=path.join(pinRoot,source.sourceBasePath,source.files[0]!.path),bytes=readFileSync(file);
     const changed=Buffer.from(bytes);changed[0]=changed[0]!^1;writeFileSync(file,changed);
-    const failed=run();expect(failed.status).not.toBe(0);expect(failed.stderr).toMatch(/official Pi file digest mismatch|export resource digest drift/);
+    const failed=run();expect(failed.status).not.toBe(0);expect(failed.stderr).toMatch(/export resource digest drift/);
   });
 });

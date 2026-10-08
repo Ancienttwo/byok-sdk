@@ -9,7 +9,3 @@ export interface OfficialPiProvenance {
   readonly compilerVersion: number;
 }
 export const OFFICIAL_PI_PROVENANCE: Readonly<OfficialPiProvenance>;
-export const OFFICIAL_PI_PACKAGES: readonly string[];
-export function locateOfficialPiPackage(name: string, from: string): string;
-export function verifyOfficialPiPackage(root: string, name: string): Record<string, unknown>;
-export function verifyOfficialPiClosure(from: string): { provenance: Readonly<OfficialPiProvenance>; roots: {root: string; name: string}[] };

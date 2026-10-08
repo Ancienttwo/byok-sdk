@@ -2230,8 +2230,9 @@ through an at-most-once fetch with first-request byte equality. Both retry layer
 off. Subsequent tool rounds use their actual context; usage and overflow validation
 precede message egress. Sentinel history never enters SessionManager or the artifact.
 
-A single checked official eight-package closure inventory supplies build, native
-identity and release/registry guards. Tarball integrity, signed provenance, exact
-versions and installed-file digests replace fork markers. ADR-037 removed launch
-attestation: Pi starts from the installed SDK package, or re-enters a single-file
+A single checked official provenance record supplies the native identity and the
+release/registry guards. Tarball integrity, signed provenance and exact versions of
+the direct pins replace fork markers. The installed closure is read, not hash-gated:
+the indirect Pi packages take the newest release their upstream caret ranges admit.
+ADR-037 removed launch attestation: Pi starts from the installed SDK package, or re-enters a single-file
 product through `sdkHelperHost`. M5 provider C measurements remain a separate gate.

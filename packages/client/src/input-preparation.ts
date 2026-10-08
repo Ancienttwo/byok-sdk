@@ -491,7 +491,7 @@ export interface InputPreparationCompiledSnapshotV1 extends Omit<InputPreparatio
  * never observed.
  *
  * There is no `runtimeIdentity`, `compilerVersion` or `policyIdentity` field:
- * those are derived from the verified installed artifact closure and the
+ * those are derived from the pinned official Pi release and the
  * daemon's own configured policy, never from caller text.
  */
 export interface InputPreparationRequestV1 {
@@ -1146,8 +1146,8 @@ export interface InputPreparationReceiptV1 {
  *   that does not match what was asked about.
  * - `policy_revision_mismatch` — the request's `policyRevision` is not this
  *   daemon's configured revision.
- * - `runtime_identity_unavailable` — the installed native closure could not be
- *   verified, so no artifact can carry a runtime identity.
+ * - `runtime_identity_unavailable` — the pinned Pi runtime identity could not
+ *   be resolved, so no artifact can carry a runtime identity.
  * - `unsupported_input` — the input is outside the declared first support set,
  *   or the native compiler refused it. Nothing is filled in.
  * - `limit_exceeded` — a configured byte / in-flight / counter-call bound.

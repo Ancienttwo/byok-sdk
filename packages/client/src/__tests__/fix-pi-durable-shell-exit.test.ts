@@ -78,9 +78,13 @@ describe.skipIf(process.platform === 'win32')('F16-2 foreground exit releases ba
     expect(result.value.spillPath).toBeDefined();
     const spill = await readFile(result.value.spillPath!);
     expect(spill.length).toBe(Buffer.byteLength(text) + 2 + Buffer.byteLength('stderr-tail'));
-    expect(spill.subarray(0, Buffer.byteLength(text))).toEqual(Buffer.from(text));
-    expect(spill.includes(Buffer.from('stderr-tail'))).toBe(true);
-    expect(spill.subarray(-2)).toEqual(Buffer.from([0xe6, 0xb1]));
+    // The spill keeps arrival order. The parent reads stdout and stderr
+    // concurrently, so the stderr chunk can land anywhere between stdout
+    // chunks; only the incomplete UTF-8 tail is held until the stream ends.
+    const marker = spill.indexOf(Buffer.from('stderr-tail'));
+    expect(marker).toBeGreaterThanOrEqual(0);
+    const stdoutBytes = Buffer.concat([spill.subarray(0, marker), spill.subarray(marker + Buffer.byteLength('stderr-tail'))]);
+    expect(stdoutBytes).toEqual(Buffer.concat([Buffer.from(text), Buffer.from([0xe6, 0xb1])]));
     await assertReleased(f);
   });
 

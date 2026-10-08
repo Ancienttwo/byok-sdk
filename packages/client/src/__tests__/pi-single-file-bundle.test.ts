@@ -11,7 +11,7 @@ import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { getDocsPath, getExamplesPath, getReadmePath } from '@earendil-works/pi-coding-agent';
 import { assemblePreparedPiToolSurface } from '../adapters/pi/prepared-tools';
-import { resolveInstalledPiRuntimeIdentity, createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
+import { resolvePinnedPiRuntimeIdentity, createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
 import { createPreparedToolSurfaceAssembler } from '../daemon/prepared-tool-surface';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { bindMcpToolsetServerObservation, observeMcpServer } from '../mcp/observation';
@@ -165,7 +165,7 @@ async function preparedFixture(root: string, cwd: string, env: Record<string, st
   await fs.copyFile(fileURLToPath(new URL('./fixtures/mcp-fixture-server.mjs', import.meta.url)), script);
   const server = { command: process.execPath, args: [script, '{}'] };
   const registry = new McpToolsetRegistry({ 's2.echo.v1': { mcpServers: { fixture: server } } });
-  const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+  const compiler = createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity());
   const runtimeIdentity = `${compiler.runtime.packageName}@${compiler.runtime.packageVersion}+${compiler.runtime.closureDigest}.compiler-${compiler.runtime.compilerVersion}`;
   const assembled = await createPreparedToolSurfaceAssembler({ toolsetRegistry: registry, runtimeEnv: () => env })
     .assemble({ agentMemory: 'none', requiredToolsets: ['s2.echo.v1'], runtimeIdentity });

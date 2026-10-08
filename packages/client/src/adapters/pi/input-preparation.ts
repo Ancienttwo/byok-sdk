@@ -1,7 +1,4 @@
-import { OFFICIAL_PI_PROVENANCE, verifyOfficialPiClosure } from './official-pi-installation.mjs';
-import path from 'node:path';
-import { existsSync, readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { OFFICIAL_PI_PROVENANCE } from './official-pi-installation.mjs';
 import type {
   InputPreparationCompiledPromptSnapshotV1,
   InputPreparationCompiledSnapshotV1,
@@ -14,7 +11,7 @@ import type {
 import type { McpToolsetServerObservation } from '../../mcp/observation';
 import { McpAuthorityError } from '../../mcp/authority-error';
 import { projectMcpTools, qualifiedMcpToolName, type McpToolProjection } from '../../mcp/projection';
-import { PI_PACKAGE_NAME, resolvePiRuntimeIdentity, type PiRuntimeIdentity } from './resolve-bin';
+import { resolvePiRuntimeIdentity } from './resolve-bin';
 import {
   buildPreparedTranscriptMessages,
   canonicalPreparedDigest,
@@ -32,14 +29,13 @@ import {
 } from './prepared-request';
 
 /**
- * The prepared-input compiler bound to the verified official Pi closure.
+ * The prepared-input compiler bound to the official Pi release the SDK pins.
  *
  * It does three things:
  *
- * 1. Verifies the INSTALLED runtime closure and derives the runtime / compiler
- *    identity from it — the manifest actually on disk, cross-checked against
- *    the exact version `packages/client/package.json` pins — outside the
- *    compile, once per compiler instance.
+ * 1. Derives the runtime / compiler identity from the exact version
+ *    `packages/client/package.json` pins and the provenance recorded for that
+ *    release. It does not read the installed closure.
  * 2. Compiles D through A1' (`./prepared-request.ts`): the Host transcript T
  *    and the projected model go through the official `streamSimple`, and the
  *    final body string is captured by an injected fetch that never sends.
@@ -191,157 +187,24 @@ export interface InputPreparationCompiler {
 // Runtime identity
 // ---------------------------------------------------------------------------
 
-interface InstalledPiManifest {
-  name?: unknown;
-  version?: unknown;
-}
-
 /**
- * The one official runtime tuple this build admits: the coding agent and the
- * two lockstep packages the prepared lane compiles and runs against, each at
- * exactly one version, with the upstream tag and commit that version was
- * published from (npm registry `gitHead`, recorded in the WP0 breakage map).
- * Artifact integrity (`sha512` per `name@version`) is not observable from an
- * installed package directory; the release identity gate
- * (`scripts/release/pi-runtime-identity.mjs`) proves it against `bun.lock`.
- */
-const OFFICIAL_PI_RUNTIME = Object.freeze({
-  name: OFFICIAL_PI_PROVENANCE.packageName,
-  version: OFFICIAL_PI_PROVENANCE.packageVersion,
-  lockstep: Object.freeze(['@earendil-works/pi-ai', '@earendil-works/pi-agent-core'] as const),
-});
-
-/** One observed installed manifest, as read off disk or from a measured record. */
-export interface InstalledPiPackage {
-  readonly name?: unknown;
-  readonly version?: unknown;
-}
-
-/**
- * The official-runtime identity seam. Every observed package must belong to
- * the official tuple at exactly its version, the coding agent must be observed
- * exactly once, and the client pin must name that same tuple. The caller
- * supplies every manifest it can observe: package resolution observes the
- * coding agent and both lockstep packages. Anything else is
- * `runtime_identity_unavailable`.
- */
-function assertOfficialPin(pinned: PiRuntimeIdentity): string {
-  const tuple = `${OFFICIAL_PI_RUNTIME.name}@${OFFICIAL_PI_RUNTIME.version}`;
-  if (pinned.name !== OFFICIAL_PI_RUNTIME.name || pinned.version !== OFFICIAL_PI_RUNTIME.version) {
-    throw new InputPreparationRuntimeIdentityError(
-      `@byok-sdk/client pins ${pinned.name}@${pinned.version}, but this build prepares input only against ${tuple}`,
-    );
-  }
-  return tuple;
-}
-
-export function assertOfficialRuntimeIdentity(
-  installed: readonly InstalledPiPackage[],
-  pinned: PiRuntimeIdentity,
-): typeof OFFICIAL_PI_PROVENANCE {
-  const tuple = assertOfficialPin(pinned);
-  const admitted: readonly string[] = [OFFICIAL_PI_RUNTIME.name, ...OFFICIAL_PI_RUNTIME.lockstep];
-  for (const manifest of installed) {
-    if (typeof manifest.name !== 'string' || !admitted.includes(manifest.name) || manifest.version !== OFFICIAL_PI_RUNTIME.version) {
-      throw new InputPreparationRuntimeIdentityError(
-        `${PI_PACKAGE_NAME} runtime closure resolved ${String(manifest.name)}@${String(manifest.version)}, but this build admits only ${admitted.map(name => `${name}@${OFFICIAL_PI_RUNTIME.version}`).join(', ')}`,
-      );
-    }
-  }
-  const agents = installed.filter(manifest => manifest.name === OFFICIAL_PI_RUNTIME.name).length;
-  if (agents !== 1) {
-    throw new InputPreparationRuntimeIdentityError(
-      `${PI_PACKAGE_NAME} runtime closure must observe exactly one ${tuple}, observed ${agents}`,
-    );
-  }
-  return OFFICIAL_PI_PROVENANCE;
-}
-
-/**
- * Resolve one lockstep package the way this module loads it and read its
- * manifest. Fails closed: an unresolvable or manifest-less package is not an
- * observed identity.
- */
-function resolveLockstepManifest(name: string): InstalledPiManifest {
-  let entry: string;
-  try {
-    entry = fileURLToPath(import.meta.resolve(name));
-  } catch (cause) {
-    throw new InputPreparationRuntimeIdentityError(`${name} could not be resolved; input preparation cannot derive a runtime identity`, { cause });
-  }
-  const found = findInstalledManifest(path.dirname(entry));
-  if (found === undefined) {
-    throw new InputPreparationRuntimeIdentityError(`${name} resolved to ${entry}, which has no readable enclosing package manifest`);
-  }
-  return found.manifest;
-}
-
-/**
- * Walk up from the runtime package's resolved main entry to its enclosing
- * package root: the package is pure ESM and does not export `./package.json`.
- */
-function findInstalledManifest(startDir: string): { dir: string; manifest: InstalledPiManifest } | undefined {
-  let dir = startDir;
-  for (let depth = 0; depth < 6; depth++) {
-    const candidate = path.join(dir, 'package.json');
-    if (existsSync(candidate)) {
-      try {
-        const manifest = JSON.parse(readFileSync(candidate, 'utf8')) as InstalledPiManifest;
-        if (typeof manifest.name === 'string') return { dir, manifest };
-      } catch {
-        return undefined;
-      }
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) return undefined;
-    dir = parent;
-  }
-  return undefined;
-}
-
-/**
- * Derive the runtime / compiler identity from the VERIFIED installed package.
- * No PATH or version-label fallback: an artifact whose identity is not exactly
- * known cannot be counted against.
- */
-export function resolveInstalledPiRuntimeIdentity(): InputPreparationRuntimeIdentityV1 {
-  const pinned = resolvePiRuntimeIdentity();
-  let mainEntry: string;
-  try {
-    mainEntry = fileURLToPath(import.meta.resolve(PI_PACKAGE_NAME));
-  } catch (cause) {
-    throw new InputPreparationRuntimeIdentityError(
-      `${PI_PACKAGE_NAME} could not be resolved; input preparation cannot derive a runtime identity`,
-      { cause },
-    );
-  }
-  const installed = findInstalledManifest(path.dirname(mainEntry));
-  if (installed === undefined) {
-    throw new InputPreparationRuntimeIdentityError(
-      `${PI_PACKAGE_NAME} resolved to ${mainEntry}, which has no readable enclosing package manifest`,
-    );
-  }
-  verifyOfficialPiClosure(path.dirname(fileURLToPath(import.meta.resolve('@byok-sdk/client/package.json'))));
-  return runtimeIdentity(assertOfficialRuntimeIdentity(
-    [installed.manifest, ...OFFICIAL_PI_RUNTIME.lockstep.map(resolveLockstepManifest)],
-    pinned,
-  ));
-}
-
-/**
- * The runtime / compiler identity of the Pi build this SDK pins, without an
- * installed package. A single-file product (`sdkHelperHost`) bundles Pi, so it
- * has no installed package to read. The value is the same as
- * {@link resolveInstalledPiRuntimeIdentity} returns for that pin.
+ * The runtime / compiler identity of the Pi release this SDK pins. The client
+ * pin must name the official release whose provenance this build records.
+ * The installed closure is not read: npm resolves the indirect Pi packages to
+ * the newest compatible release, and a single-file product bundles Pi and has
+ * no installed package. Artifact integrity of the direct dependencies is the
+ * release identity gate's (`scripts/release/pi-runtime-identity.mjs`).
  */
 export function resolvePinnedPiRuntimeIdentity(): InputPreparationRuntimeIdentityV1 {
-  assertOfficialPin(resolvePiRuntimeIdentity());
-  return runtimeIdentity(OFFICIAL_PI_PROVENANCE);
-}
-
-function runtimeIdentity(provenance: typeof OFFICIAL_PI_PROVENANCE): InputPreparationRuntimeIdentityV1 {
+  const pinned = resolvePiRuntimeIdentity();
+  const official = `${OFFICIAL_PI_PROVENANCE.packageName}@${OFFICIAL_PI_PROVENANCE.packageVersion}`;
+  if (`${pinned.name}@${pinned.version}` !== official) {
+    throw new InputPreparationRuntimeIdentityError(
+      `@byok-sdk/client pins ${pinned.name}@${pinned.version}, but this build prepares input only against ${official}`,
+    );
+  }
   return Object.freeze({
-    ...provenance,
+    ...OFFICIAL_PI_PROVENANCE,
     envelopeFormat: PREPARED_ENVELOPE_FORMAT,
     requestFormat: PREPARED_REQUEST_FORMAT,
     compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,

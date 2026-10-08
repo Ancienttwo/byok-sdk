@@ -93,7 +93,7 @@ export interface PreparedPiToolSurfaceInput {
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
   /** Canonically ordered by server name, exactly as the preparation ordered them. */
   readonly servers: readonly PreparedPiServerBinding[];
-  /** The verified installed native closure identity string. */
+  /** The pinned official Pi runtime identity string. */
   readonly runtimeIdentity: string;
   /** What the durable record says this preparation froze. */
   readonly expectedToolBindingDigest: string;

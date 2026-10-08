@@ -147,7 +147,7 @@ function excerptAt(source: string, index: number): string {
   return source.slice(start, end === -1 ? source.length : end).trim().slice(0, 160);
 }
 
-/** Only the independently checked JSON evidence literal may name upstream files as data. */
+/** Only the independently checked JSON evidence literal may name upstream packages as data. */
 function withoutOfficialClosureData(source: string): string {
   if (!source.includes('var official_pi_closure_default =')) return source;
   const prefix = 'var official_pi_closure_default = ';

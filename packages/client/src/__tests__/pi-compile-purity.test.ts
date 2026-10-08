@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   createPiInputPreparationCompiler,
-  resolveInstalledPiRuntimeIdentity,
+  resolvePinnedPiRuntimeIdentity,
 } from '../adapters/pi/input-preparation';
 import { preparedCompileRequest } from './fixtures/prepared-compile-snapshot';
 
@@ -520,7 +520,7 @@ describe('B-P2 native composition: call-time purity, measured in an isolated chi
     // honest: the body it produced and the body `adapters/pi/input-preparation.ts`
     // produces from the SHARED fixture are the same bytes, so a drift between
     // the two makes this fail rather than quietly moving what is measured.
-    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+    const compiler = createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity());
     const compiled = await compiler.compile(preparedCompileRequest());
 
     expect(clean.report.failure).toBeNull();

@@ -17,7 +17,7 @@ import { probeMcpServer } from '../../daemon/mcp-tools-probe';
 import { McpToolsetRegistry } from '../../daemon/toolset-registry';
 import { createPreparedToolSurfaceAssembler } from '../../daemon/prepared-tool-surface';
 import { PiAdapter } from '../../adapters/pi/pi-adapter';
-import { resolveInstalledPiRuntimeIdentity, createPiInputPreparationCompiler } from '../../adapters/pi/input-preparation';
+import { resolvePinnedPiRuntimeIdentity, createPiInputPreparationCompiler } from '../../adapters/pi/input-preparation';
 import { projectPiMcpEnvironment } from '../../adapters/pi/mcp-environment';
 
 const FIXTURE = fileURLToPath(new URL('./mcp-fixture-server.mjs', import.meta.url));
@@ -167,7 +167,7 @@ export async function prepareOnThisDevice(endpoint: ProviderEndpoint, input: {
       mcpServers: { teamserver: server },
     },
   });
-  const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+  const compiler = createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity());
   const runtimeIdentity =
     `${compiler.runtime.packageName}@${compiler.runtime.packageVersion}`
     + `+${compiler.runtime.closureDigest}.compiler-${compiler.runtime.compilerVersion}`;
