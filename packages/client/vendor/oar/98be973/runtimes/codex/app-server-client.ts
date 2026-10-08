@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 0be506f for injected processes, bounded RPCs and server replies (Apache-2.0).
+// BYOK change: Modified from OAR 98be973 for injected processes, bounded RPCs and server replies (Apache-2.0).
 // BYOK change: The caller owns process creation and must enforce bounded kill/exited semantics.
 export interface LineProcess {
   readonly spawned: Promise<void>;
@@ -31,6 +31,7 @@ import { asRecord, parseJson, type JsonRecord } from "../../shared/json.js";
 import { redactError } from "../../shared/mcp-servers.js";
 // BYOK change: Keep startup synchronous at the injected spawn seam; do not use the upstream queued-client wrapper.
 // BYOK change: Use caller-owned exitError diagnostics instead of shared/executable processFailure.
+// BYOK change: The injected LineProcess has no resources reader, so the client omits upstream `resources`.
 
 /**
  * Minimal persistent JSON-RPC client over codex app-server's stdio JSONL

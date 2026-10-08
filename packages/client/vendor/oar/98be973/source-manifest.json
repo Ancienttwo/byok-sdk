@@ -2,9 +2,9 @@
   "format": "byok.vendor-source",
   "version": 1,
   "package": "@botiverse/oar",
-  "packageVersion": "0.37.0",
+  "packageVersion": "0.44.0",
   "repository": "https://github.com/botiverse/oar",
-  "commit": "0be506ff7ee86f315dafda0c2d48de1a6cac5d62",
+  "commit": "98be973dea8e7f745507ab4039059f9bac6c2ee4",
   "license": "Apache-2.0",
   "files": [
     {
@@ -24,6 +24,18 @@
       "sourcePath": "packages/oar/src/contracts/deliver.ts",
       "upstreamSha256": "364c97d57e78184ee0f5a3735c26987cb9c2ce76cc2577b43157d16b3b85be72",
       "vendoredSha256": "364c97d57e78184ee0f5a3735c26987cb9c2ce76cc2577b43157d16b3b85be72"
+    },
+    {
+      "path": "contracts/errors.ts",
+      "sourcePath": "packages/oar/src/contracts/errors.ts",
+      "upstreamSha256": "1a94356672a7b06f68160207df0a984fa7d8b086159121f1f451dc3b0229f8b0",
+      "vendoredSha256": "1a94356672a7b06f68160207df0a984fa7d8b086159121f1f451dc3b0229f8b0"
+    },
+    {
+      "path": "contracts/failure.ts",
+      "sourcePath": "packages/oar/src/contracts/failure.ts",
+      "upstreamSha256": "de23cf684ad68ec4b1e07d75f4aa3d44e35bbf31f5dd2026e23c9dde8041010e",
+      "vendoredSha256": "de23cf684ad68ec4b1e07d75f4aa3d44e35bbf31f5dd2026e23c9dde8041010e"
     },
     {
       "path": "contracts/graph.ts",
@@ -46,20 +58,20 @@
     {
       "path": "contracts/records.ts",
       "sourcePath": "packages/oar/src/contracts/records.ts",
-      "upstreamSha256": "6d63a352089e303dd1673c50e10dc2fc5bf0a01dfbecdf30c1f13cca088ac546",
-      "vendoredSha256": "6d63a352089e303dd1673c50e10dc2fc5bf0a01dfbecdf30c1f13cca088ac546"
+      "upstreamSha256": "ef6389cfc9565476d3ffae418149e2d2a4db6655bf2838e405072c23d37aa8bc",
+      "vendoredSha256": "ef6389cfc9565476d3ffae418149e2d2a4db6655bf2838e405072c23d37aa8bc"
     },
     {
       "path": "contracts/session-options.ts",
       "sourcePath": "packages/oar/src/contracts/session-options.ts",
-      "upstreamSha256": "24fbba016f49ae77527fe3dff009f521afd6075cc016c4e063c29f3e215324b8",
-      "vendoredSha256": "24fbba016f49ae77527fe3dff009f521afd6075cc016c4e063c29f3e215324b8"
+      "upstreamSha256": "2ab23f9fbd31df9d9d19a101d5b7209676e752ae6f4c9cca9e21db40e70e0cce",
+      "vendoredSha256": "2ab23f9fbd31df9d9d19a101d5b7209676e752ae6f4c9cca9e21db40e70e0cce"
     },
     {
       "path": "contracts/session.ts",
       "sourcePath": "packages/oar/src/contracts/session.ts",
-      "upstreamSha256": "2207eb030f272a099fc25672ea95a0f38a8420ea064dee76d0a8c2f9b8cabe92",
-      "vendoredSha256": "2207eb030f272a099fc25672ea95a0f38a8420ea064dee76d0a8c2f9b8cabe92"
+      "upstreamSha256": "372a059d14911c82e1295dd4241e4658a36cc1aefc4245247dbedfc4f7596a55",
+      "vendoredSha256": "372a059d14911c82e1295dd4241e4658a36cc1aefc4245247dbedfc4f7596a55"
     },
     {
       "path": "contracts/status.ts",
@@ -82,9 +94,21 @@
     {
       "path": "runtimes/codex/app-server-client.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/app-server-client.ts",
-      "upstreamSha256": "b9a7fa3b3af1513a0ad6487b352ef761759a8d3ae7d54b7e4563bf42af4c9c33",
-      "vendoredSha256": "f0ac023598a3229e31799a532498b076f86f3022658daedf0cb0d32b15991d25",
-      "delta": "Inject caller-owned line-process spawn; pass explicit env unchanged; preserve server ids and support replies; default/per-request timeouts; bounded held and pending state with fatal overflow; release timers on settlement, failed write, exit and kill. S2b: settlement consumer errors reject already-dequeued waiters; no uncaught timer failure. Re-vendor: omit upstream home queue and executable diagnostics; preserve direct injected ownership and bounded exitError; retain handled spawned promise. Native replies await acknowledged stdin writes under bounded ownership. 0.33.1 re-vendor: MCP credential redaction of error and exit text through the caller-owned exitError. 0.37.0 re-vendor: killTree is not passed, because the caller-owned spawn owns tree termination; an exit or kill settles pending requests as exited (budget overflow stays error) and the owned transport reports the exit after stdout closes, so pending entries are not kept for late replies; error replies carry the redacted native error."
+      "upstreamSha256": "8feb48c52a41b566ac7dfcfb4c85ca44dc583350e4ab1e8a2af46166bdbc87e3",
+      "vendoredSha256": "a6cce7282121a8fcf706157277f0d34cb6e0eb242b19fe05b2ec0ff0f801b68c",
+      "delta": "Inject caller-owned line-process spawn; pass explicit env unchanged; preserve server ids and support replies; default/per-request timeouts; bounded held and pending state with fatal overflow; release timers on settlement, failed write, exit and kill. S2b: settlement consumer errors reject already-dequeued waiters; no uncaught timer failure. Re-vendor: omit upstream home queue and executable diagnostics; preserve direct injected ownership and bounded exitError; retain handled spawned promise. Native replies await acknowledged stdin writes under bounded ownership. 0.33.1 re-vendor: MCP credential redaction of error and exit text through the caller-owned exitError. 0.37.0 re-vendor: killTree is not passed, because the caller-owned spawn owns tree termination; an exit or kill settles pending requests as exited (budget overflow stays error) and the owned transport reports the exit after stdout closes, so pending entries are not kept for late replies; error replies carry the redacted native error. 0.44.0 re-vendor: keep the explicit string env without the upstream sessionEnvironment merge; omit upstream resources, because the injected LineProcess has no resources reader."
+    },
+    {
+      "path": "runtimes/codex/failure.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/failure.ts",
+      "upstreamSha256": "28a7bd7c3863a360ba0a1e52c0b3508d04ec505e4be0392471d0955a1186dded",
+      "vendoredSha256": "28a7bd7c3863a360ba0a1e52c0b3508d04ec505e4be0392471d0955a1186dded"
+    },
+    {
+      "path": "runtimes/codex/input-delivery.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/input-delivery.ts",
+      "upstreamSha256": "ece2bc4c6c33429410e5018468437f18402fe12b75ddd0d27f770427ec0b6644",
+      "vendoredSha256": "ece2bc4c6c33429410e5018468437f18402fe12b75ddd0d27f770427ec0b6644"
     },
     {
       "path": "runtimes/codex/item-detail.ts",
@@ -95,16 +119,15 @@
     {
       "path": "runtimes/codex/open.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/open.ts",
-      "upstreamSha256": "0dcf1376be5baa8786a721829c770b4baa0749692680d9671ee3415ba438ba05",
-      "vendoredSha256": "f00c0efc8ef847c81dd4c33a91f74b742169d48f48d74514bdb29bcf5b4525f6",
+      "upstreamSha256": "36188b53e4610d60ddf745223550d202d5107a9dfd7ac98397febac68c1e9e4c",
+      "vendoredSha256": "b42dd7c35387922751340a646278afbda56edee405a65035132211f545721619",
       "delta": " Native interactions: explicit on-request policy with readback, opt-in caller-owned request lifecycle, one-shot typed replies and local cancellation records; no fallback allow or persistence. Native replies await acknowledged stdin writes under bounded ownership."
     },
     {
       "path": "runtimes/codex/projection.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/projection.ts",
-      "upstreamSha256": "6ddfff80a823297f9b75070cfb132486a09d326c79359e43c2989141de64f4a1",
-      "vendoredSha256": "34548b3181866612d19390e37dd70155a07efb03f585c7f687c83e3ee44d91ed",
-      "delta": "BYOK S2a: remove regex failure classification, retain raw reason and required failure unknown sentinel."
+      "upstreamSha256": "292182aa5a2a2077a22e710981a94203f32bad654a8f19d67060f4ccdc6ae1ee",
+      "vendoredSha256": "292182aa5a2a2077a22e710981a94203f32bad654a8f19d67060f4ccdc6ae1ee"
     },
     {
       "path": "runtimes/codex/reasoning.ts",
@@ -115,16 +138,16 @@
     {
       "path": "runtimes/codex/rpc-control.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/rpc-control.ts",
-      "upstreamSha256": "a6c1dc8717d63933f7460f3942152b9a0a9d343b8744c46a73c68008c7ead8ec",
-      "vendoredSha256": "348988d19e4ee665c16057661925c4b13090973d0aaa69dd8dace4434b0988c8",
+      "upstreamSha256": "62b2a800a9831000b23765168ca44886b09b24e7f7b906a4f57e65b9ef90b137",
+      "vendoredSha256": "8e871a8f4db52a63a5f997b23d538929dc457d9c0f21f7fc1f082dbc9aaf3c15",
       "delta": "Pass configurable control deadline (default 30000ms) and record typed RPC timeouts as rejected responses. Use an equivalent deferred Promise compatible with the SDK ES2022 lib. S2b: replace the redundant deferred response waiter with synchronous response capture to avoid hanging on required-consumer/budget failure. 0.37.0 re-vendor: keep the synchronous capture with the upstream fallback takeover, exited outcome and late-reply frame; a failed takeover record rejects the control and never escapes the fallback timer."
     },
     {
       "path": "runtimes/codex/session.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/session.ts",
-      "upstreamSha256": "0b4aec13eb1a205023101ce7fd98263c7f3b41258371a64161530324c78a97ed",
-      "vendoredSha256": "158cbd1d7ff664e2e6771339d6ac4c14f7bc868ff8947cd1f28569dd07a31356",
-      "delta": "BYOK S2a: injected spawn and explicit filtered env; caller-selected sandbox (danger-full-access default, inherit passes no override); raw AdapterSession without sealSession/input-images; native-first frame capture with visible fold failure/kill; bounded server request decline/reject using 0.159.2 response schemas; ES2022 deferred Promise. S2b: explicit body.origin=byok-native; inject required consumer/budget before registration. Re-vendor: remove capabilities.steer; refine optional generic steer to a required Codex method; no withdraw or derived deliver. Native interactions: explicit on-request policy with readback, opt-in caller-owned request lifecycle, one-shot typed replies and local cancellation records; no fallback allow or persistence. Native replies await acknowledged stdin writes under bounded ownership. 0.33.1 re-vendor: build the open request before the owned spawn and pass its redactor to the client. 0.37.0 re-vendor: take the upstream abort fallback; its kill and the server-request deadline timer never throw out of the timer."
+      "upstreamSha256": "6459fc5f4ba6c4342ead538c6d6745946370cb1e8f2ccb3198574a6577786b27",
+      "vendoredSha256": "20f1b294b08069eed72f4e6dd557ebbf401148871b6765c3dc0e57a6a79f5cc1",
+      "delta": "BYOK S2a: injected spawn and explicit filtered env; caller-selected sandbox (danger-full-access default, inherit passes no override); raw AdapterSession without sealSession/input-images; native-first frame capture with visible fold failure/kill; bounded server request decline/reject using 0.159.2 response schemas; ES2022 deferred Promise. S2b: explicit body.origin=byok-native; inject required consumer/budget before registration. Re-vendor: remove capabilities.steer; refine optional generic steer to a required Codex method; no withdraw or derived deliver. Native interactions: explicit on-request policy with readback, opt-in caller-owned request lifecycle, one-shot typed replies and local cancellation records; no fallback allow or persistence. Native replies await acknowledged stdin writes under bounded ownership. 0.33.1 re-vendor: build the open request before the owned spawn and pass its redactor to the client. 0.37.0 re-vendor: take the upstream abort fallback; its kill and the server-request deadline timer never throw out of the timer. 0.44.0 re-vendor: take the upstream input-delivery fold, steer acceptance record and MCP tool denials; options.env stays a complete string environment, so no value is a null removal; steer keeps caller-owned image admission; omit upstream resources."
     },
     {
       "path": "runtimes/codex/tasks.ts",
@@ -139,16 +162,34 @@
       "vendoredSha256": "bdb82c501900748b414d99d8d0c05d5e0abd28239c52d6e6e80a7848193de3d1"
     },
     {
+      "path": "runtimes/codex/tool-denials.ts",
+      "sourcePath": "packages/oar/src/runtimes/codex/tool-denials.ts",
+      "upstreamSha256": "74fb6e046c2286caebe49edaa0055642c873ea5e389afa9e56bc632441383612",
+      "vendoredSha256": "74fb6e046c2286caebe49edaa0055642c873ea5e389afa9e56bc632441383612"
+    },
+    {
       "path": "shared/abort-fallback.ts",
       "sourcePath": "packages/oar/src/shared/abort-fallback.ts",
       "upstreamSha256": "665fad321bdcfc1b1e9d67f7f8beb621e2d796cd61383d8fb2d27e52573670a3",
       "vendoredSha256": "665fad321bdcfc1b1e9d67f7f8beb621e2d796cd61383d8fb2d27e52573670a3"
     },
     {
+      "path": "shared/control-input.ts",
+      "sourcePath": "packages/oar/src/shared/control-input.ts",
+      "upstreamSha256": "4ec197e2d4dcfcbe9654bd60be5d5b45d469f323b9606530cf6f9384cea4962d",
+      "vendoredSha256": "4ec197e2d4dcfcbe9654bd60be5d5b45d469f323b9606530cf6f9384cea4962d"
+    },
+    {
       "path": "shared/executable/process-tree.ts",
       "sourcePath": "packages/oar/src/shared/executable/process-tree.ts",
       "upstreamSha256": "83f5c75c28cdb7bc8e045a54c944e17001cf75f9d75edd97b2b4c5387b8377e2",
       "vendoredSha256": "83f5c75c28cdb7bc8e045a54c944e17001cf75f9d75edd97b2b4c5387b8377e2"
+    },
+    {
+      "path": "shared/failure-class.ts",
+      "sourcePath": "packages/oar/src/shared/failure-class.ts",
+      "upstreamSha256": "769de4cf3b7cbbcd30d2007059fe88cdea207ffb14db63aee08b63859f1ee8a7",
+      "vendoredSha256": "769de4cf3b7cbbcd30d2007059fe88cdea207ffb14db63aee08b63859f1ee8a7"
     },
     {
       "path": "shared/instant.ts",
@@ -165,15 +206,15 @@
     {
       "path": "shared/mcp-servers.ts",
       "sourcePath": "packages/oar/src/shared/mcp-servers.ts",
-      "upstreamSha256": "3195d4d01435cb28f64935aa9208e113bb248ecd3831ca2fa2f1f2d69f302a68",
-      "vendoredSha256": "db3443bcce28020ba49ac09ba5caf40bd3bb2657321bb7aec3d10c77d32a76cf",
+      "upstreamSha256": "8689e7fc5297419c308f9ce1270fef403c4d8020a56fd67ec092b51008b54eb5",
+      "vendoredSha256": "f8d41f1a5bc1708a73f82605d833f93b23b0592e29084669de62dd7b09179381",
       "delta": "ES2022 lib: sort the spread copy instead of toSorted."
     },
     {
       "path": "shared/session-kernel.ts",
       "sourcePath": "packages/oar/src/shared/session-kernel.ts",
-      "upstreamSha256": "87c9c85cb8bf039cff3ac9c8e2e1ae3c88cbf39bc21d7d9313eff55c25eb561e",
-      "vendoredSha256": "75e163b0599a4568b71f77cb7d6b0aabcb075a87b3914557303fec3dc7939649",
+      "upstreamSha256": "c9786fcfcab10141e8c2055989a9c7b0713ed60c63b41cd6d49c217a1f56387b",
+      "vendoredSha256": "76b758666d8d2c074b7f12a3b0dfd1c629142350750ea5dc7f38f9ca84db8e23",
       "delta": "BYOK S2b: fatal serialized retained-record byte budget; required consumer runs after append outside best-effort observers."
     },
     {

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { codexSession } from '../../vendor/oar/0be506f/runtimes/codex/session';
-import * as projection from '../../vendor/oar/0be506f/runtimes/codex/projection';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/0be506f/runtimes/codex/app-server-client';
+import { codexSession } from '../../vendor/oar/98be973/runtimes/codex/session';
+import * as projection from '../../vendor/oar/98be973/runtimes/codex/projection';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/98be973/runtimes/codex/app-server-client';
 
 function fakeServer() {
   let receive!: (line: string) => void;
@@ -164,5 +164,41 @@ describe('unconnected OAR Codex adapter', () => {
     if (frame?.kind !== 'frame') throw new Error('missing frame');
     const event = frame.body.events[0];
     expect(event?.kind === 'turn_ended' ? event.outcome : null).toHaveProperty('failure', 'unknown');
+  });
+
+  it('classifies a failed turn from its structured codexErrorInfo', () => {
+    const outcome = (error: unknown) => {
+      const { commands } = projection.foldCodexNotification(projection.initialCodexProjection('root'), 'turn/completed', { threadId: 'root', turn: { status: 'failed', error } });
+      const frame = commands[0];
+      const event = frame?.kind === 'frame' ? frame.body.events[0] : undefined;
+      return event?.kind === 'turn_ended' ? event.outcome : null;
+    };
+    expect(outcome({ message: 'limit', codexErrorInfo: 'usageLimitExceeded' })).toEqual({ kind: 'failed', reason: 'failed', failure: 'quota' });
+    expect(outcome({ message: 'busy', codexErrorInfo: { responseStreamConnectionFailed: { httpStatusCode: 429 } } })).toEqual({ kind: 'failed', reason: 'failed', failure: 'rate_limited', status: 429 });
+  });
+
+  it('refuses empty prompt and steer input before any RPC is written', async () => {
+    const fake = fakeServer(); const session = await fake.open();
+    const before = fake.writes.length;
+    expect((await session.prompt('')).response.body).toEqual({ kind: 'rejected', code: 'unsupported', reason: 'empty input: give text or images' });
+    await session.prompt('hello');
+    const steerAt = fake.writes.length;
+    expect((await session.steer('')).response.body).toMatchObject({ kind: 'rejected', code: 'unsupported' });
+    expect(fake.writes.length).toBe(steerAt);
+    expect(fake.writes.slice(before).filter(frame => frame.method === 'turn/start')).toHaveLength(1);
+    await session.dispose();
+  });
+
+  it('reports an accepted steer as dropped when its turn is interrupted before codex echoes it', async () => {
+    const fake = fakeServer(); const session = await fake.open();
+    await session.prompt('long turn');
+    fake.frame({ method: 'turn/started', params: { threadId: 'thread-root', turn: { id: 'turn-root' } } });
+    expect((await session.steer('more', { inputId: 'echoed' })).response.body.kind).toBe('accepted');
+    expect((await session.steer('lost', { inputId: 'dropped' })).response.body.kind).toBe('accepted');
+    fake.frame({ method: 'item/started', params: { threadId: 'thread-root', turnId: 'turn-root', item: { type: 'userMessage', clientId: 'echoed' } } });
+    fake.frame({ method: 'turn/completed', params: { threadId: 'thread-root', turn: { id: 'turn-root', status: 'interrupted' } } });
+    const events = session.records().flatMap(record => record.kind === 'frame' ? record.body.events : []);
+    expect(events.filter(event => event.kind === 'input_dropped')).toEqual([{ kind: 'input_dropped', inputId: 'dropped', reason: 'turn_interrupted' }]);
+    await session.dispose();
   });
 });

@@ -16,7 +16,7 @@ SDK 把 Host 桥接到用户本机自己的 agent：Claude Code、Codex 与 Pi�
 - 无人值守的 session 中没有人回答审批提示。审批 gate 只会让 session 挂起，不会带来安全。
 - 在 YOLO session 中，agent 已经有同一 OS user 的写权限。所以 launch cwd、loader deny 与 extension 隔离不再保护任何东西。
 
-参考实现 OAR v0.29.0（`f1a2b88`）。SDK 现在 vendored 的是 OAR 0.37.0，路径为 `packages/client/vendor/oar/0be506f/`。下面的引用指 v0.29.0：
+参考实现 OAR v0.29.0（`f1a2b88`）。SDK 现在 vendored 的是 OAR 0.44.0，路径为 `packages/client/vendor/oar/98be973/`。下面的引用指 v0.29.0：
 
 - 「Sessions run YOLO by default … a gate is a hang, not safety. A host wanting isolation opts in」（`contracts/session.ts:90-99`）。
 - 「The library is mechanism; the host chooses the policy」（`docs/spec/subagents.md:81`）。
