@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createPreparedToolSurfaceAssembler } from '../daemon/prepared-tool-surface';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
-import { createPiInputPreparationCompiler, resolveInstalledPiRuntimeIdentity } from '../adapters/pi/input-preparation';
+import { createPiInputPreparationCompiler, resolvePinnedPiRuntimeIdentity } from '../adapters/pi/input-preparation';
 import { inputPreparationRuntimeIdentityString } from '../input-preparation';
 import { preparedCompileRequest } from './fixtures/prepared-compile-snapshot';
 
@@ -12,7 +12,7 @@ describe('memory-only preparation through the real descriptor process and compil
     // The packaged host exposes the finite __byok_sdk_helper re-entry before
     // its own runtime parser.
     const installPath = await fs.realpath(fileURLToPath(new URL('../../dist/bin/byok-pi-prepared.js', import.meta.url)));
-    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+    const compiler = createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity());
     const assembler = createPreparedToolSurfaceAssembler({
       toolsetRegistry: new McpToolsetRegistry({}),
       runtimeEnv: () => ({ PATH: '/usr/bin:/bin' }),

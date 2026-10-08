@@ -938,31 +938,39 @@ remain the only device protocol.
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. The SDK pins the official unmodified
-`@earendil-works/pi-coding-agent@1.0.4` plus chord, pi-agent-core, pi-ai,
-pi-codemode, pi-durable, pi-mcp, pi-telemetry and pi-tui to exactly 1.0.4 (upstream commit
+`@earendil-works/pi-coding-agent@1.0.4` plus chord, pi-agent-core, pi-ai and
+pi-durable to exactly 1.0.4 (upstream commit
 `7c10bd4337495ee613f2224843ecdf349b80d1df`, closureDigest
-`fb68a2820fb78075a9195e930ee8c55f235d9f46abc861dc3f1c3a85592b2625`). Fork aliases and dual runtimes are
+`3e2b04b5a0b3a5e288e9ca2b41227e1b84d1bd5d8404e9133ccf0f1be3675100`). pi-codemode, pi-mcp,
+pi-telemetry and pi-tui reach an install only through the caret ranges of the
+coding agent and pi-ai, so npm installs the newest compatible release of each.
+The SDK reads their installed version and does not gate it. Fork aliases and dual runtimes are
 retired. `resolvePiRuntimeIdentity()` reads the static dependency projection;
 resolved name/version mismatch fails closed. There is no implicit global Pi fallback.
 Only public Pi APIs are used; private imports, patches, copied provider serializers
 or Session core, and global monkey-patches are forbidden.
 
-The checked official closure inventory binds each package's name, version, tarball
-SHA-512 integrity, signed provenance and upstream commit, and every installed file's
-SHA-256. Acquisition verifies npm signatures and Sigstore provenance against the
-release workflow identity; the checked inventory includes the provenance bundles.
-Build and isolated release/registry installs verify every resolved sibling instance
-against those bytes and reject fork packages. `nativeProvenance` binds the coding
-package identity, tarball integrity, provenance digest, whole closure digest and
-compiler version. Input preparation verifies the installed closure before it
-derives the runtime identity; a single-file product (`sdkHelperHost`) uses the
-SDK pin. The SDK does not attest the runtime executable at launch (ADR-037).
-Closure drift found by these checks is a refusal, never a substituted runtime.
+The checked official provenance record (`official-pi-closure.json`) binds the
+name, version, tarball SHA-512 integrity, signed provenance and upstream commit of
+each of the nine official packages at the pinned release. It holds no file
+inventory. Acquisition verifies npm signatures and Sigstore provenance against
+the release workflow identity; the record includes the provenance bundles.
+Isolated release/registry installs require each direct pin at exactly the pinned
+version with the locked integrity, prove the coding agent against its official
+tarball, and reject fork packages. They read and report the installed version of
+each indirect package, and do not gate it. `nativeProvenance` binds the coding
+package identity, tarball integrity, provenance digest, the digest of the whole
+record (`closureDigest`) and compiler version. Input preparation derives the
+runtime identity from the client pin and this record. It does not read the
+installed closure, so the identity is the same for an npm install and for a
+single-file product (`sdkHelperHost`). A client pin that does not name the
+recorded release is a refusal. The SDK does not attest the runtime executable at
+launch (ADR-037).
 
 Official coding-agent 1.0.4, like 1.0.3, ships no npm shrinkwrap. The npm
 physical root count has not been re-measured for 1.0.4. The local Bun install
 has eleven resolved physical roots across nine official package names.
-The closure check verifies all instances; no singleton guarantee is claimed.
+The release check verifies all direct instances; no singleton guarantee is claimed.
 The scripted workflow probe covers the vendored arbiter's built-in
 Agent/compat stream path. It does not prove cross-instance
 registration visibility: pi-ai/compat owns a module-local apiProviderRegistry,
@@ -2043,7 +2051,7 @@ Prepared child environment is rebuilt through an explicit EnvironmentBuilder all
 
 A1'' compile uses only a placeholder key and injected capture-and-throw fetch against the actual baseUrl. The official OpenAI client reads exactly OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET, OPENAI_LOG and OPENAI_CUSTOM_HEADERS. The approved purity contract is D independence plus this exact read set, not zero reads; an upgrade changing the set requires a fresh ruling. Poisoning these variables must leave D unchanged. OPENAI_LOG may cause a local request log during compile: the device owner deliberately enabled this debug setting; the accepted side effect remains local, does not change D and is not sent externally. No global env or transport monkey-patch is permitted.
 
-Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.0.4 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected closure inventory and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.37.0 source at `packages/client/vendor/oar/0be506f/`, from upstream commit `0be506ff7ee86f315dafda0c2d48de1a6cac5d62`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
+Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.0.4 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.37.0 source at `packages/client/vendor/oar/0be506f/`, from upstream commit `0be506ff7ee86f315dafda0c2d48de1a6cac5d62`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
 
 pi-durable 1.0.1 ruling (2026-10-04, approved by Aimpact): admitted at exactly 1.0.1. Its shipped code is byte-identical to 1.0.0 (version-only change), and the closure was freshly attested at closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`.
 
@@ -2053,7 +2061,9 @@ pi-durable 1.0.3 ruling (2026-10-05, approved by Aimpact via herdr go 「全线�
 
 pi-durable 1.0.4 ruling (2026-10-06, approved by the owner: 「我是要升到1.04」): admitted at exactly 1.0.4, closure freshly attested at closureDigest `fb68a2820fb78075a9195e930ee8c55f235d9f46abc861dc3f1c3a85592b2625` (upstream commit `7c10bd4337495ee613f2224843ecdf349b80d1df`). The 1.0.4 breaking changes apply to `NodeExecutionEnv.watch()` permission handling and the env conformance suite. The SDK does not call `watch()` and does not run that suite, so no BYOK source change is required. The durable coding tools get the upstream `read`, output-BOM and progress-default fixes. The new `@earendil-works/pi-env` package is not in the closure.
 
-Exactness has three independent checks: bun.lock exact versions and sha512 integrity under frozen install; verification of all resolved official package instances' manifests (nine inventoried package names; eleven resolved instances on the collecting Bun host) and file inventories against tarball/provenance evidence, at build, release and input preparation; release-pack and registry-readback isolated-install convergence. The SDK does not attest the Pi executable at launch (ADR-037). Renamed provenance fields are packageName, packageVersion, tarballIntegrity, upstreamCommit, provenanceDigest, closureDigest and compilerVersion; upstreamBase/forkBuild are retired, not filled with dummy values. The official tarball signatures and provenance are collected reproducibly by `scripts/release/collect-official-pi-closure.mjs`.
+Exactness of the direct pins has three independent checks: bun.lock exact versions and sha512 integrity under frozen install (the root `overrides` also hold the repo's own install of the indirect packages at the pin); the build entry check that each installed direct package is at the pin; release-pack and registry-readback isolated installs, which require the direct pins with the locked integrities and prove the coding agent against its official tarball. The indirect packages are read, not gated: the release gates log their installed version, and input preparation does not read them. The SDK does not attest the Pi executable at launch (ADR-037).
+
+Indirect Pi ruling (2026-10-07, owner, ADR-037): upstream published all nine `@earendil-works/*` packages at 1.1.0 on 2026-10-07 22:10 UTC. A fresh npm install of the client then resolved pi-codemode, pi-mcp, pi-telemetry and pi-tui to 1.1.0, and the installed-closure hash check refused it: the prepared lane failed with `official Pi package identity mismatch` and release-pack failed. pi-tui ships native addons and may not be a direct dependency, so the SDK cannot pin these four. The installed closure is therefore read, not hash-gated, at runtime and in the release check. The provenance record dropped its file inventories, so closureDigest changed from `fb68a282…` to `3e2b04b5…` with no compiler version change (the same rule as a Pi pin change): a preparation compiled before declines with `preparation_runtime_identity_mismatch`, and a Host accounting ruling for the old runtime identity string is `accounting_policy_inapplicable` until the Host rules the new string. Renamed provenance fields are packageName, packageVersion, tarballIntegrity, upstreamCommit, provenanceDigest, closureDigest and compilerVersion; upstreamBase/forkBuild are retired, not filled with dummy values. The official tarball signatures and provenance are collected reproducibly by `scripts/release/collect-official-pi-closure.mjs`.
 
 ### 0.22.0 Host calibration and upgrade boundary
 

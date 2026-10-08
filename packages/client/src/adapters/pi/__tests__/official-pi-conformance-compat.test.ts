@@ -14,7 +14,7 @@ import { streamSimple } from '@earendil-works/pi-ai/api/openai-completions';
 import type { InputPreparationModelV1 } from '../../../input-preparation';
 import {
   createPiInputPreparationCompiler,
-  resolveInstalledPiRuntimeIdentity,
+  resolvePinnedPiRuntimeIdentity,
   type CompilePreparedInputRequest,
 } from '../input-preparation';
 import {
@@ -182,7 +182,7 @@ describe('official Pi 1.0.4: compat is endpoint-detected (g)', () => {
       binding: { inputIdentity: 'i', runtimeIdentity: 'r', policyIdentity: 'p', profileRevision: 'v' },
       toolExecutors: { byok_observe: 'b'.repeat(64) },
     };
-    const compiled = await createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity()).compile(request);
+    const compiled = await createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity()).compile(request);
     expect(compiled.requestBody).toBe(realOpenAiShort.body);
     expect(compiled.residual).toEqual([]);
     expect(compiled.counterProjection).toBe(compiled.requestBody);

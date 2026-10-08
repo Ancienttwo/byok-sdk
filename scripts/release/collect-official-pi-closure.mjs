@@ -1,8 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { verify as verifySigstore } from 'sigstore';
 import { createHash, createPublicKey, verify } from 'node:crypto';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
 const output=fileURLToPath(new URL('../../packages/client/src/adapters/pi/official-pi-closure.json', import.meta.url));
@@ -32,19 +31,11 @@ for (const name of names) {
  assert.ok(statement.predicate.buildDefinition.resolvedDependencies.some(d=>d.digest.gitCommit===commit));
  const tarball=Buffer.from(await(await fetch(metadata.dist.tarball)).arrayBuffer());
  assert.equal('sha512-'+createHash('sha512').update(tarball).digest('base64'),integrity);
- const temp=mkdtempSync(join(evidence,'official-package-'));const archive=join(temp,'package.tgz');writeFileSync(archive,tarball);
- const entries=execFileSync('tar',['-tzf',archive],{encoding:'utf8'}).trim().split('\n');
- assert.ok(entries.every(p=>p.startsWith('package/')&&!p.split('/').includes('..')));
- execFileSync('tar',['-xzf',archive,'-C',temp]);
- const base=join(temp,'package');
- const files=readdirSync(base,{recursive:true,withFileTypes:true}).filter(e=>e.isFile()).map(e=>{
-  const file=join(e.parentPath,e.name);const bytes=readFileSync(file);return {path:file.slice(base.length+1),bytes:bytes.length,sha256:sha(bytes)};
- }).sort((a,b)=>a.path<b.path?-1:1);
  const bundle=JSON.stringify(attestation.bundle);
  writeFileSync(join(evidence,name.split('/')[1]+'-provenance.json'),bundle+'\n');
  records.push({name,version,tarballIntegrity:integrity,upstreamCommit:commit,provenanceDigest:sha(bundle),provenanceBundle:attestation.bundle,
-  provenance:{predicateType:statement.predicateType,repository:'https://github.com/earendil-works/pi',workflow:'.github/workflows/build-binaries.yml',ref:`refs/tags/v${version}`,certificateIssuer:'https://token.actions.githubusercontent.com',verifiedBy:'sigstore.verify',attestationUrl:metadata.dist.attestations.url},files});
- console.log(`${name}@${version}: registry signature, Sigstore provenance, tarball integrity verified; ${files.length} file digests`);
+  provenance:{predicateType:statement.predicateType,repository:'https://github.com/earendil-works/pi',workflow:'.github/workflows/build-binaries.yml',ref:`refs/tags/v${version}`,certificateIssuer:'https://token.actions.githubusercontent.com',verifiedBy:'sigstore.verify',attestationUrl:metadata.dist.attestations.url}});
+ console.log(`${name}@${version}: registry signature, Sigstore provenance, tarball integrity verified`);
 }
 writeFileSync(output,JSON.stringify({format:'byok.official-pi-closure',version:1,packages:records},null,2)+'\n');
 console.log('Wrote '+output);

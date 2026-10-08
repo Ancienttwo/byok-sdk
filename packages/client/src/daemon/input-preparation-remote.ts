@@ -131,7 +131,7 @@ export interface RemoteInputPreparationDeps {
   readonly deviceId: string;
   /**
    * Absent when this daemon has no `inputPreparation` section at all, or when
-   * the installed native closure could not be verified. Both answer a typed
+   * the pinned Pi runtime identity could not be resolved. Both answer a typed
    * completion rather than throwing.
    */
   readonly service: InputPreparationService | undefined;

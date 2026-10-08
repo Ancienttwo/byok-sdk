@@ -89,6 +89,7 @@ Native-interaction 模式是 Host 显式 opt-in 的本地 seam，不属于 YOLO 
 - `createDaemon` 对已删除的配置键抛错：`permissionDefaults`、`mcpLaunchCwd`、`agentEgress.sanitizer`、`toolImplementationAuthority`。
 - `@byok-sdk/implementation-identity` 退役，后续 train 不再发布它。
 - 去掉 launch-cwd guard 后，同一 uid 的代码可以在 session cwd 放置 `bunfig.toml` preload。在 YOLO 下 agent 已有同一 uid 的写权限，所以这不增加新的权限。
+- 已安装的 Pi closure 只读取，不做哈希 gate（2026-10-07，上游 1.1.0 发布后）。prepared lane 的 runtime identity 来自 SDK pin。release check 只精确检查五个 direct pin，四个 indirect 包只记录版本。
 
 ## Implementation
 

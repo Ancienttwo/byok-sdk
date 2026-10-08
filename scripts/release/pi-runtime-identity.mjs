@@ -1,25 +1,28 @@
-import { verifyOfficialPiPackage, OFFICIAL_PI_PROVENANCE } from '../../packages/client/src/adapters/pi/official-pi-installation.mjs';
+import { OFFICIAL_PI_PROVENANCE } from '../../packages/client/src/adapters/pi/official-pi-installation.mjs';
 // Single authority for the Pi runtime identity across the release gates.
 //
 // `packages/client/package.json` pins the official
 // `@earendil-works/pi-coding-agent` to one exact version, and pins every
 // closure package the SDK imports directly to that same exact version.
-// Transitive siblings are fixed by the lockfile and verified installed closure.
 // `pi-tui` ships prebuilt `.node` addons and may not be a direct dependency
 // (release-graph purity gate); pi-durable and chord are direct exact pins under
 // the R4 durable ruling. The remaining siblings (`pi-telemetry`,
-// `pi-codemode`, `pi-mcp`) reach the install only through the coding agent, and the lockfile and installed
-// integrity checks below still hold each to the exact version. The integrity of each
-// `name@version` is recorded once, in `bun.lock`. Every release gate derives the
-// expected identity here instead of hardcoding any half of it:
+// `pi-codemode`, `pi-mcp`) and `pi-tui` reach an install only through the
+// coding agent's caret ranges, so npm installs the newest compatible release.
+// The release gates read and report their installed version; they do not gate
+// it. The integrity of each `name@version` is recorded once, in `bun.lock`.
+// Every release gate derives the expected identity here instead of hardcoding
+// any half of it:
 //
 // - `parsePiRuntimeIdentity`: exact pins, from the client manifest;
 // - `readLockedPiClosure`: exact version + `sha512` integrity per closure
 //   package, from `bun.lock`, and no fork alias anywhere in it;
-// - `assertInstalledPiRuntime`: an isolated npm install holds exactly that
-//   closure, npm installed exactly those integrities, and the installed
-//   coding-agent file set is byte-identical to the official tarball whose
-//   `sha512` is the locked integrity.
+// - `readInstalledPiClosure`: an isolated npm install holds exactly the direct
+//   pins with exactly the locked integrities, nothing from the retired fork,
+//   and some version of each indirect package, which it reports;
+// - `assertInstalledPiRuntime`: also proves the installed coding-agent file set
+//   is byte-identical to the official tarball whose `sha512` is the locked
+//   integrity.
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs';
@@ -59,6 +62,9 @@ const PI_INDIRECT_CLOSURE = Object.freeze([
   '@earendil-works/pi-codemode',
   '@earendil-works/pi-mcp',
 ]);
+
+/** The closure packages the client pins directly, each exactly at the coding-agent version. */
+export const PI_DIRECT_CLOSURE = Object.freeze(PI_RUNTIME_CLOSURE.filter((name) => !PI_INDIRECT_CLOSURE.includes(name)));
 
 /** The retired fork's package scope; nothing from it may be locked or installed. */
 const PI_FORK_PREFIX = '@byok-sdk/pi-';
@@ -327,21 +333,22 @@ function assertFileSet(label, subject, expected, actual) {
 }
 
 /**
- * Prove an isolated npm install holds exactly the pinned official Pi closure:
- * one coding-agent runtime, every closure package at exactly the pinned version
- * and installed by npm with exactly the locked integrity, nothing from the
- * retired fork, and a coding-agent file set byte-identical to the official
- * tarball whose `sha512` is the locked integrity. Throws on the first
- * violation. Downloads one tarball (`npm pack`), so it needs the registry.
+ * Read the Pi closure of an isolated npm install without the registry. The
+ * direct pins must be installed exactly: one coding-agent runtime, every direct
+ * package only at the pinned version, and every npm-recorded integrity equal to
+ * the locked one. Nothing from the retired fork may be installed. The indirect
+ * packages are read, not gated: npm installs the newest release that the
+ * coding agent's caret ranges admit, and this returns what it installed.
  *
  * @param {string} installRoot directory whose `node_modules` npm installed (holds `package-lock.json`)
  * @param {{ packageName: string, version: string }} identity from `parsePiRuntimeIdentity`
  * @param {Map<string, string>} locked from `readLockedPiClosure`
  * @param {string} label gate name, used in error messages
- * @param {{ command: string, prefix: string[] }} npm how to invoke npm
- * @returns {{ root: string, manifest: Record<string, unknown> }} the single installed Pi package
+ * @returns {{ pi: { root: string, manifest: Record<string, unknown> }, unproven: { key: string, name: string }[], indirect: string[] }}
+ *   the single installed coding agent, the direct npm entries without a
+ *   recorded integrity, and one `name@version` (or `name absent`) per indirect package
  */
-export function assertInstalledPiRuntime(installRoot, identity, locked, label, npm) {
+export function readInstalledPiClosure(installRoot, identity, locked, label) {
   const installed = collectInstalledPackages(installRoot);
   const forks = installed.filter((entry) => String(entry.manifest.name).startsWith(PI_FORK_PREFIX));
   if (forks.length !== 0) {
@@ -349,9 +356,8 @@ export function assertInstalledPiRuntime(installRoot, identity, locked, label, n
       `${label}: the retired Pi fork is installed at ${forks.map((entry) => path.relative(installRoot, entry.root)).join(', ')}`,
     );
   }
-  for (const name of PI_RUNTIME_CLOSURE) {
+  for (const name of PI_DIRECT_CLOSURE) {
     const copies = installed.filter((entry) => entry.manifest.name === name);
-    for (const entry of copies) verifyOfficialPiPackage(entry.root, name);
     const drift = copies.filter((entry) => entry.manifest.version !== identity.version);
     if (copies.length === 0 || drift.length !== 0 || (name === identity.packageName && copies.length !== 1)) {
       throw new Error(
@@ -362,48 +368,73 @@ export function assertInstalledPiRuntime(installRoot, identity, locked, label, n
   }
   const [pi] = installed.filter((entry) => entry.manifest.name === identity.packageName);
 
-  // npm records tarball integrity in its lockfile. Pi 1.0.4 does not ship
-  // npm-shrinkwrap.json. A copy with recorded integrity must match the lock.
-  // A copy without it must have the exact file set of the official tarball
-  // whose sha512 is the locked integrity.
+  // npm records tarball integrity in its lockfile. Pi does not ship
+  // npm-shrinkwrap.json. A direct copy with recorded integrity must match the
+  // lock. A direct copy without it must be proven by content.
   const npmLock = readManifest(path.join(installRoot, 'package-lock.json'));
   if (npmLock?.packages === undefined) throw new Error(`${label}: ${installRoot} has no npm package-lock.json`);
-  const copies = new Map(PI_RUNTIME_CLOSURE.map((name) => [name, []]));
+  const recorded = new Set();
+  const unproven = [];
   for (const [key, entry] of Object.entries(npmLock.packages)) {
     if (!key.includes('node_modules/')) continue;
     const name = key.slice(key.lastIndexOf('node_modules/') + 'node_modules/'.length);
-    if (copies.has(name)) copies.get(name).push({ key, version: entry.version, integrity: entry.integrity });
+    if (!PI_DIRECT_CLOSURE.includes(name)) continue;
+    recorded.add(name);
+    if (entry.version !== identity.version) {
+      throw new Error(`${label}: npm installed ${key} at ${entry.version}, expected ${identity.version}`);
+    }
+    if (entry.integrity === undefined) {
+      unproven.push({ key, name });
+    } else if (entry.integrity !== locked.get(name)) {
+      throw new Error(`${label}: npm installed ${key} with integrity ${entry.integrity}, bun.lock records ${locked.get(name)}`);
+    }
   }
+  for (const name of PI_DIRECT_CLOSURE) {
+    if (!recorded.has(name)) throw new Error(`${label}: npm installed no ${name}`);
+  }
+  const indirect = PI_INDIRECT_CLOSURE.map((name) => {
+    const versions = [...new Set(installed.filter((entry) => entry.manifest.name === name).map((entry) => String(entry.manifest.version)))];
+    return versions.length === 0 ? `${name} absent` : `${name}@${versions.sort().join('+')}`;
+  });
+  return { pi, unproven, indirect };
+}
+
+/**
+ * Prove an isolated npm install holds the pinned official Pi runtime:
+ * everything `readInstalledPiClosure` proves, plus a coding-agent file set
+ * byte-identical to the official tarball whose `sha512` is the locked
+ * integrity, and the same proof for each direct copy that npm installed
+ * without a recorded integrity. Reports the installed indirect versions.
+ * Throws on the first violation. Downloads one tarball (`npm pack`), so it
+ * needs the registry.
+ *
+ * @param {string} installRoot directory whose `node_modules` npm installed (holds `package-lock.json`)
+ * @param {{ packageName: string, version: string }} identity from `parsePiRuntimeIdentity`
+ * @param {Map<string, string>} locked from `readLockedPiClosure`
+ * @param {string} label gate name, used in error messages
+ * @param {{ command: string, prefix: string[] }} npm how to invoke npm
+ * @returns {{ root: string, manifest: Record<string, unknown> }} the single installed Pi package
+ */
+export function assertInstalledPiRuntime(installRoot, identity, locked, label, npm) {
+  const { pi, unproven, indirect } = readInstalledPiClosure(installRoot, identity, locked, label);
   const official = new Map();
   const officialFiles = (name) => {
     if (!official.has(name)) official.set(name, readOfficialTarball(name, identity.version, locked.get(name), label, npm));
     return official.get(name);
   };
-  let fileProven = 0;
-  for (const [name, entries] of copies) {
-    if (entries.length === 0) throw new Error(`${label}: npm installed no ${name}`);
-    for (const entry of entries) {
-      if (entry.version !== identity.version) {
-        throw new Error(`${label}: npm installed ${entry.key} at ${entry.version}, expected ${identity.version}`);
-      }
-      if (entry.integrity !== undefined) {
-        if (entry.integrity !== locked.get(name)) {
-          throw new Error(`${label}: npm installed ${entry.key} with integrity ${entry.integrity}, bun.lock records ${locked.get(name)}`);
-        }
-        continue;
-      }
-      assertFileSet(label, `${entry.key} (no npm integrity)`, officialFiles(name), readInstalledFiles(path.join(installRoot, entry.key)));
-      fileProven += 1;
-    }
+  for (const { key, name } of unproven) {
+    assertFileSet(label, `${key} (no npm integrity)`, officialFiles(name), readInstalledFiles(path.join(installRoot, key)));
   }
   // The runtime itself is always proven by content, whatever npm recorded.
   const tarballFiles = officialFiles(identity.packageName);
   assertFileSet(label, `installed ${identity.packageName}@${identity.version}`, tarballFiles, readInstalledFiles(pi.root));
+  const short = (name) => name.slice('@earendil-works/'.length);
   console.log(
-    `[${label}] official Pi closure ${PI_RUNTIME_CLOSURE.map((name) => name.slice('@earendil-works/'.length)).join(', ')}` +
+    `[${label}] official Pi direct pins ${PI_DIRECT_CLOSURE.map(short).join(', ')}` +
       `@${identity.version}: recorded npm integrities equal bun.lock; single ${identity.packageName} at ` +
       `${path.relative(installRoot, pi.root)} matches the official tarball (${tarballFiles.size} files); ` +
-      `${fileProven} cop${fileProven === 1 ? 'y' : 'ies'} without npm integrity matched their official tarballs; fork manifests=0`,
+      `${unproven.length} cop${unproven.length === 1 ? 'y' : 'ies'} without npm integrity matched their official tarballs; fork manifests=0`,
   );
+  console.log(`[${label}] indirect Pi packages (read, not gated): ${indirect.map(short).join(', ')}`);
   return pi;
 }

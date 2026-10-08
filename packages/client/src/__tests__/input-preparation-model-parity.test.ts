@@ -20,7 +20,7 @@ import {
 } from '../input-preparation';
 import {
   createPiInputPreparationCompiler,
-  resolveInstalledPiRuntimeIdentity,
+  resolvePinnedPiRuntimeIdentity,
   verifyPreparedPiInput,
   type CompilePreparedInputRequest,
 } from '../adapters/pi/input-preparation';
@@ -644,7 +644,7 @@ function admittedProjectedModel(overrides: Record<string, unknown> = {}): InputP
 
 describe('input preparation: a projected BYOK provider compiles and is consumed by the pinned official runtime', () => {
   it('compiles an opaque `byok-sdk-<ref>` provider id and carries it verbatim into the envelope', async () => {
-    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+    const compiler = createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity());
     const compiled = await compiler.compile(compileRequest(admittedProjectedModel()));
 
     const carried = compiled.envelope.providerRequest.model as unknown as Record<string, unknown>;
@@ -683,7 +683,7 @@ describe('input preparation: a projected BYOK provider compiles and is consumed 
     // differ only in an opaque id must compile to the same request — otherwise
     // the opaque id would have silently widened what gets sent — while the
     // digests must differ, because the model is part of what was counted.
-    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+    const compiler = createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity());
     const opaque = await compiler.compile(compileRequest(admittedProjectedModel()));
     const builtin = await compiler.compile(compileRequest(admittedProjectedModel({ provider: 'zai' })));
 
@@ -700,7 +700,7 @@ describe('input preparation: a projected BYOK provider compiles and is consumed 
     // deliberately NOT the object handed to the compile: it is the same wire
     // model re-read by the prepared host's independent parser, which is exactly
     // how the launch presents it.
-    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+    const compiler = createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity());
     const compiled = await compiler.compile(compileRequest(admittedProjectedModel()));
     const expectedModel = throughPreparedHost(projectedWireModel());
     expect(expectedModel).toBeDefined();
@@ -743,7 +743,7 @@ describe('input preparation: a projected BYOK provider compiles and is consumed 
   });
 
   it('refuses a whitespace-only provider id as a typed compile refusal', async () => {
-    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+    const compiler = createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity());
     await expect(compiler.compile(compileRequest(admittedProjectedModel({ provider: '   ' }))))
       .rejects.toBeInstanceOf(InputPreparationCompileError);
   });

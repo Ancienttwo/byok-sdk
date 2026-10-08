@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER, PI_RUNTIME_CLOSURE, readLockedPiClosure } from './pi-runtime-identity.mjs';
+import {
+  parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER, PI_DIRECT_CLOSURE, PI_RUNTIME_CLOSURE, readInstalledPiClosure, readLockedPiClosure,
+} from './pi-runtime-identity.mjs';
 
 const releasePackSource = readFileSync(
   fileURLToPath(new URL('./pack-and-smoke.mjs', import.meta.url)),
@@ -52,6 +56,7 @@ test('release pack accepts exact prerelease versions while Pi remains a stable p
 
 const PI_INDIRECT = ['@earendil-works/pi-tui', '@earendil-works/pi-telemetry', '@earendil-works/pi-codemode', '@earendil-works/pi-mcp'];
 const PI_DIRECT = PI_RUNTIME_CLOSURE.filter((name) => !PI_INDIRECT.includes(name));
+assert.deepEqual(PI_DIRECT_CLOSURE, PI_DIRECT);
 const exactClosure = (version) => Object.fromEntries(PI_DIRECT.map((name) => [name, version]));
 
 test('the Pi runtime identity authority admits only an exact official closure', () => {
@@ -118,4 +123,61 @@ test('the repo pins the official Pi closure the release gates verify', () => {
   const locked = readLockedPiClosure(readFileSync(fileURLToPath(new URL('../../bun.lock', import.meta.url)), 'utf8'), identity);
   assert.equal(locked.get(PI_DEPENDENCY_SPECIFIER), 'sha512-+956nfMFHr5lDUVY/2Q4k+YzojzBuCaBXFgj0eSlXVGr7QVliVddKdc1Pz6yVg1dOlJQmb67doOVrlMsIcIdaw==');
   assert.equal(clientManifest.optionalDependencies?.[PI_DEPENDENCY_SPECIFIER], undefined);
+});
+
+/**
+ * One isolated npm install: `node_modules/<name>/package.json` per installed
+ * package and the `package-lock.json` npm writes beside it.
+ */
+function npmInstallFixture(packages) {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'byok-pi-installed-closure-'));
+  const lockPackages = { '': { name: 'fixture' } };
+  for (const { name, version, integrity } of packages) {
+    const dir = path.join(root, 'node_modules', ...name.split('/'));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name, version }));
+    lockPackages[`node_modules/${name}`] = { version, ...(integrity === undefined ? {} : { integrity }) };
+  }
+  writeFileSync(path.join(root, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: lockPackages }));
+  return root;
+}
+
+test('the installed closure gates the direct pins and reports newer indirect packages', () => {
+  const identity = { packageName: PI_DEPENDENCY_SPECIFIER, version: '1.0.4' };
+  const integrityOf = (name) => `sha512-${Buffer.from(name).toString('base64')}`;
+  const locked = new Map(PI_RUNTIME_CLOSURE.map((name) => [name, integrityOf(name)]));
+  const direct = PI_DIRECT.map((name) => ({ name, version: '1.0.4', integrity: integrityOf(name) }));
+  // A fresh install after upstream published 1.1.0: the caret ranges of the
+  // coding agent and pi-ai take the newer indirect packages.
+  const newerIndirect = PI_INDIRECT.map((name) => ({ name, version: '1.1.0', integrity: `sha512-${'C'.repeat(86)}==` }));
+  const read = (packages) => {
+    const root = npmInstallFixture(packages);
+    try {
+      return readInstalledPiClosure(root, identity, locked, 'fixture');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  };
+
+  const fresh = read([...direct, ...newerIndirect]);
+  assert.equal(fresh.pi.manifest.name, PI_DEPENDENCY_SPECIFIER);
+  assert.deepEqual(fresh.unproven, []);
+  assert.deepEqual(fresh.indirect, PI_INDIRECT.map((name) => `${name}@1.1.0`));
+  assert.deepEqual(read(direct).indirect, PI_INDIRECT.map((name) => `${name} absent`));
+
+  // A wrong direct pin, as installed or as npm recorded it, still fails.
+  for (const name of PI_DIRECT) {
+    const drifted = direct.map((entry) => (entry.name === name ? { ...entry, version: '1.1.0' } : entry));
+    assert.throws(() => read([...drifted, ...newerIndirect]),
+      new RegExp(`expected (?:exactly one|only) installed ${name.replace('/', '\\/')}@1\\.0\\.4, found 1\\.1\\.0`));
+    const forged = direct.map((entry) => (entry.name === name ? { ...entry, integrity: `sha512-${'D'.repeat(86)}==` } : entry));
+    assert.throws(() => read([...forged, ...newerIndirect]), /with integrity sha512-D+==, bun\.lock records/);
+  }
+  assert.throws(() => read(direct.filter((entry) => entry.name !== '@earendil-works/chord')),
+    /expected only installed @earendil-works\/chord@1\.0\.4, found none/);
+  // A direct copy without a recorded npm integrity is left for the content proof.
+  const withoutIntegrity = direct.map((entry) => (entry.name === '@earendil-works/pi-ai' ? { ...entry, integrity: undefined } : entry));
+  assert.deepEqual(read(withoutIntegrity).unproven, [{ key: 'node_modules/@earendil-works/pi-ai', name: '@earendil-works/pi-ai' }]);
+  // The retired fork scope is refused wherever it appears.
+  assert.throws(() => read([...direct, { name: '@byok-sdk/pi-tui', version: '0.85.1' }]), /the retired Pi fork is installed/);
 });

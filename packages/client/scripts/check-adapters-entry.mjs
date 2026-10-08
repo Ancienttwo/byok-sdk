@@ -45,8 +45,6 @@ assert.deepEqual(adaptersExport, {
 // module loading and with no install present.
 assert.equal(manifest.byok?.piRuntimePin, manifest.dependencies?.['@earendil-works/pi-coding-agent'],
   'client byok.piRuntimePin must exactly project dependency alias');
-const { verifyOfficialPiClosure } = await import('../src/adapters/pi/official-pi-installation.mjs');
-verifyOfficialPiClosure(packageRoot);
 // Exact official semver pin. The installed manifest must be the official
 // package at exactly that version; integrity and provenance are the release
 // identity gate's (`scripts/release/pi-runtime-identity.mjs`), not this
@@ -72,11 +70,12 @@ assert.equal(manifest.dependencies?.['@juicesharp/rpiv-todo'], undefined);
 assert.equal(manifest.dependencies?.['@juicesharp/rpiv-i18n'], '2.8.0');
 assert.equal(manifest.dependencies?.['@earendil-works/pi-tui'], undefined);
 assert.equal(manifest.devDependencies?.['@earendil-works/pi-tui'], undefined);
-// Upstream publishes its packages in lockstep, so every package of the
-// pure-JavaScript coding-agent closure is pinned exactly at the coding-agent
-// version and installed at that version. `pi-tui` ships prebuilt `.node`
-// addons, so it cannot be a direct dependency (release-graph purity gate);
-// its version and integrity are held by `scripts/release/pi-runtime-identity.mjs`.
+// Upstream publishes its packages in lockstep, so every direct Pi dependency
+// is pinned exactly at the coding-agent version and installed at that version.
+// `pi-tui` ships prebuilt `.node` addons, so it cannot be a direct dependency
+// (release-graph purity gate). It and the other indirect Pi packages reach an
+// install through the coding agent's caret ranges; the release gate
+// (`scripts/release/pi-runtime-identity.mjs`) reads their version, not gates it.
 for (const name of ['@earendil-works/pi-ai', '@earendil-works/pi-agent-core', '@earendil-works/pi-durable', '@earendil-works/chord']) {
   assert.equal(manifest.dependencies?.[name], nativeManifest.version,
     `client ${name} pin must equal the exact @earendil-works/pi-coding-agent version`);

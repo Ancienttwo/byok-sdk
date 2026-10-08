@@ -547,8 +547,9 @@ try {
     if (clientManifest.optionalDependencies?.[PI_DEPENDENCY_SPECIFIER]) {
       throw new Error('isolated client manifest must not make pi optional');
     }
-    // The official package at the pinned version, and the whole isolated tree
-    // holds exactly the pinned official closure with the locked integrities.
+    // The official package at the pinned version, and the isolated tree holds
+    // exactly the direct Pi pins with the locked integrities. The indirect Pi
+    // packages are read and reported, not gated.
     const piManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@earendil-works', 'pi-coding-agent', 'package.json'), 'utf8'));
     if (piManifest.name !== piRuntime.packageName || piManifest.version !== piRuntime.version) {
       throw new Error(

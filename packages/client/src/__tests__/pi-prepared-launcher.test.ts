@@ -31,7 +31,7 @@ import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { createPreparedToolSurfaceAssembler } from '../daemon/prepared-tool-surface';
 import { PiAdapter, type PiAdapterOptions } from '../adapters/pi/pi-adapter';
 import { PREPARED_PROJECTION_COMPARED_MODEL_FIELDS } from '../bin/pi-prepared-host';
-import { resolveInstalledPiRuntimeIdentity, createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
+import { resolvePinnedPiRuntimeIdentity, createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
 import { canonicalPreparedValue } from '../adapters/pi/prepared-request';
 import { parsePiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { parseModelProviderProfile, type ModelProviderProfile } from '../../../keys/src/provider-profile';
@@ -241,7 +241,7 @@ async function prepareOnThisDevice(
       mcpServers: { teamserver: server },
     },
   });
-  const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+  const compiler = createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity());
   const runtimeIdentity =
     `${compiler.runtime.packageName}@${compiler.runtime.packageVersion}`
     + `+${compiler.runtime.closureDigest}.compiler-${compiler.runtime.compilerVersion}`;

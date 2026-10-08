@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import type { SpawnFn } from '../adapters/pi/rpc-client';
-import { createPiInputPreparationCompiler, resolveInstalledPiRuntimeIdentity } from '../adapters/pi/input-preparation';
+import { createPiInputPreparationCompiler, resolvePinnedPiRuntimeIdentity } from '../adapters/pi/input-preparation';
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { sealRuntimeOperationManifest, type RuntimePreparedLaunchV1 } from '../types';
@@ -81,7 +81,7 @@ const BINDING = {
 
 /** A REAL retained envelope from the SDK's A1' compile; only its consumer is scripted. */
 async function prepareArtifact(cwd: string, artifactPath: string): Promise<RuntimePreparedLaunchV1> {
-  const compiled = await createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity()).compile({
+  const compiled = await createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity()).compile({
     snapshot: {
       prompt: { systemPrompt: 'You summarise repositories.' },
       messages: [{ role: 'user', content: 'summarise the repository', timestamp: 1_700_000_000_000 }],
