@@ -172,21 +172,28 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.24.0`; publication requires separate release
+aligned dispatch release is `0.25.0-rc.1`; publication requires separate release
 authorization and registry readback. The current independent keys candidate is
-`0.9.0`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.24.0`, proven from an isolated standard npm install rather
+`0.10.0-rc.1`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.25.0-rc.1`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-The release owner approved stable 0.24.0 for all nine aligned packages and
-stable keys 0.9.0 on 2026-10-06. The complete public set is ten packages,
-including cloud-do's first-publication candidate. Stable publication omits
-`--tag` and requires each exact version on `latest` after publication. Source
-preparation is not npm execution approval or evidence of publication. The
-reviewed schema-3 first-publication contract remains in force; cloud-do has no
-assumed previous 0.23.0 stable tag. Historical registry receipts below are not a
-fresh readback. Required exact-source artifacts and SDK/Host acceptance gates
-remain open until independently established.
+The 0.25.0-rc.1 train is a prepared prerelease, not yet published. The release
+owner approved 0.25.0-rc.1 for the eight aligned packages and keys
+0.10.0-rc.1 on 2026-10-09, under the npm dist-tag `rc`. A prerelease train
+publishes every public package as a prerelease on one dist-tag, which is why
+keys is also a prerelease. `latest` stays 0.24.0 / keys 0.9.0, and the reviewed
+registry baseline records that prior `latest` for all nine packages. The 0.25
+line is a MINOR: it has pre-1.0 breaking cuts (protocol v2, the minimal-guardrails
+removals of ADR-037, the retired implementation-identity package, Pi 1.1.0 and
+OAR 0.44.0). keys 0.10.0 is a MINOR: it adds `requestTimeoutMs`, changes the Pi
+launcher grammar (`--pi-projection-dir` replaces `--launch-binding`) and drops
+the implementation-identity dependency. Notes: `docs/releases/v0.25.0.md`.
+
+The 0.24.0 train is published: npm shows all ten 0.24.0 / keys 0.9.0 packages
+published on 2026-10-06, read back as `latest` on 2026-10-09, with registry
+integrities equal to the push CI `release-pack` artifact of `756eb921`. The
+repository has no `v0.24.0` tag and no publication record for it.
 
 The 0.24 line is a MINOR under this policy: it adds Host surfaces and Agent
 memory intents, and now also includes the Node 24.15.0 floor, Codex app-server
@@ -196,8 +203,6 @@ fits the source: keys adds the durable launcher entry/API, its Node floor
 changes, and its identity dependency introduces external-CLI authority and V2
 launch records. The approved independent MINOR is keys `0.9.0`; its manifest,
 lock workspace record and exact packed core/identity edges follow that decision.
-The Agent memory intent wire remains a candidate contract until the stable
-release is published; changing source versions alone does not freeze it.
 See [0.24 release and migration notes](releases/v0.24.0.md) for exact source
 evidence, package set, cutover/rollback and the distinct SDK/Host acceptance gates.
 
@@ -220,10 +225,11 @@ edges (core and implementation-identity) must resolve to 0.22.0.
 The identity/core topology merge remains deferred as a separate public package
 and dependency-graph cutover; it is not part of version preparation.
 
-The last train the registry has confirmed is `0.23.0` with keys `0.8.0`,
-published on 2026-09-28 from the `v0.23.0` tag (`bcf65a3f`); both read back as
-`latest` on 2026-09-28. The previous train, `0.22.0` / keys `0.7.0`, was
-published on 2026-09-25 from the `v0.22.0` tag (`0962f14f`). The registry, not this document, is the
+The last train the registry has confirmed is `0.24.0` with keys `0.9.0`,
+published on 2026-10-06 and read back as `latest` on 2026-10-09; its source is
+`756eb921` by artifact integrity, and it has no `v0.24.0` tag. The previous
+train, `0.23.0` / keys `0.8.0`, was published on 2026-09-28 from the `v0.23.0`
+tag (`bcf65a3f`). The registry, not this document, is the
 authority on what has shipped — read it back with `npm view @byok-sdk/core version`
 and `npm view @byok-sdk/keys version`.
 

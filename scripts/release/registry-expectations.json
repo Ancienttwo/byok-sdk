@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "packages": {
-    "@byok-sdk/core": { "priorPublication": "existing", "previousLatest": "0.23.0" },
-    "@byok-sdk/protocol": { "priorPublication": "existing", "previousLatest": "0.23.0" },
-    "@byok-sdk/server": { "priorPublication": "existing", "previousLatest": "0.23.0" },
-    "@byok-sdk/cloud": { "priorPublication": "existing", "previousLatest": "0.23.0" },
-    "@byok-sdk/client": { "priorPublication": "existing", "previousLatest": "0.23.0" },
-    "@byok-sdk/cloud-dataplane": { "priorPublication": "existing", "previousLatest": "0.23.0" },
-    "@byok-sdk/cloud-do": { "priorPublication": "none", "previousLatest": null },
-    "@byok-sdk/ui-runtime": { "priorPublication": "existing", "previousLatest": "0.23.0" },
-    "@byok-sdk/keys": { "priorPublication": "existing", "previousLatest": "0.8.0" }
+    "@byok-sdk/core": { "priorPublication": "existing", "previousLatest": "0.24.0" },
+    "@byok-sdk/protocol": { "priorPublication": "existing", "previousLatest": "0.24.0" },
+    "@byok-sdk/server": { "priorPublication": "existing", "previousLatest": "0.24.0" },
+    "@byok-sdk/cloud": { "priorPublication": "existing", "previousLatest": "0.24.0" },
+    "@byok-sdk/client": { "priorPublication": "existing", "previousLatest": "0.24.0" },
+    "@byok-sdk/cloud-dataplane": { "priorPublication": "existing", "previousLatest": "0.24.0" },
+    "@byok-sdk/cloud-do": { "priorPublication": "existing", "previousLatest": "0.24.0" },
+    "@byok-sdk/ui-runtime": { "priorPublication": "existing", "previousLatest": "0.24.0" },
+    "@byok-sdk/keys": { "priorPublication": "existing", "previousLatest": "0.9.0" }
   }
 }

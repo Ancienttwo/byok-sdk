@@ -13,10 +13,13 @@ The previous train is 0.22.0 / keys 0.7.0, published on 2026-09-25 from the
 [publication record](../../docs/releases/v0.22.0-publication.md).
 
 Current dist-tags and version availability require a fresh registry readback;
-the historical receipt is not a live registry snapshot. The 0.24 source remains
-unpublished. The owner approved stable 0.24.0 for the nine aligned packages and
-stable keys 0.9.0 on 2026-10-06; npm execution approval remains separate. See
-[0.24 release/migration gates](../../docs/releases/v0.24.0.md).
+the historical receipt is not a live registry snapshot. npm shows 0.24.0 /
+keys 0.9.0 published on 2026-10-06 and on `latest` on 2026-10-09. Its registry
+integrities equal the push CI `release-pack` artifact of `756eb921`. It has no
+`v0.24.0` tag and no publication record here. The owner approved the
+prerelease 0.25.0-rc.1 / keys 0.10.0-rc.1 under the dist-tag `rc` on
+2026-10-09; npm execution approval remains separate. See
+[0.25.0-rc.1 release notes](../../docs/releases/v0.25.0.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
 
@@ -33,28 +36,28 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 ## Version selection
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
-The approved source manifests name stable train 0.24.0 and independent keys
-0.9.0. Both are MINOR releases: the train contains breaking runtime/storage/
-identity cuts and additive features; keys adds durable launcher/API behavior,
-a higher Node floor and changed identity authority. The old keys dependency-only
-PATCH rationale is superseded. Keep lock workspace records, API/version docs
-and exact packed internal dependencies consistent with these authorities.
+The approved source manifests name the prerelease train 0.25.0-rc.1 and
+independent keys 0.10.0-rc.1. Both are MINOR lines: the train contains protocol
+v2 and the ADR-037 removals; keys adds `requestTimeoutMs`, changes the Pi
+launcher grammar and drops the implementation-identity dependency. Keep lock
+workspace records, API/version docs and exact packed internal dependencies
+consistent with these authorities.
 
-The approved stable candidate set contains nine aligned packages plus keys,
-including cloud-do. Do not skip the first-publication package. A future RC would
-require a new explicit decision, all ten prerelease versions and one non-`latest`
-tag; it is not this release plan.
+The approved candidate set contains eight aligned packages plus keys: nine
+packages. `@byok-sdk/implementation-identity` is retired and is not published.
+All nine are prereleases on the one non-`latest` tag `rc`.
 The [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-records the prior stable tags and explicitly identifies first publications.
+records the prior stable tags (0.24.0, keys 0.9.0) and explicitly identifies
+first publications; this train has none.
 The prerelease path keeps those existing stable tags fixed.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
 package-document absence before a declared first publication, then exact-version
 readback and the declared absent `latest` after an RC. Missing tags/versions or
 failed registry reads do not establish package absence. Stable publication
 omits `--tag` and requires its exact version on `latest`.
-The stable version/channel decision authorizes source preparation only; it does
+The version/channel decision authorizes source preparation only; it does
 not authorize npm execution, tagging, live qualification or production rollout.
-The [stable publication plan](../../docs/releases/v0.24.0.md#stable-publication-plan)
+The [publication plan](../../docs/releases/v0.25.0.md#publication-plan)
 lists the exact package order and remaining dry-run prerequisites.
 
 ## Pre-publication Host integration

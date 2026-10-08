@@ -1,20 +1,18 @@
 # Changelog
 
-## 0.24.0 / @byok-sdk/keys 0.9.0 — 2026-10-06 (stable source; unpublished)
+## 0.25.0-rc.1 / @byok-sdk/keys 0.10.0-rc.1 — 2026-10-09 (prepared; not published)
 
-- **Release preparation** — the owner approved stable 0.24.0 for all nine aligned
-  packages, including cloud-do, and independent keys 0.9.0. Update public manifests
-  and lock workspace records together. keys is a MINOR for durable launcher/API,
-  Node-floor and identity-authority changes; its exact packed core and identity
-  edges are 0.24.0. Fresh final-source schema-3 artifacts, registry checks, required
-  Host acceptance and separate npm execution approval remain gates.
-  See the [stable publication plan](docs/releases/v0.24.0.md#stable-publication-plan).
+Release candidate for 0.25.0, to be published under the npm dist-tag `rc`;
+`latest` stays 0.24.0 / keys 0.9.0. It carries the minimal-guardrails cut
+(ADR-037) with protocol v2, the official Pi 1.1.0 runtime and the private OAR
+0.44.0 source.
 
-- **Breaking (runtime)** — raise the minimum Node.js version to 24.15.0 across
-  all workspace packages. Development/CI baseline is pinned to Node 24.21.0,
-  with a Node 26 forward-compatibility CI leg.
-
-## Unreleased
+- **Release preparation** — the owner approved 0.25.0-rc.1 for the eight
+  aligned packages and keys 0.10.0-rc.1 on 2026-10-09, under the dist-tag `rc`.
+  The public set is nine packages. `@byok-sdk/implementation-identity` is
+  retired and is not published. Manifests and lock workspace records change
+  together. The registry baseline now records `latest` 0.24.0 for every aligned
+  package, cloud-do included, and 0.9.0 for keys.
 
 - **Changed (client)** — update the private OAR source from 0.37.0 to 0.44.0
   (`98be973`). A Codex prompt or steer with empty text and no images is now
@@ -268,6 +266,24 @@
     applies. A bad value throws a `TypeError` at `createDaemon` or at adapter
     construction. New exported type: `CodexSandboxSetting`.
 
+- **Breaking (protocol, client, cloud)** — remove the SDK permission policy.
+  Sessions run without an SDK permission gate; each local agent keeps its own
+  guardrails, as in OAR (`9c6df0fc`).
+  Plan: `plans/plan-20261007-1340-minimal-guardrails.md` (slice 1).
+  - Protocol: `PROTOCOL_VERSION` moves from 1 to 2. Remove the task offer
+    `policy` (`PermissionPolicy`), the runtime capability `permissionModes`
+    and the input-preparation `permissionMode`. A v1 envelope is rejected;
+    there is no v1 reader. Upgrade the server and the client together, and
+    drain v1 mailbox rows before the upgrade.
+  - Client: an ordinary Claude session starts with
+    `--dangerously-skip-permissions`. Codex keeps `approvalPolicy: never`.
+    Native-interaction mode keeps its Host approval flags. Remove the
+    permission mappers, mode admission, the MCP readonly filter and per-tool
+    MCP grants. `createDaemon` throws when `DaemonConfig.permissionDefaults`
+    is set.
+  - Claude refuses `--dangerously-skip-permissions` as root unless the
+    environment marks a sandbox. Run the daemon as a normal OS user.
+
 - **Changed (client)** — update the private OAR source from 0.25.0 to 0.29.0
   (`f1a2b88eb63e47de8197514e9329642e2d0ae02c`). Codex usage records now carry
   optional `cacheRead` and `cacheWrite` token parts. Add `shared/token-totals.ts`
@@ -283,6 +299,33 @@
   MCP tool allowlist readback at prepare, before spawn. Remove the
   `runtime_version_unsupported` refusal reason. `team relay` only warns. New
   exported type: `RuntimeDetectionAdvisory`.
+
+- **keys 0.10.0-rc.1** — a MINOR: `requestTimeoutMs` is new API (#290), the
+  Pi launcher drops `--launch-binding` and takes `--pi-projection-dir`, and keys
+  no longer depends on `@byok-sdk/implementation-identity`. Its packed core edge
+  is exactly 0.25.0-rc.1. Its version is a prerelease because a prerelease train
+  publishes only prerelease packages on one dist-tag.
+- [Release notes](docs/releases/v0.25.0.md).
+
+## 0.24.0 / @byok-sdk/keys 0.9.0 — 2026-10-06 (published; no `v0.24.0` tag)
+
+- **Publication** — npm shows all ten 0.24.0 / keys 0.9.0 packages published
+  on 2026-10-06, and `latest` read back as 0.24.0 / 0.9.0 on 2026-10-09. Each
+  registry SHA-512 integrity equals the `release-pack` artifact of the push CI
+  run for `756eb921` (run 37502692360). This repository has no `v0.24.0` tag
+  and no publication record for it.
+
+- **Release preparation** — the owner approved stable 0.24.0 for all nine aligned
+  packages, including cloud-do, and independent keys 0.9.0. Update public manifests
+  and lock workspace records together. keys is a MINOR for durable launcher/API,
+  Node-floor and identity-authority changes; its exact packed core and identity
+  edges are 0.24.0. Fresh final-source schema-3 artifacts, registry checks, required
+  Host acceptance and separate npm execution approval remain gates.
+  See the [stable publication plan](docs/releases/v0.24.0.md#stable-publication-plan).
+
+- **Breaking (runtime)** — raise the minimum Node.js version to 24.15.0 across
+  all workspace packages. Development/CI baseline is pinned to Node 24.21.0,
+  with a Node 26 forward-compatibility CI leg.
 
 - **Changed (client)** — update the private OAR source from 0.20.3 to 0.25.0
   (`a800aa00ba9c754c88ba25f84a6981e757b0f19f`). Add the upstream
