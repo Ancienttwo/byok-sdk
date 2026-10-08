@@ -22,6 +22,7 @@ import {
   RuntimeStartupDisposalFailure,
   isRuntimeExecutionFailure,
 } from '../../runtime-failure';
+import { buildRuntimeEnv } from '../../daemon/environment';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import {
@@ -99,6 +100,7 @@ export class CodexAdapter implements RuntimeAdapter {
         await execFileAsync(command, ['app-server', '--help'], {
           timeout: DETECT_TIMEOUT_MS,
           killSignal: 'SIGKILL',
+          env: buildRuntimeEnv({ ambient: process.env }),
         });
       } catch {
         return { kind: 'refused', reason: 'app_server_unavailable' };
@@ -108,6 +110,7 @@ export class CodexAdapter implements RuntimeAdapter {
         const auth = await execFileAsync(command, ['login', 'status'], {
           timeout: DETECT_TIMEOUT_MS,
           killSignal: 'SIGKILL',
+          env: buildRuntimeEnv({ ambient: process.env }),
         });
         authPresent = /logged in (using|with)/i.test(
           auth.stdout + '\n' + auth.stderr,

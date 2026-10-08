@@ -16,6 +16,12 @@
 
 ## Unreleased
 
+- **Fixed (client)** — the runtime detection probes (`--version`, Claude
+  `auth status`, Codex `app-server --help` and `login status`, Pi
+  `--version`) now get the environment a task child gets
+  (`buildRuntimeEnv`). Before, they got the full daemon environment,
+  `CLAUDECODE` and `BYOK_*` included.
+
 - **Fixed (client)** — importing `@byok-sdk/client` no longer runs a CLI when a
   host bundles it into one file (#291). The print custody entry had a module-init
   `import.meta.main` guard; in a single-file bundle that flag is true for every

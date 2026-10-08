@@ -234,7 +234,8 @@ report (`adapters/codex/codex-adapter.ts`), and pi's env-var-name-only check
 
 **Environment inheritance (ADR-037 D2/D3)**: every task child — the runtime
 CLI and the MCP servers the daemon probes for it — gets the daemon's full
-environment, as in OAR. `daemon/environment.ts`'s `buildRuntimeEnv` removes
+environment, as in OAR. The runtime detection probes (`--version`, `auth
+status`, `app-server --help`, `login status`) get the same environment. `daemon/environment.ts`'s `buildRuntimeEnv` removes
 only `CLAUDECODE` (so a child agent starts as its own top-level session) and
 this SDK's own control-plane variables (`BYOK_*`). Provider API keys, cloud
 credentials and loader variables such as `NODE_OPTIONS`, `LD_*` and `DYLD_*`
