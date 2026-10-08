@@ -166,6 +166,8 @@ interface ProbeReport {
   readonly requestBody?: string;
   readonly warmRequestBody?: string;
   readonly envelopeDigest?: string;
+  readonly warmEnvelopeDigest?: string;
+  readonly responseDurations: { readonly compileCold: number[]; readonly compileWarm: number[] };
   readonly load: ProbePhase;
   readonly compileCold: ProbePhase;
   readonly compileWarm: ProbePhase;
@@ -273,13 +275,15 @@ interface ProbeOptions {
   readonly ambient?: 'long' | 'short';
   /** Forces the clock and every generator to a fixed, far-apart set of values. */
   readonly skew?: 'a' | 'b';
+  /** Positive monotonic increments make final response elapsed time observable. */
+  readonly monotonicStepMs?: number;
 }
 
 async function runProbe(
   mode: string,
   label: string,
   canaryValue: string,
-  { ambient, skew }: ProbeOptions = {},
+  { ambient, skew, monotonicStepMs }: ProbeOptions = {},
 ): Promise<ProbeRun> {
   const ambientRoot = seedAmbientRoot(label, canaryValue);
   const reportPath = path.join(ambientRoot, 'report.json');
@@ -289,6 +293,7 @@ async function runProbe(
     JSON.stringify({
       mode,
       skew: skew ?? null,
+      monotonicStepMs: monotonicStepMs ?? 0,
       reportPath,
       canaryFile: path.join(ambientRoot, 'home', 'private-canary.txt'),
       canaryEnvKey: CANARY_ENV_KEY,
@@ -379,6 +384,8 @@ const originFile = (origin: string): string => origin.replace(/:\d+:\d+$/u, '');
  *    (official 1.1.0) — `AssistantMessageEventStream` start time and the
  *    in-memory `durationMs` of the output message; never serialized into
  *    the request.
+ *    The differing-elapsed-time case observes distinct native durations
+ *    while requiring identical captured request bytes and envelope digests.
  *
  * A version bump that moves another clock read onto the compile path must add
  * it HERE with a justification, and the forced-skew case decides whether it
@@ -489,8 +496,8 @@ beforeAll(async () => {
     runProbe('clean', 'clean', 'CANARY-CLEAN'),
     runProbe('clean', 'ambient-a', 'CANARY-AMBIENT-A', { ambient: 'long' }),
     runProbe('clean', 'ambient-b', 'CANARY-AMBIENT-B', { ambient: 'short' }),
-    runProbe('clean', 'skew-a', 'CANARY-SKEW-A', { skew: 'a' }),
-    runProbe('clean', 'skew-b', 'CANARY-SKEW-B', { skew: 'b' }),
+    runProbe('clean', 'skew-a', 'CANARY-SKEW-A', { skew: 'a', monotonicStepMs: 7 }),
+    runProbe('clean', 'skew-b', 'CANARY-SKEW-B', { skew: 'b', monotonicStepMs: 1009 }),
     runProbe('control-fs', 'control-fs', 'CANARY-CONTROL-FS'),
     runProbe('control-env', 'control-env', 'CANARY-CONTROL-ENV'),
     runProbe('control-capability', 'control-capability', 'CANARY-CONTROL-CAP'),
@@ -571,13 +578,13 @@ describe('B-P2 native composition: call-time purity, measured in an isolated chi
     }
   });
 
-  it('reads no clock and no generator during either compile call', () => {
+  it('reads only justified bookkeeping clocks and generators during either compile call', () => {
     // NOT a purity assertion, and deliberately not stated as "zero": reading
     // the clock touches nothing ambient, and the provider path does it
     // legitimately. What is asserted is that every such read in a compile
-    // phase is on `ALLOWED_COMPILE_NONDETERMINISM` with a justification. On
-    // this build the list is empty and so is the measurement, in both phases
-    // and under both forced skews.
+    // phase is on `ALLOWED_COMPILE_NONDETERMINISM` with a justification:
+    // the recorded provider bookkeeping origins above are permitted; every
+    // other origin/API remains a failure, under both forced skews and phases.
     for (const run of [clean, skewA, skewB]) {
       expect(nondeterminismOffAllowlist(run.report.compileCold)).toEqual([]);
       expect(nondeterminismOffAllowlist(run.report.compileWarm)).toEqual([]);
@@ -598,6 +605,21 @@ describe('B-P2 native composition: call-time purity, measured in an isolated chi
     expect(skewB.report.requestBody).toBe(skewA.report.requestBody);
     expect(skewB.report.envelopeDigest).toBe(skewA.report.envelopeDigest);
     expect(skewB.report.warmRequestBody).toBe(skewA.report.warmRequestBody);
+  });
+
+  it('observes different response elapsed times while captured request bytes and digests remain identical', () => {
+    for (const phase of ['compileCold', 'compileWarm'] as const) {
+      expect(skewA.report.responseDurations[phase]).toEqual([7]);
+      expect(skewB.report.responseDurations[phase]).toEqual([1009]);
+      expect(skewA.report.responseDurations[phase]).not.toEqual(skewB.report.responseDurations[phase]);
+    }
+    for (const run of [clean, skewA, skewB]) {
+      expect(run.report.failure).toBeNull();
+      expect(run.report.requestBody).toBe(clean.report.requestBody);
+      expect(run.report.warmRequestBody).toBe(clean.report.requestBody);
+      expect(run.report.envelopeDigest).toBe(clean.report.envelopeDigest);
+      expect(run.report.warmEnvelopeDigest).toBe(clean.report.envelopeDigest);
+    }
   });
 
   it('observes the cold load, and every touch it makes is on the allowlist', () => {

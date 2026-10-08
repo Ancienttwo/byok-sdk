@@ -12,7 +12,7 @@
 // binding the SDK compile module and official pi-ai take is a binding to a
 // monitored function.
 //
-// What is loaded (official Pi 1.0.4, A1'): the SDK's own compile entry
+// What is loaded (the pinned official Pi release, A1'): the SDK's own compile entry
 // `compilePreparedPiInput` (`adapters/pi/input-preparation.ts`), handed in as
 // a pre-built ESM file at `config.compileEntry` (the parent test bundles it
 // from source, since the published dist exports no compile entry), and the
@@ -45,6 +45,7 @@ import tls from 'node:tls';
 import workerThreads from 'node:worker_threads';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { authorizationPath, liesWithinReadRoots, rememberAuthorizedFd } from './pi-purity-path-authorization.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 
@@ -52,6 +53,11 @@ const SELF = fileURLToPath(import.meta.url);
 // monitored: the probe's own setup must not appear in its own report.
 const config = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 const writeReport = fs.writeFileSync;
+const nativeCwd = process.cwd.bind(process);
+const boundedCleanOnly = config.boundedCleanOnly === true;
+if (boundedCleanOnly && config.mode !== 'clean') throw new Error('bounded duration probe permits clean mode only');
+const boundedReadRoots = boundedCleanOnly
+  ? config.boundedReadRoots.map((root) => fs.realpathSync(root)) : [];
 
 /**
  * The installed official pi-ai root — the package that owns both modules the
@@ -131,6 +137,8 @@ const monitorsAbsent = [];
  * construction and therefore fails the assertion instead of vanishing from it.
  */
 const fdPaths = new Map();
+// Authorization uses full native paths, never the truncated diagnostic labels.
+const fdAuthorizations = new Map();
 
 function tally(table, key, entry) {
   const existing = table.get(key);
@@ -197,9 +205,10 @@ function pathLabel(value) {
 }
 
 /** Remember what a monitored open returned, so later fd-based calls name a path. */
-function rememberFd(fd, pathArgument) {
+function rememberFd(fd, pathArgument, openCwd) {
   const known = pathLabel(pathArgument);
   if (typeof fd === 'number' && Number.isInteger(fd) && known !== null) fdPaths.set(fd, known);
+  if (boundedCleanOnly) rememberAuthorizedFd(fdAuthorizations, fd, pathArgument, openCwd ?? nativeCwd());
 }
 
 /** First argument only, stringified and bounded: enough to name a path, never a payload. */
@@ -300,6 +309,28 @@ function absent(key, api, reason) {
   monitorsAbsent.push({ target: label, key: String(key), api, reason });
 }
 
+function refuseBoundedEffect(kind, api, args) {
+  if (!boundedCleanOnly) return;
+  if (kind === 'process' || kind === 'network') throw new Error(`bounded probe refused ${api}`);
+  if ((phase === 'compileCold' || phase === 'compileWarm') && (kind === 'fs' || kind === 'ambient')) {
+    throw new Error(`bounded compile refused ${api}`);
+  }
+  if (kind !== 'fs') return;
+  const readApi = /^fs\.(?:promises\.)?(?:access|exists|lstat|stat|fstat|realpath|readFile|open|read|readv|close)(?:Sync)?(?:\.native)?$/u;
+  if (!readApi.test(api)) throw new Error(`bounded load refused filesystem mutation ${api}`);
+  const resolved = authorizationPath(fdAuthorizations, args[0], nativeCwd());
+  if (typeof resolved !== 'string') throw new Error(`bounded load refused unknown path ${api}`);
+  if (!liesWithinReadRoots(resolved, boundedReadRoots)) {
+    throw new Error(`bounded load refused outside read roots ${api}`);
+  }
+  const options = args[1];
+  const flag = /\.open(?:Sync)?$/u.test(api) ? options
+    : /\.readFile(?:Sync)?$/u.test(api) && options && typeof options === 'object' ? options.flag : undefined;
+  if (flag !== undefined && flag !== 'r' && flag !== 'rs' && flag !== 0) {
+    throw new Error(`bounded load refused non-read-only flag ${api}`);
+  }
+}
+
 function watch(target, key, kind, api, { callThrough = true, before, after } = {}) {
   if (target === undefined || target === null) return absent(key, api, 'container-absent');
   const original = Reflect.get(target, key);
@@ -310,6 +341,7 @@ function watch(target, key, kind, api, { callThrough = true, before, after } = {
   const proxy = new Proxy(original, {
     apply(fn, self, args) {
       record(kind, api, describe(args, kind));
+      refuseBoundedEffect(kind, api, args);
       if (!callThrough) throw new Error(`purity monitor refused ${api}: this probe performs no network I/O`);
       const forwarded = before === undefined ? args : before(args);
       const result = Reflect.apply(fn, self, forwarded);
@@ -318,6 +350,7 @@ function watch(target, key, kind, api, { callThrough = true, before, after } = {
     },
     construct(fn, args, newTarget) {
       record(kind, api, describe(args, kind));
+      refuseBoundedEffect(kind, api, args);
       if (!callThrough) throw new Error(`purity monitor refused new ${api}: this probe performs no network I/O`);
       return Reflect.construct(fn, args, newTarget);
     },
@@ -359,9 +392,10 @@ const OPEN_HOOKS = {
       const last = args.length - 1;
       const callback = args[last];
       if (typeof callback !== 'function') return args;
+      const openCwd = boundedCleanOnly ? nativeCwd() : undefined;
       const forwarded = args.slice();
       forwarded[last] = function wrapped(error, fd) {
-        rememberFd(fd, args[0]);
+        if (error === null || error === undefined) rememberFd(fd, args[0], openCwd);
         return Reflect.apply(callback, this, arguments);
       };
       return forwarded;
@@ -370,10 +404,11 @@ const OPEN_HOOKS = {
   'fs.promises.open': {
     after(args, result) {
       if (result === null || typeof result?.then !== 'function') return;
+      const openCwd = boundedCleanOnly ? nativeCwd() : undefined;
       // Observation only: the returned promise is what the caller gets back,
       // and this branch neither replaces it nor changes its settlement.
       result.then(
-        (handle) => rememberFd(handle?.fd, args[0]),
+        (handle) => rememberFd(handle?.fd, args[0], openCwd),
         () => {},
       );
     },
@@ -465,6 +500,11 @@ const skew = config.skew === undefined || config.skew === null ? null : SKEWS[co
 if (config.skew !== undefined && config.skew !== null && skew === undefined) {
   throw new Error(`unknown skew ${String(config.skew)}`);
 }
+const monotonicStepMs = config.monotonicStepMs ?? 0;
+if (!Number.isSafeInteger(monotonicStepMs) || monotonicStepMs < 0 || (monotonicStepMs > 0 && skew === null)) {
+  throw new Error('monotonicStepMs requires a nonnegative integer and a configured skew when positive');
+}
+let performanceSequenceIndex = 0;
 
 /**
  * A clock or generator monitor. RECORD-ONLY unless a skew is configured: no
@@ -526,7 +566,8 @@ function installNondeterminismMonitors() {
   install(globalThis, 'Date', 'globalThis.Date', dateProxy);
 
   watchValue(Math, 'random', 'Math.random', (_args, forced) => forced.random);
-  watchValue(globalThis.performance, 'now', 'performance.now', (_args, forced) => forced.performanceNow);
+  watchValue(globalThis.performance, 'now', 'performance.now', (_args, forced) =>
+    forced.performanceNow + performanceSequenceIndex++ * monotonicStepMs);
   // `.bigint` first, for the same reason `Date.now` is: the outer proxy
   // forwards `get`, so wrapping the outer function first would hide it.
   watchValue(process.hrtime, 'bigint', 'process.hrtime.bigint', (_args, forced) => forced.hrtimeBigint);
@@ -769,12 +810,43 @@ if (config.mode !== 'clean') installNegativeControl(config.mode);
 const report = {
   mode: config.mode,
   skew: config.skew ?? null,
+  monotonicStepMs,
   node: process.version,
   nodeMajor: Number.parseInt(process.versions.node.split('.')[0], 10),
   failure: null,
   monitorInstallFailures,
   monitorsAbsent,
+  responseDurations: { compileCold: [], compileWarm: [] },
 };
+
+// Observe the terminal message AFTER the native push/end computes durationMs.
+// Never replace a message, the native clock calculation, or the captured request.
+async function observeResponseDurations() {
+  const { AssistantMessageEventStream } = await import(
+    pathToFileURL(path.join(officialRoots[1], 'dist/utils/event-stream.js')).href
+  );
+  const seen = new WeakSet();
+  const observe = (stream, message) => {
+    if ((phase !== 'compileCold' && phase !== 'compileWarm') || seen.has(stream)) return;
+    if (typeof message?.durationMs !== 'number' || !Number.isFinite(message.durationMs)) return;
+    seen.add(stream);
+    report.responseDurations[phase].push(message.durationMs);
+  };
+  const prototype = AssistantMessageEventStream.prototype;
+  const push = prototype.push;
+  prototype.push = function (event) {
+    const result = Reflect.apply(push, this, [event]);
+    if (event.type === 'done') observe(this, event.message);
+    else if (event.type === 'error') observe(this, event.error);
+    return result;
+  };
+  const end = prototype.end;
+  prototype.end = function (message) {
+    const result = Reflect.apply(end, this, [message]);
+    observe(this, message);
+    return result;
+  };
+}
 
 try {
   phase = 'load';
@@ -785,18 +857,22 @@ try {
   // LOAD phase here: the compile phases below measure calls, not module loads.
   const sdk = await import(pathToFileURL(config.compileEntry).href);
   await sdk.loadOfficialCompiler();
-  const input = compileRequest();
+  await observeResponseDurations();
+  const input = config.requestFromEntry === true ? sdk.preparedCompileRequest() : compileRequest();
 
   phase = 'compileCold';
+  performanceSequenceIndex = 0;
   const cold = await sdk.compilePreparedPiInput(input);
 
   phase = 'compileWarm';
+  performanceSequenceIndex = 0;
   const warm = await sdk.compilePreparedPiInput(input);
 
   phase = 'report';
   report.requestBody = cold.providerRequest.body;
   report.warmRequestBody = warm.providerRequest.body;
   report.envelopeDigest = cold.digest;
+  report.warmEnvelopeDigest = warm.digest;
 } catch (error) {
   phase = 'report';
   report.failure = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
