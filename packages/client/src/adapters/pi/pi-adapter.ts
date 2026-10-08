@@ -1087,9 +1087,16 @@ class PiSession implements Session {
                 }, { cause: rpc.terminalError });
               }
               if (value.type === 'agent_settled') {
+                // Native abort is terminal authority before optional statistics.
+                // A failed statistics read must not make an aborted run retryable.
+                const abortFailure = value.aborted === true ? new RuntimeExecutionFailure({
+                  phase: 'run', category: 'semantic', retry: 'non-retryable',
+                  reason: 'pi run aborted before completion',
+                }) : undefined;
+                if (abortFailure) terminalFailure = abortFailure;
                 // Read after settlement and deliver before turn_end, where the consumer stops.
                 let timer: ReturnType<typeof setTimeout> | undefined;
-                let stats: PiRpcMessage;
+                let stats: PiRpcMessage | undefined;
                 try {
                   stats = await Promise.race([rpc.send({ type: 'get_session_stats' }),
                     new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new RuntimeExecutionFailure({
@@ -1097,16 +1104,13 @@ class PiSession implements Session {
                       reason: 'pi get_session_stats response timed out',
                     })), 1000); }),
                   ]);
+                } catch (cause) {
+                  if (!abortFailure) throw cause;
+                  // Deliver unavailable usage, then the already-recorded abort.
+                  // TaskRunner continues to own requested cancellation during teardown.
                 } finally { if (timer !== undefined) clearTimeout(timer); }
-                // Pi 1.1 reports native cancellation explicitly. Preserve final usage,
-                // then fail an unsolicited abort instead of acknowledging success.
-                // TaskRunner owns requested cancellation and suppresses late terminals.
-                if (value.aborted === true) terminalFailure = new RuntimeExecutionFailure({
-                  phase: 'run', category: 'semantic', retry: 'non-retryable',
-                  reason: 'pi run aborted before completion',
-                });
-                else session.pendingTurnEnd = true;
-                return { value: mapPiContextUsage(stats.success === false ? undefined : stats.data, hostContextWindow), done: false };
+                if (!abortFailure) session.pendingTurnEnd = true;
+                return { value: mapPiContextUsage(stats?.success === false ? undefined : stats?.data, hostContextWindow), done: false };
               }
               const mapped = mapPiMessageToAgentEvent(value);
               if (value.type === 'auto_retry_end' && value.success === false) {
