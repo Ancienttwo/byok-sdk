@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseBunLock, parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER, readLockedPiClosure } from './pi-runtime-identity.mjs';
+import { parseBunLock, parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER, PI_RUNTIME_CLOSURE, readLockedPiClosure } from './pi-runtime-identity.mjs';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 const dispatchPackages = [
@@ -147,6 +147,16 @@ try {
   piRuntime = parsePiRuntimeIdentity(readJson('packages/client/package.json'));
 } catch (error) {
   errors.push(error.message);
+}
+// Workspace overrides can conceal a stale published manifest. Every existing
+// direct Pi edge must agree before npm packs independently installable packages.
+if (piRuntime) for (const [directory] of publicPackages) {
+  const manifest = readJson(`${directory}/package.json`);
+  for (const [name, version] of Object.entries(manifest.dependencies ?? {})) {
+    if (PI_RUNTIME_CLOSURE.includes(name) && version !== piRuntime.version) {
+      errors.push(`${directory}/package.json: ${name} must pin the shared official Pi runtime ${piRuntime.version}, got ${version}`);
+    }
+  }
 }
 if (typeof releaseVersion !== 'string' || !exactReleaseVersion.test(releaseVersion)) {
   errors.push('packages/core/package.json: version must be an exact SemVer release train version');

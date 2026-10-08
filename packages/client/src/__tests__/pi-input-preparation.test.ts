@@ -152,7 +152,7 @@ describe('B-P2 native composition: runtime identity', () => {
     expect(identity.packageVersion).toBe(pinned.version);
     expect(identity.packageName).toBe('@earendil-works/pi-coding-agent');
     expect(identity.tarballIntegrity).toMatch(/^sha512-/);
-    expect(identity.upstreamCommit).toBe('7c10bd4337495ee613f2224843ecdf349b80d1df');
+    expect(identity.upstreamCommit).toBe('abe508e1b89912adde45528136c3221eb69acdd7');
     expect(identity.closureDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(identity.envelopeFormat).toBe('byok.pi.prepared-input');
     expect(identity.requestFormat).toBe('byok.pi.openai-completions.request');
@@ -454,9 +454,9 @@ describe('B-P2 native composition: the envelope contract is verified, not assume
 
   const SUPPORTED_IDENTITY = {
     packageName: '@earendil-works/pi-coding-agent',
-    packageVersion: '1.0.4',
+    packageVersion: '1.1.0',
     tarballIntegrity: 'sha512-test', provenanceDigest: 'a'.repeat(64), closureDigest: 'b'.repeat(64),
-    upstreamCommit: '7c10bd4337495ee613f2224843ecdf349b80d1df',
+    upstreamCommit: 'abe508e1b89912adde45528136c3221eb69acdd7',
     envelopeFormat: 'byok.pi.prepared-input',
     requestFormat: 'byok.pi.openai-completions.request',
     compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,

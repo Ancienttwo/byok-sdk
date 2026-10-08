@@ -354,7 +354,7 @@ async function handleCommand(msg) {
       });
       send({ type: 'turn_end', message: {}, toolResults: [] });
       send({ type: 'agent_end', messages: [], willRetry: false });
-      send({ type: 'agent_settled' });
+      send({ type: 'agent_settled', aborted: msg.message === 'fake native abort' });
       break;
     }
 
@@ -365,7 +365,7 @@ async function handleCommand(msg) {
     case 'abort':
       send({ type: 'response', command: 'abort', success: true, id: msg.id });
       send({ type: 'agent_end', messages: [], willRetry: false });
-      send({ type: 'agent_settled' });
+      send({ type: 'agent_settled', aborted: true });
       break;
 
     case 'bash':

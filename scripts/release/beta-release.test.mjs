@@ -5,6 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { OFFICIAL_PI_PROVENANCE } from '../../packages/client/src/adapters/pi/official-pi-installation.mjs';
 
 import {
   exactReleaseVersion,
@@ -74,7 +75,7 @@ test('publish and readback reject a missing or latest prerelease tag before regi
       const manifest = { name: `@byok-sdk/${name}`, version };
       if (name === 'client') {
         manifest.dependencies = Object.fromEntries(
-          ['pi-coding-agent', 'pi-ai', 'pi-agent-core', 'pi-durable', 'chord'].map((pkg) => [`@earendil-works/${pkg}`, '1.0.4']),
+          ['pi-coding-agent', 'pi-ai', 'pi-agent-core', 'pi-durable', 'chord'].map((pkg) => [`@earendil-works/${pkg}`, OFFICIAL_PI_PROVENANCE.packageVersion]),
         );
       }
       writeFileSync(path.join(fixturePackage, 'package.json'), `${JSON.stringify(manifest)}\n`);

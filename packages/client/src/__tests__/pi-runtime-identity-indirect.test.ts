@@ -8,16 +8,16 @@ import { preparedCompileRequest } from './fixtures/prepared-compile-snapshot';
 
 /**
  * pi-coding-agent and pi-ai depend on these four packages with a caret range,
- * so a fresh npm install takes the newest compatible release. Upstream
- * published 1.1.0 for all of them on 2026-10-07.
+ * so a fresh npm install takes the newest compatible release. The version is
+ * synthetic: it only has to be newer than the official pin.
  */
 const INDIRECT_PI_PACKAGES = ['pi-telemetry', 'pi-tui', 'pi-codemode', 'pi-mcp'];
-const NEWER_INDIRECT_VERSION = '1.1.0';
+const NEWER_INDIRECT_VERSION = '1.2.0';
 const INDIRECT_MANIFEST = new RegExp(`[\\\\/]@earendil-works[\\\\/](?:${INDIRECT_PI_PACKAGES.join('|')})[\\\\/]package\\.json$`, 'u');
 
 // Every module in this graph that reads an installed indirect manifest sees the
 // newer version, as on a machine that installs today. The package bytes stay
-// the 1.0.4 bytes, which 1.1.0 is compatible with.
+// the pinned bytes; only the manifest version is newer.
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>();
   const readFileSync = ((file: unknown, options?: unknown) => {

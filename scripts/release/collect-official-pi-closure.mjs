@@ -1,5 +1,19 @@
 import { fileURLToPath } from 'node:url';
-import { verify as verifySigstore } from 'sigstore';
+import { createRequire } from 'node:module';
+import { dirname } from 'node:path';
+// Reuse sigstore's verifier with its npm-distributed trust root. No TUF,
+// transparency service or auth endpoints are contacted during collection.
+const require = createRequire(import.meta.url);
+const sigstoreRequire = createRequire(require.resolve('sigstore'));
+const { bundleFromJSON } = sigstoreRequire('@sigstore/bundle');
+const { Verifier, toTrustMaterial, toSignedEntity } = sigstoreRequire('@sigstore/verify');
+const { TrustedRoot } = sigstoreRequire('@sigstore/protobuf-specs');
+const seeds = sigstoreRequire(join(dirname(sigstoreRequire.resolve('@sigstore/tuf')), '../seeds.json'));
+const trustedRoot = TrustedRoot.fromJSON(JSON.parse(Buffer.from(seeds['https://tuf-repo-cdn.sigstore.dev'].targets['trusted_root.json'], 'base64')));
+const verifier = new Verifier(toTrustMaterial(trustedRoot), { ctlogThreshold: 1, tlogThreshold: 1 });
+const verifySigstore = (bundle, options) => verifier.verify(toSignedEntity(bundleFromJSON(bundle)), {
+ subjectAlternativeName: options.certificateIdentityURI, extensions: { issuer: options.certificateIssuer },
+});
 import { createHash, createPublicKey, verify } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,7 +31,8 @@ const sha=(bytes,algorithm='sha256')=>createHash(algorithm).update(bytes).digest
 const records=[];
 for (const name of names) {
  const metadata=await(await fetch(`https://registry.npmjs.org/${name}/${version}`)).json();
- assert.equal(metadata.name,name); assert.equal(metadata.version,version); assert.equal(metadata.gitHead,commit);
+ assert.equal(metadata.name,name); assert.equal(metadata.version,version); // npm may omit gitHead; the verified SLSA resolved dependency below is authoritative.
+ if (metadata.gitHead !== undefined) assert.equal(metadata.gitHead,commit);
  const integrity=metadata.dist.integrity;
  assert.ok(metadata.dist.signatures.some(sig=>{const key=keys.find(k=>k.keyid===sig.keyid);return key&&verify('sha256',Buffer.from(`${name}@${version}:${integrity}`),createPublicKey({key:Buffer.from(key.key,'base64'),format:'der',type:'spki'}),Buffer.from(sig.sig,'base64'));}));
  const attestations=await(await fetch(metadata.dist.attestations.url)).json();
@@ -34,7 +49,7 @@ for (const name of names) {
  const bundle=JSON.stringify(attestation.bundle);
  writeFileSync(join(evidence,name.split('/')[1]+'-provenance.json'),bundle+'\n');
  records.push({name,version,tarballIntegrity:integrity,upstreamCommit:commit,provenanceDigest:sha(bundle),provenanceBundle:attestation.bundle,
-  provenance:{predicateType:statement.predicateType,repository:'https://github.com/earendil-works/pi',workflow:'.github/workflows/build-binaries.yml',ref:`refs/tags/v${version}`,certificateIssuer:'https://token.actions.githubusercontent.com',verifiedBy:'sigstore.verify',attestationUrl:metadata.dist.attestations.url}});
+  provenance:{predicateType:statement.predicateType,repository:'https://github.com/earendil-works/pi',workflow:'.github/workflows/build-binaries.yml',ref:`refs/tags/v${version}`,certificateIssuer:'https://token.actions.githubusercontent.com',verifiedBy:'@sigstore/verify (offline npm-bundled trusted root)',attestationUrl:metadata.dist.attestations.url}});
  console.log(`${name}@${version}: registry signature, Sigstore provenance, tarball integrity verified`);
 }
 writeFileSync(output,JSON.stringify({format:'byok.official-pi-closure',version:1,packages:records},null,2)+'\n');
