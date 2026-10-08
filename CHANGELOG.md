@@ -16,6 +16,30 @@
 
 ## Unreleased
 
+- **Fixed (client)** — importing `@byok-sdk/client` no longer runs a CLI when a
+  host bundles it into one file (#291). The print custody entry had a module-init
+  `import.meta.main` guard; in a single-file bundle that flag is true for every
+  inlined module, so loading the bundle ran the entry and exited 1. The entry is
+  gone with the custody stack, and no module-init CLI guard remains. A test
+  bundles `dist/index.js` and runs it under Node. Hosts can remove a
+  `define: { "import.meta.main": "false" }` workaround.
+
+- **Security (client)** — update the `undici` pin from 8.9.0 to 8.11.2 (#293).
+  8.9.0 is in the range of ten advisories, two of them high
+  (GHSA-w293-vg96-wgc3, GHSA-rfgv-xxqx-mfg5); 8.10.2 fixes all of them.
+
+- **Added (keys)** — `requestTimeoutMs` on `OpenAiCompatibleChatClient` and
+  `AnthropicMessagesClient` (#290). It sets the total request deadline, body read
+  included; the default stays `PROVIDER_TIMEOUT_MS` (15 s). Long non-streaming
+  generations can now finish. `fetchWithProviderGuards` takes an optional
+  `timeoutMs`. `checkProviderKey` does not change.
+
+- **Added (server)** — every SQLite open refusal is now a `SqliteSchemaError` with
+  `code` (`SQLITE_SCHEMA_UNSUPPORTED`, `SQLITE_MIGRATION_REFUSED`,
+  `SQLITE_SCHEMA_INVALID`), `foundVersion` and `requiredVersion` (#292). Hosts can
+  check a stale `server.sqlite` at startup without parsing the message. The
+  messages do not change.
+
 - **Fixed (client)** — on 2026-10-07 upstream published all nine
   `@earendil-works/*` Pi packages at 1.1.0. The client pins pi-coding-agent,
   pi-ai, pi-agent-core, pi-durable and chord at 1.0.4, but pi-codemode,

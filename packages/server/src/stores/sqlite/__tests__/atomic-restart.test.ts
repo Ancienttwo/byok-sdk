@@ -10,7 +10,7 @@ import {
 import { createWebCrypto } from '@byok-sdk/cloud';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createSqliteEmbeddedStores } from '..';
-import { isSqliteAvailable, openSqliteDatabase } from '../../../sqlite-support';
+import { isSqliteAvailable, openSqliteDatabase, SqliteSchemaError } from '../../../sqlite-support';
 
 const describeSqlite = isSqliteAvailable() ? describe : describe.skip;
 const TENANT = tenantId('tenant-restart');
@@ -75,12 +75,15 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
     db.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('schema_version', '999')").run();
     db.close();
 
-    expect(() =>
-      createSqliteEmbeddedStores(
-        { path },
-        { clock: createMutableClock(), crypto: createWebCrypto() },
-      ),
-    ).toThrow('Unsupported BYOK SQLite schema version');
+    const open = () => createSqliteEmbeddedStores(
+      { path },
+      { clock: createMutableClock(), crypto: createWebCrypto() },
+    );
+    expect(open).toThrow('Unsupported BYOK SQLite schema version');
+    expect(open).toThrow(SqliteSchemaError);
+    expect(open).toThrow(expect.objectContaining({
+      code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '999', requiredVersion: '4',
+    }));
   });
 
   it('keeps the immutable target device fence across restart', async () => {

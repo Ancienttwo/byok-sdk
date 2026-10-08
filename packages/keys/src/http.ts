@@ -10,15 +10,30 @@ export type ProviderFetch = (
 /** Response body ceiling, ported from `providers.ts:106`. */
 export const PROVIDER_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
 
-/** Per-request timeout, ported from `providers.ts:107`. */
+/**
+ * Default total request deadline, ported from `providers.ts:107`. Clients
+ * accept `requestTimeoutMs` because long non-streaming generations exceed it.
+ */
 export const PROVIDER_TIMEOUT_MS = 15_000;
+
+/** Largest delay `setTimeout` honors; a longer one fires immediately. */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+/** Validate a total request deadline: a whole number of milliseconds a timer can hold. */
+export function providerRequestTimeoutMs(value: number = PROVIDER_TIMEOUT_MS): number {
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_TIMER_DELAY_MS) {
+    throw new RangeError(`Provider request timeout must be an integer from 1 to ${MAX_TIMER_DELAY_MS} ms`);
+  }
+  return value;
+}
 
 /**
  * Issue a provider request under the source's guards
  * (`providers.ts:1711-1743`): the URL is re-validated immediately before the
  * call, the caller's abort signal is chained, and an internal timeout aborts
  * with a distinguishable reason so a timeout maps to
- * `PROVIDER_REQUEST_TIMEOUT` rather than a bare `AbortError`. The returned
+ * `PROVIDER_REQUEST_TIMEOUT` rather than a bare `AbortError`. `timeoutMs`
+ * bounds the whole round trip, body reads included. The returned
  * response owns the guarded body: consume or cancel it to release the guard;
  * otherwise the original deadline cancels it. Neither headers nor body reads
  * depend on the injected transport honoring its abort signal.
@@ -28,7 +43,9 @@ export async function fetchWithProviderGuards(
   url: string,
   init: RequestInit,
   signal: AbortSignal,
+  timeoutMs: number = PROVIDER_TIMEOUT_MS,
 ): Promise<Response> {
+  const deadlineMs = providerRequestTimeoutMs(timeoutMs);
   normalizeProviderUrl(url);
   signal.throwIfAborted();
   const controller = new AbortController();
@@ -75,7 +92,7 @@ export async function fetchWithProviderGuards(
   const timeout = setTimeout(() => abort(new ByokKeysError(
     'PROVIDER_REQUEST_TIMEOUT',
     'Provider request timed out',
-  )), PROVIDER_TIMEOUT_MS);
+  )), deadlineMs);
   signal.addEventListener('abort', onAbort, { once: true });
   try {
     const pending = Promise.resolve(fetchImpl(url, { ...init, signal: controller.signal }));

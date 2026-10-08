@@ -57,6 +57,41 @@ export class SqliteUnavailableError extends Error {
   }
 }
 
+/**
+ * Why a SQLite file was refused at open, so a host can tell the user what to do
+ * without parsing the message:
+ * - `SQLITE_SCHEMA_UNSUPPORTED`: the stored version is not this build's and no
+ *   matching `migration` selector was given (an older file needs one; a newer
+ *   file needs a newer build).
+ * - `SQLITE_MIGRATION_REFUSED`: the selected migration would lose durable
+ *   authority; preserve the file for reconciliation.
+ * - `SQLITE_SCHEMA_INVALID`: the file contradicts its declared BYOK schema or
+ *   is not a BYOK database.
+ */
+export type SqliteSchemaErrorCode = 'SQLITE_SCHEMA_UNSUPPORTED' | 'SQLITE_MIGRATION_REFUSED' | 'SQLITE_SCHEMA_INVALID';
+
+export class SqliteSchemaError extends Error {
+  readonly code: SqliteSchemaErrorCode;
+  /** The stored `schema_version`; `undefined` when the file has none. */
+  readonly foundVersion: string | undefined;
+  /** The schema version this build writes. */
+  readonly requiredVersion: string;
+
+  constructor(
+    code: SqliteSchemaErrorCode,
+    message: string,
+    foundVersion: string | undefined,
+    requiredVersion: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = 'SqliteSchemaError';
+    this.code = code;
+    this.foundVersion = foundVersion;
+    this.requiredVersion = requiredVersion;
+  }
+}
+
 /** `node:sqlite`'s minimum Node.js version (https://nodejs.org/api/sqlite.html). */
 const MIN_NODE_MAJOR = 22;
 const MIN_NODE_MINOR = 5;

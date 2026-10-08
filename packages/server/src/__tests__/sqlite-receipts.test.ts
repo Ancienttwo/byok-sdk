@@ -162,8 +162,10 @@ describe('SQLite receipt recovery', () => {
     db.close();
     const migration = version === '1' ? 'v1-to-v4' : 'v2-to-v4';
     expect(() => open()).toThrow('Unsupported BYOK SQLite schema version');
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: version, requiredVersion: '4' }));
     expect(() => open(`v${version}-to-v3` as typeof migration)).toThrow('Target-v3 migration selectors are no longer supported');
     expect(() => open(migration)).toThrow('historical receipts are unavailable');
+    expect(() => open(migration)).toThrow(expect.objectContaining({ code: 'SQLITE_MIGRATION_REFUSED', foundVersion: version }));
     const check = new DatabaseSync(path);
     expect(check.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe(version);
     expect(check.prepare("SELECT name FROM sqlite_master WHERE name = 'request_receipt'").get()).toBeUndefined();
@@ -184,8 +186,21 @@ describe('SQLite receipt recovery', () => {
     const { open, path } = fixture(); await open().stores.close();
     const db = new DatabaseSync(path); db.exec('DROP TABLE request_receipt'); db.close();
     expect(() => open()).toThrow();
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '4' }));
     const check = new DatabaseSync(path, { readOnly: true });
     expect(check.prepare("SELECT name FROM sqlite_master WHERE name = 'request_receipt'").get()).toBeUndefined();
+    check.close();
+  });
+
+  it('refuses a missing durable table as a typed schema error without recreating it', async () => {
+    const { open, path } = fixture(); await open().stores.close();
+    const db = new DatabaseSync(path); db.exec('DROP TABLE mailbox_message'); db.close();
+    expect(() => open()).toThrow(expect.objectContaining({
+      name: 'SqliteSchemaError', code: 'SQLITE_SCHEMA_INVALID', foundVersion: '4', requiredVersion: '4',
+      message: expect.stringContaining('FROM mailbox_message'),
+    }));
+    const check = new DatabaseSync(path, { readOnly: true });
+    expect(check.prepare("SELECT name FROM sqlite_master WHERE name = 'mailbox_message'").get()).toBeUndefined();
     check.close();
   });
 
@@ -230,11 +245,13 @@ describe('SQLite receipt recovery', () => {
     db.exec("DROP TABLE request_receipt; ALTER TABLE task_attempt DROP COLUMN claimed_harness_id; UPDATE byok_sqlite_meta SET value = '2' WHERE key = 'schema_version'; INSERT INTO mailbox_cursor VALUES ('receipts', 'device-receipts', 2, 1, 1, '2026-01-01T00:00:00.000Z')");
     db.close();
     expect(() => open('v2-to-v4')).toThrow('delivery history');
+    expect(() => open('v2-to-v4')).toThrow(expect.objectContaining({ code: 'SQLITE_MIGRATION_REFUSED', foundVersion: '2' }));
     const corrupt = new DatabaseSync(path);
     expect(corrupt.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('2');
     corrupt.exec("ALTER TABLE task_attempt ADD COLUMN claimed_harness_id TEXT; UPDATE byok_sqlite_meta SET value = '4' WHERE key = 'schema_version'; CREATE TABLE request_receipt (tenant_id TEXT NOT NULL, key TEXT NOT NULL, body TEXT NOT NULL, recorded_at TEXT NOT NULL)");
     corrupt.close();
     expect(() => open()).toThrow('Invalid BYOK SQLite request receipt schema');
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '4' }));
   });
 
   it('keeps cancellation result authority after reopen', async () => {

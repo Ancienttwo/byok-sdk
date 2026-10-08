@@ -57,6 +57,8 @@ import {
   closeSqliteDatabaseAfterInitializationFailure,
   openSqliteDatabase,
   secureSqliteFilePermissions,
+  SqliteSchemaError,
+  type SqliteSchemaErrorCode,
 } from '../../sqlite-support';
 
 const DEFAULT_MAILBOX_READ_LIMIT = 50;
@@ -184,6 +186,17 @@ class SqliteCoordinator {
 
   constructor(path: string, migration?: 'v1-to-v4' | 'v2-to-v4' | 'v3-to-v4') {
     this.db = openSqliteDatabase(path);
+    let foundVersion: string | undefined;
+    const schemaError = (code: SqliteSchemaErrorCode, message: string, options?: ErrorOptions) =>
+      new SqliteSchemaError(code, message, foundVersion, SQLITE_SCHEMA_VERSION, options);
+    // Do not silently recreate missing durable authorities in an existing file.
+    const assertProjection = (projection: string) => {
+      try {
+        this.db.prepare(`SELECT ${projection} LIMIT 0`);
+      } catch (error) {
+        throw schemaError('SQLITE_SCHEMA_INVALID', `Missing BYOK SQLite durable authority: SELECT ${projection}`, { cause: error });
+      }
+    };
     try {
       // The host must stop every old writer before this open. A version fence
       // prevents later downgrade opens, not writes through an already-open handle.
@@ -195,11 +208,11 @@ class SqliteCoordinator {
         if (hasMetadata !== undefined) {
           const version = this.db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'")
             .get() as { value: string } | undefined;
+          foundVersion = version?.value;
           if (version?.value !== SQLITE_SCHEMA_VERSION && !((version?.value === '1' && migration === 'v1-to-v4') || (version?.value === '2' && migration === 'v2-to-v4') || (version?.value === '3' && migration === 'v3-to-v4'))) {
-            throw new Error(`Unsupported BYOK SQLite schema version ${JSON.stringify(version?.value)}; ` +
+            throw schemaError('SQLITE_SCHEMA_UNSUPPORTED', `Unsupported BYOK SQLite schema version ${JSON.stringify(version?.value)}; ` +
               `this build requires ${SQLITE_SCHEMA_VERSION}. Stop all writers, back up the database and explicitly select migration: 'v1-to-v4' or 'v2-to-v4' for a receipt-free legacy database without task history, or 'v3-to-v4' for a database without ambiguous claimed identity. Target-v3 migration selectors are no longer supported.`);
           }
-          // Do not silently recreate missing durable authorities in an existing file.
           for (const projection of [
             'tenant_id, device_id, next_seq, delivered_seq, acked_seq, updated_at FROM mailbox_cursor',
             'tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at FROM mailbox_message',
@@ -209,27 +222,27 @@ class SqliteCoordinator {
             'tenant_id, hash, ref_kind, ref_id, created_at FROM object_reference',
             'blob_id, tenant_id, reservation_id, content_hash, byte_size, content_type, uploaded, data FROM blob',
           ]) {
-            this.db.prepare(`SELECT ${projection} LIMIT 0`);
+            assertProjection(projection);
           }
           if (version?.value === '1' || version?.value === '2') {
             // Old compositions lost these facts on restart. Never synthesize
             // receipts from status, mailbox bodies or a caller's retry payload.
             for (const table of ['task_attempt', 'mailbox_message', 'agent_message_admission']) {
               if (this.db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get() !== undefined) {
-                throw new Error('Cannot migrate BYOK SQLite database with task history: historical receipts are unavailable; preserve this database for reconciliation');
+                throw schemaError('SQLITE_MIGRATION_REFUSED', 'Cannot migrate BYOK SQLite database with task history: historical receipts are unavailable; preserve this database for reconciliation');
               }
             }
             if (this.db.prepare('SELECT 1 FROM mailbox_cursor WHERE next_seq <> 1 OR delivered_seq <> 0 OR acked_seq <> 0 LIMIT 1').get() !== undefined) {
-              throw new Error('Cannot migrate BYOK SQLite database with delivery history: historical receipts are unavailable; preserve this database for reconciliation');
+              throw schemaError('SQLITE_MIGRATION_REFUSED', 'Cannot migrate BYOK SQLite database with delivery history: historical receipts are unavailable; preserve this database for reconciliation');
             }
             if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'request_receipt'").get() !== undefined) {
-              throw new Error('Unexpected request receipt authority in legacy BYOK SQLite schema');
+              throw schemaError('SQLITE_SCHEMA_INVALID', 'Unexpected request receipt authority in legacy BYOK SQLite schema');
             }
             this.db.exec(RECEIPT_SCHEMA);
           }
           if (version?.value === '1') {
             const unexpected = this.db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'device_directory'").get();
-            if (unexpected !== undefined) throw new Error('Unexpected device directory in BYOK SQLite schema v1');
+            if (unexpected !== undefined) throw schemaError('SQLITE_SCHEMA_INVALID', 'Unexpected device directory in BYOK SQLite schema v1');
             this.db.exec(DEVICE_SCHEMA);
           }
           if (version?.value !== SQLITE_SCHEMA_VERSION) {
@@ -237,28 +250,28 @@ class SqliteCoordinator {
             // custom claim whose identity was discarded. Neither mutable device
             // inventory nor the requested offer proves the actual adapter.
             if (this.db.prepare('SELECT 1 FROM task_attempt WHERE owner_device_id IS NOT NULL AND claimed_runtime IS NULL LIMIT 1').get() !== undefined) {
-              throw new Error('Cannot migrate BYOK SQLite database with ambiguous claimed identity: historical harness identities are unavailable; preserve this database for reconciliation');
+              throw schemaError('SQLITE_MIGRATION_REFUSED', 'Cannot migrate BYOK SQLite database with ambiguous claimed identity: historical harness identities are unavailable; preserve this database for reconciliation');
             }
             this.db.exec('ALTER TABLE task_attempt ADD COLUMN claimed_harness_id TEXT');
             this.db.prepare("UPDATE byok_sqlite_meta SET value = ? WHERE key = 'schema_version'").run(SQLITE_SCHEMA_VERSION);
           }
         } else {
           const existing = this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get();
-          if (existing !== undefined) throw new Error('Existing SQLite database has no BYOK schema metadata');
+          if (existing !== undefined) throw schemaError('SQLITE_SCHEMA_INVALID', 'Existing SQLite database has no BYOK schema metadata');
           this.db.exec(SCHEMA);
           this.db.exec(RECEIPT_SCHEMA);
           this.db.exec(DEVICE_SCHEMA);
           this.db.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('schema_version', ?)").run(SQLITE_SCHEMA_VERSION);
         }
-        this.db.prepare('SELECT claimed_harness_id FROM task_attempt LIMIT 0');
-        this.db.prepare('SELECT tenant_id, device_id, product_id, machine_id, device_name, device_public_key, proof_key_id, proof_key_epoch, capabilities_json, harnesses_json FROM device_directory LIMIT 0');
+        assertProjection('claimed_harness_id FROM task_attempt');
+        assertProjection('tenant_id, device_id, product_id, machine_id, device_name, device_public_key, proof_key_id, proof_key_epoch, capabilities_json, harnesses_json FROM device_directory');
         const receiptColumns = this.db.prepare('PRAGMA table_info(request_receipt)').all() as unknown as
           { name: string; type: string; notnull: number; pk: number }[];
         const expectedColumns = ['tenant_id', 'key', 'body', 'recorded_at'];
         if (receiptColumns.length !== expectedColumns.length || receiptColumns.some((column, index) =>
           column.name !== expectedColumns[index] || column.type !== 'TEXT' || column.notnull !== 1 ||
           column.pk !== (index < 2 ? index + 1 : 0))) {
-          throw new Error('Invalid BYOK SQLite request receipt schema');
+          throw schemaError('SQLITE_SCHEMA_INVALID', 'Invalid BYOK SQLite request receipt schema');
         }
         this.db.exec('COMMIT');
       } catch (error) {
