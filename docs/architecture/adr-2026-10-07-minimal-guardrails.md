@@ -69,7 +69,7 @@ Native-interaction 模式是 Host 显式 opt-in 的本地 seam，不属于 YOLO 
 - SDK 保留的 MCP 名称与 helper preflight。
 - Host content-read gate（Host 对 workspace、transcript、artifact 的读取）。
 - Path-mutation gate、Agent-home 单写者 lease、Git workspace lease。
-- Process-tree / Job Object kill，duration 与 output 上限。
+- Process-tree / Job Object kill，duration 与 output 上限。POSIX 残留与 OAR 相同：父进程在 SDK 读进程表之前已退出的进程被 init 收养，SDK 不结束它（例如 Claude 与 Pi 在独立 session 中执行 `cmd &` 留下的后台进程）。
 - Audit log 脱敏。
 - BYOK provider key custody：`BYOK_*` env deny，daemon 中没有 provider key，Pi BYOK key 投影目录。
 

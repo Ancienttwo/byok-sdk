@@ -1,6 +1,9 @@
 # Plan: minimal guardrails, inherit the user's agent config
 
-Status: approved by the owner on 2026-10-07. Execution follows the slices.
+Status: complete (2026-10-08). Approved by the owner on 2026-10-07. The
+decision is ADR-037 (`docs/architecture/adr-2026-10-07-minimal-guardrails.md`).
+Merged PRs: #297, #298, #299, #300, #301, #302. Real-agent acceptance and its
+follow-up fixes: `docs/notes/2026-10-08-minimal-guardrails-acceptance.md`.
 
 ## Goal
 

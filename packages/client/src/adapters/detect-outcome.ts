@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { buildRuntimeEnv } from '../daemon/environment';
 import type { RuntimeDetectResult } from '../types';
 
 type ProbeFailure = Exclude<RuntimeDetectResult, { kind: 'available' }>;
@@ -18,6 +19,7 @@ export function classifyDetectError(error: unknown): ProbeFailure {
  * This probe owns both the deadline and the version child. A killed child is
  * not by itself timeout evidence (execFile also kills on output overflow).
  * Resolve only at execFile completion; SIGKILL bounds a TERM-ignoring probe.
+ * The probe gets the environment a task child gets (`buildRuntimeEnv`).
  */
 export async function probeRuntimeVersion(command: string, timeoutMs: number, prefixArgs: readonly string[] = []): Promise<VersionProbeResult> {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new TypeError('invalid runtime probe timeout');
@@ -25,7 +27,7 @@ export async function probeRuntimeVersion(command: string, timeoutMs: number, pr
     let timer: NodeJS.Timeout | undefined;
     let timedOut = false;
     try {
-      const child = execFile(command, [...prefixArgs, '--version'], { encoding: 'utf8' }, (error, stdout, stderr) => {
+      const child = execFile(command, [...prefixArgs, '--version'], { encoding: 'utf8', env: buildRuntimeEnv({ ambient: process.env }) }, (error, stdout, stderr) => {
         if (timer) clearTimeout(timer);
         // Output overflow is already a known failure even if a TERM-ignoring
         // child requires the deadline's SIGKILL to finish cleanup.
