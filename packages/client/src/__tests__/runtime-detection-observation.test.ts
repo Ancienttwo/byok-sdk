@@ -109,6 +109,35 @@ describe('runtime probe evidence', () => {
     }
   });
 
+  it.skipIf(process.platform === 'win32')('gives every detect probe the task child environment, without CLAUDECODE or BYOK_*', async () => {
+    // Synthetic values only. The fixture records names and one synthetic value, never the real env.
+    const record = path.join(await directory(), 'probe-env.jsonl');
+    const command = await executable(`const fs = require('node:fs');
+const flagged = Object.keys(process.env).filter((name) => name === 'CLAUDECODE' || name.startsWith('BYOK_'));
+fs.appendFileSync(${JSON.stringify(record)}, JSON.stringify({ argv: process.argv.slice(2), flagged, user: process.env.PROBE_USER_SETTING ?? null }) + '\\n');
+const arg = process.argv[2];
+if (arg === '--version') console.log('codex-cli 0.160.0');
+else if (arg === 'auth') console.log('{"loggedIn":true}');
+else if (arg === 'login') console.log('Logged in using ChatGPT');`);
+    vi.stubEnv('CLAUDECODE', '1');
+    vi.stubEnv('BYOK_PROBE_SENTINEL', 'synthetic-byok-value');
+    vi.stubEnv('PROBE_USER_SETTING', 'synthetic-user-value');
+    try {
+      for (const Adapter of [ClaudeAdapter, CodexAdapter, PiAdapter]) {
+        expect(await new Adapter({ resolveBin: () => ({ command, source: 'env' }) }).detect()).toMatchObject({ kind: 'available' });
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    const calls = (await fs.readFile(record, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { argv: string[]; flagged: string[]; user: string | null });
+    expect(calls.map((call) => call.argv.join(' '))).toEqual([
+      '--version', 'auth status --json',
+      '--version', 'app-server --help', 'login status',
+      '--version',
+    ]);
+    for (const call of calls) expect(call).toMatchObject({ flagged: [], user: 'synthetic-user-value' });
+  });
+
   it.skipIf(process.platform === 'win32').each([false, true])('does not relabel output overflow as timeout when ignoring TERM=%s', async (ignoreTerm) => {
     const command = await executable(`${ignoreTerm ? "process.on('SIGTERM', () => {});" : ''} process.stdout.on('error', () => {}); process.stdout.write('x'.repeat(2 * 1024 * 1024)); setInterval(() => {}, 1000);`);
     const { child, result } = controlledVersionProbe(command);

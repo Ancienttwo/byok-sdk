@@ -234,7 +234,8 @@ report (`adapters/codex/codex-adapter.ts`), and pi's env-var-name-only check
 
 **Environment inheritance (ADR-037 D2/D3)**: every task child — the runtime
 CLI and the MCP servers the daemon probes for it — gets the daemon's full
-environment, as in OAR. `daemon/environment.ts`'s `buildRuntimeEnv` removes
+environment, as in OAR. The runtime detection probes (`--version`, `auth
+status`, `app-server --help`, `login status`) get the same environment. `daemon/environment.ts`'s `buildRuntimeEnv` removes
 only `CLAUDECODE` (so a child agent starts as its own top-level session) and
 this SDK's own control-plane variables (`BYOK_*`). Provider API keys, cloud
 credentials and loader variables such as `NODE_OPTIONS`, `LD_*` and `DYLD_*`
@@ -819,7 +820,11 @@ Both enforcement mechanisms above are DAEMON-SIDE only — a `setTimeout` and
 an in-process byte counter, not a kernel/cgroup/rlimit-level ceiling. Bundled
 runtime disposal owns the full subprocess tree and escalates TERM to KILL; on
 POSIX it also kills descendants that left the runtime's process group, but never
-the host or its group, and a pid only while its start time matches. Still,
+the host or its group, and a pid only while its start time matches. It reaches
+only processes still below the runtime root when it reads the process table. A
+process whose parent exited before that read is re-parented to init and
+survives: for example a background job (`cmd &`) from a Claude or Pi shell,
+which runs in a session of its own. OAR has the same limit. Still,
 a kernel-level uninterruptible process or OS authority failure can still make
 the receipt reject. In that case active/Git ownership remains held and the
 failure is locally visible; it is never treated as successful cleanup. Treat

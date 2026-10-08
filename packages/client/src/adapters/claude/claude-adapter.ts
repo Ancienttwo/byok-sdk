@@ -17,6 +17,7 @@ import {
   type Session,
 } from '../../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../../runtime-failure';
+import { buildRuntimeEnv } from '../../daemon/environment';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin';
 import { createClaudeControlChannel } from './control-channel';
 import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES } from './native-interactions';
@@ -431,7 +432,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
    */
   private async probeAuthPresent(command: string): Promise<boolean> {
     try {
-      const { stdout } = await execFileAsync(command, ['auth', 'status', '--json'], { timeout: DETECT_TIMEOUT_MS });
+      const { stdout } = await execFileAsync(command, ['auth', 'status', '--json'], {
+        timeout: DETECT_TIMEOUT_MS,
+        env: buildRuntimeEnv({ ambient: process.env }),
+      });
       const parsed = JSON.parse(stdout) as { loggedIn?: unknown };
       return parsed.loggedIn === true;
     } catch {

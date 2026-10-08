@@ -476,13 +476,17 @@ export class PiAdapter implements RuntimeAdapter {
           let mcpConfigDir: string | undefined;
           let runtimeEnv = { ...runtimeLaunch.env };
           const taskMcpServers = startInput.mcpServers ?? {};
-          let mcpConfigPath: string;
           let hostConfigDigest: string;
           let hostConfigPath: string;
           try {
+            // mkdtemp creates the directory 0700. The one file in it is
+            // created 0600 ('wx': a new file, so the mode applies at creation)
+            // and is removed on every start failure and on close. It holds
+            // `mcpEnv`, which already has no provider credential names
+            // (`projectPiMcpEnvironment`).
             mcpConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-mcp-'));
             await fs.chmod(mcpConfigDir, 0o700).catch(() => {});
-            mcpConfigPath = path.join(mcpConfigDir, 'mcp-config.json');
+            hostConfigPath = path.join(mcpConfigDir, 'rpc-launch.json');
             // The daemon's observation travels WITH the servers: the extension
             // registers exactly the tools named here and discovers nothing of
             // its own, so the tools the model is shown are the tools this task
@@ -490,24 +494,18 @@ export class PiAdapter implements RuntimeAdapter {
             //
             // What is written is the START observation, already compared
             // above with the one this operation was admitted with.
-            await fs.writeFile(
-              mcpConfigPath,
-              JSON.stringify({
+            const serialized = serializePiHostConfig({
+              format: 'byok.pi.rpc-launch', version: 4, cwd: runtimeLaunch.sessionCwd,
+              mcp: {
                 mcpEnv,
                 mcpServers: taskMcpServers,
                 observation: startInput.mcpToolsetTools ?? {},
                 // The servers start in the session cwd, as in OAR.
                 launchCwd: runtimeLaunch.sessionCwd,
-              }),
-              { mode: 0o600 },
-            );
-            hostConfigPath = path.join(mcpConfigDir!, 'rpc-launch.json');
-            const serialized = serializePiHostConfig({
-              format: 'byok.pi.rpc-launch', version: 4, cwd: runtimeLaunch.sessionCwd,
-              mcp: JSON.parse(await fs.readFile(mcpConfigPath, 'utf8')),
+              },
             });
             hostConfigDigest = serialized.digest;
-            await fs.writeFile(hostConfigPath, serialized.bytes, { mode: 0o600 });
+            await fs.writeFile(hostConfigPath, serialized.bytes, { mode: 0o600, flag: 'wx' });
           } catch (cause) {
             await cleanupMcpConfigDir(mcpConfigDir);
             throw new RuntimeExecutionFailure({

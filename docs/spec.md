@@ -905,7 +905,11 @@ Bundled adapters create an owned POSIX process group and terminate the group
 with TERM-to-KILL escalation; Windows uses `taskkill /T /F`. On POSIX, disposal
 and the host-exit sweep also SIGKILL the descendants that left the group, read
 from the process table before TERM and before KILL and checked by start time,
-as OAR 0.37.0 does. TaskRunner records
+as OAR 0.37.0 does. This reaches only processes still below the runtime root at
+that read. A process whose parent exited before the read is re-parented to init
+and is not ended. For example, Claude and Pi run each shell command in a session
+of its own, so a background job (`cmd &`) outlives `close()` and
+`daemon.stop()`. OAR has the same limit. TaskRunner records
 the semantic terminal once, but retains its active entry and Git workspace
 lease until close succeeds. A failed attempt emits local
 `runtime-disposal-failed` evidence and may be retried by shutdown without
@@ -1387,7 +1391,10 @@ Pi's MCP environment is projected once at daemon admission. The projection uses
 the shared fixed credential exclusion set and three controlled Pi directory
 names. The same object goes to the probe and to config serialization. Pool
 configuration requires `mcpEnv`, refuses private and credential names and never
-reads Pi's ambient environment.
+reads Pi's ambient environment. The ordinary lane writes this configuration to
+one file, `rpc-launch.json`, in a new 0700 temporary directory. The file is
+created 0600 and removed on every start failure and on `close()`. It holds the
+inherited environment values of `mcpEnv`, but no provider credential name.
 
 The Node package's private `#byok-pi-runtime-host` maps only to shipped dist JS
 and declaration files. It is not a public export. Native Pi evaluation stays

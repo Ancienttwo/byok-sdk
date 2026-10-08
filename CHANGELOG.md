@@ -16,6 +16,29 @@
 
 ## Unreleased
 
+- **Fixed (client)** — a `task.cancel` (or a startup deadline or shutdown)
+  that aborts a runtime start before the start returns no longer leaves the
+  runtime quarantined. Codex and Pi do not read the abort signal, so their
+  start settles only when the session opens. While that start still runs,
+  the daemon does not report a disposal failure; its 1 s retry closes the
+  late session after the start settles. `daemon.stop()` waits up to 5 s
+  after the abort for the start to settle, then closes the late session.
+  Before, the daemon emitted `runtime-disposal-failed` at once, and
+  `daemon.stop()` rejected with `RuntimeDisposalFailure` while the start was
+  still in flight. A start that does not settle in that time still keeps its
+  ownership and is reported, as before.
+
+- **Fixed (client)** — the runtime detection probes (`--version`, Claude
+  `auth status`, Codex `app-server --help` and `login status`, Pi
+  `--version`) now get the environment a task child gets
+  (`buildRuntimeEnv`). Before, they got the full daemon environment,
+  `CLAUDECODE` and `BYOK_*` included.
+
+- **Security (client)** — the ordinary Pi lane writes its launch
+  configuration once, to `rpc-launch.json` (0600, created exclusively, in a
+  new 0700 directory). The redundant `mcp-config.json` copy of the same
+  `mcpEnv` is gone. `mcpEnv` already has no provider credential names.
+
 - **Fixed (client)** — importing `@byok-sdk/client` no longer runs a CLI when a
   host bundles it into one file (#291). The print custody entry had a module-init
   `import.meta.main` guard; in a single-file bundle that flag is true for every
@@ -76,10 +99,15 @@
   example, a tool started in a session of its own), as OAR 0.36.1 does. The
   SDK reads the process table before TERM and again before KILL, signals a
   pid only while its start time matches, and never signals the host or its
-  group. `close()` resolves only after those descendants are gone. Windows
-  is unchanged. The code is OAR's `shared/executable/process-tree.ts`,
-  vendored with upstream bytes. The Codex server-request deadline timer no
-  longer throws when a settlement fails.
+  group. `close()` resolves only after those descendants are gone. This
+  reaches only processes still below the runtime root at that read. A process
+  whose parent exited before the read is re-parented to init and is not
+  ended, as in OAR. Real Claude and Pi run each shell command in a session of
+  its own, so a background job (`cmd &`) outlives `close()` and
+  `daemon.stop()`. Windows is unchanged. The code is OAR's
+  `shared/executable/process-tree.ts`, vendored with upstream bytes. The
+  Codex server-request deadline timer no longer throws when a settlement
+  fails.
 
 - **Docs** — record the minimal-guardrails decision as
   [ADR-037](docs/architecture/adr-2026-10-07-minimal-guardrails.md). It

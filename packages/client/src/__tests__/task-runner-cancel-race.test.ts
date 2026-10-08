@@ -22,8 +22,13 @@ const unusedBlobClient: BlobResolver = {
   },
 };
 
-async function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[]): Promise<TaskRunner> {
+async function makeRunner(
+  adapter: StubRuntimeAdapter,
+  sent: Envelope[],
+  overrides: Partial<Pick<TaskRunnerDeps, 'onRuntimeDisposalFailure'>> = {},
+): Promise<TaskRunner> {
   const deps: TaskRunnerDeps = {
+    ...overrides,
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-taskrunner-workspace-'),
     deviceId: 'device-1',
@@ -127,6 +132,45 @@ describe('TaskRunner: cancel arriving during the offer-processing window (findin
     await vi.waitFor(() => expect(adapter.sessions[0]?.closeCalled).toBe(true), { timeout: 3_000 });
     expect(adapter.sessions[0]?.interruptCalled).toBe(true);
     expect(runner.activeTaskCount).toBe(0);
+  });
+
+  it('a cancel during a start that ignores the abort lets shutdown wait for the late session and close it', async () => {
+    // The real Codex and Pi start() do not read the abort signal: they settle
+    // only when their session opens. A shutdown that comes before that must
+    // wait for the start to settle, then close the late session. It must not
+    // report a disposal failure for a start that is still settling.
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const disposalFailures: unknown[] = [];
+    const runner = await makeRunner(adapter, sent, { onRuntimeDisposalFailure: (event) => disposalFailures.push(event) });
+    const releaseStart = adapter.blockStart();
+    const taskId = 'task-cancel-pending-start';
+
+    const offerPromise = runner.handleEnvelope(createEnvelope('task.offer', { instruction: 'slow start' }, { taskId, seq: 1 }));
+    await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
+    await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'cancel while starting' }, { taskId, seq: 2 }));
+    await vi.waitFor(() => expect(sent.some((e) => e.type === 'task.cancelled' && e.task_id === taskId)).toBe(true));
+
+    runner.stopAcceptingOffers();
+    let shutdownError: unknown;
+    let shutdownSettled = false;
+    const shutdown = runner.shutdownActiveTasks('daemon stop').then(
+      () => { shutdownSettled = true; },
+      (error: unknown) => { shutdownSettled = true; shutdownError = error; },
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(shutdownSettled).toBe(false);
+
+    releaseStart();
+    await Promise.all([offerPromise, shutdown]);
+
+    expect(shutdownError).toBeUndefined();
+    expect(disposalFailures).toEqual([]);
+    expect(adapter.sessions).toHaveLength(1);
+    expect(adapter.sessions[0]?.closeCalled).toBe(true);
+    expect(runner.activeTaskCount).toBe(0);
+    expect(sent.filter((e) => e.task_id === taskId && ['task.started', 'task.fail', 'task.complete', 'task.cancelled'].includes(e.type))
+      .map((e) => e.type)).toEqual(['task.cancelled']);
   });
 
   it('a cancel arriving before the matching offer is even looked at declines it instead of ever claiming (checkpoint 1)', async () => {
