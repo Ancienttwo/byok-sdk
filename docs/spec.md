@@ -1306,8 +1306,9 @@ existing operator-owned Codex sessions in one workspace. Each private binding
 names its member context, native thread UUID, explicit loopback WebSocket or
 Unix endpoint, and starting notification sequence. The operator must configure
 each native session with that same member's Team MCP grant; the relay does not
-infer or establish that mapping. The absolute Codex executable must pass the
-qualified `codex-cli 0.160.0` version preflight. This is a client CLI binding,
+infer or establish that mapping. The relay reads the Codex version and warns
+when it is not the qualified `codex-cli 0.160.0`; it does not refuse, and the
+receipt parser still fails closed on a changed receipt shape. This is a client CLI binding,
 not a TaskRunner, native-session lifecycle owner, or new package boundary.
 
 Authenticated `team_notifications.snapshot` accepts the existing member-context
@@ -2622,7 +2623,10 @@ MCP grant. Readonly/plan remain available without native interaction opt-in;
 confirm remains unsupported. Claude's own existing allow rules may bypass the
 callback, so this is not an all-tools-confirmation policy.
 
-Codex remains pinned to CLI 0.160.0. Opt-in opens/resumes with `on-request` and
+Codex is qualified against CLI 0.160.0. As in OAR, the version is read, never
+gated: Codex updates itself, so any other version is admitted with a
+`runtime_version_unqualified` advisory. Native contracts are probed instead
+(app-server presence, exact MCP tool allowlist readback). Opt-in opens/resumes with `on-request` and
 requires native policy readback before a session is exposed; ordinary default
 mode remains `never`. The existing danger-full-access sandbox is unchanged,
 so confirm policy remains unsupported. Only command/file approval requests and

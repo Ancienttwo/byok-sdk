@@ -27,11 +27,14 @@ if (argv[0] === 'login') {
 if (argv[0] === 'mcp' && argv[1] === 'get') {
   const name = argv[2];
   let enabled_tools = [];
-  try {
-    enabled_tools = JSON.parse(
-      config[`mcp_servers.${name}.enabled_tools`] ?? '[]',
-    );
-  } catch {}
+  // An older Codex that ignores the per-server tool configuration reads back none.
+  if (process.env.FAKE_CODEX_IGNORES_MCP_TOOL_CONFIG !== '1') {
+    try {
+      enabled_tools = JSON.parse(
+        config[`mcp_servers.${name}.enabled_tools`] ?? '[]',
+      );
+    } catch {}
+  }
   console.log(JSON.stringify({ name, enabled: true, enabled_tools }));
   process.exit(0);
 }

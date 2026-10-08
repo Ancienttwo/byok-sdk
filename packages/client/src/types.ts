@@ -49,13 +49,22 @@ export const RUNTIME_DETECTION_FAILURE_KINDS = ['not-found', 'not-executable', '
  * reads credential storage. Failure variants contain no arbitrary diagnostics.
  */
 export type RuntimeDetectResult =
-  | { readonly kind: 'available'; readonly version?: string; readonly authPresent?: boolean }
+  | { readonly kind: 'available'; readonly version?: string; readonly authPresent?: boolean; readonly advisory?: RuntimeDetectionAdvisory }
   | { readonly kind: Exclude<typeof RUNTIME_DETECTION_FAILURE_KINDS[number], 'refused'> }
   | { readonly kind: 'refused'; readonly reason: RuntimeDetectionRefusalReason };
 
+/**
+ * A local agent updates itself, so a version the SDK was not qualified against
+ * is a warning, not a refusal. `version` on the result carries what was found.
+ */
+export interface RuntimeDetectionAdvisory {
+  readonly reason: 'runtime_version_unqualified';
+  readonly qualifiedVersion: string;
+}
+
 export type RuntimeDetectionRefusalReason = ToolImplementationUnavailableReasonV1
   | 'installation_observation_unsupported' | 'native_identity_mismatch' | 'launch_cwd_unavailable'
-  | 'app_server_unavailable' | 'runtime_version_unsupported';
+  | 'app_server_unavailable';
 
 /** Explicit scope, never a launch environment or task/lane-selection authority. */
 export type RuntimeInstallationObservationContext = { readonly authority: ToolImplementationAuthority } & (

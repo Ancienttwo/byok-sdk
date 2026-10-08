@@ -71,6 +71,8 @@ export interface ProbedRuntime {
   outcome: RuntimeDetectResult['kind'];
   reason?: RuntimeDetectionRefusalReason;
   version?: string;
+  /** Set when the runtime is not the version the SDK was qualified against; a warning only. */
+  qualifiedVersion?: string;
   authPresent?: boolean;
   steer: boolean;
   resume: boolean;
@@ -111,6 +113,9 @@ export async function probeRuntimes(
           ...(detected.kind !== 'available' || detected.version === undefined
             ? {}
             : { version: boundedSingleLine(detected.version, MAX_RUNTIME_VERSION_CHARS) }),
+          ...(detected.kind === 'available' && detected.advisory !== undefined
+            ? { qualifiedVersion: boundedSingleLine(detected.advisory.qualifiedVersion, MAX_RUNTIME_VERSION_CHARS) }
+            : {}),
           ...(detected.kind === 'available' && typeof detected.authPresent === 'boolean' ? { authPresent: detected.authPresent } : {}),
           steer,
           resume,

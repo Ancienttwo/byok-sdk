@@ -101,12 +101,18 @@ describe('Codex persistent app-server adapter', () => {
       adapter().descriptor.environmentRequirements.credentialNames,
     ).toEqual([]);
   });
-  it('detect returns typed refusal for unqualified versions', async () => {
-    vi.stubEnv('FAKE_CODEX_VERSION', 'codex-cli 0.159.1');
-    expect(await adapter().detect()).toEqual({
-      kind: 'refused',
-      reason: 'runtime_version_unsupported',
+  it.each(['codex-cli 0.161.0', 'codex-cli 1.0.0', 'codex-cli 0.159.1', 'codex-cli 0.160.0-alpha.1', 'codex 0.161.0'])('detect admits unqualified version %j with an advisory, never a refusal', async (output) => {
+    vi.stubEnv('FAKE_CODEX_VERSION', output);
+    expect(await adapter().detect()).toMatchObject({
+      kind: 'available',
+      version: output,
+      advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '0.160.0' },
     });
+  });
+  it('detect admits the qualified version without an advisory', async () => {
+    const detected = await adapter().detect();
+    expect(detected).toMatchObject({ kind: 'available', version: 'codex-cli 0.160.0' });
+    expect(detected).not.toHaveProperty('advisory');
   });
   it('detect refuses a missing app-server subcommand', async () => {
     vi.stubEnv('FAKE_CODEX_NO_APP_SERVER', '1');

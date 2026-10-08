@@ -82,8 +82,9 @@ describe('Codex reserved Agent-message permission composition', () => {
         return spawn(command, args, options);
       }) as never,
     });
-    const originalVersion = process.env.FAKE_CODEX_VERSION;
-    process.env.FAKE_CODEX_VERSION = 'codex-cli 0.148.0';
+    // Capability, not version: this Codex ignores per-server tool config, so the allowlist readback fails.
+    const originalIgnore = process.env.FAKE_CODEX_IGNORES_MCP_TOOL_CONFIG;
+    process.env.FAKE_CODEX_IGNORES_MCP_TOOL_CONFIG = '1';
     try {
       const prepared = await adapter.prepare({
         offer: { instruction: 'publish one message', policy: { mode: 'auto' } },
@@ -94,12 +95,12 @@ describe('Codex reserved Agent-message permission composition', () => {
       });
       expect(prepared).toMatchObject({
         kind: 'reject', retryable: false,
-        reason: expect.stringContaining('runtime_version_unsupported'),
+        reason: expect.stringContaining('Codex MCP preflight failed'),
       });
       expect(captured).toHaveLength(0);
     } finally {
-      if (originalVersion === undefined) delete process.env.FAKE_CODEX_VERSION;
-      else process.env.FAKE_CODEX_VERSION = originalVersion;
+      if (originalIgnore === undefined) delete process.env.FAKE_CODEX_IGNORES_MCP_TOOL_CONFIG;
+      else process.env.FAKE_CODEX_IGNORES_MCP_TOOL_CONFIG = originalIgnore;
     }
   });
 });
