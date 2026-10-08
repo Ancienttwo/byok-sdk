@@ -16,6 +16,13 @@
 
 ## Unreleased
 
+- **Changed (client)** — update the official Pi runtime from 1.0.4 to 1.1.0
+  (all nine `@earendil-works/*` packages, upstream `abe508e1`). Pi 1.1.0 adds
+  `agent_settled.aborted`; the adapter reports an aborted settlement as a
+  non-retryable failure, also when the optional session statistics fail.
+  `closureDigest` changes, so a preparation compiled for 1.0.4 declines with
+  `preparation_runtime_identity_mismatch`; prepare it again.
+
 - **Fixed (client)** — a `task.cancel` (or a startup deadline or shutdown)
   that aborts a runtime start before the start returns no longer leaves the
   runtime quarantined. Codex and Pi do not read the abort signal, so their
