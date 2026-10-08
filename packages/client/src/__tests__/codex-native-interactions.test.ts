@@ -15,8 +15,8 @@ async function open(scenario = 'approval', host?: Partial<NativeInteractionHostO
   const dir = await mkdtemp(path.join(os.tmpdir(), 'byok-native-codex-')); directories.push(dir); const receipt = path.join(dir, 'frames.jsonl');
   const requests: { request: NativeInteractionRequest; channel: NativeInteractionChannel }[] = [];
   const adapter = new CodexAdapter({ resolveBin: () => ({ command: fixture, source: 'path' }), nativeInteractions: { timeoutMs: 1000, onRequest: (request, channel) => { requests.push({ request, channel }); }, ...host } });
-  const session = await startPreparedOperation(adapter, { instruction: 'fixture', policy: { mode: 'auto' }, ...(resume ? { sessionRef: resume } : {}) }, {
-    workspaceDir: dir, policy: { mode: 'auto' }, env: { PATH: process.env.PATH, FAKE_NATIVE_SCENARIO: scenario, FAKE_NATIVE_RECEIPT: receipt },
+  const session = await startPreparedOperation(adapter, { instruction: 'fixture', ...(resume ? { sessionRef: resume } : {}) }, {
+    workspaceDir: dir, env: { PATH: process.env.PATH, FAKE_NATIVE_SCENARIO: scenario, FAKE_NATIVE_RECEIPT: receipt },
   });
   sessions.push(session);
   return { adapter, session, requests, frames: async () => (await readFile(receipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line)) as Record<string, any>[] };
@@ -28,7 +28,7 @@ describe('Codex native interaction prepared-adapter bridge', () => {
   it('advertises only explicit opt-in and keeps legacy confirm unsupported', async () => {
     expect(new CodexAdapter().descriptor.capabilities.nativeInteractions).toBeUndefined();
     const f = await open();
-    expect(f.adapter.descriptor.capabilities).toMatchObject({ approvalInteractive: false, permissionModes: ['auto'], nativeInteractions: { approvalDecisions: ['allow-once', 'allow-session', 'deny', 'cancel'], structuredQuestions: true } });
+    expect(f.adapter.descriptor.capabilities).toMatchObject({ approvalInteractive: false, nativeInteractions: { approvalDecisions: ['allow-once', 'allow-session', 'deny', 'cancel'], structuredQuestions: true } });
     const r = await first(f); await f.session.interactions!.respond(approve(r.request)); await finish(f.session);
     expect((await f.frames()).find(frame => frame.method === 'thread/start')?.params.approvalPolicy).toBe('on-request');
   });
@@ -95,7 +95,7 @@ describe('Codex native interaction prepared-adapter bridge', () => {
   });
   it('a refused follow-up disables native callbacks until another valid prompt', async () => {
     const f = await open('refused-followup'); const r = await first(f); await r.channel.respond(approve(r.request)); await finish(f.session);
-    await expect(f.session.followUp({ instruction: 'refused', policy: { mode: 'auto' } })).rejects.toThrow('fixture prompt refused');
+    await expect(f.session.followUp({ instruction: 'refused' })).rejects.toThrow('fixture prompt refused');
     await expect(finish(f.session)).rejects.toThrow(); expect(f.requests).toHaveLength(1);
   });
   it('rejects a mismatched provider policy readback before the first prompt', async () => {

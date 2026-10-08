@@ -27,6 +27,15 @@ registerHooks({
         // Not a TypeScript sibling; fall through to Node's own answer below.
       }
     }
+    // The vendored OAR source imports its TypeScript siblings as `.js`, the
+    // TypeScript convention; resolve a missing `.js` to its `.ts` sibling.
+    if (specifier.startsWith('.') && specifier.endsWith('.js')) {
+      try {
+        return nextResolve(specifier, context);
+      } catch {
+        return nextResolve(`${specifier.slice(0, -3)}.ts`, context);
+      }
+    }
     return nextResolve(specifier, context);
   },
 });

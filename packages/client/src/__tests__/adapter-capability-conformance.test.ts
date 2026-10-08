@@ -46,11 +46,9 @@ async function createFixture(id: QualifiedRuntime): Promise<AdapterCapabilityFix
     async start(input = {}) {
       const session = await startPreparedOperation(adapter, {
         instruction: 'conformance turn',
-        policy: { mode: 'auto' },
         ...(input.sessionRef === undefined ? {} : { sessionRef: input.sessionRef }),
       }, {
         workspaceDir: directory,
-        policy: { mode: 'auto' },
         // Synthetic HOME and explicit env: never inherit real provider credentials.
         env: {
           PATH: process.env.PATH,
@@ -85,10 +83,6 @@ async function createFixture(id: QualifiedRuntime): Promise<AdapterCapabilityFix
         params: expect.objectContaining({ expectedTurnId: 'turn-1', input: [{ type: 'text', text }] }),
       }));
     },
-    assertNoRuntimeInvocation() {
-      expect(resolveBin).not.toHaveBeenCalled();
-      expect(invocations).toEqual([]);
-    },
     async dispose() {
       try {
         const results = await Promise.allSettled(sessions.map((session) => session.close()));
@@ -102,10 +96,10 @@ async function createFixture(id: QualifiedRuntime): Promise<AdapterCapabilityFix
 }
 
 runAdapterCapabilityConformance({
-  id: 'claude', steer: false, permissionModes: ['auto', 'readonly', 'plan'],
+  id: 'claude', steer: false,
   create: () => createFixture('claude'),
 });
 runAdapterCapabilityConformance({
-  id: 'codex', steer: true, permissionModes: ['auto'],
+  id: 'codex', steer: true,
   create: () => createFixture('codex'),
 });

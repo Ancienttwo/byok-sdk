@@ -1,8 +1,7 @@
-import { OFFICIAL_PI_PROVENANCE, verifyOfficialPiClosure, assertOfficialPiProvenance } from './official-pi-installation.mjs';
+import { OFFICIAL_PI_PROVENANCE, verifyOfficialPiClosure } from './official-pi-installation.mjs';
 import path from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import type { PermissionMode } from '@byok-sdk/protocol';
 import type {
   InputPreparationCompiledPromptSnapshotV1,
   InputPreparationCompiledSnapshotV1,
@@ -13,13 +12,8 @@ import type {
   InputPreparationRuntimeIdentityV1,
 } from '../../input-preparation';
 import type { McpToolsetServerObservation } from '../../mcp/observation';
-import type { McpLaunchAttestation } from '../../daemon/trusted-launch-cwd';
-import {
-  toolImplementationUnavailable,
-  type ToolImplementationAttestedV1,
-  type ToolImplementationIdentityV1,
-} from '../../daemon/tool-implementation-identity';
-import { filterMcpObservationForPolicy, projectMcpTools, qualifiedMcpToolName } from '../../mcp/projection';
+import { McpAuthorityError } from '../../mcp/authority-error';
+import { projectMcpTools, qualifiedMcpToolName, type McpToolProjection } from '../../mcp/projection';
 import { PI_PACKAGE_NAME, resolvePiRuntimeIdentity, type PiRuntimeIdentity } from './resolve-bin';
 import {
   buildPreparedTranscriptMessages,
@@ -228,20 +222,24 @@ export interface InstalledPiPackage {
  * the official tuple at exactly its version, the coding agent must be observed
  * exactly once, and the client pin must name that same tuple. The caller
  * supplies every manifest it can observe: package resolution observes the
- * coding agent and both lockstep packages; an attested install record observes
- * its digest-verified coding-agent manifest, and the record's own measurement
- * covers the rest. Anything else is `runtime_identity_unavailable`.
+ * coding agent and both lockstep packages. Anything else is
+ * `runtime_identity_unavailable`.
  */
-export function assertOfficialRuntimeIdentity(
-  installed: readonly InstalledPiPackage[],
-  pinned: PiRuntimeIdentity,
-): typeof OFFICIAL_PI_PROVENANCE {
+function assertOfficialPin(pinned: PiRuntimeIdentity): string {
   const tuple = `${OFFICIAL_PI_RUNTIME.name}@${OFFICIAL_PI_RUNTIME.version}`;
   if (pinned.name !== OFFICIAL_PI_RUNTIME.name || pinned.version !== OFFICIAL_PI_RUNTIME.version) {
     throw new InputPreparationRuntimeIdentityError(
       `@byok-sdk/client pins ${pinned.name}@${pinned.version}, but this build prepares input only against ${tuple}`,
     );
   }
+  return tuple;
+}
+
+export function assertOfficialRuntimeIdentity(
+  installed: readonly InstalledPiPackage[],
+  pinned: PiRuntimeIdentity,
+): typeof OFFICIAL_PI_PROVENANCE {
+  const tuple = assertOfficialPin(pinned);
   const admitted: readonly string[] = [OFFICIAL_PI_RUNTIME.name, ...OFFICIAL_PI_RUNTIME.lockstep];
   for (const manifest of installed) {
     if (typeof manifest.name !== 'string' || !admitted.includes(manifest.name) || manifest.version !== OFFICIAL_PI_RUNTIME.version) {
@@ -324,55 +322,29 @@ export function resolveInstalledPiRuntimeIdentity(): InputPreparationRuntimeIden
     );
   }
   verifyOfficialPiClosure(path.dirname(fileURLToPath(import.meta.resolve('@byok-sdk/client/package.json'))));
-  const provenance = assertOfficialRuntimeIdentity(
+  return runtimeIdentity(assertOfficialRuntimeIdentity(
     [installed.manifest, ...OFFICIAL_PI_RUNTIME.lockstep.map(resolveLockstepManifest)],
     pinned,
-  );
+  ));
+}
+
+/**
+ * The runtime / compiler identity of the Pi build this SDK pins, without an
+ * installed package. A single-file product (`sdkHelperHost`) bundles Pi, so it
+ * has no installed package to read. The value is the same as
+ * {@link resolveInstalledPiRuntimeIdentity} returns for that pin.
+ */
+export function resolvePinnedPiRuntimeIdentity(): InputPreparationRuntimeIdentityV1 {
+  assertOfficialPin(resolvePiRuntimeIdentity());
+  return runtimeIdentity(OFFICIAL_PI_PROVENANCE);
+}
+
+function runtimeIdentity(provenance: typeof OFFICIAL_PI_PROVENANCE): InputPreparationRuntimeIdentityV1 {
   return Object.freeze({
     ...provenance,
     envelopeFormat: PREPARED_ENVELOPE_FORMAT,
     requestFormat: PREPARED_REQUEST_FORMAT,
     compilerVersion: SUPPORTED_PREPARED_COMPILER_VERSION,
-  });
-}
-
-/**
- * Derive the runtime / compiler identity from an ATTESTED install record
- * instead of from package resolution. A writable manifest is never an
- * execution-identity authority, so where a host install record exists, the
- * record's own declared provenance is the only source. Fails closed.
- */
-export function piRuntimeIdentityFromAttestedRecord(
-  identity: Pick<ToolImplementationAttestedV1, 'installPath' | 'nativeProvenance'>,
-): InputPreparationRuntimeIdentityV1 {
-  const pinned = resolvePiRuntimeIdentity();
-  const provenance = identity.nativeProvenance;
-  if (provenance === undefined) {
-    throw new InputPreparationRuntimeIdentityError(
-      `the attested install record at ${identity.installPath} declares no nativeProvenance; the runtime provenance must come from the record, never from a package manifest`,
-    );
-  }
-  if (provenance.packageName !== pinned.name || provenance.packageVersion !== pinned.version) {
-    throw new InputPreparationRuntimeIdentityError(
-      `the attested install record at ${identity.installPath} declares ${provenance.packageName}@${provenance.packageVersion}, but @byok-sdk/client pins ${pinned.name}@${pinned.version}`,
-    );
-  }
-  if (provenance.compilerVersion !== SUPPORTED_PREPARED_COMPILER_VERSION) {
-    throw new InputPreparationRuntimeIdentityError(
-      `the attested install record at ${identity.installPath} declares compiler version ${String(provenance.compilerVersion)}, but this build of @byok-sdk/client prepares input against version ${String(SUPPORTED_PREPARED_COMPILER_VERSION)}`,
-    );
-  }
-  assertOfficialPiProvenance(provenance);
-  return Object.freeze({
-    packageName: provenance.packageName,
-    packageVersion: provenance.packageVersion,
-    tarballIntegrity: provenance.tarballIntegrity,
-    provenanceDigest: provenance.provenanceDigest,
-    closureDigest: provenance.closureDigest,
-    upstreamCommit: provenance.upstreamCommit,
-    envelopeFormat: PREPARED_ENVELOPE_FORMAT,
-    requestFormat: PREPARED_REQUEST_FORMAT,
-    compilerVersion: provenance.compilerVersion,
   });
 }
 
@@ -740,43 +712,9 @@ export function preparedRequestContentIsTextOnly(requestBody: string): boolean {
  * fingerprint changes, which is what makes drift between preparation and
  * launch a hard refusal.
  *
- * What it binds ABOUT the executable is exactly what a host authority attested
- * and this SDK then measured: the {@link ToolImplementationIdentityV1} the
- * daemon resolved for that server, bound whole. Where no authority attested
- * one — which is every server on a daemon constructed without a resolver — the
- * bound value is the named unavailable reason, not a guess. Folding raw
- * `command`/`args` in and calling the result an identity would be worse than
- * leaving the gap open: it would read as an integrity guarantee that nothing
- * verifies.
- *
- * So the gap is carried explicitly rather than papered over, and it travels
- * into the receipt: a preparation whose every tool is `attested` clears
- * `executor_identity_unproven`, and one with any `unavailable` tool does not.
+ * It binds nothing about the executable itself: the SDK does not measure tool
+ * executables.
  */
-
-/**
- * The identity a NATIVE tool's fingerprint binds.
- *
- * The TYPE and every rule about it live in
- * `daemon/tool-implementation-identity.ts`, which is the single authority for
- * what an implementation identity is and the only file that can produce an
- * attested one. This file only names the value it hashes.
- *
- * MCP tools no longer use it: the daemon now resolves one real identity per
- * projected server (`daemon/prepared-tool-surface.ts`) and passes it in, so an
- * MCP fingerprint commits to whatever was actually established — attested, or
- * a named unavailable reason. Pi's own native tools have no install record to
- * resolve against and no separate executable to measure: they are code inside
- * the verified runtime closure the `runtimeIdentity` already binds, so the
- * honest value for them is "nobody attested this separately".
- *
- * Both halves changed the day a real proof reached the MCP call site, which is
- * correct: a tool whose implementation is proven is not the same tool as one
- * whose implementation was merely assumed, and nothing frozen under the weaker
- * claim should silently validate under the stronger one.
- */
-const NATIVE_TOOL_IMPLEMENTATION_IDENTITY: ToolImplementationIdentityV1 =
-  toolImplementationUnavailable('implementation_identity_unattested');
 
 /**
  * Digest one value with the canonical form the envelope digests use
@@ -800,29 +738,6 @@ export interface McpToolFingerprintInput {
   readonly inputSchema: unknown;
   /** The resolved native runtime identity string the binding already uses. */
   readonly runtimeIdentity: string;
-  /**
-   * WHERE this tool's server is launched, and through what.
-   *
-   * Carried beside the toolset's `definitionRevision` rather than inside it
-   * (`daemon/toolset-registry.ts`): that digest is the operator's configured
-   * intent — the `command`/`args` they wrote and the classification they
-   * declared — and an SDK launcher upgrade is not a change to their
-   * configuration. Both are still bound here, so a launch directory or a
-   * launcher that changed between preparation and launch is drift and the
-   * frozen manifest is refused, without churning the operator's revision on
-   * every SDK release.
-   */
-  readonly launch: McpLaunchAttestation;
-  /**
-   * What the daemon established about the implementation behind this server
-   * (`daemon/tool-implementation-identity.ts`), bound WHOLE rather than as a
-   * label: an attested identity carries the install path, the closure digest
-   * and the stat tuple that was measured, and a fingerprint that bound only
-   * the word "attested" would validate a different install under the same
-   * claim. Required, not optional — a caller that could omit it would freeze a
-   * manifest whose implementation claim is silently absent.
-   */
-  readonly implementation: ToolImplementationIdentityV1;
 }
 
 /** Everything one Pi-native tool's fingerprint binds. */
@@ -835,7 +750,7 @@ export interface NativeToolFingerprintInput {
 
 export async function mcpToolObservationFingerprint(input: McpToolFingerprintInput): Promise<string> {
   return canonicalDigest({
-    v: 1,
+    v: 3,
     source: 'mcp',
     toolsetId: input.toolsetId,
     toolsetDefinitionRevision: input.toolsetDefinitionRevision,
@@ -845,52 +760,25 @@ export async function mcpToolObservationFingerprint(input: McpToolFingerprintInp
     toolName: input.toolName,
     toolSchemaDigest: await canonicalDigest(input.inputSchema),
     runtimeIdentity: input.runtimeIdentity,
-    launch: { launchCwd: input.launch.launchCwd, launcher: input.launch.launcher },
-    implementationIdentity: input.implementation,
   });
 }
 
 export async function nativeToolObservationFingerprint(input: NativeToolFingerprintInput): Promise<string> {
   return canonicalDigest({
-    v: 1,
+    v: 2,
     source: 'pi-native',
     toolName: input.toolName,
     toolSchemaDigest: await canonicalDigest(input.parameters),
     runtimeIdentity: input.runtimeIdentity,
-    implementationIdentity: NATIVE_TOOL_IMPLEMENTATION_IDENTITY,
   });
 }
 
 export interface ToolExecutorsRequest {
-  /** The daemon's frozen observation, keyed by projected server name. Unfiltered: the policy is applied here. */
+  /** The daemon's frozen observation, keyed by projected server name. */
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
-  /**
-   * The task's permission mode. Required, and applied to the observation
-   * before anything is fingerprinted, so a frozen manifest cannot bind an
-   * executor for a tool the prepared session would never register. A caller
-   * that had to remember to filter first is a caller that eventually forgets,
-   * and the failure would be a manifest quietly wider than the session.
-   */
-  readonly permissionMode: PermissionMode;
   /** `toolsetId` -> the registry's definition revision for it. Every observed toolset must appear. */
   readonly toolsetDefinitionRevisions: Readonly<Record<string, string>>;
-  /**
-   * The launch boundary this task's MCP servers were observed under and will
-   * run under — `daemon/trusted-launch-cwd.ts`'s
-   * {@link McpLaunchAttestation}. Required, not optional: a manifest frozen
-   * without it would validate a launch in any directory, which is the exact
-   * fact it exists to pin.
-   */
-  readonly launch: McpLaunchAttestation;
-  /**
-   * `serverName` -> the implementation identity this daemon resolved for it,
-   * once, before anything was spawned. Every observed server must appear;
-   * a missing one is a compile refusal rather than an assumed absence,
-   * because "nobody resolved this" and "the resolver said unavailable" are
-   * different facts and only the second one is a fingerprint input.
-   */
-  readonly implementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
-  /** Pi's own tools, already filtered by policy, in the order they are registered. */
+  /** Pi's own tools, in the order they are registered. */
   readonly nativeTools: readonly { readonly name: string; readonly parameters: unknown }[];
   readonly runtimeIdentity: string;
 }
@@ -921,24 +809,21 @@ export async function buildToolExecutorsFromObservation(
       runtimeIdentity: request.runtimeIdentity,
     });
   }
-  // Same filter, same core, same answer as the ordinary extension's
-  // registration and as every adapter's grant: the manifest is frozen over
-  // exactly the tools a prepared session will register.
-  const allowed = filterMcpObservationForPolicy(request.observation, request.permissionMode);
-  if (!allowed.ok) throw new InputPreparationCompileError(allowed.reason);
-  for (const tool of projectMcpTools(allowed.observation)) {
-    const server = allowed.observation[tool.serverName]!;
+  // Same core, same answer as the ordinary extension's registration: the
+  // manifest is frozen over exactly the tools a prepared session will register.
+  let projected: readonly McpToolProjection[];
+  try {
+    projected = projectMcpTools(request.observation);
+  } catch (error) {
+    if (error instanceof McpAuthorityError) throw new InputPreparationCompileError(error.message);
+    throw error;
+  }
+  for (const tool of projected) {
+    const server = request.observation[tool.serverName]!;
     const toolsetDefinitionRevision = request.toolsetDefinitionRevisions[tool.toolsetId];
     if (toolsetDefinitionRevision === undefined) {
       throw new InputPreparationCompileError(
         `toolset ${JSON.stringify(tool.toolsetId)} has no definition revision; its tools cannot be fingerprinted`,
-      );
-    }
-    const implementation = request.implementations[tool.serverName];
-    if (implementation === undefined) {
-      throw new InputPreparationCompileError(
-        `MCP server ${JSON.stringify(tool.serverName)} has no resolved implementation identity;`
-        + ' its tools cannot be fingerprinted',
       );
     }
     toolExecutors[qualifiedMcpToolName(tool.serverName, tool.toolName)] = await mcpToolObservationFingerprint({
@@ -950,8 +835,6 @@ export async function buildToolExecutorsFromObservation(
       toolName: tool.toolName,
       inputSchema: tool.inputSchema,
       runtimeIdentity: request.runtimeIdentity,
-      launch: request.launch,
-      implementation,
     });
   }
   return Object.freeze({ toolExecutors: Object.freeze(toolExecutors) });

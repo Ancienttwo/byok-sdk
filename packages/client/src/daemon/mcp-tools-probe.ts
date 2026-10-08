@@ -1,7 +1,6 @@
 import type { McpStdioServerConfig } from '../types';
 import { McpAuthorityError } from '../mcp/client';
 import { observeMcpServer, type McpServerObservation } from '../mcp/observation';
-import type { ToolImplementationIdentityV1 } from './tool-implementation-identity';
 
 /**
  * The daemon's admission-time use of the shared MCP core (`../mcp/`).
@@ -38,32 +37,12 @@ export interface McpToolsProbeOptions {
   /**
    * The exact base environment the RUNTIME child of this task receives
    * (`buildRuntimeEnv`, `./environment.ts`) — never `process.env`. The probe
-   * spawns a host-configured command, so it must not become the one place the
-   * daemon's own ambient credentials (an `AWS_SECRET_ACCESS_KEY` or
-   * `DATABASE_URL` set for the daemon's own deployment, this SDK's own
-   * `BYOK_*` control-plane variables) reach a server the real runtime path
-   * would have filtered out. Required, deliberately: a caller that forgets it
-   * fails to compile rather than silently reinstating the blanket passthrough.
+   * spawns a host-configured command, so it must not become the one place
+   * this SDK's own `BYOK_*` control-plane variables reach a server the real
+   * runtime path would have filtered out. Required, deliberately: a caller
+   * that forgets it fails to compile rather than passing `process.env`.
    */
   env: Readonly<Record<string, string>>;
-  /**
-   * Working directory for the probed child — the same directory the runtime
-   * CLI is spawned in, so a server resolving relative paths sees what it will
-   * see for real. Omitted only when no such directory is resolved before
-   * admission.
-   */
-  cwd?: string;
-  /**
-   * What this daemon established about the implementation behind this server
-   * (`./tool-implementation-identity.ts`), forwarded to the shared MCP core so
-   * the probe spawn re-measures an attested one before starting it.
-   *
-   * Absent means nothing was claimed. The core refuses the spawn rather than
-   * demoting the claim, so a probe of an attested server that no longer
-   * measures the same fails with an {@link McpAuthorityError} and the task
-   * declines permanently.
-   */
-  implementation?: ToolImplementationIdentityV1;
 }
 
 /**
@@ -83,8 +62,6 @@ export async function probeMcpServer(
   return observeMcpServer(serverName, server, {
     ...(options.label === undefined ? {} : { label: options.label }),
     env: options.env,
-    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
-    ...(options.implementation === undefined ? {} : { implementation: options.implementation }),
     timeoutMs: options.timeoutMs ?? MCP_TOOLS_PROBE_TIMEOUT_MS,
   });
 }

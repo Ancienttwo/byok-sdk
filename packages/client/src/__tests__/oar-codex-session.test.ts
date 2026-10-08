@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { codexSession } from '../../vendor/oar/a800aa0/runtimes/codex/session';
-import * as projection from '../../vendor/oar/a800aa0/runtimes/codex/projection';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/a800aa0/runtimes/codex/app-server-client';
+import { codexSession } from '../../vendor/oar/0be506f/runtimes/codex/session';
+import * as projection from '../../vendor/oar/0be506f/runtimes/codex/projection';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/0be506f/runtimes/codex/app-server-client';
 
 function fakeServer() {
   let receive!: (line: string) => void;
@@ -101,6 +101,60 @@ describe('unconnected OAR Codex adapter', () => {
     expect((await pending).response.body).toMatchObject({ kind: 'rejected', code: 'error' });
     expect((await session.prompt('retry')).response.body.kind).toBe('accepted');
     await session.dispose();
+  });
+
+  it('accepts an unanswered interrupt after 10 s and kills the app-server', async () => {
+    vi.useFakeTimers();
+    const fake = fakeServer(); const session = await fake.open();
+    await session.prompt('long turn');
+    vi.mocked(fake.child.write).mockImplementationOnce(() => {});
+    const abort = session.abort();
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(fake.child.kill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await abort).response.body).toEqual({ kind: 'accepted' });
+    expect(fake.child.kill).toHaveBeenCalledTimes(1);
+    expect(session.records().some(record => record.kind === 'response' && record.body.kind === 'exited')).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('withdraws the abort fallback when codex refuses the interrupt', async () => {
+    vi.useFakeTimers();
+    const fake = fakeServer(); const session = await fake.open();
+    await session.prompt('long turn');
+    vi.mocked(fake.child.write).mockImplementationOnce((line: string) => {
+      fake.frame({ id: JSON.parse(line).id, error: { code: -32600, message: 'turn already ended' } });
+    });
+    expect((await session.abort()).response.body).toEqual({ kind: 'rejected', code: 'runtime_refused', reason: 'turn already ended' });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fake.child.kill).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    await session.dispose();
+  });
+
+  it('records a control in flight at dispose as runtime_exited', async () => {
+    const fake = fakeServer(); const session = await fake.open();
+    vi.mocked(fake.child.write).mockImplementationOnce(() => {});
+    const pending = session.prompt('in flight');
+    await session.dispose();
+    expect((await pending).response.body).toEqual({ kind: 'rejected', code: 'runtime_exited', reason: 'app-server killed' });
+  });
+
+  it('keeps a failed settlement inside the server-request deadline timer and rejects the pending control', async () => {
+    vi.useFakeTimers();
+    const fake = fakeServer();
+    let armed = false;
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, { cwd: '/workspace', env: { HOME: '/home' } }, 1_000, {
+      onRecord: record => { if (armed && record.kind === 'response') throw new Error('consumer failed'); },
+    });
+    vi.mocked(fake.child.write).mockImplementationOnce(() => {});
+    const pending = session.prompt('in flight').catch(error => error);
+    fake.child.writeAcknowledged = () => new Promise(() => {});
+    armed = true;
+    fake.frame({ id: 'late', method: 'item/commandExecution/requestApproval', params: {} });
+    await expect(vi.advanceTimersByTimeAsync(1_000)).resolves.not.toThrow();
+    expect(fake.child.kill).toHaveBeenCalled();
+    expect((await pending).message).toBe('consumer failed');
   });
 
   it('keeps raw failed-turn reason without classifying it', () => {

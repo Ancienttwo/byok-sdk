@@ -19,7 +19,7 @@ const AGENT_REF = { agentId: 'agent-protocol', profileRevision: 'profile-protoco
 const CONTENT_HASH = 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const POLICY = {
   policyRevision: 'protocol-policy-r1',
-  activity: { mode: 'metadata-status' as const, delivery: 'latest-value' as const },
+  activity: { delivery: 'latest-value' as const, maxCoalesceMs: 250, maxEventBytes: 262144 },
   reliable: {
     maxPendingEventsPerAgent: 10,
     maxPendingBytesPerAgent: 4096,
@@ -80,7 +80,6 @@ describe('Agent egress typed wire contract', () => {
       'task.offer_for_agent_with_egress',
       {
         instruction: 'strict Agent egress offer',
-        policy: { mode: 'auto' },
         agentRef: AGENT_REF,
         sessionRef: 'session-protocol',
         egressPolicy: POLICY,
@@ -108,7 +107,6 @@ describe('Agent egress typed wire contract', () => {
       'task.offer_for_agent_with_egress_fresh',
       {
         instruction: 'start typed egress Agent work',
-        policy: { mode: 'auto' },
         agentRef: AGENT_REF,
         egressPolicy: POLICY,
       },
@@ -121,7 +119,6 @@ describe('Agent egress typed wire contract', () => {
         'task.offer_for_agent_with_egress',
         {
           instruction: 'resume typed egress Agent work',
-          policy: { mode: 'auto' },
           agentRef: AGENT_REF,
           egressPolicy: POLICY,
         } as never,
@@ -133,7 +130,6 @@ describe('Agent egress typed wire contract', () => {
         'task.offer_for_agent_with_egress_fresh',
         {
           instruction: 'fresh typed egress Agent work',
-          policy: { mode: 'auto' },
           agentRef: AGENT_REF,
           sessionRef: 'forbidden-prestart-session',
           egressPolicy: POLICY,

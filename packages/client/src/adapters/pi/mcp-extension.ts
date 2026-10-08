@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs';
 import type { ExtensionAPI, ExtensionFactory } from '@earendil-works/pi-coding-agent';
 import {
-  filterMcpObservationForPolicy,
   projectMcpTools,
   type McpToolProjection,
 } from '../../mcp/projection';
@@ -54,8 +53,7 @@ function loadTaskScopedConfig(): TaskScopedMcpConfig {
  *
  * Reserved servers are the one case the daemon does not observe: they are this
  * SDK's own binaries, their tool names are fixed by the protocol each defines
- * (`../mcp-tool-grants.ts` grants them from a constant, never from an
- * observation), and only the binary itself knows their schemas. They are read
+ * (never an observation), and only the binary itself knows their schemas. They are read
  * live, at session start, and never enter the canonical toolset projection —
  * no host toolset, no billing artifact and no frozen manifest includes them.
  */
@@ -111,16 +109,12 @@ function registerByokMcpToolsWithConfig(pi: ExtensionAPI, config: TaskScopedMcpC
       (pi.registerTool as (definition: unknown) => void)(tool);
     }
   };
-  // The daemon's observation is the single authority for host toolsets, the
-  // order comes from the core rather than from this file, and so does the
-  // policy filter: the adapter admitted this task on exactly this call, so
-  // running it again here registers the set the task was admitted with rather
-  // than a second opinion about it. A tool the mode excludes is never
-  // registered at all — the model does not see it, so there is no call to
-  // refuse and no tokens spent attempting one.
-  const allowed = filterMcpObservationForPolicy(config.observation, config.permissionMode);
-  if (!allowed.ok) fail(allowed.reason);
-  register(projectMcpTools(allowed.observation), 'qualified');
+  // The daemon's observation is the single authority for host toolsets, and
+  // the order comes from the core rather than from this file.
+  let projected: readonly McpToolProjection[];
+  try { projected = projectMcpTools(config.observation); }
+  catch (error) { fail(error instanceof Error ? error.message : String(error)); }
+  register(projected, 'qualified');
 
   const reserved = Object.keys(config.mcpServers).filter((name) => isReservedMcpServerName(name));
   if (reserved.length > 0) {

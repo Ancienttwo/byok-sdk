@@ -47,7 +47,7 @@ it.skipIf(process.platform === 'win32')('TaskRunner waits for the real durable j
     piByokLauncher:{command:'unused-custody',profileDbPath:path.join(root,'profiles'),sessionDir:path.join(root,'sessions')},
   },[adapter],{hostedJournal:{journal}});
   const record = await daemon.pair('pairing-code'); await daemon.start();
-  server.send(createEnvelope('task.offer_for_agent',{instruction:'Host input',policy:{mode:'auto'},runtime:'pi',agentRef:{agentId:'durable-agent',profileRevision:'1'}},{taskId:'durable-wiring-task',seq:server.nextSeq()}));
+  server.send(createEnvelope('task.offer_for_agent',{instruction:'Host input',runtime:'pi',agentRef:{agentId:'durable-agent',profileRevision:'1'}},{taskId:'durable-wiring-task',seq:server.nextSeq()}));
   await vi.waitFor(() => expect(entered).toBe(true));
   expect(acknowledged).toBe(false);
   const db = new DatabaseSync(path.join(storeDir,'daemon.db'),{readOnly:true});

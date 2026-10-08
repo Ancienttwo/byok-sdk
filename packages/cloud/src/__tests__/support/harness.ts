@@ -113,5 +113,5 @@ export function createHarness(options: InMemoryByokCloudOptions = {}): CloudHarn
 
 /** The minimal valid `task.offer` payload — an instruction plus an auto policy. */
 export function offerPayload(instruction = 'do the thing') {
-  return { instruction, policy: { mode: 'auto' as const } };
+  return { instruction };
 }

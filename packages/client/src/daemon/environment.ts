@@ -1,89 +1,31 @@
-import { LOADER_ENV_DENY_PATTERNS } from '@byok-sdk/implementation-identity';
-export { LOADER_ENV_DENY_PATTERNS, loaderEnvInjections } from '@byok-sdk/implementation-identity';
-
 /**
- * M5: per-runtime environment allowlist for spawned agent child processes.
+ * The environment of every child process of a task: the runtime CLI and the
+ * MCP servers the daemon probes for it.
  *
- * Before this module existed, `task-runner.ts` built every task's
- * `RuntimeOperationStartInput.env` as `process.env` verbatim — the daemon's OWN full
- * environment, unfiltered, handed to whichever runtime CLI (`pi`/`claude`/
- * `codex`) `pickAdapter` selected. Any credential-shaped variable sitting in
- * the daemon's own environment for a completely unrelated reason (an
- * `AWS_SECRET_ACCESS_KEY`, `DATABASE_URL`, `GITHUB_TOKEN` set for the
- * daemon's OWN deployment, nothing to do with any coding-agent runtime) was
- * therefore inherited by every single spawned agent process — a
- * credential-leak gap, not a deliberate design choice.
+ * {@link buildRuntimeEnv} inherits the daemon's full environment, as OAR
+ * does. The user's own agent reads its own configuration and credentials from
+ * it. Only two groups of names are removed:
  *
- * {@link buildRuntimeEnv} replaces that blanket passthrough with an explicit
- * allowlist, built fresh per task from three layers:
+ * - `CLAUDECODE`: Claude Code sets it inside its own sessions. OAR removes
+ *   it so that a child agent starts as its own top-level session.
+ * - `BYOK_*`: this SDK's own control-plane variables (key custody).
  *
- * 1. A small, always-included platform baseline ({@link BASE_PLATFORM_ALLOWLIST}
- *    / {@link WINDOWS_BASE_ALLOWLIST}) — the bare minimum any CLI needs to
- *    resolve its own binaries/libraries, find a home/temp directory, and
- *    behave sanely in a non-interactive shell.
- * 2. Whatever ADDITIONAL names the *specific* runtime adapter about to be
- *    spawned declares it actually needs
- *    (`RuntimeAdapter.descriptor.environmentRequirements` — see
- *    `../types.ts`). A descriptor that declares no names gets the platform
- *    baseline only; descriptors are required and frozen before claim.
- * 3. A per-device, per-runtime operator override (`DaemonConfig
- *    .runtimeEnvironment` — see `create-daemon.ts`) — a local escape hatch
- *    for a product/operator that knows it needs one more variable forwarded
- *    to one specific runtime on this one device.
- *
- * One hard, unconditional deny always wins over all three layers above,
- * including the operator's own override: `BYOK_*`, this SDK's own
- * control-plane variables, must never reach a spawned agent process — see
- * {@link HARD_DENY_PATTERNS}.
+ * {@link buildAllowlistedEnv} is the narrow form. Only two Pi lanes use it:
+ * the durable Pi tool shell and the prepared Pi lane on the Pi auth store.
  *
  * Every name in every list may be an exact match or a `*`-suffixed prefix
  * (e.g. `'LC_*'` matches `LC_ALL`, `LC_CTYPE`, ...).
  */
 
-/**
- * What one runtime adapter declares it needs beyond the always-included
- * platform baseline. Declared in the required frozen
- * `RuntimeAdapter.descriptor.environmentRequirements` (`../types.ts`).
- */
-export interface RuntimeEnvironmentRequirements {
+/** Inputs to {@link buildAllowlistedEnv}. */
+export interface BuildAllowlistedEnvOptions {
   /**
-   * Extra non-secret, config-discovery-shaped variable names this runtime's
-   * own CLI reads (e.g. a `<RUNTIME>_CONFIG_DIR`-style override) — anything
-   * that isn't itself a credential. Optional: most adapters need nothing
-   * beyond the platform baseline.
-   */
-  baseNames?: readonly string[];
-  /**
-   * Credential/auth variable names this runtime's own CLI reads to
-   * authenticate (e.g. a provider API key). Kept as its own field (distinct
-   * from `baseNames`) so a product's own security review can reason about
-   * "what credential-shaped names does this runtime get" as a single,
-   * explicit list per adapter — see e.g. the pi adapter's
-   * `KNOWN_PROVIDER_ENV_VARS`.
-   */
-  credentialNames?: readonly string[];
-}
-
-/** Inputs to {@link buildRuntimeEnv}. */
-export interface BuildRuntimeEnvOptions {
-  /**
-   * The daemon's own ambient environment (normally `process.env`). Never
-   * mutated — every returned variable is copied into a fresh object.
+   * The ambient environment (normally `process.env`). Never mutated — every
+   * returned variable is copied into a fresh object.
    */
   ambient: NodeJS.ProcessEnv;
-  /**
-   * The selected runtime adapter's own declared requirements —
-   * `undefined` means "platform baseline only" for this helper. The public
-   * RuntimeAdapter descriptor always supplies this object before TaskRunner
-   * invokes the helper.
-   */
-  requirements?: RuntimeEnvironmentRequirements;
-  /**
-   * This device's own operator-configured escape hatch for this one runtime
-   * (`DaemonConfig.runtimeEnvironment?.[adapterId]?.allow`) — merged in like
-   * any other allowlist entry, still subject to the hard deny below.
-   */
-  locallyAllowedNames?: readonly string[];
+  /** Names admitted beyond the platform baseline, still subject to the hard deny. */
+  allow?: readonly string[];
   /**
    * Test seam: which platform's extra base vars to include
    * ({@link WINDOWS_BASE_ALLOWLIST} vs none) — defaults to `process.platform`
@@ -104,11 +46,11 @@ export interface BuildRuntimeEnvOptions {
  * F3: the four standard proxy variables are included here deliberately, in
  * both `SCREAMING_CASE` (what curl and most CLIs check first) and lowercase
  * `snake_case` (the conventional form on Unix — some tools check only one
- * spelling, some check both), not gated behind any adapter's own
- * `environmentRequirements()`: an agent CLI spawned behind a corporate proxy
+ * spelling, some check both), not gated behind a caller's own `allow`
+ * list: an agent CLI spawned behind a corporate proxy
  * with none of these forwarded silently loses all outbound network access —
  * a materially worse default than forwarding a proxy URL. See
- * docs/security.md's environment-allowlist section for the accepted
+ * docs/security.md's "Proxy variables pass through" paragraph for the accepted
  * trade-off this implies (a proxy URL may itself embed proxy credentials).
  */
 const BASE_PLATFORM_ALLOWLIST: readonly string[] = [
@@ -139,7 +81,7 @@ const BASE_PLATFORM_ALLOWLIST: readonly string[] = [
   'all_proxy',
 ];
 
-/** Additional always-included names on win32 only — see {@link BuildRuntimeEnvOptions.platform}. */
+/** Additional always-included names on win32 only — see {@link BuildAllowlistedEnvOptions.platform}. */
 const WINDOWS_BASE_ALLOWLIST: readonly string[] = [
   'SystemRoot',
   'COMSPEC',
@@ -152,30 +94,17 @@ const WINDOWS_BASE_ALLOWLIST: readonly string[] = [
 ];
 
 /**
- * Hard deny — wins unconditionally over every allowlist layer above (the
- * platform baseline, an adapter's own declared requirements, AND the
- * operator's own local override): this SDK's own control-plane variables
- * must never reach a spawned agent process, full stop. A product embedding
- * this SDK cannot accidentally (or deliberately, via
- * `runtimeEnvironment.<id>.allow`) punch a hole in this. Checked LAST in
- * {@link buildRuntimeEnv}'s per-variable decision, deliberately: it must be
- * the final word on every single variable, never short-circuited past by an
- * earlier allow match.
+ * Hard deny. It wins over every allow entry and applies to both builders. It
+ * is checked LAST in the per-variable decision, so no allow match can skip
+ * it.
  */
 const HARD_DENY_PATTERNS: readonly string[] = [
+  'CLAUDECODE',
   'BYOK_*',
-  // Loader injection. These change how an interpreter LOADS code, before the
-  // first statement of whatever it was asked to run — including this SDK's own
-  // `bin/byok-launch-cwd.mjs`, whose entire job is to establish a trusted cwd
-  // before a server binary starts. An operator `runtimeEnvironment.<id>.allow`
-  // entry naming one of them would hand the agent a way in ahead of every
-  // check the launcher makes, so the deny is absolute here exactly as
-  // `BYOK_*` is. See `./trusted-launch-cwd.ts`.
-  ...LOADER_ENV_DENY_PATTERNS,
 ];
 
 /**
- * F1: `caseInsensitive` is `true` only on win32 (see {@link buildRuntimeEnv}).
+ * F1: `caseInsensitive` is `true` only on win32.
  * Windows environment variable names are case-insensitive at the OS level
  * but NOT case-normalized by Node — `process.env` hands back whatever
  * casing the variable actually has there (`Path`, `ComSpec`,
@@ -198,38 +127,46 @@ function matchesAny(name: string, patterns: readonly string[], caseInsensitive: 
   return patterns.some((pattern) => matchesPattern(name, pattern, caseInsensitive));
 }
 
-/**
- * Build the environment one specific runtime's spawned child process should
- * actually receive — a fresh object, never `options.ambient` itself and
- * never mutated in place. See this module's own doc comment for the full
- * allow/deny model.
- */
-export function buildRuntimeEnv(options: BuildRuntimeEnvOptions): Record<string, string> {
-  const platform = options.platform ?? process.platform;
+function copyAdmitted(
+  ambient: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+  admitted: (name: string, caseInsensitive: boolean) => boolean,
+): Record<string, string> {
   // F1: win32 only — see `matchesPattern`'s own doc comment for why OS-cased
   // keys make case-sensitive matching silently wrong there specifically.
-  // Every other platform keeps exact case-sensitive matching, unchanged.
+  // A mixed-case `Byok_Secret` is denied there exactly as `BYOK_SECRET` is.
   const caseInsensitive = platform === 'win32';
-  const allowPatterns: readonly string[] = [
-    ...BASE_PLATFORM_ALLOWLIST,
-    ...(platform === 'win32' ? WINDOWS_BASE_ALLOWLIST : []),
-    ...(options.requirements?.baseNames ?? []),
-    ...(options.requirements?.credentialNames ?? []),
-    ...(options.locallyAllowedNames ?? []),
-  ];
-
   const result: Record<string, string> = {};
-  for (const [name, value] of Object.entries(options.ambient)) {
+  for (const [name, value] of Object.entries(ambient)) {
     if (value === undefined) continue;
-    // Deny checked LAST, deliberately (see HARD_DENY_PATTERNS's own doc
-    // comment) — this must be the final word on every single variable. Also
-    // case-insensitive on win32 (F1): a mixed-case `Byok_Secret` must be
-    // denied there exactly as `BYOK_SECRET` is denied everywhere else — the
-    // operator's own local override must not be able to punch a hole in the
-    // hard deny just because win32 happened to hand back different casing.
-    if (matchesAny(name, allowPatterns, caseInsensitive) && !matchesAny(name, HARD_DENY_PATTERNS, caseInsensitive)) {
+    if (admitted(name, caseInsensitive) && !matchesAny(name, HARD_DENY_PATTERNS, caseInsensitive)) {
       result[name] = value;
     }
   }
   return result;
+}
+
+/**
+ * The environment every child process of a task receives: the full ambient
+ * environment minus the hard deny. A fresh object; `ambient` is never
+ * mutated.
+ */
+export function buildRuntimeEnv(
+  options: { ambient: NodeJS.ProcessEnv; platform?: NodeJS.Platform },
+): Record<string, string> {
+  return copyAdmitted(options.ambient, options.platform ?? process.platform, () => true);
+}
+
+/**
+ * The platform baseline plus `options.allow`, minus the hard deny. Only two
+ * Pi lanes use it (see this module's own doc comment).
+ */
+export function buildAllowlistedEnv(options: BuildAllowlistedEnvOptions): Record<string, string> {
+  const platform = options.platform ?? process.platform;
+  const allowPatterns: readonly string[] = [
+    ...BASE_PLATFORM_ALLOWLIST,
+    ...(platform === 'win32' ? WINDOWS_BASE_ALLOWLIST : []),
+    ...(options.allow ?? []),
+  ];
+  return copyAdmitted(options.ambient, platform, (name, caseInsensitive) => matchesAny(name, allowPatterns, caseInsensitive));
 }

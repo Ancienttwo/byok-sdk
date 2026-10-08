@@ -60,7 +60,7 @@ function binding(overrides: Partial<InputPreparationBindingV1> = {}): InputPrepa
     source: { revision: 'src-rev-1', digest: 'src-digest-1' },
     target: { endpoint: 'https://api.z.ai/api/coding/paas/v4', modelId: 'glm-4.6' },
     policyRevision: 'policy-1',
-    agentMemory: 'none', permissionMode: 'auto',
+    agentMemory: 'none',
     runtime: {
       packageName: '@byok-sdk/pi-coding-agent',
       packageVersion: '0.85.1001',
@@ -119,7 +119,7 @@ const SUMMARY: InputPreparationArtifactSummaryV1 = {
   residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
   observationDigest: 'observation-digest-1',
   toolBindingDigest: 'tool-binding-digest-1',
-  toolImplementationKinds: { mcp__team__list: 'unavailable:resolver_unconfigured' },
+  toolNames: ['mcp__team__list'],
 };
 
 /** A reservation with bounds far above anything these durability tests write. */
@@ -364,9 +364,9 @@ describe('B-P2 store: restart roundtrip', () => {
     const created = await store.reserve(reserve());
 
     expect(created.record.version).toBe(INPUT_PREPARATION_RECORD_VERSION);
-    expect(INPUT_PREPARATION_RECORD_VERSION).toBe(8);
+    expect(INPUT_PREPARATION_RECORD_VERSION).toBe(10);
     // The wire version is a different agreement, moved by a different reason.
-    expect(INPUT_PREPARATION_VERSION).toBe(8);
+    expect(INPUT_PREPARATION_VERSION).toBe(9);
     expect((await openStore(storeDir)).get(created.record.recordId)?.version).toBe(INPUT_PREPARATION_RECORD_VERSION);
   });
 });

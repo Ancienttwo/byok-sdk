@@ -42,15 +42,16 @@ export declare const ContentReadPolicySchema: z.ZodObject<{
     allowedMimeTypes: z.ZodArray<z.ZodString>;
 }, z.core.$strict>;
 export type ContentReadPolicy = z.infer<typeof ContentReadPolicySchema>;
-export declare const AgentEgressActivityPolicySchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
-    mode: z.ZodLiteral<"metadata-status">;
-    delivery: z.ZodLiteral<"latest-value">;
-}, z.core.$strict>, z.ZodObject<{
-    mode: z.ZodLiteral<"contentful-trajectory">;
+/**
+ * The latest-value activity lane. Agent events go to the Host as the runtime
+ * produced them; these limits only bound transport (coalesce window and one
+ * event's byte size).
+ */
+export declare const AgentEgressActivityPolicySchema: z.ZodObject<{
     delivery: z.ZodLiteral<"latest-value">;
     maxCoalesceMs: z.ZodNumber;
     maxEventBytes: z.ZodNumber;
-}, z.core.$strict>], "mode">;
+}, z.core.$strict>;
 export type AgentEgressActivityPolicy = z.infer<typeof AgentEgressActivityPolicySchema>;
 export declare const AgentReliableQuotaPolicySchema: z.ZodObject<{
     maxPendingEventsPerAgent: z.ZodNumber;
@@ -59,21 +60,18 @@ export declare const AgentReliableQuotaPolicySchema: z.ZodObject<{
 }, z.core.$strict>;
 export type AgentReliableQuotaPolicy = z.infer<typeof AgentReliableQuotaPolicySchema>;
 /**
- * The only consumable policy shape for Agent egress.  Missing/unknown policy
- * is intentionally not represented as a default: callers must select a
- * revision and all three content surfaces independently.
+ * The only consumable policy shape for Agent egress. It selects transport
+ * limits and the Host content-read surfaces. It does not filter, redact or
+ * omit Agent egress content. Callers must select a revision and all three
+ * content-read surfaces independently.
  */
 export declare const AgentEgressPolicySchema: z.ZodObject<{
     policyRevision: z.ZodString;
-    activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-        mode: z.ZodLiteral<"metadata-status">;
-        delivery: z.ZodLiteral<"latest-value">;
-    }, z.core.$strict>, z.ZodObject<{
-        mode: z.ZodLiteral<"contentful-trajectory">;
+    activity: z.ZodObject<{
         delivery: z.ZodLiteral<"latest-value">;
         maxCoalesceMs: z.ZodNumber;
         maxEventBytes: z.ZodNumber;
-    }, z.core.$strict>], "mode">;
+    }, z.core.$strict>;
     reliable: z.ZodObject<{
         maxPendingEventsPerAgent: z.ZodNumber;
         maxPendingBytesPerAgent: z.ZodNumber;
@@ -111,7 +109,6 @@ export declare const AgentEgressDropReasonSchema: z.ZodEnum<{
     invalid_envelope: "invalid_envelope";
     policy_denied: "policy_denied";
     quota_exceeded: "quota_exceeded";
-    sanitizer_rejected: "sanitizer_rejected";
 }>;
 export type AgentEgressDropReason = z.infer<typeof AgentEgressDropReasonSchema>;
 export declare const AgentContentReadSurfaceSchema: z.ZodEnum<{
@@ -355,7 +352,7 @@ export declare const KNOWN_AGENT_EVENT_TYPES: readonly string[];
  * combines this with {@link AgentEventSchema} for real use.
  *
  * Deliberately asymmetric with envelope-level control/security fields
- * (`instruction`, `policy` — see `messages.ts`/`permission.ts`), which stay
+ * (`instruction` — see `messages.ts`), which stay
  * fail-closed on unknown shapes with no equivalent widening: this tolerance
  * applies only to observability data (agent progress events), never to
  * control/security surfaces. That asymmetry is the freeze rule.
@@ -1579,7 +1576,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 resume: z.ZodOptional<z.ZodBoolean>;
                 approvalInteractive: z.ZodOptional<z.ZodBoolean>;
                 mcpToolsets: z.ZodOptional<z.ZodBoolean>;
-                permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
             }, z.core.$strip>>;
         }, z.core.$strip>>>;
         harnesses: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -1590,7 +1586,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 resume: z.ZodOptional<z.ZodBoolean>;
                 approvalInteractive: z.ZodOptional<z.ZodBoolean>;
                 mcpToolsets: z.ZodOptional<z.ZodBoolean>;
-                permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
             }, z.core.$strip>;
         }, z.core.$strip>>>;
         configuredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -1627,18 +1622,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 url: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
         }, z.core.$strict>]>;
-        policy: z.ZodObject<{
-            mode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
-            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            workspaceRoot: z.ZodOptional<z.ZodString>;
-            network: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strict>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
             codex: "codex";
@@ -1696,18 +1679,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 url: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
         }, z.core.$strict>]>;
-        policy: z.ZodObject<{
-            mode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
-            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            workspaceRoot: z.ZodOptional<z.ZodString>;
-            network: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strict>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
             codex: "codex";
@@ -1766,18 +1737,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 url: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
         }, z.core.$strict>]>;
-        policy: z.ZodObject<{
-            mode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
-            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            workspaceRoot: z.ZodOptional<z.ZodString>;
-            network: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strict>;
         agentRef: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
@@ -1845,18 +1804,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 url: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
         }, z.core.$strict>]>;
-        policy: z.ZodObject<{
-            mode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
-            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            workspaceRoot: z.ZodOptional<z.ZodString>;
-            network: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strict>;
         agentRef: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
@@ -1907,15 +1854,11 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         sessionRef: z.ZodString;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
-            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                mode: z.ZodLiteral<"metadata-status">;
-                delivery: z.ZodLiteral<"latest-value">;
-            }, z.core.$strict>, z.ZodObject<{
-                mode: z.ZodLiteral<"contentful-trajectory">;
+            activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
                 maxCoalesceMs: z.ZodNumber;
                 maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>], "mode">;
+            }, z.core.$strict>;
             reliable: z.ZodObject<{
                 maxPendingEventsPerAgent: z.ZodNumber;
                 maxPendingBytesPerAgent: z.ZodNumber;
@@ -1964,18 +1907,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
                 url: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
         }, z.core.$strict>]>;
-        policy: z.ZodObject<{
-            mode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
-            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            workspaceRoot: z.ZodOptional<z.ZodString>;
-            network: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strict>;
         agentRef: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
@@ -2025,15 +1956,11 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }, z.core.$strip>>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
-            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                mode: z.ZodLiteral<"metadata-status">;
-                delivery: z.ZodLiteral<"latest-value">;
-            }, z.core.$strict>, z.ZodObject<{
-                mode: z.ZodLiteral<"contentful-trajectory">;
+            activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
                 maxCoalesceMs: z.ZodNumber;
                 maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>], "mode">;
+            }, z.core.$strict>;
             reliable: z.ZodObject<{
                 maxPendingEventsPerAgent: z.ZodNumber;
                 maxPendingBytesPerAgent: z.ZodNumber;
@@ -2073,18 +2000,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     session_ref: z.ZodOptional<z.ZodString>;
     seq: z.ZodNumber;
     payload: z.ZodObject<{
-        policy: z.ZodObject<{
-            mode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
-            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            workspaceRoot: z.ZodOptional<z.ZodString>;
-            network: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strict>;
         agentRef: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
@@ -2144,15 +2059,11 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         }>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
-            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                mode: z.ZodLiteral<"metadata-status">;
-                delivery: z.ZodLiteral<"latest-value">;
-            }, z.core.$strict>, z.ZodObject<{
-                mode: z.ZodLiteral<"contentful-trajectory">;
+            activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
                 maxCoalesceMs: z.ZodNumber;
                 maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>], "mode">;
+            }, z.core.$strict>;
             reliable: z.ZodObject<{
                 maxPendingEventsPerAgent: z.ZodNumber;
                 maxPendingBytesPerAgent: z.ZodNumber;
@@ -2406,12 +2317,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             contentHash: z.ZodString;
         }, z.core.$strict>]>;
         requiredToolsets: z.ZodArray<z.ZodString>;
-        permissionMode: z.ZodEnum<{
-            auto: "auto";
-            confirm: "confirm";
-            plan: "plan";
-            readonly: "readonly";
-        }>;
         accountingPolicyRef: z.ZodOptional<z.ZodObject<{
             revision: z.ZodString;
             ruledRuntime: z.ZodString;
@@ -2519,7 +2424,6 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             resume: z.ZodOptional<z.ZodBoolean>;
             approvalInteractive: z.ZodOptional<z.ZodBoolean>;
             mcpToolsets: z.ZodOptional<z.ZodBoolean>;
-            permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
         }, z.core.$strip>>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
@@ -3127,7 +3031,6 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                     resume: z.ZodOptional<z.ZodBoolean>;
                     approvalInteractive: z.ZodOptional<z.ZodBoolean>;
                     mcpToolsets: z.ZodOptional<z.ZodBoolean>;
-                    permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
                 }, z.core.$strip>>;
             }, z.core.$strip>>>;
             harnesses: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -3138,7 +3041,6 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                     resume: z.ZodOptional<z.ZodBoolean>;
                     approvalInteractive: z.ZodOptional<z.ZodBoolean>;
                     mcpToolsets: z.ZodOptional<z.ZodBoolean>;
-                    permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
                 }, z.core.$strip>;
             }, z.core.$strip>>>;
             configuredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -3175,18 +3077,6 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                     url: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>;
             }, z.core.$strict>]>;
-            policy: z.ZodObject<{
-                mode: z.ZodEnum<{
-                    auto: "auto";
-                    confirm: "confirm";
-                    plan: "plan";
-                    readonly: "readonly";
-                }>;
-                allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                workspaceRoot: z.ZodOptional<z.ZodString>;
-                network: z.ZodOptional<z.ZodBoolean>;
-            }, z.core.$strict>;
             runtime: z.ZodOptional<z.ZodEnum<{
                 claude: "claude";
                 codex: "codex";
@@ -3244,18 +3134,6 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                     url: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>;
             }, z.core.$strict>]>;
-            policy: z.ZodObject<{
-                mode: z.ZodEnum<{
-                    auto: "auto";
-                    confirm: "confirm";
-                    plan: "plan";
-                    readonly: "readonly";
-                }>;
-                allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                workspaceRoot: z.ZodOptional<z.ZodString>;
-                network: z.ZodOptional<z.ZodBoolean>;
-            }, z.core.$strict>;
             runtime: z.ZodOptional<z.ZodEnum<{
                 claude: "claude";
                 codex: "codex";
@@ -3314,18 +3192,6 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                     url: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>;
             }, z.core.$strict>]>;
-            policy: z.ZodObject<{
-                mode: z.ZodEnum<{
-                    auto: "auto";
-                    confirm: "confirm";
-                    plan: "plan";
-                    readonly: "readonly";
-                }>;
-                allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                workspaceRoot: z.ZodOptional<z.ZodString>;
-                network: z.ZodOptional<z.ZodBoolean>;
-            }, z.core.$strict>;
             agentRef: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
@@ -3393,18 +3259,6 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                     url: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>;
             }, z.core.$strict>]>;
-            policy: z.ZodObject<{
-                mode: z.ZodEnum<{
-                    auto: "auto";
-                    confirm: "confirm";
-                    plan: "plan";
-                    readonly: "readonly";
-                }>;
-                allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                workspaceRoot: z.ZodOptional<z.ZodString>;
-                network: z.ZodOptional<z.ZodBoolean>;
-            }, z.core.$strict>;
             agentRef: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
@@ -3455,15 +3309,11 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
             sessionRef: z.ZodString;
             egressPolicy: z.ZodObject<{
                 policyRevision: z.ZodString;
-                activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                    mode: z.ZodLiteral<"metadata-status">;
-                    delivery: z.ZodLiteral<"latest-value">;
-                }, z.core.$strict>, z.ZodObject<{
-                    mode: z.ZodLiteral<"contentful-trajectory">;
+                activity: z.ZodObject<{
                     delivery: z.ZodLiteral<"latest-value">;
                     maxCoalesceMs: z.ZodNumber;
                     maxEventBytes: z.ZodNumber;
-                }, z.core.$strict>], "mode">;
+                }, z.core.$strict>;
                 reliable: z.ZodObject<{
                     maxPendingEventsPerAgent: z.ZodNumber;
                     maxPendingBytesPerAgent: z.ZodNumber;
@@ -3512,18 +3362,6 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                     url: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>;
             }, z.core.$strict>]>;
-            policy: z.ZodObject<{
-                mode: z.ZodEnum<{
-                    auto: "auto";
-                    confirm: "confirm";
-                    plan: "plan";
-                    readonly: "readonly";
-                }>;
-                allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                workspaceRoot: z.ZodOptional<z.ZodString>;
-                network: z.ZodOptional<z.ZodBoolean>;
-            }, z.core.$strict>;
             agentRef: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
@@ -3573,15 +3411,11 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
             }, z.core.$strip>>;
             egressPolicy: z.ZodObject<{
                 policyRevision: z.ZodString;
-                activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                    mode: z.ZodLiteral<"metadata-status">;
-                    delivery: z.ZodLiteral<"latest-value">;
-                }, z.core.$strict>, z.ZodObject<{
-                    mode: z.ZodLiteral<"contentful-trajectory">;
+                activity: z.ZodObject<{
                     delivery: z.ZodLiteral<"latest-value">;
                     maxCoalesceMs: z.ZodNumber;
                     maxEventBytes: z.ZodNumber;
-                }, z.core.$strict>], "mode">;
+                }, z.core.$strict>;
                 reliable: z.ZodObject<{
                     maxPendingEventsPerAgent: z.ZodNumber;
                     maxPendingBytesPerAgent: z.ZodNumber;
@@ -3621,18 +3455,6 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
         session_ref: z.ZodOptional<z.ZodString>;
         seq: z.ZodNumber;
         payload: z.ZodObject<{
-            policy: z.ZodObject<{
-                mode: z.ZodEnum<{
-                    auto: "auto";
-                    confirm: "confirm";
-                    plan: "plan";
-                    readonly: "readonly";
-                }>;
-                allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                workspaceRoot: z.ZodOptional<z.ZodString>;
-                network: z.ZodOptional<z.ZodBoolean>;
-            }, z.core.$strict>;
             agentRef: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
@@ -3692,15 +3514,11 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
             }>;
             egressPolicy: z.ZodObject<{
                 policyRevision: z.ZodString;
-                activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                    mode: z.ZodLiteral<"metadata-status">;
-                    delivery: z.ZodLiteral<"latest-value">;
-                }, z.core.$strict>, z.ZodObject<{
-                    mode: z.ZodLiteral<"contentful-trajectory">;
+                activity: z.ZodObject<{
                     delivery: z.ZodLiteral<"latest-value">;
                     maxCoalesceMs: z.ZodNumber;
                     maxEventBytes: z.ZodNumber;
-                }, z.core.$strict>], "mode">;
+                }, z.core.$strict>;
                 reliable: z.ZodObject<{
                     maxPendingEventsPerAgent: z.ZodNumber;
                     maxPendingBytesPerAgent: z.ZodNumber;
@@ -3954,12 +3772,6 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 contentHash: z.ZodString;
             }, z.core.$strict>]>;
             requiredToolsets: z.ZodArray<z.ZodString>;
-            permissionMode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
             accountingPolicyRef: z.ZodOptional<z.ZodObject<{
                 revision: z.ZodString;
                 ruledRuntime: z.ZodString;
@@ -4067,7 +3879,6 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 resume: z.ZodOptional<z.ZodBoolean>;
                 approvalInteractive: z.ZodOptional<z.ZodBoolean>;
                 mcpToolsets: z.ZodOptional<z.ZodBoolean>;
-                permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
             }, z.core.$strip>>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
@@ -4547,7 +4358,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                     resume: z.ZodOptional<z.ZodBoolean>;
                     approvalInteractive: z.ZodOptional<z.ZodBoolean>;
                     mcpToolsets: z.ZodOptional<z.ZodBoolean>;
-                    permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
                 }, z.core.$strip>>;
             }, z.core.$strip>>>;
             harnesses: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -4558,7 +4368,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                     resume: z.ZodOptional<z.ZodBoolean>;
                     approvalInteractive: z.ZodOptional<z.ZodBoolean>;
                     mcpToolsets: z.ZodOptional<z.ZodBoolean>;
-                    permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
                 }, z.core.$strip>;
             }, z.core.$strip>>>;
             configuredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -4595,18 +4404,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                     url: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>;
             }, z.core.$strict>]>;
-            policy: z.ZodObject<{
-                mode: z.ZodEnum<{
-                    auto: "auto";
-                    confirm: "confirm";
-                    plan: "plan";
-                    readonly: "readonly";
-                }>;
-                allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                workspaceRoot: z.ZodOptional<z.ZodString>;
-                network: z.ZodOptional<z.ZodBoolean>;
-            }, z.core.$strict>;
             runtime: z.ZodOptional<z.ZodEnum<{
                 claude: "claude";
                 codex: "codex";
@@ -4664,18 +4461,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                     url: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>;
             }, z.core.$strict>]>;
-            policy: z.ZodObject<{
-                mode: z.ZodEnum<{
-                    auto: "auto";
-                    confirm: "confirm";
-                    plan: "plan";
-                    readonly: "readonly";
-                }>;
-                allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                workspaceRoot: z.ZodOptional<z.ZodString>;
-                network: z.ZodOptional<z.ZodBoolean>;
-            }, z.core.$strict>;
             runtime: z.ZodOptional<z.ZodEnum<{
                 claude: "claude";
                 codex: "codex";
@@ -4734,18 +4519,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                     url: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>;
             }, z.core.$strict>]>;
-            policy: z.ZodObject<{
-                mode: z.ZodEnum<{
-                    auto: "auto";
-                    confirm: "confirm";
-                    plan: "plan";
-                    readonly: "readonly";
-                }>;
-                allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                workspaceRoot: z.ZodOptional<z.ZodString>;
-                network: z.ZodOptional<z.ZodBoolean>;
-            }, z.core.$strict>;
             agentRef: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
@@ -4813,18 +4586,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                     url: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>;
             }, z.core.$strict>]>;
-            policy: z.ZodObject<{
-                mode: z.ZodEnum<{
-                    auto: "auto";
-                    confirm: "confirm";
-                    plan: "plan";
-                    readonly: "readonly";
-                }>;
-                allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                workspaceRoot: z.ZodOptional<z.ZodString>;
-                network: z.ZodOptional<z.ZodBoolean>;
-            }, z.core.$strict>;
             agentRef: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
@@ -4875,15 +4636,11 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
             sessionRef: z.ZodString;
             egressPolicy: z.ZodObject<{
                 policyRevision: z.ZodString;
-                activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                    mode: z.ZodLiteral<"metadata-status">;
-                    delivery: z.ZodLiteral<"latest-value">;
-                }, z.core.$strict>, z.ZodObject<{
-                    mode: z.ZodLiteral<"contentful-trajectory">;
+                activity: z.ZodObject<{
                     delivery: z.ZodLiteral<"latest-value">;
                     maxCoalesceMs: z.ZodNumber;
                     maxEventBytes: z.ZodNumber;
-                }, z.core.$strict>], "mode">;
+                }, z.core.$strict>;
                 reliable: z.ZodObject<{
                     maxPendingEventsPerAgent: z.ZodNumber;
                     maxPendingBytesPerAgent: z.ZodNumber;
@@ -4932,18 +4689,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                     url: z.ZodOptional<z.ZodString>;
                 }, z.core.$strip>;
             }, z.core.$strict>]>;
-            policy: z.ZodObject<{
-                mode: z.ZodEnum<{
-                    auto: "auto";
-                    confirm: "confirm";
-                    plan: "plan";
-                    readonly: "readonly";
-                }>;
-                allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                workspaceRoot: z.ZodOptional<z.ZodString>;
-                network: z.ZodOptional<z.ZodBoolean>;
-            }, z.core.$strict>;
             agentRef: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
@@ -4993,15 +4738,11 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
             }, z.core.$strip>>;
             egressPolicy: z.ZodObject<{
                 policyRevision: z.ZodString;
-                activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                    mode: z.ZodLiteral<"metadata-status">;
-                    delivery: z.ZodLiteral<"latest-value">;
-                }, z.core.$strict>, z.ZodObject<{
-                    mode: z.ZodLiteral<"contentful-trajectory">;
+                activity: z.ZodObject<{
                     delivery: z.ZodLiteral<"latest-value">;
                     maxCoalesceMs: z.ZodNumber;
                     maxEventBytes: z.ZodNumber;
-                }, z.core.$strict>], "mode">;
+                }, z.core.$strict>;
                 reliable: z.ZodObject<{
                     maxPendingEventsPerAgent: z.ZodNumber;
                     maxPendingBytesPerAgent: z.ZodNumber;
@@ -5041,18 +4782,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
         session_ref: z.ZodOptional<z.ZodString>;
         seq: z.ZodNumber;
         payload: z.ZodObject<{
-            policy: z.ZodObject<{
-                mode: z.ZodEnum<{
-                    auto: "auto";
-                    confirm: "confirm";
-                    plan: "plan";
-                    readonly: "readonly";
-                }>;
-                allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-                workspaceRoot: z.ZodOptional<z.ZodString>;
-                network: z.ZodOptional<z.ZodBoolean>;
-            }, z.core.$strict>;
             agentRef: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
@@ -5112,15 +4841,11 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
             }>;
             egressPolicy: z.ZodObject<{
                 policyRevision: z.ZodString;
-                activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                    mode: z.ZodLiteral<"metadata-status">;
-                    delivery: z.ZodLiteral<"latest-value">;
-                }, z.core.$strict>, z.ZodObject<{
-                    mode: z.ZodLiteral<"contentful-trajectory">;
+                activity: z.ZodObject<{
                     delivery: z.ZodLiteral<"latest-value">;
                     maxCoalesceMs: z.ZodNumber;
                     maxEventBytes: z.ZodNumber;
-                }, z.core.$strict>], "mode">;
+                }, z.core.$strict>;
                 reliable: z.ZodObject<{
                     maxPendingEventsPerAgent: z.ZodNumber;
                     maxPendingBytesPerAgent: z.ZodNumber;
@@ -5374,12 +5099,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 contentHash: z.ZodString;
             }, z.core.$strict>]>;
             requiredToolsets: z.ZodArray<z.ZodString>;
-            permissionMode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
             accountingPolicyRef: z.ZodOptional<z.ZodObject<{
                 revision: z.ZodString;
                 ruledRuntime: z.ZodString;
@@ -5487,7 +5206,6 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 resume: z.ZodOptional<z.ZodBoolean>;
                 approvalInteractive: z.ZodOptional<z.ZodBoolean>;
                 mcpToolsets: z.ZodOptional<z.ZodBoolean>;
-                permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
             }, z.core.$strip>>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
@@ -6021,12 +5739,6 @@ export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminated
                 modelId: z.ZodString;
             }, z.core.$strict>;
             policyRevision: z.ZodString;
-            permissionMode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
             runtime: z.ZodObject<{
                 packageName: z.ZodString;
                 packageVersion: z.ZodString;
@@ -6078,7 +5790,7 @@ export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminated
             }, z.core.$strict>>;
             observationDigest: z.ZodString;
             toolBindingDigest: z.ZodString;
-            toolImplementationKinds: z.ZodRecord<z.ZodString, z.ZodString>;
+            toolNames: z.ZodArray<z.ZodString>;
         }, z.core.$strict>>;
         counter: z.ZodOptional<z.ZodObject<{
             method: z.ZodString;
@@ -6118,7 +5830,6 @@ export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminated
             counter_authority_not_production: "counter_authority_not_production";
             counter_coverage_incomplete: "counter_coverage_incomplete";
             counter_interrupted: "counter_interrupted";
-            executor_identity_unproven: "executor_identity_unproven";
             failed: "failed";
             not_prepared: "not_prepared";
             projection_unknown: "projection_unknown";
@@ -6150,11 +5861,9 @@ export declare const InputPreparationCompletionRequestSchema: z.ZodDiscriminated
         durable_write_failed: "durable_write_failed";
         input_preparation_record_log_unsupported: "input_preparation_record_log_unsupported";
         input_preparation_unconfigured: "input_preparation_unconfigured";
-        launch_boundary_unavailable: "launch_boundary_unavailable";
         limit_exceeded: "limit_exceeded";
         not_found: "not_found";
         observation_drift: "observation_drift";
-        permission_mode_denied: "permission_mode_denied";
         policy_revision_mismatch: "policy_revision_mismatch";
         request_conflict: "request_conflict";
         rpc_frame_too_large: "rpc_frame_too_large";
@@ -6222,12 +5931,6 @@ export declare const InputPreparationReadbackSchema: z.ZodObject<{
                 modelId: z.ZodString;
             }, z.core.$strict>;
             policyRevision: z.ZodString;
-            permissionMode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
             runtime: z.ZodObject<{
                 packageName: z.ZodString;
                 packageVersion: z.ZodString;
@@ -6279,7 +5982,7 @@ export declare const InputPreparationReadbackSchema: z.ZodObject<{
             }, z.core.$strict>>;
             observationDigest: z.ZodString;
             toolBindingDigest: z.ZodString;
-            toolImplementationKinds: z.ZodRecord<z.ZodString, z.ZodString>;
+            toolNames: z.ZodArray<z.ZodString>;
         }, z.core.$strict>>;
         counter: z.ZodOptional<z.ZodObject<{
             method: z.ZodString;
@@ -6319,7 +6022,6 @@ export declare const InputPreparationReadbackSchema: z.ZodObject<{
             counter_authority_not_production: "counter_authority_not_production";
             counter_coverage_incomplete: "counter_coverage_incomplete";
             counter_interrupted: "counter_interrupted";
-            executor_identity_unproven: "executor_identity_unproven";
             failed: "failed";
             not_prepared: "not_prepared";
             projection_unknown: "projection_unknown";
@@ -6342,11 +6044,9 @@ export declare const InputPreparationReadbackSchema: z.ZodObject<{
         durable_write_failed: "durable_write_failed";
         input_preparation_record_log_unsupported: "input_preparation_record_log_unsupported";
         input_preparation_unconfigured: "input_preparation_unconfigured";
-        launch_boundary_unavailable: "launch_boundary_unavailable";
         limit_exceeded: "limit_exceeded";
         not_found: "not_found";
         observation_drift: "observation_drift";
-        permission_mode_denied: "permission_mode_denied";
         policy_revision_mismatch: "policy_revision_mismatch";
         request_conflict: "request_conflict";
         rpc_frame_too_large: "rpc_frame_too_large";
@@ -6499,8 +6199,6 @@ export { PROTOCOL_VERSION, CAPABILITY_FLAGS, STRICT_AGENT_ONLY_CAPABILITY } from
 export type { CapabilityFlag } from './version';
 export { BlobRefSchema, CONTENT_HASH_RE } from './blob';
 export type { BlobRef } from './blob';
-export { PermissionPolicySchema, PERMISSION_MODES } from './permission';
-export type { PermissionPolicy, PermissionMode } from './permission';
 export { PROVIDER_PROFILE_BINDING_CAPABILITY, PROVIDER_MODEL_CAPABILITIES, ProviderProfileRefSchema, ProviderProfileRevisionSchema, ProviderProfileHashSchema, ProviderModelCapabilitySchema, ProviderProfileBindingSchema, } from './provider-profile-binding';
 export type { ProviderProfileRef, ProviderProfileRevision, ProviderProfileHash, ProviderModelCapability, ProviderProfileBinding, } from './provider-profile-binding';
 export { PROVIDER_PROVISIONING_CAPABILITY, PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION, PROVIDER_PROVISIONING_OPERATIONS, PROVIDER_PROVISIONING_OPERATION_GENERATION_MAXIMUM, PROVIDER_PROVISIONING_REJECTION_CODES, PROVIDER_PROVISIONING_HOST_TERMINAL_CODES, PROVIDER_PROVISIONING_DISPOSITIONS, PROVIDER_PROVISIONING_KEY_CHECK_RESULTS, ProviderProvisioningAvailablePayloadSchema, ProviderProvisioningKeyCheckResultSchema, ProviderProvisioningKeyCheckSchema, ProviderProvisioningOperationSchema, ProviderProvisioningOperationGenerationSchema, ProviderProvisioningOperationDigestSchema, ProviderProvisioningRejectionCodeSchema, ProviderProvisioningProviderStatusSchema, ProviderProvisioningCompletionSchema, ProviderProvisioningDispositionSchema, ProviderProvisioningReadbackSchema, } from './provider-provisioning';
@@ -6513,8 +6211,8 @@ export { AgentEgressPolicySchema, AgentEgressActivityPolicySchema, AgentReliable
 export type { AgentEgressPolicy, AgentEgressActivityPolicy, AgentReliableQuotaPolicy, ContentReadPolicy, AgentEgressLane, AgentEgressDropReason, AgentMessageContentType, AgentMessageEgressRequirement, AgentMessageServerContext, AgentContentReadSurface, AgentContentActorKind, AgentContentActor, AgentContentDecodeAs, AgentContentReadDecision, AgentContentReadDenialReason, } from './agent-egress';
 export { AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_MAX_BYTES, AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM, AgentHomeProjectionProfileRevisionSchema, AgentHomeProjectionHashSchema, AgentHomeProjectionOutcomeSchema, AgentHomeProjectionValueSchema, } from './agent-home-projection';
 export type { AgentHomeProjectionProfileRevision, AgentHomeProjectionHash, AgentHomeProjectionOutcome, AgentHomeProjectionValue, } from './agent-home-projection';
-export { AGENT_INPUT_PREPARATION_CAPABILITY, INPUT_PREPARATION_WIRE_VERSION, InputPreparationContentHashSchema, InputPreparationPermissionModeSchema, InputPreparationPolicyRevisionSchema, InputPreparationProfileIdSchema, InputPreparationSourceSchema, InputPreparationModelCostSchema, InputPreparationModelSchema, InputPreparationOptionsSchema, InputPreparationSelectionSchema, InputPreparationPromptSnapshotSchema, InputPreparationUserMessageSchema, InputPreparationHostCanonicalAssistantMessageSchema, InputPreparationMessageSchema, InputPreparationContextDocumentSchema, InputPreparationStateSchema, InputPreparationReadinessReasonSchema, InputPreparationRuntimeIdentitySchema, InputPreparationCounterTargetSchema, InputPreparationAccountingPolicyRefSchema, InputPreparationCounterProviderEvidenceSchema, InputPreparationCounterEvidenceSchema, InputPreparationResidualValueClassSchema, InputPreparationResidualKeySchema, InputPreparationProjectionSchema, InputPreparationToolImplementationKindSchema, InputPreparationArtifactSummarySchema, InputPreparationBindingSchema, InputPreparationReceiptSummarySchema, InputPreparationReferenceSchema, InputPreparationOfferBindingSchema, InputPreparationRejectionReasonSchema, } from './input-preparation';
-export type { InputPreparationPermissionMode, InputPreparationSource, InputPreparationModel, InputPreparationOptions, InputPreparationSelection, InputPreparationMessage, InputPreparationContextDocument, InputPreparationState, InputPreparationReadinessReason, InputPreparationAccountingPolicyRef, InputPreparationResidualValueClass, InputPreparationRuntimeIdentity, InputPreparationReceiptSummary, InputPreparationOfferBinding, InputPreparationRejectionReason, } from './input-preparation';
+export { AGENT_INPUT_PREPARATION_CAPABILITY, INPUT_PREPARATION_WIRE_VERSION, InputPreparationContentHashSchema, InputPreparationPolicyRevisionSchema, InputPreparationProfileIdSchema, InputPreparationSourceSchema, InputPreparationModelCostSchema, InputPreparationModelSchema, InputPreparationOptionsSchema, InputPreparationSelectionSchema, InputPreparationPromptSnapshotSchema, InputPreparationUserMessageSchema, InputPreparationHostCanonicalAssistantMessageSchema, InputPreparationMessageSchema, InputPreparationContextDocumentSchema, InputPreparationStateSchema, InputPreparationReadinessReasonSchema, InputPreparationRuntimeIdentitySchema, InputPreparationCounterTargetSchema, InputPreparationAccountingPolicyRefSchema, InputPreparationCounterProviderEvidenceSchema, InputPreparationCounterEvidenceSchema, InputPreparationResidualValueClassSchema, InputPreparationResidualKeySchema, InputPreparationProjectionSchema, InputPreparationArtifactSummarySchema, InputPreparationBindingSchema, InputPreparationReceiptSummarySchema, InputPreparationReferenceSchema, InputPreparationOfferBindingSchema, InputPreparationRejectionReasonSchema, } from './input-preparation';
+export type { InputPreparationSource, InputPreparationModel, InputPreparationOptions, InputPreparationSelection, InputPreparationMessage, InputPreparationContextDocument, InputPreparationState, InputPreparationReadinessReason, InputPreparationAccountingPolicyRef, InputPreparationResidualValueClass, InputPreparationRuntimeIdentity, InputPreparationReceiptSummary, InputPreparationOfferBinding, InputPreparationRejectionReason, } from './input-preparation';
 export { AGENT_MEMORY_PROJECTION_CAPABILITY, AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES, AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE, AgentMemoryProjectionGrantRefSchema, AgentMemoryProjectionSessionRefSchema, AgentMemoryProjectionWriterEpochSchema, AgentMemoryProjectionSourceSeqSchema, AgentMemoryProjectionSnapshotSchema, AgentMemoryProjectionMeteringReceiptSchema, AgentMemoryProjectionMutationSchema, AgentMemoryProjectionReceiptSchema, AgentMemoryProjectionEraseResultSchema, agentMemoryProjectionBase64UrlByteLength, } from './agent-memory-projection';
 export type { AgentMemoryProjectionGrantRef, AgentMemoryProjectionSessionRef, AgentMemoryProjectionWriterEpoch, AgentMemoryProjectionSourceSeq, AgentMemoryProjectionSnapshot, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionEraseResult, } from './agent-memory-projection';
 export { HOST_MCP_TASK_CONTEXT_CAPABILITY } from './task-assertion';
@@ -6561,7 +6259,7 @@ import { z } from 'zod';
  * 3. Every shape here is `.strict()`. This is control data: an unrecognized
  *    field must be REJECTED, not silently stripped, per docs/protocol.md's
  *    freeze-rule asymmetry. Adding a field post-freeze is therefore a
- *    breaking change, exactly like `PermissionPolicySchema`.
+ *    breaking change.
  */
 /**
  * The ONE version of the input-preparation contract, shared by this relay wire
@@ -6574,7 +6272,7 @@ import { z } from 'zod';
  * below. See `INPUT_PREPARATION_VERSION` in the client for what each version
  * changed.
  */
-export declare const INPUT_PREPARATION_WIRE_VERSION: 8;
+export declare const INPUT_PREPARATION_WIRE_VERSION: 9;
 /**
  * Capability required before a task-free remote input preparation — or a
  * prepared Execution — is admitted: `agent-input-preparation-v<N>`, where
@@ -6597,7 +6295,7 @@ export declare const INPUT_PREPARATION_WIRE_VERSION: 8;
  * devices as a pair is the operator precondition for the cut (`docs/spec.md`,
  * bounded admission); nothing here parses an older receipt.
  */
-export declare const AGENT_INPUT_PREPARATION_CAPABILITY: "agent-input-preparation-v8";
+export declare const AGENT_INPUT_PREPARATION_CAPABILITY: "agent-input-preparation-v9";
 /** The preparation surface uses the package-wide lowercase `sha256:<hex>` transport form. */
 export declare const InputPreparationContentHashSchema: z.ZodString;
 /**
@@ -6616,26 +6314,6 @@ export declare const InputPreparationPolicyRevisionSchema: z.ZodString;
  * anything is compiled.
  */
 export declare const InputPreparationProfileIdSchema: z.ZodString;
-/**
- * The permission mode a preparation is compiled FOR.
- *
- * It is the same closed set every task policy uses (`permission.ts`'s
- * `PERMISSION_MODES`), spelled here as its own schema because a preparation
- * carries a mode without carrying a policy: there is no task, no grant and no
- * approval seam on this wire. The mode selects which tools the device's own
- * observation projects into the counted manifest, and nothing else.
- *
- * Declared by the requester rather than inferred by the device: a device that
- * guessed would be counting a manifest the requester never asked for, and a
- * device that defaulted would silently count the widest one.
- */
-export declare const InputPreparationPermissionModeSchema: z.ZodEnum<{
-    auto: "auto";
-    confirm: "confirm";
-    plan: "plan";
-    readonly: "readonly";
-}>;
-export type InputPreparationPermissionMode = z.infer<typeof InputPreparationPermissionModeSchema>;
 /** Explicit prepared SDK memory selection; never defaulted. */
 export declare const PreparedAgentMemoryModeSchema: z.ZodEnum<{
     none: "none";
@@ -6938,7 +6616,7 @@ export type InputPreparationState = z.infer<typeof InputPreparationStateSchema>;
  * `ready` means the preparation CAN BE CONSUMED — the artifact is intact and
  * unexpired, the native compiler's projection is content-complete, every
  * residual key is ruled by an applicable Host accounting policy, D is text
- * only, every executor identity is attested, and — only when the device has an
+ * only, and — only when the device has an
  * optional counter configured — that count is provider-authoritative and
  * covered. No count is required: the size evidence is
  * `artifact.requestBytes`, the exact byte length of the frozen D. It is
@@ -6954,7 +6632,6 @@ export declare const InputPreparationReadinessReasonSchema: z.ZodEnum<{
     counter_authority_not_production: "counter_authority_not_production";
     counter_coverage_incomplete: "counter_coverage_incomplete";
     counter_interrupted: "counter_interrupted";
-    executor_identity_unproven: "executor_identity_unproven";
     failed: "failed";
     not_prepared: "not_prepared";
     projection_unknown: "projection_unknown";
@@ -7068,16 +6745,6 @@ export declare const InputPreparationCounterEvidenceSchema: z.ZodObject<{
     completedAt: z.ZodISODateTime;
 }, z.core.$strict>;
 /**
- * What the device established about the implementation behind ONE
- * model-visible tool: `attested`, or `unavailable:<reason>` naming which of
- * the SDK's closed unavailable reasons applies.
- *
- * A kind, never the identity itself: an install path, a closure digest or a
- * stat tuple is device-local filesystem detail, and a receipt discloses
- * identity facts, not the machine's layout.
- */
-export declare const InputPreparationToolImplementationKindSchema: z.ZodString;
-/**
  * What the native compiler proved about ONE top-level key of D that lies
  * outside P(D).
  *
@@ -7139,19 +6806,16 @@ export declare const InputPreparationProjectionSchema: z.ZodObject<{
  * launch checkable rather than assumed:
  *
  * - `observationDigest` binds everything the device OBSERVED — the projected
- *   tools, their executor fingerprints, the launch attestation and the
- *   implementation identities — so a launch whose live observation differs is
- *   a different manifest, whatever the schemas say.
+ *   tools and their executor fingerprints — so a launch whose live
+ *   observation differs is a different manifest, whatever the schemas say.
  * - `toolBindingDigest` binds only the facts that can be re-derived WITHOUT
- *   spawning a server: the launch attestation, the toolset definition
- *   revisions and the implementation identities. It is what a replay of an
- *   already-recorded requestId compares against, because re-probing to detect
- *   drift would be the second executor fact the idempotency key exists to
- *   prevent.
- * - `toolImplementationKinds` states, per model-visible tool name, whether the
- *   implementation behind it was attested. It is the evidence behind
- *   `executor_identity_unproven`, so a reader does not have to take that
- *   readiness reason on trust.
+ *   spawning a server: the toolset definition revisions and the configured
+ *   argv. It is what a replay of an already-recorded requestId compares
+ *   against, because re-probing to detect drift would be the second executor
+ *   fact the idempotency key exists to prevent.
+ * - `toolNames` lists the counted model-visible tool names, sorted. A launch
+ *   that registers a different set can name the tool that appeared or
+ *   vanished.
  */
 export declare const InputPreparationArtifactSummarySchema: z.ZodObject<{
     requestDigest: z.ZodString;
@@ -7182,7 +6846,7 @@ export declare const InputPreparationArtifactSummarySchema: z.ZodObject<{
     }, z.core.$strict>>;
     observationDigest: z.ZodString;
     toolBindingDigest: z.ZodString;
-    toolImplementationKinds: z.ZodRecord<z.ZodString, z.ZodString>;
+    toolNames: z.ZodArray<z.ZodString>;
 }, z.core.$strict>;
 /** The immutable binding a receipt carries and a later consumer must re-present. */
 export declare const InputPreparationBindingSchema: z.ZodObject<{
@@ -7205,12 +6869,6 @@ export declare const InputPreparationBindingSchema: z.ZodObject<{
         modelId: z.ZodString;
     }, z.core.$strict>;
     policyRevision: z.ZodString;
-    permissionMode: z.ZodEnum<{
-        auto: "auto";
-        confirm: "confirm";
-        plan: "plan";
-        readonly: "readonly";
-    }>;
     runtime: z.ZodObject<{
         packageName: z.ZodString;
         packageVersion: z.ZodString;
@@ -7270,12 +6928,6 @@ export declare const InputPreparationReceiptSummarySchema: z.ZodObject<{
             modelId: z.ZodString;
         }, z.core.$strict>;
         policyRevision: z.ZodString;
-        permissionMode: z.ZodEnum<{
-            auto: "auto";
-            confirm: "confirm";
-            plan: "plan";
-            readonly: "readonly";
-        }>;
         runtime: z.ZodObject<{
             packageName: z.ZodString;
             packageVersion: z.ZodString;
@@ -7327,7 +6979,7 @@ export declare const InputPreparationReceiptSummarySchema: z.ZodObject<{
         }, z.core.$strict>>;
         observationDigest: z.ZodString;
         toolBindingDigest: z.ZodString;
-        toolImplementationKinds: z.ZodRecord<z.ZodString, z.ZodString>;
+        toolNames: z.ZodArray<z.ZodString>;
     }, z.core.$strict>>;
     counter: z.ZodOptional<z.ZodObject<{
         method: z.ZodString;
@@ -7367,7 +7019,6 @@ export declare const InputPreparationReceiptSummarySchema: z.ZodObject<{
         counter_authority_not_production: "counter_authority_not_production";
         counter_coverage_incomplete: "counter_coverage_incomplete";
         counter_interrupted: "counter_interrupted";
-        executor_identity_unproven: "executor_identity_unproven";
         failed: "failed";
         not_prepared: "not_prepared";
         projection_unknown: "projection_unknown";
@@ -7431,11 +7082,9 @@ export declare const InputPreparationRejectionReasonSchema: z.ZodEnum<{
     durable_write_failed: "durable_write_failed";
     input_preparation_record_log_unsupported: "input_preparation_record_log_unsupported";
     input_preparation_unconfigured: "input_preparation_unconfigured";
-    launch_boundary_unavailable: "launch_boundary_unavailable";
     limit_exceeded: "limit_exceeded";
     not_found: "not_found";
     observation_drift: "observation_drift";
-    permission_mode_denied: "permission_mode_denied";
     policy_revision_mismatch: "policy_revision_mismatch";
     request_conflict: "request_conflict";
     rpc_frame_too_large: "rpc_frame_too_large";
@@ -7464,16 +7113,6 @@ export declare const ProtocolVersionNumberSchema: z.ZodNumber;
  * end-to-end — older daemons omit `capabilities` entirely — and every field
  * inside it is itself optional, since detection can be partial.
  *
- * Per-tool allow/deny lists are deliberately NOT included here (noise).
- * `permissionModes` mirrors `PERMISSION_MODES` (`permission.ts`) but is kept
- * as a bare `string[]` rather than `z.enum(PERMISSION_MODES)`: this is a
- * runtime's self-reported observability data, not a control/security field,
- * so — per the freeze rule (tolerate unknown for observability, fail closed
- * for control/security; see `agent-event.ts`'s unknown-variant tolerance for
- * the same asymmetry applied to `task.progress` events) — it stays tolerant
- * of a mode string a newer runtime might report that this schema doesn't
- * enumerate yet, rather than rejecting the whole `conn.hello`.
- *
  * Unrecognized keys inside `capabilities` itself, by contrast, are silently
  * stripped (zod's default object behavior — same as every other payload
  * schema in this file) rather than passed through: this is a closed, typed
@@ -7485,7 +7124,6 @@ export declare const RuntimeCapabilitiesSchema: z.ZodObject<{
     resume: z.ZodOptional<z.ZodBoolean>;
     approvalInteractive: z.ZodOptional<z.ZodBoolean>;
     mcpToolsets: z.ZodOptional<z.ZodBoolean>;
-    permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
 }, z.core.$strip>;
 export type RuntimeCapabilities = z.infer<typeof RuntimeCapabilitiesSchema>;
 /**
@@ -7506,7 +7144,6 @@ export declare const RuntimeInfoSchema: z.ZodObject<{
         resume: z.ZodOptional<z.ZodBoolean>;
         approvalInteractive: z.ZodOptional<z.ZodBoolean>;
         mcpToolsets: z.ZodOptional<z.ZodBoolean>;
-        permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
 export type RuntimeInfo = z.infer<typeof RuntimeInfoSchema>;
@@ -7521,7 +7158,6 @@ export declare const HarnessInfoSchema: z.ZodObject<{
         resume: z.ZodOptional<z.ZodBoolean>;
         approvalInteractive: z.ZodOptional<z.ZodBoolean>;
         mcpToolsets: z.ZodOptional<z.ZodBoolean>;
-        permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
     }, z.core.$strip>;
 }, z.core.$strip>;
 export type HarnessInfo = z.infer<typeof HarnessInfoSchema>;
@@ -7533,7 +7169,6 @@ export declare const HarnessInventorySchema: z.ZodArray<z.ZodObject<{
         resume: z.ZodOptional<z.ZodBoolean>;
         approvalInteractive: z.ZodOptional<z.ZodBoolean>;
         mcpToolsets: z.ZodOptional<z.ZodBoolean>;
-        permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
     }, z.core.$strip>;
 }, z.core.$strip>>;
 /** Maximum logical toolsets one daemon may advertise as locally configured. */
@@ -7588,7 +7223,6 @@ export declare const ConnHelloPayloadSchema: z.ZodObject<{
             resume: z.ZodOptional<z.ZodBoolean>;
             approvalInteractive: z.ZodOptional<z.ZodBoolean>;
             mcpToolsets: z.ZodOptional<z.ZodBoolean>;
-            permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
         }, z.core.$strip>>;
     }, z.core.$strip>>>;
     harnesses: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -7599,7 +7233,6 @@ export declare const ConnHelloPayloadSchema: z.ZodObject<{
             resume: z.ZodOptional<z.ZodBoolean>;
             approvalInteractive: z.ZodOptional<z.ZodBoolean>;
             mcpToolsets: z.ZodOptional<z.ZodBoolean>;
-            permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
         }, z.core.$strip>;
     }, z.core.$strip>>>;
     configuredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -7663,18 +7296,6 @@ export declare const TaskOfferPayloadSchema: z.ZodObject<{
             url: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>;
     }, z.core.$strict>]>;
-    policy: z.ZodObject<{
-        mode: z.ZodEnum<{
-            auto: "auto";
-            confirm: "confirm";
-            plan: "plan";
-            readonly: "readonly";
-        }>;
-        allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        workspaceRoot: z.ZodOptional<z.ZodString>;
-        network: z.ZodOptional<z.ZodBoolean>;
-    }, z.core.$strict>;
     runtime: z.ZodOptional<z.ZodEnum<{
         claude: "claude";
         codex: "codex";
@@ -7736,18 +7357,6 @@ export declare const TaskOfferWithToolsetsPayloadSchema: z.ZodObject<{
             url: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>;
     }, z.core.$strict>]>;
-    policy: z.ZodObject<{
-        mode: z.ZodEnum<{
-            auto: "auto";
-            confirm: "confirm";
-            plan: "plan";
-            readonly: "readonly";
-        }>;
-        allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        workspaceRoot: z.ZodOptional<z.ZodString>;
-        network: z.ZodOptional<z.ZodBoolean>;
-    }, z.core.$strict>;
     runtime: z.ZodOptional<z.ZodEnum<{
         claude: "claude";
         codex: "codex";
@@ -7804,18 +7413,6 @@ export declare const TaskOfferForAgentPayloadSchema: z.ZodObject<{
             url: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>;
     }, z.core.$strict>]>;
-    policy: z.ZodObject<{
-        mode: z.ZodEnum<{
-            auto: "auto";
-            confirm: "confirm";
-            plan: "plan";
-            readonly: "readonly";
-        }>;
-        allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        workspaceRoot: z.ZodOptional<z.ZodString>;
-        network: z.ZodOptional<z.ZodBoolean>;
-    }, z.core.$strict>;
     agentRef: z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
@@ -7881,18 +7478,6 @@ export declare const TaskOfferForAgentWithEgressPayloadSchema: z.ZodObject<{
             url: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>;
     }, z.core.$strict>]>;
-    policy: z.ZodObject<{
-        mode: z.ZodEnum<{
-            auto: "auto";
-            confirm: "confirm";
-            plan: "plan";
-            readonly: "readonly";
-        }>;
-        allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        workspaceRoot: z.ZodOptional<z.ZodString>;
-        network: z.ZodOptional<z.ZodBoolean>;
-    }, z.core.$strict>;
     agentRef: z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
@@ -7943,15 +7528,11 @@ export declare const TaskOfferForAgentWithEgressPayloadSchema: z.ZodObject<{
     sessionRef: z.ZodString;
     egressPolicy: z.ZodObject<{
         policyRevision: z.ZodString;
-        activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-            mode: z.ZodLiteral<"metadata-status">;
-            delivery: z.ZodLiteral<"latest-value">;
-        }, z.core.$strict>, z.ZodObject<{
-            mode: z.ZodLiteral<"contentful-trajectory">;
+        activity: z.ZodObject<{
             delivery: z.ZodLiteral<"latest-value">;
             maxCoalesceMs: z.ZodNumber;
             maxEventBytes: z.ZodNumber;
-        }, z.core.$strict>], "mode">;
+        }, z.core.$strict>;
         reliable: z.ZodObject<{
             maxPendingEventsPerAgent: z.ZodNumber;
             maxPendingBytesPerAgent: z.ZodNumber;
@@ -7999,18 +7580,6 @@ export declare const TaskOfferForAgentWithEgressFreshPayloadSchema: z.ZodObject<
             url: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>;
     }, z.core.$strict>]>;
-    policy: z.ZodObject<{
-        mode: z.ZodEnum<{
-            auto: "auto";
-            confirm: "confirm";
-            plan: "plan";
-            readonly: "readonly";
-        }>;
-        allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        workspaceRoot: z.ZodOptional<z.ZodString>;
-        network: z.ZodOptional<z.ZodBoolean>;
-    }, z.core.$strict>;
     agentRef: z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
@@ -8060,15 +7629,11 @@ export declare const TaskOfferForAgentWithEgressFreshPayloadSchema: z.ZodObject<
     }, z.core.$strip>>;
     egressPolicy: z.ZodObject<{
         policyRevision: z.ZodString;
-        activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-            mode: z.ZodLiteral<"metadata-status">;
-            delivery: z.ZodLiteral<"latest-value">;
-        }, z.core.$strict>, z.ZodObject<{
-            mode: z.ZodLiteral<"contentful-trajectory">;
+        activity: z.ZodObject<{
             delivery: z.ZodLiteral<"latest-value">;
             maxCoalesceMs: z.ZodNumber;
             maxEventBytes: z.ZodNumber;
-        }, z.core.$strict>], "mode">;
+        }, z.core.$strict>;
         reliable: z.ZodObject<{
             maxPendingEventsPerAgent: z.ZodNumber;
             maxPendingBytesPerAgent: z.ZodNumber;
@@ -8121,18 +7686,6 @@ export type TaskOfferForAgentWithEgressFreshPayload = z.infer<typeof TaskOfferFo
  * and declines non-retryably on any difference; nothing here is authority.
  */
 export declare const TaskOfferPreparedPayloadSchema: z.ZodObject<{
-    policy: z.ZodObject<{
-        mode: z.ZodEnum<{
-            auto: "auto";
-            confirm: "confirm";
-            plan: "plan";
-            readonly: "readonly";
-        }>;
-        allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-        workspaceRoot: z.ZodOptional<z.ZodString>;
-        network: z.ZodOptional<z.ZodBoolean>;
-    }, z.core.$strict>;
     agentRef: z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
@@ -8192,15 +7745,11 @@ export declare const TaskOfferPreparedPayloadSchema: z.ZodObject<{
     }>;
     egressPolicy: z.ZodObject<{
         policyRevision: z.ZodString;
-        activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-            mode: z.ZodLiteral<"metadata-status">;
-            delivery: z.ZodLiteral<"latest-value">;
-        }, z.core.$strict>, z.ZodObject<{
-            mode: z.ZodLiteral<"contentful-trajectory">;
+        activity: z.ZodObject<{
             delivery: z.ZodLiteral<"latest-value">;
             maxCoalesceMs: z.ZodNumber;
             maxEventBytes: z.ZodNumber;
-        }, z.core.$strict>], "mode">;
+        }, z.core.$strict>;
         reliable: z.ZodObject<{
             maxPendingEventsPerAgent: z.ZodNumber;
             maxPendingBytesPerAgent: z.ZodNumber;
@@ -8232,7 +7781,7 @@ export declare const TaskOfferPreparedPayloadSchema: z.ZodObject<{
     }, z.core.$strict>>;
 }, z.core.$strict>;
 export type TaskOfferPreparedPayload = z.infer<typeof TaskOfferPreparedPayloadSchema>;
-/** Daemon -> cloud: one durable reliable-lane item after local sanitization. */
+/** Daemon -> cloud: one durable reliable-lane item, forwarded as the Agent produced it. */
 export declare const AgentEgressReliablePayloadSchema: z.ZodObject<{
     agentRef: z.ZodObject<{
         agentId: z.ZodString;
@@ -8499,14 +8048,6 @@ export type AgentMemoryIntentAvailablePayload = z.infer<typeof AgentMemoryIntent
  * `deadlineAt` may only ever be TIGHTENED locally: the device clamps to
  * `min(deadlineAt - now, limits.preparationDeadlineMs)`, so a generous Host
  * deadline cannot enlarge a configured local bound.
- *
- * `permissionMode` is DECLARED by the requester and validated by the device;
- * the device never infers it. A preparation counts tokens for one concrete
- * tool manifest, and that manifest is the policy-filtered set for exactly one
- * mode (`mcp/projection.ts`'s `filterMcpObservationForPolicy`) — so a
- * preparation whose mode is unstated is a count of a manifest nobody named.
- * The device applies the declared mode to its own observation and records it
- * in the artifact binding; it is not a grant, and it authorizes nothing.
  */
 export declare const AgentInputPreparationPayloadSchema: z.ZodObject<{
     agentMemory: z.ZodEnum<{
@@ -8615,12 +8156,6 @@ export declare const AgentInputPreparationPayloadSchema: z.ZodObject<{
         contentHash: z.ZodString;
     }, z.core.$strict>]>;
     requiredToolsets: z.ZodArray<z.ZodString>;
-    permissionMode: z.ZodEnum<{
-        auto: "auto";
-        confirm: "confirm";
-        plan: "plan";
-        readonly: "readonly";
-    }>;
     accountingPolicyRef: z.ZodOptional<z.ZodObject<{
         revision: z.ZodString;
         ruledRuntime: z.ZodString;
@@ -8748,7 +8283,6 @@ export declare const TaskClaimPayloadSchema: z.ZodObject<{
         resume: z.ZodOptional<z.ZodBoolean>;
         approvalInteractive: z.ZodOptional<z.ZodBoolean>;
         mcpToolsets: z.ZodOptional<z.ZodBoolean>;
-        permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
 export type TaskClaimPayload = z.infer<typeof TaskClaimPayloadSchema>;
@@ -8761,8 +8295,7 @@ export declare const TaskStartedPayloadSchema: z.ZodObject<{}, z.core.$strip>;
 export type TaskStartedPayload = z.infer<typeof TaskStartedPayloadSchema>;
 /**
  * daemon -> server: decline an offer *before* claiming it (M1 gap #5) — e.g.
- * no compatible/available runtime, or the offered policy exceeds this
- * device's ceiling. Fail-closed rejections must use this instead of silently
+ * no compatible/available runtime. Fail-closed rejections must use this instead of silently
  * dropping the offer.
  *
  * Decision (see docs/protocol.md "Declined vs. Failed" for the full
@@ -9259,18 +8792,6 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
                 url: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
         }, z.core.$strict>]>;
-        policy: z.ZodObject<{
-            mode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
-            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            workspaceRoot: z.ZodOptional<z.ZodString>;
-            network: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strict>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
             codex: "codex";
@@ -9320,18 +8841,6 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
                 url: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
         }, z.core.$strict>]>;
-        policy: z.ZodObject<{
-            mode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
-            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            workspaceRoot: z.ZodOptional<z.ZodString>;
-            network: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strict>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
             codex: "codex";
@@ -9382,18 +8891,6 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
                 url: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
         }, z.core.$strict>]>;
-        policy: z.ZodObject<{
-            mode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
-            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            workspaceRoot: z.ZodOptional<z.ZodString>;
-            network: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strict>;
         agentRef: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
@@ -9453,18 +8950,6 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
                 url: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
         }, z.core.$strict>]>;
-        policy: z.ZodObject<{
-            mode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
-            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            workspaceRoot: z.ZodOptional<z.ZodString>;
-            network: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strict>;
         agentRef: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
@@ -9515,15 +9000,11 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
         sessionRef: z.ZodString;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
-            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                mode: z.ZodLiteral<"metadata-status">;
-                delivery: z.ZodLiteral<"latest-value">;
-            }, z.core.$strict>, z.ZodObject<{
-                mode: z.ZodLiteral<"contentful-trajectory">;
+            activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
                 maxCoalesceMs: z.ZodNumber;
                 maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>], "mode">;
+            }, z.core.$strict>;
             reliable: z.ZodObject<{
                 maxPendingEventsPerAgent: z.ZodNumber;
                 maxPendingBytesPerAgent: z.ZodNumber;
@@ -9564,18 +9045,6 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
                 url: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
         }, z.core.$strict>]>;
-        policy: z.ZodObject<{
-            mode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
-            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            workspaceRoot: z.ZodOptional<z.ZodString>;
-            network: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strict>;
         agentRef: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
@@ -9625,15 +9094,11 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
         }, z.core.$strip>>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
-            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                mode: z.ZodLiteral<"metadata-status">;
-                delivery: z.ZodLiteral<"latest-value">;
-            }, z.core.$strict>, z.ZodObject<{
-                mode: z.ZodLiteral<"contentful-trajectory">;
+            activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
                 maxCoalesceMs: z.ZodNumber;
                 maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>], "mode">;
+            }, z.core.$strict>;
             reliable: z.ZodObject<{
                 maxPendingEventsPerAgent: z.ZodNumber;
                 maxPendingBytesPerAgent: z.ZodNumber;
@@ -9665,18 +9130,6 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
         }, z.core.$strict>>;
     }, z.core.$strict>;
     readonly 'task.offer_prepared': z.ZodObject<{
-        policy: z.ZodObject<{
-            mode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
-            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            workspaceRoot: z.ZodOptional<z.ZodString>;
-            network: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strict>;
         agentRef: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
@@ -9736,15 +9189,11 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
         }>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
-            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                mode: z.ZodLiteral<"metadata-status">;
-                delivery: z.ZodLiteral<"latest-value">;
-            }, z.core.$strict>, z.ZodObject<{
-                mode: z.ZodLiteral<"contentful-trajectory">;
+            activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
                 maxCoalesceMs: z.ZodNumber;
                 maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>], "mode">;
+            }, z.core.$strict>;
             reliable: z.ZodObject<{
                 maxPendingEventsPerAgent: z.ZodNumber;
                 maxPendingBytesPerAgent: z.ZodNumber;
@@ -9791,18 +9240,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
                 url: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
         }, z.core.$strict>]>;
-        policy: z.ZodObject<{
-            mode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
-            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            workspaceRoot: z.ZodOptional<z.ZodString>;
-            network: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strict>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
             codex: "codex";
@@ -9852,18 +9289,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
                 url: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
         }, z.core.$strict>]>;
-        policy: z.ZodObject<{
-            mode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
-            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            workspaceRoot: z.ZodOptional<z.ZodString>;
-            network: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strict>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
             codex: "codex";
@@ -9914,18 +9339,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
                 url: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
         }, z.core.$strict>]>;
-        policy: z.ZodObject<{
-            mode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
-            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            workspaceRoot: z.ZodOptional<z.ZodString>;
-            network: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strict>;
         agentRef: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
@@ -9985,18 +9398,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
                 url: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
         }, z.core.$strict>]>;
-        policy: z.ZodObject<{
-            mode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
-            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            workspaceRoot: z.ZodOptional<z.ZodString>;
-            network: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strict>;
         agentRef: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
@@ -10047,15 +9448,11 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         sessionRef: z.ZodString;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
-            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                mode: z.ZodLiteral<"metadata-status">;
-                delivery: z.ZodLiteral<"latest-value">;
-            }, z.core.$strict>, z.ZodObject<{
-                mode: z.ZodLiteral<"contentful-trajectory">;
+            activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
                 maxCoalesceMs: z.ZodNumber;
                 maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>], "mode">;
+            }, z.core.$strict>;
             reliable: z.ZodObject<{
                 maxPendingEventsPerAgent: z.ZodNumber;
                 maxPendingBytesPerAgent: z.ZodNumber;
@@ -10096,18 +9493,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
                 url: z.ZodOptional<z.ZodString>;
             }, z.core.$strip>;
         }, z.core.$strict>]>;
-        policy: z.ZodObject<{
-            mode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
-            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            workspaceRoot: z.ZodOptional<z.ZodString>;
-            network: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strict>;
         agentRef: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
@@ -10157,15 +9542,11 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         }, z.core.$strip>>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
-            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                mode: z.ZodLiteral<"metadata-status">;
-                delivery: z.ZodLiteral<"latest-value">;
-            }, z.core.$strict>, z.ZodObject<{
-                mode: z.ZodLiteral<"contentful-trajectory">;
+            activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
                 maxCoalesceMs: z.ZodNumber;
                 maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>], "mode">;
+            }, z.core.$strict>;
             reliable: z.ZodObject<{
                 maxPendingEventsPerAgent: z.ZodNumber;
                 maxPendingBytesPerAgent: z.ZodNumber;
@@ -10197,18 +9578,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         }, z.core.$strict>>;
     }, z.core.$strict>;
     readonly 'task.offer_prepared': z.ZodObject<{
-        policy: z.ZodObject<{
-            mode: z.ZodEnum<{
-                auto: "auto";
-                confirm: "confirm";
-                plan: "plan";
-                readonly: "readonly";
-            }>;
-            allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-            workspaceRoot: z.ZodOptional<z.ZodString>;
-            network: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strict>;
         agentRef: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
@@ -10268,15 +9637,11 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         }>;
         egressPolicy: z.ZodObject<{
             policyRevision: z.ZodString;
-            activity: z.ZodDiscriminatedUnion<[z.ZodObject<{
-                mode: z.ZodLiteral<"metadata-status">;
-                delivery: z.ZodLiteral<"latest-value">;
-            }, z.core.$strict>, z.ZodObject<{
-                mode: z.ZodLiteral<"contentful-trajectory">;
+            activity: z.ZodObject<{
                 delivery: z.ZodLiteral<"latest-value">;
                 maxCoalesceMs: z.ZodNumber;
                 maxEventBytes: z.ZodNumber;
-            }, z.core.$strict>], "mode">;
+            }, z.core.$strict>;
             reliable: z.ZodObject<{
                 maxPendingEventsPerAgent: z.ZodNumber;
                 maxPendingBytesPerAgent: z.ZodNumber;
@@ -10326,7 +9691,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
                 resume: z.ZodOptional<z.ZodBoolean>;
                 approvalInteractive: z.ZodOptional<z.ZodBoolean>;
                 mcpToolsets: z.ZodOptional<z.ZodBoolean>;
-                permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
             }, z.core.$strip>>;
         }, z.core.$strip>>>;
         harnesses: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -10337,7 +9701,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
                 resume: z.ZodOptional<z.ZodBoolean>;
                 approvalInteractive: z.ZodOptional<z.ZodBoolean>;
                 mcpToolsets: z.ZodOptional<z.ZodBoolean>;
-                permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
             }, z.core.$strip>;
         }, z.core.$strip>>>;
         configuredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -10665,12 +10028,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             contentHash: z.ZodString;
         }, z.core.$strict>]>;
         requiredToolsets: z.ZodArray<z.ZodString>;
-        permissionMode: z.ZodEnum<{
-            auto: "auto";
-            confirm: "confirm";
-            plan: "plan";
-            readonly: "readonly";
-        }>;
         accountingPolicyRef: z.ZodOptional<z.ZodObject<{
             revision: z.ZodString;
             ruledRuntime: z.ZodString;
@@ -10722,7 +10079,6 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             resume: z.ZodOptional<z.ZodBoolean>;
             approvalInteractive: z.ZodOptional<z.ZodBoolean>;
             mcpToolsets: z.ZodOptional<z.ZodBoolean>;
-            permissionModes: z.ZodOptional<z.ZodArray<z.ZodString>>;
         }, z.core.$strip>>;
     }, z.core.$strip>;
     readonly 'task.started': z.ZodObject<{}, z.core.$strip>;
@@ -10953,46 +10309,6 @@ export declare const SERVER_TO_DAEMON_TYPES: readonly ["conn.ack", "task.offer",
  */
 export declare const DAEMON_TO_SERVER_TYPES: readonly ["task.claim", "task.started", "task.decline", "task.progress", "task.artifact", "task.await_approval", "task.complete", "task.fail", "task.cancelled", "task.approval_resolved", "agent.egress.reliable", "agent.message.publish", "agent.content.receipt"];
 export {};
-// ==== @byok-sdk/protocol dist/permission.d.ts ====
-import { z } from 'zod';
-export declare const PERMISSION_MODES: readonly ['auto', 'confirm', 'readonly', 'plan'];
-export type PermissionMode = (typeof PERMISSION_MODES)[number];
-/**
- * Policy the server proposes for a task. The daemon/runtime adapter maps this
- * onto the concrete runtime's flags; anything that can't be expressed exactly
- * must fail closed (deny) rather than silently widen the grant.
- *
- * `.strict()`: this is control/security data, so per the freeze rule's
- * observability-vs-control asymmetry (docs/protocol.md "Freeze rule") an
- * unrecognized field must be REJECTED, not silently stripped-and-ignored the
- * way an ordinary payload's unknown field is (plain `z.object()`'s default
- * behavior). Without `.strict()`, a policy carrying a future constraint this
- * schema doesn't know about yet would parse successfully with that
- * constraint silently discarded — exactly the silent-widening failure mode
- * this type's own doc comment above warns against, since a stripped
- * constraint is indistinguishable from a constraint that was never sent.
- *
- * Consequence: adding a new field to this schema post-freeze is therefore a
- * BREAKING change requiring a `PROTOCOL_VERSION` bump — unlike the general
- * "a new optional field on an existing payload is non-breaking" rule the
- * freeze rule grants every other schema. That's intentional: a new
- * security/control constraint must force a conscious version bump so an
- * unupgraded peer can never silently ignore it, rather than being added the
- * same low-friction way a harmless observability field would be.
- */
-export declare const PermissionPolicySchema: z.ZodObject<{
-    mode: z.ZodEnum<{
-        auto: "auto";
-        confirm: "confirm";
-        plan: "plan";
-        readonly: "readonly";
-    }>;
-    allowTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    denyTools: z.ZodOptional<z.ZodArray<z.ZodString>>;
-    workspaceRoot: z.ZodOptional<z.ZodString>;
-    network: z.ZodOptional<z.ZodBoolean>;
-}, z.core.$strict>;
-export type PermissionPolicy = z.infer<typeof PermissionPolicySchema>;
 // ==== @byok-sdk/protocol dist/provider-profile-binding.d.ts ====
 import { z } from 'zod';
 /** Daemon capability required before an exact local provider profile may be offered. */
@@ -11471,25 +10787,34 @@ export declare const MAILBOX_READ_AHEAD_CAPABILITY = "mailbox-read-ahead";
  * do not require a bump — servers negotiate the highest common version and
  * daemons/servers must ignore unknown fields and unknown message types.
  *
- * FROZEN v1 (end of M2 — see docs/protocol.md "Freeze rule"): the pi, claude,
- * and codex runtime adapters have all exercised the wire, and every M1/M2
- * protocol gap has been closed. `PROTOCOL_VERSION` stays `1` from here
- * forward; it does not bump for additive changes (new optional fields, new
- * message types, new `AgentEvent` variants, new capability flags) — only for
- * a breaking one (changing, removing, or retyping anything that already
- * exists).
+ * FROZEN (see docs/protocol.md "Freeze rule"): `PROTOCOL_VERSION` does not
+ * bump for additive changes (new optional fields, new message types, new
+ * `AgentEvent` variants, new capability flags) — only for a breaking one
+ * (changing, removing, or retyping anything that already exists).
+ *
+ * v2 removed the task offer's `policy` (`PermissionPolicy`), the runtime
+ * capability `permissionModes` and the input-preparation `permissionMode`.
+ * Sessions run without an SDK permission gate; each local agent keeps its
+ * own guardrails. A v1 envelope is rejected; there is no v1 reader.
+ * v2 also removed the egress policy's `metadata-status` activity mode, its
+ * `activity.mode` field and the `sanitizer_rejected` drop reason. Agent
+ * egress goes to the Host as the runtime produced it.
+ * v2 also removed the input-preparation artifact's `toolImplementationKinds`
+ * and the readiness reason `executor_identity_unproven`. The SDK does not
+ * attest tool executables. The artifact names its counted tools in
+ * `toolNames`.
  *
  * IMPORTANT: changing this constant, or changing/removing/retyping any
  * already-frozen schema in this package, requires a DELIBERATE update to the
- * committed golden fixtures in `src/__tests__/golden/` (`v1.frozen.json`,
- * `v1.envelopes.ndjson`) — see `src/__tests__/freeze-guard.test.ts`, which
+ * committed golden fixtures in `src/__tests__/golden/` (`v<N>.frozen.json`,
+ * `v<N>.envelopes.ndjson`) — see `src/__tests__/freeze-guard.test.ts`, which
  * fails loudly on exactly that kind of drift. A passing freeze-guard run
  * after such a change means either (a) the change was genuinely additive and
  * the golden was regenerated with justification, or (b) this constant was
  * bumped alongside a new golden generation for the new version — never a
  * silent edit to either file to make the test pass.
  */
-export declare const PROTOCOL_VERSION = 1;
+export declare const PROTOCOL_VERSION = 2;
 /** Host declares that this device accepts only Agent-bound offer variants. */
 export declare const STRICT_AGENT_ONLY_CAPABILITY: 'strict-agent-only';
 /**
@@ -11571,5 +10896,5 @@ export declare const STRICT_AGENT_ONLY_CAPABILITY: 'strict-agent-only';
  * cannot accidentally execute the instruction without the required tools.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v8", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];

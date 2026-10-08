@@ -96,7 +96,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     const envelope = decodeEnvelope(terminal ?? '');
     expect(envelope.type).toBe('task.complete');
     expect(envelope.task_id).toBe(offer.taskId);
-    expect(envelope.v).toBe(1);
+    expect(envelope.v).toBe(2);
     if (envelope.type === 'task.complete') {
       expect(envelope.payload.summary).toBe('working over long-poll');
     }
@@ -132,7 +132,6 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     await vi.waitFor(async () => {
       offer = await cloud.enqueueAgentOffer(record.deviceId, {
         instruction: 'run the durable Agent over hosted long-poll',
-        policy: { mode: 'auto' },
         runtime: 'pi',
         agentRef: { agentId: 'agent-hosted-longpoll', profileRevision: 'profile-1' },
       });

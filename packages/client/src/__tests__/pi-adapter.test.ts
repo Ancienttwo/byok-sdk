@@ -3,8 +3,8 @@ import { spawn as realSpawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import type { AgentEvent, PermissionMode, TaskOfferPayload } from '@byok-sdk/protocol';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
@@ -13,14 +13,14 @@ import { startPreparedOperation, type PreparedOperationResources } from './fixtu
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { observationOf } from './fixtures/mcp-observation';
 import {
-  filterMcpObservationForPolicy,
   projectMcpTools,
   qualifiedMcpToolName,
   type McpToolsetServerObservation,
 } from '../mcp';
-import { trustedCwd } from './fixtures/launch-cwd';
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
+/** A product Pi asset root that holds the SDK asset manifest: the built package assets. */
+const PRODUCT_ASSETS = fileURLToPath(new URL('../../dist/assets/', import.meta.url));
 
 function fakePiAdapter(): PiAdapter {
   return new PiAdapter({
@@ -39,7 +39,7 @@ async function takeEvents(session: Session, count: number): Promise<AgentEvent[]
 
 async function makeCtx(env: NodeJS.ProcessEnv = process.env): Promise<PreparedOperationResources> {
   const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-adapter-test-'));
-  return { workspaceDir, policy: { mode: 'auto' }, env };
+  return { workspaceDir, env };
 }
 
 async function startAdapter(adapter: PiAdapter, task: TaskOfferPayload, resources: PreparedOperationResources): Promise<Session> {
@@ -48,13 +48,13 @@ async function startAdapter(adapter: PiAdapter, task: TaskOfferPayload, resource
 
 const baseTask: TaskOfferPayload = {
   instruction: 'say hi',
-  policy: { mode: 'auto' },
 };
 
 describe('PiAdapter against the fake-pi fixture', () => {
   const openSessions: Session[] = [];
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await Promise.all(openSessions.splice(0).map((s) => s.close()));
   });
 
@@ -85,7 +85,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
       await fs.chmod(script, 0o600);
       await fs.copyFile(path.join(path.dirname(FIXTURE_PATH), 'process-tree-receipt.mjs'), path.join(dir, 'process-tree-receipt.mjs'));
       const adapter = new PiAdapter({ resolveBin: () => ({ command: script, source: 'package' }) });
-      session = await startAdapter(adapter, baseTask, { workspaceDir: dir, policy: { mode: 'auto' }, env: process.env });
+      session = await startAdapter(adapter, baseTask, { workspaceDir: dir, env: process.env });
       expect(session.sessionRef.length).toBeGreaterThan(0);
       expect(await takeEvents(session, 5)).toHaveLength(5);
     } finally { await session?.close(); await fs.rm(dir, { recursive: true, force: true }); }
@@ -177,10 +177,8 @@ describe('PiAdapter against the fake-pi fixture', () => {
         modelId: 'gpt-5.2',
       },
     };
-    const session = await startAdapter(adapter,
-      task,
-      await makeCtx({ ...process.env, OPENAI_API_KEY: 'sk-sentinel' }),
-    );
+    const ctx = await makeCtx({ ...process.env, OPENAI_API_KEY: 'sk-sentinel' });
+    const session = await startAdapter(adapter, task, ctx);
     openSessions.push(session);
 
     expect(calls).toHaveLength(1);
@@ -197,21 +195,19 @@ describe('PiAdapter against the fake-pi fixture', () => {
       '--model',
       'gpt-5.2',
       '--runtime-entry', 'pi-rpc',
-      '--pi-cwd', await trustedCwd(),
-      '--pi-fixed-args', '[]',
-      '--launch-binding', expect.any(String),
+      // The Pi process starts in the session cwd, as in OAR.
+      '--pi-cwd', await fs.realpath(ctx.workspaceDir),
+      '--pi-projection-dir', expect.any(String),
       '--pi-config-digest', expect.stringMatching(/^[0-9a-f]{64}$/),
       '--',
       '--config', expect.any(String),
       '--mode',
       'rpc',
-      '--no-skills',
     ]);
     expect(JSON.stringify(calls[0])).not.toContain('sk-sentinel');
     expect(calls[0]?.env.OPENAI_API_KEY).toBeUndefined();
     await expect(session.followUp({
       instruction: 'switch provider',
-      policy: { mode: 'auto' },
       dispatchSelection: {
         lane: 'byok',
         runtimeId: 'pi',
@@ -248,7 +244,8 @@ describe('PiAdapter against the fake-pi fixture', () => {
       },
     };
 
-    const session = await startAdapter(adapter, task, await makeCtx());
+    const ctx = await makeCtx();
+    const session = await startAdapter(adapter, task, ctx);
     openSessions.push(session);
 
     expect(calls).toEqual([{
@@ -267,17 +264,91 @@ describe('PiAdapter against the fake-pi fixture', () => {
         '--model',
         'gpt-5.2',
         '--runtime-entry', 'pi-rpc',
-        '--pi-cwd', await trustedCwd(),
-        '--pi-fixed-args', '[]',
-        '--launch-binding', expect.any(String),
+        '--pi-cwd', await fs.realpath(ctx.workspaceDir),
+        '--pi-projection-dir', expect.any(String),
       '--pi-config-digest', expect.stringMatching(/^[0-9a-f]{64}$/),
         '--',
         '--config', expect.any(String),
         '--mode',
         'rpc',
-        '--no-skills',
       ],
     }]);
+  });
+
+  // A single-file/SEA product re-enters its own executable for Pi, the same
+  // way it does for every other SDK-reserved helper. No installed Pi package
+  // is resolved.
+  it('re-enters the product executable through the reserved helper in the ordinary lane', async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const spawnFn = ((command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
+      calls.push({ command, args: [...args] });
+      return realSpawn(FIXTURE_PATH, args.slice(2), options);
+    }) as never;
+    const adapter = new PiAdapter({
+      resolveBin: () => { throw new Error('a single-file product resolves no installed Pi package'); },
+      spawnFn,
+      sdkHelperHost: { mode: 'self-executable' },
+    });
+    const ctx = await makeCtx({ ...process.env, PI_PACKAGE_DIR: PRODUCT_ASSETS });
+    const session = await startAdapter(adapter, baseTask, ctx);
+    openSessions.push(session);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.command).toBe(process.execPath);
+    expect(calls[0]?.args.slice(0, 3)).toEqual(['__byok_sdk_helper', 'pi-rpc', expect.stringMatching(/^--config-digest=[0-9a-f]{64}$/)]);
+    expect(calls[0]?.args.slice(3)).toEqual(['--config', expect.any(String), '--mode', 'rpc']);
+  });
+
+  it('re-enters the product executable through the reserved helper in the BYOK keys lane', async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const spawnFn = ((command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
+      calls.push({ command, args: [...args] });
+      return realSpawn(FIXTURE_PATH, args.slice(args.indexOf('--') + 1), options);
+    }) as never;
+    const adapter = new PiAdapter({
+      resolveBin: () => { throw new Error('a single-file product resolves no installed Pi package'); },
+      spawnFn,
+      sdkHelperHost: { mode: 'self-executable', executable: '/product/runtime', entry: '/product/release/sdk.js' },
+      byokLauncher: { command: '/opt/byok-pi-provider-launcher', profileDbPath: '/private/providers.sqlite', sessionDir: '/private/pi-sessions' },
+    });
+    const task: TaskOfferPayload = { ...baseTask, dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'gpt-5.2' } };
+    const ctx = await makeCtx({ ...process.env, PI_PACKAGE_DIR: PRODUCT_ASSETS });
+    const session = await startAdapter(adapter, task, ctx);
+    openSessions.push(session);
+    const args = calls[0]?.args ?? [];
+    expect(calls[0]?.command).toBe('/opt/byok-pi-provider-launcher');
+    expect(args.slice(0, 2)).toEqual(['--pi-bin', '/product/runtime']);
+    expect(args.slice(args.indexOf('--pi-entry'), args.indexOf('--pi-entry') + 4))
+      .toEqual(['--pi-entry', '/product/release/sdk.js', '--pi-fixed-args', JSON.stringify(['__byok_sdk_helper', 'pi-rpc'])]);
+  });
+
+  it('reports the bundled Pi pin for a single-file product without a version child', async () => {
+    const adapter = new PiAdapter({
+      resolveBin: () => { throw new Error('a single-file product resolves no installed Pi package'); },
+      sdkHelperHost: { mode: 'self-executable' },
+    });
+    vi.stubEnv('PI_PACKAGE_DIR', PRODUCT_ASSETS);
+    await expect(adapter.detect()).resolves.toMatchObject({ kind: 'available', version: resolvePiRuntimeIdentity().version });
+    expect(() => new PiAdapter({ sdkHelperHost: { mode: 'self-executable', executable: 'relative' } })).toThrow(/absolute executable path/);
+  });
+
+  // L3: an asset root without the SDK manifest is reported early, not as an
+  // opaque ENOENT inside the Pi child.
+  it('reports a single-file product without its Pi asset manifest as not-found and refuses its launch with the reason', async () => {
+    const bundle = new PiAdapter({ sdkHelperHost: { mode: 'self-executable', executable: process.execPath, entry: '/product/sdk.js' } });
+    vi.stubEnv('PI_PACKAGE_DIR', '');
+    await expect(bundle.detect()).resolves.toEqual({ kind: 'not-found' });
+    const empty = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-empty-pi-assets-'));
+    try {
+      vi.stubEnv('PI_PACKAGE_DIR', empty);
+      await expect(bundle.detect()).resolves.toEqual({ kind: 'not-found' });
+      const compiled = new PiAdapter({ sdkHelperHost: { mode: 'self-executable', executable: path.join(empty, 'product') } });
+      vi.stubEnv('PI_PACKAGE_DIR', '');
+      await expect(compiled.detect()).resolves.toEqual({ kind: 'not-found' });
+    } finally { await fs.rm(empty, { recursive: true, force: true }); }
+    const prepared = await bundle.prepare({ offer: { instruction: 'Never sent' }, descriptor: bundle.descriptor, requiredToolsetIds: [] });
+    if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
+    await expect(prepared.operation.resolveRuntimeLaunch!({ kind: 'instruction', cwd: os.tmpdir(), env: {}, projectionRoot: path.join(os.tmpdir(), 'byok-unused-projections') }))
+      .rejects.toMatchObject({ name: 'RuntimeExecutionFailure', phase: 'start', message: 'pi_bundled_assets_unavailable: an interpreter + bundle product must set PI_PACKAGE_DIR to its Pi asset root' });
   });
 
   it('validates the BYOK launcher at construction before prepare or spawn', () => {
@@ -307,7 +378,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     // copy of it would decide whether a prepared host or an rpc child is
     // parented — the same class of override as `--pi-bin` or `--provider`.
     for (const reserved of [
-      '--', '--pi-bin', '--pi-entry', '--pi-cwd', '--pi-fixed-args', '--launch-binding',
+      '--', '--pi-bin', '--pi-entry', '--pi-cwd', '--pi-projection-dir', '--pi-config-digest',
       '--runtime-entry', '--profile-db', '--session-dir', '--macos-keychain-path',
       '--secret-service-prefix', '--provider', '--model', '--profile-revision',
       '--profile-hash', '--required-capabilities', '--validate-only',
@@ -464,11 +535,11 @@ describe('PiAdapter against the fake-pi fixture', () => {
     await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/No API key found/);
   });
 
-  it('carries the trusted launch directory for a task whose only MCP server is a reserved SDK helper', async () => {
+  it('carries the session cwd for a task whose only MCP server is a reserved SDK helper', async () => {
     // The reserved helpers (memory, messaging) are MCP server children like
     // any projected toolset server, and pi's own extension opens them from
-    // this config — so the boundary has to be in the file even when the
-    // device projected no host toolset at all.
+    // this config — so the cwd has to be in the file even when the device
+    // projected no host toolset at all.
     const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
     const spawnFn = ((_command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
       calls.push({ args: [...args], env: options?.env ?? {} });
@@ -490,8 +561,8 @@ describe('PiAdapter against the fake-pi fixture', () => {
       mcpServers: { byokagentmemory: { command: '/opt/byok-agent-memory-mcp' } },
       // `mcp-extension.ts` refuses to open any server without this and passes
       // it straight to `spawn` as the child's cwd (`pi-mcp-launch-cwd.test.ts`
-      // reads it back out of a real child).
-      launchCwd: await trustedCwd(),
+      // reads it back out of a real child). It is the session cwd, as in OAR.
+      launchCwd: ctx.workspaceDir,
     });
 
     await session.close();
@@ -523,7 +594,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
       '--config', expect.any(String),
       '--mode',
       'rpc',
-      '--no-skills',
     ]);
     const configPath = calls[0]?.args[calls[0]!.args.indexOf('--config') + 1];
     expect(typeof configPath).toBe('string');
@@ -536,49 +606,11 @@ describe('PiAdapter against the fake-pi fixture', () => {
         docs: { command: '/opt/docs-mcp', args: ['--readonly'], env: { BYOK_AGENT_MESSAGE_CONTEXT: 'sealed-context' } },
       },
       observation: observationOf({ docs: ['search_docs'] }),
-      permissionMode: 'auto',
       // pi's own extension opens these servers, so the operator's
-      // command/args are untouched and the trusted directory travels beside
-      // them — it reaches `spawn` as `cwd`, not as a launcher wrapper.
-      launchCwd: await trustedCwd(),
+      // command/args are untouched and the session cwd travels beside them —
+      // it reaches `spawn` as `cwd`.
+      launchCwd: ctx.workspaceDir,
     });
-
-    await session.close();
-    openSessions.splice(openSessions.indexOf(session), 1);
-    await expect(fs.access(configPath as string)).rejects.toThrow();
-  });
-
-  it('keeps the base extension stack loaded while constraining readonly tools', async () => {
-    const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
-    const spawnFn = ((_command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
-      calls.push({ args: [...args], env: options?.env ?? {} });
-      return realSpawn(FIXTURE_PATH, args, options);
-    }) as never;
-    const adapter = new PiAdapter({
-      resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      spawnFn,
-    });
-    const task: TaskOfferPayload = { ...baseTask, policy: { mode: 'readonly' } };
-    const ctx = await makeCtx();
-    ctx.policy = task.policy;
-
-    const session = await startAdapter(adapter, task, ctx);
-    openSessions.push(session);
-
-    expect(calls[0]?.args).toEqual([
-      expect.stringMatching(/^--config-digest=[0-9a-f]{64}$/),
-      '--config', expect.any(String),
-      '--mode',
-      'rpc',
-      '--no-skills',
-      '--tools',
-      'read,grep,find,ls,subagent,todo',
-    ]);
-    const configPath = calls[0]?.args[calls[0]!.args.indexOf('--config') + 1];
-    expect(typeof configPath).toBe('string');
-    expect(calls[0]?.env.BYOK_PI_PERMISSION_MODE).toBeUndefined();
-    expect(JSON.parse(await fs.readFile(configPath as string, 'utf8')).mcp)
-      .toEqual({ mcpEnv: projectPiMcpEnvironment(ctx.env), mcpServers: {}, observation: {}, permissionMode: 'readonly' });
 
     await session.close();
     openSessions.splice(openSessions.indexOf(session), 1);
@@ -619,123 +651,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
     expect(fakePiAdapter().descriptor.requiresMcpToolsetToolObservation).toBe(true);
   });
 
-  it('accepts a readonly toolset offer only when the device can say which tools mutate', async () => {
-    // Per-tool registration makes the distinction EXPRESSIBLE; the operator's
-    // `McpToolsetConfig.readOnlyTools` makes it DECIDABLE. Without a
-    // declaration nothing on this device classifies a toolset's tools, and
-    // inferring one from names or descriptions would be exactly the heuristic
-    // that makes a permission boundary meaningless — so the refusal names the
-    // missing field rather than running with everything enabled.
-    const adapter = fakePiAdapter();
-    const offer: TaskOfferPayload = { ...baseTask, policy: { mode: 'readonly' } };
-    const rejection = await adapter.prepare({
-      offer,
-      policy: offer.policy,
-      descriptor: adapter.descriptor,
-      requiredToolsetIds: ['docs'],
-      mcpServers: { docs: { command: '/opt/docs-mcp' } },
-      mcpToolsetTools: observationOf({ docs: ['search_docs'] }),
-    });
-    expect(rejection).toMatchObject({
-      kind: 'reject',
-      reason: expect.stringMatching(/readOnlyTools/),
-      retryable: false,
-    });
-    // Nothing about the old proxy reasoning survives in the refusal.
-    expect((rejection as { reason: string }).reason).not.toMatch(/proxy/);
-
-    // The same offer, with the device's classification present, is admitted.
-    await expect(adapter.prepare({
-      offer,
-      policy: offer.policy,
-      descriptor: adapter.descriptor,
-      requiredToolsetIds: ['docs'],
-      mcpServers: { docs: { command: '/opt/docs-mcp' } },
-      mcpToolsetTools: observationOf(
-        { docs: ['search_docs', 'delete_docs'] },
-        { readOnlyTools: { docs: ['search_docs'] } },
-      ),
-    })).resolves.toMatchObject({ kind: 'prepared' });
-  });
-
-  it('runs a classified readonly toolset and hands the child only the read-only tools', async () => {
-    // The Owner-approved shape: the device declares which `(server, tool)`
-    // pairs read, the task-scoped config carries that classification with the
-    // task's mode, and the extension registers exactly the allowed subset —
-    // the mutation tool is never registered, so there is no call to refuse.
-    const calls: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
-    const spawnFn = ((_command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
-      calls.push({ args: [...args], env: options?.env ?? {} });
-      return realSpawn(FIXTURE_PATH, args, options);
-    }) as never;
-    const adapter = new PiAdapter({
-      resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      spawnFn,
-    });
-    const task: TaskOfferPayload = { ...baseTask, policy: { mode: 'readonly' } };
-    const ctx = await makeCtx();
-    ctx.policy = task.policy;
-    ctx.mcpServers = { docs: { command: '/opt/docs-mcp' } };
-    ctx.mcpToolsetTools = observationOf(
-      { docs: ['search_docs', 'delete_docs'] },
-      { readOnlyTools: { docs: ['search_docs'] } },
-    );
-
-    const session = await startAdapter(adapter, task, ctx);
-    openSessions.push(session);
-
-    const configPath = calls[0]?.args[calls[0]!.args.indexOf('--config') + 1] as string;
-    expect(calls[0]?.env.BYOK_PI_PERMISSION_MODE).toBeUndefined();
-    const written = JSON.parse(await fs.readFile(configPath, 'utf8')).mcp as {
-      permissionMode: PermissionMode;
-      observation: Record<string, McpToolsetServerObservation>;
-    };
-    // The mode travels with the observation, so the extension applies the SAME
-    // shared filter the adapter just admitted this task with.
-    expect(written.permissionMode).toBe('readonly');
-    expect(written.observation.docs!.tools.map((tool) => [tool.name, tool.readOnly])).toEqual([
-      ['search_docs', true],
-      ['delete_docs', false],
-    ]);
-    // What the child may actually register and call: only the read-only tool.
-    const allowed = filterMcpObservationForPolicy(written.observation, written.permissionMode);
-    expect(allowed.ok).toBe(true);
-    expect(projectMcpTools((allowed as { observation: typeof written.observation }).observation)
-      .map((tool) => qualifiedMcpToolName(tool.serverName, tool.toolName)))
-      .toEqual(['mcp__docs__search_docs']);
-
-    await session.close();
-    openSessions.splice(openSessions.indexOf(session), 1);
-  });
-
-  it('fails non-retryably when only the CLASSIFICATION changes between prepare() and start()', async () => {
-    // Same server, same tool names, same schemas — a start() observation that
-    // reclassifies a mutation tool as read-only would widen the task's grant
-    // without changing anything a name-only comparison could see.
-    const calls: string[][] = [];
-    const adapter = new PiAdapter({
-      resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
-      spawnFn: ((_command: string, args: string[]) => {
-        calls.push([...args]);
-        throw new Error('spawn must not be reached');
-      }) as never,
-    });
-    const task: TaskOfferPayload = { ...baseTask, policy: { mode: 'readonly' } };
-    const ctx = await makeCtx();
-    ctx.policy = task.policy;
-    ctx.mcpServers = { docs: { command: '/opt/docs-mcp' } };
-    const tools = { docs: ['search_docs', 'delete_docs'] };
-    ctx.mcpToolsetTools = observationOf(tools, { readOnlyTools: { docs: ['search_docs'] } });
-    ctx.startMcpToolsetTools = observationOf(tools, { readOnlyTools: { docs: ['search_docs', 'delete_docs'] } });
-
-    await expect(startAdapter(adapter, task, ctx)).rejects.toMatchObject({
-      category: 'authority',
-      retry: 'non-retryable',
-      message: expect.stringContaining('different MCP toolset tool authority'),
-    });
-    expect(calls).toHaveLength(0);
-  });
-
   it('rejects an ungrantable projected server name before anything is spawned', async () => {
     // claude and codex refuse this in prepare() because they interpolate the
     // name into a CLI grant. pi refuses it for its own reason: the projection
@@ -746,10 +661,9 @@ describe('PiAdapter against the fake-pi fixture', () => {
       resolveBin: () => { throw new Error('resolveBin must not be reached'); },
       spawnFn: (() => { throw new Error('spawn must not be reached'); }) as never,
     });
-    const offer: TaskOfferPayload = { ...baseTask, policy: { mode: 'auto' } };
+    const offer: TaskOfferPayload = { ...baseTask };
     const rejection = await adapter.prepare({
       offer,
-      policy: offer.policy,
       descriptor: adapter.descriptor,
       requiredToolsetIds: ['docs'],
       mcpServers: { 'docs.read.v1': { command: '/opt/docs-mcp' } },
@@ -768,10 +682,9 @@ describe('PiAdapter against the fake-pi fixture', () => {
       resolveBin: () => { throw new Error('resolveBin must not be reached'); },
       spawnFn: (() => { throw new Error('spawn must not be reached'); }) as never,
     });
-    const offer: TaskOfferPayload = { ...baseTask, policy: { mode: 'auto' } };
+    const offer: TaskOfferPayload = { ...baseTask };
     const rejection = await adapter.prepare({
       offer,
-      policy: offer.policy,
       descriptor: adapter.descriptor,
       requiredToolsetIds: ['docs'],
       mcpServers: { docs: { command: '/opt/docs-mcp' } },
@@ -782,24 +695,16 @@ describe('PiAdapter against the fake-pi fixture', () => {
     expect((rejection as { reason: string }).reason).toMatch(/no tools\/list observation/u);
   });
 
-  it('accepts an auto toolset offer and hands the observation to the extension', async () => {
+  it('accepts a toolset offer and hands the observation to the extension', async () => {
     const adapter = fakePiAdapter();
-    const offer: TaskOfferPayload = { ...baseTask, policy: { mode: 'auto' } };
+    const offer: TaskOfferPayload = { ...baseTask };
     await expect(adapter.prepare({
       offer,
-      policy: offer.policy,
       descriptor: adapter.descriptor,
       requiredToolsetIds: ['docs'],
       mcpServers: { docs: { command: '/opt/docs-mcp' } },
       mcpToolsetTools: observationOf({ docs: ['search_docs'] }),
     })).resolves.toMatchObject({ kind: 'prepared' });
-  });
-
-  it('fails closed on a policy pi cannot express, without ever spawning a process', async () => {
-    const adapter = fakePiAdapter();
-    const ctx = await makeCtx();
-    ctx.policy = { mode: 'confirm' };
-    await expect(startAdapter(adapter, baseTask, ctx)).rejects.toThrow(/cannot express permission mode "confirm"/);
   });
 
   it('prepares a valid blob-ref without fetching it; TaskRunner resolves its string after claim', async () => {
@@ -810,7 +715,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
     };
     await expect(adapter.prepare({
       offer: task,
-      policy: task.policy,
       descriptor: adapter.descriptor,
       requiredToolsetIds: [],
     })).resolves.toMatchObject({ kind: 'prepared' });
@@ -825,26 +729,6 @@ describe('PiAdapter against the fake-pi fixture', () => {
       // S0/H-002: pi has no needs_approval notion at all
       // (`PiSession.resolveApproval` throws unconditionally).
       approvalInteractive: false,
-      permissionModes: ['auto', 'readonly'],
-    });
-  });
-
-  it('descriptor declares the known provider credential env vars — the same single source of truth detect() uses', () => {
-    const adapter = fakePiAdapter();
-    expect(adapter.descriptor.environmentRequirements).toEqual({
-      credentialNames: [
-        'ANTHROPIC_API_KEY',
-        'ANTHROPIC_OAUTH_TOKEN',
-        'OPENAI_API_KEY',
-        'GEMINI_API_KEY',
-        'AZURE_OPENAI_API_KEY',
-        'DEEPSEEK_API_KEY',
-        'GROQ_API_KEY',
-        'MISTRAL_API_KEY',
-        'OPENROUTER_API_KEY',
-        'XAI_API_KEY',
-        'ZAI_API_KEY',
-      ],
     });
   });
 });

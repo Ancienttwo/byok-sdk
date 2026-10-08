@@ -167,7 +167,6 @@ describe('Agent memory MCP local authority', () => {
       resume: true,
       approvalInteractive: true,
       mcpToolsets: false,
-      permissionModes: ['auto'],
     });
     const runner = new TaskRunner({
       adapters: [adapter],
@@ -193,7 +192,6 @@ describe('Agent memory MCP local authority', () => {
       'task.offer_for_agent',
       {
         instruction: 'strict Agent task must not receive an unsupported MCP surface',
-        policy: { mode: 'auto' },
         runtime: 'codex',
         agentRef: { agentId: 'agent-memory-mcp-toolsets', profileRevision: 'profile-1' },
       },
@@ -216,14 +214,12 @@ describe('Agent memory MCP local authority', () => {
       resume: true,
       approvalInteractive: true,
       mcpToolsets: false,
-      permissionModes: ['auto'],
     });
     const supported = new StubRuntimeAdapter('supported-memory-runtime', { kind: 'available' }, {
       steer: true,
       resume: true,
       approvalInteractive: true,
       mcpToolsets: true,
-      permissionModes: ['auto'],
     });
     const runner = new TaskRunner({
       adapters: [unsupported, supported],
@@ -250,7 +246,6 @@ describe('Agent memory MCP local authority', () => {
       'task.offer_for_agent',
       {
         instruction: 'automatic strict Agent selection must skip MCP-incompatible runtimes',
-        policy: { mode: 'auto' },
         agentRef: { agentId: 'agent-memory-mcp-selection', profileRevision: 'profile-1' },
       },
       { taskId: 'task-memory-mcp-selection', seq: 1 },

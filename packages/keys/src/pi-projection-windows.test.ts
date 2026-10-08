@@ -162,7 +162,7 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
         stdin: JSON.stringify({ path: directory }),
       }, event => logPhase(`owned-${event.phase}`, `generation=${event.generation} t=${event.elapsedMs}ms pid=${event.pid ?? 'none'} ${event.detail ?? ''}`));
       pendingCleanup = { directory, owner, log: logPhase };
-      const probe = owner.run(() => assertPiProjectionDirectory(directory, directory));
+      const probe = owner.run(() => assertPiProjectionDirectory(directory));
       let watchdog: NodeJS.Timeout | undefined;
       const watchdogPromise = new Promise<never>((_resolve, reject) => {
         watchdog = setTimeout(() => {
@@ -195,7 +195,7 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
     try {
       await createPrivateFixture(directory);
       await exec('icacls', [directory, '/grant', '*S-1-1-0:(R)', '/Q'], { windowsHide: true });
-      await expect(assertPiProjectionDirectory(directory, directory)).rejects.toThrow('pi_projection_acl_unauthorized_ace');
+      await expect(assertPiProjectionDirectory(directory)).rejects.toThrow('pi_projection_acl_unauthorized_ace');
     } finally { await fs.rm(directory, { recursive: true, force: true }); }
   });
   it('refuses the real Windows directory owner rather than the current token', async () => {
@@ -210,7 +210,7 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
       await createPrivateFixture(directory);
       await fs.symlink(directory, junction, 'junction');
       await expect(assertWindowsPiProjectionAcl(junction)).rejects.toThrow('pi_projection_reparse_point');
-      await expect(assertPiProjectionDirectory(junction, junction)).rejects.toThrow('pi_projection_not_directory_or_symlink');
+      await expect(assertPiProjectionDirectory(junction)).rejects.toThrow('pi_projection_not_directory_or_symlink');
     } finally { await fs.rm(root, { recursive: true, force: true }); }
   });
 });

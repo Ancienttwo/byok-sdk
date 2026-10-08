@@ -5,9 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { canonicalPreparedValue } from '../adapters/pi/prepared-request';
 import {
-  classifyMcpToolsetServerObservation,
-  filterMcpObservationForPolicy,
-  mcpToolsetToolNames,
   observeMcpServer,
   projectMcpTools,
   qualifiedMcpToolName,
@@ -16,30 +13,8 @@ import {
 } from '../mcp';
 import { createPiMcpTools } from '../adapters/pi/mcp-tools';
 import { buildToolExecutorsFromObservation } from '../adapters/pi/input-preparation';
-import {
-  TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED,
-  toolImplementationUnavailable,
-  type ToolImplementationIdentityV1,
-} from '../daemon/tool-implementation-identity';
-import { resolveMcpToolsetGrants } from '../adapters/mcp-tool-grants';
 import { BYOK_PI_MCP_CONFIG_PATH } from '../adapters/pi/mcp-config';
-import { trustedCwd } from './fixtures/launch-cwd';
 
-const LAUNCH = {
-  launchCwd: '/',
-  launcher: { kind: 'node', interpreter: '/usr/bin/node', script: '/pkg/bin/byok-launch-cwd.mjs' },
-} as const;
-
-/**
- * What this SDK's DEFAULT produces for every server: no configured
- * `toolImplementationAuthority`, so nothing is attested. It is a real value
- * the fingerprint binds, not a placeholder — see the attested case below,
- * which must fingerprint differently.
- */
-const IMPLEMENTATIONS: Readonly<Record<string, ToolImplementationIdentityV1>> = Object.freeze({
-  salesko: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED,
-  salesko_proposals: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED,
-});
 
 /**
  * The single-projection property: the ordinary Pi extension and the core must
@@ -142,12 +117,11 @@ describe('MCP projection — canonical ordering', () => {
  */
 async function registeredByRealExtension(
   observation: Record<string, McpToolsetServerObservation>,
-  permissionMode = 'auto',
 ): Promise<{ names: string[]; definitions: Array<{ name: string; description: string; parameters: unknown }> }> {
   const dir = await tempDir();
   const configPath = path.join(dir, 'mcp-config.json');
   const mcpServers = Object.fromEntries(Object.keys(observation).map((name) => [name, serverSpec()]));
-  await fs.writeFile(configPath, JSON.stringify({ mcpEnv: ENV, mcpServers, observation, permissionMode, launchCwd: await trustedCwd() }));
+  await fs.writeFile(configPath, JSON.stringify({ mcpEnv: ENV, mcpServers, observation, launchCwd: process.cwd() }));
   process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
 
   const definitions: Array<{ name: string; description: string; parameters: unknown }> = [];
@@ -210,8 +184,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
       mcpEnv: ENV,
       mcpServers: { byokagentteam: serverSpec() },
       observation: {},
-      permissionMode: 'auto',
-      launchCwd: await trustedCwd(),
+      launchCwd: process.cwd(),
     }));
     process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
 
@@ -243,8 +216,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
         byokagentteam: serverSpec(),
       },
       observation,
-      permissionMode: 'auto',
-      launchCwd: await trustedCwd(),
+      launchCwd: process.cwd(),
     }));
     process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
 
@@ -276,8 +248,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
       mcpEnv: ENV,
       mcpServers: { byokagentteam: serverSpec(), byokagentmessage: serverSpec() },
       observation: {},
-      permissionMode: 'auto',
-      launchCwd: await trustedCwd(),
+      launchCwd: process.cwd(),
     }));
     process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
 
@@ -300,8 +271,7 @@ describe('MCP projection — the ordinary extension and the core agree', () => {
       mcpEnv: ENV,
       mcpServers: { salesko: serverSpec() },
       observation: {},
-      permissionMode: 'auto',
-      launchCwd: await trustedCwd(),
+      launchCwd: process.cwd(),
     }));
     process.env[BYOK_PI_MCP_CONFIG_PATH] = configPath;
     const extension = await import('../adapters/pi/mcp-extension');
@@ -322,10 +292,9 @@ describe('MCP projection — executor fingerprints', () => {
     const observation = await realObservation();
     const { toolExecutors } = await buildToolExecutorsFromObservation({
       observation,
-      permissionMode: 'auto',
       toolsetDefinitionRevisions: REVISIONS,
       nativeTools: [{ name: 'read', parameters: { type: 'object' } }],
-      runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
+      runtimeIdentity: RUNTIME,
     });
     expect(Object.keys(toolExecutors)).toEqual([
       'read',
@@ -340,10 +309,9 @@ describe('MCP projection — executor fingerprints', () => {
     const observation = await realObservation();
     const build = async () => buildToolExecutorsFromObservation({
       observation,
-      permissionMode: 'auto',
       toolsetDefinitionRevisions: REVISIONS,
       nativeTools: [],
-      runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
+      runtimeIdentity: RUNTIME,
     });
     expect((await build()).toolExecutors).toEqual((await build()).toolExecutors);
   });
@@ -373,53 +341,19 @@ describe('MCP projection — executor fingerprints', () => {
   ])('changes when %s changes', async (_label, mutate, revisions) => {
     const observation = await realObservation();
     const base = await buildToolExecutorsFromObservation({
-      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
+      observation, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
     });
     const after = await buildToolExecutorsFromObservation({
-      observation: mutate(observation), permissionMode: 'auto', toolsetDefinitionRevisions: revisions, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
+      observation: mutate(observation), toolsetDefinitionRevisions: revisions, nativeTools: [], runtimeIdentity: RUNTIME,
     });
     expect(after.toolExecutors['mcp__salesko__find_leads'])
       .not.toBe(base.toolExecutors['mcp__salesko__find_leads']);
   });
 
-  it('changes when the launch directory or the launcher changes, and the operator revision does not', async () => {
-    // The launch boundary is bound as its OWN fact, beside the toolset's
-    // `definitionRevision` rather than inside it. A server started in a
-    // different directory, or reached through a different launcher, is not the
-    // same executor — so a manifest frozen under one must not validate under
-    // the other. The operator's configured `{command, args}` revision is
-    // untouched by any of it, so an SDK launcher upgrade never churns the
-    // device configuration's own digest.
-    const observation = await realObservation();
-    const base = await buildToolExecutorsFromObservation({
-      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
-    });
-    const movedCwd = await buildToolExecutorsFromObservation({
-      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
-      launch: { ...LAUNCH, launchCwd: '/opt/byok/releases/1.2.3-abcdef' },
-    });
-    const newLauncher = await buildToolExecutorsFromObservation({
-      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
-      launch: { ...LAUNCH, launcher: { kind: 'node', interpreter: '/usr/local/bin/node', script: LAUNCH.launcher.script } },
-    });
-    const noLauncher = await buildToolExecutorsFromObservation({
-      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, implementations: IMPLEMENTATIONS,
-      launch: { launchCwd: LAUNCH.launchCwd, launcher: null },
-    });
-    const key = 'mcp__salesko__find_leads';
-    const fingerprints = [base, movedCwd, newLauncher, noLauncher].map((r) => r.toolExecutors[key]);
-    expect(new Set(fingerprints).size).toBe(4);
-    // Same toolset revisions throughout: the operator changed nothing.
-    expect(REVISIONS).toEqual({
-      'salesko.read.v1': `sha256:${'1'.repeat(64)}`,
-      'salesko.propose.v1': `sha256:${'2'.repeat(64)}`,
-    });
-  });
-
   it('does NOT change when a schema is re-serialized with its keys in another order', async () => {
     const observation = await realObservation();
     const base = await buildToolExecutorsFromObservation({
-      observation, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
+      observation, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
     });
     const reordered = {
       ...observation,
@@ -439,267 +373,18 @@ describe('MCP projection — executor fingerprints', () => {
       },
     };
     const after = await buildToolExecutorsFromObservation({
-      observation: reordered, permissionMode: 'auto', toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
+      observation: reordered, toolsetDefinitionRevisions: REVISIONS, nativeTools: [], runtimeIdentity: RUNTIME,
     });
     expect(after.toolExecutors).toEqual(base.toolExecutors);
-  });
-
-  it('fingerprints an attested implementation differently from an unattested one', async () => {
-    // The property: an implementation identity is a fingerprint INPUT, not a
-    // label beside it. A tool whose implementation is proven is not the same
-    // tool as one whose implementation was merely assumed, so nothing frozen
-    // under the weaker claim may validate under the stronger one.
-    const observation = await realObservation();
-    const build = async (implementations: Readonly<Record<string, ToolImplementationIdentityV1>>) =>
-      (await buildToolExecutorsFromObservation({
-        observation,
-        permissionMode: 'auto',
-        toolsetDefinitionRevisions: REVISIONS,
-        nativeTools: [],
-        runtimeIdentity: RUNTIME,
-        launch: LAUNCH,
-        implementations,
-      })).toolExecutors['mcp__salesko__find_leads'];
-
-    const unconfigured = await build(IMPLEMENTATIONS);
-    const unattested = await build({
-      ...IMPLEMENTATIONS,
-      salesko: toolImplementationUnavailable('implementation_identity_unattested'),
-    });
-    const attested = await build({
-      ...IMPLEMENTATIONS,
-      salesko: {
-        kind: 'attested',
-        authority: 'host-install-record',
-        manifestRevision: 'host-r1',
-        form: 'compiled-executable',
-        installPath: '/opt/byok/releases/1.2.3/salesko-agent',
-        closureDigest: 'a'.repeat(64),
-        closureKind: 'artifact',
-        launchArgv: ['mcp', 'serve'],
-        launchCwd: LAUNCH.launchCwd,
-        launchEnvNamesDigest: 'b'.repeat(64),
-        loaderEnvValuesDigest: 'c'.repeat(64),
-        installStat: { dev: 1, ino: 2, size: 3, mtimeMs: 4, mode: 0o100555, uid: 0, gid: 0 },
-      },
-    });
-
-    expect(new Set([unconfigured, unattested, attested]).size).toBe(3);
-  });
-
-  it('refuses to fingerprint a server whose implementation identity was never resolved', async () => {
-    // "Nobody resolved this" and "the resolver said unavailable" are different
-    // facts, and only the second one is a fingerprint input. An absent entry is
-    // therefore a refusal rather than an assumed absence.
-    await expect(buildToolExecutorsFromObservation({
-      observation: await realObservation(),
-      permissionMode: 'auto',
-      toolsetDefinitionRevisions: REVISIONS,
-      nativeTools: [],
-      runtimeIdentity: RUNTIME,
-      launch: LAUNCH,
-      implementations: { salesko: TOOL_IMPLEMENTATION_RESOLVER_UNCONFIGURED },
-    })).rejects.toThrow(/has no resolved implementation identity/u);
   });
 
   it('refuses to fingerprint a toolset with no definition revision', async () => {
     await expect(buildToolExecutorsFromObservation({
       observation: await realObservation(),
-      permissionMode: 'auto',
       toolsetDefinitionRevisions: { 'salesko.read.v1': REVISIONS['salesko.read.v1'] },
       nativeTools: [],
-      runtimeIdentity: RUNTIME, launch: LAUNCH, implementations: IMPLEMENTATIONS,
+      runtimeIdentity: RUNTIME,
     })).rejects.toThrow(/no definition revision/u);
-  });
-});
-
-describe('MCP projection — grants derive from the same observation', () => {
-  it('resolves grant names out of the observation object itself', async () => {
-    const observation = await realObservation();
-    const servers = Object.fromEntries(Object.keys(observation).map((name) => [name, serverSpec()]));
-    const resolution = resolveMcpToolsetGrants(servers, observation, 'auto');
-    expect(resolution).toMatchObject({
-      ok: true,
-      grants: [
-        { server: 'salesko', tools: ['echo', 'find_leads'] },
-        { server: 'salesko_proposals', tools: ['propose_update'] },
-      ],
-    });
-    // The same names the runtimes are granted are the names the projection
-    // registers — one authority, two views.
-    expect(mcpToolsetToolNames(observation)).toEqual({
-      salesko: ['echo', 'find_leads'],
-      salesko_proposals: ['propose_update'],
-    });
-  });
-
-  it('still refuses a projected server the daemon never observed', async () => {
-    const observation = await realObservation();
-    const servers = {
-      ...Object.fromEntries(Object.keys(observation).map((name) => [name, serverSpec()])),
-      unobserved: serverSpec(),
-    };
-    const resolution = resolveMcpToolsetGrants(servers, observation, 'auto');
-    expect(resolution.ok).toBe(false);
-  });
-});
-
-/**
- * One real server shaped like `salesko.read.v1` plus the propose tool that
- * must never survive a restricted policy, classified through the SAME join the
- * daemon performs (`classifyMcpToolsetServerObservation`) rather than by
- * hand-writing `readOnly` flags a real device could never produce.
- */
-const READ_TOOLS = [
-  'get_account', 'get_contact', 'get_lead', 'list_accounts',
-  'list_contacts', 'search_leads', 'summarize_pipeline',
-] as const;
-
-function saleskoShapedSpec() {
-  return serverSpec({
-    serverInfo: { name: 'byok-mcp-fixture-salesko', version: '1.0.0' },
-    tools: [
-      ...READ_TOOLS.map((name) => ({
-        name,
-        description: `${name} reads.`,
-        inputSchema: { type: 'object', properties: { id: { type: 'string' } } },
-      })),
-      {
-        name: 'propose_graph_change_set',
-        description: 'Propose a change set for human review.',
-        inputSchema: { type: 'object', properties: { body: { type: 'string' } }, required: ['body'] },
-      },
-    ],
-  });
-}
-
-async function classifiedObservation(
-  readOnlyTools: readonly string[] | null = [...READ_TOOLS],
-): Promise<Record<string, McpToolsetServerObservation>> {
-  const observed = await observeMcpServer('salesko', saleskoShapedSpec(), { env: ENV, timeoutMs: 15_000 });
-  return {
-    salesko: classifyMcpToolsetServerObservation(observed, {
-      toolsetId: 'salesko.read.v1',
-      readOnlyTools,
-    }),
-  };
-}
-
-describe('MCP projection — one policy filter, every consumer', () => {
-  it('classifies exactly the declared tools and nothing else', async () => {
-    const observation = await classifiedObservation();
-    expect(observation.salesko!.tools.map((tool) => [tool.name, tool.readOnly])).toEqual([
-      ['get_account', true],
-      ['get_contact', true],
-      ['get_lead', true],
-      ['list_accounts', true],
-      ['list_contacts', true],
-      ['propose_graph_change_set', false],
-      ['search_leads', true],
-      ['summarize_pipeline', true],
-    ]);
-  });
-
-  it('rejects a classification naming a tool the server does not expose', async () => {
-    // The declaration is stale configuration, not a smaller toolset: the
-    // operator classified something that no longer exists, so nothing else
-    // they said about this server can be trusted either.
-    await expect(classifiedObservation([...READ_TOOLS, 'get_invoice']))
-      .rejects.toThrow(/does not expose tool name\(s\) \["get_invoice"\]/u);
-  });
-
-  it('leaves every tool unclassified when the toolset declares nothing', async () => {
-    const observation = await classifiedObservation(null);
-    expect(observation.salesko!.tools.every((tool) => tool.readOnly === undefined)).toBe(true);
-  });
-
-  it('under readonly the extension registers exactly the classified read tools', async () => {
-    const observation = await classifiedObservation();
-    const allowed = filterMcpObservationForPolicy(observation, 'readonly');
-    expect(allowed.ok).toBe(true);
-    const expected = projectMcpTools((allowed as { observation: typeof observation }).observation)
-      .map((tool) => qualifiedMcpToolName(tool.serverName, tool.toolName));
-
-    const { names } = await registeredByRealExtension(observation, 'readonly');
-    expect(names).toEqual(expected);
-    expect(names).toEqual(READ_TOOLS.map((tool) => `mcp__salesko__${tool}`));
-    // Not registered, not merely refused at call time: the model never sees it.
-    expect(names).not.toContain('mcp__salesko__propose_graph_change_set');
-  });
-
-  it('under auto the same observation registers the propose tool too', async () => {
-    const { names } = await registeredByRealExtension(await classifiedObservation(), 'auto');
-    expect(names).toContain('mcp__salesko__propose_graph_change_set');
-    expect(names).toHaveLength(READ_TOOLS.length + 1);
-  });
-
-  it('freezes the SAME filtered set the ordinary extension registers', async () => {
-    // The single-projection property, extended to the policy: the prepared
-    // manifest and the ordinary session must not be able to disagree about
-    // which tools a mode allows.
-    const observation = await classifiedObservation();
-    const { names } = await registeredByRealExtension(observation, 'readonly');
-    const { toolExecutors } = await buildToolExecutorsFromObservation({
-      observation,
-      permissionMode: 'readonly',
-      toolsetDefinitionRevisions: { 'salesko.read.v1': `sha256:${'1'.repeat(64)}` },
-      nativeTools: [],
-      runtimeIdentity: '@byok-sdk/pi-coding-agent@0.85.1002+test', launch: LAUNCH, implementations: IMPLEMENTATIONS,
-    });
-    expect(Object.keys(toolExecutors)).toEqual(names);
-  });
-
-  it('refuses to freeze a manifest for a mode the toolset carries no classification for', async () => {
-    await expect(buildToolExecutorsFromObservation({
-      observation: await classifiedObservation(null),
-      permissionMode: 'readonly',
-      toolsetDefinitionRevisions: { 'salesko.read.v1': `sha256:${'1'.repeat(64)}` },
-      nativeTools: [],
-      runtimeIdentity: '@byok-sdk/pi-coding-agent@0.85.1002+test', launch: LAUNCH, implementations: IMPLEMENTATIONS,
-    })).rejects.toThrow(/declares no McpToolsetConfig\.readOnlyTools/u);
-  });
-
-  it('refuses a server the policy leaves with nothing callable', async () => {
-    const observation = await classifiedObservation([]);
-    expect(observation.salesko!.tools.every((tool) => tool.readOnly === false)).toBe(true);
-    expect(filterMcpObservationForPolicy(observation, 'readonly')).toMatchObject({
-      ok: false,
-      reason: expect.stringContaining('exposes no tool classified read-only'),
-    });
-  });
-
-  it('auto is every observed tool, classified or not', async () => {
-    const unclassified = await classifiedObservation(null);
-    expect(filterMcpObservationForPolicy(unclassified, 'auto')).toEqual({ ok: true, observation: unclassified });
-  });
-
-  it('confirm is every observed tool and needs no classification at all', async () => {
-    // Confirm gates each call on a human rather than on a tool set, so it is
-    // NOT a narrowing mode: an unclassified toolset must pass through it
-    // unchanged instead of being refused for a missing `readOnlyTools`.
-    const unclassified = await classifiedObservation(null);
-    expect(filterMcpObservationForPolicy(unclassified, 'confirm'))
-      .toEqual({ ok: true, observation: unclassified });
-    const classified = await classifiedObservation();
-    expect(filterMcpObservationForPolicy(classified, 'confirm'))
-      .toEqual({ ok: true, observation: classified });
-  });
-
-  it('plan narrows exactly like readonly', async () => {
-    // `daemon/policy.ts` ranks plan as the mode that produces NO side effects,
-    // so it may never be wider than readonly.
-    const observation = await classifiedObservation();
-    const plan = filterMcpObservationForPolicy(observation, 'plan');
-    const readonly = filterMcpObservationForPolicy(observation, 'readonly');
-    expect(plan).toEqual(readonly);
-    expect(projectMcpTools((plan as { observation: typeof observation }).observation)
-      .map((tool) => qualifiedMcpToolName(tool.serverName, tool.toolName)))
-      .toEqual(READ_TOOLS.map((tool) => `mcp__salesko__${tool}`));
-    // And it inherits readonly's fail-closed refusal, not auto's pass-through.
-    expect(filterMcpObservationForPolicy(await classifiedObservation(null), 'plan')).toMatchObject({
-      ok: false,
-      reason: expect.stringContaining('declares no McpToolsetConfig.readOnlyTools'),
-    });
   });
 });
 
@@ -722,46 +407,12 @@ describe.each([
     expect(() => projectMcpTools(observation)).toThrow(`duplicate MCP runtime tool name "${name}"`);
   });
 
-  it('rejects the same collision in names-only grants before runtime launch', async () => {
-    const observation = await collidingObservation();
-    expect(() => mcpToolsetToolNames(observation)).toThrow(`duplicate MCP runtime tool name "${name}"`);
-    expect(resolveMcpToolsetGrants(
-      Object.fromEntries(pairs.map(([server]) => [server!, serverSpec()])),
-      observation,
-      'auto',
-    )).toEqual({ ok: false, reason: `duplicate MCP runtime tool name "${name}"` });
-  });
-
-  it.each(['auto', 'confirm', 'readonly', 'plan'] as const)(
-    'rejects raw read/mutation identity collisions before %s filtering', async (mode) => {
-      const raw = await collidingObservation();
-      const entries = Object.entries(raw).map(([serverName, server], index) => [serverName, {
-        ...server,
-        tools: [
-          ...server.tools.map((tool) => ({ ...tool, readOnly: index === 0 })),
-          { name: 'safe_read', description: '', inputSchema: { type: 'object' }, readOnly: true },
-        ],
-      }] as const);
-      const observation = Object.fromEntries(entries);
-      const reason = `duplicate MCP runtime tool name "${name}"`;
-      expect(filterMcpObservationForPolicy(observation, mode)).toEqual({ ok: false, reason });
-      expect(resolveMcpToolsetGrants(
-        Object.fromEntries(pairs.map(([server]) => [server!, serverSpec()])), observation, mode,
-      )).toEqual({ ok: false, reason });
-    },
-  );
-
   it('refuses a prepared executor map instead of overwriting a tool fingerprint', async () => {
     await expect(buildToolExecutorsFromObservation({
       observation: await collidingObservation(),
       toolsetDefinitionRevisions: Object.fromEntries(pairs.map(([server]) => [server!, `revision-${server}`])),
-      // Consumed only after the projection below rejects the collision, so the
-      // tested refusal is reached before either fixture fact is read.
-      launch: { launchCwd: '/', launcher: null },
-      implementations: {},
       nativeTools: [],
       runtimeIdentity: 'fixture-runtime',
-      permissionMode: 'auto',
     })).rejects.toThrow(`duplicate MCP runtime tool name "${name}"`);
   });
 });

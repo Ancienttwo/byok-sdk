@@ -73,7 +73,7 @@ async function makeRunner(
 
 async function offerAndActivate(runner: TaskRunner, taskId: string): Promise<void> {
   await runner.handleEnvelope(
-    createEnvelope('task.offer', { instruction: 'do gated work', policy: { mode: 'confirm' } }, { taskId, seq: 1 }),
+    createEnvelope('task.offer', { instruction: 'do gated work' }, { taskId, seq: 1 }),
   );
 }
 
@@ -128,8 +128,7 @@ class RelayingAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
     id: 'claude',
     supportsDispatchSelection: false,
-    capabilities: { steer: false, resume: true, approvalInteractive: true, permissionModes: ['confirm'] },
-    environmentRequirements: { credentialNames: [] },
+    capabilities: { steer: false, resume: true, approvalInteractive: true },
   });
   readonly sessions: RelayingSession[] = [];
 

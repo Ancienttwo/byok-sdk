@@ -87,8 +87,7 @@ import {
  *  5. Durable reserve, before any counter is ever invoked. Same key and digest
  *     returns the existing fact; a different digest conflicts (§10.3.5).
  *  6. The ONE prepared-tool-surface assembly (`./prepared-tool-surface.ts`) —
- *     launch boundary, implementation identities, probe, policy filter,
- *     projection, fingerprints — deliberately AFTER the reserve, so a
+ *     probe, policy filter, projection, fingerprints — deliberately AFTER the reserve, so a
  *     re-delivery of an already-recorded requestId answers from the durable
  *     record without starting a single server.
  *  7. Pure compile, then ONE serialized closure that admits the artifact
@@ -211,10 +210,6 @@ export interface InputPreparationService {
  * - `request_content_not_text` — D carries a content part whose `type` is not
  *   `text`, read off the record's `requestContentTextOnly`, which was decided
  *   once over D's own bytes when the artifact was retained.
- * - `executor_identity_unproven` — derived from the recorded per-tool
- *   implementation kinds: a manifest is only as proven as its least proven
- *   entry. On this SDK's default — no configured `toolImplementationAuthority`
- *   — every kind is `unavailable:resolver_unconfigured`.
  * - `counter_authority_not_production` / `counter_coverage_incomplete` — a
  *   counter is OPTIONAL, and neither reason exists without one. When one IS on
  *   the record, a fixture count can never make a receipt ready (so an offline
@@ -282,22 +277,6 @@ export function inputPreparationReadinessReasons(
     } else {
       const ruled = new Set(policy.ruledResidualKeys);
       if (record.artifact.residual.some((entry) => !ruled.has(entry.key))) reasons.push('residual_not_ruled');
-    }
-    // A tool executor string is an OBSERVATION fingerprint. It binds what a
-    // server said about a tool AND the implementation identity this daemon
-    // resolved for that server — so whether it proves anything about the
-    // executable depends entirely on whether that identity was attested.
-    //
-    // The receipt therefore reads the recorded kinds rather than asserting the
-    // limitation unconditionally: any tool whose implementation is
-    // `unavailable` keeps the whole preparation unready, because a manifest is
-    // only as proven as its least proven entry. On this SDK's default — no
-    // configured `toolImplementationAuthority` — every kind is
-    // `unavailable:resolver_unconfigured` and the reason is always present,
-    // which is the same honest answer as before; what changed is that it is
-    // now derived from evidence instead of hard-coded.
-    if (Object.values(record.artifact.toolImplementationKinds).some((kind) => kind !== 'attested')) {
-      reasons.push('executor_identity_unproven');
     }
     if (record.artifactBytes === 0 || nowMs >= Date.parse(record.artifactExpiresAt)) reasons.push('artifact_expired');
   }
@@ -695,7 +674,6 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       source: { revision: request.source.revision, digest: request.source.digest },
       target,
       policyRevision: limits.revision,
-      permissionMode: request.permissionMode,
       runtime: options.compiler.runtime,
       requestDigest,
       // Host authority, carried verbatim. Never defaulted: a preparation whose
@@ -749,9 +727,8 @@ export function createInputPreparationService(options: InputPreparationServiceOp
   ): Promise<InputPreparationRecord> {
     if (runAborted(run)) await cancelBeforeCounter(record.recordId, run);
     // --- observation stage ------------------------------------------------
-    // The one entry that resolves the launch boundary, resolves an
-    // implementation identity per server, probes through both, and returns the
-    // frozen tool surface. It runs AFTER the durable reserve above, which is
+    // The one entry that probes the servers and returns the frozen tool
+    // surface. It runs AFTER the durable reserve above, which is
     // what makes a re-delivery return the recorded fact without a second
     // spawn: no server is started until this key is provably new.
     let surface: PreparedToolSurface;
@@ -759,7 +736,6 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       const assembled = await options.toolSurface.assemble({
         requiredToolsets: request.requiredToolsets,
         agentMemory: request.agentMemory,
-        permissionMode: request.permissionMode,
         runtimeIdentity: inputPreparationRuntimeIdentityString(options.compiler.runtime),
       });
       // Assembly owns any probes it started. Wait for their cleanup before
@@ -892,7 +868,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       residual: compiled.residual,
       observationDigest: surface.observationDigest,
       toolBindingDigest: surface.toolBindingDigest,
-      toolImplementationKinds: surface.toolImplementationKinds,
+      toolNames: surface.toolNames,
     };
     // Decided once, over D's own bytes, and retained beside the artifact in
     // the same durable transition.
@@ -1180,9 +1156,8 @@ export function createInputPreparationService(options: InputPreparationServiceOp
           // to prevent.
           //
           // Drift is still checked, on the half of the evidence that can be
-          // re-derived without starting anything: the launch attestation, the
-          // toolset definition revisions, the configured argv and the
-          // implementation identities. If any of those moved since the recorded
+          // re-derived without starting anything: the toolset definition
+          // revisions and the configured argv. If any of those moved since the recorded
           // artifact was frozen, the recorded receipt no longer describes this
           // device and the repeat is REFUSED rather than answered — the caller
           // mints a new preparation instead of silently receiving one bound to
@@ -1204,7 +1179,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
             if (rebound.binding.toolBindingDigest !== recorded.toolBindingDigest) {
               throw new InputPreparationRequestError(
                 'observation_drift',
-                'the launch binding, toolset definitions or tool implementations behind this preparation'
+                'the toolset definitions behind this preparation'
                   + ' changed after its artifact was frozen; it will not be re-derived under the same requestId',
               );
             }

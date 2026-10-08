@@ -385,7 +385,7 @@ describe('device assertion broker: assertion.issue', () => {
     // window exists on every unpair — the CLI shuts the daemon down first and
     // clears device.json afterwards — it is just narrower.
     server.send(
-      createEnvelope('task.offer', { instruction: 'work', policy: { mode: 'auto' } }, { taskId: 't-shutdown', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { instruction: 'work' }, { taskId: 't-shutdown', seq: server.nextSeq() }),
     );
     await server.waitFor((event) => event.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));

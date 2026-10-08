@@ -97,9 +97,9 @@ npm install --save-dev @cloudflare/workers-types
 
 The public candidate dispatch packages are `@byok-sdk/client`, `@byok-sdk/server`,
 `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`, `@byok-sdk/core`,
-`@byok-sdk/protocol`, and `@byok-sdk/ui-runtime`, all on the same train;
-`@byok-sdk/implementation-identity` follows the train as a support package that
-client and keys install for you. Starting with 0.21.0, the `byok-sdk` namespace
+`@byok-sdk/protocol`, and `@byok-sdk/ui-runtime`, all on the same train.
+`@byok-sdk/implementation-identity` is retired and no later train publishes it.
+Starting with 0.21.0, the `byok-sdk` namespace
 umbrella and `@byok-sdk/testkit` are no longer published. Their existing
 versions stay on npm; see
 [Packages no longer published](docs/releases/v0.21.0.md#packages-no-longer-published).
@@ -121,8 +121,14 @@ versions stay on npm; see
   a deterministic, React-free Live Activity Timeline view model. Browser auth,
   redaction, transport, and presentation remain host responsibilities.
 
-Both profiles share the frozen v1 protocol, tenant isolation, durable device
-proof, truth CAS, explicit capabilities, and fail-closed policy handling.
+Both profiles share the frozen v2 protocol, tenant isolation, durable device
+proof, truth CAS, and explicit capabilities.
+
+Sessions run YOLO in the user-specified workspace. The user's own Claude Code,
+Codex and Pi configuration and guardrails apply; the SDK keeps only the
+invariants it owns. See
+[ADR-037](docs/architecture/adr-2026-10-07-minimal-guardrails.md) and
+[the security model](docs/security.md).
 
 ## Agent-first local homes and egress
 
@@ -139,8 +145,9 @@ owned and opaque. In particular, `artifacts` is not an SDK schema or a required
 directory. See [the host local-storage contract](docs/host-local-storage-layout.md).
 
 The Agent egress contract adds one consumed `AgentEgressPolicy`.
-Metadata/status activity is the safe default; contentful trajectory is an
-explicit capability-gated opt-in. Reliable evidence is fsynced under the
+Agent egress goes to the Host as the runtime produced it. The SDK does not
+filter, redact or omit it; the policy sets only transport limits and the
+content-read surfaces. Reliable evidence is fsynced under the
 canonical Agent home and retried with stable cursors until an exact ack, while
 latest-value activity remains replaceable and reports typed drop reasons.
 The daemon's tenant binding comes only from the authenticated pair response

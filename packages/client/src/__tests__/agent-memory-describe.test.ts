@@ -3,14 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it } from 'vitest';
-import { observePreparedMemory, resolvePreparedMemoryImplementation } from '../daemon/prepared-agent-memory';
-import { mcpLaunchAttestation } from '../daemon/trusted-launch-cwd';
-import {
-  realToolImplementationFsProbe,
-  type ToolImplementationAuthority,
-  type ToolImplementationFsProbe,
-} from '../daemon/tool-implementation-identity';
-import { trustedCwd } from './fixtures/launch-cwd';
+import { observePreparedMemory } from '../daemon/prepared-agent-memory';
 import {
   AGENT_MEMORY_MCP_SERVER_INFO,
   AGENT_MEMORY_TOOLS,
@@ -19,7 +12,6 @@ import {
 import {
   preparedAgentMemoryDescriptorDigest,
   preparedAgentMemoryExecutorFingerprints,
-  preparedAgentMemoryModeAllowedByPolicy,
   preparedAgentMemoryModeWithinCeiling,
   preparedAgentMemoryTools,
   validatePreparedAgentMemoryObservation,
@@ -57,14 +49,9 @@ describe('prepared Agent-memory descriptor', () => {
     expect(preparedAgentMemoryTools('read-write', observation).map((tool) => tool.name)).toEqual(['memory_recall', 'memory_save']);
     expect(preparedAgentMemoryModeWithinCeiling('read', 'read-write')).toBe(true);
     expect(preparedAgentMemoryModeWithinCeiling('read-write', 'read')).toBe(false);
-    expect(preparedAgentMemoryModeAllowedByPolicy('read', 'readonly')).toBe(true);
-    expect(preparedAgentMemoryModeAllowedByPolicy('read-write', 'readonly')).toBe(false);
-    expect(preparedAgentMemoryModeAllowedByPolicy('read', 'auto', ['memory_recall'])).toBe(false);
 
     const first = preparedAgentMemoryDescriptorDigest(observation);
-    const fingerprints = preparedAgentMemoryExecutorFingerprints(observation, 'read-write', {
-      descriptor: 'descriptor-attested', execution: 'execution-attested',
-    }, 'runtime-attested');
+    const fingerprints = preparedAgentMemoryExecutorFingerprints(observation, 'read-write', 'runtime-identity');
     expect(first).toMatch(/^sha256:[a-f0-9]{64}$/u);
     expect(fingerprints).toHaveLength(2);
     expect(new Set(fingerprints).size).toBe(2);
@@ -101,18 +88,6 @@ afterEach(async () => {
   await Promise.all(dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
-/** Only uid/mode are overridden: a non-root test cannot create the root-owned install the resolver requires. */
-function rootOwnedProbe(): ToolImplementationFsProbe {
-  return {
-    async lstat(target) {
-      const real = await realToolImplementationFsProbe.lstat(target);
-      return { ...real, uid: 0, mode: real.mode & ~0o222 };
-    },
-    realpath: (target) => realToolImplementationFsProbe.realpath(target),
-    digest: (target) => realToolImplementationFsProbe.digest(target),
-  };
-}
-
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -133,10 +108,9 @@ async function waitForFile(file: string): Promise<string> {
 }
 
 /**
- * A REAL descriptor child, attested through the production resolver and
- * spawned through the production SDK-helper spawn gate. It records its pid,
- * then either never answers `initialize` or answers it and never answers
- * `tools/list`, and it keeps itself alive until it is killed.
+ * A REAL descriptor child. It records its pid, then either never answers
+ * `initialize` or answers it and never answers `tools/list`, and it keeps
+ * itself alive until it is killed.
  */
 async function hangingDescriptor(stage: 'initialize' | 'tools/list') {
   const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-memory-descriptor-')));
@@ -166,27 +140,8 @@ async function hangingDescriptor(stage: 'initialize' | 'tools/list') {
     '',
   ].join('\n'));
   await fs.chmod(script, 0o755);
-  const closureDigest = await realToolImplementationFsProbe.digest(script);
-  const launchCwd = await trustedCwd();
-  const authority: ToolImplementationAuthority = {
-    resolve: async (locator) => ({
-      kind: 'attested',
-      authority: 'host-install-record',
-      manifestRevision: 'memory-helper@test',
-      form: 'compiled-executable',
-      installPath: script,
-      closureDigest,
-      closureKind: 'artifact',
-      launchArgv: ['__byok_sdk_helper', (locator as { entry: string }).entry],
-      launchCwd,
-    } as never),
-  };
-  const env = Object.freeze({});
-  const probe = rootOwnedProbe();
-  const implementation = await resolvePreparedMemoryImplementation(
-    authority, env, mcpLaunchAttestation({ cwd: launchCwd }), probe,
-  );
-  return { implementation, env, probe, pidFile, listedFile };
+  const describe = Object.freeze({ command: script, args: Object.freeze(['__byok_sdk_helper', 'agent-memory-describe']) });
+  return { describe, env: Object.freeze({}), pidFile, listedFile };
 }
 
 describe('a cancelled task-free descriptor probe leaves no child alive', () => {
@@ -196,7 +151,7 @@ describe('a cancelled task-free descriptor probe leaves no child alive', () => {
   ] as const)('kills the descriptor child when the probe is cancelled %s', async (_label, stage) => {
     const fixture = await hangingDescriptor(stage);
     const controller = new AbortController();
-    const observed = observePreparedMemory(fixture.implementation, fixture.env, controller.signal, fixture.probe);
+    const observed = observePreparedMemory(fixture.describe, fixture.env, controller.signal);
     const settled = observed.then(() => 'resolved', () => 'rejected');
     const pid = Number(await waitForFile(fixture.pidFile));
     spawned.push(pid);

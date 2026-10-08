@@ -70,7 +70,6 @@ describe('redelivery across a real receive outage (finding F2, real @byok-sdk/se
 
     const handle = await real.byok.dispatch({
       instruction: 'do a thing that needs approval',
-      policy: { mode: 'confirm' },
     });
 
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');

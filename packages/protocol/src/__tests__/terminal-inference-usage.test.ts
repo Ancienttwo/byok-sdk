@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { EnvelopeValidationError, parseMessage } from '../index';
 
 const HEADER = {
-  v: 1,
+  v: 2,
   id: '00000000-0000-4000-8000-000000000201',
   ts: '2026-08-21T10:00:00.000Z',
   task_id: 'task-inference-usage',

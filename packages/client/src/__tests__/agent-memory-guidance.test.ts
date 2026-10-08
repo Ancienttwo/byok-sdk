@@ -55,7 +55,6 @@ describe('Agent memory guidance', () => {
       resume: true,
       approvalInteractive: true,
       mcpToolsets: true,
-      permissionModes: ['auto', 'readonly', 'plan', 'confirm'],
     }));
     const gitWorkspaceStore = new GitWorkspaceStore(storeDir);
     await gitWorkspaceStore.initialize();
@@ -94,7 +93,6 @@ describe('Agent memory guidance', () => {
           'task.offer_for_agent',
           {
             instruction: `agent instruction for ${runtime}`,
-            policy: { mode: 'auto' },
             runtime,
             agentRef: { agentId: `agent-${runtime}`, profileRevision: 'profile-1' },
           },
@@ -109,7 +107,6 @@ describe('Agent memory guidance', () => {
           'task.offer',
           {
             instruction: `ordinary instruction for ${runtime}`,
-            policy: { mode: 'auto' },
             runtime,
           },
           { taskId: `ordinary-task-${runtime}`, seq: seq++ },

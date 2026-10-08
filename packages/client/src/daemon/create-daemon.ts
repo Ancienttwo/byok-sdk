@@ -9,7 +9,6 @@ import {
 } from '@byok-sdk/core';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { statSync } from 'node:fs';
 import {
   createEnvelope,
   decodeEnvelope,
@@ -40,7 +39,6 @@ import type {
   RuntimeId,
   RuntimeInfo,
 } from '@byok-sdk/protocol';
-import type { PermissionPolicy } from '@byok-sdk/protocol';
 import type {
   RuntimeAdapter,
   GitWorkspaceConfig,
@@ -64,7 +62,7 @@ import {
 } from '../release-identity';
 import { PiAdapter, validatePiByokLauncherConfig } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
-import { CodexAdapter } from '../adapters/codex/codex-adapter';
+import { assertCodexSandboxSetting, CodexAdapter, type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
 import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
 import { AuthManager } from './auth-manager';
 import { BlobClient } from './blob-client';
@@ -133,10 +131,9 @@ import {
   type InputPreparationService,
 } from './input-preparation-service';
 import { InputPreparationUnsupportedRecordVersionError } from './input-preparation-store';
-import { resolvePiInputPreparationCompiler } from '../adapters/pi/input-preparation-runtime';
+import { createPiInputPreparationCompiler, resolveInstalledPiRuntimeIdentity, resolvePinnedPiRuntimeIdentity } from '../adapters/pi/input-preparation';
 import { decodeTeamMemberContext, encodeTeamMemberContext, LocalTeamWorkspace } from './team-workspace';
 import { McpToolsetRegistry, McpToolsetRevisionConflictError } from './toolset-registry';
-import type { ToolImplementationAuthority } from './tool-implementation-identity';
 import { ConnectionManager } from './connection-manager';
 import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
 import { OperationalHealthTracker, type OperationalHealthSnapshot } from './operational-health';
@@ -174,7 +171,6 @@ import {
 } from './progress-batcher';
 import { AgentEgressController, type AgentEgressReliableAppendResult } from './agent-egress-controller';
 import { resolveAgentEgressPolicy, type AgentEgressStatus } from './agent-egress-policy';
-import { sanitizeEgressEnvelope, type AgentEgressSanitizer } from './agent-egress-sanitizer';
 import type { AgentContentReceiptWithoutReliableIdentity, AgentReliableEgressRecord } from './agent-egress-spool';
 import { AgentContentAuditStore } from './agent-content-audit-store';
 import { AgentHomeProjectionCompletionClient } from './agent-home-projection-client';
@@ -189,9 +185,8 @@ import {
 import { createPreparedToolSurfaceAssembler } from './prepared-tool-surface';
 import { buildRuntimeEnv } from './environment';
 import { resolveAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
-import type { McpLaunchCwdConfig } from './trusted-launch-cwd';
 import { preflightAgentMessageMcp } from './agent-message-mcp-preflight';
-import { resolveAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
+import { resolveAgentMemoryDescribeBin, resolveAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
 import { resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../sdk-reserved-helper-host';
 import {
   isAgentMemorySecureFilesystemAvailable,
@@ -411,9 +406,8 @@ export interface DaemonConfig {
    * M5 batch-3 (workstream 1): explicit auto-select priority order for
    * `TaskRunner.pickAdapter`'s no-explicit-runtime branch (`task-runner.ts`)
    * — tried in listed order; the first candidate that is both PRESENT
-   * (`adapter.detect()`) and CAPABLE (declares the offer's
-   * `PermissionPolicy.mode` in its own `descriptor.capabilities.permissionModes` —
-   * see `adapterSupportsMode`) wins. Unset defaults to
+   * (`adapter.detect()`) and CAPABLE (declares MCP toolset projection when
+   * the offer requires it) wins. Unset defaults to
    * `DEFAULT_RUNTIME_PREFERENCE` (`task-runner.ts`): `['claude', 'codex',
    * 'pi']` — pi LAST, deliberately.
    *
@@ -438,29 +432,6 @@ export interface DaemonConfig {
    * sequence among whatever that allowlist, if set, already let through.
    */
   runtimePreference?: RuntimeId[];
-  /**
-   * The device operator's configured policy CEILING — every `task.offer`'s
-   * own policy is merged against this and fail-closed-rejected if it asks
-   * for more latitude than this allows (`daemon/policy.ts`'s
-   * `computeEffectivePolicy`).
-   *
-   * M5 batch-3 (workstream 1): `workspaceRoot` set on THIS ceiling is still
-   * merged into the effective policy handed to an adapter as
-   * `ctx.policy.workspaceRoot` (`computeEffectivePolicy` is unchanged) — but
-   * no bundled adapter (pi/claude/codex) actually reads or enforces it;
-   * every adapter derives its real confinement from `ctx.workspaceDir` (the
-   * daemon-created per-task directory) instead — see docs/security.md's
-   * "Workspace confinement is a convention, not a sandbox" section. Setting
-   * it here is therefore silently inert rather than actively dangerous by
-   * itself (an OFFER independently asking for its OWN `workspaceRoot` is a
-   * separate, fail-closed-declined case — see `TaskRunner.handleOffer` —
-   * precisely because THAT looks like a live security control when it
-   * isn't). `start()` below logs a loud, one-time `console.warn` whenever
-   * this ceiling sets `workspaceRoot`, so an operator who configured it
-   * expecting real enforcement finds out immediately instead of trusting a
-   * control nothing honors.
-   */
-  permissionDefaults?: PermissionPolicy;
   storeDir?: string;
   /**
    * Opt-in host composition for a daemon launched under a different OS
@@ -474,17 +445,12 @@ export interface DaemonConfig {
   /** Optional white-label branding — see `DaemonBranding`. Carried through verbatim to `status().branding`. */
   branding?: DaemonBranding;
   /**
-   * M5: per-device, per-runtime escape hatch into the environment allowlist
-   * `task-runner.ts` builds each task's spawn environment from
-   * (`daemon/environment.ts`'s `buildRuntimeEnv`) — keyed by runtime id
-   * (`'pi' | 'claude' | 'codex'`, though not typed that narrowly here since
-   * an id with no matching adapter is simply never looked up). `allow`
-   * entries are exact variable names or `*`-suffixed prefixes, merged in
-   * alongside that runtime adapter's own declared
-   * `descriptor.environmentRequirements` — this can never override the hard
-   * `BYOK_*` deny (see `environment.ts`'s own doc comment).
+   * Codex sandbox for the bundled Codex adapter that `createDaemon` builds,
+   * as OAR's `OAR_CODEX_SANDBOX`. Default `danger-full-access`. `inherit`
+   * passes no sandbox override, so the user's own `config.toml` applies.
+   * `createDaemon` throws a TypeError for any other value.
    */
-  runtimeEnvironment?: Record<string, { allow?: string[] }>;
+  codexSandbox?: CodexSandboxSetting;
   /**
    * Device-local registry behind wire-level `requiredToolsets` ids. Only
    * logical ids cross the SaaS wire; MCP executable definitions stay here.
@@ -698,43 +664,6 @@ export interface DaemonConfig {
    * method for intents; the only entry is the mailbox notice.
    */
   agentMemoryIntents?: AgentMemoryIntentTransport;
-  /**
-   * Operator input to the MCP toolset launch boundary
-   * (`./trusted-launch-cwd.ts`), forwarded verbatim to
-   * `TaskRunnerDeps.mcpLaunchCwd`.
-   *
-   * Absent means the platform default directory and — only when this process
-   * is provably plain Node — `process.execPath` as the launcher interpreter.
-   * Neither default is assumed: both are proven per offer, and an offer whose
-   * boundary this daemon cannot prove is declined non-retryably rather than
-   * started without one.
-   *
-   * A PRESENT section is validated here, at construction, the same discipline
-   * `deviceAssertion` and `inputPreparation` follow: a non-absolute `dir`, or a
-   * `launcherInterpreter` that is not an existing regular file, is a
-   * construction error rather than a per-offer decline nobody reads. What
-   * cannot be decided here is deliberately left to the resolver: whether the
-   * directory is still non-writable is a fact about the filesystem NOW, so it
-   * is proven once per offer and never cached.
-   */
-  mcpLaunchCwd?: McpLaunchCwdConfig;
-  /**
-   * The host's install-record authority for MCP toolset server
-   * implementations (`./tool-implementation-identity.ts`), forwarded verbatim
-   * to `TaskRunnerDeps.toolImplementationAuthority`.
-   *
-   * This SDK ships NO resolver and NO default, and there is nothing to
-   * validate here: an absent section is the supported state, and it means
-   * every implementation identity this daemon resolves is
-   * `resolver_unconfigured`. An absolute path is not an attestation, so a
-   * daemon without this section proves nothing about which executable serves a
-   * tool call and says so rather than implying otherwise.
-   *
-   * What a PRESENT authority buys is the refusal: an install it attested is
-   * re-measured before every spawn of that server, and a spawn whose artifact
-   * no longer measures the same is declined non-retryably.
-   */
-  toolImplementationAuthority?: ToolImplementationAuthority;
 }
 
 /**
@@ -765,8 +694,6 @@ export interface InputPreparationDaemonConfig {
 export interface AgentEgressConfig {
   /** Exact policy the daemon is willing to consume from an Agent offer. */
   policy: AgentEgressPolicy;
-  /** Named redaction hook for explicit contentful trajectory only. */
-  sanitizer?: AgentEgressSanitizer;
   /**
    * Device-local additions required to make one server-selected transfer
    * policy executable. These values only supplement `policy.transfers`: a
@@ -1063,12 +990,15 @@ function isRuntimeId(id: string): id is RuntimeId {
 }
 
 /** Runtimes actually detected as present on this device, typed per protocol §10 gap #4 (`ConnHelloPayload.runtimes`). Computed once at `start()` — re-probing on every reconnect would mean re-spawning each runtime's `--version` check for no real benefit within one daemon lifetime. */
-async function detectRuntimes(adapters: RuntimeAdapter[], authority: ToolImplementationAuthority | undefined): Promise<{ runtimes: RuntimeInfo[]; harnesses: HarnessInfo[] }> {
-  const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: await observeRuntimeDetection(adapter, authority) })));
+async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{ runtimes: RuntimeInfo[]; harnesses: HarnessInfo[] }> {
+  const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: await observeRuntimeDetection(adapter) })));
   const runtimes: RuntimeInfo[] = [];
   const harnesses: HarnessInfo[] = [];
   for (const { adapter, detected } of detections) {
     if (detected.kind !== 'available') continue;
+    if (detected.advisory !== undefined) {
+      console.warn(`[byok/client] ${adapter.descriptor.id} ${detected.version ?? '(unknown version)'} is not the qualified ${detected.advisory.qualifiedVersion}; continuing`);
+    }
     if (!isRuntimeId(adapter.descriptor.id)) {
       harnesses.push({ id: HarnessIdSchema.parse(adapter.descriptor.id),
         ...(detected.version === undefined ? {} : { version: detected.version }),
@@ -1261,11 +1191,11 @@ const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['pi', 'claude', 'codex'];
 function buildAdapter(id: RuntimeId, config: DaemonConfig): RuntimeAdapter {
   switch (id) {
     case 'pi':
-      return new PiAdapter({ byokLauncher: config.piByokLauncher, ...(config.durablePi === true ? { durablePi: { replicaRoot: path.join(DeviceStore.resolveDir(config.productId, config.storeDir), 'durable') } } : {}) });
+      return new PiAdapter({ byokLauncher: config.piByokLauncher, ...(config.sdkHelperHost === undefined ? {} : { sdkHelperHost: config.sdkHelperHost }), ...(config.durablePi === true ? { durablePi: { replicaRoot: path.join(DeviceStore.resolveDir(config.productId, config.storeDir), 'durable') } } : {}) });
     case 'claude':
       return new ClaudeAdapter();
     case 'codex':
-      return new CodexAdapter({ sdkHelperHost: config.sdkHelperHost });
+      return new CodexAdapter(config.codexSandbox === undefined ? {} : { sandbox: config.codexSandbox });
   }
 }
 
@@ -1338,47 +1268,6 @@ function resolveDeviceAssertionTtlMs(config: DeviceAssertionConfig | undefined):
   return ttlMs;
 }
 
-/**
- * Validates `DaemonConfig.mcpLaunchCwd` — see that field's own doc comment for
- * why this is a construction error and what is deliberately NOT checked here.
- *
- * `launcherInterpreter` is stat'ed (following symlinks: a packaged Node is
- * routinely a symlink into a versioned prefix) and required to be a regular
- * file. An attested interpreter that does not exist would otherwise surface as
- * a spawn failure inside the first task that needed a launcher-wrapped
- * runtime, long after the operator could connect it to what they configured.
- */
-function validateMcpLaunchCwd(config: McpLaunchCwdConfig | undefined): McpLaunchCwdConfig | undefined {
-  if (config === undefined) return undefined;
-  if (config.dir !== undefined && (!path.isAbsolute(config.dir) || /[\u0000\r\n]/u.test(config.dir))) {
-    throw new Error(
-      `DaemonConfig.mcpLaunchCwd.dir must be an absolute directory path — got ${JSON.stringify(config.dir)}. Omit the section to use the platform default (\`/\` on POSIX, %SystemRoot% on Windows).`,
-    );
-  }
-  const interpreter = config.launcherInterpreter;
-  if (interpreter !== undefined) {
-    if (!path.isAbsolute(interpreter) || /[\u0000\r\n]/u.test(interpreter)) {
-      throw new Error(
-        `DaemonConfig.mcpLaunchCwd.launcherInterpreter must be an absolute executable path — got ${JSON.stringify(interpreter)}`,
-      );
-    }
-    let stats;
-    try {
-      stats = statSync(interpreter);
-    } catch {
-      throw new Error(
-        `DaemonConfig.mcpLaunchCwd.launcherInterpreter ${JSON.stringify(interpreter)} does not exist`,
-      );
-    }
-    if (!stats.isFile()) {
-      throw new Error(
-        `DaemonConfig.mcpLaunchCwd.launcherInterpreter ${JSON.stringify(interpreter)} is not a regular file`,
-      );
-    }
-  }
-  return config;
-}
-
 export function createDaemonWithAdapters(
   config: DaemonConfig,
   adapters: RuntimeAdapter[],
@@ -1401,6 +1290,18 @@ export function buildDaemonWithAdapters(
   overrides: DaemonOverrides = {},
   assertionProbe?: AssertionIssueProbe,
 ): Daemon {
+  if (Object.hasOwn(config, 'permissionDefaults')) {
+    throw new Error('DaemonConfig.permissionDefaults was removed: the local agent\'s own permission settings apply');
+  }
+  if (config.agentEgress !== undefined && Object.hasOwn(config.agentEgress, 'sanitizer')) {
+    throw new Error('DaemonConfig.agentEgress.sanitizer was removed: Agent egress goes to the Host as is');
+  }
+  if (Object.hasOwn(config, 'mcpLaunchCwd')) {
+    throw new Error('DaemonConfig.mcpLaunchCwd was removed: MCP servers start in the session cwd, as the agent runtime does');
+  }
+  if (Object.hasOwn(config, 'toolImplementationAuthority')) {
+    throw new Error('DaemonConfig.toolImplementationAuthority was removed: the SDK does not attest tool or runtime executables');
+  }
   if (config.providerProvisioning !== undefined && typeof config.providerProvisioning !== 'function') {
     throw new Error('DaemonConfig.providerProvisioning must be a handler function when present');
   }
@@ -1440,6 +1341,9 @@ export function buildDaemonWithAdapters(
   const agentMemoryMcpBin = config.agentHome === undefined
     ? undefined
     : resolveAgentMemoryMcpBin(externalAgentMemoryFilesystem, config.sdkHelperHost);
+  const agentMemoryDescribeBin = config.agentHome === undefined
+    ? undefined
+    : resolveAgentMemoryDescribeBin(externalAgentMemoryFilesystem, config.sdkHelperHost);
   const localAgentRelease = resolveLocalAgentReleaseIdentity(config.localAgentRelease);
   const toolsetRegistry = new McpToolsetRegistry(config.mcpToolsets);
   validatePiByokLauncherConfig(config.piByokLauncher);
@@ -1504,12 +1408,12 @@ export function buildDaemonWithAdapters(
   const agentHomeAttemptLimit = config.maxConcurrentMutableSessionsPerAgentHome
     ?? DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME;
   const egressPolicy = resolveAgentEgressPolicy(config.agentEgress?.policy);
-  const egressBatcherOptions: ProgressBatcherOptions | undefined = egressPolicy.activity.mode === 'contentful-trajectory'
-    ? {
+  const egressBatcherOptions: ProgressBatcherOptions | undefined = config.agentEgress === undefined
+    ? config.progressBatch
+    : {
         ...config.progressBatch,
         flushIntervalMs: Math.min(config.progressBatch?.flushIntervalMs ?? 250, egressPolicy.activity.maxCoalesceMs),
-      }
-    : config.progressBatch;
+      };
 
   // Same up-front discipline as `maxTaskOutputBytes` above: the presence
   // cadence is pure config, so a band violation is a construction error rather
@@ -1532,7 +1436,6 @@ export function buildDaemonWithAdapters(
   // Resolved into a `Set` (exact membership, no ordering, no pattern) and a
   // number here, once, so the handler below cannot read a different allowlist
   // or a different TTL than the one that was validated.
-  const mcpLaunchCwd = validateMcpLaunchCwd(config.mcpLaunchCwd);
   const deviceAssertionAudiences = resolveDeviceAssertionAudiences(config.deviceAssertion);
   const deviceAssertionTtlMs = resolveDeviceAssertionTtlMs(config.deviceAssertion);
   /**
@@ -1566,43 +1469,24 @@ export function buildDaemonWithAdapters(
   const inputPreparationLimits =
     config.inputPreparation === undefined ? undefined : validateInputPreparationLimits(config.inputPreparation.limits);
   /**
-   * The ONE prepared-tool-surface entry, bound to this daemon's registry,
-   * launch-cwd configuration and implementation authority
+   * The ONE prepared-tool-surface entry, bound to this daemon's registry
    * (`./prepared-tool-surface.ts`).
    *
-   * It replaces the remote lane's former `observeRequiredToolsets`, which
-   * probed with a label, a timeout and an environment and nothing else — no
-   * trusted launch directory and no implementation identity. There is
-   * deliberately no second path left: both the local `input_preparation.prepare`
-   * control call and the remote `agent.input.preparation` envelope reach this
-   * assembler through `InputPreparationService.prepare`, so a preparation's
-   * fingerprints and an offer's admission bind the same launch boundary.
+   * There is deliberately no second path: both
+   * the local `input_preparation.prepare` control call and the remote
+   * `agent.input.preparation` envelope reach this assembler through
+   * `InputPreparationService.prepare`, so a preparation's fingerprints and an
+   * offer's admission bind the same facts.
    *
-   * The runtime environment is resolved PER CALL, from the pi descriptor and
-   * `config.runtimeEnvironment`, exactly as the offer path builds it — a value
-   * captured at construction would shadow a later configuration reload.
+   * The runtime environment is resolved PER CALL, exactly as the offer path
+   * builds it — a value captured at construction would miss a later change.
    */
-  const preparationRuntimeEnv = () => {
-    const piDescriptor = adapters.find((adapter) => adapter.descriptor.id === 'pi')?.descriptor;
-    return buildRuntimeEnv({
-      ambient: process.env,
-      ...(piDescriptor?.environmentRequirements === undefined
-        ? {}
-        : { requirements: piDescriptor.environmentRequirements }),
-      ...(config.runtimeEnvironment?.pi?.allow === undefined
-        ? {}
-        : { locallyAllowedNames: config.runtimeEnvironment.pi.allow }),
-    });
-  };
+  const preparationRuntimeEnv = () => buildRuntimeEnv({ ambient: process.env });
   const preparedToolSurface = createPreparedToolSurfaceAssembler({
     memoryAvailable: () => isAgentMemorySecureFilesystemAvailable(config.agentMemoryFilesystem !== undefined),
     toolsetRegistry,
-    ...(mcpLaunchCwd === undefined ? {} : { mcpLaunchCwd }),
     runtimeEnv: preparationRuntimeEnv,
-    ...(config.permissionDefaults === undefined ? {} : { permissionCeiling: config.permissionDefaults }),
-    ...(config.toolImplementationAuthority === undefined
-      ? {}
-      : { toolImplementationAuthority: config.toolImplementationAuthority }),
+    ...(agentMemoryDescribeBin === undefined ? {} : { agentMemoryDescribe: agentMemoryDescribeBin }),
   });
   let inputPreparationService: InputPreparationService | undefined;
   let inputPreparationInitialization: Promise<void> | undefined;
@@ -1621,10 +1505,9 @@ export function buildDaemonWithAdapters(
   function initializeInputPreparation(): Promise<void> {
     return inputPreparationInitialization ??= (async () => {
       if (config.inputPreparation === undefined || inputPreparationLimits === undefined) return;
-      const compiler = await resolvePiInputPreparationCompiler({
-        authority: config.toolImplementationAuthority,
-        env: preparationRuntimeEnv(), sessionCwd: config.workspaceRoot,
-      });
+      // A single-file product bundles Pi and has no installed package to read.
+      const compiler = createPiInputPreparationCompiler(config.sdkHelperHost === undefined
+        ? resolveInstalledPiRuntimeIdentity() : resolvePinnedPiRuntimeIdentity());
       inputPreparationService = createInputPreparationService({
         storeDir, limits: inputPreparationLimits,
         authorityResolver: config.inputPreparation.authorityResolver,
@@ -1686,7 +1569,6 @@ export function buildDaemonWithAdapters(
   // this with the exact loaded DeviceRecord binding before it accepts work.
   let agentEgress = new AgentEgressController({
     policy: egressPolicy,
-    ...(config.agentEgress?.sanitizer === undefined ? {} : { sanitizer: config.agentEgress.sanitizer }),
   });
   const gitWorkspaceManager = config.gitWorkspace ? overrides.gitWorkspace?.manager ?? new GitWorkspaceManager(config.workspaceRoot, { ownerId: stableGitWorkspaceOwnerId(storeDir, config.productId) }) : undefined;
   const gitWorkspaceStore = config.gitWorkspace ? overrides.gitWorkspace?.store ?? new GitWorkspaceStore(storeDir) : undefined;
@@ -2006,10 +1888,7 @@ export function buildDaemonWithAdapters(
         // deactivate it before the new record can be followed by shutdown
         // terminal/progress activity.
         agentEgress.deactivate();
-        agentEgress = new AgentEgressController({
-          policy: egressPolicy,
-          ...(config.agentEgress.sanitizer === undefined ? {} : { sanitizer: config.agentEgress.sanitizer }),
-        });
+        agentEgress = new AgentEgressController({ policy: egressPolicy });
       }
       if (wasRunning) {
         // The pair response has replaced device.json, so the running daemon's
@@ -2129,7 +2008,6 @@ export function buildDaemonWithAdapters(
       agentEgress = new AgentEgressController({
         policy: egressPolicy,
         tenantId: record.tenantId,
-        ...(config.agentEgress.sanitizer === undefined ? {} : { sanitizer: config.agentEgress.sanitizer }),
       });
     }
     // Capability publication happens only after this SDK-owned preflight has
@@ -2140,21 +2018,6 @@ export function buildDaemonWithAdapters(
       await agentEgress.recover(path.join(config.agentHome.hostStorageRoot, 'agents'));
     }
     fleetJitter = createFleetJitter(config.productId, record.deviceId);
-
-    // M5 batch-3 (workstream 1): see `DaemonConfig.permissionDefaults`'s own
-    // doc comment above — a configured ceiling `workspaceRoot` is merged
-    // into every task's effective policy but enforced by no bundled adapter.
-    // Logged once per `start()` (not per task, not per offer) — same
-    // operator-facing, non-fatal `console.warn` convention `checkServerUrl`'s
-    // `dangerouslyAllowInsecureRemote` warning above already uses in this
-    // file. This is purely a LOCAL-ceiling warning: an OFFER independently
-    // asking for its own `workspaceRoot` is a different, fail-closed-declined
-    // case handled by `TaskRunner.handleOffer`, not here.
-    if (config.permissionDefaults?.workspaceRoot !== undefined) {
-      console.warn(
-        `[byok/client] WARNING: permissionDefaults.workspaceRoot ("${config.permissionDefaults.workspaceRoot}") is configured, but no bundled runtime adapter (pi/claude/codex) enforces PermissionPolicy.workspaceRoot — every adapter confines a task to ctx.workspaceDir instead. This ceiling value has no enforcement effect; see docs/security.md's "Workspace confinement is a convention, not a sandbox" section.`,
-      );
-    }
 
     const journalIdentity: JournalIdentity | undefined = activeJournal
       ? { tenantId: record.tenantId, productId: config.productId, deviceId: record.deviceId }
@@ -2225,7 +2088,7 @@ export function buildDaemonWithAdapters(
 
     blobLifecycleAbort = new AbortController();
     const [{ runtimes, harnesses }, blobClient] = await Promise.all([
-      detectRuntimes(adapters, config.toolImplementationAuthority),
+      detectRuntimes(adapters),
       Promise.resolve(new BlobClient(config.serverUrl, auth, { signal: blobLifecycleAbort.signal })),
     ]);
     // M3-2a: local runtime-detection result — computed once per `start()`,
@@ -2284,7 +2147,7 @@ export function buildDaemonWithAdapters(
      * That completion is ACCEPTED by cloud: the completion route asserts no
      * device capability (`cloud.ts`'s `completeInputPreparationFromStores`),
      * precisely so this rejection is recordable by a device that never
-     * advertised `agent-input-preparation-v8`. The flag remains the admission
+     * advertised `agent-input-preparation-v9`. The flag remains the admission
      * gate on `enqueueInputPreparation`.
      *
      * The handler takes the service directly, so a preparation runs IN-PROCESS.
@@ -2328,7 +2191,7 @@ export function buildDaemonWithAdapters(
 
     // The journal owns terminal bytes; the transport owns one delivery queue.
     // A local write failure must never bypass durability and send different truth.
-    const sendSanitizedEnvelope: TaskRunnerDeps['send'] = (envelope) => {
+    const sendEnvelope: TaskRunnerDeps['send'] = (envelope) => {
       const terminalKind = terminalKindOf(envelope.type);
       if (!activeJournal || !journalIdentity || terminalKind === undefined || envelope.task_id === undefined) {
         observer.handleOutboundEnvelope(envelope);
@@ -2378,33 +2241,12 @@ export function buildDaemonWithAdapters(
         }
       });
     };
-    const sendEnvelope: TaskRunnerDeps['send'] = (candidate) => {
-      // The egress policy is additive and applies only to a running
-      // Agent egress offer, including task.offer_prepared. Plain Agent-home
-      // offers retain their exact established task.* wire semantics.
-      if (candidate.task_id === undefined || runner?.usesAgentEgress(candidate.task_id) !== true) {
-        sendSanitizedEnvelope(candidate);
-        return;
-      }
-      const sanitized = sanitizeEgressEnvelope(candidate, egressPolicy, config.agentEgress?.sanitizer, {
-        resultDocumentSelected: runner.selectsResultDocument(candidate.task_id),
-      });
-      if (!sanitized.ok) {
-        // Fail closed at the single outbound boundary. In particular, a
-        // throwing sanitizer does not leave original candidate bytes on the
-        // WS/long-poll queue as a fallback.
-        agentEgress.noteTransportDrop(sanitized.reason);
-        return;
-      }
-      sendSanitizedEnvelope(sanitized.envelope);
-    };
 
     const deps: TaskRunnerDeps = {
       adapters,
       runtimeAllowlist: config.runtimeAllowlist,
       // M5 batch-3: see `DaemonConfig.runtimePreference`'s own doc comment above.
       runtimePreference: config.runtimePreference,
-      permissionDefaults: config.permissionDefaults,
       workspaceRoot: config.workspaceRoot,
       ...(agentHomeManager === undefined ? {} : { agentHome: agentHomeManager }),
       ...(config.strictAgentOnly === true ? { strictAgentOnly: true } : {}),
@@ -2412,12 +2254,10 @@ export function buildDaemonWithAdapters(
       maxConcurrentMutableSessionsPerAgentHome: agentHomeAttemptLimit,
       ...(agentSessionHandoffs === undefined ? {} : { agentSessionHandoffs }),
       deviceId: record.deviceId,
-      // M5: see `DaemonConfig.runtimeEnvironment`'s own doc comment above.
-      runtimeEnvironment: config.runtimeEnvironment,
       getMcpToolsets: () => toolsetRegistry.snapshot().toolsets,
       // The prepared-Execution lane, present only on a daemon whose input
       // preparation service actually constructed — which is also the only
-      // daemon that advertises `agent-input-preparation-v8` and can hold a record
+      // daemon that advertises `agent-input-preparation-v9` and can hold a record
       // a `task.offer_prepared` could name. The three device facts travel with
       // the store because this file already owns them: re-deriving the
       // installed runtime identity or the operator's policy revision inside the
@@ -2440,13 +2280,6 @@ export function buildDaemonWithAdapters(
             ),
           },
         }),
-      // The operator's launch-boundary input, already validated above. Passed
-      // through unchanged: the daemon holds no second opinion about which
-      // directory is trusted — `resolveTrustedLaunchCwd` proves it per offer.
-      ...(mcpLaunchCwd === undefined ? {} : { mcpLaunchCwd }),
-      ...(config.toolImplementationAuthority === undefined
-        ? {}
-        : { toolImplementationAuthority: config.toolImplementationAuthority }),
       // M3-2a: `send` is already this file's OWN closure (not something
       // `TaskRunner` builds) — every `task.claim`/`task.started`/
       // `task.progress`/`task.artifact`/`task.await_approval`/
@@ -2515,6 +2348,7 @@ export function buildDaemonWithAdapters(
       // builds the exact `deps` object it did before this seam existed.
       ...(config.resultDocument ? { resultDocument: config.resultDocument } : {}),
       ...(agentMemoryMcpBin === undefined ? {} : { agentMemoryMcpBin }),
+      ...(agentMemoryDescribeBin === undefined ? {} : { agentMemoryDescribeBin }),
       ...(config.agentMemoryFilesystem === undefined ? {} : { agentMemoryFilesystemHelperBin: path.resolve(config.agentMemoryFilesystem.helperBin) }),
       ...(config.agentHome !== undefined && config.agentEgress !== undefined ? {
         agentMessageMcpBin: resolveAgentMessageMcpBin(config.sdkHelperHost),
@@ -4168,15 +4002,7 @@ export function buildDaemonWithAdapters(
             sessionRef: record.sessionRef,
           },
         );
-    // The payload's optional host redaction already ran before append/hash;
-    // this second SDK boundary pass validates the frozen envelope without
-    // invoking a non-idempotent host sanitizer a second time.
-    const sanitized = sanitizeEgressEnvelope(envelope, egressPolicy, undefined, { lane: 'reliable' });
-    if (!sanitized.ok) {
-      agentEgress.noteTransportDrop(sanitized.reason, record.agentRef);
-      return;
-    }
-    connection.send(sanitized.envelope);
+    connection.send(envelope);
   }
 
   async function publishReliableAgentEgress(input: AgentReliableEgressInput): Promise<AgentEgressReliableAppendResult> {
@@ -4323,5 +4149,6 @@ export function buildDaemonWithAdapters(
  * in-house runtime, test stubs) use `createDaemonWithAdapters` directly.
  */
 export function createDaemon(config: DaemonConfig): Daemon {
+  if (config.codexSandbox !== undefined) assertCodexSandboxSetting(config.codexSandbox, 'DaemonConfig.codexSandbox');
   return createDaemonWithAdapters(config, buildDefaultAdapters(config));
 }

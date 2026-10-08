@@ -55,10 +55,10 @@ function canonical(value: unknown): string {
   return JSON.stringify(value) ?? 'undefined';
 }
 function validateTarget(target: BotTarget): void {
-  const t = object(target); const allowed = ['deviceId','agentRef','runtime','policy','egressPolicy','requiredToolsets'];
+  const t = object(target); const allowed = ['deviceId','agentRef','runtime','egressPolicy','requiredToolsets'];
   if (Object.keys(t).some(k => !allowed.includes(k))) throw new Error('Target contains undeclared authority');
   text(target.deviceId, 'deviceId', 200); text(target.agentRef?.agentId, 'agentId', 200); text(target.agentRef?.profileRevision, 'profileRevision', 200);
-  if (!['pi','claude','codex'].includes(target.runtime) || !target.policy || !target.egressPolicy) throw new Error('Invalid target');
+  if (!['pi','claude','codex'].includes(target.runtime) || !target.egressPolicy) throw new Error('Invalid target');
 }
 export function parseClarification(document: unknown): ClarificationResult {
   if (Buffer.byteLength(JSON.stringify(document) ?? '') > 16384) throw new Error('Clarification document too large');

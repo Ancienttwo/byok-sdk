@@ -76,7 +76,6 @@ async function setup() {
     taskId: TASK_ID,
     payload: {
       instruction: 'run an Agent memory erase epoch regression task',
-      policy: { mode: 'auto' },
       agentRef: AGENT_REF,
     },
   });
@@ -103,7 +102,6 @@ describe('Agent-memory erase epoch P1 regression', () => {
       taskId: taskB,
       payload: {
         instruction: 'run the second historical Agent memory task',
-        policy: { mode: 'auto' },
         agentRef: AGENT_REF,
       },
     });

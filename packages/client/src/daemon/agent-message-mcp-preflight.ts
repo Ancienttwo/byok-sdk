@@ -21,14 +21,12 @@ export const AGENT_MESSAGE_MCP_PREFLIGHT_TIMEOUT_MS = 10_000;
 export async function preflightAgentMessageMcp(
   server: Readonly<McpStdioServerConfig>,
   env: Readonly<Record<string, string>>,
-  cwd?: string,
   timeoutMs = AGENT_MESSAGE_MCP_PREFLIGHT_TIMEOUT_MS,
 ): Promise<void> {
   const tools = await probeMcpServerTools(AGENT_MESSAGE_MCP_SERVER_NAME, server, {
     label: 'helper',
     timeoutMs,
     env,
-    ...(cwd === undefined ? {} : { cwd }),
   });
   if (!tools.includes(AGENT_MESSAGE_TOOL_NAME)) {
     throw new Error(`helper tools/list omitted ${AGENT_MESSAGE_TOOL_NAME}`);

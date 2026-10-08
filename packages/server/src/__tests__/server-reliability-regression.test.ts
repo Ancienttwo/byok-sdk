@@ -88,7 +88,7 @@ describe('issues #141-#144 server reliability regressions', () => {
   it('#141 reserves a legacy attempt before mailbox visibility and retries one stable offer only', async () => {
     const { cloud, base } = cloudWithFirstMailboxAppendFailure();
     const taskId = 'task-legacy-retry';
-    const input = { taskId, payload: { instruction: 'first body', policy: { mode: 'auto' as const } } };
+    const input = { taskId, payload: { instruction: 'first body' } };
 
     await expect(cloud.enqueueOffer(TENANT, 'device-a', input)).rejects.toThrow('injected mailbox append failure');
     expect(await cloud.readTaskAttempt(TENANT, taskId)).toMatchObject({ taskId, deviceId: 'device-a' });
@@ -96,7 +96,7 @@ describe('issues #141-#144 server reliability regressions', () => {
     await expect(
       cloud.enqueueOffer(TENANT, 'device-a', {
         taskId,
-        payload: { instruction: 'changed before retry', policy: { mode: 'auto' } },
+        payload: { instruction: 'changed before retry' },
       }),
     ).rejects.toMatchObject({ code: 'coordination_input_invalid' });
 
@@ -104,7 +104,7 @@ describe('issues #141-#144 server reliability regressions', () => {
     await expect(
       cloud.enqueueOffer(TENANT, 'device-a', {
         taskId,
-        payload: { instruction: 'changed body', policy: { mode: 'auto' } },
+        payload: { instruction: 'changed body' },
       }),
     ).rejects.toMatchObject({ code: 'coordination_input_invalid' });
 

@@ -55,14 +55,14 @@ const byok = createByokServer({
 // keep its own map from taskId -> handle; this is that map.
 const handles = new Map<string, TaskHandle>();
 
-// `TaskSnapshot` no longer carries `instruction`/`runtime`/`policy`: the
+// `TaskSnapshot` no longer carries `instruction`/`runtime`: the
 // coordination kernel stores a task's OUTCOME, not the host's input, so
 // re-reading them off a snapshot would mean the kernel keeping a second copy
 // of this demo's own form fields. Correct ownership is here — the dispatcher
 // already has them — so the list view joins them back in by taskId.
 const dispatched = new Map<
   string,
-  { instruction: string; runtime?: DispatchInput['runtime']; policy: DispatchInput['policy'] }
+  { instruction: string; runtime?: DispatchInput['runtime'] }
 >();
 
 const publicDir = path.join(exampleDir, 'public');
@@ -122,12 +122,6 @@ app.post('/api/tasks', async (c) => {
   const input: DispatchInput = {
     instruction: body.instruction,
     runtime: body.runtime as DispatchInput['runtime'],
-    // M0's only implemented adapter (pi) can't express `confirm`/`plan` (see
-    // packages/client/src/adapters/pi/permission-mapping.ts) — the SDK's own
-    // dispatch() default is the safer `confirm`, but this demo only ever
-    // talks to pi, so it opts into `auto` explicitly rather than dispatching
-    // a task that would fail-closed on every run.
-    policy: { mode: 'auto' },
     // Optional follow-up-turn pass-through: a caller that already has a
     // prior task's reported `sessionRef` (see GET /api/tasks/:taskId) can
     // carry it into a new dispatch so the runtime adapter resumes that same
@@ -143,7 +137,6 @@ app.post('/api/tasks', async (c) => {
     dispatched.set(handle.taskId, {
       instruction: input.instruction,
       ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
-      policy: input.policy,
     });
     return c.json({ taskId: handle.taskId });
   } catch (err) {

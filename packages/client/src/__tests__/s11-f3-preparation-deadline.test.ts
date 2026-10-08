@@ -68,7 +68,6 @@ function payload(overrides: Record<string, unknown> = {}): AgentInputPreparation
     deadlineAt: new Date(Date.now() + 60_000).toISOString(),
     context: { inline: CONTEXT_JSON },
     agentMemory: 'none', requiredToolsets: ['team'],
-    permissionMode: 'auto',
     ...overrides,
   });
 }
@@ -170,7 +169,7 @@ async function harness(overrides: { authorityResolver?: InputPreparationAuthorit
 function localRequest(wire: AgentInputPreparationPayload): InputPreparationRequestV1 {
   return { format: INPUT_PREPARATION_REQUEST_FORMAT, version: INPUT_PREPARATION_VERSION, requestId: wire.requestId, policyRevision: wire.policyRevision,
     scope: { deviceId: LOCAL_DEVICE_ID, agentRef: wire.agentRef.agentId, profileRevision: wire.agentRef.profileRevision, profileId: wire.profileId },
-    source: wire.source, selection: wire.selection, snapshot: CONTEXT_DOCUMENT as InputPreparationRequestV1['snapshot'], agentMemory: wire.agentMemory, permissionMode: wire.permissionMode, requiredToolsets: wire.requiredToolsets };
+    source: wire.source, selection: wire.selection, snapshot: CONTEXT_DOCUMENT as InputPreparationRequestV1['snapshot'], agentMemory: wire.agentMemory, requiredToolsets: wire.requiredToolsets };
 }
 function observe<T>(promise: Promise<T>) {
   const result: { state: string; value?: T; error?: unknown } = { state: 'pending' };

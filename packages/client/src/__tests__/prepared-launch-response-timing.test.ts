@@ -12,7 +12,6 @@ import { createPiInputPreparationCompiler, resolveInstalledPiRuntimeIdentity } f
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { sealRuntimeOperationManifest, type RuntimePreparedLaunchV1 } from '../types';
-import { trustedCwd } from './fixtures/launch-cwd';
 
 /**
  * The 0.86 response-timing change, at the one seam that has to tolerate it.
@@ -81,7 +80,7 @@ const BINDING = {
 } as const;
 
 /** A REAL retained envelope from the SDK's A1' compile; only its consumer is scripted. */
-async function prepareArtifact(cwd: string, artifactPath: string, launchCwd: string): Promise<RuntimePreparedLaunchV1> {
+async function prepareArtifact(cwd: string, artifactPath: string): Promise<RuntimePreparedLaunchV1> {
   const compiled = await createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity()).compile({
     snapshot: {
       prompt: { systemPrompt: 'You summarise repositories.' },
@@ -109,11 +108,8 @@ async function prepareArtifact(cwd: string, artifactPath: string, launchCwd: str
       model: MODEL,
       binding: { ...BINDING },
     },
-    permissionMode: 'auto',
     toolBindingDigest: 'prepared-timing-tool-binding',
     observationDigest: 'prepared-timing-observation',
-    launch: { cwd: launchCwd },
-    toolImplementations: {},
     toolsetDefinitionRevisions: {},
   };
 }
@@ -144,10 +140,8 @@ async function startPrepared(refuse: boolean): Promise<{ close: () => Promise<vo
       );
     }) as unknown as SpawnFn,
   });
-  const policy = { mode: 'auto' as const };
   const prepared = await adapter.prepare({
-    offer: { instruction: 'summarise the repository', policy },
-    policy,
+    offer: { instruction: 'summarise the repository' },
     descriptor: adapter.descriptor,
     requiredToolsetIds: [],
   });
@@ -157,13 +151,11 @@ async function startPrepared(refuse: boolean): Promise<{ close: () => Promise<vo
     taskId: 'prepared-timing-task',
     runtimeId: 'pi',
     descriptor: adapter.descriptor,
-    policy,
     requiredToolsetIds: [],
     workspace: { workspaceDir: workspace },
     forwardedEnvironmentNames: Object.keys(env).sort(),
   });
-  const launchCwd = await trustedCwd();
-  const preparation = await prepareArtifact(workspace, path.join(recordDir, 'artifact.json'), launchCwd);
+  const preparation = await prepareArtifact(workspace, path.join(recordDir, 'artifact.json'));
   const runtimeLaunch = await prepared.operation.resolveRuntimeLaunch!({
     kind: 'prepared',
     cwd: workspace,
@@ -177,7 +169,6 @@ async function startPrepared(refuse: boolean): Promise<{ close: () => Promise<vo
     manifest,
     env,
     mcpEnv: projectPiMcpEnvironment(env),
-    mcpLaunch: { cwd: launchCwd },
   });
   return { close: () => session.close(), events: session.events };
 }

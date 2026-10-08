@@ -1,0 +1,76 @@
+import type { AvailableInstallation } from "./installation.js";
+
+declare const utcInstantBrand: unique symbol;
+
+/**
+ * An absolute UTC instant in the canonical ISO 8601 form produced by
+ * `Date.prototype.toISOString()`, for example `2026-08-22T09:59:00.000Z`.
+ * Build one with `utcInstantFromDate` (from `@botiverse/oar`), which returns
+ * null for an invalid date; never cast a string to it.
+ */
+export type UtcInstant = string & { readonly [utcInstantBrand]: true };
+
+export interface AccountUsageWindow {
+  /** Human-readable, runtime-provided name of the usage bucket. */
+  readonly label: string;
+  /** Consumed fraction normalized to the inclusive range from 0 to 1. */
+  readonly usedRatio: number;
+  /** Next reset as a UTC instant; omitted when the runtime does not report one. */
+  readonly resetsAt?: UtcInstant;
+  /** The runtime's own key for this window, stable across reads (`label` is for display and may be reworded): key a time series by it. Omitted when the runtime names none. */
+  readonly id?: string;
+  /** The window's length in milliseconds, when the runtime reports it or its key names it; with `resetsAt` it places the window's start. Omitted otherwise. */
+  readonly durationMs?: number;
+}
+
+/** Stable reason codes; no credentials or provider response bodies are included. */
+export type AccountUsageUnsupportedReason =
+  | "capability_unavailable"
+  | "unsupported_installation"
+  | "unsupported_auth_mode"
+  | "unsupported_auth_storage"
+  | "auth_configuration_unavailable"
+  | "endpoint_unavailable"
+  | "quota_unavailable";
+
+export type AccountUsageReauthReason =
+  | "not_authenticated"
+  | "credentials_missing"
+  | "scope_missing"
+  | "credentials_rejected";
+
+export type AccountUsageSnapshot =
+  | {
+      readonly kind: "available";
+      /** Runtime-reported subscription plan or tier; omitted when not exposed. */
+      readonly plan?: string;
+      /** Signed-in account email; omitted when the runtime does not expose one. */
+      readonly email?: string;
+      /**
+       * Runtime-reported account display name (for example a profile nickname);
+       * omitted when not exposed. Lets callers identify accounts that have no email.
+       */
+      readonly displayName?: string;
+      readonly rateLimited: boolean;
+      readonly windows: readonly AccountUsageWindow[];
+    }
+  | {
+      readonly kind: "reauth_required";
+      /** Built-in readers always report a reason; optional for older adapters. */
+      readonly reason?: AccountUsageReauthReason;
+    }
+  | {
+      readonly kind: "unsupported";
+      /** Unsupported for this installation/account does not imply missing capability. */
+      readonly reason?: AccountUsageUnsupportedReason;
+    };
+
+export interface AccountUsageReadOptions {
+  /** Bounds the whole read, every process it starts and request it sends included; each reader has its own default. Past it the read rejects. */
+  readonly timeoutMs?: number;
+}
+
+export type AccountUsageReader = (
+  installation: AvailableInstallation,
+  options?: AccountUsageReadOptions,
+) => Promise<AccountUsageSnapshot>;

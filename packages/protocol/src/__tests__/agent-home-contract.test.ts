@@ -11,7 +11,6 @@ import {
 const agentRef = { agentId: 'agent-1', profileRevision: 'profile-r7' } as const;
 const offer = {
   instruction: 'continue the durable agent task',
-  policy: { mode: 'auto' as const },
   agentRef,
 };
 

@@ -229,7 +229,7 @@ describe('native interaction process-lifetime contract', () => {
     expect(trap).not.toHaveBeenCalled();
   });
   it('freezes explicit capabilities and leaves omission unsupported', () => {
-    const base = { id: 'custom', supportsDispatchSelection: false, environmentRequirements: { credentialNames: [] }, capabilities: { steer: false, resume: false, approvalInteractive: false, permissionModes: ['auto'] } };
+    const base = { id: 'custom', supportsDispatchSelection: false, capabilities: { steer: false, resume: false, approvalInteractive: false } };
     expect(freezeRuntimeAdapterDescriptor(base).capabilities.nativeInteractions).toBeUndefined();
     const declared = ['allow-once', 'deny'] as ('allow-once' | 'deny')[];
     const frozen = freezeRuntimeAdapterDescriptor({ ...base, capabilities: { ...base.capabilities, nativeInteractions: { approvalDecisions: declared, structuredQuestions: true } } });

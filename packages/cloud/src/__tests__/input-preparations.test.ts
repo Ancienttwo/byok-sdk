@@ -49,7 +49,7 @@ function desired(
     deadlineAt: '2026-01-01T00:01:00.000Z',
     context: { inline: '{"prompt":{},"messages":[]}' },
     requiredToolsets: ['team'],
-    agentMemory: 'none' as const, permissionMode: 'auto' as const,
+    agentMemory: 'none' as const,
     ...overrides,
   };
 }
@@ -66,7 +66,7 @@ const RECEIPT: InputPreparationReceiptSummary = {
     source: { revision: 'source-r42', digest: `sha256:${'c'.repeat(64)}` },
     target: { endpoint: 'https://provider.example/v1', modelId: 'model-1' },
     policyRevision: POLICY,
-    agentMemory: 'none', permissionMode: 'auto',
+    agentMemory: 'none',
     runtime: {
       packageName: '@byok-sdk/pi-coding-agent',
       packageVersion: '0.85.1001',
@@ -89,10 +89,10 @@ const RECEIPT: InputPreparationReceiptSummary = {
     residual: [{ key: 'max_tokens', valueClass: 'bounded_integer' }],
     observationDigest: 'sha256:observation',
     toolBindingDigest: 'sha256:binding',
-    toolImplementationKinds: { mcp__teamserver__list: 'unavailable:resolver_unconfigured' },
+    toolNames: ['mcp__teamserver__list'],
   },
   ready: false,
-  readinessReasons: ['accounting_policy_missing', 'executor_identity_unproven'],
+  readinessReasons: ['accounting_policy_missing'],
   artifactExpiresAt: '2026-01-01T01:00:00.000Z',
 };
 
@@ -153,7 +153,7 @@ describe('remote input preparation', () => {
 
   it('refuses a device that declares only the retired unversioned token — version skew never reaches the mailbox', async () => {
     // A 0.19 device declares `agent-input-preparation`; this cloud speaks
-    // `agent-input-preparation-v8`. Relaying would earn a strict-schema 422 on
+    // `agent-input-preparation-v9`. Relaying would earn a strict-schema 422 on
     // the completion PUT and a permanently frozen redelivery cursor, so the
     // refusal lands at enqueue, typed, with nothing durable behind it.
     const harness = createHarness();

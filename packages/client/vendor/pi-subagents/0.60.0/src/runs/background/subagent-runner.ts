@@ -14,11 +14,9 @@ import { createChildTranscriptWriter, type ChildTranscriptWriter } from "../../s
 import { closeSteerInbox, consumeInterruptRequest, consumeSteerRequests, deliverInterruptRequest, deliverStopRequest, deliverTimeoutRequest, enqueueStepSteer, steerAcksDir, steerCapabilityPath, stepSteerInboxDir, watchAsyncControlInbox, type SteerAck, type SteerCapability, type SteerRequest, type StopRequest } from "./control-channel.ts";
 import { appendJsonl as appendRawJsonl, formatOutputArtifactContent, getArtifactPaths, writeArtifact, writeMetadata } from "../../shared/artifacts.ts";
 import { PI_CODING_AGENT_PACKAGE, resolveInstalledPiPackageRoot } from "../shared/pi-spawn.ts";
-// WP4 custody reroute: every child this runner spawns is minted and
-// dispatched by the SDK custody dispatcher (admission -> permit -> descendant
-// record -> helper direct-connect shape); no legacy discovery remains.
-import { dispatchCustodyPiSubagentSpawn } from "../../../../../../src/custody/custody-dispatcher.ts";
-import { consumeWorkflowChildPermit } from "../../shared/workflow-child-permit.ts";
+// SDK delta: print children re-enter the SDK bundle through its helper host
+// instead of a discovered pi CLI.
+import { resolvePiSubagentSpawn } from "../../../../../../src/subagents/spawn.ts";
 import { preflightLaunchCwd } from "../shared/launch-cwd.ts";
 import { captureSingleOutputSnapshot, extractChildWrittenOutput, finalizeSingleOutput, formatSavedOutputReference, injectOutputPathSystemPrompt, injectSingleOutputInstruction, resolveSingleOutput, type SingleOutputSnapshot } from "../shared/single-output.ts";
 import {
@@ -57,6 +55,7 @@ import {
 	type MaxOutputConfig,
 	SUBAGENT_LIFECYCLE_ARTIFACT_VERSION,
 	truncateOutput,
+	getSubagentDepthEnv,
 } from "../../shared/types.ts";
 import {
 	DEFAULT_CONTROL_CONFIG,
@@ -148,8 +147,6 @@ import { resolveWatchdogConfig } from "../../watchdog/settings.ts";
 import { createBoundedByteTail, createBoundedLineReader, formatProtocolOutputLimit, MAX_CHILD_STDERR_BYTES, PI_AGGREGATE_EVENT_PROJECTOR, projectChildLifecycle, type ChildLifecycleAction, type ChildLifecycleState, type ProtocolOutputLimit } from "../shared/child-protocol.ts";
 import { acquireSessionLease, type SessionLeaseRequest } from "../shared/session-lease.ts";
 import { buildExternalCliPrompt, runExternalCli } from "../shared/external-cli-runner.ts";
-import { readAdmittedRunnerConfig } from "../../../../../../src/custody/external-cli-admission.ts";
-import { custodyExternalInstallations } from "../../../../../../src/custody/external-cli-authority.ts";
 import { resolveClaudeCodeLaunch } from "../shared/claude-code-adapter.ts";
 import { resolveCodexExecLaunch } from "../shared/codex-exec-adapter.ts";
 import { resolveCursorAgentLaunch } from "../shared/cursor-agent-adapter.ts";
@@ -640,32 +637,12 @@ function runPiStreaming(
 		const processInstanceId = randomUUID();
 		onWriterProcess?.({ state: "spawning" });
 		const outputStream = fs.createWriteStream(outputFile, { flags: "w" });
-		// WP4 custody reroute: the runner -> print child is the zero-charge
-		// bootstrap edge. The depth env increment (getSubagentDepthEnv) is
-		// discarded here — the frozen counting table is the dispatcher's
-		// alone — and the child env/argv are exactly what the minted
-		// descendant record attests. A dispatch refusal rejects this run and
-		// is reported through the runner's normal failure path.
-		const dispatched = dispatchCustodyPiSubagentSpawn({
-			child: "pi-subagent-print",
+		const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSubagentDepth) };
+		const spawnSpec = resolvePiSubagentSpawn("pi-subagent-print", args);
+		const child = spawn(spawnSpec.command, spawnSpec.args, {
 			cwd,
-			vendorArgv: args,
-			vendorEnv: env ?? {},
-		});
-		const permitLaunch = dispatched.permitLaunch;
-		const permitError = consumeWorkflowChildPermit(permitLaunch.permit, {
-			workflowRunId: permitLaunch.workflowRunId,
-			childKey: permitLaunch.childKey,
-			agent: permitLaunch.agent,
-			launchContractDigest: permitLaunch.launchContractDigest,
-			context: permitLaunch.context,
-			runner: "pi",
-		});
-		if (permitError) throw new Error(`workflow child permit refused: ${permitError}`);
-		const child = spawn(dispatched.command, dispatched.args, {
-			cwd: dispatched.cwd,
 			stdio: ["ignore", "pipe", "pipe"],
-			env: dispatched.env,
+			env: spawnEnv,
 			windowsHide: true,
 			detached: process.platform !== "win32",
 		});
@@ -677,7 +654,7 @@ function runPiStreaming(
 		let model: string | undefined;
 		let writerRegistrationError: string | undefined;
 		if (typeof child.pid === "number") {
-			processTreeController = createOwnedProcessTreeController(child.pid, { observation: "kernel-presence" });
+			processTreeController = createOwnedProcessTreeController(child.pid);
 			try {
 				onWriterProcess?.({ state: "running", pid: child.pid });
 			} catch (writerError) {
@@ -1503,19 +1480,16 @@ async function runSingleStepInner(
 
 	if (step.runner?.type === "external-cli") {
 		const externalCwd = step.cwd ?? ctx.cwd;
-		const installation = custodyExternalInstallations().find(value => value.adapter === step.runner!.adapter);
-		const commandPrefixArgs = installation?.identity.interpreter ? [installation.identity.installPath] : [];
 		const adapterLaunch = step.runner.adapter === "codex-exec" || step.runner.adapter === "codex-exec-writer"
-			? resolveCodexExecLaunch({ adapter: step.runner.adapter, command: installation?.identity.interpreter?.path ?? installation?.identity.installPath ?? step.runner.command, commandPrefixArgs, asyncDir: path.dirname(ctx.outputFile), stepIndex: ctx.flatIndex })
+			? resolveCodexExecLaunch({ adapter: step.runner.adapter, command: step.runner.command, asyncDir: path.dirname(ctx.outputFile), stepIndex: ctx.flatIndex })
 			: step.runner.adapter === "claude-code" || step.runner.adapter === "claude-code-writer"
-				? resolveClaudeCodeLaunch({ adapter: step.runner.adapter, command: installation?.identity.interpreter?.path ?? installation?.identity.installPath ?? step.runner.command, commandPrefixArgs })
+				? resolveClaudeCodeLaunch({ adapter: step.runner.adapter, command: step.runner.command })
 				: step.runner.adapter === "cursor-agent" || step.runner.adapter === "cursor-agent-writer"
 					? resolveCursorAgentLaunch({ adapter: step.runner.adapter, command: step.runner.command, cwd: externalCwd, asyncDir: path.dirname(ctx.outputFile), stepIndex: ctx.flatIndex })
 				: undefined;
 		const runner = resolveExternalCliRunnerStatus({ ...step.runner, ...(adapterLaunch ? { args: adapterLaunch.args } : {}) });
 		const outputSnapshot = captureSingleOutputSnapshot(step.outputPath);
 		const external = await runExternalCli(omitUndefinedProperties({
-			adapter: step.runner.adapter,
 			command: adapterLaunch?.command ?? runner.command,
 			args: adapterLaunch?.args ?? runner.args,
 			cwd: externalCwd,
@@ -1528,7 +1502,6 @@ async function runSingleStepInner(
 			finalOutputPath: adapterLaunch?.finalOutputPath,
 			promptFilePath: adapterLaunch?.promptFilePath,
 			temporaryDirectories: adapterLaunch?.temporaryDirectories,
-			deadlineAt: ctx.deadlineAt,
 			registerTimeout: ctx.registerTimeout,
 			registerStop: ctx.registerStop,
 			timeoutMessage: ctx.timeoutMessage,
@@ -5630,36 +5603,39 @@ async function runConfiguredSubagent(config: SubagentRunConfig): Promise<void> {
 	}
 }
 
-function startConfiguredSubagent(config: SubagentRunConfig): void {
-	runConfiguredSubagent(config).catch((runErr) => {
+function startConfiguredSubagent(config: SubagentRunConfig): Promise<void> {
+	return runConfiguredSubagent(config).catch((runErr) => {
 		console.error("Subagent runner error:", runErr);
 		process.exit(1);
 	});
 }
 
 /**
- * WP4 in-bundle runner entry: the SDK helper host invokes this with the
- * runner config path carried by the BYOK_SDK_CUSTODY_RUNNER_CONFIG transport
- * commitment, replacing the old jiti child that read process.argv[2]. The
- * argv/stdin branches are preserved from the upstream script tail; only the
- * argv source moved into the parameter.
+ * SDK delta: the in-bundle runner entry. The SDK helper host calls it with the
+ * runner config path from the helper argv, in place of the upstream jiti
+ * child that read process.argv[2] at module load. The argv/stdin branches are
+ * the upstream script tail; only the argv source moved into the parameter.
+ * The returned promise settles when the configured run has finished, so the
+ * helper host can wait for it before the product exits.
  */
-export function runSubagentRunnerEntry(argv: readonly string[] = []): void {
-	const configArg = argv[0] ?? process.argv[2];
+export function runSubagentRunnerEntry(argv: readonly string[] = []): Promise<void> {
+	const configArg = argv[0];
 	if (configArg) {
 		try {
-			const config = readAdmittedRunnerConfig(configArg) as SubagentRunConfig;
+			const configJson = fs.readFileSync(configArg, "utf-8");
+			const config = JSON.parse(configJson) as SubagentRunConfig;
 			try {
 				fs.unlinkSync(configArg);
 			} catch {
 				// Temp config cleanup is best effort.
 			}
-			startConfiguredSubagent(config);
+			return startConfiguredSubagent(config);
 		} catch (err) {
 			console.error("Subagent runner error:", err);
 			process.exit(1);
 		}
-	} else {
+	}
+	return new Promise((resolve) => {
 		let input = "";
 		process.stdin.setEncoding("utf-8");
 		process.stdin.on("data", (chunk) => {
@@ -5668,11 +5644,11 @@ export function runSubagentRunnerEntry(argv: readonly string[] = []): void {
 		process.stdin.on("end", () => {
 			try {
 				const config = JSON.parse(input) as SubagentRunConfig;
-				startConfiguredSubagent(config);
+				startConfiguredSubagent(config).then(resolve);
 			} catch (err) {
 				console.error("Subagent runner error:", err);
 				process.exit(1);
 			}
 		});
-	}
+	});
 }

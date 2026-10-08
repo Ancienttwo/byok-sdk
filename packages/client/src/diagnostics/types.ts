@@ -31,7 +31,6 @@ export interface DiagnosticsSnapshot {
     authPresent?: boolean;
     steer: boolean;
     resume: boolean;
-    permissionModeCount: number;
   }>;
   control:
     | { status: 'offline'; reason: string }

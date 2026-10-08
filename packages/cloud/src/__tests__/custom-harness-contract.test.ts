@@ -5,7 +5,7 @@ import { handleInboundEnvelope } from '../inbound';
 import { tenantStoresFor } from '../tenant-stores';
 import { createHarness, TENANT_A, offerPayload } from './support/harness';
 
-const capabilities = { steer: true, resume: true, approvalInteractive: false, permissionModes: ['auto' as const] };
+const capabilities = { steer: true, resume: true, approvalInteractive: false };
 const inventory = [{ id: 'acme-harness', version: '1.2.3', capabilities }];
 
 async function setup() {
@@ -73,7 +73,7 @@ describe('custom harness protocol authority', () => {
     await stores.devices.recordCapabilities({ capabilities: ['custom-harness'], harnesses: inventory });
     await expect(h.cloud.enqueueOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), harnessId: 'other' } })).rejects.toThrow();
     await expect(h.cloud.enqueueOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), harnessId: 'acme-harness', runtime: 'pi' } })).rejects.toThrow();
-    const hello = createEnvelope('conn.hello', { deviceId, productId: 'test-product', protocolVersions: [1], capabilities: [], runtimes: [], harnesses: inventory });
+    const hello = createEnvelope('conn.hello', { deviceId, productId: 'test-product', protocolVersions: [2], capabilities: [], runtimes: [], harnesses: inventory });
     expect(await handleInboundEnvelope(stores, deviceId, hello)).toBe('rejected');
   });
 

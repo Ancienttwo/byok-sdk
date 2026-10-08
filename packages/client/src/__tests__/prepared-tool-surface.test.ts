@@ -32,22 +32,11 @@ import {
 } from '../daemon/prepared-tool-surface';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { probeMcpServer } from '../daemon/mcp-tools-probe';
-import {
-  assertToolImplementationBeforeSpawn,
-  parseToolImplementationIdentity,
-  realToolImplementationFsProbe,
-  toolImplementationLaunchEnvNamesDigest,
-  toolImplementationLoaderEnvValuesDigest,
-  type ToolImplementationAttestedV1,
-  type ToolImplementationAuthority,
-  type ToolImplementationFsProbe,
-} from '../daemon/tool-implementation-identity';
 import type {
   CompilePreparedInputRequest,
   CompiledPreparedInput,
   InputPreparationCompiler,
 } from '../adapters/pi/input-preparation';
-import { trustedCwd } from './fixtures/launch-cwd';
 import * as preparedAgentMemory from '../daemon/prepared-agent-memory';
 import type { PreparedAgentMemoryState } from '../daemon/prepared-agent-memory';
 import { validatePreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
@@ -61,8 +50,7 @@ const ASSEMBLER_ENV: Readonly<Record<string, string>> = Object.freeze({ PATH: pr
 
 /**
  * The ONE prepared-tool-surface entry (`daemon/prepared-tool-surface.ts`),
- * driven against REAL MCP server children, a REAL toolset registry and the
- * REAL launch boundary of the machine the suite runs on.
+ * driven against REAL MCP server children and a REAL toolset registry.
  *
  * What these cases are for, stated as properties rather than as mechanisms:
  *
@@ -70,11 +58,6 @@ const ASSEMBLER_ENV: Readonly<Record<string, string>> = Object.freeze({ PATH: pr
  *   manifest for the same `requiredToolsets`, byte for byte, because there is
  *   only one thing that can produce one. A path that grew its own observation
  *   would diverge here on the first schema, order or fingerprint difference.
- * - A preparation's servers start inside the proven launch boundary, so a
- *   `bunfig.toml` `preload` planted in a directory the agent can write never
- *   runs before a probed server's own first statement.
- * - An attested server is re-measured before the probe spawn, so a tampered
- *   install refuses the preparation instead of fingerprinting the replacement.
  * - One `requestId` yields one observation. A repeat answers from the durable
  *   record without starting anything, and refuses outright if the evidence it
  *   was frozen against moved.
@@ -110,7 +93,6 @@ function registryWith(recordTo?: string): McpToolsetRegistry {
       mcpServers: {
         teamserver: fixtureServer(recordTo === undefined ? {} : { recordTo }),
       },
-      readOnlyTools: { teamserver: ['echo'] },
     },
   });
 }
@@ -268,7 +250,6 @@ function localRequest(overrides: Partial<InputPreparationRequestV1> = {}): Input
       },
       options: { cacheRetention: 'none', maxTokens: 4_096 },
     },
-    permissionMode: 'auto',
     agentMemory: 'none', requiredToolsets: ['team'],
     snapshot: JSON.parse(CONTEXT_JSON) as InputPreparationRequestV1['snapshot'],
     ...overrides,
@@ -287,7 +268,6 @@ function remotePayload(overrides: Record<string, unknown> = {}): AgentInputPrepa
     deadlineAt: new Date(Date.now() + 60_000).toISOString(),
     context: { inline: CONTEXT_JSON },
     agentMemory: 'none', requiredToolsets: ['team'],
-    permissionMode: 'auto',
     ...overrides,
   });
 }
@@ -379,234 +359,32 @@ describe('one assembly entry, consumed by both preparation paths', () => {
   });
 });
 
-describe('a preparation observes inside the proven launch boundary', () => {
-  it('starts every probed server in the trusted directory, with the planted preload unexecuted', async () => {
-    const recordTo = path.join(await tempDir('byok-prepared-surface-record-'), 'record.jsonl');
-    // The negative control: a `bunfig.toml` `preload` in a directory the agent
-    // can write. It is only ever executed by a child whose cwd is that
-    // directory, so the fixture's `preloaded` flag is the observable that
-    // separates "started in the trusted directory" from "started in the
-    // agent's own home".
-    const agentWritable = await tempDir('byok-prepared-surface-home-');
-    await fs.writeFile(path.join(agentWritable, 'bunfig.toml'), 'preload = ["./preload.mjs"]\n');
-    await fs.writeFile(
-      path.join(agentWritable, 'preload.mjs'),
-      'globalThis.__BYOK_LAUNCH_CWD_PRELOADED__ = true;\n',
-    );
-
-    const result = await assembler(registryWith(recordTo)).assemble({
-      agentMemory: 'none', requiredToolsets: ['team'],
-      permissionMode: 'auto',
-      runtimeIdentity: RUNTIME_IDENTITY,
-    });
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error('unreachable');
-
-    const start = JSON.parse((await fs.readFile(recordTo, 'utf8')).split('\n')[0]!) as {
-      cwd: string;
-      preloaded: boolean;
-    };
-    expect(start.cwd).toBe(await trustedCwd());
-    expect(start.preloaded).toBe(false);
-    expect(result.surface.launch.launchCwd).toBe(await trustedCwd());
-  });
-});
-
-describe('a tampered install refuses the preparation before it is fingerprinted', () => {
-  /**
-   * The seam that lets a non-root test exercise the ownership rule
-   * `resolveToolImplementationIdentity` enforces. Only ownership and the write
-   * bits are overridden; the digest, the size and the inode are read off the
-   * real file.
-   */
-  function rootOwnedProbe(): ToolImplementationFsProbe {
-    return {
-      async lstat(target) {
-        const real = await realToolImplementationFsProbe.lstat(target);
-        return { ...real, uid: 0, mode: real.mode & ~0o222 };
-      },
-      realpath: (target) => realToolImplementationFsProbe.realpath(target),
-      digest: (target) => realToolImplementationFsProbe.digest(target),
-    };
-  }
-
-  async function attestReal(installPath: string, probe: ToolImplementationFsProbe): Promise<ToolImplementationAttestedV1> {
-    const stats = await probe.lstat(installPath);
-    const identity = parseToolImplementationIdentity({
-      kind: 'attested',
-      authority: 'host-install-record',
-      manifestRevision: 'fixture@1',
-      form: 'compiled-executable',
-      installPath,
-      closureDigest: await probe.digest(installPath),
-      closureKind: 'artifact',
-      launchArgv: [],
-      launchCwd: '/',
-      // Measured off the same environment the assembler hands to `spawn`
-      // (`runtimeEnv` above), because that is the fact an identity binds and
-      // the gate re-measures. A fabricated pair would refuse every spawn here
-      // for `launch_env_drift` instead of for the tampering under test.
-      launchEnvNamesDigest: toolImplementationLaunchEnvNamesDigest(ASSEMBLER_ENV),
-      loaderEnvValuesDigest: toolImplementationLoaderEnvValuesDigest(ASSEMBLER_ENV),
-      installStat: {
-        dev: stats.dev, ino: stats.ino, size: stats.size, mtimeMs: stats.mtimeMs,
-        mode: stats.mode, uid: stats.uid, gid: stats.gid,
-      },
-    });
-    return identity as ToolImplementationAttestedV1;
-  }
-
-  it('refuses a server whose attested artifact changed between the attestation and the probe', async () => {
-    const probe = rootOwnedProbe();
-    const artifact = path.join(await tempDir(), 'teamserver-install');
-    await fs.writeFile(artifact, 'original bytes\n');
-    const attested = await attestReal(artifact, probe);
-    // Tampered AFTER the host attested it. The record still names a real file;
-    // its bytes and its stat tuple are no longer the ones that were measured.
-    await fs.writeFile(artifact, 'replaced bytes\n');
-
-    const authority: ToolImplementationAuthority = {
-      resolve: async () => ({
-        kind: 'attested',
-        authority: 'host-install-record',
-        manifestRevision: attested.manifestRevision,
-        form: 'compiled-executable',
-        installPath: attested.installPath,
-        closureDigest: attested.closureDigest,
-        closureKind: 'artifact',
-        launchArgv: [],
-        launchCwd: '/',
-      }),
-    };
-
-    const spawns: string[] = [];
-    const result = await assembler(registryWith(), {
-      toolImplementationAuthority: authority,
-      toolImplementationFsProbe: probe,
-      probe: async (serverName, server, options) => {
-        spawns.push(serverName);
-        return probeMcpServer(serverName, server, options);
-      },
-    }).assemble({ agentMemory: 'none', requiredToolsets: ['team'], permissionMode: 'auto', runtimeIdentity: RUNTIME_IDENTITY });
-
-    // Resolution itself refuses to promote the record past the measurement, so
-    // the identity that reaches the probe is `unavailable` rather than a claim
-    // about a file that changed. The preparation still completes — it simply
-    // proves nothing — and the receipt says so through the recorded kind.
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error('unreachable');
-    expect(new Set(Object.values(result.surface.toolImplementationKinds))).toEqual(
-      new Set(['unavailable:install_record_mismatch']),
-    );
-    expect(spawns).toEqual(['teamserver']);
-  });
-
-  it('refuses the whole preparation when an attested server no longer measures the same at the spawn gate', async () => {
-    const probe = rootOwnedProbe();
-    const artifact = path.join(await tempDir(), 'teamserver-install');
-    await fs.writeFile(artifact, 'original bytes\n');
-    const attested = await attestReal(artifact, probe);
-
-    const authority: ToolImplementationAuthority = {
-      resolve: async () => ({
-        kind: 'attested',
-        authority: 'host-install-record',
-        manifestRevision: attested.manifestRevision,
-        form: 'compiled-executable',
-        installPath: attested.installPath,
-        closureDigest: attested.closureDigest,
-        closureKind: 'artifact',
-        launchArgv: [],
-        launchCwd: '/',
-      }),
-    };
-
-    const result = await assembler(registryWith(), {
-      toolImplementationAuthority: authority,
-      toolImplementationFsProbe: probe,
-      // Between resolve and spawn the artifact is replaced, which is what the
-      // shared pre-spawn gate exists to catch: the preparation refuses rather
-      // than fingerprinting the replacement under the original claim.
-      probe: async (serverName, server, options) => {
-        await fs.writeFile(artifact, 'replaced between resolve and spawn\n');
-        return probeMcpServer(serverName, server, options);
-      },
-    }).assemble({ agentMemory: 'none', requiredToolsets: ['team'], permissionMode: 'auto', runtimeIdentity: RUNTIME_IDENTITY });
-
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('unreachable');
-    expect(result.code).toBe('toolsets_unobservable');
-    expect(result.message).toMatch(/failed implementation reverification before launch/u);
-  });
-
+describe('the two assembly stages share one measured environment', () => {
   it('spawns with the environment stage 1 measured, even when runtimeEnv answers differently the second time', async () => {
     // The two stages are two moments, and `deps.runtimeEnv()` is resolved per
     // call so an operator reload is never shadowed. A reload that lands
     // BETWEEN them must not make stage 2 spawn under an environment stage 1
-    // never measured — that is `launch_env_drift` at the gate for a difference
-    // the preparation itself introduced.
-    const probe = rootOwnedProbe();
-    const artifact = path.join(await tempDir(), 'teamserver-install');
-    await fs.writeFile(artifact, 'original bytes\n');
-    const attested = await attestReal(artifact, probe);
-
-    const authority: ToolImplementationAuthority = {
-      resolve: async () => ({
-        kind: 'attested',
-        authority: 'host-install-record',
-        manifestRevision: attested.manifestRevision,
-        form: 'compiled-executable',
-        installPath: attested.installPath,
-        closureDigest: attested.closureDigest,
-        closureKind: 'artifact',
-        launchArgv: [],
-        launchCwd: '/',
-      }),
-    };
-
+    // never measured.
     let envCalls = 0;
     const spawnedEnvs: Readonly<Record<string, string>>[] = [];
     const result = await assembler(registryWith(), {
-      // First answer: the environment the identity is measured against.
-      // Every later answer carries an extra name, which would move the names
-      // digest and refuse the spawn if stage 2 asked again.
       runtimeEnv: () => {
         envCalls += 1;
         return envCalls === 1
           ? { ...ASSEMBLER_ENV }
           : { ...ASSEMBLER_ENV, RELOADED_BETWEEN_STAGES: '1' };
       },
-      toolImplementationAuthority: authority,
-      toolImplementationFsProbe: probe,
       probe: async (serverName, server, options) => {
-        const env = options.env ?? {};
-        spawnedEnvs.push(env);
-        // The pre-spawn gate `mcp/client.ts` asks before it starts the child,
-        // asked here with the ownership seam a non-root test needs —
-        // `probeMcpServer` forwards no fs probe, so the real one inside it
-        // would refuse every identity this suite attests as root-owned. The
-        // identity is then withheld from the real probe so the gate is asked
-        // exactly once, on the evidence under test.
-        const { implementation, ...withoutIdentity } = options;
-        await assertToolImplementationBeforeSpawn(
-          `MCP toolset server ${JSON.stringify(serverName)}`,
-          implementation,
-          env,
-          probe,
-        );
-        return probeMcpServer(serverName, server, withoutIdentity);
+        spawnedEnvs.push(options.env ?? {});
+        return probeMcpServer(serverName, server, options);
       },
-    }).assemble({ agentMemory: 'none', requiredToolsets: ['team'], permissionMode: 'auto', runtimeIdentity: RUNTIME_IDENTITY });
+    }).assemble({ agentMemory: 'none', requiredToolsets: ['team'], runtimeIdentity: RUNTIME_IDENTITY });
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error('unreachable');
-    // The gate passed: the identity stayed attested rather than refusing the
-    // preparation for drift the stub's second answer would have produced.
-    expect(new Set(Object.values(result.surface.toolImplementationKinds))).toEqual(new Set(['attested']));
     expect(spawnedEnvs).toHaveLength(1);
     expect(spawnedEnvs[0]).not.toHaveProperty('RELOADED_BETWEEN_STAGES');
-    expect(toolImplementationLaunchEnvNamesDigest(spawnedEnvs[0]!))
-      .toBe(toolImplementationLaunchEnvNamesDigest(ASSEMBLER_ENV));
+    expect(Object.keys(spawnedEnvs[0]!).sort()).toEqual(Object.keys(ASSEMBLER_ENV).sort());
   });
 
   it('carries the measured environment on the binding, so stage 1 alone answers it', async () => {
@@ -670,7 +448,6 @@ describe('one requestId, one observation', () => {
       {
         team: {
           mcpServers: { teamserver: fixtureServer({ protocolVersion: '2025-06-18' }) },
-          readOnlyTools: { teamserver: ['echo'] },
         },
       },
       registry.snapshot().revision,
@@ -682,58 +459,15 @@ describe('one requestId, one observation', () => {
   });
 });
 
-describe('the declared permission mode is intent, admitted by the device', () => {
-  it('refuses a mode above the operator ceiling instead of narrowing it', async () => {
-    // The same merge a task offer goes through (`daemon/policy.ts`'s
-    // `computeEffectivePolicy`, which `TaskRunner.handleOffer` calls with this
-    // exact ceiling). Parsing the enum is not admission.
-    const spawns: string[] = [];
-    const result = await assembler(registryWith(), {
-      permissionCeiling: { mode: 'readonly' },
-      probe: async (serverName, server, options) => {
-        spawns.push(serverName);
-        return probeMcpServer(serverName, server, options);
-      },
-    }).assemble({ agentMemory: 'none', requiredToolsets: ['team'], permissionMode: 'auto', runtimeIdentity: RUNTIME_IDENTITY });
-
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error('unreachable');
-    expect(result.code).toBe('permission_mode_denied');
-    // Never a downgrade to the ceiling's mode, and never a spawn: an
-    // unadmitted preparation observes nothing.
-    expect(spawns).toEqual([]);
-  });
-
-  it('filters the manifest through the operator classification the admitted mode requires', async () => {
-    // `readonly` narrows, and it narrows through the ONE policy filter the
-    // ordinary extension registers through. The fixture toolset classifies
-    // exactly one of its two tools read-only.
-    const result = await assembler(registryWith(), { permissionCeiling: { mode: 'readonly' } }).assemble({
-      agentMemory: 'none', requiredToolsets: ['team'],
-      permissionMode: 'readonly',
-      runtimeIdentity: RUNTIME_IDENTITY,
-    });
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error('unreachable');
-
-    expect(result.surface.tools.map((tool) => tool.name)).toEqual(['mcp__teamserver__echo']);
-    // The schemas the model is shown and the executors the manifest binds are
-    // the same set — the filter runs once, before both.
-    expect(Object.keys(result.surface.toolExecutors)).toEqual(['mcp__teamserver__echo']);
-    expect(Object.keys(result.surface.toolImplementationKinds)).toEqual(['mcp__teamserver__echo']);
-  });
-});
-
 describe('the native tool set is PARTIAL and pinned as such', () => {
   it('compiles the observed MCP half only, and says so', async () => {
     // PARTIAL — the prepared NATIVE tool set is not connected to preparation.
-    // Pi's own tools are selected by a runtime policy a task-free preparation
+    // Pi's own tools are selected by the runtime, which a task-free preparation
     // never resolves, so the entry passes `nativeTools: []`; the final Main set
-    // (Q1 = policy-filtered native + MCP) stays the runtime's decision.
+    // (Q1 = native + MCP) stays the runtime's decision.
     // Removing that limit must change this test.
     const result = await assembler(registryWith()).assemble({
       agentMemory: 'none', requiredToolsets: ['team'],
-      permissionMode: 'auto',
       runtimeIdentity: RUNTIME_IDENTITY,
     });
     expect(result.ok).toBe(true);
@@ -749,67 +483,36 @@ describe('the native tool set is PARTIAL and pinned as such', () => {
 // Prepared Agent memory: typed preparation refusals and replay without a probe
 // ---------------------------------------------------------------------------
 
-/** Only uid/mode are overridden: a non-root test cannot create the root-owned install the resolver requires. */
-function rootOwnedProbe(): ToolImplementationFsProbe {
-  return {
-    async lstat(target) {
-      const real = await realToolImplementationFsProbe.lstat(target);
-      return { ...real, uid: 0, mode: real.mode & ~0o222 };
-    },
-    realpath: (target) => realToolImplementationFsProbe.realpath(target),
-    digest: (target) => realToolImplementationFsProbe.digest(target),
-  };
-}
-
-/**
- * An attested SDK memory helper install (both entries) whose artifact is a
- * REAL file the resolver measures. `body` is the child's whole behaviour.
- */
-async function memoryHelper(body: string): Promise<{ authority: ToolImplementationAuthority; rewrite: (next: string) => Promise<void> }> {
+/** An SDK memory descriptor helper whose artifact is a REAL file. `body` is the child's whole behaviour. */
+async function memoryHelper(body: string): Promise<{ describe: { command: string; args: readonly string[] } }> {
   const script = path.join(await tempDir('byok-prepared-memory-helper-'), 'agent-memory-helper');
-  const launchCwd = await trustedCwd();
-  let closureDigest = '';
-  const rewrite = async (next: string): Promise<void> => {
-    await fs.writeFile(script, next);
-    await fs.chmod(script, 0o755);
-    closureDigest = await realToolImplementationFsProbe.digest(script);
-  };
-  await rewrite(body);
-  return {
-    rewrite,
-    authority: {
-      resolve: async (locator) => ({
-        kind: 'attested', authority: 'host-install-record', manifestRevision: 'memory-helper@test',
-        form: 'compiled-executable', installPath: script, closureDigest, closureKind: 'artifact',
-        launchArgv: ['__byok_sdk_helper', (locator as { entry: string }).entry], launchCwd,
-      } as never),
-    },
-  };
+  await fs.writeFile(script, body);
+  await fs.chmod(script, 0o755);
+  return { describe: { command: script, args: ['__byok_sdk_helper', 'agent-memory-describe'] } };
 }
 
-function memoryAssembler(authority: ToolImplementationAuthority, memoryAvailable = true): PreparedToolSurfaceAssembler {
+function memoryAssembler(describe: { command: string; args: readonly string[] }, memoryAvailable = true): PreparedToolSurfaceAssembler {
   return assembler(new McpToolsetRegistry({}), {
     memoryAvailable: () => memoryAvailable,
-    toolImplementationAuthority: authority,
-    toolImplementationFsProbe: rootOwnedProbe(),
+    agentMemoryDescribe: describe,
   });
 }
 
-const MEMORY_ONLY = { agentMemory: 'read', requiredToolsets: [], permissionMode: 'auto', runtimeIdentity: RUNTIME_IDENTITY } as const;
+const MEMORY_ONLY = { agentMemory: 'read', requiredToolsets: [], runtimeIdentity: RUNTIME_IDENTITY } as const;
 
 describe('prepared Agent memory refuses a preparation by its typed C5 code', () => {
-  it('refuses an unavailable secure platform as unsupported_input / agent_memory_unavailable before any helper is resolved', async () => {
+  it('refuses an unavailable secure platform as unsupported_input / agent_memory_unavailable before any helper is started', async () => {
     const helper = await memoryHelper('#!/bin/sh\nexit 0\n');
-    const resolve = vi.spyOn(preparedAgentMemory, 'resolvePreparedMemoryImplementation');
-    const result = await memoryAssembler(helper.authority, false).assemble(MEMORY_ONLY);
+    const observe = vi.spyOn(preparedAgentMemory, 'observePreparedMemory');
+    const result = await memoryAssembler(helper.describe, false).assemble(MEMORY_ONLY);
     expect(result).toMatchObject({ ok: false, code: 'unsupported_input', detail: 'agent_memory_unavailable' });
-    expect(resolve).not.toHaveBeenCalled();
+    expect(observe).not.toHaveBeenCalled();
   });
 
   it('refuses a descriptor that cannot be observed as toolsets_unobservable / agent_memory_descriptor_unobservable, never dropping memory', async () => {
-    // A real attested descriptor child that exits before `initialize`.
+    // A real descriptor child that exits before `initialize`.
     const helper = await memoryHelper('#!/bin/sh\nexit 3\n');
-    const result = await memoryAssembler(helper.authority).assemble(MEMORY_ONLY);
+    const result = await memoryAssembler(helper.describe).assemble(MEMORY_ONLY);
     expect(result).toMatchObject({ ok: false, code: 'toolsets_unobservable', detail: 'agent_memory_descriptor_unobservable' });
   });
 });
@@ -821,7 +524,7 @@ describe('a memory preparation replay never probes the descriptor again', () => 
     tools: AGENT_MEMORY_TOOLS.map(({ name, description, inputSchema, _meta }) => ({ name, description, inputSchema, _meta })),
   });
 
-  async function memoryService(authority: ToolImplementationAuthority) {
+  async function memoryService(describe: { command: string; args: readonly string[] }) {
     const compiler = stubCompiler();
     const service = createInputPreparationService({
       storeDir: await tempDir('byok-prepared-memory-replay-store-'),
@@ -832,7 +535,7 @@ describe('a memory preparation replay never probes the descriptor again', () => 
       },
       counter: fixtureCounter(),
       compiler,
-      toolSurface: memoryAssembler(authority),
+      toolSurface: memoryAssembler(describe),
     });
     await service.open();
     cleanups.push(() => service.stop());
@@ -842,8 +545,8 @@ describe('a memory preparation replay never probes the descriptor again', () => 
   it('answers a replay from the durable record with one descriptor observation in total', async () => {
     const helper = await memoryHelper('#!/bin/sh\nexit 0\n');
     const observe = vi.spyOn(preparedAgentMemory, 'observePreparedMemory')
-      .mockImplementation(async (implementation) => ({ implementation, observation: OBSERVED }));
-    const { service, compiler } = await memoryService(helper.authority);
+      .mockImplementation(async () => ({ observation: OBSERVED }));
+    const { service, compiler } = await memoryService(helper.describe);
     const request = localRequest({ agentMemory: 'read', requiredToolsets: [] });
 
     const first = await service.prepare(request);
@@ -854,33 +557,17 @@ describe('a memory preparation replay never probes the descriptor again', () => 
     expect(observe).toHaveBeenCalledTimes(1);
     expect(compiler.calls).toHaveLength(1);
   });
-
-  it('refuses a replay after the helper install changed, still without a second descriptor observation', async () => {
-    const helper = await memoryHelper('#!/bin/sh\nexit 0\n');
-    const observe = vi.spyOn(preparedAgentMemory, 'observePreparedMemory')
-      .mockImplementation(async (implementation) => ({ implementation, observation: OBSERVED }));
-    const { service } = await memoryService(helper.authority);
-    const request = localRequest({ agentMemory: 'read', requiredToolsets: [] });
-    await service.prepare(request);
-    expect(observe).toHaveBeenCalledTimes(1);
-
-    // Same requestId, a different attested helper artifact behind it.
-    await helper.rewrite('#!/bin/sh\nexit 1\n');
-    await expect(service.prepare(request)).rejects.toMatchObject({ code: 'observation_drift' });
-    expect(observe).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe('a tool-less preparation (requiredToolsets [] and agentMemory none)', () => {
-  const TOOLLESS = { agentMemory: 'none', requiredToolsets: [], permissionMode: 'auto', runtimeIdentity: RUNTIME_IDENTITY } as const;
+  const TOOLLESS = { agentMemory: 'none', requiredToolsets: [], runtimeIdentity: RUNTIME_IDENTITY } as const;
 
-  it('is counted with an empty manifest, the proven launch boundary, and no server probed', async () => {
+  it('is counted with an empty manifest and no server probed', async () => {
     const spawns: string[] = [];
     const bound = await assembler(registryWith()).resolveBinding({ agentMemory: 'none', requiredToolsets: [] });
     if (!bound.ok) throw new Error(`${bound.code}: ${bound.detail}`);
     expect(bound.binding.servers).toEqual([]);
     expect(bound.binding.toolsetDefinitionRevisions).toEqual({});
-    expect(bound.binding.launch.launchCwd.length).toBeGreaterThan(0);
 
     const result = await assembler(registryWith(), {
       probe: async (serverName, server, options) => {
@@ -891,18 +578,10 @@ describe('a tool-less preparation (requiredToolsets [] and agentMemory none)', (
     if (!result.ok) throw new Error(`${result.code}: ${result.detail}`);
     expect(result.surface.tools).toEqual([]);
     expect(result.surface.toolExecutors).toEqual({});
-    expect(result.surface.toolImplementationKinds).toEqual({});
-    expect(result.surface.launch).toEqual(bound.binding.launch);
+    expect(result.surface.toolNames).toEqual([]);
     // The binding digest is the same one stage 1 alone answered.
     expect(result.surface.toolBindingDigest).toBe(bound.binding.toolBindingDigest);
     expect(spawns).toEqual([]);
-  });
-
-  it('keeps refusing a tool-less preparation on a device that can prove no launch directory', async () => {
-    const result = await assembler(registryWith(), {
-      mcpLaunchCwd: { dir: path.join(os.tmpdir(), 'byok-no-such-launch-dir-for-toolless') },
-    }).assemble(TOOLLESS);
-    expect(result).toMatchObject({ ok: false, code: 'launch_boundary_unavailable' });
   });
 
   it('answers a replay from the durable record, and no longer depends on toolsets it never named', async () => {
@@ -927,7 +606,7 @@ describe('a tool-less preparation (requiredToolsets [] and agentMemory none)', (
     // The operator changes a toolset this record never named: same requestId,
     // and the replay is still the same answer from the same record.
     registry.reload(
-      { team: { mcpServers: { teamserver: fixtureServer({ protocolVersion: '2025-06-18' }) }, readOnlyTools: { teamserver: ['echo'] } } },
+      { team: { mcpServers: { teamserver: fixtureServer({ protocolVersion: '2025-06-18' }) } } },
       registry.snapshot().revision,
     );
     expect(await service.prepare(request)).toEqual(first);

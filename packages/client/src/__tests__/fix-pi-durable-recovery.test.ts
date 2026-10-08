@@ -30,11 +30,7 @@ async function fixture(plan: WorkerPlan[]) {
   const journal: string[] = [];
   const children: ChildProcess[] = [];
   const release = vi.fn(async () => {});
-  // Exercise real binding checks with the explicit unconfigured development
-  // identity. The injected spawn launches only our inert fixture, never Pi.
-  const binding = { format: 'byok.implementation-spawn' as const, version: 1 as const,
-    identity: { kind: 'unavailable' as const, reason: 'resolver_unconfigured' as const },
-    command: process.execPath, fixedArgv: [], cwd: root, envCommitments: {} };
+  // The injected spawn launches only our inert fixture, never Pi.
   const session = await startDurablePi({
     input: {
       instruction: 'synthetic instruction', mcpEnv: {},
@@ -45,9 +41,8 @@ async function fixture(plan: WorkerPlan[]) {
       durableContext: { tenantId: 'tenant', lifecycle: { ownsLease: () => true,
         record: async (kind: string, count: number) => { journal.push(`${kind}:${count}`); } } },
     } as DurableStart['input'],
-    runtimeLaunch: { kind: 'pi-durable', credentialSource: 'keys-profile', binding, env: {}, release,
-      declaration: binding.identity, decision: { kind: 'unconfigured', reason: 'resolver_unconfigured' },
-      descendantPlan: null, sessionCwd: home },
+    runtimeLaunch: { kind: 'pi-durable', credentialSource: 'keys-profile', command: process.execPath, fixedArgs: [], cwd: root,
+      projectionDir: path.join(root, 'projection'), env: {}, release, sessionCwd: home },
     replicaRoot: path.join(root, 'replica'),
     launcher: { command: 'inert-test-launcher', profileDbPath: path.join(root, 'unused-profiles'), sessionDir: path.join(root, 'unused-sessions') },
     launcherArgs: [],

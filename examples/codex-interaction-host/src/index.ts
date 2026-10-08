@@ -33,9 +33,6 @@ export async function startFixtureHost(options: FixtureHostOptions): Promise<{
   const host = new TerminalInteractionHost(randomUUID(), randomUUID(), options.output, options.timeoutMs);
   let workspace: string | undefined;
   const removeWorkspace = async () => { if (workspace) await rm(workspace, { recursive: true, force: true }); };
-  // This exact mode is required by the current SDK; it is safe here ONLY because
-  // the fixed fixture never executes tools or calls a provider. It is not a sandbox.
-  const policy = { mode: 'auto' as const };
   const instruction = 'Synthetic native-interaction fixture. Do not execute any command.';
   const env = { PATH: process.env.PATH, FAKE_HOST_SCENARIO: options.scenario,
     ...(options.fixtureReceiptPath ? { FAKE_HOST_RECEIPT: options.fixtureReceiptPath } : {}) };
@@ -46,13 +43,13 @@ export async function startFixtureHost(options: FixtureHostOptions): Promise<{
     const adapter = new CodexAdapter({ resolveBin: () => ({ command, source: 'path' }),
       nativeInteractions: host.nativeInteractions });
     workspace = await mkdtemp(path.join(tmpdir(), 'byok-codex-reference-'));
-    const prepared = await adapter.prepare({ offer: { instruction, policy }, policy,
+    const prepared = await adapter.prepare({ offer: { instruction },
       descriptor: adapter.descriptor, requiredToolsetIds: [] });
     if (prepared.kind === 'reject') throw new Error('fixture adapter refused');
     host.assertOutputAvailable();
     options.signal?.throwIfAborted();
     const manifest = sealRuntimeOperationManifest({ taskId: host.taskId, runtimeId: 'codex',
-      descriptor: adapter.descriptor, policy, requiredToolsetIds: [],
+      descriptor: adapter.descriptor, requiredToolsetIds: [],
       workspace: { workspaceDir: workspace }, forwardedEnvironmentNames: Object.keys(env).sort() });
     started = await prepared.operation.start({ kind: 'instruction', manifest, instruction, env, signal: options.signal });
     const session = started;

@@ -1,12 +1,10 @@
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions';
 import { CodexNativeInteractions } from './native-interactions';
-import { randomBytes } from 'node:crypto';
 import { execFile, type spawn as nodeSpawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
 import type {
   AgentEvent,
-  PermissionMode,
   TaskOfferPayload,
 } from '@byok-sdk/protocol';
 import {
@@ -24,20 +22,6 @@ import {
   RuntimeStartupDisposalFailure,
   isRuntimeExecutionFailure,
 } from '../../runtime-failure';
-import {
-  resolveSdkReservedHelperBin,
-  type SdkHelperHostConfig,
-} from '../../sdk-reserved-helper-host';
-import {
-  wrapMcpServerWithLaunchCwd,
-  type McpLaunchBinding,
-} from '../../daemon/trusted-launch-cwd';
-import {
-  grantFingerprint,
-  resolveMcpToolsetGrants,
-  resolveReservedMcpToolGrants,
-  type McpToolsetGrant,
-} from '../mcp-tool-grants';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import {
@@ -47,15 +31,28 @@ import {
 import { CodexProjection, type CodexRecord } from './projection';
 import { AsyncQueue } from '../../util/async-queue';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin';
-import { mapPermissionPolicyToCodexArgs } from './permission-mapping';
-import { withoutProviderCredentials } from '../provider-credential-environment';
+import { isQualifiedCodexVersion, QUALIFIED_CODEX_VERSION } from './codex-version';
 
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5000;
-const RESERVED_MCP_POLICY_PROBE_TIMEOUT_MS = 5000;
-const PINNED_CODEX_VERSION = '0.160.0';
+/** A Codex `sandbox_mode`, or `inherit` to pass no override so the user's `config.toml` applies. */
+export type CodexSandboxSetting = 'read-only' | 'workspace-write' | 'danger-full-access' | 'inherit';
+const CODEX_SANDBOX_SETTINGS: readonly string[] = ['read-only', 'workspace-write', 'danger-full-access', 'inherit'];
+
+/** Throws a TypeError unless `value` is a {@link CodexSandboxSetting}. */
+export function assertCodexSandboxSetting(value: unknown, label: string): asserts value is CodexSandboxSetting {
+  if (typeof value !== 'string' || !CODEX_SANDBOX_SETTINGS.includes(value)) {
+    throw new TypeError(`${label} must be one of ${CODEX_SANDBOX_SETTINGS.join(', ')}`);
+  }
+}
+
 export interface CodexAdapterOptions {
-  sdkHelperHost?: SdkHelperHostConfig;
+  /**
+   * Codex sandbox for every session, as OAR's `OAR_CODEX_SANDBOX`. Default
+   * `danger-full-access`: no human answers an approval prompt, so a sandbox
+   * denial is a stalled task. `inherit` lets the user's own `config.toml` win.
+   */
+  sandbox?: CodexSandboxSetting;
   resolveBin?: () => ResolvedBin;
   spawnFn?: typeof nodeSpawn;
   maxRetainedBytes?: number;
@@ -64,24 +61,21 @@ export interface CodexAdapterOptions {
   nativeInteractions?: NativeInteractionHostOptions;
 }
 
-/** Codex app-server is experimental. Only the qualified 0.160.0 binary is admitted; no exec compatibility path. */
+/** Codex app-server is experimental and has no exec compatibility path. Version policy: `codex-version.ts`. */
 export class CodexAdapter implements RuntimeAdapter {
   get descriptor() { return freezeRuntimeAdapterDescriptor({
     id: 'codex',
     supportsDispatchSelection: true,
-    requiresMcpToolsetToolObservation: true,
-    mcpServerLaunch: 'launcher-wrapped',
     capabilities: {
       steer: true,
       resume: true,
       approvalInteractive: false,
       ...(this.options.nativeInteractions === undefined ? {} : { nativeInteractions: { approvalDecisions: ['allow-once', 'allow-session', 'deny', 'cancel'] as const, structuredQuestions: true } }),
       mcpToolsets: true,
-      permissionModes: ['auto'],
     },
-    environmentRequirements: { credentialNames: [] },
   }); }
   constructor(private readonly options: CodexAdapterOptions = {}) {
+    if (options.sandbox !== undefined) assertCodexSandboxSetting(options.sandbox, 'CodexAdapterOptions.sandbox');
     this.options = { ...options, ...(options.nativeInteractions === undefined ? {} : { nativeInteractions: snapshotNativeInteractionHostOptions(options.nativeInteractions) }) };
     if (
       !Number.isSafeInteger(options.maxRetainedBytes ?? 16 * 1024 * 1024) ||
@@ -101,8 +95,6 @@ export class CodexAdapter implements RuntimeAdapter {
       const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS);
       if (version.kind !== 'available') return version;
       const text = version.stdout.trim() || version.stderr.trim();
-      if (text !== `codex-cli ${PINNED_CODEX_VERSION}`)
-        return { kind: 'refused', reason: 'runtime_version_unsupported' };
       try {
         await execFileAsync(command, ['app-server', '--help'], {
           timeout: DETECT_TIMEOUT_MS,
@@ -121,7 +113,14 @@ export class CodexAdapter implements RuntimeAdapter {
           auth.stdout + '\n' + auth.stderr,
         );
       } catch {}
-      return { kind: 'available', version: text, authPresent };
+      return {
+        kind: 'available',
+        version: text,
+        authPresent,
+        ...(!isQualifiedCodexVersion(text)
+          ? { advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: QUALIFIED_CODEX_VERSION } as const }
+          : {}),
+      };
     } catch (error) {
       return classifyDetectError(error);
     }
@@ -129,13 +128,6 @@ export class CodexAdapter implements RuntimeAdapter {
   async prepare(
     input: RuntimeAdapterPrepareInput,
   ): Promise<RuntimeAdapterPrepareResult> {
-    const policy = mapPermissionPolicyToCodexArgs(input.policy);
-    if (!policy.ok)
-      return {
-        kind: 'reject',
-        reason: policy.reason ?? 'unsupported Codex policy',
-        retryable: false,
-      };
     let model: string | undefined;
     try {
       model = subscriptionModel(input.offer.dispatchSelection);
@@ -155,44 +147,10 @@ export class CodexAdapter implements RuntimeAdapter {
         retryable: false,
       };
     const command = (this.options.resolveBin ?? resolveCodexBin)().command;
-    const projected = resolveMcpToolsetGrants(
-      input.mcpServers,
-      input.mcpToolsetTools,
-      input.policy.mode,
-    );
-    if (!projected.ok)
-      return { kind: 'reject', reason: projected.reason, retryable: false };
-    const grants = [
-      ...resolveReservedMcpToolGrants(input.mcpServers),
-      ...projected.grants,
-    ];
-    try {
-      for (const grant of grants)
-        await probeCodexMcpToolApproval(
-          command,
-          grant.server,
-          input.mcpServers![grant.server]!,
-          grant.tools,
-        );
-    } catch (error) {
-      return {
-        kind: 'reject',
-        reason: `Codex MCP preflight failed: ${error instanceof Error ? error.message : 'invalid readback'}`,
-        retryable: false,
-      };
-    }
     return {
       kind: 'prepared',
       operation: {
-        start: (start) =>
-          this.start(
-            start,
-            command,
-            model,
-            projected.grants,
-            grants,
-            input.policy.mode,
-          ),
+        start: (start) => this.start(start, command, model),
       },
     };
   }
@@ -200,22 +158,7 @@ export class CodexAdapter implements RuntimeAdapter {
     input: RuntimeOperationStartInput,
     command: string,
     model: string | undefined,
-    prepared: readonly McpToolsetGrant[],
-    grants: readonly McpToolsetGrant[],
-    mode: PermissionMode,
   ): Promise<Session> {
-    const actual = resolveMcpToolsetGrants(
-      input.mcpServers,
-      input.mcpToolsetTools,
-      mode,
-    );
-    if (
-      !actual.ok ||
-      grantFingerprint(actual.grants) !== grantFingerprint(prepared)
-    )
-      throw authority(
-        'prepared codex operation received different MCP toolset tool authority',
-      );
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string')
       throw authority('codex requires a resolved instruction');
     if (subscriptionModel(input.manifest.dispatchSelection) !== model)
@@ -225,16 +168,8 @@ export class CodexAdapter implements RuntimeAdapter {
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('codex manifest has no sealed cwd');
     const workspace = await fs.realpath(cwd);
-    // Operator allow cannot opt this subscription runtime into env credentials.
-    // Strip before adding the task-owned MCP transport payloads, never ambient env.
-    const env = withoutProviderCredentials(input.env);
-    const configArgs = codexMcpConfigArgs(
-      input.mcpServers,
-      env,
-      this.options.sdkHelperHost,
-      grants,
-      input.mcpLaunch,
-    );
+    // As OAR: the servers go in the thread/start or thread/resume config.
+    const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
     const spawned = createOwnedLineProcessSpawn({
       spawnFn: this.options.spawnFn,
     });
@@ -249,7 +184,7 @@ export class CodexAdapter implements RuntimeAdapter {
     try {
       const raw = await codexSession(
         (bin, args, options) => {
-          const child = spawned(bin, [...args, ...configArgs], options);
+          const child = spawned(bin, args, options);
           session.own(child);
           void child.exited.then(
             () => session.exited(),
@@ -260,9 +195,11 @@ export class CodexAdapter implements RuntimeAdapter {
         { kind: 'available', via: 'executable', command },
         {
           cwd,
-          env: env as Record<string, string>,
+          env: input.env as Record<string, string>,
           ...(model === undefined ? {} : { model }),
           ...(this.options.nativeInteractions === undefined ? {} : { approvalPolicy: "on-request" as const }),
+          sandboxMode: this.options.sandbox ?? 'danger-full-access',
+          ...(mcpServers.length === 0 ? {} : { mcpServers }),
           ...(input.manifest.sessionRef === undefined
             ? {}
             : { resume: input.manifest.sessionRef }),
@@ -448,8 +385,6 @@ class CodexSession implements Session {
   async followUp(task: TaskOfferPayload): Promise<void> {
     if (typeof task.instruction !== 'string')
       throw new PolicyUnsupportedError('codex requires a string instruction');
-    if (!mapPermissionPolicyToCodexArgs(task.policy ?? { mode: 'auto' }).ok)
-      throw new PolicyUnsupportedError('unsupported Codex policy');
     const model = subscriptionModel(task.dispatchSelection);
     if (model !== undefined && model !== this.model)
       throw new PolicyUnsupportedError(
@@ -542,141 +477,4 @@ function subscriptionModel(
       'codex cannot execute this runtime selection',
     );
   return selection.modelId;
-}
-
-async function probeCodexMcpToolApproval(
-  command: string,
-  name: string,
-  server: NonNullable<RuntimeAdapterPrepareInput['mcpServers']>[string],
-  tools: readonly string[],
-): Promise<void> {
-  // Qualified app-server 0.160.0 does not accept the old exec ignore-user-config flag.
-  // Pin the named server's exact enabled_tools and per-tool settings and read back only that grant.
-  const probeArgs = [
-    'mcp',
-    'get',
-    name,
-    '--json',
-    '-c',
-    `mcp_servers.${name}.command=${JSON.stringify(server.command)}`,
-    ...codexMcpToolApprovalArgs(name, tools),
-  ];
-  const result = await execFileAsync(command, probeArgs, {
-    timeout: RESERVED_MCP_POLICY_PROBE_TIMEOUT_MS,
-    killSignal: 'SIGKILL',
-  });
-  const parsed = JSON.parse(result.stdout) as {
-    name?: unknown;
-    enabled?: unknown;
-    enabled_tools?: unknown;
-  };
-  const readBack = Array.isArray(parsed.enabled_tools)
-    ? parsed.enabled_tools
-    : undefined;
-  if (
-    parsed.name !== name ||
-    parsed.enabled !== true ||
-    readBack === undefined ||
-    readBack.length !== tools.length ||
-    readBack.some((tool, index) => tool !== tools[index])
-  ) {
-    throw new Error(
-      `Codex did not read back the exact tool allowlist for MCP server "${name}"`,
-    );
-  }
-}
-
-/** The one-server grant pair: an exact tool allowlist, and per-tool approval for exactly those tools. */
-function codexMcpToolApprovalArgs(
-  name: string,
-  tools: readonly string[],
-): string[] {
-  const args = [
-    '-c',
-    `mcp_servers.${name}.enabled_tools=${JSON.stringify([...tools])}`,
-  ];
-  for (const tool of tools) {
-    args.push(
-      '-c',
-      `mcp_servers.${name}.tools.${tool}.approval_mode="approve"`,
-    );
-  }
-  return args;
-}
-
-function codexMcpConfigArgs(
-  servers: RuntimeOperationStartInput['mcpServers'],
-  env: NodeJS.ProcessEnv,
-  helperHost: SdkHelperHostConfig | undefined,
-  grants: readonly McpToolsetGrant[] = [],
-  launch?: McpLaunchBinding,
-): string[] {
-  if (servers === undefined || Object.keys(servers).length === 0) return [];
-  // Codex spawns every server itself from these `-c` overrides, and
-  // `mcp_servers.*` has no cwd field — the child would inherit the CLI's cwd,
-  // which for an Agent task is the Agent home the agent writes by design, and
-  // from which a `bun --compile` server binary runs `bunfig.toml` `preload`
-  // before its own code. The `mcp-env` helper that unseals each server's
-  // environment is therefore itself launched through this package's
-  // `bin/byok-launch-cwd.mjs`, which chdirs into the daemon's
-  // proven-non-writable directory before exec'ing it; the real server inherits
-  // that directory from the helper. The CLI's own cwd is unchanged.
-  if (launch?.launcher === undefined) {
-    throw new RuntimeExecutionFailure({
-      phase: 'start',
-      category: 'authority',
-      retry: 'non-retryable',
-      reason:
-        'prepared codex operation received MCP servers without a trusted launch directory',
-    });
-  }
-  const launchBinding = { cwd: launch.cwd, launcher: launch.launcher };
-  const grantedTools = new Map(
-    grants.map((grant) => [grant.server, grant.tools] as const),
-  );
-  const args: string[] = []; // app-server 0.160.0 has no ignore-user-config flag.
-  for (const [name, server] of Object.entries(servers).sort(([left], [right]) =>
-    left.localeCompare(right),
-  )) {
-    const key = `BYOK_MCP_PAYLOAD_${randomBytes(16).toString('hex').toUpperCase()}`;
-    env[key] = JSON.stringify(server);
-    let helper;
-    try {
-      helper = wrapMcpServerWithLaunchCwd(
-        resolveSdkReservedHelperBin('mcp-env', helperHost),
-        launchBinding,
-      );
-    } catch (cause) {
-      // Same reason as the claude adapter: a `launch_cwd_*` refusal is this
-      // adapter's own pre-spawn refusal and must arrive typed, or TaskRunner
-      // projects it as a generic `runtime adapter contract violation during
-      // start` and the operator never sees which rule refused.
-      throw new RuntimeExecutionFailure(
-        {
-          phase: 'start',
-          category: 'authority',
-          retry: 'non-retryable',
-          reason: `prepared codex operation cannot launch an MCP server in the trusted launch directory: ${cause instanceof Error ? cause.message : 'launch_cwd_target_refused'}`,
-        },
-        { cause },
-      );
-    }
-    args.push(
-      '-c',
-      `mcp_servers.${name}.command=${JSON.stringify(helper.command)}`,
-    );
-    args.push(
-      '-c',
-      `mcp_servers.${name}.args=${JSON.stringify([...(helper.args ?? [])])}`,
-    );
-    args.push(
-      '-c',
-      `mcp_servers.${name}.env.BYOK_MCP_ENV_KEY=${JSON.stringify(key)}`,
-    );
-    args.push('-c', `mcp_servers.${name}.env_vars=${JSON.stringify([key])}`);
-    const granted = grantedTools.get(name);
-    if (granted !== undefined)
-      args.push(...codexMcpToolApprovalArgs(name, granted));
-  }
-  return args;
 }

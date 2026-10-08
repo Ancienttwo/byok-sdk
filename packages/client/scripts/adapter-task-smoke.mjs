@@ -255,11 +255,6 @@ try {
       storeDir,
       runtimeAllowlist: runtimes,
       runtimePreference: runtimes,
-      runtimeEnvironment: {
-        claude: { allow: ['FAKE_CLAUDE_PROCESS_TREE_FILE', 'FAKE_CLAUDE_HANG_AFTER_TOOL'] },
-        codex: { allow: ['FAKE_CODEX_PROCESS_TREE_FILE', 'FAKE_CODEX_HANG'] },
-        pi: { allow: ['FAKE_PI_PROCESS_TREE_FILE', 'FAKE_PI_HANG_AFTER_TOOL'] },
-      },
       shutdownGraceMs: 2_000,
     },
     adapters,
@@ -296,7 +291,6 @@ try {
         providerId: 'openai',
         modelId: 'gpt-5.2',
       },
-      policy: { mode: 'auto' },
     }),
     'Pi BYOK missing-launcher dispatch',
   );
@@ -319,7 +313,7 @@ try {
 
   for (const runtime of runtimes) {
     const handle = await withTimeout(
-      byok.dispatch({ deviceId, instruction: `adapter task smoke: ${runtime}`, runtime, policy: { mode: 'auto' } }),
+      byok.dispatch({ deviceId, instruction: `adapter task smoke: ${runtime}`, runtime }),
       `${runtime} dispatch`,
     );
     const taskEventsPromise = collectTaskEvents(handle);
@@ -369,7 +363,7 @@ try {
     process.env[envNames.hang] = '1';
     try {
       const handle = await withTimeout(
-        byok.dispatch({ deviceId, instruction: `adapter lifecycle smoke: ${runtime}`, runtime, policy: { mode: 'auto' } }),
+        byok.dispatch({ deviceId, instruction: `adapter lifecycle smoke: ${runtime}`, runtime }),
         `${runtime} lifecycle dispatch`,
       );
       await waitFor(

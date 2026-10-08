@@ -252,7 +252,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       );
       const taskOffer = createEnvelope(
         'task.offer',
-        { instruction: 'do the thing', policy: { mode: 'confirm' } },
+        { instruction: 'do the thing' },
         { taskId: 'task_forged', seq: 100 },
       );
 
@@ -275,7 +275,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       const claim = createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId });
       const forgedOffer = createEnvelope(
         'task.offer',
-        { instruction: 'forged', policy: { mode: 'confirm' } },
+        { instruction: 'forged' },
         { taskId: 'task_forged_2', seq: 999 },
       );
 

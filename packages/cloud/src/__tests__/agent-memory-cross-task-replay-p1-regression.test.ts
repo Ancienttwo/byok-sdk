@@ -78,7 +78,7 @@ describe('Agent-memory cross-task replay P1 regression', () => {
     for (const taskId of ['task-a', 'task-b']) {
       await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
         taskId,
-        payload: { instruction: `run ${taskId}`, policy: { mode: 'auto' }, agentRef: AGENT_REF },
+        payload: { instruction: `run ${taskId}`, agentRef: AGENT_REF },
       });
     }
 

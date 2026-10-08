@@ -14,7 +14,6 @@ import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../bin/agent-m
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
 import { AGENT_MEMORY_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
 import { sealRuntimeOperationManifest, type RuntimePreparedLaunchV1 } from '../types';
-import { trustedCwd } from './fixtures/launch-cwd';
 import { openPreparedMemoryCall } from '../bin/pi-prepared-host';
 import { McpStdioClient } from '../mcp/client';
 
@@ -46,22 +45,6 @@ const MODEL = {
 };
 
 const MEMORY = {
-  implementation: {
-    descriptor: {
-      kind: 'attested', authority: 'host-install-record', manifestRevision: 'descriptor',
-      form: 'compiled-executable', installPath: '/descriptor', closureDigest: 'a'.repeat(64),
-      closureKind: 'artifact', launchArgv: ['__byok_sdk_helper', 'agent-memory-describe'],
-      launchCwd: '/', launchEnvNamesDigest: 'b'.repeat(64), loaderEnvValuesDigest: 'c'.repeat(64),
-      installStat: { dev: 1, ino: 1, size: 1, mtimeMs: 1, mode: 0o100555, uid: 0, gid: 0 },
-    },
-    execution: {
-      kind: 'attested', authority: 'host-install-record', manifestRevision: 'execution',
-      form: 'compiled-executable', installPath: '/execution', closureDigest: 'd'.repeat(64),
-      closureKind: 'artifact', launchArgv: ['__byok_sdk_helper', 'agent-memory-mcp'],
-      launchCwd: '/', launchEnvNamesDigest: 'e'.repeat(64), loaderEnvValuesDigest: 'f'.repeat(64),
-      installStat: { dev: 1, ino: 2, size: 1, mtimeMs: 1, mode: 0o100555, uid: 0, gid: 0 },
-    },
-  },
   observation: validatePreparedAgentMemoryObservation({
     serverInfo: AGENT_MEMORY_MCP_SERVER_INFO,
     protocolVersion: '2025-03-26',
@@ -74,6 +57,7 @@ const MEMORY = {
 function runtimeMemoryConfig() {
   return {
     agentMemory: 'read',
+    cwd: '/',
     memory: MEMORY,
     memoryCall: {
       command: '/execution',
@@ -110,9 +94,9 @@ describe('prepared Agent memory runtime configuration', () => {
       content: [{ type: 'text', text: 'memory result' }],
     } as never);
 
-    // This is a transport-boundary mock: the identity suite owns physical
-    // attestation; this test pins the runtime's descriptor parity and call
-    // routing without pretending a test fixture is an installed SDK helper.
+    // This is a transport-boundary mock: this test pins the runtime's
+    // descriptor parity and call routing without pretending a test fixture is
+    // an installed SDK helper.
     const memoryCall = await openPreparedMemoryCall(runtimeMemoryConfig());
     if (memoryCall === undefined) throw new Error('selected memory produced no runtime call');
     await expect(memoryCall.call('memory_recall', { path: 'MEMORY.md' })).resolves.toEqual({
@@ -149,7 +133,7 @@ describe('prepared Agent memory runtime configuration', () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
-  it('keeps an attested memory helper in private execution config, outside the empty Host MCP map', async () => {
+  it('keeps the memory helper in private execution config, outside the empty Host MCP map', async () => {
     const workspace = await tempDir('byok-prepared-memory-runtime-workspace-');
     const recordDir = await tempDir('byok-prepared-memory-runtime-record-');
     const artifactPath = path.join(recordDir, 'artifact.json');
@@ -177,15 +161,12 @@ describe('prepared Agent memory runtime configuration', () => {
         return spawn(command, [TIMING_HOST, ...args.slice(1)], options);
       }) as unknown as SpawnFn,
     });
-    const policy = { mode: 'auto' as const, allowTools: [] };
     const prepared = await adapter.prepare({
-      offer: { instruction: 'recall the current memory', policy },
-      policy,
+      offer: { instruction: 'recall the current memory' },
       descriptor: adapter.descriptor,
       requiredToolsetIds: [],
     });
     if (prepared.kind === 'reject') throw new Error(prepared.reason);
-    const launchCwd = await trustedCwd();
     const preparation: RuntimePreparedLaunchV1 = {
       agentMemory: 'read',
       memory: MEMORY as never,
@@ -200,11 +181,8 @@ describe('prepared Agent memory runtime configuration', () => {
           policyIdentity: 'policy', profileRevision: 'profile',
         },
       },
-      permissionMode: 'auto',
       toolBindingDigest: 'memory-tool-binding',
       observationDigest: 'memory-observation',
-      launch: { cwd: launchCwd },
-      toolImplementations: {},
       toolsetDefinitionRevisions: {},
     };
     const manifest = sealRuntimeOperationManifest({
@@ -212,7 +190,6 @@ describe('prepared Agent memory runtime configuration', () => {
       taskId: 'prepared-memory-runtime-task',
       runtimeId: 'pi',
       descriptor: adapter.descriptor,
-      policy,
       requiredToolsetIds: [],
       workspace: { workspaceDir: workspace },
       forwardedEnvironmentNames: [],
@@ -229,7 +206,7 @@ describe('prepared Agent memory runtime configuration', () => {
       projectionRoot: path.join(recordDir, 'projections'),
     });
     const memoryServer = {
-      command: '/attested-agent-memory-helper',
+      command: '/agent-memory-helper',
       args: ['__byok_sdk_helper', 'agent-memory-mcp'],
       env: {
         BYOK_STORE_DIR: '/private/store',
@@ -245,7 +222,6 @@ describe('prepared Agent memory runtime configuration', () => {
       manifest,
       env,
       mcpEnv: projectPiMcpEnvironment(env),
-      mcpLaunch: { cwd: launchCwd },
       mcpServers: { [AGENT_MEMORY_MCP_SERVER_NAME]: memoryServer },
     });
     try {

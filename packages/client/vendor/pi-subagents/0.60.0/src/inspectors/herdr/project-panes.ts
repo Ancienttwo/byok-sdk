@@ -1,11 +1,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
-// WP4 custody reroute: the legacy pi discovery seam this module used to
-// launch an interactive pi session is gone. The SDK runtime is headless — an
-// interactive REPL pane is not an attested exec point and cannot be a
-// descendant record — so this lane now refuses with a visible error instead
-// of discovering a launcher.
+// SDK delta: the legacy pi discovery seam this module used to launch an
+// interactive pi session is gone. The SDK runtime is headless and has no
+// interactive pi entry, so this lane refuses with a visible error instead of
+// discovering a launcher.
 import { formatShellCommand } from "./shell-command.ts";
 import { getProjectSubagentsDir } from "../../shared/artifacts.ts";
 import { writeAtomicJson } from "../../shared/atomic-json.ts";
@@ -412,11 +411,10 @@ async function inspectPane(client: HerdrClient, paneId: string, signal?: AbortSi
 
 function projectPaneCommand(message: string | undefined): string {
 	void message;
-	// Fail-closed: an interactive pi session in a pane is not one of the
-	// attested subagent exec points, and the SDK custody runtime mints no
-	// descendant record for one. The refusal is the visible tool result.
+	// The SDK runtime has no interactive pi entry. The refusal is the visible
+	// tool result.
 	return formatShellCommand("printf", [
-		"herdr project pane launch is unavailable in the SDK custody runtime: no attested interactive pi exec point",
+		"herdr project pane launch is unavailable in the SDK runtime: no interactive pi entry",
 	]);
 }
 

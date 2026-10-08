@@ -1,12 +1,10 @@
 import { parsePiMcpEnvironment } from './mcp-environment';
 import { isAbsolute } from 'node:path';
-import { PERMISSION_MODES, type PermissionMode } from '@byok-sdk/protocol';
 import type { CallToolResult } from '@modelcontextprotocol/client';
 import { McpAuthorityError, McpStdioClient, type McpStdioServerSpec } from '../../mcp/client';
 import {
   diffMcpObservation,
   GRANTABLE_TOOL_NAME,
-  type McpClassifiedToolDescriptor,
   type McpServerObservation,
   type McpToolDescriptor,
   type McpToolsetServerObservation,
@@ -14,10 +12,6 @@ import {
 import type { McpToolProjection } from '../../mcp/projection';
 import type { McpToolCallHost } from './mcp-tools';
 import { isReservedMcpServerName } from '../../sdk-reserved-mcp';
-import {
-  parseToolImplementationIdentity,
-  type ToolImplementationIdentityV1,
-} from '../../daemon/tool-implementation-identity';
 
 /**
  * The ONE task-scoped MCP host both Pi entries run on.
@@ -29,15 +23,15 @@ import {
  * "which child executed this tool call", and the prepared lane freezes an
  * executor identity per tool precisely so that question has exactly one.
  *
- * Everything in this file is parsing and process lifecycle. The policy filter,
- * the projection and the registered tool shapes stay in the shared core
+ * Everything in this file is parsing and process lifecycle. The projection and
+ * the registered tool shapes stay in the shared core
  * (`../../mcp/`) and in `./mcp-tools.ts`.
  */
 
 /**
  * The SDK's own Pi control variables, by name shape. Every variable the adapter
  * sets on the Pi child to address this SDK's entries
- * (`BYOK_PI_MCP_CONFIG_PATH`, `BYOK_PI_PERMISSION_MODE`) matches it, so a new
+ * (`BYOK_PI_MCP_CONFIG_PATH`) matches it, so a new
  * one is stripped from MCP server children by existing.
  */
 const BYOK_PI_CONTROL_ENV_PREFIX = /^BYOK_PI_/u;
@@ -65,39 +59,16 @@ export interface TaskScopedMcpConfig {
   readonly mcpEnv: Readonly<Record<string, string>>;
   readonly mcpServers: Readonly<Record<string, McpStdioServerSpec>>;
   /**
-   * Everything the daemon observed, classification included — NOT the subset
-   * the policy allows. Registration narrows it; drift verification does not,
-   * because a server that grew a tool since admission has drifted whether or
-   * not the model would have been shown that tool.
+   * Everything the daemon observed. A server that grew a tool since admission
+   * has drifted.
    */
   readonly observation: Readonly<Record<string, McpToolsetServerObservation>>;
-  /** This task's permission mode, applied to the observation by the shared core. */
-  readonly permissionMode: PermissionMode;
   /**
-   * The working directory every server below is spawned in — the one the
-   * daemon proved this uid cannot write and probed each server in
-   * (`daemon/trusted-launch-cwd.ts`).
-   *
-   * Required whenever this task projects any server, and NOT defaulted here:
-   * omitting it would silently hand the child the Pi process's own cwd, which
-   * is the canonical Agent home — a directory the agent writes by design, and
-   * from which a `bun --compile` server binary reads `bunfig.toml` `preload`
-   * before running its own code.
+   * The working directory every server below is spawned in: the session
+   * workspace or the Agent home, as in OAR. Required whenever this task
+   * projects any server, so a server never inherits a different process cwd.
    */
   readonly launchCwd?: string;
-  /**
-   * What the daemon established about the implementation behind each projected
-   * server, keyed by projected server name
-   * (`daemon/tool-implementation-identity.ts`).
-   *
-   * The values are the daemon's, resolved once at admission; this file does not
-   * resolve, repair or default them. An ATTESTED one is re-measured against the
-   * filesystem before its server is spawned, so a forged entry buys an
-   * immediate refusal rather than a trusted identity — and a malformed one
-   * refuses the whole configuration, because a silently dropped identity is a
-   * spawn that quietly stopped being checked.
-   */
-  readonly toolImplementations: Readonly<Record<string, ToolImplementationIdentityV1>>;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -121,7 +92,7 @@ export function parseMcpServerSpec(name: string, raw: unknown, fail: McpConfigFa
   });
 }
 
-export function parseMcpTool(server: string, raw: unknown, fail: McpConfigFailure): McpClassifiedToolDescriptor {
+export function parseMcpTool(server: string, raw: unknown, fail: McpConfigFailure): McpToolDescriptor {
   if (!isPlainObject(raw) || typeof raw.name !== 'string' || !GRANTABLE_TOOL_NAME.test(raw.name)) {
     fail(`observation.${server} carries a tool without a grantable name`);
   }
@@ -130,19 +101,10 @@ export function parseMcpTool(server: string, raw: unknown, fail: McpConfigFailur
     fail(`observation.${server}.${name} has a non-string description`);
   }
   if (!isPlainObject(raw.inputSchema)) fail(`observation.${server}.${name} has no object inputSchema`);
-  // Present on every tool of a classified toolset and on none of an
-  // unclassified one. A non-boolean is refused rather than coerced: this field
-  // decides what a restricted policy may call, and a truthy string would widen
-  // the very boundary it describes. Live `tools/list` answers carry no
-  // classification at all — the server is not the authority on it.
-  if (raw.readOnly !== undefined && typeof raw.readOnly !== 'boolean') {
-    fail(`observation.${server}.${name} has a non-boolean readOnly classification`);
-  }
   return Object.freeze({
     name,
     description: (raw.description as string | undefined) ?? '',
     inputSchema: raw.inputSchema,
-    ...(raw.readOnly === undefined ? {} : { readOnly: raw.readOnly as boolean }),
   });
 }
 
@@ -179,14 +141,6 @@ export function parseTaskScopedMcpConfig(parsed: unknown, fail: McpConfigFailure
   catch (error) { fail(error instanceof Error ? error.message : String(error)); }
   if (!isPlainObject(parsed.mcpServers)) fail('the task-scoped configuration must contain an mcpServers object');
   if (!isPlainObject(parsed.observation)) fail('the task-scoped configuration must contain an observation object');
-  // Validated against the protocol's own enumeration, not merely "a non-empty
-  // string": this value decides policy in the shared core, and an unrecognized
-  // one would otherwise reach `filterMcpObservationForPolicy` as a mode nobody
-  // wrote a rule for.
-  if (typeof parsed.permissionMode !== 'string'
-    || !(PERMISSION_MODES as readonly string[]).includes(parsed.permissionMode)) {
-    fail(`the task-scoped configuration must contain a permissionMode of [${PERMISSION_MODES.join(', ')}]`);
-  }
   const mcpServers: Record<string, McpStdioServerSpec> = {};
   for (const [name, raw] of Object.entries(parsed.mcpServers)) mcpServers[name] = parseMcpServerSpec(name, raw, fail);
   const observation: Record<string, McpToolsetServerObservation> = {};
@@ -206,20 +160,6 @@ export function parseTaskScopedMcpConfig(parsed: unknown, fail: McpConfigFailure
       fail(`mcpServers.${name} has no daemon observation; refusing to discover its tools here`);
     }
   }
-  const toolImplementations: Record<string, ToolImplementationIdentityV1> = {};
-  if (parsed.toolImplementations !== undefined) {
-    if (!isPlainObject(parsed.toolImplementations)) {
-      fail('the task-scoped configuration toolImplementations must be an object');
-    }
-    for (const [name, raw] of Object.entries(parsed.toolImplementations)) {
-      if (mcpServers[name] === undefined) {
-        fail(`toolImplementations.${name} names a server this task does not project`);
-      }
-      const identity = parseToolImplementationIdentity(raw);
-      if (identity === undefined) fail(`toolImplementations.${name} is not an implementation identity this SDK issued`);
-      toolImplementations[name] = identity;
-    }
-  }
   const launchCwd = parsed.launchCwd;
   if (Object.keys(mcpServers).length > 0) {
     if (typeof launchCwd !== 'string' || !isAbsolute(launchCwd)) {
@@ -232,8 +172,6 @@ export function parseTaskScopedMcpConfig(parsed: unknown, fail: McpConfigFailure
     mcpEnv,
     mcpServers: Object.freeze(mcpServers),
     observation: Object.freeze(observation),
-    permissionMode: parsed.permissionMode as PermissionMode,
-    toolImplementations: Object.freeze(toolImplementations),
     ...(typeof launchCwd === 'string' ? { launchCwd } : {}),
   });
 }
@@ -290,21 +228,9 @@ export class McpServerPool implements McpToolCallHost {
     if (launchCwd === undefined) {
       this.fail(`MCP server "${serverName}" has no launchCwd; refusing to start it in this process's own directory`);
     }
-    const implementation = this.config.toolImplementations[serverName];
     const client = new McpStdioClient(server, {
       label: `MCP toolset server "${serverName}"`,
-      // The core re-measures an ATTESTED identity before it spawns the child and
-      // refuses the connection if the install no longer measures the way the
-      // daemon attested it — never downgrading it to unavailable-and-continue.
-      // A server with no identity (an SDK-reserved helper, or any server on an
-      // unconfigured daemon) carries no claim, so there is nothing to
-      // re-measure.
-      ...(implementation === undefined ? {} : { implementation }),
       env: this.childEnv(),
-      // Passed explicitly rather than inherited: this process's cwd is the Agent
-      // home. `spawn` chdirs in the child before exec, so the server binary's
-      // own runtime initialisation — `bunfig.toml` preload included — already
-      // sees the trusted directory.
       cwd: launchCwd,
     });
     try {

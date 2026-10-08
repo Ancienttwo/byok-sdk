@@ -42,7 +42,7 @@ describe('unknown AgentEvent variant tolerance', () => {
 
   it('a full task.progress envelope with an unknown event type parses via parseMessage without throwing', () => {
     const raw = {
-      v: 1,
+      v: 2,
       id: '11111111-1111-4111-8111-111111111111',
       ts: new Date().toISOString(),
       type: 'task.progress',

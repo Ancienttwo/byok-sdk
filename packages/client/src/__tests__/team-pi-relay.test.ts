@@ -9,7 +9,6 @@ import { PiTeamSession } from '../bin/team-pi-session';
 import { serializePiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { PI_TEAM_OPERATOR_TOKEN } from '../bin/team-pi-operator-entry';
 import { runSdkReservedHelperCommand } from '../sdk-reserved-helper-host';
-import { RUNTIME_LAUNCH_KINDS } from '../daemon/tool-implementation-identity';
 import { runTeamPiRelayCommand } from '../bin/commands/team-pi-relay';
 
 const microtasks = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
@@ -32,7 +31,6 @@ async function fixture() {
 
 describe('Pi native interaction admission', () => {
   it('does not admit the operator entry through daemon runtime or reserved helper dispatch', async () => {
-    expect(RUNTIME_LAUNCH_KINDS).toEqual(['pi-rpc', 'pi-prepared']);
     expect(await runSdkReservedHelperCommand([PI_TEAM_OPERATOR_TOKEN])).toBe(false);
     await expect(runSdkReservedHelperCommand(['__byok_sdk_helper', PI_TEAM_OPERATOR_TOKEN])).rejects.toThrow('invalid SDK-reserved helper command');
   });
@@ -64,7 +62,7 @@ describe('Pi native interaction admission', () => {
       const configPath = path.join(dir, 'operator.json');
       const serialized = serializePiHostConfig({format:'byok.pi.team-operator',version:1,cwd:dir,sessionDir:path.join(dir,'sessions'),
         provider:'zai',model:'glm-5.3',systemPromptPath:prompt,extensionPaths:[extension],
-        mcp:{mcpEnv:{},mcpServers:{},observation:{},permissionMode:'auto'}});
+        mcp:{mcpEnv:{},mcpServers:{},observation:{}}});
       await fs.writeFile(configPath, serialized.bytes);
       invocation = {command:process.execPath,args:[path.resolve('dist/bin/byok-agent.js'),PI_TEAM_OPERATOR_TOKEN,
         `--config-digest=${serialized.digest}`,'--config',configPath]};
@@ -86,7 +84,7 @@ describe('Pi native interaction admission', () => {
     const { dir, extension } = await fixture(); const events: Record<string,unknown>[] = [];
     const host = await PiTeamSession.start({operatorInvocation:{command:process.execPath,args:[path.resolve('dist/bin/byok-agent.js'),PI_TEAM_OPERATOR_TOKEN]},workspaceId:'room',cwd:dir,sessionDir:path.join(dir,'session'),provider:'zai',model:'glm-5.3',systemPrompt:'Synthetic no-model probe.',extensionPaths:[extension],
       env:{...process.env, PI_PROVIDER_API_KEY:'synthetic-relay-key', PI_CODING_AGENT_DIR:dir},
-      mcpConfig:{mcpServers:{},observation:{},permissionMode:'auto'},onEvent:e=>events.push(e)}); children.push(host);
+      mcpConfig:{mcpServers:{},observation:{}},onEvent:e=>events.push(e)}); children.push(host);
     const config = JSON.parse(await fs.readFile(path.join(dir,'session','team-mcp.json'),'utf8'));
     expect(config.mcpEnv.PI_PROVIDER_API_KEY).toBeUndefined();
     expect(config.mcpEnv.PI_CODING_AGENT_DIR).toBeUndefined();

@@ -29,7 +29,6 @@ import {
 import { sealRuntimeOperationManifest } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { startPreparedOperation } from './fixtures/prepared-operation';
-import { trustedCwd } from './fixtures/launch-cwd';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
@@ -285,10 +284,8 @@ describe('SDK-owned Agent home contract', () => {
       descriptor: {
         id: 'pi',
         supportsDispatchSelection: false,
-        capabilities: { steer: false, resume: true, approvalInteractive: false, permissionModes: ['auto'] },
-        environmentRequirements: {},
+        capabilities: { steer: false, resume: true, approvalInteractive: false },
       },
-      policy: { mode: 'auto' },
       requiredToolsetIds: [],
       agentRef: ref('one', 'profile-1'),
       cwd: '/tmp/agent-home-one',
@@ -341,7 +338,7 @@ describe('SDK-owned Agent home contract', () => {
     const agentRef = ref('agent-runtime', 'profile-3');
     await runner.handleEnvelope(createEnvelope(
       'task.offer_for_agent',
-      { instruction: 'run in the durable Agent home', policy: { mode: 'auto' }, runtime: 'pi', agentRef },
+      { instruction: 'run in the durable Agent home', runtime: 'pi', agentRef },
       { taskId: 'task-agent-runtime', seq: 1 },
     ));
 
@@ -392,12 +389,12 @@ describe('SDK-owned Agent home contract', () => {
     await Promise.all([
       runner.handleEnvelope(createEnvelope(
         'task.offer_for_agent',
-        { instruction: 'first conversation', policy: { mode: 'auto' }, runtime: 'pi', agentRef },
+        { instruction: 'first conversation', runtime: 'pi', agentRef },
         { taskId: 'task-parallel-a', seq: 1 },
       )),
       runner.handleEnvelope(createEnvelope(
         'task.offer_for_agent',
-        { instruction: 'second conversation', policy: { mode: 'auto' }, runtime: 'pi', agentRef },
+        { instruction: 'second conversation', runtime: 'pi', agentRef },
         { taskId: 'task-parallel-b', seq: 2 },
       )),
     ]);
@@ -474,7 +471,7 @@ describe('SDK-owned Agent home contract', () => {
 
     await runner.handleEnvelope(createEnvelope(
       'task.offer_for_agent',
-      { instruction: 'fail before session start', policy: { mode: 'auto' }, runtime: 'pi', agentRef },
+      { instruction: 'fail before session start', runtime: 'pi', agentRef },
       { taskId, seq: 1 },
     ));
 
@@ -526,7 +523,7 @@ describe('SDK-owned Agent home contract', () => {
 
     await runner.handleEnvelope(createEnvelope(
       'task.offer_for_agent',
-      { instruction: 'fail while writing handoff', policy: { mode: 'auto' }, runtime: 'pi', agentRef },
+      { instruction: 'fail while writing handoff', runtime: 'pi', agentRef },
       { taskId, seq: 1 },
     ));
 
@@ -587,14 +584,14 @@ describe('SDK-owned Agent home contract', () => {
 
     await runner.handleEnvelope(createEnvelope(
       'task.offer_for_agent',
-      { instruction: 'fail while writing handoff', policy: { mode: 'auto' }, runtime: 'pi', agentRef },
+      { instruction: 'fail while writing handoff', runtime: 'pi', agentRef },
       { taskId, seq: 1 },
     ));
 
     const cwd = await agentHome.layout.canonicalHomePath(agentRef);
     expect(agentHome.executionLeaseManager.activeAttemptCount(cwd)).toBe(1);
     await runner.handleEnvelope(createEnvelope('task.offer_for_agent', {
-      instruction: 'competing writer', policy: { mode: 'auto' }, runtime: 'pi', agentRef,
+      instruction: 'competing writer', runtime: 'pi', agentRef,
     }, { taskId: 'competing-writer', seq: 2 }));
     expect(adapter.sessions).toHaveLength(1);
     expect(sent.at(-1)?.type).toBe('task.decline');
@@ -637,7 +634,7 @@ describe('SDK-owned Agent home contract', () => {
 
     await runner.handleEnvelope(createEnvelope(
       'task.offer_for_agent',
-      { instruction: 'fail safely', policy: { mode: 'auto' }, runtime: 'pi', agentRef },
+      { instruction: 'fail safely', runtime: 'pi', agentRef },
       { taskId: 'task-permanent-prestart-failure', seq: 1 },
     ));
 
@@ -681,7 +678,7 @@ describe('SDK-owned Agent home contract', () => {
 
     await runner.handleEnvelope(createEnvelope(
       'task.offer_for_agent',
-      { instruction: 'complete despite evidence outage', policy: { mode: 'auto' }, runtime: 'pi', agentRef },
+      { instruction: 'complete despite evidence outage', runtime: 'pi', agentRef },
       { taskId: 'task-permanent-active-failure', seq: 1 },
     ));
     adapter.sessions[0]!.emit({ type: 'turn_end' });
@@ -738,7 +735,6 @@ describe('SDK-owned Agent home contract', () => {
       'task.offer_for_agent',
       {
         instruction: 'resume',
-        policy: { mode: 'auto' as const },
         runtime: 'pi' as const,
         sessionRef: 'session-original',
         agentRef,
@@ -788,7 +784,7 @@ describe('SDK-owned Agent home contract', () => {
 
     await runner.handleEnvelope(createEnvelope(
       'task.offer_for_agent',
-      { instruction: 'finish after lease marker conflict', policy: { mode: 'auto' }, runtime: 'pi', agentRef },
+      { instruction: 'finish after lease marker conflict', runtime: 'pi', agentRef },
       { taskId: 'task-release-conflict', seq: 1 },
     ));
     const home = path.join(await fs.realpath(hostStorageRoot), 'agents', agentRef.agentId);
@@ -816,7 +812,9 @@ describe('SDK-owned Agent home contract', () => {
       const cwd = await makeRoot();
       const observedCwds: Array<string | URL | undefined> = [];
       const piSessionCwds: string[] = [];
-      const expectedProcessCwd = runtime === 'pi' ? await trustedCwd() : cwd;
+      // Every runtime process starts in the session cwd, as in OAR. Pi binds it
+      // as a real path, because its host compares it with `process.cwd()`.
+      const expectedProcessCwd = runtime === 'pi' ? await fs.realpath(cwd) : cwd;
       const spawnFn = ((command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
         observedCwds.push(options?.cwd);
         if (runtime === 'pi') {
@@ -837,16 +835,13 @@ describe('SDK-owned Agent home contract', () => {
           : new CodexAdapter({ resolveBin: () => ({ command: RUNTIME_FIXTURES.codex, source: 'path' }), spawnFn });
       const session = await startPreparedOperation(
         adapter,
-        { instruction: 'verify cwd', policy: { mode: 'auto' } },
-        { workspaceDir: cwd, policy: { mode: 'auto' }, env: process.env },
+        { instruction: 'verify cwd' },
+        { workspaceDir: cwd, env: process.env },
       );
       await session.close();
       expect(observedCwds.length).toBeGreaterThan(0);
-      // docs/spec.md: Runtime launch descriptions sealed asset set; P2
-      // separates trusted process cwd from the manifest-owned session cwd.
       expect(observedCwds.every((observed) => observed === expectedProcessCwd)).toBe(true);
       if (runtime === 'pi') {
-        expect(expectedProcessCwd).not.toBe(cwd);
         expect(piSessionCwds).toHaveLength(observedCwds.length);
         expect(piSessionCwds.every((observed) => observed === cwd)).toBe(true);
       }

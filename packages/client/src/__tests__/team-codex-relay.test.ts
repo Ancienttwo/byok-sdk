@@ -128,8 +128,12 @@ describe('private bindings and native transport', () => {
     const s = await setup(); const bin = path.join(s.dir, 'fake-codex'); const argv = path.join(s.dir, 'argv.json');
     const write = async (output: string, code = 0) => fs.writeFile(bin, `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(argv)}, JSON.stringify(process.argv.slice(2))); console.log(${JSON.stringify(output)}); process.exit(${code});`, { mode: 0o700 });
     const input = { codexBin: bin, binding: s.bindings[0]!, throughSeq: 2, signal: new AbortController().signal };
-    await write('codex-cli 0.160.0'); expect(await preflightCodexRelay(bin, input.signal)).toBe('0.160.0');
-    await write('codex-cli 0.153.5'); await expect(preflightCodexRelay(bin, input.signal)).rejects.toThrow();
+    const warnings: string[] = []; const warn = (message: string) => { warnings.push(message); };
+    await write('codex-cli 0.160.0'); expect(await preflightCodexRelay(bin, input.signal, warn)).toBe('codex-cli 0.160.0'); expect(warnings).toEqual([]);
+    await write('codex-cli 0.153.5'); expect(await preflightCodexRelay(bin, input.signal, warn)).toBe('codex-cli 0.153.5');
+    await write('codex-cli 0.161.0'); expect(await preflightCodexRelay(bin, input.signal, warn)).toBe('codex-cli 0.161.0');
+    expect(warnings).toEqual([expect.stringContaining('"codex-cli 0.153.5" is not the qualified codex-cli 0.160.0'), expect.stringContaining('"codex-cli 0.161.0" is not the qualified')]);
+    await write('broken', 1); await expect(preflightCodexRelay(bin, input.signal, warn)).rejects.toThrow('could not run codex --version');
     await write(`Queued message ${receipt} for thread ${input.binding.threadId}.`); expect(await queueCodexTeamNotification(input)).toBe(receipt);
     const args = JSON.parse(await fs.readFile(argv, 'utf8')); expect(args.slice(0,5)).toEqual(['queue', '--remote', input.binding.endpoint, '--thread', input.binding.threadId]); expect(JSON.stringify(args)).not.toContain(input.binding.context);
     await write(`Queued message ${receipt} for thread ${s.bindings[1]!.threadId}.`); await expect(queueCodexTeamNotification(input)).rejects.toThrow('invalid');

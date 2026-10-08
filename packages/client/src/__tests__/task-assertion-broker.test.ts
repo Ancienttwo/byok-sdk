@@ -60,7 +60,6 @@ const MCP_CAPABLE: RuntimeCapabilities = {
   resume: true,
   approvalInteractive: true,
   mcpToolsets: true,
-  permissionModes: ['auto', 'confirm'],
 };
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -251,7 +250,6 @@ describe('task assertion broker: task_assertion.issue', () => {
         'task.offer_for_agent',
         {
           instruction: 'qualify the inbound lead',
-          policy: { mode: 'auto' },
           runtime: 'pi',
           agentRef: { agentId: AGENT_ID, profileRevision: PROFILE_REVISION },
           requiredToolsets: [...requiredToolsets],
@@ -708,7 +706,7 @@ describe('task assertion broker: task_assertion.issue', () => {
     const built = await pairedAndStartedUngated('acme-cap-no-tools', {}, false);
     try {
       server.send(createEnvelope('task.offer_for_agent', {
-        instruction: 'no host tools', policy: { mode: 'auto' }, runtime: 'pi',
+        instruction: 'no host tools', runtime: 'pi',
         agentRef: { agentId: AGENT_ID, profileRevision: PROFILE_REVISION },
       }, { taskId: 'task-no-host-tools', seq: server.nextSeq() }));
       await server.waitFor((event) => event.type === 'task.started' && event.task_id === 'task-no-host-tools');
@@ -724,7 +722,7 @@ describe('task assertion broker: task_assertion.issue', () => {
     const unsubscribe = built.daemon.subscribe((event) => events.push(event));
     try {
       server.send(createEnvelope('task.offer_for_agent', {
-        instruction: 'wait then cancel', policy: { mode: 'auto' }, runtime: 'pi',
+        instruction: 'wait then cancel', runtime: 'pi',
         agentRef: { agentId: AGENT_ID, profileRevision: PROFILE_REVISION }, requiredToolsets: [READ_TOOLSET],
       }, { taskId: 'task-cancel-discovery', seq: server.nextSeq() }));
       await vi.waitFor(() => expect(events.some((event) => event.kind === 'offered')).toBe(true));
@@ -743,7 +741,7 @@ describe('task assertion broker: task_assertion.issue', () => {
     const unsubscribe = built.daemon.subscribe((event) => events.push(event));
     try {
       server.send(createEnvelope('task.offer_for_agent', {
-        instruction: 'wait then stop', policy: { mode: 'auto' }, runtime: 'pi',
+        instruction: 'wait then stop', runtime: 'pi',
         agentRef: { agentId: AGENT_ID, profileRevision: PROFILE_REVISION }, requiredToolsets: [READ_TOOLSET],
       }, { taskId: 'task-stop-during-discovery', seq: server.nextSeq() }));
       await vi.waitFor(() => expect(events.some((event) => event.kind === 'offered')).toBe(true));

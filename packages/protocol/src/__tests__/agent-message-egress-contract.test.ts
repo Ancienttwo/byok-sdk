@@ -12,7 +12,7 @@ import {
 const agentRef = { agentId: '11111111-1111-4111-8111-111111111111', profileRevision: '7' } as const;
 const egressPolicy = {
   policyRevision: 'p1',
-  activity: { mode: 'metadata-status', delivery: 'latest-value' },
+  activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
   reliable: { maxPendingEventsPerAgent: 8, maxPendingBytesPerAgent: 262144, maxPendingBytesPerTenant: 524288 },
   transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
 } as const;
@@ -28,7 +28,6 @@ describe('Agent-initiated message egress protocol', () => {
     expect(AGENT_MESSAGE_EGRESS_CAPABILITY).toBe('agent-message-egress');
     const shared = {
       instruction: 'send one message',
-      policy: { mode: 'readonly', allowTools: [] },
       agentRef,
       runtime: 'codex',
       egressPolicy,
@@ -43,7 +42,6 @@ describe('Agent-initiated message egress protocol', () => {
     expect(TERMINAL_PROJECTION_SELECTION_CAPABILITY).toBe('terminal-projection-selection');
     const shared = {
       instruction: 'send one message',
-      policy: { mode: 'readonly', allowTools: [] },
       agentRef,
       runtime: 'codex',
       egressPolicy,
@@ -63,11 +61,11 @@ describe('Agent-initiated message egress protocol', () => {
   test('keeps model-authored routing and unknown message contracts out of the strict declaration', () => {
     const base = { mode: 'required', contract: 'chat.v1', contentType: 'text/plain', maxBytes: 1000 } as const;
     expect(TaskOfferForAgentWithEgressFreshPayloadSchema.safeParse({
-      instruction: 'send', policy: { mode: 'readonly', allowTools: [] }, agentRef, egressPolicy,
+      instruction: 'send', agentRef, egressPolicy,
       messageEgress: { ...base, target: 'conversation-1' },
     }).success).toBe(false);
     expect(TaskOfferForAgentWithEgressFreshPayloadSchema.safeParse({
-      instruction: 'send', policy: { mode: 'readonly', allowTools: [] }, agentRef, egressPolicy,
+      instruction: 'send', agentRef, egressPolicy,
       messageEgress: { ...base, maxBytes: 262145 },
     }).success).toBe(false);
   });

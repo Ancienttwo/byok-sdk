@@ -155,11 +155,11 @@ kind, endpoint and model name never infer it; Pi's built-in catalog does not
 override the namespaced local projection. Model limits do not constitute Host
 ContextPack budgets or measured available input tokens.
 
-The launcher accepts the adapter's bounded absolute extension paths and the
-two validated task inputs `BYOK_PI_MCP_CONFIG_PATH` and
-`BYOK_PI_PERMISSION_MODE`. Provider/model/thinking selection remains local
-profile authority; delegated flags cannot override it. Arbitrary environment
-names and provider credentials remain excluded. The profile SQLite schema
+The launcher accepts the adapter's bounded absolute extension paths and an
+absolute `--config` path. Provider/model/thinking selection remains local
+profile authority; delegated flags cannot override it. The Pi child gets a
+narrow inherited environment; arbitrary environment names, `BYOK_*` names and
+ambient provider credentials are excluded. The profile SQLite schema
 adds nullable `pi_model`; an older store is rejected without migration or
 deletion. Operators must preserve it and explicitly provision a separate
 current-schema store. No automatic conversion or live-store mutation is part
@@ -227,11 +227,12 @@ published on 2026-09-25 from the `v0.22.0` tag (`0962f14f`). The registry, not t
 authority on what has shipped — read it back with `npm view @byok-sdk/core version`
 and `npm view @byok-sdk/keys version`.
 
-The public candidate package set is exactly ten packages: the nine aligned train
+The public candidate package set is exactly nine packages: the eight aligned train
 packages `@byok-sdk/core`, `@byok-sdk/protocol`, `@byok-sdk/client`,
-`@byok-sdk/server`, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`,
-`@byok-sdk/ui-runtime` and `@byok-sdk/implementation-identity`, plus the
-independently versioned `@byok-sdk/keys`. Every other workspace package is
+`@byok-sdk/server`, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`
+and `@byok-sdk/ui-runtime`, plus the independently versioned `@byok-sdk/keys`.
+`@byok-sdk/implementation-identity` is retired: the SDK no longer attests
+executables, and no later train publishes it. Every other workspace package is
 private. Starting with 0.21.0 the unscoped `byok-sdk` namespace umbrella is
 retired (ADR-035): consumers install and import the scoped packages directly,
 and no empty umbrella, alias package or dual export replaces it.
@@ -345,44 +346,12 @@ existing optional `version` and `authPresent` facts. Custom adapters must author
 this shape; old `present` shapes, mixed authorities, unknown kinds, and malformed
 metadata are rejected. There is no compatibility translation.
 
-`refused` requires exactly `kind` and `reason`. Its finite reason vocabulary is
-the shared implementation unavailable vocabulary plus
-`installation_observation_unsupported`, `native_identity_mismatch` and
-`launch_cwd_unavailable`. No other arm accepts `reason`; arbitrary error text
-is never parsed into a reason. A custom adapter's valid declaration is not
-proof that the adapter performed a trusted measurement.
-
-With a configured Pi implementation authority, daemon registration, task
-selection and local CLI/doctor use the single installed-observation route.
-They call `detectInstallation(context, signal?)` on the actual adapter;
-a missing method returns `refused/installation_observation_unsupported`.
-Injected adapters are not replaced and this route never falls back to `detect`.
-Unconfigured Pi and non-Pi retain their explicit existing discovery routes.
-
-`RuntimeInstallationObservationContext` carries the authority and either an
-explicit enabled `runtimeEntry` or `scope: 'enabled-top-level'`. Generic consumers
-use the complete enabled top-level set in `RUNTIME_LAUNCH_KINDS` order
-(`pi-rpc`, then `pi-prepared`). The first failed entry supplies its exact finite
-reason; both entries must have equal common record, physical measurements,
-policy, edges and verified native version. Aggregate `available` carries only
-that version. Runner/print are not enabled or substituted. Detection never
-chooses the task lane; `resources.kind` retains that authority.
-
-Bundled Pi installed observation measures selected artifact/interpreter/assets,
-fixed prefix and native package manifest using the shared physical core. It
-executes no candidate or version child, allocates no task state, constructs no
-launch env and observes no authentication/credential facts. The separate shared
-`RuntimeInstallationMeasurementV1` result lacks environment digests and is
-rejected as a launch identity by both types and the identity/spawn parsers.
-Native version comes from digest-verified manifest bytes compared with the
-record and static SDK pin, never schema success or a guessed version.
-
-Cwd observation is strictly read-only: observed missing, noncanonical, symlink,
-non-directory or current-owner components refuse. It does not perform `wx`
-probes, measure ACLs or prove non-writability. Read success is not launch
-admission. Prepare/final-spawn retains independent measurement and full cwd
-checks; a later mutation must still fail there. No measured observation is
-cached or lent to launch authorization.
+`refused` requires exactly `kind` and `reason`. Its only reason is
+`app_server_unavailable`. No other arm accepts `reason`; arbitrary error text
+is never parsed into a reason. Daemon registration, task selection and local
+CLI/doctor call `detect(signal?)` on the actual adapter. Detection never
+chooses the task lane; `resources.kind` retains that authority. The SDK does
+not measure the installed runtime.
 
 Bundled version probes map OS `ENOENT` to `not-found` and
 `EACCES`/`EPERM`/`ENOEXEC` to `not-executable`. Platform errno differences remain
@@ -447,18 +416,18 @@ side-effect-free `prepare()` method; preparation returns either a fail-closed
 rejection or one `PreparedRuntimeOperation`. There is no direct adapter
 `start()` path and no 0.3 compatibility shape.
 
-For every offer, the daemon snapshots the descriptor, resolves local policy and
-toolset authority, and calls `prepare()` before it claims the task. Preparation
+For every offer, the daemon snapshots the descriptor, resolves toolset
+authority, and calls `prepare()` before it claims the task. Preparation
 must not spawn, create a temporary file, mutate or allocate a workspace,
 allocate a session id, or read a credential value. It pins the runtime's
-normalized policy, provider/model/lane and launcher decision. The daemon then
+provider/model/lane and launcher decision. The daemon then
 seals one immutable operation manifest before `task.claim`; its runtime id,
-descriptor, policy, toolset ids, dispatch selection, session/workspace identity
+descriptor, toolset ids, dispatch selection, session/workspace identity
 and forwarded environment **names** are the only authority reused for claim,
 environment projection and prepared-operation start. Credential values never
 enter this manifest, diagnostics, or wire messages.
 
-An unsupported instruction, policy, lane/runtime/model combination, missing
+An unsupported instruction, lane/runtime/model combination, missing
 BYOK custody launcher, or local toolset/session incompatibility is declined
 before claim. A prepared operation receives runtime resources only after the
 sealed manifest exists and claim has succeeded. This is a client-internal
@@ -519,36 +488,27 @@ continuation cannot complete successfully. AgentSession retry and provider retry
 stream has an at-most-once fetch and forbids redirects. Tool-result continuations
 are not pre-frozen and never replay the first D: their accepted risk remains
 Errata 1 E4.4, covered by post-response overflow detection, an event and an alert.
-The existing usage-before-body, typed overflow/usage_unavailable, pre-pin checks,
-and egress sanitization remain mandatory.
+The existing usage-before-body, typed overflow/usage_unavailable and pre-pin
+checks remain mandatory.
 
 The host registers no uncounted native tool, no message tool, and loads no device
 extensions, skills, context files or prompt templates. Its resource loader loads
-only the owned inline extension. MCP calls use the existing task-scoped pool and
-implementation gate. A zero-tool session is supported: it is a record whose counted
-manifest is empty (`requiredToolsets: []` with `agentMemory: 'none'`), launched under
-the same launch attestation as any other prepared record (see the lifecycle below).
+only the owned inline extension. MCP calls use the existing task-scoped pool.
+A zero-tool session is supported: it is a record whose counted
+manifest is empty (`requiredToolsets: []` with `agentMemory: 'none'`) (see the lifecycle below).
 
-Two refusals are structural rather than incidental. A prepared Execution never
+One refusal is structural rather than incidental. A prepared Execution never
 resumes: a sealed `sessionRef` and a preparation reference together fail closed,
-because resuming binds the frozen request to a history nobody counted. And a
-prepared operation admitted under a permission mode its manifest was not counted
-for is refused, because a manifest is the policy-filtered set for exactly one
-mode.
+because resuming binds the frozen request to a history nobody counted.
 
-Prepared native-tool selection must be empty. A policy selecting native tools
-is refused before pinning; a preparation observes and counts MCP tools only.
-`requiredToolsets: []` is valid on preparation, and a policy that selects no native
-tool (`auto` or `readonly` with `allowTools: []`) launches zero native tools. With `agentMemory: 'none'` that pair counts zero tools at
-all, and the record is admitted and launched with zero tools from 0.24.0; earlier
+A prepared session launches no native tool. A preparation observes and counts
+MCP tools only. `requiredToolsets: []` is valid on preparation. With
+`agentMemory: 'none'` that record counts zero tools at all, and the record is admitted and launched with zero tools from 0.24.0; earlier
 releases refused it at three points (preparation, admission and the Pi launch) even
 though the protocol accepted it. The prepared offer for such a record omits
 `requiredToolsets`, because an offer's own `requiredToolsets` stays non-empty
 (`RequiredToolsetsSchema` is `.min(1)`); an offer that names `[]` is a schema failure,
-not a tool-less request. A tool-less record still needs a permission policy that
-selects no native tool (`auto` or `readonly` with `allowTools: []`). `auto` without
-`allowTools` (`policy_inexpressible`) and an `allowTools` that names a native tool
-(`native_tools_uncounted`) are refused before pinning. General ordinary-offer toolset
+not a tool-less request. General ordinary-offer toolset
 requirements are unchanged, including the ordinary lane's refusal to run a required
 toolset that resolves to no server.
 
@@ -591,15 +551,13 @@ device's own receipt told it, and the device compares each against its durable
 record.
 
 The lifecycle is prepare → offer_prepared → admit → compare → seal → pin → claim
-→ start. Admission is the SAME admission every other offer runs — the policy
-merge, the trusted launch boundary, one implementation identity per projected
-server, the `tools/list` probe through both. What is added is a comparison at
+→ start. Admission is the SAME admission every other offer runs, including the
+Pi `tools/list` probe of each projected server. What is added is a comparison at
 the seal point, item by item, because a refused prepared Execution has to say
 WHAT differed rather than that a digest moved: the device row, the Agent, the
 profile revision, the limits-policy revision, the re-presented request and
-envelope digests, the admitted permission mode, the installed runtime identity,
-the launch attestation, the model-visible tool set by name, the
-implementation-identity kind behind each of those names, and finally the two
+envelope digests, the installed runtime identity,
+the model-visible tool set by name, and finally the two
 surface digests — which are recomputed on the LIVE observation with the same
 functions the preparation computed the recorded ones with. Every difference
 declines non-retryably, with its own reason.
@@ -608,23 +566,18 @@ The toolset revisions both digests bind are the revisions of the toolsets the RE
 names, read from the same registry snapshot the preparation read. A toolset that is
 configured on the device but named by no record is not part of that binding, so
 configuring or changing an unrelated toolset never invalidates a prepared record.
-A tool-less record (an empty counted manifest, no memory) binds no toolset at all,
-yet it still binds the launch attestation: the device must prove a non-writable
-launch directory before the offer is pinned, and a device that cannot prove one
-declines non-retryably. A launcher-wrapped runtime still fails
-`preparation_launch_attestation_mismatch`, tool-less or not.
+A tool-less record (an empty counted manifest, no memory) binds no toolset at all.
 
 Prepared execution injects no message MCP helper. Memory uses the explicit
 `agentMemory` selection described below; `none` starts no memory helper, so a tool-less
-prepared start launches no MCP server (it still carries the resolved launch directory
-as its attestation). Message context remains server-only;
+prepared start launches no MCP server. Message context remains server-only;
 `messageEgress` enables the existing durable outbox. The daemon collects Pi text
 progress into the final reply. Overflow or missing/unreadable usage fails before
 any body can be published. At turn end it checks usage first, extracts any selected
 result document, appends and publishes its immutable draft, and waits for the exact
 accepted disposition before `task.complete` with `preparedObservation`. Activity
-and terminal envelopes pass through the same strict egress sanitizer as fresh
-Agent egress offers. The message tool never enters D.
+and terminal envelopes go to the Host as is, as for fresh Agent egress offers.
+The message tool never enters D.
 
 **Prepared Agent memory (scoped v8 cut).**
 [Prepared Agent Memory Contract](researches/2026-09-28-prepared-agent-memory-contract.md)
@@ -635,26 +588,23 @@ preparation and execution both check it. Memory-only preparation uses
 preparation (`agentMemory: 'none'`) is the same shape with no memory tools either.
 
 The credential-free SDK descriptor supplies the complete tool schemas and operation
-metadata. Selected tools, both attested helper identities and mode participate in
-the existing compiler/count/digest path. After comparison, pin and claim, the daemon
-mints a private task token. The execution helper is physically reverified and its
-full descriptor must match before a model request. `read` exposes recall only;
+metadata. Selected tools and mode participate in the existing compiler/count/digest
+path. The SDK does not attest the memory helpers. After comparison, pin and claim,
+the daemon mints a private task token. The execution helper's full descriptor must
+match before a model request. `read` exposes recall only;
 `read-write` additionally exposes save. Both the helper and daemon reject writes
-outside that grant. `readonly` permits only `read`; `confirm`/`plan` cannot select
-memory. Selected bare memory names in `denyTools` reject the preparation/offer.
+outside that grant.
 
 Device-local home/CAS and live recall semantics remain authoritative. Counted memory
 tool schemas do not freeze memory file contents. This cut adds no automatic snapshot,
-Host UI or native tools. SDK source is v8; downstream paired upgrade and deployment
+Host UI or native tools. SDK source is now v9 (see the v9 cut); downstream paired upgrade and deployment
 remain separate actions. No v7 reader, mode default or fallback is retained.
 
-Pi policy `{mode:'auto', allowTools:[]}` explicitly selects zero native tools on
-both fresh and prepared lanes. Omitting `allowTools` retains Pi's default native
-registry on fresh execution and is inexpressible for prepared execution. Observed MCP toolset grants and reserved
-grants on fresh offers remain separately admitted; prepared offers grant only their explicitly selected, counted SDK memory tools.
-The same native-selection validator runs before pin and again in the prepared
-host: nonempty native selections remain `native_tools_uncounted`. This changes
-the former fresh-lane interpretation of an explicit empty allowlist.
+Fresh Pi execution keeps Pi's default native tools and the user's own
+extensions and skills. Prepared execution launches no native tool. Observed MCP
+toolsets and reserved helpers on fresh offers remain separately admitted;
+prepared offers expose only their counted MCP tools and explicitly selected SDK
+memory tools.
 
 Pin strictly precedes claim, and that ordering is the whole single-consumption
 guarantee. Two runners can both compare successfully; they then race one
@@ -748,7 +698,7 @@ carries no version field, so a device and a cloud on different contract
 versions used to find out only when a completion PUT failed its strict schema,
 and the device then redelivered that envelope forever. The device capability
 is therefore `agent-input-preparation-v<N>`, where `<N>` is
-`INPUT_PREPARATION_WIRE_VERSION` (currently `agent-input-preparation-v8`). A
+`INPUT_PREPARATION_WIRE_VERSION` (currently `agent-input-preparation-v9`). A
 daemon declares only the token of the version it speaks; the cloud's
 input-preparation and prepared-offer enqueue gates accept only the token of the
 version they speak, so a skewed device is refused at enqueue with
@@ -778,6 +728,16 @@ run against the stopped daemon
 after the drain (see the operator step above). The fourteen admission comparisons retain their roles; the compiler,
 envelope and identity values being compared change. A skipped drain needs explicit
 operator handling of the old entries; upgrading alone does not repair them.
+
+**Operator precondition for the v9 cut (ADR-037).** Wire version 9 removes
+`permissionMode` from the request and the binding, replaces the artifact's
+`toolImplementationKinds` with `toolNames`, and removes the readiness reason
+`executor_identity_unproven`. The capability is `agent-input-preparation-v9`.
+The local record is version 10. The prepared tool binding and surface digests
+are version 3 and the Pi MCP fingerprint is version 2, so a record prepared
+before this change declines with `preparation_tool_binding_digest_mismatch`.
+Apply the same drain, paired upgrade and `retire-input-preparation` steps as for
+the v8 cut, then recreate the preparations.
 
 The evidence has four parts, and each is read off a recorded fact rather than
 asserted.
@@ -846,12 +806,10 @@ receipt forever, so an offline suite can never look like production accounting
 evidence, and an uncovered count keeps `counter_coverage_incomplete`. An absent
 counter produces neither reason.
 
-On a default install, meanwhile, no record can reach READY at all: with no
-`toolImplementationAuthority` configured every implementation identity resolves
-to `executor_identity_unproven`, and an SDK with no Host accounting ruling adds
-`accounting_policy_missing`. A real prepared offer against such a record
+On a default install, meanwhile, no record can reach READY at all: an SDK
+with no Host accounting ruling adds `accounting_policy_missing`. A real prepared offer against such a record
 declines `preparation_not_ready` — and will keep doing so until a Host ruling
-and a Salesko resolver land. That is the SDK's shipped default, not a
+lands. That is the SDK's shipped default, not a
 misconfiguration. A production counter is no longer on that list.
 
 ### Post-admission runtime failure authority
@@ -944,7 +902,10 @@ typed `RuntimeDisposalFailure` with closed stage `signal`, `quiescence`, or
 `cleanup` and an audit-safe reason. It carries no retry disposition.
 
 Bundled adapters create an owned POSIX process group and terminate the group
-with TERM-to-KILL escalation; Windows uses `taskkill /T /F`. TaskRunner records
+with TERM-to-KILL escalation; Windows uses `taskkill /T /F`. On POSIX, disposal
+and the host-exit sweep also SIGKILL the descendants that left the group, read
+from the process table before TERM and before KILL and checked by start time,
+as OAR 0.37.0 does. TaskRunner records
 the semantic terminal once, but retains its active entry and Git workspace
 lease until close succeeds. A failed attempt emits local
 `runtime-disposal-failed` evidence and may be retried by shutdown without
@@ -974,22 +935,6 @@ is a hosted attempt-delivery state, while the existing client owns
 `Session.interrupt()` and the existing `task.cancel` / `task.cancelled` messages
 remain the only device protocol.
 
-## Shared implementation identity measurement
-
-The Node-only `@byok-sdk/implementation-identity` support package is the single
-source for install-record validation, physical implementation measurement and
-pre-spawn revalidation. Client retains runtime policy and re-exports its existing
-identity types; keys retains credential custody and must perform the eventual
-final-spawn measurement in its own process. Moving this authority does not by
-itself complete the Pi runtime/keys spawn wiring.
-
-Client and keys consume the same exact packed support-package version. Source
-`workspace:*` edges follow the existing core convention; packed-edge and release
-graph checks reject version divergence. The new support package follows the
-aligned train and publishes before its consumers. Keys remains independently
-versioned but its next artifact must bind that train. No registry release is
-implied by this source change.
-
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. The SDK pins the official unmodified
@@ -1009,15 +954,15 @@ release workflow identity; the checked inventory includes the provenance bundles
 Build and isolated release/registry installs verify every resolved sibling instance
 against those bytes and reject fork packages. `nativeProvenance` binds the coding
 package identity, tarball integrity, provenance digest, whole closure digest and
-compiler version. Encapsulated runtime records attest the sealed code artifact and
-its declared assets; runtime checks compare the official provenance and manifest
-bytes without resolving a mutable external package installation. File tampering or
-provenance drift is a refusal, never a substituted runtime.
+compiler version. Input preparation verifies the installed closure before it
+derives the runtime identity; a single-file product (`sdkHelperHost`) uses the
+SDK pin. The SDK does not attest the runtime executable at launch (ADR-037).
+Closure drift found by these checks is a refusal, never a substituted runtime.
 
 Official coding-agent 1.0.4, like 1.0.3, ships no npm shrinkwrap. The npm
 physical root count has not been re-measured for 1.0.4. The local Bun install
 has eleven resolved physical roots across nine official package names.
-Attestation verifies all instances; no singleton guarantee is claimed.
+The closure check verifies all instances; no singleton guarantee is claimed.
 The scripted workflow probe covers the vendored arbiter's built-in
 Agent/compat stream path. It does not prove cross-instance
 registration visibility: pi-ai/compat owns a module-local apiProviderRegistry,
@@ -1306,8 +1251,9 @@ existing operator-owned Codex sessions in one workspace. Each private binding
 names its member context, native thread UUID, explicit loopback WebSocket or
 Unix endpoint, and starting notification sequence. The operator must configure
 each native session with that same member's Team MCP grant; the relay does not
-infer or establish that mapping. The absolute Codex executable must pass the
-qualified `codex-cli 0.160.0` version preflight. This is a client CLI binding,
+infer or establish that mapping. The relay reads the Codex version and warns
+when it is not the qualified `codex-cli 0.160.0`; it does not refuse, and the
+receipt parser still fails closed on a changed receipt shape. This is a client CLI binding,
 not a TaskRunner, native-session lifecycle owner, or new package boundary.
 
 Authenticated `team_notifications.snapshot` accepts the existing member-context
@@ -1359,424 +1305,91 @@ relative path (`mcp_toolset_command_not_absolute`) or a command starting with
 probe, a claim, or a runtime `start()`. Nothing is resolved, normalized or
 looked up on PATH: a bare name is a lookup performed in the child's environment
 at spawn time, which would make the registry's content revision identify a
-string rather than a program, and the launch-directory boundary chdirs before
-that lookup would happen. The rule is global across pi, codex and claude. An
-absolute path is not executor attestation — it says the device named one file,
-not that the file is the product it claims to be. SDK-reserved helper servers
+string rather than a program. The rule is global across pi, codex and claude. An
+absolute path does not prove which program runs — it says the device named one
+file, not that the file is the product it claims to be. The SDK does not attest
+it (ADR-037). SDK-reserved helper servers
 are unaffected: they are built from `process.execPath` or an asserted-absolute
 host executable, never from operator configuration.
 
-Before admitting a toolset task the daemon starts each projected server and
-reads its own `initialize` + `tools/list` answer. That observation — full tool
-descriptors, the server's self-reported identity and the negotiated protocol
-version — is the only authority on what a toolset contains: configuration
-carries `command`/`args` and cannot say what a server exposes. Every runtime
-binds the same observation, claude and codex by pre-granting the observed
-names and pi by registering one tool per observed tool with that tool's own
-schema. A server that reports a tool name outside the grantable shape fails
-the whole observation and the task is declined permanently.
+Before admitting a toolset task for Pi, the daemon starts each projected server
+and reads its own `initialize` + `tools/list` answer (owner decision D5). That
+observation — full tool descriptors, the server's self-reported identity and
+the negotiated protocol version — is what Pi registers: one tool per observed
+tool, with that tool's own schema. A preparation also counts and
+fingerprints it. A server that reports a tool name outside the registrable
+shape fails the whole observation and the task is declined permanently.
 
-A toolset's per-tool read/mutation classification is operator-owned:
-`McpToolsetConfig.readOnlyTools` declares the read-only tools per
-`(server, tool)`, and nothing else may say so. It is never inferred from tool
-names, descriptions, schemas, or a server's own `readOnlyHint` annotation,
-which is the server's self-assessment rather than a security authority.
-
-The registry validates the declaration when it is present — every server named
-must be defined in the same toolset, every tool name must satisfy the grantable
-shape, a repeated name is refused rather than de-duplicated, and an empty
-declaration is refused because omitting the field is how a device says a
-toolset is unclassified. The declaration is part of the toolset's
-`definitionRevision`, so changing a classification changes the toolset
-revision, clears a lifecycle observation bound to the old one, and changes
-every prepared executor fingerprint derived from it.
-
-Configuration and observation are cross-checked at admission. A classified tool
-the server does not expose is stale configuration and declines the task
-permanently. An observed tool the declaration omits is a MUTATION tool — the
-fail-closed default, so a tool an operator forgot to classify is never granted.
-The daemon records the result per tool in the observation it hands the adapter,
-derived from configuration only.
-
-One policy rule then applies to every runtime, and exactly two permission modes
-narrow. Under `readonly` and `plan` a task gets exactly the tools classified
-read-only: the rest are not granted to claude or codex, not registered with pi,
-and not fingerprinted into a prepared manifest — a tool the model can see is a
-tool it will spend tokens attempting, so there is no "register it and refuse
-the call" state. `plan` narrows because plan mode produces no side effects at
-all, so it may not be wider than `readonly`. Under `auto` a task gets every
-observed tool. `confirm` remains in the protocol for adapters with interactive
-approval; Claude rejects it before runtime side effects. The two fail-closed
-refusals therefore apply only under a narrowing
-mode: a toolset with no declaration at all cannot run under `readonly` or
-`plan` and is declined by name, and a projected server the mode leaves with no
-callable tool declines the whole admission rather than half-satisfying it.
+Claude and Codex list their MCP tools themselves, so the daemon does not probe
+for them. Claude gets the selected servers in a task-scoped `--mcp-config`;
+Codex gets them in the `thread/start` or `thread/resume` config (`mcp_servers`).
+The SDK grants no per-tool
+permission and does not classify tools as read-only or mutating. Each tool call
+follows the agent's own guardrails and the user's own configuration (ADR-037).
 
 ### The launch working directory
 
-Every MCP server child the daemon is responsible for — the admission probe, pi's
-own pool, and the servers claude and codex spawn from the configuration the SDK
-writes them — starts in a directory this daemon's uid has been PROVEN unable to
-write. The runtime CLI itself is unaffected and keeps its manifest cwd, because
-session resume and relative-path resolution depend on it.
+The runtime and every MCP server it starts use the session cwd: the task
+workspace or the Agent home. This is the OAR behavior. Pi's pool starts each
+server in the session cwd. Claude and Codex start their servers themselves,
+from the configuration the SDK writes. The SDK does not wrap a server in a
+launcher.
 
-The boundary is scoped by ORIGIN-INDEPENDENCE: it covers every MCP server the
-task will generate, not only the host toolsets the device projects. The
-reserved SDK helpers the daemon injects (agent messaging, agent memory) and the
-servers a third-party runtime adapter generates for itself are the same kind
-of child, launched from the same inherited cwd. Claude no longer generates
-an approval MCP server. `TaskRunner` therefore resolves the binding
-whenever a task will generate at least one server of any origin — the projected
-toolsets, the reserved helpers it adds, or a server the picked adapter declares
-it generates itself (`RuntimeAdapterDescriptor.generatesApprovalMcpServer`
-paired with the effective mode) — and an adapter's own fail-closed guard counts
-the configuration it GENERATED, not the map the daemon handed it. A task that
-generates no MCP server at all resolves no binding and is never refused for
-one.
+The admission `tools/list` probe and the reserved helper preflight run before
+the session workspace exists. They start in the daemon's own cwd.
 
-The reason is an interpreter fact, not a hypothetical: a `bun --compile`
-single-file binary reads `$cwd/bunfig.toml` and runs its `preload` entries
-before any of the program's own code, and `--config=/dev/null` does not suppress
-that for a compiled binary. Until this boundary existed, those children
-inherited the canonical Agent home — the directory the agent's own tools write
-by design — so an agent could hand arbitrary preload code to the very server it
-was being served by. Controlling the cwd is the only control point for it.
+`DaemonConfig.mcpLaunchCwd` was removed. `createDaemon` refuses a config that
+still has it.
 
-The directory is resolved once per offer, and non-writability is proven rather
-than assumed: the daemon attempts to create a file in the candidate and requires
-the attempt to fail with `EACCES`, `EPERM` or `EROFS`. A candidate that accepts
-the write is rejected even if its mode bits looked right — mode bits do not
-account for ACLs, for the effective uid, or for a filesystem remounted
-read-write. The candidate is `DaemonConfig.mcpLaunchCwd.dir` (forwarded to
-`TaskRunnerDeps.mcpLaunchCwd`) when the operator configured one (the intended
-value is an immutable, root-owned versioned release directory), otherwise the
-platform default: `/` on POSIX, `%SystemRoot%` on Windows. A directory this same
-uid can write — anything under `os.tmpdir()` included — is refused: the agent's
-tools run at that same uid, so a 0700 random directory isolates other users and
-nothing else. A symlink is refused rather than followed.
+A `bun --compile` binary reads `$cwd/bunfig.toml` and runs its `preload`
+entries first. Same-uid code can put such a file in the session cwd. The SDK
+does not guard this path. In a YOLO session the agent already has same-uid
+write access.
 
-The probe alone is not the boundary, because both of its premises are facts this
-uid can change, so the directory AND every ancestor up to the volume root must
-lie outside this uid's control. A directory OWNED by this uid answers the probe
-with `EACCES` while its owner stays free to `chmod` the write bit back, so
-ownership by another uid (root, in the intended shape) is required rather than a
-cleared write bit — `..._owned_by_current_uid` names that rejection. And
-`rename(2)` replaces a directory using write permission on its PARENT, not on
-the directory being replaced, so a root-owned 0555 directory inside a directory
-this uid can write is one this uid can swap out wholesale; every ancestor is put
-through the identical check, and `..._ancestor_writable`,
-`..._ancestor_owned_by_current_uid`, `..._ancestor_is_a_symlink`,
-`..._ancestor_not_a_directory` and `..._ancestor_unreadable` name which link of
-the chain failed.
+The daemon does not deny loader environment variables. `buildRuntimeEnv`
+removes only `CLAUDECODE` and the `BYOK_*` control names. Values such as
+`NODE_OPTIONS`, `LD_*` and `DYLD_*` reach the child as the user set them.
 
-Two conditions make the boundary unprovable, and both refuse the offer
-non-retryably instead of admitting an unprotected launch:
+The SDK does not attest tool or runtime executables. There is no install
+record, no implementation identity and no pre-spawn measurement.
+`DaemonConfig.toolImplementationAuthority` was removed. `createDaemon` refuses
+a config that still has it.
 
-- **Running as uid 0.** No directory on the machine is unwritable by root, so
-  the daemon reports `root_cannot_prove_write_boundary`. This is a documented
-  limitation of running the daemon as root, not a default that is quietly
-  filled in.
+### Pi runtime launch
 
-  Windows has the same posture under a different name. A daemon running
-  elevated (Administrator) can create files in `%SystemRoot%`, so the platform
-  default accepts the write probe and is refused with
-  `platform_default_is_writable`; every MCP toolset launch on that host is then
-  refused. The refusal is the boundary working, not a defect. To get a usable
-  launch cwd there, run the daemon non-elevated, and use a default or
-  explicitly configured directory that passes the same directory proof; an
-  explicit `mcpLaunchCwd.dir` is not an elevation bypass — whether it is usable
-  depends only on the proof result.
-- **No trusted launcher.** claude's `mcpServers` JSON and codex's
-  `-c mcp_servers.*` have no per-server cwd field, so each server there is
-  reached through a launcher that changes directory and then execs the real
-  command with its argv passed through structurally — no shell word splitting,
-  no quoting, so an argument containing a space, a tab, a newline, a quote,
-  `$(...)`, a backtick, `*`, `;` or `&&` arrives byte-identical. Which launcher
-  depends on the platform, and a host that has neither is refused:
+The Pi runtime starts from the installed SDK package. A launch has a command,
+an optional entry script, the real path of the session cwd as process cwd,
+the environment, and the credential source. The Pi process starts in the
+session cwd, as in OAR. The prepared lane gives Pi only the platform baseline,
+the controlled Pi directory names and the provider names.
 
-  | Platform | Launcher | Evidence |
-  |---|---|---|
-  | darwin | trusted system `/bin/sh` bootstrap | verified on the development host |
-  | linux | trusted system `/bin/sh` bootstrap (dash, bash-as-sh, busybox) | verified in containers |
-  | win32 | `bin/byok-launch-cwd.mjs` on a real Node host; a non-Node host without a trusted launcher is refused | three separate facts: (a) the launcher executed for real on windows-latest — VERIFIED on run 34975106907/34975103065 (job 104400732107): 10/10 launcher cases including the target's terminal state; the termination behaviour of launcher and target is verified for that runner and process shape, the forwarding mechanism is not observed (run 34960882911 failed in the test fixture; run 34965275367 failed the earlier launcher-only signal assertion — `docs/researches/20260915-c07-launch-cwd-shell-bootstrap-evidence.md`); (b) a writable platform default refused with `platform_default_is_writable` — VERIFIED on run 34960882911, whose elevated runner produced exactly that refusal, and pinned by a unit test; (c) non-elevated admission of a real directory on Windows — VERIFIED on run 34984246100 (job 104432153979, head 86675f4d): the `npm-release-pack` windows-latest leg ran the same driver under a freshly created non-administrator local account (asserted `BUILTIN\Users`, not `BUILTIN\Administrators`, Medium integrity), both negative-control writes to `%SystemRoot%` and the volume root were denied, the real platform default resolved under that token, the packed Pi stack's reserved MCP server started in the trusted directory, and all three `packed-cli-mcp` `tools/call` paths passed; teardown revoked the account's ACEs by SID and removed it. This is admission and the forward smoke on that runner and process shape; it says nothing about elevated hosts (see the uid-0/elevated bullet) — `docs/researches/20260915-c07-launch-cwd-shell-bootstrap-evidence.md` |
+The keys lane receives the launch through reserved launcher flags:
+`--pi-bin`, optional `--pi-entry`, optional `--pi-fixed-args` (the single-file
+re-entry prefix, a JSON string array), `--pi-cwd`, `--pi-projection-dir` and
+`--pi-config-digest`. Client allocates its empty private projection directory
+outside the session cwd. Keys validates path, canonical/non-link shape, owner,
+access policy and emptiness before it opens credential custody. POSIX requires
+current uid and 0700. Windows requires current token owner SID, a protected
+DACL and only current-user, SYSTEM and Administrators Allow ACEs, and rejects
+reparse points. These checks prove layout and ownership at check time, not
+isolation from another same-uid process. The prepared lane keeps its Pi
+auth-store credential source.
 
-  On POSIX the launcher is `sh -c 'cd -- "$0" && exec "$@"' <dir> <command>
-  [...args]`: `$0` is the trusted directory and `"$@"` is the target's argv, so
-  nothing is ever interpolated into the program text. The shell is required to
-  be a root-owned, non-group/other-writable regular file (checked on the
-  realpath, with the `/bin/sh` symlink itself required to be root-owned too);
-  otherwise the offer is refused with `launch_cwd_shell_not_root_owned`,
-  `launch_cwd_shell_writable`, `launch_cwd_shell_not_a_regular_file` or
-  `launch_cwd_shell_unreadable`. No Node host is needed, so a daemon embedded in
-  a `bun --compile` product executable has a trusted launcher with no
-  configuration at all.
-
-  On win32 the launcher is this package's `bin/byok-launch-cwd.mjs`, which needs
-  a real Node: a daemon embedded in a `bun --compile` product executable must not
-  run it on `process.execPath`, because Bun would read `bunfig.toml` and preload
-  before the launcher's own first statement. `process.execPath` is used only when
-  the process is provably plain Node (not Bun, not Deno, not a single-executable
-  application); any other win32 host is refused with
-  `launch_cwd_launcher_unavailable`. There is deliberately no Windows shell path.
-
-  A launch-cwd PASS asserts WHERE the server starts. It does **not** assert that
-  the launcher or the executor is the binary it claims to be — launcher/executor
-  identity integrity is the separate attested-install work (§26).
-
-`McpLaunchCwdConfig` reaches the daemon as `DaemonConfig.mcpLaunchCwd`, which
-`createDaemon` forwards verbatim to `TaskRunnerDeps.mcpLaunchCwd`. An absent
-section leaves the host on the platform default directory and the platform
-launcher above, which is the supported shape. `launcherInterpreter` is an
-ESCAPE HATCH for a host that has neither platform launcher and can attest a Node
-binary of its own; it is not a supported path, and a host that sets it takes on
-proving the binary it names is one the agent's uid cannot replace. A present
-section is validated at CONSTRUCTION — `dir` must be absolute, and
-`launcherInterpreter` must be an absolute path to an existing regular file — so
-a host that configured a boundary it cannot have fails to start rather than
-discovering it on the first offer that needed one. What construction deliberately
-does not decide is whether the directory is still outside this uid's control:
-that is a fact about the filesystem now, so it is proven once per offer and
-never cached.
-
-Loader environment variables are denied absolutely, above every allowlist layer
-including the operator's own `runtimeEnvironment.<id>.allow`. `NODE_OPTIONS`,
-`NODE_REPL_EXTERNAL_MODULE`, `NODE_PATH`, `BUN_*`, `DYLD_*` and `LD_*` change how
-an interpreter loads code before the launcher's first statement; `ENV`,
-`BASH_ENV`, `SHELLOPTS`, `BASHOPTS`, `CDPATH` and `PS4` do the same to the shell
-bootstrap (`ENV`/`BASH_ENV` name a file the shell sources first, `SHELLOPTS` is
-imported by bash-as-sh and applied before the script, `CDPATH` redirects a
-relative `cd`, `PS4` is expanded while tracing). The Node launcher re-asserts the
-same list on itself and refuses to start if it sees one, because it is also
-reached through a runtime CLI that composes its own child environment.
-
-The launch directory and the launcher's identity are bound into the prepared
-launch path's executor fingerprints as their own fact, beside the toolset's
-`definitionRevision` rather than inside it: an SDK launcher upgrade is drift a
-frozen manifest must refuse, but it is not a change to the operator's configured
-`command`/`args`, and folding it in would churn every stored revision on every
-SDK release.
-
-### Executor implementation identity
-
-A launch-cwd PASS says WHERE a server starts. It says nothing about WHAT
-starts, and an absolute path does not either: it records that the device named
-one file, not that the file is the product it claims to be. Executor
-implementation identity is that separate fact, and the SDK carries it as a
-typed value per projected toolset server rather than implying it.
-
-The authority split is deliberate and total:
-
-- **The host owns the install record.** Only the host knows where it put a
-  versioned immutable release, which manifest revision produced it, and which
-  interpreter (if any) is encapsulated with it. It supplies that record through
-  `DaemonConfig.toolImplementationAuthority`. A resolver returns exactly one of
-  two things: an install record, or an unavailable reason. The record is the
-  manifest revision, the form, the versioned install path, the artifact's
-  closure digest, the interpreter triple (`path`, `digest`,
-  `loadCommandsDigest`) for an `interpreter+bundle`, the optional entry, the
-  launch argv and cwd, and — for a release that carries them — the sealed asset
-  root and asset list, plus the official closure provenance. That is the whole of
-  the host's authority.
-- **The SDK owns the assertion, and everything it can measure itself.** A
-  record is never believed. Before it becomes an identity the daemon measures
-  the path itself: path identity = symlink-free parent chain + regular
-  non-symlink leaf bound by `(dev, ino, tuple, digest)`; hardlink aliases of
-  the same inode are the same artifact. Concretely, every directory component
-  must resolve to itself, the leaf must be a regular file and not a symlink,
-  and the file must be root-owned, carry no write bit for anyone, and hash to
-  the `closureDigest` the record claims — and, for an `interpreter+bundle`, the
-  interpreter must satisfy the same facts against its own digest. The leaf's
-  own `realpath` is deliberately not compared against the recorded name: a
-  second name for the same inode is the same file, and `realpath` does not
-  answer a hardlinked file with a stable name on every runtime. Identity is
-  pinned by the inode and the bytes instead, so a replaced file at the recorded
-  name — hardlink, rename or overwrite — still fails. Four fields are then
-  sealed onto the identity by the SDK and are **not** part of what a resolver
-  may send; a record that carries one of them is not an install record:
-  - `installStat` — the artifact's `(dev, ino, size, mtime, mode, uid, gid)`.
-  - `interpreterStat` — the same tuple for the interpreter, present iff the
-    record names one.
-  - `assetStats` — the same tuple per sealed asset, in the record's order,
-    present iff the record declares assets.
-  - `launchEnvNamesDigest` — the names the spawned child's environment carries.
-  - `loaderEnvValuesDigest` — §27.2, the loader-affecting values as they would
-    reach that child, expected to be the empty canonical map.
-
-  The last two are facts about the exact environment object the SDK will hand
-  to `spawn` (`buildRuntimeEnv`'s output for that task on that device). A host
-  does not have that object, must not reconstruct one from its own
-  `process.env`, and must not keep a copy of this SDK's loader deny list. Both
-  digests are taken over a projection that excludes two NAMED sets THIS SDK
-  itself adds or removes between measuring and spawning: an exact, enumerated
-  list of the SDK-minted lifecycle names that actually reach a gated child
-  (`BYOK_HOST_TOOLSET_CONTEXT`, `BYOK_STORE_DIR`, `BYOK_PRODUCT_ID`), and the
-  provider-credential names stripped at
-  subscription and BYOK-custody boundaries by the existing credential-custody
-  authority. The shared finite inventory includes Codex's `CODEX_API_KEY` and
-  `CODEX_ACCESS_TOKEN`, matches credential case aliases, and is applied before
-  top-level Codex spawn even when the operator explicitly allows those names.
-  Platform discovery and locally allowed non-credential config (including
-  `CODEX_HOME`) remain; the SDK does not inspect or change CLI-owned auth stores.
-  So one identity survives both spawn points without binding a
-  difference the SDK made on purpose. It is NOT a `BYOK_*` prefix exemption:
-  the prefix is not intrinsically inert, so any other name wearing this SDK's
-  control prefix on the environment of a child about to start under an
-  attested identity refuses the spawn with `launch_env_unexpected_control_name`
-  rather than being projected away. Nothing that can influence a loader is
-  excluded from either digest.
-
-**This SDK ships no resolver and no default.** An absent
-`toolImplementationAuthority` is the supported state, and it means every
-identity is `unavailable: 'resolver_unconfigured'`. Nothing degrades and
-nothing is refused for a claim nobody made — the daemon simply proves nothing
-about its executors, and every receipt built on those identities carries
-`executor_identity_unproven`. The other unavailable reasons name who could not
-answer: `implementation_identity_unattested` (the resolver threw, or answered
-with something that is not an install record), `unencapsulated_source` and
-`interpreter_not_encapsulated` (the resolver's own verdicts about what backs
-the tool), `interpreter_form_unsupported` (a compiled executable that names an
-interpreter, or a bundle that names none), `install_record_mismatch` and
-`reverify_failed`.
-
-### Runtime launch descriptions and the sealed asset set
-
-When input preparation is enabled, daemon startup awaits one compiler/service
-initialization before exposing even the enrollment control endpoint. A configured
-implementation authority must resolve an attested `pi-prepared` record whose
-prefix and native provenance match this SDK's static pin/compiler contract;
-refusal fails startup without package discovery. Only an absent authority uses
-the installed development package resolver. The synchronous daemon factory stays
-synchronous; the resolved compiler identity is fixed for that daemon instance.
-
-Pi runtime launch (unreleased P2) resolves `{subject: {kind: "runtime", runtimeId: "pi"},
-runtimeEntry: "pi-rpc" | "pi-prepared"}`. The caller supplies no guessed executable.
-The host selects one install record; the SDK derives and measures the command,
-entry, fixed helper prefix, sealed process cwd, native provenance and controlled
-Pi directory values. A configured authority cannot return `resolver_unconfigured`
-to select the unattested development path. The explicit session cwd remains a
-separate task input to the SDK-owned session entry.
-
-The keys lane receives this physical binding through reserved launcher flags.
-Client allocates its empty private projection directory; keys validates path,
-canonical/non-link shape, owner, access policy and emptiness before opening
-credential custody. It rechecks the final target immediately after adding the
-provider credential and before spawn. POSIX requires current uid and 0700;
-Windows requires current token owner SID, a protected DACL and only current-user,
-SYSTEM and Administrators Allow ACEs, and rejects reparse points. These checks
-prove layout/ownership at check time, not isolation from another same-uid process.
-The prepared lane retains its existing Pi auth-store credential source, explicitly
-recorded in the launch description; credential model unification is not claimed.
-
-Pi's MCP environment is projected once at daemon admission using the shared
-fixed credential exclusion set and three controlled Pi directory names. The
-same object goes to identity measurement, probe and config serialization. Pool
-configuration requires `mcpEnv`, refuses private/credential names and never reads
-Pi's ambient environment. Ordinary Pi's own allowed provider environment remains
-separate. Existing MCP vectors without Pi directory variables retain their digest.
+Pi's MCP environment is projected once at daemon admission. The projection uses
+the shared fixed credential exclusion set and three controlled Pi directory
+names. The same object goes to the probe and to config serialization. Pool
+configuration requires `mcpEnv`, refuses private and credential names and never
+reads Pi's ambient environment.
 
 The Node package's private `#byok-pi-runtime-host` maps only to shipped dist JS
-and declaration files; it is not a public export. This keeps native Pi evaluation
-behind an explicit helper dispatch without runtime code generation or a loader
-fallback. Windows positive ACL proof for this slice and S2 bundle containment
-remain separate acceptance evidence; local POSIX checks do not prove them.
+and declaration files. It is not a public export. Native Pi evaluation stays
+behind an explicit helper dispatch.
 
-An install record can be asked about two different subjects, and the SDK makes
-that explicit rather than leaving it to shape inference. A locator carries a
-`subject`: `{ kind: 'mcp-server', toolsetId, serverName }` names one configured
-server inside one toolset, and `{ kind: 'runtime', runtimeId }` names the
-coding-agent runtime the task itself executes in. An MCP locator cannot stand
-in for a runtime locator, because the two carry different contracts.
-
-A runtime record additionally declares two components:
-
-- **The sealed asset set** — `assetRoot`, an absolute symlink-free directory,
-  and `assets`, a sorted duplicate-free list of `{ path, digest }` whose paths
-  are relative to that root. A release is not one file: its theme JSON is a
-  hard startup dependency, and its lazily-read templates and WebAssembly are
-  reachable from ordinary tools. Static data is not covered by the artifact's
-  own closure digest, so each asset is measured at resolve exactly as the
-  artifact is — canonical path identity, root-owned, no write bit, declared
-  digest — and re-measured before every spawn. The refusal names `asset` as its
-  subject. A path that is absolute, non-normalized or climbing, and a root that
-  does not resolve to itself, are refused as records rather than repaired.
-- **`nativeProvenance`** — the official package name and version, tarball integrity, provenance
-  and closure digests, upstream commit and compiler-contract revision, declared by the host from
-  the single exact pin it built the release from. It is what input preparation
-  counts against. A `package.json` reached by resolving a package specifier is
-  never a source for it: under a single-artifact release that resolution runs
-  through a user-writable install cache, and a manifest the agent can rewrite
-  would be an execution-identity authority the agent controls. Where a record
-  exists, the record is the only source, and a record whose package identity is
-  not exactly the SDK's own pin fails closed with nothing to degrade to.
-
-From an attested runtime identity plus that pin the SDK derives ONE immutable
-**runtime launch description**: the interpreter (or compiled artifact) and the
-sealed bundle taken from the identity itself, the fixed reserved-helper argv
-prefix for the launch kind — bound separately from every task flag — the
-**sealed process cwd**, the **session cwd** passed to the runtime explicitly,
-the asset root, and the environment names the description commits a value for.
-Nothing in it is discovered at launch time from a package shape, a resolved bin
-or a module-resolution call. The process cwd is deliberately not the Agent
-home: a writable process cwd executes interpreter preload and dotenv files
-before any check inside the entry can run, and a WebAssembly module planted
-there is loaded for real. A record whose declared launch argv is not the fixed
-prefix, whose sealed cwd is the session cwd, or which names a second entry, is
-refused. The description has a canonical digest, which is what a consumer
-carries from the moment a launch is decided to the moment the child starts.
-
-The runtime subject is stricter than the MCP subject, and deliberately so. An
-MCP server whose implementation is unproven still runs, and the receipt says it
-is unproven. A runtime whose implementation is unproven does not run at all: it
-is the process the whole task executes inside, so an unattested one makes every
-downstream attestation decorative. The decision therefore has three cases that
-cannot be collapsed into one another — `attested` (spawn exactly this, after
-re-measuring), `declined` (an authority is configured and the runtime is not
-attested: refuse the task), and `unconfigured` (no authority is wired in, which
-is this SDK's shipped default and keeps the development path unattested exactly
-as it is today).
-
-Where an identity IS attested, it is re-measured before EVERY spawn of that
-server — the daemon's admission probe and the pi extension's own server pool
-both go through the SDK's single MCP client, which runs the check before it
-spawns the child. The identity is resolved once per offer, beside the launch
-binding, and both spawn points consume that one value; a second resolve at
-launch would be a second opinion about the same install. Reverification
-requires the same realpath, the same non-symlink regular file, the same stat
-tuple — `uid`, `gid` and `mode` included, so an install that stopped being
-root-owned or grew a write bit fails it — and the same content digest, for the
-artifact AND for the interpreter of an `interpreter+bundle`; the refusal names
-which of the two moved. It also re-digests the environment that child is about
-to be handed, and answers `launch_env_drift` when a name appeared, vanished or
-was renamed, or a loader-affecting value reached the child — and
-`launch_env_unexpected_control_name` when that child's environment carries a
-`BYOK_*` control name this SDK mints on no gated path, which fails closed even
-when the same name was already present at resolve and the digests therefore
-agree. Both are spawn-only verdicts and never unavailable reasons: at resolve
-there is nothing to disagree with, because that is the moment the environment
-is measured, and the host-facing resolution contract is unchanged by either. A failure REFUSES the spawn non-retryably with its reason; it is never downgraded
-to unavailable-and-continue, because a server that was attested and no longer
-measures the same is a server that changed under a claim somebody relied on.
-
-What an attested identity proves is exactly that: at resolve, and again at each
-spawn, the file at that versioned realpath — and the interpreter beside it —
-was a root-owned, non-symlink, non-writable regular file whose bytes hash to
-the attested digest and whose stat tuple had not moved, and the environment
-handed to that spawn agreed with the environment measured at resolve over the
-names projection plus the controlled loader-values scope — not that the two
-environments were identical. What it does
-**not** prove, carried honestly rather than implied away:
-
-- post-hoc modification by root, which no measurement by a non-root daemon can
-  exclude;
-- the integrity of the kernel, `dyld`, SIP-owned system libraries, or anything
-  else the loader maps in beside the artifact;
-- injection into the live process after `exec`;
-- anything about the network peers the server talks to.
-
-Release signing is a separate authority and is not claimed here. An attested
-identity is not constructible by a caller: the control surface has no field
-anywhere in which an identity could be sent, and an identity nobody earned
-names a file that fails the measurement and refuses the spawn.
+A single-file product sets `sdkHelperHost: { mode: 'self-executable' }`. Every
+Pi launch then re-enters the product executable as
+`<executable> [<entry>] __byok_sdk_helper <pi-rpc|pi-prepared|pi-durable>`, and
+the product names its Pi asset root in `PI_PACKAGE_DIR` (a Bun-compiled
+executable may keep the assets beside itself).
 
 The authenticated local control socket accepts an expected-revision
 compare-and-swap reload of the complete registry. The CLI host reads
@@ -1799,13 +1412,15 @@ ready. Same-content reload retains a matching observation, while a changed
 definition clears it. The SDK does not probe commands or infer readiness from
 executable presence.
 
-Claude is the sole bundled runtime supported in this slice. Its selected local
-servers are projected into one task-scoped `--mcp-config` under
-`--strict-mcp-config`. Claude rejects `confirm` and does not inject an
-approval MCP server. Claude, not the daemon, owns the resulting task-scoped MCP
-subprocess lifetime. Therefore these registry status primitives are not a
-long-lived connector supervisor and do not independently observe a crash or
-recovery. Pi and Codex decline toolset-aware offers. The
+All three bundled runtimes advertise `mcpToolsets`. Claude projects the selected
+local servers into one task-scoped `--mcp-config`; the user's own Claude MCP
+configuration, settings, deny rules and hooks also load. Codex receives them in
+the `thread/start` or `thread/resume` config (`mcp_servers`), on top of the
+user's `config.toml`. Pi starts them
+from its task-scoped server pool. For Claude and Codex the runtime, not the
+daemon, owns the resulting MCP subprocess lifetime. Therefore these registry
+status primitives are not a long-lived connector supervisor and do not
+independently observe a crash or recovery. The
 self-hosted coordinator requires a live `toolset-selection` capability before
 task creation; a stateless hosted caller must route only to a device it already
 knows is capable.
@@ -1935,11 +1550,10 @@ Cloud orchestration does not make the runtime cloud-hosted: provider access,
 tool execution, runtime-native transcript, credential custody, and opaque
 Agent-home contents remain local authorities. Recursive mirroring is never
 authorized. The additive Agent egress path consumes one exact, revisioned
-`AgentEgressPolicy`: activity defaults to metadata/status latest-value
-projection; contentful trajectory requires explicit host selection plus the
-`agent-egress-policy` capability. Every outbound envelope passes the same
-fail-closed sanitizer boundary before long-poll encoding. A rejected or
-throwing sanitizer emits no original bytes.
+`AgentEgressPolicy`. The policy sets transport limits and the content-read
+surfaces. Agent events, results and artifacts go to the Host as the runtime
+produced them. The SDK does not filter, redact or omit them (owner decision
+D4, 2026-10-07, following OAR "nothing gated, nothing dropped").
 
 The tenant used by Agent egress and hosted local journaling is not editable
 host configuration. Pairing projects the required opaque non-secret tenant
@@ -2257,9 +1871,11 @@ bytes are not durable evidence: a crash during a failed journal write cannot
 promise exact-result recovery.
 
 Codex prompts use documented stdin `-` with EOF, including resumed turns. Each
-MCP server receives a separate environment payload through `env_vars` and the
-SDK reserved `mcp-env` helper; original command/args/env values are absent from
-Codex argv. Helpers resolve from the same `dist/bin` for package root, adapters
+MCP server goes to Codex in the `thread/start` or `thread/resume` config
+(`mcp_servers`), as in OAR. Codex starts each server with its allowlisted
+environment plus the entry's `env`. Server command/args/env values are absent
+from Codex argv and the Codex process environment, and Codex error text passes
+a redactor that replaces each `env` value with `[redacted]`. Helpers resolve from the same `dist/bin` for package root, adapters
 and official CLI bundles; release pack smoke runs actual MCP calls through all
 three installed entries. This preserves per-server values for colliding environment names
 without changing Codex auth or user configuration. Raw stdout frames are bounded
@@ -2358,7 +1974,7 @@ error. This observation does not prove native Session.close or home release.
 Recurring execution submission uses one public `RecurringExecutionInputSchema`
 for both Cloud `submitRecurringExecution(tenant, input)` and embedded
 `recurring.submit(input)`. The Host persists the validated input before dispatch:
-taskId, exact deviceId, fresh payload with explicit runtime, policy, AgentRef,
+taskId, exact deviceId, fresh payload with explicit runtime, AgentRef,
 egress policy, required message and terminal projection, plus server-held
 message context. SessionRef and unknown fields are rejected. The input may
 carry the existing instruction blob reference; this does not waive Host context
@@ -2384,7 +2000,7 @@ status, is not evidence of mailbox delivery or physical Agent-home release.
 
 ### Explicit internal result projection under Agent egress
 
-A strict fresh Agent task may select `terminalProjection: { mode: 'result-document', contract }` without user `messageEgress`. Under metadata-status, that frozen task selection authorizes the extracted document as a separate internal result; terminal summary and activity stay metadata-only. The daemon must preserve the selected document through outbound projection rather than silently deliver document-less success. An unselected document is not authorized by its presence in a payload. Existing extractor validation, server capability gates and configured Host sanitizer remain applicable. This is an execution/result primitive: Host owns SummaryJob, coverage/version CAS, budgets and scheduling; schema support alone is not native-runtime or tool-isolation acceptance. On the prepared lane the same primitive runs with zero tools (a tool-less record, an offer that omits `requiredToolsets`, no `messageEgress`); the extractor and the server `result-document` capability remain required.
+A strict fresh Agent task may select `terminalProjection: { mode: 'result-document', contract }` without user `messageEgress`. That frozen task selection makes the extracted document a separate internal result. The daemon must not deliver document-less success. Existing extractor validation and server capability gates remain applicable. This is an execution/result primitive: Host owns SummaryJob, coverage/version CAS, budgets and scheduling; schema support alone is not native-runtime or tool-isolation acceptance. On the prepared lane the same primitive runs with zero tools (a tool-less record, an offer that omits `requiredToolsets`, no `messageEgress`); the extractor and the server `result-document` capability remain required.
 
 ### Recurring Host composition requirements
 
@@ -2408,26 +2024,26 @@ complete ContextPack/Summary, native-runtime, migration or production acceptance
 
 ### Pi credential launcher executable contract
 
-Pi custody consumes the client-decided runtime launch binding: `--pi-bin`, optional `--pi-entry`, `--pi-fixed-args`, `--pi-cwd` and `--launch-binding` describe the same physical target. Keys validates these fields and the declared projection directory before reading credentials, then reverifies immediately before spawn. The SDK-owned RPC entry receives explicit session cwd in its configuration. A configured install authority selects the interpreter and sealed entry; only the explicitly unconfigured development path uses package/runtime defaults. Version detection retains its existing timeout and error classification. No shell, argv0 fallback or inference from an executable suffix selects the runtime.
+Pi custody consumes the client-decided runtime launch: `--pi-bin`, optional `--pi-entry`, optional `--pi-fixed-args`, `--pi-cwd`, `--pi-projection-dir` and `--pi-config-digest`. Keys validates these fields and the projection directory before it reads credentials. The SDK-owned RPC entry receives explicit session cwd in its configuration. The installed SDK package, or the single-file product through `sdkHelperHost`, supplies the interpreter and entry. Version detection retains its existing timeout and error classification. No shell, argv0 fallback or inference from an executable suffix selects the runtime.
 
 
-The durable Pi lane runs in a separate `byok-pi-durable` executable launched through the same credential launcher and launch-binding contract as `byok-pi-prepared`. The credential launcher transfers the provider key over a private, one-shot JSON IPC channel bound to the launch config digest; it MUST NEVER place the key in the durable child's environment, argv, stdio RPC or replica files. The worker consumes it into model/provider memory and disconnects IPC before constructing tools or MCP children. Deleting process.env is not an isolation mechanism. Tool exec MUST force `inheritEnv: false` and an explicit allowlist. Conformance tests require no key in both inherited tool env and the worker's OS-introspectable initial environment (`ps eww` / `/proc/<pid>/environ`). The daemon communicates with it over stdio RPC, does not depend on `@byok-sdk/keys`, and never reads, proxies or forwards credentials. Its environment is rebuilt by the same EnvironmentBuilder allowlist with `BYOK_*` and loader-injection deny. One child exclusively owns one durable storage; because upstream pi-durable provides no cross-process lock, the child MUST acquire an OS exclusive lock (flock or sidecar lockfile) bound to the current leaseId before opening storage, and MUST fail closed if it cannot. The child exists only while its daemon holds the home's single-writer lease; lease release requires the child's disposal receipt or confirmed process-tree death (wait after KILL).
+The durable Pi lane runs in a separate `byok-pi-durable` executable launched through the same credential launcher contract as `byok-pi-prepared`. The credential launcher transfers the provider key over a private, one-shot JSON IPC channel bound to the launch config digest; it MUST NEVER place the key in the durable child's environment, argv, stdio RPC or replica files. The worker consumes it into model/provider memory and disconnects IPC before constructing tools or MCP children. Deleting process.env is not an isolation mechanism. Tool exec MUST force `inheritEnv: false` and an explicit allowlist. Conformance tests require no key in both inherited tool env and the worker's OS-introspectable initial environment (`ps eww` / `/proc/<pid>/environ`). The daemon communicates with it over stdio RPC, does not depend on `@byok-sdk/keys`, and never reads, proxies or forwards credentials. Its environment is rebuilt by the same EnvironmentBuilder allowlist with the `BYOK_*` deny. One child exclusively owns one durable storage; because upstream pi-durable provides no cross-process lock, the child MUST acquire an OS exclusive lock (flock or sidecar lockfile) bound to the current leaseId before opening storage, and MUST fail closed if it cannot. The child exists only while its daemon holds the home's single-writer lease; lease release requires the child's disposal receipt or confirmed process-tree death (wait after KILL).
 
 ### Durable Pi lane (experimental, flag-gated)
 
-The durable Pi lane is disabled by default and advertised only as an adapter capability; protocol intersection remains the execution gate. The first slice runs one harness with one root conversation per execution (per-execution replica required). The lane admits only the YOLO effective policy and refuses any other computed effective policy before spawning. Tool permission follows the owner's YOLO ruling: the `beforeTool` hook admits calls without Host approval and emits no `needs_approval`; a throwing hook blocks the call. Hard path denials apply only to tools with structured path arguments; bash is best-effort only (reject explicit `BYOK_*` / loader-injection assignments) and is not workspace-bound under YOLO—boundary is env isolation (`inheritEnv: false`) plus process/replica lock. YOLO does not relax replay: slice 1 declares no replay-safe tools; any future read-only allowlist requires a separate reviewed slice, and the environment allowlist still applies. Slice 1 is an unprepared ordinary path: harness `compaction.enabled` is false and `retry.maxRetries` is 0. This disables auto-retry, not checkpoint model-request resends; permitted same-execution recovery reports ordinary observed usage. Prepared-lane guarantees (first-request byte identity with counted artifact, at-most-once scoped fetch, prepared charge-once binding) do not apply. Harness events map onto existing AgentEvent variants using Pi 1.0 names: `run_end`→`turn_end`, `tool_execution_*`→`tool_use`/`tool_result`, `usage_changed`/`message_end`→`usage`, `task_failed`→`error`, result-doc writes→`artifact`; `snapshot` must not be replayed as live progress; needs_approval is unused; unmapped events follow the existing unknown-event rule. The final answer is written to a result document and delivered only through an explicitly selected `terminalProjection: result-document`. Background subagents, wake tasks, memory documents, fork, multi-client steering and remote execution environments are not part of this slice. Recurring schedules remain Host-driven; the device does not interpret cron.
+The durable Pi lane is disabled by default and advertised only as an adapter capability; protocol intersection remains the execution gate. The first slice runs one harness with one root conversation per execution (per-execution replica required). The lane runs YOLO, as every lane does since ADR-037; there is no SDK permission policy to compute. Tool permission follows the owner's YOLO ruling: the `beforeTool` hook admits calls without Host approval and emits no `needs_approval`; a throwing hook blocks the call. The structured file tools may reach any path except the durable replica store; there is no workspace containment. Bash is best-effort only (reject explicit `BYOK_*` assignments) and is not workspace-bound under YOLO—boundary is env isolation (`inheritEnv: false`) plus process/replica lock. YOLO does not relax replay: slice 1 declares no replay-safe tools; any future read-only allowlist requires a separate reviewed slice, and the environment allowlist still applies. Slice 1 is an unprepared ordinary path: harness `compaction.enabled` is false and `retry.maxRetries` is 0. This disables auto-retry, not checkpoint model-request resends; permitted same-execution recovery reports ordinary observed usage. Prepared-lane guarantees (first-request byte identity with counted artifact, at-most-once scoped fetch, prepared charge-once binding) do not apply. Harness events map onto existing AgentEvent variants using Pi 1.0 names: `run_end`→`turn_end`, `tool_execution_*`→`tool_use`/`tool_result`, `usage_changed`/`message_end`→`usage`, `task_failed`→`error`, result-doc writes→`artifact`; `snapshot` must not be replayed as live progress; needs_approval is unused; unmapped events follow the existing unknown-event rule. The final answer is written to a result document and delivered only through an explicitly selected `terminalProjection: result-document`. Background subagents, wake tasks, memory documents, fork, multi-client steering and remote execution environments are not part of this slice. Recurring schedules remain Host-driven; the device does not interpret cron.
 
 ### Official Pi migration security and installation contract (2026-09-25 consolidation)
 
-Prepared wire and durable record were cut to version 7 here; the prepared Agent memory cut supersedes this with version 8 (see the v8 operator precondition above). Each cut is one-shot with no old-token or old-record reads. `prompt` contains exactly the required Host `systemPrompt` string, including an empty string if explicitly supplied. It enters D verbatim. Prepared models receive no Pi default system prompt, local cwd, skills, docs, tool snippets or coding guidelines. Tools are declared only through the observed tools parameter. A record whose `requiredToolsets` is empty is admitted on this lane only when it also counts no Agent memory (`agentMemory: 'none'`), in which case it is a tool-less record (the offer omits `requiredToolsets`; the launch attestation is still bound and the policy must select no native tool: `auto` or `readonly` with `allowTools: []`). Before 0.24.0 that combination was refused at preparation, admission and launch; only the memory-only shape (`agentMemory` other than `none`) was admitted.
+Prepared wire and durable record were cut to version 7 here; the prepared Agent memory cut supersedes this with version 8 (see the v8 operator precondition above). Each cut is one-shot with no old-token or old-record reads. `prompt` contains exactly the required Host `systemPrompt` string, including an empty string if explicitly supplied. It enters D verbatim. Prepared models receive no Pi default system prompt, local cwd, skills, docs, tool snippets or coding guidelines. Tools are declared only through the observed tools parameter. A record whose `requiredToolsets` is empty is admitted on this lane only when it also counts no Agent memory (`agentMemory: 'none'`), in which case it is a tool-less record (the offer omits `requiredToolsets`; the prepared session launches no native tool). Before 0.24.0 that combination was refused at preparation, admission and launch; only the memory-only shape (`agentMemory` other than `none`) was admitted.
 
 The SDK-owned envelope `byok.pi.prepared-input` is version 4, request format `byok.pi.openai-completions.request`, compilerVersion 4. P(D) is the entire captured body string D, byte for byte, with residual=[]; no serializer classification table or token claim exists. The first request alone is frozen. Tool-result continuations use their current context and the same per-stream retry-off, at-most-once scoped fetch; they never replay the first D. Errata 1 E4.4's accepted continuation risk remains: post-response overflow detection, appended event and alert. Host runtime ruling and C must be reissued after M5, with ruledResidualKeys=[]; Salesko must assemble framing and product instructions into the complete systemPrompt.
 
-Prepared child environment is rebuilt through an explicit EnvironmentBuilder allowlist before launch binding. The six OpenAI constructor variables and undeclared OPENAI_* are not inherited. The final scoped fetch admits only content-type, accept, authorization, Pi user-agent, the measured fixed x-stainless metadata (including timeout), and session-affinity fields bound to the frozen provider session id. OpenAI-Organization, OpenAI-Project and custom headers cause a typed refusal with zero sends. Both AgentSession retry and provider retry are disabled; repeated fetch calls in one stream are refused, including after a transport failure. Redirect following is disabled.
+Prepared child environment is rebuilt through an explicit EnvironmentBuilder allowlist before launch. The six OpenAI constructor variables and undeclared OPENAI_* are not inherited. The final scoped fetch admits only content-type, accept, authorization, Pi user-agent, the measured fixed x-stainless metadata (including timeout), and session-affinity fields bound to the frozen provider session id. OpenAI-Organization, OpenAI-Project and custom headers cause a typed refusal with zero sends. Both AgentSession retry and provider retry are disabled; repeated fetch calls in one stream are refused, including after a transport failure. Redirect following is disabled.
 
 A1'' compile uses only a placeholder key and injected capture-and-throw fetch against the actual baseUrl. The official OpenAI client reads exactly OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET, OPENAI_LOG and OPENAI_CUSTOM_HEADERS. The approved purity contract is D independence plus this exact read set, not zero reads; an upgrade changing the set requires a fresh ruling. Poisoning these variables must leave D unchanged. OPENAI_LOG may cause a local request log during compile: the device owner deliberately enabled this debug setting; the accepted side effect remains local, does not change D and is not sent externally. No global env or transport monkey-patch is permitted.
 
-Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.0.4 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires fresh closure attestation and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in attestation, eleven Bun-resolved official package instances on the attesting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.25.0 source at `packages/client/vendor/oar/a800aa0/`, from upstream commit `a800aa00ba9c754c88ba25f84a6981e757b0f19f`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their measured JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
+Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.0.4 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected closure inventory and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.37.0 source at `packages/client/vendor/oar/0be506f/`, from upstream commit `0be506ff7ee86f315dafda0c2d48de1a6cac5d62`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
 
 pi-durable 1.0.1 ruling (2026-10-04, approved by Aimpact): admitted at exactly 1.0.1. Its shipped code is byte-identical to 1.0.0 (version-only change), and the closure was freshly attested at closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`.
 
@@ -2437,7 +2053,7 @@ pi-durable 1.0.3 ruling (2026-10-05, approved by Aimpact via herdr go 「全线�
 
 pi-durable 1.0.4 ruling (2026-10-06, approved by the owner: 「我是要升到1.04」): admitted at exactly 1.0.4, closure freshly attested at closureDigest `fb68a2820fb78075a9195e930ee8c55f235d9f46abc861dc3f1c3a85592b2625` (upstream commit `7c10bd4337495ee613f2224843ecdf349b80d1df`). The 1.0.4 breaking changes apply to `NodeExecutionEnv.watch()` permission handling and the env conformance suite. The SDK does not call `watch()` and does not run that suite, so no BYOK source change is required. The durable coding tools get the upstream `read`, output-BOM and progress-default fixes. The new `@earendil-works/pi-env` package is not in the closure.
 
-Exactness has three independent checks: bun.lock exact versions and sha512 integrity under frozen install; runtime verification of all resolved official package instances' manifests (nine attested package names; eleven resolved instances on the attesting Bun host) and file inventories against tarball/provenance evidence; release-pack and registry-readback isolated-install convergence. Encapsulated runtime records bind the measured artifact and approved closure provenance without looking up external packages. Renamed provenance fields are packageName, packageVersion, tarballIntegrity, upstreamCommit, provenanceDigest, closureDigest and compilerVersion; upstreamBase/forkBuild are retired, not filled with dummy values. The official tarball signatures and provenance are collected reproducibly by `scripts/release/collect-official-pi-closure.mjs`.
+Exactness has three independent checks: bun.lock exact versions and sha512 integrity under frozen install; verification of all resolved official package instances' manifests (nine inventoried package names; eleven resolved instances on the collecting Bun host) and file inventories against tarball/provenance evidence, at build, release and input preparation; release-pack and registry-readback isolated-install convergence. The SDK does not attest the Pi executable at launch (ADR-037). Renamed provenance fields are packageName, packageVersion, tarballIntegrity, upstreamCommit, provenanceDigest, closureDigest and compilerVersion; upstreamBase/forkBuild are retired, not filled with dummy values. The official tarball signatures and provenance are collected reproducibly by `scripts/release/collect-official-pi-closure.mjs`.
 
 ### 0.22.0 Host calibration and upgrade boundary
 
@@ -2488,63 +2104,15 @@ configuration is the context window authority even if runtime stats differ.
 Historical v1 envelopes remain readable and unchanged; older consumers ignore
 these optional fields.
 
-## N1 official external CLI custody edge (T6, 2026-10-02)
+## Pi subagents
 
-The terminal edge is `pi-subagent-runner -> official-external-cli`, with
-`inheritsCredential: false`. The six adapter identifiers are a closed vocabulary;
-readonly and writer modes bind different code-owned argv. A bare command, an
-unknown adapter, an unproven installation or an undetermined authentication mode
-refuses before an external model task child is created.
-
-`ToolImplementationAuthority` resolves the independent `official-external-cli`
-subject to `OfficialExternalCliInstallV2`: the ordinary install record plus
-non-secret official-source/config-restriction proof references and explicit
-HOME/config directories. The Host verifies those release/config proofs; the SDK
-measures and reverifies artifact/interpreter/resources and directory identity.
-The approved scope is the CLI's own account login. No provider key, OAuth/cloud
-credential, Pi transport, BYOK control, loader injection, caller argv or auth/
-backend/config override reaches the external child. CLI-owned auth stores are
-never read or copied by SDK code.
-
-SDK runtime plans and descendant launches use cohort V2. Old launch/plan records
-are refused rather than upgraded. The verified Host plan supplies helper policy,
-full closure and sealed process cwd; session/config cwd remains the task
-workspace. Its fanout grant must cover the inherited root budget manifest.
-Initial config, actual helper read and append consumption share SDK input
-validation. Config bytes are committed before helper admission. Append rejects
-and acknowledges the whole observed batch, and accepted/rejected request IDs
-cannot be replayed. A validated input is not a spawn permit.
-
-Every custody-managed helper/probe/task requires a physical root claim. External
-and writer tasks share `E=min(R,16)` and `W=min(E,4)` across all adapters and
-parents in the root; live caps are `Q=2`, `J=1`, further bounded by root/session
-limits. Only the initial step/attempt may redeem the runner's existing logical
-depth charge. Later steps/retry attempts require another charge; consumed permits
-and the same operation/attempt cannot launch twice. Final identity/argv/env/
-parent/permit checks and cumulative/live claims precede native spawn under the
-root admission lock. Cancellation and absolute deadlines are checked before
-probes and final admission. Cumulative claims are never refunded after a spawn
-attempt; only confirmed termination releases live slots. POSIX external cleanup
-uses kernel process-group presence, without ps/taskkill child processes. Unknown
-quiescence keeps slots occupied.
-
-These are internal derivation/launch limits, with no money/token metering or
-spend cap and no projection to subscription balances. Official CLI availability
-requires an approved pinned installation/config scope and platform smoke;
-fixture evidence is not login-service acceptance. Cursor authentication mode and
-Windows external process-tree supervision remain unsupported/fail-closed in
-this cohort. Top-level Codex environment stripping is a separate change.
-
-
-### T6 Claude final-mode proof
-Every Claude terminal task rechecks CLI-produced own-login mode/config scope immediately before final physical reverify and task admission. Unknown, changed or mismatching status refuses without a task reservation; the real status child consumes a physical root claim. The SDK does not add an unproved universal forceLoginMethod setting: Host declarations have no enforced version capability field. Same-UID change after the final check or during lock wait remains a documented check-time risk. No account-store contents or new credentials are read by the SDK.
-
-
-### T6 uncertain groups, declared output scope and preflight
-A post-PID setup failure requests SIGTERM for the detached child group while retaining uncertain live slots and all cumulative claims; only explicit PID/group absence permits F5 reclamation. Async output roots are independent of task cwd, tied to the SDK request/directory snapshot and step filename, and rechecked before native launch; symlink/hardlink escapes refuse. Adapter eager output deletion is replaced by cleanup only after final scope verification. Advisory prepare preflight for every adapter and spawn preflight before Claude's final status probe use the same replay/E/W/depth policy as authoritative final locked admission, create no reservation/physical probe, and never replace final atomic policy checks.
-
-### T6 locked physical tuple supplement (F2)
-Official external CLI probes and terminal task admission retain the full asynchronous byte/environment reverify. After acquiring the shared root admission lock, before permit consumption/native spawn, the SDK additionally checks identity-owned artifact/interpreter/declared asset tuples and canonical parent paths, external home/config directory tuples, and the committed parent record. A known pre-spawn mismatch rolls back the uncommitted reservation under the existing F1 rule. This is a synchronous tuple-only supplement, preserving same-inode hardlink layouts, not an atomic OS execution guarantee or login-store content proof. Same-UID in-place edits preserving every tuple and the residual final check-to-spawn interval remain check-time limits. No credential/billing authority or new per-adapter budget is introduced.
+ADR-037 removed the SDK custody dispatcher, its launch records and slot caps,
+and the external-CLI custody (`pi-subagent-runner -> official-external-cli`).
+A Pi subagent child re-enters the SDK bundle that runs the parent:
+`<runtime> [<entry>] __byok_sdk_helper <pi-subagent-print|pi-subagent-runner>`
+(`packages/client/src/subagents/spawn.ts`). The vendored subagents extension
+keeps its own depth (`PI_SUBAGENT_MAX_DEPTH`) and concurrency limits, as in OAR.
+The SDK adds no second limit and no money or token spend cap.
 
 ## Local native interaction contract
 
@@ -2561,8 +2129,8 @@ This local seam is distinct from the existing remote `needs_approval` /
 wire payload, remote authorization, UI, persistent grant, or Host reconnect
 protocol. Claude and Codex wire this seam only when their local adapter is constructed
 with `nativeInteractions` Host callbacks. With that option absent, neither
-advertises native interaction support. Pi remains unsupported. The existing
-`approvalInteractive` declarations and permission admission rules stay
+advertises native interaction support, and the session runs YOLO (ADR-037). Pi
+remains unsupported. The existing `approvalInteractive` declarations stay
 authoritative for the remote task path. Local capability metadata does not
 assert that every task exposes every tool or will ask an interactive question.
 
@@ -2616,16 +2184,22 @@ and never sends `updatedPermissions`. It offers only allow-once, deny and cancel
 inside `updatedInput.answers`; duplicate native text/labels are refused rather
 than overwritten. Cancellation/timeout sends deny plus interrupt, while a
 native `control_cancel_request` writes no answer. Unknown/malformed requests or
-native identity drift dispose the process. Opt-in is admitted only in auto
-mode, and a request cannot override a sealed built-in allowlist or exact observed
-MCP grant. Readonly/plan remain available without native interaction opt-in;
-confirm remains unsupported. Claude's own existing allow rules may bypass the
-callback, so this is not an all-tools-confirmation policy.
+native identity drift dispose the process. Opt-in launches Claude with
+`--permission-prompt-tool stdio --permission-mode acceptEdits` instead of
+`--dangerously-skip-permissions`. Claude then asks the Host for every MCP tool
+call, the SDK reserved memory and message tools included; no per-tool grant
+exists. Claude's own existing allow rules may bypass the callback, so this is
+not an all-tools-confirmation policy.
 
-Codex remains pinned to CLI 0.160.0. Opt-in opens/resumes with `on-request` and
-requires native policy readback before a session is exposed; ordinary default
-mode remains `never`. The existing danger-full-access sandbox is unchanged,
-so confirm policy remains unsupported. Only command/file approval requests and
+Codex is qualified against CLI 0.160.0. As in OAR, the version is read, never
+gated: Codex updates itself, so any other version is admitted with a
+`runtime_version_unqualified` advisory. Native contracts are probed instead
+(app-server presence). Opt-in opens/resumes with `on-request` and
+requires approval-policy readback before a session is exposed; ordinary default
+mode remains `never`. The sandbox is `danger-full-access` by default, as in
+OAR. `DaemonConfig.codexSandbox` selects `read-only` or `workspace-write`, or
+`inherit` to pass no sandbox override so the user's own `config.toml` applies.
+Only command/file approval requests and
 `item/tool/requestUserInput` are mapped. Allow-once maps to `accept`, session
 scope to `acceptForSession`, denial to `decline` and cancellation to `cancel`.
 Structured questions keep native question IDs and answer arrays. User-input

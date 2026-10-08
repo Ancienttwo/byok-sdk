@@ -5,8 +5,6 @@ export type { CapabilityFlag } from './version';
 export { BlobRefSchema, CONTENT_HASH_RE } from './blob';
 export type { BlobRef } from './blob';
 
-export { PermissionPolicySchema, PERMISSION_MODES } from './permission';
-export type { PermissionPolicy, PermissionMode } from './permission';
 
 export {
   PROVIDER_PROFILE_BINDING_CAPABILITY,
@@ -191,7 +189,6 @@ export {
   AGENT_INPUT_PREPARATION_CAPABILITY,
   INPUT_PREPARATION_WIRE_VERSION,
   InputPreparationContentHashSchema,
-  InputPreparationPermissionModeSchema,
   InputPreparationPolicyRevisionSchema,
   InputPreparationProfileIdSchema,
   InputPreparationSourceSchema,
@@ -214,7 +211,6 @@ export {
   InputPreparationResidualValueClassSchema,
   InputPreparationResidualKeySchema,
   InputPreparationProjectionSchema,
-  InputPreparationToolImplementationKindSchema,
   InputPreparationArtifactSummarySchema,
   InputPreparationBindingSchema,
   InputPreparationReceiptSummarySchema,
@@ -223,7 +219,6 @@ export {
   InputPreparationRejectionReasonSchema,
 } from './input-preparation';
 export type {
-  InputPreparationPermissionMode,
   InputPreparationSource,
   InputPreparationModel,
   InputPreparationOptions,

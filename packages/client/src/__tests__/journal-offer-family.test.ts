@@ -94,20 +94,20 @@ async function setup(type: string) {
     // The one offer that carries no instruction: the request is already inside
     // the frozen envelope the referenced record retained.
     ? {
-      policy: { mode: 'auto', allowTools: [] }, runtime: 'pi', agentRef,
+      runtime: 'pi', agentRef,
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       agentMemory: 'none',
       preparation: { reference: 'journal-family-record', requestDigest: 'journal-family-request-digest' },
     }
     : {
-      instruction: 'journal lifecycle', policy: { mode: 'auto' }, runtime: 'pi',
+      instruction: 'journal lifecycle', runtime: 'pi',
       ...(type.includes('for_agent') ? { agentRef } : {}),
       ...(type.includes('with_egress') ? { egressPolicy: DEFAULT_AGENT_EGRESS_POLICY } : {}),
       ...(type === 'task.offer_for_agent_with_egress' ? { sessionRef: 'resume-session' } : {}),
       ...(type === 'task.offer_with_toolsets' ? { requiredToolsets: ['test-missing'] } : {}),
     };
   const seq = server.nextSeq();
-  const envelope: Envelope = EnvelopeSchema.parse({ v: 1, id: randomUUID(), ts: new Date().toISOString(), type, task_id: 'task-147', seq, payload });
+  const envelope: Envelope = EnvelopeSchema.parse({ v: 2, id: randomUUID(), ts: new Date().toISOString(), type, task_id: 'task-147', seq, payload });
   server.send(envelope);
   await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server.url, device.deviceId)).toBe(seq), EVENTUAL_STATE_BUDGET_MS);
   return { config, adapter, storeDir, envelope, device };

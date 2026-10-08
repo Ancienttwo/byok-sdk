@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { AgentEvent } from '@byok-sdk/protocol';
+import { AgentEgressReliablePayloadSchema, type AgentEvent } from '@byok-sdk/protocol';
 import type { AgentRef } from '../agent-home';
 import {
   type AgentEgressDropReason,
@@ -8,7 +8,6 @@ import {
   type AgentEgressLaneStatus,
   type AgentEgressPolicy,
   type AgentEgressStatus,
-  metadataStatusEvent,
 } from './agent-egress-policy';
 import {
   AGENT_EGRESS_DIRECTORY,
@@ -21,20 +20,17 @@ import {
   type AgentContentReceiptWithoutReliableIdentity,
   type AgentReliableEgressRecord,
 } from './agent-egress-spool';
-import { sanitizeReliablePayload, type AgentEgressSanitizer } from './agent-egress-sanitizer';
 
 export interface AgentEgressControllerOptions {
   readonly policy: Readonly<AgentEgressPolicy>;
   /** Authenticated tenant identity, never accepted from an egress event. */
   readonly tenantId?: string;
-  readonly sanitizer?: AgentEgressSanitizer;
 }
 
 export interface AgentEgressProgressInput {
   readonly agentRef?: AgentRef;
   readonly taskId: string;
   readonly events: readonly AgentEvent[];
-  readonly serverCapabilities: readonly string[];
 }
 
 export interface AgentEgressReliableInput {
@@ -110,7 +106,10 @@ export class AgentEgressController {
     this.noteDrop('latest-value', reason, agentRef);
   }
 
-  /** Project before TaskRunner builds a `task.progress` envelope. */
+  /**
+   * Coalesce to the latest value before TaskRunner builds a `task.progress`
+   * envelope. Events go to the Host as the runtime produced them.
+   */
   projectLatestValue(input: AgentEgressProgressInput): readonly AgentEvent[] {
     // No Agent identity means this is the established legacy task lane. The
     // additive Agent egress contract has no authority to rewrite it.
@@ -119,15 +118,10 @@ export class AgentEgressController {
       this.noteDrop('latest-value', 'policy_denied', input.agentRef);
       return [];
     }
-    if (this.options.policy.activity.mode === 'contentful-trajectory' && !input.serverCapabilities.includes('agent-egress-policy')) {
-      this.noteDrop('latest-value', 'capability_missing', input.agentRef);
-      return [];
-    }
-    const projected = input.events.map((event) => this.options.policy.activity.mode === 'metadata-status' ? metadataStatusEvent(event) : event);
-    if (this.options.tenantId === undefined) return Object.freeze(projected);
+    if (this.options.tenantId === undefined) return Object.freeze([...input.events]);
 
     let latest: AgentEvent | undefined;
-    for (const event of projected) {
+    for (const event of input.events) {
       const offered = this.latest.offer({ agentRef: input.agentRef, tenantId: this.options.tenantId, event }, this.options.policy);
       if (!offered.accepted) {
         this.noteDrop('latest-value', offered.reason, input.agentRef);
@@ -148,15 +142,11 @@ export class AgentEgressController {
       this.noteDrop('reliable', 'policy_denied', input.agentRef);
       return { ok: false, reason: 'policy_denied' };
     }
-    let payload: unknown;
-    try {
-      payload = sanitizeReliablePayload(input.payload, this.options.policy, this.options.sanitizer, {
-        agentId: input.agentRef.agentId,
-        tenantId: this.options.tenantId,
-      });
-    } catch {
-      this.noteDrop('reliable', 'sanitizer_rejected', input.agentRef);
-      return { ok: false, reason: 'sanitizer_rejected' };
+    // The payload goes to the Host as is. It must still be a valid wire value
+    // (JSON, at most 256 KiB) before the spool makes it durable.
+    if (!AgentEgressReliablePayloadSchema.shape.payload.safeParse(input.payload).success) {
+      this.noteDrop('reliable', 'invalid_envelope', input.agentRef);
+      return { ok: false, reason: 'invalid_envelope' };
     }
     try {
       const spoolOpen = this.spoolFor(input.homeDir, input.agentRef);
@@ -167,7 +157,7 @@ export class AgentEgressController {
           agentRef: input.agentRef,
           tenantId,
           policyRevision: this.options.policy.policyRevision,
-          payload,
+          payload: input.payload,
           sessionRef: input.sessionRef,
           ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
           ...(input.eventId === undefined ? {} : { eventId: input.eventId }),

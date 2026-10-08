@@ -11,3 +11,13 @@ export function resolveAgentMemoryMcpBin(
   const resolved = resolveSdkReservedHelperBin('agent-memory-mcp', host);
   return Object.freeze({ command: resolved.command, args: resolved.args });
 }
+
+/** Resolve the SDK-owned task-free Agent-memory descriptor helper a preparation observes. */
+export function resolveAgentMemoryDescribeBin(
+  externalHelperConfigured = false,
+  host?: SdkHelperHostConfig,
+): ResolvedAgentMemoryMcpBin | undefined {
+  if (!isAgentMemorySecureFilesystemAvailable(externalHelperConfigured)) return undefined;
+  const resolved = resolveSdkReservedHelperBin('agent-memory-describe', host);
+  return Object.freeze({ command: resolved.command, args: resolved.args });
+}

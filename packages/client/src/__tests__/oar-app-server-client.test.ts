@@ -5,9 +5,9 @@ import path from 'node:path';
 import {
   startAppServerClient, RpcTimeoutError,
   type LineProcess, type SpawnLineProcess, type AppServerLimits,
-} from '../../vendor/oar/a800aa0/runtimes/codex/app-server-client.js';
-import { rpcControl } from '../../vendor/oar/a800aa0/runtimes/codex/rpc-control.js';
-import { createSessionKernel } from '../../vendor/oar/a800aa0/shared/session-kernel.js';
+} from '../../vendor/oar/0be506f/runtimes/codex/app-server-client.js';
+import { rpcControl } from '../../vendor/oar/0be506f/runtimes/codex/rpc-control.js';
+import { createSessionKernel } from '../../vendor/oar/0be506f/shared/session-kernel.js';
 
 function fakeProcess() {
   const lines: Array<(line: string) => void> = [];
@@ -198,10 +198,96 @@ describe('OAR injected app-server client', () => {
     expect(kernel.records().map(record => record.kind)).toEqual(['request', 'response']);
     expect(onError).not.toHaveBeenCalled(); expect(vi.getTimerCount()).toBe(0);
   });
+
+  it('settles pending and later requests as exited after an exit or a kill, and keeps budget overflow an error', async () => {
+    vi.useFakeTimers();
+    const exited = setup();
+    const onExit = vi.fn();
+    const beforeExit = exited.client.request('waiting', {}, onExit).catch(error => error);
+    exited.exit(9);
+    expect(onExit).toHaveBeenCalledWith({ kind: 'exited', error: await beforeExit });
+    const afterExit = vi.fn();
+    await expect(exited.client.request('later', {}, afterExit)).rejects.toThrow('app-server exited');
+    expect(afterExit.mock.calls[0]![0]).toMatchObject({ kind: 'exited' });
+
+    const killed = setup();
+    const onKill = vi.fn();
+    const beforeKill = killed.client.request('waiting', {}, onKill).catch(error => error);
+    killed.client.kill();
+    expect((await beforeKill).message).toBe('app-server killed');
+    expect(onKill.mock.calls[0]![0]).toMatchObject({ kind: 'exited' });
+
+    const overflow = setup({ maxPending: 1 });
+    const onOverflow = vi.fn();
+    const first = overflow.client.request('first', {}, onOverflow).catch(error => error);
+    await overflow.client.request('second', {}).catch(() => {});
+    expect((await first).message).toContain('pending limit exceeded');
+    expect(onOverflow.mock.calls[0]![0]).toMatchObject({ kind: 'error' });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('passes the redacted native error object with an error reply', async () => {
+    const fake = fakeProcess();
+    const client = startAppServerClient(fake.spawn, 'fake-codex', {}, {}, undefined, {}, { redact: text => text.replaceAll('TOKEN', '[redacted]') });
+    const settled = vi.fn();
+    const reply = client.request('refused', {}, settled).catch(error => error);
+    fake.line({ id: 1, error: { code: -32000, message: 'bad TOKEN', data: { header: 'Bearer TOKEN', attempts: 2 } } });
+    expect((await reply).message).toBe('bad [redacted]');
+    expect(settled.mock.calls[0]![0]).toMatchObject({
+      kind: 'error', native: { code: -32000, message: 'bad [redacted]', data: { header: 'Bearer [redacted]', attempts: 2 } },
+    });
+    client.kill();
+  });
+
+  it('records an exited outcome as runtime_exited without the plan error mapper', async () => {
+    const { client, exit } = setup();
+    const kernel = createSessionKernel('test-session'); const onError = vi.fn(() => ({ kind: 'accepted' as const }));
+    const control = rpcControl(kernel, client, {
+      body: { kind: 'steer', input: 'x' }, gate: () => null, method: 'turn/steer', params: () => ({}),
+      onReply: () => ({ kind: 'accepted' }), onError,
+    });
+    exit(1);
+    expect((await control).response.body).toEqual({ kind: 'rejected', code: 'runtime_exited', reason: 'app-server exited' });
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('lets a pending fallback accept a control and records the late native reply as a frame', async () => {
+    const { client, line } = setup();
+    const kernel = createSessionKernel('test-session');
+    let takeover: (() => void) | undefined;
+    const control = rpcControl(kernel, client, {
+      body: { kind: 'abort' }, gate: () => null, method: 'turn/interrupt', params: () => ({}),
+      onPending: accept => { takeover = accept; },
+      onReply: () => ({ kind: 'rejected', code: 'runtime_refused', reason: 'second answer' }), onError: () => ({ kind: 'rejected', code: 'runtime_refused', reason: 'second answer' }),
+    });
+    takeover!();
+    line({ id: 1, result: { late: true } });
+    expect((await control).response.body).toEqual({ kind: 'accepted' });
+    const records = kernel.records();
+    expect(records.map(record => record.kind)).toEqual(['request', 'response', 'frame']);
+    expect(records[2]).toMatchObject({ kind: 'frame', body: { type: 'turn/interrupt', native: { late: true }, events: [] } });
+    client.kill();
+  });
+
+  it('keeps a failed fallback record inside the takeover and rejects the control with the failure', async () => {
+    const { client } = setup();
+    const kernel = createSessionKernel('test-session', {
+      onRecord: record => { if (record.kind === 'response') throw new Error('consumer failed'); },
+    });
+    let takeover: (() => void) | undefined;
+    const control = rpcControl(kernel, client, {
+      body: { kind: 'abort' }, gate: () => null, method: 'turn/interrupt', params: () => ({}),
+      onPending: accept => { takeover = accept; },
+      onReply: () => ({ kind: 'accepted' }), onError: () => ({ kind: 'rejected', code: 'runtime_refused', reason: 'refused' }),
+    }).catch(error => error);
+    expect(() => takeover!()).not.toThrow();
+    expect(() => client.kill()).toThrow('consumer failed');
+    expect((await control).message).toBe('consumer failed');
+  });
 });
 
-it('accounts for every vendored file and the six maintained runtime source deltas', () => {
-  const root = path.resolve(import.meta.dirname, '../../vendor/oar/a800aa0');
+it('accounts for every vendored file and the seven maintained source deltas', () => {
+  const root = path.resolve(import.meta.dirname, '../../vendor/oar/0be506f');
   const manifest = JSON.parse(readFileSync(path.join(root, 'source-manifest.json'), 'utf8')) as {
     files: Array<{ path: string; sourcePath: string; upstreamSha256: string; vendoredSha256: string; delta?: string }>;
   };
@@ -213,6 +299,6 @@ it('accounts for every vendored file and the six maintained runtime source delta
     if (!row.delta) expect(row.vendoredSha256).toBe(row.upstreamSha256);
     if (row.path.endsWith('.ts')) expect(row.sourcePath).toBe(`packages/oar/src/${row.path}`);
   }
-  expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual(['runtimes/codex/app-server-client.ts', 'runtimes/codex/open.ts', 'runtimes/codex/projection.ts', 'runtimes/codex/rpc-control.ts', 'runtimes/codex/session.ts', 'shared/session-kernel.ts']);
+  expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual(['runtimes/codex/app-server-client.ts', 'runtimes/codex/open.ts', 'runtimes/codex/projection.ts', 'runtimes/codex/rpc-control.ts', 'runtimes/codex/session.ts', 'shared/mcp-servers.ts', 'shared/session-kernel.ts']);
   expect(readFileSync(path.join(root, 'LICENSE'), 'utf8')).toContain('Apache License');
 });

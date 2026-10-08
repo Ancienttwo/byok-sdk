@@ -28,7 +28,7 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 }
 
 function offer(taskId: string, seq: number): Envelope {
-  return createEnvelope('task.offer', { instruction: taskId, policy: { mode: 'auto' } }, { taskId, seq });
+  return createEnvelope('task.offer', { instruction: taskId }, { taskId, seq });
 }
 
 async function seededAuth(): Promise<AuthManager> {
@@ -271,7 +271,7 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     ['gap-crossing unknown task seq', { events: [{ type: 'task.future', seq: 2 }], cursor: 2 }],
     ['decreasing task page order', {
       events: [
-        { v: 1, id: '10000000-0000-4000-8000-000000000135', ts: new Date().toISOString(), type: 'task.offer', task_id: 'known', seq: 1, payload: { instruction: 'known', policy: { mode: 'auto' } } },
+        { v: 2, id: '10000000-0000-4000-8000-000000000135', ts: new Date().toISOString(), type: 'task.offer', task_id: 'known', seq: 1, payload: { instruction: 'known' } },
         { type: 'task.future', seq: 1 },
       ],
       cursor: 1,

@@ -71,7 +71,7 @@ describe('the inbound gate', () => {
     const inbound = [
       createEnvelope('task.approve', {}, { taskId: 'task-1', seq: 1 }),
       createEnvelope('task.cancel', {}, { taskId: 'task-1', seq: 2 }),
-      createEnvelope('conn.ack', { protocolVersion: 1, capabilities: [], serverTime: new Date().toISOString() }, { seq: 3 }),
+      createEnvelope('conn.ack', { protocolVersion: 2, capabilities: [], serverTime: new Date().toISOString() }, { seq: 3 }),
     ];
     for (const envelope of inbound) {
       expect(await handleInboundEnvelope(stores, deviceId, envelope)).toBe('rejected');

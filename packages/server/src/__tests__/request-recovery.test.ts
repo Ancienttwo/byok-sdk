@@ -14,7 +14,7 @@ describe('public facade request recovery', () => {
     let byok = createByokServer(options); let http = await startServer(byok);
     try {
       const daemon = await connectFakeDaemonLongPoll(http.baseUrl, byok, { productId: options.productId });
-      const input = { taskId: 'host-persisted-a', deviceId: daemon.deviceId, instruction: 'original', runtime: 'claude' as const, policy: { mode: 'auto' as const } };
+      const input = { taskId: 'host-persisted-a', deviceId: daemon.deviceId, instruction: 'original', runtime: 'claude' as const };
       await expect(byok.dispatch({ ...input, deviceId: undefined })).rejects.toThrow('explicit deviceId');
       await expect(byok.dispatch({ ...input, taskId: '' })).rejects.toThrow('non-empty');
       const mutable = { ...input, taskId: 'captured-before-await' };
@@ -25,7 +25,7 @@ describe('public facade request recovery', () => {
       expect(handle.taskId).toBe(input.taskId);
       const original = await byok.tasks.offer(input.taskId);
       expect(original).toMatchObject({ taskId: input.taskId, deviceId: daemon.deviceId, delivered: true,
-        type: 'task.offer', payload: { instruction: 'original', runtime: 'claude', policy: { mode: 'auto' } } });
+        type: 'task.offer', payload: { instruction: 'original', runtime: 'claude' } });
       for (const retry of [input, { ...input, instruction: 'changed' }]) {
         await expect(byok.dispatch(retry)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
       }

@@ -29,7 +29,6 @@ import {
   type AgentRef,
   type AgentMessagePublishPayload,
   type AgentMessageDispositionPayload,
-  type PermissionPolicy,
   type TaskState,
 } from '@byok-sdk/protocol';
 import type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
@@ -589,12 +588,10 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       );
     }
 
-    const policy: PermissionPolicy = input.policy ?? { mode: 'confirm' };
     const runtime = dispatchSelection?.runtimeId ?? input.runtime;
     const common = {
       ...(input.harnessId === undefined ? {} : { harnessId: input.harnessId }),
       instruction: input.instruction,
-      policy,
       ...(runtime === undefined ? {} : { runtime }),
       ...(dispatchSelection === undefined ? {} : { dispatchSelection }),
     };

@@ -13,7 +13,7 @@ import { startPreparedOperation } from './fixtures/prepared-operation';
 const fixture = fileURLToPath(new URL('./fixtures/claude-native-interactions.mjs', import.meta.url));
 const sessions: Session[] = [];
 const directories: string[] = [];
-const task = { instruction: 'Offline native interaction test', policy: { mode: 'auto' as const } };
+const task = { instruction: 'Offline native interaction test' };
 
 async function start(scenario: string, native: NativeInteractionHostOptions | undefined, sessionRef?: string) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-native-'));
@@ -21,7 +21,7 @@ async function start(scenario: string, native: NativeInteractionHostOptions | un
   const transcript = path.join(directory, 'transcript.jsonl');
   const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: fixture, source: 'path' }), nativeInteractions: native });
   const session = await startPreparedOperation(adapter, { ...task, ...(sessionRef === undefined ? {} : { sessionRef }) }, {
-    workspaceDir: directory, policy: task.policy,
+    workspaceDir: directory,
     env: { ...process.env, CLAUDE_NATIVE_SCENARIO: scenario, CLAUDE_NATIVE_TRANSCRIPT: transcript },
   });
   sessions.push(session);
@@ -222,13 +222,6 @@ describe('Claude native interactions through prepared process transport', () => 
     expect(frames.some(frame => frame.type === 'user')).toBe(false);
   });
 
-  it.each(['readonly', 'plan', 'confirm'] as const)('keeps %s policy unsupported with native callbacks enabled', async mode => {
-    const resolveBin = vi.fn(() => ({ command: fixture, source: 'path' as const }));
-    const adapter = new ClaudeAdapter({ resolveBin, nativeInteractions: { onRequest: () => {} } });
-    const result = await adapter.prepare({ offer: task, policy: { mode }, descriptor: adapter.descriptor, requiredToolsetIds: [] });
-    expect(result).toMatchObject({ kind: 'reject', retryable: false });
-    expect(resolveBin).not.toHaveBeenCalled();
-  });
 });
 
 describe('Claude native bridge transport fencing', () => {
@@ -243,12 +236,6 @@ describe('Claude native bridge transport fencing', () => {
     return { native, request: requests[0]!, onFatal };
   }
 
-  it('does not expose or answer a tool outside sealed policy authority', () => {
-    const onFatal = vi.fn(); const onRequest = vi.fn(); const write = vi.fn(async () => {});
-    const native = new ClaudeNativeInteractionBridge({ onRequest, onFatal }, undefined, name => name === 'Read');
-    native.bind(write); native.beginTurn(); native.receive({ type: 'system', subtype: 'init', session_id: 'session' }); native.receive(permission);
-    expect(onRequest).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled(); expect(onFatal).toHaveBeenCalledOnce(); native.close();
-  });
   it('provider cancellation fences a response queued in the same tick', async () => {
     const write = vi.fn(async () => {});
     const { native, request } = bridge(write);

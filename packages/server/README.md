@@ -15,7 +15,6 @@ const task = await server.dispatch({
   deviceId,
   instruction: 'Find five qualified prospects and draft follow-ups.',
   runtime: 'claude',
-  policy: { mode: 'auto' },
   requiredToolsets: ['salesko.prospecting'],
 });
 ```

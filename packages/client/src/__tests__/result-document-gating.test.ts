@@ -73,7 +73,7 @@ async function runToTurnEnd(
   outputChunks: string[] = ['all ', 'done'],
 ): Promise<void> {
   await runner.handleEnvelope(
-    createEnvelope('task.offer', { instruction: 'do the thing', policy: { mode: 'auto' } }, { taskId, seq: 1 }),
+    createEnvelope('task.offer', { instruction: 'do the thing' }, { taskId, seq: 1 }),
   );
   const session = adapter.sessions[0]!;
   for (const text of outputChunks) session.emit({ type: 'progress', text });
@@ -432,7 +432,7 @@ describe('DaemonConfig.resultDocument end to end (real daemon + in-process serve
 
   async function driveOneTask(adapter: StubRuntimeAdapter): Promise<Envelope> {
     server.send(
-      createEnvelope('task.offer', { instruction: 'do the thing', policy: { mode: 'auto' } }, { taskId: 'task-1', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { instruction: 'do the thing' }, { taskId: 'task-1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
     const session = adapter.sessions[0]!;
@@ -482,7 +482,7 @@ describe('DaemonConfig.resultDocument end to end (real daemon + in-process serve
     await setupDaemon(adapter, { resultDocument: { extract: () => ({ kind: 'invoice' }) } });
 
     server.send(
-      createEnvelope('task.offer', { instruction: 'do the thing', policy: { mode: 'auto' } }, { taskId: 'task-1', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { instruction: 'do the thing' }, { taskId: 'task-1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
 

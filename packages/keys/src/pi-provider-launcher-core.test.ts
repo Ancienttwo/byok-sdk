@@ -4,7 +4,6 @@ import { promises as fs } from 'node:fs';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 
 import { ChildProcess } from 'node:child_process';
-import * as identity from '@byok-sdk/implementation-identity';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 import { InMemorySecretStore, modelProviderSecretName } from './secret-store';
 import {
@@ -50,17 +49,8 @@ function profile(authMode: 'bearer' | 'none') {
   });
 }
 
-function binding(projectionDir = '/projection', sessionDir = '/sessions', command = '/opt/pi', entry?: string): identity.ImplementationSpawnBindingV1 {
-  return {
-    format: 'byok.implementation-spawn', version: 1,
-    identity: { kind: 'unavailable', reason: 'resolver_unconfigured' },
-    command, ...(entry === undefined ? {} : { entry }), fixedArgv: ['__byok_sdk_helper', 'pi-rpc'], cwd: '/sealed',
-    envCommitments: { PI_CODING_AGENT_DIR: projectionDir, PI_CODING_AGENT_SESSION_DIR: sessionDir },
-  };
-}
-function launchFlags(command: string, sessionDir: string, entry?: string): string[] {
-  const launch = binding('/projection', sessionDir, command, entry);
-  return ['--launch-binding', JSON.stringify(launch), '--pi-cwd', launch.cwd, '--pi-fixed-args', JSON.stringify(launch.fixedArgv), '--pi-config-digest', 'a'.repeat(64)];
+function launchFlags(projectionDir = '/projection'): string[] {
+  return ['--pi-cwd', '/sealed', '--pi-projection-dir', projectionDir, '--pi-config-digest', 'a'.repeat(64)];
 }
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -69,7 +59,7 @@ describe('Pi provider launcher core', () => {
     const mcp = path.join(os.tmpdir(), 'task-mcp.json');
     const env = buildPiProviderChildEnvironment({
       ambient: { BYOK_PI_MCP_CONFIG_PATH: mcp, BYOK_PI_PERMISSION_MODE: 'readonly', BYOK_PI_UNTRUSTED: 'discard', ZAI_API_KEY: CANARY },
-      binding: binding(), sessionDir: '/sessions', secret: undefined,
+      projectionDir: '/projection', sessionDir: '/sessions', secret: undefined,
     });
     expect(env.BYOK_PI_MCP_CONFIG_PATH).toBeUndefined();
     expect(env.BYOK_PI_PERMISSION_MODE).toBeUndefined();
@@ -80,7 +70,7 @@ describe('Pi provider launcher core', () => {
     { BYOK_PI_MCP_CONFIG_PATH: './relative' }, { BYOK_PI_MCP_CONFIG_PATH: '/bad\npath' },
     { BYOK_PI_PERMISSION_MODE: 'auto\n' }, { BYOK_PI_PERMISSION_MODE: 'confirm' },
   ])('discards obsolete SDK extension context', (ambient) => {
-    expect(buildPiProviderChildEnvironment({ ambient, binding: binding(), sessionDir: '/sessions', secret: undefined })).toEqual({PI_CODING_AGENT_DIR:'/projection', PI_CODING_AGENT_SESSION_DIR:'/sessions'});
+    expect(buildPiProviderChildEnvironment({ ambient, projectionDir: '/projection', sessionDir: '/sessions', secret: undefined })).toEqual({PI_CODING_AGENT_DIR:'/projection', PI_CODING_AGENT_SESSION_DIR:'/sessions'});
   });
   it('parses only the closed launcher contract and requires absolute custody paths', () => {
     const profileDbPath = path.join(os.tmpdir(), 'providers.sqlite');
@@ -101,7 +91,7 @@ describe('Pi provider launcher core', () => {
       'local-model',
       '--macos-keychain-path',
       macosKeychainPath,
-      ...launchFlags('/opt/pi', sessionDir),
+      ...launchFlags(),
       '--',
       '--mode',
       'rpc',
@@ -217,7 +207,7 @@ describe('Pi provider launcher core', () => {
         GITHUB_TOKEN: 'ambient-other-secret',
         PI_PROVIDER_API_KEY: 'ambient-projection-key',
       },
-      binding: binding('/private/projection', '/private/sessions'),
+      projectionDir: '/private/projection',
       sessionDir: '/private/sessions',
       secret: 'exact-custody-key',
       platform: 'darwin',
@@ -261,8 +251,8 @@ describe('Pi provider launcher core', () => {
     '--session-dir', path.join(os.tmpdir(), 'sessions'), '--provider', 'custom', '--model', 'local-model'];
   it('preserves a spaced script path as one argument and leaves executable mode explicit', () => {
     const piEntry = path.join(os.tmpdir(), 'Pi package with spaces', 'cli.js');
-    expect(parsePiProviderLauncherOptions([...args, '--pi-entry', piEntry, ...launchFlags(process.execPath, path.join(os.tmpdir(), 'sessions'), piEntry), '--', '--mode', 'rpc']).piEntry).toBe(piEntry);
-    expect(parsePiProviderLauncherOptions([...args, ...launchFlags(process.execPath, path.join(os.tmpdir(), 'sessions')), '--', '--mode', 'rpc']).piEntry).toBeUndefined();
+    expect(parsePiProviderLauncherOptions([...args, '--pi-entry', piEntry, ...launchFlags(), '--', '--mode', 'rpc']).piEntry).toBe(piEntry);
+    expect(parsePiProviderLauncherOptions([...args, ...launchFlags(), '--', '--mode', 'rpc']).piEntry).toBeUndefined();
   });
   it.each(['relative.js', '', '/tmp/bad\nentry.js', '/tmp/bad\u0000entry.js'])('rejects invalid entry %j', entry => {
     expect(() => parsePiProviderLauncherOptions([...args, '--pi-entry', entry, '--', '--mode', 'rpc'])).toThrow();
@@ -275,11 +265,11 @@ describe('committed Pi spawn boundary', () => {
     const projection = path.join(root, 'projection');
     const sessions = path.join(root, 'sessions');
     await fs.mkdir(projection, { mode: 0o700 });
-    const launch = binding(projection, sessions, process.execPath, path.join(root, 'entry with spaces.js'));
+    const launch = { command: process.execPath, entry: path.join(root, 'entry with spaces.js'), cwd: '/sealed' };
     const options = parsePiProviderLauncherOptions([
-      '--pi-bin', launch.command, '--runtime-entry', 'pi-rpc', '--pi-entry', launch.entry!, '--profile-db', path.join(root, 'db'),
+      '--pi-bin', launch.command, '--runtime-entry', 'pi-rpc', '--pi-entry', launch.entry, '--profile-db', path.join(root, 'db'),
       '--session-dir', sessions, '--provider', 'custom', '--model', 'local-model',
-      '--launch-binding', JSON.stringify(launch), '--pi-cwd', launch.cwd, '--pi-fixed-args', JSON.stringify(launch.fixedArgv), '--pi-config-digest', 'a'.repeat(64),
+      '--pi-cwd', launch.cwd, '--pi-projection-dir', projection, '--pi-config-digest', 'a'.repeat(64),
       '--', '--config', path.join(root, 'task config.json'), '--mode', 'rpc', '--no-skills',
     ]);
     const provider = parseModelProviderProfile({ ...profile('bearer'), pi_model: PI_MODEL_FIXTURE });
@@ -292,8 +282,8 @@ describe('committed Pi spawn boundary', () => {
   it('requires one launcher-owned digest and refuses delegated overrides', async () => {
     const f = await fixture();
     try {
-      const base = ['--pi-bin',f.launch.command,'--runtime-entry','pi-rpc','--pi-entry',f.launch.entry!,'--profile-db',path.join(f.root,'db'),
-        '--session-dir',f.sessions,'--provider','custom','--model','local-model',...launchFlags(f.launch.command,f.sessions,f.launch.entry)];
+      const base = ['--pi-bin',f.launch.command,'--runtime-entry','pi-rpc','--pi-entry',f.launch.entry,'--profile-db',path.join(f.root,'db'),
+        '--session-dir',f.sessions,'--provider','custom','--model','local-model',...launchFlags(f.projection)];
       const withoutDigest = base.slice(0,-2);
       for (const own of [withoutDigest,[...withoutDigest,'--pi-config-digest','invalid'],[...base,'--pi-config-digest','a'.repeat(64)]]) {
         expect(()=>parsePiProviderLauncherOptions([...own,'--','--mode','rpc'])).toThrow(/pi-config-digest/);
@@ -313,26 +303,36 @@ describe('committed Pi spawn boundary', () => {
     } finally {await fs.rm(f.root,{recursive:true,force:true});}
   });
 
-  it('requires explicit binding for actual launch, while validate-only stays credential-blind', () => {
+  it('requires an explicit cwd and projection directory for actual launch, while validate-only stays credential-blind', () => {
     const base = ['--pi-bin', '/opt/pi', '--runtime-entry', 'pi-rpc', '--profile-db', '/db', '--session-dir', '/sessions', '--provider', 'custom', '--model', 'local-model'];
-    expect(() => parsePiProviderLauncherOptions([...base, '--', '--mode', 'rpc'])).toThrow(/launch-binding/);
-    expect(parsePiProviderLauncherOptions([...base, '--validate-only', 'true']).launchBinding).toBeUndefined();
-    const good = launchFlags('/opt/pi', '/sessions');
-    for (const [flag, replacement] of [['--pi-cwd', '/other'], ['--pi-fixed-args', '["spoof"]'], ['--launch-binding', JSON.stringify({...binding(), identity:{kind:'unavailable',reason:'record_missing'}})]]) {
-      const bad = [...good]; bad[bad.indexOf(flag!) + 1] = replacement!;
-      expect(() => parsePiProviderLauncherOptions([...base, ...bad, '--', '--mode', 'rpc'])).toThrow();
+    expect(() => parsePiProviderLauncherOptions([...base, '--', '--mode', 'rpc'])).toThrow(/pi-cwd/);
+    expect(parsePiProviderLauncherOptions([...base, '--validate-only', 'true']).piProjectionDir).toBeUndefined();
+    expect(parsePiProviderLauncherOptions([...base, ...launchFlags(), '--', '--mode', 'rpc'])).toMatchObject({ piCwd: '/sealed', piProjectionDir: '/projection' });
+    for (const flag of ['--pi-cwd', '--pi-projection-dir']) {
+      const bad = launchFlags(); bad[bad.indexOf(flag) + 1] = 'relative';
+      expect(() => parsePiProviderLauncherOptions([...base, ...bad, '--', '--mode', 'rpc'])).toThrow(/absolute/);
+    }
+    expect(() => parsePiProviderLauncherOptions([...base, ...launchFlags(), '--launch-binding', '{}', '--', '--mode', 'rpc'])).toThrow(/unknown launcher argument/);
+  });
+
+  it('accepts only the single-file re-entry prefix for the parsed runtime entry in --pi-fixed-args', () => {
+    const base = (entry: string) => ['--pi-bin', '/product/agent', '--runtime-entry', entry, '--profile-db', '/db', '--session-dir', '/sessions', '--provider', 'custom', '--model', 'local-model', ...launchFlags()];
+    expect(parsePiProviderLauncherOptions([...base('pi-rpc'), '--', '--mode', 'rpc']).piFixedArgs).toEqual([]);
+    expect(parsePiProviderLauncherOptions([...base('pi-rpc'), '--pi-fixed-args', '["__byok_sdk_helper","pi-rpc"]', '--', '--mode', 'rpc']).piFixedArgs)
+      .toEqual(['__byok_sdk_helper', 'pi-rpc']);
+    expect(parsePiProviderLauncherOptions([...base('pi-prepared'), '--pi-fixed-args', '["__byok_sdk_helper","pi-prepared"]', '--', '--config', '/c.json']).piFixedArgs)
+      .toEqual(['__byok_sdk_helper', 'pi-prepared']);
+    for (const bad of ['', 'not json', '[]', '["__byok_sdk_helper"]', '["__byok_sdk_helper","pi-prepared"]', '["__byok_sdk_helper","pi-rpc","x"]',
+      '["other","pi-rpc"]', '[ "__byok_sdk_helper", "pi-rpc" ]']) {
+      expect(() => parsePiProviderLauncherOptions([...base('pi-rpc'), '--pi-fixed-args', bad, '--', '--mode', 'rpc']), bad).toThrow(/--pi-fixed-args (must be exactly|requires a value)/);
     }
   });
 
-  it('refuses undeclared or changed controlled directories and ignores ambient ones', async () => {
-    const launch = binding();
-    const env = buildPiProviderChildEnvironment({ ambient:{PI_PACKAGE_DIR:'/ambient', PI_CODING_AGENT_DIR:'/ambient'}, binding:launch, sessionDir:'/sessions', secret:undefined });
-    expect(env.PI_PACKAGE_DIR).toBeUndefined();
+  it('sets the launch-owned Pi directories, ignores ambient ones and keeps the product Pi asset root', () => {
+    const env = buildPiProviderChildEnvironment({ ambient:{PI_PACKAGE_DIR:'/product/pi-assets', PI_CODING_AGENT_DIR:'/ambient', PI_CODING_AGENT_SESSION_DIR:'/ambient'}, projectionDir:'/projection', sessionDir:'/sessions', secret:undefined });
+    expect(env.PI_PACKAGE_DIR).toBe('/product/pi-assets');
     expect(env.PI_CODING_AGENT_DIR).toBe('/projection');
-    const actual = {command:launch.command, entry:launch.entry, fixedArgv:launch.fixedArgv, cwd:launch.cwd};
-    await expect(identity.assertImplementationSpawnBinding(launch, {...actual, env:{...env, PI_PACKAGE_DIR:'/undeclared'}})).rejects.toThrow(/undeclared or changed/);
-    await expect(identity.assertImplementationSpawnBinding(launch, {...actual, env:{...env, PI_CODING_AGENT_DIR:'/changed'}})).rejects.toThrow(/undeclared or changed/);
-    expect(() => buildPiProviderChildEnvironment({ambient:{}, binding:launch, sessionDir:'/other', secret:undefined})).toThrow(/directories/);
+    expect(env.PI_CODING_AGENT_SESSION_DIR).toBe('/sessions');
   });
 
   it.each(['mode', 'nonempty', 'symlink', 'parent-symlink', 'owner', 'file'] as const)(
@@ -348,7 +348,7 @@ describe('committed Pi spawn boundary', () => {
         }
         if (kind === 'parent-symlink') {
           const alias = path.join(f.root, 'alias'); await fs.symlink(f.root, alias);
-          f.options.launchBinding = {...f.options.launchBinding!, envCommitments:{...f.launch.envCommitments, PI_CODING_AGENT_DIR:path.join(alias,'projection')}};
+          f.options.piProjectionDir = path.join(alias, 'projection');
         }
         if (kind === 'owner') {
           const stat = await fs.lstat(f.projection);
@@ -367,8 +367,10 @@ describe('committed Pi spawn boundary', () => {
     },
   );
 
-  it('rejects an exact-path mismatch', async () => {
-    await expect(assertPiProjectionDirectory('/projection', '/other')).rejects.toThrow(/committed path/);
+  it('rejects a projection path that is not absolute and normalized', async () => {
+    for (const candidate of ['projection', '/projection/../projection']) {
+      await expect(assertPiProjectionDirectory(candidate)).rejects.toThrow(/absolute normalized/);
+    }
   });
 
   // Production refuses the Windows durable entry before custody; POSIX IPC evidence runs elsewhere.
@@ -389,33 +391,38 @@ describe('committed Pi spawn boundary', () => {
       expect(kill).not.toHaveBeenCalled(); await launched.cleanup();
     } finally { await fs.rm(f.root,{recursive:true,force:true}); }
   });
-  it('injects exactly one secret after layout checks, rechecks final env, and spawns the checked argv/cwd', async () => {
+  it('injects exactly one secret after layout checks and spawns the requested argv/cwd', async () => {
     const f = await fixture();
     try {
       const order: string[] = [];
       const read = f.store.get.bind(f.store);
       vi.spyOn(f.store, 'get').mockImplementation(async (name) => { order.push('secret'); return read(name); });
-      const gate = identity.assertImplementationSpawnBinding;
-      const snapshots: Record<string,string>[] = [];
-      vi.spyOn(identity, 'assertImplementationSpawnBinding').mockImplementation(async (binding, actual) => {
-        order.push('gate'); snapshots.push({...actual.env}); await gate(binding, actual);
-      });
       const spawn = vi.fn(() => {order.push('spawn'); return new ChildProcess();});
       const launched = await startPiProvider(f.provider, f.options, {ambient:{PATH:'/usr/bin', OPENAI_API_KEY:'ambient-secret'}, createSecretStore:() => f.store, spawn, profiles:f.profiles});
-      expect(order).toEqual(['gate','secret','gate','spawn']);
+      expect(order).toEqual(['secret','spawn']);
       const [command, args, spawnOptions] = spawn.mock.calls[0] as unknown as [string,string[],{cwd:string;env:Record<string,string>}];
       expect(command).toBe(f.launch.command);
-      expect(args.slice(0,4)).toEqual([f.launch.entry,'__byok_sdk_helper','pi-rpc',`--config-digest=${'a'.repeat(64)}`]);
+      expect(args.slice(0,2)).toEqual([f.launch.entry,`--config-digest=${'a'.repeat(64)}`]);
       expect(spawnOptions.cwd).toBe(f.launch.cwd);
-      expect(spawnOptions.env).toEqual({...snapshots[0], PI_PROVIDER_API_KEY:CANARY});
-      expect(snapshots[1]).toEqual(spawnOptions.env);
-      expect(identity.toolImplementationLaunchEnvNamesDigest(snapshots[0]!)).toBe(identity.toolImplementationLaunchEnvNamesDigest(snapshots[1]!));
-      expect(identity.toolImplementationLoaderEnvValuesDigest(snapshots[0]!)).toBe(identity.toolImplementationLoaderEnvValuesDigest(snapshots[1]!));
+      expect(spawnOptions.env).toEqual({PATH:'/usr/bin', PI_CODING_AGENT_DIR:f.projection, PI_CODING_AGENT_SESSION_DIR:f.sessions, PI_PROVIDER_API_KEY:CANARY});
       expect(JSON.stringify(args)).not.toContain(CANARY);
-      expect(JSON.stringify(f.options.launchBinding)).not.toContain(CANARY);
+      expect(JSON.stringify(f.options)).not.toContain(CANARY);
       expect(await fs.readFile(path.join(f.projection,'models.json'),'utf8')).not.toContain(CANARY);
       await launched.cleanup();
       expect(await fs.readdir(f.projection)).toEqual([]);
+    } finally { await fs.rm(f.root,{recursive:true,force:true}); }
+  });
+
+  it('spawns a single-file product with its fixed re-entry argv before the config digest', async () => {
+    const f = await fixture();
+    try {
+      const spawn = vi.fn(() => new ChildProcess());
+      const launched = await startPiProvider(f.provider, { ...f.options, piFixedArgs: ['__byok_sdk_helper', 'pi-rpc'] },
+        {ambient:{PATH:'/usr/bin'}, createSecretStore:() => f.store, spawn, profiles:f.profiles});
+      const [command, args] = spawn.mock.calls[0] as unknown as [string,string[]];
+      expect(command).toBe(f.launch.command);
+      expect(args.slice(0,4)).toEqual([f.launch.entry,'__byok_sdk_helper','pi-rpc',`--config-digest=${'a'.repeat(64)}`]);
+      await launched.cleanup();
     } finally { await fs.rm(f.root,{recursive:true,force:true}); }
   });
 
@@ -431,25 +438,6 @@ describe('committed Pi spawn boundary', () => {
       expect(spawn).not.toHaveBeenCalled();
       expect(await fs.readdir(f.projection)).toEqual([]);
     } finally { await fs.rm(f.root, { recursive: true, force: true }); }
-  });
-
-  it('refuses post-credential drift at the final gate with zero target spawns', async () => {
-    const f = await fixture();
-    try {
-      const originalGet = f.store.get.bind(f.store);
-      vi.spyOn(f.store,'get').mockImplementation(async (name) => {
-        // Admission authority remains fixed; mutation after custody must be caught.
-        f.options.launchBinding = {...f.options.launchBinding!};
-        (f.launch as {cwd:string}).cwd = '/changed-after-secret';
-        return originalGet(name);
-      });
-      // Use the same mutable binding as the caller until the final assertion.
-      f.options.launchBinding = f.launch;
-      const spawn = vi.fn(() => new ChildProcess());
-      await expect(startPiProvider(f.provider,f.options,{ambient:{},createSecretStore:()=>f.store,spawn,profiles:f.profiles})).rejects.toThrow(/launch description drift/);
-      expect(f.store.get).toHaveBeenCalledOnce(); expect(spawn).not.toHaveBeenCalled();
-      expect(await fs.readdir(f.projection)).toEqual([]);
-    } finally { await fs.rm(f.root,{recursive:true,force:true}); }
   });
 });
 
@@ -523,13 +511,12 @@ describe('the prepared runtime entry spawn', () => {
       const sessions = path.join(root, 'sessions');
       const configPath = path.join(root, 'prepared launch.json');
       await fs.mkdir(projection, { mode: 0o700 });
-      const launch = binding(projection, sessions, process.execPath, path.join(root, 'host.js'));
+      const launch = { command: process.execPath, entry: path.join(root, 'host.js'), cwd: '/sealed' };
       const options = parsePiProviderLauncherOptions([
-        '--pi-bin', launch.command, '--runtime-entry', 'pi-prepared', '--pi-entry', launch.entry!,
+        '--pi-bin', launch.command, '--runtime-entry', 'pi-prepared', '--pi-entry', launch.entry,
         '--profile-db', path.join(root, 'db'), '--session-dir', sessions,
         '--provider', 'custom', '--model', 'local-model',
-        '--launch-binding', JSON.stringify(launch), '--pi-cwd', launch.cwd,
-        '--pi-fixed-args', JSON.stringify(launch.fixedArgv), '--pi-config-digest', 'a'.repeat(64),
+        '--pi-cwd', launch.cwd, '--pi-projection-dir', projection, '--pi-config-digest', 'a'.repeat(64),
         '--', '--config', configPath,
       ]);
       const provider = parseModelProviderProfile({ ...profile('bearer'), pi_model: PI_MODEL_FIXTURE });
@@ -539,7 +526,7 @@ describe('the prepared runtime entry spawn', () => {
       const launched = await startPiProvider(provider, options, { ambient: { PATH: '/usr/bin' }, createSecretStore: () => store, spawn, profiles: await profilesWith(provider) });
       const [command, args, spawnOptions] = spawn.mock.calls[0] as unknown as [string, string[], { cwd: string; env: Record<string, string> }];
       expect(command).toBe(launch.command);
-      expect(args).toEqual([launch.entry, '__byok_sdk_helper', 'pi-rpc', `--config-digest=${'a'.repeat(64)}`, '--config', configPath]);
+      expect(args).toEqual([launch.entry, `--config-digest=${'a'.repeat(64)}`, '--config', configPath]);
       expect(args).not.toContain('--provider');
       expect(args).not.toContain('--thinking');
       expect(JSON.stringify(args)).not.toContain(CANARY);
@@ -558,13 +545,12 @@ describe('the prepared runtime entry spawn', () => {
       const projection = path.join(root, 'projection');
       const sessions = path.join(root, 'sessions');
       await fs.mkdir(projection, { mode: 0o700 });
-      const launch = binding(projection, sessions, process.execPath, path.join(root, 'host.js'));
+      const launch = { command: process.execPath, entry: path.join(root, 'host.js'), cwd: '/sealed' };
       const options = parsePiProviderLauncherOptions([
-        '--pi-bin', launch.command, '--runtime-entry', 'pi-prepared', '--pi-entry', launch.entry!,
+        '--pi-bin', launch.command, '--runtime-entry', 'pi-prepared', '--pi-entry', launch.entry,
         '--profile-db', path.join(root, 'db'), '--session-dir', sessions,
         '--provider', 'custom', '--model', 'local-model',
-        '--launch-binding', JSON.stringify(launch), '--pi-cwd', launch.cwd,
-        '--pi-fixed-args', JSON.stringify(launch.fixedArgv), '--pi-config-digest', 'a'.repeat(64),
+        '--pi-cwd', launch.cwd, '--pi-projection-dir', projection, '--pi-config-digest', 'a'.repeat(64),
         '--', '--config', path.join(root, 'launch.json'), '--mode', 'rpc',
       ]);
       const provider = parseModelProviderProfile({ ...profile('bearer'), pi_model: PI_MODEL_FIXTURE });

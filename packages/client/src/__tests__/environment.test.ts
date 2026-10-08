@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { buildRuntimeEnv } from '../daemon/environment';
+import { buildAllowlistedEnv, buildRuntimeEnv } from '../daemon/environment';
 
 /** A minimal ambient env with no incidental host cruft — every test builds exactly the vars it cares about, rather than depending on whatever happens to be set on the machine running the suite. */
 function ambient(vars: Record<string, string>): NodeJS.ProcessEnv {
   return { ...vars };
 }
 
-describe('buildRuntimeEnv', () => {
-  it('includes only the platform baseline when the adapter declares no requirements at all (fail-closed by omission)', () => {
-    const result = buildRuntimeEnv({
+describe('buildAllowlistedEnv', () => {
+  it('includes only the platform baseline when the caller allows no extra names (fail-closed by omission)', () => {
+    const result = buildAllowlistedEnv({
       ambient: ambient({
         PATH: '/usr/bin',
         HOME: '/home/user',
@@ -21,7 +21,7 @@ describe('buildRuntimeEnv', () => {
   });
 
   it('includes the full platform baseline (PATH/HOME/USER/USERPROFILE/TMPDIR/TEMP/TMP/LANG/TZ/TERM/SHELL) when set', () => {
-    const result = buildRuntimeEnv({
+    const result = buildAllowlistedEnv({
       ambient: ambient({
         PATH: '/bin',
         HOME: '/home/user',
@@ -52,7 +52,7 @@ describe('buildRuntimeEnv', () => {
   });
 
   it('matches LC_* and XDG_* as prefixes, not exact names', () => {
-    const result = buildRuntimeEnv({
+    const result = buildAllowlistedEnv({
       ambient: ambient({
         LC_ALL: 'en_US.UTF-8',
         LC_CTYPE: 'en_US.UTF-8',
@@ -81,10 +81,10 @@ describe('buildRuntimeEnv', () => {
       LOCALAPPDATA: 'C:\\Users\\user\\AppData\\Local',
     });
 
-    const onWindows = buildRuntimeEnv({ ambient: env, platform: 'win32' });
+    const onWindows = buildAllowlistedEnv({ ambient: env, platform: 'win32' });
     expect(onWindows).toEqual(env);
 
-    const onDarwin = buildRuntimeEnv({ ambient: env, platform: 'darwin' });
+    const onDarwin = buildAllowlistedEnv({ ambient: env, platform: 'darwin' });
     expect(onDarwin).toEqual({});
   });
 
@@ -96,21 +96,21 @@ describe('buildRuntimeEnv', () => {
       ProgramFiles: 'C:\\Program Files',
     });
 
-    const result = buildRuntimeEnv({ ambient: osCasedEnv, platform: 'win32' });
+    const result = buildAllowlistedEnv({ ambient: osCasedEnv, platform: 'win32' });
     expect(result).toEqual(osCasedEnv);
   });
 
-  it('F1: hard-denies BYOK_* case-insensitively on win32, so a mixed-case Byok_X / byok_secret cannot leak through even via an explicit locallyAllowedNames entry', () => {
-    const result = buildRuntimeEnv({
+  it('F1: hard-denies BYOK_* case-insensitively on win32, so a mixed-case Byok_X / byok_secret cannot leak through even via an explicit allow entry', () => {
+    const result = buildAllowlistedEnv({
       ambient: ambient({ Path: 'C:\\Windows', byok_secret: 'must-not-leak', Byok_X: 'also-must-not-leak' }),
       platform: 'win32',
-      locallyAllowedNames: ['byok_secret', 'Byok_X'],
+      allow: ['byok_secret', 'Byok_X'],
     });
     expect(result).toEqual({ Path: 'C:\\Windows' });
   });
 
   it('F1: keeps matching byte-exact/case-sensitive on non-win32 — an OS-cased key spelled the way win32 would spell it (Path) does NOT match the PATH pattern there', () => {
-    const result = buildRuntimeEnv({
+    const result = buildAllowlistedEnv({
       ambient: ambient({ Path: 'wrong-case-should-not-match', PATH: '/usr/bin' }),
       platform: 'darwin',
     });
@@ -130,68 +130,44 @@ describe('buildRuntimeEnv', () => {
     };
 
     for (const platform of ['linux', 'darwin'] as const) {
-      const result = buildRuntimeEnv({ ambient: ambient(proxyVars), platform });
+      const result = buildAllowlistedEnv({ ambient: ambient(proxyVars), platform });
       expect(result).toEqual(proxyVars);
     }
   });
 
-  it('adds requirements.baseNames and requirements.credentialNames on top of the platform baseline', () => {
-    const result = buildRuntimeEnv({
+  it('adds allow names on top of the platform baseline', () => {
+    const result = buildAllowlistedEnv({
       ambient: ambient({
         PATH: '/bin',
         MY_CONFIG_DIR: '/config',
         MY_API_KEY: 'secret-value',
         UNRELATED: 'nope',
       }),
-      requirements: { baseNames: ['MY_CONFIG_DIR'], credentialNames: ['MY_API_KEY'] },
+      allow: ['MY_CONFIG_DIR', 'MY_API_KEY'],
     });
     expect(result).toEqual({ PATH: '/bin', MY_CONFIG_DIR: '/config', MY_API_KEY: 'secret-value' });
   });
 
-  it('supports a `*`-suffixed prefix pattern in requirements', () => {
-    const result = buildRuntimeEnv({
+  it('supports a `*`-suffixed prefix pattern in allow', () => {
+    const result = buildAllowlistedEnv({
       ambient: ambient({ PATH: '/bin', FOO_ONE: '1', FOO_TWO: '2', BAR: 'nope' }),
-      requirements: { baseNames: ['FOO_*'] },
+      allow: ['FOO_*'],
     });
     expect(result).toEqual({ PATH: '/bin', FOO_ONE: '1', FOO_TWO: '2' });
   });
 
-  it('adds locallyAllowedNames (the per-device operator override) on top of everything else', () => {
-    const result = buildRuntimeEnv({
-      ambient: ambient({ PATH: '/bin', OPERATOR_ALLOWED_VAR: 'yes', OTHER: 'no' }),
-      locallyAllowedNames: ['OPERATOR_ALLOWED_VAR'],
-    });
-    expect(result).toEqual({ PATH: '/bin', OPERATOR_ALLOWED_VAR: 'yes' });
-  });
-
-  it('hard-denies BYOK_* even when explicitly listed in requirements.baseNames', () => {
-    const result = buildRuntimeEnv({
+  it('hard-denies BYOK_* even when explicitly listed in allow', () => {
+    const result = buildAllowlistedEnv({
       ambient: ambient({ PATH: '/bin', BYOK_CONTROL_SECRET: 'must-not-leak' }),
-      requirements: { baseNames: ['BYOK_CONTROL_SECRET'] },
-    });
-    expect(result).toEqual({ PATH: '/bin' });
-  });
-
-  it('hard-denies BYOK_* even when explicitly listed in requirements.credentialNames', () => {
-    const result = buildRuntimeEnv({
-      ambient: ambient({ PATH: '/bin', BYOK_CONTROL_SECRET: 'must-not-leak' }),
-      requirements: { credentialNames: ['BYOK_CONTROL_SECRET'] },
-    });
-    expect(result).toEqual({ PATH: '/bin' });
-  });
-
-  it('hard-denies BYOK_* even when explicitly listed in locallyAllowedNames (the operator override cannot punch a hole in it)', () => {
-    const result = buildRuntimeEnv({
-      ambient: ambient({ PATH: '/bin', BYOK_CONTROL_SECRET: 'must-not-leak' }),
-      locallyAllowedNames: ['BYOK_CONTROL_SECRET'],
+      allow: ['BYOK_CONTROL_SECRET'],
     });
     expect(result).toEqual({ PATH: '/bin' });
   });
 
   it('hard-denies any BYOK_*-prefixed name, not just an exact BYOK_ literal', () => {
-    const result = buildRuntimeEnv({
+    const result = buildAllowlistedEnv({
       ambient: ambient({ PATH: '/bin', BYOK_STORE_DIR: '/secret/store', BYOK_ANYTHING: 'x' }),
-      locallyAllowedNames: ['BYOK_STORE_DIR', 'BYOK_ANYTHING'],
+      allow: ['BYOK_STORE_DIR', 'BYOK_ANYTHING'],
     });
     expect(result).toEqual({ PATH: '/bin' });
   });
@@ -199,27 +175,80 @@ describe('buildRuntimeEnv', () => {
   it('never mutates the ambient object passed in', () => {
     const env = ambient({ PATH: '/bin', SECRET: 'x' });
     const before = { ...env };
-    buildRuntimeEnv({ ambient: env, requirements: { baseNames: ['SECRET'] } });
+    buildAllowlistedEnv({ ambient: env, allow: ['SECRET'] });
     expect(env).toEqual(before);
   });
 
   it('returns a fresh object each call, not a reference to ambient', () => {
     const env = ambient({ PATH: '/bin' });
-    const result = buildRuntimeEnv({ ambient: env });
+    const result = buildAllowlistedEnv({ ambient: env });
     expect(result).not.toBe(env);
   });
 
   it('skips a variable whose ambient value is undefined', () => {
     const env: NodeJS.ProcessEnv = { PATH: '/bin', GHOST: undefined };
-    const result = buildRuntimeEnv({ ambient: env, requirements: { baseNames: ['GHOST'] } });
+    const result = buildAllowlistedEnv({ ambient: env, allow: ['GHOST'] });
     expect(result).toEqual({ PATH: '/bin' });
   });
 
   it('excludes an unrelated variable that matches none of the allow layers', () => {
-    const result = buildRuntimeEnv({
+    const result = buildAllowlistedEnv({
       ambient: ambient({ PATH: '/bin', DATABASE_URL: 'postgres://leak' }),
-      requirements: { credentialNames: ['SOME_OTHER_KEY'] },
+      allow: ['SOME_OTHER_KEY'],
     });
     expect(result).toEqual({ PATH: '/bin' });
+  });
+});
+
+describe('buildRuntimeEnv', () => {
+  it('inherits the full ambient environment, user variables and provider keys included', () => {
+    const env = ambient({
+      PATH: '/usr/bin',
+      HOME: '/home/user',
+      MY_TEAM_SETTING: 'from-the-user-shell',
+      ANTHROPIC_API_KEY: 'sk-ant-user',
+      OPENAI_API_KEY: 'sk-openai-user',
+      CLAUDE_CONFIG_DIR: '/home/user/.claude-work',
+      CODEX_HOME: '/home/user/.codex',
+    });
+    expect(buildRuntimeEnv({ ambient: env, platform: 'darwin' })).toEqual(env);
+  });
+
+  it('drops CLAUDECODE and every BYOK_* name and keeps the loader names', () => {
+    const result = buildRuntimeEnv({
+      ambient: ambient({
+        PATH: '/usr/bin',
+        CLAUDECODE: '1',
+        BYOK_STORE_DIR: '/secret/store',
+        BYOK_ANYTHING: 'x',
+        NODE_OPTIONS: '--require /tmp/x.js',
+        LD_PRELOAD: '/tmp/x.so',
+        DYLD_INSERT_LIBRARIES: '/tmp/x.dylib',
+      }),
+      platform: 'linux',
+    });
+    expect(result).toEqual({
+      PATH: '/usr/bin',
+      NODE_OPTIONS: '--require /tmp/x.js',
+      LD_PRELOAD: '/tmp/x.so',
+      DYLD_INSERT_LIBRARIES: '/tmp/x.dylib',
+    });
+  });
+
+  it('F1: drops mixed-case CLAUDECODE and BYOK_* names on win32 and keeps OS-cased names', () => {
+    const result = buildRuntimeEnv({
+      ambient: ambient({ Path: 'C:\\Windows', ClaudeCode: '1', byok_secret: 'must-not-leak', Byok_X: 'also-must-not-leak' }),
+      platform: 'win32',
+    });
+    expect(result).toEqual({ Path: 'C:\\Windows' });
+  });
+
+  it('returns a fresh object, skips undefined values and never mutates ambient', () => {
+    const env: NodeJS.ProcessEnv = { PATH: '/bin', GHOST: undefined, CLAUDECODE: '1' };
+    const before = { ...env };
+    const result = buildRuntimeEnv({ ambient: env });
+    expect(result).toEqual({ PATH: '/bin' });
+    expect(result).not.toBe(env);
+    expect(env).toEqual(before);
   });
 });

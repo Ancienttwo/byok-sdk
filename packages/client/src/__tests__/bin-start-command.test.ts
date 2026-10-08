@@ -77,7 +77,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     server.send(
       createEnvelope(
         'task.offer',
-        { instruction: 'do the thing', policy: { mode: 'auto' } },
+        { instruction: 'do the thing' },
         { taskId: 'task-1', seq: server.nextSeq() },
       ),
     );

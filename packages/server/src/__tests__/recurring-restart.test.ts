@@ -31,9 +31,9 @@ it('recovers recurring admission and independent observations through a recreate
       'terminal-projection-selection', 'agent-egress-fresh-session',
     ] });
     const input = RecurringExecutionInputSchema.parse({ taskId: 'persisted-execution', deviceId: device.deviceId,
-      payload: { instruction: '历史与当前输入', runtime: 'codex', policy: { mode: 'auto' },
+      payload: { instruction: '历史与当前输入', runtime: 'codex',
         agentRef: { agentId: 'recurring-agent', profileRevision: '1' },
-        egressPolicy: { policyRevision: '1', activity: { mode: 'metadata-status', delivery: 'latest-value' },
+        egressPolicy: { policyRevision: '1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
           reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
           transfers: { workspace: { maxBytes: 512, allowedMimeTypes: ['text/plain'] }, transcript: 'disabled', artifact: 'disabled' } },
         messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },

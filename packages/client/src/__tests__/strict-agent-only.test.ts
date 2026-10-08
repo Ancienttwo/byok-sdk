@@ -72,9 +72,9 @@ describe('strict Agent-only daemon admission', () => {
 
   it('declines both legacy offer variants after receive while producing no runtime side effects', async () => {
     const adapter = await startStrict();
-    server.send(createEnvelope('task.offer', { instruction: 'legacy', policy: { mode: 'auto' } }, { taskId: 'strict-legacy', seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { instruction: 'legacy' }, { taskId: 'strict-legacy', seq: server.nextSeq() }));
     server.send(createEnvelope('task.offer_with_toolsets', {
-      instruction: 'legacy tools', policy: { mode: 'auto' }, requiredToolsets: ['salesko'],
+      instruction: 'legacy tools', requiredToolsets: ['salesko'],
     }, { taskId: 'strict-toolset', seq: server.nextSeq() }));
     for (const taskId of ['strict-legacy', 'strict-toolset']) {
       const decline = await server.waitFor((entry) => entry.type === 'task.decline' && entry.task_id === taskId);
@@ -89,11 +89,11 @@ describe('strict Agent-only daemon admission', () => {
     const adapter = await startStrict();
     const cancelled = 'strict-pre-cancel';
     server.send(createEnvelope('task.cancel', { reason: 'operator cancelled first' }, { taskId: cancelled, seq: server.nextSeq() }));
-    server.send(createEnvelope('task.offer', { instruction: 'legacy', policy: { mode: 'auto' } }, { taskId: cancelled, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { instruction: 'legacy' }, { taskId: cancelled, seq: server.nextSeq() }));
     const cancellationDecline = await server.waitFor((entry) => entry.type === 'task.decline' && entry.task_id === cancelled);
     expect((cancellationDecline.payload as { reason: string }).reason).toMatch(/cancelled before claim/i);
 
-    const duplicate = createEnvelope('task.offer', { instruction: 'legacy', policy: { mode: 'auto' } }, { taskId: 'strict-duplicate', seq: server.nextSeq() });
+    const duplicate = createEnvelope('task.offer', { instruction: 'legacy' }, { taskId: 'strict-duplicate', seq: server.nextSeq() });
     server.send(duplicate);
     await server.waitFor((entry) => entry.type === 'task.decline' && entry.task_id === 'strict-duplicate');
     server.send({ ...duplicate, seq: server.nextSeq() });
@@ -105,7 +105,7 @@ describe('strict Agent-only daemon admission', () => {
   it('continues to admit the Agent offer variants', async () => {
     const adapter = await startStrict();
     server.send(createEnvelope('task.offer_for_agent', {
-      instruction: 'agent work', policy: { mode: 'auto' }, agentRef: { agentId: 'strict-agent', profileRevision: 'r1' },
+      instruction: 'agent work', agentRef: { agentId: 'strict-agent', profileRevision: 'r1' },
     }, { taskId: 'strict-agent-offer', seq: server.nextSeq() }));
     await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'strict-agent-offer');
     expect(adapter.sessions).toHaveLength(1);

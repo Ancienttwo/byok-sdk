@@ -76,7 +76,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
       expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
 
-    const handle = await real.byok.dispatch({ instruction: 'run over long-poll', policy: { mode: 'auto' } });
+    const handle = await real.byok.dispatch({ instruction: 'run over long-poll' });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const session = adapter.sessions[0]!;
@@ -144,7 +144,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
 
     // Task A: stalls the cursor via a persistently-failing steer, so every
     // subsequent long-poll cycle re-pulls the whole post-cursor backlog.
-    const handleA = await real.byok.dispatch({ instruction: 'task A (stalls the cursor)', policy: { mode: 'auto' } });
+    const handleA = await real.byok.dispatch({ instruction: 'task A (stalls the cursor)' });
     await waitForTaskEvent(handleA, (e) => e.kind === 'state' && e.state === 'Running');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const sessionA = adapter.sessions[0]!;
@@ -160,7 +160,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
     // this point, so task B's first (and, post-fix, only) attempt brings
     // the running total to 2 — that's the count to synchronize on, not 1.
     const releaseB = adapter.blockStart();
-    const handleB = await real.byok.dispatch({ instruction: 'task B (redelivered while in flight)', policy: { mode: 'auto' } });
+    const handleB = await real.byok.dispatch({ instruction: 'task B (redelivered while in flight)' });
     taskBId = handleB.taskId;
     await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(2));
 
@@ -219,7 +219,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
       expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
 
-    const handle = await real.byok.dispatch({ instruction: 'run over long-poll', policy: { mode: 'auto' } });
+    const handle = await real.byok.dispatch({ instruction: 'run over long-poll' });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const session = adapter.sessions[0]!;

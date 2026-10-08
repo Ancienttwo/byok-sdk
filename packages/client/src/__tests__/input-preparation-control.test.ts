@@ -35,7 +35,6 @@ import {
 } from '../input-preparation';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
-import { trustedCwd } from './fixtures/launch-cwd';
 
 /**
  * One real stdio MCP server, configured as a device toolset.
@@ -43,8 +42,8 @@ import { trustedCwd } from './fixtures/launch-cwd';
  * It is here because the request contract no longer lets a caller state a tool
  * manifest: a preparation names `requiredToolsets`, and the daemon observes
  * them itself. So the end-to-end path only exists when this device actually
- * has a toolset to observe, and these cases now exercise the real probe, the
- * real launch boundary and the real fingerprints along with everything else.
+ * has a toolset to observe, and these cases now exercise the real probe and
+ * the real fingerprints along with everything else.
  */
 const MCP_FIXTURE = fileURLToPath(new URL('./fixtures/mcp-fixture-server.mjs', import.meta.url));
 const TOOLSETS = {
@@ -160,7 +159,6 @@ function preparationRequest(overrides: Partial<InputPreparationRequestV1> = {}):
       prompt: { systemPrompt: 'be precise\nprefer small diffs' },
       messages: [{ role: 'user', content: 'summarise the repository', timestamp: 1_700_000_000_000 }],
     },
-    permissionMode: 'auto',
     agentMemory: 'none', requiredToolsets: ['team'],
     ...overrides,
   };
@@ -220,34 +218,6 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     client = connected.client;
     return { storeDir, config };
   }
-
-  it('awaits once-only configured runtime identity before exposing any control endpoint', async () => {
-    const storeDir = await tmpDir('byok-prep-init-store-');
-    const workspaceRoot = await tmpDir('byok-prep-init-ws-');
-    let entered!: () => void;
-    const resolving = new Promise<void>(resolve => { entered = resolve; });
-    let decline!: () => void;
-    const blocked = new Promise<void>(resolve => { decline = resolve; });
-    const resolve = vi.fn(async () => { entered(); await blocked; return { kind: 'unavailable', reason: 'implementation_identity_unattested' } as const; });
-    daemon = createDaemonWithAdapters({
-      localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-prep-init',
-      serverUrl: server.url, workspaceRoot, storeDir,
-      inputPreparation: { limits: LIMITS, authorityResolver, counter },
-      toolImplementationAuthority: { resolve }, serviceEnrollment: { enabled: true },
-    }, [new StubRuntimeAdapter('pi')]);
-    expect(resolve).not.toHaveBeenCalled(); // The public factory remains synchronous and side-effect free here.
-    const starting = daemon.start();
-    const rejected = expect(starting).rejects.toThrow('configured pi-prepared implementation unavailable');
-    await resolving;
-    const endpoint = await connectControlClient({ storeDir, productId: 'acme-prep-init' });
-    expect(endpoint.ok).toBe(false);
-    decline(); await rejected;
-    await expect(daemon.start()).rejects.toThrow('configured pi-prepared implementation unavailable');
-    expect(resolve).toHaveBeenCalledTimes(1);
-    expect(resolve).toHaveBeenCalledWith({ subject: { kind: 'runtime', runtimeId: 'pi' }, runtimeEntry: 'pi-prepared' });
-    expect((await connectControlClient({ storeDir, productId: 'acme-prep-init' })).ok).toBe(false);
-    expect(counter.calls).toEqual([]);
-  });
 
   it('declares only the versioned capability token, never the retired unversioned one', async () => {
     await start({ enabled: true, productId: 'acme-prep-token' });
@@ -312,7 +282,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
 
     // An ordinary task still runs end to end.
     server.send(
-      createEnvelope('task.offer', { instruction: 'do work', policy: { mode: 'auto' } }, { taskId: 't-ordinary', seq: server.nextSeq() }),
+      createEnvelope('task.offer', { instruction: 'do work' }, { taskId: 't-ordinary', seq: server.nextSeq() }),
     );
     await server.waitFor((envelope) => envelope.type === 'task.started');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -373,26 +343,18 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     expect(receipt.binding.runtime.packageName).toBe('@earendil-works/pi-coding-agent');
     expect(receipt.binding.runtime.upstreamCommit).toMatch(/^[0-9a-f]{40}$/u);
     expect(receipt.binding.runtime.compilerVersion).toBe(4);
-    // The mode the manifest was filtered for is recorded, not inferred.
-    expect(receipt.binding.permissionMode).toBe('auto');
-    // The tools were OBSERVED from the configured toolset, and every one of
-    // them carries the implementation kind this daemon resolved for it. This
-    // SDK ships no `toolImplementationAuthority`, so that is the unconfigured
-    // answer — stated as evidence rather than assumed.
-    expect(Object.keys(receipt.artifact?.toolImplementationKinds ?? {})).toEqual([
+    // No permission mode is bound into a preparation.
+    expect(receipt.binding).not.toHaveProperty('permissionMode');
+    // The tools were OBSERVED from the configured toolset.
+    expect(receipt.artifact?.toolNames).toEqual([
       'mcp__teamserver__echo',
       'mcp__teamserver__find_leads',
     ]);
-    expect(new Set(Object.values(receipt.artifact?.toolImplementationKinds ?? {}))).toEqual(
-      new Set(['unavailable:resolver_unconfigured']),
-    );
     expect(receipt.artifact?.observationDigest).toMatch(/^[0-9a-f]{64}$/u);
     expect(receipt.artifact?.toolBindingDigest).toMatch(/^[0-9a-f]{64}$/u);
-    // The observation happened inside the proven launch boundary.
-    expect(await trustedCwd()).toBeTruthy();
     expect(receipt.counter).toMatchObject({ authority: 'test_fixture', value: 4_242 });
 
-    // A fixture count, an unruled residual set and unattested executors can
+    // A fixture count and an unruled residual set can
     // never be ready. `projection_unknown` is absent on purpose: the compiler
     // DID prove a content-complete projection, so what is missing is the Host's
     // accounting ruling, which this request deliberately does not carry.
@@ -402,7 +364,6 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
         'accounting_policy_missing',
         'counter_authority_not_production',
         'counter_coverage_incomplete',
-        'executor_identity_unproven',
       ]),
     );
     expect(receipt.readinessReasons).not.toContain('projection_unknown');

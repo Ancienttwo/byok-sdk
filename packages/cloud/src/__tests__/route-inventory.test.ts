@@ -179,7 +179,7 @@ describe('tenant isolation across every device-class resource', () => {
       body: JSON.stringify({
         messages: [
           {
-            v: 1,
+            v: 2,
             id: crypto.randomUUID(),
             ts: new Date().toISOString(),
             type: 'task.claim',

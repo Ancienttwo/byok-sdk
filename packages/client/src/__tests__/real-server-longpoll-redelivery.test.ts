@@ -74,7 +74,7 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
       expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
 
-    const handle = await real.byok.dispatch({ instruction: 'run over long-poll', policy: { mode: 'auto' } });
+    const handle = await real.byok.dispatch({ instruction: 'run over long-poll' });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const session = adapter.sessions[0]!;
@@ -165,7 +165,7 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
         expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
       });
 
-      const handle = await real.byok.dispatch({ instruction: 'run over long-poll', policy: { mode: 'auto' } });
+      const handle = await real.byok.dispatch({ instruction: 'run over long-poll' });
       await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
       await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
       const session = adapter.sessions[0]!;

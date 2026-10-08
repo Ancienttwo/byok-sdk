@@ -40,7 +40,7 @@ export async function runStatusCommand(config: DaemonConfig, deps: StatusDeps = 
   const [record, events, runtimes] = await Promise.all([
     new DeviceStore(storeDir).load(),
     readAuditEvents(storeDir),
-    probeRuntimes(adapters, { toolImplementationAuthority: config.toolImplementationAuthority }),
+    probeRuntimes(adapters),
   ]);
   const tasks = deriveTasksFromEvents(events);
 

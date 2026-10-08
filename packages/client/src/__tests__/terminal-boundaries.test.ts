@@ -52,7 +52,7 @@ describe('terminal durability and actual harness boundaries', () => {
     await daemon.start();
     const identity = { tenantId: record.tenantId, deviceId: record.deviceId, productId: cfg.productId };
     const seq = server.nextSeq();
-    const offer = createEnvelope('task.offer', { instruction: 'run once', policy: { mode: 'auto' } }, { taskId: 'pending-decline', seq });
+    const offer = createEnvelope('task.offer', { instruction: 'run once' }, { taskId: 'pending-decline', seq });
     server.send(offer);
     await vi.waitFor(() => expect(candidates.length).toBeGreaterThan(0));
     expect((await journal.readTask('pending-decline', identity))?.localState).toBe('received');
@@ -86,11 +86,11 @@ describe('terminal durability and actual harness boundaries', () => {
         await daemon.pair(pairing.code);
         const device = (await new DeviceStore(cfg.storeDir!, undefined, cfg.productId).credentials.read())!;
         await post(cloud.url, device.accessToken, createEnvelope('conn.hello', {
-          deviceId: device.deviceId, productId: cfg.productId, protocolVersions: [1],
-          capabilities: ['custom-harness'], runtimes: [], harnesses: [{ id: 'acme-harness', capabilities: { ...adapter.descriptor.capabilities, permissionModes: [...adapter.descriptor.capabilities.permissionModes] } }],
+          deviceId: device.deviceId, productId: cfg.productId, protocolVersions: [2],
+          capabilities: ['custom-harness'], runtimes: [], harnesses: [{ id: 'acme-harness', capabilities: { ...adapter.descriptor.capabilities } }],
         }));
         const offer = await cloud.cloud.enqueueOffer(cloud.tenant, device.deviceId, { payload: {
-          instruction: 'interrupted', policy: { mode: 'auto' }, ...(explicit ? { harnessId: 'acme-harness' } : {}),
+          instruction: 'interrupted', ...(explicit ? { harnessId: 'acme-harness' } : {}),
         } });
         const journal = new SqliteLocalTaskJournal({ storeDir: cfg.storeDir! });
         const bytes = encodeEnvelope(offer.envelope);
@@ -117,7 +117,7 @@ describe('terminal durability and actual harness boundaries', () => {
       const device = await daemon.pair((await cloud.createPairingCode()).code); await daemon.start();
       await vi.waitFor(async () => expect((await cloud.cloud.listDevices(cloud.tenant))[0]?.harnesses?.[0]?.id).toBe('acme-harness'));
       const offer = await cloud.cloud.enqueueOffer(cloud.tenant, device.deviceId, { payload: {
-        instruction: 'large result', policy: { mode: 'auto' }, ...(explicit ? { harnessId: 'acme-harness' } : {}),
+        instruction: 'large result', ...(explicit ? { harnessId: 'acme-harness' } : {}),
       } });
       await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
       adapter.sessions[0]!.emit({ type: 'progress', text: 'x'.repeat(8192) });

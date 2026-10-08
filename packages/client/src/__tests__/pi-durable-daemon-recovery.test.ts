@@ -123,7 +123,7 @@ async function recoveryScenario(daemonOnly: boolean, interpreter = process.execP
     await vi.waitFor(()=>{if(child.exitCode!==null) throw new Error(logs.join(''));expect(stdout).toContain('"ready":true');},PROCESS_WAIT);return child;
   };
   const first=await start();
-  const offer=(taskId:string,instruction:string)=>createEnvelope('task.offer_for_agent',{instruction,policy:{mode:'auto'},runtime:'pi',agentRef:{agentId:'recovery-agent',profileRevision:'1'},dispatchSelection:{lane:'byok',runtimeId:'pi',providerId:'probe',modelId:'probe'}},{taskId,seq:server!.nextSeq()});
+  const offer=(taskId:string,instruction:string)=>createEnvelope('task.offer_for_agent',{instruction,runtime:'pi',agentRef:{agentId:'recovery-agent',profileRevision:'1'},dispatchSelection:{lane:'byok',runtimeId:'pi',providerId:'probe',modelId:'probe'}},{taskId,seq:server!.nextSeq()});
   server.send(offer('old-task','OLD_HOST_CONTEXT'));
   await waitEnvelope(event=>event.type==='task.started'&&event.task_id==='old-task',first);
   let oldLaunch:Record<string,any> | undefined;
@@ -192,10 +192,10 @@ it.skipIf(BUN_BIN === undefined || process.platform === 'win32')('N1 real custod
   const profilePath=path.join(root,'profile.json');await fs.writeFile(profilePath,JSON.stringify({controlDir:control,profile:{adapter:'openai_compatible',auth_mode:'bearer',base_url:`http://127.0.0.1:${address.port}/v1`,capabilities:[],created_at:'2026-10-02T00:00:00.000Z',updated_at:'2026-10-02T00:00:00.000Z',display_name:'Fixture',enabled:true,kind:'model',model:'probe',profile_ref:'probe',provider_kind:'custom',pi_model:{...PI_MODEL_FIXTURE,reasoning:false,thinkingLevel:'off'}}}));
   const adapter=new PiAdapter({durablePi:{replicaRoot:path.join(store,'durable')},byokLauncher:{command:process.execPath,args:[launcher],profileDbPath:profilePath,sessionDir:path.join(root,'sessions')}});
   const selection={lane:'byok' as const,runtimeId:'pi' as const,providerId:'probe',modelId:'probe'};
-  const prepared=await adapter.prepare({offer:{instruction:'N1 fresh Host context',dispatchSelection:selection},policy:{mode:'auto'}} as never);if(prepared.kind!=='prepared')throw new Error(prepared.reason);
-  const env=buildRuntimeEnv({ambient:process.env,requirements:{credentialNames:[]}});
+  const prepared=await adapter.prepare({offer:{instruction:'N1 fresh Host context',dispatchSelection:selection}} as never);if(prepared.kind!=='prepared')throw new Error(prepared.reason);
+  const env=buildRuntimeEnv({ ambient: process.env });
   const launch=await prepared.operation.resolveRuntimeLaunch!({kind:'instruction',cwd:home,env,projectionRoot:path.join(store,'projections')});
-  const manifest=sealRuntimeOperationManifest({taskId:'ipc-task',runtimeId:'pi',descriptor:adapter.descriptor,policy:{mode:'auto'},dispatchSelection:selection,requiredToolsetIds:[],cwd:home,workspace:{workspaceDir:home},agentRef:{agentId:'ipc-agent',profileRevision:'1'},lease:{leaseId:'ipc-lease',canonicalHome:home},forwardedEnvironmentNames:Object.keys(env)});
+  const manifest=sealRuntimeOperationManifest({taskId:'ipc-task',runtimeId:'pi',descriptor:adapter.descriptor,dispatchSelection:selection,requiredToolsetIds:[],cwd:home,workspace:{workspaceDir:home},agentRef:{agentId:'ipc-agent',profileRevision:'1'},lease:{leaseId:'ipc-lease',canonicalHome:home},forwardedEnvironmentNames:Object.keys(env)});
   const session=await prepared.operation.start({kind:'instruction',instruction:'N1 fresh Host context',manifest,env,runtimeLaunch:launch,mcpEnv:projectPiMcpEnvironment(env),durableContext:{tenantId:'tenant-test',lifecycle:{ownsLease:()=>true,record:async()=>{}}}});sessions.push(session);
   const events=[];for await(const event of session.events)events.push(event);
   expect(events.some(event=>event.type==='error')).toBe(false);expect(events.at(-1)).toEqual({type:'turn_end'});
@@ -218,9 +218,9 @@ it.skipIf(process.platform !== 'darwin')('real built keys launcher bin completes
   const profilePath=path.join(root,'profiles.db');const profiles=new SqliteProviderProfileStore({path:profilePath});
   try{await profiles.save(parseModelProviderProfile({adapter:'openai_compatible',auth_mode:'bearer',base_url:`http://127.0.0.1:${address.port}/v1`,capabilities:[],created_at:'2026-10-03T00:00:00.000Z',updated_at:'2026-10-03T00:00:00.000Z',display_name:'OS custody fixture',enabled:true,kind:'model',model:'probe',profile_ref:'probe',provider_kind:'custom',pi_model:{...PI_MODEL_FIXTURE,reasoning:false,thinkingLevel:'off'}}));}finally{await profiles.close();}
   const adapter=new PiAdapter({durablePi:{replicaRoot:path.join(store,'durable')},byokLauncher:{command:process.execPath,args:[path.resolve(clientRoot,'../keys/dist/bin/pi-provider-launcher.js')],profileDbPath:profilePath,sessionDir:path.join(root,'sessions'),secretServicePrefix:servicePrefix}});
-  const selection={lane:'byok' as const,runtimeId:'pi' as const,providerId:'probe',modelId:'probe'};const prepared=await adapter.prepare({offer:{instruction:'real bin',dispatchSelection:selection},policy:{mode:'auto'}} as never);if(prepared.kind!=='prepared')throw new Error(prepared.reason);
-  const env=buildRuntimeEnv({ambient:process.env,requirements:{credentialNames:[]}});const launch=await prepared.operation.resolveRuntimeLaunch!({kind:'instruction',cwd:home,env,projectionRoot:path.join(store,'projections')});
-  const manifest=sealRuntimeOperationManifest({taskId:'real-bin',runtimeId:'pi',descriptor:adapter.descriptor,policy:{mode:'auto'},dispatchSelection:selection,requiredToolsetIds:[],cwd:home,workspace:{workspaceDir:home},agentRef:{agentId:'real-bin-agent',profileRevision:'1'},lease:{leaseId:'real-bin-lease',canonicalHome:home},forwardedEnvironmentNames:Object.keys(env)});
+  const selection={lane:'byok' as const,runtimeId:'pi' as const,providerId:'probe',modelId:'probe'};const prepared=await adapter.prepare({offer:{instruction:'real bin',dispatchSelection:selection}} as never);if(prepared.kind!=='prepared')throw new Error(prepared.reason);
+  const env=buildRuntimeEnv({ ambient: process.env });const launch=await prepared.operation.resolveRuntimeLaunch!({kind:'instruction',cwd:home,env,projectionRoot:path.join(store,'projections')});
+  const manifest=sealRuntimeOperationManifest({taskId:'real-bin',runtimeId:'pi',descriptor:adapter.descriptor,dispatchSelection:selection,requiredToolsetIds:[],cwd:home,workspace:{workspaceDir:home},agentRef:{agentId:'real-bin-agent',profileRevision:'1'},lease:{leaseId:'real-bin-lease',canonicalHome:home},forwardedEnvironmentNames:Object.keys(env)});
   const session=await prepared.operation.start({kind:'instruction',instruction:'real bin',manifest,env,runtimeLaunch:launch,mcpEnv:projectPiMcpEnvironment(env),durableContext:{tenantId:'tenant-test',lifecycle:{ownsLease:()=>true,record:async()=>{}}}});sessions.push(session);
   const events=[];for await(const event of session.events)events.push(event);expect(events.some(event=>event.type==='error')).toBe(false);expect(events.at(-1)).toEqual({type:'turn_end'});expect(headers).toEqual([`Bearer ${SENTINEL}`]);
 });

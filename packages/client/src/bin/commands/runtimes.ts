@@ -11,6 +11,6 @@ export interface RuntimesDeps {
 export async function runRuntimesCommand(config: DaemonConfig, deps: RuntimesDeps = {}): Promise<void> {
   const log = deps.log ?? ((line: string) => console.log(line));
   const adapters = deps.adapters ?? defaultRuntimeAdapters(config.runtimeAllowlist);
-  const runtimes = await probeRuntimes(adapters, { toolImplementationAuthority: config.toolImplementationAuthority });
+  const runtimes = await probeRuntimes(adapters);
   for (const line of formatRuntimeLines(runtimes)) log(line);
 }

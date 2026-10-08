@@ -34,7 +34,7 @@ const transfer = { maxBytes: 1024, allowedMimeTypes: ['text/plain'] };
 function policy(overrides: Partial<AgentEgressPolicy['transfers']> = {}): AgentEgressPolicy {
   return {
     policyRevision: 'content-policy-r1',
-    activity: { mode: 'metadata-status', delivery: 'latest-value' },
+    activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
     reliable: {
       maxPendingEventsPerAgent: 8,
       maxPendingBytesPerAgent: 4096,

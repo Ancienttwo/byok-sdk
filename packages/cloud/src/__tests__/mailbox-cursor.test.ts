@@ -52,7 +52,6 @@ describe('GET /byok/events cursor semantics', () => {
     const enqueued = await harness.cloud.enqueueToolsetOffer(TENANT_A, device.deviceId, {
       payload: {
         instruction: 'find qualified leads',
-        policy: { mode: 'auto' },
         runtime: 'claude',
         requiredToolsets: ['salesko'],
       },

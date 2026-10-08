@@ -21,12 +21,13 @@ they are not a second runtime-selection registry.
 | Recover pending native interactions after process restart | Unsupported | Unsupported | No new support introduced |
 | Host browser/mobile reconnect | Host-owned; not native session resume | Host-owned; not native session resume | Host-owned |
 
-Claude's default permission modes are `auto`, `readonly`, and `plan`; native
-interaction opt-in is admitted only with `auto` and retains the task's exact
-tool grants. Codex's mode is `auto`. Both reject `confirm` before invoking a
-runtime. Native request/reply support does not establish an every-tool
-confirmation policy. An upstream
-approval request is not permission to widen the policy of an admitted task.
+By default Claude and Codex run YOLO
+([ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md)): Claude with
+`--dangerously-skip-permissions`, Codex with `approvalPolicy: never`. Native
+interaction opt-in replaces those flags: Claude uses
+`--permission-prompt-tool stdio --permission-mode acceptEdits`, Codex uses
+`approvalPolicy: on-request`. Native request/reply support does not establish
+an every-tool confirmation policy.
 
 Pi is intentionally outside this qualification change. Existing Pi behavior
 and its existing tests are unchanged; this matrix does not downgrade its
@@ -90,7 +91,7 @@ receive a new generation and cannot answer the old process's requests.
 - Claude uses the official stdio initialize/can_use_tool protocol. It never
   emits persistent permission updates. Questions preserve exact question text,
   selected labels, multiple selections and free text. Unknown native controls,
-  reused IDs or requests exceeding sealed tool authority fail closed.
+  reused IDs and malformed requests dispose the process.
 - Codex 0.160.0 uses explicit `on-request` policy and verifies its readback;
   command/file decisions retain their native scope. Questions preserve native
   question IDs and answer arrays. Exact active-turn and resume-thread checks
@@ -102,9 +103,8 @@ receive a new generation and cannot answer the old process's requests.
   invalidate requests without converting them to steer text.
 
 `structuredQuestions` describes the installed bridge capability. A task must
-also expose the provider's question tool; a narrower tool allowlist can remove
-it. Claude's native opt-in does not support readonly/plan policies. Native
-requests can also be bypassed by the provider's own allow rules, so an opted-in
+also expose the provider's question tool; the user's own agent configuration
+can remove it. Native requests can also be bypassed by the provider's own allow rules, so an opted-in
 Host must not infer that every tool call necessarily prompts.
 
 The enabled-mode suites are `native-interactions.test.ts`,

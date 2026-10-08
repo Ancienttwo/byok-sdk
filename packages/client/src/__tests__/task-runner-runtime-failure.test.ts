@@ -41,7 +41,7 @@ describe('TaskRunner typed runtime failure projection', () => {
   }
 
   async function offer(taskId: string): Promise<void> {
-    server.send(createEnvelope('task.offer', { instruction: 'run', policy: { mode: 'auto' } }, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { instruction: 'run' }, { taskId, seq: server.nextSeq() }));
     await server.waitFor((event) => event.type === 'task.claim' && event.task_id === taskId);
   }
 

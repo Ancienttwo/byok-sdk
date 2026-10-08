@@ -1,12 +1,14 @@
 // Check source types across the private JS/declaration boundary.
 // The bridge exposes a smaller surface than the full OAR adapter.
 import type * as Bridge from '../../packages/client/src/runtime/codex-session-runtime.js';
-import type { codexSession as vendorSession, CodexAdapterSession } from '../../packages/client/vendor/oar/a800aa0/runtimes/codex/session.js';
-import type { ControlResult, RawEvent } from '../../packages/client/vendor/oar/a800aa0/contracts/session.js';
-import type { LineProcess, SpawnLineProcess } from '../../packages/client/vendor/oar/a800aa0/runtimes/codex/app-server-client.js';
+import type { codexSession as vendorSession, CodexAdapterSession } from '../../packages/client/vendor/oar/0be506f/runtimes/codex/session.js';
+import type { ControlResult, RawEvent } from '../../packages/client/vendor/oar/0be506f/contracts/session.js';
+import type { LineProcess, SpawnLineProcess } from '../../packages/client/vendor/oar/0be506f/runtimes/codex/app-server-client.js';
 import type { spawnOwnedLineProcess } from '../../packages/client/src/runtime/owned-line-process.js';
 import type { buildRuntimeEnv } from '../../packages/client/src/daemon/environment.js';
 import type { CodexProjection, CodexRecord } from '../../packages/client/src/adapters/codex/projection.js';
+import type * as TreeBridge from '../../packages/client/src/runtime/oar-process-tree.js';
+import type * as VendorTree from '../../packages/client/vendor/oar/0be506f/shared/executable/process-tree.js';
 
 type Assert<T extends true> = T;
 type Equal<A, B> =
@@ -25,7 +27,7 @@ type BridgeArgs = Parameters<typeof Bridge.codexSession>;
 type Executable = Extract<VendorArgs[1], { via: 'executable' }>;
 type BridgeInstallation = Mutable<Pick<Executable, 'kind' | 'via' | 'command'>>;
 type BridgeOptions = Mutable<
-  Pick<VendorArgs[2], 'cwd' | 'resume' | 'model' | 'approvalPolicy'> & Required<Pick<VendorArgs[2], 'env'>>
+  Pick<VendorArgs[2], 'cwd' | 'resume' | 'model' | 'approvalPolicy' | 'sandboxMode' | 'mcpServers'> & Required<Pick<VendorArgs[2], 'env'>>
 >;
 type VendorHooks = NonNullable<VendorArgs[4]>;
 type BridgeHooks = Mutable<Omit<VendorHooks, 'onRecord'>> & {
@@ -105,3 +107,12 @@ export type CheckVendorEnv = Assert<Assignable<ReturnType<typeof buildRuntimeEnv
 export type CheckProjectionRecord = Assert<Equal<Parameters<CodexProjection['consume']>[1], CodexRecord>>;
 export type CheckProjectionInput = Assert<Assignable<RawEvent, Parameters<CodexProjection['consume']>[1]>>;
 export type CheckHookRecord = Assert<Assignable<RawEvent, Parameters<NonNullable<NonNullable<BridgeArgs[4]>['onRecord']>>[0]>>;
+
+// The process-tree bridge re-exports the vendored OAR functions with their exact types.
+export type CheckTreeExports = Assert<Equal<keyof typeof TreeBridge, 'descendantsOf' | 'killEntries' | 'readProcessTable'>>;
+export type CheckTreeVendorExports = Assert<Equal<Exclude<keyof typeof VendorTree, 'ProcessEntry' | 'ProcessTable'>, keyof typeof TreeBridge>>;
+export type CheckTreeEntry = Assert<Equal<TreeBridge.ProcessEntry, VendorTree.ProcessEntry>>;
+export type CheckTreeTable = Assert<Equal<TreeBridge.ProcessTable, VendorTree.ProcessTable>>;
+export type CheckTreeRead = Assert<Equal<typeof TreeBridge.readProcessTable, typeof VendorTree.readProcessTable>>;
+export type CheckTreeWalk = Assert<Equal<typeof TreeBridge.descendantsOf, typeof VendorTree.descendantsOf>>;
+export type CheckTreeKill = Assert<Equal<typeof TreeBridge.killEntries, typeof VendorTree.killEntries>>;

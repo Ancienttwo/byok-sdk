@@ -712,7 +712,7 @@ export interface TaskHandleDeps {
 export declare function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHandle;
 // ==== @byok-sdk/server dist/types.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
-import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, PermissionPolicy, RuntimeCapabilities, RuntimeId, RuntimeInfo, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskState, ToolsetId, TerminalProjectionSelection } from '@byok-sdk/protocol';
+import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, RuntimeInfo, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskState, ToolsetId, TerminalProjectionSelection } from '@byok-sdk/protocol';
 import type { TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { RateLimiterOptions } from './rate-limiter';
 /** Mutually-exclusive storage authority for the embedded reference server. */
@@ -837,7 +837,6 @@ export interface DispatchInput {
     dispatchSelection?: DispatchSelection;
     runtime?: RuntimeId;
     harnessId?: string;
-    policy?: PermissionPolicy;
     deviceId?: string;
     sessionRef?: string;
     /** Logical device-local MCP toolsets required for this task; never executable definitions. */
@@ -1002,8 +1001,8 @@ export interface MachineInfo {
  * `@byok-sdk/cloud`) on every call — never a mirrored record this package
  * maintains alongside it.
  *
- * Deliberately smaller than it used to be: `instruction`, `runtime`, `policy`
- * and `requiredToolsets` were DISPATCH INPUT the host already holds and the
+ * Deliberately smaller than it used to be: `instruction`, `runtime` and
+ * `requiredToolsets` were DISPATCH INPUT the host already holds and the
  * kernel does not persist (ADR-028 — an attempt records ownership and
  * disposition, not the request that produced it). A host that wants them back
  * keeps its own map keyed by `taskId`; this snapshot never re-derives them.

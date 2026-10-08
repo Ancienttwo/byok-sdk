@@ -57,7 +57,7 @@ for (const phase of ['detect', 'prepare'] as const) {
         return originalPrepare(input);
       });
       const offer = (taskId: string) => createEnvelope('task.offer_for_agent', {
-        instruction: 'work', policy: { mode: 'auto' }, harnessId: 'acme-harness', agentRef: { agentId: 'shared', profileRevision: 'r1' },
+        instruction: 'work', harnessId: 'acme-harness', agentRef: { agentId: 'shared', profileRevision: 'r1' },
       }, { taskId, seq: server.nextSeq() });
       server.send(offer('blocked'));
       await vi.waitFor(() => expect(entered).toBe(true));

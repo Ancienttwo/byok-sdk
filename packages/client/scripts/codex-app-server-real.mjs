@@ -15,7 +15,7 @@ const { join } = await import('node:path');
 const { execFile } = await import('node:child_process');
 const { promisify } = await import('node:util');
 const { codexSession } = await import(
-  '../vendor/oar/a800aa0/runtimes/codex/session.ts'
+  '../vendor/oar/0be506f/runtimes/codex/session.ts'
 );
 const { spawnOwnedLineProcess } = await import(
   '../src/runtime/owned-line-process.ts'
@@ -63,10 +63,7 @@ for (const entry of JSON.parse(listed.stdout))
       overrides[`mcp_servers.${entry.name}.url`] = '"http://127.0.0.1:9/mcp"';
     overrides[`mcp_servers.${entry.name}.enabled`] = 'false';
   }
-const env = buildRuntimeEnv({
-  ambient: process.env,
-  requirements: { credentialNames: [] },
-});
+const env = buildRuntimeEnv({ ambient: process.env });
 let raw;
 let projection;
 let complete;

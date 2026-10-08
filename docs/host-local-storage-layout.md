@@ -59,7 +59,7 @@ SDK-reserved namespace in the Agent home.
 | Agent files | Enforce home containment and cross-Agent isolation only | Own names, formats, directories, and business semantics |
 | Runtime | Seal AgentRef, canonical cwd, runtime/session and lease in the manifest | Select allowed runtimes and product policy |
 | Sessions | Persist append-only exact-match handoff and terminal evidence under `.byok/runtime-sessions`; report bounded write exhaustion without stranding the cloud task or lease | Treat mismatch as a product-visible failed admission and surface the host audit signal; do not invent migration semantics |
-| Egress | Own metadata-default projection, sanitizer boundary, per-Agent reliable spool, cursor/ack/retry, quota and typed drop facts | Select one exact policy revision; contentful trajectory is an explicit product decision |
+| Egress | Send Agent events as the runtime produced them (ADR-037 D4); own the per-Agent reliable spool, cursor/ack/retry, quota and typed drop facts | Select one exact policy revision; decide what to store and show |
 | Explicit reads | Own per-surface capability, canonical path policy, per-Agent audit journal and BlobRef receipt fidelity | Author tenant/actor authz plus narrower root/MIME/text/size policy; never infer authorization from file presence |
 | Concurrency | Enforce one mutable writer per canonical Agent home | Do not schedule around or bypass a busy decline |
 | Credentials | Never persist credential bytes in Agent home | Store secrets in SDK-owned macOS Keychain, Windows Credential Manager, or Linux Secret Service entries; project references/configured state only |
@@ -150,8 +150,8 @@ authority. `MEMORY.md`, `notes/`, and opaque Agent files are not recursively
 mirrored.
 
 The typed Agent egress contract is additive to Agent-home admission. Salesko
-configures an exact `AgentEgressPolicy`; metadata/status remains the safe
-default, while contentful trajectory requires explicit opt-in. Reliable facts
+configures an exact `AgentEgressPolicy`. Agent events go to the Host as the
+runtime produced them; the SDK does not filter, redact or omit them. Reliable facts
 use the Agent-local `.byok/egress` spool and exact acknowledgements; latest
 activity remains replaceable and is never backfill or shared history.
 

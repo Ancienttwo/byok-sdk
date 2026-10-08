@@ -3,7 +3,6 @@ import {
   EnvelopeValidationError,
   EnvelopeSchema,
   MessagesSendRequestSchema,
-  PermissionPolicySchema,
   ProtocolError,
   TaskArtifactPayloadSchema,
   TaskOfferPayloadSchema,
@@ -15,9 +14,9 @@ import {
 } from '../index';
 
 describe('malformed payload rejection', () => {
-  it.each([0, -1, 2, 99])('rejects unsupported wire major %i before either decode or HTTP batch admission', (v) => {
+  it.each([0, -1, 1, 3, 99])('rejects unsupported wire major %i before either decode or HTTP batch admission', (v) => {
     const supported = createEnvelope('task.offer', {
-      instruction: 'same task contract', policy: { mode: 'auto' },
+      instruction: 'same task contract',
     }, { taskId: 'version-gate', seq: 1 });
     const unsupported = { ...supported, v };
     expect(() => parseMessage(unsupported)).toThrow(EnvelopeValidationError);
@@ -27,22 +26,9 @@ describe('malformed payload rejection', () => {
     expect(parseMessage(supported)).toEqual(supported);
   });
 
-  it('rejects task.offer missing required "policy"', () => {
-    const raw = {
-      v: 1,
-      id: '11111111-1111-4111-8111-111111111111',
-      ts: new Date().toISOString(),
-      type: 'task.offer',
-      task_id: 'task-1',
-      seq: 1,
-      payload: { instruction: 'do it' /* missing policy */ },
-    };
-    expect(() => parseMessage(raw)).toThrow(EnvelopeValidationError);
-  });
-
   it('rejects task.steer with wrong payload field type', () => {
     const raw = {
-      v: 1,
+      v: 2,
       id: '11111111-1111-4111-8111-111111111111',
       ts: new Date().toISOString(),
       type: 'task.steer',
@@ -55,7 +41,7 @@ describe('malformed payload rejection', () => {
 
   it('rejects an envelope with a non-uuid id', () => {
     const raw = {
-      v: 1,
+      v: 2,
       id: 'not-a-uuid',
       ts: new Date().toISOString(),
       type: 'task.approve',
@@ -68,7 +54,7 @@ describe('malformed payload rejection', () => {
 
   it('rejects an envelope with a non-ISO-8601 timestamp', () => {
     const raw = {
-      v: 1,
+      v: 2,
       id: '11111111-1111-4111-8111-111111111111',
       ts: 'yesterday',
       type: 'task.approve',
@@ -85,7 +71,7 @@ describe('malformed payload rejection', () => {
 
   it('EnvelopeValidationError carries the zod issues for diagnostics', () => {
     const raw = {
-      v: 1,
+      v: 2,
       id: 'not-a-uuid',
       ts: new Date().toISOString(),
       type: 'task.approve',
@@ -126,7 +112,7 @@ describe('unknown-field tolerance (forward-compat)', () => {
 describe('unknown message type handling', () => {
   it('throws UnknownMessageTypeError (not EnvelopeValidationError) for an unrecognized type', () => {
     const raw = {
-      v: 1,
+      v: 2,
       id: '11111111-1111-4111-8111-111111111111',
       ts: new Date().toISOString(),
       type: 'task.teleport', // does not exist (yet)
@@ -166,45 +152,26 @@ describe('unknown message type handling', () => {
   });
 
   it('missing/non-string type is also treated as unknown, not a hard parse error', () => {
-    expect(() => parseMessage({ v: 1, id: '11111111-1111-4111-8111-111111111111', ts: new Date().toISOString() })).toThrow(
+    expect(() => parseMessage({ v: 2, id: '11111111-1111-4111-8111-111111111111', ts: new Date().toISOString() })).toThrow(
       UnknownMessageTypeError,
     );
     expect(() =>
-      parseMessage({ v: 1, id: '11111111-1111-4111-8111-111111111111', ts: new Date().toISOString(), type: 42 }),
+      parseMessage({ v: 2, id: '11111111-1111-4111-8111-111111111111', ts: new Date().toISOString(), type: 42 }),
     ).toThrow(UnknownMessageTypeError);
   });
 });
 
-describe('instruction/policy remain fail-closed on unknown shapes (pre-freeze asymmetry vs. AgentEvent tolerance)', () => {
+describe('instruction remains fail-closed on unknown shapes (pre-freeze asymmetry vs. AgentEvent tolerance)', () => {
   // Unlike task.progress's AgentEvent events (observability data, now
   // tolerant of unknown variants — see agent-event.test.ts), `instruction`
-  // and `policy` are control/security fields and must never gain an
+  // is a control/security field and must never gain an
   // unknown-tolerant fallback. These are regression guards for that rule.
-
-  it('PermissionPolicySchema rejects an unrecognized mode', () => {
-    const result = PermissionPolicySchema.safeParse({ mode: 'yolo' });
-    expect(result.success).toBe(false);
-  });
 
   it('TaskOfferPayloadSchema rejects an instruction that is neither a string nor a {blobRef} object', () => {
     const result = TaskOfferPayloadSchema.safeParse({
       instruction: { unknownKind: 'from a hypothetical future variant' },
-      policy: { mode: 'auto' },
     });
     expect(result.success).toBe(false);
-  });
-
-  it('a task.offer envelope with an unrecognized policy.mode still throws EnvelopeValidationError', () => {
-    const raw = {
-      v: 1,
-      id: '11111111-1111-4111-8111-111111111111',
-      ts: new Date().toISOString(),
-      type: 'task.offer',
-      task_id: 'task-1',
-      seq: 1,
-      payload: { instruction: 'do it', policy: { mode: 'yolo' } },
-    };
-    expect(() => parseMessage(raw)).toThrow(EnvelopeValidationError);
   });
 });
 

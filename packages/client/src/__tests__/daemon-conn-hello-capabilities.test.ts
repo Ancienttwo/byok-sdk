@@ -24,7 +24,7 @@ async function tmpDir(prefix: string): Promise<string> {
 /**
  * Pre-freeze protocol addition (`RuntimeInfo.capabilities`, `messages.ts`):
  * `conn.hello.runtimes[]` now carries each detected runtime's own
- * steer/resume/approvalInteractive/permissionModes, surfaced by
+ * steer/resume/approvalInteractive, surfaced by
  * `create-daemon.ts`'s `detectRuntimes`/`toRuntimeInfoCapabilities`. This
  * exercises the FULL real path (all three bundled adapters, driven through
  * their real fixture binaries — the same fixtures each adapter's own test
@@ -101,7 +101,6 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       resume: true,
       mcpToolsets: true,
       approvalInteractive: false,
-      permissionModes: ['auto', 'readonly'],
     });
 
     // Claude still supports plan; its private confirm/approval MCP path has been removed.
@@ -110,7 +109,6 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       resume: true,
       approvalInteractive: false,
       mcpToolsets: true,
-      permissionModes: ['auto', 'readonly', 'plan'],
     });
 
     // codex: persistent app-server steering with YOLO-only auto permission mode.
@@ -119,7 +117,6 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
       resume: true,
       approvalInteractive: false,
       mcpToolsets: true,
-      permissionModes: ['auto'],
     });
 
     // The wire value remains adapter-generated. The shipped adapters all
@@ -198,9 +195,7 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
           steer: false,
           resume: false,
           approvalInteractive: false,
-          permissionModes: ['auto'],
         },
-        environmentRequirements: { credentialNames: [] },
       }),
       async detect() {
         return { kind: 'available' };
