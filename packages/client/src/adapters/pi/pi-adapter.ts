@@ -1098,7 +1098,14 @@ class PiSession implements Session {
                     })), 1000); }),
                   ]);
                 } finally { if (timer !== undefined) clearTimeout(timer); }
-                session.pendingTurnEnd = true;
+                // Pi 1.1 reports native cancellation explicitly. Preserve final usage,
+                // then fail an unsolicited abort instead of acknowledging success.
+                // TaskRunner owns requested cancellation and suppresses late terminals.
+                if (value.aborted === true) terminalFailure = new RuntimeExecutionFailure({
+                  phase: 'run', category: 'semantic', retry: 'non-retryable',
+                  reason: 'pi run aborted before completion',
+                });
+                else session.pendingTurnEnd = true;
                 return { value: mapPiContextUsage(stats.success === false ? undefined : stats.data, hostContextWindow), done: false };
               }
               const mapped = mapPiMessageToAgentEvent(value);

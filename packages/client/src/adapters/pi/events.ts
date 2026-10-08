@@ -77,7 +77,7 @@ function mapPiAssistantUsage(msg: PiRpcMessage): Extract<AgentEvent, { type: 'us
 }
 
 /**
- * Map pi 0.85.1 RPC frames into BYOK's runtime-neutral event contract.
+ * Map official Pi RPC frames into BYOK's runtime-neutral event contract.
  *
  * `agent_settled` is the only whole-task completion authority. `agent_end`
  * ends one low-level agent run, but pi may still perform retry/compaction or
@@ -136,6 +136,10 @@ export function mapPiMessageToAgentEvent(msg: PiRpcMessage): AgentEvent | undefi
     }
 
     case 'agent_settled':
+      if (msg.aborted === true) throw new RuntimeExecutionFailure({
+        phase: 'run', category: 'semantic', retry: 'non-retryable',
+        reason: 'pi run aborted before completion',
+      });
       return { type: 'turn_end' };
 
     // Routine unless it ends an assistant message (one provider call); it
