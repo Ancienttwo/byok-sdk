@@ -7,22 +7,29 @@ composition over Postgres and R2.
 
 ## Release status
 
-The release owner approved the stable source version set on 2026-10-06:
-**0.24.0** for the nine aligned packages and **0.9.0** for independent keys,
-including the Worker-only cloud-do package in the ten-package public set.
-These source versions are not published. Fresh exact-source CI artifacts,
-registry checks, required Host acceptance and separate npm execution approval
-remain release gates.
-[Release and migration notes](docs/releases/v0.24.0.md) describe the breaking
-Node, adapter, identity and SQLite changes, local native-interaction support,
-Host upgrade/rollback steps and remaining acceptance gates.
+The current source candidate is the prerelease **0.25.0-rc.1** for the eight
+aligned packages, with independent keys **0.10.0-rc.1**. The release owner
+approved it on 2026-10-09. It is not published. Publication will use the npm
+dist-tag `rc`, so `latest` stays 0.24.0 / keys 0.9.0. The public set is nine
+packages; `@byok-sdk/implementation-identity` is retired.
+[Release notes](docs/releases/v0.25.0.md) describe the breaking changes since
+0.24.0 (protocol v2, minimal guardrails per ADR-037, removed configuration keys
+and APIs, the keys launcher grammar, Pi 1.1.0 and OAR 0.44.0) and the upgrade
+steps.
 
 Versioned install examples below describe the current source manifests. They
-are pending publication and usable only after exact registry readback. Before
+are usable only after publication and exact registry readback. Before
 publication, a Host can test verified accepted CI tarballs from one exact SHA;
 that does not establish production or live-runtime acceptance.
 
-The last publication recorded here is **0.23.0**, with independent keys
+The current `latest` release is **0.24.0**, with independent keys **0.9.0**.
+npm shows all ten 0.24.0 / keys 0.9.0 packages published on 2026-10-06; their
+registry integrities equal the push CI `release-pack` artifact of `756eb921`.
+The repository has no `v0.24.0` tag and no publication record for it. The
+[0.24 release notes](docs/releases/v0.24.0.md) describe its Node, adapter,
+identity and SQLite changes and the Host upgrade/rollback steps from 0.23.
+
+The last publication with a record here is **0.23.0**, with independent keys
 **0.8.0**, published on 2026-09-28 from `v0.23.0` (`bcf65a3f`, PR #237).
 Its [publication record](docs/releases/v0.23.0-publication.md) records `latest`
 at that time; query the registry before relying on current tags. The
@@ -77,21 +84,21 @@ Install the scoped packages your composition uses and import each one under
 its own name. For example, a self-hosted composition:
 
 ```sh
-npm install @byok-sdk/server@0.24.0 @byok-sdk/client@0.24.0
+npm install @byok-sdk/server@0.25.0-rc.1 @byok-sdk/client@0.25.0-rc.1
 ```
 
 ```ts
 import { createByokServer } from '@byok-sdk/server';
 ```
 
-The Worker-only cloud-do source candidate is pending npm publication.
-The approved first-release target is stable 0.24.0; the example below becomes
-usable only after publication and exact registry readback.
+The Worker-only cloud-do package is published from 0.24.0. The example below
+names the 0.25.0-rc.1 candidate; it becomes usable only after publication and
+exact registry readback.
 See [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
 
 ~~~sh
-# Approved stable source version; publication is pending.
-npm install @byok-sdk/cloud-do@0.24.0
+# Release candidate source version; publication is pending.
+npm install @byok-sdk/cloud-do@0.25.0-rc.1
 npm install --save-dev @cloudflare/workers-types
 ~~~
 
@@ -237,7 +244,7 @@ It is intentionally outside the dispatch packages and their entire dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.9.0
+npm install @byok-sdk/keys@0.10.0-rc.1
 ```
 
 ## Host connector composition
@@ -253,5 +260,5 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.9.0`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.10.0-rc.1`
 require Node.js 24.15.0 or newer. MIT licensed.

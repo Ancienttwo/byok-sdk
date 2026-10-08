@@ -14,10 +14,19 @@ import {
 } from './registry-contract.mjs';
 import { assertNoPartialPrereleaseRegistryState, assertPrereleaseReadyToPublish } from './publish.mjs';
 
-const plan = JSON.parse(readFileSync(new URL('./registry-expectations.json', import.meta.url), 'utf8'));
-const names = Object.keys(plan.packages);
+const reviewed = JSON.parse(readFileSync(new URL('./registry-expectations.json', import.meta.url), 'utf8'));
+const names = Object.keys(reviewed.packages);
 const fresh = '@byok-sdk/cloud-do';
 const old = '@byok-sdk/core';
+// Contract fixture: the 0.24.0-rc.1 baseline shape, with one declared first
+// publication. The reviewed file has no first publication after 0.24.0, so the
+// contract tests keep this fixture to cover that path.
+const plan = {
+  schemaVersion: 1,
+  packages: Object.fromEntries(names.map((name) => [name, name === fresh
+    ? { priorPublication: 'none', previousLatest: null }
+    : { priorPublication: 'existing', previousLatest: name === '@byok-sdk/keys' ? '0.8.0' : '0.23.0' }])),
+};
 const rc = '0.24.0-rc.1';
 const keysRc = '0.8.1-rc.1';
 const good = (value) => ({ status: 0, stdout: JSON.stringify(value), stderr: '' });
@@ -84,8 +93,17 @@ function mutateResponse(fixture, selector, change) {
   fixture.responses.set(selector, good(value));
 }
 
-test('the reviewed plan enumerates all nine packages and explicitly distinguishes the first publication', () => {
+test('the reviewed plan enumerates all nine packages with their prior stable latest', () => {
   assert.equal(names.length, 9);
+  assert.equal(validateRegistryExpectations(reviewed, names), reviewed);
+  assert.ok(!names.includes('@byok-sdk/implementation-identity'));
+  for (const name of names) {
+    assert.deepEqual(reviewed.packages[name],
+      { priorPublication: 'existing', previousLatest: name === '@byok-sdk/keys' ? '0.9.0' : '0.24.0' });
+  }
+});
+
+test('the contract fixture enumerates all nine packages and explicitly distinguishes the first publication', () => {
   assert.equal(validateRegistryExpectations(plan, names), plan);
   assert.deepEqual(plan.packages[fresh], { priorPublication: 'none', previousLatest: null });
   assert.equal(plan.packages[old].previousLatest, '0.23.0');
