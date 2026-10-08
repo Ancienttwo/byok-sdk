@@ -1391,7 +1391,10 @@ Pi's MCP environment is projected once at daemon admission. The projection uses
 the shared fixed credential exclusion set and three controlled Pi directory
 names. The same object goes to the probe and to config serialization. Pool
 configuration requires `mcpEnv`, refuses private and credential names and never
-reads Pi's ambient environment.
+reads Pi's ambient environment. The ordinary lane writes this configuration to
+one file, `rpc-launch.json`, in a new 0700 temporary directory. The file is
+created 0600 and removed on every start failure and on `close()`. It holds the
+inherited environment values of `mcpEnv`, but no provider credential name.
 
 The Node package's private `#byok-pi-runtime-host` maps only to shipped dist JS
 and declaration files. It is not a public export. Native Pi evaluation stays

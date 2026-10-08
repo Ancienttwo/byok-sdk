@@ -34,6 +34,11 @@
   (`buildRuntimeEnv`). Before, they got the full daemon environment,
   `CLAUDECODE` and `BYOK_*` included.
 
+- **Security (client)** — the ordinary Pi lane writes its launch
+  configuration once, to `rpc-launch.json` (0600, created exclusively, in a
+  new 0700 directory). The redundant `mcp-config.json` copy of the same
+  `mcpEnv` is gone. `mcpEnv` already has no provider credential names.
+
 - **Fixed (client)** — importing `@byok-sdk/client` no longer runs a CLI when a
   host bundles it into one file (#291). The print custody entry had a module-init
   `import.meta.main` guard; in a single-file bundle that flag is true for every

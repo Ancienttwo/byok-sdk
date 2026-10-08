@@ -617,6 +617,42 @@ describe('PiAdapter against the fake-pi fixture', () => {
     await expect(fs.access(configPath as string)).rejects.toThrow();
   });
 
+  it.skipIf(process.platform === 'win32')('writes one private launch file without provider credential values and removes it on close', async () => {
+    // Synthetic values only; assertions report booleans, never file text.
+    const calls: string[][] = [];
+    const spawnFn = ((_command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
+      calls.push([...args]);
+      return realSpawn(FIXTURE_PATH, args, options);
+    }) as never;
+    const adapter = new PiAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }), spawnFn });
+    const ctx = await makeCtx({
+      ...process.env,
+      OPENAI_API_KEY: 'synthetic-provider-credential',
+      PROBE_USER_SETTING: 'synthetic-user-setting',
+    });
+
+    const session = await startAdapter(adapter, baseTask, ctx);
+    openSessions.push(session);
+    const configPath = calls[0]?.[calls[0]!.indexOf('--config') + 1];
+    if (typeof configPath !== 'string') throw new Error('missing pi launch config path');
+    const configDir = path.dirname(configPath);
+    expect((await fs.stat(configDir)).mode & 0o777).toBe(0o700);
+    expect((await fs.stat(configPath)).mode & 0o777).toBe(0o600);
+    expect(await fs.readdir(configDir)).toEqual(['rpc-launch.json']);
+    const text = await fs.readFile(configPath, 'utf8');
+    const mcpEnvNames = Object.keys((JSON.parse(text) as { mcp: { mcpEnv: Record<string, string> } }).mcp.mcpEnv);
+    expect({
+      providerName: mcpEnvNames.includes('OPENAI_API_KEY'),
+      providerValue: text.includes('synthetic-provider-credential'),
+      userName: mcpEnvNames.includes('PROBE_USER_SETTING'),
+      userValue: text.includes('synthetic-user-setting'),
+    }).toEqual({ providerName: false, providerValue: false, userName: true, userValue: true });
+
+    await session.close();
+    openSessions.splice(openSessions.indexOf(session), 1);
+    await expect(fs.access(configDir)).rejects.toThrow();
+  });
+
   it('fails non-retryably when the tool observation drifts between prepare() and start()', async () => {
     // pi bakes no grant into a CLI argument — the task-scoped MCP config the
     // extension registers from IS the grant — so without a re-check at start()
