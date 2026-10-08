@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import type { SpawnFn } from '../adapters/pi/rpc-client';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
-import { resolveInstalledPiRuntimeIdentity, createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
+import { resolvePinnedPiRuntimeIdentity, createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
 import { sealRuntimeOperationManifest, type RuntimePreparedLaunchV1 } from '../types';
 import { resolveBunBin } from './support/test-bun-bin';
@@ -114,7 +114,7 @@ async function prepareArtifact(home: string, artifactPath: string): Promise<Runt
     contextWindow: 8192, maxTokens: 1024,
   };
   const binding = { inputIdentity: 'cwd-input', runtimeIdentity: 'cwd-runtime', policyIdentity: 'cwd-policy', profileRevision: 'cwd-profile' };
-  const compiled = await createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity()).compile({
+  const compiled = await createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity()).compile({
     snapshot: {
       prompt: { systemPrompt: PREPARED_SYSTEM_PROMPT },
       messages: [{ role: 'user', content: 'report cwd', timestamp: 1700000000000 }], tools: [],

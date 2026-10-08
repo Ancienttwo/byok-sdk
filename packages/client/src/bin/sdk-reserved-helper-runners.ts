@@ -109,7 +109,7 @@ export async function runSdkReservedHelper(kind: SdkReservedHelperKind, argv: re
       await (await import('#byok-pi-runtime-host')).runPiDurableHost(argv);
       return;
     case 'pi-prepared':
-      await (await import('#byok-pi-runtime-host')).runPiPreparedHost(argv, 'bundled');
+      await (await import('#byok-pi-runtime-host')).runPiPreparedHost(argv);
       return;
     case 'agent-message-mcp':
       await runAgentMessageMcp();

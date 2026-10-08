@@ -14,7 +14,7 @@ import type { InputPreparationCompiledSnapshotV1, InputPreparationModelV1 } from
 import {
   createPiInputPreparationCompiler,
   InputPreparationCompileError,
-  resolveInstalledPiRuntimeIdentity,
+  resolvePinnedPiRuntimeIdentity,
   verifyPreparedPiInput,
   type CompilePreparedInputRequest,
   type PreparedPiExpectedV1,
@@ -104,7 +104,7 @@ afterEach(() => {
 });
 
 async function compile(request = compileRequest()) {
-  return createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity()).compile(request);
+  return createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity()).compile(request);
 }
 
 interface Run {

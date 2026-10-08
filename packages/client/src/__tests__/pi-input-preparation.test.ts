@@ -5,13 +5,13 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   createPiInputPreparationCompiler,
-  resolveInstalledPiRuntimeIdentity,
+  resolvePinnedPiRuntimeIdentity,
   verifyCompiledPreparedInput,
   InputPreparationCompileError,
   SUPPORTED_PREPARED_COMPILER_VERSION,
   type CompilePreparedInputRequest,
 } from '../adapters/pi/input-preparation';
-import { PI_PACKAGE_NAME, resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
+import { resolvePiRuntimeIdentity } from '../adapters/pi/resolve-bin';
 import {
   PREPARED_COMPILE_SYSTEM_PROMPT,
   preparedCompileRequest as compileRequest,
@@ -142,44 +142,18 @@ function walkNativeClosure(entries: readonly string[]): { files: Set<string>; th
 }
 
 describe('B-P2 native composition: runtime identity', () => {
-  it('derives identity from the installed artifact closure, not from a caller label', () => {
-    const identity = resolveInstalledPiRuntimeIdentity();
+  it('derives identity from the pinned official release, not from a caller label', () => {
+    const identity = resolvePinnedPiRuntimeIdentity();
     const pinned = resolvePiRuntimeIdentity();
 
-    // The pin in the client manifest and the manifest actually on disk are two
-    // independent facts; the identity is only issued when they agree.
+    // The pin in the client manifest names the official release whose
+    // provenance this build records; the identity is that release.
     expect(identity.packageName).toBe(pinned.name);
     expect(identity.packageVersion).toBe(pinned.version);
-
-    const installedManifestPath = path.join(
-      path.dirname(fileURLToPath(import.meta.resolve(PI_PACKAGE_NAME))),
-      '..',
-      'package.json',
-    );
-    const installed = JSON.parse(readFileSync(installedManifestPath, 'utf8')) as {
-      name: string;
-      version: string;
-      byokFork?: unknown;
-    };
-    expect(identity.packageName).toBe(installed.name);
-    expect(identity.packageVersion).toBe(installed.version);
-    expect(installed.name).toBe('@earendil-works/pi-coding-agent');
-    // The official artifact carries no fork stanza; the provenance is the
-    // pinned official tuple (upstream tag and registry gitHead), not a
-    // manifest-declared claim.
-    expect(Object.hasOwn(installed, 'byokFork')).toBe(false);
+    expect(identity.packageName).toBe('@earendil-works/pi-coding-agent');
     expect(identity.tarballIntegrity).toMatch(/^sha512-/);
     expect(identity.upstreamCommit).toBe('7c10bd4337495ee613f2224843ecdf349b80d1df');
     expect(identity.closureDigest).toMatch(/^[0-9a-f]{64}$/);
-    // The two lockstep packages the compile and the session load are installed
-    // at exactly the coding agent's version.
-    for (const lockstep of ['@earendil-works/pi-ai', '@earendil-works/pi-agent-core']) {
-      const manifest = JSON.parse(readFileSync(
-        path.join(path.dirname(fileURLToPath(import.meta.resolve(lockstep))), '..', 'package.json'),
-        'utf8',
-      )) as { name: string; version: string };
-      expect({ name: manifest.name, version: manifest.version }).toEqual({ name: lockstep, version: installed.version });
-    }
     expect(identity.envelopeFormat).toBe('byok.pi.prepared-input');
     expect(identity.requestFormat).toBe('byok.pi.openai-completions.request');
     // The SUPPORTED constant, not a literal claim about the native: every
@@ -191,7 +165,7 @@ describe('B-P2 native composition: runtime identity', () => {
 
 describe('B-P2 native composition: pure compile', () => {
   it('compiles the authorized full schemas and text into D, P(D) and the structural projection contract', async () => {
-    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+    const compiler = createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity());
     const compiled = await compiler.compile(compileRequest());
 
     const body = JSON.parse(compiled.requestBody) as {
@@ -242,7 +216,7 @@ describe('B-P2 native composition: pure compile', () => {
   });
 
   it('is deterministic: the same authorized input always yields the same D and digest', async () => {
-    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+    const compiler = createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity());
     const first = await compiler.compile(compileRequest());
     const second = await compiler.compile(compileRequest());
     expect(second.requestBody).toBe(first.requestBody);
@@ -252,7 +226,7 @@ describe('B-P2 native composition: pure compile', () => {
   });
 
   it('hands the native compile the declared thinkingLevelMap and compat, verbatim, and only when declared', async () => {
-    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+    const compiler = createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity());
     const thinkingLevelMap = {
       off: null, minimal: 'low', low: 'low', medium: 'medium', high: 'high', xhigh: 'high', max: 'high',
     } as const;
@@ -295,7 +269,7 @@ describe('B-P2 native composition: pure compile', () => {
     // `pi-compile-purity.test.ts`. This stays because a compile that mutated
     // the ambient environment would be a defect this cheap check still catches
     // on the SDK's own call path.
-    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+    const compiler = createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity());
 
     const envBefore = JSON.stringify(process.env);
     const compiled = await compiler.compile(compileRequest());
@@ -413,7 +387,7 @@ describe('B-P2 native composition: unsupported input rejects rather than filling
   it('rejects a tool schema without object properties', async () => {
     const request = compileRequest();
     const tools = request.snapshot.tools.map(tool => ({ ...tool, parameters: { type: 'object' } }));
-    await expect(createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity()).compile({ ...request, snapshot: { ...request.snapshot, tools } })).rejects.toBeInstanceOf(InputPreparationCompileError);
+    await expect(createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity()).compile({ ...request, snapshot: { ...request.snapshot, tools } })).rejects.toBeInstanceOf(InputPreparationCompileError);
   });
 
   it.each([
@@ -460,7 +434,7 @@ describe('B-P2 native composition: unsupported input rejects rather than filling
       },
     ],
   ])('rejects %s', async (_label, build) => {
-    const compiler = createPiInputPreparationCompiler(resolveInstalledPiRuntimeIdentity());
+    const compiler = createPiInputPreparationCompiler(resolvePinnedPiRuntimeIdentity());
     await expect(compiler.compile(build())).rejects.toBeInstanceOf(InputPreparationCompileError);
   });
 });

@@ -82,8 +82,8 @@ import {
  *     refusal, and a grant that does not match the claim is a refusal too — a
  *     resolver cannot launder an identity through this seam (§10.3.1).
  *  4. The normalized request digest binds the whole request together with the
- *     TRUSTED scope and the runtime identity derived from the verified
- *     installed closure. Caller text contributes nothing to that identity.
+ *     TRUSTED scope and the runtime identity derived from the pinned
+ *     official Pi release. Caller text contributes nothing to that identity.
  *  5. Durable reserve, before any counter is ever invoked. Same key and digest
  *     returns the existing fact; a different digest conflicts (§10.3.5).
  *  6. The ONE prepared-tool-surface assembly (`./prepared-tool-surface.ts`) —
@@ -172,7 +172,7 @@ export interface InputPreparationService {
   stop(): Promise<void>;
   /**
    * The runtime/compiler identity this service binds every artifact to,
-   * derived from the VERIFIED installed closure. Exposed because a caller that
+   * derived from the pinned official Pi release. Exposed because a caller that
    * builds `toolExecutors` must fingerprint against the SAME identity the
    * compiler will bind, and re-deriving it from its own copy of the compiler
    * is how those two silently drift apart.

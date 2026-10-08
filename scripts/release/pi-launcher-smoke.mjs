@@ -20,7 +20,7 @@ const require = createRequire(import.meta.url);
 const keysRoot = path.dirname(require.resolve('@byok-sdk/keys/package.json'));
 const clientRoot = path.dirname(require.resolve('@byok-sdk/client/package.json'));
 // Exact official client dependency, never an unversioned PATH executable.
-// The manifest and installed closure must match the approved official pin.
+// The installed coding-agent manifest must match the approved official pin.
 const piEntry = fileURLToPath(import.meta.resolve(PI_DEPENDENCY_SPECIFIER));
 const piRoot = path.dirname(path.dirname(piEntry));
 const piManifest = JSON.parse(await readFile(path.join(piRoot, 'package.json'), 'utf8'));
