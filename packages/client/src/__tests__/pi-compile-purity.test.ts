@@ -375,6 +375,10 @@ const originFile = (origin: string): string => origin.replace(/:\d+:\d+$/u, '');
  *    correlating local log entries" (openai 7.19.0); never on the wire body.
  *  - `Date.now` twice at `openai/client.mjs` — request start / headers
  *    timing for the log line and retry bookkeeping.
+ *  - `Date.now` and `performance.now` at pi-ai `utils/event-stream.js`
+ *    (official 1.1.0) — `AssistantMessageEventStream` start time and the
+ *    in-memory `durationMs` of the output message; never serialized into
+ *    the request.
  *
  * A version bump that moves another clock read onto the compile path must add
  * it HERE with a justification, and the forced-skew case decides whether it
@@ -384,6 +388,8 @@ const ALLOWED_COMPILE_NONDETERMINISM: { readonly api: string; readonly originFil
   { api: 'Date.now', originFile: 'official:dist/api/openai-completions.js' },
   { api: 'Math.random', originFile: 'dep:openai/client.mjs' },
   { api: 'Date.now', originFile: 'dep:openai/client.mjs' },
+  { api: 'Date.now', originFile: 'official:dist/utils/event-stream.js' },
+  { api: 'performance.now', originFile: 'official:dist/utils/event-stream.js' },
 ];
 
 const nondeterminismOffAllowlist = (phase: ProbePhase): unknown[] =>
