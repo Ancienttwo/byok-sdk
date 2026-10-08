@@ -819,7 +819,11 @@ Both enforcement mechanisms above are DAEMON-SIDE only — a `setTimeout` and
 an in-process byte counter, not a kernel/cgroup/rlimit-level ceiling. Bundled
 runtime disposal owns the full subprocess tree and escalates TERM to KILL; on
 POSIX it also kills descendants that left the runtime's process group, but never
-the host or its group, and a pid only while its start time matches. Still,
+the host or its group, and a pid only while its start time matches. It reaches
+only processes still below the runtime root when it reads the process table. A
+process whose parent exited before that read is re-parented to init and
+survives: for example a background job (`cmd &`) from a Claude or Pi shell,
+which runs in a session of its own. OAR has the same limit. Still,
 a kernel-level uninterruptible process or OS authority failure can still make
 the receipt reject. In that case active/Git ownership remains held and the
 failure is locally visible; it is never treated as successful cleanup. Treat

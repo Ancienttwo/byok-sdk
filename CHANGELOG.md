@@ -76,10 +76,15 @@
   example, a tool started in a session of its own), as OAR 0.36.1 does. The
   SDK reads the process table before TERM and again before KILL, signals a
   pid only while its start time matches, and never signals the host or its
-  group. `close()` resolves only after those descendants are gone. Windows
-  is unchanged. The code is OAR's `shared/executable/process-tree.ts`,
-  vendored with upstream bytes. The Codex server-request deadline timer no
-  longer throws when a settlement fails.
+  group. `close()` resolves only after those descendants are gone. This
+  reaches only processes still below the runtime root at that read. A process
+  whose parent exited before the read is re-parented to init and is not
+  ended, as in OAR. Real Claude and Pi run each shell command in a session of
+  its own, so a background job (`cmd &`) outlives `close()` and
+  `daemon.stop()`. Windows is unchanged. The code is OAR's
+  `shared/executable/process-tree.ts`, vendored with upstream bytes. The
+  Codex server-request deadline timer no longer throws when a settlement
+  fails.
 
 - **Docs** — record the minimal-guardrails decision as
   [ADR-037](docs/architecture/adr-2026-10-07-minimal-guardrails.md). It

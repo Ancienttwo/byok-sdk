@@ -441,8 +441,15 @@ export async function requestOwnedProcessTreeTermination(options: OwnedProcessTr
  * left the group (read before the SIGTERM and again before the SIGKILL, each
  * pid checked by start time) and waits until they are gone. Only ends that
  * this module starts do this: a root that exited by itself leaves its
- * descendants alone. A process that left the tree before the first read, or
- * that started after it and outlives the root, is not reached.
+ * descendants alone. A process that started after the first read and
+ * outlives the root is not reached.
+ *
+ * POSIX residual, as in OAR: the tree walk finds a process only while its
+ * parent chain still leads to the root. A process whose parent exited before
+ * the read is re-parented to init and is not reached. Real Claude and Pi run
+ * each shell command in a session of its own, so `cmd &` makes exactly this:
+ * the shell exits at once and the background job outlives `close()`.
+ *
  * win32 measures the pid set taskkill
  * reported walking (`stage:'quiescence'` names how many of those were still
  * alive at the deadline). Neither platform reads a terminator's exit status:

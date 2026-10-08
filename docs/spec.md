@@ -905,7 +905,11 @@ Bundled adapters create an owned POSIX process group and terminate the group
 with TERM-to-KILL escalation; Windows uses `taskkill /T /F`. On POSIX, disposal
 and the host-exit sweep also SIGKILL the descendants that left the group, read
 from the process table before TERM and before KILL and checked by start time,
-as OAR 0.37.0 does. TaskRunner records
+as OAR 0.37.0 does. This reaches only processes still below the runtime root at
+that read. A process whose parent exited before the read is re-parented to init
+and is not ended. For example, Claude and Pi run each shell command in a session
+of its own, so a background job (`cmd &`) outlives `close()` and
+`daemon.stop()`. OAR has the same limit. TaskRunner records
 the semantic terminal once, but retains its active entry and Git workspace
 lease until close succeeds. A failed attempt emits local
 `runtime-disposal-failed` evidence and may be retried by shutdown without
