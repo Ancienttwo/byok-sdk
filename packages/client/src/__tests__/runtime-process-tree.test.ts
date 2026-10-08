@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,11 +9,13 @@ import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { isRuntimeDisposalFailure } from '../runtime-failure';
+import { disposeOwnedProcessTree, withOwnedProcessTree } from '../adapters/process-tree';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
 const PI_FIXTURE = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 const CLAUDE_FIXTURE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 const CODEX_FIXTURE = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.meta.url));
+const DESCENDANT_FIXTURE = fileURLToPath(new URL('./fixtures/process-tree-descendant.mjs', import.meta.url));
 
 interface ProcessTreeReceipt {
   rootPid: number;
@@ -45,12 +48,12 @@ function reapAll(pids: number[]): void {
   }
 }
 
-async function readReceipt(file: string): Promise<ProcessTreeReceipt> {
+async function readReceipt(file: string, required: ReadonlyArray<keyof ProcessTreeReceipt> = ['rootPid', 'descendantPid', 'grandchildPid']): Promise<ProcessTreeReceipt> {
   const deadline = Date.now() + 2_000;
   while (Date.now() < deadline) {
     try {
       const receipt = JSON.parse(await fs.readFile(file, 'utf8')) as ProcessTreeReceipt;
-      if (receipt.rootPid > 0 && receipt.descendantPid > 0 && receipt.grandchildPid > 0) return receipt;
+      if (required.every((key) => receipt[key] > 0)) return receipt;
     } catch {
       // The fixture writes asynchronously after spawn; retry until the bounded deadline.
     }
@@ -191,3 +194,32 @@ describe('bundled runtime process-tree disposal', () => {
     }
   });
 });
+
+describe.skipIf(process.platform === 'win32')('POSIX descendants that left the owned process group', () => {
+  it.each([
+    { stop: 'honours SIGTERM', ignoreTerm: '0' },
+    { stop: 'ignores SIGTERM', ignoreTerm: '1' },
+  ])('dispose ends a setsid grandchild when the root $stop', async ({ ignoreTerm }) => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-process-tree-setsid-'));
+    const receiptFile = path.join(workspaceDir, 'process-tree.json');
+    // The owned root starts its grandchild with `detached: true`: a session and group of its own.
+    const child = spawn(process.execPath, [DESCENDANT_FIXTURE, receiptFile, '0', ignoreTerm, '', '1'], withOwnedProcessTree({
+      stdio: 'ignore', env: {},
+    }));
+    let closed = false;
+    const closeReceipt = new Promise<void>((resolve) => child.once('close', () => { closed = true; resolve(); }));
+    const receipt = await readReceipt(receiptFile, ['descendantPid', 'grandchildPid']);
+    const pids = [receipt.descendantPid, receipt.grandchildPid];
+    try {
+      expect(pids.map(processExists)).toEqual([true, true]);
+      await disposeOwnedProcessTree({
+        child, waitClosed: () => closeReceipt, isClosed: () => closed, label: 'setsid fixture', termGraceMs: 300,
+      });
+      expect(pids.map(processExists)).toEqual([false, false]);
+    } finally {
+      reapAll(pids);
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+});
+

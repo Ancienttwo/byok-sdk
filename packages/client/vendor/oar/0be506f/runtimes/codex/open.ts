@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR e1f9177 for explicit native interaction approval policy (Apache-2.0).
+// BYOK change: Modified from OAR 0be506f for explicit native interaction approval policy (Apache-2.0).
 import type { McpServer, RuntimeEventBody, SessionOptions } from "../../contracts/session.js";
 import { asRecord, type JsonRecord } from "../../shared/json.js";
 import { checkMcpServerNames, givenMcpServers, isHttpMcpServer, mcpCredentialRedactor } from "../../shared/mcp-servers.js";

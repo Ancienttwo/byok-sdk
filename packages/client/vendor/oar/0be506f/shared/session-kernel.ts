@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR e1f9177 for a required consumer and fatal retained-record byte budget (Apache-2.0).
+// BYOK change: Modified from OAR 0be506f for a required consumer and fatal retained-record byte budget (Apache-2.0).
 import { randomUUID } from "node:crypto";
 import type {
   ControlResult,

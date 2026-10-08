@@ -16,6 +16,26 @@
 
 ## Unreleased
 
+- **Changed (client)** — update the private OAR source from 0.33.1 to 0.37.0
+  (`0be506f`). The raw Codex session takes OAR's abort fallback: when codex
+  neither refuses an interrupt nor ends the turn within 10 s, the abort is
+  accepted and the app-server is killed. A control that is in flight when the
+  app-server exits or is killed now records `rejected` with code
+  `runtime_exited`, not `runtime_refused`. Error replies keep the redacted
+  native error. The `CodexAdapter` default interrupt deadline (1 s) ends the
+  session before the 10 s fallback, so adapter events do not change.
+  See `docs/notes/2026-10-08-oar-0.37.0-upgrade.md`.
+
+- **Fixed (client)** — on POSIX, runtime disposal and the host-exit sweep now
+  also end the descendants that left the runtime's process group (for
+  example, a tool started in a session of its own), as OAR 0.36.1 does. The
+  SDK reads the process table before TERM and again before KILL, signals a
+  pid only while its start time matches, and never signals the host or its
+  group. `close()` resolves only after those descendants are gone. Windows
+  is unchanged. The code is OAR's `shared/executable/process-tree.ts`,
+  vendored with upstream bytes. The Codex server-request deadline timer no
+  longer throws when a settlement fails.
+
 - **Docs** — record the minimal-guardrails decision as
   [ADR-037](docs/architecture/adr-2026-10-07-minimal-guardrails.md). It
   supersedes `sdk-architecture.md` §9.2 "Permission bypass: REJECTED". The

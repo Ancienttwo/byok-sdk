@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR e1f9177 to retain failure reasons without regex classification (Apache-2.0).
+// BYOK change: Modified from OAR 0be506f to retain failure reasons without regex classification (Apache-2.0).
 import type {
   FrameBody,
   RuntimeEventBody,

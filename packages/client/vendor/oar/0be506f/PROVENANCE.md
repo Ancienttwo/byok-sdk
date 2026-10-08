@@ -1,8 +1,8 @@
-# OAR e1f9177 private runtime fork
+# OAR 0be506f private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.33.1, fixed commit `e1f91770a7edbaf4521f570345f2e8d0c998d238`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.37.0, fixed commit `0be506ff7ee86f315dafda0c2d48de1a6cac5d62`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
-`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 26 source files plus LICENSE. Nineteen source files keep upstream bytes. Seven source files contain BYOK changes. The six added files are imports of the selected contracts and Codex fold. No Cursor, ACP, CLI, arena, executable manager or branded resources are included.
+`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 28 source files plus LICENSE. Twenty-one source files keep upstream bytes. Seven source files contain BYOK changes. The added files are imports of the selected contracts, the Codex fold and the Codex session, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls. No Cursor, ACP, CLI, arena, executable manager or branded resources are included.
 
 ## BYOK S1 changes
 
@@ -129,3 +129,18 @@ Seven selected paths changed upstream. Three new dependencies enter the inventor
 
 The BYOK event projection reads native frames, so the resume baseline does not change BYOK usage events.
 The other 16 selected paths have the same upstream bytes.
+
+## 0.33.1 → 0.37.0 re-vendor
+
+The new base is tag v0.37.0, commit `0be506ff7ee86f315dafda0c2d48de1a6cac5d62`.
+Six selected paths changed upstream. One new dependency enters the inventory.
+
+- `contracts/session-options.ts`, `contracts/session.ts` and `contracts/status.ts` keep upstream bytes. The changes are comments and the optional `stop` evidence type on a running status.
+- `shared/abort-fallback.ts` is new and keeps upstream bytes. `runtimes/codex/session.ts` imports it.
+- `runtimes/codex/session.ts` takes the upstream abort fallback. An abort arms a 10 s fallback. When codex does not refuse the interrupt and no `turn/completed` or exit comes within 10 s, the fallback accepts the abort if it has no response yet, and kills the app-server. A refused interrupt withdraws its attempt. A turn end or an exit clears the fallback. BYOK change: the fallback kill and the existing server-request deadline timer never throw out of the timer. A failed settlement already rejected its control.
+- `runtimes/codex/rpc-control.ts` takes the upstream fallback takeover, the `runtime_exited` outcome and the late-reply frame. It keeps the BYOK synchronous response capture. BYOK change: a failed takeover record rejects the control and never escapes the fallback timer.
+- `runtimes/codex/app-server-client.ts` takes the `exited` outcome and the redacted native error on error replies. An exit or a kill settles pending requests as `exited`. A BYOK budget overflow stays `error`. The upstream `killTree: true` spawn option is not passed: the caller-owned spawn owns tree termination. The owned transport reports the exit after stdout closes, so the client does not keep pending entries for late replies after an exit. After a kill, the client ignores later lines, as before.
+
+Process tree: `shared/executable/process-tree.ts` is new and keeps upstream bytes. It is not imported by the Codex fork. The SDK process-tree authority (`src/adapters/process-tree.ts`) calls it through the JS/declaration bridge `src/runtime/oar-process-tree.js`. On POSIX, the owned disposal and the host-exit sweep now also end the descendants that left the runtime's process group, as upstream 6d1589d does: the table is read before the SIGTERM and again before the SIGKILL, and a pid is signalled only while its start time matches. Windows keeps `taskkill /T` and the kill-on-close Job Object. The upstream `killTree` option maps to this one mechanism. The fork adds no second tree killer.
+
+The other 20 selected source paths have the same upstream bytes.

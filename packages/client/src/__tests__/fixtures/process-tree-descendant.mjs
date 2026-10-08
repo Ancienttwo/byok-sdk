@@ -11,7 +11,11 @@
 // knows the grandchild's pid. Tests poll the file until all three pids are
 // present (see `readReceipt` in ../runtime-process-tree.test.ts).
 //
-// argv: <receiptFile> <rootPid> <ignoreTerm 0|1> <escapeLogFile|''>
+// argv: <receiptFile> <rootPid> <ignoreTerm 0|1> <escapeLogFile|''> [detachGrandchild 0|1]
+//
+// `detachGrandchild=1` starts the grandchild in a session of its own (POSIX
+// setsid through `detached: true`), so it has left this process's group: only
+// a tree walk, never the group signal, reaches it.
 //
 // `escapeLogFile`, when non-empty, turns this process into the escape-race
 // fixture: it spawns a fresh child every 100ms and appends each pid to that
@@ -22,12 +26,12 @@
 import { spawn } from 'node:child_process';
 import { appendFileSync, renameSync, writeFileSync } from 'node:fs';
 
-const [receiptFile, rootPid, ignoreTerm, escapeLog] = process.argv.slice(2);
+const [receiptFile, rootPid, ignoreTerm, escapeLog, detachGrandchild] = process.argv.slice(2);
 
 if (ignoreTerm === '1') process.on('SIGTERM', () => {});
 
 const grandchildSource = `${ignoreTerm === '1' ? "process.on('SIGTERM', () => {});" : ''}setTimeout(() => {}, 60_000)`;
-const grandchild = spawn(process.execPath, ['-e', grandchildSource], { stdio: 'ignore' });
+const grandchild = spawn(process.execPath, ['-e', grandchildSource], { stdio: 'ignore', detached: detachGrandchild === '1' });
 if (grandchild.pid === undefined) {
   process.stderr.write('process-tree-descendant: grandchild did not receive a pid\n');
   process.exit(1);

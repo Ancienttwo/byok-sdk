@@ -1,6 +1,8 @@
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { walkTaskkillPidSet } from './taskkill-pid-set';
+// OAR 0.37.0 `shared/executable/process-tree.ts`, vendored with upstream bytes.
+import { descendantsOf, killEntries, readProcessTable, type ProcessEntry, type ProcessTable } from '../runtime/oar-process-tree.js';
 
 const DEFAULT_TERM_GRACE_MS = 750;
 const DEFAULT_KILL_GRACE_MS = 2_000;
@@ -13,6 +15,8 @@ interface OwnedTerminationState {
   requested: boolean;
   /** win32 only: the process ids `taskkill /T /F` reported walking. This set — not taskkill's exit status — is what disposal measures for quiescence. */
   acceptedPids: Set<number>;
+  /** POSIX only: the root's descendants read just before the SIGTERM, those that left its group included, until they have had their SIGKILL. */
+  descendants: readonly ProcessEntry[];
 }
 
 const terminationState = new WeakMap<ChildProcess, OwnedTerminationState>();
@@ -20,7 +24,7 @@ const terminationState = new WeakMap<ChildProcess, OwnedTerminationState>();
 function stateFor(child: ChildProcess): OwnedTerminationState {
   const existing = terminationState.get(child);
   if (existing) return existing;
-  const created: OwnedTerminationState = { requested: false, acceptedPids: new Set<number>() };
+  const created: OwnedTerminationState = { requested: false, acceptedPids: new Set<number>(), descendants: [] };
   terminationState.set(child, created);
   return created;
 }
@@ -83,11 +87,19 @@ let hostExitHandlerInstalled = false;
  * each target is swept in its own try/catch so one unreachable tree cannot
  * strand the rest. POSIX kills the owned process GROUP — `withOwnedProcessTree`
  * made the root a group leader precisely so this one signal reaches the whole
- * tree. win32 has no process groups to signal, so it pays for a synchronous
- * `taskkill /T /F` per target.
+ * group — and, for a root still running, the descendants that left the group
+ * and their groups, from one synchronous process-table read. win32 has no
+ * process groups to signal, so it pays for a synchronous `taskkill /T /F` per
+ * target.
  */
 function terminateOwnedTreesForHostExit(): void {
-  for (const target of hostExitTargets.values()) {
+  // One read of the process table serves every target (OAR 0.37.0 `ownership.ts`).
+  let table: ProcessTable | null = null;
+  const read = (): ProcessTable => {
+    table ??= readProcessTable();
+    return table;
+  };
+  for (const [child, target] of hostExitTargets) {
     try {
       if (target.platform === 'win32') {
         target.spawnSyncFn('taskkill', ['/PID', String(target.pid), '/T', '/F'], {
@@ -95,6 +107,9 @@ function terminateOwnedTreesForHostExit(): void {
           windowsHide: true,
         });
       } else {
+        // Its descendants outside its group too, found below it only while it
+        // runs: a reaped pid may already be someone else's.
+        if (isRunning(child)) killEntries(descendantsOf(read(), target.pid), read());
         target.kill(-target.pid, 'SIGKILL');
       }
     } catch {
@@ -216,6 +231,38 @@ function positivePid(child: ChildProcess, label: string): number | undefined {
     });
   }
   return pid;
+}
+
+/** The root has not exited, so its pid still names it and the table below it is its own tree. */
+function isRunning(child: ChildProcess): boolean {
+  return child.exitCode === null && child.signalCode === null;
+}
+
+/**
+ * POSIX, just before the SIGTERM: remember the root's descendants, those that
+ * left its process group included (OAR 0.37.0 `spawnLineProcess().kill()`,
+ * 6d1589d). Read while the root runs: once it is gone, what left its group is
+ * re-parented and no longer found below it.
+ */
+function rememberDescendants(child: ChildProcess, pid: number): void {
+  if (isRunning(child)) stateFor(child).descendants = descendantsOf(readProcessTable(), pid);
+}
+
+/**
+ * SIGKILL the remembered descendants plus `more` that `table` still shows as
+ * the same process (same start time), and their groups; never the host or its
+ * group (OAR `killEntries`). Returns the pids signalled, for the quiescence wait.
+ */
+function killDescendants(child: ChildProcess, table: () => ProcessTable, more: readonly ProcessEntry[] = []): number[] {
+  const state = stateFor(child);
+  const entries = [...state.descendants, ...more];
+  state.descendants = [];
+  if (entries.length === 0) return [];
+  const current = table();
+  killEntries(entries, current);
+  return [...new Set(entries
+    .filter((entry) => entry.pid !== process.pid && current.get(entry.pid)?.start === entry.start)
+    .map((entry) => entry.pid))];
 }
 
 function groupExists(pid: number, label: string, kill: KillFn): boolean {
@@ -382,6 +429,7 @@ export async function requestOwnedProcessTreeTermination(options: OwnedProcessTr
     state.requested = true;
     return;
   }
+  rememberDescendants(options.child, pid);
   signalGroup(pid, 'SIGTERM', options.label, options.killFn ?? defaultKill);
   stateFor(options.child).requested = true;
 }
@@ -389,7 +437,13 @@ export async function requestOwnedProcessTreeTermination(options: OwnedProcessTr
 /**
  * Resolve only after the adapter-owned root and descendants are quiescent.
  *
- * POSIX measures the owned process GROUP; win32 measures the pid set taskkill
+ * POSIX measures the owned process GROUP, then SIGKILLs the descendants that
+ * left the group (read before the SIGTERM and again before the SIGKILL, each
+ * pid checked by start time) and waits until they are gone. Only ends that
+ * this module starts do this: a root that exited by itself leaves its
+ * descendants alone. A process that left the tree before the first read, or
+ * that started after it and outlives the root, is not reached.
+ * win32 measures the pid set taskkill
  * reported walking (`stage:'quiescence'` names how many of those were still
  * alive at the deadline). Neither platform reads a terminator's exit status:
  * on win32 `stage:'signal'` now means only that taskkill could not be spawned.
@@ -480,17 +534,32 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
   }
 
   if (groupExists(pid, options.label, kill) && !terminationState.get(options.child)?.requested) {
+    rememberDescendants(options.child, pid);
     signalGroup(pid, 'SIGTERM', options.label, kill);
     stateFor(options.child).requested = true;
   }
+  const killed: number[] = [];
   if (!(await waitUntil(() => groupExists(pid, options.label, kill), termGraceMs))) {
+    // Read again first: the root may have started more since the SIGTERM.
+    const table = readProcessTable();
+    const more = isRunning(options.child) ? descendantsOf(table, pid) : [];
     signalGroup(pid, 'SIGKILL', options.label, kill);
+    killed.push(...killDescendants(options.child, () => table, more));
     if (!(await waitUntil(() => groupExists(pid, options.label, kill), killGraceMs))) {
       throw new RuntimeDisposalFailure({
         stage: 'quiescence',
         reason: `${options.label} runtime process group remained live after SIGKILL`,
       });
     }
+  }
+  // The group is gone. What the root left running outside it, from the read
+  // before the SIGTERM, goes now (OAR does this when the root exits).
+  killed.push(...killDescendants(options.child, readProcessTable));
+  if (!(await waitUntil(() => killed.some((descendant) => processExists(descendant, options.label, kill)), killGraceMs))) {
+    throw new RuntimeDisposalFailure({
+      stage: 'quiescence',
+      reason: `${options.label} runtime descendants outside its process group remained live after SIGKILL`,
+    });
   }
   if (!(await waitWithDeadline(options.waitClosed(), killGraceMs))) {
     throw new RuntimeDisposalFailure({
