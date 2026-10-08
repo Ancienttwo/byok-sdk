@@ -4,7 +4,7 @@ import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import type { PiRuntimeLaunchResources } from '../adapters/pi/runtime-launch';
 import { awaitAdmission } from './admission-wait';
 import { terminalIdentity } from './terminal-identity';
-import { startOwnedRuntime } from './runtime-start';
+import { abortedStartOf, startOwnedRuntime, type AbortedStart } from './runtime-start';
 import { DEFAULT_ARTIFACT_LIMITS, readArtifactBytes } from './artifact-read';
 import { observeRuntimeDetection } from '../runtime-detection';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -1708,6 +1708,8 @@ export class TaskRunner {
     dispose: () => Promise<void>;
     settle?: () => Promise<void>;
     release: () => Promise<void>;
+    /** An aborted start that is still running: there is nothing to dispose yet. */
+    abortedStart?: AbortedStart;
   }>();
 
   private readonly startupDisposals = new Map<string, Promise<boolean>>();
@@ -1723,11 +1725,18 @@ export class TaskRunner {
   private async disposeStartupOwnerOnce(taskId: string): Promise<boolean> {
     const owner = this.startupOwners.get(taskId);
     if (!owner) return true;
+    let disposed = false;
     try {
       await owner.settle?.();
-      await owner.dispose();
-      await this.deps.awaitTerminalCommit?.(taskId);
-      await owner.release();
+      // An aborted start that still runs has not returned its owner yet. That
+      // is not a disposal failure: shutdown waits for it, and the retry below
+      // finds it once it settles.
+      if (!owner.abortedStart?.running()) {
+        await owner.dispose();
+        await this.deps.awaitTerminalCommit?.(taskId);
+        await owner.release();
+        disposed = true;
+      }
     } catch (caught) {
       const failure = isRuntimeDisposalFailure(caught) ? caught : new RuntimeDisposalFailure({
         stage: 'quiescence', reason: 'startup runtime disposal has not been confirmed',
@@ -1735,6 +1744,8 @@ export class TaskRunner {
       this.deps.onRuntimeDisposalFailure?.({ taskId, runtimeId: owner.runtimeId,
         stage: failure.stage, reason: failure.message });
       console.error(`[byok/client] startup ownership retained for ${taskId}: ${failure.message}`);
+    }
+    if (!disposed) {
       if (!this.startupRetryTimer && !this.stoppingOffers) {
         this.startupRetryTimer = setTimeout(() => {
           this.startupRetryTimer = undefined;
@@ -1759,7 +1770,8 @@ export class TaskRunner {
     if (offers?.size) await Promise.all(offers);
     const active = [...this.tasks.values()];
     await Promise.all(active.map((task) => this.shutdownTask(task, reason)));
-    for (const taskId of this.startupOwners.keys()) {
+    for (const [taskId, owner] of this.startupOwners) {
+      await owner.abortedStart?.settled;
       if (!await this.disposeStartupOwner(taskId)) throw new RuntimeDisposalFailure({
         stage: 'quiescence', reason: 'startup runtime ownership remains quarantined',
       });
@@ -2846,8 +2858,10 @@ export class TaskRunner {
             ...(agentBinding === undefined ? {} : { agentRef: agentBinding.resolution.agentRef }),
           }, { taskId });
           let cancellationSettled = false;
+          const abortedStart = abortedStartOf(err);
           this.startupOwners.set(taskId, {
             runtimeId: pick.descriptor.id,
+            ...(abortedStart === undefined ? {} : { abortedStart }),
             dispose: disposalFailure ? err.retryDisposal : async () => {},
             ...(cancelled ? { settle: async () => {
               if (cancellationSettled) return;
@@ -2862,8 +2876,11 @@ export class TaskRunner {
             release: async () => { await ownedBinding?.lease.release(); gitLease?.release(); },
           });
           agentLeaseTransferred = true;
-          if (disposalFailure) this.deps.onRuntimeDisposalFailure?.({ taskId, runtimeId: pick.descriptor.id,
-            stage: 'quiescence', reason: err.message });
+          // An abort while the start still runs is not a disposal failure:
+          // nothing has been disposed yet. `disposeStartupOwnerOnce` reports
+          // it if a later attempt fails.
+          if (disposalFailure && abortedStart === undefined) this.deps.onRuntimeDisposalFailure?.({ taskId,
+            runtimeId: pick.descriptor.id, stage: 'quiescence', reason: err.message });
           if (!cancelled) {
             const reason = this.stoppingOffers ? 'daemon shutting down during runtime startup' : errorMessage(err);
             const retryable = this.stoppingOffers;

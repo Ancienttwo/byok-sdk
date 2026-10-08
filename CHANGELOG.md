@@ -16,6 +16,18 @@
 
 ## Unreleased
 
+- **Fixed (client)** — a `task.cancel` (or a startup deadline or shutdown)
+  that aborts a runtime start before the start returns no longer leaves the
+  runtime quarantined. Codex and Pi do not read the abort signal, so their
+  start settles only when the session opens. While that start still runs,
+  the daemon does not report a disposal failure; its 1 s retry closes the
+  late session after the start settles. `daemon.stop()` waits up to 5 s
+  after the abort for the start to settle, then closes the late session.
+  Before, the daemon emitted `runtime-disposal-failed` at once, and
+  `daemon.stop()` rejected with `RuntimeDisposalFailure` while the start was
+  still in flight. A start that does not settle in that time still keeps its
+  ownership and is reported, as before.
+
 - **Fixed (client)** — the runtime detection probes (`--version`, Claude
   `auth status`, Codex `app-server --help` and `login status`, Pi
   `--version`) now get the environment a task child gets
