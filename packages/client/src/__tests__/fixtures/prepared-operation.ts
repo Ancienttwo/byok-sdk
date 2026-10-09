@@ -27,6 +27,8 @@ export interface PreparedOperationResources {
   startMcpToolsetTools?: McpToolsetToolObservation;
   gitWorkspace?: { workspaceId: string; baseline?: string };
   approvalChannel?: ApprovalChannel;
+  /** Seals a `memory-reader` Agent manifest whose run directory is `workspaceDir`. */
+  reader?: { canonicalHome: string };
 }
 
 /** Exercise the public descriptor → prepare → sealed-manifest → operation path in adapter unit tests. */
@@ -51,6 +53,12 @@ export async function startPreparedOperation(
     requiredToolsetIds: [],
     ...(offer.dispatchSelection === undefined ? {} : { dispatchSelection: offer.dispatchSelection }),
     ...(offer.sessionRef === undefined ? {} : { sessionRef: offer.sessionRef }),
+    ...(resources.reader === undefined ? {} : {
+      agentRef: { agentId: 'adapter-unit-agent', profileRevision: 'r1' },
+      cwd: resources.workspaceDir,
+      homeAccess: 'memory-reader' as const,
+      lease: { leaseId: 'adapter-unit-lease', canonicalHome: resources.reader.canonicalHome },
+    }),
     workspace: {
       workspaceDir: resources.workspaceDir,
       ...(resources.gitWorkspace === undefined

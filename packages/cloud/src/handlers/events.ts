@@ -54,7 +54,8 @@ import { authenticateDevice, type DeviceRouteDeps } from './shared';
  *   `interactive-approval`, `approval-targeting`, `toolset-selection`;
  * - device-side flags the kernel reads off `conn.hello` instead —
  *   `strict-agent-only` (`packages/cloud/src/cloud.ts:967`),
- *   `terminal-projection-selection` (`packages/cloud/src/cloud.ts:1356`);
+ *   `terminal-projection-selection` (`packages/cloud/src/cloud.ts:1356`),
+ *   `agent-home-readers` (the Agent offer enqueue gates in `cloud.ts`);
  * - deployment-conditional routes a static const cannot honestly promise —
  *   `blob-upload`, whose handlers mount only when the declaration carries
  *   `blobs.presigned` (`packages/cloud/src/cloud.ts:787`);

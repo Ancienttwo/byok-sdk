@@ -20,6 +20,7 @@ import type {
   TaskState,
   ToolsetId,
   TerminalProjectionSelection,
+  AgentHomeAccess,
 } from '@byok-sdk/protocol';
 import type { TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { RateLimiterOptions } from './rate-limiter';
@@ -163,6 +164,13 @@ export interface DispatchInput {
   messageEgress?: AgentMessageEgressRequirement;
   /** Exact offer-scoped terminal projection authority. */
   terminalProjection?: TerminalProjectionSelection;
+  /**
+   * `memory-reader` runs this Agent task in its own run directory beside
+   * other readers and at most one writer. Requires `agentRef` and a device
+   * that advertises `agent-home-readers`; the kernel refuses it otherwise,
+   * before the task exists. Absent means a writer.
+   */
+  homeAccess?: AgentHomeAccess;
   /** Host-only product destination/freshness authority; never serialized to the daemon. */
   agentMessageContext?: AgentMessageServerContext;
 }

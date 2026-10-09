@@ -2141,6 +2141,7 @@ export declare const RecurringExecutionInputSchema: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodNonOptional<z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -3654,7 +3655,7 @@ export interface CloudRootStores {
 }
 export declare function tenantStoresFor(principal: Principal, root: CloudRootStores): TenantStores;
 // ==== @byok-sdk/cloud dist/terminal-result.d.ts ====
-import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TaskFailPayload } from '@byok-sdk/protocol';
+import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TaskFailPayload } from '@byok-sdk/protocol';
 import type { RequestReceipt } from './stores/ports';
 /** Canonical device evidence, independent of the Host cancellation projection. */
 export interface DeviceTerminal {
@@ -3686,6 +3687,13 @@ export interface TerminalResult {
      * when the home had no applied projection.
      */
     readonly agentHomeProjection?: TerminalAgentHomeProjection;
+    /**
+     * Memory-change evidence of a `memory-reader` Attempt, verbatim from the
+     * winning terminal: whether `MEMORY.md` or `notes/` changed while the reader
+     * ran, and which files. Absent for a writer Attempt, for a claimed failure
+     * before the Attempt became active, and for an older daemon.
+     */
+    readonly agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
     readonly summary?: string;
     /**
      * The runtime's closing reply, verbatim `task.complete.finalMessage`. Absent

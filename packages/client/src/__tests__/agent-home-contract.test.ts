@@ -358,7 +358,7 @@ describe('SDK-owned Agent home contract', () => {
     })).resolves.toMatchObject({ terminalCause: 'complete' });
   });
 
-  it('runs different sessions for the same Agent concurrently while retaining one canonical home, once the host raises the per-home cap', async () => {
+  it('runs different sessions for the same Agent concurrently as memory-reader Attempts, each in its own run directory under the canonical home', async () => {
     const hostStorageRoot = await makeRoot();
     const storeDir = await makeRoot();
     const adapter = new StubRuntimeAdapter('pi');
@@ -368,11 +368,9 @@ describe('SDK-owned Agent home contract', () => {
       workspaceRoot: await makeRoot(),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: new AgentSessionHandoffStore(),
-      // WP0: concurrent sessions in ONE canonical home are no longer the
-      // default — a host that wants them raises the per-home Attempt cap
-      // explicitly and takes the co-writing exposure with it. Without this,
-      // the second offer is declined retryably as `agent home busy`.
-      maxConcurrentMutableSessionsPerAgentHome: 2,
+      // #317: concurrent sessions in ONE canonical home are memory-reader
+      // Attempts. A second writer offer is declined retryably as
+      // `agent home busy`; readers each get their own run directory.
       deviceId: 'device-1',
       send: (envelope) => sent.push(envelope),
       blobClient: {
@@ -389,12 +387,12 @@ describe('SDK-owned Agent home contract', () => {
     await Promise.all([
       runner.handleEnvelope(createEnvelope(
         'task.offer_for_agent',
-        { instruction: 'first conversation', runtime: 'pi', agentRef },
+        { instruction: 'first conversation', runtime: 'pi', agentRef, homeAccess: 'memory-reader' },
         { taskId: 'task-parallel-a', seq: 1 },
       )),
       runner.handleEnvelope(createEnvelope(
         'task.offer_for_agent',
-        { instruction: 'second conversation', runtime: 'pi', agentRef },
+        { instruction: 'second conversation', runtime: 'pi', agentRef, homeAccess: 'memory-reader' },
         { taskId: 'task-parallel-b', seq: 2 },
       )),
     ]);
@@ -402,8 +400,10 @@ describe('SDK-owned Agent home contract', () => {
     expect(adapter.startCalls).toHaveLength(2);
     expect(sent.filter((entry) => entry.type === 'task.decline' || entry.type === 'task.fail')).toEqual([]);
     expect(runner.activeTaskCount).toBe(2);
+    const home = path.join(await fs.realpath(hostStorageRoot), 'agents', agentRef.agentId);
     expect(new Set(adapter.startCalls.map((call) => call.ctx.workspaceDir))).toEqual(new Set([
-      path.join(await fs.realpath(hostStorageRoot), 'agents', agentRef.agentId),
+      path.join(home, '.byok', 'runs', 'task-parallel-a'),
+      path.join(home, '.byok', 'runs', 'task-parallel-b'),
     ]));
     for (const session of adapter.sessions) session.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
@@ -589,7 +589,7 @@ describe('SDK-owned Agent home contract', () => {
     ));
 
     const cwd = await agentHome.layout.canonicalHomePath(agentRef);
-    expect(agentHome.executionLeaseManager.activeAttemptCount(cwd)).toBe(1);
+    expect(agentHome.executionLeaseManager.activeAttemptCount(cwd, 'memory-writer')).toBe(1);
     await runner.handleEnvelope(createEnvelope('task.offer_for_agent', {
       instruction: 'competing writer', runtime: 'pi', agentRef,
     }, { taskId: 'competing-writer', seq: 2 }));
@@ -597,7 +597,7 @@ describe('SDK-owned Agent home contract', () => {
     expect(sent.at(-1)?.type).toBe('task.decline');
     closeFails = false;
     await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'retry cleanup' }, { taskId, seq: 3 }));
-    expect(agentHome.executionLeaseManager.activeAttemptCount(cwd)).toBe(0);
+    expect(agentHome.executionLeaseManager.activeAttemptCount(cwd, 'memory-writer')).toBe(0);
     expect(sent.filter(e => e.type === 'task.fail')).toHaveLength(1);
     expect(sent.filter(e => e.type === 'task.started')).toHaveLength(0);
   });

@@ -25,6 +25,7 @@ import {
   STRICT_AGENT_ONLY_CAPABILITY,
   TASK_STATES,
   TerminalProjectionSelectionSchema,
+  AgentHomeAccessSchema,
   type AgentHomeProjectionPayload,
   type AgentRef,
   type AgentMessagePublishPayload,
@@ -515,6 +516,10 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     if (messageEgress === undefined && input.agentMessageContext !== undefined) {
       throw new Error('agentMessageContext requires messageEgress');
     }
+    const homeAccess = input.homeAccess === undefined ? undefined : AgentHomeAccessSchema.parse(input.homeAccess);
+    if (homeAccess !== undefined && agentRef === undefined) {
+      throw new Error('homeAccess requires an explicit AgentRef; legacy task dispatch has no Agent home');
+    }
     const agentMessageContext =
       messageEgress === undefined ? undefined : AgentMessageServerContextSchema.parse(input.agentMessageContext);
     const dispatchSelection =
@@ -612,6 +617,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
               agentRef,
               egressPolicy,
               ...(terminalProjection === undefined ? {} : { terminalProjection }),
+              ...(homeAccess === undefined ? {} : { homeAccess }),
               ...(messageEgress === undefined ? {} : { messageEgress }),
               ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
             },
@@ -632,6 +638,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
               agentRef,
               egressPolicy,
               ...(terminalProjection === undefined ? {} : { terminalProjection }),
+              ...(homeAccess === undefined ? {} : { homeAccess }),
               ...(messageEgress === undefined ? {} : { messageEgress }),
               ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
             },
@@ -646,6 +653,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
               agentRef,
               ...(sessionRef === undefined ? {} : { sessionRef }),
               ...(terminalProjection === undefined ? {} : { terminalProjection }),
+              ...(homeAccess === undefined ? {} : { homeAccess }),
               ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
             },
           });

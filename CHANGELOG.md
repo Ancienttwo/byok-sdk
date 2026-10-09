@@ -60,6 +60,30 @@
   byok-sdk-auth-none`. The `pi-durable` entry now refuses a keyless profile at
   admission with `PROVIDER_PROFILE_INVALID`, as `pi-prepared` already did.
   Before, it failed in the worker after the child started.
+- **Added (protocol, client, cloud, server)** — One Agent home runs
+  `memory-reader` Attempts beside its one writer. An Agent offer with
+  `homeAccess: 'memory-reader'` runs in its own run directory,
+  `<home>/.byok/runs/<taskId>/`. `DaemonConfig.maxConcurrentReaderAttemptsPerAgentHome`
+  (default 4) limits readers per home; the writer limit stays one. The device
+  advertises `agent-home-readers`, and server and cloud refuse a reader offer
+  to a device without it before task creation. A reader session resumes in
+  its recorded run directory; the handoff binds `homeAccess`. Reader terminals
+  carry `agentHomeMemoryChange`, and `TerminalResult` projects it. The Codex
+  adapter makes the home the project root for a reader, so Codex still reads
+  the home's `AGENTS.md` (#317).
+- **Removed (client)** — `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome`.
+  A value above 1 let Attempts co-write one home. Reader Attempts replace it,
+  and setting it is now a construction error. The writer `agent home busy`
+  decline reason does not change; a reader decline names the reader count
+  (#317).
+- **Changed (client)** — Execution lease API for #317:
+  `AgentHomeExecutionStatus` reports `maxConcurrentReaderAttemptsPerAgentHome`
+  and `activeReaderAttempts` instead of
+  `maxConcurrentMutableSessionsPerAgentHome`.
+  `AgentHomeExecutionLeaseManager.activeAttemptCount(canonicalHome, homeAccess)`
+  now takes an access mode and counts only that mode.
+  `AgentHomeExecutionLease` gains the required members `homeAccess` and
+  `writerOverlapped()`, so a host that implements the interface must add them.
 
 ## 0.25.0 / @byok-sdk/keys 0.10.0 - 2026-10-09
 

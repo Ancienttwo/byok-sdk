@@ -62,6 +62,16 @@ export interface CodexAdapterOptions {
   nativeInteractions?: NativeInteractionHostOptions;
 }
 
+/**
+ * Codex reads `AGENTS.md` from its project root down to `cwd`, and finds the
+ * project root by the `project_root_markers` config (default `[".git"]`).
+ * When no ancestor has a marker, it reads `cwd` only. A `memory-reader` cwd is
+ * `<home>/.byok/runs/<taskId>/`, so Codex would miss the persona in the home.
+ * The home always holds the SDK-owned `.byok/`, so this marker makes the home
+ * the project root. The run directory itself has no `.byok/`.
+ */
+const READER_PROJECT_ROOT_ARGS = Object.freeze(['-c', 'project_root_markers=[".byok"]']);
+
 /** Codex app-server is experimental and has no exec compatibility path. Version policy: `codex-version.ts`. */
 export class CodexAdapter implements RuntimeAdapter {
   get descriptor() { return freezeRuntimeAdapterDescriptor({
@@ -204,6 +214,7 @@ export class CodexAdapter implements RuntimeAdapter {
           ...(this.options.nativeInteractions === undefined ? {} : { approvalPolicy: "on-request" as const }),
           sandboxMode: this.options.sandbox ?? 'danger-full-access',
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
+          ...(input.manifest.homeAccess === 'memory-reader' ? { launchArgs: READER_PROJECT_ROOT_ARGS } : {}),
           ...(input.manifest.sessionRef === undefined
             ? {}
             : { resume: input.manifest.sessionRef }),

@@ -22,11 +22,12 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
  * WP0 regression suite for the per-canonical-Agent-home single-writer gate
  * (`plans/plan-20260903-0436-agent-home-single-writer.md`).
  *
- * The invariant under test: at most
- * `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome` (default 1) Attempts
- * may hold an execution lease in one canonical Agent home at a time, across
- * every lane and every session, and the slot is surrendered only after the
- * attempt is terminal AND `Session.close()` succeeded.
+ * The invariant under test: at most one writer Attempt (an Agent offer
+ * without `homeAccess`) may hold an execution lease in one canonical Agent
+ * home at a time, across every lane and every session, and the slot is
+ * surrendered only after the attempt is terminal AND `Session.close()`
+ * succeeded. `memory-reader` Attempts are counted apart; see
+ * `agent-home-readers.test.ts`.
  */
 
 async function temp(prefix: string): Promise<string> {
@@ -148,9 +149,10 @@ describe('canonical Agent home single writer (WP0)', () => {
     expect(server.received.some((entry) => entry.type === 'task.claim' && entry.task_id === 'same-home-second')).toBe(false);
 
     expect(harness.daemon.status().agentHomeExecution).toEqual({
-      maxConcurrentMutableSessionsPerAgentHome: 1,
+      maxConcurrentReaderAttemptsPerAgentHome: 4,
       activeHomes: 1,
       activeAttempts: 1,
+      activeReaderAttempts: 0,
     });
   });
 
@@ -166,9 +168,10 @@ describe('canonical Agent home single writer (WP0)', () => {
     expect(harness.pi.startCalls[0]!.ctx.workspaceDir).not.toBe(harness.pi.startCalls[1]!.ctx.workspaceDir);
     expect(server.received.filter((entry) => entry.type === 'task.decline')).toHaveLength(0);
     expect(harness.daemon.status().agentHomeExecution).toEqual({
-      maxConcurrentMutableSessionsPerAgentHome: 1,
+      maxConcurrentReaderAttemptsPerAgentHome: 4,
       activeHomes: 2,
       activeAttempts: 2,
+      activeReaderAttempts: 0,
     });
   });
 
@@ -207,9 +210,10 @@ describe('canonical Agent home single writer (WP0)', () => {
 
     // Fail closed: a home whose writer could not be proven gone stays busy.
     expect(harness.daemon.status().agentHomeExecution).toEqual({
-      maxConcurrentMutableSessionsPerAgentHome: 1,
+      maxConcurrentReaderAttemptsPerAgentHome: 4,
       activeHomes: 1,
       activeAttempts: 1,
+      activeReaderAttempts: 0,
     });
     server.send(offer('disposal-second', 'disposal-agent', 'claude'));
     const declined = await server.waitFor(declineFor('disposal-second'));
@@ -290,28 +294,22 @@ describe('canonical Agent home single writer (WP0)', () => {
     expect(restarted.daemon.status().agentHomeExecution.activeAttempts).toBe(1);
   });
 
-  it('admits exactly the configured number of Attempts when a host raises the limit', async () => {
-    const harness = await start({ maxConcurrentMutableSessionsPerAgentHome: 2 });
-
-    server.send(offer('limit-one', 'limit-agent', 'pi'));
-    await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'limit-one');
-    server.send(offer('limit-two', 'limit-agent', 'pi'));
-    await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'limit-two');
-    server.send(offer('limit-three', 'limit-agent', 'pi'));
-    const declined = await server.waitFor(declineFor('limit-three'));
-
-    expect(declineReason(declined)).toBe('agent home busy: 2 active attempt(s)');
-    expect(declineRetryable(declined)).toBe(true);
-    expect(harness.daemon.status().agentHomeExecution).toEqual({
-      maxConcurrentMutableSessionsPerAgentHome: 2,
-      activeHomes: 1,
-      activeAttempts: 2,
-    });
-    // Same lane on purpose: two concurrent Attempts in one home must still
-    // carry distinct runtime sessionRefs, which the execution lease manager
-    // enforces independently of this cap.
-    expect(harness.pi.startCalls).toHaveLength(2);
-    expect(harness.claude.startCalls).toHaveLength(0);
+  it('refuses the removed maxConcurrentMutableSessionsPerAgentHome at construction, whatever its value', async () => {
+    const workspaceRoot = await temp('byok-single-writer-removed-workspace-');
+    const storeDir = await temp('byok-single-writer-removed-store-');
+    const hostStorageRoot = await temp('byok-single-writer-removed-home-');
+    for (const limit of [1, 2]) {
+      expect(() => createDaemonWithAdapters({
+        localAgentRelease: { version: '0.0.0-test' },
+        productName: 'Single writer',
+        productId: `single-writer-removed-${limit}`,
+        serverUrl: server.url,
+        workspaceRoot,
+        storeDir,
+        agentHome: { hostStorageRoot },
+        maxConcurrentMutableSessionsPerAgentHome: limit,
+      } as DaemonConfig, [new LaneAdapter('pi')])).toThrow(/maxConcurrentMutableSessionsPerAgentHome was removed/);
+    }
   });
 
   it('never lets a pre-cancelled or duplicate offer consume a slot', async () => {
@@ -343,9 +341,10 @@ describe('canonical Agent home single writer (WP0)', () => {
     expect(harness.pi.startCalls).toHaveLength(1);
     // One attempt per home, two homes: the duplicate consumed no second slot.
     expect(harness.daemon.status().agentHomeExecution).toEqual({
-      maxConcurrentMutableSessionsPerAgentHome: 1,
+      maxConcurrentReaderAttemptsPerAgentHome: 4,
       activeHomes: 2,
       activeAttempts: 2,
+      activeReaderAttempts: 0,
     });
   });
 
@@ -452,9 +451,10 @@ describe('canonical Agent home single writer (WP0)', () => {
     // `one` is untouched: still exactly one attempt in exactly one home, and
     // the alias was never materialized into a second directory.
     expect(harness.daemon.status().agentHomeExecution).toEqual({
-      maxConcurrentMutableSessionsPerAgentHome: 1,
+      maxConcurrentReaderAttemptsPerAgentHome: 4,
       activeHomes: 1,
       activeAttempts: 1,
+      activeReaderAttempts: 0,
     });
     expect((await fs.lstat(linkHome)).isSymbolicLink()).toBe(true);
     expect((await fs.readdir(agentsRoot)).sort()).toEqual(['one', 'two']);
@@ -471,9 +471,10 @@ describe('canonical Agent home single writer (WP0)', () => {
       const status = await conn.client.request<ControlStatusResult>('status');
       expect(status.agentHomeExecution).toEqual(harness.daemon.status().agentHomeExecution);
       expect(status.agentHomeExecution).toEqual({
-        maxConcurrentMutableSessionsPerAgentHome: 1,
+        maxConcurrentReaderAttemptsPerAgentHome: 4,
         activeHomes: 1,
         activeAttempts: 1,
+        activeReaderAttempts: 0,
       });
       // Counts only: the control status never names a home path or an Agent.
       expect(JSON.stringify(status.agentHomeExecution)).not.toContain(harness.hostStorageRoot);
@@ -482,7 +483,7 @@ describe('canonical Agent home single writer (WP0)', () => {
     }
   });
 
-  it('rejects an unusable concurrency limit at construction instead of reinterpreting it', async () => {
+  it('rejects an unusable reader concurrency limit at construction instead of reinterpreting it', async () => {
     const workspaceRoot = await temp('byok-single-writer-invalid-workspace-');
     const storeDir = await temp('byok-single-writer-invalid-store-');
     const hostStorageRoot = await temp('byok-single-writer-invalid-home-');
@@ -494,11 +495,11 @@ describe('canonical Agent home single writer (WP0)', () => {
       workspaceRoot,
       storeDir,
       agentHome: { hostStorageRoot },
-      maxConcurrentMutableSessionsPerAgentHome: limit,
+      maxConcurrentReaderAttemptsPerAgentHome: limit,
     }, [new LaneAdapter('pi')]);
 
     for (const limit of [0, -1, Number.NaN, 1.5, Number.POSITIVE_INFINITY]) {
-      expect(() => build(limit)).toThrow(/maxConcurrentMutableSessionsPerAgentHome must be a positive safe integer/);
+      expect(() => build(limit)).toThrow(/maxConcurrentReaderAttemptsPerAgentHome must be a positive safe integer/);
     }
     expect(() => build(3)).not.toThrow();
   });
