@@ -142,7 +142,7 @@ describe('a startup-deadline decline hands the canonical Agent home back to the 
       expect(sent.some((entry) => entry.type === 'task.claim')).toBe(false);
       expect(adapter.startCalls).toHaveLength(0);
       // Nothing was ever admitted, so no execution lease exists to release.
-      expect(agentHome.executionLeaseManager.activeAttemptSummary()).toEqual({ homes: 0, attempts: 0 });
+      expect(agentHome.executionLeaseManager.activeAttemptSummary()).toEqual({ homes: 0, attempts: 0, readerAttempts: 0 });
 
       // Attempt 2 — SAME runner, SAME deps object, SAME home. Only the
       // startup budget changes, and it changes on the object the runner holds.
@@ -159,7 +159,7 @@ describe('a startup-deadline decline hands the canonical Agent home back to the 
       expect(sent.filter((entry) => entry.type === 'task.decline'
         && entry.payload.reason.startsWith(AGENT_HOME_BUSY_PREFIX))).toEqual([]);
       // Exactly what ONE admitted attempt implies: one home, one attempt.
-      expect(agentHome.executionLeaseManager.activeAttemptSummary()).toEqual({ homes: 1, attempts: 1 });
+      expect(agentHome.executionLeaseManager.activeAttemptSummary()).toEqual({ homes: 1, attempts: 1, readerAttempts: 0 });
 
       // Late results from the retired admission path continue nothing.
       const beforeLate = sent.length;
@@ -169,7 +169,7 @@ describe('a startup-deadline decline hands the canonical Agent home back to the 
       await new Promise((resolve) => setImmediate(resolve));
       expect(sent.slice(beforeLate).filter((entry) => entry.task_id === 'blocked')).toEqual([]);
       expect(adapter.startCalls).toHaveLength(1);
-      expect(agentHome.executionLeaseManager.activeAttemptSummary()).toEqual({ homes: 1, attempts: 1 });
+      expect(agentHome.executionLeaseManager.activeAttemptSummary()).toEqual({ homes: 1, attempts: 1, readerAttempts: 0 });
 
       adapter.sessions[0]!.emit({ type: 'turn_end' });
       await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));

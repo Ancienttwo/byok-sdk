@@ -8,7 +8,7 @@ the only Agent-home composition rule:
 ```text
 <hostStorageRoot>/
   agents/
-    <validated-agentId>/              runtime cwd
+    <validated-agentId>/              writer runtime cwd
       MEMORY.md                       create-if-missing, preserve existing
       notes/                          create-if-missing, preserve existing
       .byok/                           SDK-reserved internal namespace
@@ -18,8 +18,10 @@ the only Agent-home composition rule:
           reliable-v1.jsonl           append/fsync, exact-ack retirement
         content-read-audit-v1.jsonl   content-free per-Agent decisions
         runtime-sessions/
-          <runtime>-<session-hash>.jsonl
+          <runtime>-<session-hash>.jsonl   writer and reader sessions
           <runtime>-task-<task-hash>.jsonl
+        runs/
+          <taskId>/                    memory-reader runtime cwd, kept after the terminal
       ...                             opaque Agent files
 ```
 
@@ -28,7 +30,10 @@ an absolute path. Salesko must not join `agents/<agentId>` itself. The SDK
 validates the typed `AgentRef`, composes that suffix, creates missing
 directories and seed assets, resolves existing ancestors and real paths,
 rejects symlink/traversal/cross-Agent escape, and seals the canonical Agent
-home as runtime cwd. Daemon startup materializes and write-probes the canonical
+home as the writer's runtime cwd. A `homeAccess: 'memory-reader'` Attempt runs
+in `.byok/runs/<taskId>/` instead, under the same home, so the host-owned
+layout does not change. The SDK creates that directory, keeps it after the
+terminal for a resume, and removes old ones by retention. Daemon startup materializes and write-probes the canonical
 root/`agents` namespace before advertising `agent-home-contract`; a configured
 but unusable root therefore never admits a cloud Agent offer.
 
@@ -61,7 +66,7 @@ SDK-reserved namespace in the Agent home.
 | Sessions | Persist append-only exact-match handoff and terminal evidence under `.byok/runtime-sessions`; report bounded write exhaustion without stranding the cloud task or lease | Treat mismatch as a product-visible failed admission and surface the host audit signal; do not invent migration semantics |
 | Egress | Send Agent events as the runtime produced them (ADR-037 D4); own the per-Agent reliable spool, cursor/ack/retry, quota and typed drop facts | Select one exact policy revision; decide what to store and show |
 | Explicit reads | Own per-surface capability, canonical path policy, per-Agent audit journal and BlobRef receipt fidelity | Author tenant/actor authz plus narrower root/MIME/text/size policy; never infer authorization from file presence |
-| Concurrency | Enforce one mutable writer per canonical Agent home | Do not schedule around or bypass a busy decline |
+| Concurrency | Enforce one writer Attempt per canonical Agent home, and at most `maxConcurrentReaderAttemptsPerAgentHome` (default 4) `memory-reader` Attempts, each in its own `.byok/runs/<taskId>/`; report reader memory changes in `agentHomeMemoryChange` without enforcing read-only memory; remove reader run directories by retention (32 per home, 7 days, never an active one or one a recent reader handoff points to) | Send concurrent memory-reading work as reader offers and keep memory writes in the writer; do not write memory files while readers run if the attribution matters; do not schedule around or bypass a busy decline |
 | Credentials | Never persist credential bytes in Agent home | Store secrets in SDK-owned macOS Keychain, Windows Credential Manager, or Linux Secret Service entries; project references/configured state only |
 
 ## Host-root relocation authority

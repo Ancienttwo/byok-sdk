@@ -70,6 +70,31 @@ load the persona instruction file from an ancestor of cwd. Codex resolves its
 project root from a Git root. If a runtime does not read ancestors, its
 adapter must add the home as an extra instruction or read directory.
 
+Findings (2026-10-09, probe home with `AGENTS.md` and cwd
+`<home>/.byok/runs/task-1/`):
+
+- Pi 1.1.0 walks every ancestor. `loadProjectContextFiles` in
+  `dist/core/resource-loader.js` (lines 165-191) checks `AGENTS.override.md`,
+  `AGENTS.md`, `AGENTS.MD`, `CLAUDE.md` and `CLAUDE.MD` from cwd up to the
+  root. The byok Pi RPC host does not set `noContextFiles`; only the frozen
+  prepared lane sets it. A probe session with the run cwd loaded the home
+  `AGENTS.md` marker. No adapter change. Durable Pi binds cwd to the canonical
+  home, so it declines reader offers without retry.
+- Codex 0.162.0 stops at the project root. The default is
+  `project_root_markers = [".git"]`. `codex debug prompt-input` with the run
+  cwd did not load the home `AGENTS.md` when the home had no `.git`. It loaded
+  it when the home had `.git`, when cwd was the home, and in both cases with
+  `-c 'project_root_markers=[".byok"]'`. Adapter change: a reader start passes
+  that override through OAR `SessionOptions.launchArgs`. The handoff ledger
+  stays in the home, so the run directory has no `.byok` of its own and the
+  home is the first marked ancestor.
+- Claude Code 2.1.291 walks ancestors. The binary documents the upward
+  `CLAUDE.md` walk ("the upward file walk finds the main repo's
+  CLAUDE.local.md"), and its prompt audit lists `CLAUDE.md` and `AGENTS.md`
+  "in the project root and its ancestor" directories. Observed: a session with
+  cwd in a nested worktree loaded the parent repo `CLAUDE.md`. The adapter
+  passes no `--setting-sources`. No adapter change.
+
 ### Sessions
 
 Reader Attempts support resume in the first version.
@@ -137,17 +162,65 @@ cap; resume is supported now.
 
 ## Task Breakdown
 
-- [ ] Verify ancestor instruction-file discovery for Claude, Codex and Pi.
-- [ ] Protocol: `homeAccess`, capability flag, terminal `agentHomeMemoryChange`.
-- [ ] Cloud and server: capability gate before task creation.
-- [ ] Client: separate counts, reader run directory, retention, digests.
-- [ ] Client: handoff binds `homeAccess`; reader resume reuses the run cwd;
+- [x] Verify ancestor instruction-file discovery for Claude, Codex and Pi.
+- [x] Protocol: `homeAccess`, capability flag, terminal `agentHomeMemoryChange`.
+- [x] Cloud and server: capability gate before task creation.
+- [x] Client: separate counts, reader run directory, retention, digests.
+- [x] Client: handoff binds `homeAccess`; reader resume reuses the run cwd;
   missing run directory declines.
-- [ ] Docs: spec, protocol, host-local-storage-layout responsibility matrix.
-- [ ] Tests: N readers plus 1 writer, disjoint cwd, second writer declined,
+- [x] Docs: spec, protocol, host-local-storage-layout responsibility matrix.
+- [x] Tests: N readers plus 1 writer, disjoint cwd, second writer declined,
   reader change evidence in all four outcomes, retention never removes an
   active run, reader resume reuses its cwd, access-mode mismatch declines,
   missing run directory declines.
+
+
+## Deviations from the design
+
+- `reader-attributed` means "a reader changed memory": this reader or another
+  reader that overlapped it. The device cannot tell readers apart.
+- `task.offer_prepared` and both egress offers inherit `homeAccess`, under the
+  same capability gate.
+- Durable Pi declines a reader offer without retry, because it binds cwd to
+  the canonical home.
+- A fresh reader `taskId` must be one plain path segment; otherwise the offer
+  gets a non-retryable decline before any side effect.
+- `paths` holds at most 512 entries (twice the 256-file digest bound, for a
+  full delete plus a full add).
+- The reader handoff ledger stays in the home. A resume finds the run
+  directory through it, and the run directory has no `.byok` of its own.
+- The writer `agent home busy` reason does not change; a reader decline names
+  the reader count.
+
+## Verification evidence (2026-10-09)
+
+Regression proof: the new tests ran against the pre-change sources (`packages`
+from 53a51669, new test files kept, a trimmed copy without the new unit
+module). Client: 19 failed (18 daemon reader tests and the Codex reader test).
+Cloud: 7 failed (6 gate cases and the memory-change projection). Server: 3
+failed. The cloud writer-admission case passed, as expected.
+
+Checks on the final tree:
+
+- `bun run build`: exit 0.
+- `bun run typecheck`: exit 0.
+- `bun run check:api-surface`: "9 package golden(s) match the built
+  declarations". The goldens were updated on purpose. The removed lines are the
+  old cap, its default constant, the old status fields, and the changed
+  `activeAttemptCount` and handoff-store signatures.
+- `bun run check:version-authority`: agrees with 0.25.0 and keys 0.10.0.
+- `bun run test:scripts`: 68 tests, 68 pass.
+- `BYOK_TEST_BUN_BIN=... BYOK_REQUIRE_BUN=1 bun run test`: the client package
+  passed with 305 files and 3611 tests (27 skipped). The other packages passed:
+  cloud 483, cloud-dataplane 73, cloud-do 873 (vitest) plus 15 (node), conformance
+  162, core 373, example-basic 85, example-codex-interaction-host 31,
+  example-live-activity-host 48, example-salesko-connector-broker 34, keys 690,
+  protocol 505, server 406, testkit 4, ui-runtime 26. The sequential runner stops
+  at the first failing package, so the suite ran in parts. Two loaded runs had
+  timeouts in `fix-mcp-observation-deadline`, `pi-durable-daemon-recovery`,
+  `sdk-reserved-helper-host`, `task-runner-cancel-native` (client) and
+  cloud-do `hooks.test.ts` ("timed out waiting for envelope", "Test timed out in
+  5000ms"). They pass alone, and they do not use reader offers.
 
 ## Not in scope
 

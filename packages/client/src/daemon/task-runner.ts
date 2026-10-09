@@ -32,6 +32,7 @@ import {
   type TerminalInferenceUsage,
   type TerminalPreparedObservation,
   type TerminalAgentHomeProjection,
+  type TerminalAgentHomeMemoryChange,
   type TerminalProjectionSelection,
   type TaskOfferPayload,
   type TaskOfferForAgentPayload,
@@ -65,12 +66,20 @@ import {
 } from '../input-preparation';
 import {
   AgentHomeBusyError,
+  AgentHomeReaderRunMissingError,
   AgentHomeResolutionError,
   AgentHomeManager,
   type AgentHomeExecutionBinding,
   type AgentRef,
   validateAgentRef,
 } from '../agent-home';
+import {
+  compareAgentHomeMemory,
+  digestAgentHomeMemory,
+  isReaderRunName,
+  type AgentHomeAccessMode,
+  type AgentHomeMemoryDigest,
+} from '../agent-home-readers';
 import {
   AgentSessionHandoffStore,
   type AgentTerminalCause,
@@ -113,7 +122,7 @@ import {
   type McpToolsetServerObservation,
 } from '../mcp/observation';
 import type { ResolvedAgentMessageMcpBin } from './resolve-agent-message-mcp-bin';
-import { prependAgentMemoryGuidance } from './memory-guidance';
+import { prependAgentMemoryGuidance, prependAgentMemoryReaderGuidance } from './memory-guidance';
 import type { ResolvedAgentMemoryMcpBin } from './resolve-agent-memory-mcp-bin';
 import {
   AgentMemoryService,
@@ -418,14 +427,12 @@ function resultDocumentRejectionDetail(check: Extract<ResultDocumentCheck, { ok:
 export const DEFAULT_MAX_TASK_OUTPUT_BYTES = 64 * 1024 * 1024;
 
 /**
- * WP0: default number of Attempts allowed to execute concurrently in one
- * canonical Agent home. One — the canonical home is every Agent session's
- * cwd, so a second concurrent Attempt is a second writer of the same
- * `MEMORY.md`, `notes/` and `.git`. Raising it is an explicit host choice
- * (`DaemonConfig.maxConcurrentMutableSessionsPerAgentHome`) that re-enables
- * the 0.12.0 co-writing exposure; there is no implicit fallback to it.
+ * Default number of `memory-reader` Attempts that may run concurrently in one
+ * canonical Agent home. Readers are counted apart from the writer. A home has
+ * at most one writer Attempt, fixed: the writer runs in the home itself, so a
+ * second writer would co-write `MEMORY.md`, `notes/` and `.git`.
  */
-export const DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME = 1;
+export const DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME = 4;
 
 export interface TaskRunnerDeps {
   adapters: RuntimeAdapter[];
@@ -484,12 +491,13 @@ export interface TaskRunnerDeps {
   /** Local authority: legacy offers are declined after journal/dedup/cancel precedence. */
   strictAgentOnly?: boolean;
   /**
-   * WP0: how many Attempts may execute concurrently in ONE canonical Agent
-   * home — see `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome`'s own
-   * doc comment (`create-daemon.ts`) for the validated contract. Unset
-   * defaults to {@link DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME}.
+   * How many `memory-reader` Attempts may run concurrently in ONE canonical
+   * Agent home — see `DaemonConfig.maxConcurrentReaderAttemptsPerAgentHome`'s
+   * own doc comment (`create-daemon.ts`) for the validated contract. Unset
+   * defaults to {@link DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME}.
+   * The writer limit is fixed at one.
    */
-  maxConcurrentMutableSessionsPerAgentHome?: number;
+  maxConcurrentReaderAttemptsPerAgentHome?: number;
   /** Exact host-selected policy accepted by `task.offer_for_agent_with_egress`. */
   agentEgressPolicy?: Readonly<AgentEgressPolicy>;
   /** Latest-value activity lane and reliable spool for Agent egress offers. */
@@ -738,10 +746,20 @@ interface ActiveTask {
   agentHandoff?: {
     sessionRef: string;
     runtimeId: string;
+    /** Canonical Agent home; the handoff ledger lives under it. */
+    home: string;
     cwd: string;
+    homeAccess?: 'memory-reader';
   };
   /** The task-free projection applied when this Agent Attempt started; see `TerminalAgentHomeProjectionSchema`. */
   appliedAgentHomeProjection?: TerminalAgentHomeProjection;
+  /**
+   * A `memory-reader` Attempt's memory digest at start; `digest` is
+   * `undefined` when it could not be measured. Absent for a writer.
+   */
+  readerMemoryBaseline?: { readonly digest: AgentHomeMemoryDigest | undefined };
+  /** Measured once, at the first terminal decision; see `TerminalAgentHomeMemoryChangeSchema`. */
+  agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
   terminalCause?: AgentTerminalCause;
   terminalReason?: string;
   agentTerminalPersisted?: boolean;
@@ -1005,6 +1023,11 @@ function offeredSessionRef(payload: AcceptedOfferPayload): string | undefined {
   if (!Object.prototype.hasOwnProperty.call(payload, 'sessionRef')) return undefined;
   const value = (payload as unknown as { sessionRef?: unknown }).sessionRef;
   return typeof value === 'string' ? value : undefined;
+}
+
+/** An Agent offer without `homeAccess` is a writer. */
+function offeredHomeAccess(payload: AcceptedOfferPayload): AgentHomeAccessMode {
+  return 'homeAccess' in payload && payload.homeAccess === 'memory-reader' ? 'memory-reader' : 'memory-writer';
 }
 
 function errorMessage(err: unknown): string {
@@ -1462,10 +1485,10 @@ export class TaskRunner {
     return this.deps.maxInlineEventBytes ?? DEFAULT_MAX_INLINE_EVENT_BYTES;
   }
 
-  /** WP0: effective per-canonical-Agent-home Attempt cap — see {@link DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME}. */
-  private get maxConcurrentMutableSessionsPerAgentHome(): number {
-    return this.deps.maxConcurrentMutableSessionsPerAgentHome
-      ?? DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME;
+  /** Effective per-canonical-Agent-home reader cap — see {@link DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME}. */
+  private get maxConcurrentReaderAttemptsPerAgentHome(): number {
+    return this.deps.maxConcurrentReaderAttemptsPerAgentHome
+      ?? DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME;
   }
 
   /**
@@ -2015,6 +2038,8 @@ export class TaskRunner {
       this.decline(taskId, reason, retryable, agentRef);
     };
     const sessionRef = offeredSessionRef(payload);
+    const homeAccess = offeredHomeAccess(payload);
+    const readerAttempt = homeAccess === 'memory-reader';
     // The prepared lane is selected by the presence of this value and nothing
     // else. Absent for every ordinary offer, so every branch below that does
     // not mention it behaves exactly as it did before this lane existed.
@@ -2148,8 +2173,18 @@ export class TaskRunner {
       // create `agents/<agentId>` or bind an Agent identity for an offer that
       // is about to be declined. `resolve()` still runs later, on the
       // admission path, for an offer that actually executes.
+      //
+      // Writers and `memory-reader` Attempts are counted apart: one writer,
+      // and up to `maxConcurrentReaderAttemptsPerAgentHome` readers, each in
+      // its own run directory. A fresh reader names that directory after its
+      // taskId, so a taskId that is not one plain path segment is refused here,
+      // before any side effect.
       if (agentRef !== undefined) {
-        const limit = this.maxConcurrentMutableSessionsPerAgentHome;
+        if (readerAttempt && sessionRef === undefined && !isReaderRunName(taskId)) {
+          decline('a memory-reader Attempt needs a taskId that is one plain path segment ([A-Za-z0-9._-], at most 128 characters)', false);
+          return;
+        }
+        const limit = readerAttempt ? this.maxConcurrentReaderAttemptsPerAgentHome : 1;
         let canonicalHome: string;
         try {
           canonicalHome = await this.deps.agentHome!.layout.canonicalHomePath(agentRef);
@@ -2161,15 +2196,16 @@ export class TaskRunner {
           return;
         }
         if (admissionWithdrawn()) return;
-        const active = this.deps.agentHome!.executionLeaseManager.activeAttemptCount(canonicalHome)
-          + (this.homeReservations.get(canonicalHome) ?? 0);
+        const reservationKey = `${homeAccess}\0${canonicalHome}`;
+        const active = this.deps.agentHome!.executionLeaseManager.activeAttemptCount(canonicalHome, homeAccess)
+          + (this.homeReservations.get(reservationKey) ?? 0);
         if (active >= limit) {
-          decline(`agent home busy: ${active} active attempt(s)`, true);
+          decline(`agent home busy: ${active} active ${readerAttempt ? 'reader ' : ''}attempt(s)`, true);
           return;
         }
         // Check and reserve are synchronous at the canonical-home authority.
-        this.homeReservations.set(canonicalHome, (this.homeReservations.get(canonicalHome) ?? 0) + 1);
-        reservedHome = canonicalHome;
+        this.homeReservations.set(reservationKey, (this.homeReservations.get(reservationKey) ?? 0) + 1);
+        reservedHome = reservationKey;
       }
 
       // S3b (L-002): the pre-claim admission veto stays after the strict
@@ -2259,6 +2295,11 @@ export class TaskRunner {
         return;
       }
       if (terminalProjection?.mode === 'result-document' && !this.deps.resultDocument && pick.descriptor.capabilities.durablePi !== true) { decline('selected runtime has no result document extractor', false); return; }
+      if (readerAttempt && pick.descriptor.capabilities.durablePi === true) {
+        // Durable Pi binds its replica to the canonical home as its cwd.
+        decline('durable Pi runs only in the canonical Agent home; it does not run memory-reader Attempts', false);
+        return;
+      }
       if (!isKnownRuntimeId(pick.descriptor.id) && !(this.deps.getServerCapabilities?.() ?? []).includes('custom-harness')) {
         decline('server does not support the selected custom harness identity', false);
         return;
@@ -2386,8 +2427,30 @@ export class TaskRunner {
       }
 
       if (agentRef !== undefined) {
+        // A resumed reader runs again in the run directory its session handoff
+        // recorded. The ledger lives in the home, so it is found by sessionRef.
+        let readerRunDirectory: string | undefined;
+        if (readerAttempt && sessionRef !== undefined) {
+          try {
+            const resolution = await this.deps.agentHome!.layout.resolve(agentRef);
+            readerRunDirectory = await this.deps.agentSessionHandoffs!.readerSessionCwd({
+              agentRef: resolution.agentRef,
+              sessionRef,
+              runtimeId: pick.descriptor.id,
+              home: resolution.canonicalHome,
+            });
+          } catch (error) {
+            decline(`Agent session handoff mismatch: ${errorMessage(error)}`, false);
+            return;
+          }
+        }
         try {
-          agentBinding = await this.deps.agentHome!.acquireExecution(agentRef, { taskId, sessionRef });
+          agentBinding = await this.deps.agentHome!.acquireExecution(agentRef, {
+            taskId,
+            sessionRef,
+            homeAccess,
+            ...(readerRunDirectory === undefined ? {} : { runDirectory: readerRunDirectory }),
+          });
           releaseReservation();
         } catch (error) {
           decline(
@@ -2406,6 +2469,7 @@ export class TaskRunner {
       let gitExisting = false;
       let plainWorkspaceNeedsResolve = false;
       let appliedAgentHomeProjection: TerminalAgentHomeProjection | undefined;
+      let readerMemoryBaseline: ActiveTask['readerMemoryBaseline'];
       if (agentBinding !== undefined) {
         workspaceDir = agentBinding.lease.cwd;
         if (sessionRef !== undefined) {
@@ -2414,12 +2478,41 @@ export class TaskRunner {
               agentRef: agentBinding.resolution.agentRef,
               sessionRef,
               runtimeId: pick.descriptor.id,
+              home: agentBinding.resolution.canonicalHome,
               cwd: workspaceDir,
+              ...(readerAttempt ? { homeAccess: 'memory-reader' as const } : {}),
             });
           } catch (error) {
             await agentBinding.lease.release().catch(() => {});
             agentBinding = undefined;
             decline(`Agent session handoff mismatch: ${errorMessage(error)}`, false);
+            return;
+          }
+        }
+        if (readerAttempt) {
+          const fresh = sessionRef === undefined;
+          try {
+            const referencedRuns = fresh
+              ? await this.deps.agentSessionHandoffs!.readerRunReferences(agentBinding.resolution.canonicalHome)
+                .catch((error: unknown) => {
+                  console.warn(`[byok/client] reader run retention skipped for ${taskId}: session handoffs are unreadable: ${errorMessage(error)}`);
+                  return undefined;
+                })
+              : undefined;
+            const prepared = await this.deps.agentHome!.prepareReaderRun(agentBinding, {
+              fresh,
+              ...(referencedRuns === undefined ? {} : { referencedRuns }),
+              nowMs: Date.now(),
+            });
+            if (prepared.retentionError !== undefined) {
+              console.warn(`[byok/client] reader run retention failed for ${taskId}: ${errorMessage(prepared.retentionError)}`);
+            }
+          } catch (error) {
+            await agentBinding.lease.release().catch(() => {});
+            agentBinding = undefined;
+            decline(error instanceof AgentHomeReaderRunMissingError
+              ? `Agent session ${sessionRef} cannot resume: its reader run directory no longer exists`
+              : `Agent reader run directory preparation failed: ${errorMessage(error)}`, false);
             return;
           }
         }
@@ -2437,6 +2530,11 @@ export class TaskRunner {
           console.warn(`[byok/client] Agent-home projection record is unreadable for ${taskId}; terminal evidence omits it: ${errorMessage(error)}`);
           return undefined;
         });
+        // Evidence only (#317): the SDK does not make memory read-only. The
+        // reader terminal compares this digest with one taken at the terminal.
+        if (readerAttempt) {
+          readerMemoryBaseline = { digest: await digestAgentHomeMemory(agentBinding.resolution.canonicalHome) };
+        }
         if (messageRequirement !== undefined) {
           try {
             const outbox = await this.agentMessageOutbox(agentBinding.resolution.canonicalHome);
@@ -2527,6 +2625,7 @@ export class TaskRunner {
         ...(agentBinding === undefined ? {} : {
           agentRef: agentBinding.resolution.agentRef,
           cwd: agentBinding.lease.cwd,
+          ...(readerAttempt ? { homeAccess: 'memory-reader' as const } : {}),
           lease: {
             leaseId: agentBinding.lease.leaseId,
             canonicalHome: agentBinding.resolution.canonicalHome,
@@ -2852,7 +2951,9 @@ export class TaskRunner {
             kind: 'instruction' as const,
             instruction: agentBinding === undefined
               ? (gitWorkspaceId ? prependGitWorkspaceGuidance(resolvedInstruction) : resolvedInstruction)
-              : prependAgentMemoryGuidance(resolvedInstruction),
+              : readerAttempt
+                ? prependAgentMemoryReaderGuidance(resolvedInstruction)
+                : prependAgentMemoryGuidance(resolvedInstruction),
           }
           : { kind: 'prepared' as const, preparation: preparedLaunch }),
         manifest,
@@ -2989,9 +3090,12 @@ export class TaskRunner {
           agentHandoff: {
             sessionRef: session.sessionRef,
             runtimeId: pick.descriptor.id,
+            home: agentBinding.resolution.canonicalHome,
             cwd: workspaceDir,
+            ...(readerAttempt ? { homeAccess: 'memory-reader' as const } : {}),
           },
           ...(appliedAgentHomeProjection === undefined ? {} : { appliedAgentHomeProjection }),
+          ...(readerMemoryBaseline === undefined ? {} : { readerMemoryBaseline }),
         }),
         gitWorkspaceId,
         gitLease,
@@ -3035,7 +3139,9 @@ export class TaskRunner {
               taskId,
               sessionRef: session.sessionRef,
               runtimeId: pick.descriptor.id,
+              home: binding.resolution.canonicalHome,
               cwd: workspaceDir,
+              ...(readerAttempt ? { homeAccess: 'memory-reader' as const } : {}),
               leaseId: binding.lease.leaseId,
             }));
         } catch (error) {
@@ -4604,7 +4710,9 @@ export class TaskRunner {
           agentRef,
           taskId,
           runtimeId: context.runtimeId,
+          home: context.binding.resolution.canonicalHome,
           cwd: context.binding.lease.cwd,
+          ...(context.binding.lease.homeAccess === 'memory-reader' ? { homeAccess: 'memory-reader' as const } : {}),
           leaseId: context.binding.lease.leaseId,
           ...(context.sessionRef === undefined ? {} : { sessionRef: context.sessionRef }),
           terminalReason: reason,
@@ -4691,10 +4799,16 @@ export class TaskRunner {
   /** Exact Agent identity projection for claim/terminal wire payloads. */
   private agentTerminalPayload(
     active: ActiveTask,
-  ): { agentRef?: AgentRef; harnessId?: string; agentHomeProjection?: TerminalAgentHomeProjection } {
+  ): {
+    agentRef?: AgentRef;
+    harnessId?: string;
+    agentHomeProjection?: TerminalAgentHomeProjection;
+    agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
+  } {
     return {
       ...terminalIdentity(active.adapter.descriptor.id, active.agentRef),
       ...(active.appliedAgentHomeProjection === undefined ? {} : { agentHomeProjection: active.appliedAgentHomeProjection }),
+      ...(active.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: active.agentHomeMemoryChange }),
     };
   }
 
@@ -4892,6 +5006,7 @@ export class TaskRunner {
     }
     active.terminalCause = cause;
     active.terminalReason = reason;
+    await this.measureReaderMemoryChange(active);
     if (active.agentBinding === undefined || active.agentRef === undefined || active.agentHandoff === undefined) {
       return true;
     }
@@ -4903,7 +5018,9 @@ export class TaskRunner {
           agentRef,
           sessionRef: handoff.sessionRef,
           runtimeId: handoff.runtimeId,
+          home: handoff.home,
           cwd: handoff.cwd,
+          ...(handoff.homeAccess === undefined ? {} : { homeAccess: handoff.homeAccess }),
         },
         cause,
         reason,
@@ -4918,6 +5035,24 @@ export class TaskRunner {
         `${AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS} attempts; publishing the exact terminal and retrying during cleanup: ${errorMessage(result.error)}`,
     );
     return false;
+  }
+
+  /**
+   * Memory-change evidence of a `memory-reader` Attempt (#317), measured once
+   * at its first terminal decision, before the terminal envelope is built.
+   * The execution lease is still held, so the overlap flag covers every
+   * writer that started before this point.
+   */
+  private async measureReaderMemoryChange(active: ActiveTask): Promise<void> {
+    if (active.readerMemoryBaseline === undefined || active.agentHomeMemoryChange !== undefined) return;
+    const binding = active.agentBinding;
+    if (binding === undefined) return;
+    const after = await digestAgentHomeMemory(binding.resolution.canonicalHome);
+    active.agentHomeMemoryChange ??= compareAgentHomeMemory(
+      active.readerMemoryBaseline.digest,
+      after,
+      binding.lease.writerOverlapped(),
+    );
   }
 
   private async retryAgentTerminalEvidence(
@@ -5080,7 +5215,9 @@ export class TaskRunner {
               agentRef,
               sessionRef: handoff.sessionRef,
               runtimeId: handoff.runtimeId,
+              home: handoff.home,
               cwd: handoff.cwd,
+              ...(handoff.homeAccess === undefined ? {} : { homeAccess: handoff.homeAccess }),
             },
             cause,
             active.terminalReason,

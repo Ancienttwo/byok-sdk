@@ -1501,10 +1501,12 @@ path segment. No host resolver or `workspaceHint` participates in this path.
 The client validates existing-ancestor and realpath containment, rejects
 symlink and cross-Agent collisions, creates missing Agent home, `MEMORY.md`,
 and `notes/`, and preserves existing bytes. The canonical Agent home root is
-the sole runtime cwd and is sealed with AgentRef, runtime/session identity and
-lease in the immutable operation manifest. `.byok` is the SDK's reserved
-internal namespace for process-owned home activity, session-scoped execution
-leases, and exact-match runtime-session evidence. All other files are opaque
+the writer's runtime cwd; a `memory-reader` Attempt runs in
+`.byok/runs/<taskId>/` under it. The cwd is sealed with AgentRef,
+runtime/session identity and lease in the immutable operation manifest.
+`.byok` is the SDK's reserved internal namespace for process-owned home
+activity, session-scoped execution leases, exact-match runtime-session
+evidence, and reader run directories. All other files are opaque
 Agent-owned content: the SDK does not
 require a literal `artifacts/` directory or parse/index projects, PDFs, images,
 notes, memory, or profile schema.
@@ -1513,18 +1515,39 @@ Agent dispatch requires an explicit device and its durable authenticated
 `agent-home-contract` declaration before task creation or mailbox enqueue.
 Claim, decline, and every terminal message echo exact AgentRef. Resume requires
 exact agentId, profileRevision, sessionRef, runtime and canonical cwd; mismatch
-fails closed. Within one daemon process, execution is serialized per canonical
-Agent home: at most `maxConcurrentMutableSessionsPerAgentHome` Attempts, default
-one, may execute in a home at a time, across every lane and every session. A
-further offer for a home already at that limit is declined retryably before
-adapter preparation, claim, workspace or process side effects, and its reason
-carries counts only. The slot is surrendered only when the Attempt is terminal
-and its runtime session closed; a failed disposal keeps the home busy. Raising
-the limit above one is an explicit host choice that permits concurrent sessions
-of one Agent to co-write that home's shared content (`MEMORY.md`, `notes/`,
-`.git`); the SDK never selects it implicitly. Underneath that cap, execution
-leases remain keyed by `(agentId, sessionRef)`, so a duplicate execution for
-the same session is busy regardless of the limit. A fresh task is task-keyed
+fails closed. Within one daemon process, a canonical Agent home runs at most
+one writer Attempt and at most `maxConcurrentReaderAttemptsPerAgentHome`
+reader Attempts (default four), counted apart, across every lane and every
+session. An Agent offer without `homeAccess` is the writer and runs in the
+canonical home, which is why the writer limit is fixed at one: a second writer
+would co-write `MEMORY.md`, `notes/` and `.git`. An offer with
+`homeAccess: 'memory-reader'` runs in its own run directory,
+`<home>/.byok/runs/<taskId>/`, so reader cwds never overlap; the home stays an
+ancestor of that cwd, so the runtime still loads the persona instruction file.
+The Codex adapter adds `project_root_markers=[".byok"]` for a reader, because
+Codex otherwise reads `AGENTS.md` only up to a Git root. A device advertises
+`agent-home-readers`, and server and cloud refuse a reader offer to a device
+without it before task creation. A further offer for a home already at its
+limit is declined retryably before adapter preparation, claim, workspace or
+process side effects, and its reason carries counts only. The slot is
+surrendered only when the Attempt is terminal and its runtime session closed;
+a failed disposal keeps the home busy. The removed
+`maxConcurrentMutableSessionsPerAgentHome` is a construction error.
+Underneath those limits, execution leases remain keyed by
+`(agentId, sessionRef)`, so a duplicate execution for the same session is busy
+regardless of the limit. A reader session handoff binds `homeAccess` and the
+run directory: a resume runs in that directory again, an access-mode mismatch
+is a non-retryable decline, and a missing run directory is a non-retryable
+decline that names the session. Run directories stay after the terminal;
+retention at a fresh reader start removes the oldest beyond 32 per home and
+those older than 7 days, never an active one, and keeps one that a reader
+handoff updated within 7 days. The SDK does not make memory read-only: each
+reader terminal carries `agentHomeMemoryChange` (`unchanged`,
+`reader-attributed`, `unattributed` when a writer overlapped, or `unmeasured`)
+with the changed paths. A task-free projection still needs the base lease, so
+it waits while any reader or writer runs; a host that keeps readers running
+all the time delays persona updates, and the retryable mailbox redelivery
+covers that wait. A fresh task is task-keyed
 until its runtime creates the durable session, then
 the SDK atomically binds the lease to that `sessionRef`. SDK-reserved shared
 metadata mutations remain short and serialized per home. Agent-memory hosted
@@ -1532,7 +1555,7 @@ projection is the bounded exception: concurrent closing sessions serialize one
 complete open/replay/snapshot/redact/append/replay transaction per home because
 its durable outbox is one compare-and-swap authority; its publish wait retains
 the existing timeout. Runtime execution stays session-parallel during that
-close-time transaction whenever the host has raised the per-home limit. The
+close-time transaction whenever several Attempts of one home close. The
 process-owned home activity marker remains until the final session exits, so
 relocation and any other operation that requires a
 quiescent home still fail closed while an execution is active. A second daemon

@@ -31,6 +31,7 @@ export {
   AgentHomeCollisionError,
   AgentHomeBusyError,
   AgentHomeLeaseCorruptError,
+  AgentHomeReaderRunMissingError,
   AgentHomeLayout,
   AgentHomeLeaseManager,
   AgentHomeManager,
@@ -66,6 +67,7 @@ export type {
   AgentHomeExecutionBinding,
   AgentHomeExecutionStatus,
 } from './agent-home';
+export type { AgentHomeAccessMode } from './agent-home-readers';
 export {
   localStateRelocation,
   LocalStateRelocationError,

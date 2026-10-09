@@ -41,6 +41,15 @@ export const PROTOCOL_VERSION = 2;
 export const STRICT_AGENT_ONLY_CAPABILITY = 'strict-agent-only' as const;
 
 /**
+ * The device runs `homeAccess: 'memory-reader'` Agent offers: each reader
+ * Attempt gets its own run directory under the Agent home, and readers are
+ * counted apart from the one writer. The Agent offers are strict, so a host
+ * must refuse a reader offer to a device without this flag before it creates
+ * the task.
+ */
+export const AGENT_HOME_READERS_CAPABILITY = 'agent-home-readers' as const;
+
+/**
  * Capability flags exchanged during the connection handshake (`conn.hello` /
  * `conn.ack`). Additional flags may be introduced without a protocol version
  * bump; unrecognized flags must be ignored by both sides.
@@ -131,6 +140,7 @@ export const CAPABILITY_FLAGS = [
   PROVIDER_PROFILE_BINDING_CAPABILITY,
   'toolset-selection',
   'agent-home-contract',
+  AGENT_HOME_READERS_CAPABILITY,
   STRICT_AGENT_ONLY_CAPABILITY,
   AGENT_EGRESS_POLICY_CAPABILITY,
   AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,

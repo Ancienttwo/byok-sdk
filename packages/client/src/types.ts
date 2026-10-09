@@ -299,8 +299,18 @@ export interface RuntimeOperationManifest {
   readonly sessionRef?: string;
   /** Strict Agent identity, present only for task.offer_for_agent. */
   readonly agentRef?: AgentRef;
-  /** Canonical runtime cwd; for an Agent task this is the Agent home root. */
+  /**
+   * Canonical runtime cwd. For an Agent writer it is the Agent home root. For
+   * a `memory-reader` Attempt it is the run directory
+   * `<home>/.byok/runs/<taskId>/`, and `lease.canonicalHome` names the home.
+   */
   readonly cwd?: string;
+  /**
+   * Present for a `memory-reader` Agent Attempt only. An adapter whose runtime
+   * does not read instruction files from ancestors of `cwd` uses it to point
+   * the runtime at `lease.canonicalHome`.
+   */
+  readonly homeAccess?: 'memory-reader';
   /** Opaque local lease identity sealed with the Agent manifest. */
   readonly lease?: {
     readonly leaseId: string;
@@ -514,6 +524,7 @@ export function sealRuntimeOperationManifest(manifest: RuntimeOperationManifest)
       ? {}
       : { agentRef: Object.freeze({ agentId: manifest.agentRef.agentId, profileRevision: manifest.agentRef.profileRevision }) }),
     cwd: manifest.cwd ?? manifest.workspace.workspaceDir,
+    ...(manifest.homeAccess === undefined ? {} : { homeAccess: manifest.homeAccess }),
     ...(manifest.lease === undefined
       ? {}
       : { lease: Object.freeze({ leaseId: manifest.lease.leaseId, canonicalHome: manifest.lease.canonicalHome }) }),
