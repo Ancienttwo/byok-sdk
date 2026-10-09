@@ -283,7 +283,11 @@ await runtime.dispose();
   const directEnv = {...startupEnv,PI_CODING_AGENT_DIR:path.join(dir,'direct-agent')};
   delete directEnv.ZAI_API_KEY; delete directEnv.UNRELATED_CANARY;
   await mkdir(directEnv.PI_CODING_AGENT_DIR,{recursive:true});
-  await writeFile(path.join(directEnv.PI_CODING_AGENT_DIR,'models.json'),JSON.stringify(buildPiProviderProjection(profile)));
+  // The direct leg models an operator models.json with no configured auth, so
+  // it drops the keys-only auth_mode:none placeholder apiKey from the projection.
+  const directModels = buildPiProviderProjection(profile);
+  for (const provider of Object.values(directModels.providers)) delete provider.apiKey;
+  await writeFile(path.join(directEnv.PI_CODING_AGENT_DIR,'models.json'),JSON.stringify(directModels));
   await writeFile(path.join(directEnv.PI_CODING_AGENT_DIR,'settings.json'),JSON.stringify({defaultProvider:'byok-sdk-packed-zai',defaultModel:profile.model}));
   const prepared = await adapter.prepare({offer:{instruction:'Never sent'},descriptor:adapter.descriptor,requiredToolsetIds:[],
     mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation});

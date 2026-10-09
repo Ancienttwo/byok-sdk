@@ -3,7 +3,10 @@ import path from 'node:path';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 const { thinkingLevel, ...modelSettings } = PI_MODEL_FIXTURE;
 
+import { modelApiUrl } from './http';
+import { MODEL_PROVIDER_VENDORS } from './provider-catalog';
 import {
+  PI_AUTH_NONE_API_KEY,
   PI_LAUNCHER_RUNTIME_ENTRIES,
   PI_PROJECTED_KEY_ENV,
   buildPiPreparedArgs,
@@ -84,7 +87,7 @@ describe('buildPiProviderProjection', () => {
       pi_model: PI_MODEL_FIXTURE,
       adapter: 'anthropic',
       auth_mode: 'x_api_key',
-      base_url: 'https://api.anthropic.com',
+      base_url: 'https://api.anthropic.com/v1',
       capabilities: [],
       display_name: 'Claude',
       enabled: true,
@@ -103,6 +106,63 @@ describe('buildPiProviderProjection', () => {
         },
       },
     });
+  });
+
+  /** Pi's Anthropic SDK requests `${baseUrl}/v1/messages`; the keys client requests `modelApiUrl(base_url, 'messages')`. */
+  const piAnthropicEndpoint = (profile: ReturnType<typeof parseModelProviderProfile>) => {
+    const projection = buildPiProviderProjection(profile) as { providers: Record<string, { baseUrl: string }> };
+    return `${projection.providers[`byok-sdk-${profile.profile_ref}`]!.baseUrl}/v1/messages`;
+  };
+  const anthropicProfile = (provider_kind: string, base_url: string) => parseModelProviderProfile({
+    ...timestamps, pi_model: PI_MODEL_FIXTURE, adapter: 'anthropic', auth_mode: 'x_api_key', base_url,
+    capabilities: [], display_name: 'Messages', enabled: true, kind: 'model', model: 'messages-model',
+    profile_ref: 'messages', provider_kind,
+  });
+
+  it.each(Object.entries(MODEL_PROVIDER_VENDORS).filter(([, vendor]) => vendor.adapter === 'anthropic'))(
+    'sends Pi to the keys client endpoint for catalog entry %s',
+    (kind, vendor) => {
+      const profile = anthropicProfile(kind, vendor.base_url);
+      expect(piAnthropicEndpoint(profile)).toBe(modelApiUrl(vendor.base_url, 'messages'));
+      expect(piAnthropicEndpoint(profile)).not.toContain('/v1/v1/');
+    },
+  );
+
+  it.each([
+    ['https://gateway.example/anthropic/v1', 'https://gateway.example/anthropic/v1/messages'],
+    ['https://gateway.example/anthropic/v1/', 'https://gateway.example/anthropic/v1/messages'],
+    ['https://gateway.example/anthropic/v1/messages', 'https://gateway.example/anthropic/v1/messages'],
+    ['http://127.0.0.1:8080/v1', 'http://127.0.0.1:8080/v1/messages'],
+  ])('sends Pi to the keys client endpoint for custom base_url %s', (baseUrl, endpoint) => {
+    expect(modelApiUrl(baseUrl, 'messages')).toBe(endpoint);
+    expect(piAnthropicEndpoint(anthropicProfile('custom', baseUrl))).toBe(endpoint);
+  });
+
+  it.each(['https://gateway.example/anthropic', 'https://api.anthropic.com', 'https://gateway.example/v2'])(
+    'refuses a custom Anthropic base_url %s that Pi cannot reach exactly',
+    (baseUrl) => {
+      expect(() => buildPiProviderProjection(anthropicProfile('custom', baseUrl)))
+        .toThrow(expect.objectContaining({ code: 'PROVIDER_URL_INVALID' }));
+    },
+  );
+
+  it('projects the fixed placeholder key, and no bearer flag, for a keyless rpc profile', () => {
+    expect(PI_AUTH_NONE_API_KEY).toBe('byok-sdk-auth-none');
+    expect(buildPiProviderProjection(argvProfile(), 'pi-rpc')).toStrictEqual({
+      providers: {
+        'byok-sdk-synthetic': {
+          baseUrl: 'http://127.0.0.1:9191/v1',
+          api: 'openai-completions',
+          apiKey: PI_AUTH_NONE_API_KEY,
+          models: [{ ...modelSettings, id: 'explicit-model', name: 'Synthetic', input: ['text'] }],
+        },
+      },
+    });
+  });
+
+  it.each(['pi-prepared', 'pi-durable'] as const)('refuses a keyless profile for the %s entry, which requires a credential', (entry) => {
+    expect(() => buildPiProviderProjection(argvProfile(), entry))
+      .toThrow(expect.objectContaining({ code: 'PROVIDER_PROFILE_INVALID' }));
   });
 
   it('namespaces two custom profiles of one kind as distinct Pi providers', () => {
