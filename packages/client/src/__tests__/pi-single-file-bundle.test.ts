@@ -1,6 +1,4 @@
-import exportLayout from '../adapters/pi/pi-export-asset-layout.json';
 import { execFile, spawn } from 'node:child_process';
-import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -21,9 +19,6 @@ import { resolveBunBin } from './support/test-bun-bin';
 const execFileAsync = promisify(execFile);
 const BUN_BIN = resolveBunBin();
 const CLIENT_DIST = fileURLToPath(new URL('../../dist/index.js', import.meta.url));
-
-/** The installer inventory of the export assets an interpreter+bundle asset root carries. */
-const exportAssetPaths = exportLayout.files.map(file => `${exportLayout.basePaths['interpreter+bundle']}/${file}`);
 
 /**
  * The bootstrap is a Salesko-style single-file SDK consumer, not a copy of
@@ -250,31 +245,15 @@ describe('Pi launch path — single-file product re-entry (sdkHelperHost)', () =
         const bundle = path.join(release, 'sdk-entry.js');
         const interpreter = path.join(release, 'bun'); await fs.copyFile(bun, interpreter); await fs.chmod(interpreter, 0o555);
         await fs.chmod(bundle, 0o444);
-        // Interpreted runtime assets from the exact installed pin. No Node
-        // package implementation or node_modules is copied; export template/
-        // vendor scripts are browser export resources. Photon WASM is executable
-        // code, sealed here as a component; its loader closure awaits native gate.
-        const nativeRoot = path.dirname(path.dirname(fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent'))));
-        const assetPaths = ['package.json', 'dist/modes/interactive/theme/dark.json', 'dist/modes/interactive/theme/light.json',
-          ...exportAssetPaths];
-        for (const relative of assetPaths) {
-          const target = path.join(assetRoot, relative); await fs.mkdir(path.dirname(target), { recursive: true });
-          await fs.copyFile(path.join(nativeRoot, relative), target); await fs.chmod(target, 0o444);
+        // The product build creates its Pi asset root with the SDK helper, from
+        // the exact installed pin. No Node package implementation or
+        // node_modules is copied; export template/vendor scripts are browser
+        // export resources. Photon WASM is executable code, sealed here as a
+        // component; its loader closure awaits native gate.
+        const sdk = await import(CLIENT_DIST) as typeof import('../index');
+        for (const relative of await sdk.copyPiRuntimeAssets({ outDir: assetRoot, form: 'interpreter+bundle' })) {
+          await fs.chmod(path.join(assetRoot, relative), 0o444);
         }
-        // The same shipped locale layout.
-        const localeManifestPath = 'extensions/rpiv-todo/2.8.0/manifest.json';
-        const localeManifest = JSON.parse(await fs.readFile(new URL(`../../dist/assets/${localeManifestPath}`, import.meta.url), 'utf8'));
-        await fs.mkdir(path.join(assetRoot, path.dirname(localeManifestPath)), { recursive: true });
-        await fs.copyFile(fileURLToPath(new URL(`../../dist/assets/${localeManifestPath}`, import.meta.url)), path.join(assetRoot, localeManifestPath));
-        for (const row of localeManifest.assets as Array<{ path: string; digest: string }>) {
-          const target = path.join(assetRoot, row.path); await fs.mkdir(path.dirname(target), { recursive: true });
-          await fs.copyFile(fileURLToPath(new URL(`../../dist/assets/${row.path}`, import.meta.url)), target);
-          await fs.chmod(target, 0o444);
-        }
-        const nativeRequire = createRequire(path.join(nativeRoot, 'package.json'));
-        const photonSource = path.join(path.dirname(nativeRequire.resolve('@silvia-odwyer/photon-node')), 'photon_rs_bg.wasm');
-        const photonTarget = path.join(assetRoot, 'photon_rs_bg.wasm');
-        await fs.copyFile(photonSource, photonTarget); await fs.chmod(photonTarget, 0o444);
         const paths: Record<string, string> = {}; const tier1: string[] = []; const nativeBlockers: string[] = [];
         for (const kind of ['instruction', 'prepared'] as const) {
           const entryKind = kind === 'instruction' ? 'pi-rpc' : 'pi-prepared';

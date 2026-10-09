@@ -1005,10 +1005,11 @@ client; published library/CLI execution requires Node.js 24.15.0 or newer.
 The device daemon may also be shipped as a Bun-compiled single-file launcher;
 this repository verifies that optional recipe and Bun custody/crash paths.
 Those focused guarantees do not claim general Bun runtime compatibility for
-all SDK library/composition APIs. A Bun-compiled or Node SEA single-file
-launcher cannot embed pi's external CLI package; that deployment
-must provide the version-matched, Node-executed pi sidecar explicitly through
-`BYOK_PI_BIN`.
+all SDK library/composition APIs. A single-file launcher has no installed pi
+package to resolve. An interpreter + bundle product or a Bun-compiled product
+ships official pi through `sdkHelperHost` and a Pi asset root made by
+`copyPiRuntimeAssets`; see the single-file product contract below. This
+repository does not verify pi in a Node SEA payload.
 
 The pi RPC boundary is also version-specific. `message_update` is delta-only;
 BYOK assembles progress from `assistantMessageEvent.delta`. `agent_end` closes
@@ -1417,6 +1418,31 @@ Pi launch then re-enters the product executable as
 `<executable> [<entry>] __byok_sdk_helper <pi-rpc|pi-prepared|pi-durable>`, and
 the product names its Pi asset root in `PI_PACKAGE_DIR` (a Bun-compiled
 executable may keep the assets beside itself).
+
+This is the one supported way to ship official pi in a host download. The
+product bundles the SDK root, so official pi from the build machine install is
+in its bundle. The helper below refuses a build machine whose installed pi is
+not the client pin.
+The product does not ship separate SDK helper scripts or a `node_modules` tree,
+and the adapter does not resolve an installed pi package. The product build
+calls `copyPiRuntimeAssets({ outDir, form })` from `@byok-sdk/client`. The
+`form` is `interpreter+bundle` (an interpreter runs the product bundle) or
+`compiled-executable` (a Bun-compiled executable). The helper resolves the
+installed pi package on the build machine and requires the exact client pin.
+It verifies the five pi export resources against their recorded SHA-256 digests
+and the SDK todo locale assets against their build manifest. A mismatch, or a
+target that is not empty, fails closed. The asset root then holds the pi
+`package.json`, the pi themes and export resources at the paths pi uses for the
+form, the photon WASM file and the SDK todo locale assets with their license
+and provenance files. The photon loader of pi reads its WASM file beside the
+executable; without it, pi skips image resizing. The asset root is a build
+output of the product. The product must not mix asset roots of two pins.
+`detect()` reports `available` with the client pin only when the asset root
+holds the SDK asset manifest; otherwise it reports `not-found`, and a launch is
+refused with `pi_bundled_assets_unavailable`. The client packaging test builds
+an interpreter + bundle host with no `node_modules` and runs one pi task
+against a loopback provider. It also builds a Bun-compiled host whose asset
+root is its own directory, with no `PI_PACKAGE_DIR`, and runs the same task.
 
 The authenticated local control socket accepts an expected-revision
 compare-and-swap reload of the complete registry. The CLI host reads

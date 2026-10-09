@@ -30,6 +30,15 @@
   Pi MCP server children and the Pi BYOK key lane no longer inherit them. A
   test compares the list with the names that pinned pi discovers, so a pi
   upgrade cannot add a name without notice (#326).
+- **Added (client)** — `copyPiRuntimeAssets({ outDir, form })` creates the Pi
+  asset root of a single-file product in its build (#327). It requires the
+  exact pinned official pi package, verifies the pi export resources and the
+  SDK todo locale assets, and refuses a target that is not empty. With
+  `sdkHelperHost` and `PI_PACKAGE_DIR`, a host download runs official pi with
+  no `node_modules`. A new packaging test runs one pi task from an
+  interpreter + bundle host and from a Bun-compiled host against a loopback
+  provider. The spec and client README now state this as the supported way to
+  ship pi; the stale `BYOK_PI_BIN` sidecar text is removed.
 
 ## 0.25.0 / @byok-sdk/keys 0.10.0 - 2026-10-09
 
