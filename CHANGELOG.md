@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.25.0 / @byok-sdk/keys 0.10.0 - 2026-10-09 (stable source candidate)
+
+Stable preparation for nine packages on npm's `latest` channel. Publication is
+pending. This release includes the rc.1 breaking changes and rc.2 integration
+fixes below; see [stable release notes](docs/releases/v0.25.0-stable.md) for the
+protocol v2 upgrade order and remaining publication gates.
+
 - **Changed (client)** — update the private OAR source from 0.44.0 to 0.45.1
   (`7dc98e0`). The raw Codex adapter takes upstream launch arguments and
   service-tier readback. The SDK bridge exposes neither option, so ordinary
