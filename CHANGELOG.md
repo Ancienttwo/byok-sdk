@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.26.0-rc.1 / @byok-sdk/keys 0.11.0-rc.1 — 2026-10-10 (prepared; not published)
+
+Release candidate for 0.26.0, to be published under the npm dist-tag `rc`;
+`latest` stays 0.25.0 / keys 0.10.0. It adds memory-reader Attempts on an
+Agent home, the closing reply on `task.complete`, `copyPiRuntimeAssets`, the
+public keys Pi launcher entry and the private OAR 0.48.0 source.
+
+- **Release preparation** — the owner approved 0.26.0-rc.1 for the eight
+  aligned packages and keys 0.11.0-rc.1 on 2026-10-10, under the dist-tag `rc`.
+  The public set is nine packages. Manifests and lock workspace records change
+  together. The registry baseline now records `latest` 0.25.0 for every aligned
+  package and 0.10.0 for keys.
+
 - **Added (protocol, client, cloud, server)** — `task.complete.finalMessage`
   carries the runtime's closing reply. `TaskResult.finalMessage`,
   `TerminalResult.finalMessage` and `ResultDocumentTask.finalMessage` expose
@@ -84,6 +97,14 @@
   now takes an access mode and counts only that mode.
   `AgentHomeExecutionLease` gains the required members `homeAccess` and
   `writerOverlapped()`, so a host that implements the interface must add them.
+- **keys 0.11.0-rc.1** — a MINOR: `runPiProviderLauncher`,
+  `parsePiProviderLauncherOptions`, `PiProviderLauncherOptions`,
+  `PiProviderLauncherHost` and `PI_AUTH_NONE_API_KEY` are new public API
+  (#323, #325), and Pi admission now refuses an Anthropic profile whose
+  endpoint does not end in `/v1/messages` (#324). Its packed core edge is
+  exactly 0.26.0-rc.1. Its version is a prerelease because a prerelease train
+  publishes only prerelease packages on one dist-tag.
+- [Release notes](docs/releases/v0.26.0.md).
 
 ## 0.25.0 / @byok-sdk/keys 0.10.0 - 2026-10-09
 

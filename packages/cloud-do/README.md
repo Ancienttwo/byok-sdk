@@ -4,23 +4,24 @@ This package hosts a pi-durable session in a Cloudflare Durable Object.
 It provides native SQLite storage, inline tools, wake and inbox processing,
 usage limits, settlement hooks, and transcript reads.
 
-The current stable line is 0.25.0, published in the nine-package release set
-with keys 0.10.0 on npm's `latest` dist-tag. The published rc.2 remains on `rc`.
-Registry readback confirms the exact versions and accepted package bytes;
-publication does not establish live Host acceptance. See the
-[release notes](../../docs/releases/v0.25.0-stable.md#version-set-and-channel)
-and [publication record](../../docs/releases/v0.25.0-publication.md).
+The current source candidate is the prerelease 0.26.0-rc.1, in the nine-package
+release set with keys 0.11.0-rc.1, under the npm dist-tag `rc`. `latest` stays
+0.25.0, published with keys 0.10.0; see its
+[publication record](../../docs/releases/v0.25.0-publication.md). npm
+publication of the candidate is pending; source preparation does not
+establish registry or live-Host acceptance. See the
+[release notes](../../docs/releases/v0.26.0.md#version-set-and-channel).
 The package needs Node 24.15.0 or later for build tooling.
 
 ## Install and subclass
 
-The following install example names the exact published stable version.
-Install the approved package, or use verified accepted CI tarballs from one
-source SHA for integration. Do not use a workspace source import as
-installed-package acceptance evidence.
+The following install example names the release candidate source version. It
+becomes usable only after publication and exact registry readback. Before that,
+use verified accepted CI tarballs from one source SHA for integration. Do not
+use a workspace source import as installed-package acceptance evidence.
 
 ~~~sh
-npm install @byok-sdk/cloud-do@0.25.0
+npm install @byok-sdk/cloud-do@0.26.0-rc.1
 npm install --save-dev @cloudflare/workers-types
 ~~~
 

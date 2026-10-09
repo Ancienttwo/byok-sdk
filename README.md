@@ -7,22 +7,32 @@ composition over Postgres and R2.
 
 ## Release status
 
-The current stable release is **0.25.0** for eight aligned packages, with
+The current source candidate is the prerelease **0.26.0-rc.1** for the eight
+aligned packages, with independent keys **0.11.0-rc.1**. The release owner
+approved it on 2026-10-10. It is not published. Publication will use the npm
+dist-tag `rc`, so `latest` stays 0.25.0 / keys 0.10.0. The public set is nine
+packages; `@byok-sdk/implementation-identity` stays retired.
+[Release notes](docs/releases/v0.26.0.md) describe the additions since 0.25.0
+(memory-reader Attempts, the closing reply, `copyPiRuntimeAssets`, the public
+keys Pi launcher entry and OAR 0.48.0), the client and keys breaking cuts and
+the upgrade steps.
+
+Versioned install examples below describe the current source manifests. They
+are usable only after publication and exact registry readback. Before
+publication, a Host can test verified accepted CI tarballs from one exact SHA;
+that does not establish production or live-runtime acceptance.
+
+The current `latest` release is **0.25.0** for eight aligned packages, with
 independent keys **0.10.0**, published on npm `latest` on 2026-10-09 from
-`v0.25.0` (`3278b834`, PR #320). The public set contains nine packages;
-`@byok-sdk/implementation-identity` is retired. The
+`v0.25.0` (`3278b834`, PR #320). The
 [publication record](docs/releases/v0.25.0-publication.md) verifies accepted
 CI bytes, registry integrities, dependency edges and a clean npm install.
 [Stable release notes](docs/releases/v0.25.0-stable.md) cover the release and
-upgrade steps. The published rc.2 remains on the `rc` channel; its
-[notes](docs/releases/v0.25.0-rc.2.md) and the
+upgrade steps. The published 0.25.0-rc.2 remains on the `rc` channel until this
+candidate is published; its [notes](docs/releases/v0.25.0-rc.2.md) and the
 [rc.1 breaking-change record](docs/releases/v0.25.0.md) remain historical evidence.
 
-Versioned install examples below name the read-back published versions.
-Installed-package proof does not establish production or live-runtime
-acceptance; those retain the evidence boundaries in the release notes.
-
-The previous `latest` release was **0.24.0**, with independent keys **0.9.0**.
+Before it, `latest` was **0.24.0**, with independent keys **0.9.0**.
 npm shows all ten 0.24.0 / keys 0.9.0 packages published on 2026-10-06; their
 registry integrities equal the push CI `release-pack` artifact of `756eb921`.
 The repository has no `v0.24.0` tag and no publication record for it. The
@@ -84,7 +94,7 @@ Install the scoped packages your composition uses and import each one under
 its own name. For example, a self-hosted composition:
 
 ```sh
-npm install @byok-sdk/server@0.25.0 @byok-sdk/client@0.25.0
+npm install @byok-sdk/server@0.26.0-rc.1 @byok-sdk/client@0.26.0-rc.1
 ```
 
 ```ts
@@ -92,12 +102,13 @@ import { createByokServer } from '@byok-sdk/server';
 ```
 
 The Worker-only cloud-do package is published from 0.24.0. The example below
-names the read-back stable 0.25.0 release.
+names the 0.26.0-rc.1 candidate; it becomes usable only after publication and
+exact registry readback.
 See [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
 
 ~~~sh
-# Exact published stable version.
-npm install @byok-sdk/cloud-do@0.25.0
+# Release candidate source version; publication is pending.
+npm install @byok-sdk/cloud-do@0.26.0-rc.1
 npm install --save-dev @cloudflare/workers-types
 ~~~
 
@@ -243,7 +254,7 @@ It is intentionally outside the dispatch packages and their entire dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.10.0
+npm install @byok-sdk/keys@0.11.0-rc.1
 ```
 
 ## Host connector composition
@@ -259,5 +270,5 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.10.0`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.11.0-rc.1`
 require Node.js 24.15.0 or newer. MIT licensed.
