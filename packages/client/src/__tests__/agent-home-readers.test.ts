@@ -99,8 +99,12 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     }, { taskId, seq: server.nextSeq() }));
   }
 
+  // The daemon claims first, then starts the runtime and records the handoff,
+  // then sends task.started. Wait for task.started so that the runtime session
+  // and the handoff exist before a test reads them.
   async function claimed(taskId: string): Promise<void> {
     await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === taskId);
+    await server.waitFor((entry) => entry.type === 'task.started' && entry.task_id === taskId);
   }
 
   async function declined(taskId: string): Promise<{ reason: string; retryable: boolean }> {
