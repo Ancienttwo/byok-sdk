@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,6 +10,15 @@ const KEY = 'Primary~0123456789ABCDEFGHIJKLMNOP';
 const SECONDARY = 'Secondary~0123456789QRSTUVWXYZabcd';
 const SKILL = 'load_financial_analysis_skill';
 const DAY = 86_400_000;
+// Real workerd alarms drive every wake. Under parallel CI load one wake can take more than one second, and each poll
+// of the store can take hundreds of milliseconds, so waits must not use the hidden 1 s default of vi.waitFor.
+// The bounds below only stop a genuine hang. Each assertion keeps its exact expected state and count.
+vi.setConfig({ testTimeout: 30_000 });
+const eventually = <T>(check: () => T | Promise<T>) => vi.waitFor(check, { timeout: 10_000 });
+// Tool timeout for tests that hold one call past its deadline and then need a later free call to succeed. The held
+// call is paused without a bound, so only the free call depends on this value. Under parallel load a free call took up
+// to 450 ms from start to settlement, which is longer than a 150 ms deadline.
+const HELD_CALL_TIMEOUT_MS = 2_000;
 type Row = Record<string, unknown>;
 type Rows = Record<string, Row[]>;
 interface ProviderCall { url: string; body: { messages: { role: string; content: string }[]; tools?: unknown[] } }
@@ -78,6 +87,13 @@ beforeAll(async () => {
 });
 afterAll(async () => { providerReleases.splice(0).forEach(resolve => resolve()); await mf?.dispose(); if (persist) await rm(persist, { recursive: true, force: true }); });
 beforeEach(() => { providerReleases.splice(0).forEach(resolve => resolve()); calls.length = 0; logs.length = 0; scenario = {}; reservations.clear(); reserveCalls.length = 0; });
+// A failed test can leave its alarms and wakes running in the shared runtime, and they add calls to the next test.
+// Replace the runtime and its store after a failure, so that one failure cannot cause failures in later tests.
+afterEach(async ({ task }) => {
+  if (task.result?.state !== 'fail') return;
+  providerReleases.splice(0).forEach(resolve => resolve()); await mf.dispose(); await rm(persist, { recursive: true, force: true });
+  persist = await mkdtemp(path.join(os.tmpdir(), 'byok-wake-inbox-')); mf = runtime(); await mf.ready;
+});
 async function rpc(name: string, operation: string, extra: Row = {}) {
   return (await mf.getWorker('wake-runtime')).fetch('http://test/', { method: 'POST', body: JSON.stringify({ name, operation, ...extra }) });
 }
@@ -93,7 +109,7 @@ async function setup(controls: Row = {}, limits?: Row) {
 const dump = (name: string) => json<Rows>(name, 'dump');
 const sql = (name: string, query: string, params: (string | number | null)[] = []) => json<Row[]>(name, 'sql', { query, params });
 async function enqueue(name: string, item: Row) { return json<Row>(name, 'enqueue', { item: { source: 'message', ...item } }); }
-async function waitState(name: string, count = 1, state = 'completed') { await vi.waitFor(async () => expect((await dump(name)).cloud_executions?.filter(row => row.state === state)).toHaveLength(count)); return dump(name); }
+async function waitState(name: string, count = 1, state = 'completed') { await eventually(async () => expect((await dump(name)).cloud_executions?.filter(row => row.state === state)).toHaveLength(count)); return dump(name); }
 async function restart(nativeObserver = '') { await mf.dispose(); mf = runtime(nativeObserver); await mf.ready; }
 function frameEvents(rows: Rows): (Row & { data: Row })[] { return (rows.cloud_events ?? []).map(row => ({ ...row, data: JSON.parse(String(row.dataJson)) as Row })); }
 function entries(rows: Rows) { return (rows.pi_entries ?? []).map(row => JSON.parse(String(row.record)) as Row); }
@@ -109,8 +125,12 @@ async function code(name: string, operation: string, extra: Row, expected: strin
   expect(await response.json()).toMatchObject({ error: { code: expected } });
 }
 function wakeInput(index: number) { return JSON.parse(calls[index]!.body.messages.find(message => message.role === 'user')!.content) as { history: { input: unknown; reply: string }[]; inbox: { seq: number; source: string; text: string }[] }; }
-async function readFrames(response: Awaited<ReturnType<typeof rpc>>, count: number) {
-  const reader = response.body!.getReader(); const decoder = new TextDecoder(); let text = '';
+// Miniflare's getWorker() fetch wraps undici's Response in a new Response and drops the original. undici cancels the
+// shared body when that original object is garbage collected while the body is unlocked, and the reader then sees an
+// empty, finished stream. Lock the body as soon as the stream opens, before any other await, so that GC cannot cancel it.
+async function events(name: string, cursor: Row) { return (await rpc(name, 'events', { cursor })).body!.getReader(); }
+async function readFrames(reader: Awaited<ReturnType<typeof events>>, count: number) {
+  const decoder = new TextDecoder(); let text = '';
   while ((text.match(/^id: /gm) ?? []).length < count) { const next = await reader.read(); if (next.done) break; text += decoder.decode(next.value); }
   await reader.cancel();
   return text.split('\n\n').filter(frame => frame.startsWith('id:')).map(frame => ({ id: Number(frame.match(/^id: (\d+)/m)![1]), type: frame.match(/^event: (.*)/m)![1], data: JSON.parse(frame.match(/^data: (.*)/m)![1]!) as Row }));
@@ -131,7 +151,7 @@ describe('real workerd inbox admission and durable dedup', () => {
     await json(name, 'cancel-item', { seq: row.seq });
     expect((await enqueue(name, { dedupKey: 'same', text: 'first', availableAt })).accepted).toBe(false);
     const before = Date.now(); await enqueue(name, { dedupKey: 'default-times', text: 'default' });
-    await vi.waitFor(async () => expect((await dump(name)).cloud_inbox!.find(row => row.dedupKey === 'default-times')!.state).toBe('done'));
+    await eventually(async () => expect((await dump(name)).cloud_inbox!.find(row => row.dedupKey === 'default-times')!.state).toBe('done'));
     expect((await enqueue(name, { dedupKey: 'default-times', text: 'default' })).accepted).toBe(false);
     const defaults = (await dump(name)).cloud_inbox!.find(row => row.dedupKey === 'default-times')!;
     expect(Number(defaults.availableAt)).toBeGreaterThanOrEqual(before); expect(defaults.expiresAt).toBe(Number(defaults.availableAt) + DAY);
@@ -176,7 +196,9 @@ describe('native wake runs, continuity, profile order and gate budgets', () => {
   it('uses real future alarms, preserves T2 and builds history from native final replies only', async () => {
     const name = await setup(); expect((await json(name, 'status')).alarm).toBeNull();
     scenario = { tools: [1] };
-    const t1 = Date.now() + 300, t2 = t1 + 600;
+    // Each check below must run before the next real alarm. Under load one RPC poll can take over a second,
+    // so the gaps are larger than the measured poll latency.
+    const t1 = Date.now() + 1_000, t2 = t1 + 2_000;
     await enqueue(name, { dedupKey: 'T1', text: 'first input', availableAt: t1 });
     await enqueue(name, { dedupKey: 'T2', source: 'schedule', text: 'second input', availableAt: t2 });
     expect(Number((await json(name, 'status')).alarm)).toBeLessThanOrEqual(t1);
@@ -215,7 +237,7 @@ describe('native wake runs, continuity, profile order and gate budgets', () => {
   it('measures the complete canonical JSON budget including multibyte and escaped controls', async () => {
     const name = await setup({ largeSchema: true }); const availableAt = Date.now() + 500;
     for (let i = 0; i < 4; i++) await enqueue(name, { dedupKey: `bytes:${i}`, text: (i % 2 ? '会话' : '\u0001').repeat(2_000), availableAt });
-    await vi.waitFor(async () => expect((await dump(name)).cloud_inbox!.every(row => row.state === 'done')).toBe(true));
+    await eventually(async () => expect((await dump(name)).cloud_inbox!.every(row => row.state === 'done')).toBe(true));
     for (let i = 0; i < calls.length; i++) expect(Buffer.byteLength(JSON.stringify(wakeInput(i)))).toBeLessThanOrEqual(48_000);
     expect(Buffer.byteLength(JSON.stringify(calls[0]!.body.tools))).toBeGreaterThan(48_000);
   });
@@ -224,7 +246,7 @@ describe('native wake runs, continuity, profile order and gate budgets', () => {
     const name = await setup(); const availableAt = Date.now() + 100;
     await enqueue(name, { dedupKey: 'unfit', text: '\u0001'.repeat(16_000), availableAt });
     await enqueue(name, { dedupKey: 'later', text: 'safe later', availableAt: availableAt + DAY });
-    await vi.waitFor(async () => expect((await dump(name)).cloud_inbox).toMatchObject([{ state: 'failed', errorCode: 'CLOUD_INBOX_TOO_LARGE' }, { state: 'queued' }]));
+    await eventually(async () => expect((await dump(name)).cloud_inbox).toMatchObject([{ state: 'failed', errorCode: 'CLOUD_INBOX_TOO_LARGE' }, { state: 'queued' }]));
     expect(calls).toHaveLength(0);
   });
 
@@ -233,7 +255,7 @@ describe('native wake runs, continuity, profile order and gate budgets', () => {
     const size = () => Buffer.byteLength(JSON.stringify([{ seq: 1, source: 'message', text }]));
     text += 'x'.repeat(48_000 - size()); expect(size()).toBe(48_000); expect(text.length).toBeLessThanOrEqual(16_000);
     await enqueue(name, { dedupKey: 'exact-array-budget', text });
-    await vi.waitFor(async () => expect((await dump(name)).cloud_inbox).toMatchObject([{ state: 'failed', errorCode: 'CLOUD_INBOX_TOO_LARGE' }]));
+    await eventually(async () => expect((await dump(name)).cloud_inbox).toMatchObject([{ state: 'failed', errorCode: 'CLOUD_INBOX_TOO_LARGE' }]));
     expect(calls).toHaveLength(0);
   });
 
@@ -257,7 +279,7 @@ describe('single native slot, arrivals and cancellation', () => {
   it('holds one wake slot, coalesces mid-run arrivals, and caps the next batch at 16', async () => {
     const name = await setup({ pauseTool: true }); scenario = { tools: [1] };
     await enqueue(name, { dedupKey: 'active', text: 'first' });
-    await vi.waitFor(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
     await code(name, 'submit', { input: { instruction: 'must be busy' } }, 'CLOUD_TOOL_BUSY');
     for (let i = 0; i < 17; i++) await enqueue(name, { dedupKey: `arrival:${i}`, text: `later ${i}` });
     const active = await dump(name); expect(active.cloud_executions).toMatchObject([{ state: 'running' }]); expect(calls).toHaveLength(1);
@@ -271,10 +293,10 @@ describe('single native slot, arrivals and cancellation', () => {
     const name = await setup({ pauseTool: true, deny: true }); scenario = { tools: [1] };
     const response = await rpc(name, 'submit', { input: { instruction: 'live submit' } }); const reading = response.text();
     void reading.catch(() => undefined);
-    await vi.waitFor(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
     await enqueue(name, { dedupKey: 'while-submit', text: 'later', availableAt: Date.now() + 100 });
     await json(name, 'controls', { controls: { pauseTool: true, deny: true, failCredentials: true } });
-    await vi.waitFor(async () => expect((await dump(name)).fixture_alarms!.length).toBeGreaterThan(0));
+    await eventually(async () => expect((await dump(name)).fixture_alarms!.length).toBeGreaterThan(0));
     expect((await dump(name)).cloud_executions).toMatchObject([{ state: 'running' }]);
     expect((await dump(name)).cloud_inbox).toMatchObject([{ state: 'queued', attempts: 0 }]); expect(reserveCalls).toHaveLength(0); expect(calls).toHaveLength(1);
     await json(name, 'controls', { controls: { pauseTool: true, deny: true } });
@@ -286,10 +308,10 @@ describe('single native slot, arrivals and cancellation', () => {
     const future = await enqueue(name, { dedupKey: 'cancel-queued', text: 'queued', availableAt: Date.now() + DAY });
     const futureSeq = Number(future.seq ?? (future.row as Row)?.seq); await json(name, 'cancel-item', { seq: futureSeq });
     await enqueue(name, { dedupKey: 'cancel-running', text: 'running' });
-    await vi.waitFor(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
     const running = (await dump(name)).cloud_inbox!.find(row => row.state === 'running')!;
     await json(name, 'cancel-item', { seq: running.seq });
-    await vi.waitFor(async () => expect((await dump(name)).cloud_inbox!.find(row => row.seq === running.seq)!.state).toBe('failed'));
+    await eventually(async () => expect((await dump(name)).cloud_inbox!.find(row => row.seq === running.seq)!.state).toBe('failed'));
     await json(name, 'release');
     const rows = await dump(name); expect(rows.cloud_inbox).toMatchObject([{ state: 'cancelled', attempts: 0 }, { state: 'failed', errorCode: 'CLOUD_EXECUTION_ABORTED' }]);
     expect(calls).toHaveLength(1); noSecrets(rows, logs);
@@ -356,7 +378,7 @@ describe('persisted restarts and consumer reservation fencing', () => {
     const name = await setup({ pauseAdmission: true, deny: true }); const availableAt = Date.now() + 200;
     await enqueue(name, { dedupKey: 'denied', text: 'denied selection', availableAt });
     const cancelled = await enqueue(name, { dedupKey: 'cancel-before-denial', text: 'cancelled selection', availableAt });
-    await vi.waitFor(async () => expect((await dump(name)).fixture_admissions).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_admissions).toHaveLength(1));
     await json(name, 'cancel-item', { seq: cancelled.seq }); await json(name, 'release');
     const rows = await waitState(name, 1, 'interrupted');
     expect(rows.cloud_inbox).toMatchObject([{ state: 'failed', attempts: 0, errorCode: 'CLOUD_TOOL_NOT_AVAILABLE' }, { state: 'cancelled', attempts: 0 }]);
@@ -367,7 +389,7 @@ describe('persisted restarts and consumer reservation fencing', () => {
     const name = await setup({ pauseAdmission: true }); const availableAt = Date.now() + 200;
     await enqueue(name, { dedupKey: 'credential-failure', text: 'selected', availableAt });
     const cancelled = await enqueue(name, { dedupKey: 'cancel-before-preflight', text: 'cancel selected', availableAt });
-    await vi.waitFor(async () => expect((await dump(name)).fixture_admissions).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_admissions).toHaveLength(1));
     const key = reserveCalls[0]!; expect(reservations.get(key)).toBe('held');
     await json(name, 'cancel-item', { seq: cancelled.seq });
     await json(name, 'controls', { controls: { pauseAdmission: true, failCredentials: true } }); await json(name, 'release');
@@ -381,7 +403,7 @@ describe('persisted restarts and consumer reservation fencing', () => {
   it('observes a genuine placed native submission with zero steps and requeues from the saved eligibility', async () => {
     const name = await setup({ nativePause: 'request' });
     await enqueue(name, { dedupKey: 'zero-step', text: 'pause native request' });
-    await vi.waitFor(async () => {
+    await eventually(async () => {
       const rows = await dump(name); expect(rows.cloud_executions).toMatchObject([{ state: 'running', steps: 0, aborted: 0, fatalCode: null }]);
       expect(rows.pi_submissions!.map(row => JSON.parse(String(row.record)))).toEqual(expect.arrayContaining([expect.objectContaining({ status: 'placed' })]));
       expect(tasks(rows).some(task => (task.state as Row).status === 'running' && ((task.state as Row).checkpoint as Row)?.phase === 'request')).toBe(true);
@@ -400,7 +422,7 @@ describe('persisted restarts and consumer reservation fencing', () => {
   it('keeps a failed recovery promise rejected instead of swallowing its storage failure', async () => {
     const name = await setup({ nativePause: 'request' });
     await enqueue(name, { dedupKey: 'recovery-rejection', text: 'fail actual recovery settlement' });
-    await vi.waitFor(async () => expect(tasks(await dump(name)).some(task => ((task.state as Row).checkpoint as Row)?.phase === 'request')).toBe(true));
+    await eventually(async () => expect(tasks(await dump(name)).some(task => ((task.state as Row).checkpoint as Row)?.phase === 'request')).toBe(true));
     await sql(name, "CREATE TRIGGER fixture_recovery_fail BEFORE INSERT ON cloud_events WHEN NEW.type='run.interrupted' BEGIN SELECT RAISE(ABORT,'recovery-write-failure'); END");
     await restart('alarm');
     await code(name, 'ready', {}, 'CLOUD_MODEL_REQUEST_FAILED');
@@ -415,7 +437,7 @@ describe('persisted restarts and consumer reservation fencing', () => {
 
   it('preserves zero-step cancellation across restart instead of requeueing', async () => {
     const name = await setup({ nativePause: 'request' }); await enqueue(name, { dedupKey: 'aborted-zero', text: 'cancel before request' });
-    await vi.waitFor(async () => expect(tasks(await dump(name)).some(task => ((task.state as Row).checkpoint as Row)?.phase === 'request')).toBe(true));
+    await eventually(async () => expect(tasks(await dump(name)).some(task => ((task.state as Row).checkpoint as Row)?.phase === 'request')).toBe(true));
     await json(name, 'cancel-run');
     const before = await dump(name); expect(before.cloud_executions).toMatchObject([{ steps: 0, aborted: 1, fatalCode: 'CLOUD_EXECUTION_ABORTED' }]);
     await restart(); await json(name, 'ready');
@@ -424,11 +446,11 @@ describe('persisted restarts and consumer reservation fencing', () => {
 
   it('preserves the original zero-step eligibility through a second restart after native abort before adjudication', async () => {
     const name = await setup({ nativePause: 'request' }); await enqueue(name, { dedupKey: 'double-restart', text: 'save eligibility once' });
-    await vi.waitFor(async () => expect(tasks(await dump(name)).some(task => ((task.state as Row).checkpoint as Row)?.phase === 'request')).toBe(true));
+    await eventually(async () => expect(tasks(await dump(name)).some(task => ((task.state as Row).checkpoint as Row)?.phase === 'request')).toBe(true));
     expect(calls).toHaveLength(0); await restart('recovery');
     await json(name, 'controls', { controls: { nativePause: 'recovery' } });
     expect((await json(name, 'open-recovery')).recovering).toBe(true);
-    await vi.waitFor(async () => expect(tasks(await dump(name)).every(task => (task.state as Row).status === 'terminal')).toBe(true));
+    await eventually(async () => expect(tasks(await dump(name)).every(task => (task.state as Row).status === 'terminal')).toBe(true));
     const paused = await dump(name);
     expect(JSON.parse(String(paused.cloud_executions![0]!.eligibilityJson))).toEqual({ steps: 0, aborted: 0, fatalCode: null, wasStale: true });
     expect(paused.cloud_executions![0]!.fatalCode).toBe('CLOUD_EXECUTION_INTERRUPTED');
@@ -442,14 +464,14 @@ describe('persisted restarts and consumer reservation fencing', () => {
   it('exhausts the fourth actual native claim after three zero-step checkpoint restarts', async () => {
     const name = await setup({ nativePause: 'request' }); await enqueue(name, { dedupKey: 'four-native-claims', text: 'bound unpaid retries' });
     for (let attempt = 1; attempt <= 3; attempt++) {
-      await vi.waitFor(async () => {
+      await eventually(async () => {
         const rows = await dump(name); expect(rows.cloud_inbox).toMatchObject([{ state: 'running', attempts: attempt }]);
         const run = rows.cloud_executions!.find(row => row.state === 'running')!; expect(run.steps).toBe(0);
         expect(tasks(rows).some(task => task.conversationId === run.conversationId && ((task.state as Row).checkpoint as Row)?.phase === 'request')).toBe(true);
       });
       expect(calls).toHaveLength(0); await restart('request'); await json(name, 'ready');
     }
-    await vi.waitFor(async () => expect((await dump(name)).cloud_inbox).toMatchObject([{ state: 'failed', attempts: 4, errorCode: 'CLOUD_WAKE_EXHAUSTED' }]));
+    await eventually(async () => expect((await dump(name)).cloud_inbox).toMatchObject([{ state: 'failed', attempts: 4, errorCode: 'CLOUD_WAKE_EXHAUSTED' }]));
     expect(calls).toHaveLength(0);
     const rows = await dump(name); expect(rows.cloud_executions).toHaveLength(4);
     expect(rows.cloud_executions!.every(row => row.state === 'interrupted' && row.steps === 0)).toBe(true);
@@ -459,7 +481,7 @@ describe('persisted restarts and consumer reservation fencing', () => {
     const name = await setup({ nativePause: 'receipt' }); let stream: Promise<string> | undefined;
     if (trigger === 'wake') await enqueue(name, { dedupKey: 'receipt-gap', text: 'complete native before host receipt' });
     else stream = (await rpc(name, 'submit', { input: { instruction: 'complete native before host receipt' } })).text().catch(() => 'restart disconnected');
-    await vi.waitFor(async () => {
+    await eventually(async () => {
       const rows = await dump(name); expect(rows.cloud_executions).toMatchObject([{ state: 'running', submissionId: null, steps: 1 }]);
       expect(rows.pi_submissions!.map(row => JSON.parse(String(row.record)))).toEqual(expect.arrayContaining([expect.objectContaining({ status: 'done' })]));
     });
@@ -471,7 +493,7 @@ describe('persisted restarts and consumer reservation fencing', () => {
   it('maps a real unanswered native submit to its fixed provider failure on recovery', async () => {
     const name = await setup({ nativePause: 'receipt' }); scenario = { status: 503 };
     const reading = (await rpc(name, 'submit', { input: { instruction: 'provider failure before host receipt' } })).text().catch(() => 'restart disconnected');
-    await vi.waitFor(async () => expect((await dump(name)).pi_submissions!.map(row => JSON.parse(String(row.record)))).toEqual(expect.arrayContaining([expect.objectContaining({ status: 'unanswered', detail: 'CLOUD_MODEL_REQUEST_FAILED' })])));
+    await eventually(async () => expect((await dump(name)).pi_submissions!.map(row => JSON.parse(String(row.record)))).toEqual(expect.arrayContaining([expect.objectContaining({ status: 'unanswered', detail: 'CLOUD_MODEL_REQUEST_FAILED' })])));
     const before = await dump(name); expect(before.cloud_executions).toMatchObject([{ state: 'running', submissionId: null }]);
     await restart(); await reading; await json(name, 'ready');
     expect((await dump(name)).cloud_executions).toMatchObject([{ state: 'failed', errorCode: 'CLOUD_MODEL_REQUEST_FAILED' }]); expect(calls).toHaveLength(1);
@@ -481,7 +503,7 @@ describe('persisted restarts and consumer reservation fencing', () => {
     const name = await setup({ holdNativeOutcome: true });
     if (nativeStatus === 'unanswered') scenario = { status: 503 };
     await enqueue(name, { dedupKey: 'completing-' + nativeStatus, text: 'hold native cleanup after committed result' });
-    await vi.waitFor(async () => {
+    await eventually(async () => {
       const rows = await dump(name);
       expect(rows.pi_submissions!.map(row => JSON.parse(String(row.record)))).toEqual(expect.arrayContaining([expect.objectContaining({ status: nativeStatus })]));
       expect(tasks(rows).some(task => task.kind === 'pi.generation' && (task.state as Row).status === 'completing')).toBe(true);
@@ -508,7 +530,7 @@ describe('persisted restarts and consumer reservation fencing', () => {
   it('replays only the ledger after an actual in-flight native tool restart and records late undelivered settlement', async () => {
     const name = await setup({ pauseTool: true, projection: 'valid' }); scenario = { tools: [1] };
     await enqueue(name, { dedupKey: 'tool-restart', text: 'native tool' });
-    await vi.waitFor(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
     const before = await dump(name); expect(before.cloud_invocations).toMatchObject([{ state: 'running', replayCount: 0 }]);
     expect(tasks(before).some(task => task.kind === 'pi.tool' && (task.state as Row).status === 'running')).toBe(true);
     await restart(); await json(name, 'ready'); const rows = await dump(name);
@@ -523,12 +545,12 @@ describe('persisted restarts and consumer reservation fencing', () => {
   it('observes starting plus committed pending reservation before restart and emits one release', async () => {
     const name = await setup({ pauseAdmission: true });
     await enqueue(name, { dedupKey: 'pending-reservation', text: 'read later' });
-    await vi.waitFor(async () => expect((await dump(name)).fixture_admissions).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_admissions).toHaveLength(1));
     const before = await dump(name); expect(before.cloud_executions).toMatchObject([{ state: 'starting', reservation: 'pending', steps: 0 }]);
     expect(before.cloud_inbox).toMatchObject([{ state: 'queued', attempts: 0 }]); expect(before.pi_submissions).toHaveLength(0);
     const key = String(before.fixture_admissions![0]!.admissionKey); expect(reservations.get(key)).toBe('held'); expect(calls).toHaveLength(0);
     await restart(); await json(name, 'ready');
-    await vi.waitFor(async () => expect(frameEvents(await dump(name)).filter(event => event.type === 'run.reservation' && event.data.action === 'release' && event.data.key === key)).toHaveLength(1));
+    await eventually(async () => expect(frameEvents(await dump(name)).filter(event => event.type === 'run.reservation' && event.data.action === 'release' && event.data.key === key)).toHaveLength(1));
     await json(name, 'billing-cancel', { key });
     await waitState(name); expect(reservations.get(key)).toBe('released'); expect(reserveCalls.filter(value => value === key)).toHaveLength(1);
   });
@@ -536,7 +558,7 @@ describe('persisted restarts and consumer reservation fencing', () => {
   it('pins a paid native task before restart and never sends the old request again', async () => {
     const name = await setup(); scenario = { pause: true };
     await enqueue(name, { dedupKey: 'paid', text: 'paid interrupted' });
-    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    await eventually(() => expect(calls).toHaveLength(1));
     const before = await dump(name); expect(before.cloud_executions).toMatchObject([{ state: 'running', steps: 1 }]);
     expect(before.cloud_inbox).toMatchObject([{ state: 'running', attempts: 1 }]);
     expect(tasks(before).some(task => (task.state as Row).status === 'running')).toBe(true);
@@ -551,7 +573,7 @@ describe('persisted restarts and consumer reservation fencing', () => {
     const name = await setup();
     await sql(name, "CREATE TRIGGER fixture_settle_fail BEFORE INSERT ON cloud_events WHEN NEW.type='run.completed' BEGIN SELECT RAISE(ABORT,'settlement-storage-failure'); END");
     await enqueue(name, { dedupKey: 'done-before-settle', text: 'complete once' });
-    await vi.waitFor(async () => {
+    await eventually(async () => {
       const rows = await dump(name); expect(rows.pi_submissions!.map(row => JSON.parse(String(row.record)))).toEqual(expect.arrayContaining([expect.objectContaining({ status: 'done' })]));
       expect(rows.cloud_executions).toMatchObject([{ state: 'running', steps: 1 }]);
     });
@@ -564,7 +586,7 @@ describe('persisted restarts and consumer reservation fencing', () => {
 
   it('cancels selected rows during a real admission pause and revalidates the empty claim', async () => {
     const name = await setup({ pauseAdmission: true }); await enqueue(name, { dedupKey: 'cancel-setup', text: 'cancel during setup' });
-    await vi.waitFor(async () => expect((await dump(name)).fixture_admissions).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_admissions).toHaveLength(1));
     const before = await dump(name); expect(before.cloud_executions).toMatchObject([{ state: 'starting', reservation: 'pending' }]);
     await json(name, 'cancel-item', { seq: before.cloud_inbox![0]!.seq }); await json(name, 'release');
     const rows = await waitState(name, 1, 'interrupted'); expect(rows.cloud_executions).toMatchObject([{ errorCode: 'CLOUD_WAKE_EMPTY' }]);
@@ -575,14 +597,14 @@ describe('persisted restarts and consumer reservation fencing', () => {
   it('fences a consumer reserve that arrives after cancellation and ignores its late SDK receipt', async () => {
     const name = await setup(); scenario = { pauseBilling: true };
     await enqueue(name, { dedupKey: 'cancel-before-reserve', text: 'cancel reservation' });
-    await vi.waitFor(() => expect(reserveCalls).toHaveLength(1));
+    await eventually(() => expect(reserveCalls).toHaveLength(1));
     const key = reserveCalls[0]!; expect(reservations.has(key)).toBe(false);
     expect((await dump(name)).cloud_executions).toMatchObject([{ state: 'starting', reservation: 'pending' }]);
     await json(name, 'cancel-run');
-    await vi.waitFor(async () => expect(frameEvents(await dump(name)).filter(event => event.type === 'run.reservation' && event.data.key === key && event.data.action === 'release')).toHaveLength(1));
+    await eventually(async () => expect(frameEvents(await dump(name)).filter(event => event.type === 'run.reservation' && event.data.key === key && event.data.action === 'release')).toHaveLength(1));
     // The separate consumer applies the release event before its delayed reserve commits.
     await json(name, 'billing-cancel', { key }); scenario.pauseBilling = false; providerReleases.splice(0).forEach(resolve => resolve());
-    await vi.waitFor(async () => expect((await dump(name)).fixture_admissions).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_admissions).toHaveLength(1));
     expect(reservations.get(key)).toBe('released');
     const rows = await dump(name); expect(rows.cloud_executions).toMatchObject([{ state: 'interrupted', reservation: 'released' }]);
     expect(frameEvents(rows).filter(event => event.type === 'run.reservation' && event.data.key === key && event.data.reservation === 'held')).toHaveLength(0);
@@ -625,7 +647,7 @@ describe('durable events, SSE resume, snapshots and byte-offset final output', (
     expect(paused.first).toContain('id: 1\n'); expect(paused.done).toBe(false);
     await sql(name, 'UPDATE cloud_events SET createdAt=?', [Date.now() - 8 * DAY]);
     await enqueue(name, { dedupKey: 'trim-unread-trigger', text: 'retain new head', availableAt });
-    await vi.waitFor(async () => expect((await dump(name)).cloud_event_meta).toMatchObject([{ trimmedThrough: 120, highWater: 121 }]));
+    await eventually(async () => expect((await dump(name)).cloud_event_meta).toMatchObject([{ trimmedThrough: 120, highWater: 121 }]));
     const drained = await json<{ text: string }>(name, 'drain-events');
     const full = paused.first + drained.text;
     expect((full.match(/^event: reset$/gm) ?? [])).toHaveLength(1);
@@ -643,10 +665,10 @@ describe('durable events, SSE resume, snapshots and byte-offset final output', (
 
   it('replays retained SQL events from a cursor and rejects expired or future cursors', async () => {
     const name = await setup(); await enqueue(name, { dedupKey: 'events', text: 'complete' }); const rows = await waitState(name);
-    const expected = frameEvents(rows); const first = await readFrames(await rpc(name, 'events', { cursor: { after: 0 } }), expected.length);
+    const expected = frameEvents(rows); const first = await readFrames(await events(name, { after: 0 }), expected.length);
     expect(first.map(event => event.id)).toEqual(expected.map(event => event.seq));
     const after = first[1]!.id;
-    const replay = await readFrames(await rpc(name, 'events', { cursor: { after } }), first.length - 2);
+    const replay = await readFrames(await events(name, { after }), first.length - 2);
     expect(replay.map(event => event.id)).toEqual(first.slice(2).map(event => event.id));
     await code(name, 'events', { cursor: { after: first.at(-1)!.id + 1 } }, 'CLOUD_EVENT_CURSOR_EXPIRED');
     await code(name, 'events', { cursor: { after: -1 } }, 'CLOUD_EVENT_CURSOR_EXPIRED');
@@ -663,13 +685,13 @@ describe('durable events, SSE resume, snapshots and byte-offset final output', (
     const rows = await dump(name); const covered = rows.cloud_events!.filter(row => Number(row.seq) <= snapshot.highWater && row.type === 'inbox.accepted');
     expect(snapshot.inbox.map(row => row.seq).sort()).toEqual(covered.map(row => Number(row.ref)).sort());
     const next = rows.cloud_events!.filter(row => Number(row.seq) > snapshot.highWater);
-    if (next.length) expect((await readFrames(await rpc(name, 'events', { cursor: { after: snapshot.highWater } }), next.length)).map(event => event.id)).toEqual(next.map(row => row.seq));
+    if (next.length) expect((await readFrames(await events(name, { after: snapshot.highWater }), next.length)).map(event => event.id)).toEqual(next.map(row => row.seq));
   });
 
   it('starts omitted cursors from the current SQL watermark and tails only new events', async () => {
     const name = await setup(); await enqueue(name, { dedupKey: 'old', text: 'old event', availableAt: Date.now() + DAY });
     const before = await json<{ highWater: number }>(name, 'snapshot');
-    const stream = await rpc(name, 'events', { cursor: {} });
+    const stream = await events(name, {});
     await enqueue(name, { dedupKey: 'new', text: 'new event', availableAt: Date.now() + DAY });
     const replay = await readFrames(stream, 1); expect(replay).toHaveLength(1); expect(replay[0]!.id).toBeGreaterThan(before.highWater);
     expect(replay[0]!.type).toBe('inbox.accepted');
@@ -677,11 +699,11 @@ describe('durable events, SSE resume, snapshots and byte-offset final output', (
 
   it('caps streams at eight and disconnecting readers never cancels a wake', async () => {
     const name = await setup({ pauseTool: true }); scenario = { tools: [1] };
-    await enqueue(name, { dedupKey: 'readers', text: 'read' }); await vi.waitFor(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
-    const responses: Awaited<ReturnType<typeof rpc>>[] = [];
-    for (let i = 0; i < 8; i++) responses.push(await rpc(name, 'events', { cursor: { after: 0 } }));
+    await enqueue(name, { dedupKey: 'readers', text: 'read' }); await eventually(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
+    const readers: Awaited<ReturnType<typeof events>>[] = [];
+    for (let i = 0; i < 8; i++) readers.push(await events(name, { after: 0 }));
     await code(name, 'events', { cursor: { after: 0 } }, 'CLOUD_EVENTS_BUSY');
-    await Promise.all(responses.map(response => response.body!.cancel()));
+    await Promise.all(readers.map(reader => reader.cancel()));
     expect((await dump(name)).cloud_executions).toMatchObject([{ state: 'running', aborted: 0 }]);
     await json(name, 'release'); await waitState(name); expect(calls).toHaveLength(2);
   });
@@ -703,9 +725,13 @@ describe('durable events, SSE resume, snapshots and byte-offset final output', (
   });
 
   it('keeps all 116 outstanding inbox rows and native invocation refs in one snapshot', async () => {
-    const name = await setup({ pauseTool: true }); scenario = { tools: [1] }; const availableAt = Date.now() + 500;
+    // The wake must claim all 16 rows. Hold its alarm until all 16 are admitted, because under load the 16 enqueues can
+    // outlast any due-time offset, and a wake that starts early claims fewer rows and leaves the rest queued.
+    const name = await setup({ pauseTool: true, pauseAlarm: true }); scenario = { tools: [1] }; const availableAt = Date.now() + 500;
     for (let i = 0; i < 16; i++) await enqueue(name, { dedupKey: `claimed:${i}`, text: `claim ${i}`, availableAt });
-    await vi.waitFor(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
+    await json(name, 'release-alarm');
+    await eventually(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
+    expect((await dump(name)).cloud_inbox!.filter(row => row.state === 'queued')).toHaveLength(0);
     for (let i = 0; i < 100; i++) await enqueue(name, { dedupKey: `outstanding:${i}`, text: `queue ${i}`, availableAt: Date.now() + DAY });
     const snapshot = await json<{ inbox: Row[]; runs: Row[]; invocations: Row[]; highWater: number }>(name, 'snapshot');
     expect(snapshot.inbox).toHaveLength(116); expect(snapshot.inbox.every(row => row.payloadJson === null)).toBe(true);
@@ -724,14 +750,14 @@ describe('durable events, SSE resume, snapshots and byte-offset final output', (
     for (let i = 0; i < 170; i++) { await enqueue(name, { dedupKey: `trim:${i}`, text: 'past', availableAt: Date.now() + DAY }); await json(name, 'cancel-item', { seq: i + 102 }); }
     await sql(name, 'UPDATE cloud_events SET createdAt=?', [Date.now() - 8 * DAY]);
     await enqueue(name, { dedupKey: 'maintenance-trigger', text: 'future', availableAt: Date.now() + DAY });
-    await vi.waitFor(async () => expect((await dump(name)).cloud_events!.length).toBeLessThan(10));
+    await eventually(async () => expect((await dump(name)).cloud_events!.length).toBeLessThan(10));
     const snapshot = await json<{ inbox: Row[]; highWater: number }>(name, 'snapshot');
     expect(snapshot.inbox.some(row => row.dedupKey === 'old-schedule' && row.state === 'queued')).toBe(true);
     const rows = await dump(name); expect(Number(rows.cloud_event_meta![0]!.trimmedThrough)).toBeGreaterThan(500);
     expect(snapshot.highWater).toBe(rows.cloud_event_meta![0]!.highWater);
     expect(Number((await json(name, 'status')).alarm)).toBeLessThanOrEqual(Number(rows.cloud_events![0]!.createdAt) + 7 * DAY);
     const head = Number(rows.cloud_events![0]!.seq);
-    const retained = await readFrames(await rpc(name, 'events', { cursor: { after: head - 1 } }), rows.cloud_events!.length);
+    const retained = await readFrames(await events(name, { after: head - 1 }), rows.cloud_events!.length);
     expect(retained.map(event => event.id)).toEqual(rows.cloud_events!.map(row => row.seq));
   }, 30_000);
 });
@@ -741,7 +767,7 @@ const transcript = (name: string, page: Row = {}) => json<TranscriptPage>(name, 
 const receipts = (rows: Rows): (Row & { run: Row & { usage: Row; admittedSeqs: number[]; claimedSeqs: number[] } })[] => (rows.fixture_receipts ?? []).map(row => ({ ...row, run: JSON.parse(String(row.runJson)) as Row & { usage: Row; admittedSeqs: number[]; claimedSeqs: number[] } }));
 const renewals = (rows: Rows) => (rows.fixture_renewals ?? []).map(row => JSON.parse(String(row.requestJson)) as Row);
 async function waitAck(name: string, count = 1) {
-  await vi.waitFor(async () => expect((await dump(name)).cloud_executions!.filter(row => row.settlementAck === 1)).toHaveLength(count));
+  await eventually(async () => expect((await dump(name)).cloud_executions!.filter(row => row.settlementAck === 1)).toHaveLength(count));
   return dump(name);
 }
 async function direct(name: string, instruction = 'fixture direct input') {
@@ -810,7 +836,7 @@ describe('4e-2 real native renewal, dispatch intent and billing facts', () => {
   for (const stop of ['deadline', 'cancel'] as const) it(`releases an uncooperative model renewal at ${stop} without provider work`, async () => {
     const name = await setup({ audit: true, pauseRenew: 'model' }, { turnTimeoutMs: stop === 'deadline' ? 150 : 2_000 });
     await enqueue(name, { dedupKey: `renew-${stop}`, text: 'renew never cooperates' });
-    await vi.waitFor(async () => expect((await dump(name)).fixture_renewals).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_renewals).toHaveLength(1));
     if (stop === 'cancel') await json(name, 'cancel-run');
     const rows = await waitAck(name);
     expect(calls).toHaveLength(0);
@@ -821,7 +847,7 @@ describe('4e-2 real native renewal, dispatch intent and billing facts', () => {
   });
 
   it('times out tool renewal before taking the sole inline slot, so the next run can dispatch', async () => {
-    const name = await setup({ audit: true, pauseRenew: 'tool' }, { inlineFetches: 1, callTimeoutMs: 150 }); scenario = { tools: [1] };
+    const name = await setup({ audit: true, pauseRenew: 'tool' }, { inlineFetches: 1, callTimeoutMs: HELD_CALL_TIMEOUT_MS }); scenario = { tools: [1] };
     await enqueue(name, { dedupKey: 'tool-renew-timeout', text: 'time out before dispatch' });
     const first = await waitAck(name);
     expect(first.fixture_dispatches).toHaveLength(0);
@@ -836,7 +862,7 @@ describe('4e-2 real native renewal, dispatch intent and billing facts', () => {
   for (const denial of [false, true]) it(`renews actual persisted tool replay with recovery=true${denial ? ' and denies consumer replay' : ''}`, async () => {
     const name = await setup({ audit: true, pauseTool: true }); scenario = { tools: [1] };
     await enqueue(name, { dedupKey: 'recovery-renew', text: 'persist a running native tool' });
-    await vi.waitFor(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
     await restart('alarm');
     await json(name, 'controls', { controls: { audit: true, ...(denial ? { renewDeny: 'recovery' } : {}) } });
     await json(name, 'ready'); await json(name, 'release');
@@ -906,14 +932,14 @@ describe('4e-2 real native renewal, dispatch intent and billing facts', () => {
   for (const holdBody of ['before-usage', 'after-usage'] as const) it(`binds ${holdBody} held-stream accounting to run A across cancel and run B`, async () => {
     const name = await setup({ audit: true }); scenario = { holdBody, usageFrames: [[{ prompt_tokens: 41, completion_tokens: 3 }]] };
     await enqueue(name, { dedupKey: 'held-A', text: 'hold this native response' });
-    await vi.waitFor(() => expect(calls).toHaveLength(1));
-    if (holdBody === 'after-usage') await vi.waitFor(async () => expect((await dump(name)).cloud_executions).toMatchObject([{ inputTokens: 41 }]));
+    await eventually(() => expect(calls).toHaveLength(1));
+    if (holdBody === 'after-usage') await eventually(async () => expect((await dump(name)).cloud_executions).toMatchObject([{ inputTokens: 41 }]));
     const runA = (await dump(name)).cloud_executions![0]!.conversationId;
     await json(name, 'cancel-run'); await waitAck(name);
     scenario = { usageFrames: [[], [{ prompt_tokens: 12, completion_tokens: 2 }]] };
     await direct(name, 'new run B'); const before = await waitAck(name, 2);
     providerReleases.splice(0).forEach(resolve => resolve());
-    await vi.waitFor(async () => expect((await dump(name)).cloud_executions!.find(row => row.conversationId === runA)).toEqual(before.cloud_executions!.find(row => row.conversationId === runA)));
+    await eventually(async () => expect((await dump(name)).cloud_executions!.find(row => row.conversationId === runA)).toEqual(before.cloud_executions!.find(row => row.conversationId === runA)));
     const rows = await dump(name); const a = rows.cloud_executions!.find(row => row.conversationId === runA)!;
     expect(a).toMatchObject({ sentRequests: 1, inputTokens: holdBody === 'after-usage' ? 41 : 0, outputTokens: holdBody === 'after-usage' ? 3 : 0 });
     expect(rows.cloud_executions!.find(row => row.conversationId !== runA)).toMatchObject({ inputTokens: 12, outputTokens: 2 });
@@ -974,7 +1000,7 @@ describe('4e-2 terminal-first settlement and stable admission', () => {
     expect(before.cloud_executions).toMatchObject([{ state: 'completed', settlementAck: 0 }]);
     await json(name, 'controls', { controls: { audit: true, pauseSettlementRunId: olderId } });
     await json(name, 'release-alarm');
-    await vi.waitFor(async () => expect((await dump(name)).fixture_settlements).toHaveLength(2));
+    await eventually(async () => expect((await dump(name)).fixture_settlements).toHaveLength(2));
     expect(await json(name, 'runtime')).toMatchObject({ busy: false, hasLiveOwner: false });
     const response = await rpc(name, 'submit', { input: { instruction: 'new run while older settlement is paused' } });
     expect(response.status).toBe(200); const submitted = response.text();
@@ -990,10 +1016,9 @@ describe('4e-2 terminal-first settlement and stable admission', () => {
   it('rings the live event doorbell as soon as consumer settlement succeeds', async () => {
     const name = await setup({ audit: true, pauseSettlement: true });
     const submitted = direct(name);
-    await vi.waitFor(async () => expect((await dump(name)).fixture_settlements).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_settlements).toHaveLength(1));
     const snapshot = await json<{ highWater: number }>(name, 'snapshot');
-    const stream = await rpc(name, 'events', { cursor: { after: snapshot.highWater } });
-    const frame = readFrames(stream, 1);
+    const frame = readFrames(await events(name, { after: snapshot.highWater }), 1);
     await json(name, 'release-settlement');
     const frames = await Promise.race([frame, new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('Settlement doorbell did not ring')), 2_000))]);
     expect(frames).toMatchObject([{ type: 'run.settlement', data: { ack: true } }]);
@@ -1003,7 +1028,7 @@ describe('4e-2 terminal-first settlement and stable admission', () => {
   it('releases an uncooperative settlement hook at the real call timeout and retries its receipt', async () => {
     const name = await setup({ audit: true, pauseSettlement: true, pauseAlarm: true });
     const submitted = direct(name);
-    await vi.waitFor(async () => expect((await dump(name)).fixture_settlements).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_settlements).toHaveLength(1));
     expect(await submitted).toContain('"type":"done"');
     const timedOut = await dump(name); expect(timedOut.cloud_executions).toMatchObject([{ state: 'completed', settlementAck: 0 }]);
     await json(name, 'controls', { controls: { audit: true } }); await json(name, 'release-alarm'); const rows = await waitAck(name);
@@ -1016,7 +1041,7 @@ describe('4e-2 terminal-first settlement and stable admission', () => {
     const name = await setup({ audit: true, pauseAdmission: true }); const at = Date.now() + 200;
     const selected: Row[] = [];
     for (let i = 0; i < 3; i++) selected.push(await enqueue(name, { dedupKey: `shrink:${i}`, text: `selected text ${i}`, availableAt: at }));
-    await vi.waitFor(async () => expect((await dump(name)).fixture_admission_details).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_admission_details).toHaveLength(1));
     const original = await dump(name); const admission = JSON.parse(String(original.fixture_admission_details![0]!.detailJson)) as { digest: string; seqs: number[] };
     expect(admission.seqs).toEqual(selected.map(row => row.seq)); expect(admission.digest).toMatch(/^[a-f0-9]{64}$/);
     await json(name, 'cancel-item', { seq: selected[1]!.seq });
@@ -1030,7 +1055,7 @@ describe('4e-2 terminal-first settlement and stable admission', () => {
   for (const denied of [false, true]) it(`compensates ${denied ? 'admission denial' : 'an all-cancelled empty claim'} with its original digest and empty claimed seqs`, async () => {
     const name = await setup({ audit: true, pauseAdmission: true, deny: denied });
     const item = await enqueue(name, { dedupKey: 'empty-selection', text: 'selected but never dispatched' });
-    await vi.waitFor(async () => expect((await dump(name)).fixture_admission_details).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_admission_details).toHaveLength(1));
     const original = JSON.parse(String((await dump(name)).fixture_admission_details![0]!.detailJson)) as Row;
     if (!denied) await json(name, 'cancel-item', { seq: item.seq });
     await json(name, 'release'); const rows = await waitAck(name);
@@ -1050,7 +1075,7 @@ describe('4e-2 native text handoff, transcript paging and legacy history', () =>
     expect((await dump(name)).cloud_inbox!.find(row => row.seq === b.seq)).toMatchObject({ inputDurable: 0, payloadJson: JSON.stringify({ text: 'never committed text' }) });
     await sql(name, 'UPDATE cloud_events SET createdAt=?', [Date.now() - 8 * DAY]);
     await enqueue(name, { dedupKey: 'trim-transcript', text: 'retained new item', availableAt: Date.now() + DAY });
-    await vi.waitFor(async () => expect(Number((await dump(name)).cloud_event_meta![0]!.trimmedThrough)).toBeGreaterThan(0));
+    await eventually(async () => expect(Number((await dump(name)).cloud_event_meta![0]!.trimmedThrough)).toBeGreaterThan(0));
     page = await transcript(name); expect(page.items.find(row => row.seq === b.seq)?.text).toBe('never committed text');
     expect(calls).toHaveLength(0);
   });
@@ -1058,7 +1083,7 @@ describe('4e-2 native text handoff, transcript paging and legacy history', () =>
   it('keeps text when cancel stops a claimed wake before its real input commit', async () => {
     const name = await setup({ audit: true, pauseInput: true });
     const item = await enqueue(name, { dedupKey: 'pre-input-cancel', text: 'claim text before durable commit' });
-    await vi.waitFor(async () => expect((await dump(name)).cloud_inbox).toMatchObject([{ state: 'running', inputDurable: 0 }]));
+    await eventually(async () => expect((await dump(name)).cloud_inbox).toMatchObject([{ state: 'running', inputDurable: 0 }]));
     const before = await dump(name); expect(entries(before).filter(entry => entry.kind === 'byok.run-input')).toHaveLength(0);
     await json(name, 'cancel-run');
     await restart('alarm'); await json(name, 'ready');
@@ -1073,7 +1098,7 @@ describe('4e-2 native text handoff, transcript paging and legacy history', () =>
     const name = await setup({ audit: true });
     await sql(name, "CREATE TRIGGER fixture_input_commit_fail BEFORE INSERT ON pi_entries WHEN json_extract(NEW.record,'$.kind')='byok.run-input' BEGIN SELECT RAISE(ABORT,'native-input-write-failure'); END");
     const item = await enqueue(name, { dedupKey: 'input-failure', text: 'native commit failed text' });
-    await vi.waitFor(async () => {
+    await eventually(async () => {
       expect((await dump(name)).cloud_executions).toMatchObject([{ state: 'running', steps: 0 }]);
       expect(await json(name, 'runtime')).toMatchObject({ hasLiveOwner: false });
     });
@@ -1094,7 +1119,7 @@ describe('4e-2 native text handoff, transcript paging and legacy history', () =>
     const name = await setup({ audit: true });
     await sql(name, "CREATE TRIGGER fixture_input_marker_fail BEFORE UPDATE ON cloud_inbox WHEN NEW.inputDurable>OLD.inputDurable BEGIN SELECT RAISE(ABORT,'input-marker-write-failure'); END");
     const item = await enqueue(name, { dedupKey: 'marker-failure', text: 'native text precedes marker' });
-    await vi.waitFor(async () => {
+    await eventually(async () => {
       expect((await dump(name)).cloud_executions).toMatchObject([{ state: 'running', steps: 0 }]);
       expect(await json(name, 'runtime')).toMatchObject({ hasLiveOwner: false });
     });
@@ -1136,7 +1161,7 @@ describe('4e-2 native text handoff, transcript paging and legacy history', () =>
     const first = await transcript(name, { limit: 2 }); expect(first.items.map(row => row.seq)).toEqual([selected[4]!.seq, selected[3]!.seq]);
     scenario = { pause: true };
     await sql(name, 'UPDATE cloud_inbox SET availableAt=? WHERE seq=?', [Date.now() - 1, Number(selected[0]!.seq)]);
-    const waking = rpc(name, 'alarm'); await vi.waitFor(() => expect(calls).toHaveLength(4));
+    const waking = rpc(name, 'alarm'); await eventually(() => expect(calls).toHaveLength(4));
     const current = (await dump(name)).cloud_executions!.at(-1)!.conversationId;
     expect((await dump(name)).cloud_inbox!.find(row => row.seq === selected[0]!.seq)).toMatchObject({ inputDurable: 1 });
     const runningItems: Row[] = []; let runningNext = first.next;
@@ -1181,7 +1206,7 @@ describe('4e-2 native text handoff, transcript paging and legacy history', () =>
 
   for (const outcome of ['reclaim', 'queued', 'expiry-purge'] as const) it(`preserves the historical native input and correct legacy ownership after requeue -> ${outcome}`, async () => {
     const name = await setup({ audit: true, nativePause: 'request' }); const item = await enqueue(name, { dedupKey: 'legacy-requeue', text: 'requeued historical input' });
-    await vi.waitFor(async () => expect(tasks(await dump(name)).some(task => ((task.state as Row).checkpoint as Row)?.phase === 'request')).toBe(true));
+    await eventually(async () => expect(tasks(await dump(name)).some(task => ((task.state as Row).checkpoint as Row)?.phase === 'request')).toBe(true));
     const originalId = (await dump(name)).cloud_executions![0]!.conversationId;
     await restart('alarm'); await json(name, 'ready');
     expect((await dump(name)).cloud_inbox).toMatchObject([{ state: 'queued', runId: null, attempts: 1 }]);
@@ -1237,7 +1262,7 @@ describe('4e-2 remaining native budget and legacy controls', () => {
     const name = await setup({ audit: true, ...(!missing ? { pauseAdmission: true } : {}) });
     const item = await enqueue(name, { dedupKey: 'legacy-no-source', text: 'no legacy source after control' });
     if (!missing) {
-      await vi.waitFor(async () => expect((await dump(name)).fixture_admissions).toHaveLength(1));
+      await eventually(async () => expect((await dump(name)).fixture_admissions).toHaveLength(1));
       await json(name, 'cancel-item', { seq: item.seq }); await json(name, 'release');
     }
     const before = await waitAck(name); const id = Number(before.cloud_executions![0]!.conversationId);
@@ -1252,7 +1277,7 @@ describe('4e-2 remaining native budget and legacy controls', () => {
   it('delivers a restored active legacy run once with a null admission digest', async () => {
     const name = await setup({ audit: true, pauseTool: true }); scenario = { tools: [1] };
     await enqueue(name, { dedupKey: 'legacy-active', text: 'active old run' });
-    await vi.waitFor(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
     await oldMembershipStore(name); await sql(name, 'UPDATE cloud_executions SET admissionDigest=NULL,admittedSeqs=NULL');
     await restart('alarm'); await json(name, 'ready'); const recovered = await dump(name);
     expect(recovered.cloud_executions).toMatchObject([{ state: 'interrupted', settlementAck: 0, membershipPending: 0 }]);
@@ -1269,7 +1294,7 @@ describe('4e-2 zero-dispatch credential compensation', () => {
   it('compensates a held selection when real credential preflight fails before the native gate', async () => {
     const name = await setup({ audit: true, pauseAdmission: true });
     await enqueue(name, { dedupKey: 'credential-compensation', text: 'hold then lose credential' });
-    await vi.waitFor(async () => expect((await dump(name)).fixture_admissions).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_admissions).toHaveLength(1));
     await json(name, 'controls', { controls: { audit: true, pauseAdmission: true, failCredentials: true } });
     await json(name, 'release'); const rows = await waitAck(name);
     expect(calls).toHaveLength(0); expect(rows.fixture_renewals).toHaveLength(0);
@@ -1281,10 +1306,10 @@ describe('4e-2 zero-dispatch credential compensation', () => {
 
 describe('4e-2 native uncooperative dispatch slot', () => {
   it('keeps the sole inline slot until the ignored-abort dispatch returns, then admits another native tool', async () => {
-    const name = await setup({ audit: true, pauseTool: true }, { inlineFetches: 1, callTimeoutMs: 150 });
+    const name = await setup({ audit: true, pauseTool: true }, { inlineFetches: 1, callTimeoutMs: HELD_CALL_TIMEOUT_MS });
     scenario = { tools: [1] };
     await enqueue(name, { dedupKey: 'uncooperative-slot', text: 'hold consumer dispatch past its deadline' });
-    await vi.waitFor(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
     const first = await waitAck(name);
     expect(first.cloud_invocations).toMatchObject([{ state: 'timed_out', errorCode: 'CLOUD_TOOL_TIMEOUT' }]);
     expect(first.fixture_dispatches).toMatchObject([{ completed: 0 }]);
@@ -1293,7 +1318,7 @@ describe('4e-2 native uncooperative dispatch slot', () => {
     expect(blocked.fixture_dispatches).toHaveLength(1);
     expect(blocked.cloud_invocations!.at(-1)).toMatchObject({ state: 'failed', errorCode: 'CLOUD_TOOL_BUSY' });
     await json(name, 'release');
-    await vi.waitFor(async () => expect((await dump(name)).fixture_dispatches).toMatchObject([{ completed: 1, aborted: 1 }]));
+    await eventually(async () => expect((await dump(name)).fixture_dispatches).toMatchObject([{ completed: 1, aborted: 1 }]));
     scenario = { tools: Array<number>(calls.length).fill(0).concat(1) };
     await direct(name, 'request tool after the held dispatch returns'); const rows = await waitAck(name, 3);
     expect(rows.fixture_dispatches).toHaveLength(2); expect(rows.cloud_invocations!.at(-1)).toMatchObject({ state: 'succeeded', errorCode: null });
@@ -1305,7 +1330,7 @@ describe('4e-2 cancel before native input commit without restart', () => {
   it('releases the real paused commit after cancellation without appending input or discarding fallback text', async () => {
     const name = await setup({ audit: true, pauseInput: true });
     const item = await enqueue(name, { dedupKey: 'cancel-input-no-restart', text: 'retain this cancelled pre-commit input' });
-    await vi.waitFor(async () => expect((await dump(name)).cloud_inbox).toMatchObject([{ state: 'running', inputDurable: 0 }]));
+    await eventually(async () => expect((await dump(name)).cloud_inbox).toMatchObject([{ state: 'running', inputDurable: 0 }]));
     expect(entries(await dump(name)).filter(entry => entry.kind === 'byok.run-input')).toHaveLength(0);
     await json(name, 'cancel-run'); await json(name, 'release'); const rows = await waitAck(name);
     expect(calls).toHaveLength(0); expect(entries(rows).filter(entry => entry.kind === 'byok.run-input')).toHaveLength(0);
@@ -1324,7 +1349,7 @@ describe('4e-2 instruction validation and mixed compensation controls', () => {
   ] as const) it(`rejects ${label} system instructions before creating a native run`, async () => {
     const name = await setup({ audit: true, instructionsText });
     await enqueue(name, { dedupKey: 'invalid-instructions', text: 'keep the submitted input' });
-    await vi.waitFor(async () => expect((await dump(name)).cloud_inbox).toMatchObject([
+    await eventually(async () => expect((await dump(name)).cloud_inbox).toMatchObject([
       { state: 'failed', attempts: 0, errorCode: 'CLOUD_REQUEST_INVALID', payloadJson: JSON.stringify({ text: 'keep the submitted input' }) },
     ]));
     const rows = await dump(name);
@@ -1352,7 +1377,7 @@ describe('4e-2 instruction validation and mixed compensation controls', () => {
   it('reports a new transcript as unacked before the consumer settlement commits', async () => {
     const name = await setup({ audit: true, pauseSettlement: true });
     await enqueue(name, { dedupKey: 'new-ack-gate', text: 'wait for actual settlement' });
-    await vi.waitFor(async () => expect((await dump(name)).fixture_settlements).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_settlements).toHaveLength(1));
     const before = await transcript(name);
     expect(before.runs).toMatchObject([{ state: 'completed', settlementAck: false }]);
     await json(name, 'release-settlement'); await waitAck(name);
@@ -1383,7 +1408,7 @@ describe('4e-2 review fixes: independent consumer closes and legacy reads', () =
     const name = await setup({ audit: true, failSettlementOnce: true });
     scenario = { usageFrames: [[{ prompt_tokens: 29, completion_tokens: 7 }]] };
     await enqueue(name, { dedupKey: 'consumer-wake-retry', text: 'one paid wake and one failed consumer close' });
-    await vi.waitFor(async () => expect((await dump(name)).fixture_settlements).toHaveLength(1));
+    await eventually(async () => expect((await dump(name)).fixture_settlements).toHaveLength(1));
     const before = await dump(name); const id = Number(before.cloud_executions![0]!.conversationId);
     expect(before.cloud_executions).toMatchObject([{ trigger: 'wake', state: 'completed', settlementAck: 0, steps: 1, sentRequests: 1, inputTokens: 29, outputTokens: 7 }]);
     expect(before.fixture_receipts).toHaveLength(0); expect(calls).toHaveLength(1);
