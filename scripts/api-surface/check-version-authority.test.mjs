@@ -35,7 +35,7 @@ const SPEC = [
   '',
   'A version bump does not authorize publish. The current',
   'aligned dispatch release is `0.12.0`; publication requires separate release',
-  'authorization and registry readback. The current independent keys candidate is',
+  'authorization and registry readback. The current independent keys release is',
   '`0.3.9`; its packed and published `@byok-sdk/core` edge must be the exact current',
   'dispatch release, `0.12.0`.',
   '',
@@ -136,7 +136,7 @@ test('a stale spec keys phrase is reported', (t) => {
   });
   const result = runCheck(root);
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /current independent keys candidate is stated as 0\.3\.8/);
+  assert.match(result.stderr, /current independent keys release is stated as 0\.3\.8/);
 });
 
 test('a spec missing the authority phrase fails closed', (t) => {
@@ -144,7 +144,7 @@ test('a spec missing the authority phrase fails closed', (t) => {
   const result = runCheck(root);
   assert.equal(result.status, 1);
   assert.match(result.stderr, /the phrase naming the current aligned dispatch release \(0\.12\.0\) is missing/);
-  assert.match(result.stderr, /the phrase naming the current independent keys candidate \(0\.3\.9\) is missing/);
+  assert.match(result.stderr, /the phrase naming the current independent keys release \(0\.3\.9\) is missing/);
 });
 
 test('the manifests, not the docs, are the authority', (t) => {
