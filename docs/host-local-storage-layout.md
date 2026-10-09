@@ -37,7 +37,9 @@ terminal for a resume, and removes old ones by retention. Agent content reads
 do not open `.byok`, so the host gets reader output from the terminal
 `finalMessage` or `summary`, a result document, task artifacts, or the local
 filesystem. The `projection.prepare` hook gets the run directory as `cwd` for
-a reader, and the writer of the home can run at the same time. Daemon startup materializes and write-probes the canonical
+a reader, and the writer of the home can run at the same time.
+
+Daemon startup materializes and write-probes the canonical
 root/`agents` namespace before advertising `agent-home-contract`; a configured
 but unusable root therefore never admits a cloud Agent offer.
 

@@ -1069,9 +1069,9 @@ export declare class AgentHomeExecutionLeaseManager {
      * not the owner identity.
      */
     activeAttemptCount(canonicalHome: string, homeAccess: AgentHomeAccessMode): number;
-    /** Run directories that active reader Attempts of this home use; retention never removes them. */
     /** How many active reader leases of this home use `cwd` as their run directory. */
     activeReaderRunHolders(canonicalHome: string, cwd: string): number;
+    /** Run directories that active reader Attempts of this home use; retention never removes them. */
     activeReaderRunDirectories(canonicalHome: string): ReadonlySet<string>;
     /**
      * Counts-only readback for daemon/control status. Scoped to this manager's

@@ -847,7 +847,6 @@ export class AgentHomeExecutionLeaseManager {
     return count;
   }
 
-  /** Run directories that active reader Attempts of this home use; retention never removes them. */
   /** How many active reader leases of this home use `cwd` as their run directory. */
   activeReaderRunHolders(canonicalHome: string, cwd: string): number {
     let holders = 0;
@@ -857,6 +856,7 @@ export class AgentHomeExecutionLeaseManager {
     return holders;
   }
 
+  /** Run directories that active reader Attempts of this home use; retention never removes them. */
   activeReaderRunDirectories(canonicalHome: string): ReadonlySet<string> {
     const directories = new Set<string>();
     for (const entry of AgentHomeExecutionLeaseManager.groups.get(canonicalHome)?.leasesByKey.values() ?? []) {
