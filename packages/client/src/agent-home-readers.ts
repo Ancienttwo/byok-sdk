@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   AGENT_HOME_MEMORY_DIGEST_MAX_BYTES,
@@ -41,7 +41,9 @@ export function isReaderRunName(taskId: string): boolean {
  * - Then, while more than `maxRetained` directories remain, the oldest
  *   unprotected directory is removed first.
  *
- * Age is the directory's own modification time.
+ * Age is the directory's own modification time. Before each removal it
+ * checks again that `runsRoot` resolves to itself, so a swapped symbolic link
+ * cannot redirect a removal outside the home.
  */
 export async function pruneReaderRuns(input: {
   readonly runsRoot: string;
@@ -75,6 +77,9 @@ export async function pruneReaderRuns(input: {
   }
   const removed: string[] = [];
   const remove = async (dir: string): Promise<void> => {
+    if (await fs.realpath(input.runsRoot) !== input.runsRoot) {
+      throw new Error('the reader runs directory changed through a symbolic link during retention');
+    }
     await fs.rm(dir, { recursive: true, force: true });
     removed.push(dir);
   };
@@ -98,17 +103,21 @@ export type AgentHomeMemoryDigest = ReadonlyMap<string, string>;
 
 /**
  * Fingerprints `MEMORY.md` and every entry under `notes/`, bounded by
- * {@link AGENT_HOME_MEMORY_DIGEST_MAX_FILES} entries and
+ * {@link AGENT_HOME_MEMORY_DIGEST_MAX_FILES} entries (directories count) and
  * {@link AGENT_HOME_MEMORY_DIGEST_MAX_BYTES} bytes. It never follows a
- * symbolic link: a link is fingerprinted by its target text. Returns
- * `undefined` when a bound is exceeded or a read fails; the caller then
- * reports `unmeasured`.
+ * symbolic link: a link is fingerprinted by its target text. A file is opened
+ * without following a link and without blocking, must be a regular file, and
+ * is read only up to the remaining byte budget. Returns `undefined` when a
+ * bound is exceeded, an entry is not a directory, regular file or link, or a
+ * read fails; the caller then reports `unmeasured`.
  */
 export async function digestAgentHomeMemory(home: string): Promise<AgentHomeMemoryDigest | undefined> {
   const digest = new Map<string, string>();
   let bytes = 0;
+  let entries = 0;
   const visit = async (relative: string): Promise<boolean> => {
     if (relative.length > AGENT_HOME_MEMORY_PATH_MAX_LENGTH) return false;
+    if (relative !== 'notes' && ++entries > AGENT_HOME_MEMORY_DIGEST_MAX_FILES) return false;
     const absolute = path.join(home, ...relative.split('/'));
     let stat: Awaited<ReturnType<typeof fs.lstat>>;
     try {
@@ -118,27 +127,25 @@ export async function digestAgentHomeMemory(home: string): Promise<AgentHomeMemo
       throw error;
     }
     if (stat.isDirectory()) {
-      const names = (await fs.readdir(absolute)).sort();
-      for (const name of names) {
-        if (!(await visit(`${relative}/${name}`))) return false;
+      const directory = await fs.opendir(absolute);
+      try {
+        for await (const entry of directory) {
+          if (!(await visit(`${relative}/${entry.name}`))) return false;
+        }
+      } finally {
+        await directory.close().catch(() => {});
       }
       return true;
     }
-    if (digest.size >= AGENT_HOME_MEMORY_DIGEST_MAX_FILES) return false;
     if (stat.isSymbolicLink()) {
       digest.set(relative, `link:${await fs.readlink(absolute)}`);
       return true;
     }
-    if (!stat.isFile()) {
-      digest.set(relative, 'special');
-      return true;
-    }
-    bytes += stat.size;
-    if (bytes > AGENT_HOME_MEMORY_DIGEST_MAX_BYTES) return false;
-    const content = await fs.readFile(absolute);
-    bytes += content.length - stat.size;
-    if (bytes > AGENT_HOME_MEMORY_DIGEST_MAX_BYTES) return false;
-    digest.set(relative, `sha256:${createHash('sha256').update(content).digest('hex')}`);
+    if (!stat.isFile()) return false;
+    const fingerprint = await fingerprintRegularFile(absolute, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES - bytes);
+    if (fingerprint === undefined) return false;
+    bytes += fingerprint.bytes;
+    digest.set(relative, fingerprint.hash);
     return true;
   };
   try {
@@ -148,6 +155,38 @@ export async function digestAgentHomeMemory(home: string): Promise<AgentHomeMemo
     return undefined;
   }
   return digest;
+}
+
+const DIGEST_OPEN_FLAGS = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0);
+const DIGEST_READ_CHUNK_BYTES = 64 * 1024;
+
+/**
+ * Hashes one regular file through a handle opened without following a link,
+ * so a path swapped after `lstat` cannot point the read at a device or FIFO.
+ * Returns `undefined` when the handle is not a regular file or the file is
+ * larger than `budget` bytes.
+ */
+async function fingerprintRegularFile(
+  absolute: string,
+  budget: number,
+): Promise<{ readonly hash: string; readonly bytes: number } | undefined> {
+  const handle = await fs.open(absolute, DIGEST_OPEN_FLAGS);
+  try {
+    if (!(await handle.stat()).isFile()) return undefined;
+    const hash = createHash('sha256');
+    const chunk = Buffer.alloc(DIGEST_READ_CHUNK_BYTES);
+    let total = 0;
+    for (;;) {
+      const { bytesRead } = await handle.read(chunk, 0, Math.min(chunk.length, budget - total + 1), null);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+      if (total > budget) return undefined;
+      hash.update(chunk.subarray(0, bytesRead));
+    }
+    return { hash: `sha256:${hash.digest('hex')}`, bytes: total };
+  } finally {
+    await handle.close();
+  }
 }
 
 /**

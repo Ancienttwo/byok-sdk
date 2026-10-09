@@ -90,12 +90,16 @@ export interface AgentHomeResolution {
   readonly hostStorageRoot: string;
   /** SDK-owned `<hostStorageRoot>/agents` authority, after realpath. */
   readonly agentsRoot: string;
-  /** Canonical absolute Agent home. This is also the runtime cwd. */
+  /**
+   * Canonical absolute Agent home. It is the runtime cwd of a writer Attempt;
+   * a memory-reader Attempt runs in its run directory under this home.
+   */
   readonly homeDir: string;
   readonly canonicalHome: string;
 }
 
 export interface AgentHomeProjectionInput extends AgentHomeResolution {
+  /** Runtime cwd: the home for a writer, the run directory for a memory-reader. */
   readonly cwd: string;
 }
 
@@ -111,7 +115,13 @@ export interface AgentHomeProjectionApplyInput extends AgentHomeProjectionInput 
  * `agents/<agentId>` itself. The SDK does not parse the projected content.
  */
 export interface AgentHomeProjection {
-  /** Optional creation/task-time host preparation retained as a distinct lifecycle. */
+  /**
+   * Optional creation/task-time host preparation retained as a distinct
+   * lifecycle. It runs at every Attempt start under that Attempt's execution
+   * lease. For a memory-reader Attempt, `cwd` is the run directory, and the
+   * one writer of the home can be running at the same time, so a hook that
+   * changes home files must tolerate a concurrent writer.
+   */
   prepare?(input: AgentHomeProjectionInput): void | Promise<void>;
   /**
    * Task-free opaque desired-state consumer. It must atomically and
@@ -838,6 +848,15 @@ export class AgentHomeExecutionLeaseManager {
   }
 
   /** Run directories that active reader Attempts of this home use; retention never removes them. */
+  /** How many active reader leases of this home use `cwd` as their run directory. */
+  activeReaderRunHolders(canonicalHome: string, cwd: string): number {
+    let holders = 0;
+    for (const entry of AgentHomeExecutionLeaseManager.groups.get(canonicalHome)?.leasesByKey.values() ?? []) {
+      if (entry.homeAccess === 'memory-reader' && entry.cwd === cwd) holders += 1;
+    }
+    return holders;
+  }
+
   activeReaderRunDirectories(canonicalHome: string): ReadonlySet<string> {
     const directories = new Set<string>();
     for (const entry of AgentHomeExecutionLeaseManager.groups.get(canonicalHome)?.leasesByKey.values() ?? []) {
@@ -1061,8 +1080,11 @@ export class AgentHomeManager {
 
   /**
    * Prepares the run directory of a reader lease under the home's execution
-   * queue. A fresh reader first applies retention, then creates its own new
-   * directory: an existing one is an error, so two tasks never share a
+   * queue. A fresh reader first applies retention, then creates its own
+   * directory. A redelivered offer can find the directory that an earlier
+   * start of the same task created before a crash: the start reuses it when
+   * it is a real, empty directory that no other active reader holds, and
+   * throws {@link AgentHomeBusyError} otherwise, so two tasks never share a
    * directory. A resumed reader requires its recorded directory to exist and
    * throws {@link AgentHomeReaderRunMissingError} when it does not.
    *
@@ -1088,6 +1110,9 @@ export class AgentHomeManager {
         if (!stat.isDirectory() || stat.isSymbolicLink()) {
           throw new AgentHomeResolutionError('the reader run directory is not a real directory');
         }
+        if (await fs.realpath(lease.cwd) !== lease.cwd) {
+          throw new AgentHomeResolutionError('the reader run directory resolves through a symlink');
+        }
         return {};
       }
       const runsRoot = await ensureDirectoryNoSymlink(resolution.canonicalHome, path.dirname(lease.cwd));
@@ -1102,12 +1127,31 @@ export class AgentHomeManager {
           maxRetained: AGENT_HOME_READER_RUN_MAX_RETAINED - 1,
         }).catch((error: unknown) => { retentionError = error; });
       }
-      await fs.mkdir(lease.cwd, { mode: 0o700 });
+      const created = await fs.mkdir(lease.cwd, { mode: 0o700 }).then(() => true, (error: NodeJS.ErrnoException) => {
+        if (error.code === 'EEXIST') return false;
+        throw error;
+      });
+      if (!created) await this.assertReusableReaderRun(binding);
       if (await fs.realpath(lease.cwd) !== lease.cwd) {
         throw new AgentHomeResolutionError('the reader run directory changed through a symlink while it was created');
       }
       return retentionError === undefined ? {} : { retentionError };
     });
+  }
+
+  /** A fresh reader may reuse only a real, empty run directory that no other active reader holds. */
+  private async assertReusableReaderRun(binding: AgentHomeExecutionBinding): Promise<void> {
+    const { resolution, lease } = binding;
+    const stat = await fs.lstat(lease.cwd);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || await fs.realpath(lease.cwd) !== lease.cwd) {
+      throw new AgentHomeBusyError('the reader run directory of this task exists and is not a real directory');
+    }
+    if (this.executionLeaseManager.activeReaderRunHolders(resolution.canonicalHome, lease.cwd) > 1) {
+      throw new AgentHomeBusyError('another active reader holds the run directory of this task');
+    }
+    if ((await fs.readdir(lease.cwd)).length > 0) {
+      throw new AgentHomeBusyError('the reader run directory of this task exists and is not empty');
+    }
   }
 
   /** Initialize only after any requested session exact-match has succeeded. */

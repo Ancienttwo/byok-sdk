@@ -1547,7 +1547,22 @@ reader terminal carries `agentHomeMemoryChange` (`unchanged`,
 with the changed paths. A task-free projection still needs the base lease, so
 it waits while any reader or writer runs; a host that keeps readers running
 all the time delays persona updates, and the retryable mailbox redelivery
-covers that wait. A fresh task is task-keyed
+covers that wait. Agent content reads never open `.byok`, so a host cannot read
+a reader run directory through `agent.content.read`. A reader returns its
+output in the terminal `finalMessage` and `summary`, in a result document, or
+as task artifacts; a host on the same machine can also read the run directory
+from the local filesystem. The optional host `projection.prepare` hook runs at
+every Attempt start under that Attempt's lease. For a reader its `cwd` is the
+run directory, and the writer of the home can run at the same time. A
+redelivered fresh reader offer reuses its run directory only when the
+directory is real, empty, and held by no other active reader; otherwise the
+offer gets a retryable decline. The memory fingerprint counts directories
+toward its 256-entry bound, opens a file without following a link, reads no
+more than the byte bound, and reports `unmeasured` for an entry that is not a
+directory, regular file or link. A daemon advertises `agent-home-readers`
+whenever it has an Agent home. A lane that runs only durable Pi declines every
+reader offer without retry, because durable Pi runs only in the canonical home.
+A fresh task is task-keyed
 until its runtime creates the durable session, then
 the SDK atomically binds the lease to that `sessionRef`. SDK-reserved shared
 metadata mutations remain short and serialized per home. Agent-memory hosted

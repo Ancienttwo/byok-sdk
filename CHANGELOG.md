@@ -52,10 +52,17 @@
   the home's `AGENTS.md` (#317).
 - **Removed (client)** — `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome`.
   A value above 1 let Attempts co-write one home. Reader Attempts replace it,
-  and setting it is now a construction error. `AgentHomeExecutionStatus`
-  reports `maxConcurrentReaderAttemptsPerAgentHome` and
-  `activeReaderAttempts` instead. The writer `agent home busy` decline
-  reason does not change; a reader decline names the reader count (#317).
+  and setting it is now a construction error. The writer `agent home busy`
+  decline reason does not change; a reader decline names the reader count
+  (#317).
+- **Changed (client)** — Execution lease API for #317:
+  `AgentHomeExecutionStatus` reports `maxConcurrentReaderAttemptsPerAgentHome`
+  and `activeReaderAttempts` instead of
+  `maxConcurrentMutableSessionsPerAgentHome`.
+  `AgentHomeExecutionLeaseManager.activeAttemptCount(canonicalHome, homeAccess)`
+  now takes an access mode and counts only that mode.
+  `AgentHomeExecutionLease` gains the required members `homeAccess` and
+  `writerOverlapped()`, so a host that implements the interface must add them.
 
 ## 0.25.0 / @byok-sdk/keys 0.10.0 - 2026-10-09
 

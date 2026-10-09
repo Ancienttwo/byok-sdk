@@ -2510,9 +2510,11 @@ export class TaskRunner {
           } catch (error) {
             await agentBinding.lease.release().catch(() => {});
             agentBinding = undefined;
+            // A busy run directory (a redelivered task found a directory it
+            // cannot reuse) may clear; every other failure is permanent.
             decline(error instanceof AgentHomeReaderRunMissingError
               ? `Agent session ${sessionRef} cannot resume: its reader run directory no longer exists`
-              : `Agent reader run directory preparation failed: ${errorMessage(error)}`, false);
+              : `Agent reader run directory preparation failed: ${errorMessage(error)}`, error instanceof AgentHomeBusyError);
             return;
           }
         }

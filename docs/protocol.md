@@ -603,17 +603,20 @@ than 7 days.
 
 The SDK does not make memory read-only. Each reader terminal carries
 `agentHomeMemoryChange`. The device fingerprints `MEMORY.md` and every entry
-under `notes/` (at most 256 entries and 16 MiB, never following a symbolic
-link) at reader start and at the terminal decision:
+under `notes/` (at most 256 entries, directories included, and 16 MiB, never
+following a symbolic link) at reader start and at the terminal decision:
 
 | `outcome` | Meaning | `paths` |
 |---|---|---|
 | `unchanged` | The fingerprints are equal | absent |
 | `reader-attributed` | They differ, and no writer Attempt of the home overlapped this reader. A reader changed memory: this one or an overlapping reader | changed files, relative to the home |
 | `unattributed` | They differ, and a writer Attempt overlapped this reader | changed files, relative to the home |
-| `unmeasured` | A bound was exceeded or a read failed | absent |
+| `unmeasured` | A bound was exceeded, an entry is not a directory, regular file or link, or a read failed | absent |
 
-The device sees only Attempts it runs. A host that writes memory files itself
+Agent content reads never open `.byok`, so a host cannot read a reader run
+directory through them. A reader returns its output in the terminal
+`finalMessage` and `summary`, a result document, or task artifacts. The device
+sees only Attempts it runs. A host that writes memory files itself
 while readers run makes the attribution ambiguous. The field is absent on a
 writer terminal and on a claimed failure before the Attempt became active. The
 cloud read model (`readTaskResult`) projects it verbatim.

@@ -795,7 +795,9 @@ export declare function isReaderRunName(taskId: string): boolean;
  * - Then, while more than `maxRetained` directories remain, the oldest
  *   unprotected directory is removed first.
  *
- * Age is the directory's own modification time.
+ * Age is the directory's own modification time. Before each removal it
+ * checks again that `runsRoot` resolves to itself, so a swapped symbolic link
+ * cannot redirect a removal outside the home.
  */
 export declare function pruneReaderRuns(input: {
     readonly runsRoot: string;
@@ -809,11 +811,13 @@ export declare function pruneReaderRuns(input: {
 export type AgentHomeMemoryDigest = ReadonlyMap<string, string>;
 /**
  * Fingerprints `MEMORY.md` and every entry under `notes/`, bounded by
- * {@link AGENT_HOME_MEMORY_DIGEST_MAX_FILES} entries and
+ * {@link AGENT_HOME_MEMORY_DIGEST_MAX_FILES} entries (directories count) and
  * {@link AGENT_HOME_MEMORY_DIGEST_MAX_BYTES} bytes. It never follows a
- * symbolic link: a link is fingerprinted by its target text. Returns
- * `undefined` when a bound is exceeded or a read fails; the caller then
- * reports `unmeasured`.
+ * symbolic link: a link is fingerprinted by its target text. A file is opened
+ * without following a link and without blocking, must be a regular file, and
+ * is read only up to the remaining byte budget. Returns `undefined` when a
+ * bound is exceeded, an entry is not a directory, regular file or link, or a
+ * read fails; the caller then reports `unmeasured`.
  */
 export declare function digestAgentHomeMemory(home: string): Promise<AgentHomeMemoryDigest | undefined>;
 /**
@@ -862,11 +866,15 @@ export interface AgentHomeResolution {
     readonly hostStorageRoot: string;
     /** SDK-owned `<hostStorageRoot>/agents` authority, after realpath. */
     readonly agentsRoot: string;
-    /** Canonical absolute Agent home. This is also the runtime cwd. */
+    /**
+     * Canonical absolute Agent home. It is the runtime cwd of a writer Attempt;
+     * a memory-reader Attempt runs in its run directory under this home.
+     */
     readonly homeDir: string;
     readonly canonicalHome: string;
 }
 export interface AgentHomeProjectionInput extends AgentHomeResolution {
+    /** Runtime cwd: the home for a writer, the run directory for a memory-reader. */
     readonly cwd: string;
 }
 export interface AgentHomeProjectionApplyInput extends AgentHomeProjectionInput {
@@ -880,7 +888,13 @@ export interface AgentHomeProjectionApplyInput extends AgentHomeProjectionInput 
  * `agents/<agentId>` itself. The SDK does not parse the projected content.
  */
 export interface AgentHomeProjection {
-    /** Optional creation/task-time host preparation retained as a distinct lifecycle. */
+    /**
+     * Optional creation/task-time host preparation retained as a distinct
+     * lifecycle. It runs at every Attempt start under that Attempt's execution
+     * lease. For a memory-reader Attempt, `cwd` is the run directory, and the
+     * one writer of the home can be running at the same time, so a hook that
+     * changes home files must tolerate a concurrent writer.
+     */
     prepare?(input: AgentHomeProjectionInput): void | Promise<void>;
     /**
      * Task-free opaque desired-state consumer. It must atomically and
@@ -1056,6 +1070,8 @@ export declare class AgentHomeExecutionLeaseManager {
      */
     activeAttemptCount(canonicalHome: string, homeAccess: AgentHomeAccessMode): number;
     /** Run directories that active reader Attempts of this home use; retention never removes them. */
+    /** How many active reader leases of this home use `cwd` as their run directory. */
+    activeReaderRunHolders(canonicalHome: string, cwd: string): number;
     activeReaderRunDirectories(canonicalHome: string): ReadonlySet<string>;
     /**
      * Counts-only readback for daemon/control status. Scoped to this manager's
@@ -1101,8 +1117,11 @@ export declare class AgentHomeManager {
     }): Promise<AgentHomeExecutionBinding>;
     /**
      * Prepares the run directory of a reader lease under the home's execution
-     * queue. A fresh reader first applies retention, then creates its own new
-     * directory: an existing one is an error, so two tasks never share a
+     * queue. A fresh reader first applies retention, then creates its own
+     * directory. A redelivered offer can find the directory that an earlier
+     * start of the same task created before a crash: the start reuses it when
+     * it is a real, empty directory that no other active reader holds, and
+     * throws {@link AgentHomeBusyError} otherwise, so two tasks never share a
      * directory. A resumed reader requires its recorded directory to exist and
      * throws {@link AgentHomeReaderRunMissingError} when it does not.
      *
@@ -1119,6 +1138,8 @@ export declare class AgentHomeManager {
     }): Promise<{
         readonly retentionError?: unknown;
     }>;
+    /** A fresh reader may reuse only a real, empty run directory that no other active reader holds. */
+    private assertReusableReaderRun;
     /** Initialize only after any requested session exact-match has succeeded. */
     initialize(binding: AgentHomeBinding): Promise<void>;
     /**
@@ -6681,6 +6702,8 @@ export declare const AGENT_MEMORY_GUIDANCE: string;
  * `<home>/.byok/runs/<taskId>/`, so the memory is three levels up. The writer
  * Attempt owns memory changes. This is guidance only: the SDK does not make
  * memory read-only, and the reader terminal reports any memory change.
+ * Agent content reads do not reach the run directory (it is under `.byok/`),
+ * so the guidance puts the result in the final reply, not in a file.
  */
 export declare const AGENT_MEMORY_READER_GUIDANCE: string;
 export declare function prependAgentMemoryGuidance(instruction: string): string;

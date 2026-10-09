@@ -222,6 +222,29 @@ Checks on the final tree:
   cloud-do `hooks.test.ts` ("timed out waiting for envelope", "Test timed out in
   5000ms"). They pass alone, and they do not use reader offers.
 
+## Review fixes (2026-10-10)
+
+The independent review returned ACCEPT-WITH-FIXES. The branch was rebased onto
+main (#328 squash, #329 OAR 0.48, #330). OAR 087df16 still has
+`SessionOptions.launchArgs`. A live probe confirmed that Codex 0.162.0 loads the
+home `AGENTS.md` from a run directory only with the override.
+
+- A redelivered fresh reader reuses a real, empty run directory that no other
+  active reader holds. Any other existing directory gets a retryable decline.
+- Agent content reads stay closed to `.byok`. The docs name the channels for
+  reader output. The reader guidance puts the result in the final reply.
+- The docs state that `projection.prepare` gets the run directory as `cwd` for
+  a reader, while the writer can run.
+- The memory digest opens files with `O_NOFOLLOW | O_NONBLOCK`, requires a
+  regular file, reads only the remaining byte budget, and counts directories.
+  Any other entry type is `unmeasured`.
+- Retention checks the runs directory realpath before each removal. A resumed
+  reader checks the run directory realpath.
+- The CHANGELOG lists the lease API changes.
+
+Seven of the nine new tests fail on the pre-fix sources. The two that pass
+(a link to a device, the byte bound) pin behavior that the old code had.
+
 ## Not in scope
 
 Memory merge logic, Host scheduling, and a cross-process OS sandbox.

@@ -1,8 +1,9 @@
+import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import {
   AGENT_HOME_DIRECTORY,
   AgentHomeBusyError,
@@ -365,6 +366,71 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     expect(harness.daemon.status().agentHomeExecution.activeAttempts).toBe(0);
   });
 
+  it('declines the resume of a reader session whose run directory resolves through a symlink, without retry', async () => {
+    const harness = await start();
+    const home = await harness.home('linked');
+    offer('linked-first', 'linked', { reader: true });
+    await claimed('linked-first');
+    const sessionRef = harness.pi.sessions[0]!.sessionRef;
+    await complete(harness, 0, 'linked-first');
+    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the reader to release');
+    // The run directory itself stays a real directory; its parent becomes a link.
+    const outside = await fs.realpath(await temp('byok-readers-outside-'));
+    await fs.rename(path.join(home, '.byok', 'runs'), path.join(outside, 'runs'));
+    await fs.symlink(path.join(outside, 'runs'), path.join(home, '.byok', 'runs'));
+
+    offer('linked-resume', 'linked', { reader: true, sessionRef });
+    const decline = await declined('linked-resume');
+    expect(decline).toEqual({
+      reason: 'Agent reader run directory preparation failed: the reader run directory resolves through a symlink',
+      retryable: false,
+    });
+    expect(harness.pi.startCalls).toHaveLength(1);
+    expect(harness.daemon.status().agentHomeExecution.activeAttempts).toBe(0);
+  });
+
+  it('reuses the empty run directory a redelivered fresh reader offer left before a crash', async () => {
+    const harness = await start();
+    const home = await harness.home('redelivered');
+    const runDirectory = path.join(home, '.byok', 'runs', 'redelivered-reader');
+    await fs.mkdir(runDirectory, { recursive: true, mode: 0o700 });
+
+    offer('redelivered-reader', 'redelivered', { reader: true });
+    await claimed('redelivered-reader');
+    expect(harness.pi.startCalls[0]!.ctx.workspaceDir).toBe(runDirectory);
+    await complete(harness, 0, 'redelivered-reader');
+  });
+
+  it('declines a fresh reader retryably when its run directory exists and is not empty', async () => {
+    const harness = await start();
+    const home = await harness.home('occupied');
+    const runDirectory = path.join(home, '.byok', 'runs', 'occupied-reader');
+    await fs.mkdir(runDirectory, { recursive: true, mode: 0o700 });
+    await fs.writeFile(path.join(runDirectory, 'left-over.txt'), 'x');
+
+    offer('occupied-reader', 'occupied', { reader: true });
+    const decline = await declined('occupied-reader');
+    expect(decline).toEqual({
+      reason: 'Agent reader run directory preparation failed: the reader run directory of this task exists and is not empty',
+      retryable: true,
+    });
+    expect(harness.pi.startCalls).toHaveLength(0);
+    expect(await fs.readdir(runDirectory)).toEqual(['left-over.txt']);
+    expect(harness.daemon.status().agentHomeExecution.activeAttempts).toBe(0);
+  });
+
+  it('sends the reader terminal with unmeasured evidence when a FIFO appears under notes/', async () => {
+    const harness = await start();
+    const home = await harness.home('fifo');
+    offer('fifo-reader', 'fifo', { reader: true });
+    await claimed('fifo-reader');
+    execFileSync('mkfifo', [path.join(home, 'notes', 'pipe')]);
+
+    const terminal = await complete(harness, 0, 'fifo-reader');
+    expect(payloadOf(terminal).agentHomeMemoryChange).toEqual({ outcome: 'unmeasured' });
+    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the reader lease to release');
+  });
+
   it('retention at a fresh reader start keeps active and recently resumable runs and removes stale ones', async () => {
     const harness = await start();
     const home = await harness.home('retained');
@@ -465,6 +531,17 @@ describe('reader run retention (#317)', () => {
     });
     expect((await fs.readdir(runs)).sort()).toEqual(['a', 'd', 'e']);
   });
+
+  it('removes nothing when the runs directory does not resolve to itself', async () => {
+    const runs = await runsWith(['old']);
+    await age(path.join(runs, 'old'), AGENT_HOME_READER_RUN_MAX_AGE_MS + DAY_MS);
+    const link = path.join(await fs.realpath(await temp('byok-reader-runs-link-')), 'runs');
+    await fs.symlink(runs, link);
+
+    await expect(pruneReaderRuns({ runsRoot: link, active: new Set(), referenced: new Map(), nowMs: Date.now() }))
+      .rejects.toThrow(/changed through a symbolic link/);
+    expect(await fs.readdir(runs)).toEqual(['old']);
+  });
 });
 
 describe('reader memory digest (#317)', () => {
@@ -490,6 +567,38 @@ describe('reader memory digest (#317)', () => {
     await fs.rm(path.join(home, 'notes', 'gone.md'));
     expect(compareAgentHomeMemory(before, await digestAgentHomeMemory(home), false))
       .toEqual({ outcome: 'reader-attributed', paths: ['notes/gone.md'] });
+  });
+
+  it('reports unmeasured for a FIFO and never opens it', async () => {
+    const home = await temp('byok-reader-digest-');
+    await fs.mkdir(path.join(home, 'notes'));
+    execFileSync('mkfifo', [path.join(home, 'notes', 'pipe')]);
+    await expect(digestAgentHomeMemory(home)).resolves.toBeUndefined();
+  });
+
+  it('fingerprints a link to a device by its target and never reads the device', async () => {
+    const home = await temp('byok-reader-digest-');
+    await fs.mkdir(path.join(home, 'notes'));
+    await fs.symlink('/dev/zero', path.join(home, 'notes', 'zero'));
+    expect((await digestAgentHomeMemory(home))?.get('notes/zero')).toBe('link:/dev/zero');
+  });
+
+  it('counts directories toward the entry bound', async () => {
+    const home = await temp('byok-reader-digest-');
+    await fs.mkdir(path.join(home, 'notes'));
+    await Promise.all(Array.from({ length: 257 }, (_, index) => fs.mkdir(path.join(home, 'notes', `d-${index}`))));
+    await expect(digestAgentHomeMemory(home)).resolves.toBeUndefined();
+  });
+
+  it('reports unmeasured when the files exceed the byte bound', async () => {
+    const home = await temp('byok-reader-digest-');
+    await fs.mkdir(path.join(home, 'notes'));
+    const half = Buffer.alloc(AGENT_HOME_MEMORY_DIGEST_MAX_BYTES / 2, 1);
+    await fs.writeFile(path.join(home, 'notes', 'a.bin'), half);
+    await fs.writeFile(path.join(home, 'notes', 'b.bin'), half);
+    expect((await digestAgentHomeMemory(home))?.size).toBe(2);
+    await fs.writeFile(path.join(home, 'MEMORY.md'), 'one more byte');
+    await expect(digestAgentHomeMemory(home)).resolves.toBeUndefined();
   });
 });
 
