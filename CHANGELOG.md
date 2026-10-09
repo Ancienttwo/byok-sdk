@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Changed (client)** — update the private OAR source from 0.44.0 to 0.45.1
+  (`7dc98e0`). The raw Codex adapter takes upstream launch arguments and
+  service-tier readback. The SDK bridge exposes neither option, so ordinary
+  task launches and SDK events keep their existing behavior.
+  See `docs/notes/2026-10-09-oar-0.45.1-upgrade.md`.
+
 ## 0.25.0-rc.2 / @byok-sdk/keys 0.10.0-rc.2 — 2026-10-09
 
 - Client test credential stores now use the same product identity as OS stores.

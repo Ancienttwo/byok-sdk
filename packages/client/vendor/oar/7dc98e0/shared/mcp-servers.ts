@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 98be973 for the SDK ES2022 lib (Apache-2.0).
+// BYOK change: Modified from OAR 7dc98e0 for the SDK ES2022 lib (Apache-2.0).
 import { UnsupportedOptionError } from "../contracts/errors.js";
 import type { McpServer } from "../contracts/session.js";
 

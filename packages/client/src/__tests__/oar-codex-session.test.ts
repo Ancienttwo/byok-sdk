@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { codexSession } from '../../vendor/oar/98be973/runtimes/codex/session';
-import * as projection from '../../vendor/oar/98be973/runtimes/codex/projection';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/98be973/runtimes/codex/app-server-client';
+import { codexSession } from '../../vendor/oar/7dc98e0/runtimes/codex/session';
+import * as projection from '../../vendor/oar/7dc98e0/runtimes/codex/projection';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/7dc98e0/runtimes/codex/app-server-client';
 
-function fakeServer() {
+function fakeServer(openReply: Record<string, unknown> = {}) {
   let receive!: (line: string) => void;
   const exitHandlers: Array<(code: number | null) => void> = [];
   let resolveExit!: (code: number | null) => void;
@@ -16,7 +16,7 @@ function fakeServer() {
       const frame = JSON.parse(line); writes.push(frame);
       if (typeof frame.method !== 'string' || frame.id === undefined) return;
       const result = frame.method === 'thread/start' || frame.method === 'thread/resume'
-        ? { thread: { id: 'thread-root' }, model: 'model', reasoningEffort: null }
+        ? { thread: { id: 'thread-root' }, model: 'model', reasoningEffort: null, ...openReply }
         : frame.method === 'turn/start' ? { turn: { id: 'turn-root' } } : {};
       receive(JSON.stringify({ id: frame.id, result }));
     }),
@@ -40,6 +40,67 @@ describe('unconnected OAR Codex adapter', () => {
     expect(fake.spawn.mock.calls[0]![1]).toContain('sandbox_mode="danger-full-access"');
     expect(Object.keys(session).sort()).toEqual(['abort','capabilities','dispose','graph','id','prompt','queue','rawEvents','records','steer'].sort());
     await session.dispose(); expect(fake.child.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes launch arguments to the owned spawn without adding them to records', async () => {
+    const fake = fakeServer();
+    const launchArgs = ['-c', 'service_tier="fast"'];
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home' }, launchArgs,
+    });
+    expect(fake.spawn.mock.calls[0]![1]).toEqual([
+      'app-server', '-c', 'sandbox_mode="danger-full-access"', ...launchArgs, '--listen', 'stdio://',
+    ]);
+    expect(fake.spawn.mock.calls[0]![2]).toEqual({ cwd: '/workspace', env: { HOME: '/home' } });
+    expect(JSON.stringify(session.records())).not.toContain('service_tier="fast"');
+    await session.dispose();
+  });
+
+  it.each([
+    { resume: undefined, serviceTier: 'priority', nativeTier: 'priority' },
+    { resume: 'thread-root', serviceTier: 'priority', nativeTier: 'priority' },
+    { resume: undefined, serviceTier: 'default', nativeTier: null },
+    { resume: 'thread-root', serviceTier: 'default', nativeTier: null },
+  ])('verifies service tier $serviceTier on open with resume=$resume and folds native updates', async ({ resume, serviceTier, nativeTier }) => {
+    const fake = fakeServer({ serviceTier: nativeTier });
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home' }, serviceTier, ...(resume === undefined ? {} : { resume }),
+    });
+    const method = resume === undefined ? 'thread/start' : 'thread/resume';
+    expect(fake.writes.find(frame => frame.method === method)?.params).toMatchObject({ serviceTier });
+    expect(session.records()).toContainEqual(expect.objectContaining({
+      kind: 'frame', body: expect.objectContaining({ type: method, events: expect.arrayContaining([{ kind: 'service_tier', serviceTier }]) }),
+    }));
+    fake.frame({ method: 'thread/settings/updated', params: { threadId: 'thread-root', threadSettings: { serviceTier: null } } });
+    expect(session.records().at(-1)).toMatchObject({ kind: 'frame', body: { events: [{ kind: 'service_tier', serviceTier: 'default' }] } });
+    await session.dispose();
+  });
+
+  it.each([{ serviceTier: 'flex' }, {}])('kills the owned process if the requested tier is substituted or unreported: %j', async openReply => {
+    const fake = fakeServer(openReply);
+    await expect(codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home' }, serviceTier: 'priority',
+    })).rejects.toThrow('although priority was requested');
+    expect(fake.child.kill).toHaveBeenCalledTimes(1);
+    await fake.child.exited;
+  });
+
+  it('names an unconfirmed tier when the native open RPC fails and releases the process', async () => {
+    const fake = fakeServer();
+    const write = vi.mocked(fake.child.write).getMockImplementation()!;
+    vi.mocked(fake.child.write).mockImplementation(line => {
+      const frame = JSON.parse(line);
+      if (frame.method === 'thread/start') {
+        fake.frame({ id: frame.id, error: { code: -32602, message: 'unsupported tier' } });
+      } else {
+        write(line);
+      }
+    });
+    await expect(codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home' }, serviceTier: 'priority',
+    })).rejects.toThrow('serviceTier priority could not be confirmed (actual unreported): unsupported tier');
+    expect(fake.child.kill).toHaveBeenCalledTimes(1);
+    await fake.child.exited;
   });
 
   it('preserves native facts before derived readings and keeps child completion separate from root controls', async () => {

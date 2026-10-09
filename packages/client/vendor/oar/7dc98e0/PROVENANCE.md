@@ -1,6 +1,6 @@
-# OAR 98be973 private runtime fork
+# OAR 7dc98e0 private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.44.0, fixed commit `98be973dea8e7f745507ab4039059f9bac6c2ee4`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.45.1, fixed commit `7dc98e08f9c0ba99158ddada29cb0d4c80ef7dc6`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
 `source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 35 source files plus LICENSE. Twenty-nine source files keep upstream bytes. Six source files contain BYOK changes. The added files are imports of the selected contracts, the Codex fold and the Codex session, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls. No Cursor, ACP, CLI, arena, executable manager or branded resources are included.
 
@@ -160,3 +160,17 @@ Eleven selected paths changed upstream. Seven new dependencies enter the invento
 - `runtimes/codex/session.ts` takes the input-delivery fold, the steer acceptance record and the tool denials. `options.env` stays a complete string environment, so no value is a null removal. Steer keeps caller-owned image admission. `resources` is omitted. The bridge type check names it as an intentional omission.
 
 `shared/environment.ts` is not vendored. The other 18 selected paths have the same upstream bytes.
+
+## 0.44.0 → 0.45.1 re-vendor
+
+The new base is tag v0.45.1, commit `7dc98e08f9c0ba99158ddada29cb0d4c80ef7dc6`.
+Eight selected paths changed upstream. The inventory stays at 35 source files and LICENSE, with six maintained files.
+
+- `contracts/records.ts`, `contracts/session-options.ts`, `contracts/session.ts` and `runtimes/codex/projection.ts` keep upstream bytes. They add `launchArgs`, `serviceTier`, the `service_tier` event and the derived Session query type.
+- `runtimes/codex/app-server-client.ts` takes host launch arguments after the sandbox config overrides and before `--listen`. The injected spawn still receives only the explicit environment and cwd; it owns process creation, stderr and tree termination.
+- `runtimes/codex/open.ts` takes service-tier params on both start and resume, verifies the native reply, and records native tier evidence. Null means `default`; an absent field is no evidence. The BYOK approval policy stays.
+- `runtimes/codex/rpc-control.ts` names a requested tier when the thread open fails. `runtimes/codex/session.ts` passes the launch args and requested tier through these seams. The caller-selected sandbox and ownership/adoption wait stay.
+
+The other 27 selected source paths have the same upstream bytes. The upstream executable diagnostics, model lister and observe modules remain outside the selected closure. In particular, 0.45.1's concurrent-message observe fix does not enter this raw adapter. BYOK's private JS/declaration bridge exposes neither new option; ordinary SDK task launches and native event projection keep their existing behavior.
+
+Build assets copy this source's LICENSE, PROVENANCE.md and source-manifest.json to `dist/assets/provenance/oar/7dc98e0/`.
