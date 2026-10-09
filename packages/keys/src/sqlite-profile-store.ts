@@ -294,6 +294,10 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
     }
     this.#database = openSqliteDatabase(options.path, {
       readOnly: options.readOnly ?? false,
+      validateSchema: (database) => {
+        const existing = database.prepare("SELECT 1 FROM sqlite_master WHERE name = 'provider_profile'").get();
+        if (existing !== undefined) assertProviderProfileSchemaIsCurrent(database, options.path);
+      },
     });
     if (!options.readOnly) {
       try {

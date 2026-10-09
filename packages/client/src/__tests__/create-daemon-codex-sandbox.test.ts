@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CodexAdapterOptions } from '../adapters/codex/codex-adapter';
-import { createDaemon, type DaemonConfig } from '../daemon/create-daemon';
+import { createDaemon, createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
 
 /**
  * `DaemonConfig.codexSandbox` mirrors OAR's `OAR_CODEX_SANDBOX` for the
@@ -53,5 +53,18 @@ describe('DaemonConfig.codexSandbox', () => {
     expect(() => createDaemon(config({ codexSandbox: codexSandbox as never }))).toThrow(TypeError);
     expect(() => createDaemon(config({ codexSandbox: codexSandbox as never }))).toThrow(/DaemonConfig\.codexSandbox must be one of/);
     expect(constructed).toHaveLength(0);
+  });
+});
+
+
+describe('injected adapter sandbox configuration', () => {
+  it.each(['inherit', 'read-only', 'invalid', null, undefined])('rejects an explicit codexSandbox (%j)', (codexSandbox) => {
+    expect(() => createDaemonWithAdapters(config({ codexSandbox: codexSandbox as never }), []))
+      .toThrow(/codexSandbox.*createDaemon.*adapter/i);
+    expect(constructed).toHaveLength(0);
+  });
+
+  it('accepts injected adapters when no default-adapter option is present', () => {
+    expect(() => createDaemonWithAdapters(config(), [])).not.toThrow();
   });
 });

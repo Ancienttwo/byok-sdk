@@ -23,7 +23,7 @@ import officialClosure from '../adapters/pi/official-pi-closure.json';
  * 3. No trace of the refused graph: `ajv`, `pi-coding-agent`, `@earendil-works`,
  *    `jiti`, `photon`, `@modelcontextprotocol/client`.
  * 4. Every static import specifier is a node builtin, `@byok-sdk/core`,
- *    `@byok-sdk/protocol`, or a relative path.
+ *    `@byok-sdk/protocol`, its schema-free preparation version entry, or a relative path.
  *
  * Rules 1-4 are applied to the guarded entry AND to every file it reaches by a
  * relative import that resolves inside `dist/`, each visited once, so a shared
@@ -102,7 +102,7 @@ const GUARDED: readonly { readonly file: string; readonly allowedSubstrings: rea
 ];
 
 /** The only bare specifiers a guarded entry may statically import. */
-const ALLOWED_BARE_IMPORTS = new Set(['@byok-sdk/core', '@byok-sdk/protocol']);
+const ALLOWED_BARE_IMPORTS = new Set(['@byok-sdk/core', '@byok-sdk/protocol', '@byok-sdk/protocol/input-preparation-version']);
 
 const FORBIDDEN_SUBSTRINGS = [
   'ajv',

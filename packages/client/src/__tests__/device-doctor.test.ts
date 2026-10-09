@@ -37,6 +37,7 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  await store.credentials.clear();
   await fs.rm(root, { recursive: true, force: true });
 });
 

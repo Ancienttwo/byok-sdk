@@ -569,10 +569,12 @@ export declare class SqliteUnavailableError extends Error {
  *   file needs a newer build).
  * - `SQLITE_MIGRATION_REFUSED`: the selected migration would lose durable
  *   authority; preserve the file for reconciliation.
+ * - `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: pending mailbox rows do not use
+ *   the current wire major. Drain with the previous SDK before upgrading.
  * - `SQLITE_SCHEMA_INVALID`: the file contradicts its declared BYOK schema or
  *   is not a BYOK database.
  */
-export type SqliteSchemaErrorCode = 'SQLITE_SCHEMA_UNSUPPORTED' | 'SQLITE_MIGRATION_REFUSED' | 'SQLITE_SCHEMA_INVALID';
+export type SqliteSchemaErrorCode = 'SQLITE_SCHEMA_UNSUPPORTED' | 'SQLITE_MIGRATION_REFUSED' | 'SQLITE_SCHEMA_INVALID' | 'SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED';
 export declare class SqliteSchemaError extends Error {
     readonly code: SqliteSchemaErrorCode;
     /** The stored `schema_version`; `undefined` when the file has none. */

@@ -449,6 +449,8 @@ export interface DaemonConfig {
    * as OAR's `OAR_CODEX_SANDBOX`. Default `danger-full-access`. `inherit`
    * passes no sandbox override, so the user's own `config.toml` applies.
    * `createDaemon` throws a TypeError for any other value.
+   * `createDaemonWithAdapters` rejects this key, even when undefined.
+   * Configure the injected CodexAdapter with its own sandbox option.
    */
   codexSandbox?: CodexSandboxSetting;
   /**
@@ -1273,6 +1275,9 @@ export function createDaemonWithAdapters(
   adapters: RuntimeAdapter[],
   overrides: DaemonOverrides = {},
 ): Daemon {
+  if (Object.hasOwn(config, 'codexSandbox')) {
+    throw new TypeError('DaemonConfig.codexSandbox is only supported by createDaemon; configure the injected Codex adapter directly');
+  }
   return buildDaemonWithAdapters(config, adapters, overrides);
 }
 
@@ -4148,5 +4153,5 @@ export function buildDaemonWithAdapters(
  */
 export function createDaemon(config: DaemonConfig): Daemon {
   if (config.codexSandbox !== undefined) assertCodexSandboxSetting(config.codexSandbox, 'DaemonConfig.codexSandbox');
-  return createDaemonWithAdapters(config, buildDefaultAdapters(config));
+  return buildDaemonWithAdapters(config, buildDefaultAdapters(config));
 }

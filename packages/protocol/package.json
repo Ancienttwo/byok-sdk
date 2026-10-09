@@ -25,7 +25,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./input-preparation-version": {
+      "types": "./dist/input-preparation-version.d.ts",
+      "import": "./dist/input-preparation-version.js"
+    }
   },
   "files": [
     "dist",

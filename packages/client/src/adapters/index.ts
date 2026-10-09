@@ -38,3 +38,5 @@ export type {
   NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason,
   NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode,
 } from '../native-interactions';
+
+export { buildRuntimeEnv } from '../daemon/environment';

@@ -393,6 +393,13 @@ and artifacts go to the Host as is; the SDK does not filter, redact or omit
 them. Reliable events are fsynced under
 the canonical Agent home and retire only after an exact ack.
 
+Device credentials belong to the OS user and `productId`. All `storeDir` values
+for that product share one OS credential entry. A new directory does not create
+an unpaired device. Before replacing server state, stop all daemons for that
+product and unpair with the old configuration (`byok-agent unpair --config <path>`).
+Alternatively, use a new `productId` for an independent enrollment. Unpair clears
+the shared credential for every directory of that product.
+
 Hosts that need cold setup or diagnostic state use
 `readDeviceEnrollmentStatus({ productId, storeDir })`. It validates the
 complete SDK-owned record but returns only `unpaired`, `paired` with
@@ -601,3 +608,16 @@ stop or stdin EOF terminates it. Neither pause nor a new dialog recalls already
 admitted work. Runtime/grants remain separate from the native Codex session.
 
 MIT licensed. Node.js 24.15.0 or newer.
+
+### Direct adapter environments
+
+Hosts that use `@byok-sdk/client/adapters` can import `buildRuntimeEnv` from that
+entry. Pass `buildRuntimeEnv({ ambient: process.env })` as the operation's `env`.
+It copies the environment and removes `CLAUDECODE` and `BYOK_*`. It retains
+loader variables such as `NODE_OPTIONS`, `LD_*`, and `DYLD_*`, as required by
+ADR-037. Direct adapters use the environment supplied by the Host. The builder
+uses case-insensitive names on Windows.
+
+`codexSandbox` belongs to `createDaemon`, which builds the default adapters.
+`createDaemonWithAdapters` rejects that key. Set `sandbox` on the injected
+`CodexAdapter` instead.

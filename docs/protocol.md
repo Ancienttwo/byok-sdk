@@ -2487,3 +2487,29 @@ null occupancy stays unknown. On the prepared Pi lane, Host `pi_model`
 configuration is the context window authority even if runtime stats differ.
 Historical v1 envelopes remain readable and unchanged; older consumers ignore
 these optional fields.
+
+## SQLite startup check for wire-major upgrades
+
+The embedded server checks every pending mailbox row when it opens SQLite.
+A non-v2 major, missing major, or malformed JSON causes `SqliteSchemaError` with
+code `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`. SQLite schema version 4 alone does
+not prove that the pending wire rows use v2. Retained `acked` and `expired` rows
+do not block startup. The check does not change or retire mailbox rows.
+
+Before upgrading, stop new dispatch and let the previous server and clients
+finish and acknowledge their pending rows. On an offline copy, check:
+
+```sql
+SELECT tenant_id, device_id, seq, message_id
+FROM mailbox_message
+WHERE state = 'pending'
+  AND CASE WHEN json_valid(body)
+    THEN json_type(body, '$.v') IS NOT 'integer' OR json_extract(body, '$.v') <> 2
+    ELSE 1 END;
+```
+
+An empty result confirms only the envelope-major check. It does not prove full
+payload validity or task completion. If rows remain, preserve the database and
+finish the drain with the previous SDK. Do not delete rows to force startup.
+A fresh server database needs fresh device enrollment. Changing only the client
+`storeDir` keeps the OS credential for the same `productId`.

@@ -44,7 +44,8 @@ import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
  */
 
 import { createHash } from 'node:crypto';
-import { INPUT_PREPARATION_WIRE_VERSION, type PreparedAgentMemoryMode } from '@byok-sdk/protocol';
+import { INPUT_PREPARATION_WIRE_VERSION } from '@byok-sdk/protocol/input-preparation-version';
+import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 
 // ---------------------------------------------------------------------------
 // Format identifiers

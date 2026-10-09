@@ -100,7 +100,10 @@ export function isSqliteAvailable(): boolean {
  */
 export function openSqliteDatabase(
   path: string,
-  options?: DatabaseSyncOptions,
+  options?: DatabaseSyncOptions & {
+    /** Validate existing authority before persistent pragmas or caller DDL. */
+    validateSchema?: (database: DatabaseSync) => void;
+  },
   faults?: SqliteOpenFaultSeam,
 ): DatabaseSync {
   const { DatabaseSync } = loadSqliteModule();
@@ -108,12 +111,14 @@ export function openSqliteDatabase(
   if (path !== ':memory:' && !readOnly) {
     mkdirSync(dirname(path), { mode: SECURE_DIR_MODE, recursive: true });
   }
+  const { validateSchema, ...databaseOptions } = options ?? {};
   const database = new DatabaseSync(path, {
     timeout: DEFAULT_BUSY_TIMEOUT_MS,
-    ...options,
+    ...databaseOptions,
   });
   try {
     faults?.onStep?.('after-open');
+    validateSchema?.(database);
     if (path !== ':memory:' && !readOnly) {
       database.exec('PRAGMA journal_mode = WAL');
       faults?.onStep?.('after-wal');

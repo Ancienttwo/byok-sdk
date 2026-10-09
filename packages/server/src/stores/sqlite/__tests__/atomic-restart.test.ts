@@ -121,7 +121,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
       proposedMessageId: 'cancel-restart',
       reason: 'restart proof',
       materialize: async (seq, messageId) => ({
-        body: JSON.stringify({ seq, messageId }),
+        body: JSON.stringify({ v: 2, id: messageId, seq, ts: '2026-01-01T00:00:00.000Z', type: 'task.cancel', task_id: 'task-restart', payload: { reason: 'restart proof' } }),
         bodyHash: contentHash(`sha256:${'b'.repeat(64)}`),
         byteSize: 42n,
       }),
