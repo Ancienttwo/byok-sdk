@@ -6,6 +6,7 @@ import {
   type TerminalInferenceUsage,
   type TerminalPreparedObservation,
   type TerminalAgentHomeProjection,
+  type TerminalAgentHomeMemoryChange,
   type TaskFailPayload,
 } from '@byok-sdk/protocol';
 import { ByokCloudError } from './errors';
@@ -49,6 +50,13 @@ export interface TerminalResult {
    * when the home had no applied projection.
    */
   readonly agentHomeProjection?: TerminalAgentHomeProjection;
+  /**
+   * Memory-change evidence of a `memory-reader` Attempt, verbatim from the
+   * winning terminal: whether `MEMORY.md` or `notes/` changed while the reader
+   * ran, and which files. Absent for a writer Attempt, for a claimed failure
+   * before the Attempt became active, and for an older daemon.
+   */
+  readonly agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
   readonly summary?: string;
   /**
    * The runtime's closing reply, verbatim `task.complete.finalMessage`. Absent
@@ -114,6 +122,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         state: 'complete',
         ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
         ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
+        ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
         summary: envelope.payload.summary,
         ...(envelope.payload.finalMessage === undefined ? {} : { finalMessage: envelope.payload.finalMessage }),
         sessionRef: envelope.payload.sessionRef,
@@ -134,6 +143,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         state: 'failed',
         ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
         ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
+        ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
         ...(envelope.payload.recovery === undefined ? {} : { recovery: envelope.payload.recovery }),
         reason: envelope.payload.reason,
         terminalCause: envelope.payload.reason,
@@ -170,6 +180,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         state: 'cancelled',
         ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
         ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
+        ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
         ...(envelope.payload.reason !== undefined ? { reason: envelope.payload.reason } : {}),
         ...(envelope.payload.reason === undefined ? {} : { terminalCause: envelope.payload.reason }),
         ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),

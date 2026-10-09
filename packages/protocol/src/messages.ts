@@ -327,6 +327,20 @@ export const TaskOfferWithToolsetsPayloadSchema = TaskOfferPayloadSchema.extend(
 export type TaskOfferWithToolsetsPayload = z.infer<typeof TaskOfferWithToolsetsPayloadSchema>;
 
 /**
+ * How an Agent Attempt uses its Agent home. `memory-reader` runs the Attempt
+ * in its own run directory, `<home>/.byok/runs/<taskId>/`, beside other
+ * reader Attempts and at most one writer Attempt. The home stays an ancestor
+ * of that cwd, so the runtime still finds the persona and memory. Absent means
+ * a writer: the Attempt runs in the canonical home, and one home has at most
+ * one writer at a time. The SDK does not make memory read-only; a reader
+ * terminal reports memory changes in `agentHomeMemoryChange`. A host sends this
+ * field only to a device that advertises `agent-home-readers`: the Agent
+ * offers are strict, so an older daemon cannot accept it.
+ */
+export const AgentHomeAccessSchema = z.literal('memory-reader');
+export type AgentHomeAccess = z.infer<typeof AgentHomeAccessSchema>;
+
+/**
  * Strict additive offer for a durable host-owned Agent. An older daemon that
  * does not advertise `agent-home-contract` skips this distinct message type
  * instead of stripping identity and applying legacy workspace semantics.
@@ -335,6 +349,7 @@ export const TaskOfferForAgentPayloadSchema = z
   .object({
     instruction: z.union([z.string(), InstructionBlobRefSchema]),
     agentRef: AgentRefSchema,
+    homeAccess: AgentHomeAccessSchema.optional(),
     requiredToolsets: RequiredToolsetsSchema.optional(),
     runtime: RuntimeIdSchema.optional(),
     harnessId: HarnessIdSchema.optional(),
@@ -1196,6 +1211,45 @@ export const TerminalAgentHomeProjectionSchema = z
   .strict();
 export type TerminalAgentHomeProjection = z.infer<typeof TerminalAgentHomeProjectionSchema>;
 
+/** Maximum memory files one reader digest covers: `MEMORY.md` plus every entry under `notes/`. */
+export const AGENT_HOME_MEMORY_DIGEST_MAX_FILES = 256;
+/** Maximum bytes of memory files one reader digest reads. */
+export const AGENT_HOME_MEMORY_DIGEST_MAX_BYTES = 16 * 1024 * 1024;
+/** Maximum length of one changed memory path, relative to the Agent home. */
+export const AGENT_HOME_MEMORY_PATH_MAX_LENGTH = 1024;
+
+const AgentHomeMemoryChangedPathsSchema = z
+  .array(z.string().min(1).max(AGENT_HOME_MEMORY_PATH_MAX_LENGTH).regex(/^[^\u0000]+$/u))
+  .min(1)
+  // A path can leave one digest and another can enter the other one.
+  .max(AGENT_HOME_MEMORY_DIGEST_MAX_FILES * 2);
+
+/**
+ * Memory-change evidence of one `memory-reader` Attempt. The device hashes
+ * `MEMORY.md` and every file under `notes/` when the reader starts and again
+ * at its terminal, and compares the two digests.
+ *
+ * - `unchanged`: the digests are equal.
+ * - `reader-attributed`: the digests differ and no writer Attempt of the home
+ *   overlapped this reader. A reader Attempt changed memory: this one, or
+ *   another reader that overlapped it.
+ * - `unattributed`: the digests differ and a writer Attempt overlapped this
+ *   reader, so the change has no single source.
+ * - `unmeasured`: the digest bound was exceeded, or a read failed.
+ *
+ * `paths` lists the changed files relative to the home, with `/` separators.
+ * The device sees only Attempts it runs; a host that writes memory files
+ * itself while readers run makes the attribution ambiguous. Absent on writer
+ * terminals and on a claimed failure before the Attempt became active.
+ */
+export const TerminalAgentHomeMemoryChangeSchema = z.discriminatedUnion('outcome', [
+  z.object({ outcome: z.literal('unchanged') }).strict(),
+  z.object({ outcome: z.literal('reader-attributed'), paths: AgentHomeMemoryChangedPathsSchema }).strict(),
+  z.object({ outcome: z.literal('unattributed'), paths: AgentHomeMemoryChangedPathsSchema }).strict(),
+  z.object({ outcome: z.literal('unmeasured') }).strict(),
+]);
+export type TerminalAgentHomeMemoryChange = z.infer<typeof TerminalAgentHomeMemoryChangeSchema>;
+
 /**
  * daemon -> server: task finished successfully.
  *
@@ -1247,6 +1301,7 @@ export const TaskCompletePayloadSchema = z.object({
   preparedObservation: TerminalPreparedObservationSchema.optional(),
   agentRef: AgentRefSchema.optional(),
   agentHomeProjection: TerminalAgentHomeProjectionSchema.optional(),
+  agentHomeMemoryChange: TerminalAgentHomeMemoryChangeSchema.optional(),
 });
 export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
 
@@ -1262,6 +1317,7 @@ export const TaskFailPayloadSchema = z.object({
   preparedObservation: TerminalPreparedObservationSchema.optional(),
   agentRef: AgentRefSchema.optional(),
   agentHomeProjection: TerminalAgentHomeProjectionSchema.optional(),
+  agentHomeMemoryChange: TerminalAgentHomeMemoryChangeSchema.optional(),
 });
 export type TaskFailPayload = z.infer<typeof TaskFailPayloadSchema>;
 
@@ -1290,6 +1346,7 @@ export const TaskCancelledPayloadSchema = z.object({
   usage: TerminalInferenceUsageSchema.optional(),
   agentRef: AgentRefSchema.optional(),
   agentHomeProjection: TerminalAgentHomeProjectionSchema.optional(),
+  agentHomeMemoryChange: TerminalAgentHomeMemoryChangeSchema.optional(),
 });
 export type TaskCancelledPayload = z.infer<typeof TaskCancelledPayloadSchema>;
 

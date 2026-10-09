@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { validateAgentRef, type AgentRef } from '../agent-home';
+import { agentHomeReaderRunDirectory, validateAgentRef, type AgentRef } from '../agent-home';
 
 export type AgentTerminalCause = 'complete' | 'failed' | 'cancelled';
 
@@ -11,27 +11,47 @@ export interface AgentSessionHandoff {
   readonly taskId: string;
   readonly sessionRef: string;
   readonly runtimeId: string;
-  /** Canonical Agent home and runtime cwd; these are intentionally one value. */
+  /**
+   * Runtime cwd. For a writer session it is the canonical Agent home. For a
+   * `memory-reader` session it is the run directory `<home>/.byok/runs/<taskId>`
+   * that the first Attempt created; a resume runs there again.
+   */
   readonly cwd: string;
+  /** Present for a `memory-reader` session only; absent means a writer session. */
+  readonly homeAccess?: 'memory-reader';
   readonly leaseId: string;
   readonly terminalCause?: AgentTerminalCause;
   readonly terminalReason?: string;
   readonly updatedAt: string;
 }
 
+/**
+ * Exact session identity. Every field must match the recorded handoff,
+ * including the access mode: a reader session never resumes as a writer, and
+ * a writer session never resumes as a reader.
+ */
 export interface AgentSessionHandoffMatch {
   readonly agentRef: AgentRef;
   readonly sessionRef: string;
   readonly runtimeId: string;
+  /**
+   * Canonical Agent home. The session ledger lives in its
+   * `.byok/runtime-sessions/`. Defaults to `cwd`, which is the home of a
+   * writer session. A reader session must name it.
+   */
+  readonly home?: string;
   readonly cwd: string;
+  readonly homeAccess?: 'memory-reader';
 }
 
 export interface AgentTaskTerminalEvidence {
   readonly agentRef: AgentRef;
   readonly taskId: string;
   readonly runtimeId: string;
-  /** Canonical Agent home and sealed runtime cwd. */
+  /** Sealed runtime cwd: the canonical Agent home, or a reader's run directory. */
   readonly cwd: string;
+  /** Present for a `memory-reader` Attempt only. */
+  readonly homeAccess?: 'memory-reader';
   readonly leaseId: string;
   /** Present when adapter start succeeded but handoff persistence failed. */
   readonly sessionRef?: string;
@@ -44,7 +64,10 @@ export interface AgentTaskTerminalMatch {
   readonly agentRef: AgentRef;
   readonly taskId: string;
   readonly runtimeId: string;
+  /** Canonical Agent home, as in {@link AgentSessionHandoffMatch.home}. Defaults to `cwd`. */
+  readonly home?: string;
   readonly cwd: string;
+  readonly homeAccess?: 'memory-reader';
 }
 
 interface StoredShape extends AgentSessionHandoff {
@@ -110,6 +133,9 @@ function parseTaskTerminalEntry(value: unknown): AgentTaskTerminalEvidence {
   if (value.terminalCause !== 'failed') {
     throw new AgentSessionHandoffCorruptError('taskTerminal.terminalCause must be failed');
   }
+  if (value.homeAccess !== undefined && value.homeAccess !== 'memory-reader') {
+    throw new AgentSessionHandoffCorruptError('taskTerminal.homeAccess is invalid');
+  }
   if (Number.isNaN(Date.parse(value.updatedAt))) {
     throw new AgentSessionHandoffCorruptError('taskTerminal.updatedAt must be an ISO date');
   }
@@ -118,6 +144,7 @@ function parseTaskTerminalEntry(value: unknown): AgentTaskTerminalEvidence {
     taskId: value.taskId,
     runtimeId: value.runtimeId,
     cwd: path.resolve(value.cwd),
+    ...(value.homeAccess === undefined ? {} : { homeAccess: 'memory-reader' as const }),
     leaseId: value.leaseId,
     ...(value.sessionRef === undefined ? {} : { sessionRef: value.sessionRef }),
     terminalCause: 'failed',
@@ -166,12 +193,16 @@ function parseEntry(value: unknown): AgentSessionHandoff {
   if (value.terminalReason !== undefined && typeof value.terminalReason !== 'string') {
     throw new AgentSessionHandoffCorruptError('handoff.terminalReason must be a string');
   }
+  if (value.homeAccess !== undefined && value.homeAccess !== 'memory-reader') {
+    throw new AgentSessionHandoffCorruptError('handoff.homeAccess is invalid');
+  }
   return Object.freeze({
     agentRef,
     taskId: value.taskId,
     sessionRef: value.sessionRef,
     runtimeId: value.runtimeId,
     cwd: path.resolve(value.cwd),
+    ...(value.homeAccess === undefined ? {} : { homeAccess: 'memory-reader' as const }),
     leaseId: value.leaseId,
     ...(value.terminalCause === undefined ? {} : { terminalCause: value.terminalCause }),
     ...(value.terminalReason === undefined ? {} : { terminalReason: value.terminalReason }),
@@ -183,25 +214,55 @@ function sameRef(left: AgentRef, right: AgentRef): boolean {
   return left.agentId === right.agentId && left.profileRevision === right.profileRevision;
 }
 
-function sameMatch(entry: AgentSessionHandoff, expected: AgentSessionHandoffMatch): boolean {
+function sameMatch(
+  entry: AgentSessionHandoff,
+  expected: Omit<AgentSessionHandoffMatch, 'home'>,
+): boolean {
   return (
     sameRef(entry.agentRef, expected.agentRef) &&
     entry.sessionRef === expected.sessionRef &&
     entry.runtimeId === expected.runtimeId &&
-    entry.cwd === path.resolve(expected.cwd)
+    entry.cwd === path.resolve(expected.cwd) &&
+    entry.homeAccess === expected.homeAccess
   );
 }
 
 function sameTaskTerminalMatch(
   entry: AgentTaskTerminalEvidence,
-  expected: AgentTaskTerminalMatch,
+  expected: Omit<AgentTaskTerminalMatch, 'home'>,
 ): boolean {
   return (
     sameRef(entry.agentRef, expected.agentRef) &&
     entry.taskId === expected.taskId &&
     entry.runtimeId === expected.runtimeId &&
-    entry.cwd === path.resolve(expected.cwd)
+    entry.cwd === path.resolve(expected.cwd) &&
+    entry.homeAccess === expected.homeAccess
   );
+}
+
+/**
+ * A writer's cwd is the home itself. A reader's cwd is a direct child of
+ * `<home>/.byok/runs/`. Anything else is a caller error, never a new ledger.
+ */
+function assertCwdForAccess(home: string, cwd: string, homeAccess: 'memory-reader' | undefined): void {
+  const resolvedHome = path.resolve(home);
+  const resolvedCwd = path.resolve(cwd);
+  const valid = homeAccess === undefined
+    ? resolvedCwd === resolvedHome
+    : (() => {
+        try {
+          return agentHomeReaderRunDirectory(resolvedHome, path.basename(resolvedCwd)) === resolvedCwd;
+        } catch {
+          return false;
+        }
+      })();
+  if (!valid) {
+    throw new AgentSessionHandoffStoreError(
+      homeAccess === undefined
+        ? 'a writer Agent session cwd must be the canonical Agent home'
+        : 'a reader Agent session cwd must be a run directory under the canonical Agent home',
+    );
+  }
 }
 
 function sessionFileName(runtimeId: string, sessionRef: string): string {
@@ -216,11 +277,11 @@ function taskTerminalFileName(runtimeId: string, taskId: string): string {
   return `${runtime}-task-${digest}.jsonl`;
 }
 
-async function evidenceDirectory(cwdInput: string): Promise<string> {
-  if (!path.isAbsolute(cwdInput)) {
-    throw new AgentSessionHandoffStoreError('Agent session cwd must be absolute');
+async function evidenceDirectory(homeInput: string): Promise<string> {
+  if (!path.isAbsolute(homeInput)) {
+    throw new AgentSessionHandoffStoreError('Agent home must be absolute');
   }
-  const cwd = await fs.realpath(cwdInput);
+  const cwd = await fs.realpath(homeInput);
   let cursor = cwd;
   for (const component of ['.byok', 'runtime-sessions']) {
     cursor = path.join(cursor, component);
@@ -247,7 +308,8 @@ async function evidenceDirectory(cwdInput: string): Promise<string> {
  * home. Each session gets one hash-addressed append-only JSONL ledger under
  * `.byok/runtime-sessions/`; session text never becomes a pathname. Unlike
  * the legacy SessionWorkspaceStore, corrupt bytes are never interpreted as a
- * missing mapping.
+ * missing mapping. Reader sessions keep their ledger in the home too, not in
+ * their run directory, so a resume can find the run directory by sessionRef.
  */
 export class AgentSessionHandoffStore {
   private readonly queues = new Map<string, Promise<void>>();
@@ -278,16 +340,61 @@ export class AgentSessionHandoffStore {
     const entry = await this.get(expected);
     if (entry === undefined || !sameMatch(entry, expected)) {
       throw new AgentSessionHandoffMismatchError(
-        `Agent session handoff ${expected.sessionRef} does not match AgentRef/profileRevision/runtime/cwd exactly`,
+        `Agent session handoff ${expected.sessionRef} does not match AgentRef/profileRevision/runtime/cwd/homeAccess exactly`,
       );
     }
     return entry;
   }
 
+  /**
+   * The run directory a `memory-reader` session recorded, for its resume.
+   * Throws a mismatch when no handoff exists, when the session was recorded
+   * by a writer, or when the AgentRef or runtime differ.
+   */
+  async readerSessionCwd(
+    expected: Omit<AgentSessionHandoffMatch, 'home' | 'cwd' | 'homeAccess'> & { readonly home: string },
+  ): Promise<string> {
+    const entry = await this.get({ ...expected, cwd: expected.home, homeAccess: 'memory-reader' });
+    if (entry === undefined || entry.homeAccess !== 'memory-reader') {
+      throw new AgentSessionHandoffMismatchError(
+        `Agent session handoff ${expected.sessionRef} is not a memory-reader session`,
+      );
+    }
+    const match = { ...expected, cwd: entry.cwd, homeAccess: 'memory-reader' as const };
+    if (!sameMatch(entry, match)) {
+      throw new AgentSessionHandoffMismatchError(
+        `Agent session handoff ${expected.sessionRef} does not match AgentRef/profileRevision/runtime/cwd/homeAccess exactly`,
+      );
+    }
+    assertCwdForAccess(expected.home, entry.cwd, 'memory-reader');
+    return entry.cwd;
+  }
+
+  /**
+   * Reader run directories that session ledgers of this home point to, each
+   * with the last update time of its ledger in ms. Retention keeps these
+   * directories until the record is older than the age limit. A corrupt
+   * ledger throws, and the caller then skips retention.
+   */
+  async readerRunReferences(home: string): Promise<ReadonlyMap<string, number>> {
+    const directory = await evidenceDirectory(home);
+    const references = new Map<string, number>();
+    for (const name of await fs.readdir(directory)) {
+      if (!name.endsWith('.jsonl')) continue;
+      const filePath = path.join(directory, name);
+      const entry = await this.enqueue(filePath, () => this.loadSessionLedger(filePath));
+      if (entry?.homeAccess !== 'memory-reader') continue;
+      const updatedAt = Date.parse(entry.updatedAt);
+      references.set(entry.cwd, Math.max(references.get(entry.cwd) ?? updatedAt, updatedAt));
+    }
+    return references;
+  }
+
   /** Append-only, fsynced write. The caller awaits this before task.started. */
   async record(
-    input: Omit<AgentSessionHandoff, 'updatedAt' | 'terminalCause' | 'terminalReason'>,
+    input: Omit<AgentSessionHandoff, 'updatedAt' | 'terminalCause' | 'terminalReason'> & { readonly home?: string },
   ): Promise<AgentSessionHandoff> {
+    assertCwdForAccess(input.home ?? input.cwd, input.cwd, input.homeAccess);
     const filePath = await this.filePath(input);
     return this.enqueue(filePath, async () => {
       const prior = await this.load(filePath);
@@ -297,12 +404,13 @@ export class AgentSessionHandoffStore {
         sessionRef: input.sessionRef,
         runtimeId: input.runtimeId,
         cwd: path.resolve(input.cwd),
+        ...(input.homeAccess === undefined ? {} : { homeAccess: 'memory-reader' as const }),
         leaseId: input.leaseId,
         updatedAt: new Date().toISOString(),
       });
       if (prior !== undefined && !sameMatch(prior, next)) {
         throw new AgentSessionHandoffMismatchError(
-          `session ${input.sessionRef} is already bound to a different AgentRef/profileRevision/runtime/cwd`,
+          `session ${input.sessionRef} is already bound to a different AgentRef/profileRevision/runtime/cwd/homeAccess`,
         );
       }
       await this.append(filePath, { version: 1, ...next });
@@ -343,13 +451,16 @@ export class AgentSessionHandoffStore {
    * `task.fail`, so cloud state can never outrun the Agent-local evidence.
    */
   async recordTaskTerminal(
-    input: Omit<AgentTaskTerminalEvidence, 'updatedAt' | 'terminalCause'>,
+    input: Omit<AgentTaskTerminalEvidence, 'updatedAt' | 'terminalCause'> & { readonly home?: string },
   ): Promise<AgentTaskTerminalEvidence> {
+    assertCwdForAccess(input.home ?? input.cwd, input.cwd, input.homeAccess);
     const expected: AgentTaskTerminalMatch = {
       agentRef: validateAgentRef(input.agentRef),
       taskId: input.taskId,
       runtimeId: input.runtimeId,
+      ...(input.home === undefined ? {} : { home: input.home }),
       cwd: path.resolve(input.cwd),
+      ...(input.homeAccess === undefined ? {} : { homeAccess: input.homeAccess }),
     };
     const filePath = await this.taskTerminalFilePath(expected);
     return this.enqueue(filePath, async () => {
@@ -359,8 +470,9 @@ export class AgentSessionHandoffStore {
           `task ${input.taskId} terminal evidence is bound to a different AgentRef/profileRevision/runtime/cwd`,
         );
       }
+      const { home: _home, ...identity } = expected;
       const next = Object.freeze({
-        ...expected,
+        ...identity,
         leaseId: input.leaseId,
         ...(input.sessionRef === undefined ? {} : { sessionRef: input.sessionRef }),
         terminalCause: 'failed' as const,
@@ -377,7 +489,9 @@ export class AgentSessionHandoffStore {
       agentRef: validateAgentRef(expectedInput.agentRef),
       taskId: expectedInput.taskId,
       runtimeId: expectedInput.runtimeId,
+      ...(expectedInput.home === undefined ? {} : { home: expectedInput.home }),
       cwd: path.resolve(expectedInput.cwd),
+      ...(expectedInput.homeAccess === undefined ? {} : { homeAccess: expectedInput.homeAccess }),
     };
     const filePath = await this.taskTerminalFilePath(expected);
     return this.enqueue(filePath, async () => {
@@ -391,11 +505,13 @@ export class AgentSessionHandoffStore {
     });
   }
 
-  private async filePath(match: AgentSessionHandoffMatch): Promise<string> {
+  private async filePath(
+    match: Pick<AgentSessionHandoffMatch, 'agentRef' | 'sessionRef' | 'runtimeId' | 'home' | 'cwd'>,
+  ): Promise<string> {
     validateAgentRef(match.agentRef);
     assertNonEmptyString(match.sessionRef, 'handoff.sessionRef');
     assertNonEmptyString(match.runtimeId, 'handoff.runtimeId');
-    const directory = await evidenceDirectory(match.cwd);
+    const directory = await evidenceDirectory(match.home ?? match.cwd);
     return path.join(directory, sessionFileName(match.runtimeId, match.sessionRef));
   }
 
@@ -403,7 +519,7 @@ export class AgentSessionHandoffStore {
     validateAgentRef(match.agentRef);
     assertNonEmptyString(match.taskId, 'taskTerminal.taskId');
     assertNonEmptyString(match.runtimeId, 'taskTerminal.runtimeId');
-    const directory = await evidenceDirectory(match.cwd);
+    const directory = await evidenceDirectory(match.home ?? match.cwd);
     return path.join(directory, taskTerminalFileName(match.runtimeId, match.taskId));
   }
 
@@ -420,6 +536,27 @@ export class AgentSessionHandoffStore {
 
   private async load(filePath: string): Promise<AgentSessionHandoff | undefined> {
     return (await this.loadAll(filePath)).at(-1);
+  }
+
+  /**
+   * The latest session entry of one ledger file, or `undefined` for a
+   * task-terminal evidence file. The two file kinds share one directory, and
+   * a runtime id can make their names look alike, so the record kind decides.
+   */
+  private async loadSessionLedger(filePath: string): Promise<AgentSessionHandoff | undefined> {
+    let first: unknown;
+    try {
+      const raw = await fs.readFile(filePath, 'utf8');
+      const line = raw.split('\n').find((candidate) => candidate.length > 0);
+      if (line === undefined) return undefined;
+      first = JSON.parse(line) as unknown;
+    } catch (error) {
+      throw new AgentSessionHandoffCorruptError(
+        `Agent session evidence is unreadable: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (isRecord(first) && first.kind === 'task-terminal') return undefined;
+    return this.load(filePath);
   }
 
   private async loadAll(filePath: string): Promise<AgentSessionHandoff[]> {

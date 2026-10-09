@@ -67,6 +67,7 @@ import {
   AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY,
   AGENT_CONTENT_WORKSPACE_READ_CAPABILITY,
   AGENT_HOME_PROJECTION_CAPABILITY,
+  AGENT_HOME_READERS_CAPABILITY,
   AGENT_INPUT_PREPARATION_CAPABILITY,
   PROVIDER_PROVISIONING_CAPABILITY,
   AGENT_MEMORY_INTENT_CAPABILITY,
@@ -1907,6 +1908,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
       ...(input.payload.messageEgress === undefined ? [] : [AGENT_MESSAGE_EGRESS_CAPABILITY]),
       ...(input.payload.terminalProjection === undefined ? [] : [TERMINAL_PROJECTION_SELECTION_CAPABILITY]),
+      ...(input.payload.homeAccess === undefined ? [] : [AGENT_HOME_READERS_CAPABILITY]),
     ]);
     const payload = TaskOfferForAgentWithEgressFreshPayloadSchema.parse(input.payload);
     const enqueued = await enqueueTaskEnvelope(
@@ -1948,6 +1950,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       await assertAgentCapabilities(tenant, deviceId, [
         AGENT_HOME_CONTRACT_CAPABILITY,
         ...(input.payload.terminalProjection === undefined ? [] : [TERMINAL_PROJECTION_SELECTION_CAPABILITY]),
+        ...(input.payload.homeAccess === undefined ? [] : [AGENT_HOME_READERS_CAPABILITY]),
       ]);
       // Parse the strict control payload before reserving a mailbox sequence.
       // A malformed/oversized AgentRef therefore cannot leave a durable
@@ -1967,6 +1970,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
         ...(input.payload.messageEgress === undefined ? [] : [AGENT_MESSAGE_EGRESS_CAPABILITY]),
         ...(input.payload.terminalProjection === undefined ? [] : [TERMINAL_PROJECTION_SELECTION_CAPABILITY]),
+        ...(input.payload.homeAccess === undefined ? [] : [AGENT_HOME_READERS_CAPABILITY]),
       ]);
       // Parsed before a mailbox sequence is reserved, exactly as the strict
       // Agent offer above is: a malformed preparation reference must not leave
@@ -1987,6 +1991,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
         ...(input.payload.messageEgress === undefined ? [] : [AGENT_MESSAGE_EGRESS_CAPABILITY]),
         ...(input.payload.terminalProjection === undefined ? [] : [TERMINAL_PROJECTION_SELECTION_CAPABILITY]),
+        ...(input.payload.homeAccess === undefined ? [] : [AGENT_HOME_READERS_CAPABILITY]),
       ]);
       const payload = TaskOfferForAgentWithEgressPayloadSchema.parse(input.payload);
       const enqueued = await enqueueTaskEnvelope(

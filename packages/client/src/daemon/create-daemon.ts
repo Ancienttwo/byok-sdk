@@ -23,6 +23,7 @@ import {
   AGENT_MESSAGE_EGRESS_CAPABILITY,
   HOST_MCP_TASK_CONTEXT_CAPABILITY,
   AGENT_HOME_PROJECTION_CAPABILITY,
+  AGENT_HOME_READERS_CAPABILITY,
   AGENT_INPUT_PREPARATION_CAPABILITY,
   TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   PROVIDER_PROFILE_BINDING_CAPABILITY,
@@ -159,7 +160,7 @@ import {
 } from './journal/storage-policy';
 import { DEFAULT_MAX_INLINE_EVENT_BYTES, MIN_MAX_INLINE_EVENT_BYTES } from './event-spill';
 import {
-  DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME,
+  DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME,
   DEFAULT_MAX_TASK_OUTPUT_BYTES,
   TaskRunner,
   type ResultDocumentExtractor,
@@ -354,25 +355,26 @@ export interface DaemonConfig {
    */
   strictAgentOnly?: boolean;
   /**
-   * WP0: how many Attempts this daemon lets execute CONCURRENTLY in one
-   * canonical Agent home, across every lane and every session. Default
-   * {@link DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME} (1).
+   * How many `homeAccess: 'memory-reader'` Attempts this daemon lets run
+   * CONCURRENTLY in one canonical Agent home, across every lane and every
+   * session. Default {@link DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME} (4).
    *
-   * The canonical home is every Agent session's cwd, so each concurrent
-   * Attempt in it is another writer of the same `MEMORY.md`, `notes/` and
-   * `.git`. At the default, a second offer for a home that already has an
-   * active Attempt is declined retryably before adapter preparation, the
-   * claim, or any process side effect — the busy-home contract downstream
-   * hosts already depend on.
+   * Readers are counted apart from the writer. A home has at most one writer
+   * Attempt, fixed: the writer runs in the home itself, so a second writer
+   * would co-write `MEMORY.md`, `notes/` and `.git`. Each reader runs in its
+   * own run directory, `<home>/.byok/runs/<taskId>/`. An offer over either
+   * limit is declined retryably before adapter preparation, the claim, or any
+   * process side effect.
    *
-   * Raising it above 1 is an explicit host choice that re-enables the
-   * 0.12.0 concurrent-session behaviour, including its co-writing exposure;
-   * the SDK never falls back to it on its own. Validated up front, the same
-   * way `maxTaskOutputBytes` is: a positive safe integer, so `0`, a negative
-   * number, `NaN` and a non-integer are construction errors rather than a
-   * silently reinterpreted "unlimited".
+   * Validated up front, the same way `maxTaskOutputBytes` is: a positive safe
+   * integer, so `0`, a negative number, `NaN` and a non-integer are
+   * construction errors rather than a silently reinterpreted "unlimited".
+   *
+   * The removed `maxConcurrentMutableSessionsPerAgentHome` is a construction
+   * error: a value above 1 let Attempts co-write one home, which reader
+   * Attempts replace.
    */
-  maxConcurrentMutableSessionsPerAgentHome?: number;
+  maxConcurrentReaderAttemptsPerAgentHome?: number;
   /**
    * Explicit Agent-local/cloud egress selection. Omission still enforces the
    * SDK metadata/status projection, but does not advertise or admit the new
@@ -1083,7 +1085,7 @@ function computeCapabilities(
   if (adapters.some((adapter) => adapter.descriptor.capabilities.mcpToolsets === true)) {
     flags.push('toolset-selection');
   }
-  if (agentHomeConfigured) flags.push('agent-home-contract');
+  if (agentHomeConfigured) flags.push('agent-home-contract', AGENT_HOME_READERS_CAPABILITY);
   if (strictAgentOnly) flags.push(STRICT_AGENT_ONLY_CAPABILITY);
   if (agentHomeProjectionConfigured) flags.push(AGENT_HOME_PROJECTION_CAPABILITY);
   // Advertised only by a daemon whose `inputPreparation` section is present
@@ -1408,19 +1410,24 @@ export function buildDaemonWithAdapters(
   // something the first offer discovers — and there is no
   // `Number.POSITIVE_INFINITY` opt-out here: "no cap" is exactly the
   // co-writing state this exists to prevent.
+  if (Object.prototype.hasOwnProperty.call(config, 'maxConcurrentMutableSessionsPerAgentHome')) {
+    throw new Error(
+      'DaemonConfig.maxConcurrentMutableSessionsPerAgentHome was removed. A home has one writer Attempt; send concurrent tasks as homeAccess: \'memory-reader\' offers and set maxConcurrentReaderAttemptsPerAgentHome to limit them.',
+    );
+  }
   if (
-    config.maxConcurrentMutableSessionsPerAgentHome !== undefined
-    && !(Number.isSafeInteger(config.maxConcurrentMutableSessionsPerAgentHome)
-      && config.maxConcurrentMutableSessionsPerAgentHome > 0)
+    config.maxConcurrentReaderAttemptsPerAgentHome !== undefined
+    && !(Number.isSafeInteger(config.maxConcurrentReaderAttemptsPerAgentHome)
+      && config.maxConcurrentReaderAttemptsPerAgentHome > 0)
   ) {
     throw new Error(
-      `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome must be a positive safe integer (or omitted to use the default of ${DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME}) — got ${config.maxConcurrentMutableSessionsPerAgentHome}. Raising it above 1 lets that many Attempts co-write one canonical Agent home; 0, a negative number, NaN, or a non-integer is rejected rather than silently treated as "uncapped".`,
+      `DaemonConfig.maxConcurrentReaderAttemptsPerAgentHome must be a positive safe integer (or omitted to use the default of ${DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME}) — got ${config.maxConcurrentReaderAttemptsPerAgentHome}. 0, a negative number, NaN, or a non-integer is rejected rather than silently treated as "uncapped".`,
     );
   }
   // Resolved exactly once so the admission gate and the status readback below
   // can never report different numbers.
-  const agentHomeAttemptLimit = config.maxConcurrentMutableSessionsPerAgentHome
-    ?? DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME;
+  const agentHomeReaderLimit = config.maxConcurrentReaderAttemptsPerAgentHome
+    ?? DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME;
   const egressPolicy = resolveAgentEgressPolicy(config.agentEgress?.policy);
   const egressBatcherOptions: ProgressBatcherOptions | undefined = config.agentEgress === undefined
     ? config.progressBatch
@@ -2264,8 +2271,8 @@ export function buildDaemonWithAdapters(
       ...(config.workspaceRoot === undefined ? {} : { workspaceRoot: config.workspaceRoot }),
       ...(agentHomeManager === undefined ? {} : { agentHome: agentHomeManager }),
       ...(config.strictAgentOnly === true ? { strictAgentOnly: true } : {}),
-      // WP0: already validated up front — see `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome`.
-      maxConcurrentMutableSessionsPerAgentHome: agentHomeAttemptLimit,
+      // Already validated up front — see `DaemonConfig.maxConcurrentReaderAttemptsPerAgentHome`.
+      maxConcurrentReaderAttemptsPerAgentHome: agentHomeReaderLimit,
       ...(agentSessionHandoffs === undefined ? {} : { agentSessionHandoffs }),
       deviceId: record.deviceId,
       getMcpToolsets: () => toolsetRegistry.snapshot().toolsets,
@@ -4086,9 +4093,10 @@ export function buildDaemonWithAdapters(
   function agentHomeExecutionStatus(): AgentHomeExecutionStatus {
     const summary = agentHomeManager?.executionLeaseManager.activeAttemptSummary();
     return {
-      maxConcurrentMutableSessionsPerAgentHome: agentHomeAttemptLimit,
+      maxConcurrentReaderAttemptsPerAgentHome: agentHomeReaderLimit,
       activeHomes: summary?.homes ?? 0,
       activeAttempts: summary?.attempts ?? 0,
+      activeReaderAttempts: summary?.readerAttempts ?? 0,
     };
   }
 

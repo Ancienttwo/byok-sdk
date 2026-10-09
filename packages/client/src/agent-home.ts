@@ -11,6 +11,13 @@ import {
 } from '@byok-sdk/protocol';
 import { atomicWriteFile } from './util/atomic-write';
 import {
+  AGENT_HOME_READER_RUN_MAX_RETAINED,
+  AGENT_HOME_READER_RUNS_DIRECTORY,
+  isReaderRunName,
+  pruneReaderRuns,
+  type AgentHomeAccessMode,
+} from './agent-home-readers';
+import {
   acquirePathMutationGate,
   PathMutationGateBusyError,
   type PathMutationGate,
@@ -57,6 +64,18 @@ export class AgentHomeBusyError extends AgentHomeError {
   }
 }
 
+/**
+ * A resumed reader session's run directory is gone, for example after
+ * retention removed it. The SDK does not create a new directory for an old
+ * session, so the offer is declined without retry.
+ */
+export class AgentHomeReaderRunMissingError extends AgentHomeError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AgentHomeReaderRunMissingError';
+  }
+}
+
 /** A malformed persisted lease is integrity failure, never retryable contention. */
 export class AgentHomeLeaseCorruptError extends AgentHomeResolutionError {
   constructor(message: string) {
@@ -71,12 +90,16 @@ export interface AgentHomeResolution {
   readonly hostStorageRoot: string;
   /** SDK-owned `<hostStorageRoot>/agents` authority, after realpath. */
   readonly agentsRoot: string;
-  /** Canonical absolute Agent home. This is also the runtime cwd. */
+  /**
+   * Canonical absolute Agent home. It is the runtime cwd of a writer Attempt;
+   * a memory-reader Attempt runs in its run directory under this home.
+   */
   readonly homeDir: string;
   readonly canonicalHome: string;
 }
 
 export interface AgentHomeProjectionInput extends AgentHomeResolution {
+  /** Runtime cwd: the home for a writer, the run directory for a memory-reader. */
   readonly cwd: string;
 }
 
@@ -92,7 +115,13 @@ export interface AgentHomeProjectionApplyInput extends AgentHomeProjectionInput 
  * `agents/<agentId>` itself. The SDK does not parse the projected content.
  */
 export interface AgentHomeProjection {
-  /** Optional creation/task-time host preparation retained as a distinct lifecycle. */
+  /**
+   * Optional creation/task-time host preparation retained as a distinct
+   * lifecycle. It runs at every Attempt start under that Attempt's execution
+   * lease. For a memory-reader Attempt, `cwd` is the run directory, and the
+   * one writer of the home can be running at the same time, so a hook that
+   * changes home files must tolerate a concurrent writer.
+   */
   prepare?(input: AgentHomeProjectionInput): void | Promise<void>;
   /**
    * Task-free opaque desired-state consumer. It must atomically and
@@ -121,8 +150,18 @@ export interface AgentHomeBinding {
 }
 
 export interface AgentHomeExecutionLease extends AgentHomeLease {
+  /**
+   * `memory-writer` runs in the canonical home. `memory-reader` runs in its
+   * own run directory, `<home>/.byok/runs/<name>`, which is then `cwd`.
+   */
+  readonly homeAccess: AgentHomeAccessMode;
   /** Fresh tasks are task-keyed until the runtime returns its durable session id. */
   bindSession(sessionRef: string): Promise<void>;
+  /**
+   * Whether a writer Attempt of the same home was active at any time while
+   * this lease was held. Meaningful for a reader lease only.
+   */
+  writerOverlapped(): boolean;
 }
 
 export interface AgentHomeExecutionBinding {
@@ -616,19 +655,36 @@ export class AgentHomeLeaseManager {
  * status (`create-daemon.ts`).
  */
 export interface AgentHomeExecutionStatus {
-  /** Effective `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome` for this daemon. */
-  maxConcurrentMutableSessionsPerAgentHome: number;
+  /** Effective `DaemonConfig.maxConcurrentReaderAttemptsPerAgentHome`. A home always has at most one writer. */
+  maxConcurrentReaderAttemptsPerAgentHome: number;
   /** Canonical Agent homes this daemon currently holds at least one execution lease in. */
   activeHomes: number;
-  /** Total Attempts holding an execution lease across those homes. */
+  /** Total Attempts, writers and readers, holding an execution lease across those homes. */
   activeAttempts: number;
+  /** The `memory-reader` Attempts among `activeAttempts`. */
+  activeReaderAttempts: number;
+}
+
+interface AgentHomeExecutionEntry {
+  readonly leaseId: string;
+  readonly homeAccess: AgentHomeAccessMode;
+  readonly cwd: string;
+  writerOverlapped: boolean;
 }
 
 interface AgentHomeExecutionGroup {
   readonly manager: AgentHomeLeaseManager;
   readonly baseLease: AgentHomeLease;
   readonly agentId: string;
-  readonly leasesByKey: Map<string, string>;
+  readonly leasesByKey: Map<string, AgentHomeExecutionEntry>;
+}
+
+/** The run directory of one reader Attempt: a direct child of `<home>/.byok/runs/`. */
+export function agentHomeReaderRunDirectory(canonicalHome: string, name: string): string {
+  if (!isReaderRunName(name)) {
+    throw new AgentHomeResolutionError('reader run directory name must be one plain path segment');
+  }
+  return path.join(canonicalHome, AGENT_HOME_INTERNAL_DIRECTORY, AGENT_HOME_READER_RUNS_DIRECTORY, name);
 }
 
 function executionKey(input: { readonly taskId: string; readonly sessionRef?: string }): string {
@@ -648,8 +704,13 @@ function executionKey(input: { readonly taskId: string; readonly sessionRef?: st
  * This layer counts; it does not cap. How many Attempts may be active in one
  * canonical home is a daemon admission decision made once, before any side
  * effect, by `TaskRunner.handleOffer`'s per-home busy gate reading
- * {@link AgentHomeExecutionLeaseManager.activeAttemptCount} against
- * `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome` (default 1).
+ * {@link AgentHomeExecutionLeaseManager.activeAttemptCount} per access mode:
+ * one writer, and `DaemonConfig.maxConcurrentReaderAttemptsPerAgentHome`
+ * readers (default 4).
+ *
+ * A writer lease's cwd is the canonical home. A reader lease's cwd is its own
+ * run directory, which the caller names. A reader lease records whether a
+ * writer lease of the same home overlapped it, for memory-change evidence.
  */
 export class AgentHomeExecutionLeaseManager {
   private static readonly groups = new Map<string, AgentHomeExecutionGroup>();
@@ -659,9 +720,21 @@ export class AgentHomeExecutionLeaseManager {
 
   async acquire(
     resolution: AgentHomeResolution,
-    input: { readonly taskId: string; readonly sessionRef?: string },
+    input: {
+      readonly taskId: string;
+      readonly sessionRef?: string;
+      readonly homeAccess?: AgentHomeAccessMode;
+      /** Required for a reader: its run directory under this home. */
+      readonly cwd?: string;
+    },
   ): Promise<AgentHomeExecutionLease> {
     const initialKey = executionKey(input);
+    const homeAccess = input.homeAccess ?? 'memory-writer';
+    const cwd = homeAccess === 'memory-writer' ? resolution.canonicalHome : input.cwd;
+    if (cwd === undefined || (homeAccess === 'memory-reader'
+      && cwd !== agentHomeReaderRunDirectory(resolution.canonicalHome, path.basename(cwd)))) {
+      throw new AgentHomeResolutionError('a reader execution lease needs a run directory under its Agent home');
+    }
     return this.exclusive(resolution.canonicalHome, async () => {
       let group = AgentHomeExecutionLeaseManager.groups.get(resolution.canonicalHome);
       if (group === undefined) {
@@ -681,7 +754,17 @@ export class AgentHomeExecutionLeaseManager {
       }
 
       const leaseId = randomUUID();
-      group.leasesByKey.set(initialKey, leaseId);
+      const others = [...group.leasesByKey.values()];
+      if (homeAccess === 'memory-writer') {
+        for (const other of others) if (other.homeAccess === 'memory-reader') other.writerOverlapped = true;
+      }
+      const entry: AgentHomeExecutionEntry = {
+        leaseId,
+        homeAccess,
+        cwd,
+        writerOverlapped: homeAccess === 'memory-reader' && others.some((other) => other.homeAccess === 'memory-writer'),
+      };
+      group.leasesByKey.set(initialKey, entry);
       let currentKey = initialKey;
       let sessionBound = input.sessionRef !== undefined;
       let released = false;
@@ -689,14 +772,16 @@ export class AgentHomeExecutionLeaseManager {
         leaseId,
         agentRef: resolution.agentRef,
         canonicalHome: resolution.canonicalHome,
-        cwd: resolution.canonicalHome,
+        cwd,
+        homeAccess,
         homeIdentity: group.baseLease.homeIdentity,
+        writerOverlapped: (): boolean => entry.writerOverlapped,
         bindSession: async (sessionRef: string): Promise<void> => {
           const nextKey = executionKey({ taskId: input.taskId, sessionRef });
           await this.exclusive(resolution.canonicalHome, async () => {
             if (released) throw new AgentHomeBusyError(`Agent execution lease ${leaseId} is already released`);
             const currentGroup = AgentHomeExecutionLeaseManager.groups.get(resolution.canonicalHome);
-            if (currentGroup !== group || currentGroup.leasesByKey.get(currentKey) !== leaseId) {
+            if (currentGroup !== group || currentGroup.leasesByKey.get(currentKey) !== entry) {
               throw new AgentHomeBusyError(`Agent execution lease ${leaseId} is no longer owned by this process`);
             }
             if (nextKey === currentKey) return;
@@ -708,7 +793,7 @@ export class AgentHomeExecutionLeaseManager {
             if (currentGroup.leasesByKey.has(nextKey)) {
               throw new AgentHomeBusyError(`Agent session already has an active execution lease in ${resolution.canonicalHome}`);
             }
-            currentGroup.leasesByKey.set(nextKey, leaseId);
+            currentGroup.leasesByKey.set(nextKey, entry);
             currentGroup.leasesByKey.delete(currentKey);
             currentKey = nextKey;
             sessionBound = true;
@@ -718,7 +803,7 @@ export class AgentHomeExecutionLeaseManager {
           await this.exclusive(resolution.canonicalHome, async () => {
             if (released) return;
             const currentGroup = AgentHomeExecutionLeaseManager.groups.get(resolution.canonicalHome);
-            if (currentGroup !== group || currentGroup.leasesByKey.get(currentKey) !== leaseId) {
+            if (currentGroup !== group || currentGroup.leasesByKey.get(currentKey) !== entry) {
               released = true;
               throw new AgentHomeBusyError(`Agent execution lease ${leaseId} is no longer owned by this process`);
             }
@@ -735,9 +820,9 @@ export class AgentHomeExecutionLeaseManager {
   }
 
   /**
-   * WP0: Attempts currently holding an execution lease on this exact
-   * canonical home, across every lane and every session. This is the number
-   * the daemon's admission gate reads before any side effect — see
+   * WP0: Attempts of one access mode currently holding an execution lease on
+   * this exact canonical home, across every lane and every session. This is
+   * the number the daemon's admission gate reads before any side effect — see
    * `TaskRunner.handleOffer`'s per-home busy gate.
    *
    * Derived from the one lease registry above rather than a second tally, so
@@ -754,8 +839,30 @@ export class AgentHomeExecutionLeaseManager {
    * being protected is the filesystem path (`MEMORY.md`, `notes/`, `.git`),
    * not the owner identity.
    */
-  activeAttemptCount(canonicalHome: string): number {
-    return AgentHomeExecutionLeaseManager.groups.get(canonicalHome)?.leasesByKey.size ?? 0;
+  activeAttemptCount(canonicalHome: string, homeAccess: AgentHomeAccessMode): number {
+    let count = 0;
+    for (const entry of AgentHomeExecutionLeaseManager.groups.get(canonicalHome)?.leasesByKey.values() ?? []) {
+      if (entry.homeAccess === homeAccess) count += 1;
+    }
+    return count;
+  }
+
+  /** How many active reader leases of this home use `cwd` as their run directory. */
+  activeReaderRunHolders(canonicalHome: string, cwd: string): number {
+    let holders = 0;
+    for (const entry of AgentHomeExecutionLeaseManager.groups.get(canonicalHome)?.leasesByKey.values() ?? []) {
+      if (entry.homeAccess === 'memory-reader' && entry.cwd === cwd) holders += 1;
+    }
+    return holders;
+  }
+
+  /** Run directories that active reader Attempts of this home use; retention never removes them. */
+  activeReaderRunDirectories(canonicalHome: string): ReadonlySet<string> {
+    const directories = new Set<string>();
+    for (const entry of AgentHomeExecutionLeaseManager.groups.get(canonicalHome)?.leasesByKey.values() ?? []) {
+      if (entry.homeAccess === 'memory-reader') directories.add(entry.cwd);
+    }
+    return directories;
   }
 
   /**
@@ -763,21 +870,24 @@ export class AgentHomeExecutionLeaseManager {
    * own leases, so the number describes this daemon rather than every home
    * any manager in the process happens to hold. Never exposes a home path.
    */
-  activeAttemptSummary(): { readonly homes: number; readonly attempts: number } {
+  activeAttemptSummary(): { readonly homes: number; readonly attempts: number; readonly readerAttempts: number } {
     let homes = 0;
     let attempts = 0;
+    let readerAttempts = 0;
     for (const group of AgentHomeExecutionLeaseManager.groups.values()) {
       if (group.manager !== this.manager) continue;
       homes += 1;
       attempts += group.leasesByKey.size;
+      for (const entry of group.leasesByKey.values()) if (entry.homeAccess === 'memory-reader') readerAttempts += 1;
     }
-    return { homes, attempts };
+    return { homes, attempts, readerAttempts };
   }
 
   async mutate<T>(binding: AgentHomeExecutionBinding, operation: () => Promise<T>): Promise<T> {
     return this.exclusive(binding.resolution.canonicalHome, async () => {
       const group = AgentHomeExecutionLeaseManager.groups.get(binding.resolution.canonicalHome);
-      if (group === undefined || group.manager !== this.manager || ![...group.leasesByKey.values()].includes(binding.lease.leaseId)) {
+      if (group === undefined || group.manager !== this.manager
+        || ![...group.leasesByKey.values()].some((entry) => entry.leaseId === binding.lease.leaseId)) {
         throw new AgentHomeBusyError('Agent execution lease does not own this home mutation');
       }
       return operation();
@@ -941,13 +1051,107 @@ export class AgentHomeManager {
     return Object.freeze({ resolution, lease });
   }
 
+  /**
+   * A writer runs in the canonical home. A fresh reader runs in
+   * `<home>/.byok/runs/<taskId>/`. A resumed reader passes the run directory
+   * its session handoff recorded, as `runDirectory`.
+   */
   async acquireExecution(
     agentRef: AgentRef,
-    input: { readonly taskId: string; readonly sessionRef?: string },
+    input: {
+      readonly taskId: string;
+      readonly sessionRef?: string;
+      readonly homeAccess?: AgentHomeAccessMode;
+      readonly runDirectory?: string;
+    },
   ): Promise<AgentHomeExecutionBinding> {
     const resolution = await this.layout.resolve(agentRef);
-    const lease = await this.executionLeaseManager.acquire(resolution, input);
+    const homeAccess = input.homeAccess ?? 'memory-writer';
+    const lease = await this.executionLeaseManager.acquire(resolution, {
+      taskId: input.taskId,
+      ...(input.sessionRef === undefined ? {} : { sessionRef: input.sessionRef }),
+      homeAccess,
+      ...(homeAccess === 'memory-writer' ? {} : {
+        cwd: input.runDirectory ?? agentHomeReaderRunDirectory(resolution.canonicalHome, input.taskId),
+      }),
+    });
     return Object.freeze({ resolution, lease });
+  }
+
+  /**
+   * Prepares the run directory of a reader lease under the home's execution
+   * queue. A fresh reader first applies retention, then creates its own
+   * directory. A redelivered offer can find the directory that an earlier
+   * start of the same task created before a crash: the start reuses it when
+   * it is a real, empty directory that no other active reader holds, and
+   * throws {@link AgentHomeBusyError} otherwise, so two tasks never share a
+   * directory. A resumed reader requires its recorded directory to exist and
+   * throws {@link AgentHomeReaderRunMissingError} when it does not.
+   *
+   * Retention never removes the directory of an active reader.
+   * `referencedRuns` maps run directories to the last update time of the
+   * reader session handoff that points to them; `undefined` skips retention
+   * for this start. A retention failure does not block the Attempt: it is
+   * returned as `retentionError`.
+   */
+  async prepareReaderRun(
+    binding: AgentHomeExecutionBinding,
+    input: { readonly fresh: boolean; readonly referencedRuns?: ReadonlyMap<string, number>; readonly nowMs: number },
+  ): Promise<{ readonly retentionError?: unknown }> {
+    const { resolution, lease } = binding;
+    if (lease.homeAccess !== 'memory-reader') throw new AgentHomeError('only a reader execution lease has a run directory');
+    return this.mutateExecution(binding, async () => {
+      if (!input.fresh) {
+        const stat = await fs.lstat(lease.cwd).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return undefined;
+          throw error;
+        });
+        if (stat === undefined) throw new AgentHomeReaderRunMissingError('the reader run directory of this session no longer exists');
+        if (!stat.isDirectory() || stat.isSymbolicLink()) {
+          throw new AgentHomeResolutionError('the reader run directory is not a real directory');
+        }
+        if (await fs.realpath(lease.cwd) !== lease.cwd) {
+          throw new AgentHomeResolutionError('the reader run directory resolves through a symlink');
+        }
+        return {};
+      }
+      const runsRoot = await ensureDirectoryNoSymlink(resolution.canonicalHome, path.dirname(lease.cwd));
+      let retentionError: unknown;
+      if (input.referencedRuns !== undefined) {
+        await pruneReaderRuns({
+          runsRoot,
+          active: this.executionLeaseManager.activeReaderRunDirectories(resolution.canonicalHome),
+          referenced: input.referencedRuns,
+          nowMs: input.nowMs,
+          // Leave room for the directory this start creates next.
+          maxRetained: AGENT_HOME_READER_RUN_MAX_RETAINED - 1,
+        }).catch((error: unknown) => { retentionError = error; });
+      }
+      const created = await fs.mkdir(lease.cwd, { mode: 0o700 }).then(() => true, (error: NodeJS.ErrnoException) => {
+        if (error.code === 'EEXIST') return false;
+        throw error;
+      });
+      if (!created) await this.assertReusableReaderRun(binding);
+      if (await fs.realpath(lease.cwd) !== lease.cwd) {
+        throw new AgentHomeResolutionError('the reader run directory changed through a symlink while it was created');
+      }
+      return retentionError === undefined ? {} : { retentionError };
+    });
+  }
+
+  /** A fresh reader may reuse only a real, empty run directory that no other active reader holds. */
+  private async assertReusableReaderRun(binding: AgentHomeExecutionBinding): Promise<void> {
+    const { resolution, lease } = binding;
+    const stat = await fs.lstat(lease.cwd);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || await fs.realpath(lease.cwd) !== lease.cwd) {
+      throw new AgentHomeBusyError('the reader run directory of this task exists and is not a real directory');
+    }
+    if (this.executionLeaseManager.activeReaderRunHolders(resolution.canonicalHome, lease.cwd) > 1) {
+      throw new AgentHomeBusyError('another active reader holds the run directory of this task');
+    }
+    if ((await fs.readdir(lease.cwd)).length > 0) {
+      throw new AgentHomeBusyError('the reader run directory of this task exists and is not empty');
+    }
   }
 
   /** Initialize only after any requested session exact-match has succeeded. */

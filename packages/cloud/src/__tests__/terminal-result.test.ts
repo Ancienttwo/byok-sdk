@@ -180,6 +180,28 @@ describe('readTaskResult', () => {
     expect(bare && Object.hasOwn(bare, 'agentHomeProjection')).toBe(false);
   });
 
+  it('projects reader memory-change evidence verbatim from complete, fail and cancelled terminals', async () => {
+    const attributed = { outcome: 'reader-attributed' as const, paths: ['MEMORY.md', 'notes/plan.md'] };
+    const completed = await readyTask();
+    await handleInboundEnvelope(stores, deviceId, createEnvelope('task.complete', {
+      summary: 's', sessionRef: 'reader-session', agentHomeMemoryChange: attributed,
+    }, { taskId: completed }));
+    expect((await harness.cloud.readTaskResult(TENANT_A, completed))?.agentHomeMemoryChange).toEqual(attributed);
+
+    const failed = await readyTask();
+    await handleInboundEnvelope(stores, deviceId, createEnvelope('task.fail', {
+      reason: 'runtime crashed', retryable: false, agentHomeMemoryChange: { outcome: 'unmeasured' },
+    }, { taskId: failed }));
+    expect((await harness.cloud.readTaskResult(TENANT_A, failed))?.agentHomeMemoryChange).toEqual({ outcome: 'unmeasured' });
+
+    const cancelled = await readyTask();
+    await handleInboundEnvelope(stores, deviceId, createEnvelope('task.cancelled', {
+      agentHomeMemoryChange: { outcome: 'unattributed', paths: ['notes/a.md'] },
+    }, { taskId: cancelled }));
+    expect((await harness.cloud.readTaskResult(TENANT_A, cancelled))?.agentHomeMemoryChange)
+      .toEqual({ outcome: 'unattributed', paths: ['notes/a.md'] });
+  });
+
   it('leaves document ABSENT — not null, not synthesized — for a legacy completed terminal', async () => {
     const taskId = await readyTask();
     await handleInboundEnvelope(
@@ -194,6 +216,7 @@ describe('readTaskResult', () => {
     expect(result && Object.hasOwn(result, 'document')).toBe(false);
     expect(result && Object.hasOwn(result, 'finalMessage')).toBe(false);
     expect(result && Object.hasOwn(result, 'agentHomeProjection')).toBe(false);
+    expect(result && Object.hasOwn(result, 'agentHomeMemoryChange')).toBe(false);
     expect(result && Object.hasOwn(result, 'usage')).toBe(false);
   });
 
