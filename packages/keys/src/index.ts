@@ -180,6 +180,16 @@ export type {
 } from './registry';
 
 export {
+  PI_AUTH_NONE_API_KEY,
   PI_PROJECTED_KEY_ENV,
   buildPiProviderProjection,
 } from './pi-provider-projection';
+
+export {
+  parsePiProviderLauncherOptions,
+  runPiProviderLauncher,
+} from './pi-provider-launcher-core';
+export type {
+  PiProviderLauncherHost,
+  PiProviderLauncherOptions,
+} from './pi-provider-launcher-core';

@@ -39,6 +39,27 @@
   interpreter + bundle host and from a Bun-compiled host against a loopback
   provider. The spec and client README now state this as the supported way to
   ship pi; the stale `BYOK_PI_BIN` sidecar text is removed.
+- **Added (keys)** — `runPiProviderLauncher(options, { createSecretStore })`
+  and `parsePiProviderLauncherOptions` are public (#323). A host that stores
+  keys with its own options, for example a macOS `storagePrefix`, builds its
+  own launcher executable with its own `SecretStore`. The entry keeps the
+  exact profile checks, the custody lock and the pending-change refusal. The
+  bundled `byok-pi-provider-launcher` now uses this entry; its flags and
+  behavior do not change.
+- **Fixed (keys)** — the Pi projection of an `anthropic` profile no longer
+  sends Pi to `/v1/v1/messages` (#324). The projected `baseUrl` is the keys
+  client endpoint `modelApiUrl(base_url, 'messages')` without the
+  `/v1/messages` suffix that Pi appends. Catalog profiles need no change. An
+  Anthropic profile whose endpoint does not end in `/v1/messages` (for
+  example `base_url: 'https://api.anthropic.com'`) now fails Pi admission with
+  `PROVIDER_URL_INVALID`; set `base_url` to the `/v1` form.
+- **Fixed (keys)** — an `auth_mode: 'none'` profile now runs through the
+  `pi-rpc` entry (#325). The projection sets the fixed, non-secret `apiKey`
+  `PI_AUTH_NONE_API_KEY` (`byok-sdk-auth-none`), because Pi refuses a request
+  without a key. The endpoint receives `authorization: Bearer
+  byok-sdk-auth-none`. The `pi-durable` entry now refuses a keyless profile at
+  admission with `PROVIDER_PROFILE_INVALID`, as `pi-prepared` already did.
+  Before, it failed in the worker after the child started.
 
 ## 0.25.0 / @byok-sdk/keys 0.10.0 - 2026-10-09
 

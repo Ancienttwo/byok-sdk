@@ -64,7 +64,8 @@ Three consequences hold today and are the package's standing constraints:
 2. `@byok-sdk/keys` is outside the scope of the M5 credential-isolation claim.
    Installing it is opting into a package that holds a provider API key, and
    that choice is yours, not something the dispatch SDK does on your behalf.
-3. The optional `byok-pi-provider-launcher` is the only supported composition
+3. The optional `byok-pi-provider-launcher`, or a host launcher built on
+   `runPiProviderLauncher`, is the only supported composition
    with agent dispatch. It receives non-secret provider/model ids and paths,
    opens the already-provisioned profile database read-only, reads the OS
    credential only when the selected profile requires one — under the store's
@@ -256,6 +257,56 @@ revision/hash, model, and required capabilities. A validation-only invocation
 checks the read-only SQLite authority before task claim; the launch invocation
 checks the same fields again before reading the OS credential or spawning Pi.
 
+## Pi provider launcher
+
+The bundled `byok-pi-provider-launcher` reads keys from the platform OS store
+with the default storage options. A host that stores keys with other options
+(for example a macOS `storagePrefix` or `account`) builds its own launcher
+executable on the same custody code, and points the client
+`piByokLauncher.command` at it:
+
+```ts
+import {
+  MacOsKeychainSecretStore,
+  parsePiProviderLauncherOptions,
+  runPiProviderLauncher,
+} from '@byok-sdk/keys';
+
+const options = parsePiProviderLauncherOptions(process.argv.slice(2));
+process.exitCode = await runPiProviderLauncher(options, {
+  createSecretStore: () => new MacOsKeychainSecretStore({
+    keychainPath: options.macosKeychainPath,
+    servicePrefix: options.secretServicePrefix,
+    storagePrefix: 'host-b64-v1:',
+  }),
+});
+```
+
+`runPiProviderLauncher` applies the same checks as the bundled executable:
+the exact profile and model, the exact binding, the runtime-entry refusals,
+the custody lock, and the pending-change refusal. It calls
+`createSecretStore` only for a profile that requires a key, and only under
+the configuration lock. It forwards SIGINT and SIGTERM to the Pi child and
+resolves with the child's exit code. The host applies `secretServicePrefix`
+and `macosKeychainPath` from the parsed options when its store uses them.
+
+The Pi projection keeps the profile URL convention of the direct clients.
+For the `anthropic` adapter, Pi's Anthropic SDK appends `/v1/messages` to the
+projected `baseUrl`. The projection therefore removes that suffix from the
+keys client endpoint `modelApiUrl(base_url, 'messages')`. A catalog
+`base_url` such as `https://api.anthropic.com/v1` projects
+`https://api.anthropic.com`. An Anthropic profile whose endpoint does not
+end in `/v1/messages` fails Pi admission with `PROVIDER_URL_INVALID`. The
+direct `AnthropicMessagesClient` still accepts it.
+
+For `auth_mode: 'none'`, the `pi-rpc` projection sets the fixed, non-secret
+`apiKey` `PI_AUTH_NONE_API_KEY` (`byok-sdk-auth-none`). Pi refuses a request
+without a key, and documents a dummy key for keyless servers. The endpoint
+therefore receives `authorization: Bearer byok-sdk-auth-none`; the launcher
+reads no credential. The `pi-prepared` and `pi-durable` entries require a
+launcher-delivered key, so a keyless profile fails their admission with
+`PROVIDER_PROFILE_INVALID` before a child starts.
+
 ## Module inventory
 
 Every module under `src/`, one line of responsibility each. The public surface is
@@ -287,8 +338,8 @@ whatever `index.ts` re-exports; nothing here is reachable by deep import.
 | `sealed-provisioning.ts` | `applySealedProviderProvisioning` — device-side validation and crash-safe commit of a sealed provisioning request |
 | `provider-key-check.ts` | `checkProviderKey` — one bounded live check with a closed-set outcome |
 | `pi-provider-projection.ts` | Credential-blind Pi `models.json` projection for one validated profile/model |
-| `pi-provider-launcher-core.ts` | Closed launcher argv contract, the custody snapshot the launcher reads its key through, and auth-mode-aware exact secret resolution |
-| `bin/pi-provider-launcher.ts` | No-listener credential-custody executable that reads the OS store and spawns pinned Pi with a private projection |
+| `pi-provider-launcher-core.ts` | Closed launcher argv contract, the public `runPiProviderLauncher` entry, the custody snapshot the launcher reads its key through, and auth-mode-aware exact secret resolution |
+| `bin/pi-provider-launcher.ts` | No-listener credential-custody executable: `runPiProviderLauncher` with the platform OS store and its default storage options |
 
 Auth modes map to headers as follows, and this mapping is the package's wire
 contract:
