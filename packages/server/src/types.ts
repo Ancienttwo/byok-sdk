@@ -207,7 +207,16 @@ export interface AgentEgressReceipt {
 /** Outcome of a task that reached a terminal state. */
 export interface TaskResult {
   state: Extract<TaskState, 'Complete' | 'Failed' | 'Cancelled'>;
+  /** Every `progress` text of the task, joined with no separator. */
   summary?: string;
+  /**
+   * The runtime's closing reply, projected verbatim from
+   * `task.complete.finalMessage`: the assistant text after the last tool
+   * interaction, or the last whole message for Codex. Read the task's final
+   * answer here; `summary` also holds commentary. Absent when the run ended
+   * with no closing text, or when the daemon build predates the field.
+   */
+  finalMessage?: string;
   sessionRef?: string;
   artifactRefs?: BlobRef[];
   reason?: string;

@@ -331,6 +331,7 @@ export {
   checkResultDocument,
   TerminalInferenceUsageSchema,
   TerminalPreparedObservationSchema,
+  TerminalAgentHomeProjectionSchema,
   TERMINAL_INFERENCE_USAGE_MAX_TOKENS,
   TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS,
   TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH,
@@ -380,6 +381,7 @@ export type {
   TaskApprovalResolvedPayload,
   TerminalInferenceUsage,
   TerminalPreparedObservation,
+  TerminalAgentHomeProjection,
 } from './messages';
 
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';

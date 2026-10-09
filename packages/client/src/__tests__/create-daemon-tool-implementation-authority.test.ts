@@ -25,7 +25,7 @@ describe('createDaemonWithAdapters: removed DaemonConfig.toolImplementationAutho
       expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter('pi', { kind: 'available' })]))
         .toThrow('DaemonConfig.toolImplementationAuthority was removed: the SDK does not attest tool or runtime executables');
     } finally {
-      await fs.rm(config.workspaceRoot, { recursive: true, force: true });
+      await fs.rm(config.workspaceRoot!, { recursive: true, force: true });
       await fs.rm(config.storeDir!, { recursive: true, force: true });
     }
   });

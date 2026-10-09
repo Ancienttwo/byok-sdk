@@ -148,7 +148,8 @@ describe('TaskRunner: result document, flag-gated send', () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0]!.finalOutput).toBe('part one, part two');
-    expect(calls[0]!.task).toEqual({ taskId: 'task-1', sessionRef: adapter.sessions[0]!.sessionRef });
+    // #322: the stub emits deltas with no tool call, so the closing reply is the whole text.
+    expect(calls[0]!.task).toEqual({ taskId: 'task-1', sessionRef: adapter.sessions[0]!.sessionRef, finalMessage: 'part one, part two' });
   });
 
   it('sends NO document when the extractor returns undefined — completion is identical to having no extractor at all', async () => {
@@ -379,7 +380,7 @@ describe('TaskRunner: result document, fail-closed branches', () => {
 });
 
 describe('TaskRunner: no extractor configured', () => {
-  it('completes byte-identically to the pre-change payload, consulting neither extractor nor capabilities', async () => {
+  it('adds no document-feature fields to the payload, consulting neither extractor nor capabilities', async () => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];
     const getServerCapabilities = vi.fn(CAPABLE);
@@ -390,7 +391,8 @@ describe('TaskRunner: no extractor configured', () => {
     const done = await waitForTerminal(sent);
     expect(done.type).toBe('task.complete');
     if (done.type !== 'task.complete') throw new Error('unreachable');
-    expect(done.payload).toEqual({ summary: 'all done', sessionRef: adapter.sessions[0]!.sessionRef });
+    // #322 adds the closing reply; the document feature still adds nothing here.
+    expect(done.payload).toEqual({ summary: 'all done', finalMessage: 'all done', sessionRef: adapter.sessions[0]!.sessionRef });
     expect('document' in done.payload).toBe(false);
     expect(getServerCapabilities).not.toHaveBeenCalled();
   });

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- **Added (protocol, client, cloud, server)** — `task.complete.finalMessage`
+  carries the runtime's closing reply. `TaskResult.finalMessage`,
+  `TerminalResult.finalMessage` and `ResultDocumentTask.finalMessage` expose
+  it. `summary` keeps the whole run's text. The Codex adapter declares
+  `progressEventsAreMessages`, so its last `agentMessage` is the closing reply
+  and earlier commentary is not part of it. A required Agent message that the
+  daemon writes for a Codex task now uses that last message too (#322).
+- **Changed (client)** — `DaemonConfig.workspaceRoot` is optional when
+  `strictAgentOnly` is true. A daemon that is not strict still fails
+  construction without it. The CLI config follows the same rule, and
+  diagnostics report `not-configured` for a strict daemon without it (#319).
+- **Added (protocol, client, cloud)** — Agent Attempt terminals carry the
+  optional `agentHomeProjection` evidence: the applied projection revision and
+  hash at Attempt start. The daemon does not compare it with the offer's
+  `profileRevision`; the host decides (#318).
+
 ## 0.25.0 / @byok-sdk/keys 0.10.0 - 2026-10-09
 
 Nine packages are published on npm's `latest` channel from `v0.25.0`

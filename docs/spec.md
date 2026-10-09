@@ -1780,7 +1780,9 @@ receipt work and do not enter `finishedTaskIds`. Agent offer variants remain
 normal. Server/cloud explicit dispatch rejects legacy work to a strict device
 before task/mailbox mutation, and implicit legacy selection skips strict
 devices. Those producer gates are scheduling defenses only; stale connections
-remain covered by the local gate.
+remain covered by the local gate. A strict daemon never reads
+`DaemonConfig.workspaceRoot`, so the field is optional there; every other
+daemon must still supply it at construction.
 
 
 ### Owned Pi RPC team member and GUI interaction

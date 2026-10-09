@@ -29,6 +29,8 @@ function blobRef(): BlobRef {
   };
 }
 
+const projectionEvidence = { profileRevision: '3', projectionHash: `sha256:${'3'.repeat(64)}` };
+
 const terminalUsage = {
   runtime: 'codex' as const,
   promptTokens: 120,
@@ -85,12 +87,13 @@ describe('readTaskResult', () => {
     const taskId = await readyTask();
     const artifactRefs = [blobRef()];
     const document = { score: 9, notes: ['tight', 'loose'] };
+    const agentHomeProjection = { profileRevision: '3', projectionHash: `sha256:${'3'.repeat(64)}` };
     const outcome = await handleInboundEnvelope(
       stores,
       deviceId,
       createEnvelope(
         'task.complete',
-        { summary: 'did the thing', sessionRef: 'session-1', artifactRefs, document, usage: terminalUsage },
+        { summary: 'Working on it.did the thing', finalMessage: 'did the thing', sessionRef: 'session-1', artifactRefs, document, usage: terminalUsage, agentHomeProjection },
         { taskId },
       ),
     );
@@ -99,7 +102,9 @@ describe('readTaskResult', () => {
     const result = await harness.cloud.readTaskResult(TENANT_A, taskId);
     expect(result?.taskId).toBe(taskId);
     expect(result?.state).toBe('complete');
-    expect(result?.summary).toBe('did the thing');
+    expect(result?.summary).toBe('Working on it.did the thing');
+    expect(result?.finalMessage).toBe('did the thing');
+    expect(result?.agentHomeProjection).toEqual(agentHomeProjection);
     expect(result?.sessionRef).toBe('session-1');
     expect(result?.artifactRefs).toEqual(artifactRefs);
     expect(result?.document).toEqual(document);
@@ -112,7 +117,7 @@ describe('readTaskResult', () => {
     const outcome = await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.fail', { reason: 'runtime crashed', retryable: true, usage: terminalUsage }, { taskId }),
+      createEnvelope('task.fail', { reason: 'runtime crashed', retryable: true, usage: terminalUsage, agentHomeProjection: projectionEvidence }, { taskId }),
     );
     expect(outcome).toBe('accepted');
 
@@ -121,6 +126,7 @@ describe('readTaskResult', () => {
     expect(result?.reason).toBe('runtime crashed');
     expect(result?.retryable).toBe(true);
     expect(result?.usage).toEqual(terminalUsage);
+    expect(result?.agentHomeProjection).toEqual(projectionEvidence);
     expect(result?.summary).toBeUndefined();
   });
 
@@ -154,12 +160,13 @@ describe('readTaskResult', () => {
     await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.cancelled', { reason: 'user asked', usage: terminalUsage }, { taskId: explained }),
+      createEnvelope('task.cancelled', { reason: 'user asked', usage: terminalUsage, agentHomeProjection: projectionEvidence }, { taskId: explained }),
     );
     const withReason = await harness.cloud.readTaskResult(TENANT_A, explained);
     expect(withReason?.state).toBe('cancelled');
     expect(withReason?.reason).toBe('user asked');
     expect(withReason?.usage).toEqual(terminalUsage);
+    expect(withReason?.agentHomeProjection).toEqual(projectionEvidence);
 
     const silent = await readyTask();
     await handleInboundEnvelope(
@@ -170,6 +177,7 @@ describe('readTaskResult', () => {
     const bare = await harness.cloud.readTaskResult(TENANT_A, silent);
     expect(bare?.state).toBe('cancelled');
     expect(bare && Object.hasOwn(bare, 'reason')).toBe(false);
+    expect(bare && Object.hasOwn(bare, 'agentHomeProjection')).toBe(false);
   });
 
   it('leaves document ABSENT — not null, not synthesized — for a legacy completed terminal', async () => {
@@ -184,6 +192,8 @@ describe('readTaskResult', () => {
     expect(result?.summary).toBe('ok');
     expect(result?.document).toBeUndefined();
     expect(result && Object.hasOwn(result, 'document')).toBe(false);
+    expect(result && Object.hasOwn(result, 'finalMessage')).toBe(false);
+    expect(result && Object.hasOwn(result, 'agentHomeProjection')).toBe(false);
     expect(result && Object.hasOwn(result, 'usage')).toBe(false);
   });
 

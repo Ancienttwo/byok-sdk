@@ -1180,6 +1180,23 @@ export const TerminalPreparedObservationSchema = z
 export type TerminalPreparedObservation = z.infer<typeof TerminalPreparedObservationSchema>;
 
 /**
+ * The task-free Agent-home projection (`agent.home_projection`) that the
+ * device had already applied when an Agent Attempt started. The writer lease
+ * keeps a new projection out of the home until the Attempt ends, so this is
+ * the persona the Attempt ran with. The SDK does not compare it with the
+ * offer's `agentRef.profileRevision`: the host decides whether a mismatch
+ * matters. Absent when the task was not Agent-bound, or when the home had no
+ * applied projection record.
+ */
+export const TerminalAgentHomeProjectionSchema = z
+  .object({
+    profileRevision: AgentHomeProjectionProfileRevisionSchema,
+    projectionHash: AgentHomeProjectionHashSchema,
+  })
+  .strict();
+export type TerminalAgentHomeProjection = z.infer<typeof TerminalAgentHomeProjectionSchema>;
+
+/**
  * daemon -> server: task finished successfully.
  *
  * `document` (additive-minor, docs/protocol.md "Freeze rule"): the OPTIONAL
@@ -1208,6 +1225,15 @@ export type TerminalPreparedObservation = z.infer<typeof TerminalPreparedObserva
 export const TaskCompletePayloadSchema = z.object({
   harnessId: HarnessIdSchema.optional(),
   summary: z.string(),
+  /**
+   * The runtime's closing reply: the assistant text after the last tool
+   * interaction, or the last whole message for a runtime whose `progress`
+   * events are whole messages (Codex). `summary` keeps the whole run's text,
+   * so a host reads the final answer here without parsing commentary out of
+   * it. Absent when the run ended with no closing text. An older server strips
+   * this optional field; the host then sees it absent and keeps `summary`.
+   */
+  finalMessage: z.string().optional(),
   sessionRef: z.string(),
   artifactRefs: z.array(BlobRefSchema).optional(),
   document: z
@@ -1220,6 +1246,7 @@ export const TaskCompletePayloadSchema = z.object({
   /** Present on a prepared Execution only — see {@link TerminalPreparedObservationSchema}. */
   preparedObservation: TerminalPreparedObservationSchema.optional(),
   agentRef: AgentRefSchema.optional(),
+  agentHomeProjection: TerminalAgentHomeProjectionSchema.optional(),
 });
 export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
 
@@ -1234,6 +1261,7 @@ export const TaskFailPayloadSchema = z.object({
   /** Present on a prepared Execution that observed provider usage before failing. */
   preparedObservation: TerminalPreparedObservationSchema.optional(),
   agentRef: AgentRefSchema.optional(),
+  agentHomeProjection: TerminalAgentHomeProjectionSchema.optional(),
 });
 export type TaskFailPayload = z.infer<typeof TaskFailPayloadSchema>;
 
@@ -1261,6 +1289,7 @@ export const TaskCancelledPayloadSchema = z.object({
   reason: z.string().optional(),
   usage: TerminalInferenceUsageSchema.optional(),
   agentRef: AgentRefSchema.optional(),
+  agentHomeProjection: TerminalAgentHomeProjectionSchema.optional(),
 });
 export type TaskCancelledPayload = z.infer<typeof TaskCancelledPayloadSchema>;
 

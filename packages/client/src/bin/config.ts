@@ -12,7 +12,7 @@ import { OFFICIAL_LOCAL_AGENT_RELEASE } from './official-release';
  * comment for the overall command/read-model design this supports.
  */
 
-const REQUIRED_FIELDS = ['productName', 'productId', 'serverUrl', 'workspaceRoot'] as const;
+const REQUIRED_FIELDS = ['productName', 'productId', 'serverUrl'] as const;
 
 /**
  * Thrown by {@link loadConfig} on a missing/unreadable/invalid config.
@@ -71,6 +71,10 @@ export function loadConfig(configPath: string | undefined, overrides: Partial<Cl
     if (!merged[field]) {
       throw new ConfigError(`config is missing required field "${field}"`);
     }
+  }
+  // A strict Agent daemon never uses workspaceRoot (DaemonConfig.workspaceRoot).
+  if (merged.strictAgentOnly !== true && !merged.workspaceRoot) {
+    throw new ConfigError('config is missing required field "workspaceRoot"');
   }
   return { ...merged, localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE } as DaemonConfig;
 }

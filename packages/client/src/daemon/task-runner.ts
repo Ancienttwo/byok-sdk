@@ -31,6 +31,7 @@ import {
   type RuntimeId,
   type TerminalInferenceUsage,
   type TerminalPreparedObservation,
+  type TerminalAgentHomeProjection,
   type TerminalProjectionSelection,
   type TaskOfferPayload,
   type TaskOfferForAgentPayload,
@@ -352,6 +353,12 @@ export interface ResultDocumentTask {
   readonly sessionRef: string;
   /** Exact offer-scoped second projection; absent for legacy and message-only offers. */
   readonly terminalProjection?: Readonly<TerminalProjectionSelection>;
+  /**
+   * The runtime's closing reply, the same text as `task.complete.finalMessage`.
+   * `finalOutput` stays the whole run's text. Absent when the run ended with
+   * no closing text.
+   */
+  readonly finalMessage?: string;
 }
 
 /**
@@ -470,7 +477,8 @@ export interface TaskRunnerDeps {
     /** `toolsetId` -> definition revision, from one registry read per call. */
     readonly toolsetDefinitionRevisions: () => ReadonlyMap<string, string>;
   };
-  workspaceRoot: string;
+  /** Parent of legacy `workspaceRoot/<taskId>` workspaces. Required unless `strictAgentOnly` is true. */
+  workspaceRoot?: string;
   /** Strict Agent offer authority. Absent means legacy offers never resolve an Agent home. */
   agentHome?: AgentHomeManager;
   /** Local authority: legacy offers are declined after journal/dedup/cancel precedence. */
@@ -732,6 +740,8 @@ interface ActiveTask {
     runtimeId: string;
     cwd: string;
   };
+  /** The task-free projection applied when this Agent Attempt started; see `TerminalAgentHomeProjectionSchema`. */
+  appliedAgentHomeProjection?: TerminalAgentHomeProjection;
   terminalCause?: AgentTerminalCause;
   terminalReason?: string;
   agentTerminalPersisted?: boolean;
@@ -749,6 +759,12 @@ interface ActiveTask {
    * what the DAEMON-authored required Agent message publishes, so the
    * user-visible reply is the model's closing answer rather than its
    * intermediate narration ("let me read X first…") glued in front of it.
+   *
+   * The same slice is `task.complete.finalMessage` and the extractor's
+   * `ResultDocumentTask.finalMessage`, so the host reads the same closing reply
+   * the daemon would publish. An adapter whose descriptor sets
+   * `progressEventsAreMessages` (Codex) also resets it at each `progress`
+   * event, so the slice is that runtime's last whole message.
    *
    * `turn_end` deliberately does not reset (it is what reads this), and
    * neither does `usage`: bundled adapters emit terminal usage IMMEDIATELY
@@ -861,6 +877,12 @@ interface QueuedApprovalRequest {
 type PickResult =
   | { ok: true; adapter: RuntimeAdapter; descriptor: RuntimeAdapterDescriptor }
   | { ok: false; reason: string; retryable: boolean };
+
+/** The closing reply (`ActiveTask.finalTextParts`), or `undefined` when it holds only whitespace. */
+function closingReply(active: ActiveTask): string | undefined {
+  const text = active.finalTextParts.join('');
+  return text.trim() === '' ? undefined : text;
+}
 
 /**
  * M5 (claimed runtime): `RuntimeAdapter.descriptor.id` is a bare `string` (`../types.ts`)
@@ -1414,7 +1436,17 @@ export class TaskRunner {
    */
   private stoppingOffers = false;
 
-  constructor(private readonly deps: TaskRunnerDeps) {}
+  constructor(private readonly deps: TaskRunnerDeps) {
+    if (deps.strictAgentOnly !== true && (typeof deps.workspaceRoot !== 'string' || deps.workspaceRoot === '')) {
+      throw new Error('TaskRunnerDeps.workspaceRoot is required unless strictAgentOnly is true');
+    }
+  }
+
+  /** A legacy offer's workspace. Only a non-strict runner admits one, and its constructor required the root. */
+  private legacyWorkspaceDir(taskId: string): string {
+    if (this.deps.workspaceRoot === undefined) throw new Error('legacy workspace requested from a strict Agent-only runner');
+    return path.join(this.deps.workspaceRoot, taskId);
+  }
 
   get activeTaskCount(): number {
     return this.tasks.size + this.startupOwners.size;
@@ -2373,6 +2405,7 @@ export class TaskRunner {
       let gitBaseline: string | undefined;
       let gitExisting = false;
       let plainWorkspaceNeedsResolve = false;
+      let appliedAgentHomeProjection: TerminalAgentHomeProjection | undefined;
       if (agentBinding !== undefined) {
         workspaceDir = agentBinding.lease.cwd;
         if (sessionRef !== undefined) {
@@ -2398,6 +2431,12 @@ export class TaskRunner {
           decline(`Agent home initialization failed: ${errorMessage(error)}`, false);
           return;
         }
+        // Terminal evidence only (#318): an unreadable projection record must not
+        // block an Attempt that ran before this evidence existed, so omit it.
+        appliedAgentHomeProjection = await this.deps.agentHome!.readAppliedProjection(agentBinding).catch((error: unknown) => {
+          console.warn(`[byok/client] Agent-home projection record is unreadable for ${taskId}; terminal evidence omits it: ${errorMessage(error)}`);
+          return undefined;
+        });
         if (messageRequirement !== undefined) {
           try {
             const outbox = await this.agentMessageOutbox(agentBinding.resolution.canonicalHome);
@@ -2441,7 +2480,7 @@ export class TaskRunner {
             return;
           }
         } else {
-          workspaceDir = path.join(this.deps.workspaceRoot, taskId);
+          workspaceDir = this.legacyWorkspaceDir(taskId);
           gitWorkspaceId = randomUUID();
         }
         try {
@@ -2452,7 +2491,7 @@ export class TaskRunner {
         }
       } else if (!this.deps.gitWorkspaceManager && !this.deps.gitWorkspaceStore) {
         known = sessionRef ? await this.deps.sessionWorkspaces.get(sessionRef) : undefined;
-        workspaceDir = known?.workspaceDir ?? path.join(this.deps.workspaceRoot, taskId);
+        workspaceDir = known?.workspaceDir ?? this.legacyWorkspaceDir(taskId);
         plainWorkspaceNeedsResolve = true;
       } else {
         decline('workspace mode is unavailable', true);
@@ -2952,6 +2991,7 @@ export class TaskRunner {
             runtimeId: pick.descriptor.id,
             cwd: workspaceDir,
           },
+          ...(appliedAgentHomeProjection === undefined ? {} : { appliedAgentHomeProjection }),
         }),
         gitWorkspaceId,
         gitLease,
@@ -3731,8 +3771,7 @@ export class TaskRunner {
               this.sendAgentMessageRecord(outbox!, record);
               return;
             }
-            const finalTextRun = active.finalTextParts.join('').trim();
-            const body = finalTextRun !== '' ? finalTextRun : finalOutput.trim();
+            const body = (closingReply(active) ?? finalOutput).trim();
             if (outbox === undefined || active.agentRef === undefined) {
               // Invariant violation, not a runtime shortfall: a
               // `messageEgress.mode:'required'` task cannot be admitted
@@ -3790,6 +3829,10 @@ export class TaskRunner {
         }
         if (event.type === 'progress') {
           active.summaryParts.push(event.text);
+          // A blank whole message must not erase the reply that came before it.
+          if (active.adapter.descriptor.progressEventsAreMessages === true && event.text.trim() !== '') {
+            active.finalTextParts.length = 0;
+          }
           active.finalTextParts.push(event.text);
         }
         if (event.type === 'artifact') await this.sendArtifact(active, event.name, event.contentType);
@@ -3846,8 +3889,10 @@ export class TaskRunner {
     }
     await this.settleSemanticTerminal(active, async () => {
       await this.persistAgentTerminalEvidence(active, 'complete');
+      const finalMessage = closingReply(active);
       return createEnvelope('task.complete', {
         summary: finalOutput,
+        ...(finalMessage === undefined ? {} : { finalMessage }),
         sessionRef: active.session.sessionRef,
         ...(document !== undefined ? { document } : {}),
         ...this.terminalInferenceUsagePayload(active),
@@ -4644,8 +4689,13 @@ export class TaskRunner {
   }
 
   /** Exact Agent identity projection for claim/terminal wire payloads. */
-  private agentTerminalPayload(active: ActiveTask): { agentRef?: AgentRef; harnessId?: string } {
-    return terminalIdentity(active.adapter.descriptor.id, active.agentRef);
+  private agentTerminalPayload(
+    active: ActiveTask,
+  ): { agentRef?: AgentRef; harnessId?: string; agentHomeProjection?: TerminalAgentHomeProjection } {
+    return {
+      ...terminalIdentity(active.adapter.descriptor.id, active.agentRef),
+      ...(active.appliedAgentHomeProjection === undefined ? {} : { agentHomeProjection: active.appliedAgentHomeProjection }),
+    };
   }
 
   /**
@@ -4721,9 +4771,11 @@ export class TaskRunner {
 
     let document: unknown;
     try {
+      const finalMessage = closingReply(active);
       document = extract(finalOutput, {
         taskId: active.taskId,
         sessionRef: active.session.sessionRef,
+        ...(finalMessage === undefined ? {} : { finalMessage }),
         ...(active.terminalProjection === undefined ? {} : { terminalProjection: active.terminalProjection }),
       });
     } catch (err) {
@@ -5142,7 +5194,7 @@ export class TaskRunner {
 
   /** `reuseDir`, when set (a known sessionRef's recorded workspace), is used verbatim instead of a fresh `workspaceRoot/<taskId>` directory — `mkdir recursive` is idempotent either way, so ensuring-exists is safe to do unconditionally. */
   private async resolveWorkspaceDir(taskId: string, reuseDir: string | undefined): Promise<string> {
-    const dir = reuseDir ?? path.join(this.deps.workspaceRoot, taskId);
+    const dir = reuseDir ?? this.legacyWorkspaceDir(taskId);
     await fs.mkdir(dir, { recursive: true });
     return dir;
   }

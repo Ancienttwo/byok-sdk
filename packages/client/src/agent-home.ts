@@ -7,6 +7,7 @@ import {
   type AgentHomeProjectionOutcome,
   type AgentHomeProjectionPayload,
   type AgentRef,
+  type TerminalAgentHomeProjection,
 } from '@byok-sdk/protocol';
 import { atomicWriteFile } from './util/atomic-write';
 import {
@@ -967,6 +968,18 @@ export class AgentHomeManager {
   async initializeExecution(binding: AgentHomeExecutionBinding): Promise<void> {
     await this.mutateExecution(binding, () =>
       this.initializeResolved(binding.resolution, binding.lease.cwd));
+  }
+
+  /**
+   * The task-free projection already applied to this home, from the SDK-owned
+   * ordering record. Read it while the execution lease is held: `project()`
+   * needs the same lease, so the record cannot change during the Attempt.
+   */
+  async readAppliedProjection(binding: AgentHomeExecutionBinding): Promise<TerminalAgentHomeProjection | undefined> {
+    const state = await readProjectionState(binding.resolution);
+    return state === undefined
+      ? undefined
+      : { profileRevision: state.agentRef.profileRevision, projectionHash: state.projectionHash };
   }
 
   async mutateExecution<T>(binding: AgentHomeExecutionBinding, operation: () => Promise<T>): Promise<T> {

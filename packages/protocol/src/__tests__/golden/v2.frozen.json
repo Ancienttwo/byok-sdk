@@ -4917,6 +4917,9 @@
         "summary": {
           "type": "string"
         },
+        "finalMessage": {
+          "type": "string"
+        },
         "sessionRef": {
           "type": "string"
         },
@@ -5061,6 +5064,24 @@
           "required": [
             "agentId",
             "profileRevision"
+          ],
+          "additionalProperties": false
+        },
+        "agentHomeProjection": {
+          "type": "object",
+          "properties": {
+            "profileRevision": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            "projectionHash": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "profileRevision",
+            "projectionHash"
           ],
           "additionalProperties": false
         }
@@ -5215,6 +5236,24 @@
             "profileRevision"
           ],
           "additionalProperties": false
+        },
+        "agentHomeProjection": {
+          "type": "object",
+          "properties": {
+            "profileRevision": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            "projectionHash": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "profileRevision",
+            "projectionHash"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -5315,6 +5354,24 @@
           "required": [
             "agentId",
             "profileRevision"
+          ],
+          "additionalProperties": false
+        },
+        "agentHomeProjection": {
+          "type": "object",
+          "properties": {
+            "profileRevision": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            "projectionHash": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "profileRevision",
+            "projectionHash"
           ],
           "additionalProperties": false
         }
@@ -10524,6 +10581,9 @@
               "summary": {
                 "type": "string"
               },
+              "finalMessage": {
+                "type": "string"
+              },
               "sessionRef": {
                 "type": "string"
               },
@@ -10668,6 +10728,24 @@
                 "required": [
                   "agentId",
                   "profileRevision"
+                ],
+                "additionalProperties": false
+              },
+              "agentHomeProjection": {
+                "type": "object",
+                "properties": {
+                  "profileRevision": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]{0,18}$"
+                  },
+                  "projectionHash": {
+                    "type": "string",
+                    "pattern": "^sha256:[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "profileRevision",
+                  "projectionHash"
                 ],
                 "additionalProperties": false
               }
@@ -10866,6 +10944,24 @@
                   "profileRevision"
                 ],
                 "additionalProperties": false
+              },
+              "agentHomeProjection": {
+                "type": "object",
+                "properties": {
+                  "profileRevision": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]{0,18}$"
+                  },
+                  "projectionHash": {
+                    "type": "string",
+                    "pattern": "^sha256:[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "profileRevision",
+                  "projectionHash"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -11010,6 +11106,24 @@
                 "required": [
                   "agentId",
                   "profileRevision"
+                ],
+                "additionalProperties": false
+              },
+              "agentHomeProjection": {
+                "type": "object",
+                "properties": {
+                  "profileRevision": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]{0,18}$"
+                  },
+                  "projectionHash": {
+                    "type": "string",
+                    "pattern": "^sha256:[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "profileRevision",
+                  "projectionHash"
                 ],
                 "additionalProperties": false
               }
@@ -17993,6 +18107,9 @@
                       "summary": {
                         "type": "string"
                       },
+                      "finalMessage": {
+                        "type": "string"
+                      },
                       "sessionRef": {
                         "type": "string"
                       },
@@ -18137,6 +18254,24 @@
                         "required": [
                           "agentId",
                           "profileRevision"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "agentHomeProjection": {
+                        "type": "object",
+                        "properties": {
+                          "profileRevision": {
+                            "type": "string",
+                            "pattern": "^[1-9][0-9]{0,18}$"
+                          },
+                          "projectionHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        },
+                        "required": [
+                          "profileRevision",
+                          "projectionHash"
                         ],
                         "additionalProperties": false
                       }
@@ -18335,6 +18470,24 @@
                           "profileRevision"
                         ],
                         "additionalProperties": false
+                      },
+                      "agentHomeProjection": {
+                        "type": "object",
+                        "properties": {
+                          "profileRevision": {
+                            "type": "string",
+                            "pattern": "^[1-9][0-9]{0,18}$"
+                          },
+                          "projectionHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        },
+                        "required": [
+                          "profileRevision",
+                          "projectionHash"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -18479,6 +18632,24 @@
                         "required": [
                           "agentId",
                           "profileRevision"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "agentHomeProjection": {
+                        "type": "object",
+                        "properties": {
+                          "profileRevision": {
+                            "type": "string",
+                            "pattern": "^[1-9][0-9]{0,18}$"
+                          },
+                          "projectionHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        },
+                        "required": [
+                          "profileRevision",
+                          "projectionHash"
                         ],
                         "additionalProperties": false
                       }
@@ -24513,6 +24684,9 @@
                       "summary": {
                         "type": "string"
                       },
+                      "finalMessage": {
+                        "type": "string"
+                      },
                       "sessionRef": {
                         "type": "string"
                       },
@@ -24657,6 +24831,24 @@
                         "required": [
                           "agentId",
                           "profileRevision"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "agentHomeProjection": {
+                        "type": "object",
+                        "properties": {
+                          "profileRevision": {
+                            "type": "string",
+                            "pattern": "^[1-9][0-9]{0,18}$"
+                          },
+                          "projectionHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        },
+                        "required": [
+                          "profileRevision",
+                          "projectionHash"
                         ],
                         "additionalProperties": false
                       }
@@ -24855,6 +25047,24 @@
                           "profileRevision"
                         ],
                         "additionalProperties": false
+                      },
+                      "agentHomeProjection": {
+                        "type": "object",
+                        "properties": {
+                          "profileRevision": {
+                            "type": "string",
+                            "pattern": "^[1-9][0-9]{0,18}$"
+                          },
+                          "projectionHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        },
+                        "required": [
+                          "profileRevision",
+                          "projectionHash"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -24999,6 +25209,24 @@
                         "required": [
                           "agentId",
                           "profileRevision"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "agentHomeProjection": {
+                        "type": "object",
+                        "properties": {
+                          "profileRevision": {
+                            "type": "string",
+                            "pattern": "^[1-9][0-9]{0,18}$"
+                          },
+                          "projectionHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        },
+                        "required": [
+                          "profileRevision",
+                          "projectionHash"
                         ],
                         "additionalProperties": false
                       }

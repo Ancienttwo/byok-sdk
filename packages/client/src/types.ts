@@ -221,6 +221,17 @@ export interface RuntimeAdapterDescriptor {
    * never makes an offer wait on one it has no use for.
    */
   readonly requiresMcpToolsetToolObservation?: boolean;
+  /**
+   * Whether each `progress` event carries one complete assistant message
+   * rather than a streaming delta. Codex emits one event per completed
+   * `agentMessage`, so its commentary and its final answer arrive as separate
+   * events with no tool interaction between them. When this is true, the
+   * daemon starts a new closing reply at every `progress` event, so the
+   * closing reply (`task.complete.finalMessage`) is the last message only.
+   * Absent or false: consecutive `progress` events form one reply until a
+   * tool interaction.
+   */
+  readonly progressEventsAreMessages?: boolean;
 }
 
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
@@ -459,6 +470,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
     id: descriptor.id,
     supportsDispatchSelection: descriptor.supportsDispatchSelection === true,
     requiresMcpToolsetToolObservation: descriptor.requiresMcpToolsetToolObservation === true,
+    ...(descriptor.progressEventsAreMessages === true ? { progressEventsAreMessages: true } : {}),
     capabilities: Object.freeze({
       ...(descriptor.capabilities.durablePi === undefined ? {} : { durablePi: descriptor.capabilities.durablePi === true }),
       ...(descriptor.capabilities.nativeInteractions === undefined ? {} : {

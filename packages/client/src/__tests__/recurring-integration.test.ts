@@ -84,7 +84,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
   const precedingTurns = outcome === 'document' ? 1 : 0;
   // Synthetic model output, not a production Summary schema/quality assessment.
   const document = { schemaVersion: 'test.internal-summary.v1', text: 'User constraint: 中文 🐝, no external tools.' };
-  const extracts: Array<{ taskId: string; sessionRef: string; terminalProjection?: unknown }> = [];
+  const extracts: Array<{ taskId: string; sessionRef: string; terminalProjection?: unknown; finalMessage?: string }> = [];
   const daemon = createDaemonWithAdapters({
     localAgentRelease: { version: '0.0.0-summary-test' }, productName: 'summary test', productId: options.productId,
     serverUrl: http.baseUrl, workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'store'),
@@ -147,13 +147,15 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
     expect(offer?.payload).not.toHaveProperty('sessionRef');
     expect(offer?.payload).not.toHaveProperty('messageEgress');
     releaseClose = session.blockClose();
-    session.emit({ type: 'progress', text: outcome === 'invalid' ? '{invalid-json' : JSON.stringify(document) });
+    const replyText = outcome === 'invalid' ? '{invalid-json' : JSON.stringify(document);
+    session.emit({ type: 'progress', text: replyText });
     session.emit({ type: 'turn_end' });
     await vi.waitFor(async () => expect(await sdk.tasks.deviceTerminal(taskId)).toMatchObject({
       envelope: { type: outcome === 'document' ? 'task.complete' : 'task.fail' },
     }), { timeout: 10000 });
     const terminal = await sdk.tasks.deviceTerminal(taskId);
-    expect(extracts).toEqual([{ taskId, sessionRef: session.sessionRef, terminalProjection: selector }]);
+    // #322: the extractor also receives the closing reply, here the only text.
+    expect(extracts).toEqual([{ taskId, sessionRef: session.sessionRef, terminalProjection: selector, finalMessage: replyText }]);
     expect(messages).toEqual(precedingTurns ? ['preceding-user-turn'] : []);
     expect(await sdk.tasks.agentMessage(taskId, deviceId, agentRef)).toBeUndefined();
     expect(daemon.status().activeTaskCount).toBeGreaterThan(0);
