@@ -16,10 +16,12 @@ Current dist-tags and version availability require a fresh registry readback;
 the historical receipt is not a live registry snapshot. npm shows 0.24.0 /
 keys 0.9.0 published on 2026-10-06 and on `latest` on 2026-10-09. Its registry
 integrities equal the push CI `release-pack` artifact of `756eb921`. It has no
-`v0.24.0` tag and no publication record here. The owner approved the
-prerelease 0.25.0-rc.1 / keys 0.10.0-rc.1 under the dist-tag `rc` on
-2026-10-09; npm execution approval remains separate. See
-[0.25.0-rc.1 release notes](../../docs/releases/v0.25.0.md).
+`v0.24.0` tag and no publication record here. The 0.25.0-rc.1 / keys
+0.10.0-rc.1 train is published on `rc`;
+see its [registry readback](../../docs/releases/v0.25.0-rc.1-registry.md).
+On 2026-10-09 the owner authorized merging #314 and publishing the next RC.
+The current plan is 0.25.0-rc.2 / keys 0.10.0-rc.2 under `rc`, with `latest`
+unchanged. See [rc.2 release notes](../../docs/releases/v0.25.0-rc.2.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
 
@@ -36,8 +38,8 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 ## Version selection
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
-The approved source manifests name the prerelease train 0.25.0-rc.1 and
-independent keys 0.10.0-rc.1. Both are MINOR lines: the train contains protocol
+The approved source manifests name the prerelease train 0.25.0-rc.2 and
+independent keys 0.10.0-rc.2. Both are MINOR lines: the train contains protocol
 v2 and the ADR-037 removals; keys adds `requestTimeoutMs`, changes the Pi
 launcher grammar and drops the implementation-identity dependency. Keep lock
 workspace records, API/version docs and exact packed internal dependencies
@@ -57,7 +59,7 @@ failed registry reads do not establish package absence. Stable publication
 omits `--tag` and requires its exact version on `latest`.
 The version/channel decision authorizes source preparation only; it does
 not authorize npm execution, tagging, live qualification or production rollout.
-The [publication plan](../../docs/releases/v0.25.0.md#publication-plan)
+The [publication plan](../../docs/releases/v0.25.0-rc.2.md#publication-plan)
 lists the exact package order and remaining dry-run prerequisites.
 
 ## Pre-publication Host integration

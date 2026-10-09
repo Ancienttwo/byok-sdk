@@ -7,15 +7,14 @@ composition over Postgres and R2.
 
 ## Release status
 
-The current source candidate is the prerelease **0.25.0-rc.1** for the eight
-aligned packages, with independent keys **0.10.0-rc.1**. The release owner
-approved it on 2026-10-09. It is not published. Publication will use the npm
-dist-tag `rc`, so `latest` stays 0.24.0 / keys 0.9.0. The public set is nine
-packages; `@byok-sdk/implementation-identity` is retired.
-[Release notes](docs/releases/v0.25.0.md) describe the breaking changes since
-0.24.0 (protocol v2, minimal guardrails per ADR-037, removed configuration keys
-and APIs, the keys launcher grammar, Pi 1.1.0 and OAR 0.44.0) and the upgrade
-steps.
+The current source line is **0.25.0-rc.2** for eight aligned packages, with
+independent keys **0.10.0-rc.2**. The owner approved publication on 2026-10-09
+under the npm dist-tag `rc`. The stable `latest` channel stays at 0.24.0 /
+keys 0.9.0. The public set contains nine packages;
+`@byok-sdk/implementation-identity` is retired.
+[rc.2 release notes](docs/releases/v0.25.0-rc.2.md) describe the integration
+fixes. [rc.1 release notes](docs/releases/v0.25.0.md) describe the breaking
+changes since 0.24.0 and the upgrade steps.
 
 Versioned install examples below describe the current source manifests. They
 are usable only after publication and exact registry readback. Before
@@ -84,7 +83,7 @@ Install the scoped packages your composition uses and import each one under
 its own name. For example, a self-hosted composition:
 
 ```sh
-npm install @byok-sdk/server@0.25.0-rc.1 @byok-sdk/client@0.25.0-rc.1
+npm install @byok-sdk/server@0.25.0-rc.2 @byok-sdk/client@0.25.0-rc.2
 ```
 
 ```ts
@@ -92,13 +91,13 @@ import { createByokServer } from '@byok-sdk/server';
 ```
 
 The Worker-only cloud-do package is published from 0.24.0. The example below
-names the 0.25.0-rc.1 candidate; it becomes usable only after publication and
-exact registry readback.
+names the 0.25.0-rc.2 release line. Confirm its exact registry version before
+installation.
 See [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
 
 ~~~sh
-# Release candidate source version; publication is pending.
-npm install @byok-sdk/cloud-do@0.25.0-rc.1
+# Exact release candidate; verify registry availability before installation.
+npm install @byok-sdk/cloud-do@0.25.0-rc.2
 npm install --save-dev @cloudflare/workers-types
 ~~~
 
@@ -244,7 +243,7 @@ It is intentionally outside the dispatch packages and their entire dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.10.0-rc.1
+npm install @byok-sdk/keys@0.10.0-rc.2
 ```
 
 ## Host connector composition
@@ -260,5 +259,5 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.10.0-rc.1`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.10.0-rc.2`
 require Node.js 24.15.0 or newer. MIT licensed.

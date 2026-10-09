@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.25.0-rc.2 / @byok-sdk/keys 0.10.0-rc.2 — 2026-10-09
 
 - Client test credential stores now use the same product identity as OS stores.
   Changing `storeDir` keeps pairing. Use unpair or a new `productId` to reset it.
@@ -9,7 +9,9 @@
 - `@byok-sdk/client/adapters` exports `buildRuntimeEnv` for direct hosts.
 - The embedded SQLite server refuses unsupported pending mailbox wire majors
   at startup with `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`. Historical acknowledged
-  and expired messages do not block startup.
+  and expired messages do not block startup. Each open scans pending rows.
+  Custom mailbox writers must store JSON wire envelopes with `v: 2`; arbitrary
+  application bodies cannot pass this startup check.
 - Keys checks existing profile DDL before WAL setup or schema writes. Rejected
   legacy profile stores keep their original bytes and tables.
 - Adapters read the preparation version from the schema-free

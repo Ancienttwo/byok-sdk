@@ -172,15 +172,15 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.25.0-rc.1`; publication requires separate release
+aligned dispatch release is `0.25.0-rc.2`; publication requires separate release
 authorization and registry readback. The current independent keys candidate is
-`0.10.0-rc.1`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.25.0-rc.1`, proven from an isolated standard npm install rather
+`0.10.0-rc.2`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.25.0-rc.2`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-The 0.25.0-rc.1 train is a prepared prerelease, not yet published. The release
-owner approved 0.25.0-rc.1 for the eight aligned packages and keys
-0.10.0-rc.1 on 2026-10-09, under the npm dist-tag `rc`. A prerelease train
+The 0.25.0-rc.2 train is a prerelease. The release
+owner approved publication of 0.25.0-rc.2 for the eight aligned packages and keys
+0.10.0-rc.2 on 2026-10-09, under the npm dist-tag `rc`. A prerelease train
 publishes every public package as a prerelease on one dist-tag, which is why
 keys is also a prerelease. `latest` stays 0.24.0 / keys 0.9.0, and the reviewed
 registry baseline records that prior `latest` for all nine packages. The 0.25
@@ -188,7 +188,9 @@ line is a MINOR: it has pre-1.0 breaking cuts (protocol v2, the minimal-guardrai
 removals of ADR-037, the retired implementation-identity package, Pi 1.1.0 and
 OAR 0.44.0). keys 0.10.0 is a MINOR: it adds `requestTimeoutMs`, changes the Pi
 launcher grammar (`--pi-projection-dir` replaces `--launch-binding`) and drops
-the implementation-identity dependency. Notes: `docs/releases/v0.25.0.md`.
+the implementation-identity dependency. Notes: `docs/releases/v0.25.0-rc.2.md`
+and the rc.1 breaking-change record
+`docs/releases/v0.25.0.md`.
 
 The 0.24.0 train is published: npm shows all ten 0.24.0 / keys 0.9.0 packages
 published on 2026-10-06, read back as `latest` on 2026-10-09, with registry
