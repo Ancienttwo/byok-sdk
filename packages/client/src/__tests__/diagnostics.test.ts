@@ -95,6 +95,15 @@ async function unusedLoopbackPort(): Promise<number> {
 }
 
 describe('diagnostics collector', () => {
+  it('reports a strict Agent daemon without workspaceRoot as not-configured, not missing (#319)', async () => {
+    const dir = await tempDir();
+    const { workspaceRoot: _unused, ...rest } = config(dir);
+    const snapshot = await collectDiagnostics({ ...rest, strictAgentOnly: true }, dir, { adapters: [], connectControl: unreachable });
+
+    expect(snapshot.workspace).toEqual({ status: 'not-configured' });
+    expect(snapshot.checks.find((check) => check.id === 'workspace')?.status).toBe('pass');
+  });
+
   it('reports a corrupt health file without changing its bytes', async () => {
     const dir = await tempDir();
     const healthPath = path.join(dir, OPERATIONAL_HEALTH_FILENAME);

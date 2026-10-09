@@ -317,7 +317,13 @@ export interface DaemonConfig {
    * wants no supersession at all supplies `async () => undefined`.
    */
   machineId?: () => Promise<string | undefined>;
-  workspaceRoot: string;
+  /**
+   * Parent directory of each legacy offer's `workspaceRoot/<taskId>`
+   * workspace, and of Git workspace mode. Required unless `strictAgentOnly`
+   * is true: a strict Agent daemon refuses every legacy offer and runs each
+   * Agent offer in its SDK-owned home, so it never reads this path.
+   */
+  workspaceRoot?: string;
   /**
    * Strict Agent execution boundary. The host selects one absolute branded
    * storage root; the SDK alone composes `agents/<agentId>`, initializes the
@@ -1393,6 +1399,9 @@ export function buildDaemonWithAdapters(
   if (config.strictAgentOnly === true && config.agentHome === undefined) {
     throw new Error('DaemonConfig.strictAgentOnly requires DaemonConfig.agentHome');
   }
+  if (config.strictAgentOnly !== true && (typeof config.workspaceRoot !== 'string' || config.workspaceRoot === '')) {
+    throw new Error('DaemonConfig.workspaceRoot is required unless DaemonConfig.strictAgentOnly is true');
+  }
   // WP0: same up-front discipline as `maxTaskOutputBytes` above. A cap that
   // governs how many writers may share one Agent home is a correctness
   // control, so an unusable value is a construction error rather than
@@ -1573,7 +1582,9 @@ export function buildDaemonWithAdapters(
   let agentEgress = new AgentEgressController({
     policy: egressPolicy,
   });
-  const gitWorkspaceManager = config.gitWorkspace ? overrides.gitWorkspace?.manager ?? new GitWorkspaceManager(config.workspaceRoot, { ownerId: stableGitWorkspaceOwnerId(storeDir, config.productId) }) : undefined;
+  // Git workspace mode excludes agentHome, so it is never strict and the
+  // validation above has already required workspaceRoot.
+  const gitWorkspaceManager = config.gitWorkspace ? overrides.gitWorkspace?.manager ?? new GitWorkspaceManager(config.workspaceRoot!, { ownerId: stableGitWorkspaceOwnerId(storeDir, config.productId) }) : undefined;
   const gitWorkspaceStore = config.gitWorkspace ? overrides.gitWorkspace?.store ?? new GitWorkspaceStore(storeDir) : undefined;
   // S3b (L-002), same three-part shape as `gitWorkspace` above: optional
   // config field, conditional construction, override seam. An absent
@@ -2250,7 +2261,7 @@ export function buildDaemonWithAdapters(
       runtimeAllowlist: config.runtimeAllowlist,
       // M5 batch-3: see `DaemonConfig.runtimePreference`'s own doc comment above.
       runtimePreference: config.runtimePreference,
-      workspaceRoot: config.workspaceRoot,
+      ...(config.workspaceRoot === undefined ? {} : { workspaceRoot: config.workspaceRoot }),
       ...(agentHomeManager === undefined ? {} : { agentHome: agentHomeManager }),
       ...(config.strictAgentOnly === true ? { strictAgentOnly: true } : {}),
       // WP0: already validated up front — see `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome`.

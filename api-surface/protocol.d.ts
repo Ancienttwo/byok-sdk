@@ -2581,6 +2581,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     payload: z.ZodObject<{
         harnessId: z.ZodOptional<z.ZodString>;
         summary: z.ZodString;
+        finalMessage: z.ZodOptional<z.ZodString>;
         sessionRef: z.ZodString;
         artifactRefs: z.ZodOptional<z.ZodArray<z.ZodObject<{
             blobId: z.ZodString;
@@ -2612,6 +2613,10 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         agentRef: z.ZodOptional<z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeProjection: z.ZodOptional<z.ZodObject<{
+            profileRevision: z.ZodString;
+            projectionHash: z.ZodString;
         }, z.core.$strict>>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
@@ -2653,6 +2658,10 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>>;
+        agentHomeProjection: z.ZodOptional<z.ZodObject<{
+            profileRevision: z.ZodString;
+            projectionHash: z.ZodString;
+        }, z.core.$strict>>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -2682,6 +2691,10 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
         agentRef: z.ZodOptional<z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeProjection: z.ZodOptional<z.ZodObject<{
+            profileRevision: z.ZodString;
+            projectionHash: z.ZodString;
         }, z.core.$strict>>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
@@ -4036,6 +4049,7 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
         payload: z.ZodObject<{
             harnessId: z.ZodOptional<z.ZodString>;
             summary: z.ZodString;
+            finalMessage: z.ZodOptional<z.ZodString>;
             sessionRef: z.ZodString;
             artifactRefs: z.ZodOptional<z.ZodArray<z.ZodObject<{
                 blobId: z.ZodString;
@@ -4067,6 +4081,10 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
             agentRef: z.ZodOptional<z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
+            }, z.core.$strict>>;
+            agentHomeProjection: z.ZodOptional<z.ZodObject<{
+                profileRevision: z.ZodString;
+                projectionHash: z.ZodString;
             }, z.core.$strict>>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
@@ -4108,6 +4126,10 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
             }, z.core.$strict>>;
+            agentHomeProjection: z.ZodOptional<z.ZodObject<{
+                profileRevision: z.ZodString;
+                projectionHash: z.ZodString;
+            }, z.core.$strict>>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -4137,6 +4159,10 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
             agentRef: z.ZodOptional<z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
+            }, z.core.$strict>>;
+            agentHomeProjection: z.ZodOptional<z.ZodObject<{
+                profileRevision: z.ZodString;
+                projectionHash: z.ZodString;
             }, z.core.$strict>>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
@@ -5363,6 +5389,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
         payload: z.ZodObject<{
             harnessId: z.ZodOptional<z.ZodString>;
             summary: z.ZodString;
+            finalMessage: z.ZodOptional<z.ZodString>;
             sessionRef: z.ZodString;
             artifactRefs: z.ZodOptional<z.ZodArray<z.ZodObject<{
                 blobId: z.ZodString;
@@ -5394,6 +5421,10 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
             agentRef: z.ZodOptional<z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
+            }, z.core.$strict>>;
+            agentHomeProjection: z.ZodOptional<z.ZodObject<{
+                profileRevision: z.ZodString;
+                projectionHash: z.ZodString;
             }, z.core.$strict>>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
@@ -5435,6 +5466,10 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
             }, z.core.$strict>>;
+            agentHomeProjection: z.ZodOptional<z.ZodObject<{
+                profileRevision: z.ZodString;
+                projectionHash: z.ZodString;
+            }, z.core.$strict>>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -5464,6 +5499,10 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
             agentRef: z.ZodOptional<z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
+            }, z.core.$strict>>;
+            agentHomeProjection: z.ZodOptional<z.ZodObject<{
+                profileRevision: z.ZodString;
+                projectionHash: z.ZodString;
             }, z.core.$strict>>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
@@ -6220,8 +6259,8 @@ export { TERMINAL_PROJECTION_SELECTION_CAPABILITY, TerminalProjectionContractSch
 export type { TerminalProjectionSelection } from './terminal-projection';
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
-export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, TaskOfferPreparedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
-export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, TaskOfferPreparedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, } from './messages';
+export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, TaskOfferPreparedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
+export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, TaskOfferPreparedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, } from './messages';
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';
 export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
@@ -8570,6 +8609,20 @@ export declare const TerminalPreparedObservationSchema: z.ZodObject<{
 }, z.core.$strict>;
 export type TerminalPreparedObservation = z.infer<typeof TerminalPreparedObservationSchema>;
 /**
+ * The task-free Agent-home projection (`agent.home_projection`) that the
+ * device had already applied when an Agent Attempt started. The writer lease
+ * keeps a new projection out of the home until the Attempt ends, so this is
+ * the persona the Attempt ran with. The SDK does not compare it with the
+ * offer's `agentRef.profileRevision`: the host decides whether a mismatch
+ * matters. Absent when the task was not Agent-bound, or when the home had no
+ * applied projection record.
+ */
+export declare const TerminalAgentHomeProjectionSchema: z.ZodObject<{
+    profileRevision: z.ZodString;
+    projectionHash: z.ZodString;
+}, z.core.$strict>;
+export type TerminalAgentHomeProjection = z.infer<typeof TerminalAgentHomeProjectionSchema>;
+/**
  * daemon -> server: task finished successfully.
  *
  * `document` (additive-minor, docs/protocol.md "Freeze rule"): the OPTIONAL
@@ -8598,6 +8651,7 @@ export type TerminalPreparedObservation = z.infer<typeof TerminalPreparedObserva
 export declare const TaskCompletePayloadSchema: z.ZodObject<{
     harnessId: z.ZodOptional<z.ZodString>;
     summary: z.ZodString;
+    finalMessage: z.ZodOptional<z.ZodString>;
     sessionRef: z.ZodString;
     artifactRefs: z.ZodOptional<z.ZodArray<z.ZodObject<{
         blobId: z.ZodString;
@@ -8629,6 +8683,10 @@ export declare const TaskCompletePayloadSchema: z.ZodObject<{
     agentRef: z.ZodOptional<z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
+    }, z.core.$strict>>;
+    agentHomeProjection: z.ZodOptional<z.ZodObject<{
+        profileRevision: z.ZodString;
+        projectionHash: z.ZodString;
     }, z.core.$strict>>;
 }, z.core.$strip>;
 export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
@@ -8663,6 +8721,10 @@ export declare const TaskFailPayloadSchema: z.ZodObject<{
     agentRef: z.ZodOptional<z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
+    }, z.core.$strict>>;
+    agentHomeProjection: z.ZodOptional<z.ZodObject<{
+        profileRevision: z.ZodString;
+        projectionHash: z.ZodString;
     }, z.core.$strict>>;
 }, z.core.$strip>;
 export type TaskFailPayload = z.infer<typeof TaskFailPayloadSchema>;
@@ -8705,6 +8767,10 @@ export declare const TaskCancelledPayloadSchema: z.ZodObject<{
     agentRef: z.ZodOptional<z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
+    }, z.core.$strict>>;
+    agentHomeProjection: z.ZodOptional<z.ZodObject<{
+        profileRevision: z.ZodString;
+        projectionHash: z.ZodString;
     }, z.core.$strict>>;
 }, z.core.$strip>;
 export type TaskCancelledPayload = z.infer<typeof TaskCancelledPayloadSchema>;
@@ -10164,6 +10230,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
     readonly 'task.complete': z.ZodObject<{
         harnessId: z.ZodOptional<z.ZodString>;
         summary: z.ZodString;
+        finalMessage: z.ZodOptional<z.ZodString>;
         sessionRef: z.ZodString;
         artifactRefs: z.ZodOptional<z.ZodArray<z.ZodObject<{
             blobId: z.ZodString;
@@ -10195,6 +10262,10 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         agentRef: z.ZodOptional<z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeProjection: z.ZodOptional<z.ZodObject<{
+            profileRevision: z.ZodString;
+            projectionHash: z.ZodString;
         }, z.core.$strict>>;
     }, z.core.$strip>;
     readonly 'task.fail': z.ZodObject<{
@@ -10228,6 +10299,10 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>>;
+        agentHomeProjection: z.ZodOptional<z.ZodObject<{
+            profileRevision: z.ZodString;
+            projectionHash: z.ZodString;
+        }, z.core.$strict>>;
     }, z.core.$strip>;
     readonly 'task.cancelled': z.ZodObject<{
         harnessId: z.ZodOptional<z.ZodString>;
@@ -10249,6 +10324,10 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
         agentRef: z.ZodOptional<z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeProjection: z.ZodOptional<z.ZodObject<{
+            profileRevision: z.ZodString;
+            projectionHash: z.ZodString;
         }, z.core.$strict>>;
     }, z.core.$strip>;
     readonly 'task.approval_resolved': z.ZodObject<{

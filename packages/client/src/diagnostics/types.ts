@@ -52,7 +52,8 @@ export interface DiagnosticsSnapshot {
     integrity?: 'ok' | 'not-checked';
     reason?: string;
   };
-  workspace: { status: 'available' | 'missing' | 'unavailable'; writable?: boolean; reason?: string };
+  /** `not-configured`: a strict Agent daemon has no `workspaceRoot`; each Agent offer runs in its SDK-owned home. */
+  workspace: { status: 'available' | 'missing' | 'unavailable' | 'not-configured'; writable?: boolean; reason?: string };
   quarantine: {
     status: 'available' | 'missing' | 'unavailable';
     count: number;

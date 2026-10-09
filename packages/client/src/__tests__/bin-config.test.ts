@@ -77,6 +77,17 @@ describe('bin/config: loadConfig', () => {
     expect(() => loadConfig(undefined, { productName: 'Acme' })).toThrow(/productId/);
   });
 
+  it('requires workspaceRoot unless the config is strict Agent-only (#319)', () => {
+    const base = { productName: 'Acme', productId: 'acme', serverUrl: 'http://example' };
+    expect(() => loadConfig(undefined, base)).toThrow(ConfigError);
+    expect(() => loadConfig(undefined, base)).toThrow(/workspaceRoot/);
+    expect(loadConfig(undefined, { ...base, strictAgentOnly: true })).toEqual({
+      ...base,
+      strictAgentOnly: true,
+      localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE,
+    });
+  });
+
   it('throws ConfigError on an unreadable config path', () => {
     expect(() => loadConfig('/no/such/path/config.json')).toThrow(ConfigError);
   });

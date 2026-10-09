@@ -166,6 +166,22 @@ observability tolerance rule and strips it. The frozen fingerprint golden was
 regenerated for this additive schema change, while the historical envelope
 corpus remains a pre-usage compatibility witness.
 
+**Landed additive minor: `task.complete.finalMessage`.** `task.complete`
+gains an OPTIONAL string with the runtime's closing reply. It is the assistant
+text after the last tool interaction. For a runtime whose `progress` events are
+whole messages (Codex), it is the last message only. `summary` does not change:
+it still joins every `progress` text with no separator. The daemon omits the
+field when the run ended with no closing text. No capability flag gates it. An
+older server strips it, and the host then reads `summary` as before. The frozen
+fingerprint golden was regenerated for this change.
+
+**Landed additive minor: terminal `agentHomeProjection`.** `task.complete`,
+`task.fail` and `task.cancelled` gain the same OPTIONAL
+`TerminalAgentHomeProjection` evidence: the projection revision and hash that
+an Agent Attempt started with (§2.2). It is observability only. No capability
+flag gates it. An older server strips it. The frozen fingerprint golden was
+regenerated for this change.
+
 ## 1. Envelope
 
 Every wire message is a single-line NDJSON envelope:
@@ -301,7 +317,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `task.progress` | D→S | **required** | optional | `seq` (payload-level batch order — §1.2), `events[]` | Batches of normalized `AgentEvent`s |
 | `task.artifact` | D→S | **required** | optional | `name`, `contentType`, `inline?`, `blobRef?` | An artifact is produced |
 | `task.await_approval` | D→S | **required** | optional | `summary`, `approvalId?` (M5, additive — §5.3) | Runtime raised `needs_approval` |
-| `task.complete` | D→S | **required** | optional | `summary`, `sessionRef`, `artifactRefs?`, `document?` (additive — §7.2), `agentRef?` | Runtime reached `turn_end` |
+| `task.complete` | D→S | **required** | optional | `summary`, `finalMessage?` (additive — Freeze rule), `sessionRef`, `artifactRefs?`, `document?` (additive — §7.2), `agentRef?` | Runtime reached `turn_end` |
 | `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `agentRef?` | Task ends in error |
 | `task.cancelled` | D→S | **required** | optional | `reason?`, `agentRef?` | Task ends `Cancelled` (server- or daemon-initiated) |
 | `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2) — gated on the `approval_resolved` capability flag |
@@ -438,6 +454,20 @@ full tenant/device/request/AgentRef/hash/outcome readback. Unknown or
 cross-device request is `404`; identity mismatch is `422`; changing a terminal
 fact is `409`. Handler failure or non-exact readback does not advance the
 server-to-daemon cursor.
+
+**Offer revision and projection revision.** An Agent task offer's
+`agentRef.profileRevision` and the applied projection revision are two
+different facts. The daemon does not require them to be equal, and it does
+not decline an offer because of a difference. A projection can arrive after
+the offer that expected it, and an old offer can run after a newer projection.
+Instead, each terminal of an Agent Attempt (`task.complete`, `task.fail`,
+`task.cancelled`) carries the optional `agentHomeProjection`:
+`{ profileRevision, projectionHash }` of the projection that was applied when
+the Attempt started. The Attempt holds the canonical-home lease, so no new
+projection is applied while it runs. The field is absent when the home has no
+applied projection record. The host compares it with the terminal `agentRef`
+and decides whether the result is usable. The cloud read model
+(`readTaskResult`) projects it verbatim.
 
 **`TaskOfferPayload.dispatchSelection` is the authoritative LLM target when
 present.** It is a strict discriminated union:
@@ -1420,6 +1450,7 @@ matters:
 | Field | Carries | For |
 |---|---|---|
 | `summary` | Prose | A human reading what happened |
+| `finalMessage` | Prose | The runtime's closing reply, without earlier commentary |
 | `artifactRefs[]` | Files (inline or blob) | Multi-file, binary, or oversized output |
 | `document` | ONE JSON value | The product's structured terminal result |
 

@@ -13,6 +13,7 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import * as runtimeStart from '../daemon/runtime-start';
 import { RuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../runtime-failure';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
+import { freezeRuntimeAdapterDescriptor } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 const roots: string[] = [];
@@ -701,7 +702,7 @@ describe('required Agent message completion gate', () => {
    * `messageEgress.mode:'required'` task whose model never calls the message
    * tool, so the DAEMON authors the body from the runtime's own text.
    */
-  async function startRequiredMessageTask(prefix: string, taskId: string): Promise<{
+  async function startRequiredMessageTask(prefix: string, taskId: string, wholeMessages = false): Promise<{
     sent: Envelope[];
     adapter: StubRuntimeAdapter;
     runner: TaskRunner;
@@ -713,6 +714,12 @@ describe('required Agent message completion gate', () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
+    if (wholeMessages) {
+      // The Codex adapter's descriptor shape: one `progress` per whole message.
+      Object.defineProperty(adapter, 'descriptor', {
+        value: freezeRuntimeAdapterDescriptor({ ...adapter.descriptor, progressEventsAreMessages: true }),
+      });
+    }
     const runner = new TaskRunner({
       adapters: [adapter], workspaceRoot: await temporary(`byok-${prefix}-workspace-`),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
@@ -772,6 +779,21 @@ describe('required Agent message completion gate', () => {
     const message = sent.find((envelope) => envelope.type === 'agent.message.publish');
     if (message?.type !== 'agent.message.publish') throw new Error('missing message publish');
     expect(message.payload.body).toBe('first half. second half.');
+  });
+
+  it('publishes only the last whole message for a whole-message adapter, and a trailing blank message keeps it (#322)', async () => {
+    const taskId = 'message-task-whole-messages';
+    const { sent, adapter } = await startRequiredMessageTask('message-whole', taskId, true);
+
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'I will draft the reply.' });
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'the answer' });
+    adapter.sessions[0]!.emit({ type: 'progress', text: '  ' });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+
+    await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'agent.message.publish')).toBe(true));
+    const message = sent.find((envelope) => envelope.type === 'agent.message.publish');
+    if (message?.type !== 'agent.message.publish') throw new Error('missing message publish');
+    expect(message.payload.body).toBe('the answer');
   });
 
   it('keeps terminal usage out of the reset set so a text-only run still publishes its whole reply', async () => {

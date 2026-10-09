@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Added (protocol, client, cloud, server)** — `task.complete.finalMessage`
+  carries the runtime's closing reply. `TaskResult.finalMessage`,
+  `TerminalResult.finalMessage` and `ResultDocumentTask.finalMessage` expose
+  it. `summary` keeps the whole run's text. The Codex adapter declares
+  `progressEventsAreMessages`, so its last `agentMessage` is the closing reply
+  and earlier commentary is not part of it. A required Agent message that the
+  daemon writes for a Codex task now uses that last message too (#322).
+- **Changed (client)** — `DaemonConfig.workspaceRoot` is optional when
+  `strictAgentOnly` is true. A daemon that is not strict still fails
+  construction without it. The CLI config follows the same rule, and
+  diagnostics report `not-configured` for a strict daemon without it (#319).
+- **Added (protocol, client, cloud)** — Agent Attempt terminals carry the
+  optional `agentHomeProjection` evidence: the applied projection revision and
+  hash at Attempt start. The daemon does not compare it with the offer's
+  `profileRevision`; the host decides (#318).
 - **Changed (client)** — update the private OAR source from 0.45.1 to 0.48.0
   (`087df16`). The derived Codex fold now reports `turn_active`, streamed
   command output as `outputDelta` and `app_request_cancelled`. SDK events read

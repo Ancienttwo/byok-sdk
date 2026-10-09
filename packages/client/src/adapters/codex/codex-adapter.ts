@@ -67,6 +67,7 @@ export class CodexAdapter implements RuntimeAdapter {
   get descriptor() { return freezeRuntimeAdapterDescriptor({
     id: 'codex',
     supportsDispatchSelection: true,
+    progressEventsAreMessages: true,
     capabilities: {
       steer: true,
       resume: true,

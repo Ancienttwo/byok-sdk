@@ -61,6 +61,7 @@ export function toTaskResult(terminal: TerminalResult | undefined): TaskResult |
   return {
     state: terminal.state === 'complete' ? 'Complete' : terminal.state === 'failed' ? 'Failed' : 'Cancelled',
     summary: terminal.summary,
+    ...(terminal.finalMessage === undefined ? {} : { finalMessage: terminal.finalMessage }),
     sessionRef: terminal.sessionRef,
     artifactRefs: terminal.artifactRefs === undefined ? undefined : [...terminal.artifactRefs],
     ...(terminal.document === undefined ? {} : { document: terminal.document }),

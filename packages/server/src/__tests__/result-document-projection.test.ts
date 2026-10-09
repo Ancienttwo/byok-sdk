@@ -71,6 +71,27 @@ describe('additive-minor: task.complete.document projection', () => {
     expect((await instance.tasks.get(handle.taskId))?.result?.document).toEqual(document);
   });
 
+  it('projects payload.finalMessage into TaskResult.finalMessage, apart from the joined summary (#322)', async () => {
+    const { byok: instance, daemon } = await startWithDaemon();
+    const handle = await instance.dispatch({ instruction: 'reply with exactly: CONSOLIDATED' });
+    await claimAndStart(instance, daemon, handle);
+
+    await daemon.send(createEnvelope('task.complete', {
+      summary: 'I will consolidate memory.CONSOLIDATED',
+      finalMessage: 'CONSOLIDATED',
+      sessionRef: 'sess_1',
+    }, { taskId: handle.taskId }));
+
+    const result = await handle.result();
+    expect(result).toEqual({
+      state: 'Complete',
+      summary: 'I will consolidate memory.CONSOLIDATED',
+      finalMessage: 'CONSOLIDATED',
+      sessionRef: 'sess_1',
+    });
+    expect((await instance.tasks.get(handle.taskId))?.result?.finalMessage).toBe('CONSOLIDATED');
+  });
+
   it('projects a non-object JSON root unchanged — the channel is schema-neutral', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
     const handle = await instance.dispatch({ instruction: 'produce an array' });

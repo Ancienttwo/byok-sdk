@@ -737,7 +737,7 @@ export declare function piLaunchCommand(launch: PiRuntimeLaunchResources, runtim
     args: string[];
 };
 // ==== @byok-sdk/client dist/agent-home.d.ts ====
-import { type AgentHomeProjectionOutcome, type AgentHomeProjectionPayload, type AgentRef } from '@byok-sdk/protocol';
+import { type AgentHomeProjectionOutcome, type AgentHomeProjectionPayload, type AgentRef, type TerminalAgentHomeProjection } from '@byok-sdk/protocol';
 export type { AgentRef } from '@byok-sdk/protocol';
 export declare const AGENT_HOME_DIRECTORY = "agents";
 export declare const AGENT_HOME_INTERNAL_DIRECTORY = ".byok";
@@ -982,6 +982,12 @@ export declare class AgentHomeManager {
      */
     initializeTaskFree(binding: AgentHomeBinding): Promise<void>;
     initializeExecution(binding: AgentHomeExecutionBinding): Promise<void>;
+    /**
+     * The task-free projection already applied to this home, from the SDK-owned
+     * ordering record. Read it while the execution lease is held: `project()`
+     * needs the same lease, so the record cannot change during the Attempt.
+     */
+    readAppliedProjection(binding: AgentHomeExecutionBinding): Promise<TerminalAgentHomeProjection | undefined>;
     mutateExecution<T>(binding: AgentHomeExecutionBinding, operation: () => Promise<T>): Promise<T>;
     private initializeResolved;
     supportsTaskFreeProjection(): boolean;
@@ -3629,7 +3635,13 @@ export interface DaemonConfig {
      * wants no supersession at all supplies `async () => undefined`.
      */
     machineId?: () => Promise<string | undefined>;
-    workspaceRoot: string;
+    /**
+     * Parent directory of each legacy offer's `workspaceRoot/<taskId>`
+     * workspace, and of Git workspace mode. Required unless `strictAgentOnly`
+     * is true: a strict Agent daemon refuses every legacy offer and runs each
+     * Agent offer in its SDK-owned home, so it never reads this path.
+     */
+    workspaceRoot?: string;
     /**
      * Strict Agent execution boundary. The host selects one absolute branded
      * storage root; the SDK alone composes `agents/<agentId>`, initializes the
@@ -7706,6 +7718,12 @@ export interface ResultDocumentTask {
     readonly sessionRef: string;
     /** Exact offer-scoped second projection; absent for legacy and message-only offers. */
     readonly terminalProjection?: Readonly<TerminalProjectionSelection>;
+    /**
+     * The runtime's closing reply, the same text as `task.complete.finalMessage`.
+     * `finalOutput` stays the whole run's text. Absent when the run ended with
+     * no closing text.
+     */
+    readonly finalMessage?: string;
 }
 /**
  * Host-supplied glue that turns a finished task's final output into the
@@ -7798,7 +7816,8 @@ export interface TaskRunnerDeps {
         /** `toolsetId` -> definition revision, from one registry read per call. */
         readonly toolsetDefinitionRevisions: () => ReadonlyMap<string, string>;
     };
-    workspaceRoot: string;
+    /** Parent of legacy `workspaceRoot/<taskId>` workspaces. Required unless `strictAgentOnly` is true. */
+    workspaceRoot?: string;
     /** Strict Agent offer authority. Absent means legacy offers never resolve an Agent home. */
     agentHome?: AgentHomeManager;
     /** Local authority: legacy offers are declined after journal/dedup/cancel precedence. */
@@ -8251,6 +8270,8 @@ export declare class TaskRunner {
      */
     private stoppingOffers;
     constructor(deps: TaskRunnerDeps);
+    /** A legacy offer's workspace. Only a non-strict runner admits one, and its constructor required the root. */
+    private legacyWorkspaceDir;
     get activeTaskCount(): number;
     /** M5 batch-3 (workstream 2): effective `maxTaskOutputBytes` cap for this daemon — see {@link DEFAULT_MAX_TASK_OUTPUT_BYTES}'s own doc comment. */
     private get maxTaskOutputBytes();
@@ -9445,8 +9466,9 @@ export interface DiagnosticsSnapshot {
         integrity?: 'ok' | 'not-checked';
         reason?: string;
     };
+    /** `not-configured`: a strict Agent daemon has no `workspaceRoot`; each Agent offer runs in its SDK-owned home. */
     workspace: {
-        status: 'available' | 'missing' | 'unavailable';
+        status: 'available' | 'missing' | 'unavailable' | 'not-configured';
         writable?: boolean;
         reason?: string;
     };
@@ -12078,6 +12100,17 @@ export interface RuntimeAdapterDescriptor {
      * never makes an offer wait on one it has no use for.
      */
     readonly requiresMcpToolsetToolObservation?: boolean;
+    /**
+     * Whether each `progress` event carries one complete assistant message
+     * rather than a streaming delta. Codex emits one event per completed
+     * `agentMessage`, so its commentary and its final answer arrive as separate
+     * events with no tool interaction between them. When this is true, the
+     * daemon starts a new closing reply at every `progress` event, so the
+     * closing reply (`task.complete.finalMessage`) is the last message only.
+     * Absent or false: consecutive `progress` events form one reply until a
+     * tool interaction.
+     */
+    readonly progressEventsAreMessages?: boolean;
 }
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
 export interface RuntimeAdapterPrepareInput {
