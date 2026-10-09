@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   DeviceCredentialStore,
@@ -12,7 +13,19 @@ const nativeWindowsSmoke =
 const COMMAND_TIMEOUT_MS = 20_000;
 const PHASE_TIMEOUT_MS = 25_000;
 const CLEAR_PHASE_TIMEOUT_MS = 65_000;
-const TEST_TIMEOUT_MS = 180_000;
+// initial_read is the job's first Windows PowerShell 5.1 `Add-Type
+// -OutputAssembly` compile. Across 43 green runs it took median 3.6 s, max 9 s
+// (warm phases: median 0.6 s) and twice hit the 20 s per-child kill. Only this
+// cold phase gets the wider bound; warm phases keep the tight one.
+const COLD_COMMAND_TIMEOUT_MS = 60_000;
+const COLD_PHASE_TIMEOUT_MS = 65_000;
+// Worst case is every phase using its full bound: initial_read + replace +
+// fresh_read + clear + final_read + cleanup_clear, plus headroom.
+const TEST_TIMEOUT_MS =
+  COLD_PHASE_TIMEOUT_MS +
+  PHASE_TIMEOUT_MS * 3 +
+  CLEAR_PHASE_TIMEOUT_MS * 2 +
+  30_000;
 
 type NativePhase =
   | 'initial_read'
@@ -23,6 +36,10 @@ type NativePhase =
   | 'cleanup_clear';
 
 let activePhase: NativePhase | undefined;
+
+function commandTimeoutMs(phase: NativePhase): number {
+  return phase === 'initial_read' ? COLD_COMMAND_TIMEOUT_MS : COMMAND_TIMEOUT_MS;
+}
 
 /**
  * Windows-only diagnostic runner for this opt-in native probe. It executes the
@@ -38,6 +55,7 @@ const runBoundedNativeCommand: DeviceCommandRunner = (executable, args, stdin) =
       return;
     }
 
+    const commandTimeout = commandTimeoutMs(phase);
     const child = spawn(executable, [...args], {
       env: process.env,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -56,12 +74,15 @@ const runBoundedNativeCommand: DeviceCommandRunner = (executable, args, stdin) =
 
     const timer = setTimeout(() => {
       child.kill();
+      // Byte counts only: stdout/stderr content is never logged here.
       finish(
         new Error(
-          `Windows credential native command timed out (phase=${phase}, timeout_ms=${COMMAND_TIMEOUT_MS})`,
+          `Windows credential native command timed out (phase=${phase}, ` +
+            `executable=${path.basename(executable)}, timeout_ms=${commandTimeout}, ` +
+            `stdout_bytes=${Buffer.byteLength(stdout)}, stderr_bytes=${Buffer.byteLength(stderr)})`,
         ),
       );
-    }, COMMAND_TIMEOUT_MS);
+    }, commandTimeout);
 
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
@@ -131,7 +152,7 @@ describe.skipIf(!nativeWindowsSmoke)('Windows Credential Manager native smoke', 
     let mayExist = false;
 
     try {
-      expect(await runPhase('initial_read', () => writer.read())).toBeUndefined();
+      expect(await runPhase('initial_read', () => writer.read(), COLD_PHASE_TIMEOUT_MS)).toBeUndefined();
 
       mayExist = true;
       await runPhase('replace', () => writer.replace(record));
