@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 7dc98e0 for explicit native interaction approval policy (Apache-2.0).
+// BYOK change: Modified from OAR 087df16 for explicit native interaction approval policy (Apache-2.0).
 import { validateCodexToolDenials } from "./tool-denials.js";
 import type { McpServer, RuntimeEventBody, SessionOptions } from "../../contracts/session.js";
 import { asRecord, type JsonRecord } from "../../shared/json.js";
