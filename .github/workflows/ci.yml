@@ -578,8 +578,14 @@ jobs:
             # the positive keys test at 5004ms against vitest's 5s default; paying
             # the cold cost here keeps every test inside its own budget. Round 4
             # (unset + warm-up) is the only green configuration observed so far.
+            # The warm-up must NOT Import-Module explicitly: that skips PS 5.1
+            # module auto-load, so the per-user analysis cache for the probe's own
+            # cmdlets (pi-provider-launcher-core.ts: ConvertFrom-Json, Get-Item,
+            # Get-Acl, ConvertTo-Json) was never built and the first real probe
+            # stayed cold. Exercise the same cmdlets via auto-load instead, in this
+            # same identity and LOCALAPPDATA as the test step below.
             & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
-              -NoProfile -NonInteractive -Command 'Import-Module Microsoft.PowerShell.Security; [void](Get-Command Get-Acl).Name'
+              -NoProfile -NonInteractive -Command '$ErrorActionPreference = ''Stop''; ''{}'' | ConvertFrom-Json | Out-Null; Get-Item -LiteralPath $env:TEMP | Out-Null; Get-Acl -LiteralPath $env:TEMP | Out-Null; @{ a = 1 } | ConvertTo-Json | Out-Null'
             if ($LASTEXITCODE -ne 0) { Fail 92 'PS 5.1 module warm-up failed under the standard-user token' }
 
             # git compares safe.directory against its own forward-slash spelling of

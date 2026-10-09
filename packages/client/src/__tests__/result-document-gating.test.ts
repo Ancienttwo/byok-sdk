@@ -490,10 +490,18 @@ describe('DaemonConfig.resultDocument end to end (real daemon + in-process serve
 
     // ...and rolled back to an older build before the task finishes. The next
     // successful events response is the server capability authority.
+    //
+    // `httpRequests` records a poll when the server RECEIVES it, which is
+    // before the daemon has read that poll's response. The first poll counted
+    // after the rollback is answered with the rolled-back capabilities, but
+    // seeing it here does not prove the daemon has applied them. The daemon
+    // polls one request at a time and applies a response's capabilities before
+    // it sends the next poll, so a SECOND poll after the rollback proves the
+    // daemon has already applied the rolled-back answer.
     const pollsBeforeRollback = server.httpRequests.filter((request) => request.pathname === '/byok/events').length;
     server.setAckCapabilities([]);
     await vi.waitFor(
-      () => expect(server.httpRequests.filter((request) => request.pathname === '/byok/events').length).toBeGreaterThan(pollsBeforeRollback),
+      () => expect(server.httpRequests.filter((request) => request.pathname === '/byok/events').length).toBeGreaterThanOrEqual(pollsBeforeRollback + 2),
       { timeout: 5000 },
     );
 

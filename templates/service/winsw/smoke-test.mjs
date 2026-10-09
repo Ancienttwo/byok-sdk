@@ -99,6 +99,26 @@ async function assertScState(expected) {
 }
 
 /**
+ * sc.exe can lag a beat behind WinSW's own return (install/start return before
+ * the SCM reports RUNNING; `winsw stop` returns while the service is still
+ * STOP_PENDING), so poll briefly: up to 10 x 1 s, then fail with the last
+ * observed `sc.exe query` output.
+ */
+async function waitForScState(expected) {
+  let lastErr;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      await assertScState(expected);
+      return;
+    } catch (err) {
+      lastErr = err;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+  throw lastErr;
+}
+
+/**
  * Finding F7: real, win32-only proof that `ensureSecureDir` (the one
  * chokepoint `DeviceStore.save()`/`control-server.ts`'s `startControlServer`
  * both funnel `storeDir` creation through — see `util/secure-dir.ts`) genuinely
@@ -148,20 +168,7 @@ try {
   console.log(`==> installing WinSW service (name=${name})`);
   await lifecycle.install();
 
-  // sc.exe can lag a beat behind WinSW's own "installed and started"
-  // return -- poll briefly rather than asserting instantly.
-  let lastErr;
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      await assertScState('RUNNING');
-      lastErr = undefined;
-      break;
-    } catch (err) {
-      lastErr = err;
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-  }
-  if (lastErr) throw lastErr;
+  await waitForScState('RUNNING');
 
   const status = await lifecycle.status();
   console.log(`    lifecycle.status(): ${JSON.stringify(status)}`);
@@ -172,7 +179,7 @@ try {
 
   console.log('==> stopping via the lifecycle API');
   await lifecycle.stop();
-  await assertScState('STOPPED');
+  await waitForScState('STOPPED');
 
   console.log('==> starting again via the lifecycle API');
   await lifecycle.start();
