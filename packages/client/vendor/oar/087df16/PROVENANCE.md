@@ -1,8 +1,8 @@
-# OAR 7dc98e0 private runtime fork
+# OAR 087df16 private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.45.1, fixed commit `7dc98e08f9c0ba99158ddada29cb0d4c80ef7dc6`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.48.0, fixed commit `087df160dd64cd020c98a8b089ce8feb01f73590`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
-`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 35 source files plus LICENSE. Twenty-nine source files keep upstream bytes. Six source files contain BYOK changes. The added files are imports of the selected contracts, the Codex fold and the Codex session, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls. No Cursor, ACP, CLI, arena, executable manager or branded resources are included.
+`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 36 source files plus LICENSE. Thirty source files keep upstream bytes. Six source files contain BYOK changes. The added files are imports of the selected contracts, the Codex fold and the Codex session, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls. No Cursor, ACP, CLI, arena, executable manager or branded resources are included.
 
 ## BYOK S1 changes
 
@@ -173,4 +173,19 @@ Eight selected paths changed upstream. The inventory stays at 35 source files an
 
 The other 27 selected source paths have the same upstream bytes. The upstream executable diagnostics, model lister and observe modules remain outside the selected closure. In particular, 0.45.1's concurrent-message observe fix does not enter this raw adapter. BYOK's private JS/declaration bridge exposes neither new option; ordinary SDK task launches and native event projection keep their existing behavior.
 
-Build assets copy this source's LICENSE, PROVENANCE.md and source-manifest.json to `dist/assets/provenance/oar/7dc98e0/`.
+## 0.45.1 → 0.48.0 re-vendor
+
+The new base is tag v0.48.0, commit `087df160dd64cd020c98a8b089ce8feb01f73590`.
+Five selected paths changed upstream. One new dependency enters the inventory. The inventory is now 36 source files and LICENSE, with six maintained files.
+
+- `contracts/records.ts`, `contracts/session.ts` and `contracts/tool-output.ts` keep upstream bytes. They add the `turn_active` and `app_request_cancelled` events, the `runtime_refused` reason on `input_dropped`, the `ToolCallProgress` type with `outputDelta`, and the optional `contextBreakdown()` Session member.
+- `contracts/context-breakdown.ts` is new and keeps upstream bytes. `contracts/session.ts` imports it. It has no imports.
+- `runtimes/codex/projection.ts` keeps upstream bytes. The derived fold reads `turn/started` as `turn_active`. It reads a command output delta as `tool_call_progress.outputDelta`, not as `output`. It reads `serverRequest/resolved` as `app_request_cancelled`.
+- `shared/session-kernel.ts` takes the upstream `globalThis.crypto.randomUUID` and drops the `node:crypto` import. The fatal byte budget and the required consumer stay.
+
+Upstream assumes that OAR answers no Codex request. This fork answers server requests. So the derived fold also reads a `serverRequest/resolved` that follows a BYOK reply as `app_request_cancelled`. Derived frames do not reach BYOK events. The BYOK event projection and the native interaction bridge read the native frames only. The native bridge withdraws a request on `serverRequest/resolved` only while that request is still pending.
+
+The other 30 prior selected source paths have the same upstream bytes. The other five maintained files have no upstream change. Their BYOK deltas stay, and only their change notices name the new base.
+Upstream 0.46.0 to 0.48.0 also adds Pi Durable, OpenCode v2, the installer plan, the Claude `contextBreakdown()` reader and observe changes. These modules remain outside the selected closure. No upstream npm dependency enters the SDK. The raw Codex session has no `contextBreakdown` member. Upstream Codex has none either.
+
+Build assets copy this source's LICENSE, PROVENANCE.md and source-manifest.json to `dist/assets/provenance/oar/087df16/`.

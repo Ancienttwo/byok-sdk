@@ -1,6 +1,5 @@
-// BYOK change: Modified from OAR 7dc98e0 for a required consumer and fatal retained-record byte budget (Apache-2.0).
+// BYOK change: Modified from OAR 087df16 for a required consumer and fatal retained-record byte budget (Apache-2.0).
 import { emptyInputRefusal } from "./control-input.js";
-import { randomUUID } from "node:crypto";
 import type {
   ControlResult,
   Cursor,
@@ -110,7 +109,7 @@ function deliver(observer: RawEventObserver, record: RawEvent): void {
 }
 
 // BYOK change: The required consumer runs outside best-effort observer swallowing; facts are appended before delivery.
-export function createSessionKernel(sessionId: string = randomUUID(), hooks: {
+export function createSessionKernel(sessionId: string = globalThis.crypto.randomUUID(), hooks: {
   readonly maxBytes?: number;
   readonly onRecord?: (record: RawEvent) => void;
   readonly onLimit?: () => never;
@@ -168,7 +167,7 @@ export function createSessionKernel(sessionId: string = randomUUID(), hooks: {
     return disposing ? { kind: "rejected", code: "disposed", reason: "session disposed" } : null;
   };
   const request: SessionKernel["request"] = (direction, body, at) =>
-    append((envelope) => ({ ...envelope, kind: "request", id: at?.id ?? randomUUID(), direction, body }), at);
+    append((envelope) => ({ ...envelope, kind: "request", id: at?.id ?? globalThis.crypto.randomUUID(), direction, body }), at);
   const respond: SessionKernel["respond"] = (requestId, body, at) =>
     append((envelope) => ({ ...envelope, kind: "response", requestId, body }), at);
 

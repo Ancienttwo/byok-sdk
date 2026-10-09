@@ -1,7 +1,7 @@
 import type { CredentialProblem, FailureClass } from "./failure.js";
 import type { InputImage, InputOrigin } from "./input.js";
+import type { ToolCallProgress, ToolOutputPart } from "./tool-output.js";
 import type { TaskEventBody } from "./tasks.js";
-import type { ToolOutputPart } from "./tool-output.js";
 
 /**
  * The record stream and the events read off it. Three words, three layers:
@@ -18,9 +18,7 @@ import type { ToolOutputPart } from "./tool-output.js";
  * Semantics live in docs/spec; the session control surface that produces
  * these records is in ./session.ts.
  */
-
 // ─── The record stream ────────────────────────────────────────────────────
-
 /**
  * Self-certifying envelope on every record (docs/spec/attribution.md).
  * Identity and ordering rest on `seq` alone; `receivedAt` is best-effort
@@ -135,8 +133,10 @@ export interface UserMessage {
  * merges consecutive pieces for consumers who want blocks.
  */
 export type RuntimeEventBody = UserMessage
-  /** The runtime discarded an input on interruption, established by its native marker or documented behavior. Returns ownership to the caller for resend; never inferred by a view from turn completion. */
-  | { readonly kind: "input_dropped"; readonly inputId: string; readonly reason: "turn_interrupted" }
+  /** The runtime reports an active turn, including one adopted without a prompt request. Not a second turn when `turn_started` already opened it. */
+  | { readonly kind: "turn_active" }
+  /** The runtime discarded or refused an accepted input, established by native evidence. runtime_refused covers a later refused steering RPC. Returns ownership to the caller for resend; never inferred by a view from turn completion. */
+  | { readonly kind: "input_dropped"; readonly inputId: string; readonly reason: "turn_interrupted" | "runtime_refused" }
   /** `messageId`: the runtime's id of the assistant message the text is part of (codex `agentMessage` item, claude API message), so two messages of one turn stay apart; absent when it names none (pi, cursor, ACP) and in older records. */
   | { readonly kind: "text_delta"; readonly text: string; readonly messageId?: string }
   /** A reasoning output item; its lifecycle remains observable without readable contents. `messageId` names the native message when provided, keeping streamed reasoning from distinct messages apart when coalescing. */
@@ -160,9 +160,8 @@ export type RuntimeEventBody = UserMessage
       /** The process exit status the runtime reported for a command it ran (codex `commandExecution.exitCode`, grok and antigravity `rawOutput.exit_code`, a cursor shell result's `exitCode`); `null` when the runtime says it ended without one (a signal). Absent when the runtime reports none (claude, pi), never derived from `result` or output. */
       readonly exitCode?: number | null;
     }
-  /** Partial output of a running tool call, when the runtime streams it (pi `tool_execution_update`, codex `item/commandExecution/outputDelta`, an ACP `tool_call_update` carrying `rawOutput`). claude streams none; cursor's shell output deltas are recorded with no event. */
-  | { readonly kind: "tool_call_progress"; readonly callId: string; readonly output?: string }
-  /** The runtime's OWN completion report for a turn (claude `result`, codex `turn/completed`, pi `agent_end`, an ACP prompt answer). The turn's start is the prompt request record itself; if a runtime reports no end, none appears. */
+  | ToolCallProgress
+  /** The runtime's OWN completion report for a turn (claude `result`, codex `turn/completed`, pi `agent_settled`, an ACP prompt answer). A prompt request produces `turn_started`; a native active-run report produces `turn_active`. Neither implies an outcome: if a runtime reports no end, none appears. */
   | { readonly kind: "turn_ended"; readonly outcome: TurnOutcome }
   /** The runtime began compacting its context. `trigger` is the runtime's own word for why (pi: manual | threshold | overflow; codex: none). claude reports only the boundary after the fact, so it never says this. */
   | { readonly kind: "compaction_started"; readonly trigger?: string }
@@ -182,7 +181,9 @@ export type RuntimeEventBody = UserMessage
   /** The reasoning-effort level the runtime reports as in effect, in its own spelling (codex `reasoningEffort`, an ACP `thought_level` option's current value, pi `thinkingLevel`, cursor's reasoning parameter): its own report, never the request echoed. claude's stream carries none. */
   | { readonly kind: "effort"; readonly effort: string }
   /** The runtime-reported service tier; `default` means explicitly no special tier. */
-  | { readonly kind: "service_tier"; readonly serviceTier: string };
+  | { readonly kind: "service_tier"; readonly serviceTier: string }
+  /** The runtime withdrew a `toApp` request it had sent (`app_request` with this `requestId`) and no longer waits on an answer: claude `control_cancel_request`, codex `serverRequest/resolved` (oar answers no codex request, so a resolved one was cleared by codex itself). Never inferred from a turn ending. */
+  | { readonly kind: "app_request_cancelled"; readonly requestId: string };
 
 /** The toRuntime control actions a Session issues. */
 export type ControlAction = "prompt" | "steer" | "queue" | "withdraw" | "abort" | "dispose";
@@ -286,11 +287,7 @@ export type TurnOutcome =
     readonly status?: number;
   };
 
-/**
- * Current context fullness, borrowed from pi's shape because it already
- * models the hard case: `tokens` is null when unknown (right after compaction,
- * before the next model response), and `percent` follows.
- */
+/** Current context fullness, borrowed from pi's shape because it already models the hard case: `tokens` is null when unknown (right after compaction, before the next model response), and `percent` follows. */
 export interface ContextUsage {
   readonly tokens: number | null;
   readonly contextWindow: number | null;

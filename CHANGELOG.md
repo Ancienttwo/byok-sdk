@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Changed (client)** — update the private OAR source from 0.45.1 to 0.48.0
+  (`087df16`). The derived Codex fold now reports `turn_active`, streamed
+  command output as `outputDelta` and `app_request_cancelled`. SDK events read
+  native Codex frames only, so ordinary task launches and SDK events keep their
+  existing behavior. See `docs/notes/2026-10-09-oar-0.48-upgrade.md`.
+
 ## 0.25.0 / @byok-sdk/keys 0.10.0 - 2026-10-09
 
 Nine packages are published on npm's `latest` channel from `v0.25.0`
