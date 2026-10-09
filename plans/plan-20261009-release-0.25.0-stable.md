@@ -1,6 +1,6 @@
 # Close out stable 0.25.0 / keys 0.10.0
 
-Status: source preparation and verification in progress.
+Status: completed; published and read back as 0.25.0 / keys 0.10.0 on `latest`.
 
 ## Authority and boundary
 
@@ -11,9 +11,10 @@ plus independently versioned keys 0.10.0, targeting npm `latest`. Base:
 
 The execution slice covers version/lock/docs alignment, checks, a reviewable
 release PR, integration and exact-main-CI artifact verification/dry run.
-Npm execution remains the separately authorized boundary in the release
-runbook. Paid providers, Host data migration and deployment are not part of
-source preparation. Existing Host acceptance items remain open.
+Npm execution was separately authorized after final verification, followed by
+registry readback, `v0.25.0` and the GitHub Release. Paid providers, Host data
+migration and deployment were outside the approved publication. Existing
+Host acceptance items remain open.
 
 ## Contract
 
@@ -33,10 +34,10 @@ source preparation. Existing Host acceptance items remain open.
 - [x] Create an isolated release worktree and align the nine public versions.
 - [x] Regenerate lock metadata and prove no dependency resolution changed.
 - [x] Finish build, typecheck, test, API/version, script and release-graph checks.
-- [ ] Review and submit the release PR, qualify its exact head, then integrate.
-- [ ] Qualify the exact merged SHA, download its accepted artifacts and dry run.
-- [ ] Reconcile final-artifact Host/runtime evidence and npm publication authority.
-- [ ] Authorized npm execution, readback, annotated tag and GitHub Release.
+- [x] Review and submit the release PR, qualify its exact head, then integrate.
+- [x] Qualify the exact merged SHA, download its accepted artifacts and dry run.
+- [x] Reconcile final-artifact Host/runtime evidence and npm publication authority.
+- [x] Authorized npm execution, readback, annotated tag and GitHub Release.
 
 ## Evidence
 
@@ -52,5 +53,15 @@ build, typecheck, API/version authority, release graph, 68 script tests and
 7,367 workspace tests (160 environment-gated skips). Parsed manifest/lock
 comparison proves version-only changes and retained external resolutions.
 See [the verification note](../tasks/notes/20261009-release-0.25.0-stable.md).
+
+Final source: `3278b834172efefb50d0dbdd07a29db18521349b` (PR #320).
+Main push CI 37899363164 passed all 24 jobs. Original stable artifacts passed
+hash/identity/dependency verification and the publisher dry run. After the
+owner approved execution, all nine packages published; the initial readback
+stopped on registry propagation, then standalone readback passed without
+another execute run. `v0.25.0` was annotated at that source and pushed.
+The stable GitHub Release is latest; its eleven uploaded assets were downloaded
+and byte-compared to the nine original tarballs, manifest and receipt. See the
+[publication record](../docs/releases/v0.25.0-publication.md).
 
 Current execution evidence is retained under ignored `_ops/release-0.25.0`.
