@@ -52,6 +52,20 @@ export interface SessionOptions {
    * `Session.effort()` is the runtime's report, where it gives one.
    */
   readonly effort?: string;
+  /**
+   * Runtime-native service tier, one of the model's `ModelEntry.serviceTiers`,
+   * or `default` to explicitly disable a special tier. `default` is an
+   * opt-out, not an entry in the catalog. Omission follows the runtime's
+   * configuration and restore rules; see its page for resume behavior.
+   * Applied at open, including resume; reopen to change it. The adapter reads
+   * the native report before returning and rejects a refused or substituted
+   * tier instead of silently running another. Runtimes without a verified
+   * channel reject with UnsupportedOptionError on serviceTier, declared in
+   * Runtime.refusedSessionOptions. A runtime that accepts this option lists
+   * its tiers, and one that lists tiers accepts it. Session.serviceTier()
+   * folds native reports; provider-side availability can still change later.
+   */
+  readonly serviceTier?: string;
   /** Resume the runtime-native session identified by a previous Session.id. In a `cwd` other than the session's own, see `cwd`: kimi and opencode refuse it with `UnsupportedOptionError` (docs/spec/runtime-matrix.md#refused-session-options). */
   readonly resume?: string;
   /** Environment changes for the processes THIS session spawns: a string sets the variable (including an empty string); null removes it from the inherited environment. The host environment is never changed. Subprocess runtimes: the runtime process itself (tools inherit). In-process runtimes: only the agent's tool subprocesses; provider config needs the runtime's native channel there. CAVEAT for PATH-like entries: a runtime that runs tools through a login shell (codex: zsh/bash -lc) lets profile scripts reorder or rebuild PATH (probed: codex demotes injected entries on Linux and macOS path_helper/.zprofile can drop them). Injected CLIs should be invoked by ABSOLUTE path. Pi refuses removals combined with stdio mcpServers because its MCP transport re-inherits the host environment. Refused when non-empty by cursor, whose tools run in the host process with no environment of their own: `session()` rejects with `UnsupportedOptionError` (`Runtime.refusedSessionOptions`, docs/spec/runtime-matrix.md#refused-session-options). */
@@ -99,4 +113,23 @@ export interface SessionOptions {
    * sandbox: another allowed tool may provide the same capability.
    */
   readonly disallowedTools?: readonly string[];
+  /**
+   * Extra command-line arguments for the runtime process this session
+   * starts, for a host that knows a runtime flag OAR does not model (for
+   * example codex `-c service_tier="fast"`). They go where that runtime's
+   * CLI takes options; each runtime page says where. OAR passes them
+   * unchecked and promises nothing about their effect: an argument can
+   * conflict with one OAR passes, one that changes the protocol OAR speaks
+   * (claude's output format, codex's `--listen`) breaks the session, and a
+   * flag the runtime does not know usually makes it exit (the open rejects;
+   * claude opens with its exit as the first record). OAR's own checks
+   * (model, effort and the other typed options read back from the runtime)
+   * cover only those options. OAR never records them (no record, event,
+   * error or voyage header), though a runtime's own error output can quote
+   * them. They are NOT secret: any local user can read a process's argv
+   * (`ps`), so credentials belong in `env`. Give them again on resume. Refused when non-empty by runtimes with no
+   * process of their own (pi, cursor) and by morph: `session()` rejects with
+   * `UnsupportedOptionError` (`Runtime.refusedSessionOptions`).
+   */
+  readonly launchArgs?: readonly string[];
 }

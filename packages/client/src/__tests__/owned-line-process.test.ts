@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { spawn, type SpawnOptions } from 'node:child_process';
 import { createOwnedLineProcessSpawn, spawnOwnedLineProcess } from '../runtime/owned-line-process';
 import { __hostExitBackstopForTests } from '../adapters/process-tree';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/98be973/runtimes/codex/app-server-client';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/7dc98e0/runtimes/codex/app-server-client';
 
 const checkedSpawn: SpawnLineProcess = spawnOwnedLineProcess;
 const live: LineProcess[] = [];

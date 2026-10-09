@@ -1,7 +1,7 @@
 // Keep this check at root, outside package source and declaration build roots.
 // It compares the private JS/declaration bridge with vendor and SDK source types.
 // The SDK projection imports built protocol types, so run after `bun run build`.
-// On re-vendor, update the 98be973 pins together in these four files:
+// On re-vendor, update the 7dc98e0 pins together in these four files:
 // packages/client/src/runtime/codex-session-runtime.js,
 // packages/client/src/runtime/oar-process-tree.js, this test, and
 // scripts/api-surface/oar-bridge-types.ts.
@@ -24,7 +24,7 @@ test('OAR JS bridge re-exports the checked vendored codexSession', () => {
   assert.equal(body.length, 1, 'OAR JS bridge must have one checked re-export');
   const statement = body[0];
   assert.equal(statement.type, 'ExportNamedDeclaration');
-  assert.equal(statement.source?.value, '../../vendor/oar/98be973/runtimes/codex/session.js');
+  assert.equal(statement.source?.value, '../../vendor/oar/7dc98e0/runtimes/codex/session.js');
   assert.deepEqual(statement.specifiers.map(({ local, exported }) => [local.name, exported.name]), [
     ['codexSession', 'codexSession'],
   ]);
@@ -36,7 +36,7 @@ test('OAR process-tree JS bridge re-exports the checked vendored functions', () 
   assert.equal(body.length, 1, 'OAR process-tree bridge must have one checked re-export');
   const statement = body[0];
   assert.equal(statement.type, 'ExportNamedDeclaration');
-  assert.equal(statement.source?.value, '../../vendor/oar/98be973/shared/executable/process-tree.js');
+  assert.equal(statement.source?.value, '../../vendor/oar/7dc98e0/shared/executable/process-tree.js');
   assert.deepEqual(statement.specifiers.map(({ local, exported }) => [local.name, exported.name]), [
     ['descendantsOf', 'descendantsOf'],
     ['killEntries', 'killEntries'],

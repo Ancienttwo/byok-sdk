@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 98be973 for injected processes, bounded RPCs and server replies (Apache-2.0).
+// BYOK change: Modified from OAR 7dc98e0 for injected processes, bounded RPCs and server replies (Apache-2.0).
 // BYOK change: The caller owns process creation and must enforce bounded kill/exited semantics.
 export interface LineProcess {
   readonly spawned: Promise<void>;
@@ -94,10 +94,12 @@ interface Pending {
   timer?: ReturnType<typeof setTimeout>; // BYOK change: cleared on every settlement path.
 }
 
-/** How the app-server process is handled. BYOK change: the caller's spawn owns stderr and the process tree, so only `redact` remains. */
+/** How the app-server process is handled. BYOK change: the caller's spawn owns stderr and the process tree. */
 export interface AppServerProcessOptions {
   /** Applied to the text of every error the client reports (codex's error message, the exit's stderr tail): a session's MCP credentials must never reach one. */
   readonly redact?: (text: string) => string;
+  /** The host's own `app-server` arguments (SessionOptions.launchArgs), unchecked, after oar's `-c` overrides and before `--listen`. */
+  readonly launchArgs?: readonly string[];
 }
 
 export function startAppServerClient(
@@ -115,13 +117,15 @@ export function startAppServerClient(
   for (const value of [maxHeld, maxPending]) {
     if (!Number.isSafeInteger(value) || value < 1) throw new Error("app-server limits must be positive safe integers");
   }
-  // -c KEY=VALUE injects config at launch. This is the ONLY seam that reaches
-  // codex's exec tool: thread/start.sandboxMode does not (pinned on a real
-  // login: thread param honored for its own turns but exec follows config).
+  // -c KEY=VALUE injects config at launch, for every thread of this process
+  // (session.ts sets sandbox_mode this way). thread/start can also set the
+  // sandbox per thread, but its field is `sandbox`: an unknown field such as
+  // `sandboxMode` is ignored without an error.
   const overrideArgs = Object.entries(configOverrides).flatMap(([key, value]) => ["-c", `${key}=${value}`]);
+  const launchArgs = processOptions.launchArgs ?? [];
   const child = spawnLineProcess(
     command,
-    ["app-server", ...overrideArgs, "--listen", "stdio://"],
+    ["app-server", ...overrideArgs, ...launchArgs, "--listen", "stdio://"],
     // BYOK change: upstream killTree is not passed. The caller-owned spawn owns tree termination.
     { ...(cwd === undefined ? {} : { cwd }), env }, // BYOK change: preserve filtered env verbatim.
   );

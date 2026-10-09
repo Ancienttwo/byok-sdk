@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 98be973 for a required consumer and fatal retained-record byte budget (Apache-2.0).
+// BYOK change: Modified from OAR 7dc98e0 for a required consumer and fatal retained-record byte budget (Apache-2.0).
 import { emptyInputRefusal } from "./control-input.js";
 import { randomUUID } from "node:crypto";
 import type {

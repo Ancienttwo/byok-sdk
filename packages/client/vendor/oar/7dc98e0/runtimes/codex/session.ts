@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 98be973 for injected processes, native-first recording, bounded request refusal and caller-selected sandbox (Apache-2.0).
+// BYOK change: Modified from OAR 7dc98e0 for injected processes, native-first recording, bounded request refusal and caller-selected sandbox (Apache-2.0).
 /* oxlint-disable import/max-dependencies -- The adapter composes protocol, input and process-lifetime mechanisms. */
 import type { AvailableInstallation } from "../../contracts/installation.js"; // BYOK change: direct type-only contract import.
 import { randomUUID } from "node:crypto";
@@ -78,9 +78,8 @@ export async function codexSession(
   // BYOK change: Explicit environment and caller sandbox; ambient OAR_CODEX_SANDBOX is ignored.
   if (options.env === undefined) throw new Error("codex session requires an explicit filtered environment");
   // YOLO default (repo policy 2026-08-24): bypass the sandbox too, not just
-  // approvals. Injected as a launch -c override because that is the only seam
-  // that governs codex's exec tool. "inherit" skips the override, so the
-  // user's own config wins.
+  // approvals. Injected as a launch -c override (app-server-client.ts).
+  // "inherit" skips the override, so the user's own config wins.
   const sandboxMode = options.sandboxMode ?? "danger-full-access";
   const configOverrides: Record<string, string> = sandboxMode === "inherit" ? {} : { sandbox_mode: `"${sandboxMode}"` };
   if (!Number.isFinite(serverRequestTimeoutMs) || serverRequestTimeoutMs <= 0 || serverRequestTimeoutMs > 2_147_483_647) {
@@ -88,7 +87,7 @@ export async function codexSession(
   }
   // Every error the client reports goes through the redactor first: the
   // open's config carries the session's MCP credentials to codex.
-  const client = startAppServerClient(spawnLineProcess, installation.command, options.env, configOverrides, options.cwd, undefined, { redact });
+  const client = startAppServerClient(spawnLineProcess, installation.command, options.env, configOverrides, options.cwd, undefined, { redact, ...(options.launchArgs === undefined ? {} : { launchArgs: options.launchArgs }) });
   // BYOK change: Ownership/adoption must settle before the first protocol write.
   try {
     await client.spawned;
@@ -116,7 +115,7 @@ export async function codexSession(
   const started = await openThread(client, openMethod, async () => {
     const reply = await client.request(openMethod, filteredOpenParams, markOpen);
     return reply;
-  });
+  }, options.serviceTier);
   const threadId = asRecord(started.thread)?.id;
   if (typeof threadId !== "string") {
     client.kill();

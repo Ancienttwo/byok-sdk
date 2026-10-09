@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 98be973 to bound control RPCs and record timeout rejection (Apache-2.0).
+// BYOK change: Modified from OAR 7dc98e0 to bound control RPCs and record timeout rejection (Apache-2.0).
 import { emptyInputRefusal } from "../../shared/control-input.js";
 import type {
   ControlResult,
@@ -89,12 +89,14 @@ export async function openThread(
   client: AppServerClient,
   method: "thread/start" | "thread/resume",
   send: () => Promise<JsonRecord>,
+  serviceTier?: string,
 ): Promise<JsonRecord> {
   try {
     return await send();
   } catch (error) {
     client.kill();
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`codex ${method} failed: ${message}`, { cause: error });
+    const detail = serviceTier === undefined ? message : `serviceTier ${serviceTier} could not be confirmed (actual unreported): ${message}`;
+    throw new Error(`codex ${method} failed: ${detail}`, { cause: error });
   }
 }
