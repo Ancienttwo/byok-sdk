@@ -5,6 +5,10 @@
 export const PROVIDER_CREDENTIAL_ENV_DENY_NAMES = Object.freeze([
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_OAUTH_TOKEN',
+  // Official pi sends this as `Authorization: Bearer` for the anthropic provider.
+  'ANTHROPIC_AUTH_TOKEN',
+  // Path to a federation identity token that official pi's anthropic provider reads.
+  'ANTHROPIC_IDENTITY_TOKEN_FILE',
   'OPENAI_API_KEY',
   // Codex 0.159.2 auth inputs; CLI-owned login discovery (e.g. CODEX_HOME)
   // is configuration and deliberately not part of this bounded credential set.
@@ -40,9 +44,15 @@ export const PROVIDER_CREDENTIAL_ENV_DENY_NAMES = Object.freeze([
   'XIAOMI_TOKEN_PLAN_CN_API_KEY',
   'XIAOMI_TOKEN_PLAN_AMS_API_KEY',
   'XIAOMI_TOKEN_PLAN_SGP_API_KEY',
+  'COPILOT_GITHUB_TOKEN',
+  'GOOGLE_CLOUD_API_KEY',
+  'META_API_KEY',
+  'TYPESAFE_API_KEY',
   'AWS_ACCESS_KEY_ID',
   'AWS_SECRET_ACCESS_KEY',
   'AWS_SESSION_TOKEN',
+  'AWS_BEARER_TOKEN_BEDROCK',
+  'AWS_WEB_IDENTITY_TOKEN_FILE',
   'GOOGLE_APPLICATION_CREDENTIALS',
   // Reserved by the keys-owned Pi projection. It must never be inherited
   // from the daemon; the launcher deletes any ambient copy and injects only

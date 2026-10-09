@@ -7,6 +7,14 @@
   command output as `outputDelta` and `app_request_cancelled`. SDK events read
   native Codex frames only, so ordinary task launches and SDK events keep their
   existing behavior. See `docs/notes/2026-10-09-oar-0.48-upgrade.md`.
+- **Security (client)** — the provider credential deny list now covers every
+  credential name that the pinned official pi 1.1.0 reads:
+  `ANTHROPIC_AUTH_TOKEN`, `COPILOT_GITHUB_TOKEN`, `GOOGLE_CLOUD_API_KEY`,
+  `META_API_KEY`, `TYPESAFE_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK`, and the token
+  file paths `ANTHROPIC_IDENTITY_TOKEN_FILE` and `AWS_WEB_IDENTITY_TOKEN_FILE`.
+  Pi MCP server children and the Pi BYOK key lane no longer inherit them. A
+  test compares the list with the names that pinned pi discovers, so a pi
+  upgrade cannot add a name without notice (#326).
 
 ## 0.25.0 / @byok-sdk/keys 0.10.0 - 2026-10-09
 
