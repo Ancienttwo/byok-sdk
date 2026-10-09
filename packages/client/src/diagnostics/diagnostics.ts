@@ -325,7 +325,8 @@ async function inspectJournal(storeDir: string): Promise<DiagnosticsSnapshot['jo
   }
 }
 
-async function inspectWorkspace(workspaceRoot: string): Promise<DiagnosticsSnapshot['workspace']> {
+async function inspectWorkspace(workspaceRoot: string | undefined): Promise<DiagnosticsSnapshot['workspace']> {
+  if (workspaceRoot === undefined) return { status: 'not-configured' };
   try {
     const stat = await fs.stat(workspaceRoot);
     if (!stat.isDirectory()) return { status: 'unavailable', reason: 'workspace root is not a directory' };

@@ -501,6 +501,24 @@ export interface PiRuntimeIdentity {
  */
 export declare function resolvePiRuntimeIdentity(): PiRuntimeIdentity;
 /**
+ * The installed root of the pinned official Pi package. Its manifest name and
+ * version must both equal the client pin; a mismatch fails closed instead of
+ * returning an unverified runtime. `remedy` ends every refusal.
+ *
+ * Deliberately does NOT use `createRequire(...).resolve()`: this package is
+ * pure ESM with no `require` export condition (`exports["."]` only offers
+ * `import`), so CJS-style resolution fails with
+ * `ERR_PACKAGE_PATH_NOT_EXPORTED`. It also does NOT resolve the
+ * `./package.json` subpath directly (also not exported); instead it resolves
+ * the package's main entry via `import.meta.resolve` and walks upward to the
+ * enclosing package root.
+ */
+export declare function resolvePinnedPiPackage(remedy: string): {
+    readonly dir: string;
+    readonly identity: PiRuntimeIdentity;
+    readonly bin: string | Record<string, string> | undefined;
+};
+/**
  * Resolve the pi CLI executable from the required package installed alongside
  * `@byok-sdk/client`. There is intentionally no automatic PATH fallback: a
  * global `pi` would create a second, unversioned authority for this contract.
@@ -511,17 +529,6 @@ export declare function resolvePiRuntimeIdentity(): PiRuntimeIdentity;
  * so an out-of-process substitution (e.g. examples/basic's e2e run swapping
  * in the fake-pi fixture, or a single-file product injecting its required
  * Node 24.15+ pi sidecar) has no other seam to use.
- *
- * Deliberately does NOT use `createRequire(...).resolve()`: this package is
- * pure ESM with no `require` export condition (`exports["."]` only offers
- * `import`), so CJS-style resolution fails with
- * `ERR_PACKAGE_PATH_NOT_EXPORTED`. It also does NOT resolve the
- * `./package.json` subpath directly (also not exported); instead it resolves
- * the package's main entry via `import.meta.resolve` and walks upward to the
- * enclosing package root.
- *
- * That root's manifest name and version are both compared against the pin,
- * and a mismatch fails closed instead of launching an unverified runtime.
  */
 export declare function resolvePiBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/pi/rpc-client.d.ts ====
@@ -683,6 +690,30 @@ export declare class PiRpcClient {
     private buildExitError;
     private onClosed;
 }
+// ==== @byok-sdk/client dist/adapters/pi/runtime-assets.d.ts ====
+/**
+ * How a single-file product runs Pi. `interpreter+bundle`: an interpreter
+ * (Node or Bun) runs the product's JS bundle. `compiled-executable`: a
+ * Bun-compiled executable. Pi looks for its files at different paths in each.
+ */
+export type PiRuntimeAssetForm = 'interpreter+bundle' | 'compiled-executable';
+export interface CopyPiRuntimeAssetsOptions {
+    /** The product's Pi asset root. It must not exist or must be empty. */
+    readonly outDir: string;
+    readonly form: PiRuntimeAssetForm;
+}
+/**
+ * Create the Pi asset root of a single-file product from the installed
+ * `@byok-sdk/client` and its pinned official Pi package. Run it in the
+ * product build, then ship `outDir` with the product and name it in
+ * `PI_PACKAGE_DIR` (a Bun-compiled executable may keep it beside itself).
+ *
+ * The Pi package must be the exact official pin. The Pi export resources must
+ * match their recorded SHA-256 digests, and the SDK todo locale assets must
+ * match their build manifest; a mismatch fails closed. Returns the written
+ * file paths, relative to `outDir`, in sorted order.
+ */
+export declare function copyPiRuntimeAssets(options: CopyPiRuntimeAssetsOptions): Promise<readonly string[]>;
 // ==== @byok-sdk/client dist/adapters/pi/runtime-launch.d.ts ====
 /** The SDK-owned Pi entry a launch starts. */
 export type PiRuntimeLaunchKind = 'pi-rpc' | 'pi-prepared' | 'pi-durable';
@@ -736,8 +767,68 @@ export declare function piLaunchCommand(launch: PiRuntimeLaunchResources, runtim
     command: string;
     args: string[];
 };
+// ==== @byok-sdk/client dist/agent-home-readers.d.ts ====
+import { type TerminalAgentHomeMemoryChange } from '@byok-sdk/protocol';
+/**
+ * How one Agent Attempt uses its home. The wire carries only
+ * `homeAccess: 'memory-reader'`; an absent value is the writer.
+ */
+export type AgentHomeAccessMode = 'memory-writer' | 'memory-reader';
+/** SDK-owned parent of reader run directories, under the home's `.byok/`. */
+export declare const AGENT_HOME_READER_RUNS_DIRECTORY = "runs";
+/** Retention keeps at most this many reader run directories per home. */
+export declare const AGENT_HOME_READER_RUN_MAX_RETAINED = 32;
+/** Retention removes an unprotected reader run directory older than this. */
+export declare const AGENT_HOME_READER_RUN_MAX_AGE_MS: number;
+/**
+ * Whether a taskId can name a reader run directory. A taskId is any
+ * non-empty wire string, so the SDK accepts only one plain path segment.
+ */
+export declare function isReaderRunName(taskId: string): boolean;
+/**
+ * Removes old reader run directories. Inputs are canonical absolute paths.
+ *
+ * - A directory in `active` is never removed.
+ * - A directory that a reader session handoff points to stays while that
+ *   record's last update is within the age limit.
+ * - Other directories older than the age limit are removed.
+ * - Then, while more than `maxRetained` directories remain, the oldest
+ *   unprotected directory is removed first.
+ *
+ * Age is the directory's own modification time. Before each removal it
+ * checks again that `runsRoot` resolves to itself, so a swapped symbolic link
+ * cannot redirect a removal outside the home.
+ */
+export declare function pruneReaderRuns(input: {
+    readonly runsRoot: string;
+    readonly active: ReadonlySet<string>;
+    readonly referenced: ReadonlyMap<string, number>;
+    readonly nowMs: number;
+    readonly maxRetained?: number;
+    readonly maxAgeMs?: number;
+}): Promise<readonly string[]>;
+/** Relative path (with `/` separators) -> content fingerprint of one memory file. */
+export type AgentHomeMemoryDigest = ReadonlyMap<string, string>;
+/**
+ * Fingerprints `MEMORY.md` and every entry under `notes/`, bounded by
+ * {@link AGENT_HOME_MEMORY_DIGEST_MAX_FILES} entries (directories count) and
+ * {@link AGENT_HOME_MEMORY_DIGEST_MAX_BYTES} bytes. It never follows a
+ * symbolic link: a link is fingerprinted by its target text. A file is opened
+ * without following a link and without blocking, must be a regular file, and
+ * is read only up to the remaining byte budget. Returns `undefined` when a
+ * bound is exceeded, an entry is not a directory, regular file or link, or a
+ * read fails; the caller then reports `unmeasured`.
+ */
+export declare function digestAgentHomeMemory(home: string): Promise<AgentHomeMemoryDigest | undefined>;
+/**
+ * Compares the reader's start and terminal digests. `writerOverlapped` is
+ * true when a writer Attempt of the same home was active at any time
+ * during the reader.
+ */
+export declare function compareAgentHomeMemory(before: AgentHomeMemoryDigest | undefined, after: AgentHomeMemoryDigest | undefined, writerOverlapped: boolean): TerminalAgentHomeMemoryChange;
 // ==== @byok-sdk/client dist/agent-home.d.ts ====
-import { type AgentHomeProjectionOutcome, type AgentHomeProjectionPayload, type AgentRef } from '@byok-sdk/protocol';
+import { type AgentHomeProjectionOutcome, type AgentHomeProjectionPayload, type AgentRef, type TerminalAgentHomeProjection } from '@byok-sdk/protocol';
+import { type AgentHomeAccessMode } from './agent-home-readers';
 export type { AgentRef } from '@byok-sdk/protocol';
 export declare const AGENT_HOME_DIRECTORY = "agents";
 export declare const AGENT_HOME_INTERNAL_DIRECTORY = ".byok";
@@ -757,6 +848,14 @@ export declare class AgentHomeCollisionError extends AgentHomeResolutionError {
 export declare class AgentHomeBusyError extends AgentHomeError {
     constructor(message: string);
 }
+/**
+ * A resumed reader session's run directory is gone, for example after
+ * retention removed it. The SDK does not create a new directory for an old
+ * session, so the offer is declined without retry.
+ */
+export declare class AgentHomeReaderRunMissingError extends AgentHomeError {
+    constructor(message: string);
+}
 /** A malformed persisted lease is integrity failure, never retryable contention. */
 export declare class AgentHomeLeaseCorruptError extends AgentHomeResolutionError {
     constructor(message: string);
@@ -767,11 +866,15 @@ export interface AgentHomeResolution {
     readonly hostStorageRoot: string;
     /** SDK-owned `<hostStorageRoot>/agents` authority, after realpath. */
     readonly agentsRoot: string;
-    /** Canonical absolute Agent home. This is also the runtime cwd. */
+    /**
+     * Canonical absolute Agent home. It is the runtime cwd of a writer Attempt;
+     * a memory-reader Attempt runs in its run directory under this home.
+     */
     readonly homeDir: string;
     readonly canonicalHome: string;
 }
 export interface AgentHomeProjectionInput extends AgentHomeResolution {
+    /** Runtime cwd: the home for a writer, the run directory for a memory-reader. */
     readonly cwd: string;
 }
 export interface AgentHomeProjectionApplyInput extends AgentHomeProjectionInput {
@@ -785,7 +888,13 @@ export interface AgentHomeProjectionApplyInput extends AgentHomeProjectionInput 
  * `agents/<agentId>` itself. The SDK does not parse the projected content.
  */
 export interface AgentHomeProjection {
-    /** Optional creation/task-time host preparation retained as a distinct lifecycle. */
+    /**
+     * Optional creation/task-time host preparation retained as a distinct
+     * lifecycle. It runs at every Attempt start under that Attempt's execution
+     * lease. For a memory-reader Attempt, `cwd` is the run directory, and the
+     * one writer of the home can be running at the same time, so a hook that
+     * changes home files must tolerate a concurrent writer.
+     */
     prepare?(input: AgentHomeProjectionInput): void | Promise<void>;
     /**
      * Task-free opaque desired-state consumer. It must atomically and
@@ -813,8 +922,18 @@ export interface AgentHomeBinding {
     readonly lease: AgentHomeLease;
 }
 export interface AgentHomeExecutionLease extends AgentHomeLease {
+    /**
+     * `memory-writer` runs in the canonical home. `memory-reader` runs in its
+     * own run directory, `<home>/.byok/runs/<name>`, which is then `cwd`.
+     */
+    readonly homeAccess: AgentHomeAccessMode;
     /** Fresh tasks are task-keyed until the runtime returns its durable session id. */
     bindSession(sessionRef: string): Promise<void>;
+    /**
+     * Whether a writer Attempt of the same home was active at any time while
+     * this lease was held. Meaningful for a reader lease only.
+     */
+    writerOverlapped(): boolean;
 }
 export interface AgentHomeExecutionBinding {
     readonly resolution: AgentHomeResolution;
@@ -890,13 +1009,17 @@ export declare class AgentHomeLeaseManager {
  * status (`create-daemon.ts`).
  */
 export interface AgentHomeExecutionStatus {
-    /** Effective `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome` for this daemon. */
-    maxConcurrentMutableSessionsPerAgentHome: number;
+    /** Effective `DaemonConfig.maxConcurrentReaderAttemptsPerAgentHome`. A home always has at most one writer. */
+    maxConcurrentReaderAttemptsPerAgentHome: number;
     /** Canonical Agent homes this daemon currently holds at least one execution lease in. */
     activeHomes: number;
-    /** Total Attempts holding an execution lease across those homes. */
+    /** Total Attempts, writers and readers, holding an execution lease across those homes. */
     activeAttempts: number;
+    /** The `memory-reader` Attempts among `activeAttempts`. */
+    activeReaderAttempts: number;
 }
+/** The run directory of one reader Attempt: a direct child of `<home>/.byok/runs/`. */
+export declare function agentHomeReaderRunDirectory(canonicalHome: string, name: string): string;
 /**
  * Session-scoped execution leases share one process-owned home marker. The
  * marker remains until the final session exits, so relocation still sees the
@@ -905,8 +1028,13 @@ export interface AgentHomeExecutionStatus {
  * This layer counts; it does not cap. How many Attempts may be active in one
  * canonical home is a daemon admission decision made once, before any side
  * effect, by `TaskRunner.handleOffer`'s per-home busy gate reading
- * {@link AgentHomeExecutionLeaseManager.activeAttemptCount} against
- * `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome` (default 1).
+ * {@link AgentHomeExecutionLeaseManager.activeAttemptCount} per access mode:
+ * one writer, and `DaemonConfig.maxConcurrentReaderAttemptsPerAgentHome`
+ * readers (default 4).
+ *
+ * A writer lease's cwd is the canonical home. A reader lease's cwd is its own
+ * run directory, which the caller names. A reader lease records whether a
+ * writer lease of the same home overlapped it, for memory-change evidence.
  */
 export declare class AgentHomeExecutionLeaseManager {
     private readonly manager;
@@ -916,11 +1044,14 @@ export declare class AgentHomeExecutionLeaseManager {
     acquire(resolution: AgentHomeResolution, input: {
         readonly taskId: string;
         readonly sessionRef?: string;
+        readonly homeAccess?: AgentHomeAccessMode;
+        /** Required for a reader: its run directory under this home. */
+        readonly cwd?: string;
     }): Promise<AgentHomeExecutionLease>;
     /**
-     * WP0: Attempts currently holding an execution lease on this exact
-     * canonical home, across every lane and every session. This is the number
-     * the daemon's admission gate reads before any side effect — see
+     * WP0: Attempts of one access mode currently holding an execution lease on
+     * this exact canonical home, across every lane and every session. This is
+     * the number the daemon's admission gate reads before any side effect — see
      * `TaskRunner.handleOffer`'s per-home busy gate.
      *
      * Derived from the one lease registry above rather than a second tally, so
@@ -937,7 +1068,11 @@ export declare class AgentHomeExecutionLeaseManager {
      * being protected is the filesystem path (`MEMORY.md`, `notes/`, `.git`),
      * not the owner identity.
      */
-    activeAttemptCount(canonicalHome: string): number;
+    activeAttemptCount(canonicalHome: string, homeAccess: AgentHomeAccessMode): number;
+    /** How many active reader leases of this home use `cwd` as their run directory. */
+    activeReaderRunHolders(canonicalHome: string, cwd: string): number;
+    /** Run directories that active reader Attempts of this home use; retention never removes them. */
+    activeReaderRunDirectories(canonicalHome: string): ReadonlySet<string>;
     /**
      * Counts-only readback for daemon/control status. Scoped to this manager's
      * own leases, so the number describes this daemon rather than every home
@@ -946,6 +1081,7 @@ export declare class AgentHomeExecutionLeaseManager {
     activeAttemptSummary(): {
         readonly homes: number;
         readonly attempts: number;
+        readonly readerAttempts: number;
     };
     mutate<T>(binding: AgentHomeExecutionBinding, operation: () => Promise<T>): Promise<T>;
     private exclusive;
@@ -968,10 +1104,42 @@ export declare class AgentHomeManager {
     preflightSync(): void;
     /** Resolve and lease without applying downstream projection side effects. */
     acquire(agentRef: AgentRef): Promise<AgentHomeBinding>;
+    /**
+     * A writer runs in the canonical home. A fresh reader runs in
+     * `<home>/.byok/runs/<taskId>/`. A resumed reader passes the run directory
+     * its session handoff recorded, as `runDirectory`.
+     */
     acquireExecution(agentRef: AgentRef, input: {
         readonly taskId: string;
         readonly sessionRef?: string;
+        readonly homeAccess?: AgentHomeAccessMode;
+        readonly runDirectory?: string;
     }): Promise<AgentHomeExecutionBinding>;
+    /**
+     * Prepares the run directory of a reader lease under the home's execution
+     * queue. A fresh reader first applies retention, then creates its own
+     * directory. A redelivered offer can find the directory that an earlier
+     * start of the same task created before a crash: the start reuses it when
+     * it is a real, empty directory that no other active reader holds, and
+     * throws {@link AgentHomeBusyError} otherwise, so two tasks never share a
+     * directory. A resumed reader requires its recorded directory to exist and
+     * throws {@link AgentHomeReaderRunMissingError} when it does not.
+     *
+     * Retention never removes the directory of an active reader.
+     * `referencedRuns` maps run directories to the last update time of the
+     * reader session handoff that points to them; `undefined` skips retention
+     * for this start. A retention failure does not block the Attempt: it is
+     * returned as `retentionError`.
+     */
+    prepareReaderRun(binding: AgentHomeExecutionBinding, input: {
+        readonly fresh: boolean;
+        readonly referencedRuns?: ReadonlyMap<string, number>;
+        readonly nowMs: number;
+    }): Promise<{
+        readonly retentionError?: unknown;
+    }>;
+    /** A fresh reader may reuse only a real, empty run directory that no other active reader holds. */
+    private assertReusableReaderRun;
     /** Initialize only after any requested session exact-match has succeeded. */
     initialize(binding: AgentHomeBinding): Promise<void>;
     /**
@@ -982,6 +1150,12 @@ export declare class AgentHomeManager {
      */
     initializeTaskFree(binding: AgentHomeBinding): Promise<void>;
     initializeExecution(binding: AgentHomeExecutionBinding): Promise<void>;
+    /**
+     * The task-free projection already applied to this home, from the SDK-owned
+     * ordering record. Read it while the execution lease is held: `project()`
+     * needs the same lease, so the record cannot change during the Attempt.
+     */
+    readAppliedProjection(binding: AgentHomeExecutionBinding): Promise<TerminalAgentHomeProjection | undefined>;
     mutateExecution<T>(binding: AgentHomeExecutionBinding, operation: () => Promise<T>): Promise<T>;
     private initializeResolved;
     supportsTaskFreeProjection(): boolean;
@@ -2195,25 +2369,45 @@ export interface AgentSessionHandoff {
     readonly taskId: string;
     readonly sessionRef: string;
     readonly runtimeId: string;
-    /** Canonical Agent home and runtime cwd; these are intentionally one value. */
+    /**
+     * Runtime cwd. For a writer session it is the canonical Agent home. For a
+     * `memory-reader` session it is the run directory `<home>/.byok/runs/<taskId>`
+     * that the first Attempt created; a resume runs there again.
+     */
     readonly cwd: string;
+    /** Present for a `memory-reader` session only; absent means a writer session. */
+    readonly homeAccess?: 'memory-reader';
     readonly leaseId: string;
     readonly terminalCause?: AgentTerminalCause;
     readonly terminalReason?: string;
     readonly updatedAt: string;
 }
+/**
+ * Exact session identity. Every field must match the recorded handoff,
+ * including the access mode: a reader session never resumes as a writer, and
+ * a writer session never resumes as a reader.
+ */
 export interface AgentSessionHandoffMatch {
     readonly agentRef: AgentRef;
     readonly sessionRef: string;
     readonly runtimeId: string;
+    /**
+     * Canonical Agent home. The session ledger lives in its
+     * `.byok/runtime-sessions/`. Defaults to `cwd`, which is the home of a
+     * writer session. A reader session must name it.
+     */
+    readonly home?: string;
     readonly cwd: string;
+    readonly homeAccess?: 'memory-reader';
 }
 export interface AgentTaskTerminalEvidence {
     readonly agentRef: AgentRef;
     readonly taskId: string;
     readonly runtimeId: string;
-    /** Canonical Agent home and sealed runtime cwd. */
+    /** Sealed runtime cwd: the canonical Agent home, or a reader's run directory. */
     readonly cwd: string;
+    /** Present for a `memory-reader` Attempt only. */
+    readonly homeAccess?: 'memory-reader';
     readonly leaseId: string;
     /** Present when adapter start succeeded but handoff persistence failed. */
     readonly sessionRef?: string;
@@ -2225,7 +2419,10 @@ export interface AgentTaskTerminalMatch {
     readonly agentRef: AgentRef;
     readonly taskId: string;
     readonly runtimeId: string;
+    /** Canonical Agent home, as in {@link AgentSessionHandoffMatch.home}. Defaults to `cwd`. */
+    readonly home?: string;
     readonly cwd: string;
+    readonly homeAccess?: 'memory-reader';
 }
 export declare class AgentSessionHandoffStoreError extends Error {
     constructor(message: string);
@@ -2241,7 +2438,8 @@ export declare class AgentSessionHandoffMismatchError extends AgentSessionHandof
  * home. Each session gets one hash-addressed append-only JSONL ledger under
  * `.byok/runtime-sessions/`; session text never becomes a pathname. Unlike
  * the legacy SessionWorkspaceStore, corrupt bytes are never interpreted as a
- * missing mapping.
+ * missing mapping. Reader sessions keep their ledger in the home too, not in
+ * their run directory, so a resume can find the run directory by sessionRef.
  */
 export declare class AgentSessionHandoffStore {
     private readonly queues;
@@ -2250,8 +2448,25 @@ export declare class AgentSessionHandoffStore {
     history(expected: AgentSessionHandoffMatch): Promise<readonly AgentSessionHandoff[]>;
     /** Exact identity check used before a strict Agent resume is admitted. */
     requireMatch(expected: AgentSessionHandoffMatch): Promise<AgentSessionHandoff>;
+    /**
+     * The run directory a `memory-reader` session recorded, for its resume.
+     * Throws a mismatch when no handoff exists, when the session was recorded
+     * by a writer, or when the AgentRef or runtime differ.
+     */
+    readerSessionCwd(expected: Omit<AgentSessionHandoffMatch, 'home' | 'cwd' | 'homeAccess'> & {
+        readonly home: string;
+    }): Promise<string>;
+    /**
+     * Reader run directories that session ledgers of this home point to, each
+     * with the last update time of its ledger in ms. Retention keeps these
+     * directories until the record is older than the age limit. A corrupt
+     * ledger throws, and the caller then skips retention.
+     */
+    readerRunReferences(home: string): Promise<ReadonlyMap<string, number>>;
     /** Append-only, fsynced write. The caller awaits this before task.started. */
-    record(input: Omit<AgentSessionHandoff, 'updatedAt' | 'terminalCause' | 'terminalReason'>): Promise<AgentSessionHandoff>;
+    record(input: Omit<AgentSessionHandoff, 'updatedAt' | 'terminalCause' | 'terminalReason'> & {
+        readonly home?: string;
+    }): Promise<AgentSessionHandoff>;
     /** Records the first terminal cause without changing the exact handoff identity. */
     recordTerminal(expected: AgentSessionHandoffMatch, cause: AgentTerminalCause, reason?: string): Promise<AgentSessionHandoff>;
     /**
@@ -2259,12 +2474,20 @@ export declare class AgentSessionHandoffStore {
      * session handoff existed. Callers await the fsync before sending
      * `task.fail`, so cloud state can never outrun the Agent-local evidence.
      */
-    recordTaskTerminal(input: Omit<AgentTaskTerminalEvidence, 'updatedAt' | 'terminalCause'>): Promise<AgentTaskTerminalEvidence>;
+    recordTaskTerminal(input: Omit<AgentTaskTerminalEvidence, 'updatedAt' | 'terminalCause'> & {
+        readonly home?: string;
+    }): Promise<AgentTaskTerminalEvidence>;
     getTaskTerminal(expectedInput: AgentTaskTerminalMatch): Promise<AgentTaskTerminalEvidence | undefined>;
     private filePath;
     private taskTerminalFilePath;
     private enqueue;
     private load;
+    /**
+     * The latest session entry of one ledger file, or `undefined` for a
+     * task-terminal evidence file. The two file kinds share one directory, and
+     * a runtime id can make their names look alike, so the record kind decides.
+     */
+    private loadSessionLedger;
     private loadAll;
     private loadTaskTerminal;
     private append;
@@ -3629,7 +3852,13 @@ export interface DaemonConfig {
      * wants no supersession at all supplies `async () => undefined`.
      */
     machineId?: () => Promise<string | undefined>;
-    workspaceRoot: string;
+    /**
+     * Parent directory of each legacy offer's `workspaceRoot/<taskId>`
+     * workspace, and of Git workspace mode. Required unless `strictAgentOnly`
+     * is true: a strict Agent daemon refuses every legacy offer and runs each
+     * Agent offer in its SDK-owned home, so it never reads this path.
+     */
+    workspaceRoot?: string;
     /**
      * Strict Agent execution boundary. The host selects one absolute branded
      * storage root; the SDK alone composes `agents/<agentId>`, initializes the
@@ -3660,25 +3889,26 @@ export interface DaemonConfig {
      */
     strictAgentOnly?: boolean;
     /**
-     * WP0: how many Attempts this daemon lets execute CONCURRENTLY in one
-     * canonical Agent home, across every lane and every session. Default
-     * {@link DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME} (1).
+     * How many `homeAccess: 'memory-reader'` Attempts this daemon lets run
+     * CONCURRENTLY in one canonical Agent home, across every lane and every
+     * session. Default {@link DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME} (4).
      *
-     * The canonical home is every Agent session's cwd, so each concurrent
-     * Attempt in it is another writer of the same `MEMORY.md`, `notes/` and
-     * `.git`. At the default, a second offer for a home that already has an
-     * active Attempt is declined retryably before adapter preparation, the
-     * claim, or any process side effect — the busy-home contract downstream
-     * hosts already depend on.
+     * Readers are counted apart from the writer. A home has at most one writer
+     * Attempt, fixed: the writer runs in the home itself, so a second writer
+     * would co-write `MEMORY.md`, `notes/` and `.git`. Each reader runs in its
+     * own run directory, `<home>/.byok/runs/<taskId>/`. An offer over either
+     * limit is declined retryably before adapter preparation, the claim, or any
+     * process side effect.
      *
-     * Raising it above 1 is an explicit host choice that re-enables the
-     * 0.12.0 concurrent-session behaviour, including its co-writing exposure;
-     * the SDK never falls back to it on its own. Validated up front, the same
-     * way `maxTaskOutputBytes` is: a positive safe integer, so `0`, a negative
-     * number, `NaN` and a non-integer are construction errors rather than a
-     * silently reinterpreted "unlimited".
+     * Validated up front, the same way `maxTaskOutputBytes` is: a positive safe
+     * integer, so `0`, a negative number, `NaN` and a non-integer are
+     * construction errors rather than a silently reinterpreted "unlimited".
+     *
+     * The removed `maxConcurrentMutableSessionsPerAgentHome` is a construction
+     * error: a value above 1 let Attempts co-write one home, which reader
+     * Attempts replace.
      */
-    maxConcurrentMutableSessionsPerAgentHome?: number;
+    maxConcurrentReaderAttemptsPerAgentHome?: number;
     /**
      * Explicit Agent-local/cloud egress selection. Omission still enforces the
      * SDK metadata/status projection, but does not advertise or admit the new
@@ -6467,7 +6697,17 @@ export { McpAuthorityError };
  * content, infer durable values, or auto-inject files into the operation.
  */
 export declare const AGENT_MEMORY_GUIDANCE: string;
+/**
+ * Guidance for a `memory-reader` Attempt. Its `cwd` is its own run directory,
+ * `<home>/.byok/runs/<taskId>/`, so the memory is three levels up. The writer
+ * Attempt owns memory changes. This is guidance only: the SDK does not make
+ * memory read-only, and the reader terminal reports any memory change.
+ * Agent content reads do not reach the run directory (it is under `.byok/`),
+ * so the guidance puts the result in the final reply, not in a file.
+ */
+export declare const AGENT_MEMORY_READER_GUIDANCE: string;
 export declare function prependAgentMemoryGuidance(instruction: string): string;
+export declare function prependAgentMemoryReaderGuidance(instruction: string): string;
 // ==== @byok-sdk/client dist/daemon/observer.d.ts ====
 import { type AgentEvent, type BlobRef, type Envelope, type RuntimeInfo, type TaskState } from '@byok-sdk/protocol';
 import type { ConnectionState } from './connection-manager';
@@ -7706,6 +7946,12 @@ export interface ResultDocumentTask {
     readonly sessionRef: string;
     /** Exact offer-scoped second projection; absent for legacy and message-only offers. */
     readonly terminalProjection?: Readonly<TerminalProjectionSelection>;
+    /**
+     * The runtime's closing reply, the same text as `task.complete.finalMessage`.
+     * `finalOutput` stays the whole run's text. Absent when the run ended with
+     * no closing text.
+     */
+    readonly finalMessage?: string;
 }
 /**
  * Host-supplied glue that turns a finished task's final output into the
@@ -7740,14 +7986,12 @@ export type ResultDocumentExtractor = (finalOutput: string, task: ResultDocument
  */
 export declare const DEFAULT_MAX_TASK_OUTPUT_BYTES: number;
 /**
- * WP0: default number of Attempts allowed to execute concurrently in one
- * canonical Agent home. One — the canonical home is every Agent session's
- * cwd, so a second concurrent Attempt is a second writer of the same
- * `MEMORY.md`, `notes/` and `.git`. Raising it is an explicit host choice
- * (`DaemonConfig.maxConcurrentMutableSessionsPerAgentHome`) that re-enables
- * the 0.12.0 co-writing exposure; there is no implicit fallback to it.
+ * Default number of `memory-reader` Attempts that may run concurrently in one
+ * canonical Agent home. Readers are counted apart from the writer. A home has
+ * at most one writer Attempt, fixed: the writer runs in the home itself, so a
+ * second writer would co-write `MEMORY.md`, `notes/` and `.git`.
  */
-export declare const DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME = 1;
+export declare const DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME = 4;
 export interface TaskRunnerDeps {
     adapters: RuntimeAdapter[];
     runtimeAllowlist?: string[];
@@ -7798,18 +8042,20 @@ export interface TaskRunnerDeps {
         /** `toolsetId` -> definition revision, from one registry read per call. */
         readonly toolsetDefinitionRevisions: () => ReadonlyMap<string, string>;
     };
-    workspaceRoot: string;
+    /** Parent of legacy `workspaceRoot/<taskId>` workspaces. Required unless `strictAgentOnly` is true. */
+    workspaceRoot?: string;
     /** Strict Agent offer authority. Absent means legacy offers never resolve an Agent home. */
     agentHome?: AgentHomeManager;
     /** Local authority: legacy offers are declined after journal/dedup/cancel precedence. */
     strictAgentOnly?: boolean;
     /**
-     * WP0: how many Attempts may execute concurrently in ONE canonical Agent
-     * home — see `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome`'s own
-     * doc comment (`create-daemon.ts`) for the validated contract. Unset
-     * defaults to {@link DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME}.
+     * How many `memory-reader` Attempts may run concurrently in ONE canonical
+     * Agent home — see `DaemonConfig.maxConcurrentReaderAttemptsPerAgentHome`'s
+     * own doc comment (`create-daemon.ts`) for the validated contract. Unset
+     * defaults to {@link DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME}.
+     * The writer limit is fixed at one.
      */
-    maxConcurrentMutableSessionsPerAgentHome?: number;
+    maxConcurrentReaderAttemptsPerAgentHome?: number;
     /** Exact host-selected policy accepted by `task.offer_for_agent_with_egress`. */
     agentEgressPolicy?: Readonly<AgentEgressPolicy>;
     /** Latest-value activity lane and reliable spool for Agent egress offers. */
@@ -8251,13 +8497,15 @@ export declare class TaskRunner {
      */
     private stoppingOffers;
     constructor(deps: TaskRunnerDeps);
+    /** A legacy offer's workspace. Only a non-strict runner admits one, and its constructor required the root. */
+    private legacyWorkspaceDir;
     get activeTaskCount(): number;
     /** M5 batch-3 (workstream 2): effective `maxTaskOutputBytes` cap for this daemon — see {@link DEFAULT_MAX_TASK_OUTPUT_BYTES}'s own doc comment. */
     private get maxTaskOutputBytes();
     /** Effective per-event inline ceiling for this daemon — see `DaemonConfig.maxInlineEventBytes`. */
     private get maxInlineEventBytes();
-    /** WP0: effective per-canonical-Agent-home Attempt cap — see {@link DEFAULT_MAX_CONCURRENT_MUTABLE_SESSIONS_PER_AGENT_HOME}. */
-    private get maxConcurrentMutableSessionsPerAgentHome();
+    /** Effective per-canonical-Agent-home reader cap — see {@link DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME}. */
+    private get maxConcurrentReaderAttemptsPerAgentHome();
     /**
      * M4 Phase 4 (part B.3, observability): per-active-task queue watermarks
      * for the control socket's `status` result — see
@@ -8887,6 +9135,13 @@ export declare class TaskRunner {
     private updateGitPhaseBestEffort;
     /** Persist Agent terminal truth before wire when local storage is available. */
     private persistAgentTerminalEvidence;
+    /**
+     * Memory-change evidence of a `memory-reader` Attempt (#317), measured once
+     * at its first terminal decision, before the terminal envelope is built.
+     * The execution lease is still held, so the overlap flag covers every
+     * writer that started before this point.
+     */
+    private measureReaderMemoryChange;
     private retryAgentTerminalEvidence;
     private reportAgentTerminalEvidenceFailure;
     retryTerminalFinalization(taskId: string): Promise<void>;
@@ -9445,8 +9700,9 @@ export interface DiagnosticsSnapshot {
         integrity?: 'ok' | 'not-checked';
         reason?: string;
     };
+    /** `not-configured`: a strict Agent daemon has no `workspaceRoot`; each Agent offer runs in its SDK-owned home. */
     workspace: {
-        status: 'available' | 'missing' | 'unavailable';
+        status: 'available' | 'missing' | 'unavailable' | 'not-configured';
         writable?: boolean;
         reason?: string;
     };
@@ -9477,10 +9733,11 @@ export type OperationalHealthFixResult = {
 // ==== @byok-sdk/client dist/index.d.ts ====
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, Session, GitWorkspaceConfig, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types';
 export type { AgentRef } from './agent-home';
-export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjection, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home';
+export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjection, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home';
 export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store';
 export type { AgentSessionHandoff, AgentSessionHandoffMatch, AgentTaskTerminalEvidence, AgentTaskTerminalMatch, AgentTerminalCause, } from './daemon/agent-session-handoff-store';
 export type { AgentHomeResolution, AgentHomeProjection, AgentHomeProjectionInput, AgentHomeProjectionApplyInput, AgentHomeProjectionFunction, AgentHomeProjectionApplyFunction, AgentHomeLease, AgentHomeBinding, AgentHomeExecutionLease, AgentHomeExecutionBinding, AgentHomeExecutionStatus, } from './agent-home';
+export type { AgentHomeAccessMode } from './agent-home-readers';
 export { localStateRelocation, LocalStateRelocationError, LocalStateRelocationBusyError, LocalStateRelocationIntegrityError, } from './local-state-relocation';
 export type { LocalStateRelocationInput, LocalStateRelocationLease, } from './local-state-relocation';
 export { PolicyUnsupportedError, SteerUnsupportedError, freezeRuntimeAdapterDescriptor, sealRuntimeOperationManifest } from './types';
@@ -9601,6 +9858,8 @@ export type { EnsureSecureDirOptions } from './util/secure-dir';
 export { PiAdapter } from './adapters/pi/pi-adapter';
 export type { PiAdapterOptions, PiByokLauncherConfig } from './adapters/pi/pi-adapter';
 export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin';
+export { copyPiRuntimeAssets } from './adapters/pi/runtime-assets';
+export type { CopyPiRuntimeAssetsOptions, PiRuntimeAssetForm } from './adapters/pi/runtime-assets';
 export { ClaudeAdapter } from './adapters/claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
 export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
@@ -12078,6 +12337,17 @@ export interface RuntimeAdapterDescriptor {
      * never makes an offer wait on one it has no use for.
      */
     readonly requiresMcpToolsetToolObservation?: boolean;
+    /**
+     * Whether each `progress` event carries one complete assistant message
+     * rather than a streaming delta. Codex emits one event per completed
+     * `agentMessage`, so its commentary and its final answer arrive as separate
+     * events with no tool interaction between them. When this is true, the
+     * daemon starts a new closing reply at every `progress` event, so the
+     * closing reply (`task.complete.finalMessage`) is the last message only.
+     * Absent or false: consecutive `progress` events form one reply until a
+     * tool interaction.
+     */
+    readonly progressEventsAreMessages?: boolean;
 }
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
 export interface RuntimeAdapterPrepareInput {
@@ -12139,8 +12409,18 @@ export interface RuntimeOperationManifest {
     readonly sessionRef?: string;
     /** Strict Agent identity, present only for task.offer_for_agent. */
     readonly agentRef?: AgentRef;
-    /** Canonical runtime cwd; for an Agent task this is the Agent home root. */
+    /**
+     * Canonical runtime cwd. For an Agent writer it is the Agent home root. For
+     * a `memory-reader` Attempt it is the run directory
+     * `<home>/.byok/runs/<taskId>/`, and `lease.canonicalHome` names the home.
+     */
     readonly cwd?: string;
+    /**
+     * Present for a `memory-reader` Agent Attempt only. An adapter whose runtime
+     * does not read instruction files from ancestors of `cwd` uses it to point
+     * the runtime at `lease.canonicalHome`.
+     */
+    readonly homeAccess?: 'memory-reader';
     /** Opaque local lease identity sealed with the Agent manifest. */
     readonly lease?: {
         readonly leaseId: string;

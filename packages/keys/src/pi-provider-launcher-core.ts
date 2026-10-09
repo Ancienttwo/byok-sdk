@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { runCommand, type CommandRunner } from './command-runner';
 import { configurationPendingError, withConfigurationLock } from './custody';
 import { ByokKeysError } from './errors';
+import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import {
   PI_LAUNCHER_RUNTIME_ENTRIES, PI_PROJECTED_KEY_ENV, buildPiPreparedArgs, buildPiProviderArgs,
   buildPiProviderProjection, type PiLauncherRuntimeEntry,
@@ -12,6 +13,7 @@ import type { ProviderProfileStore } from './profile-store';
 import {
   ProviderModelCapabilitySchema,
   ProviderProfileRefSchema,
+  assertExactProviderProfileBinding,
   exactProviderProfileBinding,
   type ExactProviderProfileBinding,
   type ModelProviderProfile,
@@ -224,11 +226,12 @@ export function parsePiProviderLauncherOptions(
  * about custody: a prepared artifact is `openai-completions` bytes compiled by
  * the device, and the host resolves a key for the projected provider before it
  * will consume one. An `anthropic` adapter projects `anthropic-messages`, which
- * the prepared compiler never emits, and `auth_mode: 'none'` projects a
- * provider with no `apiKey` reference at all, so the host would refuse with
+ * the prepared compiler never emits, and an `auth_mode: 'none'` profile has
+ * no key for the host to resolve, so the host would refuse with
  * `prepared_provider_credential_unavailable` AFTER a child had already been
  * spawned. Refusing here means the admission (`--validate-only true`) answers
- * the same question the launch would, before any process exists.
+ * the same question the launch would, before any process exists. The
+ * projection refuses a keyless profile for this entry too.
  *
  * Deliberately NOT a silent narrowing of the profile: nothing here rewrites the
  * adapter or invents a credential.
@@ -561,5 +564,91 @@ export async function ensurePiSessionDirectory(sessionDir: string): Promise<void
     throw new Error(
       'existing Pi session directory must already be owner-only; refusing to change host-owned permissions',
     );
+  }
+}
+
+/** What a host supplies to {@link runPiProviderLauncher}. */
+export interface PiProviderLauncherHost {
+  /**
+   * Builds the credential store that holds the selected profile's key. The
+   * launcher calls it only for a profile that requires a credential, and only
+   * under the profile store's configuration lock. A host that stores keys with
+   * its own options (for example a `MacOsKeychainSecretStore` `storagePrefix`
+   * or `account`) builds that store here. The parsed launcher options carry
+   * `secretServicePrefix` and `macosKeychainPath` for the host to apply.
+   */
+  createSecretStore: () => SecretStore;
+}
+
+/**
+ * The credential-custody launcher, as one call: the same checks and the same
+ * launch as the bundled `byok-pi-provider-launcher` executable, with a
+ * host-built credential store.
+ *
+ * It opens the profile database read-only, requires the exact configured
+ * profile and model, checks the exact binding when the options carry one,
+ * refuses a profile the runtime entry cannot serve, and builds the projection.
+ * A validation-only call then checks custody without reading a key. A launch
+ * reads the key through the custody snapshot, spawns Pi, forwards SIGINT and
+ * SIGTERM to the child while it runs, and resolves with the child's exit code.
+ * The projection file is removed on every exit path.
+ */
+export async function runPiProviderLauncher(
+  options: PiProviderLauncherOptions,
+  host: PiProviderLauncherHost,
+): Promise<number> {
+  const profiles = new SqliteProviderProfileStore({
+    path: options.profileDbPath,
+    readOnly: true,
+  });
+  let cleanup: (() => Promise<void>) | undefined;
+  try {
+    const profile = await profiles.get(options.profileRef);
+    if (profile === undefined) {
+      throw new Error(`provider profile ${options.profileRef} is not configured`);
+    }
+    if (profile.model !== options.modelId) {
+      throw new Error(
+        `selected model ${options.modelId} does not match configured provider model ${profile.model}`,
+      );
+    }
+    if (options.expectedBinding !== undefined) {
+      assertExactProviderProfileBinding(profile, options.expectedBinding);
+    }
+    if (options.runtimeEntry === 'pi-prepared') assertPiPreparedProviderProfile(profile);
+    buildPiProviderProjection(profile, options.runtimeEntry);
+    if (options.validateOnly) {
+      await assertProviderCustodyIdle({ profiles, profile });
+      return 0;
+    }
+    const launched = await startPiProvider(profile, options, {
+      ambient: process.env,
+      profiles,
+      createSecretStore: host.createSecretStore,
+    });
+    cleanup = launched.cleanup;
+    const child = launched.child;
+
+    const forward = (signal: NodeJS.Signals): void => {
+      if (!child.killed) child.kill(signal);
+    };
+    const onSigint = (): void => forward('SIGINT');
+    const onSigterm = (): void => forward('SIGTERM');
+    process.on('SIGINT', onSigint);
+    process.on('SIGTERM', onSigterm);
+    try {
+      return await new Promise<number>((resolve, reject) => {
+        child.once('error', reject);
+        child.once('close', (code, signal) => {
+          resolve(code ?? (signal ? 1 : 0));
+        });
+      });
+    } finally {
+      process.off('SIGINT', onSigint);
+      process.off('SIGTERM', onSigterm);
+    }
+  } finally {
+    await profiles.close();
+    await cleanup?.();
   }
 }

@@ -2,6 +2,89 @@
 
 ## Unreleased
 
+- **Added (protocol, client, cloud, server)** — `task.complete.finalMessage`
+  carries the runtime's closing reply. `TaskResult.finalMessage`,
+  `TerminalResult.finalMessage` and `ResultDocumentTask.finalMessage` expose
+  it. `summary` keeps the whole run's text. The Codex adapter declares
+  `progressEventsAreMessages`, so its last `agentMessage` is the closing reply
+  and earlier commentary is not part of it. A required Agent message that the
+  daemon writes for a Codex task now uses that last message too (#322).
+- **Changed (client)** — `DaemonConfig.workspaceRoot` is optional when
+  `strictAgentOnly` is true. A daemon that is not strict still fails
+  construction without it. The CLI config follows the same rule, and
+  diagnostics report `not-configured` for a strict daemon without it (#319).
+- **Added (protocol, client, cloud)** — Agent Attempt terminals carry the
+  optional `agentHomeProjection` evidence: the applied projection revision and
+  hash at Attempt start. The daemon does not compare it with the offer's
+  `profileRevision`; the host decides (#318).
+- **Changed (client)** — update the private OAR source from 0.45.1 to 0.48.0
+  (`087df16`). The derived Codex fold now reports `turn_active`, streamed
+  command output as `outputDelta` and `app_request_cancelled`. SDK events read
+  native Codex frames only, so ordinary task launches and SDK events keep their
+  existing behavior. See `docs/notes/2026-10-09-oar-0.48-upgrade.md`.
+- **Security (client)** — the provider credential deny list now covers every
+  credential name that the pinned official pi 1.1.0 reads:
+  `ANTHROPIC_AUTH_TOKEN`, `COPILOT_GITHUB_TOKEN`, `GOOGLE_CLOUD_API_KEY`,
+  `META_API_KEY`, `TYPESAFE_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK`, and the token
+  file paths `ANTHROPIC_IDENTITY_TOKEN_FILE` and `AWS_WEB_IDENTITY_TOKEN_FILE`.
+  Pi MCP server children and the Pi BYOK key lane no longer inherit them. A
+  test compares the list with the names that pinned pi discovers, so a pi
+  upgrade cannot add a name without notice (#326).
+- **Added (client)** — `copyPiRuntimeAssets({ outDir, form })` creates the Pi
+  asset root of a single-file product in its build (#327). It requires the
+  exact pinned official pi package, verifies the pi export resources and the
+  SDK todo locale assets, and refuses a target that is not empty. With
+  `sdkHelperHost` and `PI_PACKAGE_DIR`, a host download runs official pi with
+  no `node_modules`. A new packaging test runs one pi task from an
+  interpreter + bundle host and from a Bun-compiled host against a loopback
+  provider. The spec and client README now state this as the supported way to
+  ship pi; the stale `BYOK_PI_BIN` sidecar text is removed.
+- **Added (keys)** — `runPiProviderLauncher(options, { createSecretStore })`
+  and `parsePiProviderLauncherOptions` are public (#323). A host that stores
+  keys with its own options, for example a macOS `storagePrefix`, builds its
+  own launcher executable with its own `SecretStore`. The entry keeps the
+  exact profile checks, the custody lock and the pending-change refusal. The
+  bundled `byok-pi-provider-launcher` now uses this entry; its flags and
+  behavior do not change.
+- **Fixed (keys)** — the Pi projection of an `anthropic` profile no longer
+  sends Pi to `/v1/v1/messages` (#324). The projected `baseUrl` is the keys
+  client endpoint `modelApiUrl(base_url, 'messages')` without the
+  `/v1/messages` suffix that Pi appends. Catalog profiles need no change. An
+  Anthropic profile whose endpoint does not end in `/v1/messages` (for
+  example `base_url: 'https://api.anthropic.com'`) now fails Pi admission with
+  `PROVIDER_URL_INVALID`; set `base_url` to the `/v1` form.
+- **Fixed (keys)** — an `auth_mode: 'none'` profile now runs through the
+  `pi-rpc` entry (#325). The projection sets the fixed, non-secret `apiKey`
+  `PI_AUTH_NONE_API_KEY` (`byok-sdk-auth-none`), because Pi refuses a request
+  without a key. The endpoint receives `authorization: Bearer
+  byok-sdk-auth-none`. The `pi-durable` entry now refuses a keyless profile at
+  admission with `PROVIDER_PROFILE_INVALID`, as `pi-prepared` already did.
+  Before, it failed in the worker after the child started.
+- **Added (protocol, client, cloud, server)** — One Agent home runs
+  `memory-reader` Attempts beside its one writer. An Agent offer with
+  `homeAccess: 'memory-reader'` runs in its own run directory,
+  `<home>/.byok/runs/<taskId>/`. `DaemonConfig.maxConcurrentReaderAttemptsPerAgentHome`
+  (default 4) limits readers per home; the writer limit stays one. The device
+  advertises `agent-home-readers`, and server and cloud refuse a reader offer
+  to a device without it before task creation. A reader session resumes in
+  its recorded run directory; the handoff binds `homeAccess`. Reader terminals
+  carry `agentHomeMemoryChange`, and `TerminalResult` projects it. The Codex
+  adapter makes the home the project root for a reader, so Codex still reads
+  the home's `AGENTS.md` (#317).
+- **Removed (client)** — `DaemonConfig.maxConcurrentMutableSessionsPerAgentHome`.
+  A value above 1 let Attempts co-write one home. Reader Attempts replace it,
+  and setting it is now a construction error. The writer `agent home busy`
+  decline reason does not change; a reader decline names the reader count
+  (#317).
+- **Changed (client)** — Execution lease API for #317:
+  `AgentHomeExecutionStatus` reports `maxConcurrentReaderAttemptsPerAgentHome`
+  and `activeReaderAttempts` instead of
+  `maxConcurrentMutableSessionsPerAgentHome`.
+  `AgentHomeExecutionLeaseManager.activeAttemptCount(canonicalHome, homeAccess)`
+  now takes an access mode and counts only that mode.
+  `AgentHomeExecutionLease` gains the required members `homeAccess` and
+  `writerOverlapped()`, so a host that implements the interface must add them.
+
 ## 0.25.0 / @byok-sdk/keys 0.10.0 - 2026-10-09
 
 Nine packages are published on npm's `latest` channel from `v0.25.0`

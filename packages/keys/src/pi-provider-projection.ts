@@ -1,8 +1,24 @@
 import type { ModelProviderProfile } from './provider-profile';
 import { isAbsolute } from 'node:path';
+import { ByokKeysError } from './errors';
+import { modelApiUrl } from './http';
 import { PiModelConfigSchema } from './pi-model-config';
 
 export const PI_PROJECTED_KEY_ENV = 'PI_PROVIDER_API_KEY';
+
+/**
+ * The fixed, non-secret `apiKey` projected for an `auth_mode: 'none'` profile.
+ *
+ * Pi's OpenAI client refuses a request that has no API key and no
+ * authorization header. Pi documents a fixed dummy key in `models.json` for a
+ * keyless server. The Pi child therefore sends `authorization: Bearer
+ * byok-sdk-auth-none`; a keyless server ignores it. This value is not a
+ * credential, and the launcher reads no secret for such a profile.
+ */
+export const PI_AUTH_NONE_API_KEY = 'byok-sdk-auth-none';
+
+/** The path Pi's Anthropic SDK appends to a provider `baseUrl`. */
+const PI_ANTHROPIC_MESSAGES_PATH = '/v1/messages';
 
 /**
  * The runtime entries this launcher may parent, and the ONLY two.
@@ -38,14 +54,12 @@ export function buildPiProviderProjection(profile: ModelProviderProfile, runtime
   return {
     providers: {
       [projectedProviderId]: {
-        baseUrl: profile.base_url,
+        baseUrl: profile.adapter === 'anthropic' ? piAnthropicBaseUrl(profile) : profile.base_url,
         api:
           profile.adapter === 'anthropic'
             ? 'anthropic-messages'
             : 'openai-completions',
-        ...(profile.auth_mode === 'none'
-          ? {}
-          : { apiKey: runtimeEntry === 'pi-durable' ? 'byok:durable-ipc' : `$${PI_PROJECTED_KEY_ENV}` }),
+        apiKey: piApiKey(profile, runtimeEntry),
         ...(profile.auth_mode === 'bearer' ? { authHeader: true } : {}),
         models: [
           {
@@ -61,6 +75,46 @@ export function buildPiProviderProjection(profile: ModelProviderProfile, runtime
       },
     },
   };
+}
+
+/**
+ * The Pi `baseUrl` that sends Pi's Messages request to the same URL as
+ * `AnthropicMessagesClient`.
+ *
+ * A profile `base_url` follows this package's suffix convention: the keys
+ * client posts to `modelApiUrl(base_url, 'messages')`, so the catalog stores
+ * `https://api.anthropic.com/v1`. Pi's Anthropic SDK appends `/v1/messages` to
+ * its `baseUrl`. The projection removes that suffix from the keys endpoint.
+ * No Pi `baseUrl` reaches an endpoint that does not end in `/v1/messages`, so
+ * the projection refuses such a profile and never sends Pi to another URL.
+ */
+function piAnthropicBaseUrl(profile: ModelProviderProfile): string {
+  const endpoint = modelApiUrl(profile.base_url, 'messages');
+  if (!endpoint.endsWith(PI_ANTHROPIC_MESSAGES_PATH)) {
+    throw new ByokKeysError(
+      'PROVIDER_URL_INVALID',
+      `${profile.profile_ref} Anthropic base_url must end in /v1 for Pi, which appends /v1/messages`,
+    );
+  }
+  return endpoint.slice(0, -PI_ANTHROPIC_MESSAGES_PATH.length);
+}
+
+/**
+ * The projected key reference. Only the rpc entry serves a keyless profile:
+ * the prepared host and the durable worker both require a launcher-delivered
+ * credential, so a keyless profile fails here, before a child exists.
+ */
+function piApiKey(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry): string {
+  if (profile.auth_mode !== 'none') {
+    return runtimeEntry === 'pi-durable' ? 'byok:durable-ipc' : `$${PI_PROJECTED_KEY_ENV}`;
+  }
+  if (runtimeEntry !== 'pi-rpc') {
+    throw new ByokKeysError(
+      'PROVIDER_PROFILE_INVALID',
+      `${profile.profile_ref} declares auth_mode "none"; the ${runtimeEntry} runtime entry requires a provider credential`,
+    );
+  }
+  return PI_AUTH_NONE_API_KEY;
 }
 
 /**

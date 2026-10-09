@@ -714,7 +714,7 @@ export interface TaskHandleDeps {
 export declare function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHandle;
 // ==== @byok-sdk/server dist/types.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
-import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, RuntimeInfo, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskState, ToolsetId, TerminalProjectionSelection } from '@byok-sdk/protocol';
+import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, RuntimeInfo, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess } from '@byok-sdk/protocol';
 import type { TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { RateLimiterOptions } from './rate-limiter';
 /** Mutually-exclusive storage authority for the embedded reference server. */
@@ -854,6 +854,13 @@ export interface DispatchInput {
     messageEgress?: AgentMessageEgressRequirement;
     /** Exact offer-scoped terminal projection authority. */
     terminalProjection?: TerminalProjectionSelection;
+    /**
+     * `memory-reader` runs this Agent task in its own run directory beside
+     * other readers and at most one writer. Requires `agentRef` and a device
+     * that advertises `agent-home-readers`; the kernel refuses it otherwise,
+     * before the task exists. Absent means a writer.
+     */
+    homeAccess?: AgentHomeAccess;
     /** Host-only product destination/freshness authority; never serialized to the daemon. */
     agentMessageContext?: AgentMessageServerContext;
 }
@@ -891,7 +898,16 @@ export interface AgentEgressReceipt {
 /** Outcome of a task that reached a terminal state. */
 export interface TaskResult {
     state: Extract<TaskState, 'Complete' | 'Failed' | 'Cancelled'>;
+    /** Every `progress` text of the task, joined with no separator. */
     summary?: string;
+    /**
+     * The runtime's closing reply, projected verbatim from
+     * `task.complete.finalMessage`: the assistant text after the last tool
+     * interaction, or the last whole message for Codex. Read the task's final
+     * answer here; `summary` also holds commentary. Absent when the run ended
+     * with no closing text, or when the daemon build predates the field.
+     */
+    finalMessage?: string;
     sessionRef?: string;
     artifactRefs?: BlobRef[];
     reason?: string;

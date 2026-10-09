@@ -92,6 +92,45 @@ function findPackageRoot(
 }
 
 /**
+ * The installed root of the pinned official Pi package. Its manifest name and
+ * version must both equal the client pin; a mismatch fails closed instead of
+ * returning an unverified runtime. `remedy` ends every refusal.
+ *
+ * Deliberately does NOT use `createRequire(...).resolve()`: this package is
+ * pure ESM with no `require` export condition (`exports["."]` only offers
+ * `import`), so CJS-style resolution fails with
+ * `ERR_PACKAGE_PATH_NOT_EXPORTED`. It also does NOT resolve the
+ * `./package.json` subpath directly (also not exported); instead it resolves
+ * the package's main entry via `import.meta.resolve` and walks upward to the
+ * enclosing package root.
+ */
+export function resolvePinnedPiPackage(remedy: string): {
+  readonly dir: string;
+  readonly identity: PiRuntimeIdentity;
+  readonly bin: string | Record<string, string> | undefined;
+} {
+  const expected = resolvePiRuntimeIdentity();
+  let mainEntry: string;
+  try {
+    mainEntry = fileURLToPath(import.meta.resolve(PI_PACKAGE_NAME));
+  } catch (cause) {
+    throw new Error(`Required ${PI_PACKAGE_NAME} could not be resolved; ${remedy}`, { cause });
+  }
+  const root = findPackageRoot(path.dirname(mainEntry));
+  if (root === undefined) {
+    throw new Error(`Required ${PI_PACKAGE_NAME} resolved to ${mainEntry}, which has no enclosing package manifest; ${remedy}`);
+  }
+  if (root.manifest.name !== expected.name || root.manifest.version !== expected.version) {
+    throw new Error(
+      `${PI_PACKAGE_NAME} resolved to ${String(root.manifest.name)}@${String(root.manifest.version)}, but @byok-sdk/client pins ${expected.name}@${expected.version}; ${remedy}`,
+    );
+  }
+  return { dir: root.dir, identity: expected, bin: root.manifest.bin };
+}
+
+const PI_BIN_REMEDY = 'reinstall @byok-sdk/client dependencies or set BYOK_PI_BIN to a Node 24.15+ pi sidecar';
+
+/**
  * Resolve the pi CLI executable from the required package installed alongside
  * `@byok-sdk/client`. There is intentionally no automatic PATH fallback: a
  * global `pi` would create a second, unversioned authority for this contract.
@@ -102,48 +141,17 @@ function findPackageRoot(
  * so an out-of-process substitution (e.g. examples/basic's e2e run swapping
  * in the fake-pi fixture, or a single-file product injecting its required
  * Node 24.15+ pi sidecar) has no other seam to use.
- *
- * Deliberately does NOT use `createRequire(...).resolve()`: this package is
- * pure ESM with no `require` export condition (`exports["."]` only offers
- * `import`), so CJS-style resolution fails with
- * `ERR_PACKAGE_PATH_NOT_EXPORTED`. It also does NOT resolve the
- * `./package.json` subpath directly (also not exported); instead it resolves
- * the package's main entry via `import.meta.resolve` and walks upward to the
- * enclosing package root.
- *
- * That root's manifest name and version are both compared against the pin,
- * and a mismatch fails closed instead of launching an unverified runtime.
  */
 export function resolvePiBin(): ResolvedBin {
   const override = process.env.BYOK_PI_BIN;
   if (override) {
     return { command: override, source: 'env' };
   }
-  const expected = resolvePiRuntimeIdentity();
-  let mainEntry: string;
-  try {
-    mainEntry = fileURLToPath(import.meta.resolve(PI_PACKAGE_NAME));
-  } catch (cause) {
-    throw new Error(
-      `Required ${PI_PACKAGE_NAME} could not be resolved; install @byok-sdk/client dependencies or set BYOK_PI_BIN to a Node 24.15+ pi sidecar`,
-      { cause },
-    );
-  }
-  const root = findPackageRoot(path.dirname(mainEntry));
-  if (root === undefined) {
-    throw new Error(
-      `Required ${PI_PACKAGE_NAME} resolved to ${mainEntry}, which has no enclosing package manifest; reinstall @byok-sdk/client dependencies or set BYOK_PI_BIN to a Node 24.15+ pi sidecar`,
-    );
-  }
-  if (root.manifest.name !== expected.name || root.manifest.version !== expected.version) {
-    throw new Error(
-      `${PI_PACKAGE_NAME} resolved to ${String(root.manifest.name)}@${String(root.manifest.version)}, but @byok-sdk/client pins ${expected.name}@${expected.version}; reinstall the pinned dependency or set BYOK_PI_BIN to a Node 24.15+ pi sidecar`,
-    );
-  }
-  const binRel = typeof root.manifest.bin === 'string' ? root.manifest.bin : root.manifest.bin?.pi;
+  const root = resolvePinnedPiPackage(PI_BIN_REMEDY);
+  const binRel = typeof root.bin === 'string' ? root.bin : root.bin?.pi;
   if (binRel === undefined) {
     throw new Error(
-      `Required ${expected.name}@${expected.version} does not expose the pi CLI; reinstall the pinned dependency or set BYOK_PI_BIN to a Node 24.15+ pi sidecar`,
+      `Required ${root.identity.name}@${root.identity.version} does not expose the pi CLI; ${PI_BIN_REMEDY}`,
     );
   }
   return { command: path.join(root.dir, binRel), source: 'package' };

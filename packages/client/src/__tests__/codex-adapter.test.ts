@@ -212,6 +212,39 @@ describe('Codex persistent app-server adapter', () => {
       expect(captures[0]).not.toContain('--skip-git-repo-check');
     }
   });
+  it('makes the Agent home the Codex project root for a memory-reader run directory only (#317)', async () => {
+    // Codex reads AGENTS.md from its project root down to cwd. Without a
+    // marker in an ancestor it reads cwd only, so a reader in
+    // `<home>/.byok/runs/<taskId>/` would miss the home's persona.
+    const capture = async (reader: boolean): Promise<string[]> => {
+      const captures: string[][] = [];
+      const resources = await ctx();
+      if (reader) {
+        const runDir = path.join(resources.workspaceDir, '.byok', 'runs', 'reader-task');
+        await fs.mkdir(runDir, { recursive: true });
+        resources.reader = { canonicalHome: resources.workspaceDir };
+        resources.workspaceDir = runDir;
+      }
+      const s = await open(
+        adapter({
+          spawnFn: ((cmd: string, args: string[], opts: Parameters<typeof spawn>[2]) => {
+            captures.push(args);
+            return spawn(cmd, args, opts);
+          }) as typeof spawn,
+        }),
+        task,
+        resources,
+      );
+      await turn(s);
+      return captures[0]!;
+    };
+    const readerArgs = await capture(true);
+    const markerIndex = readerArgs.indexOf('project_root_markers=[".byok"]');
+    expect(markerIndex).toBeGreaterThan(0);
+    expect(readerArgs[markerIndex - 1]).toBe('-c');
+    expect(readerArgs.indexOf('--listen')).toBeGreaterThan(markerIndex);
+    expect((await capture(false)).join(' ')).not.toContain('project_root_markers');
+  });
   it('passes model in the authoritative thread/start payload, not CLI argv', async () => {
     const resources = await ctx();
     const file = path.join(resources.workspaceDir, 'rpc.jsonl');

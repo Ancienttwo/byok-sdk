@@ -90,7 +90,12 @@ describe('the embedded agent-memory entry module graph', () => {
     // calls them — and splitting that constant into a leaf module would be a
     // change to the Agent-home boundary, not to this entry. If this list needs
     // to grow, say why in the same commit.
+    //
+    // `agent-home-readers.ts` joined that inert tail with #317: `agent-home.ts`
+    // imports the reader run-directory name check and retention from it. It
+    // adds no external import, and nothing on this entry calls it.
     expect(GRAPH.modules).toEqual([
+      'agent-home-readers.ts',
       'agent-home.ts',
       'agent-memory/index.ts',
       'bin/agent-memory-mcp-server.ts',

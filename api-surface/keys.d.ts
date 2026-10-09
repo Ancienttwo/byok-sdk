@@ -549,7 +549,9 @@ export { PROVIDER_KEY_CHECK_TIMEOUT_MS, checkProviderKey } from './provider-key-
 export type { ProviderKeyCheckOptions } from './provider-key-check';
 export { ProviderRegistry } from './registry';
 export type { ModelProviderClient, ProviderConfiguration, ProviderRegistryOptions, ProviderStatus, } from './registry';
-export { PI_PROJECTED_KEY_ENV, buildPiProviderProjection, } from './pi-provider-projection';
+export { PI_AUTH_NONE_API_KEY, PI_PROJECTED_KEY_ENV, buildPiProviderProjection, } from './pi-provider-projection';
+export { parsePiProviderLauncherOptions, runPiProviderLauncher, } from './pi-provider-launcher-core';
+export type { PiProviderLauncherHost, PiProviderLauncherOptions, } from './pi-provider-launcher-core';
 // ==== @byok-sdk/keys dist/macos-keychain.d.ts ====
 import { type CommandRunner } from './command-runner';
 import { type SecretStore } from './secret-store';
@@ -713,9 +715,171 @@ export declare const PiModelConfigSchema: z.ZodObject<{
     }, z.core.$strict>;
 }, z.core.$strict>;
 export type PiModelConfig = z.infer<typeof PiModelConfigSchema>;
+// ==== @byok-sdk/keys dist/pi-provider-launcher-core.d.ts ====
+import { type ChildProcess } from 'node:child_process';
+import { type CommandRunner } from './command-runner';
+import { type PiLauncherRuntimeEntry } from './pi-provider-projection';
+import type { ProviderProfileStore } from './profile-store';
+import { type ExactProviderProfileBinding, type ModelProviderProfile, type ProviderProfileRef } from './provider-profile';
+import { type SecretStore } from './secret-store';
+export interface PiProviderLauncherOptions {
+    piBin: string;
+    /** Explicit script entry for the selected interpreter; never inferred from a filename. */
+    piEntry?: string;
+    /**
+     * The fixed argv after the entry. A single-file product re-enters itself
+     * with `__byok_sdk_helper <kind>`. Empty for the installed SDK package.
+     */
+    piFixedArgs: string[];
+    /** The cwd the Pi child starts in. Required for a launch. */
+    piCwd?: string;
+    /** The client-owned empty 0700 directory the provider projection goes into. Required for a launch. */
+    piProjectionDir?: string;
+    piConfigDigest?: string;
+    /** Which of this launcher's two child grammars applies; never defaulted. */
+    runtimeEntry: PiLauncherRuntimeEntry;
+    profileDbPath: string;
+    /** Carried by the `--provider` flag: the exact local profile to launch. */
+    profileRef: ProviderProfileRef;
+    modelId: string;
+    expectedBinding?: ExactProviderProfileBinding;
+    validateOnly: boolean;
+    sessionDir: string;
+    secretServicePrefix?: string;
+    macosKeychainPath?: string;
+    piArgs: string[];
+}
+export declare function parsePiProviderLauncherOptions(args: string[]): PiProviderLauncherOptions;
+/**
+ * What a profile must declare before it may parent a prepared host.
+ *
+ * Both refusals are about the prepared lane's own compile support set, not
+ * about custody: a prepared artifact is `openai-completions` bytes compiled by
+ * the device, and the host resolves a key for the projected provider before it
+ * will consume one. An `anthropic` adapter projects `anthropic-messages`, which
+ * the prepared compiler never emits, and an `auth_mode: 'none'` profile has
+ * no key for the host to resolve, so the host would refuse with
+ * `prepared_provider_credential_unavailable` AFTER a child had already been
+ * spawned. Refusing here means the admission (`--validate-only true`) answers
+ * the same question the launch would, before any process exists. The
+ * projection refuses a keyless profile for this entry too.
+ *
+ * Deliberately NOT a silent narrowing of the profile: nothing here rewrites the
+ * adapter or invents a credential.
+ */
+export declare function assertPiPreparedProviderProfile(profile: ModelProviderProfile): void;
+/**
+ * Resolve only the credential the validated profile requires. In particular,
+ * an auth-free local provider must remain usable on hosts without an OS
+ * credential backend; constructing a keychain there would invent a false
+ * dependency and turn an explicit `auth_mode: none` into a hidden fallback.
+ */
+export declare function resolvePiProviderSecret(profile: ModelProviderProfile, createStore: () => SecretStore): Promise<string | undefined>;
+/**
+ * The launcher's credential read, as one custody snapshot (plan D5, A4):
+ * under the configuration lock, re-read the profile and require it to be the
+ * exact record the projection was built from, refuse while a pending marker
+ * exists, and only then read the key. A concurrent or interrupted credential
+ * change can therefore never yield "old profile + new key".
+ */
+export declare function readProviderCustodySnapshot(options: {
+    profiles: ProviderProfileStore;
+    profile: ModelProviderProfile;
+    createSecretStore: () => SecretStore;
+}): Promise<string | undefined>;
+/** Admission (`--validate-only`): the same snapshot check without reading the key. */
+export declare function assertProviderCustodyIdle(options: {
+    profiles: ProviderProfileStore;
+    profile: ModelProviderProfile;
+}): Promise<void>;
+/** Fixed names of the ambient environment the keys launcher passes to its Pi child. */
+export declare const KEYS_PI_INHERITED_ENV_NAMES: readonly ["PATH", "HOME", "USERPROFILE", "TMPDIR", "TEMP", "TMP", "LANG", "TZ", "TERM", "SHELL", "PI_PACKAGE_DIR", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy"];
+/** The additional inherited names on win32. */
+export declare const KEYS_PI_WINDOWS_ENV_NAMES: readonly ["SystemRoot", "COMSPEC", "PATHEXT", "windir", "SYSTEMDRIVE", "PROGRAMFILES", "APPDATA", "LOCALAPPDATA"];
+/** The inherited part of the Pi child environment: the fixed names plus `LC_*` and `XDG_*`. */
+export declare function projectKeysPiInheritedEnvironment(ambient: Readonly<Record<string, string | undefined>>, platform?: NodeJS.Platform): Record<string, string>;
+/**
+ * The Pi child environment: the inherited names (with `PI_PACKAGE_DIR`), then
+ * the two Pi directories this launch owns, then the projected key. No ambient
+ * agent or session directory survives.
+ */
+export declare function buildPiProviderChildEnvironment(options: {
+    ambient: NodeJS.ProcessEnv;
+    projectionDir: string;
+    sessionDir: string;
+    secret: string | undefined;
+    platform?: NodeJS.Platform;
+}): Record<string, string>;
+/** Read-only Windows equivalent of uid + 0700; never repairs host ACLs. */
+export declare function assertWindowsPiProjectionAcl(directory: string, options?: {
+    systemRoot?: string;
+    run?: CommandRunner;
+}): Promise<void>;
+/** Validate the client-owned empty directory before any credential access. */
+export declare function assertPiProjectionDirectory(projectionDir: string): Promise<void>;
+export interface PiProviderLaunchDependencies {
+    ambient: NodeJS.ProcessEnv;
+    createSecretStore: () => SecretStore;
+    /** The profile store the profile was read from; its custody lock guards the key read. */
+    profiles: ProviderProfileStore;
+    spawn?: (command: string, args: string[], options: {
+        cwd: string;
+        env: Record<string, string>;
+        stdio: 'inherit' | ['inherit', 'inherit', 'inherit', 'ipc'];
+        serialization?: 'json';
+    }) => ChildProcess;
+}
+/** Owns the credential-to-spawn sequence; the client retains directory ownership. */
+export declare function startPiProvider(profile: ModelProviderProfile, options: PiProviderLauncherOptions, dependencies: PiProviderLaunchDependencies): Promise<{
+    child: ChildProcess;
+    cleanup: () => Promise<void>;
+}>;
+/**
+ * Create the configured session directory owner-only without mutating the
+ * mode of an existing host-owned directory. The path is operator config, so
+ * an accidental `/`, home, or shared-directory value must never become a
+ * recursive chmod sink.
+ */
+export declare function ensurePiSessionDirectory(sessionDir: string): Promise<void>;
+/** What a host supplies to {@link runPiProviderLauncher}. */
+export interface PiProviderLauncherHost {
+    /**
+     * Builds the credential store that holds the selected profile's key. The
+     * launcher calls it only for a profile that requires a credential, and only
+     * under the profile store's configuration lock. A host that stores keys with
+     * its own options (for example a `MacOsKeychainSecretStore` `storagePrefix`
+     * or `account`) builds that store here. The parsed launcher options carry
+     * `secretServicePrefix` and `macosKeychainPath` for the host to apply.
+     */
+    createSecretStore: () => SecretStore;
+}
+/**
+ * The credential-custody launcher, as one call: the same checks and the same
+ * launch as the bundled `byok-pi-provider-launcher` executable, with a
+ * host-built credential store.
+ *
+ * It opens the profile database read-only, requires the exact configured
+ * profile and model, checks the exact binding when the options carry one,
+ * refuses a profile the runtime entry cannot serve, and builds the projection.
+ * A validation-only call then checks custody without reading a key. A launch
+ * reads the key through the custody snapshot, spawns Pi, forwards SIGINT and
+ * SIGTERM to the child while it runs, and resolves with the child's exit code.
+ * The projection file is removed on every exit path.
+ */
+export declare function runPiProviderLauncher(options: PiProviderLauncherOptions, host: PiProviderLauncherHost): Promise<number>;
 // ==== @byok-sdk/keys dist/pi-provider-projection.d.ts ====
 import type { ModelProviderProfile } from './provider-profile';
 export declare const PI_PROJECTED_KEY_ENV = "PI_PROVIDER_API_KEY";
+/**
+ * The fixed, non-secret `apiKey` projected for an `auth_mode: 'none'` profile.
+ *
+ * Pi's OpenAI client refuses a request that has no API key and no
+ * authorization header. Pi documents a fixed dummy key in `models.json` for a
+ * keyless server. The Pi child therefore sends `authorization: Bearer
+ * byok-sdk-auth-none`; a keyless server ignores it. This value is not a
+ * credential, and the launcher reads no secret for such a profile.
+ */
+export declare const PI_AUTH_NONE_API_KEY = "byok-sdk-auth-none";
 /**
  * The runtime entries this launcher may parent, and the ONLY two.
  *

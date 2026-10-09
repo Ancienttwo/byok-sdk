@@ -11,6 +11,7 @@
     "provider-profile-binding",
     "toolset-selection",
     "agent-home-contract",
+    "agent-home-readers",
     "strict-agent-only",
     "agent-egress-policy",
     "agent-egress-reliable-ack",
@@ -979,6 +980,10 @@
           ],
           "additionalProperties": false
         },
+        "homeAccess": {
+          "type": "string",
+          "const": "memory-reader"
+        },
         "requiredToolsets": {
           "minItems": 1,
           "maxItems": 16,
@@ -1275,6 +1280,10 @@
             "profileRevision"
           ],
           "additionalProperties": false
+        },
+        "homeAccess": {
+          "type": "string",
+          "const": "memory-reader"
         },
         "requiredToolsets": {
           "minItems": 1,
@@ -1793,6 +1802,10 @@
           ],
           "additionalProperties": false
         },
+        "homeAccess": {
+          "type": "string",
+          "const": "memory-reader"
+        },
         "requiredToolsets": {
           "minItems": 1,
           "maxItems": 16,
@@ -2257,6 +2270,10 @@
             "profileRevision"
           ],
           "additionalProperties": false
+        },
+        "homeAccess": {
+          "type": "string",
+          "const": "memory-reader"
         },
         "requiredToolsets": {
           "minItems": 1,
@@ -4917,6 +4934,9 @@
         "summary": {
           "type": "string"
         },
+        "finalMessage": {
+          "type": "string"
+        },
         "sessionRef": {
           "type": "string"
         },
@@ -5063,6 +5083,104 @@
             "profileRevision"
           ],
           "additionalProperties": false
+        },
+        "agentHomeProjection": {
+          "type": "object",
+          "properties": {
+            "profileRevision": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            "projectionHash": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "profileRevision",
+            "projectionHash"
+          ],
+          "additionalProperties": false
+        },
+        "agentHomeMemoryChange": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "outcome": {
+                  "type": "string",
+                  "const": "unchanged"
+                }
+              },
+              "required": [
+                "outcome"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "outcome": {
+                  "type": "string",
+                  "const": "reader-attributed"
+                },
+                "paths": {
+                  "minItems": 1,
+                  "maxItems": 512,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024,
+                    "pattern": "^[^\\u0000]+$"
+                  }
+                }
+              },
+              "required": [
+                "outcome",
+                "paths"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "outcome": {
+                  "type": "string",
+                  "const": "unattributed"
+                },
+                "paths": {
+                  "minItems": 1,
+                  "maxItems": 512,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024,
+                    "pattern": "^[^\\u0000]+$"
+                  }
+                }
+              },
+              "required": [
+                "outcome",
+                "paths"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "outcome": {
+                  "type": "string",
+                  "const": "unmeasured"
+                }
+              },
+              "required": [
+                "outcome"
+              ],
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "required": [
@@ -5215,6 +5333,104 @@
             "profileRevision"
           ],
           "additionalProperties": false
+        },
+        "agentHomeProjection": {
+          "type": "object",
+          "properties": {
+            "profileRevision": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            "projectionHash": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "profileRevision",
+            "projectionHash"
+          ],
+          "additionalProperties": false
+        },
+        "agentHomeMemoryChange": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "outcome": {
+                  "type": "string",
+                  "const": "unchanged"
+                }
+              },
+              "required": [
+                "outcome"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "outcome": {
+                  "type": "string",
+                  "const": "reader-attributed"
+                },
+                "paths": {
+                  "minItems": 1,
+                  "maxItems": 512,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024,
+                    "pattern": "^[^\\u0000]+$"
+                  }
+                }
+              },
+              "required": [
+                "outcome",
+                "paths"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "outcome": {
+                  "type": "string",
+                  "const": "unattributed"
+                },
+                "paths": {
+                  "minItems": 1,
+                  "maxItems": 512,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024,
+                    "pattern": "^[^\\u0000]+$"
+                  }
+                }
+              },
+              "required": [
+                "outcome",
+                "paths"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "outcome": {
+                  "type": "string",
+                  "const": "unmeasured"
+                }
+              },
+              "required": [
+                "outcome"
+              ],
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "required": [
@@ -5317,6 +5533,104 @@
             "profileRevision"
           ],
           "additionalProperties": false
+        },
+        "agentHomeProjection": {
+          "type": "object",
+          "properties": {
+            "profileRevision": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,18}$"
+            },
+            "projectionHash": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "profileRevision",
+            "projectionHash"
+          ],
+          "additionalProperties": false
+        },
+        "agentHomeMemoryChange": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "outcome": {
+                  "type": "string",
+                  "const": "unchanged"
+                }
+              },
+              "required": [
+                "outcome"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "outcome": {
+                  "type": "string",
+                  "const": "reader-attributed"
+                },
+                "paths": {
+                  "minItems": 1,
+                  "maxItems": 512,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024,
+                    "pattern": "^[^\\u0000]+$"
+                  }
+                }
+              },
+              "required": [
+                "outcome",
+                "paths"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "outcome": {
+                  "type": "string",
+                  "const": "unattributed"
+                },
+                "paths": {
+                  "minItems": 1,
+                  "maxItems": 512,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1024,
+                    "pattern": "^[^\\u0000]+$"
+                  }
+                }
+              },
+              "required": [
+                "outcome",
+                "paths"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "outcome": {
+                  "type": "string",
+                  "const": "unmeasured"
+                }
+              },
+              "required": [
+                "outcome"
+              ],
+              "additionalProperties": false
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -6273,6 +6587,10 @@
                 ],
                 "additionalProperties": false
               },
+              "homeAccess": {
+                "type": "string",
+                "const": "memory-reader"
+              },
               "requiredToolsets": {
                 "minItems": 1,
                 "maxItems": 16,
@@ -6614,6 +6932,10 @@
                   "profileRevision"
                 ],
                 "additionalProperties": false
+              },
+              "homeAccess": {
+                "type": "string",
+                "const": "memory-reader"
               },
               "requiredToolsets": {
                 "minItems": 1,
@@ -7177,6 +7499,10 @@
                 ],
                 "additionalProperties": false
               },
+              "homeAccess": {
+                "type": "string",
+                "const": "memory-reader"
+              },
               "requiredToolsets": {
                 "minItems": 1,
                 "maxItems": 16,
@@ -7686,6 +8012,10 @@
                   "profileRevision"
                 ],
                 "additionalProperties": false
+              },
+              "homeAccess": {
+                "type": "string",
+                "const": "memory-reader"
               },
               "requiredToolsets": {
                 "minItems": 1,
@@ -10524,6 +10854,9 @@
               "summary": {
                 "type": "string"
               },
+              "finalMessage": {
+                "type": "string"
+              },
               "sessionRef": {
                 "type": "string"
               },
@@ -10670,6 +11003,104 @@
                   "profileRevision"
                 ],
                 "additionalProperties": false
+              },
+              "agentHomeProjection": {
+                "type": "object",
+                "properties": {
+                  "profileRevision": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]{0,18}$"
+                  },
+                  "projectionHash": {
+                    "type": "string",
+                    "pattern": "^sha256:[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "profileRevision",
+                  "projectionHash"
+                ],
+                "additionalProperties": false
+              },
+              "agentHomeMemoryChange": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "outcome": {
+                        "type": "string",
+                        "const": "unchanged"
+                      }
+                    },
+                    "required": [
+                      "outcome"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "outcome": {
+                        "type": "string",
+                        "const": "reader-attributed"
+                      },
+                      "paths": {
+                        "minItems": 1,
+                        "maxItems": 512,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1024,
+                          "pattern": "^[^\\u0000]+$"
+                        }
+                      }
+                    },
+                    "required": [
+                      "outcome",
+                      "paths"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "outcome": {
+                        "type": "string",
+                        "const": "unattributed"
+                      },
+                      "paths": {
+                        "minItems": 1,
+                        "maxItems": 512,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1024,
+                          "pattern": "^[^\\u0000]+$"
+                        }
+                      }
+                    },
+                    "required": [
+                      "outcome",
+                      "paths"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "outcome": {
+                        "type": "string",
+                        "const": "unmeasured"
+                      }
+                    },
+                    "required": [
+                      "outcome"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
               }
             },
             "required": [
@@ -10866,6 +11297,104 @@
                   "profileRevision"
                 ],
                 "additionalProperties": false
+              },
+              "agentHomeProjection": {
+                "type": "object",
+                "properties": {
+                  "profileRevision": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]{0,18}$"
+                  },
+                  "projectionHash": {
+                    "type": "string",
+                    "pattern": "^sha256:[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "profileRevision",
+                  "projectionHash"
+                ],
+                "additionalProperties": false
+              },
+              "agentHomeMemoryChange": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "outcome": {
+                        "type": "string",
+                        "const": "unchanged"
+                      }
+                    },
+                    "required": [
+                      "outcome"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "outcome": {
+                        "type": "string",
+                        "const": "reader-attributed"
+                      },
+                      "paths": {
+                        "minItems": 1,
+                        "maxItems": 512,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1024,
+                          "pattern": "^[^\\u0000]+$"
+                        }
+                      }
+                    },
+                    "required": [
+                      "outcome",
+                      "paths"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "outcome": {
+                        "type": "string",
+                        "const": "unattributed"
+                      },
+                      "paths": {
+                        "minItems": 1,
+                        "maxItems": 512,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1024,
+                          "pattern": "^[^\\u0000]+$"
+                        }
+                      }
+                    },
+                    "required": [
+                      "outcome",
+                      "paths"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "outcome": {
+                        "type": "string",
+                        "const": "unmeasured"
+                      }
+                    },
+                    "required": [
+                      "outcome"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
               }
             },
             "required": [
@@ -11012,6 +11541,104 @@
                   "profileRevision"
                 ],
                 "additionalProperties": false
+              },
+              "agentHomeProjection": {
+                "type": "object",
+                "properties": {
+                  "profileRevision": {
+                    "type": "string",
+                    "pattern": "^[1-9][0-9]{0,18}$"
+                  },
+                  "projectionHash": {
+                    "type": "string",
+                    "pattern": "^sha256:[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "profileRevision",
+                  "projectionHash"
+                ],
+                "additionalProperties": false
+              },
+              "agentHomeMemoryChange": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "outcome": {
+                        "type": "string",
+                        "const": "unchanged"
+                      }
+                    },
+                    "required": [
+                      "outcome"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "outcome": {
+                        "type": "string",
+                        "const": "reader-attributed"
+                      },
+                      "paths": {
+                        "minItems": 1,
+                        "maxItems": 512,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1024,
+                          "pattern": "^[^\\u0000]+$"
+                        }
+                      }
+                    },
+                    "required": [
+                      "outcome",
+                      "paths"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "outcome": {
+                        "type": "string",
+                        "const": "unattributed"
+                      },
+                      "paths": {
+                        "minItems": 1,
+                        "maxItems": 512,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1024,
+                          "pattern": "^[^\\u0000]+$"
+                        }
+                      }
+                    },
+                    "required": [
+                      "outcome",
+                      "paths"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "outcome": {
+                        "type": "string",
+                        "const": "unmeasured"
+                      }
+                    },
+                    "required": [
+                      "outcome"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
               }
             },
             "additionalProperties": false
@@ -13742,6 +14369,10 @@
                         ],
                         "additionalProperties": false
                       },
+                      "homeAccess": {
+                        "type": "string",
+                        "const": "memory-reader"
+                      },
                       "requiredToolsets": {
                         "minItems": 1,
                         "maxItems": 16,
@@ -14083,6 +14714,10 @@
                           "profileRevision"
                         ],
                         "additionalProperties": false
+                      },
+                      "homeAccess": {
+                        "type": "string",
+                        "const": "memory-reader"
                       },
                       "requiredToolsets": {
                         "minItems": 1,
@@ -14646,6 +15281,10 @@
                         ],
                         "additionalProperties": false
                       },
+                      "homeAccess": {
+                        "type": "string",
+                        "const": "memory-reader"
+                      },
                       "requiredToolsets": {
                         "minItems": 1,
                         "maxItems": 16,
@@ -15155,6 +15794,10 @@
                           "profileRevision"
                         ],
                         "additionalProperties": false
+                      },
+                      "homeAccess": {
+                        "type": "string",
+                        "const": "memory-reader"
                       },
                       "requiredToolsets": {
                         "minItems": 1,
@@ -17993,6 +18636,9 @@
                       "summary": {
                         "type": "string"
                       },
+                      "finalMessage": {
+                        "type": "string"
+                      },
                       "sessionRef": {
                         "type": "string"
                       },
@@ -18139,6 +18785,104 @@
                           "profileRevision"
                         ],
                         "additionalProperties": false
+                      },
+                      "agentHomeProjection": {
+                        "type": "object",
+                        "properties": {
+                          "profileRevision": {
+                            "type": "string",
+                            "pattern": "^[1-9][0-9]{0,18}$"
+                          },
+                          "projectionHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        },
+                        "required": [
+                          "profileRevision",
+                          "projectionHash"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "agentHomeMemoryChange": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "unchanged"
+                              }
+                            },
+                            "required": [
+                              "outcome"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "reader-attributed"
+                              },
+                              "paths": {
+                                "minItems": 1,
+                                "maxItems": 512,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1024,
+                                  "pattern": "^[^\\u0000]+$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "outcome",
+                              "paths"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "unattributed"
+                              },
+                              "paths": {
+                                "minItems": 1,
+                                "maxItems": 512,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1024,
+                                  "pattern": "^[^\\u0000]+$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "outcome",
+                              "paths"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "unmeasured"
+                              }
+                            },
+                            "required": [
+                              "outcome"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
                       }
                     },
                     "required": [
@@ -18335,6 +19079,104 @@
                           "profileRevision"
                         ],
                         "additionalProperties": false
+                      },
+                      "agentHomeProjection": {
+                        "type": "object",
+                        "properties": {
+                          "profileRevision": {
+                            "type": "string",
+                            "pattern": "^[1-9][0-9]{0,18}$"
+                          },
+                          "projectionHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        },
+                        "required": [
+                          "profileRevision",
+                          "projectionHash"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "agentHomeMemoryChange": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "unchanged"
+                              }
+                            },
+                            "required": [
+                              "outcome"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "reader-attributed"
+                              },
+                              "paths": {
+                                "minItems": 1,
+                                "maxItems": 512,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1024,
+                                  "pattern": "^[^\\u0000]+$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "outcome",
+                              "paths"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "unattributed"
+                              },
+                              "paths": {
+                                "minItems": 1,
+                                "maxItems": 512,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1024,
+                                  "pattern": "^[^\\u0000]+$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "outcome",
+                              "paths"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "unmeasured"
+                              }
+                            },
+                            "required": [
+                              "outcome"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
                       }
                     },
                     "required": [
@@ -18481,6 +19323,104 @@
                           "profileRevision"
                         ],
                         "additionalProperties": false
+                      },
+                      "agentHomeProjection": {
+                        "type": "object",
+                        "properties": {
+                          "profileRevision": {
+                            "type": "string",
+                            "pattern": "^[1-9][0-9]{0,18}$"
+                          },
+                          "projectionHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        },
+                        "required": [
+                          "profileRevision",
+                          "projectionHash"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "agentHomeMemoryChange": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "unchanged"
+                              }
+                            },
+                            "required": [
+                              "outcome"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "reader-attributed"
+                              },
+                              "paths": {
+                                "minItems": 1,
+                                "maxItems": 512,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1024,
+                                  "pattern": "^[^\\u0000]+$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "outcome",
+                              "paths"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "unattributed"
+                              },
+                              "paths": {
+                                "minItems": 1,
+                                "maxItems": 512,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1024,
+                                  "pattern": "^[^\\u0000]+$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "outcome",
+                              "paths"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "unmeasured"
+                              }
+                            },
+                            "required": [
+                              "outcome"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
                       }
                     },
                     "additionalProperties": false
@@ -20262,6 +21202,10 @@
                         ],
                         "additionalProperties": false
                       },
+                      "homeAccess": {
+                        "type": "string",
+                        "const": "memory-reader"
+                      },
                       "requiredToolsets": {
                         "minItems": 1,
                         "maxItems": 16,
@@ -20603,6 +21547,10 @@
                           "profileRevision"
                         ],
                         "additionalProperties": false
+                      },
+                      "homeAccess": {
+                        "type": "string",
+                        "const": "memory-reader"
                       },
                       "requiredToolsets": {
                         "minItems": 1,
@@ -21166,6 +22114,10 @@
                         ],
                         "additionalProperties": false
                       },
+                      "homeAccess": {
+                        "type": "string",
+                        "const": "memory-reader"
+                      },
                       "requiredToolsets": {
                         "minItems": 1,
                         "maxItems": 16,
@@ -21675,6 +22627,10 @@
                           "profileRevision"
                         ],
                         "additionalProperties": false
+                      },
+                      "homeAccess": {
+                        "type": "string",
+                        "const": "memory-reader"
                       },
                       "requiredToolsets": {
                         "minItems": 1,
@@ -24513,6 +25469,9 @@
                       "summary": {
                         "type": "string"
                       },
+                      "finalMessage": {
+                        "type": "string"
+                      },
                       "sessionRef": {
                         "type": "string"
                       },
@@ -24659,6 +25618,104 @@
                           "profileRevision"
                         ],
                         "additionalProperties": false
+                      },
+                      "agentHomeProjection": {
+                        "type": "object",
+                        "properties": {
+                          "profileRevision": {
+                            "type": "string",
+                            "pattern": "^[1-9][0-9]{0,18}$"
+                          },
+                          "projectionHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        },
+                        "required": [
+                          "profileRevision",
+                          "projectionHash"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "agentHomeMemoryChange": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "unchanged"
+                              }
+                            },
+                            "required": [
+                              "outcome"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "reader-attributed"
+                              },
+                              "paths": {
+                                "minItems": 1,
+                                "maxItems": 512,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1024,
+                                  "pattern": "^[^\\u0000]+$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "outcome",
+                              "paths"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "unattributed"
+                              },
+                              "paths": {
+                                "minItems": 1,
+                                "maxItems": 512,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1024,
+                                  "pattern": "^[^\\u0000]+$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "outcome",
+                              "paths"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "unmeasured"
+                              }
+                            },
+                            "required": [
+                              "outcome"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
                       }
                     },
                     "required": [
@@ -24855,6 +25912,104 @@
                           "profileRevision"
                         ],
                         "additionalProperties": false
+                      },
+                      "agentHomeProjection": {
+                        "type": "object",
+                        "properties": {
+                          "profileRevision": {
+                            "type": "string",
+                            "pattern": "^[1-9][0-9]{0,18}$"
+                          },
+                          "projectionHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        },
+                        "required": [
+                          "profileRevision",
+                          "projectionHash"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "agentHomeMemoryChange": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "unchanged"
+                              }
+                            },
+                            "required": [
+                              "outcome"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "reader-attributed"
+                              },
+                              "paths": {
+                                "minItems": 1,
+                                "maxItems": 512,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1024,
+                                  "pattern": "^[^\\u0000]+$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "outcome",
+                              "paths"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "unattributed"
+                              },
+                              "paths": {
+                                "minItems": 1,
+                                "maxItems": 512,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1024,
+                                  "pattern": "^[^\\u0000]+$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "outcome",
+                              "paths"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "unmeasured"
+                              }
+                            },
+                            "required": [
+                              "outcome"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
                       }
                     },
                     "required": [
@@ -25001,6 +26156,104 @@
                           "profileRevision"
                         ],
                         "additionalProperties": false
+                      },
+                      "agentHomeProjection": {
+                        "type": "object",
+                        "properties": {
+                          "profileRevision": {
+                            "type": "string",
+                            "pattern": "^[1-9][0-9]{0,18}$"
+                          },
+                          "projectionHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[a-f0-9]{64}$"
+                          }
+                        },
+                        "required": [
+                          "profileRevision",
+                          "projectionHash"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "agentHomeMemoryChange": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "unchanged"
+                              }
+                            },
+                            "required": [
+                              "outcome"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "reader-attributed"
+                              },
+                              "paths": {
+                                "minItems": 1,
+                                "maxItems": 512,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1024,
+                                  "pattern": "^[^\\u0000]+$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "outcome",
+                              "paths"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "unattributed"
+                              },
+                              "paths": {
+                                "minItems": 1,
+                                "maxItems": 512,
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1024,
+                                  "pattern": "^[^\\u0000]+$"
+                                }
+                              }
+                            },
+                            "required": [
+                              "outcome",
+                              "paths"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "outcome": {
+                                "type": "string",
+                                "const": "unmeasured"
+                              }
+                            },
+                            "required": [
+                              "outcome"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
                       }
                     },
                     "additionalProperties": false

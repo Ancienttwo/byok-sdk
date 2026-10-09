@@ -5,6 +5,8 @@ import {
   type Envelope,
   type TerminalInferenceUsage,
   type TerminalPreparedObservation,
+  type TerminalAgentHomeProjection,
+  type TerminalAgentHomeMemoryChange,
   type TaskFailPayload,
 } from '@byok-sdk/protocol';
 import { ByokCloudError } from './errors';
@@ -41,7 +43,26 @@ export interface TerminalResult {
   readonly state: 'complete' | 'failed' | 'cancelled';
   /** Exact Agent identity echoed by the winning terminal, when Agent-bound. */
   readonly agentRef?: AgentRef;
+  /**
+   * The task-free Agent-home projection applied when the Attempt started,
+   * verbatim from the winning terminal. Compare it with `agentRef` to see
+   * which persona revision the task ran with. Absent when not Agent-bound or
+   * when the home had no applied projection.
+   */
+  readonly agentHomeProjection?: TerminalAgentHomeProjection;
+  /**
+   * Memory-change evidence of a `memory-reader` Attempt, verbatim from the
+   * winning terminal: whether `MEMORY.md` or `notes/` changed while the reader
+   * ran, and which files. Absent for a writer Attempt, for a claimed failure
+   * before the Attempt became active, and for an older daemon.
+   */
+  readonly agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
   readonly summary?: string;
+  /**
+   * The runtime's closing reply, verbatim `task.complete.finalMessage`. Absent
+   * when the run ended with no closing text, or when an older daemon sent none.
+   */
+  readonly finalMessage?: string;
   readonly sessionRef?: string;
   readonly artifactRefs?: readonly BlobRef[];
   /**
@@ -100,7 +121,10 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         taskId,
         state: 'complete',
         ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
+        ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
+        ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
         summary: envelope.payload.summary,
+        ...(envelope.payload.finalMessage === undefined ? {} : { finalMessage: envelope.payload.finalMessage }),
         sessionRef: envelope.payload.sessionRef,
         ...(envelope.payload.artifactRefs !== undefined
           ? { artifactRefs: envelope.payload.artifactRefs }
@@ -118,6 +142,8 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         taskId,
         state: 'failed',
         ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
+        ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
+        ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
         ...(envelope.payload.recovery === undefined ? {} : { recovery: envelope.payload.recovery }),
         reason: envelope.payload.reason,
         terminalCause: envelope.payload.reason,
@@ -153,6 +179,8 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         taskId,
         state: 'cancelled',
         ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
+        ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
+        ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
         ...(envelope.payload.reason !== undefined ? { reason: envelope.payload.reason } : {}),
         ...(envelope.payload.reason === undefined ? {} : { terminalCause: envelope.payload.reason }),
         ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),

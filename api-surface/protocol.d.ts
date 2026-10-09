@@ -1741,6 +1741,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -1808,6 +1809,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -1911,6 +1913,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -2004,6 +2007,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -2581,6 +2585,7 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     payload: z.ZodObject<{
         harnessId: z.ZodOptional<z.ZodString>;
         summary: z.ZodString;
+        finalMessage: z.ZodOptional<z.ZodString>;
         sessionRef: z.ZodString;
         artifactRefs: z.ZodOptional<z.ZodArray<z.ZodObject<{
             blobId: z.ZodString;
@@ -2613,6 +2618,21 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>>;
+        agentHomeProjection: z.ZodOptional<z.ZodObject<{
+            profileRevision: z.ZodString;
+            projectionHash: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            outcome: z.ZodLiteral<"unchanged">;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"reader-attributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unattributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unmeasured">;
+        }, z.core.$strict>], "outcome">>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -2653,6 +2673,21 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>>;
+        agentHomeProjection: z.ZodOptional<z.ZodObject<{
+            profileRevision: z.ZodString;
+            projectionHash: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            outcome: z.ZodLiteral<"unchanged">;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"reader-attributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unattributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unmeasured">;
+        }, z.core.$strict>], "outcome">>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -2683,6 +2718,21 @@ export declare const EnvelopeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>>;
+        agentHomeProjection: z.ZodOptional<z.ZodObject<{
+            profileRevision: z.ZodString;
+            projectionHash: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            outcome: z.ZodLiteral<"unchanged">;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"reader-attributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unattributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unmeasured">;
+        }, z.core.$strict>], "outcome">>;
     }, z.core.$strip>;
 }, z.core.$strip>, z.ZodObject<{
     v: z.ZodNumber;
@@ -3196,6 +3246,7 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
             }, z.core.$strict>;
+            homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
             requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
             runtime: z.ZodOptional<z.ZodEnum<{
                 claude: "claude";
@@ -3263,6 +3314,7 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
             }, z.core.$strict>;
+            homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
             requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
             runtime: z.ZodOptional<z.ZodEnum<{
                 claude: "claude";
@@ -3366,6 +3418,7 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
             }, z.core.$strict>;
+            homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
             requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
             runtime: z.ZodOptional<z.ZodEnum<{
                 claude: "claude";
@@ -3459,6 +3512,7 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
             }, z.core.$strict>;
+            homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
             requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
             runtime: z.ZodOptional<z.ZodEnum<{
                 claude: "claude";
@@ -4036,6 +4090,7 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
         payload: z.ZodObject<{
             harnessId: z.ZodOptional<z.ZodString>;
             summary: z.ZodString;
+            finalMessage: z.ZodOptional<z.ZodString>;
             sessionRef: z.ZodString;
             artifactRefs: z.ZodOptional<z.ZodArray<z.ZodObject<{
                 blobId: z.ZodString;
@@ -4068,6 +4123,21 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
             }, z.core.$strict>>;
+            agentHomeProjection: z.ZodOptional<z.ZodObject<{
+                profileRevision: z.ZodString;
+                projectionHash: z.ZodString;
+            }, z.core.$strict>>;
+            agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                outcome: z.ZodLiteral<"unchanged">;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"reader-attributed">;
+                paths: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"unattributed">;
+                paths: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"unmeasured">;
+            }, z.core.$strict>], "outcome">>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -4108,6 +4178,21 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
             }, z.core.$strict>>;
+            agentHomeProjection: z.ZodOptional<z.ZodObject<{
+                profileRevision: z.ZodString;
+                projectionHash: z.ZodString;
+            }, z.core.$strict>>;
+            agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                outcome: z.ZodLiteral<"unchanged">;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"reader-attributed">;
+                paths: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"unattributed">;
+                paths: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"unmeasured">;
+            }, z.core.$strict>], "outcome">>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -4138,6 +4223,21 @@ export declare const EventsPollResponseSchema: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
             }, z.core.$strict>>;
+            agentHomeProjection: z.ZodOptional<z.ZodObject<{
+                profileRevision: z.ZodString;
+                projectionHash: z.ZodString;
+            }, z.core.$strict>>;
+            agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                outcome: z.ZodLiteral<"unchanged">;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"reader-attributed">;
+                paths: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"unattributed">;
+                paths: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"unmeasured">;
+            }, z.core.$strict>], "outcome">>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -4523,6 +4623,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
             }, z.core.$strict>;
+            homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
             requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
             runtime: z.ZodOptional<z.ZodEnum<{
                 claude: "claude";
@@ -4590,6 +4691,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
             }, z.core.$strict>;
+            homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
             requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
             runtime: z.ZodOptional<z.ZodEnum<{
                 claude: "claude";
@@ -4693,6 +4795,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
             }, z.core.$strict>;
+            homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
             requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
             runtime: z.ZodOptional<z.ZodEnum<{
                 claude: "claude";
@@ -4786,6 +4889,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
             }, z.core.$strict>;
+            homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
             requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
             runtime: z.ZodOptional<z.ZodEnum<{
                 claude: "claude";
@@ -5363,6 +5467,7 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
         payload: z.ZodObject<{
             harnessId: z.ZodOptional<z.ZodString>;
             summary: z.ZodString;
+            finalMessage: z.ZodOptional<z.ZodString>;
             sessionRef: z.ZodString;
             artifactRefs: z.ZodOptional<z.ZodArray<z.ZodObject<{
                 blobId: z.ZodString;
@@ -5395,6 +5500,21 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
             }, z.core.$strict>>;
+            agentHomeProjection: z.ZodOptional<z.ZodObject<{
+                profileRevision: z.ZodString;
+                projectionHash: z.ZodString;
+            }, z.core.$strict>>;
+            agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                outcome: z.ZodLiteral<"unchanged">;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"reader-attributed">;
+                paths: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"unattributed">;
+                paths: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"unmeasured">;
+            }, z.core.$strict>], "outcome">>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -5435,6 +5555,21 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
             }, z.core.$strict>>;
+            agentHomeProjection: z.ZodOptional<z.ZodObject<{
+                profileRevision: z.ZodString;
+                projectionHash: z.ZodString;
+            }, z.core.$strict>>;
+            agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                outcome: z.ZodLiteral<"unchanged">;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"reader-attributed">;
+                paths: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"unattributed">;
+                paths: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"unmeasured">;
+            }, z.core.$strict>], "outcome">>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -5465,6 +5600,21 @@ export declare const MessagesSendRequestSchema: z.ZodObject<{
                 agentId: z.ZodString;
                 profileRevision: z.ZodString;
             }, z.core.$strict>>;
+            agentHomeProjection: z.ZodOptional<z.ZodObject<{
+                profileRevision: z.ZodString;
+                projectionHash: z.ZodString;
+            }, z.core.$strict>>;
+            agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+                outcome: z.ZodLiteral<"unchanged">;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"reader-attributed">;
+                paths: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"unattributed">;
+                paths: z.ZodArray<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                outcome: z.ZodLiteral<"unmeasured">;
+            }, z.core.$strict>], "outcome">>;
         }, z.core.$strip>;
     }, z.core.$strip>, z.ZodObject<{
         v: z.ZodNumber;
@@ -6195,7 +6345,7 @@ export declare function byokBlobUrlPath(blobId: string): string;
 export declare function byokBlobContentPath(blobId: string): string;
 // ==== @byok-sdk/protocol dist/index.d.ts ====
 export { MAILBOX_READ_AHEAD_MAX_SEQS, MAILBOX_READ_AHEAD_CAPABILITY } from './version';
-export { PROTOCOL_VERSION, CAPABILITY_FLAGS, STRICT_AGENT_ONLY_CAPABILITY } from './version';
+export { PROTOCOL_VERSION, CAPABILITY_FLAGS, STRICT_AGENT_ONLY_CAPABILITY, AGENT_HOME_READERS_CAPABILITY } from './version';
 export type { CapabilityFlag } from './version';
 export { BlobRefSchema, CONTENT_HASH_RE } from './blob';
 export type { BlobRef } from './blob';
@@ -6220,8 +6370,8 @@ export { TERMINAL_PROJECTION_SELECTION_CAPABILITY, TerminalProjectionContractSch
 export type { TerminalProjectionSelection } from './terminal-projection';
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
-export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, TaskOfferPreparedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
-export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, TaskOfferPreparedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, } from './messages';
+export { MESSAGE_TYPES, TASK_OFFER_TYPES, isTaskOfferType, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, RuntimeInfoSchema, HarnessIdSchema, HarnessInfoSchema, HarnessInventorySchema, RuntimeCapabilitiesSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, DispatchSelectionSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, ConnHelloPayloadSchema, ConnAckPayloadSchema, TaskOfferPayloadSchema, TaskOfferWithToolsetsPayloadSchema, AgentHomeAccessSchema, TaskOfferForAgentPayloadSchema, TaskOfferForAgentWithEgressPayloadSchema, TaskOfferForAgentWithEgressFreshPayloadSchema, TaskOfferPreparedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskRejectPayloadSchema, TaskCancelPayloadSchema, TaskSteerPayloadSchema, TaskClaimPayloadSchema, TaskStartedPayloadSchema, TaskDeclinePayloadSchema, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskCancelledPayloadSchema, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, TerminalInferenceUsageSchema, TerminalPreparedObservationSchema, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH, } from './messages';
+export type { ResultDocumentCheck, MessageType, RuntimeId, RuntimeInfo, RuntimeCapabilities, AgentRef, AgentHomeProjectionAgentRef, DispatchSelection, ToolsetId, ConnHelloPayload, ConnAckPayload, TaskOfferPayload, TaskOfferWithToolsetsPayload, TaskOfferForAgentPayload, TaskOfferForAgentWithEgressPayload, TaskOfferForAgentWithEgressFreshPayload, TaskOfferPreparedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskApprovePayload, TaskRejectPayload, TaskCancelPayload, TaskSteerPayload, TaskClaimPayload, TaskStartedPayload, TaskDeclinePayload, TaskProgressPayload, TaskArtifactPayload, TaskAwaitApprovalPayload, TaskCompletePayload, TaskFailPayload, TaskCancelledPayload, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, AgentHomeAccess, } from './messages';
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';
 export type { Envelope } from './envelope';
 export { ProtocolError, EnvelopeParseError, UnknownMessageTypeError, EnvelopeValidationError, } from './errors';
@@ -7375,6 +7525,19 @@ export declare const TaskOfferWithToolsetsPayloadSchema: z.ZodObject<{
 }, z.core.$strict>;
 export type TaskOfferWithToolsetsPayload = z.infer<typeof TaskOfferWithToolsetsPayloadSchema>;
 /**
+ * How an Agent Attempt uses its Agent home. `memory-reader` runs the Attempt
+ * in its own run directory, `<home>/.byok/runs/<taskId>/`, beside other
+ * reader Attempts and at most one writer Attempt. The home stays an ancestor
+ * of that cwd, so the runtime still finds the persona and memory. Absent means
+ * a writer: the Attempt runs in the canonical home, and one home has at most
+ * one writer at a time. The SDK does not make memory read-only; a reader
+ * terminal reports memory changes in `agentHomeMemoryChange`. A host sends this
+ * field only to a device that advertises `agent-home-readers`: the Agent
+ * offers are strict, so an older daemon cannot accept it.
+ */
+export declare const AgentHomeAccessSchema: z.ZodLiteral<"memory-reader">;
+export type AgentHomeAccess = z.infer<typeof AgentHomeAccessSchema>;
+/**
  * Strict additive offer for a durable host-owned Agent. An older daemon that
  * does not advertise `agent-home-contract` skips this distinct message type
  * instead of stripping identity and applying legacy workspace semantics.
@@ -7393,6 +7556,7 @@ export declare const TaskOfferForAgentPayloadSchema: z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
     }, z.core.$strict>;
+    homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
         claude: "claude";
@@ -7458,6 +7622,7 @@ export declare const TaskOfferForAgentWithEgressPayloadSchema: z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
     }, z.core.$strict>;
+    homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
         claude: "claude";
@@ -7560,6 +7725,7 @@ export declare const TaskOfferForAgentWithEgressFreshPayloadSchema: z.ZodObject<
         agentId: z.ZodString;
         profileRevision: z.ZodString;
     }, z.core.$strict>;
+    homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
         claude: "claude";
@@ -7666,6 +7832,7 @@ export declare const TaskOfferPreparedPayloadSchema: z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
     }, z.core.$strict>;
+    homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
     requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
     runtime: z.ZodOptional<z.ZodEnum<{
         claude: "claude";
@@ -8570,6 +8737,56 @@ export declare const TerminalPreparedObservationSchema: z.ZodObject<{
 }, z.core.$strict>;
 export type TerminalPreparedObservation = z.infer<typeof TerminalPreparedObservationSchema>;
 /**
+ * The task-free Agent-home projection (`agent.home_projection`) that the
+ * device had already applied when an Agent Attempt started. The writer lease
+ * keeps a new projection out of the home until the Attempt ends, so this is
+ * the persona the Attempt ran with. The SDK does not compare it with the
+ * offer's `agentRef.profileRevision`: the host decides whether a mismatch
+ * matters. Absent when the task was not Agent-bound, or when the home had no
+ * applied projection record.
+ */
+export declare const TerminalAgentHomeProjectionSchema: z.ZodObject<{
+    profileRevision: z.ZodString;
+    projectionHash: z.ZodString;
+}, z.core.$strict>;
+export type TerminalAgentHomeProjection = z.infer<typeof TerminalAgentHomeProjectionSchema>;
+/** Maximum memory files one reader digest covers: `MEMORY.md` plus every entry under `notes/`. */
+export declare const AGENT_HOME_MEMORY_DIGEST_MAX_FILES = 256;
+/** Maximum bytes of memory files one reader digest reads. */
+export declare const AGENT_HOME_MEMORY_DIGEST_MAX_BYTES: number;
+/** Maximum length of one changed memory path, relative to the Agent home. */
+export declare const AGENT_HOME_MEMORY_PATH_MAX_LENGTH = 1024;
+/**
+ * Memory-change evidence of one `memory-reader` Attempt. The device hashes
+ * `MEMORY.md` and every file under `notes/` when the reader starts and again
+ * at its terminal, and compares the two digests.
+ *
+ * - `unchanged`: the digests are equal.
+ * - `reader-attributed`: the digests differ and no writer Attempt of the home
+ *   overlapped this reader. A reader Attempt changed memory: this one, or
+ *   another reader that overlapped it.
+ * - `unattributed`: the digests differ and a writer Attempt overlapped this
+ *   reader, so the change has no single source.
+ * - `unmeasured`: the digest bound was exceeded, or a read failed.
+ *
+ * `paths` lists the changed files relative to the home, with `/` separators.
+ * The device sees only Attempts it runs; a host that writes memory files
+ * itself while readers run makes the attribution ambiguous. Absent on writer
+ * terminals and on a claimed failure before the Attempt became active.
+ */
+export declare const TerminalAgentHomeMemoryChangeSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
+    outcome: z.ZodLiteral<"unchanged">;
+}, z.core.$strict>, z.ZodObject<{
+    outcome: z.ZodLiteral<"reader-attributed">;
+    paths: z.ZodArray<z.ZodString>;
+}, z.core.$strict>, z.ZodObject<{
+    outcome: z.ZodLiteral<"unattributed">;
+    paths: z.ZodArray<z.ZodString>;
+}, z.core.$strict>, z.ZodObject<{
+    outcome: z.ZodLiteral<"unmeasured">;
+}, z.core.$strict>], "outcome">;
+export type TerminalAgentHomeMemoryChange = z.infer<typeof TerminalAgentHomeMemoryChangeSchema>;
+/**
  * daemon -> server: task finished successfully.
  *
  * `document` (additive-minor, docs/protocol.md "Freeze rule"): the OPTIONAL
@@ -8598,6 +8815,7 @@ export type TerminalPreparedObservation = z.infer<typeof TerminalPreparedObserva
 export declare const TaskCompletePayloadSchema: z.ZodObject<{
     harnessId: z.ZodOptional<z.ZodString>;
     summary: z.ZodString;
+    finalMessage: z.ZodOptional<z.ZodString>;
     sessionRef: z.ZodString;
     artifactRefs: z.ZodOptional<z.ZodArray<z.ZodObject<{
         blobId: z.ZodString;
@@ -8630,6 +8848,21 @@ export declare const TaskCompletePayloadSchema: z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
     }, z.core.$strict>>;
+    agentHomeProjection: z.ZodOptional<z.ZodObject<{
+        profileRevision: z.ZodString;
+        projectionHash: z.ZodString;
+    }, z.core.$strict>>;
+    agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        outcome: z.ZodLiteral<"unchanged">;
+    }, z.core.$strict>, z.ZodObject<{
+        outcome: z.ZodLiteral<"reader-attributed">;
+        paths: z.ZodArray<z.ZodString>;
+    }, z.core.$strict>, z.ZodObject<{
+        outcome: z.ZodLiteral<"unattributed">;
+        paths: z.ZodArray<z.ZodString>;
+    }, z.core.$strict>, z.ZodObject<{
+        outcome: z.ZodLiteral<"unmeasured">;
+    }, z.core.$strict>], "outcome">>;
 }, z.core.$strip>;
 export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
 /** daemon -> server: task failed. */
@@ -8664,6 +8897,21 @@ export declare const TaskFailPayloadSchema: z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
     }, z.core.$strict>>;
+    agentHomeProjection: z.ZodOptional<z.ZodObject<{
+        profileRevision: z.ZodString;
+        projectionHash: z.ZodString;
+    }, z.core.$strict>>;
+    agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        outcome: z.ZodLiteral<"unchanged">;
+    }, z.core.$strict>, z.ZodObject<{
+        outcome: z.ZodLiteral<"reader-attributed">;
+        paths: z.ZodArray<z.ZodString>;
+    }, z.core.$strict>, z.ZodObject<{
+        outcome: z.ZodLiteral<"unattributed">;
+        paths: z.ZodArray<z.ZodString>;
+    }, z.core.$strict>, z.ZodObject<{
+        outcome: z.ZodLiteral<"unmeasured">;
+    }, z.core.$strict>], "outcome">>;
 }, z.core.$strip>;
 export type TaskFailPayload = z.infer<typeof TaskFailPayloadSchema>;
 /**
@@ -8706,6 +8954,21 @@ export declare const TaskCancelledPayloadSchema: z.ZodObject<{
         agentId: z.ZodString;
         profileRevision: z.ZodString;
     }, z.core.$strict>>;
+    agentHomeProjection: z.ZodOptional<z.ZodObject<{
+        profileRevision: z.ZodString;
+        projectionHash: z.ZodString;
+    }, z.core.$strict>>;
+    agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+        outcome: z.ZodLiteral<"unchanged">;
+    }, z.core.$strict>, z.ZodObject<{
+        outcome: z.ZodLiteral<"reader-attributed">;
+        paths: z.ZodArray<z.ZodString>;
+    }, z.core.$strict>, z.ZodObject<{
+        outcome: z.ZodLiteral<"unattributed">;
+        paths: z.ZodArray<z.ZodString>;
+    }, z.core.$strict>, z.ZodObject<{
+        outcome: z.ZodLiteral<"unmeasured">;
+    }, z.core.$strict>], "outcome">>;
 }, z.core.$strip>;
 export type TaskCancelledPayload = z.infer<typeof TaskCancelledPayloadSchema>;
 /**
@@ -8871,6 +9134,7 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -8930,6 +9194,7 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -9025,6 +9290,7 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -9110,6 +9376,7 @@ declare const TASK_OFFER_PAYLOAD_SCHEMAS: {
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -9319,6 +9586,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -9378,6 +9646,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -9473,6 +9742,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -9558,6 +9828,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>;
+        homeAccess: z.ZodOptional<z.ZodLiteral<"memory-reader">>;
         requiredToolsets: z.ZodOptional<z.ZodArray<z.ZodString>>;
         runtime: z.ZodOptional<z.ZodEnum<{
             claude: "claude";
@@ -10164,6 +10435,7 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
     readonly 'task.complete': z.ZodObject<{
         harnessId: z.ZodOptional<z.ZodString>;
         summary: z.ZodString;
+        finalMessage: z.ZodOptional<z.ZodString>;
         sessionRef: z.ZodString;
         artifactRefs: z.ZodOptional<z.ZodArray<z.ZodObject<{
             blobId: z.ZodString;
@@ -10196,6 +10468,21 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>>;
+        agentHomeProjection: z.ZodOptional<z.ZodObject<{
+            profileRevision: z.ZodString;
+            projectionHash: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            outcome: z.ZodLiteral<"unchanged">;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"reader-attributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unattributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unmeasured">;
+        }, z.core.$strict>], "outcome">>;
     }, z.core.$strip>;
     readonly 'task.fail': z.ZodObject<{
         recovery: z.ZodOptional<z.ZodObject<{
@@ -10228,6 +10515,21 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>>;
+        agentHomeProjection: z.ZodOptional<z.ZodObject<{
+            profileRevision: z.ZodString;
+            projectionHash: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            outcome: z.ZodLiteral<"unchanged">;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"reader-attributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unattributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unmeasured">;
+        }, z.core.$strict>], "outcome">>;
     }, z.core.$strip>;
     readonly 'task.cancelled': z.ZodObject<{
         harnessId: z.ZodOptional<z.ZodString>;
@@ -10250,6 +10552,21 @@ export declare const MESSAGE_PAYLOAD_SCHEMAS: {
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>>;
+        agentHomeProjection: z.ZodOptional<z.ZodObject<{
+            profileRevision: z.ZodString;
+            projectionHash: z.ZodString;
+        }, z.core.$strict>>;
+        agentHomeMemoryChange: z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
+            outcome: z.ZodLiteral<"unchanged">;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"reader-attributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unattributed">;
+            paths: z.ZodArray<z.ZodString>;
+        }, z.core.$strict>, z.ZodObject<{
+            outcome: z.ZodLiteral<"unmeasured">;
+        }, z.core.$strict>], "outcome">>;
     }, z.core.$strip>;
     readonly 'task.approval_resolved': z.ZodObject<{
         approvalId: z.ZodString;
@@ -10794,6 +11111,14 @@ export declare const PROTOCOL_VERSION = 2;
 /** Host declares that this device accepts only Agent-bound offer variants. */
 export declare const STRICT_AGENT_ONLY_CAPABILITY: 'strict-agent-only';
 /**
+ * The device runs `homeAccess: 'memory-reader'` Agent offers: each reader
+ * Attempt gets its own run directory under the Agent home, and readers are
+ * counted apart from the one writer. The Agent offers are strict, so a host
+ * must refuse a reader offer to a device without this flag before it creates
+ * the task.
+ */
+export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
+/**
  * Capability flags exchanged during the connection handshake (`conn.hello` /
  * `conn.ack`). Additional flags may be introduced without a protocol version
  * bump; unrecognized flags must be ignored by both sides.
@@ -10872,5 +11197,5 @@ export declare const STRICT_AGENT_ONLY_CAPABILITY: 'strict-agent-only';
  * cannot accidentally execute the instruction without the required tools.
  */
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
-export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1"];
+export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];

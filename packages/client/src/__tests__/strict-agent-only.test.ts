@@ -21,8 +21,8 @@ describe('strict Agent-only daemon admission', () => {
     await server.close();
   });
 
-  async function startStrict(): Promise<StubRuntimeAdapter> {
-    const workspaceRoot = await temp('byok-strict-workspace-');
+  async function startStrict(options: { workspaceRoot?: boolean } = {}): Promise<StubRuntimeAdapter> {
+    const workspaceRoot = options.workspaceRoot === false ? undefined : await temp('byok-strict-workspace-');
     const storeDir = await temp('byok-strict-store-');
     const hostStorageRoot = await temp('byok-strict-home-');
     const adapter = new StubRuntimeAdapter('pi');
@@ -31,7 +31,7 @@ describe('strict Agent-only daemon admission', () => {
       productName: 'Strict test',
       productId: `strict-${path.basename(storeDir)}`,
       serverUrl: server.url,
-      workspaceRoot,
+      ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
       storeDir,
       agentHome: { hostStorageRoot },
       strictAgentOnly: true,
@@ -50,6 +50,14 @@ describe('strict Agent-only daemon admission', () => {
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Strict test', productId: 'strict-no-home',
       serverUrl: server.url, workspaceRoot: awaitablePath(), strictAgentOnly: true,
     }, [new StubRuntimeAdapter('pi')])).toThrow(/strictAgentOnly requires.*agentHome/i);
+  });
+
+  it('requires workspaceRoot for a daemon that is not strict Agent-only (#319)', async () => {
+    const hostStorageRoot = await temp('byok-non-strict-home-');
+    expect(() => createDaemonWithAdapters({
+      localAgentRelease: { version: '0.0.0-test' }, productName: 'Non-strict test', productId: 'non-strict-no-root',
+      serverUrl: server.url, agentHome: { hostStorageRoot },
+    }, [new StubRuntimeAdapter('pi')])).toThrow('DaemonConfig.workspaceRoot is required unless DaemonConfig.strictAgentOnly is true');
   });
 
   it('keeps strict construction filesystem-free until daemon ownership and async preflight', async () => {
@@ -100,6 +108,22 @@ describe('strict Agent-only daemon admission', () => {
     await new Promise((resolve) => setTimeout(resolve, 25));
     expect(server.received.filter((entry) => entry.type === 'task.decline' && entry.task_id === 'strict-duplicate')).toHaveLength(1);
     expect(adapter.sessions).toHaveLength(0);
+  });
+
+  it('runs an Agent offer and declines a legacy offer without a workspaceRoot (#319)', async () => {
+    const adapter = await startStrict({ workspaceRoot: false });
+    server.send(createEnvelope('task.offer', { instruction: 'legacy' }, { taskId: 'strict-no-root-legacy', seq: server.nextSeq() }));
+    const decline = await server.waitFor((entry) => entry.type === 'task.decline' && entry.task_id === 'strict-no-root-legacy');
+    expect((decline.payload as { reason: string }).reason).toMatch(/strict Agent-only/i);
+
+    server.send(createEnvelope('task.offer_for_agent', {
+      instruction: 'agent work', agentRef: { agentId: 'strict-no-root-agent', profileRevision: 'r1' },
+    }, { taskId: 'strict-no-root-agent-offer', seq: server.nextSeq() }));
+    await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'strict-no-root-agent-offer');
+    expect(adapter.sessions).toHaveLength(1);
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'done' });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await server.waitFor((entry) => entry.type === 'task.complete' && entry.task_id === 'strict-no-root-agent-offer');
   });
 
   it('continues to admit the Agent offer variants', async () => {

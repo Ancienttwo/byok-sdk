@@ -265,7 +265,7 @@ async function waitForAssertion(assertion: () => void, timeoutMs = 1_000, interv
       expect(sent.some((e) => ['task.fail', 'task.cancelled'].includes(e.type))).toBe(true);
       const records = await store!.list();
       expect(records.every((record) => !['preparing', 'active'].includes(record.phase))).toBe(true);
-      const lease = await deps.gitWorkspaceManager!.acquireLease(path.join(deps.workspaceRoot, `task-${kind}`));
+      const lease = await deps.gitWorkspaceManager!.acquireLease(path.join(deps.workspaceRoot!, `task-${kind}`));
       lease.release();
     }
   });

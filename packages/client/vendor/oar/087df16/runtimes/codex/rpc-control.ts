@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 7dc98e0 to bound control RPCs and record timeout rejection (Apache-2.0).
+// BYOK change: Modified from OAR 087df16 to bound control RPCs and record timeout rejection (Apache-2.0).
 import { emptyInputRefusal } from "../../shared/control-input.js";
 import type {
   ControlResult,

@@ -26,7 +26,7 @@ describe('createDaemonWithAdapters: removed DaemonConfig.mcpLaunchCwd', () => {
       expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter('pi', { kind: 'available' })]))
         .toThrow('DaemonConfig.mcpLaunchCwd was removed: MCP servers start in the session cwd, as the agent runtime does');
     } finally {
-      await fs.rm(config.workspaceRoot, { recursive: true, force: true });
+      await fs.rm(config.workspaceRoot!, { recursive: true, force: true });
       await fs.rm(config.storeDir!, { recursive: true, force: true });
     }
   });

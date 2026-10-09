@@ -221,6 +221,17 @@ export interface RuntimeAdapterDescriptor {
    * never makes an offer wait on one it has no use for.
    */
   readonly requiresMcpToolsetToolObservation?: boolean;
+  /**
+   * Whether each `progress` event carries one complete assistant message
+   * rather than a streaming delta. Codex emits one event per completed
+   * `agentMessage`, so its commentary and its final answer arrive as separate
+   * events with no tool interaction between them. When this is true, the
+   * daemon starts a new closing reply at every `progress` event, so the
+   * closing reply (`task.complete.finalMessage`) is the last message only.
+   * Absent or false: consecutive `progress` events form one reply until a
+   * tool interaction.
+   */
+  readonly progressEventsAreMessages?: boolean;
 }
 
 /** The pure input to one adapter admission decision. It contains no credential values or workspace resources. */
@@ -288,8 +299,18 @@ export interface RuntimeOperationManifest {
   readonly sessionRef?: string;
   /** Strict Agent identity, present only for task.offer_for_agent. */
   readonly agentRef?: AgentRef;
-  /** Canonical runtime cwd; for an Agent task this is the Agent home root. */
+  /**
+   * Canonical runtime cwd. For an Agent writer it is the Agent home root. For
+   * a `memory-reader` Attempt it is the run directory
+   * `<home>/.byok/runs/<taskId>/`, and `lease.canonicalHome` names the home.
+   */
   readonly cwd?: string;
+  /**
+   * Present for a `memory-reader` Agent Attempt only. An adapter whose runtime
+   * does not read instruction files from ancestors of `cwd` uses it to point
+   * the runtime at `lease.canonicalHome`.
+   */
+  readonly homeAccess?: 'memory-reader';
   /** Opaque local lease identity sealed with the Agent manifest. */
   readonly lease?: {
     readonly leaseId: string;
@@ -459,6 +480,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
     id: descriptor.id,
     supportsDispatchSelection: descriptor.supportsDispatchSelection === true,
     requiresMcpToolsetToolObservation: descriptor.requiresMcpToolsetToolObservation === true,
+    ...(descriptor.progressEventsAreMessages === true ? { progressEventsAreMessages: true } : {}),
     capabilities: Object.freeze({
       ...(descriptor.capabilities.durablePi === undefined ? {} : { durablePi: descriptor.capabilities.durablePi === true }),
       ...(descriptor.capabilities.nativeInteractions === undefined ? {} : {
@@ -502,6 +524,7 @@ export function sealRuntimeOperationManifest(manifest: RuntimeOperationManifest)
       ? {}
       : { agentRef: Object.freeze({ agentId: manifest.agentRef.agentId, profileRevision: manifest.agentRef.profileRevision }) }),
     cwd: manifest.cwd ?? manifest.workspace.workspaceDir,
+    ...(manifest.homeAccess === undefined ? {} : { homeAccess: manifest.homeAccess }),
     ...(manifest.lease === undefined
       ? {}
       : { lease: Object.freeze({ leaseId: manifest.lease.leaseId, canonicalHome: manifest.lease.canonicalHome }) }),

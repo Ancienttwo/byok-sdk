@@ -166,6 +166,34 @@ observability tolerance rule and strips it. The frozen fingerprint golden was
 regenerated for this additive schema change, while the historical envelope
 corpus remains a pre-usage compatibility witness.
 
+**Landed additive minor: `task.complete.finalMessage`.** `task.complete`
+gains an OPTIONAL string with the runtime's closing reply. It is the assistant
+text after the last tool interaction. For a runtime whose `progress` events are
+whole messages (Codex), it is the last message only. `summary` does not change:
+it still joins every `progress` text with no separator. The daemon omits the
+field when the run ended with no closing text. No capability flag gates it. An
+older server strips it, and the host then reads `summary` as before. The frozen
+fingerprint golden was regenerated for this change.
+
+**Landed additive minor: terminal `agentHomeProjection`.** `task.complete`,
+`task.fail` and `task.cancelled` gain the same OPTIONAL
+`TerminalAgentHomeProjection` evidence: the projection revision and hash that
+an Agent Attempt started with (§2.2). It is observability only. No capability
+flag gates it. An older server strips it. The frozen fingerprint golden was
+regenerated for this change.
+
+**Landed additive minor: Agent offer `homeAccess` and terminal
+`agentHomeMemoryChange`.** The Agent offer variants (`task.offer_for_agent`,
+`task.offer_for_agent_with_egress`, `task.offer_for_agent_with_egress_fresh`
+and `task.offer_prepared`) gain an OPTIONAL `homeAccess: 'memory-reader'`
+(§2.2). The offers are strict, so an older daemon cannot accept the field. A
+host sends it only to a device that durably advertises the new capability flag
+`agent-home-readers`; server and hosted cloud refuse it otherwise before task
+creation or mailbox append. `task.complete`, `task.fail` and `task.cancelled`
+gain the OPTIONAL `agentHomeMemoryChange` evidence of a reader Attempt. No flag
+gates the terminal field: it is observability only, and an older server strips
+it. The frozen fingerprint golden was regenerated for these additive changes.
+
 ## 1. Envelope
 
 Every wire message is a single-line NDJSON envelope:
@@ -282,10 +310,10 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `conn.ack` | S→D | optional | **required** | `protocolVersion`, `capabilities[]`, `serverTime` | Historical handshake acknowledgement; current long-poll uses response metadata |
 | `task.offer` | S→D | **required** | **required** | `instruction`, `runtime?`, `dispatchSelection?` (additive — see below), `sessionRef?`, `workspaceHint?` (reserved — see note below), `limits?` | `dispatch()` targets a device |
 | `task.offer_with_toolsets` | S→D | **required** | **required** | All `task.offer` fields plus `requiredToolsets` (1–16 logical ids) | A toolset-aware host targets a capable device |
-| `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `agentRef`, `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
+| `task.offer_for_agent` | S→D | **required** | **required** | `instruction`, `agentRef`, `homeAccess?` (additive — §2.2), `runtime?`, `dispatchSelection?`, `sessionRef?`, `requiredToolsets?`, `limits?` | An Agent dispatch targets a durably capable device |
 | `task.offer_for_agent_with_egress` | S→D | **required** | **required** | All strict Agent fields plus required `sessionRef` and exact `egressPolicy` | An Agent dispatch targets a daemon that consumed the revisioned egress contract |
 | `task.offer_for_agent_with_egress_fresh` | S→D | **required** | **required** | All strict Agent fields plus exact `egressPolicy`, with no `sessionRef` | A fresh Agent dispatch targets a daemon advertising `agent-egress-fresh-session` |
-| `task.offer_prepared` | S→D | **required** | **required** | `agentRef`, `agentMemory`, `egressPolicy`, `messageEgress?`, `preparation` (`reference`, `requestDigest`, `artifactDigest?`), `runtime?`, `dispatchSelection?`, `requiredToolsets?`, `terminalProjection?`, `limits?` — and deliberately NO `instruction` and NO `sessionRef` | An already-counted preparation is dispatched to the device that counted it |
+| `task.offer_prepared` | S→D | **required** | **required** | `agentRef`, `homeAccess?`, `agentMemory`, `egressPolicy`, `messageEgress?`, `preparation` (`reference`, `requestDigest`, `artifactDigest?`), `runtime?`, `dispatchSelection?`, `requiredToolsets?`, `terminalProjection?`, `limits?` — and deliberately NO `instruction` and NO `sessionRef` | An already-counted preparation is dispatched to the device that counted it |
 | `agent.egress.ack` | S→D | optional | **required** | exact `agentRef`, `sessionRef`, `policyRevision`, `eventId`, `cursor`, `receiptId` | Cloud durably recorded one reliable Agent event |
 | `agent.content.read` | S→D | optional | **required** | `requestId`, surface, actor, exact Agent/session/runtime/cwd, policy revision, relative target, MIME, decode mode, bounded policy | An independently authorized explicit content read is requested |
 | `agent.home.projection` | S→D | forbidden | **required** | exact `requestId`, AgentRef/profile revision, SHA-256 projection identity, bounded opaque JSON | A durable task-free projection targets one exact capable device |
@@ -301,9 +329,9 @@ append/send; receipt and ack are delivery facts, not session authority.
 | `task.progress` | D→S | **required** | optional | `seq` (payload-level batch order — §1.2), `events[]` | Batches of normalized `AgentEvent`s |
 | `task.artifact` | D→S | **required** | optional | `name`, `contentType`, `inline?`, `blobRef?` | An artifact is produced |
 | `task.await_approval` | D→S | **required** | optional | `summary`, `approvalId?` (M5, additive — §5.3) | Runtime raised `needs_approval` |
-| `task.complete` | D→S | **required** | optional | `summary`, `sessionRef`, `artifactRefs?`, `document?` (additive — §7.2), `agentRef?` | Runtime reached `turn_end` |
-| `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `agentRef?` | Task ends in error |
-| `task.cancelled` | D→S | **required** | optional | `reason?`, `agentRef?` | Task ends `Cancelled` (server- or daemon-initiated) |
+| `task.complete` | D→S | **required** | optional | `summary`, `finalMessage?` (additive — Freeze rule), `sessionRef`, `artifactRefs?`, `document?` (additive — §7.2), `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` (additive — §2.2) | Runtime reached `turn_end` |
+| `task.fail` | D→S | **required** | optional | `reason`, `retryable?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends in error |
+| `task.cancelled` | D→S | **required** | optional | `reason?`, `agentRef?`, `agentHomeProjection?`, `agentHomeMemoryChange?` | Task ends `Cancelled` (server- or daemon-initiated) |
 | `task.approval_resolved` | D→S | **required** | optional | `approvalId`, `decision` (`'approve'\|'reject'`), `resolvedBy` (`'local'`), `at` | A pending approval was resolved entirely on the device (§5.2) — gated on the `approval_resolved` capability flag |
 | `agent.egress.reliable` | D→S | optional | optional | exact Agent/session/policy identity, stable `eventId`/`cursor`, payload hash and byte count | A locally fsynced reliable event is sent or retried |
 | `agent.content.receipt` | D→S | optional | optional | exact request/actor/Agent/session/runtime/cwd/policy/target/MIME/decode identity; allowed includes hash/size/BlobRef, denied includes zero bytes and typed reason | Local content policy and audit completed |
@@ -439,6 +467,20 @@ cross-device request is `404`; identity mismatch is `422`; changing a terminal
 fact is `409`. Handler failure or non-exact readback does not advance the
 server-to-daemon cursor.
 
+**Offer revision and projection revision.** An Agent task offer's
+`agentRef.profileRevision` and the applied projection revision are two
+different facts. The daemon does not require them to be equal, and it does
+not decline an offer because of a difference. A projection can arrive after
+the offer that expected it, and an old offer can run after a newer projection.
+Instead, each terminal of an Agent Attempt (`task.complete`, `task.fail`,
+`task.cancelled`) carries the optional `agentHomeProjection`:
+`{ profileRevision, projectionHash }` of the projection that was applied when
+the Attempt started. The Attempt holds the canonical-home lease, so no new
+projection is applied while it runs. The field is absent when the home has no
+applied projection record. The host compares it with the terminal `agentRef`
+and decides whether the result is usable. The cloud read model
+(`readTaskResult`) projects it verbatim.
+
 **`TaskOfferPayload.dispatchSelection` is the authoritative LLM target when
 present.** It is a strict discriminated union:
 
@@ -535,6 +577,49 @@ resume and echoes exact AgentRef through claim/decline/terminal messages.
 `workspaceHint` has no precedence because it is absent from the strict Agent
 offer. Profile contents and non-`.byok` Agent files are opaque; `artifacts` is
 not a protocol field, schema, index, or required directory.
+
+**`homeAccess: 'memory-reader'` runs a reader Attempt.** An Agent offer without
+`homeAccess` is the writer: it runs in the canonical home, and one home has at
+most one writer at a time. A reader runs in its own run directory,
+`<home>/.byok/runs/<taskId>/`, beside up to
+`maxConcurrentReaderAttemptsPerAgentHome` (default 4) other readers and the
+one writer. The two counts are independent; an offer over either limit gets a
+retryable decline. The home is an ancestor of the reader cwd, so the runtime
+still finds the persona and memory. A fresh reader's `taskId` must be one plain
+path segment (`[A-Za-z0-9._-]`, at most 128 characters); otherwise the offer
+gets a non-retryable decline. Durable Pi runs only in the canonical home and
+declines a reader offer without retry.
+
+A reader session resumes in the run directory that its handoff recorded. The
+handoff binds `homeAccess`, so a reader session never resumes as a writer, and
+a writer session never resumes as a reader: a mismatch is a non-retryable
+decline. When the run directory of a resumed reader session is gone, the
+offer gets a non-retryable decline that names the session. The device keeps a
+run directory after the terminal. When a fresh reader starts, retention
+removes run directories older than 7 days and then the oldest ones above 32
+per home. It never removes the directory of an active reader, and it keeps a
+directory that a reader session handoff points to until that record is older
+than 7 days.
+
+The SDK does not make memory read-only. Each reader terminal carries
+`agentHomeMemoryChange`. The device fingerprints `MEMORY.md` and every entry
+under `notes/` (at most 256 entries, directories included, and 16 MiB, never
+following a symbolic link) at reader start and at the terminal decision:
+
+| `outcome` | Meaning | `paths` |
+|---|---|---|
+| `unchanged` | The fingerprints are equal | absent |
+| `reader-attributed` | They differ, and no writer Attempt of the home overlapped this reader. A reader changed memory: this one or an overlapping reader | changed files, relative to the home |
+| `unattributed` | They differ, and a writer Attempt overlapped this reader | changed files, relative to the home |
+| `unmeasured` | A bound was exceeded, an entry is not a directory, regular file or link, or a read failed | absent |
+
+Agent content reads never open `.byok`, so a host cannot read a reader run
+directory through them. A reader returns its output in the terminal
+`finalMessage` and `summary`, a result document, or task artifacts. The device
+sees only Attempts it runs. A host that writes memory files itself
+while readers run makes the attribution ambiguous. The field is absent on a
+writer terminal and on a claimed failure before the Attempt became active. The
+cloud read model (`readTaskResult`) projects it verbatim.
 
 ### 2.3 Task-free sealed provider provisioning notice
 
@@ -1420,6 +1505,7 @@ matters:
 | Field | Carries | For |
 |---|---|---|
 | `summary` | Prose | A human reading what happened |
+| `finalMessage` | Prose | The runtime's closing reply, without earlier commentary |
 | `artifactRefs[]` | Files (inline or blob) | Multi-file, binary, or oversized output |
 | `document` | ONE JSON value | The product's structured terminal result |
 

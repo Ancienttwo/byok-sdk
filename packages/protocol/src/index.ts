@@ -1,5 +1,5 @@
 export { MAILBOX_READ_AHEAD_MAX_SEQS, MAILBOX_READ_AHEAD_CAPABILITY } from './version';
-export { PROTOCOL_VERSION, CAPABILITY_FLAGS, STRICT_AGENT_ONLY_CAPABILITY } from './version';
+export { PROTOCOL_VERSION, CAPABILITY_FLAGS, STRICT_AGENT_ONLY_CAPABILITY, AGENT_HOME_READERS_CAPABILITY } from './version';
 export type { CapabilityFlag } from './version';
 
 export { BlobRefSchema, CONTENT_HASH_RE } from './blob';
@@ -300,6 +300,7 @@ export {
   ConnAckPayloadSchema,
   TaskOfferPayloadSchema,
   TaskOfferWithToolsetsPayloadSchema,
+  AgentHomeAccessSchema,
   TaskOfferForAgentPayloadSchema,
   TaskOfferForAgentWithEgressPayloadSchema,
   TaskOfferForAgentWithEgressFreshPayloadSchema,
@@ -331,6 +332,11 @@ export {
   checkResultDocument,
   TerminalInferenceUsageSchema,
   TerminalPreparedObservationSchema,
+  TerminalAgentHomeProjectionSchema,
+  TerminalAgentHomeMemoryChangeSchema,
+  AGENT_HOME_MEMORY_DIGEST_MAX_FILES,
+  AGENT_HOME_MEMORY_DIGEST_MAX_BYTES,
+  AGENT_HOME_MEMORY_PATH_MAX_LENGTH,
   TERMINAL_INFERENCE_USAGE_MAX_TOKENS,
   TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS,
   TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH,
@@ -380,6 +386,9 @@ export type {
   TaskApprovalResolvedPayload,
   TerminalInferenceUsage,
   TerminalPreparedObservation,
+  TerminalAgentHomeProjection,
+  TerminalAgentHomeMemoryChange,
+  AgentHomeAccess,
 } from './messages';
 
 export { EnvelopeSchema, isServerToDaemonType } from './envelope';

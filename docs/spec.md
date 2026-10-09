@@ -1005,10 +1005,11 @@ client; published library/CLI execution requires Node.js 24.15.0 or newer.
 The device daemon may also be shipped as a Bun-compiled single-file launcher;
 this repository verifies that optional recipe and Bun custody/crash paths.
 Those focused guarantees do not claim general Bun runtime compatibility for
-all SDK library/composition APIs. A Bun-compiled or Node SEA single-file
-launcher cannot embed pi's external CLI package; that deployment
-must provide the version-matched, Node-executed pi sidecar explicitly through
-`BYOK_PI_BIN`.
+all SDK library/composition APIs. A single-file launcher has no installed pi
+package to resolve. An interpreter + bundle product or a Bun-compiled product
+ships official pi through `sdkHelperHost` and a Pi asset root made by
+`copyPiRuntimeAssets`; see the single-file product contract below. This
+repository does not verify pi in a Node SEA payload.
 
 The pi RPC boundary is also version-specific. `message_update` is delta-only;
 BYOK assembles progress from `assistantMessageEvent.delta`. `agent_end` closes
@@ -1418,6 +1419,31 @@ Pi launch then re-enters the product executable as
 the product names its Pi asset root in `PI_PACKAGE_DIR` (a Bun-compiled
 executable may keep the assets beside itself).
 
+This is the one supported way to ship official pi in a host download. The
+product bundles the SDK root, so official pi from the build machine install is
+in its bundle. The helper below refuses a build machine whose installed pi is
+not the client pin.
+The product does not ship separate SDK helper scripts or a `node_modules` tree,
+and the adapter does not resolve an installed pi package. The product build
+calls `copyPiRuntimeAssets({ outDir, form })` from `@byok-sdk/client`. The
+`form` is `interpreter+bundle` (an interpreter runs the product bundle) or
+`compiled-executable` (a Bun-compiled executable). The helper resolves the
+installed pi package on the build machine and requires the exact client pin.
+It verifies the five pi export resources against their recorded SHA-256 digests
+and the SDK todo locale assets against their build manifest. A mismatch, or a
+target that is not empty, fails closed. The asset root then holds the pi
+`package.json`, the pi themes and export resources at the paths pi uses for the
+form, the photon WASM file and the SDK todo locale assets with their license
+and provenance files. The photon loader of pi reads its WASM file beside the
+executable; without it, pi skips image resizing. The asset root is a build
+output of the product. The product must not mix asset roots of two pins.
+`detect()` reports `available` with the client pin only when the asset root
+holds the SDK asset manifest; otherwise it reports `not-found`, and a launch is
+refused with `pi_bundled_assets_unavailable`. The client packaging test builds
+an interpreter + bundle host with no `node_modules` and runs one pi task
+against a loopback provider. It also builds a Bun-compiled host whose asset
+root is its own directory, with no `PI_PACKAGE_DIR`, and runs the same task.
+
 The authenticated local control socket accepts an expected-revision
 compare-and-swap reload of the complete registry. The CLI host reads
 `--config`; the daemon does not accept or read an arbitrary pathname. Identical
@@ -1475,10 +1501,12 @@ path segment. No host resolver or `workspaceHint` participates in this path.
 The client validates existing-ancestor and realpath containment, rejects
 symlink and cross-Agent collisions, creates missing Agent home, `MEMORY.md`,
 and `notes/`, and preserves existing bytes. The canonical Agent home root is
-the sole runtime cwd and is sealed with AgentRef, runtime/session identity and
-lease in the immutable operation manifest. `.byok` is the SDK's reserved
-internal namespace for process-owned home activity, session-scoped execution
-leases, and exact-match runtime-session evidence. All other files are opaque
+the writer's runtime cwd; a `memory-reader` Attempt runs in
+`.byok/runs/<taskId>/` under it. The cwd is sealed with AgentRef,
+runtime/session identity and lease in the immutable operation manifest.
+`.byok` is the SDK's reserved internal namespace for process-owned home
+activity, session-scoped execution leases, exact-match runtime-session
+evidence, and reader run directories. All other files are opaque
 Agent-owned content: the SDK does not
 require a literal `artifacts/` directory or parse/index projects, PDFs, images,
 notes, memory, or profile schema.
@@ -1487,18 +1515,54 @@ Agent dispatch requires an explicit device and its durable authenticated
 `agent-home-contract` declaration before task creation or mailbox enqueue.
 Claim, decline, and every terminal message echo exact AgentRef. Resume requires
 exact agentId, profileRevision, sessionRef, runtime and canonical cwd; mismatch
-fails closed. Within one daemon process, execution is serialized per canonical
-Agent home: at most `maxConcurrentMutableSessionsPerAgentHome` Attempts, default
-one, may execute in a home at a time, across every lane and every session. A
-further offer for a home already at that limit is declined retryably before
-adapter preparation, claim, workspace or process side effects, and its reason
-carries counts only. The slot is surrendered only when the Attempt is terminal
-and its runtime session closed; a failed disposal keeps the home busy. Raising
-the limit above one is an explicit host choice that permits concurrent sessions
-of one Agent to co-write that home's shared content (`MEMORY.md`, `notes/`,
-`.git`); the SDK never selects it implicitly. Underneath that cap, execution
-leases remain keyed by `(agentId, sessionRef)`, so a duplicate execution for
-the same session is busy regardless of the limit. A fresh task is task-keyed
+fails closed. Within one daemon process, a canonical Agent home runs at most
+one writer Attempt and at most `maxConcurrentReaderAttemptsPerAgentHome`
+reader Attempts (default four), counted apart, across every lane and every
+session. An Agent offer without `homeAccess` is the writer and runs in the
+canonical home, which is why the writer limit is fixed at one: a second writer
+would co-write `MEMORY.md`, `notes/` and `.git`. An offer with
+`homeAccess: 'memory-reader'` runs in its own run directory,
+`<home>/.byok/runs/<taskId>/`, so reader cwds never overlap; the home stays an
+ancestor of that cwd, so the runtime still loads the persona instruction file.
+The Codex adapter adds `project_root_markers=[".byok"]` for a reader, because
+Codex otherwise reads `AGENTS.md` only up to a Git root. A device advertises
+`agent-home-readers`, and server and cloud refuse a reader offer to a device
+without it before task creation. A further offer for a home already at its
+limit is declined retryably before adapter preparation, claim, workspace or
+process side effects, and its reason carries counts only. The slot is
+surrendered only when the Attempt is terminal and its runtime session closed;
+a failed disposal keeps the home busy. The removed
+`maxConcurrentMutableSessionsPerAgentHome` is a construction error.
+Underneath those limits, execution leases remain keyed by
+`(agentId, sessionRef)`, so a duplicate execution for the same session is busy
+regardless of the limit. A reader session handoff binds `homeAccess` and the
+run directory: a resume runs in that directory again, an access-mode mismatch
+is a non-retryable decline, and a missing run directory is a non-retryable
+decline that names the session. Run directories stay after the terminal;
+retention at a fresh reader start removes the oldest beyond 32 per home and
+those older than 7 days, never an active one, and keeps one that a reader
+handoff updated within 7 days. The SDK does not make memory read-only: each
+reader terminal carries `agentHomeMemoryChange` (`unchanged`,
+`reader-attributed`, `unattributed` when a writer overlapped, or `unmeasured`)
+with the changed paths. A task-free projection still needs the base lease, so
+it waits while any reader or writer runs; a host that keeps readers running
+all the time delays persona updates, and the retryable mailbox redelivery
+covers that wait. Agent content reads never open `.byok`, so a host cannot read
+a reader run directory through `agent.content.read`. A reader returns its
+output in the terminal `finalMessage` and `summary`, in a result document, or
+as task artifacts; a host on the same machine can also read the run directory
+from the local filesystem. The optional host `projection.prepare` hook runs at
+every Attempt start under that Attempt's lease. For a reader its `cwd` is the
+run directory, and the writer of the home can run at the same time. A
+redelivered fresh reader offer reuses its run directory only when the
+directory is real, empty, and held by no other active reader; otherwise the
+offer gets a retryable decline. The memory fingerprint counts directories
+toward its 256-entry bound, opens a file without following a link, reads no
+more than the byte bound, and reports `unmeasured` for an entry that is not a
+directory, regular file or link. A daemon advertises `agent-home-readers`
+whenever it has an Agent home. A lane that runs only durable Pi declines every
+reader offer without retry, because durable Pi runs only in the canonical home.
+A fresh task is task-keyed
 until its runtime creates the durable session, then
 the SDK atomically binds the lease to that `sessionRef`. SDK-reserved shared
 metadata mutations remain short and serialized per home. Agent-memory hosted
@@ -1506,7 +1570,7 @@ projection is the bounded exception: concurrent closing sessions serialize one
 complete open/replay/snapshot/redact/append/replay transaction per home because
 its durable outbox is one compare-and-swap authority; its publish wait retains
 the existing timeout. Runtime execution stays session-parallel during that
-close-time transaction whenever the host has raised the per-home limit. The
+close-time transaction whenever several Attempts of one home close. The
 process-owned home activity marker remains until the final session exits, so
 relocation and any other operation that requires a
 quiescent home still fail closed while an execution is active. A second daemon
@@ -1780,7 +1844,9 @@ receipt work and do not enter `finishedTaskIds`. Agent offer variants remain
 normal. Server/cloud explicit dispatch rejects legacy work to a strict device
 before task/mailbox mutation, and implicit legacy selection skips strict
 devices. Those producer gates are scheduling defenses only; stale connections
-remain covered by the local gate.
+remain covered by the local gate. A strict daemon never reads
+`DaemonConfig.workspaceRoot`, so the field is optional there; every other
+daemon must still supply it at construction.
 
 
 ### Owned Pi RPC team member and GUI interaction
@@ -2053,6 +2119,7 @@ complete ContextPack/Summary, native-runtime, migration or production acceptance
 
 Pi custody consumes the client-decided runtime launch: `--pi-bin`, optional `--pi-entry`, optional `--pi-fixed-args`, `--pi-cwd`, `--pi-projection-dir` and `--pi-config-digest`. Keys validates these fields and the projection directory before it reads credentials. The SDK-owned RPC entry receives explicit session cwd in its configuration. The installed SDK package, or the single-file product through `sdkHelperHost`, supplies the interpreter and entry. Version detection retains its existing timeout and error classification. No shell, argv0 fallback or inference from an executable suffix selects the runtime.
 
+The bundled launcher executable reads the platform OS store with its default storage options. `@byok-sdk/keys` also exports `runPiProviderLauncher(options, { createSecretStore })`, the same launcher with a host-built `SecretStore`, so a host with its own storage options supplies one launcher executable without a second store definition. Both apply the same exact profile, binding, runtime-entry and custody checks. The provider projection keeps the profile URL convention of the direct clients: for the `anthropic` adapter it projects the keys endpoint `modelApiUrl(base_url, 'messages')` without its `/v1/messages` suffix, because Pi appends that suffix, and it refuses an endpoint without that suffix with `PROVIDER_URL_INVALID`. For `auth_mode: 'none'` the `pi-rpc` projection sets the fixed non-secret `apiKey` `byok-sdk-auth-none`, because Pi refuses a request without a key; the `pi-prepared` and `pi-durable` entries require a launcher-delivered key and refuse a keyless profile with `PROVIDER_PROFILE_INVALID` at admission.
 
 The durable Pi lane runs in a separate `byok-pi-durable` executable launched through the same credential launcher contract as `byok-pi-prepared`. The credential launcher transfers the provider key over a private, one-shot JSON IPC channel bound to the launch config digest; it MUST NEVER place the key in the durable child's environment, argv, stdio RPC or replica files. The worker consumes it into model/provider memory and disconnects IPC before constructing tools or MCP children. Deleting process.env is not an isolation mechanism. Tool exec MUST force `inheritEnv: false` and an explicit allowlist. Conformance tests require no key in both inherited tool env and the worker's OS-introspectable initial environment (`ps eww` / `/proc/<pid>/environ`). The daemon communicates with it over stdio RPC, does not depend on `@byok-sdk/keys`, and never reads, proxies or forwards credentials. Its environment is rebuilt by the same EnvironmentBuilder allowlist with the `BYOK_*` deny. One child exclusively owns one durable storage; because upstream pi-durable provides no cross-process lock, the child MUST acquire an OS exclusive lock (flock or sidecar lockfile) bound to the current leaseId before opening storage, and MUST fail closed if it cannot. The child exists only while its daemon holds the home's single-writer lease; lease release requires the child's disposal receipt or confirmed process-tree death (wait after KILL).
 
@@ -2070,7 +2137,7 @@ Prepared child environment is rebuilt through an explicit EnvironmentBuilder all
 
 A1'' compile uses only a placeholder key and injected capture-and-throw fetch against the actual baseUrl. The official OpenAI client reads exactly OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET, OPENAI_LOG and OPENAI_CUSTOM_HEADERS. The approved purity contract is D independence plus this exact read set, not zero reads; an upgrade changing the set requires a fresh ruling. Poisoning these variables must leave D unchanged. OPENAI_LOG may cause a local request log during compile: the device owner deliberately enabled this debug setting; the accepted side effect remains local, does not change D and is not sent externally. No global env or transport monkey-patch is permitted.
 
-Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.1.0 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.45.1 source at `packages/client/vendor/oar/7dc98e0/`, from upstream commit `7dc98e08f9c0ba99158ddada29cb0d4c80ef7dc6`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
+Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.1.0 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.48.0 source at `packages/client/vendor/oar/087df16/`, from upstream commit `087df160dd64cd020c98a8b089ce8feb01f73590`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
 
 pi-durable 1.0.1 ruling (2026-10-04, approved by Aimpact): admitted at exactly 1.0.1. Its shipped code is byte-identical to 1.0.0 (version-only change), and the closure was freshly attested at closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`.
 
