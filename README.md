@@ -7,28 +7,29 @@ composition over Postgres and R2.
 
 ## Release status
 
-The current stable source candidate is **0.25.0** for eight aligned packages,
-with independent keys **0.10.0**. The owner authorized source preparation on
-2026-10-09 for the npm dist-tag `latest`; publication is pending. The public
-set contains nine packages; `@byok-sdk/implementation-identity` is retired.
+The current stable release is **0.25.0** for eight aligned packages, with
+independent keys **0.10.0**, published on npm `latest` on 2026-10-09 from
+`v0.25.0` (`3278b834`, PR #320). The public set contains nine packages;
+`@byok-sdk/implementation-identity` is retired. The
+[publication record](docs/releases/v0.25.0-publication.md) verifies accepted
+CI bytes, registry integrities, dependency edges and a clean npm install.
 [Stable release notes](docs/releases/v0.25.0-stable.md) cover the release and
 upgrade steps. The published rc.2 remains on the `rc` channel; its
 [notes](docs/releases/v0.25.0-rc.2.md) and the
 [rc.1 breaking-change record](docs/releases/v0.25.0.md) remain historical evidence.
 
-Versioned install examples below describe the current source manifests. They
-are usable only after publication and exact registry readback. Before
-publication, a Host can test verified accepted CI tarballs from one exact SHA;
-that does not establish production or live-runtime acceptance.
+Versioned install examples below name the read-back published versions.
+Installed-package proof does not establish production or live-runtime
+acceptance; those retain the evidence boundaries in the release notes.
 
-The current `latest` release is **0.24.0**, with independent keys **0.9.0**.
+The previous `latest` release was **0.24.0**, with independent keys **0.9.0**.
 npm shows all ten 0.24.0 / keys 0.9.0 packages published on 2026-10-06; their
 registry integrities equal the push CI `release-pack` artifact of `756eb921`.
 The repository has no `v0.24.0` tag and no publication record for it. The
 [0.24 release notes](docs/releases/v0.24.0.md) describe its Node, adapter,
 identity and SQLite changes and the Host upgrade/rollback steps from 0.23.
 
-The last publication with a record here is **0.23.0**, with independent keys
+The previous publication with a record here is **0.23.0**, with independent keys
 **0.8.0**, published on 2026-09-28 from `v0.23.0` (`bcf65a3f`, PR #237).
 Its [publication record](docs/releases/v0.23.0-publication.md) records `latest`
 at that time; query the registry before relying on current tags. The
@@ -60,7 +61,7 @@ and the keys SQLite profile schema; then **0.17.0** with keys **0.4.3**
 
 The published 0.23.0 train, like 0.22.0, uses unmodified official
 `@earendil-works/pi-coding-agent@0.87.1` and its attested sibling closure;
-the current source pins 1.1.0, which also ships in the published 0.25 RCs.
+the current source pins 1.1.0, which ships in stable 0.25.0 and its published RCs.
 The maintained fork is retired from this train; 0.21.0 remains the historical
 fork-based release. Release SemVer is observability only;
 protocol intersection and advertised capabilities remain the execution gates.
@@ -91,17 +92,16 @@ import { createByokServer } from '@byok-sdk/server';
 ```
 
 The Worker-only cloud-do package is published from 0.24.0. The example below
-names the 0.25.0 release line. Confirm its exact registry version before
-installation.
+names the read-back stable 0.25.0 release.
 See [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
 
 ~~~sh
-# Exact stable candidate; verify registry availability before installation.
+# Exact published stable version.
 npm install @byok-sdk/cloud-do@0.25.0
 npm install --save-dev @cloudflare/workers-types
 ~~~
 
-The public candidate dispatch packages are `@byok-sdk/client`, `@byok-sdk/server`,
+The public dispatch packages are `@byok-sdk/client`, `@byok-sdk/server`,
 `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`, `@byok-sdk/core`,
 `@byok-sdk/protocol`, and `@byok-sdk/ui-runtime`, all on the same train.
 `@byok-sdk/implementation-identity` is retired and no later train publishes it.
@@ -194,7 +194,7 @@ second acceptance ledger:
 
 Historical adoption checkpoints below are bound to their recorded source SHA,
 artifact or CI evidence; they are not a live main/PR/registry status report. See
-the release status above for the current source candidate. 未验收 means not
+the release status above for the current stable release. 未验收 means not
 accepted, and no overall percentage is defined:
 
 | Dimension | Status | Bound to |

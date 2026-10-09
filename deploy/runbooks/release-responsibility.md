@@ -2,7 +2,7 @@
 
 Status: CURRENT boundary contract.
 
-The last registry receipt recorded here is 0.23.0 / keys 0.8.0, read back as
+An earlier registry receipt recorded here is 0.23.0 / keys 0.8.0, read back as
 `latest` on 2026-09-28
 from the `v0.23.0` tag target (`bcf65a3f`) — see its
 [publication record](../../docs/releases/v0.23.0-publication.md) and the
@@ -20,10 +20,13 @@ integrities equal the push CI `release-pack` artifact of `756eb921`. It has no
 0.10.0-rc.1 train is published on `rc`;
 see its [registry readback](../../docs/releases/v0.25.0-rc.1-registry.md).
 The 0.25.0-rc.2 / keys 0.10.0-rc.2 train is also published on `rc`, with
-GitHub Release `v0.25.0-rc.2` at `09b41511`. On 2026-10-09 the owner authorized
-stable source preparation: 0.25.0 / keys 0.10.0, targeting `latest`. Publication
-is pending. See [stable release notes](../../docs/releases/v0.25.0-stable.md);
-the [rc.2 notes](../../docs/releases/v0.25.0-rc.2.md) retain their original scope.
+GitHub Release `v0.25.0-rc.2` at `09b41511`. On 2026-10-09 the owner separately
+authorized stable source preparation and npm execution: 0.25.0 / keys 0.10.0
+is now published on `latest` from `v0.25.0` (`3278b834`). Its
+[publication record](../../docs/releases/v0.25.0-publication.md) confirms exact
+accepted CI bytes, registry metadata and an isolated installed consumer. See
+[stable release notes](../../docs/releases/v0.25.0-stable.md); the
+[rc.2 notes](../../docs/releases/v0.25.0-rc.2.md) retain their original scope.
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
 
@@ -40,14 +43,14 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 ## Version selection
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
-The approved source manifests name the stable train 0.25.0 and independent
+The published source manifests name the stable train 0.25.0 and independent
 keys 0.10.0. Both are MINOR lines: the train contains protocol
 v2 and the ADR-037 removals; keys adds `requestTimeoutMs`, changes the Pi
 launcher grammar and drops the implementation-identity dependency. Keep lock
 workspace records, API/version docs and exact packed internal dependencies
 consistent with these authorities.
 
-The approved candidate set contains eight aligned packages plus keys: nine
+The approved publication set contains eight aligned packages plus keys: nine
 packages. `@byok-sdk/implementation-identity` is retired and is not published.
 All nine stable packages target `latest`. The
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
@@ -60,8 +63,8 @@ paths apply. Stable publication omits `--tag` and requires its exact version
 on `latest` after registry readback.
 The version/channel decision authorizes source preparation only; it does
 not authorize npm execution, tagging, live qualification or production rollout.
-The [publication plan](../../docs/releases/v0.25.0-stable.md#publication-plan)
-lists the exact package order and remaining dry-run prerequisites.
+The [publication procedure](../../docs/releases/v0.25.0-stable.md#publication-procedure)
+records the release stages; its receipt supplies exact package and artifact evidence.
 
 ## Pre-publication Host integration
 

@@ -173,17 +173,19 @@ authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
 aligned dispatch release is `0.25.0`; publication requires separate release
-authorization and registry readback. The current independent keys candidate is
+authorization and registry readback. The current independent keys release is
 `0.10.0`; its packed and published `@byok-sdk/core` edge must be the exact current
 dispatch release, `0.25.0`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-The owner authorized stable source preparation on 2026-10-09 for the eight
-aligned packages at 0.25.0 and keys at 0.10.0. All nine packages target npm's
-`latest` dist-tag. The current registry baseline remains 0.24.0 / keys 0.9.0;
-the published 0.25.0-rc.2 / keys 0.10.0-rc.2 remains on `rc`. Stable publication
-uses the final stable commit's own accepted CI tarballs and does not relabel
-RC bytes or infer publication from a source version.
+On 2026-10-09 the owner separately authorized source preparation and npm
+execution for eight aligned packages at 0.25.0 and keys at 0.10.0. All nine
+packages are published on `latest` from `v0.25.0` at `3278b834`, using its own
+accepted main CI tarballs. Registry readback confirms exact versions,
+integrities, runtime edges and an isolated npm install; see the
+[publication record](releases/v0.25.0-publication.md). The published
+0.25.0-rc.2 / keys 0.10.0-rc.2 remains on `rc`. Stable publication does not
+relabel RC bytes or infer publication from a source version.
 The 0.25 line is a MINOR: it has pre-1.0 breaking cuts (protocol v2, the
 minimal-guardrails removals of ADR-037, the retired implementation-identity
 package, Pi 1.1.0 and OAR 0.45.1). keys 0.10.0 is a MINOR: it adds
@@ -193,7 +195,8 @@ Notes: `docs/releases/v0.25.0-stable.md`; the published RC records remain in
 `docs/releases/v0.25.0-rc.2.md` and `docs/releases/v0.25.0.md`.
 
 The 0.24.0 train is published: npm shows all ten 0.24.0 / keys 0.9.0 packages
-published on 2026-10-06, read back as `latest` on 2026-10-09, with registry
+published on 2026-10-06, read back as `latest` before the 0.25 publication on
+2026-10-09, with registry
 integrities equal to the push CI `release-pack` artifact of `756eb921`. The
 repository has no `v0.24.0` tag and no publication record for it.
 
@@ -227,15 +230,16 @@ edges (core and implementation-identity) must resolve to 0.22.0.
 The identity/core topology merge remains deferred as a separate public package
 and dependency-graph cutover; it is not part of version preparation.
 
-The last train the registry has confirmed is `0.24.0` with keys `0.9.0`,
-published on 2026-10-06 and read back as `latest` on 2026-10-09; its source is
-`756eb921` by artifact integrity, and it has no `v0.24.0` tag. The previous
-train, `0.23.0` / keys `0.8.0`, was published on 2026-09-28 from the `v0.23.0`
-tag (`bcf65a3f`). The registry, not this document, is the
+The last train the registry has confirmed is `0.25.0` with keys `0.10.0`,
+published and read back as `latest` on 2026-10-09 from the `v0.25.0` tag
+(`3278b834`). Before it, 0.24.0 / keys 0.9.0 shipped on 2026-10-06 from
+`756eb921` by artifact integrity and has no `v0.24.0` tag. The earlier
+0.23.0 / keys 0.8.0 shipped on 2026-09-28 from the `v0.23.0` tag
+(`bcf65a3f`). The registry, not this document, is the
 authority on what has shipped — read it back with `npm view @byok-sdk/core version`
 and `npm view @byok-sdk/keys version`.
 
-The public candidate package set is exactly nine packages: the eight aligned train
+The public package set is exactly nine packages: the eight aligned train
 packages `@byok-sdk/core`, `@byok-sdk/protocol`, `@byok-sdk/client`,
 `@byok-sdk/server`, `@byok-sdk/cloud`, `@byok-sdk/cloud-dataplane`, `@byok-sdk/cloud-do`
 and `@byok-sdk/ui-runtime`, plus the independently versioned `@byok-sdk/keys`.

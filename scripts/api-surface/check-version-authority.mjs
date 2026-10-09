@@ -32,7 +32,7 @@ const SCOPED_MENTION = new RegExp(`@byok-sdk/([a-z0-9][a-z0-9-]*)@(${SEMVER})`, 
 const RETIRED_UMBRELLA_MENTION = new RegExp(`(?<![\\w/-])byok-sdk@(${SEMVER})`, 'g');
 const KEYS_NAME = 'keys';
 const SPEC_DISPATCH = /current\s+aligned\s+dispatch\s+release\s+is\s+`([^`]+)`/;
-const SPEC_KEYS = /current\s+independent\s+keys\s+candidate\s+is\s+`([^`]+)`/;
+const SPEC_KEYS = /current\s+independent\s+keys\s+release\s+is\s+`([^`]+)`/;
 
 export function parseArgs(argv) {
   const options = { root: defaultRoot };
@@ -144,7 +144,7 @@ export function run(argv, out = console) {
 
   const spec = readFile(root, 'docs/spec.md');
   checkSpecPhrase(errors, 'docs/spec.md', spec, SPEC_DISPATCH, dispatchVersion, 'current aligned dispatch release');
-  checkSpecPhrase(errors, 'docs/spec.md', spec, SPEC_KEYS, keysVersion, 'current independent keys candidate');
+  checkSpecPhrase(errors, 'docs/spec.md', spec, SPEC_KEYS, keysVersion, 'current independent keys release');
 
   if (errors.length > 0) {
     for (const error of errors) out.error(error);

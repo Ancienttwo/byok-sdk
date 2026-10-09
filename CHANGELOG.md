@@ -2,12 +2,14 @@
 
 ## Unreleased
 
-## 0.25.0 / @byok-sdk/keys 0.10.0 - 2026-10-09 (stable source candidate)
+## 0.25.0 / @byok-sdk/keys 0.10.0 - 2026-10-09
 
-Stable preparation for nine packages on npm's `latest` channel. Publication is
-pending. This release includes the rc.1 breaking changes and rc.2 integration
-fixes below; see [stable release notes](docs/releases/v0.25.0-stable.md) for the
-protocol v2 upgrade order and remaining publication gates.
+Nine packages are published on npm's `latest` channel from `v0.25.0`
+(`3278b834`). This release includes the rc.1 breaking changes and rc.2
+integration fixes below; see [stable release notes](docs/releases/v0.25.0-stable.md)
+for the protocol v2 upgrade order and
+[publication record](docs/releases/v0.25.0-publication.md) for accepted CI
+artifacts, registry readback and tag evidence.
 
 - **Changed (client)** — update the private OAR source from 0.44.0 to 0.45.1
   (`7dc98e0`). The raw Codex adapter takes upstream launch arguments and
