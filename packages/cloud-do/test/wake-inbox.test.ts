@@ -15,6 +15,10 @@ const DAY = 86_400_000;
 // The bounds below only stop a genuine hang. Each assertion keeps its exact expected state and count.
 vi.setConfig({ testTimeout: 30_000 });
 const eventually = <T>(check: () => T | Promise<T>) => vi.waitFor(check, { timeout: 10_000 });
+// Tool timeout for tests that hold one call past its deadline and then need a later free call to succeed. The held
+// call is paused without a bound, so only the free call depends on this value. Under parallel load a free call took up
+// to 450 ms from start to settlement, which is longer than a 150 ms deadline.
+const HELD_CALL_TIMEOUT_MS = 2_000;
 type Row = Record<string, unknown>;
 type Rows = Record<string, Row[]>;
 interface ProviderCall { url: string; body: { messages: { role: string; content: string }[]; tools?: unknown[] } }
@@ -121,8 +125,12 @@ async function code(name: string, operation: string, extra: Row, expected: strin
   expect(await response.json()).toMatchObject({ error: { code: expected } });
 }
 function wakeInput(index: number) { return JSON.parse(calls[index]!.body.messages.find(message => message.role === 'user')!.content) as { history: { input: unknown; reply: string }[]; inbox: { seq: number; source: string; text: string }[] }; }
-async function readFrames(response: Awaited<ReturnType<typeof rpc>>, count: number) {
-  const reader = response.body!.getReader(); const decoder = new TextDecoder(); let text = '';
+// Miniflare's getWorker() fetch wraps undici's Response in a new Response and drops the original. undici cancels the
+// shared body when that original object is garbage collected while the body is unlocked, and the reader then sees an
+// empty, finished stream. Lock the body as soon as the stream opens, before any other await, so that GC cannot cancel it.
+async function events(name: string, cursor: Row) { return (await rpc(name, 'events', { cursor })).body!.getReader(); }
+async function readFrames(reader: Awaited<ReturnType<typeof events>>, count: number) {
+  const decoder = new TextDecoder(); let text = '';
   while ((text.match(/^id: /gm) ?? []).length < count) { const next = await reader.read(); if (next.done) break; text += decoder.decode(next.value); }
   await reader.cancel();
   return text.split('\n\n').filter(frame => frame.startsWith('id:')).map(frame => ({ id: Number(frame.match(/^id: (\d+)/m)![1]), type: frame.match(/^event: (.*)/m)![1], data: JSON.parse(frame.match(/^data: (.*)/m)![1]!) as Row }));
@@ -657,10 +665,10 @@ describe('durable events, SSE resume, snapshots and byte-offset final output', (
 
   it('replays retained SQL events from a cursor and rejects expired or future cursors', async () => {
     const name = await setup(); await enqueue(name, { dedupKey: 'events', text: 'complete' }); const rows = await waitState(name);
-    const expected = frameEvents(rows); const first = await readFrames(await rpc(name, 'events', { cursor: { after: 0 } }), expected.length);
+    const expected = frameEvents(rows); const first = await readFrames(await events(name, { after: 0 }), expected.length);
     expect(first.map(event => event.id)).toEqual(expected.map(event => event.seq));
     const after = first[1]!.id;
-    const replay = await readFrames(await rpc(name, 'events', { cursor: { after } }), first.length - 2);
+    const replay = await readFrames(await events(name, { after }), first.length - 2);
     expect(replay.map(event => event.id)).toEqual(first.slice(2).map(event => event.id));
     await code(name, 'events', { cursor: { after: first.at(-1)!.id + 1 } }, 'CLOUD_EVENT_CURSOR_EXPIRED');
     await code(name, 'events', { cursor: { after: -1 } }, 'CLOUD_EVENT_CURSOR_EXPIRED');
@@ -677,13 +685,13 @@ describe('durable events, SSE resume, snapshots and byte-offset final output', (
     const rows = await dump(name); const covered = rows.cloud_events!.filter(row => Number(row.seq) <= snapshot.highWater && row.type === 'inbox.accepted');
     expect(snapshot.inbox.map(row => row.seq).sort()).toEqual(covered.map(row => Number(row.ref)).sort());
     const next = rows.cloud_events!.filter(row => Number(row.seq) > snapshot.highWater);
-    if (next.length) expect((await readFrames(await rpc(name, 'events', { cursor: { after: snapshot.highWater } }), next.length)).map(event => event.id)).toEqual(next.map(row => row.seq));
+    if (next.length) expect((await readFrames(await events(name, { after: snapshot.highWater }), next.length)).map(event => event.id)).toEqual(next.map(row => row.seq));
   });
 
   it('starts omitted cursors from the current SQL watermark and tails only new events', async () => {
     const name = await setup(); await enqueue(name, { dedupKey: 'old', text: 'old event', availableAt: Date.now() + DAY });
     const before = await json<{ highWater: number }>(name, 'snapshot');
-    const stream = await rpc(name, 'events', { cursor: {} });
+    const stream = await events(name, {});
     await enqueue(name, { dedupKey: 'new', text: 'new event', availableAt: Date.now() + DAY });
     const replay = await readFrames(stream, 1); expect(replay).toHaveLength(1); expect(replay[0]!.id).toBeGreaterThan(before.highWater);
     expect(replay[0]!.type).toBe('inbox.accepted');
@@ -692,10 +700,10 @@ describe('durable events, SSE resume, snapshots and byte-offset final output', (
   it('caps streams at eight and disconnecting readers never cancels a wake', async () => {
     const name = await setup({ pauseTool: true }); scenario = { tools: [1] };
     await enqueue(name, { dedupKey: 'readers', text: 'read' }); await eventually(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
-    const responses: Awaited<ReturnType<typeof rpc>>[] = [];
-    for (let i = 0; i < 8; i++) responses.push(await rpc(name, 'events', { cursor: { after: 0 } }));
+    const readers: Awaited<ReturnType<typeof events>>[] = [];
+    for (let i = 0; i < 8; i++) readers.push(await events(name, { after: 0 }));
     await code(name, 'events', { cursor: { after: 0 } }, 'CLOUD_EVENTS_BUSY');
-    await Promise.all(responses.map(response => response.body!.cancel()));
+    await Promise.all(readers.map(reader => reader.cancel()));
     expect((await dump(name)).cloud_executions).toMatchObject([{ state: 'running', aborted: 0 }]);
     await json(name, 'release'); await waitState(name); expect(calls).toHaveLength(2);
   });
@@ -717,9 +725,13 @@ describe('durable events, SSE resume, snapshots and byte-offset final output', (
   });
 
   it('keeps all 116 outstanding inbox rows and native invocation refs in one snapshot', async () => {
-    const name = await setup({ pauseTool: true }); scenario = { tools: [1] }; const availableAt = Date.now() + 500;
+    // The wake must claim all 16 rows. Hold its alarm until all 16 are admitted, because under load the 16 enqueues can
+    // outlast any due-time offset, and a wake that starts early claims fewer rows and leaves the rest queued.
+    const name = await setup({ pauseTool: true, pauseAlarm: true }); scenario = { tools: [1] }; const availableAt = Date.now() + 500;
     for (let i = 0; i < 16; i++) await enqueue(name, { dedupKey: `claimed:${i}`, text: `claim ${i}`, availableAt });
+    await json(name, 'release-alarm');
     await eventually(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
+    expect((await dump(name)).cloud_inbox!.filter(row => row.state === 'queued')).toHaveLength(0);
     for (let i = 0; i < 100; i++) await enqueue(name, { dedupKey: `outstanding:${i}`, text: `queue ${i}`, availableAt: Date.now() + DAY });
     const snapshot = await json<{ inbox: Row[]; runs: Row[]; invocations: Row[]; highWater: number }>(name, 'snapshot');
     expect(snapshot.inbox).toHaveLength(116); expect(snapshot.inbox.every(row => row.payloadJson === null)).toBe(true);
@@ -745,7 +757,7 @@ describe('durable events, SSE resume, snapshots and byte-offset final output', (
     expect(snapshot.highWater).toBe(rows.cloud_event_meta![0]!.highWater);
     expect(Number((await json(name, 'status')).alarm)).toBeLessThanOrEqual(Number(rows.cloud_events![0]!.createdAt) + 7 * DAY);
     const head = Number(rows.cloud_events![0]!.seq);
-    const retained = await readFrames(await rpc(name, 'events', { cursor: { after: head - 1 } }), rows.cloud_events!.length);
+    const retained = await readFrames(await events(name, { after: head - 1 }), rows.cloud_events!.length);
     expect(retained.map(event => event.id)).toEqual(rows.cloud_events!.map(row => row.seq));
   }, 30_000);
 });
@@ -835,7 +847,7 @@ describe('4e-2 real native renewal, dispatch intent and billing facts', () => {
   });
 
   it('times out tool renewal before taking the sole inline slot, so the next run can dispatch', async () => {
-    const name = await setup({ audit: true, pauseRenew: 'tool' }, { inlineFetches: 1, callTimeoutMs: 150 }); scenario = { tools: [1] };
+    const name = await setup({ audit: true, pauseRenew: 'tool' }, { inlineFetches: 1, callTimeoutMs: HELD_CALL_TIMEOUT_MS }); scenario = { tools: [1] };
     await enqueue(name, { dedupKey: 'tool-renew-timeout', text: 'time out before dispatch' });
     const first = await waitAck(name);
     expect(first.fixture_dispatches).toHaveLength(0);
@@ -1006,8 +1018,7 @@ describe('4e-2 terminal-first settlement and stable admission', () => {
     const submitted = direct(name);
     await eventually(async () => expect((await dump(name)).fixture_settlements).toHaveLength(1));
     const snapshot = await json<{ highWater: number }>(name, 'snapshot');
-    const stream = await rpc(name, 'events', { cursor: { after: snapshot.highWater } });
-    const frame = readFrames(stream, 1);
+    const frame = readFrames(await events(name, { after: snapshot.highWater }), 1);
     await json(name, 'release-settlement');
     const frames = await Promise.race([frame, new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('Settlement doorbell did not ring')), 2_000))]);
     expect(frames).toMatchObject([{ type: 'run.settlement', data: { ack: true } }]);
@@ -1295,7 +1306,7 @@ describe('4e-2 zero-dispatch credential compensation', () => {
 
 describe('4e-2 native uncooperative dispatch slot', () => {
   it('keeps the sole inline slot until the ignored-abort dispatch returns, then admits another native tool', async () => {
-    const name = await setup({ audit: true, pauseTool: true }, { inlineFetches: 1, callTimeoutMs: 150 });
+    const name = await setup({ audit: true, pauseTool: true }, { inlineFetches: 1, callTimeoutMs: HELD_CALL_TIMEOUT_MS });
     scenario = { tools: [1] };
     await enqueue(name, { dedupKey: 'uncooperative-slot', text: 'hold consumer dispatch past its deadline' });
     await eventually(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(1));
