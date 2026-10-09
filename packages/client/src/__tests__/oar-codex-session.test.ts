@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { codexSession } from '../../vendor/oar/7dc98e0/runtimes/codex/session';
-import * as projection from '../../vendor/oar/7dc98e0/runtimes/codex/projection';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/7dc98e0/runtimes/codex/app-server-client';
+import { codexSession } from '../../vendor/oar/087df16/runtimes/codex/session';
+import * as projection from '../../vendor/oar/087df16/runtimes/codex/projection';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/087df16/runtimes/codex/app-server-client';
 
 function fakeServer(openReply: Record<string, unknown> = {}) {
   let receive!: (line: string) => void;
@@ -113,6 +113,21 @@ describe('unconnected OAR Codex adapter', () => {
     expect((await session.prompt('still busy')).response.body).toMatchObject({ kind: 'rejected', code: 'busy' });
     fake.frame({ method: 'turn/completed', params: { threadId: 'thread-root', turn: { status: 'completed' } } });
     expect((await session.prompt('next')).response.body.kind).toBe('accepted');
+    await session.dispose();
+  });
+
+  it.each([
+    { method: 'turn/started', params: { turn: { id: 'turn-root' } }, derived: [{ kind: 'turn_active' }] },
+    { method: 'item/commandExecution/outputDelta', params: { itemId: 'cmd-1', delta: 'out' }, derived: [{ kind: 'tool_call_progress', callId: 'cmd-1', outputDelta: 'out' }] },
+    { method: 'serverRequest/resolved', params: { requestId: 7 }, derived: [{ kind: 'app_request_cancelled', requestId: '7' }] },
+  ])('keeps the native $method frame before the OAR 0.48 derived reading', async ({ method, params, derived }) => {
+    const fake = fakeServer(); const session = await fake.open();
+    await session.prompt('hello');
+    fake.frame({ method, params: { threadId: 'thread-root', ...params } });
+    const [native, reading] = session.records().slice(-2);
+    expect(native).toMatchObject({ kind: 'frame', body: { type: method, origin: 'byok-native', events: [] } });
+    expect(reading).toMatchObject({ kind: 'frame', body: { type: method, events: derived } });
+    expect(reading?.kind === 'frame' && 'origin' in reading.body).toBe(false);
     await session.dispose();
   });
 
