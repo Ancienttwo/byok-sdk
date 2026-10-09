@@ -453,6 +453,19 @@ try {
         `for (const needle of ['ajv','pi-coding-agent','@earendil-works','@modelcontextprotocol/client','@modelcontextprotocol/sdk','new Function']) {\n` +
         `  assert.equal(mcpServerSource.includes(needle), false, mcpServerEntry + ' carries ' + needle);\n` +
         `}\n` +
+        // A single-file product builds its Pi asset root from this installed
+        // tree. npm hoisting differs from the workspace linker, so only the
+        // installed tarball proves that the helper finds pi and its photon file.
+        `const { copyPiRuntimeAssets } = await import('@byok-sdk/client');\n` +
+        `const piAssets = mkdtempSync(path.join(tmpdir(), 'byok-packed-pi-assets-'));\n` +
+        `try {\n` +
+        `  const files = await copyPiRuntimeAssets({ outDir: piAssets, form: 'interpreter+bundle' });\n` +
+        `  for (const file of ['package.json','photon_rs_bg.wasm','dist/core/export-html/template.html','extensions/rpiv-todo/2.8.0/manifest.json']) assert.ok(files.includes(file), file);\n` +
+        `  assert.equal(JSON.parse(readFileSync(path.join(piAssets, 'package.json'), 'utf8')).version, require('@byok-sdk/client/package.json').byok.piRuntimePin);\n` +
+        `} finally {\n` +
+        `  rmSync(piAssets, { recursive: true, force: true });\n` +
+        `}\n` +
+        `console.log('[release-pack] installed copyPiRuntimeAssets builds a Pi asset root');\n` +
         `for (const [name, version] of [['@byok-sdk/core','${releaseVersion}'],['@byok-sdk/protocol','${releaseVersion}'],['@byok-sdk/client','${releaseVersion}'],['@byok-sdk/server','${releaseVersion}'],['@byok-sdk/cloud','${releaseVersion}'],['@byok-sdk/cloud-dataplane','${releaseVersion}'],['@byok-sdk/cloud-do','${releaseVersion}'],['@byok-sdk/ui-runtime','${releaseVersion}'],['@byok-sdk/keys','${keysVersion}']]) {\n` +
         `  const manifest = require(name + '/package.json');\n` +
         `  assert.equal(manifest.version, version, name);\n` +

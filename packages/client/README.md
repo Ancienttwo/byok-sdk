@@ -59,8 +59,26 @@ const daemon = createDaemon({
 
 Pi uses the same re-entry: each Pi launch starts
 `<executable> [<entry>] __byok_sdk_helper <pi-rpc|pi-prepared|pi-durable>`.
-Set `PI_PACKAGE_DIR` to the product's Pi asset root; a Bun-compiled executable
-may keep those assets beside itself instead.
+This is the supported way to ship official pi in a host download. The product
+bundle already holds pi at the client pin; do not ship separate helper scripts
+or `node_modules`. Create the Pi asset root in the product build:
+
+```ts
+import { copyPiRuntimeAssets } from '@byok-sdk/client';
+
+// 'interpreter+bundle': Node or Bun runs the product bundle.
+// 'compiled-executable': a Bun-compiled executable.
+await copyPiRuntimeAssets({ outDir: 'release/pi-assets', form: 'interpreter+bundle' });
+```
+
+The helper requires the exact pinned pi package on the build machine and an
+empty `outDir`. It verifies the pi export resources and the SDK todo locale
+assets, and fails closed on a mismatch. Ship `outDir` with the product. Set
+`PI_PACKAGE_DIR` to it when the product starts. A Bun-compiled executable may
+use its own directory as the asset root instead: run the helper on that empty
+directory before you write the executable into it. Without the asset root, `detect()` reports pi `not-found` and a pi
+launch is refused with `pi_bundled_assets_unavailable`. Pi reads its photon
+WASM file beside the executable; without it, pi skips image resizing.
 
 Normal Node/Bun source hosts omit `sdkHelperHost` and continue to use the
 package's installed helper scripts. A required-message offer performs an exact

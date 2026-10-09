@@ -501,6 +501,24 @@ export interface PiRuntimeIdentity {
  */
 export declare function resolvePiRuntimeIdentity(): PiRuntimeIdentity;
 /**
+ * The installed root of the pinned official Pi package. Its manifest name and
+ * version must both equal the client pin; a mismatch fails closed instead of
+ * returning an unverified runtime. `remedy` ends every refusal.
+ *
+ * Deliberately does NOT use `createRequire(...).resolve()`: this package is
+ * pure ESM with no `require` export condition (`exports["."]` only offers
+ * `import`), so CJS-style resolution fails with
+ * `ERR_PACKAGE_PATH_NOT_EXPORTED`. It also does NOT resolve the
+ * `./package.json` subpath directly (also not exported); instead it resolves
+ * the package's main entry via `import.meta.resolve` and walks upward to the
+ * enclosing package root.
+ */
+export declare function resolvePinnedPiPackage(remedy: string): {
+    readonly dir: string;
+    readonly identity: PiRuntimeIdentity;
+    readonly bin: string | Record<string, string> | undefined;
+};
+/**
  * Resolve the pi CLI executable from the required package installed alongside
  * `@byok-sdk/client`. There is intentionally no automatic PATH fallback: a
  * global `pi` would create a second, unversioned authority for this contract.
@@ -511,17 +529,6 @@ export declare function resolvePiRuntimeIdentity(): PiRuntimeIdentity;
  * so an out-of-process substitution (e.g. examples/basic's e2e run swapping
  * in the fake-pi fixture, or a single-file product injecting its required
  * Node 24.15+ pi sidecar) has no other seam to use.
- *
- * Deliberately does NOT use `createRequire(...).resolve()`: this package is
- * pure ESM with no `require` export condition (`exports["."]` only offers
- * `import`), so CJS-style resolution fails with
- * `ERR_PACKAGE_PATH_NOT_EXPORTED`. It also does NOT resolve the
- * `./package.json` subpath directly (also not exported); instead it resolves
- * the package's main entry via `import.meta.resolve` and walks upward to the
- * enclosing package root.
- *
- * That root's manifest name and version are both compared against the pin,
- * and a mismatch fails closed instead of launching an unverified runtime.
  */
 export declare function resolvePiBin(): ResolvedBin;
 // ==== @byok-sdk/client dist/adapters/pi/rpc-client.d.ts ====
@@ -683,6 +690,30 @@ export declare class PiRpcClient {
     private buildExitError;
     private onClosed;
 }
+// ==== @byok-sdk/client dist/adapters/pi/runtime-assets.d.ts ====
+/**
+ * How a single-file product runs Pi. `interpreter+bundle`: an interpreter
+ * (Node or Bun) runs the product's JS bundle. `compiled-executable`: a
+ * Bun-compiled executable. Pi looks for its files at different paths in each.
+ */
+export type PiRuntimeAssetForm = 'interpreter+bundle' | 'compiled-executable';
+export interface CopyPiRuntimeAssetsOptions {
+    /** The product's Pi asset root. It must not exist or must be empty. */
+    readonly outDir: string;
+    readonly form: PiRuntimeAssetForm;
+}
+/**
+ * Create the Pi asset root of a single-file product from the installed
+ * `@byok-sdk/client` and its pinned official Pi package. Run it in the
+ * product build, then ship `outDir` with the product and name it in
+ * `PI_PACKAGE_DIR` (a Bun-compiled executable may keep it beside itself).
+ *
+ * The Pi package must be the exact official pin. The Pi export resources must
+ * match their recorded SHA-256 digests, and the SDK todo locale assets must
+ * match their build manifest; a mismatch fails closed. Returns the written
+ * file paths, relative to `outDir`, in sorted order.
+ */
+export declare function copyPiRuntimeAssets(options: CopyPiRuntimeAssetsOptions): Promise<readonly string[]>;
 // ==== @byok-sdk/client dist/adapters/pi/runtime-launch.d.ts ====
 /** The SDK-owned Pi entry a launch starts. */
 export type PiRuntimeLaunchKind = 'pi-rpc' | 'pi-prepared' | 'pi-durable';
@@ -9623,6 +9654,8 @@ export type { EnsureSecureDirOptions } from './util/secure-dir';
 export { PiAdapter } from './adapters/pi/pi-adapter';
 export type { PiAdapterOptions, PiByokLauncherConfig } from './adapters/pi/pi-adapter';
 export { PI_PACKAGE_NAME } from './adapters/pi/resolve-bin';
+export { copyPiRuntimeAssets } from './adapters/pi/runtime-assets';
+export type { CopyPiRuntimeAssetsOptions, PiRuntimeAssetForm } from './adapters/pi/runtime-assets';
 export { ClaudeAdapter } from './adapters/claude/claude-adapter';
 export type { ClaudeAdapterOptions } from './adapters/claude/claude-adapter';
 export { CodexAdapter, type CodexAdapterOptions, type CodexSandboxSetting } from './adapters/codex/codex-adapter';
