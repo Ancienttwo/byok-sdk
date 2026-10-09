@@ -7,14 +7,14 @@ composition over Postgres and R2.
 
 ## Release status
 
-The current source line is **0.25.0-rc.2** for eight aligned packages, with
-independent keys **0.10.0-rc.2**. The owner approved publication on 2026-10-09
-under the npm dist-tag `rc`. The stable `latest` channel stays at 0.24.0 /
-keys 0.9.0. The public set contains nine packages;
-`@byok-sdk/implementation-identity` is retired.
-[rc.2 release notes](docs/releases/v0.25.0-rc.2.md) describe the integration
-fixes. [rc.1 release notes](docs/releases/v0.25.0.md) describe the breaking
-changes since 0.24.0 and the upgrade steps.
+The current stable source candidate is **0.25.0** for eight aligned packages,
+with independent keys **0.10.0**. The owner authorized source preparation on
+2026-10-09 for the npm dist-tag `latest`; publication is pending. The public
+set contains nine packages; `@byok-sdk/implementation-identity` is retired.
+[Stable release notes](docs/releases/v0.25.0-stable.md) cover the release and
+upgrade steps. The published rc.2 remains on the `rc` channel; its
+[notes](docs/releases/v0.25.0-rc.2.md) and the
+[rc.1 breaking-change record](docs/releases/v0.25.0.md) remain historical evidence.
 
 Versioned install examples below describe the current source manifests. They
 are usable only after publication and exact registry readback. Before
@@ -60,7 +60,7 @@ and the keys SQLite profile schema; then **0.17.0** with keys **0.4.3**
 
 The published 0.23.0 train, like 0.22.0, uses unmodified official
 `@earendil-works/pi-coding-agent@0.87.1` and its attested sibling closure;
-the current source pins 1.1.0 (unreleased).
+the current source pins 1.1.0, which also ships in the published 0.25 RCs.
 The maintained fork is retired from this train; 0.21.0 remains the historical
 fork-based release. Release SemVer is observability only;
 protocol intersection and advertised capabilities remain the execution gates.
@@ -83,7 +83,7 @@ Install the scoped packages your composition uses and import each one under
 its own name. For example, a self-hosted composition:
 
 ```sh
-npm install @byok-sdk/server@0.25.0-rc.2 @byok-sdk/client@0.25.0-rc.2
+npm install @byok-sdk/server@0.25.0 @byok-sdk/client@0.25.0
 ```
 
 ```ts
@@ -91,13 +91,13 @@ import { createByokServer } from '@byok-sdk/server';
 ```
 
 The Worker-only cloud-do package is published from 0.24.0. The example below
-names the 0.25.0-rc.2 release line. Confirm its exact registry version before
+names the 0.25.0 release line. Confirm its exact registry version before
 installation.
 See [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
 
 ~~~sh
-# Exact release candidate; verify registry availability before installation.
-npm install @byok-sdk/cloud-do@0.25.0-rc.2
+# Exact stable candidate; verify registry availability before installation.
+npm install @byok-sdk/cloud-do@0.25.0
 npm install --save-dev @cloudflare/workers-types
 ~~~
 
@@ -243,7 +243,7 @@ It is intentionally outside the dispatch packages and their entire dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.10.0-rc.2
+npm install @byok-sdk/keys@0.10.0
 ```
 
 ## Host connector composition
@@ -259,5 +259,5 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.10.0-rc.2`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.10.0`
 require Node.js 24.15.0 or newer. MIT licensed.

@@ -4,11 +4,12 @@ This package hosts a pi-durable session in a Cloudflare Durable Object.
 It provides native SQLite storage, inline tools, wake and inbox processing,
 usage limits, settlement hooks, and transcript reads.
 
-The current source line is the prerelease 0.25.0-rc.2, in the nine-package
-release set with keys 0.10.0-rc.2, under the npm dist-tag `rc`. `latest` stays
-0.24.0. Confirm the exact registry version before installation. Source
-preparation does not establish live Host acceptance. See the
-[release notes](../../docs/releases/v0.25.0-rc.2.md#version-set-and-channel).
+The current source line is the stable candidate 0.25.0, in the nine-package
+release set with keys 0.10.0, targeting npm's `latest` dist-tag. Publication
+is pending; `latest` remains 0.24.0 and the published rc.2 remains on `rc`.
+Confirm the exact registry version before installation. Source preparation
+does not establish live Host acceptance. See the
+[release notes](../../docs/releases/v0.25.0-stable.md#version-set-and-channel).
 The package needs Node 24.15.0 or later for build tooling.
 
 ## Install and subclass
@@ -19,7 +20,7 @@ use verified accepted CI tarballs for pre-publication integration. Do not use a
 workspace source import as installed-package acceptance evidence.
 
 ~~~sh
-npm install @byok-sdk/cloud-do@0.25.0-rc.2
+npm install @byok-sdk/cloud-do@0.25.0
 npm install --save-dev @cloudflare/workers-types
 ~~~
 
@@ -105,13 +106,13 @@ openDurableObjectStorage has the local structural factory type
 (location: DurableObjectStorage) => Promise<Storage>.
 Storage is pi-durable's native interface. The package does not import client
 source or keys types. Its three runtime dependencies are pi-durable, pi-ai,
-and chord, each pinned to 1.0.4.
+and chord, each pinned to 1.1.0.
 
 The Durable Object owns the physical connection. Closing the adapter
 invalidates that adapter. It does not close the Durable Object database.
 
 This follows the async adapter in [Cloudflare Agents d6656161](https://github.com/cloudflare/agents/blob/d6656161/packages/agents/src/harness/pi/session-store.ts).
-Current upstream uses a different synchronous pi contract. Pinned pi 1.0.4 takes
+Current upstream uses a different synchronous pi contract. Pinned pi 1.1.0 takes
 async callbacks, so `transactionSync()` cannot host its transaction callback.
 Cloudflare documents async SQL transactions on the
 [SQLite storage API](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/).
