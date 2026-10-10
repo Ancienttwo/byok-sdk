@@ -2,7 +2,20 @@
 
 ## Unreleased
 
-## 0.26.0-rc.2 / @byok-sdk/keys 0.11.0-rc.2 — 2026-10-10 (prepared; not published)
+## 0.26.0-rc.3 / @byok-sdk/keys 0.11.0-rc.3 — 2026-10-10 (prepared; not published)
+
+The owner approved rc.3 and npm execution after rc.2 reached only cloud-do,
+core and protocol. The publisher refuses continuation of a partial RC.
+This candidate keeps the same content. Only package versions and release
+metadata change. All nine packages use `rc`. `latest` stays 0.25.0 / keys
+0.10.0. Earlier rc.1 and rc.2 candidates are superseded.
+
+- The eight aligned package manifests move to 0.26.0-rc.3.
+- keys moves to 0.11.0-rc.3. Its packed core edge is exactly 0.26.0-rc.3.
+- The lock workspace records and current version documents move together.
+- [Release notes](docs/releases/v0.26.0.md) record the partial rc.2 readback.
+
+## 0.26.0-rc.2 / @byok-sdk/keys 0.11.0-rc.2 — 2026-10-10 (partially published; superseded by rc.3)
 
 Release candidate for 0.26.0, to be published under the npm dist-tag `rc`;
 `latest` stays 0.25.0 / keys 0.10.0. It carries the same content as
