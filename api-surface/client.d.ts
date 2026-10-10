@@ -44,12 +44,10 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
      * "apiProvider":"firstParty","email":"...","orgId":"...","orgName":"...",
      * "subscriptionType":"max"}`, with no token/key material anywhere in it.
      * This spawns the binary and parses ONLY its own reported status — it
-     * never reads `~/.claude` or any credential file itself, matching pi's
-     * `authPresent` computation being limited to environment-variable
-     * *names* (`../pi/pi-adapter.ts`'s `KNOWN_PROVIDER_ENV_VARS`), just via
-     * claude's own equivalent non-secret probe instead (claude's auth is
-     * OAuth-session-based via `claude auth login`, not primarily an env var,
-     * so pi's env-var-presence approach doesn't apply here the same way).
+     * never reads `~/.claude` or any credential file itself. Pi's `auth check`
+     * needs an explicit provider and a single-file product exposes no pi CLI,
+     * so pi's equivalent (`../pi/auth-presence.ts`) checks env-var *names* and
+     * the shape of its agent-dir login records instead.
      * A failed/unparseable probe (binary present but not logged in, a future
      * claude release changing this output shape, etc.) fails closed to
      * `false` — this never affects `present`, which is solely about whether
@@ -417,11 +415,11 @@ import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
 import { type ResolvedBin } from './resolve-bin';
 import { type SpawnFn } from './rpc-client';
 /**
- * Known provider credential env var *names* (never values) — see the
- * credential-isolation rule on `RuntimeAdapter`. `detect()` only checks
- * whether one of these names is set; it never reads pi's own auth storage
- * (`~/.pi/...`) or any file contents. Not exhaustive (pi supports ~30
- * providers); covers the common ones for a useful `authPresent` signal.
+ * `detect()`'s `authPresent` is pi's non-secret login-state observation
+ * (`./auth-presence.ts`): a known provider credential env var *name*, or a
+ * usable login record in pi's agent-dir `auth.json` for the configured
+ * default provider. It never returns or logs a credential value — see the
+ * credential-isolation rule on `RuntimeAdapter`.
  */
 export interface PiAdapterOptions {
     /** Opt-in ordinary, lease-bound durable worker. */
@@ -12160,8 +12158,10 @@ export interface GitWorkspaceConfig {
 export declare const RUNTIME_DETECTION_FAILURE_KINDS: readonly ['not-found', 'not-executable', 'timeout', 'probe-failed', 'refused'];
 /**
  * One probe outcome, never a separately authored presence boolean. Authentication
- * observation retains each adapter's native status/env-name probe and never
- * reads credential storage. Failure variants contain no arbitrary diagnostics.
+ * observation is each adapter's native non-secret login-state probe (a status
+ * command, credential env-var names, or Pi's shape-only agent-dir login check)
+ * and never returns, logs, or retains a credential value. Failure variants
+ * contain no arbitrary diagnostics.
  */
 export type RuntimeDetectResult = {
     readonly kind: 'available';

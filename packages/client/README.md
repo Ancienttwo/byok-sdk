@@ -110,6 +110,14 @@ Codex runs with sandbox `danger-full-access` by default. Set
 mode, or to `inherit` to apply the user's own `config.toml`. Any other value
 makes `createDaemon` throw a `TypeError`.
 
+Pi `detect()` reports `authPresent` from pi's own login state, with or without
+`sdkHelperHost`. It is `true` when a known provider credential env-var name is
+set, or when `auth.json` in pi's agent directory (`PI_CODING_AGENT_DIR`, else
+`~/.pi/agent`) holds an `api_key` or `oauth` login record for the global
+`settings.json` `defaultProvider`, or for any provider when no default is set.
+Missing or malformed files report `false`. The probe checks only presence and
+shape and never returns or logs a credential value.
+
 Hosts that only need runtime detection/composition can import the
 transport-free adapter surface:
 

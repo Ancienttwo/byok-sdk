@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **client: pi `authPresent` reflects pi's own login** (#340) — `PiAdapter.detect()`
+  previously set `authPresent` only from provider credential env-var names, so
+  a user logged in through pi's own `auth.json` (for example an OAuth provider)
+  was reported `authPresent: false` on both the installed and `sdkHelperHost`
+  paths. It now also reports `true` when pi's agent directory
+  (`PI_CODING_AGENT_DIR`, else `~/.pi/agent`) holds an `api_key` or `oauth`
+  login record for the global `settings.json` `defaultProvider`, or for any
+  provider when no default is set. The probe checks only presence and shape,
+  never returns or logs a value, and reports `false` for missing or malformed
+  files.
+
 ## 0.26.0-rc.3 / @byok-sdk/keys 0.11.0-rc.3 — 2026-10-10 (published)
 
 The owner approved rc.3 and npm execution after rc.2 reached only cloud-do,

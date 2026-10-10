@@ -44,9 +44,9 @@ import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client';
 import { abortPiRpcAndSettle } from './interrupt-settlement';
 import { buildPreparedPromptCommand, PREPARED_PROMPT_COMMAND_ID } from './prepared-prompt-frame';
 import {
-  PROVIDER_CREDENTIAL_ENV_NAMES,
   withoutProviderCredentials,
 } from '../provider-credential-environment';
+import { probePiAuthPresent } from './auth-presence';
 
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5_000;
@@ -76,11 +76,11 @@ async function cleanupMcpConfigDir(dir: string | undefined): Promise<void> {
 }
 
 /**
- * Known provider credential env var *names* (never values) — see the
- * credential-isolation rule on `RuntimeAdapter`. `detect()` only checks
- * whether one of these names is set; it never reads pi's own auth storage
- * (`~/.pi/...`) or any file contents. Not exhaustive (pi supports ~30
- * providers); covers the common ones for a useful `authPresent` signal.
+ * `detect()`'s `authPresent` is pi's non-secret login-state observation
+ * (`./auth-presence.ts`): a known provider credential env var *name*, or a
+ * usable login record in pi's agent-dir `auth.json` for the configured
+ * default provider. It never returns or logs a credential value — see the
+ * credential-isolation rule on `RuntimeAdapter`.
  */
 export interface PiAdapterOptions {
   /** Opt-in ordinary, lease-bound durable worker. */
@@ -231,7 +231,7 @@ export class PiAdapter implements RuntimeAdapter {
         } catch {
           return { kind: 'not-found' };
         }
-        const authPresent = PROVIDER_CREDENTIAL_ENV_NAMES.some((name) => process.env[name] !== undefined);
+        const authPresent = await probePiAuthPresent(process.env);
         return { kind: 'available', version, authPresent };
       }
       const bin = this.resolveBin();
@@ -240,7 +240,7 @@ export class PiAdapter implements RuntimeAdapter {
         invocation.entry === undefined ? [] : [invocation.entry]);
       if (probe.kind !== 'available') return probe;
       const version = probe.stdout.trim() || probe.stderr.trim();
-      const authPresent = PROVIDER_CREDENTIAL_ENV_NAMES.some((name) => process.env[name] !== undefined);
+      const authPresent = await probePiAuthPresent(process.env);
       return { kind: 'available', version, authPresent };
     } catch (error) {
       return classifyDetectError(error);

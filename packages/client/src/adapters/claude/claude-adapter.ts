@@ -419,12 +419,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
    * "apiProvider":"firstParty","email":"...","orgId":"...","orgName":"...",
    * "subscriptionType":"max"}`, with no token/key material anywhere in it.
    * This spawns the binary and parses ONLY its own reported status — it
-   * never reads `~/.claude` or any credential file itself, matching pi's
-   * `authPresent` computation being limited to environment-variable
-   * *names* (`../pi/pi-adapter.ts`'s `KNOWN_PROVIDER_ENV_VARS`), just via
-   * claude's own equivalent non-secret probe instead (claude's auth is
-   * OAuth-session-based via `claude auth login`, not primarily an env var,
-   * so pi's env-var-presence approach doesn't apply here the same way).
+   * never reads `~/.claude` or any credential file itself. Pi's `auth check`
+   * needs an explicit provider and a single-file product exposes no pi CLI,
+   * so pi's equivalent (`../pi/auth-presence.ts`) checks env-var *names* and
+   * the shape of its agent-dir login records instead.
    * A failed/unparseable probe (binary present but not logged in, a future
    * claude release changing this output shape, etc.) fails closed to
    * `false` — this never affects `present`, which is solely about whether
