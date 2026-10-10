@@ -9,9 +9,10 @@
   paths. It now also reports `true` when pi's agent directory
   (`PI_CODING_AGENT_DIR`, else `~/.pi/agent`) holds an `api_key` or `oauth`
   login record for the global `settings.json` `defaultProvider`, or for any
-  provider when no default is set. The probe checks only presence and shape,
-  never returns or logs a value, and reports `false` for missing or malformed
-  files.
+  provider when `settings.json` is absent or sets no default. The probe checks
+  only presence and shape, never returns or logs a value, and reports `false`
+  for a missing `auth.json` or an unreadable or malformed `auth.json` or
+  `settings.json`.
 
 - **client: bundled pi loads user extensions that import pi (#341)** — In a
   single-file product (`sdkHelperHost`), a user Pi extension that imported

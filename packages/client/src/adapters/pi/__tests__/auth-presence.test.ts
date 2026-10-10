@@ -77,11 +77,25 @@ describe('probePiAuthPresent', () => {
     // A prototype name is never an own record.
     await write('settings.json', { defaultProvider: 'constructor' });
     await expect(probe()).resolves.toBe(false);
-    // No usable default (absent, empty, non-string, or malformed settings) falls back to any provider.
-    for (const settings of [{}, { defaultProvider: '' }, { defaultProvider: 7 }, '{']) {
+    // A valid settings.json with no usable default falls back to any provider.
+    for (const settings of [{}, { defaultProvider: '' }, { defaultProvider: 7 }]) {
       await write('settings.json', settings);
       await expect(probe(), JSON.stringify(settings)).resolves.toBe(true);
     }
+    // So does an absent settings.json.
+    await fs.rm(path.join(agentDir, 'settings.json'));
+    await expect(probe()).resolves.toBe(true);
+  });
+
+  test('an unreadable or malformed settings.json observes false even with a stored login', async () => {
+    await write('auth.json', { zai: OAUTH });
+    for (const settings of ['{', '[]', 'null', '"zai"']) {
+      await write('settings.json', settings);
+      await expect(probe(), settings).resolves.toBe(false);
+    }
+    await fs.rm(path.join(agentDir, 'settings.json'));
+    await fs.mkdir(path.join(agentDir, 'settings.json'));
+    await expect(probe()).resolves.toBe(false);
   });
 });
 

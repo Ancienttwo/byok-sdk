@@ -24,14 +24,15 @@ export function resolvePiAgentDir(env: Env): string {
   return override;
 }
 
-async function readJsonObject(file: string): Promise<Record<string, unknown> | undefined> {
+/** A JSON object, `'absent'` for a missing file, or `'invalid'` for any other read or parse failure. */
+async function readJsonObject(file: string): Promise<Record<string, unknown> | 'absent' | 'invalid'> {
   try {
     const parsed: unknown = JSON.parse((await fs.readFile(file, 'utf8')).replace(/^﻿/u, ''));
     return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
       ? parsed as Record<string, unknown>
-      : undefined;
-  } catch {
-    return undefined;
+      : 'invalid';
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : 'invalid';
   }
 }
 
@@ -57,18 +58,20 @@ function isStoredLogin(entry: unknown): boolean {
  * `claude auth status`'s `loggedIn`. True when a known provider credential
  * env var *name* is set, or when pi's agent-dir `auth.json` holds a usable
  * login record for the global `settings.json` `defaultProvider` (any
- * provider when no default is configured). Missing, unreadable, or malformed
- * files observe `false`; this never throws and never returns, logs, or keeps
- * any credential value.
+ * provider when `settings.json` is absent or configures no default). A
+ * missing `auth.json`, or an unreadable or malformed `auth.json` or
+ * `settings.json`, observes `false`; this never throws and never returns,
+ * logs, or keeps any credential value.
  */
 export async function probePiAuthPresent(env: Env): Promise<boolean> {
   if (PROVIDER_CREDENTIAL_ENV_NAMES.some((name) => env[name] !== undefined)) return true;
   try {
     const agentDir = resolvePiAgentDir(env);
     const auth = await readJsonObject(path.join(agentDir, 'auth.json'));
-    if (auth === undefined) return false;
+    if (typeof auth === 'string') return false;
     const settings = await readJsonObject(path.join(agentDir, 'settings.json'));
-    const defaultProvider = settings?.defaultProvider;
+    if (settings === 'invalid') return false;
+    const defaultProvider = settings === 'absent' ? undefined : settings.defaultProvider;
     if (typeof defaultProvider === 'string' && defaultProvider.length > 0) {
       return Object.hasOwn(auth, defaultProvider) && isStoredLogin(auth[defaultProvider]);
     }

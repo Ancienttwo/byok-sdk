@@ -236,7 +236,8 @@ product exposes no pi CLI, so the pi probe checks provider credential env-var
 *names* and then reads pi's agent-dir `auth.json` (and `settings.json`
 `defaultProvider`) in-process, inspecting only whether a login record of pi's
 own `api_key`/`oauth` shape exists. It never compares, returns, logs, or keeps
-a value; missing or malformed files observe `authPresent: false`.
+a value; a missing `auth.json`, or an unreadable or malformed `auth.json` or
+`settings.json`, observes `authPresent: false`.
 
 **Environment inheritance (ADR-037 D2/D3)**: every task child — the runtime
 CLI and the MCP servers the daemon probes for it — gets the daemon's full

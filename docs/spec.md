@@ -399,8 +399,9 @@ Pi `authPresent` is pi's own login state, on the installed and `sdkHelperHost`
 paths alike. It is `true` when a known provider credential env-var name is
 set, or when pi's agent directory (`PI_CODING_AGENT_DIR`, else `~/.pi/agent`)
 holds an `auth.json` login record of pi's `api_key` or `oauth` shape for the
-global `settings.json` `defaultProvider`, or for any provider when no default
-is configured. Missing, unreadable or malformed files observe `false`. The
+global `settings.json` `defaultProvider`, or for any provider when
+`settings.json` is absent or configures no default. A missing `auth.json`, or
+an unreadable or malformed `auth.json` or `settings.json`, observes `false`. The
 probe inspects only presence and shape; it never returns, logs or retains a
 credential value. Provider keys inside `models.json` are not login state.
 
