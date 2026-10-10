@@ -178,7 +178,8 @@ authorization and registry readback. The current independent keys release is
 dispatch release, `0.26.0-rc.3`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-The 0.26.0-rc.3 train is a prepared prerelease, not yet published. The release
+The 0.26.0-rc.3 train is published on `rc`. Complete registry readback and an
+isolated npm install passed on 2026-10-10. The release
 owner approved 0.26.0-rc.1 for the eight aligned packages and keys
 0.11.0-rc.1 on 2026-10-10, under the npm dist-tag `rc`; stable follows after
 end-to-end verification. 0.26.0-rc.1 was only partially published (cloud-do,
