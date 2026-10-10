@@ -75,6 +75,23 @@ export function resolveSdkReservedHelperBin(
   });
 }
 
+/**
+ * The reserved re-entry is the single-file product, whose bundle holds official
+ * Pi (see `SdkHelperHostConfig`). Pi reads the free global `PI_BUNDLED_NODE`
+ * once, when its config module evaluates, as its own bundled Node distribution
+ * defines it. It then gives extensions the Pi packages and `typebox` from the
+ * running bundle, as the installed `pi` CLI does, instead of resolving them on
+ * disk beside the bundle, where they are absent (issue #341).
+ *
+ * Pi evaluates on the runtime host import below, so this must run first. A
+ * product bundle that evaluates Pi earlier must define `PI_BUNDLED_NODE` as
+ * `true` at build time. The installed thin bins have already evaluated their
+ * unbundled Pi when they dispatch here, so the global does not change them.
+ */
+function declareBundledPiRuntime(): void {
+  (globalThis as { PI_BUNDLED_NODE?: boolean }).PI_BUNDLED_NODE = true;
+}
+
 function isHelperKind(value: string | undefined): value is SdkReservedHelperKind {
   return value === 'agent-message-mcp' || value === 'agent-memory-mcp' || value === 'agent-memory-describe' || value === 'agent-team-mcp' || value === 'pi-rpc' || value === 'pi-prepared' || value === 'pi-durable';
 }
@@ -88,6 +105,7 @@ export async function runSdkReservedHelperCommand(
   argv: readonly string[] = process.argv.slice(2),
 ): Promise<boolean> {
   if (argv[0] !== BYOK_SDK_HELPER_SUBCOMMAND) return false;
+  declareBundledPiRuntime();
   if (argv[1] === 'pi-subagent-runner') {
     // A Pi subagent runner child (`subagents/spawn.ts`). The tail is the
     // runner config path. The runtime host is an external-dynamic import so

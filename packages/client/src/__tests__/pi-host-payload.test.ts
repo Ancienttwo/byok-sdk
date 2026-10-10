@@ -105,6 +105,21 @@ if (process.argv[2] !== 'task') {
 }
 `;
 
+/**
+ * A user Pi extension (issue #341). It imports Pi's host-provided packages, as
+ * Pi's package contract lets it, and records what it received.
+ */
+function userExtensionSource(marker: string): string {
+  return `import { writeFileSync } from 'node:fs';
+import { VERSION, type ExtensionAPI } from ${JSON.stringify(PI_SPECIFIER)};
+import { Type } from 'typebox';
+const schema: unknown = Type.Object({});
+export default function userExtension(pi: ExtensionAPI): void {
+  writeFileSync(${JSON.stringify(marker)}, JSON.stringify({ version: VERSION, schema: typeof schema, api: typeof pi.on }));
+}
+`;
+}
+
 interface HostReport {
   stage: string; error?: string; lookup?: string;
   defaultDetect?: { kind: string }; detect?: unknown;
@@ -132,19 +147,29 @@ interface HostLayout {
   readonly files: readonly string[];
 }
 
+/**
+ * A host form and, for `interpreter+bundle`, the interpreter that runs the
+ * bundle: Bun, or Node as in issue #341.
+ */
+type HostCase = 'interpreter+bundle (bun)' | 'interpreter+bundle (node)' | 'compiled-executable';
+
 /** The product build: bundle the SDK into the host entry and create its Pi asset root. */
-async function buildHost(form: 'interpreter+bundle' | 'compiled-executable', release: string, buildDir: string): Promise<HostLayout> {
+async function buildHost(host: HostCase, release: string, buildDir: string): Promise<HostLayout> {
   const sdk = await loadClient();
   await fs.writeFile(path.join(buildDir, 'host-entry.ts'), HOST_ENTRY_SOURCE);
-  if (form === 'interpreter+bundle') {
+  if (host !== 'compiled-executable') {
+    const form = 'interpreter+bundle';
     const assetRoot = path.join(release, 'pi-assets');
     await sdk.copyPiRuntimeAssets({ outDir: assetRoot, form });
     const bundle = path.join(release, 'host.js');
-    await execFileAsync(BUN_BIN!, ['build', 'host-entry.ts', '--target', 'bun', '--format', 'esm', '--outfile', bundle], { cwd: buildDir });
-    const interpreter = path.join(release, 'bun');
-    await fs.copyFile(BUN_BIN!, interpreter); await fs.chmod(interpreter, 0o555);
-    return { command: interpreter, prefix: ['--no-install', bundle], entry: bundle, piPackageDir: assetRoot, files: ['bun', 'host.js', 'pi-assets'] };
+    const node = host === 'interpreter+bundle (node)';
+    await execFileAsync(BUN_BIN!, ['build', 'host-entry.ts', '--target', node ? 'node' : 'bun', '--format', 'esm', '--outfile', bundle], { cwd: buildDir });
+    const interpreter = path.join(release, node ? 'node' : 'bun');
+    await fs.copyFile(node ? process.execPath : BUN_BIN!, interpreter); await fs.chmod(interpreter, 0o555);
+    return { command: interpreter, prefix: node ? [bundle] : ['--no-install', bundle], entry: bundle, piPackageDir: assetRoot,
+      files: [path.basename(interpreter), 'host.js', 'pi-assets'].sort() };
   }
+  const form = 'compiled-executable';
   // The asset root is the executable directory: write the assets before the executable.
   const assets = await sdk.copyPiRuntimeAssets({ outDir: release, form });
   const executable = path.join(release, 'host');
@@ -153,7 +178,7 @@ async function buildHost(form: 'interpreter+bundle' | 'compiled-executable', rel
 }
 
 describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', () => {
-  it.skipIf(BUN_BIN === undefined).each(['interpreter+bundle', 'compiled-executable'] as const)('runs a Pi task from the %s host form with no package lookup', async (form) => {
+  it.skipIf(BUN_BIN === undefined).each(['interpreter+bundle (bun)', 'interpreter+bundle (node)', 'compiled-executable'] as const)('runs a Pi task from the %s host form with no package lookup', async (form) => {
     const release = await tempRoot('byok-host-payload-release-');
     const buildDir = await tempRoot('byok-host-payload-build-');
     const runDir = await tempRoot('byok-host-payload-run-');
@@ -176,7 +201,16 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
         contextWindow: 8192, maxTokens: 256 };
       await fs.writeFile(path.join(agentDir, 'models.json'), JSON.stringify({ providers: { 'host-stub': {
         api: 'openai-completions', baseUrl: providerUrl, apiKey: 'synthetic-host-payload', models: [model] } } }));
-      await fs.writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'host-stub', defaultModel: model.id }));
+      // The user's own Pi package, as `pi install` records it: its TypeScript
+      // extension imports Pi's host-provided packages, which only the bundle holds.
+      const userPackage = path.join(runDir, 'user-pi-package');
+      const extensionMarker = path.join(runDir, 'user-extension.json');
+      await fs.mkdir(userPackage);
+      await fs.writeFile(path.join(userPackage, 'package.json'), JSON.stringify({ name: 'byok-user-pi-package', version: '0.0.0',
+        type: 'module', peerDependencies: { [PI_SPECIFIER]: '*', typebox: '*' }, pi: { extensions: ['./index.ts'] } }));
+      await fs.writeFile(path.join(userPackage, 'index.ts'), userExtensionSource(extensionMarker));
+      await fs.writeFile(path.join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'host-stub', defaultModel: model.id,
+        packages: [userPackage] }));
       const cwd = path.join(runDir, 'workspace'); await fs.mkdir(cwd);
       const home = path.join(runDir, 'home'); await fs.mkdir(home);
       // A dead loopback registry: an auto-install attempt fails instead of reaching a network.
@@ -206,6 +240,8 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       expect(events.at(-1)).toEqual({ type: 'turn_end' });
       expect(bodies).toHaveLength(1);
       expect(bodies[0]).toContain('Reply with the host payload marker.');
+      // The user's extension loaded against the Pi runtime in the bundle.
+      expect(JSON.parse(await fs.readFile(extensionMarker, 'utf8'))).toEqual({ version: '1.1.0', schema: 'object', api: 'function' });
     } finally {
       provider.closeAllConnections();
       await new Promise<void>(resolve => provider.close(() => resolve()));
