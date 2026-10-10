@@ -33,9 +33,13 @@ cloud-do, core and protocol 0.26.0-rc.1 reached the registry, so the owner
 approved 0.26.0-rc.2 / keys 0.11.0-rc.2 with the same content the same day.
 rc.2 also reached only cloud-do, core and protocol. The owner approved
 0.26.0-rc.3 / keys 0.11.0-rc.3, with the same content, and npm execution on
-2026-10-10. All nine packages are now published and read back on `rc`, from
+2026-10-10. All nine rc.3 packages were published and read back on `rc`, from
 `v0.26.0-rc.3` (`b2b1ec3d`). See its
-[publication record](../../docs/releases/v0.26.0-rc.3-publication.md) and
+[rc.3 publication record](../../docs/releases/v0.26.0-rc.3-publication.md).
+rc.3 is superseded on `rc` by the prepared 0.26.0-rc.4 / keys 0.11.0-rc.4, which
+the owner approved under the dist-tag `rc` on 2026-10-10. rc.4 adds the pi
+client fixes of PR #342 (#340, #341) and is not same-content. It is not
+published; npm execution approval remains separate. See the
 [0.26.0 release notes](../../docs/releases/v0.26.0.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
@@ -53,8 +57,8 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 ## Version selection
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
-The approved source manifests name the prerelease train 0.26.0-rc.3 and
-independent keys 0.11.0-rc.3. Both are MINOR lines: the train adds public API
+The approved source manifests name the prerelease train 0.26.0-rc.4 and
+independent keys 0.11.0-rc.4. Both are MINOR lines: the train adds public API
 (memory-reader Attempts, `task.complete.finalMessage`, `copyPiRuntimeAssets`)
 and cuts the client Agent home execution lease; keys makes its Pi launcher
 entry public and tightens Pi admission. Keep lock workspace records,
