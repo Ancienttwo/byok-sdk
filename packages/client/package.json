@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/client",
-  "version": "0.26.0-rc.2",
+  "version": "0.26.0-rc.3",
   "byok": {
     "piRuntimePin": "1.1.0"
   },
