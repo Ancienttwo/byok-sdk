@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import exportLayout from '../adapters/pi/pi-export-asset-layout.json';
 import todoLayout from '../adapters/pi/todo-locale-layout.json';
-import { resolveBunBin } from './support/test-bun-bin';
+import { REQUIRE_BUN_ENV, resolveBunBin } from './support/test-bun-bin';
 
 const execFileAsync = promisify(execFile);
 const BUN_BIN = resolveBunBin();
@@ -153,19 +153,46 @@ interface HostLayout {
  */
 type HostCase = 'interpreter+bundle (bun)' | 'interpreter+bundle (node)' | 'compiled-executable';
 
-/** The product build: bundle the SDK into the host entry and create its Pi asset root. */
-async function buildHost(host: HostCase, release: string, buildDir: string): Promise<HostLayout> {
+/**
+ * Why a copied interpreter does not run from the release directory, or
+ * undefined when it does. A Node linked against libraries beside its install
+ * (Homebrew or nvm on macOS load `@rpath/libnode.*.dylib`) is not
+ * self-contained, so its copy proves no payload. Linking instead of copying
+ * proves none either: Node resolves `process.execPath` through a symlink, so
+ * the host would relaunch the install outside the release.
+ */
+async function relocationFailure(interpreter: string): Promise<string | undefined> {
+  try {
+    await execFileAsync(interpreter, ['--version'], { timeout: 30_000 });
+    return undefined;
+  } catch (error) {
+    const stderr = (error as { stderr?: string }).stderr?.trim();
+    return `${process.execPath} does not run when copied into the release: ${stderr || String(error)}`;
+  }
+}
+
+/**
+ * The product build: bundle the SDK into the host entry and create its Pi
+ * asset root. A Node that cannot be relocated skips the case through `skip`.
+ */
+async function buildHost(host: HostCase, release: string, buildDir: string, skip: (note: string) => never): Promise<HostLayout> {
   const sdk = await loadClient();
   await fs.writeFile(path.join(buildDir, 'host-entry.ts'), HOST_ENTRY_SOURCE);
   if (host !== 'compiled-executable') {
     const form = 'interpreter+bundle';
+    const node = host === 'interpreter+bundle (node)';
+    const interpreter = path.join(release, node ? 'node' : 'bun');
+    await fs.copyFile(node ? process.execPath : BUN_BIN!, interpreter); await fs.chmod(interpreter, 0o555);
+    const failure = node ? await relocationFailure(interpreter) : undefined;
+    if (failure !== undefined) {
+      // The formal gate runs every host form; only a local run may skip one.
+      if (process.env[REQUIRE_BUN_ENV] === '1') throw new Error(failure);
+      skip(failure);
+    }
     const assetRoot = path.join(release, 'pi-assets');
     await sdk.copyPiRuntimeAssets({ outDir: assetRoot, form });
     const bundle = path.join(release, 'host.js');
-    const node = host === 'interpreter+bundle (node)';
     await execFileAsync(BUN_BIN!, ['build', 'host-entry.ts', '--target', node ? 'node' : 'bun', '--format', 'esm', '--outfile', bundle], { cwd: buildDir });
-    const interpreter = path.join(release, node ? 'node' : 'bun');
-    await fs.copyFile(node ? process.execPath : BUN_BIN!, interpreter); await fs.chmod(interpreter, 0o555);
     return { command: interpreter, prefix: node ? [bundle] : ['--no-install', bundle], entry: bundle, piPackageDir: assetRoot,
       files: [path.basename(interpreter), 'host.js', 'pi-assets'].sort() };
   }
@@ -178,7 +205,7 @@ async function buildHost(host: HostCase, release: string, buildDir: string): Pro
 }
 
 describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', () => {
-  it.skipIf(BUN_BIN === undefined).each(['interpreter+bundle (bun)', 'interpreter+bundle (node)', 'compiled-executable'] as const)('runs a Pi task from the %s host form with no package lookup', async (form) => {
+  it.skipIf(BUN_BIN === undefined).for(['interpreter+bundle (bun)', 'interpreter+bundle (node)', 'compiled-executable'] as const)('runs a Pi task from the %s host form with no package lookup', { timeout: 180_000 }, async (form, { skip }) => {
     const release = await tempRoot('byok-host-payload-release-');
     const buildDir = await tempRoot('byok-host-payload-build-');
     const runDir = await tempRoot('byok-host-payload-run-');
@@ -190,7 +217,7 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
     });
     await new Promise<void>(resolve => provider.listen(0, '127.0.0.1', resolve));
     try {
-      const host = await buildHost(form, release, buildDir);
+      const host = await buildHost(form, release, buildDir, skip);
       // The download holds only the product and its Pi asset root. No node_modules.
       expect((await fs.readdir(release)).sort()).toEqual(host.files);
 
@@ -246,5 +273,5 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       provider.closeAllConnections();
       await new Promise<void>(resolve => provider.close(() => resolve()));
     }
-  }, 180_000);
+  });
 });
