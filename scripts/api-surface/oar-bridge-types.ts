@@ -1,14 +1,14 @@
 // Check source types across the private JS/declaration boundary.
 // The bridge exposes a smaller surface than the full OAR adapter.
 import type * as Bridge from '../../packages/client/src/runtime/codex-session-runtime.js';
-import type { codexSession as vendorSession, CodexAdapterSession } from '../../packages/client/vendor/oar/087df16/runtimes/codex/session.js';
-import type { ControlResult, RawEvent } from '../../packages/client/vendor/oar/087df16/contracts/session.js';
-import type { LineProcess, SpawnLineProcess } from '../../packages/client/vendor/oar/087df16/runtimes/codex/app-server-client.js';
+import type { codexSession as vendorSession, CodexAdapterSession } from '../../packages/client/vendor/oar/b36b439/runtimes/codex/session.js';
+import type { ControlResult, RawEvent } from '../../packages/client/vendor/oar/b36b439/contracts/session.js';
+import type { LineProcess, SpawnLineProcess } from '../../packages/client/vendor/oar/b36b439/runtimes/codex/app-server-client.js';
 import type { spawnOwnedLineProcess } from '../../packages/client/src/runtime/owned-line-process.js';
 import type { buildRuntimeEnv } from '../../packages/client/src/daemon/environment.js';
 import type { CodexProjection, CodexRecord } from '../../packages/client/src/adapters/codex/projection.js';
 import type * as TreeBridge from '../../packages/client/src/runtime/oar-process-tree.js';
-import type * as VendorTree from '../../packages/client/vendor/oar/087df16/shared/executable/process-tree.js';
+import type * as VendorTree from '../../packages/client/vendor/oar/b36b439/shared/executable/process-tree.js';
 
 type Assert<T extends true> = T;
 type Equal<A, B> =

@@ -5,9 +5,10 @@ import path from 'node:path';
 import {
   startAppServerClient, RpcTimeoutError,
   type LineProcess, type SpawnLineProcess, type AppServerLimits,
-} from '../../vendor/oar/087df16/runtimes/codex/app-server-client.js';
-import { rpcControl } from '../../vendor/oar/087df16/runtimes/codex/rpc-control.js';
-import { createSessionKernel } from '../../vendor/oar/087df16/shared/session-kernel.js';
+} from '../../vendor/oar/b36b439/runtimes/codex/app-server-client.js';
+import { rpcControl } from '../../vendor/oar/b36b439/runtimes/codex/rpc-control.js';
+import { createSessionKernel } from '../../vendor/oar/b36b439/shared/session-kernel.js';
+import { sessionCredentialRedactor } from '../../vendor/oar/b36b439/shared/credential-redactor.js';
 
 function fakeProcess() {
   const lines: Array<(line: string) => void> = [];
@@ -286,8 +287,27 @@ describe('OAR injected app-server client', () => {
   });
 });
 
+describe('OAR session kernel record redaction', () => {
+  it('measures the fatal byte budget on the redacted record and delivers that record to the required consumer', () => {
+    const secret = `sk-${'x'.repeat(4096)}`;
+    const { redactValue } = sessionCredentialRedactor({ env: { OPENAI_API_KEY: secret } });
+    const native = { type: 'item/agentMessage/delta', native: { delta: secret }, events: [] };
+    const onRecord = vi.fn();
+    const kernel = createSessionKernel('root', { maxBytes: 1024, onRecord, redact: redactValue });
+    const frame = kernel.frame(native);
+    expect(frame.body.native).toEqual({ delta: '[redacted]' });
+    expect(native.native.delta).toBe(secret);
+    expect(kernel.records()).toEqual([frame]);
+    expect(onRecord).toHaveBeenCalledWith(frame);
+    const unredacted = createSessionKernel('root', { maxBytes: 1024, onRecord });
+    expect(() => unredacted.frame(native)).toThrow('session record byte budget exceeded');
+    expect(unredacted.records()).toEqual([]);
+    expect(onRecord).toHaveBeenCalledTimes(1);
+  });
+});
+
 it('accounts for every vendored file and the six maintained source deltas', () => {
-  const root = path.resolve(import.meta.dirname, '../../vendor/oar/087df16');
+  const root = path.resolve(import.meta.dirname, '../../vendor/oar/b36b439');
   const manifest = JSON.parse(readFileSync(path.join(root, 'source-manifest.json'), 'utf8')) as {
     files: Array<{ path: string; sourcePath: string; upstreamSha256: string; vendoredSha256: string; delta?: string }>;
   };
@@ -299,6 +319,6 @@ it('accounts for every vendored file and the six maintained source deltas', () =
     if (!row.delta) expect(row.vendoredSha256).toBe(row.upstreamSha256);
     if (row.path.endsWith('.ts')) expect(row.sourcePath).toBe(`packages/oar/src/${row.path}`);
   }
-  expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual(['runtimes/codex/app-server-client.ts', 'runtimes/codex/open.ts', 'runtimes/codex/rpc-control.ts', 'runtimes/codex/session.ts', 'shared/mcp-servers.ts', 'shared/session-kernel.ts']);
+  expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual(['runtimes/codex/app-server-client.ts', 'runtimes/codex/open.ts', 'runtimes/codex/rpc-control.ts', 'runtimes/codex/session.ts', 'shared/credential-redactor.ts', 'shared/session-kernel.ts']);
   expect(readFileSync(path.join(root, 'LICENSE'), 'utf8')).toContain('Apache License');
 });

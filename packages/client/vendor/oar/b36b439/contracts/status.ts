@@ -12,9 +12,18 @@ export type RunningPhase =
   | "thinking"
   | "responding"
   | "compacting"
-  | { readonly tool: string; readonly callId: string };
+  /** `writing`: the runtime is still streaming the call's arguments (a `tool_call_input_delta` came, its complete `tool_call_input` not yet); absent once they are complete and for every call without streamed arguments. */
+  | { readonly tool: string; readonly callId: string; readonly writing?: true };
 
-export type AgentStatus =
+/** Native queue evidence retained across an unrelated spontaneous turn. */
+interface PendingPrompt {
+  readonly inputId: string;
+  readonly sinceSeq: number;
+  readonly requestId?: string;
+  readonly stop?: { readonly pendingAbortIds: readonly string[]; readonly abortedOnExit: boolean };
+}
+
+export type AgentStatus = (
   | { readonly kind: "idle"; readonly lastTurnOutcome?: TurnOutcome }
   | {
       readonly kind: "running";
@@ -22,6 +31,8 @@ export type AgentStatus =
       readonly sinceSeq: number;
       /** The prompt request id when the turn was opened through this Session; absent for adopted turns. */
       readonly requestId?: string;
+      /** Input identity of the current prompt, when known. */
+      readonly inputId?: string;
       /**
        * Stop evidence for this running turn, retained so incremental reducers
        * can match abort responses and survive a checkpoint. A dispose request
@@ -35,4 +46,4 @@ export type AgentStatus =
       readonly phase: RunningPhase;
       /** Envelope receivedAt (unix epoch ms) of the latest folded record. */
       readonly lastEventAt: number;
-    };
+    }) & { readonly pendingPrompt?: PendingPrompt };

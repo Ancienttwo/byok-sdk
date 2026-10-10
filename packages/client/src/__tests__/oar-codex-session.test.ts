@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { codexSession } from '../../vendor/oar/087df16/runtimes/codex/session';
-import * as projection from '../../vendor/oar/087df16/runtimes/codex/projection';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/087df16/runtimes/codex/app-server-client';
+import { codexSession } from '../../vendor/oar/b36b439/runtimes/codex/session';
+import * as projection from '../../vendor/oar/b36b439/runtimes/codex/projection';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/b36b439/runtimes/codex/app-server-client';
+import { SessionNotFoundError } from '../../vendor/oar/b36b439/contracts/session-not-found-error';
 
 function fakeServer(openReply: Record<string, unknown> = {}) {
   let receive!: (line: string) => void;
@@ -128,6 +129,128 @@ describe('unconnected OAR Codex adapter', () => {
     expect(native).toMatchObject({ kind: 'frame', body: { type: method, origin: 'byok-native', events: [] } });
     expect(reading).toMatchObject({ kind: 'frame', body: { type: method, events: derived } });
     expect(reading?.kind === 'frame' && 'origin' in reading.body).toBe(false);
+    await session.dispose();
+  });
+
+  it('learns foreign sessions from record envelopes and lineage only from session_linked events', async () => {
+    const fake = fakeServer(); const session = await fake.open();
+    await session.prompt('hello');
+    fake.frame({ method: 'item/agentMessage/delta', params: { threadId: 'stranger', delta: 'hi' } });
+    expect(session.graph()).toEqual({ nodes: [{ id: 'thread-root' }, { id: 'stranger' }], edges: [] });
+    const item = { type: 'collabAgentToolCall', id: 'call-1', receiverThreadIds: ['child-1'] };
+    fake.frame({ method: 'item/started', params: { threadId: 'thread-root', item } });
+    const [native, reading] = session.records().slice(-2);
+    expect(native).toMatchObject({ kind: 'frame', body: { origin: 'byok-native', events: [] } });
+    expect(reading).toMatchObject({ kind: 'frame', body: { events: expect.arrayContaining([{ kind: 'session_linked', parent: 'thread-root', child: 'child-1', via: 'tool_call' }]) } });
+    expect(session.graph()).toEqual({
+      nodes: [{ id: 'thread-root' }, { id: 'stranger' }, { id: 'child-1' }],
+      edges: [{ parent: 'thread-root', child: 'child-1', via: 'tool_call' }],
+    });
+    await session.dispose();
+  });
+
+  it('rejects a missing resume target with SessionNotFoundError and keeps the message prefix', async () => {
+    const fake = fakeServer();
+    const write = vi.mocked(fake.child.write).getMockImplementation()!;
+    vi.mocked(fake.child.write).mockImplementation(line => {
+      const frame = JSON.parse(line);
+      if (frame.method === 'thread/resume') {
+        fake.frame({ id: frame.id, error: { code: -32600, message: 'no rollout found for thread id gone-thread' } });
+      } else {
+        write(line);
+      }
+    });
+    const error = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home' }, resume: 'gone-thread',
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(SessionNotFoundError);
+    expect(error).toMatchObject({
+      name: 'SessionNotFoundError',
+      sessionId: 'gone-thread',
+      message: 'codex thread/resume failed: no rollout found for thread id gone-thread',
+      cause: { method: 'thread/resume', native: { code: -32600, message: 'no rollout found for thread id gone-thread' } },
+    });
+    expect(fake.child.kill).toHaveBeenCalledTimes(1);
+    await fake.child.exited;
+  });
+
+  it.each([
+    { code: -32000, message: 'no rollout found for thread id gone-thread' },
+    { code: -32600, message: 'thread gone-thread has an active writer' },
+  ])('keeps a resume failure without the verified missing-target signal as a plain error: %j', async native => {
+    const fake = fakeServer();
+    const write = vi.mocked(fake.child.write).getMockImplementation()!;
+    vi.mocked(fake.child.write).mockImplementation(line => {
+      const frame = JSON.parse(line);
+      if (frame.method === 'thread/resume') fake.frame({ id: frame.id, error: native });
+      else write(line);
+    });
+    const error = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home' }, resume: 'gone-thread',
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(SessionNotFoundError);
+    expect(error).toMatchObject({ message: `codex thread/resume failed: ${native.message}`, cause: { method: 'thread/resume', native } });
+    await fake.child.exited;
+  });
+
+  it('redacts a credential-named env value from retained records and the required consumer, not from native inputs', async () => {
+    const secret = 'sk-test-credential-0123456789';
+    const fake = fakeServer();
+    const onRecord = vi.fn();
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home', OPENAI_API_KEY: secret, NODE_ENV: 'production' },
+    }, undefined, { onRecord });
+    expect(fake.spawn.mock.calls[0]![2].env).toMatchObject({ OPENAI_API_KEY: secret });
+    await session.prompt(`use ${secret}`);
+    expect(JSON.stringify(fake.writes.find(frame => frame.method === 'turn/start'))).toContain(secret);
+    fake.frame({ method: 'item/agentMessage/delta', params: { threadId: 'thread-root', delta: `echo ${secret} in production` } });
+    expect(JSON.stringify(session.records())).not.toContain(secret);
+    expect(JSON.stringify(onRecord.mock.calls)).not.toContain(secret);
+    expect(onRecord.mock.calls.map(([record]) => record)).toEqual(session.records());
+    const [native, reading] = session.records().slice(-2);
+    expect(native).toMatchObject({ kind: 'frame', body: { origin: 'byok-native', native: { delta: 'echo [redacted] in production' } } });
+    expect(reading).toMatchObject({ kind: 'frame', body: { events: [{ kind: 'text_delta', text: 'echo [redacted] in production' }] } });
+    expect(session.records().find(record => record.kind === 'request' && record.body.kind === 'prompt')).toMatchObject({ body: { input: 'use [redacted]' } });
+    await session.dispose();
+  });
+
+  it('redacts a credential-named env value from an error thrown on the open path', async () => {
+    const secret = 'sk-test-credential-0123456789';
+    const fake = fakeServer();
+    const write = vi.mocked(fake.child.write).getMockImplementation()!;
+    vi.mocked(fake.child.write).mockImplementation(line => {
+      const frame = JSON.parse(line);
+      if (frame.method === 'thread/start') fake.frame({ id: frame.id, error: { code: -32602, message: `bad key ${secret}` } });
+      else write(line);
+    });
+    const error = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home', OPENAI_API_KEY: secret },
+    }).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ message: 'codex thread/start failed: bad key [redacted]', cause: { native: { message: 'bad key [redacted]' } } });
+    expect(JSON.stringify(error, Object.getOwnPropertyNames(error))).not.toContain(secret);
+    await fake.child.exited;
+  });
+
+  it('redacts session credentials from errors outside the client redactor: spawn and control failures', async () => {
+    const secret = 'sk-test-credential-0123456789';
+    class SpawnFailure extends Error {}
+    const spawnFailure = vi.fn<SpawnLineProcess>(() => { throw new SpawnFailure(`spawn saw ${secret}`); });
+    const opened = await codexSession(spawnFailure, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home', OPENAI_API_KEY: secret },
+    }).catch((caught: unknown) => caught);
+    expect(opened).toBeInstanceOf(SpawnFailure);
+    expect(opened).toMatchObject({ message: 'spawn saw [redacted]' });
+    expect(String((opened as Error).stack)).not.toContain(secret);
+
+    const fake = fakeServer();
+    let failNext = false;
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home', OPENAI_API_KEY: secret },
+    }, undefined, { onRecord: record => { if (failNext && record.kind === 'request') throw new Error(`consumer saw ${secret}`); } });
+    failNext = true;
+    await expect(session.prompt('hello')).rejects.toThrow('consumer saw [redacted]');
+    failNext = false;
     await session.dispose();
   });
 
