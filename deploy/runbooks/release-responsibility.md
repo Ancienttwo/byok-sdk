@@ -33,7 +33,9 @@ cloud-do, core and protocol 0.26.0-rc.1 reached the registry, so the owner
 approved 0.26.0-rc.2 / keys 0.11.0-rc.2 with the same content the same day.
 rc.2 also reached only cloud-do, core and protocol. The owner approved
 0.26.0-rc.3 / keys 0.11.0-rc.3, with the same content, and npm execution on
-2026-10-10. See
+2026-10-10. All nine packages are now published and read back on `rc`, from
+`v0.26.0-rc.3` (`b2b1ec3d`). See its
+[publication record](../../docs/releases/v0.26.0-rc.3-publication.md) and
 [0.26.0 release notes](../../docs/releases/v0.26.0.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:

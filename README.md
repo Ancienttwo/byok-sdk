@@ -7,10 +7,10 @@ composition over Postgres and R2.
 
 ## Release status
 
-The current source candidate is the prerelease **0.26.0-rc.3** for the eight
+The current `rc` release is **0.26.0-rc.3** for the eight
 aligned packages, with independent keys **0.11.0-rc.3**. The release owner
-approved it on 2026-10-10. It is not published. Publication will use the npm
-dist-tag `rc`, so `latest` stays 0.25.0 / keys 0.10.0. The public set is nine
+approved and published it on 2026-10-10. Registry readback confirms all nine
+packages on the npm dist-tag `rc`, so `latest` stays 0.25.0 / keys 0.10.0. The public set is nine
 packages; `@byok-sdk/implementation-identity` stays retired. rc.3 carries the
 same content as rc.1 and rc.2. Both earlier candidates were only partially
 published (cloud-do, core and protocol). Both are superseded; do not install
@@ -20,10 +20,10 @@ either candidate.
 keys Pi launcher entry and OAR 0.48.0), the client and keys breaking cuts and
 the upgrade steps.
 
-Versioned install examples below describe the current source manifests. They
-are usable only after publication and exact registry readback. Before
-publication, a Host can test verified accepted CI tarballs from one exact SHA;
-that does not establish production or live-runtime acceptance.
+Versioned install examples below use the published rc.3 packages. The
+[publication record](docs/releases/v0.26.0-rc.3-publication.md) confirms exact
+registry bytes and an isolated npm install. Live Host acceptance remains
+separate.
 
 The current `latest` release is **0.25.0** for eight aligned packages, with
 independent keys **0.10.0**, published on npm `latest` on 2026-10-09 from
@@ -31,8 +31,7 @@ independent keys **0.10.0**, published on npm `latest` on 2026-10-09 from
 [publication record](docs/releases/v0.25.0-publication.md) verifies accepted
 CI bytes, registry integrities, dependency edges and a clean npm install.
 [Stable release notes](docs/releases/v0.25.0-stable.md) cover the release and
-upgrade steps. The published 0.25.0-rc.2 remains on the `rc` channel until this
-candidate is published; its [notes](docs/releases/v0.25.0-rc.2.md) and the
+upgrade steps. The earlier 0.25.0-rc.2 is superseded on the `rc` channel; its [notes](docs/releases/v0.25.0-rc.2.md) and the
 [rc.1 breaking-change record](docs/releases/v0.25.0.md) remain historical evidence.
 
 Before it, `latest` was **0.24.0**, with independent keys **0.9.0**.
@@ -105,12 +104,11 @@ import { createByokServer } from '@byok-sdk/server';
 ```
 
 The Worker-only cloud-do package is published from 0.24.0. The example below
-names the 0.26.0-rc.3 candidate; it becomes usable only after publication and
-exact registry readback.
+names the published 0.26.0-rc.3 release.
 See [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
 
 ~~~sh
-# Release candidate source version; publication is pending.
+# Published release candidate.
 npm install @byok-sdk/cloud-do@0.26.0-rc.3
 npm install --save-dev @cloudflare/workers-types
 ~~~
