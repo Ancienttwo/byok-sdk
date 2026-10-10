@@ -27,6 +27,7 @@ import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process';
 import {
   codexSession,
+  SessionNotFoundError,
   type RawCodexSession,
 } from '../../runtime/codex-session-runtime';
 import { CodexProjection, type CodexRecord } from './projection';
@@ -252,6 +253,14 @@ export class CodexAdapter implements RuntimeAdapter {
           cause: disposal,
         });
       }
+      // A resume of a missing thread cannot succeed on retry: fail closed.
+      if (error instanceof SessionNotFoundError)
+        throw new RuntimeExecutionFailure({
+          phase: 'start',
+          category: 'authority',
+          retry: 'non-retryable',
+          reason: error.message,
+        });
       throw new RuntimeExecutionFailure({
         phase: 'start',
         category: isRuntimeExecutionFailure(error)
