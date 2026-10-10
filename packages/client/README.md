@@ -126,12 +126,15 @@ makes `createDaemon` throw a `TypeError`.
 
 Pi `detect()` reports `authPresent` from pi's own login state, with or without
 `sdkHelperHost`. It is `true` when a known provider credential env-var name is
-set, or when `auth.json` in pi's agent directory (`PI_CODING_AGENT_DIR`, else
-`~/.pi/agent`) holds an `api_key` or `oauth` login record for the global
-`settings.json` `defaultProvider`, or for any provider when `settings.json` is
-absent or sets no default. A missing `auth.json`, or an unreadable or malformed
-`auth.json` or `settings.json`, reports `false`. The probe checks only presence and
-shape and never returns or logs a credential value.
+set, or when pi's agent directory (`PI_CODING_AGENT_DIR`, else `~/.pi/agent`)
+holds a credential for the global `settings.json` `defaultProvider`, or for any
+provider when `settings.json` is absent or sets no default. Either an
+`api_key` or `oauth` login record in `auth.json` or a non-empty `apiKey` on the
+provider's `models.json` entry counts. An `apiKey` that names an env var or a
+`!command` counts as configured; the probe does not resolve or run it. An
+unreadable or malformed `auth.json` or `settings.json` reports `false`, and a
+missing or malformed `models.json` adds nothing. The probe checks only presence
+and shape and never returns or logs a credential value.
 
 Hosts that only need runtime detection/composition can import the
 transport-free adapter surface:

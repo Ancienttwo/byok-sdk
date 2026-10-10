@@ -258,7 +258,8 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       // Package lookup is denied, and the default adapter reproduces the reported probe failure.
       expect(report.lookup).toMatch(/Cannot find (package|module)/u);
       expect(report.defaultDetect).toEqual({ kind: 'probe-failed' });
-      expect(report.detect).toEqual({ kind: 'available', version: '1.1.0', authPresent: false });
+      // The default provider's models.json apiKey is pi's login (#345).
+      expect(report.detect).toEqual({ kind: 'available', version: '1.1.0', authPresent: true });
       expect(report.launch).toEqual({ command: host.command, ...(host.entry === undefined ? {} : { entry: host.entry }),
         fixedArgs: ['__byok_sdk_helper', 'pi-rpc'] });
       const events = report.events!;
