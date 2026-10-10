@@ -403,12 +403,16 @@ semantics and credential custody remain unchanged.
 Pi `authPresent` is pi's own login state, on the installed and `sdkHelperHost`
 paths alike. It is `true` when a known provider credential env-var name is
 set, or when pi's agent directory (`PI_CODING_AGENT_DIR`, else `~/.pi/agent`)
-holds an `auth.json` login record of pi's `api_key` or `oauth` shape for the
-global `settings.json` `defaultProvider`, or for any provider when
-`settings.json` is absent or configures no default. A missing `auth.json`, or
-an unreadable or malformed `auth.json` or `settings.json`, observes `false`. The
-probe inspects only presence and shape; it never returns, logs or retains a
-credential value. Provider keys inside `models.json` are not login state.
+holds a credential for the global `settings.json` `defaultProvider`, or for any
+provider when `settings.json` is absent or configures no default. A credential
+is an `auth.json` login record of pi's `api_key` or `oauth` shape, or a
+`models.json` provider entry with a non-empty `apiKey` string. That `apiKey`
+counts as written, whether a literal, an env-var reference or a `!command`;
+the probe neither resolves the reference nor runs the command. An unreadable or
+malformed `auth.json` or `settings.json` observes `false`. A missing
+`auth.json` or a missing, unreadable or malformed `models.json` contributes no
+credential. The probe inspects only presence and shape; it never returns, logs
+or retains a credential value.
 
 Fresh local `runtimes` and `status` show failure kinds; `doctor` carries the same
 closed outcome and finite refusal reason in JSON and counts them in text. Its existing

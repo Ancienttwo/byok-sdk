@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **client: pi `authPresent` counts a `models.json` provider `apiKey`** (#345) —
+  a pi user whose `settings.json` `defaultProvider` is a custom provider defined
+  in `models.json` with its own `apiKey` was reported `authPresent: false`,
+  although pi runs fine. `PiAdapter.detect()` now also counts a non-empty
+  `apiKey` string on that provider's `models.json` entry (any provider when no
+  default is set). The value may be a literal, an env-var reference or a
+  `!command`; it is neither resolved nor run. `models.json` is read as pi reads
+  it (BOM, `//` comments, trailing commas). A missing or malformed `models.json`
+  adds nothing; a malformed `auth.json` or `settings.json` still reports `false`.
+
 ## 0.26.0-rc.4 / @byok-sdk/keys 0.11.0-rc.4 — 2026-10-10 (published)
 
 The owner approved rc.4 and the dist-tag `rc` on 2026-10-10, then npm execution.

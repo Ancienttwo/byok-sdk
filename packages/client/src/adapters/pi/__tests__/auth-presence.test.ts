@@ -22,7 +22,7 @@ afterEach(async () => {
   await fs.rm(agentDir, { recursive: true, force: true });
 });
 
-async function write(name: 'auth.json' | 'settings.json', content: unknown): Promise<void> {
+async function write(name: 'auth.json' | 'settings.json' | 'models.json', content: unknown): Promise<void> {
   await fs.writeFile(path.join(agentDir, name), typeof content === 'string' ? content : JSON.stringify(content));
 }
 const probe = (extra: Record<string, string> = {}) => probePiAuthPresent({ PI_CODING_AGENT_DIR: agentDir, ...extra });
@@ -99,6 +99,81 @@ describe('probePiAuthPresent', () => {
   });
 });
 
+describe('probePiAuthPresent: models.json provider apiKey', () => {
+  const provider = (apiKey: unknown) => ({ providers: { magpie: { baseUrl: 'https://magpie.invalid/v1', api: 'openai-completions', apiKey } } });
+
+  test('the defaultProvider\'s own models.json apiKey is login state, beside auth.json logins for other providers', async () => {
+    await write('settings.json', { defaultProvider: 'magpie' });
+    await write('auth.json', { zai: OAUTH, 'openai-codex': API_KEY });
+    await expect(probe()).resolves.toBe(false);
+    await write('models.json', provider(SECRET));
+    await expect(probe()).resolves.toBe(true);
+    // Without auth.json at all.
+    await fs.rm(path.join(agentDir, 'auth.json'));
+    await expect(probe()).resolves.toBe(true);
+  });
+
+  test('an env-var template or !command is configured as written: never resolved, never run', async () => {
+    await write('settings.json', { defaultProvider: 'magpie' });
+    const marker = path.join(agentDir, 'command-ran');
+    for (const apiKey of ['MAGPIE_API_KEY_NOT_SET', '$MAGPIE_API_KEY_NOT_SET', '${MAGPIE_API_KEY_NOT_SET}', `!touch '${marker}'`]) {
+      await write('models.json', provider(apiKey));
+      await expect(probe(), apiKey).resolves.toBe(true);
+    }
+    await expect(fs.access(marker)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  test('a configured defaultProvider must itself carry the apiKey; with no default any provider does', async () => {
+    await write('models.json', provider(SECRET));
+    await write('settings.json', { defaultProvider: 'zai' });
+    await expect(probe()).resolves.toBe(false);
+    await write('settings.json', { defaultProvider: 'constructor' });
+    await expect(probe()).resolves.toBe(false);
+    for (const settings of [{}, { defaultProvider: '' }]) {
+      await write('settings.json', settings);
+      await expect(probe(), JSON.stringify(settings)).resolves.toBe(true);
+    }
+    await fs.rm(path.join(agentDir, 'settings.json'));
+    await expect(probe()).resolves.toBe(true);
+  });
+
+  test('models.json is read as pi reads it: BOM, // comments and trailing commas', async () => {
+    await write('settings.json', { defaultProvider: 'magpie' });
+    await write('models.json', `\ufeff{
+  // a custom provider
+  "providers": {
+    "magpie": { "baseUrl": "https://magpie.invalid/v1", "apiKey": "${SECRET}", },
+  },
+}`);
+    await expect(probe()).resolves.toBe(true);
+  });
+
+  test('missing, malformed or shapeless models.json contributes nothing and never throws', async () => {
+    await write('settings.json', { defaultProvider: 'magpie' });
+    await expect(probe()).resolves.toBe(false);
+    for (const content of ['', '{', '[]', 'null', {}, { providers: [] }, { providers: { magpie: null } },
+      { providers: { magpie: [] } }, provider(''), provider(7), provider(null), { providers: { magpie: { baseUrl: 'https://magpie.invalid' } } }]) {
+      await write('models.json', content);
+      await expect(probe(), JSON.stringify(content)).resolves.toBe(false);
+    }
+    await fs.rm(path.join(agentDir, 'models.json'));
+    await fs.mkdir(path.join(agentDir, 'models.json'));
+    await expect(probe()).resolves.toBe(false);
+    // A malformed models.json does not hide an auth.json login.
+    await write('auth.json', { magpie: API_KEY });
+    await expect(probe()).resolves.toBe(true);
+  });
+
+  test('a malformed auth.json or settings.json still observes false, as pi fails on them', async () => {
+    await write('models.json', provider(SECRET));
+    await write('auth.json', '{');
+    await expect(probe()).resolves.toBe(false);
+    await write('auth.json', {});
+    await write('settings.json', '{');
+    await expect(probe()).resolves.toBe(false);
+  });
+});
+
 describe('PiAdapter.detect() authPresent', () => {
   beforeEach(() => {
     for (const name of PROVIDER_CREDENTIAL_ENV_NAMES) vi.stubEnv(name, undefined);
@@ -127,6 +202,16 @@ describe('PiAdapter.detect() authPresent', () => {
       await write('auth.json', '{ not json');
       await expect(adapter().detect()).resolves.toMatchObject({ kind: 'available', authPresent: false });
 
+      // #345: a models.json provider key for the default provider, auth.json holding only other providers.
+      await write('auth.json', { zai: OAUTH });
+      await write('settings.json', { defaultProvider: 'magpie' });
+      await expect(adapter().detect()).resolves.toMatchObject({ kind: 'available', authPresent: false });
+      await write('models.json', { providers: { magpie: { baseUrl: 'https://magpie.invalid/v1', apiKey: SECRET } } });
+      const byModels = await adapter().detect();
+      expect(byModels).toMatchObject({ kind: 'available', authPresent: true });
+      expect(JSON.stringify(byModels)).not.toContain(SECRET);
+
+      await write('auth.json', '{ not json');
       vi.stubEnv('ANTHROPIC_API_KEY', SECRET);
       const byEnv = await adapter().detect();
       expect(byEnv).toMatchObject({ kind: 'available', authPresent: true });

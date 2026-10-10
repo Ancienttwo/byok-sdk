@@ -24,13 +24,22 @@ export function resolvePiAgentDir(env: Env): string {
   return override;
 }
 
+/**
+ * Pi's `models.json` reader (`utils/json.js` `stripJsonComments()`): drops
+ * `//` line comments and trailing commas outside string literals.
+ */
+function stripJsonComments(input: string): string {
+  return input
+    .replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*/g, (match) => (match[0] === '"' ? match : ''))
+    .replace(/"(?:\\.|[^"\\])*"|,(\s*[}\]])/g, (match, tail: string | undefined) => tail ?? (match[0] === '"' ? match : ''));
+}
+
 /** A JSON object, `'absent'` for a missing file, or `'invalid'` for any other read or parse failure. */
-async function readJsonObject(file: string): Promise<Record<string, unknown> | 'absent' | 'invalid'> {
+async function readJsonObject(file: string, options: { readonly comments?: boolean } = {}): Promise<Record<string, unknown> | 'absent' | 'invalid'> {
   try {
-    const parsed: unknown = JSON.parse((await fs.readFile(file, 'utf8')).replace(/^﻿/u, ''));
-    return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : 'invalid';
+    const text = (await fs.readFile(file, 'utf8')).replace(/^﻿/u, '');
+    const parsed: unknown = JSON.parse(options.comments === true ? stripJsonComments(text) : text);
+    return isObject(parsed) ? parsed : 'invalid';
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : 'invalid';
   }
@@ -53,29 +62,48 @@ function isStoredLogin(entry: unknown): boolean {
     && Number.isFinite(record.expires);
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * A `models.json` provider carries its own credential when it has an `apiKey`
+ * string of pi's schema shape (non-empty). The value may be a literal, an
+ * env-var template or a `!command`; it is neither resolved nor executed, and
+ * only its type and length are inspected.
+ */
+function hasConfiguredApiKey(provider: unknown): boolean {
+  return isObject(provider) && typeof provider.apiKey === 'string' && provider.apiKey.length > 0;
+}
+
 /**
  * Pi's non-secret login-state observation, its equivalent of
  * `claude auth status`'s `loggedIn`. True when a known provider credential
- * env var *name* is set, or when pi's agent-dir `auth.json` holds a usable
- * login record for the global `settings.json` `defaultProvider` (any
- * provider when `settings.json` is absent or configures no default). A
- * missing `auth.json`, or an unreadable or malformed `auth.json` or
- * `settings.json`, observes `false`; this never throws and never returns,
- * logs, or keeps any credential value.
+ * env var *name* is set, or when the global `settings.json` `defaultProvider`
+ * (any provider when `settings.json` is absent or configures no default) has
+ * a usable login record in pi's agent-dir `auth.json` or an `apiKey` in its
+ * agent-dir `models.json`. An unreadable or malformed `auth.json` or
+ * `settings.json` observes `false`, as pi itself fails on such an `auth.json`;
+ * a missing or malformed `models.json` contributes nothing, as pi ignores it.
+ * This never throws and never returns, logs, or keeps any credential value.
  */
 export async function probePiAuthPresent(env: Env): Promise<boolean> {
   if (PROVIDER_CREDENTIAL_ENV_NAMES.some((name) => env[name] !== undefined)) return true;
   try {
     const agentDir = resolvePiAgentDir(env);
     const auth = await readJsonObject(path.join(agentDir, 'auth.json'));
-    if (typeof auth === 'string') return false;
+    if (auth === 'invalid') return false;
     const settings = await readJsonObject(path.join(agentDir, 'settings.json'));
     if (settings === 'invalid') return false;
+    const models = await readJsonObject(path.join(agentDir, 'models.json'), { comments: true });
+    const logins = auth === 'absent' ? {} : auth;
+    const providers = typeof models === 'string' || !isObject(models.providers) ? {} : models.providers;
     const defaultProvider = settings === 'absent' ? undefined : settings.defaultProvider;
     if (typeof defaultProvider === 'string' && defaultProvider.length > 0) {
-      return Object.hasOwn(auth, defaultProvider) && isStoredLogin(auth[defaultProvider]);
+      return (Object.hasOwn(logins, defaultProvider) && isStoredLogin(logins[defaultProvider]))
+        || (Object.hasOwn(providers, defaultProvider) && hasConfiguredApiKey(providers[defaultProvider]));
     }
-    return Object.values(auth).some(isStoredLogin);
+    return Object.values(logins).some(isStoredLogin) || Object.values(providers).some(hasConfiguredApiKey);
   } catch {
     return false;
   }
