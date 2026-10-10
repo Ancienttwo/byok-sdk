@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.26.0-rc.4 / @byok-sdk/keys 0.11.0-rc.4 — 2026-10-10 (prepared; not published)
+
+The owner approved rc.4 and the dist-tag `rc` on 2026-10-10; npm execution is a
+separate step. rc.3 is published and is superseded by rc.4 on the `rc` channel.
+Unlike rc.3, this candidate is not the same content: it adds the two pi client
+fixes of PR #342. `latest` stays 0.25.0 / keys 0.10.0.
+
+- The eight aligned package manifests move to 0.26.0-rc.4.
+- keys moves to 0.11.0-rc.4. Its packed core edge is exactly 0.26.0-rc.4.
+- The lock workspace records and current version documents move together.
+- [Release notes](docs/releases/v0.26.0.md) describe the rc.4 changes.
+
 - **client: pi `authPresent` reflects pi's own login** (#340) — `PiAdapter.detect()`
   previously set `authPresent` only from provider credential env-var names, so
   a user logged in through pi's own `auth.json` (for example an OAuth provider)
@@ -25,7 +37,7 @@
   a user extension package in Bun and Node bundles and in a Bun-compiled
   executable.
 
-## 0.26.0-rc.3 / @byok-sdk/keys 0.11.0-rc.3 — 2026-10-10 (published)
+## 0.26.0-rc.3 / @byok-sdk/keys 0.11.0-rc.3 — 2026-10-10 (published; superseded by rc.4)
 
 The owner approved rc.3 and npm execution after rc.2 reached only cloud-do,
 core and protocol. The publisher refuses continuation of a partial RC.
