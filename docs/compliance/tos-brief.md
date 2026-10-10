@@ -102,6 +102,15 @@ A repository-wide grep for reads of those credential paths found **no** `fs.read
 targeting `~/.claude`, `~/.codex`, or `~/.pi`. Every occurrence of those path strings is
 either the prose rule above or unrelated OS service-lifecycle / device-store paths.
 
+> **Update 2026-10-10 (#340):** the pi part of this rule changed. The pi adapter now reads
+> pi's agent-dir `auth.json` (and `settings.json` `defaultProvider`) in-process to observe
+> pi's own login state, inspecting only whether a login record of pi's `api_key`/`oauth`
+> shape exists; it never compares, returns, logs, or forwards a value
+> (`packages/client/src/adapters/pi/auth-presence.ts`, `docs/security.md`). The
+> `~/.claude` / `~/.codex` no-read statement above is unchanged. pi is MIT-licensed and
+> this is pi's own documented storage format, so the ToS analysis below (which concerns
+> Claude and Codex) is not affected.
+
 **3. Auth presence is probed via the binary's own non-secret status command, not by reading
 credentials.**
 - Claude: `packages/client/src/adapters/claude/claude-adapter.ts:315-342` runs
@@ -109,8 +118,10 @@ credentials.**
   `~/.claude` or any credential file itself" — and reads only `loggedIn: true/false`.
 - Codex: `packages/client/src/adapters/codex/codex-adapter.ts:90-123` runs `codex login
   status` and interprets its human-readable report, "without ever reading `~/.codex/auth.json`."
-- pi: `packages/client/src/adapters/pi/pi-adapter.ts:23-45` checks only whether known provider
-  env-var **names** are set (never values).
+- pi: `packages/client/src/adapters/pi/auth-presence.ts` checks whether known provider
+  env-var **names** are set (never values), then whether pi's own `auth.json` holds a login
+  record for the configured default provider (shape only, never values; updated 2026-10-10,
+  #340).
 
 **4. Official flags / official mechanisms only.**
 - Claude spawn argv (`claude-adapter.ts:240-253`): `-p --input-format stream-json
@@ -131,7 +142,7 @@ enrollment path exists.
 Grep of `packages/` and `docs/` for `bare` mode, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
 passthrough, or any API-key-based fallback spawn path returns **no such feature**. The only
 `*_API_KEY` occurrences are the env-var **name** list used for presence detection
-(`pi-adapter.ts:31-45`) and test fixtures. There is no implementation, stub, or TODO for an
+(`adapters/provider-credential-environment.ts`) and test fixtures. There is no implementation, stub, or TODO for an
 API-key escape hatch on this branch. **This is a design concept, not existing code.**
 
 **7. Per-product daemon isolation.**

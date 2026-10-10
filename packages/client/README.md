@@ -80,6 +80,20 @@ directory before you write the executable into it. Without the asset root, `dete
 launch is refused with `pi_bundled_assets_unavailable`. Pi reads its photon
 WASM file beside the executable; without it, pi skips image resizing.
 
+Bundled pi loads the user's own Pi packages and extensions from the user's
+agent directory (`settings.json` `packages`, `extensions`), as the installed
+`pi` CLI does. An extension may import the packages pi supplies to extensions:
+`@earendil-works/pi-coding-agent`, `pi-ai`, `pi-agent-core`, `pi-tui` (and
+their `@mariozechner/*` names) and `typebox`. Bundled pi gives it the modules
+in the product bundle. Before pi loads, `runSdkReservedHelperCommand()` sets
+the global `PI_BUNDLED_NODE`, the switch of pi's own bundled Node build. Pi
+reads it once, when the bundle first evaluates pi. So the product entry must
+call `runSdkReservedHelperCommand()` before its code imports pi. A product that
+imports pi itself at the top of its entry must define `PI_BUNDLED_NODE` as
+`true` in its bundler (esbuild/Bun `define: { PI_BUNDLED_NODE: 'true' }`).
+Every other import of an extension resolves from the extension's own
+directory. An extension that does not load still fails the pi task.
+
 Normal Node/Bun source hosts omit `sdkHelperHost` and continue to use the
 package's installed helper scripts. A required-message offer performs an exact
 stdio MCP initialize/tools-list handshake before adapter preparation; an
@@ -109,6 +123,15 @@ Codex runs with sandbox `danger-full-access` by default. Set
 `DaemonConfig.codexSandbox` to `read-only` or `workspace-write` for a stricter
 mode, or to `inherit` to apply the user's own `config.toml`. Any other value
 makes `createDaemon` throw a `TypeError`.
+
+Pi `detect()` reports `authPresent` from pi's own login state, with or without
+`sdkHelperHost`. It is `true` when a known provider credential env-var name is
+set, or when `auth.json` in pi's agent directory (`PI_CODING_AGENT_DIR`, else
+`~/.pi/agent`) holds an `api_key` or `oauth` login record for the global
+`settings.json` `defaultProvider`, or for any provider when `settings.json` is
+absent or sets no default. A missing `auth.json`, or an unreadable or malformed
+`auth.json` or `settings.json`, reports `false`. The probe checks only presence and
+shape and never returns or logs a credential value.
 
 Hosts that only need runtime detection/composition can import the
 transport-free adapter surface:

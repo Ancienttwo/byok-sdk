@@ -11,6 +11,13 @@ Environment: darwin (macOS), this machine, `pnpm@10.33.4`, Node ≥20 per
 `package.json`'s `engines`. Repo at `m4` branch, commit `622030a`, clean
 worktree.
 
+> **Scope note (2026-10-10):** this audit covers only `~/.claude` and `~/.codex`
+> at commit `622030a`. It never covered pi. Since #340 the pi adapter
+> deliberately reads pi's agent-dir `auth.json` to observe login presence
+> (shape only, no value returned or logged); see `docs/security.md` and
+> `packages/client/src/adapters/pi/auth-presence.ts`. The Claude/Codex
+> zero-read result below is unaffected.
+
 ## 1. Credential zero-read audit
 
 **Claim under test**: the daemon process tree never opens/reads

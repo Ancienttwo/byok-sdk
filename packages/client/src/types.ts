@@ -31,8 +31,10 @@ export const RUNTIME_DETECTION_FAILURE_KINDS = ['not-found', 'not-executable', '
 
 /**
  * One probe outcome, never a separately authored presence boolean. Authentication
- * observation retains each adapter's native status/env-name probe and never
- * reads credential storage. Failure variants contain no arbitrary diagnostics.
+ * observation is each adapter's native non-secret login-state probe (a status
+ * command, credential env-var names, or Pi's shape-only agent-dir login check)
+ * and never returns, logs, or retains a credential value. Failure variants
+ * contain no arbitrary diagnostics.
  */
 export type RuntimeDetectResult =
   | { readonly kind: 'available'; readonly version?: string; readonly authPresent?: boolean; readonly advisory?: RuntimeDetectionAdvisory }

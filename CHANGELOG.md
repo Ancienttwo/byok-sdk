@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- **client: pi `authPresent` reflects pi's own login** (#340) — `PiAdapter.detect()`
+  previously set `authPresent` only from provider credential env-var names, so
+  a user logged in through pi's own `auth.json` (for example an OAuth provider)
+  was reported `authPresent: false` on both the installed and `sdkHelperHost`
+  paths. It now also reports `true` when pi's agent directory
+  (`PI_CODING_AGENT_DIR`, else `~/.pi/agent`) holds an `api_key` or `oauth`
+  login record for the global `settings.json` `defaultProvider`, or for any
+  provider when `settings.json` is absent or sets no default. The probe checks
+  only presence and shape, never returns or logs a value, and reports `false`
+  for a missing `auth.json` or an unreadable or malformed `auth.json` or
+  `settings.json`.
+
+- **client: bundled pi loads user extensions that import pi (#341)** — In a
+  single-file product (`sdkHelperHost`), a user Pi extension that imported
+  `@earendil-works/pi-coding-agent` or `typebox` failed with `Cannot find
+  module`, so every pi task failed. `runSdkReservedHelperCommand()` now sets
+  pi's `PI_BUNDLED_NODE` switch before pi loads. Pi then gives extensions the
+  pi packages and `typebox` from the product bundle, as the installed `pi` CLI
+  does. A product that imports pi at the top of its own entry must define
+  `PI_BUNDLED_NODE` as `true` in its bundler. The host payload test now runs
+  a user extension package in Bun and Node bundles and in a Bun-compiled
+  executable.
+
 ## 0.26.0-rc.3 / @byok-sdk/keys 0.11.0-rc.3 — 2026-10-10 (published)
 
 The owner approved rc.3 and npm execution after rc.2 reached only cloud-do,

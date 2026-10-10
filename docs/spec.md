@@ -395,6 +395,16 @@ Other resolver/process failures are `probe-failed`. Failure results contain no
 paths, raw error messages, stdout or stderr. Existing authentication observation
 semantics and credential custody remain unchanged.
 
+Pi `authPresent` is pi's own login state, on the installed and `sdkHelperHost`
+paths alike. It is `true` when a known provider credential env-var name is
+set, or when pi's agent directory (`PI_CODING_AGENT_DIR`, else `~/.pi/agent`)
+holds an `auth.json` login record of pi's `api_key` or `oauth` shape for the
+global `settings.json` `defaultProvider`, or for any provider when
+`settings.json` is absent or configures no default. A missing `auth.json`, or
+an unreadable or malformed `auth.json` or `settings.json`, observes `false`. The
+probe inspects only presence and shape; it never returns, logs or retains a
+credential value. Provider keys inside `models.json` are not login state.
+
 Fresh local `runtimes` and `status` show failure kinds; `doctor` carries the same
 closed outcome and finite refusal reason in JSON and counts them in text. Its existing
 any-present pass/warn rule remains unchanged. Display `present` is a deterministic
@@ -1457,12 +1467,25 @@ form, the photon WASM file and the SDK todo locale assets with their license
 and provenance files. The photon loader of pi reads its WASM file beside the
 executable; without it, pi skips image resizing. The asset root is a build
 output of the product. The product must not mix asset roots of two pins.
+Bundled pi loads the user's own Pi packages and extensions from the user's
+agent directory, as the installed pi CLI does; there is no host option to skip
+them. Pi supplies its host-provided packages to extensions (the pi
+coding-agent, pi-ai, pi-agent-core and pi-tui packages under both scopes, and
+`typebox`). In the bundle these are the bundle's own modules:
+`runSdkReservedHelperCommand` sets the global `PI_BUNDLED_NODE`, the switch of
+pi's own bundled Node build, before it imports the runtime host that
+evaluates pi. A product bundle that evaluates pi earlier must define
+`PI_BUNDLED_NODE` as `true` at build time. Other extension imports resolve
+from the extension's own directory. An extension that fails to load fails the
+task.
 `detect()` reports `available` with the client pin only when the asset root
 holds the SDK asset manifest; otherwise it reports `not-found`, and a launch is
 refused with `pi_bundled_assets_unavailable`. The client packaging test builds
-an interpreter + bundle host with no `node_modules` and runs one pi task
-against a loopback provider. It also builds a Bun-compiled host whose asset
-root is its own directory, with no `PI_PACKAGE_DIR`, and runs the same task.
+interpreter + bundle hosts, run by Bun and by Node, with no `node_modules`, and
+runs one pi task against a loopback provider. It also builds a Bun-compiled
+host whose asset root is its own directory, with no `PI_PACKAGE_DIR`, and runs
+the same task. Each task loads a user Pi package whose TypeScript extension
+imports the pi coding-agent package and `typebox`.
 
 The authenticated local control socket accepts an expected-revision
 compare-and-swap reload of the complete registry. The CLI host reads

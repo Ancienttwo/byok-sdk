@@ -226,11 +226,18 @@ The stable Pi session path is host configuration: the launcher creates a
 missing directory owner-only, but never changes permissions on an existing
 directory, so a mistaken path cannot become a chmod sink. On POSIX, an
 existing directory that is not already owner-only is rejected.
-Presence checks remain limited to non-secret signals the CLI itself reports —
+Presence checks remain limited to non-secret login-state signals —
 `claude auth status --json`'s `loggedIn` field
 (`adapters/claude/claude-adapter.ts`), `codex login status`'s human-readable
-report (`adapters/codex/codex-adapter.ts`), and pi's env-var-name-only check
-— never a file read of `~/.claude`, `~/.codex`, or `~/.pi`.
+report (`adapters/codex/codex-adapter.ts`), and pi's login-state probe
+(`adapters/pi/auth-presence.ts`) — never a file read of `~/.claude` or
+`~/.codex`. Pi's own `auth check` needs an explicit provider and a single-file
+product exposes no pi CLI, so the pi probe checks provider credential env-var
+*names* and then reads pi's agent-dir `auth.json` (and `settings.json`
+`defaultProvider`) in-process, inspecting only whether a login record of pi's
+own `api_key`/`oauth` shape exists. It never compares, returns, logs, or keeps
+a value; a missing `auth.json`, or an unreadable or malformed `auth.json` or
+`settings.json`, observes `authPresent: false`.
 
 **Environment inheritance (ADR-037 D2/D3)**: every task child — the runtime
 CLI and the MCP servers the daemon probes for it — gets the daemon's full

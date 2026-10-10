@@ -81,6 +81,21 @@ describe('SDK-reserved helper host composition', () => {
     expect(prepared).toHaveBeenLastCalledWith([]);
   });
 
+  it('declares the bundled Pi runtime for a reserved command only, before the Pi host dispatch (#341)', async () => {
+    const scope = globalThis as { PI_BUNDLED_NODE?: boolean };
+    delete scope.PI_BUNDLED_NODE;
+    try {
+      await expect(runSdkReservedHelperCommand(['status'])).resolves.toBe(false);
+      expect(scope.PI_BUNDLED_NODE).toBeUndefined();
+      let declaredAtDispatch: boolean | undefined;
+      vi.spyOn(rpcHost, 'runPiRpcHost').mockImplementation(async () => { declaredAtDispatch = scope.PI_BUNDLED_NODE; });
+      await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, 'pi-rpc', '--config', '/x'])).resolves.toBe(true);
+      expect(declaredAtDispatch).toBe(true);
+    } finally {
+      delete scope.PI_BUNDLED_NODE;
+    }
+  });
+
   it('retains exact MCP arity at both dispatch boundaries', async () => {
     for (const kind of ['agent-message-mcp', 'agent-memory-mcp', 'agent-memory-describe', 'agent-team-mcp'] as const) {
       await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, kind, '--config', '/x'])).rejects.toThrow(/invalid/);

@@ -241,8 +241,10 @@ all absent):
   by default, authenticated with the configured key, with no further config
   needed. A real key in place of the dummy one is the only missing piece.
 
-`pi-adapter.ts` includes `ZAI_API_KEY` in its presence-only `authPresent`
-probe, so a configured GLM runtime is reflected in the example's runtime chip.
+The pi `authPresent` probe (`adapters/pi/auth-presence.ts`) counts the
+`ZAI_API_KEY` env-var name, and also a `zai` login stored in pi's own
+`auth.json` (when `zai` is pi's default provider or no default is set), so a configured GLM runtime is reflected in the example's runtime
+chip.
 
 ## Permission mode
 
