@@ -7,25 +7,26 @@ composition over Postgres and R2.
 
 ## Release status
 
-The current source candidate is the prerelease **0.26.0-rc.4** for the eight
-aligned packages, with independent keys **0.11.0-rc.4**. The release owner
-approved it and the npm dist-tag `rc` on 2026-10-10. It is not published; npm
-execution is a separate step. `latest` stays 0.25.0 / keys 0.10.0. The public
-set is nine packages; `@byok-sdk/implementation-identity` stays retired.
+The current `rc` release is **0.26.0-rc.4** for the eight aligned packages,
+with independent keys **0.11.0-rc.4**. The release owner approved it and the
+npm dist-tag `rc` on 2026-10-10, and it was published on 2026-10-11. Registry
+readback confirms all nine packages on `rc`. `latest` stays 0.25.0 / keys
+0.10.0. The public set is nine packages; `@byok-sdk/implementation-identity` stays retired.
 rc.4 adds two pi client fixes over rc.3: `authPresent` reflects pi's own
 `auth.json` login (#340), and bundled pi gives user extensions the bundle's pi
-packages (#341). The `rc` dist-tag currently points to the published
-**0.26.0-rc.3** / keys 0.11.0-rc.3 (see its
-[publication record](docs/releases/v0.26.0-rc.3-publication.md)), which rc.4
-supersedes. rc.1 and rc.2 were only partially published (cloud-do, core and
+packages (#341). The earlier published **0.26.0-rc.3** / keys 0.11.0-rc.3 (see its
+[publication record](docs/releases/v0.26.0-rc.3-publication.md)) is superseded
+by rc.4. rc.1 and rc.2 were only partially published (cloud-do, core and
 protocol) and are also superseded.
 [Release notes](docs/releases/v0.26.0.md) describe the additions since 0.25.0
 (memory-reader Attempts, the closing reply, `copyPiRuntimeAssets`, the public
 keys Pi launcher entry and OAR 0.48.0), the client and keys breaking cuts and
 the upgrade steps.
 
-Versioned install examples below name the rc.4 candidate and work only after
-rc.4 is published and read back.
+Versioned install examples below use the published rc.4 packages. The
+[publication record](docs/releases/v0.26.0-rc.4-publication.md) confirms the
+frozen artifact identity and registry readback. Live Host acceptance remains
+separate.
 
 The current `latest` release is **0.25.0** for eight aligned packages, with
 independent keys **0.10.0**, published on npm `latest` on 2026-10-09 from
@@ -106,12 +107,11 @@ import { createByokServer } from '@byok-sdk/server';
 ```
 
 The Worker-only cloud-do package is published from 0.24.0. The example below
-names the 0.26.0-rc.4 candidate; it becomes usable only after publication and
-exact registry readback.
+names the published 0.26.0-rc.4 release.
 See [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
 
 ~~~sh
-# Release candidate source version; publication is pending.
+# Published release candidate.
 npm install @byok-sdk/cloud-do@0.26.0-rc.4
 npm install --save-dev @cloudflare/workers-types
 ~~~

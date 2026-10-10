@@ -2,10 +2,10 @@
 
 ## Unreleased
 
-## 0.26.0-rc.4 / @byok-sdk/keys 0.11.0-rc.4 — 2026-10-10 (prepared; not published)
+## 0.26.0-rc.4 / @byok-sdk/keys 0.11.0-rc.4 — 2026-10-10 (published)
 
-The owner approved rc.4 and the dist-tag `rc` on 2026-10-10; npm execution is a
-separate step. rc.3 is published and is superseded by rc.4 on the `rc` channel.
+The owner approved rc.4 and the dist-tag `rc` on 2026-10-10, then npm execution.
+rc.3 is superseded by rc.4 on the `rc` channel.
 Unlike rc.3, this candidate is not the same content: it adds the two pi client
 fixes of PR #342. `latest` stays 0.25.0 / keys 0.10.0.
 
@@ -13,6 +13,8 @@ fixes of PR #342. `latest` stays 0.25.0 / keys 0.10.0.
 - keys moves to 0.11.0-rc.4. Its packed core edge is exactly 0.26.0-rc.4.
 - The lock workspace records and current version documents move together.
 - [Release notes](docs/releases/v0.26.0.md) describe the rc.4 changes.
+- [Publication record](docs/releases/v0.26.0-rc.4-publication.md) confirms all
+  nine rc.4 packages, frozen artifact identity and registry readback.
 
 - **client: pi `authPresent` reflects pi's own login** (#340) — `PiAdapter.detect()`
   previously set `authPresent` only from provider credential env-var names, so
