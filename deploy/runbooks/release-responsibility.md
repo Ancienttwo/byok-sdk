@@ -28,9 +28,11 @@ accepted CI bytes, registry metadata and an isolated installed consumer. See
 [stable release notes](../../docs/releases/v0.25.0-stable.md); the
 [rc.2 notes](../../docs/releases/v0.25.0-rc.2.md) retain their original scope.
 The owner approved the prerelease 0.26.0-rc.1 / keys 0.11.0-rc.1 under the
-dist-tag `rc` on 2026-10-10, with stable after end-to-end verification; npm
-execution approval remains separate. See
-[0.26.0-rc.1 release notes](../../docs/releases/v0.26.0.md).
+dist-tag `rc` on 2026-10-10, with stable after end-to-end verification. Only
+cloud-do, core and protocol 0.26.0-rc.1 reached the registry, so the owner
+approved 0.26.0-rc.2 / keys 0.11.0-rc.2 with the same content the same day;
+npm execution approval remains separate. See
+[0.26.0 release notes](../../docs/releases/v0.26.0.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
 
@@ -47,8 +49,8 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 ## Version selection
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
-The approved source manifests name the prerelease train 0.26.0-rc.1 and
-independent keys 0.11.0-rc.1. Both are MINOR lines: the train adds public API
+The approved source manifests name the prerelease train 0.26.0-rc.2 and
+independent keys 0.11.0-rc.2. Both are MINOR lines: the train adds public API
 (memory-reader Attempts, `task.complete.finalMessage`, `copyPiRuntimeAssets`)
 and cuts the client Agent home execution lease; keys makes its Pi launcher
 entry public and tightens Pi admission. Keep lock workspace records,
@@ -98,6 +100,8 @@ separate evidence and authorization; see the
    2. Download that run's accepted tarballs: `gh run download <run-id> -n release-pack-<sha> -D <dir>`, where `<sha>` is the full 40-character commit id (`git rev-parse HEAD`).
    3. After approving the exact package/version/channel plan, dry run `node scripts/release/publish.mjs --artifacts <dir>` for stable; append `--tag rc` for an approved RC. It refuses unless the frozen schema-3 `release-manifest.json` names the release version, exact complete package set and reviewed registry baseline, and was packed from the current `HEAD`. Every tarball the publish set needs must be present and match its recorded SHA-256, SHA-512, package identity and runtime dependency maps. Older manifests are not defaulted or upgraded in place. It queries registry version availability and, for an RC, the explicit prior-publication baseline, then prints the ordered plan. It does not publish, perform post-publication readback or tag. Only the appropriate clean not-found response can establish version/package absence; authentication, transport, malformed-output and other read errors block. `--artifacts` avoids rebuilding/repacking; a bare dry run builds and packs.
    4. Obtain separate publication authorization for that exact destination, public package/version set, channel and provenance method. For stable, release with `node scripts/release/publish.mjs --artifacts <dir> --execute`; append `--tag rc` only for an approved RC. Run interactively in Terminal.app for npm write 2FA. It refuses if the tag already exists, if `npm whoami` reports no account, or if `npm profile get --json` does not report `tfa.mode` `auth-and-writes` — there is no override. Immediately before the first RC write, it rechecks exact-version absence and the entire baseline; this narrows the race window but npm publication remains nontransactional. It then publishes each tarball in dependency order (`--provenance` only under GitHub Actions OIDC; a local release logs that no attestation is attached), reads the registry back, and only then creates the annotated `v<version>` tag carrying the source commit.
+
+      On a slow uplink, raise npm's request timeout for this run (for example `npm_config_fetch_timeout=3600000`): the client tarball is about 10.8 MB, and its publish request can outlast npm's default `fetch-timeout` of 300000 ms.
    5. Push the tag: `git push origin v<version>`. A tag exists only for a train the registry has already confirmed.
 
    **Uncertain or partial publication:** inspect exact registry versions, digests,

@@ -7,11 +7,13 @@ composition over Postgres and R2.
 
 ## Release status
 
-The current source candidate is the prerelease **0.26.0-rc.1** for the eight
-aligned packages, with independent keys **0.11.0-rc.1**. The release owner
+The current source candidate is the prerelease **0.26.0-rc.2** for the eight
+aligned packages, with independent keys **0.11.0-rc.2**. The release owner
 approved it on 2026-10-10. It is not published. Publication will use the npm
 dist-tag `rc`, so `latest` stays 0.25.0 / keys 0.10.0. The public set is nine
-packages; `@byok-sdk/implementation-identity` stays retired.
+packages; `@byok-sdk/implementation-identity` stays retired. rc.2 carries the
+same content as 0.26.0-rc.1, which was only partially published (cloud-do,
+core and protocol) and is superseded; do not install 0.26.0-rc.1.
 [Release notes](docs/releases/v0.26.0.md) describe the additions since 0.25.0
 (memory-reader Attempts, the closing reply, `copyPiRuntimeAssets`, the public
 keys Pi launcher entry and OAR 0.48.0), the client and keys breaking cuts and
@@ -94,7 +96,7 @@ Install the scoped packages your composition uses and import each one under
 its own name. For example, a self-hosted composition:
 
 ```sh
-npm install @byok-sdk/server@0.26.0-rc.1 @byok-sdk/client@0.26.0-rc.1
+npm install @byok-sdk/server@0.26.0-rc.2 @byok-sdk/client@0.26.0-rc.2
 ```
 
 ```ts
@@ -102,13 +104,13 @@ import { createByokServer } from '@byok-sdk/server';
 ```
 
 The Worker-only cloud-do package is published from 0.24.0. The example below
-names the 0.26.0-rc.1 candidate; it becomes usable only after publication and
+names the 0.26.0-rc.2 candidate; it becomes usable only after publication and
 exact registry readback.
 See [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
 
 ~~~sh
 # Release candidate source version; publication is pending.
-npm install @byok-sdk/cloud-do@0.26.0-rc.1
+npm install @byok-sdk/cloud-do@0.26.0-rc.2
 npm install --save-dev @cloudflare/workers-types
 ~~~
 
@@ -254,7 +256,7 @@ It is intentionally outside the dispatch packages and their entire dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.11.0-rc.1
+npm install @byok-sdk/keys@0.11.0-rc.2
 ```
 
 ## Host connector composition
@@ -270,5 +272,5 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.11.0-rc.1`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.11.0-rc.2`
 require Node.js 24.15.0 or newer. MIT licensed.
