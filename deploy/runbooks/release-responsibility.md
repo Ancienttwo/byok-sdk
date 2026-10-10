@@ -36,11 +36,12 @@ rc.2 also reached only cloud-do, core and protocol. The owner approved
 2026-10-10. All nine rc.3 packages were published and read back on `rc`, from
 `v0.26.0-rc.3` (`b2b1ec3d`). See its
 [rc.3 publication record](../../docs/releases/v0.26.0-rc.3-publication.md).
-rc.3 is superseded on `rc` by the prepared 0.26.0-rc.4 / keys 0.11.0-rc.4, which
-the owner approved under the dist-tag `rc` on 2026-10-10. rc.4 adds the pi
-client fixes of PR #342 (#340, #341) and is not same-content. It is not
-published; npm execution approval remains separate. See the
-[0.26.0 release notes](../../docs/releases/v0.26.0.md).
+rc.3 is superseded on `rc` by 0.26.0-rc.4 / keys 0.11.0-rc.4, which the owner
+approved under the dist-tag `rc` on 2026-10-10. rc.4 adds the pi client fixes
+of PR #342 (#340, #341) and is not same-content. All nine rc.4 packages are
+published and read back on `rc`, from `v0.26.0-rc.4` (`e3f6d723`). See its
+[rc.4 publication record](../../docs/releases/v0.26.0-rc.4-publication.md) and
+the [0.26.0 release notes](../../docs/releases/v0.26.0.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
 

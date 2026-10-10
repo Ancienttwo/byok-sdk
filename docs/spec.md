@@ -178,9 +178,9 @@ authorization and registry readback. The current independent keys release is
 dispatch release, `0.26.0-rc.4`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-The 0.26.0-rc.4 train is a prepared prerelease, not yet published. The owner
-approved 0.26.0-rc.4 / keys 0.11.0-rc.4 under the dist-tag `rc` on 2026-10-10;
-npm execution is a separate step. rc.4 is not same-content as rc.3: it adds the
+The 0.26.0-rc.4 train is published on `rc`. The owner approved
+0.26.0-rc.4 / keys 0.11.0-rc.4 under the dist-tag `rc` on 2026-10-10; complete
+registry readback passed on 2026-10-11. rc.4 is not same-content as rc.3: it adds the
 pi client fixes of PR #342 (#340 `authPresent` from pi's own login, #341 bundled
 pi user extensions). The 0.26.0-rc.3 train is published on `rc` (complete
 registry readback and an isolated npm install passed on 2026-10-10) and is

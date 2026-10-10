@@ -4,9 +4,8 @@ This package hosts a pi-durable session in a Cloudflare Durable Object.
 It provides native SQLite storage, inline tools, wake and inbox processing,
 usage limits, settlement hooks, and transcript reads.
 
-The current source candidate is the prerelease 0.26.0-rc.4, in the nine-package
-release set with keys 0.11.0-rc.4, under the npm dist-tag `rc`. It is not
-published. The published 0.26.0-rc.3 (see the
+The current `rc` release is 0.26.0-rc.4, in the nine-package release set with
+keys 0.11.0-rc.4. Registry readback passed on 2026-10-11. The earlier 0.26.0-rc.3 (see the
 [rc.3 publication record](../../docs/releases/v0.26.0-rc.3-publication.md)) is
 superseded by rc.4, and rc.1 and rc.2 were partially published and are also
 superseded. `latest` stays 0.25.0 / keys 0.10.0. See the
@@ -16,9 +15,7 @@ The package needs Node 24.15.0 or later for build tooling.
 
 ## Install and subclass
 
-The following install example names the release candidate source version. It
-becomes usable only after publication and exact registry readback. Before that,
-use verified accepted CI tarballs from one source SHA for integration. Do not
+The following install example names the published release candidate. Do not
 use a workspace source import as installed-package acceptance evidence.
 
 ~~~sh
