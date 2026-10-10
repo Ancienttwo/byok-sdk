@@ -169,9 +169,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 
-## OAR 0.48.0 087df16 (Apache-2.0)
+## OAR 0.54.3 b36b439 (Apache-2.0)
 
-Fixed upstream commit 087df160dd64cd020c98a8b089ce8feb01f73590 from https://github.com/botiverse/oar. SDK-owned private runtime fork; selected source inventory and original/maintained SHA256 are recorded in oar/087df16/source-manifest.json. BYOK changes are documented in oar/087df16/PROVENANCE.md and marked in modified files.
+Fixed upstream commit b36b439e328d836fd24d838bdadea6d2ecbcaeb5 from https://github.com/botiverse/oar. SDK-owned private runtime fork; selected source inventory and original/maintained SHA256 are recorded in oar/b36b439/source-manifest.json. BYOK changes are documented in oar/b36b439/PROVENANCE.md and marked in modified files.
 
 
                                  Apache License

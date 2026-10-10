@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 087df16 for injected processes, bounded RPCs and server replies (Apache-2.0).
+// BYOK change: Modified from OAR b36b439 for injected processes, bounded RPCs and server replies (Apache-2.0).
 // BYOK change: The caller owns process creation and must enforce bounded kill/exited semantics.
 export interface LineProcess {
   readonly spawned: Promise<void>;
@@ -28,6 +28,7 @@ export class RpcTimeoutError extends Error {
   }
 }
 import { asRecord, parseJson, type JsonRecord } from "../../shared/json.js";
+import { nativeErrorCause } from "../../shared/native-error.js";
 import { redactError } from "../../shared/mcp-servers.js";
 // BYOK change: Keep startup synchronous at the injected spawn seam; do not use the upstream queued-client wrapper.
 // BYOK change: Use caller-owned exitError diagnostics instead of shared/executable processFailure.
@@ -88,6 +89,7 @@ export interface AppServerClient {
 }
 
 interface Pending {
+  readonly method: string;
   resolve(result: JsonRecord): void;
   reject(error: Error): void;
   settled(outcome: RpcOutcome): void;
@@ -199,23 +201,23 @@ export function startAppServerClient(
     }
     if (typeof message.id === "number" && pending.has(message.id)) {
       const waiter = pending.get(message.id);
+      if (waiter === undefined) { return; }
       pending.delete(message.id);
-      clearTimeout(waiter?.timer); // BYOK change: response wins over the deadline.
+      clearTimeout(waiter.timer); // BYOK change: response wins over the deadline.
       const error = asRecord(message.error);
       if (error !== null) {
-        const failure = new Error(redact(typeof error.message === "string" ? error.message : "app-server error"));
-        const redacted = JSON.stringify(error, (_key, value: unknown) => typeof value === "string" ? redact(value) : value);
-        const native = asRecord(parseJson(redacted));
+        const cause = nativeErrorCause(waiter.method, error, redact);
+        const failure = new Error(redact(typeof error.message === "string" ? error.message : "app-server error"), { cause });
         // BYOK change: Required settlement failure must reject the promise even after removal from pending.
-        try { waiter?.settled({ kind: "error", error: failure, ...(native === null ? {} : { native }) }); }
-        catch (error) { waiter?.reject(error instanceof Error ? error : new Error(String(error))); throw error; }
-        waiter?.reject(failure);
+        try { waiter.settled({ kind: "error", error: failure, native: cause.native }); }
+        catch (error) { waiter.reject(error instanceof Error ? error : new Error(String(error))); throw error; }
+        waiter.reject(failure);
       } else {
         const result = asRecord(message.result) ?? {};
         // BYOK change: A throwing required consumer cannot strand an already dequeued waiter.
-        try { waiter?.settled({ kind: "result", result }); }
-        catch (error) { waiter?.reject(error instanceof Error ? error : new Error(String(error))); throw error; }
-        waiter?.resolve(result);
+        try { waiter.settled({ kind: "result", result }); }
+        catch (error) { waiter.reject(error instanceof Error ? error : new Error(String(error))); throw error; }
+        waiter.resolve(result);
       }
     }
   });
@@ -245,7 +247,7 @@ export function startAppServerClient(
       // oxlint-disable-next-line promise/avoid-new -- settlement is driven by the response pump
       const result = await new Promise<JsonRecord>((resolve, reject) => {
         // BYOK change: Install the deadline before write; synchronous fake/real replies can settle immediately.
-        const waiter: Pending = { resolve, reject, settled };
+        const waiter: Pending = { method, resolve, reject, settled };
         waiter.timer = setTimeout(() => {
           if (!pending.delete(id)) return;
           const error = new RpcTimeoutError(method, timeoutMs);

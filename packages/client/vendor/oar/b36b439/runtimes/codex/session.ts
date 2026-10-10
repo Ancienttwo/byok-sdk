@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 087df16 for injected processes, native-first recording, bounded request refusal and caller-selected sandbox (Apache-2.0).
+// BYOK change: Modified from OAR b36b439 for injected processes, native-first recording, bounded request refusal, caller-selected sandbox and session credential redaction without sealSession (Apache-2.0).
 /* oxlint-disable import/max-dependencies -- The adapter composes protocol, input and process-lifetime mechanisms. */
 import type { AvailableInstallation } from "../../contracts/installation.js"; // BYOK change: direct type-only contract import.
 import { randomUUID } from "node:crypto";
@@ -14,6 +14,8 @@ import { acceptCodexSteer, codexUserInput } from "./input-delivery.js";
 // BYOK change: Image admission is owned by the BYOK caller, not vendored filesystem helpers.
 import { asRecord, type JsonRecord } from "../../shared/json.js";
 // BYOK change: Return the raw adapter contract without best-effort observer projections.
+// BYOK change: Build the session credential redactor directly; upstream withSessionCredentials imports sealSession.
+import { sessionCredentialRedactor, type CredentialRedactor } from "../../shared/credential-redactor.js";
 import { createSessionKernel } from "../../shared/session-kernel.js";
 import { startAppServerClient, type RpcOutcome, type SpawnLineProcess } from "./app-server-client.js";
 import { CODEX_SETTINGS_REPORT_MS, codexOpenReadback, codexResumeEffortRefusal, codexThreadOpen } from "./open.js";
@@ -68,6 +70,23 @@ export async function codexSession(
     }) => void;
   } = {},
 ): Promise<CodexAdapterSession> {
+  // BYOK change: Upstream withSessionCredentials without sealSession. One redactor per open keeps
+  // opening failures, retained records and later control errors under the same credential rules.
+  const credentials = sessionCredentialRedactor(options);
+  try { return await openCodexSession(spawnLineProcess, installation, options, serverRequestTimeoutMs, hooks, credentials.redactValue); }
+  catch (error) { throw credentials.redactValue(error); }
+}
+
+type CodexSessionArgs = Parameters<typeof codexSession>;
+
+async function openCodexSession(
+  spawnLineProcess: SpawnLineProcess,
+  installation: AvailableInstallation,
+  options: CodexSessionArgs[2],
+  serverRequestTimeoutMs: number,
+  hooks: NonNullable<CodexSessionArgs[4]>,
+  redactValue: CredentialRedactor["redactValue"],
+): Promise<CodexAdapterSession> {
   if (installation.via !== "executable") {
     throw new Error("The codex session adapter needs an executable installation");
   }
@@ -115,7 +134,7 @@ export async function codexSession(
   const started = await openThread(client, openMethod, async () => {
     const reply = await client.request(openMethod, filteredOpenParams, markOpen);
     return reply;
-  }, options.serviceTier);
+  }, options.serviceTier, options.resume);
   const threadId = asRecord(started.thread)?.id;
   if (typeof threadId !== "string") {
     client.kill();
@@ -136,7 +155,8 @@ export async function codexSession(
     throw new Error(readback.refusal);
   }
 
-  const kernel = createSessionKernel(threadId, hooks); // BYOK change: budget/required projection before any frame.
+  // BYOK change: budget/required projection before any frame; the redactor runs before retention and the budget.
+  const kernel = createSessionKernel(threadId, { ...hooks, redact: redactValue });
   hooks.onReady?.(threadId);
   const state: CodexSessionState = {
     active: null,
@@ -161,8 +181,8 @@ export async function codexSession(
   // transport-only turn id and the control decisions (busy, spontaneous).
   const onNotification = (method: string, params: JsonRecord): void => {
     // BYOK change: Retain the exact native notification before any potentially throwing fold.
+    // The record envelope's sessionId puts a foreign thread in the graph (observe/graph.ts); no out-of-band node.
     const notificationSession = typeof params.threadId === "string" ? params.threadId : threadId;
-    if (notificationSession !== threadId) kernel.node(notificationSession);
     // BYOK change: Structural extra metadata distinguishes native frames even when derived events are empty.
     const nativeBody = { type: method, native: params, events: [], origin: "byok-native" } as const;
     kernel.frame(nativeBody, {
@@ -183,19 +203,16 @@ export async function codexSession(
     }
     const { state: nextProjection, commands } = foldCodexNotification(state.projection, method, params);
     state.projection = nextProjection;
+    const links = commands.flatMap((command) => command.kind === "link" ? [kernel.link(command.edge)] : []);
     for (const command of commands) {
       switch (command.kind) {
         case "frame":
-          if (command.sessionId !== undefined) {
-            kernel.node(command.sessionId);
-          }
-          kernel.frame(command.body, {
+          kernel.frame({ ...command.body, events: [...command.body.events, ...links] }, {
             ...(command.sessionId === undefined ? {} : { sessionId: command.sessionId }),
             ...(command.spanId === undefined ? {} : { spanId: command.spanId }),
           });
           break;
         case "link":
-          kernel.link(command.edge);
           break;
         default:
           break;
@@ -400,18 +417,23 @@ export async function codexSession(
     };
   };
 
+  // BYOK change: The upstream credentials.seal guard without sealSession: a control's thrown error is redacted.
+  const guard = <Args extends unknown[], Result>(method: (...args: Args) => Promise<Result>) =>
+    async (...args: Args): Promise<Result> => {
+      try { return await method(...args); } catch (error) { throw redactValue(error); }
+    };
   const session: CodexAdapterSession = { // BYOK change: raw adapter without sealSession/observe dependencies.
     id: kernel.sessionId,
     capabilities,
-    prompt: via(promptPlan),
-    steer: via(steerPlan),
-    queue: via(queuePlan),
+    prompt: guard(via(promptPlan)),
+    steer: guard(via(steerPlan)),
+    queue: guard(via(queuePlan)),
     // No withdraw: the queue is codex's own, and thread/queue/delete is experimental and not live-verified (docs/runtimes/input-cancellation.md).
-    abort: via(abortPlan),
+    abort: guard(via(abortPlan)),
     rawEvents: (observer, cursor) => kernel.rawEvents(observer, cursor),
     records: () => kernel.records(),
     graph: () => kernel.graph(),
-    dispose: async () => {
+    dispose: guard(async () => {
       if (disposeRequest !== null) {
         return;
       }
@@ -427,7 +449,7 @@ export async function codexSession(
       // runtime in CODEX_HOME) that the next session needs released. The
       // exit response is recorded by onExit.
       await client.exited;
-    },
+    }),
   };
   return session;
 }

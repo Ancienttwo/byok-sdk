@@ -17,7 +17,7 @@ import type { ContextBreakdown } from "./context-breakdown.js";
 import type { SessionOptions } from "./session-options.js";
 
 export type { McpServer, SessionOptions } from "./session-options.js";
-export type { CredentialProblem, FailureClass } from "./failure.js";
+export type { CredentialProblem, FailedTurn, FailureClass } from "./failure.js";
 export type { ContextBreakdown, ContextCategory, ContextItem } from "./context-breakdown.js";
 export type {
   ContextUsage,
@@ -235,7 +235,17 @@ export interface Session extends AdapterSession {
   effort(): QueryResult<string | null>;
   /** Latest native service tier for the root agent; null until reported, `default` when explicitly off. A fold, never an echo of the open option. */
   serviceTier(): QueryResult<string | null>;
-  /** THIS session's token total, counted from when it opened, plus a per-agent breakdown when children reported: deduplicated, directly summable (sum = total). A derived child session (own `sessionId`, in `graph()`) is not aggregated here; its usage is in its own records. */
+  /**
+   * THIS session's token total, counted from when it opened: everything the
+   * runtime reports it spent, subagents and compaction included where the
+   * runtime counts them (claude's `modelUsage`). With a per-agent breakdown
+   * when sub-agents reported or part of the total is no agent's:
+   * deduplicated, `byAgent` plus `unattributed` sum to `total`. A derived
+   * child session (own `sessionId`, in `graph()`) reports independent usage
+   * in its own records, added once by `withChildren`. Grok child ledgers stay
+   * native-only because they can overlap the root; late background children
+   * can be missing from its total. Independent automatic root turns are counted.
+   */
   usage(): QueryResult<SessionUsage>;
   /** Latest context fullness the runtime reported for this session's root agent; null before any. */
   contextUsage(): QueryResult<ContextUsage | null>;
@@ -266,8 +276,12 @@ export interface Session extends AdapterSession {
 export interface SessionUsage {
   /** Null until the runtime has reported token totals, never a guessed zero (kimi's ACP surface reports context only). */
   readonly total: TokenTotals | null;
-  /** Present only when more than the root agent reported tokens. */
+  /** Present only when more than the root agent reported tokens, or part of `total` is `unattributed`. */
   readonly byAgent?: readonly { readonly agentPath: readonly string[]; readonly tokens: TokenTotals }[];
+  /** What `total` includes that no `byAgent` entry accounts for (claude's subagents, sidechains and compaction, which its stream does not attribute per agent): `total` less every entry, never split by estimate. Absent when the agents account for all of it. */
+  readonly unattributed?: TokenTotals;
+  /** `total` plus each derived session's independently reported token total, nested children too, each counted once. Grok's child ledgers stay native-only to avoid possible overlap; this does not establish that the root counted every child. Absent when no child session reported independent usage, and while `total` is null. */
+  readonly withChildren?: TokenTotals;
 }
 
 export type SteerOrQueueResult =
