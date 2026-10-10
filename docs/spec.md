@@ -172,19 +172,21 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.26.0-rc.1`; publication requires separate release
+aligned dispatch release is `0.26.0-rc.2`; publication requires separate release
 authorization and registry readback. The current independent keys release is
-`0.11.0-rc.1`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.26.0-rc.1`, proven from an isolated standard npm install rather
+`0.11.0-rc.2`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.26.0-rc.2`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-The 0.26.0-rc.1 train is a prepared prerelease, not yet published. The release
+The 0.26.0-rc.2 train is a prepared prerelease, not yet published. The release
 owner approved 0.26.0-rc.1 for the eight aligned packages and keys
 0.11.0-rc.1 on 2026-10-10, under the npm dist-tag `rc`; stable follows after
-end-to-end verification. A prerelease train publishes every public package as
-a prerelease on one dist-tag, which is why keys is also a prerelease. `latest`
-stays 0.25.0 / keys 0.10.0, and the reviewed registry baseline records that
-prior `latest` for all nine packages. The 0.26 line is a MINOR: it adds public
+end-to-end verification. 0.26.0-rc.1 was only partially published (cloud-do,
+core and protocol), so the owner approved 0.26.0-rc.2 / keys 0.11.0-rc.2 the
+same day with the same content; 0.26.0-rc.1 is superseded. A prerelease train
+publishes every public package as a prerelease on one dist-tag, which is why
+keys is also a prerelease. `latest` stays 0.25.0 / keys 0.10.0, and the
+reviewed registry baseline records that prior `latest` for all nine packages. The 0.26 line is a MINOR: it adds public
 API (memory-reader Attempts and the `agent-home-readers` capability,
 `task.complete.finalMessage`, `agentHomeProjection` evidence, optional strict
 `workspaceRoot`, `copyPiRuntimeAssets`) and has pre-1.0 breaking cuts in the

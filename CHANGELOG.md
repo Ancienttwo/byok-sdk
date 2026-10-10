@@ -2,7 +2,29 @@
 
 ## Unreleased
 
-## 0.26.0-rc.1 / @byok-sdk/keys 0.11.0-rc.1 — 2026-10-10 (prepared; not published)
+## 0.26.0-rc.2 / @byok-sdk/keys 0.11.0-rc.2 — 2026-10-10 (prepared; not published)
+
+Release candidate for 0.26.0, to be published under the npm dist-tag `rc`;
+`latest` stays 0.25.0 / keys 0.10.0. It carries the same content as
+0.26.0-rc.1 / keys 0.11.0-rc.1 below; only the version and release metadata
+change.
+
+- **Release preparation** — 0.26.0-rc.1 was only partially published on
+  2026-10-10: `@byok-sdk/cloud-do`, `@byok-sdk/core` and `@byok-sdk/protocol`
+  0.26.0-rc.1 reached the registry and moved their `rc` tag; the client
+  publish failed, and the other six packages, keys 0.11.0-rc.1 among them,
+  were not published. No `v0.26.0-rc.1` tag exists. The publisher refuses to
+  continue a partial prerelease, so the owner approved 0.26.0-rc.2 for the
+  eight aligned packages and keys 0.11.0-rc.2 the same day, under the dist-tag
+  `rc`. 0.26.0-rc.1 is superseded and must not be used. Manifests and lock
+  workspace records change together. The registry baseline is unchanged: it
+  records `latest` 0.25.0 for every aligned package and 0.10.0 for keys.
+- **keys 0.11.0-rc.2** — same content as keys 0.11.0-rc.1; its packed core
+  edge is exactly 0.26.0-rc.2.
+- [Release notes](docs/releases/v0.26.0.md), including the registry readback
+  of the partial rc.1.
+
+## 0.26.0-rc.1 / @byok-sdk/keys 0.11.0-rc.1 — 2026-10-10 (partially published; superseded by rc.2)
 
 Release candidate for 0.26.0, to be published under the npm dist-tag `rc`;
 `latest` stays 0.25.0 / keys 0.10.0. It adds memory-reader Attempts on an
