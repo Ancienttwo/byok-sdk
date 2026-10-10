@@ -80,6 +80,20 @@ directory before you write the executable into it. Without the asset root, `dete
 launch is refused with `pi_bundled_assets_unavailable`. Pi reads its photon
 WASM file beside the executable; without it, pi skips image resizing.
 
+Bundled pi loads the user's own Pi packages and extensions from the user's
+agent directory (`settings.json` `packages`, `extensions`), as the installed
+`pi` CLI does. An extension may import the packages pi supplies to extensions:
+`@earendil-works/pi-coding-agent`, `pi-ai`, `pi-agent-core`, `pi-tui` (and
+their `@mariozechner/*` names) and `typebox`. Bundled pi gives it the modules
+in the product bundle. Before pi loads, `runSdkReservedHelperCommand()` sets
+the global `PI_BUNDLED_NODE`, the switch of pi's own bundled Node build. Pi
+reads it once, when the bundle first evaluates pi. So the product entry must
+call `runSdkReservedHelperCommand()` before its code imports pi. A product that
+imports pi itself at the top of its entry must define `PI_BUNDLED_NODE` as
+`true` in its bundler (esbuild/Bun `define: { PI_BUNDLED_NODE: 'true' }`).
+Every other import of an extension resolves from the extension's own
+directory. An extension that does not load still fails the pi task.
+
 Normal Node/Bun source hosts omit `sdkHelperHost` and continue to use the
 package's installed helper scripts. A required-message offer performs an exact
 stdio MCP initialize/tools-list handshake before adapter preparation; an
