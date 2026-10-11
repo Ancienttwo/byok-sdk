@@ -9,7 +9,7 @@ import { GitWorkspaceManager, type GitWorkspaceObservation, type GitWorkspaceLea
 import { GitWorkspaceStore } from '../daemon/git-workspace-store';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
-import type { Session } from '../types';
+import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, Session } from '../types';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { StubRuntimeAdapter, StubSession } from './fixtures/stub-adapter';
 
@@ -268,6 +268,74 @@ async function waitForAssertion(assertion: () => void, timeoutMs = 1_000, interv
       const lease = await deps.gitWorkspaceManager!.acquireLease(path.join(deps.workspaceRoot!, `task-${kind}`));
       lease.release();
     }
+  });
+
+  it('releases the lease when runtime launch admission throws', async () => {
+    class ThrowingLaunchAdapter extends StubRuntimeAdapter {
+      override async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+        const base = await super.prepare(input);
+        if (base.kind !== 'prepared') return base;
+        return {
+          ...base,
+          operation: {
+            ...base.operation,
+            resolveRuntimeLaunch: async () => { throw new Error('launch admission fixture failure'); },
+          },
+        };
+      }
+    }
+    const sent: Envelope[] = [];
+    const adapter = new ThrowingLaunchAdapter();
+    const { deps } = await makeDeps({ enabled: true, adapter, sent });
+    const manager = deps.gitWorkspaceManager!;
+    const acquire = vi.spyOn(manager, 'acquireLease');
+    await new TaskRunner(deps).handleEnvelope(envelope('launch-throws', 'launch-throws', payload()));
+
+    expect(sent.some((e) => e.type === 'task.decline' && e.task_id === 'launch-throws')).toBe(true);
+    expect(sent.some((e) => e.type === 'task.claim')).toBe(false);
+    expect(adapter.startCalls).toHaveLength(0);
+    expect(acquire).toHaveBeenCalledTimes(1);
+    const [workspaceDir, sessionRef] = acquire.mock.calls[0]!;
+    const lease = await manager.acquireLease(workspaceDir, sessionRef);
+    lease.release();
+  });
+
+  it('releases the lease when the offer is withdrawn during runtime launch admission', async () => {
+    let runner!: TaskRunner;
+    class WithdrawingLaunchAdapter extends StubRuntimeAdapter {
+      override async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+        const base = await super.prepare(input);
+        if (base.kind !== 'prepared') return base;
+        return {
+          ...base,
+          operation: {
+            ...base.operation,
+            resolveRuntimeLaunch: async ({ cwd }) => {
+              await runner.handleEnvelope(envelope('task.cancel', 'launch-withdrawn', { reason: 'stop' }));
+              return {
+                kind: 'pi-rpc', command: 'unused', fixedArgs: [], cwd, env: {}, sessionCwd: cwd,
+                credentialSource: 'pi-auth-store', release: async () => {},
+              };
+            },
+          },
+        };
+      }
+    }
+    const sent: Envelope[] = [];
+    const adapter = new WithdrawingLaunchAdapter();
+    const { deps } = await makeDeps({ enabled: true, adapter, sent });
+    const manager = deps.gitWorkspaceManager!;
+    const acquire = vi.spyOn(manager, 'acquireLease');
+    runner = new TaskRunner(deps);
+    await runner.handleEnvelope(envelope('launch-withdrawn', 'launch-withdrawn', payload()));
+
+    expect(sent.some((e) => e.type === 'task.decline' && e.task_id === 'launch-withdrawn')).toBe(true);
+    expect(sent.some((e) => e.type === 'task.claim')).toBe(false);
+    expect(adapter.startCalls).toHaveLength(0);
+    expect(acquire).toHaveBeenCalledTimes(1);
+    const [workspaceDir, sessionRef] = acquire.mock.calls[0]!;
+    const lease = await manager.acquireLease(workspaceDir, sessionRef);
+    lease.release();
   });
 
   it('retains the Git workspace lease until a failed disposal is retried successfully', async () => {

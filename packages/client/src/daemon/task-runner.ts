@@ -2579,10 +2579,11 @@ export class TaskRunner {
             projectionRoot: path.join(this.deps.storeDir, 'runtime-projections'),
           });
         } catch (error) {
+          gitLease?.release();
           if (!admissionWithdrawn()) decline(`runtime launch admission failed: ${errorMessage(error)}`, false);
           return;
         }
-        if (admissionWithdrawn()) return;
+        if (admissionWithdrawn()) { gitLease?.release(); return; }
       }
 
       // `env` was built before admission (see its declaration above) so the
