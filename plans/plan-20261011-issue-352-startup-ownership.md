@@ -1,6 +1,6 @@
 # Issue 352: Own startup resources in one client module
 
-Status: Review
+Status: Complete (implementation, local validation, and Draft PR)
 Issue: https://github.com/Ancienttwo/byok-sdk/issues/352
 Approval: The owner approved this slice on 2026-10-11.
 Base: 45d104282431cd93a1b2c9e5df00c5720bab6e53
@@ -42,7 +42,7 @@ The change is a refactor, not a new fault fix or performance claim.
 - [x] Add tests for cleanup order, single flight, retry, late startup, and synchronous transfer.
 - [x] Run the focused tests and all five required checks. Keep exit-code evidence.
 - [x] Complete independent review and self-review.
-- [ ] Open a Draft PR.
+- [x] Open a Draft PR.
 
 ## Verification
 
@@ -91,3 +91,10 @@ Coverage includes the full final diff and relevant caller paths.
 It found no blocking code or test issue. The stale worker-count sentence above was corrected.
 The earlier parallel failures and platform/substrate skips remain limits of the evidence.
 The review does not approve a merge, release, or deployment.
+
+## Delivery
+
+Draft PR: https://github.com/Ancienttwo/byok-sdk/pull/354.
+Implementation commit: a4f947470a8840453540f31fc2022b6d34a2dcb0.
+The pushed branch matches this commit. The PR is open and remains a draft.
+CI has started. Merge, release, and deployment are outside this delivery.
