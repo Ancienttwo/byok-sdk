@@ -160,9 +160,34 @@ describe('Codex persistent app-server adapter', () => {
     await turn(s);
   });
   it('refuses an unresolvable resume without hanging or fabricating id', async () => {
-    await expect(
-      open(adapter(), { ...task, sessionRef: 'absent' }),
-    ).rejects.toThrow('no rollout found');
+    const failure = await open(adapter(), { ...task, sessionRef: 'absent' }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({
+      phase: 'start',
+      category: 'authority',
+      retry: 'non-retryable',
+      message: expect.stringContaining('no rollout found'),
+    });
+  });
+  it('keeps an unmatched resume failure retryable infrastructure', async () => {
+    const failure = await open(
+      adapter(),
+      { ...task, sessionRef: 'absent' },
+      await ctx({ FAKE_CODEX_RESUME_ERROR_CODE: '-32000' }),
+    ).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({
+      phase: 'start',
+      category: 'infrastructure',
+      retry: 'retryable',
+      message: expect.stringContaining('no rollout found'),
+    });
   });
   it('rejects a resumed reply with a different authoritative thread id', async () => {
     await expect(

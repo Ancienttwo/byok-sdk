@@ -18,15 +18,20 @@ import { parse } from 'acorn';
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const require = createRequire(import.meta.url);
 
-test('OAR JS bridge re-exports the checked vendored codexSession', () => {
+test('OAR JS bridge re-exports the checked vendored codexSession and SessionNotFoundError', () => {
   const source = readFileSync(path.join(repoRoot, 'packages/client/src/runtime/codex-session-runtime.js'), 'utf8');
   const { body } = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
-  assert.equal(body.length, 1, 'OAR JS bridge must have one checked re-export');
-  const statement = body[0];
-  assert.equal(statement.type, 'ExportNamedDeclaration');
-  assert.equal(statement.source?.value, '../../vendor/oar/b36b439/runtimes/codex/session.js');
-  assert.deepEqual(statement.specifiers.map(({ local, exported }) => [local.name, exported.name]), [
-    ['codexSession', 'codexSession'],
+  assert.equal(body.length, 2, 'OAR JS bridge must have exactly two checked re-exports');
+  const reexports = body.map((statement) => {
+    assert.equal(statement.type, 'ExportNamedDeclaration');
+    return [
+      statement.source?.value,
+      statement.specifiers.map(({ local, exported }) => [local.name, exported.name]),
+    ];
+  });
+  assert.deepEqual(reexports, [
+    ['../../vendor/oar/b36b439/runtimes/codex/session.js', [['codexSession', 'codexSession']]],
+    ['../../vendor/oar/b36b439/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
   ]);
 });
 

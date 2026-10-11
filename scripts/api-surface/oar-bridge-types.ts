@@ -7,6 +7,7 @@ import type { LineProcess, SpawnLineProcess } from '../../packages/client/vendor
 import type { spawnOwnedLineProcess } from '../../packages/client/src/runtime/owned-line-process.js';
 import type { buildRuntimeEnv } from '../../packages/client/src/daemon/environment.js';
 import type { CodexProjection, CodexRecord } from '../../packages/client/src/adapters/codex/projection.js';
+import type { SessionNotFoundError as VendorSessionNotFoundError } from '../../packages/client/vendor/oar/b36b439/contracts/session-not-found-error.js';
 import type * as TreeBridge from '../../packages/client/src/runtime/oar-process-tree.js';
 import type * as VendorTree from '../../packages/client/vendor/oar/b36b439/shared/executable/process-tree.js';
 
@@ -60,7 +61,12 @@ type BridgeSession = {
 
 // Exact checks catch removed members, extra members, and wider local types.
 // Named aliases identify the failed seam in compiler output.
-export type CheckFunctionExports = Assert<Equal<keyof typeof Bridge, 'codexSession'>>;
+export type CheckFunctionExports = Assert<Equal<keyof typeof Bridge, 'codexSession' | 'SessionNotFoundError'>>;
+export type CheckNotFoundInstance = Assert<Equal<Bridge.SessionNotFoundError, VendorSessionNotFoundError>>;
+export type CheckNotFoundConstructor = Assert<Equal<
+  ConstructorParameters<typeof Bridge.SessionNotFoundError>,
+  ConstructorParameters<typeof VendorSessionNotFoundError>
+>>;
 export type CheckInstallation = Assert<Equal<BridgeArgs[1], BridgeInstallation>>;
 export type CheckOptions = Assert<Equal<BridgeArgs[2], BridgeOptions>>;
 export type CheckTimeout = Assert<Equal<BridgeArgs[3], VendorArgs[3]>>;

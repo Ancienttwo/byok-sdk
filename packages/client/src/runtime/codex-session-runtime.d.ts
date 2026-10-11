@@ -13,6 +13,13 @@ export interface RawCodexSession {
   records(): readonly CodexRecord[];
   dispose(): Promise<void>;
 }
+/** A resume of a missing native conversation: the vendored typed error, never matched by name or message. */
+export declare class SessionNotFoundError extends Error {
+  readonly name: 'SessionNotFoundError';
+  readonly sessionId: string;
+  readonly cause: { readonly method: string; readonly native: Readonly<Record<string, unknown>> };
+  constructor(sessionId: string, message: string, cause: { readonly method: string; readonly native: Readonly<Record<string, unknown>> });
+}
 export declare function codexSession(
   spawn: typeof spawnOwnedLineProcess,
   installation: { kind: 'available'; via: 'executable'; command: string },
