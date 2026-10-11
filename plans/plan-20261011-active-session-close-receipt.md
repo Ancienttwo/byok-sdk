@@ -1,6 +1,6 @@
 # Share the active Session close receipt
 
-Status: Review
+Status: Complete
 Approval: The owner approved this slice on 2026-10-11.
 Base: 714fc4537ae1142722f29a308eaf35212d07f89d
 Previous slice: https://github.com/Ancienttwo/byok-sdk/pull/354 (merged)
@@ -36,7 +36,7 @@ No new framework, public contract, storage format, or license change.
 - [x] Share close creation, reuse, and failure retry handling.
 - [x] Run build, typecheck, test, check:api-surface, and check:version-authority.
 - [x] Review the change and verify that existing assertions remain intact.
-- [ ] Push the branch and open a Draft PR.
+- [x] Push the branch and open a Draft PR.
 
 ## Verification
 
@@ -75,3 +75,11 @@ Its first-round acceptance was pending the full test exit code.
 The second and final review accepted the patch after reading all five exit codes and final test summaries.
 Coverage is complete for the four-file patch and recorded local profile. No blocking issue was found.
 This acceptance does not approve a merge, release, or deployment.
+
+## Delivery
+
+Draft PR: https://github.com/Ancienttwo/byok-sdk/pull/357.
+Implementation commit: 835a1e1d3901fc9d85ca88df2bdd51d762ed6c9c.
+The implementation branch was pushed and its remote SHA was read back.
+The previous startup slice is merged in main as 714fc4537ae1142722f29a308eaf35212d07f89d.
+This slice remains a Draft PR. Remote CI, merge, release, and deployment are separate steps.
