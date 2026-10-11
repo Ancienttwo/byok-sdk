@@ -134,7 +134,7 @@ PR A: release the git lease on runtime launch admission exits
 - [x] Add two regression tests to `git-workspace-task-runner.test.ts`: launch resolution throws, and the offer is withdrawn after launch resolution. Each asserts that a later acquire for the same workspace succeeds. Record that both fail on the base.
 - [x] Add `gitLease?.release()` before the two returns at `:2583` and `:2585`.
 - [x] Run the focused suites and the five required checks.
-- [ ] Open a Draft PR. Mark it as a bug fix.
+- [x] Open a Draft PR. Mark it as a bug fix. Draft PR: https://github.com/Ancienttwo/byok-sdk/pull/359.
 
 PR A verification notes:
 
@@ -146,6 +146,7 @@ The runs used local Node 26.10.0 (Homebrew), not the official Node 24.21.0. Bun 
 `bun run test` exited 1. The client package had 1 failure in 3702 tests (3674 passed, 27 skipped).
 The failing test is the node host form in `pi-host-payload.test.ts`. The Homebrew node binary links `@rpath/libnode.147.dylib`, so a copied binary cannot load. The same test fails the same way on the base code. The fix does not cause it.
 `bun run test` stops after the first failed package. A second run covered the other 14 packages. All passed: 3817 Vitest tests passed, 133 skipped, and 15 of 15 `node --test` tests in cloud-do passed.
+A rerun used nvm Node 24.18.0, which has no libnode dependency. `pi-host-payload` and `git-workspace-task-runner` passed: 18 of 18 tests, exit 0.
 
 PR B: explicit offer owner and throw safety net
 
