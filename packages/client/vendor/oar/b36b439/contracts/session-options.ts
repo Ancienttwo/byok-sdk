@@ -11,10 +11,12 @@
  * SSE: the MCP spec deprecates it. `name` is the server's name in the
  * runtime, the one its tools are known by (claude: `mcp__<name>__<tool>`).
  *
- * `env` and `headers` values are credentials: oar writes them only to the
- * runtime's native channel and never into a record, event or error, which
- * keep the key names at most (a value as `[redacted]`). Values must be
- * strings: null removal belongs to SessionOptions.env, not this native config.
+ * OAR sends `env` and `headers` through the runtime's native configuration
+ * channel; retained copies of that configuration mask their values. In other
+ * record and error text, the shared known-credential rules select values by
+ * name and shape (docs/spec/record-stream.md). Ordinary settings such as
+ * NODE_ENV and Content-Type remain readable. Values must be strings: null
+ * removal belongs to SessionOptions.env, not this native config.
  */
 export type McpServer =
   | { readonly name: string; readonly command: string; readonly args?: readonly string[]; readonly env?: Readonly<Record<string, string>> }
@@ -28,7 +30,7 @@ export type McpServer =
  * (docs/spec/runtime-matrix.md#refused-session-options).
  */
 export interface SessionOptions {
-  /** Working directory the runtime operates in. With `resume`, a directory other than the session's own is refused where the runtime would run in its own instead (kimi, opencode: `UnsupportedOptionError` on `cwd`); cursor, pi and grok refuse it with their own error (docs/runtimes/resume-cwd.md). */
+  /** Working directory the runtime operates in. With `resume`, a directory other than the session's own is refused where the runtime would run in its own instead (kimi, opencode: `UnsupportedOptionError` on `cwd`); pi and grok can report SessionNotFoundError for that cwd; Cursor reports what its SDK can find with this configuration (docs/runtimes/resume-cwd.md). */
   readonly cwd: string;
   /** Runtime-native model identifier; the runtime's default when omitted. */
   readonly model?: string;
@@ -66,9 +68,24 @@ export interface SessionOptions {
    * folds native reports; provider-side availability can still change later.
    */
   readonly serviceTier?: string;
-  /** Resume the runtime-native session identified by a previous Session.id. In a `cwd` other than the session's own, see `cwd`: kimi and opencode refuse it with `UnsupportedOptionError` (docs/spec/runtime-matrix.md#refused-session-options). */
+  /**
+   * Resume the native conversation identified by a previous Session.id.
+   * Verified missing-target signals reject with SessionNotFoundError; all
+   * other failed opens keep their own errors. Missing is scoped to the
+   * runtime's configuration, including cwd for per-directory stores. Save
+   * and reuse that cwd; kimi/opencode reject a different one with
+   * UnsupportedOptionError. See docs/spec/runtime-matrix.md#missing-resume-targets.
+   */
   readonly resume?: string;
-  /** Environment changes for the processes THIS session spawns: a string sets the variable (including an empty string); null removes it from the inherited environment. The host environment is never changed. Subprocess runtimes: the runtime process itself (tools inherit). In-process runtimes: only the agent's tool subprocesses; provider config needs the runtime's native channel there. CAVEAT for PATH-like entries: a runtime that runs tools through a login shell (codex: zsh/bash -lc) lets profile scripts reorder or rebuild PATH (probed: codex demotes injected entries on Linux and macOS path_helper/.zprofile can drop them). Injected CLIs should be invoked by ABSOLUTE path. Pi refuses removals combined with stdio mcpServers because its MCP transport re-inherits the host environment. Refused when non-empty by cursor, whose tools run in the host process with no environment of their own: `session()` rejects with `UnsupportedOptionError` (`Runtime.refusedSessionOptions`, docs/spec/runtime-matrix.md#refused-session-options). */
+  /** Environment changes for the processes THIS session spawns: a string sets the variable (including an empty string); null removes it from the inherited environment. The host environment is never changed. Subprocess runtimes: the runtime process itself (tools inherit). In-process runtimes: only the agent's tool subprocesses; provider config needs the runtime's native channel there. CAVEAT for PATH-like entries: a runtime that runs tools through a login shell (codex: zsh/bash -lc) lets profile scripts reorder or rebuild PATH (probed: codex demotes injected entries on Linux and macOS path_helper/.zprofile can drop them). Injected CLIs should be invoked by ABSOLUTE path. Pi refuses removals combined with stdio mcpServers because its MCP transport re-inherits the host environment. Refused when non-empty by cursor, whose tools run in the host process with no environment of their own: `session()` rejects with `UnsupportedOptionError` (`Runtime.refusedSessionOptions`, docs/spec/runtime-matrix.md#refused-session-options).
+   *
+   * Credential-like names with non-path values of at least eight characters,
+   * plus password-bearing connection URLs, are redacted within each OAR
+   * record and error; native inputs stay unchanged.
+   * Model echoes split across streaming deltas are outside this guarantee:
+   * hosts must not rely on this rule to prevent a model from revealing a key.
+   * Exact name rules: docs/spec/record-stream.md, "Known session credentials".
+   */
   readonly env?: Readonly<Record<string, string | null>>;
   /** REPLACE the runtime's built-in system prompt (claude --system-prompt, codex thread baseInstructions, pi resource-loader systemPrompt). Survives runtime compaction (pinned per vendor). Refused by cursor, kimi and antigravity: `session()` rejects with `UnsupportedOptionError` (`Runtime.refusedSessionOptions`, docs/spec/runtime-matrix.md#refused-session-options). */
   readonly systemPrompt?: string;

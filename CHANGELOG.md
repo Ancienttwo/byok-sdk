@@ -11,6 +11,16 @@
   `!command`; it is neither resolved nor run. `models.json` is read as pi reads
   it (BOM, `//` comments, trailing commas). A missing or malformed `models.json`
   adds nothing; a malformed `auth.json` or `settings.json` still reports `false`.
+- **Changed (client)** — update the private OAR source from 0.48.0 to 0.54.3
+  (`b36b439`). Retained Codex records, the SDK events built from them and Codex
+  session errors now redact session credentials: env and MCP values whose name
+  ends in a credential word such as `KEY`, `TOKEN`, `SECRET` or `PASSWORD`,
+  with at least eight characters and not a path, plus URL passwords. The native
+  process input stays unchanged. A Codex resume of a missing thread now rejects
+  with `SessionNotFoundError`; its message keeps the
+  `codex thread/resume failed: …` prefix. SDK events read native Codex frames
+  only, so the new derived event kinds do not reach them. See
+  `docs/notes/2026-10-11-oar-0.54-upgrade.md`.
 
 ## 0.26.0-rc.4 / @byok-sdk/keys 0.11.0-rc.4 — 2026-10-10 (published)
 

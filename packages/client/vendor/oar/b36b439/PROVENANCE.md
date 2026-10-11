@@ -1,8 +1,8 @@
-# OAR 087df16 private runtime fork
+# OAR b36b439 private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.48.0, fixed commit `087df160dd64cd020c98a8b089ce8feb01f73590`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.54.3, fixed commit `b36b439e328d836fd24d838bdadea6d2ecbcaeb5`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
-`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 36 source files plus LICENSE. Thirty source files keep upstream bytes. Six source files contain BYOK changes. The added files are imports of the selected contracts, the Codex fold and the Codex session, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls. No Cursor, ACP, CLI, arena, executable manager or branded resources are included.
+`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 41 source files plus LICENSE. Thirty-five source files keep upstream bytes. Six source files contain BYOK changes. The added files are imports of the selected contracts, the Codex fold and the Codex session, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, and `observe/graph.ts`, which the session kernel imports. No Cursor, ACP, CLI, arena, executable manager or branded resources are included.
 
 ## BYOK S1 changes
 
@@ -188,4 +188,25 @@ Upstream assumes that OAR answers no Codex request. This fork answers server req
 The other 30 prior selected source paths have the same upstream bytes. The other five maintained files have no upstream change. Their BYOK deltas stay, and only their change notices name the new base.
 Upstream 0.46.0 to 0.48.0 also adds Pi Durable, OpenCode v2, the installer plan, the Claude `contextBreakdown()` reader and observe changes. These modules remain outside the selected closure. No upstream npm dependency enters the SDK. The raw Codex session has no `contextBreakdown` member. Upstream Codex has none either.
 
-Build assets copy this source's LICENSE, PROVENANCE.md and source-manifest.json to `dist/assets/provenance/oar/087df16/`.
+## 0.48.0 → 0.54.3 re-vendor
+
+The new base is tag v0.54.3, commit `b36b439e328d836fd24d838bdadea6d2ecbcaeb5`.
+Fourteen selected paths changed upstream. Five new dependencies enter the inventory. The inventory is now 41 source files and LICENSE, with six maintained files.
+
+- `contracts/failure.ts`, `contracts/records.ts`, `contracts/session-options.ts`, `contracts/session.ts`, `contracts/status.ts`, `contracts/tasks.ts`, `runtimes/codex/failure.ts` and `shared/failure-class.ts` keep upstream bytes. They add the tagged `FailedTurn` outcome, `session_linked`, `input_queued`, `tool_call_input_delta`, `turn_active.inputId`, the `failure` and `message` of a `runtime_refused` `input_dropped`, `UsageReport.total`, the `workflow` task type and the session credential rule.
+- `shared/native-error.ts`, `contracts/session-not-found-error.ts`, `shared/redact-text.ts` and `observe/graph.ts` are new and keep upstream bytes. `observe/graph.ts` imports contract types only.
+- `shared/credential-redactor.ts` is new and maintained. Its one BYOK change sorts the spread copy instead of `toSorted`, twice, for the SDK ES2022 library. It keeps the upstream `URL.canParse`: `@types/node` types it under the ES2022 lib, and the Node 24 engine floor provides it.
+- `shared/mcp-servers.ts` now keeps upstream bytes. Upstream removed the `toSorted` line, so the old delta has no reason to stay. It is no longer maintained.
+- `runtimes/codex/app-server-client.ts` takes the request method on each pending entry, the undefined-waiter guard and the `nativeErrorCause` error cause: `{ method, native }`, with the native error redacted. The BYOK transport seams stay.
+- `runtimes/codex/open.ts` takes `sessionCredentialRedactor(options)` in place of `mcpCredentialRedactor`. The BYOK approval policy option stays. BYOK passes the complete filtered environment, so its credential-named values are also redacted from client error text.
+- `runtimes/codex/rpc-control.ts` takes `SessionNotFoundError` for a `thread/resume` that codex answers with JSON-RPC -32600 and a message starting "no rollout found for thread id", the `resumeId` parameter and the direct native cause. The message keeps the `codex thread/resume failed: ` prefix. The BYOK timeout and synchronous response capture stay.
+- `shared/session-kernel.ts` takes the upstream record redactor, the record-derived graph through `withSessionRecord`, `link()` returning a `session_linked` event with no out-of-band graph mutation, no `node()`, and `settle` with the native request body. BYOK change: `redact` is a member of the existing `hooks` object, not a second positional parameter. The kernel redacts first. The fatal byte budget then measures the redacted record, and the required consumer and observers receive it.
+- `runtimes/codex/session.ts` does not take `withSessionCredentials` or `credentials.seal`, which import `sealSession`. It builds one `sessionCredentialRedactor(options)` per open instead. Its `redactValue` is the kernel `redact` hook. It also redacts errors thrown from the open path and from `prompt`, `steer`, `queue`, `abort` and `dispose`, as the upstream guard does. `options.resume` reaches `openThread`. The `kernel.node` calls are gone: a foreign thread enters the graph through its record envelope's `sessionId`. The fold's `link` commands become `kernel.link` events on the derived frame. Native-first frames keep empty events.
+
+Not vendored: `shared/session-credentials.ts` and `shared/seal-session.ts`, because the raw adapter never seals; `observe` modules other than `graph.ts`; and all non-Codex runtimes. No upstream npm dependency enters the SDK.
+
+`runtimes/codex/projection.ts` has the same upstream bytes. Of the new derived event kinds, the Codex fold emits only `session_linked`. SDK events read native frames only. So `session_linked`, `input_queued`, `tool_call_input_delta`, `turn_active.inputId` and the `runtime_refused` `failure` and `message` do not reach SDK events. Retained records, the required consumer and errors now carry the session credential redaction. The rule covers credential-named env and MCP values of at least eight characters that are not paths, and URL passwords. Native process inputs stay unchanged.
+
+The other 22 prior selected source paths and LICENSE have the same upstream bytes.
+
+Build assets copy this source's LICENSE, PROVENANCE.md and source-manifest.json to `dist/assets/provenance/oar/b36b439/`.

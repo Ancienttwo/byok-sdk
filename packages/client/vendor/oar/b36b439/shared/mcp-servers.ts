@@ -1,11 +1,11 @@
-// BYOK change: Modified from OAR 087df16 for the SDK ES2022 lib (Apache-2.0).
+import { sessionCredentialRedactor } from "./credential-redactor.js";
 import { UnsupportedOptionError } from "../contracts/errors.js";
 import type { McpServer } from "../contracts/session.js";
 
 /*
  * Runtime-independent handling of `SessionOptions.mcpServers`: the checks
- * every runtime that attaches them shares, and the credential rule (`env` and
- * `headers` values never reach a record, event or error).
+ * every runtime that attaches them shares, and the known-credential rule
+ * shared with session records and errors.
  */
 
 /** The streamable HTTP form of an entry (`type: "http"`); the other form is stdio. */
@@ -55,27 +55,9 @@ export function checkMcpServerNames(servers: readonly McpServer[]): void {
   }
 }
 
-/** Shorter values cannot be a credential, and replacing them would garble the text around them (`code 1`). */
-const CREDENTIAL_MIN_LENGTH = 4;
-
-/** Every credential value in the entries: each `env` and `headers` value, longest first. */
-function credentialValues(servers: readonly McpServer[]): readonly string[] {
-  const values = servers.flatMap((server) => Object.values((isHttpMcpServer(server) ? server.headers : server.env) ?? {}));
-  return [...new Set(values.filter((value) => typeof value === "string" && value.length >= CREDENTIAL_MIN_LENGTH))].sort((left, right) => right.length - left.length); // BYOK change: ES2022 lib; the spread is already a copy.
-}
-
-/**
- * A redactor for text oar reports from a runtime that was given these
- * entries (an error message, a stderr tail): every `env` and `headers` value
- * of at least four characters becomes `[redacted]`. Identity when the
- * entries hold none.
- */
+/** The same credential-name, length and path rules used for retained session records. */
 export function mcpCredentialRedactor(servers: readonly McpServer[] | undefined): (text: string) => string {
-  const values = credentialValues(servers ?? []);
-  if (values.length === 0) {
-    return (text) => text;
-  }
-  return (text) => values.reduce((redacted, value) => redacted.replaceAll(value, "[redacted]"), text);
+  return sessionCredentialRedactor({ mcpServers: servers ?? [] }).redact;
 }
 
 /**

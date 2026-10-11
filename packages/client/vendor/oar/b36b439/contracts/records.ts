@@ -1,4 +1,4 @@
-import type { CredentialProblem, FailureClass } from "./failure.js";
+import type { FailedTurn, FailureClass } from "./failure.js";
 import type { InputImage, InputOrigin } from "./input.js";
 import type { ToolCallProgress, ToolOutputPart } from "./tool-output.js";
 import type { TaskEventBody } from "./tasks.js";
@@ -111,10 +111,15 @@ export interface TokenTotals {
  * `agentPath` counted from when this Session opened, resolved by the adapter
  * (the authoritative figure, deduplication and what a resumed runtime had
  * already counted never cross this surface; docs/spec/attribution.md).
+ * `total` is the session's own running total, counted the same way, where
+ * the runtime reports one that covers more than its agents' figures (claude's
+ * `modelUsage`: subagents, sidechains and compaction too); absent elsewhere,
+ * where the agents' figures sum to the session's.
  */
 export interface UsageReport {
   readonly context?: ContextUsage;
   readonly tokens?: TokenTotals;
+  readonly total?: TokenTotals;
 }
 
 /** A native user-message observation, not proof of model consumption. */
@@ -133,10 +138,16 @@ export interface UserMessage {
  * merges consecutive pieces for consumers who want blocks.
  */
 export type RuntimeEventBody = UserMessage
-  /** The runtime reports an active turn, including one adopted without a prompt request. Not a second turn when `turn_started` already opened it. */
-  | { readonly kind: "turn_active" }
-  /** The runtime discarded or refused an accepted input, established by native evidence. runtime_refused covers a later refused steering RPC. Returns ownership to the caller for resend; never inferred by a view from turn completion. */
-  | { readonly kind: "input_dropped"; readonly inputId: string; readonly reason: "turn_interrupted" | "runtime_refused" }
+  /** Native evidence of true session lineage, carried by the frame that names the relationship. Foreign session ids alone never establish an edge. */
+  | { readonly kind: "session_linked"; readonly parent: string; readonly child: string; readonly via: "tool_call" }
+  /** The runtime reports an active turn. inputId names the input it started for; absent means unknown. After input_queued, only a matching inputId begins that input’s turn. */
+  | { readonly kind: "turn_active"; readonly inputId?: string }
+  /** The runtime holds this input and has not started its turn. Only this fact gates input-specific turn attribution; acceptance alone does not. */
+  | { readonly kind: "input_queued"; readonly inputId: string }
+  /** The runtime discarded or refused an accepted input, established by native evidence. Returns ownership to the caller for resend; never inferred by a view from turn completion. */
+  | { readonly kind: "input_dropped"; readonly inputId: string; readonly reason: "turn_interrupted" }
+  /** A native refusal's classification and explanation, only when known. An input-scoped wait reads these as a failure, never as a turn_ended fact. */
+  | { readonly kind: "input_dropped"; readonly inputId: string; readonly reason: "runtime_refused"; readonly failure?: FailureClass; readonly message?: string }
   /** `messageId`: the runtime's id of the assistant message the text is part of (codex `agentMessage` item, claude API message), so two messages of one turn stay apart; absent when it names none (pi, cursor, ACP) and in older records. */
   | { readonly kind: "text_delta"; readonly text: string; readonly messageId?: string }
   /** A reasoning output item; its lifecycle remains observable without readable contents. `messageId` names the native message when provided, keeping streamed reasoning from distinct messages apart when coalescing. */
@@ -148,8 +159,10 @@ export type RuntimeEventBody = UserMessage
       /** Best-effort human-readable invocation detail when the runtime exposes it. */
       readonly input?: string;
     }
-  /** Arguments the runtime reported after the call started (an ACP `tool_call_update` carrying a `rawInput` that differs from the last one read for the call). The WHOLE input in `tool_call_started.input`'s form, replacing it and any earlier `tool_call_input` of the call, never a delta; the started record stays as the runtime first said it. */
+  /** Complete arguments reported after the call started (claude's completed `tool_use`, or ACP's updated `rawInput`). The WHOLE input replaces the earlier input, including streamed fragments; the started record stays as the runtime first said it. */
   | { readonly kind: "tool_call_input"; readonly callId: string; readonly input: string }
+  /** Append-only argument text, verbatim from the runtime (claude `input_json_delta.partial_json`). May be incomplete JSON; OAR never parses it. `tool_call_input` supplies the complete replacement. */
+  | { readonly kind: "tool_call_input_delta"; readonly callId: string; readonly delta: string }
   | {
       readonly kind: "tool_call_ended";
       readonly callId: string;
@@ -274,18 +287,8 @@ export type ResponseBody =
   /** The runtime process exited, an outcome the runtime cannot say itself. Answers a `dispose` request when oar caused it; also recorded for an unrequested exit, pointing at no request. */
   | { readonly kind: "exited"; readonly code: number | null };
 
-export type TurnOutcome =
-  | { readonly kind: "completed" }
-  | { readonly kind: "aborted" }
-  | {
-    readonly kind: "failed";
-    readonly reason: string;
-    readonly failure: FailureClass;
-    /** With `auth`, where the runtime says which. */
-    readonly credential?: CredentialProblem;
-    /** The provider's HTTP status, where the runtime reports one. */
-    readonly status?: number;
-  };
+/** How a turn ended; `failed` is a `FailedTurn`, tagged by its `failure`. */
+export type TurnOutcome = { readonly kind: "completed" } | { readonly kind: "aborted" } | FailedTurn;
 
 /** Current context fullness, borrowed from pi's shape because it already models the hard case: `tokens` is null when unknown (right after compaction, before the next model response), and `percent` follows. */
 export interface ContextUsage {
