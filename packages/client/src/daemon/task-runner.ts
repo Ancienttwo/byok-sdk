@@ -1776,6 +1776,40 @@ export class TaskRunner {
     await this.startupOwnership.disposeAll();
   }
 
+  private closeActiveSession(active: ActiveTask): Promise<void> {
+    // Store the receipt before close runs. A synchronous throw is a rejected
+    // receipt, just like an adapter's asynchronous disposal failure.
+    const attempt = active.disposalAttempt ??= Promise.resolve().then(() => active.session.close());
+    // Interrupt can start close before finalization waits for it. Observe the
+    // rejection here, but retain the receipt until finalization reports it.
+    void attempt.catch(() => undefined);
+    return attempt;
+  }
+
+  private async awaitActiveSessionClose(active: ActiveTask): Promise<boolean> {
+    const attempt = this.closeActiveSession(active);
+    try {
+      await attempt;
+    } catch (caught) {
+      if (active.disposalAttempt === attempt) active.disposalAttempt = undefined;
+      const failure = isRuntimeDisposalFailure(caught)
+        ? caught
+        : new RuntimeDisposalFailure({
+            stage: 'quiescence',
+            reason: `${active.adapter.descriptor.id} session.close() returned an untyped disposal failure`,
+          }, { cause: caught });
+      console.error(`[byok/client] runtime disposal failed for task ${active.taskId}: ${failure.message}`);
+      this.deps.onRuntimeDisposalFailure?.({
+        taskId: active.taskId,
+        runtimeId: active.adapter.descriptor.id,
+        stage: failure.stage,
+        reason: failure.message,
+      });
+      return false;
+    }
+    return true;
+  }
+
   /**
    * M5 batch-3 (workstream 2): the ONE shared per-task teardown sequence —
    * "reuse the exact interrupt/teardown machinery `shutdownActiveTasks`
@@ -1813,10 +1847,7 @@ export class TaskRunner {
     // Close drains native stdio even if an ACK arrived before final usage, or
     // the adapter never supplies turn_end. Retain this SAME receipt for finish
     // to await/retry; a deadline is never proof of disposal.
-    const disposal = active.disposalAttempt ??= Promise.resolve().then(() => active.session.close());
-    // Observe a rejected receipt without turning it into an unhandled rejection;
-    // finish() remains responsible for reporting it and retaining ownership.
-    void disposal.catch(() => undefined);
+    this.closeActiveSession(active);
     if (drainEvents) {
       // Drain events already delivered by interrupt before publishing usage.
       // A pending close/next() is not metering authority and cannot hold the
@@ -5117,27 +5148,7 @@ export class TaskRunner {
       }
     }
 
-    const attempt = active.disposalAttempt ?? active.session.close();
-    active.disposalAttempt = attempt;
-    try {
-      await attempt;
-    } catch (caught) {
-      if (active.disposalAttempt === attempt) active.disposalAttempt = undefined;
-      const failure = isRuntimeDisposalFailure(caught)
-        ? caught
-        : new RuntimeDisposalFailure({
-            stage: 'quiescence',
-            reason: `${active.adapter.descriptor.id} session.close() returned an untyped disposal failure`,
-          }, { cause: caught });
-      console.error(`[byok/client] runtime disposal failed for task ${taskId}: ${failure.message}`);
-      this.deps.onRuntimeDisposalFailure?.({
-        taskId,
-        runtimeId: active.adapter.descriptor.id,
-        stage: failure.stage,
-        reason: failure.message,
-      });
-      return false;
-    }
+    if (!await this.awaitActiveSessionClose(active)) return false;
     if (this.tasks.get(taskId) !== active) return true;
     try {
       await this.deps.awaitTerminalCommit?.(taskId);
