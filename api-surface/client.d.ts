@@ -8433,6 +8433,9 @@ export declare class TaskRunner {
      */
     private readonly preparationPinsByTask;
     private readonly inFlightOffers;
+    private readonly claimedHarnesses;
+    private readonly homeReservations;
+    private readonly startupOwnership;
     /** Blob I/O before an offer becomes an active task still belongs to that offer's cancellation authority. */
     private readonly inFlightBlobAborts;
     /**
@@ -8595,14 +8598,6 @@ export declare class TaskRunner {
      * ahead of this method — see `daemon-control-socket.test.ts`'s dedicated
      * regression test for the exact scenario.
      */
-    /** Startup resources have an owner even before a Session can become active. */
-    private startupRetryTimer;
-    private readonly claimedHarnesses;
-    private readonly homeReservations;
-    private readonly startupOwners;
-    private readonly startupDisposals;
-    private disposeStartupOwner;
-    private disposeStartupOwnerOnce;
     shutdownActiveTasks(reason: string): Promise<void>;
     /**
      * M5 batch-3 (workstream 2): the ONE shared per-task teardown sequence —
