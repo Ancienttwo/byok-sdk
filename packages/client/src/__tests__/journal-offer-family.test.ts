@@ -143,6 +143,10 @@ describe('issue #147 protocol offer family through real hosted SQLite journal', 
     await daemon!.stop(); daemon = undefined;
     await fs.copyFile(snapshot, path.join(storeDir, JOURNAL_DB_FILENAME));
     const restartedAdapter = new StubRuntimeAdapter('pi');
+    // Startup queues the recovered terminal before the connection opens, so its
+    // POST can be accepted (and confirmed locally) before start() returns. Hold
+    // that acceptance so the read below sees the row strictly before confirmation.
+    const releaseConfirmation = server.holdNextMessagesResponse((event) => event.type === 'task.fail' && event.task_id === 'task-147');
     daemon = createDaemonWithAdapters(config, [restartedAdapter]);
     await daemon.start();
     const interrupted = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'task-147');
@@ -153,6 +157,8 @@ describe('issue #147 protocol offer family through real hosted SQLite journal', 
       task_id: 'task-147', terminal_type: 'failed', bytes: encodeEnvelope(interrupted),
       payload_hash: expect.stringMatching(/^sha256:/), truth_state: 'pending',
     }]);
+    releaseConfirmation();
+    await vi.waitFor(() => expect(rows(storeDir, 'SELECT truth_state FROM journal_terminal')).toEqual([{ truth_state: 'confirmed' }]), EVENTUAL_STATE_BUDGET_MS);
     expect(restartedAdapter.startCalls).toHaveLength(0);
   });
 });
