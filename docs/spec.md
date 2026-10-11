@@ -172,11 +172,20 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.26.0-rc.4`; publication requires separate release
+aligned dispatch release is `0.26.0`; publication requires separate release
 authorization and registry readback. The current independent keys release is
-`0.11.0-rc.4`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.26.0-rc.4`, proven from an isolated standard npm install rather
+`0.11.0`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.26.0`, proven from an isolated standard npm install rather
 than the workspace graph.
+
+On 2026-10-11 the owner authorized stable source preparation for the eight
+aligned packages at 0.26.0 and keys at 0.11.0. All nine packages target npm's
+`latest` dist-tag; publication is pending. The owner chose stable before the
+end-to-end run that the rc route named. 0.26.0 adds three client changes that
+no RC carried: #345 (pi `authPresent` counts a `models.json` `apiKey`), #348
+(OAR 0.54.3) and #349 (a Codex resume of a missing thread fails as
+non-retryable `authority`). Stable publication uses the final stable commit's
+own accepted CI tarballs and does not relabel RC bytes.
 
 The 0.26.0-rc.4 train is published on `rc`. The owner approved
 0.26.0-rc.4 / keys 0.11.0-rc.4 under the dist-tag `rc` on 2026-10-10; complete
@@ -193,7 +202,7 @@ rc.2 was also partially published for those three packages. The owner approved
 0.26.0-rc.3 / keys 0.11.0-rc.3 and npm execution on 2026-10-10. rc.1 and rc.2
 are superseded. A prerelease train
 publishes every public package as a prerelease on one dist-tag, which is why
-keys is also a prerelease. `latest` stays 0.25.0 / keys 0.10.0, and the
+keys is also a prerelease. Until stable publication, `latest` stays 0.25.0 / keys 0.10.0, and the
 reviewed registry baseline records that prior `latest` for all nine packages. The 0.26 line is a MINOR: it adds public
 API (memory-reader Attempts and the `agent-home-readers` capability,
 `task.complete.finalMessage`, `agentHomeProjection` evidence, optional strict

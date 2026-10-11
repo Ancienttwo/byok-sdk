@@ -7,25 +7,23 @@ composition over Postgres and R2.
 
 ## Release status
 
-The current `rc` release is **0.26.0-rc.4** for the eight aligned packages,
-with independent keys **0.11.0-rc.4**. The release owner approved it and the
-npm dist-tag `rc` on 2026-10-10, and it was published on 2026-10-11. Registry
-readback confirms all nine packages on `rc`. `latest` stays 0.25.0 / keys
-0.10.0. The public set is nine packages; `@byok-sdk/implementation-identity` stays retired.
-rc.4 adds two pi client fixes over rc.3: `authPresent` reflects pi's own
-`auth.json` login (#340), and bundled pi gives user extensions the bundle's pi
-packages (#341). The earlier published **0.26.0-rc.3** / keys 0.11.0-rc.3 (see its
-[publication record](docs/releases/v0.26.0-rc.3-publication.md)) is superseded
-by rc.4. rc.1 and rc.2 were only partially published (cloud-do, core and
-protocol) and are also superseded.
-[Release notes](docs/releases/v0.26.0.md) describe the additions since 0.25.0
-(memory-reader Attempts, the closing reply, `copyPiRuntimeAssets`, the public
-keys Pi launcher entry and OAR 0.48.0), the client and keys breaking cuts and
-the upgrade steps.
+The current stable source candidate is **0.26.0** for the eight aligned
+packages, with independent keys **0.11.0**. On 2026-10-11 the release owner
+authorized stable preparation for the npm dist-tag `latest`; publication is
+pending. The public set is nine packages; `@byok-sdk/implementation-identity`
+stays retired. The owner chose stable before the end-to-end run that the rc
+route named. 0.26.0 also adds three client changes that no RC carried: the
+`models.json` `apiKey` probe for pi `authPresent` (#345), OAR 0.54.3 (#348)
+and the non-retryable Codex resume of a missing thread (#349).
+[Release notes](docs/releases/v0.26.0.md) describe the additions since 0.25.0,
+the client and keys breaking cuts and the upgrade steps.
 
-Versioned install examples below use the published rc.4 packages. The
-[publication record](docs/releases/v0.26.0-rc.4-publication.md) confirms the
-frozen artifact identity and registry readback. Live Host acceptance remains
+The published **0.26.0-rc.4** / keys 0.11.0-rc.4 stays on the `rc` channel (see
+its [publication record](docs/releases/v0.26.0-rc.4-publication.md)). rc.3 is
+superseded. rc.1 and rc.2 were only partially published and are also superseded.
+
+Versioned install examples below name the 0.26.0 candidate. They work only
+after publication and exact registry readback. Live Host acceptance remains
 separate.
 
 The current `latest` release is **0.25.0** for eight aligned packages, with
@@ -99,7 +97,7 @@ Install the scoped packages your composition uses and import each one under
 its own name. For example, a self-hosted composition:
 
 ```sh
-npm install @byok-sdk/server@0.26.0-rc.4 @byok-sdk/client@0.26.0-rc.4
+npm install @byok-sdk/server@0.26.0 @byok-sdk/client@0.26.0
 ```
 
 ```ts
@@ -107,12 +105,13 @@ import { createByokServer } from '@byok-sdk/server';
 ```
 
 The Worker-only cloud-do package is published from 0.24.0. The example below
-names the published 0.26.0-rc.4 release.
+names the 0.26.0 stable candidate. Confirm its exact registry version before
+installation.
 See [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
 
 ~~~sh
-# Published release candidate.
-npm install @byok-sdk/cloud-do@0.26.0-rc.4
+# Exact stable candidate; verify registry availability before installation.
+npm install @byok-sdk/cloud-do@0.26.0
 npm install --save-dev @cloudflare/workers-types
 ~~~
 
@@ -258,7 +257,7 @@ It is intentionally outside the dispatch packages and their entire dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.11.0-rc.4
+npm install @byok-sdk/keys@0.11.0
 ```
 
 ## Host connector composition
@@ -274,5 +273,5 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.11.0-rc.4`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.11.0`
 require Node.js 24.15.0 or newer. MIT licensed.

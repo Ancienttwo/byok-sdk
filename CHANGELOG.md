@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.26.0 / @byok-sdk/keys 0.11.0 — 2026-10-11 (stable source candidate)
+
+The owner authorized stable preparation for the dist-tag `latest` on
+2026-10-11. Publication is pending. The owner chose stable before the
+end-to-end run that the rc route named. The three entries below ship first in
+0.26.0; no RC carried them. The rc.4 and earlier entries are also part of 0.26.0.
+
+- The eight aligned package manifests move to 0.26.0.
+- keys moves to 0.11.0. Its packed core edge is exactly 0.26.0.
+- The lock workspace records and current version documents move together.
+- [Release notes](docs/releases/v0.26.0.md) describe the release and upgrade steps.
+
 - **client: a Codex resume of a missing thread now fails the start as non-retryable `authority`** —
   `CodexAdapter.start()` mapped the vendored `SessionNotFoundError` to retryable
   `infrastructure`, so a resume of a thread that does not exist was retried. It is
