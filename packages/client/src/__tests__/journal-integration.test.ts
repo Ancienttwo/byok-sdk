@@ -26,8 +26,8 @@ import { CursorStore } from '../daemon/cursor-store';
 import { SessionWorkspaceStore } from '../daemon/session-workspace-store';
 import { TaskRunner, type AdmissionGuardDecision, type TaskRunnerDeps } from '../daemon/task-runner';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
-import { JOURNAL_DB_FILENAME } from '../daemon/journal/sqlite-journal';
-import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
+import { DEFAULT_JOURNAL_BUSY_TIMEOUT_MS, JOURNAL_DB_FILENAME } from '../daemon/journal/sqlite-journal';
+import { isSqliteAvailable, openJournalDatabase } from '../daemon/journal/sqlite-support';
 import type { JournalIdentity, JournalReceipt, LocalTaskJournal, LocalTerminalRecord, ReceivedEnvelopeRecord, RecoverableTask } from '../daemon/journal/journal';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -60,6 +60,16 @@ async function exists(target: string): Promise<boolean> {
     .access(target)
     .then(() => true)
     .catch(() => false);
+}
+
+/** Reads `journal_terminal.truth_state` directly; the journal API lists only unconfirmed terminals. */
+function terminalTruthState(storeDir: string, taskId: string): unknown {
+  const db = openJournalDatabase(path.join(storeDir, JOURNAL_DB_FILENAME), DEFAULT_JOURNAL_BUSY_TIMEOUT_MS);
+  try {
+    return (db.prepare('SELECT truth_state FROM journal_terminal WHERE task_id = ?').get(taskId) as { truth_state?: unknown } | undefined)?.truth_state;
+  } finally {
+    db.close();
+  }
 }
 
 /**
@@ -383,6 +393,12 @@ describe('hosted journal integration (L-002)', () => {
           [adapter],
         );
         await daemon.pair('pairing-code');
+        // Startup queues the recovered terminal before the connection opens, so its
+        // POST can be accepted (and confirmed locally) before start() returns. Hold
+        // that acceptance so the read below sees the row strictly before confirmation.
+        const releaseConfirmation = server.holdNextMessagesResponse(
+          (envelope) => envelope.type === 'task.fail' && envelope.task_id === 'task-recover-1',
+        );
         await daemon.start();
 
         await server.waitFor((envelope) => envelope.type === 'task.fail' && envelope.task_id === 'task-recover-1');
@@ -391,16 +407,17 @@ describe('hosted journal integration (L-002)', () => {
 
         const after = new SqliteLocalTaskJournal({ storeDir });
         expect(await after.listRecoverable()).toEqual([]);
-        const pending = await after.listPendingTerminals({ tenantId: 'tenant-test', productId: 'test-product-journal', deviceId: 'device-1' });
-        if (pending.length > 0) {
-          expect(pending).toMatchObject([{ taskId: 'task-recover-1', terminalType: 'failed', truthState: 'pending' }]);
-        } else {
-          // A fast accepted POST may already confirm the terminal; the task
-          // row must still retain its terminal state and original bytes.
-          expect(await after.readTask('task-recover-1', { tenantId: 'tenant-test', productId: 'test-product-journal', deviceId: 'device-1' })).toMatchObject({
-            taskId: 'task-recover-1', localState: 'terminal:failed',
-          });
-        }
+        const identity = { tenantId: 'tenant-test', productId: 'test-product-journal', deviceId: 'device-1' };
+        expect(await after.listPendingTerminals(identity)).toMatchObject([
+          { taskId: 'task-recover-1', terminalType: 'failed', truthState: 'pending' },
+        ]);
+        releaseConfirmation();
+        // Transport acceptance confirms the terminal; the task row keeps its terminal state.
+        await vi.waitFor(() => expect(terminalTruthState(storeDir, 'task-recover-1')).toBe('confirmed'));
+        expect(await after.listPendingTerminals(identity)).toEqual([]);
+        expect(await after.readTask('task-recover-1', identity)).toMatchObject({
+          taskId: 'task-recover-1', localState: 'terminal:failed',
+        });
         await after.close();
         // Marked, not deleted: the row and its bytes are still there.
         const reread = new SqliteLocalTaskJournal({ storeDir });
