@@ -8599,6 +8599,8 @@ export declare class TaskRunner {
      * regression test for the exact scenario.
      */
     shutdownActiveTasks(reason: string): Promise<void>;
+    private closeActiveSession;
+    private awaitActiveSessionClose;
     /**
      * M5 batch-3 (workstream 2): the ONE shared per-task teardown sequence —
      * "reuse the exact interrupt/teardown machinery `shutdownActiveTasks`
