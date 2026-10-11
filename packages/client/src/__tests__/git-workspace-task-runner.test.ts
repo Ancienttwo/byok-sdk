@@ -85,7 +85,26 @@ async function waitForAssertion(assertion: () => void, timeoutMs = 1_000, interv
   throw lastError instanceof Error ? lastError : new Error('Timed out waiting for assertion');
 }
 
- describe('TaskRunner local Git workspace lifecycle', () => {
+/** A stub whose prepared operation resolves a runtime launch with a test-owned release. */
+class LaunchingAdapter extends StubRuntimeAdapter {
+  launchRelease: () => Promise<void> = async () => {};
+  override async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    const base = await super.prepare(input);
+    if (base.kind !== 'prepared') return base;
+    return {
+      ...base,
+      operation: {
+        ...base.operation,
+        resolveRuntimeLaunch: async ({ cwd }) => ({
+          kind: 'pi-rpc', command: 'unused', fixedArgs: [], cwd, env: {}, sessionCwd: cwd,
+          credentialSource: 'pi-auth-store', release: () => this.launchRelease(),
+        }),
+      },
+    };
+  }
+}
+
+describe('TaskRunner local Git workspace lifecycle', () => {
   afterEach(cleanup);
 
   it('keeps disabled mode legacy and performs no Git work', async () => {
@@ -336,6 +355,77 @@ async function waitForAssertion(assertion: () => void, timeoutMs = 1_000, interv
     const [workspaceDir, sessionRef] = acquire.mock.calls[0]!;
     const lease = await manager.acquireLease(workspaceDir, sessionRef);
     lease.release();
+  });
+
+  it('releases the lease when the offer throws after the lease acquire', async () => {
+    const sent: Envelope[] = [];
+    const adapter = new StubRuntimeAdapter();
+    const { deps } = await makeDeps({ enabled: true, adapter, sent });
+    deps.beforeClaim = async () => { throw new Error('fixture commitment failure'); };
+    const manager = deps.gitWorkspaceManager!;
+    const acquire = vi.spyOn(manager, 'acquireLease');
+
+    await expect(new TaskRunner(deps).handleEnvelope(envelope('throws', 'throws-after-lease', payload())))
+      .rejects.toThrow('fixture commitment failure');
+
+    expect(sent.some((e) => e.type === 'task.claim')).toBe(false);
+    expect(adapter.startCalls).toHaveLength(0);
+    expect(acquire).toHaveBeenCalledTimes(1);
+    const [workspaceDir, sessionRef] = acquire.mock.calls[0]!;
+    const lease = await manager.acquireLease(workspaceDir, sessionRef);
+    lease.release();
+  });
+
+  it('clears the in-flight offer when an offer cleanup step throws, so a redelivery is admitted', async () => {
+    const sent: Envelope[] = [];
+    const adapter = new LaunchingAdapter();
+    let launchReleaseFails = true;
+    adapter.launchRelease = async () => {
+      if (launchReleaseFails) { launchReleaseFails = false; throw new Error('fixture projection cleanup failure'); }
+    };
+    const { deps } = await makeDeps({ adapter, sent });
+    let claimFails = true;
+    deps.beforeClaim = async () => {
+      if (claimFails) { claimFails = false; throw new Error('fixture commitment failure'); }
+    };
+    const runner = new TaskRunner(deps);
+
+    await expect(runner.handleEnvelope(envelope('first', 'cleanup-throws', payload())))
+      .rejects.toThrow('fixture projection cleanup failure');
+    expect(sent.some((e) => e.type === 'task.claim')).toBe(false);
+
+    await runner.handleEnvelope(envelope('redelivery', 'cleanup-throws', payload()));
+    expect(sent.filter((e) => e.type === 'task.claim' && e.task_id === 'cleanup-throws')).toHaveLength(1);
+    expect(adapter.startCalls).toHaveLength(1);
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await waitForAssertion(() => expect(terminal(sent, 'cleanup-throws').map((e) => e.type)).toEqual(['task.complete']));
+  });
+
+  it('keeps the runtime launch projection cleanup at offer exit while a startup owner is retained', async () => {
+    // The projection holds env or IPC references, not the key itself.
+    // Removing it does not revoke a credential, so its timing stays as is.
+    const sent: Envelope[] = [];
+    const adapter = new LaunchingAdapter();
+    let launchReleases = 0;
+    adapter.launchRelease = async () => { launchReleases += 1; };
+    const releaseStart = adapter.blockStart();
+    const { deps } = await makeDeps({ adapter, sent });
+    const runner = new TaskRunner(deps);
+    const offer = runner.handleEnvelope(envelope('retained', 'retained-projection', payload()));
+    await waitForAssertion(() => expect(adapter.startCalls).toHaveLength(1));
+    await runner.handleEnvelope(envelope('task.cancel', 'retained-projection', { reason: 'stop' }));
+    await offer;
+
+    expect(terminal(sent, 'retained-projection').map((e) => e.type)).toEqual(['task.cancelled']);
+    expect(launchReleases).toBe(1);
+
+    runner.stopAcceptingOffers();
+    releaseStart();
+    await runner.shutdownActiveTasks('late start returned');
+    expect(adapter.sessions[0]?.closeCalled).toBe(true);
+    // StubSession never releases the launch, so this only shows that the
+    // startup disposal does not release it a second time.
+    expect(launchReleases).toBe(1);
   });
 
   it('retains the Git workspace lease until a failed disposal is retried successfully', async () => {

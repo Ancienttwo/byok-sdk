@@ -1,6 +1,6 @@
 # Own pre-active offer resources in one place
 
-Status: Planned (revision 2)
+Status: PR A merged (#359). D2 delivered by #361. PR B in review (revision 3)
 Approval: The owner approved this direction on 2026-10-12. Each PR needs its own review.
 Base: 5ba300cbffc4cbb728315b44362fb3a636d5a42b
 Previous slices: https://github.com/Ancienttwo/byok-sdk/pull/354 (startup owner), https://github.com/Ancienttwo/byok-sdk/pull/357 (active close receipt)
@@ -39,6 +39,25 @@ An explicit owner variable and the existing release sites avoid all three.
 
 The review also corrected the D3 reason. `models.json` holds `$PI_PROVIDER_API_KEY` or `byok:durable-ipc`, not the key (`keys/src/pi-provider-projection.ts:7`, `piApiKey`).
 The secret reaches the child through env or IPC. Deleting the projection directory does not revoke a credential.
+
+## Revision 3
+
+The issues split PR B into two items.
+Issue #361 delivers D2 (the retained startup pin) as its own bug fix.
+Issue #362 delivers D1, D3, D4, D6 and D7 as a refactor on top of #361.
+D5 lists the remaining intended changes for #362.
+
+Contract check for #362, item by item against the issue:
+
+| #362 item | Contract | Where in code |
+| --- | --- | --- |
+| 1. Owner handoff | `owner` moves from `'offer'` to `'startup'` on the same synchronous path as each `startupOwnership.register`. It moves to `'active'` on the same synchronous path as `transferToActive` and `tasks.set`. No container is transferred twice. ActiveTask still takes `gitLease` and the agent binding from handleOffer locals. | `task-runner.ts:2098`, `:3002`, `:3045`, `:3165`, `:3195` |
+| 2. Release contracts | Startup release must succeed: a throw keeps the owner, and the StartupOwnership retry timer runs the same callback again. Offer release is best effort: the agent lease uses `.catch(() => {})`, the pin logs. A logged failure is not a receipt, and no code reads it as one. | `:3239-3245`, `:3246-3260`; `startup-ownership.ts:66-98` |
+| 3. Release order | Offer: contexts, agent lease, Git lease, pin, then runtime launch. Startup callback: agent lease, Git lease, pin. Active: `finishOnce`. There is no generic LIFO list. | `:3246-3265`, `:2996-3000`, `:3039-3043` |
+| 4. Release before decline | All manual release sites stay. The finally only covers a throw or a missed site. | unchanged sites |
+| 5. In-flight markers | They clear in an inner `finally`. A cleanup throw cannot skip them. | `:3266-3270` |
+| 6. Pi projection timing | `runtimeLaunch?.release()` still runs at offer exit for a retained startup. A test pins this timing. The projection holds env or IPC references, not the key. | `:3261-3265` |
+| 7. Cancel, disposal, commit, finish order | Unchanged. No change in revoke positions, StartupOwnership, the terminal commit barrier, or finishOnce. | n/a |
 
 ## P1: Boundary
 
