@@ -43,8 +43,9 @@ published and read back on `rc`, from `v0.26.0-rc.4` (`e3f6d723`). See its
 [rc.4 publication record](../../docs/releases/v0.26.0-rc.4-publication.md).
 On 2026-10-11 the owner authorized stable preparation of 0.26.0 / keys 0.11.0
 for the dist-tag `latest`, before the end-to-end run that the rc route named.
-0.26.0 adds #347, #348 and #349, which no RC carried. It is not published; npm
-execution approval remains separate. See the
+0.26.0 adds #347, #348 and #349, which no RC carried. All nine packages are
+published on `latest` from `v0.26.0` (`34c0e504`) and read back; see its
+[publication record](../../docs/releases/v0.26.0-publication.md) and the
 [0.26.0 release notes](../../docs/releases/v0.26.0.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:

@@ -180,7 +180,9 @@ than the workspace graph.
 
 On 2026-10-11 the owner authorized stable source preparation for the eight
 aligned packages at 0.26.0 and keys at 0.11.0. All nine packages target npm's
-`latest` dist-tag; publication is pending. The owner chose stable before the
+`latest` dist-tag. They are published from `v0.26.0` (`34c0e504`), and complete
+registry readback passed on 2026-10-11; see the
+[publication record](releases/v0.26.0-publication.md). The owner chose stable before the
 end-to-end run that the rc route named. 0.26.0 adds three client changes that
 no RC carried: #345 (pi `authPresent` counts a `models.json` `apiKey`), #348
 (OAR 0.54.3) and #349 (a Codex resume of a missing thread fails as
@@ -202,7 +204,7 @@ rc.2 was also partially published for those three packages. The owner approved
 0.26.0-rc.3 / keys 0.11.0-rc.3 and npm execution on 2026-10-10. rc.1 and rc.2
 are superseded. A prerelease train
 publishes every public package as a prerelease on one dist-tag, which is why
-keys is also a prerelease. Until stable publication, `latest` stays 0.25.0 / keys 0.10.0, and the
+keys is also a prerelease. Before 0.26.0, `latest` was 0.25.0 / keys 0.10.0, and the
 reviewed registry baseline records that prior `latest` for all nine packages. The 0.26 line is a MINOR: it adds public
 API (memory-reader Attempts and the `agent-home-readers` capability,
 `task.complete.finalMessage`, `agentHomeProjection` evidence, optional strict
