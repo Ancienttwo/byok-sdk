@@ -2990,7 +2990,11 @@ export class TaskRunner {
               this.pendingCancelled.delete(taskId);
               this.addFinishedTaskId(taskId);
             } } : {}),
-            release: async () => { await ownedBinding?.lease.release(); gitLease?.release(); },
+            release: async () => {
+              await ownedBinding?.lease.release();
+              gitLease?.release();
+              await this.releasePreparationPin(taskId);
+            },
           });
           agentLeaseTransferred = true;
           // An abort while the start still runs is not a disposal failure:
@@ -3032,6 +3036,7 @@ export class TaskRunner {
         release: async () => {
           await ownedBinding?.lease.release();
           gitLease?.release();
+          await this.releasePreparationPin(taskId);
         },
       });
       try {
@@ -3226,8 +3231,10 @@ export class TaskRunner {
     } finally {
       clearTimeout(startupTimer);
       releaseReservation();
-      if (this.startupOwnership.has(taskId)) {
-        // This owner also releases the lease, but only after the disposal receipt.
+      const startupOwned = this.startupOwnership.has(taskId);
+      if (startupOwned) {
+        // This owner also releases the leases and the preparation pin, but
+        // only after the disposal receipt and the terminal commit.
         agentLeaseTransferred = true;
         await this.startupOwnership.dispose(taskId);
       }
@@ -3246,9 +3253,12 @@ export class TaskRunner {
       // An offer that never became an Execution is already terminal here: it
       // declined, failed, or was cancelled before `start()` published a
       // session. A task that DID start is in `this.tasks`, and its pin is
-      // released at its own terminal instead (`finishOnce`).
+      // released at its own terminal instead (`finishOnce`). A startup owner
+      // releases the pin itself, because a runtime it retains may still use
+      // the prepared artifact. The runtime launch projection keeps its
+      // existing cleanup timing here; that is out of scope for the pin.
       if (!this.tasks.has(taskId)) {
-        await this.releasePreparationPin(taskId);
+        if (!startupOwned) await this.releasePreparationPin(taskId);
         await runtimeLaunch?.release();
       }
       this.inFlightBlobAborts.delete(taskId);

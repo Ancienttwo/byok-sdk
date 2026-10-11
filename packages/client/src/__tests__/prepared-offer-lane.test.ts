@@ -49,6 +49,7 @@ import {
   type InputPreparationRuntimeIdentityV1,
 } from '../input-preparation';
 import type { McpToolsetConfig, RuntimeCapabilities } from '../types';
+import { RuntimeDisposalFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { observationOf } from './fixtures/mcp-observation';
 import { validatePreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
@@ -1037,6 +1038,83 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     expect(adapter.preparedStartCalls).toHaveLength(1);
 
     await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-prepared-replay', seq: 3 }));
+  });
+});
+
+describe('a retained startup owner keeps its preparation pin until disposal and terminal commit are confirmed', () => {
+  /** Far past both retention horizons, so GC would collect any unpinned record. */
+  const afterRetention = (): number => Date.now() + 10 * 60 * 60 * 1000;
+
+  async function expectRetained(built: Lane, taskId: string): Promise<void> {
+    expect(built.store.get(built.recordId)?.pin?.taskId).toBe(taskId);
+    await built.store.gc(afterRetention());
+    const record = built.store.get(built.recordId);
+    expect(record?.artifactBytes).toBeGreaterThan(0);
+    await expect(built.store.readArtifact(record!)).resolves.toBeDefined();
+  }
+
+  async function expectReleased(built: Lane): Promise<void> {
+    expect(built.store.get(built.recordId)?.pin).toBeUndefined();
+    await built.store.gc(afterRetention());
+    expect(built.store.get(built.recordId)).toBeUndefined();
+  }
+
+  /** Cancel while start() still runs, so the offer ends with a retained startup owner. */
+  async function cancelDuringStart(extra: Partial<TaskRunnerDeps> = {}) {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const releaseStart = adapter.blockStart();
+    const runner = await makeRunner(built, adapter, sent, extra);
+    const taskId = 'task-prepared-startup-retained';
+    const offered = runner.handleEnvelope(preparedOffer(taskId, reference(built)));
+    await vi.waitFor(() => expect(adapter.preparedStartCalls).toHaveLength(1));
+    await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'stop' }, { taskId, seq: 2 }));
+    await offered;
+    expect(sent.filter((envelope) => envelope.task_id === taskId && envelope.type === 'task.cancelled')).toHaveLength(1);
+    // Stop the 1s startup retry timer, so only the shutdown calls below dispose the owner.
+    runner.stopAcceptingOffers();
+    return { built, adapter, runner, taskId, releaseStart };
+  }
+
+  it('keeps the pin while start has not returned and while the late session cannot close', async () => {
+    const { built, adapter, runner, taskId, releaseStart } = await cancelDuringStart();
+    await expectRetained(built, taskId);
+
+    releaseStart();
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    const session = adapter.sessions[0]!;
+    const close = session.close.bind(session);
+    let closeConfirmed = false;
+    session.close = async () => {
+      if (!closeConfirmed) throw new RuntimeDisposalFailure({ stage: 'quiescence', reason: 'fixture tree remains live' });
+      await close();
+    };
+
+    await expect(runner.shutdownActiveTasks('close fails')).rejects.toMatchObject({ name: 'RuntimeDisposalFailure' });
+    await expectRetained(built, taskId);
+
+    closeConfirmed = true;
+    await runner.shutdownActiveTasks('close succeeds');
+    expect(session.closeCalled).toBe(true);
+    await expectReleased(built);
+  });
+
+  it('keeps the pin when disposal succeeds but the terminal commit fails', async () => {
+    let committed = false;
+    const { built, adapter, runner, taskId, releaseStart } = await cancelDuringStart({
+      awaitTerminalCommit: async () => { if (!committed) throw new Error('fixture terminal commit is not durable'); },
+    });
+
+    releaseStart();
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    await expect(runner.shutdownActiveTasks('commit fails')).rejects.toMatchObject({ name: 'RuntimeDisposalFailure' });
+    expect(adapter.sessions[0]!.closeCalled).toBe(true);
+    await expectRetained(built, taskId);
+
+    committed = true;
+    await runner.shutdownActiveTasks('commit succeeds');
+    await expectReleased(built);
   });
 });
 
