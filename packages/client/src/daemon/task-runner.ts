@@ -4,7 +4,8 @@ import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import type { PiRuntimeLaunchResources } from '../adapters/pi/runtime-launch';
 import { awaitAdmission } from './admission-wait';
 import { terminalIdentity } from './terminal-identity';
-import { abortedStartOf, startOwnedRuntime, type AbortedStart } from './runtime-start';
+import { abortedStartOf, startOwnedRuntime } from './runtime-start';
+import { StartupOwnership } from './startup-ownership';
 import { DEFAULT_ARTIFACT_LIMITS, readArtifactBytes } from './artifact-read';
 import { observeRuntimeDetection } from '../runtime-detection';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -1397,6 +1398,9 @@ export class TaskRunner {
    */
   private readonly preparationPinsByTask = new Map<string, string>();
   private readonly inFlightOffers = new Set<string>();
+  private readonly claimedHarnesses = new Map<string, string>();
+  private readonly homeReservations = new Map<string, number>();
+  private readonly startupOwnership: StartupOwnership;
   /** Blob I/O before an offer becomes an active task still belongs to that offer's cancellation authority. */
   private readonly inFlightBlobAborts = new Map<string, AbortController>();
   /**
@@ -1463,6 +1467,20 @@ export class TaskRunner {
     if (deps.strictAgentOnly !== true && (typeof deps.workspaceRoot !== 'string' || deps.workspaceRoot === '')) {
       throw new Error('TaskRunnerDeps.workspaceRoot is required unless strictAgentOnly is true');
     }
+    this.startupOwnership = new StartupOwnership({
+      isOfferInFlight: taskId => this.inFlightOffers.has(taskId),
+      allowRetry: () => !this.stoppingOffers,
+      awaitTerminalCommit: taskId => this.deps.awaitTerminalCommit?.(taskId),
+      onDisposed: taskId => {
+        this.pendingMessageTasks.delete(taskId);
+        this.revokeAgentMessageContext(taskId);
+        this.revokeAgentMemoryContext(taskId);
+        this.deleteHostToolsetContexts(taskId);
+      },
+      onDisposalFailure: (taskId, runtimeId, failure) => this.deps.onRuntimeDisposalFailure?.({
+        taskId, runtimeId, stage: failure.stage, reason: failure.message,
+      }),
+    });
   }
 
   /** A legacy offer's workspace. Only a non-strict runner admits one, and its constructor required the root. */
@@ -1472,7 +1490,7 @@ export class TaskRunner {
   }
 
   get activeTaskCount(): number {
-    return this.tasks.size + this.startupOwners.size;
+    return this.tasks.size + this.startupOwnership.count;
   }
 
   /** M5 batch-3 (workstream 2): effective `maxTaskOutputBytes` cap for this daemon — see {@link DEFAULT_MAX_TASK_OUTPUT_BYTES}'s own doc comment. */
@@ -1709,8 +1727,7 @@ export class TaskRunner {
     // this is not the refusal a caller sees — it is the registry telling the
     // truth regardless of which path initiated the shutdown.
     this.revokeAllHostToolsetContexts();
-    if (this.startupRetryTimer) clearTimeout(this.startupRetryTimer);
-    this.startupRetryTimer = undefined;
+    this.startupOwnership.stopRetry();
     for (const abort of this.inFlightBlobAborts.values()) abort.abort();
   }
 
@@ -1751,86 +1768,12 @@ export class TaskRunner {
    * ahead of this method — see `daemon-control-socket.test.ts`'s dedicated
    * regression test for the exact scenario.
    */
-  /** Startup resources have an owner even before a Session can become active. */
-  private startupRetryTimer: ReturnType<typeof setTimeout> | undefined;
-
-  private readonly claimedHarnesses = new Map<string, string>();
-
-  private readonly homeReservations = new Map<string, number>();
-
-  private readonly startupOwners = new Map<string, {
-    runtimeId: string;
-    dispose: () => Promise<void>;
-    settle?: () => Promise<void>;
-    release: () => Promise<void>;
-    /** An aborted start that is still running: there is nothing to dispose yet. */
-    abortedStart?: AbortedStart;
-  }>();
-
-  private readonly startupDisposals = new Map<string, Promise<boolean>>();
-
-  private disposeStartupOwner(taskId: string): Promise<boolean> {
-    const existing = this.startupDisposals.get(taskId);
-    if (existing) return existing;
-    const attempt = this.disposeStartupOwnerOnce(taskId).finally(() => this.startupDisposals.delete(taskId));
-    this.startupDisposals.set(taskId, attempt);
-    return attempt;
-  }
-
-  private async disposeStartupOwnerOnce(taskId: string): Promise<boolean> {
-    const owner = this.startupOwners.get(taskId);
-    if (!owner) return true;
-    let disposed = false;
-    try {
-      await owner.settle?.();
-      // An aborted start that still runs has not returned its owner yet. That
-      // is not a disposal failure: shutdown waits for it, and the retry below
-      // finds it once it settles.
-      if (!owner.abortedStart?.running()) {
-        await owner.dispose();
-        await this.deps.awaitTerminalCommit?.(taskId);
-        await owner.release();
-        disposed = true;
-      }
-    } catch (caught) {
-      const failure = isRuntimeDisposalFailure(caught) ? caught : new RuntimeDisposalFailure({
-        stage: 'quiescence', reason: 'startup runtime disposal has not been confirmed',
-      }, { cause: caught });
-      this.deps.onRuntimeDisposalFailure?.({ taskId, runtimeId: owner.runtimeId,
-        stage: failure.stage, reason: failure.message });
-      console.error(`[byok/client] startup ownership retained for ${taskId}: ${failure.message}`);
-    }
-    if (!disposed) {
-      if (!this.startupRetryTimer && !this.stoppingOffers) {
-        this.startupRetryTimer = setTimeout(() => {
-          this.startupRetryTimer = undefined;
-          for (const id of this.startupOwners.keys()) {
-            if (!this.inFlightOffers.has(id)) void this.disposeStartupOwner(id);
-          }
-        }, 1_000);
-        this.startupRetryTimer.unref?.();
-      }
-      return false;
-    }
-    if (this.startupOwners.get(taskId) === owner) this.startupOwners.delete(taskId);
-    this.pendingMessageTasks.delete(taskId);
-    this.revokeAgentMessageContext(taskId);
-    this.revokeAgentMemoryContext(taskId);
-    this.deleteHostToolsetContexts(taskId);
-    return true;
-  }
-
   async shutdownActiveTasks(reason: string): Promise<void> {
     const offers = offerSettlements.get(this);
     if (offers?.size) await Promise.all(offers);
     const active = [...this.tasks.values()];
     await Promise.all(active.map((task) => this.shutdownTask(task, reason)));
-    for (const [taskId, owner] of this.startupOwners) {
-      await owner.abortedStart?.settled;
-      if (!await this.disposeStartupOwner(taskId)) throw new RuntimeDisposalFailure({
-        stage: 'quiescence', reason: 'startup runtime ownership remains quarantined',
-      });
-    }
+    await this.startupOwnership.disposeAll();
   }
 
   /**
@@ -2012,7 +1955,7 @@ export class TaskRunner {
     // same offer while its first prepared operation is still in flight (or
     // well after it already succeeded) would start a SECOND adapter session
     // for the same task, orphaning the first.
-    if (this.tasks.has(taskId) || this.startupOwners.has(taskId) || this.inFlightOffers.has(taskId) || this.finishedTaskIds.has(taskId) || this.strictDeclinedTaskIds.has(taskId)) {
+    if (this.tasks.has(taskId) || this.startupOwnership.has(taskId) || this.inFlightOffers.has(taskId) || this.finishedTaskIds.has(taskId) || this.strictDeclinedTaskIds.has(taskId)) {
       return;
     }
 
@@ -3001,7 +2944,7 @@ export class TaskRunner {
           }, { taskId });
           let cancellationSettled = false;
           const abortedStart = abortedStartOf(err);
-          this.startupOwners.set(taskId, {
+          this.startupOwnership.register(taskId, {
             runtimeId: pick.descriptor.id,
             ...(abortedStart === undefined ? {} : { abortedStart }),
             dispose: disposalFailure ? err.retryDisposal : async () => {},
@@ -3019,7 +2962,7 @@ export class TaskRunner {
           });
           agentLeaseTransferred = true;
           // An abort while the start still runs is not a disposal failure:
-          // nothing has been disposed yet. `disposeStartupOwnerOnce` reports
+          // nothing has been disposed yet. `StartupOwnership.dispose` reports
           // it if a later attempt fails.
           if (disposalFailure && abortedStart === undefined) this.deps.onRuntimeDisposalFailure?.({ taskId,
             runtimeId: pick.descriptor.id, stage: 'quiescence', reason: err.message });
@@ -3051,7 +2994,7 @@ export class TaskRunner {
       }
 
       const ownedBinding = agentBinding;
-      this.startupOwners.set(taskId, {
+      this.startupOwnership.register(taskId, {
         runtimeId: pick.descriptor.id,
         dispose: () => session.close(),
         release: async () => {
@@ -3177,7 +3120,7 @@ export class TaskRunner {
         const reason = this.pendingCancelled.get(taskId);
         this.pendingCancelled.delete(taskId);
         agentLeaseTransferred = agentBinding !== undefined;
-        this.startupOwners.delete(taskId);
+        this.startupOwnership.transferToActive(taskId);
         this.tasks.set(taskId, active);
         await this.settleSemanticTerminal(active, async () => {
           active.eventPump ??= this.pump(active);
@@ -3207,7 +3150,7 @@ export class TaskRunner {
       // `task.cancelled` entirely.
       agentLeaseTransferred = agentBinding !== undefined;
       this.inFlightBlobAborts.delete(taskId);
-      this.startupOwners.delete(taskId);
+      this.startupOwnership.transferToActive(taskId);
       this.tasks.set(taskId, active);
       this.pendingMessageTasks.delete(taskId);
       if (active.messageOutbox !== undefined && activatedMessageRecord !== undefined) {
@@ -3251,10 +3194,10 @@ export class TaskRunner {
     } finally {
       clearTimeout(startupTimer);
       releaseReservation();
-      if (this.startupOwners.has(taskId)) {
+      if (this.startupOwnership.has(taskId)) {
         // This owner also releases the lease, but only after the disposal receipt.
         agentLeaseTransferred = true;
-        await this.disposeStartupOwner(taskId);
+        await this.startupOwnership.dispose(taskId);
       }
       if (!agentLeaseTransferred) {
         this.pendingMessageTasks.delete(taskId);
@@ -4094,8 +4037,8 @@ export class TaskRunner {
     this.revokeHostToolsetContexts(taskId);
     const active = this.tasks.get(taskId);
     if (!active) {
-      if (this.startupOwners.has(taskId) && !this.inFlightOffers.has(taskId)) {
-        await this.disposeStartupOwner(taskId);
+      if (this.startupOwnership.has(taskId) && !this.inFlightOffers.has(taskId)) {
+        await this.startupOwnership.dispose(taskId);
         return;
       }
       // Finding F4: not registered yet — record it in case handleOffer is
