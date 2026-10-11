@@ -85,7 +85,7 @@ async function waitForAssertion(assertion: () => void, timeoutMs = 1_000, interv
   throw lastError instanceof Error ? lastError : new Error('Timed out waiting for assertion');
 }
 
- /** A stub whose prepared operation resolves a runtime launch with a test-owned release. */
+/** A stub whose prepared operation resolves a runtime launch with a test-owned release. */
 class LaunchingAdapter extends StubRuntimeAdapter {
   launchRelease: () => Promise<void> = async () => {};
   override async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
@@ -390,7 +390,8 @@ describe('TaskRunner local Git workspace lifecycle', () => {
     };
     const runner = new TaskRunner(deps);
 
-    await expect(runner.handleEnvelope(envelope('first', 'cleanup-throws', payload()))).rejects.toThrow();
+    await expect(runner.handleEnvelope(envelope('first', 'cleanup-throws', payload())))
+      .rejects.toThrow('fixture projection cleanup failure');
     expect(sent.some((e) => e.type === 'task.claim')).toBe(false);
 
     await runner.handleEnvelope(envelope('redelivery', 'cleanup-throws', payload()));
@@ -422,6 +423,8 @@ describe('TaskRunner local Git workspace lifecycle', () => {
     releaseStart();
     await runner.shutdownActiveTasks('late start returned');
     expect(adapter.sessions[0]?.closeCalled).toBe(true);
+    // StubSession never releases the launch, so this only shows that the
+    // startup disposal does not release it a second time.
     expect(launchReleases).toBe(1);
   });
 
