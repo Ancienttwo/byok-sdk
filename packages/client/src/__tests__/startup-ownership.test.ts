@@ -124,6 +124,31 @@ describe('startup resource ownership', () => {
     expect(ownership.count).toBe(1);
   });
 
+  it('keeps the owner when a required release fails, and its own retry runs the release once more', async () => {
+    vi.useFakeTimers();
+    let releases = 0;
+    const { ownership, owner, events, failures } = setup();
+    owner.release = async () => {
+      events.push('release');
+      if (++releases === 1) throw new Error('agent lease release failed');
+    };
+    ownership.register('task', owner);
+    await expect(ownership.dispose('task')).resolves.toBe(false);
+    expect(ownership.has('task')).toBe(true);
+    expect(events).not.toContain('contexts');
+    expect(failures).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(ownership.has('task')).toBe(false);
+    expect(events.filter(event => event === 'release')).toHaveLength(2);
+    expect(events.at(-1)).toBe('contexts');
+
+    await ownership.disposeAll();
+    await expect(ownership.dispose('task')).resolves.toBe(true);
+    expect(events.filter(event => event === 'release')).toHaveLength(2);
+    ownership.stopRetry();
+  });
+
   it('transfers ownership synchronously and leaves cleanup to the active execution', async () => {
     const { ownership, owner, events } = setup();
     ownership.register('task', owner);

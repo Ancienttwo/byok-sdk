@@ -2091,7 +2091,11 @@ export class TaskRunner {
     };
     this.inFlightBlobAborts.set(taskId, blobAbort);
     let agentBinding: AgentHomeExecutionBinding | undefined;
-    let agentLeaseTransferred = false;
+    let gitLease: GitWorkspaceLease | undefined;
+    // The one owner of the offer's leases, pin, and contexts at each moment.
+    // Each change of owner happens on the same synchronous path as the
+    // startup registration or the active handoff it names.
+    let owner: 'offer' | 'startup' | 'active' = 'offer';
     let runtimeLaunch: PiRuntimeLaunchResources | undefined;
     let reservedHome: string | undefined;
     const releaseReservation = (): void => {
@@ -2437,7 +2441,6 @@ export class TaskRunner {
 
       let known: Awaited<ReturnType<SessionWorkspaceStore['get']>> = undefined;
       let workspaceDir: string;
-      let gitLease: GitWorkspaceLease | undefined;
       let gitWorkspaceId: string | undefined;
       let gitBaseline: string | undefined;
       let gitExisting = false;
@@ -2996,7 +2999,7 @@ export class TaskRunner {
               await this.releasePreparationPin(taskId);
             },
           });
-          agentLeaseTransferred = true;
+          owner = 'startup';
           // An abort while the start still runs is not a disposal failure:
           // nothing has been disposed yet. `StartupOwnership.dispose` reports
           // it if a later attempt fails.
@@ -3039,6 +3042,7 @@ export class TaskRunner {
           await this.releasePreparationPin(taskId);
         },
       });
+      owner = 'startup';
       try {
       if (agentBinding !== undefined) {
         try {
@@ -3156,9 +3160,9 @@ export class TaskRunner {
       if (this.pendingCancelled.has(taskId)) {
         const reason = this.pendingCancelled.get(taskId);
         this.pendingCancelled.delete(taskId);
-        agentLeaseTransferred = agentBinding !== undefined;
         this.startupOwnership.transferToActive(taskId);
         this.tasks.set(taskId, active);
+        owner = 'active';
         await this.settleSemanticTerminal(active, async () => {
           active.eventPump ??= this.pump(active);
           await this.interruptBounded(active);
@@ -3185,10 +3189,10 @@ export class TaskRunner {
       // sessionWorkspaces write (below) before registering `active` and broke
       // exactly this: a cancel racing a task.offer lost its `interrupt()`/
       // `task.cancelled` entirely.
-      agentLeaseTransferred = agentBinding !== undefined;
       this.inFlightBlobAborts.delete(taskId);
       this.startupOwnership.transferToActive(taskId);
       this.tasks.set(taskId, active);
+      owner = 'active';
       this.pendingMessageTasks.delete(taskId);
       if (active.messageOutbox !== undefined && activatedMessageRecord !== undefined) {
         this.sendAgentMessageRecord(active.messageOutbox, activatedMessageRecord);
@@ -3231,39 +3235,39 @@ export class TaskRunner {
     } finally {
       clearTimeout(startupTimer);
       releaseReservation();
-      const startupOwned = this.startupOwnership.has(taskId);
-      if (startupOwned) {
-        // This owner also releases the leases and the preparation pin, but
-        // only after the disposal receipt and the terminal commit.
-        agentLeaseTransferred = true;
-        await this.startupOwnership.dispose(taskId);
+      try {
+        if (owner === 'startup') {
+          // Startup release must succeed. The startup owner releases the
+          // leases and the preparation pin only after the disposal receipt
+          // and the terminal commit. A failed release keeps the owner, and
+          // StartupOwnership retries it.
+          await this.startupOwnership.dispose(taskId);
+        }
+        if (owner === 'offer') {
+          // Offer release is best effort. The offer never became an
+          // Execution: it declined, failed, threw, or was cancelled before
+          // `start()` published a session. Each early exit already released
+          // its leases before it declined or failed; these calls only cover
+          // a throw, and each release is idempotent. The nonces minted for
+          // its would-be children die with it.
+          this.pendingMessageTasks.delete(taskId);
+          this.revokeAgentMessageContext(taskId);
+          this.revokeAgentMemoryContext(taskId);
+          this.deleteHostToolsetContexts(taskId);
+          await agentBinding?.lease.release().catch(() => {});
+          gitLease?.release();
+          await this.releasePreparationPin(taskId);
+        }
+        // An active task's Session owns the runtime launch. The projection
+        // holds env or IPC references, not the key, so removing it does not
+        // revoke a credential. Its cleanup timing for a retained startup
+        // stays unchanged here.
+        if (owner !== 'active') await runtimeLaunch?.release();
+      } finally {
+        this.inFlightBlobAborts.delete(taskId);
+        this.inFlightOffers.delete(taskId);
+        this.claimedHarnesses.delete(taskId);
       }
-      if (!agentLeaseTransferred) {
-        this.pendingMessageTasks.delete(taskId);
-        this.revokeAgentMessageContext(taskId);
-        this.revokeAgentMemoryContext(taskId);
-        // A declined/failed offer never becomes an execution, so the nonces
-        // minted for its would-be children die with it rather than outliving
-        // the attempt in the registry.
-        this.deleteHostToolsetContexts(taskId);
-      }
-      if (agentBinding !== undefined && !agentLeaseTransferred) {
-        await agentBinding.lease.release().catch(() => {});
-      }
-      // An offer that never became an Execution is already terminal here: it
-      // declined, failed, or was cancelled before `start()` published a
-      // session. A task that DID start is in `this.tasks`, and its pin is
-      // released at its own terminal instead (`finishOnce`). A startup owner
-      // releases the pin itself, because a runtime it retains may still use
-      // the prepared artifact. The runtime launch projection keeps its
-      // existing cleanup timing here; that is out of scope for the pin.
-      if (!this.tasks.has(taskId)) {
-        if (!startupOwned) await this.releasePreparationPin(taskId);
-        await runtimeLaunch?.release();
-      }
-      this.inFlightBlobAborts.delete(taskId);
-      this.inFlightOffers.delete(taskId);
-      this.claimedHarnesses.delete(taskId);
     }
   }
 
