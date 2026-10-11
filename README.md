@@ -7,10 +7,11 @@ composition over Postgres and R2.
 
 ## Release status
 
-The current stable source candidate is **0.26.0** for the eight aligned
-packages, with independent keys **0.11.0**. On 2026-10-11 the release owner
-authorized stable preparation for the npm dist-tag `latest`; publication is
-pending. The public set is nine packages; `@byok-sdk/implementation-identity`
+The current `latest` release is **0.26.0** for the eight aligned packages,
+with independent keys **0.11.0**, published on npm `latest` on 2026-10-11 from
+`v0.26.0` (`34c0e504`, PR #350). The
+[publication record](docs/releases/v0.26.0-publication.md) verifies the frozen
+artifact identity and registry readback. The public set is nine packages; `@byok-sdk/implementation-identity`
 stays retired. The owner chose stable before the end-to-end run that the rc
 route named. 0.26.0 also adds three client changes that no RC carried: the
 `models.json` `apiKey` probe for pi `authPresent` (#345), OAR 0.54.3 (#348)
@@ -22,11 +23,10 @@ The published **0.26.0-rc.4** / keys 0.11.0-rc.4 stays on the `rc` channel (see
 its [publication record](docs/releases/v0.26.0-rc.4-publication.md)). rc.3 is
 superseded. rc.1 and rc.2 were only partially published and are also superseded.
 
-Versioned install examples below name the 0.26.0 candidate. They work only
-after publication and exact registry readback. Live Host acceptance remains
-separate.
+Versioned install examples below use the published 0.26.0 packages. Live Host
+acceptance remains separate.
 
-The current `latest` release is **0.25.0** for eight aligned packages, with
+Before it, `latest` was **0.25.0** for eight aligned packages, with
 independent keys **0.10.0**, published on npm `latest` on 2026-10-09 from
 `v0.25.0` (`3278b834`, PR #320). The
 [publication record](docs/releases/v0.25.0-publication.md) verifies accepted
@@ -35,7 +35,7 @@ CI bytes, registry integrities, dependency edges and a clean npm install.
 upgrade steps. The earlier 0.25.0-rc.2 is superseded on the `rc` channel; its [notes](docs/releases/v0.25.0-rc.2.md) and the
 [rc.1 breaking-change record](docs/releases/v0.25.0.md) remain historical evidence.
 
-Before it, `latest` was **0.24.0**, with independent keys **0.9.0**.
+Before 0.25.0, `latest` was **0.24.0**, with independent keys **0.9.0**.
 npm shows all ten 0.24.0 / keys 0.9.0 packages published on 2026-10-06; their
 registry integrities equal the push CI `release-pack` artifact of `756eb921`.
 The repository has no `v0.24.0` tag and no publication record for it. The
@@ -105,12 +105,11 @@ import { createByokServer } from '@byok-sdk/server';
 ```
 
 The Worker-only cloud-do package is published from 0.24.0. The example below
-names the 0.26.0 stable candidate. Confirm its exact registry version before
-installation.
+names the published 0.26.0 release.
 See [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
 
 ~~~sh
-# Exact stable candidate; verify registry availability before installation.
+# Published stable release.
 npm install @byok-sdk/cloud-do@0.26.0
 npm install --save-dev @cloudflare/workers-types
 ~~~
