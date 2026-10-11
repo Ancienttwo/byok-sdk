@@ -8596,13 +8596,9 @@ export declare class TaskRunner {
      * regression test for the exact scenario.
      */
     /** Startup resources have an owner even before a Session can become active. */
-    private startupRetryTimer;
+    private readonly startup;
     private readonly claimedHarnesses;
     private readonly homeReservations;
-    private readonly startupOwners;
-    private readonly startupDisposals;
-    private disposeStartupOwner;
-    private disposeStartupOwnerOnce;
     shutdownActiveTasks(reason: string): Promise<void>;
     /**
      * M5 batch-3 (workstream 2): the ONE shared per-task teardown sequence —
