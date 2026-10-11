@@ -4,22 +4,24 @@ This package hosts a pi-durable session in a Cloudflare Durable Object.
 It provides native SQLite storage, inline tools, wake and inbox processing,
 usage limits, settlement hooks, and transcript reads.
 
-The current `rc` release is 0.26.0-rc.4, in the nine-package release set with
-keys 0.11.0-rc.4. Registry readback passed on 2026-10-11. The earlier 0.26.0-rc.3 (see the
-[rc.3 publication record](../../docs/releases/v0.26.0-rc.3-publication.md)) is
-superseded by rc.4, and rc.1 and rc.2 were partially published and are also
-superseded. `latest` stays 0.25.0 / keys 0.10.0. See the
+The current stable source candidate is 0.26.0, in the nine-package release
+set with keys 0.11.0, for the npm dist-tag `latest`. Publication is pending.
+The published 0.26.0-rc.4 (see the
+[rc.4 publication record](../../docs/releases/v0.26.0-rc.4-publication.md))
+stays on `rc`; rc.1 to rc.3 are superseded. `latest` stays 0.25.0 / keys 0.10.0
+until publication. See the
 [release notes](../../docs/releases/v0.26.0.md#version-set-and-channel).
 Live Host acceptance remains separate.
 The package needs Node 24.15.0 or later for build tooling.
 
 ## Install and subclass
 
-The following install example names the published release candidate. Do not
+The following install example names the stable candidate; it works only after
+publication and exact registry readback. Do not
 use a workspace source import as installed-package acceptance evidence.
 
 ~~~sh
-npm install @byok-sdk/cloud-do@0.26.0-rc.4
+npm install @byok-sdk/cloud-do@0.26.0
 npm install --save-dev @cloudflare/workers-types
 ~~~
 

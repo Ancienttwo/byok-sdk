@@ -40,8 +40,12 @@ rc.3 is superseded on `rc` by 0.26.0-rc.4 / keys 0.11.0-rc.4, which the owner
 approved under the dist-tag `rc` on 2026-10-10. rc.4 adds the pi client fixes
 of PR #342 (#340, #341) and is not same-content. All nine rc.4 packages are
 published and read back on `rc`, from `v0.26.0-rc.4` (`e3f6d723`). See its
-[rc.4 publication record](../../docs/releases/v0.26.0-rc.4-publication.md) and
-the [0.26.0 release notes](../../docs/releases/v0.26.0.md).
+[rc.4 publication record](../../docs/releases/v0.26.0-rc.4-publication.md).
+On 2026-10-11 the owner authorized stable preparation of 0.26.0 / keys 0.11.0
+for the dist-tag `latest`, before the end-to-end run that the rc route named.
+0.26.0 adds #347, #348 and #349, which no RC carried. It is not published; npm
+execution approval remains separate. See the
+[0.26.0 release notes](../../docs/releases/v0.26.0.md).
 
 The SDK publishes npm libraries, the `byok-agent` CLI and reference packaging/service recipes. The host product owns every binary distribution decision:
 
@@ -58,8 +62,8 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 ## Version selection
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
-The approved source manifests name the prerelease train 0.26.0-rc.4 and
-independent keys 0.11.0-rc.4. Both are MINOR lines: the train adds public API
+The approved source manifests name the stable train 0.26.0 and
+independent keys 0.11.0. Both are MINOR lines: the train adds public API
 (memory-reader Attempts, `task.complete.finalMessage`, `copyPiRuntimeAssets`)
 and cuts the client Agent home execution lease; keys makes its Pi launcher
 entry public and tightens Pi admission. Keep lock workspace records,
@@ -68,11 +72,10 @@ authorities.
 
 The approved candidate set contains eight aligned packages plus keys: nine
 packages. `@byok-sdk/implementation-identity` is retired and is not published.
-All nine are prereleases on the one non-`latest` tag `rc`.
+All nine are stable versions for the dist-tag `latest`.
 The [reviewed registry baseline](../../scripts/release/registry-expectations.json)
 records the prior stable tags (0.25.0, keys 0.10.0) and explicitly identifies
 first publications; this train has none.
-The prerelease path keeps those existing stable tags fixed.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
 package-document absence before a declared first publication, then exact-version
 readback and the declared absent `latest` after an RC. Missing tags/versions or
