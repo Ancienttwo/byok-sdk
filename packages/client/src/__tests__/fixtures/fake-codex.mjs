@@ -238,7 +238,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
       send({
         id,
         error: {
-          code: -32000,
+          code: Number(process.env.FAKE_CODEX_RESUME_ERROR_CODE ?? -32600),
           message: `no rollout found for thread id ${params.threadId}`,
         },
       });

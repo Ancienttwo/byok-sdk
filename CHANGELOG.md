@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **client: a Codex resume of a missing thread now fails the start as non-retryable `authority`** —
+  `CodexAdapter.start()` mapped the vendored `SessionNotFoundError` to retryable
+  `infrastructure`, so a resume of a thread that does not exist was retried. It is
+  now a non-retryable `authority` start failure; every other open error keeps its
+  mapping. The private OAR bridge re-exports the typed error.
 - **client: pi `authPresent` counts a `models.json` provider `apiKey`** (#345) —
   a pi user whose `settings.json` `defaultProvider` is a custom provider defined
   in `models.json` with its own `apiKey` was reported `authPresent: false`,
