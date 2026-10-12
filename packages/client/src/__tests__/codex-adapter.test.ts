@@ -427,14 +427,17 @@ describe('Codex persistent app-server adapter', () => {
     resources.env.FAKE_CODEX_RPC_RECEIPT = file;
     const s = await open(adapter(), task, resources);
     await turn(s);
-    await new Promise((r) => setTimeout(r, 20));
-    const frames = (await fs.readFile(file, 'utf8'))
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line));
-    expect(
-      frames.find((f) => f.id === 'server-req' && !f.method),
-    ).toBeDefined();
+    // The fixture finishes the turn without waiting for the reply, and logs
+    // the reply only when it reads it from stdin, so poll the receipt.
+    await vi.waitFor(async () => {
+      const frames = (await fs.readFile(file, 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(
+        frames.find((f) => f.id === 'server-req' && !f.method),
+      ).toBeDefined();
+    });
   });
   it('retention overflow is explicit typed failure and termination', async () => {
     await expect(open(adapter({ maxRetainedBytes: 1 }))).rejects.toThrow(

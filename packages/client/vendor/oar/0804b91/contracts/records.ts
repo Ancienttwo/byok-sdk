@@ -1,7 +1,10 @@
-import type { FailedTurn, FailureClass } from "./failure.js";
 import type { InputImage, InputOrigin } from "./input.js";
 import type { ToolCallProgress, ToolOutputPart } from "./tool-output.js";
+import type { FailureClass } from "./failure.js";
 import type { TaskEventBody } from "./tasks.js";
+import type { TurnOutcome } from "./turn-outcome.js";
+
+export type { TurnOutcome } from "./turn-outcome.js";
 
 /**
  * The record stream and the events read off it. Three words, three layers:
@@ -88,17 +91,17 @@ export type ReasoningContent =
   | { readonly kind: "redacted" }
   | { readonly kind: "empty" };
 
-/**
- * Token totals for the agent the record is attributed to, counted from when this Session opened.
- * `cacheRead` / `cacheWrite` are parts of `input`, accumulated like it and
- * each present only when the runtime reports it: a reported 0 is 0, an
- * unreported part is absent (never derived), a report without a part adds
- * nothing to it, and a part once present stays (docs/spec/attribution.md).
+/** Runtime-reported totals for the attributed agent, counted from this Session's opening.
+ * Cache counts are parts of input; reasoning is part of output. Optional counts accumulate only when reported.
+ * Reported zero stays zero; unreported stays absent, never derived. Missing parts add nothing (docs/spec/attribution.md).
  */
 export interface TokenTotals {
   /** All input, cache reads and writes included. */
   readonly input: number;
+  /** All output, including reasoning when the runtime accounts for it. */
   readonly output: number;
+  /** The part of `output` used for reasoning, only when reported natively. */
+  readonly reasoning?: number;
   /** The part of `input` read from the prompt cache. */
   readonly cacheRead?: number;
   /** The part of `input` written to the prompt cache. */
@@ -286,9 +289,6 @@ export type ResponseBody =
   | { readonly kind: "answered"; readonly native: unknown }
   /** The runtime process exited, an outcome the runtime cannot say itself. Answers a `dispose` request when oar caused it; also recorded for an unrequested exit, pointing at no request. */
   | { readonly kind: "exited"; readonly code: number | null };
-
-/** How a turn ended; `failed` is a `FailedTurn`, tagged by its `failure`. */
-export type TurnOutcome = { readonly kind: "completed" } | { readonly kind: "aborted" } | FailedTurn;
 
 /** Current context fullness, borrowed from pi's shape because it already models the hard case: `tokens` is null when unknown (right after compaction, before the next model response), and `percent` follows. */
 export interface ContextUsage {

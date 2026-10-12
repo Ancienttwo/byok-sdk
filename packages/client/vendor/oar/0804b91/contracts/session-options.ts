@@ -32,6 +32,20 @@ export type McpServer =
 export interface SessionOptions {
   /** Working directory the runtime operates in. With `resume`, a directory other than the session's own is refused where the runtime would run in its own instead (kimi, opencode: `UnsupportedOptionError` on `cwd`); pi and grok can report SessionNotFoundError for that cwd; Cursor reports what its SDK can find with this configuration (docs/runtimes/resume-cwd.md). */
   readonly cwd: string;
+  /**
+   * Additional workspace directories, resolved relative to cwd. Uses the
+   * runtime's native workspace/access setting; cwd remains the primary
+   * directory. This neither changes the sandbox mode nor guarantees OS
+   * isolation. Loading project rules or instruction files in extra directories
+   * varies by runtime and is not guaranteed by this option.
+   * Omitted or empty adds no override: native configuration and
+   * restore rules apply. Supply again on resume where supported; Kimi
+   * refuses a non-empty list on resume because its native path ignores it.
+   * Unsupported runtimes reject with UnsupportedOptionError. See
+   * docs/spec/runtime-matrix.md#additional-directories for native scope and
+   * persistence, including Codex's replacement of runtime workspace roots.
+   */
+  readonly additionalDirectories?: readonly string[];
   /** Runtime-native model identifier; the runtime's default when omitted. */
   readonly model?: string;
   /**
@@ -68,6 +82,20 @@ export interface SessionOptions {
    * folds native reports; provider-side availability can still change later.
    */
   readonly serviceTier?: string;
+  /**
+   * JSON Schema for the session's final output, passed through unchanged.
+   * Claude applies it at process launch to every turn, including spontaneous
+   * turns. A completed Claude turn can still omit structuredOutput if the
+   * model never supplies it; hosts must check for the field, not just kind.
+   * Codex sends it on each OAR turn/start; steer keeps that turn's schema,
+   * queue is refused, and autonomous goal turns have no schema. Codex delegates
+   * validation to its provider and returns text only: the host parses and
+   * validates it. Grok sends it on every prompt, queue drain and steer and
+   * returns its native validated value. OAR never validates a schema or its
+   * output. Give it again on resume; reopen to change it. Other core runtimes
+   * refuse this option.
+   */
+  readonly outputSchema?: Readonly<Record<string, unknown>>;
   /**
    * Resume the native conversation identified by a previous Session.id.
    * Verified missing-target signals reject with SessionNotFoundError; all

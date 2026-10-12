@@ -100,9 +100,12 @@ describe('blob client (protocol §7)', () => {
       ),
     );
 
-    await server.waitFor((event) => event.type === 'task.claim' && event.task_id === taskId);
+    // Adapter detection and the real fake-claude spawn sit on this path, and
+    // under load one step can exceed the 2s default.
+    const nativeWaitMs = 5_000;
+    await server.waitFor((event) => event.type === 'task.claim' && event.task_id === taskId, nativeWaitMs);
     expect(server.received.some((event) => event.type === 'task.decline' && event.task_id === taskId)).toBe(false);
-    await server.waitFor((event) => event.type === 'task.started' && event.task_id === taskId);
+    await server.waitFor((event) => event.type === 'task.started' && event.task_id === taskId, nativeWaitMs);
     const progress = await server.waitFor(
       (event) =>
         event.type === 'task.progress' &&
@@ -110,6 +113,7 @@ describe('blob client (protocol §7)', () => {
         (event.payload as { events: Array<{ type: string; text?: string }> }).events.some(
           (item) => item.type === 'progress' && item.text === `reply-1:${resolvedInstruction}`,
         ),
+      nativeWaitMs,
     );
 
     expect(progress).toBeDefined();
