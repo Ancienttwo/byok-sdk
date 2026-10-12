@@ -8667,6 +8667,10 @@ export declare class TaskRunner {
     private armMaxDurationTimer;
     handleEnvelope(envelope: Envelope): Promise<void>;
     private handleOffer;
+    private admitOffer;
+    private reserveOfferHome;
+    private admitOfferLimits;
+    private prepareOfferRuntime;
     private withAgentMessageMcp;
     private revokeAgentMessageContext;
     /** Injected only after strict Agent admission; a host registry may never replace this reserved name. */
