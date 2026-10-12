@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Changed (client)** — update the private OAR source from 0.56.0 to 0.57.0
+  (`0804b91`). The vendored Codex fold now reads codex's native
+  `reasoningOutputTokens` into its derived token totals, and adds each
+  `session_linked` event once per record stream. SDK events read native frames
+  only and already report Codex `reasoningTokens`, so SDK events and the public
+  API do not change. See `docs/notes/2026-10-12-oar-0.57-upgrade.md`.
 - **Changed (client)** — update the private OAR source from 0.54.3 to 0.56.0
   (`163d551`). The vendored Codex session can now send `additionalDirectories`
   as `runtimeWorkspaceRoots` and `outputSchema` on `turn/start`. The SDK Codex

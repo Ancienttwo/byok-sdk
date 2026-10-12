@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 163d551 for the SDK ES2022 lib (Apache-2.0).
+// BYOK change: Modified from OAR 0804b91 for the SDK ES2022 lib (Apache-2.0).
 /* oxlint-disable import/prefer-default-export -- Shared named helper. */
 import type { SessionOptions } from "../contracts/session.js";
 import { redactText } from "./redact-text.js";

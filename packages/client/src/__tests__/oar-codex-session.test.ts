@@ -1,9 +1,9 @@
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { codexSession } from '../../vendor/oar/163d551/runtimes/codex/session';
-import * as projection from '../../vendor/oar/163d551/runtimes/codex/projection';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/163d551/runtimes/codex/app-server-client';
-import { SessionNotFoundError } from '../../vendor/oar/163d551/contracts/session-not-found-error';
+import { codexSession } from '../../vendor/oar/0804b91/runtimes/codex/session';
+import * as projection from '../../vendor/oar/0804b91/runtimes/codex/projection';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/0804b91/runtimes/codex/app-server-client';
+import { SessionNotFoundError } from '../../vendor/oar/0804b91/contracts/session-not-found-error';
 
 function fakeServer(openReply: Record<string, unknown> = {}) {
   let receive!: (line: string) => void;
@@ -191,6 +191,35 @@ describe('unconnected OAR Codex adapter', () => {
       nodes: [{ id: 'thread-root' }, { id: 'stranger' }, { id: 'child-1' }],
       edges: [{ parent: 'thread-root', child: 'child-1', via: 'tool_call' }],
     });
+    await session.dispose();
+  });
+
+  it('adds session_linked once per record stream and keeps every native frame', async () => {
+    const fake = fakeServer(); const session = await fake.open();
+    await session.prompt('hello');
+    const item = { type: 'collabAgentToolCall', id: 'call-1', receiverThreadIds: ['child-1', 'child-1'] };
+    fake.frame({ method: 'item/started', params: { threadId: 'thread-root', item } });
+    fake.frame({ method: 'item/started', params: { threadId: 'thread-root', item: { ...item, id: 'call-2' } } });
+    const frames = session.records().flatMap(record => record.kind === 'frame' ? [record.body] : []);
+    expect(frames.filter(body => 'origin' in body && body.type === 'item/started').map(body => body.native)).toEqual([
+      { threadId: 'thread-root', item }, { threadId: 'thread-root', item: { ...item, id: 'call-2' } },
+    ]);
+    expect(frames.flatMap(body => body.events.filter(event => event.kind === 'session_linked'))).toEqual([
+      { kind: 'session_linked', parent: 'thread-root', child: 'child-1', via: 'tool_call' },
+    ]);
+    expect(session.graph().edges).toEqual([{ parent: 'thread-root', child: 'child-1', via: 'tool_call' }]);
+    await session.dispose();
+  });
+
+  it('reads the native reasoning output total into the derived usage reading only', async () => {
+    const fake = fakeServer(); const session = await fake.open();
+    await session.prompt('hello');
+    const tokenUsage = { total: { inputTokens: 100, outputTokens: 50, reasoningOutputTokens: 30 }, last: { totalTokens: 150 }, modelContextWindow: 1000 };
+    fake.frame({ method: 'thread/tokenUsage/updated', params: { threadId: 'thread-root', turnId: 'turn-root', tokenUsage } });
+    const [native, reading] = session.records().slice(-2);
+    expect(native).toMatchObject({ kind: 'frame', body: { origin: 'byok-native', type: 'thread/tokenUsage/updated', native: { tokenUsage }, events: [] } });
+    expect(reading).toMatchObject({ kind: 'frame', body: { events: [{ kind: 'usage', usage: { tokens: { input: 100, output: 50, reasoning: 30 } } }] } });
+    expect(reading?.kind === 'frame' && 'origin' in reading.body).toBe(false);
     await session.dispose();
   });
 

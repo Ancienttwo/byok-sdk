@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 163d551 for injected processes, native-first recording, bounded request refusal, caller-selected sandbox and session credential redaction without sealSession (Apache-2.0).
+// BYOK change: Modified from OAR 0804b91 for injected processes, native-first recording, bounded request refusal, caller-selected sandbox and session credential redaction without sealSession (Apache-2.0).
 /* oxlint-disable import/max-dependencies -- The adapter composes protocol, input and process-lifetime mechanisms. */
 import type { AvailableInstallation } from "../../contracts/installation.js"; // BYOK change: direct type-only contract import.
 import { randomUUID } from "node:crypto";
@@ -17,6 +17,7 @@ import { asRecord, type JsonRecord } from "../../shared/json.js";
 // BYOK change: Build the session credential redactor directly; upstream withSessionCredentials imports sealSession.
 import { sessionCredentialRedactor, type CredentialRedactor } from "../../shared/credential-redactor.js";
 import { createSessionKernel } from "../../shared/session-kernel.js";
+import { newSessionLinks } from "../../shared/session-links.js";
 import { startAppServerClient, type RpcOutcome, type SpawnLineProcess } from "./app-server-client.js";
 import { CODEX_SETTINGS_REPORT_MS, codexOpenReadback, codexResumeEffortRefusal, codexThreadOpen } from "./open.js";
 import { foldCodexNotification, initialCodexProjection, type CodexProjectionState } from "./projection.js";
@@ -203,7 +204,7 @@ async function openCodexSession(
     }
     const { state: nextProjection, commands } = foldCodexNotification(state.projection, method, params);
     state.projection = nextProjection;
-    const links = commands.flatMap((command) => command.kind === "link" ? [kernel.link(command.edge)] : []);
+    const links = newSessionLinks(kernel, commands.flatMap((command) => command.kind === "link" ? [command.edge] : []));
     for (const command of commands) {
       switch (command.kind) {
         case "frame":
