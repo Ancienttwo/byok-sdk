@@ -1993,7 +1993,7 @@ export class TaskRunner {
         await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, true));
         return;
       case 'task.offer_prepared':
-        await this.handleOffer(envelope.task_id, envelope.payload, true);
+        await trackOffer(this, this.handleOffer(envelope.task_id, envelope.payload, true));
         return;
       case 'task.cancel':
         await this.handleCancel(envelope.task_id, envelope.payload.reason);
