@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.26.1 / @byok-sdk/keys 0.11.1 (prepared, not published)
+
+- **Client cleanup:** release the Git lease when runtime launch admission fails
+  or is cancelled, and keep prepared input pinned until startup cleanup ends.
+- **Client shutdown:** wait for prepared offers and share one active session
+  close attempt before releasing execution resources.
+- **Prepared offers:** prevent duplicate handling while the preparation store
+  opens.
+- **Outbound errors:** replace local absolute paths in Agent home, preparation,
+  artifact, runtime and MCP error reasons with `<local path>`.
+- **Runtime bridge:** declare `launchArgs` on the private Codex bridge.
+- **Tests:** correct journal confirmation and load-sensitive test timing.
+- The eight aligned manifests move to 0.26.1. keys moves to 0.11.1 to keep its
+  packed core dependency exactly at 0.26.1. No public API or schema changes.
+- [Candidate release notes](docs/releases/v0.26.1.md) record the release gates.
+
 - **Changed (client)** — update the private OAR source from 0.56.0 to 0.57.0
   (`0804b91`). The vendored Codex fold now reads codex's native
   `reasoningOutputTokens` into its derived token totals, and adds each

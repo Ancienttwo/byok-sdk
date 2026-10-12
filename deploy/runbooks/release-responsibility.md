@@ -63,29 +63,28 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 ## Version selection
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
-The approved source manifests name the stable train 0.26.0 and
-independent keys 0.11.0. Both are MINOR lines: the train adds public API
-(memory-reader Attempts, `task.complete.finalMessage`, `copyPiRuntimeAssets`)
-and cuts the client Agent home execution lease; keys makes its Pi launcher
-entry public and tightens Pi admission. Keep lock workspace records,
-API/version docs and exact packed internal dependencies consistent with these
-authorities.
+The prepared source manifests name the stable train 0.26.1 and independent
+keys 0.11.1. Both are PATCH releases. The train corrects client cleanup,
+prepared-offer races and outbound error paths. It adds no public API,
+persistence schema or security authority. keys changes only its version and
+its exact packed core edge to 0.26.1. Keep manifests, lock workspace records,
+version documents and packed internal dependencies consistent.
 
-The approved candidate set contains eight aligned packages plus keys: nine
-packages. `@byok-sdk/implementation-identity` is retired and is not published.
-All nine are stable versions for the dist-tag `latest`.
-The [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-records the prior stable tags (0.25.0, keys 0.10.0) and explicitly identifies
-first publications; this train has none.
+The candidate set contains eight aligned packages plus keys: nine packages.
+`@byok-sdk/implementation-identity` remains retired. The target npm dist-tag is
+`latest`. The [reviewed registry baseline](../../scripts/release/registry-expectations.json)
+names the published 0.26.0 train and keys 0.11.0. This train has no first
+publication. Stable publication omits `--tag` and requires its exact versions
+on `latest`.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
 package-document absence before a declared first publication, then exact-version
 readback and the declared absent `latest` after an RC. Missing tags/versions or
-failed registry reads do not establish package absence. Stable publication
-omits `--tag` and requires its exact version on `latest`.
-The version/channel decision authorizes source preparation only; it does
-not authorize npm execution, tagging, live qualification or production rollout.
-The [publication plan](../../docs/releases/v0.26.0.md#publication-plan)
-lists the exact package order and remaining dry-run prerequisites.
+failed registry reads do not establish package absence.
+
+The owner authorized source preparation for 0.26.1 on 2026-10-12. This does
+not authorize npm execution, tagging, live qualification or production
+rollout. The [publication plan](../../docs/releases/v0.26.1.md#publication-plan)
+names the package order and remaining release gates.
 
 ## Pre-publication Host integration
 
