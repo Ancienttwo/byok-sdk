@@ -143,7 +143,7 @@ describe('local paths in outbound handleOffer reasons', () => {
 
   it('required Agent message helper preflight failed: a helper that cannot spawn names no local path', async () => {
     const adapter = new StubRuntimeAdapter('pi');
-    const missingHelper = path.join(await temporary('byok outbound offer helper-'), 'missing helper', 'byok-agent-message-mcp');
+    const missingHelper = path.join(await temporary('byok outbound offer helper-'), 'missing helper', 'byok agent message mcp');
     const { runner: taskRunner, sent, localRoots } = await runner(adapter, {
       ...MESSAGE_DEPS,
       agentMessageMcpBin: { command: missingHelper, args: [] },
@@ -155,12 +155,12 @@ describe('local paths in outbound handleOffer reasons', () => {
 
     const reason = reasonOf(sent, 'task.decline', 'helper-path');
     expect(reason).toBe('required Agent message helper preflight failed: helper failed to start: spawn <local path> ENOENT');
-    expectNoLocalPath(reason, localRoots);
+    expectNoLocalPath(reason, localRoots, 'message mcp');
   });
 
   it('required MCP toolset server could not be observed: a server that cannot spawn names no local path', async () => {
     const adapter = new StubRuntimeAdapter('pi');
-    const missingServer = path.join(await temporary('byok outbound offer toolset-'), 'missing server', 'mcp');
+    const missingServer = path.join(await temporary('byok outbound offer toolset-'), 'missing server', 'team mcp server');
     const { runner: taskRunner, sent, localRoots } = await runner(adapter, {
       getMcpToolsets: () => new Map([['team', { mcpServers: { team: { command: missingServer } } }]]),
     });
@@ -174,7 +174,7 @@ describe('local paths in outbound handleOffer reasons', () => {
     expect(reason).toBe(
       'required MCP toolset server "team" could not be observed: MCP toolset server "team" failed to start: spawn <local path> ENOENT',
     );
-    expectNoLocalPath(reason, localRoots);
+    expectNoLocalPath(reason, localRoots, 'mcp server');
   });
 
   it('Agent message outbox initialization failed: a file where the outbox directory goes names no local path', async () => {
