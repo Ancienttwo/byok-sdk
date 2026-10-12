@@ -63,16 +63,16 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 ## Version selection
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
-The prepared source manifests name the stable train 0.26.1 and independent
+The published source manifests name the stable train 0.26.1 and independent
 keys 0.11.1. Both are PATCH releases. The train corrects client cleanup,
 prepared-offer races and outbound error paths. It adds no public API,
 persistence schema or security authority. keys changes only its version and
 its exact packed core edge to 0.26.1. Keep manifests, lock workspace records,
 version documents and packed internal dependencies consistent.
 
-The candidate set contains eight aligned packages plus keys: nine packages.
-`@byok-sdk/implementation-identity` remains retired. The target npm dist-tag is
-`latest`. The [reviewed registry baseline](../../scripts/release/registry-expectations.json)
+The published set contains eight aligned packages plus keys: nine packages.
+`@byok-sdk/implementation-identity` remains retired. All nine packages are on
+`latest`; complete readback passed. The [reviewed registry baseline](../../scripts/release/registry-expectations.json)
 names the published 0.26.0 train and keys 0.11.0. This train has no first
 publication. Stable publication omits `--tag` and requires its exact versions
 on `latest`.
@@ -81,10 +81,12 @@ package-document absence before a declared first publication, then exact-version
 readback and the declared absent `latest` after an RC. Missing tags/versions or
 failed registry reads do not establish package absence.
 
-The owner authorized source preparation for 0.26.1 on 2026-10-12. This does
-not authorize npm execution, tagging, live qualification or production
-rollout. The [publication plan](../../docs/releases/v0.26.1.md#publication-plan)
-names the package order and remaining release gates.
+The owner authorized npm execution for 0.26.1 / keys 0.11.1 on 2026-10-12.
+All nine uploads succeeded. Complete readback passed against the frozen
+merge-commit CI artifacts. The annotated `v0.26.1` tag is pushed and its
+GitHub Release is Latest. See the
+[publication record](../../docs/releases/v0.26.1-publication.md).
+Live qualification and production rollout remain separate operations.
 
 ## Pre-publication Host integration
 

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.26.1 / @byok-sdk/keys 0.11.1 (prepared, not published)
+## 0.26.1 / @byok-sdk/keys 0.11.1 (published, 2026-10-12)
 
 - **Client cleanup:** release the Git lease when runtime launch admission fails
   or is cancelled, and keep prepared input pinned until startup cleanup ends.
@@ -16,7 +16,9 @@
 - **Tests:** correct journal confirmation and load-sensitive test timing.
 - The eight aligned manifests move to 0.26.1. keys moves to 0.11.1 to keep its
   packed core dependency exactly at 0.26.1. No public API or schema changes.
-- [Candidate release notes](docs/releases/v0.26.1.md) record the release gates.
+- [Release notes](docs/releases/v0.26.1.md) record the changes and release gates.
+- [Publication record](docs/releases/v0.26.1-publication.md) confirms all nine
+  packages on `latest`, exact CI hashes, isolated install and release tag.
 
 - **Changed (client)** — update the private OAR source from 0.56.0 to 0.57.0
   (`0804b91`). The vendored Codex fold now reads codex's native
