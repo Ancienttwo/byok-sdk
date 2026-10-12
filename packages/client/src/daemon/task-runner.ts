@@ -1069,7 +1069,8 @@ const ABSOLUTE_LOCAL_PATH = /(?<=^|[\s'"`(=])(?:\/|[A-Za-z]:[\\/]|\\\\)(?:[^\s'"
  * Agent-home and session-handoff errors, and the filesystem errors under
  * them, name local paths: the canonical home, lease markers, run directories.
  * So do the filesystem errors of the preparation store, the Agent message
- * outbox, the artifact open and a runtime adapter's detect/prepare.
+ * outbox, the artifact open and a runtime adapter's detect/prepare, and an
+ * MCP server probe's spawn error and quoted stderr.
  * `task.decline`, `task.fail` and `task.progress` leave this device, so a
  * reason that forwards one keeps the error's wording and drops each absolute
  * path.
@@ -3267,7 +3268,7 @@ export class TaskRunner {
       try {
         await this.deps.agentMessageMcpPreflight(taskMcpServers![AGENT_MESSAGE_MCP_SERVER_NAME]!, mcpEnv);
       } catch (error) {
-        decline(`required Agent message helper preflight failed: ${errorMessage(error)}`, false);
+        decline(`required Agent message helper preflight failed: ${outboundErrorMessage(error)}`, false);
         return undefined;
       }
     }
@@ -3330,7 +3331,7 @@ export class TaskRunner {
       }
       if (failure !== undefined) {
         decline(
-          `required MCP toolset server "${failure.serverName}" could not be observed: ${errorMessage(failure.error)}`,
+          `required MCP toolset server "${failure.serverName}" could not be observed: ${outboundErrorMessage(failure.error)}`,
           !(failure.error instanceof McpAuthorityError),
         );
         return undefined;
