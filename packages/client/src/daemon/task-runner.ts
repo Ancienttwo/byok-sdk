@@ -1059,6 +1059,13 @@ function errorMessage(err: unknown): string {
 }
 
 /**
+ * An absolute path in quotes, as Node filesystem errors name it
+ * (`open '/path'`). The matching quote ends it, so every segment may hold
+ * spaces, the last one too.
+ */
+const QUOTED_LOCAL_PATH = /(['"`])(?:\/|[A-Za-z]:[\\/]|\\\\)(?:(?!\1)[^\r\n])*\1/g;
+
+/**
  * An absolute POSIX, drive-letter or UNC path that starts a token. Inner
  * segments may hold spaces (`Application Support/`); the last segment ends at
  * the first space, so the words after the path stay.
@@ -1075,7 +1082,9 @@ const ABSOLUTE_LOCAL_PATH = /(?<=^|[\s'"`(=])(?:\/|[A-Za-z]:[\\/]|\\\\)(?:[^\s'"
  * path.
  */
 function outboundErrorMessage(err: unknown): string {
-  return errorMessage(err).replace(ABSOLUTE_LOCAL_PATH, '<local path>');
+  return errorMessage(err)
+    .replace(QUOTED_LOCAL_PATH, '$1<local path>$1')
+    .replace(ABSOLUTE_LOCAL_PATH, '<local path>');
 }
 
 /**
