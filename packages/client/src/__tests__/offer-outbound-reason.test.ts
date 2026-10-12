@@ -6,6 +6,7 @@ import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { AgentHomeManager } from '../agent-home';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AGENT_MESSAGE_DIRECTORY, AgentMessageOutbox } from '../daemon/agent-message-outbox';
+import { preflightAgentMessageMcp } from '../daemon/agent-message-mcp-preflight';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
@@ -17,10 +18,11 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 /**
  * `task.decline`, `task.fail` and `task.progress` leave this device. These
  * `handleOffer` reasons forward an error that a runtime adapter, the Agent
- * message outbox or the artifact open produced, and a Node filesystem error
- * names its absolute path (`ENOENT: ..., open '/path'`). Each case makes a
- * real filesystem call fail and checks that the reason keeps the error but
- * not the path. The roots have a space in the name, like
+ * message outbox, an MCP server probe or the artifact open produced. A Node
+ * filesystem error names its absolute path (`ENOENT: ..., open '/path'`), and
+ * so does a failed spawn (`spawn /path ENOENT`). Each case makes a real
+ * filesystem call or spawn fail and checks that the reason keeps the error
+ * but not the path. The roots have a space in the name, like
  * `~/Library/Application Support`, and so do some file names, so the last
  * path segment is checked too.
  */
@@ -137,6 +139,42 @@ describe('local paths in outbound handleOffer reasons', () => {
     const reason = reasonOf(sent, 'task.decline', 'prepare-path');
     expect(reason).toBe("runtime preparation failed: ENOENT: no such file or directory, open '<local path>'");
     expectNoLocalPath(reason, localRoots, 'config.json');
+  });
+
+  it('required Agent message helper preflight failed: a helper that cannot spawn names no local path', async () => {
+    const adapter = new StubRuntimeAdapter('pi');
+    const missingHelper = path.join(await temporary('byok outbound offer helper-'), 'missing helper', 'byok agent message mcp');
+    const { runner: taskRunner, sent, localRoots } = await runner(adapter, {
+      ...MESSAGE_DEPS,
+      agentMessageMcpBin: { command: missingHelper, args: [] },
+      agentMessageMcpPreflight: preflightAgentMessageMcp,
+    });
+    localRoots.push(path.dirname(path.dirname(missingHelper)));
+
+    await taskRunner.handleEnvelope(messageOffer('helper-path', 1));
+
+    const reason = reasonOf(sent, 'task.decline', 'helper-path');
+    expect(reason).toBe('required Agent message helper preflight failed: helper failed to start: spawn <local path> ENOENT');
+    expectNoLocalPath(reason, localRoots, 'message mcp');
+  });
+
+  it('required MCP toolset server could not be observed: a server that cannot spawn names no local path', async () => {
+    const adapter = new StubRuntimeAdapter('pi');
+    const missingServer = path.join(await temporary('byok outbound offer toolset-'), 'missing server', 'team mcp server');
+    const { runner: taskRunner, sent, localRoots } = await runner(adapter, {
+      getMcpToolsets: () => new Map([['team', { mcpServers: { team: { command: missingServer } } }]]),
+    });
+    localRoots.push(path.dirname(path.dirname(missingServer)));
+
+    await taskRunner.handleEnvelope(createEnvelope('task.offer_with_toolsets', {
+      instruction: 'outbound offer work', runtime: 'pi', requiredToolsets: ['team'],
+    }, { taskId: 'toolset-path', seq: 1 }));
+
+    const reason = reasonOf(sent, 'task.decline', 'toolset-path');
+    expect(reason).toBe(
+      'required MCP toolset server "team" could not be observed: MCP toolset server "team" failed to start: spawn <local path> ENOENT',
+    );
+    expectNoLocalPath(reason, localRoots, 'mcp server');
   });
 
   it('Agent message outbox initialization failed: a file where the outbox directory goes names no local path', async () => {
