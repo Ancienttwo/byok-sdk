@@ -2012,11 +2012,6 @@ export class TaskRunner {
     }
   }
 
-  private offerAlreadyHandled(taskId: string): boolean {
-    return this.tasks.has(taskId) || this.startupOwnership.has(taskId) || this.inFlightOffers.has(taskId) ||
-      this.finishedTaskIds.has(taskId) || this.strictDeclinedTaskIds.has(taskId);
-  }
-
   private async handleOffer(
     taskId: string,
     payload: AcceptedOfferPayload,
@@ -2031,7 +2026,9 @@ export class TaskRunner {
     // same offer while its first prepared operation is still in flight (or
     // well after it already succeeded) would start a SECOND adapter session
     // for the same task, orphaning the first.
-    if (this.offerAlreadyHandled(taskId)) return;
+    if (this.tasks.has(taskId) || this.startupOwnership.has(taskId) || this.inFlightOffers.has(taskId) || this.finishedTaskIds.has(taskId) || this.strictDeclinedTaskIds.has(taskId)) {
+      return;
+    }
 
     let agentRef: AgentRef | undefined;
     if (strictAgentOffer) {
@@ -2081,14 +2078,15 @@ export class TaskRunner {
       // empty one — `get` refuses rather than answering `undefined`, so this
       // await is what turns a durable record back into a visible one.
       //
-      // The guard above ran before this await, and the in-flight marker is
-      // added only below it. A redelivery of this offer under a new seq can
-      // pass the guard while the first delivery waits here. Ask again on both
-      // exits, so that only one of them goes on and the other sends nothing.
+      // The redelivery guard above must hold across this await too. Without
+      // the marker here, a second delivery of this offer under a new seq
+      // passes the guard while this one waits, and then acts on a task this
+      // delivery claims, starts or declines. The marker is released on both
+      // exits and added again below, with no await in between.
+      this.inFlightOffers.add(taskId);
       try {
         await preparationLane.open();
       } catch (error) {
-        if (this.offerAlreadyHandled(taskId)) return;
         this.decline(
           taskId,
           `preparation_store_unavailable: the preparation store could not be opened: ${errorMessage(error)}`,
@@ -2096,8 +2094,9 @@ export class TaskRunner {
           agentRef,
         );
         return;
+      } finally {
+        this.inFlightOffers.delete(taskId);
       }
-      if (this.offerAlreadyHandled(taskId)) return;
       if (preparationLane.store.get(preparation.reference) === undefined) {
         this.decline(taskId, 'preparation_not_found: no preparation record under this reference on this device', false, agentRef);
         return;
