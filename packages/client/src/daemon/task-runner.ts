@@ -2098,6 +2098,13 @@ export class TaskRunner {
       // store that nothing has opened yet, and an unopened store is not an
       // empty one — `get` refuses rather than answering `undefined`, so this
       // await is what turns a durable record back into a visible one.
+      //
+      // The redelivery guard above must hold across this await too. Without
+      // the marker here, a second delivery of this offer under a new seq
+      // passes the guard while this one waits, and then acts on a task this
+      // delivery claims, starts or declines. The marker is released on both
+      // exits and added again below, with no await in between.
+      this.inFlightOffers.add(taskId);
       try {
         await preparationLane.open();
       } catch (error) {
@@ -2108,6 +2115,8 @@ export class TaskRunner {
           agentRef,
         );
         return;
+      } finally {
+        this.inFlightOffers.delete(taskId);
       }
       if (preparationLane.store.get(preparation.reference) === undefined) {
         this.decline(taskId, 'preparation_not_found: no preparation record under this reference on this device', false, agentRef);

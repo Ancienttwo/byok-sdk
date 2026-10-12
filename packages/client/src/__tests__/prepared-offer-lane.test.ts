@@ -1039,6 +1039,59 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
 
     await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-prepared-replay', seq: 3 }));
   });
+
+  // A second delivery of the same offer under a new seq reaches the runner
+  // while the first delivery waits in `open()`. Whatever the first delivery
+  // then does, the second one must open nothing and send nothing.
+  it.each([
+    { first: 'opens and starts', sent: ['task.claim', 'task.started'], starts: 1 },
+    { first: 'fails to open', sent: ['task.decline'], starts: 0 },
+    { first: 'is cancelled before claim', sent: ['task.decline'], starts: 0 },
+  ] as const)('answers a redelivered offer that arrives during open() with nothing when the first $first', async (testCase) => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const opens: Array<{ readonly release: () => void; readonly fail: () => void }> = [];
+    const runner = await makeRunner(built, adapter, sent, {
+      inputPreparationLane: {
+        store: built.store,
+        authorizeAgentMemory: async () => {},
+        open: () => new Promise<void>((resolve, reject) => {
+          opens.push({
+            release: () => { void built.store.open().then(resolve); },
+            fail: () => reject(new Error('gc failed')),
+          });
+        }),
+        runtime: RUNTIME,
+        policyRevision: POLICY_REVISION,
+        toolsetDefinitionRevisions: built.toolsetDefinitionRevisions,
+      },
+    });
+    const taskId = 'task-prepared-overlap';
+
+    const first = runner.handleEnvelope(preparedOffer(taskId, reference(built), 1));
+    await vi.waitFor(() => expect(opens).toHaveLength(1));
+    const second = runner.handleEnvelope(preparedOffer(taskId, reference(built), 2));
+    if (testCase.first === 'is cancelled before claim') {
+      await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId, seq: 3 }));
+    }
+    if (testCase.first === 'fails to open') opens[0]!.fail();
+    else opens[0]!.release();
+    await first;
+    // A second delivery that reached `open()` is let through here, so the
+    // assertions below see everything it would do.
+    opens.slice(1).forEach((open) => open.release());
+    await second;
+
+    expect(sent.map((envelope) => envelope.type)).toEqual(testCase.sent);
+    expect(adapter.preparedStartCalls).toHaveLength(testCase.starts);
+    expect(opens).toHaveLength(1);
+    if (testCase.starts === 1) {
+      // The running Execution still holds its pin.
+      expect(built.store.get(built.recordId)?.pin?.taskId).toBe(taskId);
+      await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId, seq: 4 }));
+    }
+  });
 });
 
 describe('a retained startup owner keeps its preparation pin until disposal and terminal commit are confirmed', () => {
