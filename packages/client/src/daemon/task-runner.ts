@@ -2012,6 +2012,11 @@ export class TaskRunner {
     }
   }
 
+  private offerAlreadyHandled(taskId: string): boolean {
+    return this.tasks.has(taskId) || this.startupOwnership.has(taskId) || this.inFlightOffers.has(taskId) ||
+      this.finishedTaskIds.has(taskId) || this.strictDeclinedTaskIds.has(taskId);
+  }
+
   private async handleOffer(
     taskId: string,
     payload: AcceptedOfferPayload,
@@ -2026,9 +2031,7 @@ export class TaskRunner {
     // same offer while its first prepared operation is still in flight (or
     // well after it already succeeded) would start a SECOND adapter session
     // for the same task, orphaning the first.
-    if (this.tasks.has(taskId) || this.startupOwnership.has(taskId) || this.inFlightOffers.has(taskId) || this.finishedTaskIds.has(taskId) || this.strictDeclinedTaskIds.has(taskId)) {
-      return;
-    }
+    if (this.offerAlreadyHandled(taskId)) return;
 
     let agentRef: AgentRef | undefined;
     if (strictAgentOffer) {
@@ -2077,9 +2080,15 @@ export class TaskRunner {
       // store that nothing has opened yet, and an unopened store is not an
       // empty one — `get` refuses rather than answering `undefined`, so this
       // await is what turns a durable record back into a visible one.
+      //
+      // The guard above ran before this await, and the in-flight marker is
+      // added only below it. A redelivery of this offer under a new seq can
+      // pass the guard while the first delivery waits here. Ask again on both
+      // exits, so that only one of them goes on and the other sends nothing.
       try {
         await preparationLane.open();
       } catch (error) {
+        if (this.offerAlreadyHandled(taskId)) return;
         this.decline(
           taskId,
           `preparation_store_unavailable: the preparation store could not be opened: ${errorMessage(error)}`,
@@ -2088,6 +2097,7 @@ export class TaskRunner {
         );
         return;
       }
+      if (this.offerAlreadyHandled(taskId)) return;
       if (preparationLane.store.get(preparation.reference) === undefined) {
         this.decline(taskId, 'preparation_not_found: no preparation record under this reference on this device', false, agentRef);
         return;

@@ -8666,6 +8666,7 @@ export declare class TaskRunner {
      */
     private armMaxDurationTimer;
     handleEnvelope(envelope: Envelope): Promise<void>;
+    private offerAlreadyHandled;
     private handleOffer;
     private admitOffer;
     private reserveOfferHome;
