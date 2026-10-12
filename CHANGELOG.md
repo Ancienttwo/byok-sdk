@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Changed (client)** — update the private OAR source from 0.54.3 to 0.56.0
+  (`163d551`). The vendored Codex session can now send `additionalDirectories`
+  as `runtimeWorkspaceRoots` and `outputSchema` on `turn/start`. The SDK Codex
+  adapter passes neither option, so Codex requests, SDK events and the public
+  API do not change. See `docs/notes/2026-10-12-oar-0.56-upgrade.md`.
+
 ## 0.26.0 / @byok-sdk/keys 0.11.0 — 2026-10-11 (published)
 
 The owner authorized stable preparation for the dist-tag `latest` on
