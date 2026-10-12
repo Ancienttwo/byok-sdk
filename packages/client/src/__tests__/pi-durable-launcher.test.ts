@@ -140,7 +140,8 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     expect(f.children[0]!.connected).toBe(false);
   });
   it('crash during unsafe tool ends the execution without replay or model resume', async () => {
-    const f = await fixture((res,n) => { if (n === 1) tool(res, 'printf once >> marker; echo $$ > tool-pid; sleep 60'); else finish(res, 'should never happen'); });
+    // Write tool-pid before marker: the wait below watches only marker, then reads tool-pid.
+    const f = await fixture((res,n) => { if (n === 1) tool(res, 'echo $$ > tool-pid; printf once >> marker; sleep 60'); else finish(res, 'should never happen'); });
     const until = Date.now() + 4000;
     while (Date.now() < until) {
       try { if ((await readFile(path.join(f.home, 'marker'), 'utf8')) === 'once') break; } catch {}
