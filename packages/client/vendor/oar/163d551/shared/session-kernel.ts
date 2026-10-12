@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR b36b439 for a required consumer and fatal retained-record byte budget (Apache-2.0).
+// BYOK change: Modified from OAR 163d551 for a required consumer and fatal retained-record byte budget (Apache-2.0).
 import { emptyInputRefusal } from "./control-input.js";
 import { withSessionRecord } from "../observe/graph.js";
 import type {

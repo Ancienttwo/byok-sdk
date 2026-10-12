@@ -1,8 +1,9 @@
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { codexSession } from '../../vendor/oar/b36b439/runtimes/codex/session';
-import * as projection from '../../vendor/oar/b36b439/runtimes/codex/projection';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/b36b439/runtimes/codex/app-server-client';
-import { SessionNotFoundError } from '../../vendor/oar/b36b439/contracts/session-not-found-error';
+import { codexSession } from '../../vendor/oar/163d551/runtimes/codex/session';
+import * as projection from '../../vendor/oar/163d551/runtimes/codex/projection';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/163d551/runtimes/codex/app-server-client';
+import { SessionNotFoundError } from '../../vendor/oar/163d551/contracts/session-not-found-error';
 
 function fakeServer(openReply: Record<string, unknown> = {}) {
   let receive!: (line: string) => void;
@@ -102,6 +103,50 @@ describe('unconnected OAR Codex adapter', () => {
     })).rejects.toThrow('serviceTier priority could not be confirmed (actual unreported): unsupported tier');
     expect(fake.child.kill).toHaveBeenCalledTimes(1);
     await fake.child.exited;
+  });
+
+  it.each([{ resume: undefined }, { resume: 'thread-root' }])('sends additionalDirectories as cwd-first runtimeWorkspaceRoots with resume=$resume', async ({ resume }) => {
+    const roots = [path.resolve('/workspace'), path.resolve('/workspace', 'lib'), path.resolve('/shared')];
+    const fake = fakeServer({ runtimeWorkspaceRoots: roots });
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home' }, additionalDirectories: ['lib', '/shared', 'lib'], ...(resume === undefined ? {} : { resume }),
+    });
+    const method = resume === undefined ? 'thread/start' : 'thread/resume';
+    expect(fake.writes.find(frame => frame.method === method)?.params).toMatchObject({ cwd: '/workspace', runtimeWorkspaceRoots: roots });
+    await session.dispose();
+  });
+
+  it('refuses the open and releases the process when codex does not confirm additionalDirectories', async () => {
+    const fake = fakeServer({ runtimeWorkspaceRoots: [path.resolve('/workspace')] });
+    await expect(codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home' }, additionalDirectories: ['lib'],
+    })).rejects.toThrow('codex thread/start did not confirm the requested additionalDirectories in runtimeWorkspaceRoots');
+    expect(fake.child.kill).toHaveBeenCalledTimes(1);
+    await fake.child.exited;
+  });
+
+  it('sends outputSchema on each turn/start and refuses queue while a schema is set', async () => {
+    const outputSchema = { type: 'object', properties: { answer: { type: 'string' } }, required: ['answer'] };
+    const fake = fakeServer();
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home' }, outputSchema,
+    });
+    expect((await session.prompt('hello')).response.body.kind).toBe('accepted');
+    expect(fake.writes.find(frame => frame.method === 'turn/start')?.params).toMatchObject({ outputSchema });
+    expect((await session.queue('later')).response.body).toMatchObject({
+      kind: 'rejected', code: 'unsupported', reason: expect.stringContaining('cannot carry outputSchema'),
+    });
+    expect(fake.writes.some(frame => frame.method === 'thread/queue/add')).toBe(false);
+    await session.dispose();
+  });
+
+  it('adds no workspace roots or output schema when neither option is given', async () => {
+    const fake = fakeServer(); const session = await fake.open();
+    await session.prompt('hello');
+    expect(fake.writes.find(frame => frame.method === 'thread/start')?.params).not.toHaveProperty('runtimeWorkspaceRoots');
+    expect(fake.writes.find(frame => frame.method === 'turn/start')?.params).not.toHaveProperty('outputSchema');
+    expect((await session.queue('later')).response.body.kind).toBe('accepted');
+    await session.dispose();
   });
 
   it('preserves native facts before derived readings and keeps child completion separate from root controls', async () => {
