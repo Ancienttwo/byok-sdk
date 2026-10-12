@@ -18,7 +18,7 @@ describe('the bun test gate', () => {
       return false;
     });
     expect(probed).toEqual(bunBinCandidates({ [TEST_BUN_BIN_ENV]: '/env/bun' }, '/home/u'));
-    expect(probed).toEqual(['/env/bun', '/home/u/.local/bin/bun', '/opt/homebrew/bin/bun', '/usr/local/bin/bun']);
+    expect(probed).toEqual(['/env/bun', '/home/u/.local/bin/bun', '/home/u/.bun/bin/bun', '/opt/homebrew/bin/bun', '/usr/local/bin/bun']);
   });
 
   it(`throws when ${REQUIRE_BUN_ENV}=1 and no candidate exists (fail-closed, never skip)`, () => {
