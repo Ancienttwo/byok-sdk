@@ -146,7 +146,9 @@ describe('Agent memory guidance', () => {
     for (const adapter of adapters) {
       for (const session of adapter.sessions) session.emit({ type: 'turn_end' });
     }
-    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
+    // The three ordinary tasks finish only after their bounded Git observation
+    // (sequential git child processes), which exceeds the 1s default under host load.
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0), { timeout: 5_000 });
     expect(consoleError).not.toHaveBeenCalled();
     if (isAgentMemorySecureFilesystemAvailable()) {
       await expect(runner.recallAgentMemory({ contextToken: piToken!, path: 'MEMORY.md' })).rejects.toThrow('invalid');
