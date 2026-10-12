@@ -172,11 +172,20 @@ corrections with no new public behavior, API, persistence, or security
 authority; MINOR covers additive public API/features, new forward
 migrations/authority, and any pre-1.0 breaking cut. `@byok-sdk/keys` remains
 independently versioned. A version bump does not authorize publish. The current
-aligned dispatch release is `0.26.0`; publication requires separate release
+aligned dispatch release is `0.26.1`; publication requires separate release
 authorization and registry readback. The current independent keys release is
-`0.11.0`; its packed and published `@byok-sdk/core` edge must be the exact current
-dispatch release, `0.26.0`, proven from an isolated standard npm install rather
+`0.11.1`; its packed and published `@byok-sdk/core` edge must be the exact current
+dispatch release, `0.26.1`, proven from an isolated standard npm install rather
 than the workspace graph.
+
+On 2026-10-12 the owner authorized stable source preparation for 0.26.1.
+The eight aligned packages move to 0.26.1. keys moves to 0.11.1 so its packed
+core edge can point exactly to 0.26.1. These are PATCH releases. The train
+corrects client resource cleanup, prepared-offer races and outbound error
+paths. It adds no public API, persistence schema or security authority.
+The target dist-tag is `latest`. npm still publishes 0.26.0 / keys 0.11.0.
+Source preparation does not authorize npm execution or tagging. See the
+[candidate release notes](releases/v0.26.1.md).
 
 On 2026-10-11 the owner authorized stable source preparation for the eight
 aligned packages at 0.26.0 and keys at 0.11.0. All nine packages target npm's
