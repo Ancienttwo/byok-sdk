@@ -49,6 +49,7 @@ import {
   type InputPreparationRuntimeIdentityV1,
 } from '../input-preparation';
 import type { McpToolsetConfig, RuntimeCapabilities } from '../types';
+import { RuntimeDisposalFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { observationOf } from './fixtures/mcp-observation';
 import { validatePreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
@@ -1038,6 +1039,186 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
 
     await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-prepared-replay', seq: 3 }));
   });
+
+  // A second delivery of the same offer under a new seq reaches the runner
+  // while the first delivery waits in `open()`. Whatever the first delivery
+  // then does, the second one must open nothing and send nothing.
+  it.each([
+    { first: 'opens and starts', sent: ['task.claim', 'task.started'], starts: 1 },
+    { first: 'fails to open', sent: ['task.decline'], starts: 0 },
+    { first: 'is cancelled before claim', sent: ['task.decline'], starts: 0 },
+  ] as const)('answers a redelivered offer that arrives during open() with nothing when the first $first', async (testCase) => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const opens: Array<{ readonly release: () => void; readonly fail: () => void }> = [];
+    const runner = await makeRunner(built, adapter, sent, {
+      inputPreparationLane: {
+        store: built.store,
+        authorizeAgentMemory: async () => {},
+        open: () => new Promise<void>((resolve, reject) => {
+          opens.push({
+            release: () => { void built.store.open().then(resolve); },
+            fail: () => reject(new Error('gc failed')),
+          });
+        }),
+        runtime: RUNTIME,
+        policyRevision: POLICY_REVISION,
+        toolsetDefinitionRevisions: built.toolsetDefinitionRevisions,
+      },
+    });
+    const taskId = 'task-prepared-overlap';
+
+    const first = runner.handleEnvelope(preparedOffer(taskId, reference(built), 1));
+    await vi.waitFor(() => expect(opens).toHaveLength(1));
+    const second = runner.handleEnvelope(preparedOffer(taskId, reference(built), 2));
+    if (testCase.first === 'is cancelled before claim') {
+      await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId, seq: 3 }));
+    }
+    if (testCase.first === 'fails to open') opens[0]!.fail();
+    else opens[0]!.release();
+    await first;
+    // A second delivery that reached `open()` is let through here, so the
+    // assertions below see everything it would do.
+    opens.slice(1).forEach((open) => open.release());
+    await second;
+
+    expect(sent.map((envelope) => envelope.type)).toEqual(testCase.sent);
+    expect(adapter.preparedStartCalls).toHaveLength(testCase.starts);
+    expect(opens).toHaveLength(1);
+    if (testCase.starts === 1) {
+      // The running Execution still holds its pin.
+      expect(built.store.get(built.recordId)?.pin?.taskId).toBe(taskId);
+      await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId, seq: 4 }));
+    }
+  });
+});
+
+describe('a retained startup owner keeps its preparation pin until disposal and terminal commit are confirmed', () => {
+  /** Far past both retention horizons, so GC would collect any unpinned record. */
+  const afterRetention = (): number => Date.now() + 10 * 60 * 60 * 1000;
+
+  async function expectRetained(built: Lane, taskId: string): Promise<void> {
+    expect(built.store.get(built.recordId)?.pin?.taskId).toBe(taskId);
+    await built.store.gc(afterRetention());
+    const record = built.store.get(built.recordId);
+    expect(record?.artifactBytes).toBeGreaterThan(0);
+    await expect(built.store.readArtifact(record!)).resolves.toBeDefined();
+  }
+
+  async function expectReleased(built: Lane): Promise<void> {
+    expect(built.store.get(built.recordId)?.pin).toBeUndefined();
+    await built.store.gc(afterRetention());
+    expect(built.store.get(built.recordId)).toBeUndefined();
+  }
+
+  /** Cancel while start() still runs, so the offer ends with a retained startup owner. */
+  async function cancelDuringStart(extra: Partial<TaskRunnerDeps> = {}) {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const releaseStart = adapter.blockStart();
+    const runner = await makeRunner(built, adapter, sent, extra);
+    const taskId = 'task-prepared-startup-retained';
+    const offered = runner.handleEnvelope(preparedOffer(taskId, reference(built)));
+    await vi.waitFor(() => expect(adapter.preparedStartCalls).toHaveLength(1));
+    await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'stop' }, { taskId, seq: 2 }));
+    await offered;
+    expect(sent.filter((envelope) => envelope.task_id === taskId && envelope.type === 'task.cancelled')).toHaveLength(1);
+    // Stop the 1s startup retry timer, so only the shutdown calls below dispose the owner.
+    runner.stopAcceptingOffers();
+    return { built, adapter, runner, taskId, releaseStart };
+  }
+
+  it('keeps the pin while start has not returned and while the late session cannot close', async () => {
+    const { built, adapter, runner, taskId, releaseStart } = await cancelDuringStart();
+    await expectRetained(built, taskId);
+
+    releaseStart();
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    const session = adapter.sessions[0]!;
+    const close = session.close.bind(session);
+    let closeConfirmed = false;
+    session.close = async () => {
+      if (!closeConfirmed) throw new RuntimeDisposalFailure({ stage: 'quiescence', reason: 'fixture tree remains live' });
+      await close();
+    };
+
+    await expect(runner.shutdownActiveTasks('close fails')).rejects.toMatchObject({ name: 'RuntimeDisposalFailure' });
+    await expectRetained(built, taskId);
+
+    closeConfirmed = true;
+    await runner.shutdownActiveTasks('close succeeds');
+    expect(session.closeCalled).toBe(true);
+    await expectReleased(built);
+  });
+
+  it('keeps the pin when disposal succeeds but the terminal commit fails', async () => {
+    let committed = false;
+    const { built, adapter, runner, taskId, releaseStart } = await cancelDuringStart({
+      awaitTerminalCommit: async () => { if (!committed) throw new Error('fixture terminal commit is not durable'); },
+    });
+
+    releaseStart();
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    await expect(runner.shutdownActiveTasks('commit fails')).rejects.toMatchObject({ name: 'RuntimeDisposalFailure' });
+    expect(adapter.sessions[0]!.closeCalled).toBe(true);
+    await expectRetained(built, taskId);
+
+    committed = true;
+    await runner.shutdownActiveTasks('commit succeeds');
+    await expectReleased(built);
+  });
+});
+
+describe('daemon shutdown waits for a prepared offer that is still inside start()', () => {
+  /** Hold a prepared offer inside start(), past the stopping check, shut down, then let start() return. */
+  async function shutDownDuringStart(stopOffersFirst: boolean) {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const releaseStart = adapter.blockStart();
+    const runner = await makeRunner(built, adapter, sent);
+    const taskId = 'task-prepared-shutdown-during-start';
+
+    const offered = runner.handleEnvelope(preparedOffer(taskId, reference(built)));
+    await vi.waitFor(() => expect(adapter.preparedStartCalls).toHaveLength(1));
+    if (stopOffersFirst) {
+      // The daemon order aborts the start, so the offer settles while start() still runs.
+      runner.stopAcceptingOffers();
+      const shutdown = runner.shutdownActiveTasks('daemon shutting down');
+      await offered;
+      releaseStart();
+      await shutdown;
+    } else {
+      const shutdown = runner.shutdownActiveTasks('daemon shutting down');
+      releaseStart();
+      await Promise.all([offered, shutdown]);
+    }
+
+    return {
+      built,
+      session: adapter.sessions[0]!,
+      sent: sent.filter((envelope) => envelope.task_id === taskId).map((envelope) => envelope.type),
+    };
+  }
+
+  it('does not leave the Execution running when start() returns after shutdownActiveTasks began', async () => {
+    const { built, session, sent } = await shutDownDuringStart(false);
+
+    expect(sent).toEqual(['task.claim', 'task.started', 'task.fail']);
+    expect(session.interruptCalled).toBe(true);
+    expect(session.closeCalled).toBe(true);
+    expect(built.store.get(built.recordId)?.pin).toBeUndefined();
+  });
+
+  it('closes the late session and releases the pin in the daemon order: stopAcceptingOffers, then shutdownActiveTasks', async () => {
+    const { built, session, sent } = await shutDownDuringStart(true);
+
+    expect(sent).toEqual(['task.claim', 'task.fail']);
+    expect(session.closeCalled).toBe(true);
+    expect(built.store.get(built.recordId)?.pin).toBeUndefined();
+  });
 });
 
 describe('every compared item declines by its own name, with no claim and no pin', () => {
@@ -1262,6 +1443,63 @@ describe('every compared item declines by its own name, with no claim and no pin
     expect(built.store.get(built.recordId)?.pin).toBeUndefined();
     expect(adapter.preparedStartCalls).toHaveLength(0);
     expect(adapter.startCalls).toHaveLength(0);
+  });
+
+  // `task.decline` leaves this device. A store open error can be a Node
+  // filesystem error that names its absolute path; the reason must not carry it.
+  it('declines an unopenable store with the filesystem error but no local path', async () => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const brokenStoreDir = await tempDir('byok prepared broken store-');
+    // A file where the record directory goes, so the real open fails.
+    await fs.writeFile(path.join(brokenStoreDir, 'input-preparation'), 'not a directory');
+    const brokenStore = new InputPreparationStore({
+      storeDir: brokenStoreDir,
+      retentionMs: 60 * 60 * 1000,
+      retryHorizonMs: 60 * 60 * 1000,
+    });
+    const runner = await makeRunner(built, adapter, sent, {
+      inputPreparationLane: {
+        store: brokenStore,
+        authorizeAgentMemory: async () => {},
+        open: () => brokenStore.open(),
+        runtime: RUNTIME,
+        policyRevision: POLICY_REVISION,
+        toolsetDefinitionRevisions: built.toolsetDefinitionRevisions,
+      },
+    });
+
+    await runner.handleEnvelope(preparedOffer('task-store-path', reference(built)));
+
+    expect(declineReason(sent)).toBe(
+      "preparation_store_unavailable: the preparation store could not be opened: ENOTDIR: not a directory, mkdir '<local path>'",
+    );
+    expect(declineReason(sent)).not.toContain(brokenStoreDir);
+    expect(declineReason(sent)).not.toContain(path.basename(brokenStoreDir));
+  });
+
+  it('declines a pin the store cannot write with the store\'s own message, never the filesystem path', async () => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    // A directory where the record log goes, so the real pin append fails.
+    // The store wraps that filesystem error in a fixed message, so this
+    // reason needs no redaction; the test keeps that fact pinned.
+    const recordLog = path.join(built.storeDir, 'input-preparation', 'records.jsonl');
+    await fs.rm(recordLog);
+    await fs.mkdir(recordLog);
+    const runner = await makeRunner(built, adapter, sent);
+
+    await runner.handleEnvelope(preparedOffer('task-pin-path', reference(built)));
+
+    expect(declineReason(sent)).toBe(
+      'preparation_not_ready: the preparation pin could not be written: '
+        + 'the input-preparation record could not be durably written; the log is quarantined until it is revalidated',
+    );
+    expect(declineReason(sent)).not.toContain(built.storeDir);
+    expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(0);
+    expect(adapter.preparedStartCalls).toHaveLength(0);
   });
 });
 

@@ -22,13 +22,12 @@ import path from 'node:path';
  *   that exact path. The helper must never scan on from a bad explicit path
  *   and silently run a substitute bun underneath the formal gate.
  *
- * The candidate list is the exact union of the lists the bun suites carried
+ * The candidate list is the union of the lists the bun suites carried
  * before this helper existed — pi-mcp-launch-cwd and pi-runtime-launch-cwd
- * probed the same four candidates in this order. It
- * deliberately does NOT include `~/.bun/bin/bun`: that is setup-bun's
- * internal install default, not a location a developer is assumed to have,
- * and the CI formal gate names the real path explicitly through
- * `BYOK_TEST_BUN_BIN` instead of relying on a guess.
+ * probed the same four candidates in this order — plus `~/.bun/bin/bun`, the
+ * official bun installer's default, so a local run finds a default install.
+ * The CI formal gate still names the real path explicitly through
+ * `BYOK_TEST_BUN_BIN` and never reads this list.
  */
 
 export const TEST_BUN_BIN_ENV = 'BYOK_TEST_BUN_BIN';
@@ -43,6 +42,7 @@ export function bunBinCandidates(env: NodeJS.ProcessEnv, homedir: string): Array
   return [
     env[TEST_BUN_BIN_ENV],
     path.join(homedir, '.local/bin/bun'),
+    path.join(homedir, '.bun/bin/bun'),
     '/opt/homebrew/bin/bun',
     '/usr/local/bin/bun',
   ];

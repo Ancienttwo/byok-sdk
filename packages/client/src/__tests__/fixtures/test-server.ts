@@ -77,7 +77,8 @@ export class TestServer {
   /** One-shot gate that holds the next `/byok/challenge` handler open for auth-shutdown coverage. */
   private challengeGate: Promise<void> | undefined;
   /** One-shot hold on a `/byok/messages` response — see `holdNextMessagesResponse`. */
-  private messagesHold: { predicate: (envelope: Envelope) => boolean; gate: Promise<void>; release: () => void } | undefined;
+  private messagesHold: { predicate: (envelope: Envelope) => boolean; gate: Promise<void> } | undefined;
+  private readonly messagesHoldReleases = new Set<() => void>();
   private failEventsPolls = false;
   private failBlobUploads = false;
   private dropNextBlobFinalizeResponse = false;
@@ -214,11 +215,16 @@ export class TestServer {
    * a hold that is still open.
    */
   holdNextMessagesResponse(predicate: (envelope: Envelope) => boolean): () => void {
-    let release!: () => void;
+    let resolveGate!: () => void;
     const gate = new Promise<void>((resolve) => {
-      release = resolve;
+      resolveGate = resolve;
     });
-    this.messagesHold = { predicate, gate, release };
+    const release = () => {
+      this.messagesHoldReleases.delete(release);
+      resolveGate();
+    };
+    this.messagesHoldReleases.add(release);
+    this.messagesHold = { predicate, gate };
     return release;
   }
 
@@ -299,7 +305,7 @@ export class TestServer {
 
   async close(): Promise<void> {
     // A held response keeps its connection open, and http.Server#close waits for it.
-    this.messagesHold?.release();
+    for (const release of this.messagesHoldReleases) release();
     await new Promise<void>((resolve) => this.httpServer.close(() => resolve()));
   }
 

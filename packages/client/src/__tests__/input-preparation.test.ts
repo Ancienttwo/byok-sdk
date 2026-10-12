@@ -55,6 +55,19 @@ afterEach(async () => {
   while (cleanups.length > 0) await cleanups.pop()?.();
 });
 
+/**
+ * Fake setTimeout, clearTimeout and Date for the rest of the test. With
+ * sub-second limits, a slow durable write on a loaded runner can outlast the
+ * preparation deadline, through its real timer or through a `now()` check
+ * against real Date. Fake time moves only when a test advances it, and
+ * `vi.waitFor` advances it on every poll, so the GC timer still fires. Call
+ * it before `makeService` so real timers return after the service has stopped.
+ */
+function useFakeTimeouts(): void {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  cleanups.push(async () => { vi.useRealTimers(); });
+}
+
 async function tmpStoreDir(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-input-prep-svc-'));
   cleanups.push(async () => {
@@ -1402,14 +1415,15 @@ describe('PR187 review regressions', () => {
   });
 
   it('collects idle artifacts, then tombstones without another prepare', async () => {
+    useFakeTimeouts();
     let clock = 1_000_000;
     const limits = { ...LIMITS, counterTimeoutMs: 100, preparationDeadlineMs: 200, retentionMs: 400, retryHorizonMs: 100 };
     const storeDir = await tmpStoreDir();
     const service = await makeService({ storeDir, limits, now: () => clock });
     await service.prepare(request());
     clock += 401;
-    // The GC timer is a real timer whose delay comes from the fake clock, so a
-    // fixed wall-clock sleep races CI load; poll for the drained state.
+    // The GC timer delay comes from the fake clock; each poll advances the fake
+    // timers until the background GC has drained the artifact.
     await vi.waitFor(async () => {
       expect(await fs.readdir(path.join(storeDir, 'input-preparation', 'artifacts'))).toEqual([]);
     }, { timeout: 5_000 });
@@ -1433,6 +1447,7 @@ describe('PR187 review regressions', () => {
   });
 
   it('latches background GC faults for subsequent access and stop', async () => {
+    useFakeTimeouts();
     const limits = { ...LIMITS, counterTimeoutMs: 100, preparationDeadlineMs: 200, retentionMs: 400, retryHorizonMs: 100 };
     const service = await makeService({ limits });
     await service.prepare(request());
@@ -1472,6 +1487,7 @@ describe('PR187 retention lifecycle races', () => {
   });
 
   it('waits for in-flight GC on stop and leaves no timer running', async () => {
+    useFakeTimeouts();
     const service = await makeService({ limits: { ...LIMITS, counterTimeoutMs: 100, preparationDeadlineMs: 200, retentionMs: 400, retryHorizonMs: 100 } });
     await service.prepare(request());
     let release!: () => void;
@@ -1479,14 +1495,15 @@ describe('PR187 retention lifecycle races', () => {
       release = () => resolve({ artifactsRemoved: 0, recordsRemoved: 0 });
     });
     const gc = vi.spyOn(service.store, 'gc').mockReturnValue(gate);
-    while (gc.mock.calls.length === 0) await new Promise((done) => setTimeout(done, 5));
+    while (gc.mock.calls.length === 0) await vi.advanceTimersByTimeAsync(5);
     let stopped = false;
     const stop = service.stop().then(() => { stopped = true; });
     await new Promise((done) => setImmediate(done));
     expect(stopped).toBe(false);
     release();
     await stop;
-    await new Promise((done) => setTimeout(done, 50));
+    // Past retentionMs + retryHorizonMs, so any timer left armed would fire.
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(gc).toHaveBeenCalledTimes(1);
     gc.mockRestore();
   });

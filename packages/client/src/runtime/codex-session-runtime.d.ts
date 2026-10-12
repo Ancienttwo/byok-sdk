@@ -30,6 +30,8 @@ export declare function codexSession(
     model?: string;
     approvalPolicy?: "never" | "on-request";
     sandboxMode?: "read-only" | "workspace-write" | "danger-full-access" | "inherit";
+    /** OAR SessionOptions.launchArgs: host `app-server` arguments after the sandbox override and before `--listen`. */
+    launchArgs?: readonly string[];
     /** OAR SessionOptions.mcpServers: the thread/start or thread/resume `mcp_servers` config. */
     mcpServers?: readonly (
       | { readonly name: string; readonly command: string; readonly args?: readonly string[]; readonly env?: Readonly<Record<string, string>> }

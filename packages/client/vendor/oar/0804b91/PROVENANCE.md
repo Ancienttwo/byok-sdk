@@ -1,8 +1,8 @@
-# OAR b36b439 private runtime fork
+# OAR 0804b91 private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.54.3, fixed commit `b36b439e328d836fd24d838bdadea6d2ecbcaeb5`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.57.0, fixed commit `0804b915ef511d2880e07d5329450c2484d8d62e`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
-`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 41 source files plus LICENSE. Thirty-five source files keep upstream bytes. Six source files contain BYOK changes. The added files are imports of the selected contracts, the Codex fold and the Codex session, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, and `observe/graph.ts`, which the session kernel imports. No Cursor, ACP, CLI, arena, executable manager or branded resources are included.
+`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 44 source files plus LICENSE. Thirty-eight source files keep upstream bytes. Six source files contain BYOK changes. The added files are imports of the selected contracts, the Codex fold and the Codex session, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, and `observe/graph.ts`, which the session kernel imports. No Cursor, ACP, CLI, arena, executable manager or branded resources are included.
 
 ## BYOK S1 changes
 
@@ -209,4 +209,39 @@ Not vendored: `shared/session-credentials.ts` and `shared/seal-session.ts`, beca
 
 The other 22 prior selected source paths and LICENSE have the same upstream bytes.
 
-Build assets copy this source's LICENSE, PROVENANCE.md and source-manifest.json to `dist/assets/provenance/oar/b36b439/`.
+## 0.54.3 → 0.56.0 re-vendor
+
+The new base is tag v0.56.0, commit `163d551200fde714a224619519df68f5b217495d`.
+Four selected paths changed upstream. Two new dependencies enter the inventory. The inventory is now 43 source files and LICENSE, with six maintained files.
+
+- `contracts/records.ts` and `contracts/session-options.ts` keep upstream bytes. `TurnOutcome` moves to `contracts/turn-outcome.ts` and gains the optional `structuredOutput` on its completed variant. `SessionOptions` gains the optional `additionalDirectories` and `outputSchema`.
+- `contracts/turn-outcome.ts` is new and keeps upstream bytes. `contracts/records.ts` imports it.
+- `shared/additional-directories.ts` is new and keeps upstream bytes. `runtimes/codex/open.ts` imports it. It imports `node:path` and two contracts that are already in the inventory.
+- `runtimes/codex/open.ts` takes `additionalDirectories` as `runtimeWorkspaceRoots` on `thread/start` and `thread/resume`. The list puts the resolved `cwd` first, because codex replaces its runtime roots. The open is refused when the reply does not confirm each requested root. The BYOK approval policy option stays. The merge was clean.
+- `runtimes/codex/session.ts` takes `outputSchema` on each `turn/start`. A `queue` is rejected `unsupported` while a schema is set, because a queued input cannot carry it. The three-way merge had one conflict, on the queue gate. BYOK change: the queue gate keeps caller-owned image admission, so the merged gate adds only the schema refusal and no image check.
+
+The other four maintained files have no upstream change. Their BYOK deltas stay, and only their change notices name the new base.
+The other 37 prior selected source paths and LICENSE have the same upstream bytes.
+
+The SDK Codex adapter passes neither new option, and the private JS/declaration bridge exposes neither. The raw Codex session in the bridge has no `queue` member. SDK events read native frames only, so `structuredOutput` does not reach them. Codex open, turn and queue requests from the SDK are unchanged.
+Upstream 0.55.0 and 0.56.0 also add these options to other runtimes, the `commands` inventory and process-tree cleanup for the Claude and Grok queries. These modules remain outside the selected closure. No upstream npm dependency enters the SDK.
+
+## 0.56.0 → 0.57.0 re-vendor
+
+The new base is tag v0.57.0, commit `0804b915ef511d2880e07d5329450c2484d8d62e`.
+Five selected paths changed upstream. One new dependency enters the inventory. The inventory is now 44 source files and LICENSE, with six maintained files.
+
+- `contracts/failure.ts` keeps upstream bytes. It adds the `limit_reached` and `output_schema` failure classes. Upstream sets them for Claude and Grok only. `runtimes/codex/failure.ts` has no change, so the Codex fold does not produce them.
+- `contracts/records.ts` keeps upstream bytes. `TokenTotals` gains the optional `reasoning` part of `output`. It is present only when the runtime reports it natively.
+- `shared/token-totals.ts` keeps upstream bytes. It adds, subtracts and reads the `reasoning` part like the cache parts.
+- `runtimes/codex/token-usage.ts` keeps upstream bytes. The derived usage reading takes `reasoning` from codex's `reasoningOutputTokens`. A resume subtracts the reported baseline, as for the other parts.
+- `shared/session-links.ts` is new and keeps upstream bytes. `runtimes/codex/session.ts` imports it. It imports types from `contracts/session.ts` and `shared/session-kernel.ts`, which are already in the inventory.
+- `runtimes/codex/session.ts` takes `newSessionLinks`. A derived frame carries `session_linked` only for an edge that is new to the record stream, and only once within that frame. The native frame keeps the full native params. The three-way merge had one conflict, in the imports. Upstream changes the import block next to `withSessionCredentials`, which BYOK does not import. BYOK change: the merged block keeps the direct credential redactor, session kernel and injected spawn imports and adds only the `newSessionLinks` import.
+
+The other five maintained files have no upstream change. Their BYOK deltas stay, and only their change notices name the new base.
+The other 38 prior selected source paths and LICENSE have the same upstream bytes.
+
+The SDK event projection reads native frames only. It already reads `reasoningOutputTokens` from the native `thread/tokenUsage/updated` frame. So the derived `reasoning` part and the deduplicated `session_linked` events do not reach SDK events. The private JS/declaration bridge exposes no `TokenTotals`, `FailureClass` or graph type. Codex requests from the SDK are unchanged.
+Upstream 0.57.0 also changes the CLI MCP results, the list-models contracts and readers, the Claude launch arguments, failure mapping and inventory, the observe display text and failure advice, the ACP recorder and the Antigravity, Cursor, Grok, Pi and Pi Durable runtimes. These modules remain outside the selected closure. No upstream npm dependency enters the SDK.
+
+Build assets copy this source's LICENSE, PROVENANCE.md and source-manifest.json to `dist/assets/provenance/oar/0804b91/`.

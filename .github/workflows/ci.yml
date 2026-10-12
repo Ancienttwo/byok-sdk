@@ -67,11 +67,11 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       # The bun-dependent suites (pi-mcp-launch-cwd, pi-runtime-launch-cwd)
-      # skip themselves when no bun candidate exists,
-      # and their fallback search list deliberately does NOT include
-      # ~/.bun/bin/bun — that path is setup-bun's internal install default,
-      # not a location the suites may assume. Without this step they would
-      # silently skip on every runner and CI green would never cover them.
+      # skip themselves when no bun candidate exists. Their fallback search
+      # list includes ~/.bun/bin/bun for local runs, but this gate must not
+      # depend on setup-bun's install layout. Without this step a layout
+      # change would make them silently skip, and CI green would never cover
+      # them.
       # The real absolute path is resolved rather than hardcoded so a
       # setup-bun install-layout change fails loudly here instead of
       # reintroducing silent skips; path, version and hash are printed as the

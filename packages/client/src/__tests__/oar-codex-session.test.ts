@@ -1,8 +1,9 @@
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { codexSession } from '../../vendor/oar/b36b439/runtimes/codex/session';
-import * as projection from '../../vendor/oar/b36b439/runtimes/codex/projection';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/b36b439/runtimes/codex/app-server-client';
-import { SessionNotFoundError } from '../../vendor/oar/b36b439/contracts/session-not-found-error';
+import { codexSession } from '../../vendor/oar/0804b91/runtimes/codex/session';
+import * as projection from '../../vendor/oar/0804b91/runtimes/codex/projection';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/0804b91/runtimes/codex/app-server-client';
+import { SessionNotFoundError } from '../../vendor/oar/0804b91/contracts/session-not-found-error';
 
 function fakeServer(openReply: Record<string, unknown> = {}) {
   let receive!: (line: string) => void;
@@ -104,6 +105,50 @@ describe('unconnected OAR Codex adapter', () => {
     await fake.child.exited;
   });
 
+  it.each([{ resume: undefined }, { resume: 'thread-root' }])('sends additionalDirectories as cwd-first runtimeWorkspaceRoots with resume=$resume', async ({ resume }) => {
+    const roots = [path.resolve('/workspace'), path.resolve('/workspace', 'lib'), path.resolve('/shared')];
+    const fake = fakeServer({ runtimeWorkspaceRoots: roots });
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home' }, additionalDirectories: ['lib', '/shared', 'lib'], ...(resume === undefined ? {} : { resume }),
+    });
+    const method = resume === undefined ? 'thread/start' : 'thread/resume';
+    expect(fake.writes.find(frame => frame.method === method)?.params).toMatchObject({ cwd: '/workspace', runtimeWorkspaceRoots: roots });
+    await session.dispose();
+  });
+
+  it('refuses the open and releases the process when codex does not confirm additionalDirectories', async () => {
+    const fake = fakeServer({ runtimeWorkspaceRoots: [path.resolve('/workspace')] });
+    await expect(codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home' }, additionalDirectories: ['lib'],
+    })).rejects.toThrow('codex thread/start did not confirm the requested additionalDirectories in runtimeWorkspaceRoots');
+    expect(fake.child.kill).toHaveBeenCalledTimes(1);
+    await fake.child.exited;
+  });
+
+  it('sends outputSchema on each turn/start and refuses queue while a schema is set', async () => {
+    const outputSchema = { type: 'object', properties: { answer: { type: 'string' } }, required: ['answer'] };
+    const fake = fakeServer();
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home' }, outputSchema,
+    });
+    expect((await session.prompt('hello')).response.body.kind).toBe('accepted');
+    expect(fake.writes.find(frame => frame.method === 'turn/start')?.params).toMatchObject({ outputSchema });
+    expect((await session.queue('later')).response.body).toMatchObject({
+      kind: 'rejected', code: 'unsupported', reason: expect.stringContaining('cannot carry outputSchema'),
+    });
+    expect(fake.writes.some(frame => frame.method === 'thread/queue/add')).toBe(false);
+    await session.dispose();
+  });
+
+  it('adds no workspace roots or output schema when neither option is given', async () => {
+    const fake = fakeServer(); const session = await fake.open();
+    await session.prompt('hello');
+    expect(fake.writes.find(frame => frame.method === 'thread/start')?.params).not.toHaveProperty('runtimeWorkspaceRoots');
+    expect(fake.writes.find(frame => frame.method === 'turn/start')?.params).not.toHaveProperty('outputSchema');
+    expect((await session.queue('later')).response.body.kind).toBe('accepted');
+    await session.dispose();
+  });
+
   it('preserves native facts before derived readings and keeps child completion separate from root controls', async () => {
     const fake = fakeServer(); const session = await fake.open();
     await session.prompt('hello');
@@ -146,6 +191,35 @@ describe('unconnected OAR Codex adapter', () => {
       nodes: [{ id: 'thread-root' }, { id: 'stranger' }, { id: 'child-1' }],
       edges: [{ parent: 'thread-root', child: 'child-1', via: 'tool_call' }],
     });
+    await session.dispose();
+  });
+
+  it('adds session_linked once per record stream and keeps every native frame', async () => {
+    const fake = fakeServer(); const session = await fake.open();
+    await session.prompt('hello');
+    const item = { type: 'collabAgentToolCall', id: 'call-1', receiverThreadIds: ['child-1', 'child-1'] };
+    fake.frame({ method: 'item/started', params: { threadId: 'thread-root', item } });
+    fake.frame({ method: 'item/started', params: { threadId: 'thread-root', item: { ...item, id: 'call-2' } } });
+    const frames = session.records().flatMap(record => record.kind === 'frame' ? [record.body] : []);
+    expect(frames.filter(body => 'origin' in body && body.type === 'item/started').map(body => body.native)).toEqual([
+      { threadId: 'thread-root', item }, { threadId: 'thread-root', item: { ...item, id: 'call-2' } },
+    ]);
+    expect(frames.flatMap(body => body.events.filter(event => event.kind === 'session_linked'))).toEqual([
+      { kind: 'session_linked', parent: 'thread-root', child: 'child-1', via: 'tool_call' },
+    ]);
+    expect(session.graph().edges).toEqual([{ parent: 'thread-root', child: 'child-1', via: 'tool_call' }]);
+    await session.dispose();
+  });
+
+  it('reads the native reasoning output total into the derived usage reading only', async () => {
+    const fake = fakeServer(); const session = await fake.open();
+    await session.prompt('hello');
+    const tokenUsage = { total: { inputTokens: 100, outputTokens: 50, reasoningOutputTokens: 30 }, last: { totalTokens: 150 }, modelContextWindow: 1000 };
+    fake.frame({ method: 'thread/tokenUsage/updated', params: { threadId: 'thread-root', turnId: 'turn-root', tokenUsage } });
+    const [native, reading] = session.records().slice(-2);
+    expect(native).toMatchObject({ kind: 'frame', body: { origin: 'byok-native', type: 'thread/tokenUsage/updated', native: { tokenUsage }, events: [] } });
+    expect(reading).toMatchObject({ kind: 'frame', body: { events: [{ kind: 'usage', usage: { tokens: { input: 100, output: 50, reasoning: 30 } } }] } });
+    expect(reading?.kind === 'frame' && 'origin' in reading.body).toBe(false);
     await session.dispose();
   });
 
