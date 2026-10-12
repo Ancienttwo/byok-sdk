@@ -1118,6 +1118,56 @@ describe('a retained startup owner keeps its preparation pin until disposal and 
   });
 });
 
+describe('daemon shutdown waits for a prepared offer that is still inside start()', () => {
+  /** Hold a prepared offer inside start(), past the stopping check, shut down, then let start() return. */
+  async function shutDownDuringStart(stopOffersFirst: boolean) {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const releaseStart = adapter.blockStart();
+    const runner = await makeRunner(built, adapter, sent);
+    const taskId = 'task-prepared-shutdown-during-start';
+
+    const offered = runner.handleEnvelope(preparedOffer(taskId, reference(built)));
+    await vi.waitFor(() => expect(adapter.preparedStartCalls).toHaveLength(1));
+    if (stopOffersFirst) {
+      // The daemon order aborts the start, so the offer settles while start() still runs.
+      runner.stopAcceptingOffers();
+      const shutdown = runner.shutdownActiveTasks('daemon shutting down');
+      await offered;
+      releaseStart();
+      await shutdown;
+    } else {
+      const shutdown = runner.shutdownActiveTasks('daemon shutting down');
+      releaseStart();
+      await Promise.all([offered, shutdown]);
+    }
+
+    return {
+      built,
+      session: adapter.sessions[0]!,
+      sent: sent.filter((envelope) => envelope.task_id === taskId).map((envelope) => envelope.type),
+    };
+  }
+
+  it('does not leave the Execution running when start() returns after shutdownActiveTasks began', async () => {
+    const { built, session, sent } = await shutDownDuringStart(false);
+
+    expect(sent).toEqual(['task.claim', 'task.started', 'task.fail']);
+    expect(session.interruptCalled).toBe(true);
+    expect(session.closeCalled).toBe(true);
+    expect(built.store.get(built.recordId)?.pin).toBeUndefined();
+  });
+
+  it('closes the late session and releases the pin in the daemon order: stopAcceptingOffers, then shutdownActiveTasks', async () => {
+    const { built, session, sent } = await shutDownDuringStart(true);
+
+    expect(sent).toEqual(['task.claim', 'task.fail']);
+    expect(session.closeCalled).toBe(true);
+    expect(built.store.get(built.recordId)?.pin).toBeUndefined();
+  });
+});
+
 describe('every compared item declines by its own name, with no claim and no pin', () => {
   interface Case {
     readonly name: string;
