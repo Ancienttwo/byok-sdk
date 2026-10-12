@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -28,7 +28,8 @@ describe('required native export data assets',()=>{
     cpSync(path.resolve(import.meta.dirname,'../../scripts/build-pi-export-assets.mjs'),script);
     writeFileSync(path.join(root,'package.json'),JSON.stringify({byok:{piRuntimePin:source.packageVersion}}));
     const pinRoot=path.join(root,'node_modules/@earendil-works/pi-coding-agent');
-    mkdirSync(path.dirname(pinRoot),{recursive:true});cpSync(realpathSync(nativeRoot),pinRoot,{recursive:true});
+    // Copy only what the script reads: the whole 25 MB package made this test I/O-bound under load.
+    for(const file of ['package.json',...source.files.map(row=>`${source.sourceBasePath}/${row.path}`)]){const target=path.join(pinRoot,file);mkdirSync(path.dirname(target),{recursive:true});cpSync(path.join(nativeRoot,file),target);}
     const run=()=>spawnSync(process.execPath,[script],{encoding:'utf8'});
     const built=run();expect(built.status,built.stderr).toBe(0);
     const output=path.join(root,'dist/assets/pi-export-html');
