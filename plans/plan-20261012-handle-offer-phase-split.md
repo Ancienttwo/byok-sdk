@@ -1,9 +1,10 @@
 # Split handleOffer into phase methods
 
-Status: Planned
+Status: PR 1 merged (#368). PR 2 in review (#373)
 Approval: The owner asked for this slice on 2026-10-12. Each PR needs its own review.
 Base: a13d2a559f9fab36150e31dcf0def6ad4ab28d4d
 Previous slice: `plans/plan-20261012-offer-resource-ownership.md` (D9 names this slice), delivered by #359, #363 and #364.
+Revision 2 (2026-10-12, during PR 2): The first D3 could not be met. Phases a and b2 await only on some paths, and every early exit comes before the first await. An async method adds a tick at its return on every path, so an async `screenOffer` opened a duplicate-start window. The coordinator replaced D3, changed the PR 2 seams in D7, and kept phase a inline.
 
 ## Goal
 
@@ -69,17 +70,25 @@ Reason: one bag of 30 optional fields would weaken definite assignment and hide 
 
 D2. Exits. Each `return;` inside a moved body becomes `return undefined;`. The decline, fail and release calls before it stay unchanged and in the same order. No phase sends a terminal envelope that it did not send before.
 
-D3. Await boundaries. A phase method is `async` only when its body already awaits. A seam may add a microtask boundary only where the inline code already had an `await` at that point. Otherwise the phase stays synchronous. The synchronous handoffs stay inside one method each, with no await between the steps: the owner change and `startupOwnership.register` (phase j), and the owner change, `transferToActive` and `tasks.set` (phase k).
+D3 (Revision 2). Await boundaries. Exact microtask counts are not a contract. Any extraction of code that awaits changes them. The contract has three rules.
 
-Reason: an extra await at a seam adds a scheduling point where a concurrent `task.cancel` can run. The cancel-race tests depend on these points.
+1. Never insert a yield inside an atomic check-then-act window. These are the named windows:
+   - W1: the duplicate guard (`if (this.tasks.has(taskId) || ...)`) to `inFlightOffers.add`, on every path that has no await there today.
+   - W2: the Agent-home active-count check to `homeReservations.set` and `reservedHome`.
+   - W3: `owner = 'startup'` to `startupOwnership.register`.
+   - W4: `owner = 'active'` to `transferToActive` to `tasks.set`.
+2. Synchronous code stays synchronous. A phase that never awaits is a plain sync method. A call to it adds no tick.
+3. An async phase may add ticks only at its own return. Entry into an async function runs synchronously up to its first await, so entry adds no tick. The PR body lists each added yield point, the shared state read between it and the next existing yield, and why no check-then-act spans it. A few more ticks on an existing hold (a reservation or an in-flight marker) are acceptable. They allow only interleavings that were already possible.
 
-D4. Closures. `decline`, `admissionWithdrawn` and `releaseReservation` are built once in handleOffer, as today. Phases get them through one small parameter object. `declineMemory` moves into the phase g method.
+Reason: a yield inside a check-then-act window lets a concurrent offer or `task.cancel` act on a stale check. The cancel-race tests depend on these windows.
+
+D4. Closures. `decline`, `admissionWithdrawn` and `releaseReservation` are built once in handleOffer, as today. Phases get them through one small parameter object, `OfferPhaseContext`. It also carries `taskId` and `reserveHome(reservationKey)`. `reserveHome` holds the two reservation lines of W2, so `reservedHome` stays a handleOffer local for the `finally`. `declineMemory` moves into the phase g method.
 
 D5. Phase k moves as one unit: the whole inner `try` from bindSession to the session record, with its `catch` and the `tasks.has(taskId)` rethrow. `let active!` moves with it.
 
 D6. The `finally` stays in handleOffer, unchanged except that it reads the resource record (D1). It is the ownership contract. Keeping it beside the phase calls keeps that contract visible.
 
-D7. Method names follow the phases: `screenOffer` (a), `admitOffer` (b2), `prepareOfferRuntime` (c), `acquireOfferWorkspace` (d, e, f), `admitPreparedOffer` (g), `claimOffer` (h, i), `startOfferRuntime` (j), `activateOfferSession` (k). Phase b stays inline. The implementer may adjust a seam when the code shows a better one. The plan and the PR then record the change.
+D7 (Revision 2). Method names follow the phases. Phase a stays inline in handleOffer. It is the W1 gate, and like the `finally` (D6) it stays visible in one place. Phase b2 has three methods: `admitOffer` (sync: pending cancel and strict Agent-only), `reserveOfferHome` (async: the Agent-home block, called only when `agentRef !== undefined`, as the block is guarded today), and `admitOfferLimits` (sync: admission guard, shutdown, limits, runtime selection, and the required-toolset check that was the first step of phase c). `prepareOfferRuntime` (c, async) starts at the runtime pick and ends after `adapter.prepare`. The later names stay: `acquireOfferWorkspace` (d, e, f), `admitPreparedOffer` (g), `claimOffer` (h, i), `startOfferRuntime` (j), `activateOfferSession` (k). Phase b stays inline. The implementer may adjust a seam when the code shows a better one. The plan and the PR then record the change.
 
 Rejected:
 
@@ -99,8 +108,15 @@ PR 1 verification notes: The new file is `packages/client/src/__tests__/handle-o
 
 PR 2: front phases without owned resources
 
-- [ ] Extract `screenOffer` (a), `admitOffer` (b2) and `prepareOfferRuntime` (c). Introduce the D4 parameter object.
-- [ ] Each moved body keeps its statements and order. Only seam edits change: parameters, `return undefined`, and the returned outputs.
+- [x] Keep phase a inline. Extract `admitOffer`, `reserveOfferHome` and `admitOfferLimits` (b2) and `prepareOfferRuntime` (c). Introduce the D4 parameter object with `reserveHome`.
+- [x] Each moved body keeps its statements and order. Only seam edits change: parameters, `return undefined`, the returned outputs, and the `reserveHome` call.
+- [x] Review the diff with `--color-moved`. List every seam edit and every added yield point (D3 rule 3) in the PR body.
+- [x] Focused suites and the five required checks.
+- [x] One independent read-only review. Verdict: accept with nits. No behavior defect.
+
+PR 2 verification notes: handleOffer went from 1,298 lines to 1,022 lines. Phase a and phase b stay inline. The diff changes no line between the duplicate guard and `inFlightOffers.add`, so W1 is unchanged. `reserveOfferHome` does the W2 count check and the `reserveHome` call in one synchronous stretch. A line-multiset check of the diff found no lost or changed statement. The only changes are the seam edits that the PR body lists. The PR adds two yield points, at the returns of `reserveOfferHome` and `prepareOfferRuntime`. The PR body lists them. The 24 focused files passed with one file worker (295 tests). The API golden gained four private member names. When those four lines are removed, the golden matches the base byte for byte. In the full run, one client test failed: `agent-memory-guidance.test.ts`, "injects guidance and the reserved MCP only for strict Agent tasks across the shared runtime seam". It fails the same way on unchanged origin/main on this machine. Every other workspace passed. The phase g method name `admitPreparedOffer` (D7) is also the name of an existing module function. PR 3 should choose another name, or record the overlap.
+
+PR 2 review notes: the independent review confirmed the pure move line for line, ignoring indentation. It found one new order at the `prepareOfferRuntime` exits. The home reservation is released a few ticks after the decline is sent. So offer B for the same home can see a retryable `agent home busy` after offer A declined. The base cannot produce that order. It fails closed, and B can retry. The PR body states it. For PR 3: the D4 context `const phase` (handleOffer) is shadowed by `const phase: GitWorkspacePhase` in phase d. Rename one of them before phase d moves into a method.
 
 PR 3: resource phases
 
@@ -130,6 +146,7 @@ The API golden gains private method names and loses nothing public. State that i
 ## Risks and limits
 
 The main risk is a changed scheduling point at a seam (D3), or a stale copy of a value that a later phase rewrites (D1).
+Pre-existing issue, out of scope: on the prepared lane, `await preparationLane.open()` is inside W1. Two concurrent prepared offers for one taskId can both pass the duplicate guard today. The orchestrator files it separately. Phase a stays inline, so this slice does not change that window.
 PR 1 reduces the first risk for untested branches. Review against D1 and D3 covers the rest.
 The cancel-race and shutdown tests cover the concurrent paths. They cannot prove that every microtask order is unchanged.
 
