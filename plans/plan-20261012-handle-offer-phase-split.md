@@ -91,9 +91,11 @@ Rejected:
 
 PR 1: characterization tests (tests only)
 
-- [ ] Add one TaskRunner test for each reason in the coverage gap list, unless an existing test already drives that branch (then name that test in the PR). Each test asserts the terminal envelope type, the reason, `retryable`, and that the offer released what it held (agent lease, Git lease, pin, in-flight marker) where the branch holds one.
-- [ ] All new tests pass on the base without any production change. A test that fails on the base reports a real defect: stop, file an issue, and keep it out of this PR.
-- [ ] Focused suites and the five required checks.
+- [x] Add one TaskRunner test for each reason in the coverage gap list, unless an existing test already drives that branch (then name that test in the PR). Each test asserts the terminal envelope type, the reason, `retryable`, and that the offer released what it held (agent lease, Git lease, pin, in-flight marker) where the branch holds one.
+- [x] All new tests pass on the base without any production change. A test that fails on the base reports a real defect: stop, file an issue, and keep it out of this PR.
+- [x] Focused suites and the five required checks.
+
+PR 1 verification notes: The new file is `packages/client/src/__tests__/handle-offer-characterization.test.ts`. It has nine cases. They cover eight gap reasons and the validation branch of `workspace is busy or unavailable`. Existing tests already drive four reasons: `session is incompatible with Git`, the lease branch of `workspace is busy or unavailable`, `daemon shutting down during runtime startup` and `Agent session handoff could not be durably`. A temporary probe confirmed the exact reason of each of those four tests. The probe was deleted. No production file changed. Each new case passed on the base. The new file passed three runs in a row. The focused suites passed with one file worker. With four workers, three focused files failed under machine load. They passed with one file worker. No new test found a defect. In the full run, one client test failed: `agent-memory-guidance.test.ts`, case "injects guidance and the reserved MCP only for strict Agent tasks across the shared runtime seam". It fails the same way on unchanged origin/main on this machine, so it is not caused by this PR.
 
 PR 2: front phases without owned resources
 
