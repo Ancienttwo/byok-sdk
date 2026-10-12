@@ -4,23 +4,22 @@ This package hosts a pi-durable session in a Cloudflare Durable Object.
 It provides native SQLite storage, inline tools, wake and inbox processing,
 usage limits, settlement hooks, and transcript reads.
 
-The prepared stable candidate is 0.26.1, with keys 0.11.1. It is not
-published. See the [candidate release notes](../../docs/releases/v0.26.1.md).
-
-The current `latest` release is 0.26.0, in the nine-package release set with
-keys 0.11.0. Registry readback passed on 2026-10-11; see the
-[publication record](../../docs/releases/v0.26.0-publication.md).
+The current `latest` release is 0.26.1, in the nine-package release set with
+keys 0.11.1. Registry readback and isolated installation passed on 2026-10-12.
+See the [publication record](../../docs/releases/v0.26.1-publication.md).
+The previous stable release was 0.26.0 / keys 0.11.0; its
+[publication record](../../docs/releases/v0.26.0-publication.md) remains historical.
 The published 0.26.0-rc.4 (see the
 [rc.4 publication record](../../docs/releases/v0.26.0-rc.4-publication.md))
 stays on `rc`; rc.1 to rc.3 are superseded. See the
-[release notes](../../docs/releases/v0.26.0.md#version-set-and-channel).
+[release notes](../../docs/releases/v0.26.1.md#version-set-and-channel).
 Live Host acceptance remains separate.
 The package needs Node 24.15.0 or later for build tooling.
 
 ## Install and subclass
 
-The following install example names the prepared stable candidate. Publish
-it before installation. Use an installed package to verify the consumer path.
+The following install example names the published stable release. Use an
+installed package to verify the consumer path.
 
 ~~~sh
 npm install @byok-sdk/cloud-do@0.26.1

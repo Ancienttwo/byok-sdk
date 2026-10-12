@@ -7,12 +7,15 @@ composition over Postgres and R2.
 
 ## Release status
 
-The prepared stable release is **0.26.1** for the eight aligned packages,
-with independent keys **0.11.1**. The target npm dist-tag is `latest`.
-[Candidate release notes](docs/releases/v0.26.1.md) describe the client fixes,
-version set and remaining release gates. This candidate is not published.
+The current `latest` release is **0.26.1** for the eight aligned packages,
+with independent keys **0.11.1**, published on npm on 2026-10-12 from
+`v0.26.1` (`e7f3edf2`, PR #381). The
+[publication record](docs/releases/v0.26.1-publication.md) confirms all nine
+packages, exact CI artifact hashes, registry readback and an isolated install.
+[Release notes](docs/releases/v0.26.1.md) cover the client corrections since
+0.26.0. This PATCH release adds no public API or schema migration.
 
-The current `latest` release is **0.26.0** for the eight aligned packages,
+The previous `latest` release was **0.26.0** for the eight aligned packages,
 with independent keys **0.11.0**, published on npm `latest` on 2026-10-11 from
 `v0.26.0` (`34c0e504`, PR #350). The
 [publication record](docs/releases/v0.26.0-publication.md) verifies the frozen
@@ -28,8 +31,8 @@ The published **0.26.0-rc.4** / keys 0.11.0-rc.4 stays on the `rc` channel (see
 its [publication record](docs/releases/v0.26.0-rc.4-publication.md)). rc.3 is
 superseded. rc.1 and rc.2 were only partially published and are also superseded.
 
-Versioned install examples below name the prepared 0.26.1 / keys 0.11.1
-candidate. They require publication first. Live Host acceptance remains separate.
+Versioned install examples below name the published 0.26.1 / keys 0.11.1
+release. Live Host acceptance remains separate.
 
 Before it, `latest` was **0.25.0** for eight aligned packages, with
 independent keys **0.10.0**, published on npm `latest` on 2026-10-09 from
@@ -110,11 +113,11 @@ import { createByokServer } from '@byok-sdk/server';
 ```
 
 The Worker-only cloud-do package is published from 0.24.0. The example below
-names the prepared 0.26.1 candidate.
+names the published 0.26.1 release.
 See [the cloud-do README](packages/cloud-do/README.md) for the subclass and binding.
 
 ~~~sh
-# Prepared stable candidate. Publish before installing.
+# Published stable release.
 npm install @byok-sdk/cloud-do@0.26.1
 npm install --save-dev @cloudflare/workers-types
 ~~~

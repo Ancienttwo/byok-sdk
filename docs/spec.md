@@ -178,14 +178,15 @@ authorization and registry readback. The current independent keys release is
 dispatch release, `0.26.1`, proven from an isolated standard npm install rather
 than the workspace graph.
 
-On 2026-10-12 the owner authorized stable source preparation for 0.26.1.
-The eight aligned packages move to 0.26.1. keys moves to 0.11.1 so its packed
-core edge can point exactly to 0.26.1. These are PATCH releases. The train
-corrects client resource cleanup, prepared-offer races and outbound error
-paths. It adds no public API, persistence schema or security authority.
-The target dist-tag is `latest`. npm still publishes 0.26.0 / keys 0.11.0.
-Source preparation does not authorize npm execution or tagging. See the
-[candidate release notes](releases/v0.26.1.md).
+On 2026-10-12 the owner authorized npm publication of 0.26.1 / keys 0.11.1.
+All nine packages are published on `latest` from `v0.26.1` (`e7f3edf2`).
+The exact merge-commit push CI passed all 24 jobs. Registry readback verifies
+all frozen integrities and dependency maps, and the isolated install resolves
+only core 0.26.1. The train corrects client cleanup, prepared-offer races and
+outbound error paths. It adds no public API, persistence schema or security
+authority. keys changes its exact packed core edge to 0.26.1. Both are PATCH
+releases. See the [publication record](releases/v0.26.1-publication.md) and
+[release notes](releases/v0.26.1.md).
 
 On 2026-10-11 the owner authorized stable source preparation for the eight
 aligned packages at 0.26.0 and keys at 0.11.0. All nine packages target npm's
