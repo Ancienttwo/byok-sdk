@@ -1,6 +1,6 @@
 # Split handleOffer into phase methods
 
-Status: Planned
+Status: PR 1 merged (#368). PR 2 in review (#373)
 Approval: The owner asked for this slice on 2026-10-12. Each PR needs its own review.
 Base: a13d2a559f9fab36150e31dcf0def6ad4ab28d4d
 Previous slice: `plans/plan-20261012-offer-resource-ownership.md` (D9 names this slice), delivered by #359, #363 and #364.
@@ -112,9 +112,11 @@ PR 2: front phases without owned resources
 - [x] Each moved body keeps its statements and order. Only seam edits change: parameters, `return undefined`, the returned outputs, and the `reserveHome` call.
 - [x] Review the diff with `--color-moved`. List every seam edit and every added yield point (D3 rule 3) in the PR body.
 - [x] Focused suites and the five required checks.
-- [ ] One independent read-only review.
+- [x] One independent read-only review. Verdict: accept with nits. No behavior defect.
 
 PR 2 verification notes: handleOffer went from 1,298 lines to 1,022 lines. Phase a and phase b stay inline. The diff changes no line between the duplicate guard and `inFlightOffers.add`, so W1 is unchanged. `reserveOfferHome` does the W2 count check and the `reserveHome` call in one synchronous stretch. A line-multiset check of the diff found no lost or changed statement. The only changes are the seam edits that the PR body lists. The PR adds two yield points, at the returns of `reserveOfferHome` and `prepareOfferRuntime`. The PR body lists them. The 24 focused files passed with one file worker (295 tests). The API golden gained four private member names. When those four lines are removed, the golden matches the base byte for byte. In the full run, one client test failed: `agent-memory-guidance.test.ts`, "injects guidance and the reserved MCP only for strict Agent tasks across the shared runtime seam". It fails the same way on unchanged origin/main on this machine. Every other workspace passed. The phase g method name `admitPreparedOffer` (D7) is also the name of an existing module function. PR 3 should choose another name, or record the overlap.
+
+PR 2 review notes: the independent review confirmed the pure move line for line, ignoring indentation. It found one new order at the `prepareOfferRuntime` exits. The home reservation is released a few ticks after the decline is sent. So offer B for the same home can see a retryable `agent home busy` after offer A declined. The base cannot produce that order. It fails closed, and B can retry. The PR body states it. For PR 3: the D4 context `const phase` (handleOffer) is shadowed by `const phase: GitWorkspacePhase` in phase d. Rename one of them before phase d moves into a method.
 
 PR 3: resource phases
 
