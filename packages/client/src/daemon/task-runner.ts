@@ -1045,8 +1045,11 @@ const ABSOLUTE_LOCAL_PATH = /(?<=^|[\s'"`(=])(?:\/|[A-Za-z]:[\\/]|\\\\)(?:[^\s'"
 /**
  * Agent-home and session-handoff errors, and the filesystem errors under
  * them, name local paths: the canonical home, lease markers, run directories.
- * `task.decline` and `task.fail` leave this device, so a reason that forwards
- * one keeps the error's wording and drops each absolute path.
+ * So do the filesystem errors of the preparation store, the Agent message
+ * outbox, the artifact open and a runtime adapter's detect/prepare.
+ * `task.decline`, `task.fail` and `task.progress` leave this device, so a
+ * reason that forwards one keeps the error's wording and drops each absolute
+ * path.
  */
 function outboundErrorMessage(err: unknown): string {
   return errorMessage(err).replace(ABSOLUTE_LOCAL_PATH, '<local path>');
@@ -1225,7 +1228,7 @@ async function openArtifact(workspaceDir: string, name: string): Promise<OpenArt
   try {
     handle = await fs.open(candidate, fsConstants.O_RDONLY | O_NOFOLLOW);
   } catch (err) {
-    return { ok: false, reason: `artifact "${name}" could not be opened: ${errorMessage(err)}` };
+    return { ok: false, reason: `artifact "${name}" could not be opened: ${outboundErrorMessage(err)}` };
   }
 
   try {
@@ -2059,7 +2062,7 @@ export class TaskRunner {
       } catch (error) {
         this.decline(
           taskId,
-          `preparation_store_unavailable: the preparation store could not be opened: ${errorMessage(error)}`,
+          `preparation_store_unavailable: the preparation store could not be opened: ${outboundErrorMessage(error)}`,
           false,
           agentRef,
         );
@@ -2281,7 +2284,7 @@ export class TaskRunner {
           blobAbort.signal,
         );
       } catch (error) {
-        if (!admissionWithdrawn()) decline(`runtime detection failed: ${errorMessage(error)}`, true);
+        if (!admissionWithdrawn()) decline(`runtime detection failed: ${outboundErrorMessage(error)}`, true);
         return;
       }
       if (admissionWithdrawn()) return;
@@ -2412,7 +2415,7 @@ export class TaskRunner {
           ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
         }), blobAbort.signal);
       } catch (error) {
-        if (!admissionWithdrawn()) decline(`runtime preparation failed: ${errorMessage(error)}`, true);
+        if (!admissionWithdrawn()) decline(`runtime preparation failed: ${outboundErrorMessage(error)}`, true);
         return;
       }
       if (admissionWithdrawn()) return;
@@ -2543,7 +2546,7 @@ export class TaskRunner {
           } catch (error) {
             await agentBinding.lease.release().catch(() => {});
             agentBinding = undefined;
-            decline(`Agent message outbox initialization failed: ${errorMessage(error)}`, true);
+            decline(`Agent message outbox initialization failed: ${outboundErrorMessage(error)}`, true);
             return;
           }
         }
@@ -3243,7 +3246,7 @@ export class TaskRunner {
       }
       } catch (error) {
         if (this.tasks.has(taskId)) throw error;
-        const reason = `runtime activation failed: ${errorMessage(error)}`;
+        const reason = `runtime activation failed: ${outboundErrorMessage(error)}`;
         if (agentBinding === undefined) await this.fail(taskId, reason, false);
         else await this.failClaimedAgent(taskId, reason, false, {
           binding: agentBinding, runtimeId: pick.descriptor.id, sessionRef: session.sessionRef,

@@ -1341,6 +1341,63 @@ describe('every compared item declines by its own name, with no claim and no pin
     expect(adapter.preparedStartCalls).toHaveLength(0);
     expect(adapter.startCalls).toHaveLength(0);
   });
+
+  // `task.decline` leaves this device. A store open error can be a Node
+  // filesystem error that names its absolute path; the reason must not carry it.
+  it('declines an unopenable store with the filesystem error but no local path', async () => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    const brokenStoreDir = await tempDir('byok prepared broken store-');
+    // A file where the record directory goes, so the real open fails.
+    await fs.writeFile(path.join(brokenStoreDir, 'input-preparation'), 'not a directory');
+    const brokenStore = new InputPreparationStore({
+      storeDir: brokenStoreDir,
+      retentionMs: 60 * 60 * 1000,
+      retryHorizonMs: 60 * 60 * 1000,
+    });
+    const runner = await makeRunner(built, adapter, sent, {
+      inputPreparationLane: {
+        store: brokenStore,
+        authorizeAgentMemory: async () => {},
+        open: () => brokenStore.open(),
+        runtime: RUNTIME,
+        policyRevision: POLICY_REVISION,
+        toolsetDefinitionRevisions: built.toolsetDefinitionRevisions,
+      },
+    });
+
+    await runner.handleEnvelope(preparedOffer('task-store-path', reference(built)));
+
+    expect(declineReason(sent)).toBe(
+      "preparation_store_unavailable: the preparation store could not be opened: ENOTDIR: not a directory, mkdir '<local path>'",
+    );
+    expect(declineReason(sent)).not.toContain(brokenStoreDir);
+    expect(declineReason(sent)).not.toContain(path.basename(brokenStoreDir));
+  });
+
+  it('declines a pin the store cannot write with the store\'s own message, never the filesystem path', async () => {
+    const built = await lane();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const sent: Envelope[] = [];
+    // A directory where the record log goes, so the real pin append fails.
+    // The store wraps that filesystem error in a fixed message, so this
+    // reason needs no redaction; the test keeps that fact pinned.
+    const recordLog = path.join(built.storeDir, 'input-preparation', 'records.jsonl');
+    await fs.rm(recordLog);
+    await fs.mkdir(recordLog);
+    const runner = await makeRunner(built, adapter, sent);
+
+    await runner.handleEnvelope(preparedOffer('task-pin-path', reference(built)));
+
+    expect(declineReason(sent)).toBe(
+      'preparation_not_ready: the preparation pin could not be written: '
+        + 'the input-preparation record could not be durably written; the log is quarantined until it is revalidated',
+    );
+    expect(declineReason(sent)).not.toContain(built.storeDir);
+    expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(0);
+    expect(adapter.preparedStartCalls).toHaveLength(0);
+  });
 });
 
 describe('prepared Agent memory admission declines with its exact typed reason', () => {
