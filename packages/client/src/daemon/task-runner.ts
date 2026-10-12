@@ -1036,6 +1036,23 @@ function errorMessage(err: unknown): string {
 }
 
 /**
+ * An absolute POSIX, drive-letter or UNC path that starts a token. Inner
+ * segments may hold spaces (`Application Support/`); the last segment ends at
+ * the first space, so the words after the path stay.
+ */
+const ABSOLUTE_LOCAL_PATH = /(?<=^|[\s'"`(=])(?:\/|[A-Za-z]:[\\/]|\\\\)(?:[^\s'"`,;)\\/]+(?: +[^\s'"`,;)\\/]+)*[\\/])*[^\s'"`,;)\\/]*/g;
+
+/**
+ * Agent-home and session-handoff errors, and the filesystem errors under
+ * them, name local paths: the canonical home, lease markers, run directories.
+ * `task.decline` and `task.fail` leave this device, so a reason that forwards
+ * one keeps the error's wording and drops each absolute path.
+ */
+function outboundErrorMessage(err: unknown): string {
+  return errorMessage(err).replace(ABSOLUTE_LOCAL_PATH, '<local path>');
+}
+
+/**
  * M5 batch-3 (workstream 2): races `fn()` against `timeoutMs`, resolving
  * `true` once `fn()` itself settles (success OR rejection — a rejection is
  * swallowed here, the same best-effort contract every teardown call in this
@@ -2168,7 +2185,7 @@ export class TaskRunner {
           canonicalHome = await this.deps.agentHome!.layout.canonicalHomePath(agentRef);
         } catch (error) {
           decline(
-            `Agent home admission failed: ${errorMessage(error)}`,
+            `Agent home admission failed: ${outboundErrorMessage(error)}`,
             !(error instanceof AgentHomeResolutionError),
           );
           return;
@@ -2418,7 +2435,7 @@ export class TaskRunner {
               home: resolution.canonicalHome,
             });
           } catch (error) {
-            decline(`Agent session handoff mismatch: ${errorMessage(error)}`, false);
+            decline(`Agent session handoff mismatch: ${outboundErrorMessage(error)}`, false);
             return;
           }
         }
@@ -2432,7 +2449,7 @@ export class TaskRunner {
           releaseReservation();
         } catch (error) {
           decline(
-            `Agent home admission failed: ${errorMessage(error)}`,
+            `Agent home admission failed: ${outboundErrorMessage(error)}`,
             error instanceof AgentHomeBusyError || !(error instanceof AgentHomeResolutionError),
           );
           return;
@@ -2462,7 +2479,7 @@ export class TaskRunner {
           } catch (error) {
             await agentBinding.lease.release().catch(() => {});
             agentBinding = undefined;
-            decline(`Agent session handoff mismatch: ${errorMessage(error)}`, false);
+            decline(`Agent session handoff mismatch: ${outboundErrorMessage(error)}`, false);
             return;
           }
         }
@@ -2491,7 +2508,7 @@ export class TaskRunner {
             // cannot reuse) may clear; every other failure is permanent.
             decline(error instanceof AgentHomeReaderRunMissingError
               ? `Agent session ${sessionRef} cannot resume: its reader run directory no longer exists`
-              : `Agent reader run directory preparation failed: ${errorMessage(error)}`, error instanceof AgentHomeBusyError);
+              : `Agent reader run directory preparation failed: ${outboundErrorMessage(error)}`, error instanceof AgentHomeBusyError);
             return;
           }
         }
@@ -2500,7 +2517,7 @@ export class TaskRunner {
         } catch (error) {
           await agentBinding.lease.release().catch(() => {});
           agentBinding = undefined;
-          decline(`Agent home initialization failed: ${errorMessage(error)}`, false);
+          decline(`Agent home initialization failed: ${outboundErrorMessage(error)}`, false);
           return;
         }
         // Terminal evidence only (#318): an unreadable projection record must not
@@ -3050,7 +3067,7 @@ export class TaskRunner {
         } catch (error) {
           await this.failClaimedAgent(
             taskId,
-            `Agent session execution lease could not bind the runtime session: ${errorMessage(error)}`,
+            `Agent session execution lease could not bind the runtime session: ${outboundErrorMessage(error)}`,
             false,
             {
               binding: agentBinding,
@@ -3133,7 +3150,7 @@ export class TaskRunner {
         } catch (error) {
           await this.failClaimedAgent(
             taskId,
-            `Agent session handoff could not be durably written before start: ${errorMessage(error)}`,
+            `Agent session handoff could not be durably written before start: ${outboundErrorMessage(error)}`,
             false,
             {
               binding: agentBinding,
