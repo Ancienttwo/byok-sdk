@@ -76,6 +76,9 @@ export class TestServer {
   private pairGate: Promise<void> | undefined;
   /** One-shot gate that holds the next `/byok/challenge` handler open for auth-shutdown coverage. */
   private challengeGate: Promise<void> | undefined;
+  /** One-shot hold on a `/byok/messages` response — see `holdNextMessagesResponse`. */
+  private messagesHold: { predicate: (envelope: Envelope) => boolean; gate: Promise<void> } | undefined;
+  private readonly messagesHoldReleases = new Set<() => void>();
   private failEventsPolls = false;
   private failBlobUploads = false;
   private dropNextBlobFinalizeResponse = false;
@@ -202,6 +205,29 @@ export class TestServer {
     return release;
   }
 
+  /**
+   * Test hook: hold the response to the next `/byok/messages` batch that
+   * carries an envelope matching `predicate`, until the returned release
+   * function is called. The batch is still recorded first, so `waitFor`
+   * resolves; only the HTTP acceptance is held, which is what the daemon
+   * treats as transport confirmation. Lets a test observe local state that
+   * must hold strictly before that confirmation. One-shot; `close()` releases
+   * a hold that is still open.
+   */
+  holdNextMessagesResponse(predicate: (envelope: Envelope) => boolean): () => void {
+    let resolveGate!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      resolveGate = resolve;
+    });
+    const release = () => {
+      this.messagesHoldReleases.delete(release);
+      resolveGate();
+    };
+    this.messagesHoldReleases.add(release);
+    this.messagesHold = { predicate, gate };
+    return release;
+  }
+
   isRevoked(deviceId: string): boolean {
     return this.devicesById.get(deviceId)?.revoked ?? false;
   }
@@ -278,6 +304,8 @@ export class TestServer {
   }
 
   async close(): Promise<void> {
+    // A held response keeps its connection open, and http.Server#close waits for it.
+    for (const release of this.messagesHoldReleases) release();
     await new Promise<void>((resolve) => this.httpServer.close(() => resolve()));
   }
 
@@ -560,6 +588,7 @@ export class TestServer {
     const body = (await readJsonBody(req)) as { messages?: unknown };
     const rawMessages = Array.isArray(body.messages) ? body.messages : [];
     let accepted = 0;
+    let holdGate: Promise<void> | undefined;
     for (const raw of rawMessages) {
       let envelope: Envelope;
       try {
@@ -569,7 +598,13 @@ export class TestServer {
       }
       this.recordReceivedEnvelope(envelope);
       accepted += 1;
+      if (this.messagesHold?.predicate(envelope)) {
+        holdGate = this.messagesHold.gate;
+        this.messagesHold = undefined;
+      }
     }
+    // Test hook (see `holdNextMessagesResponse`): recorded above, acceptance held here.
+    if (holdGate) await holdGate;
     respondJson(res, 200, { accepted });
   }
 
