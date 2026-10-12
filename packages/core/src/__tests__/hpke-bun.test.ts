@@ -32,7 +32,7 @@ function resolveBun(): string | undefined {
     if (!isFile(explicit)) throw new Error(`BYOK_REQUIRE_BUN=1 and BYOK_TEST_BUN_BIN=${explicit} is missing or not a file`);
     return explicit;
   }
-  const found = [explicit, path.join(os.homedir(), '.local/bin/bun'), '/opt/homebrew/bin/bun', '/usr/local/bin/bun'].find(isFile);
+  const found = [explicit, path.join(os.homedir(), '.local/bin/bun'), path.join(os.homedir(), '.bun/bin/bun'), '/opt/homebrew/bin/bun', '/usr/local/bin/bun'].find(isFile);
   if (found === undefined && process.env.BYOK_REQUIRE_BUN === '1') {
     throw new Error('BYOK_REQUIRE_BUN=1 but no bun interpreter was found');
   }

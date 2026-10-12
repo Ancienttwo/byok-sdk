@@ -23,7 +23,8 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
  * so does a failed spawn (`spawn /path ENOENT`). Each case makes a real
  * filesystem call or spawn fail and checks that the reason keeps the error
  * but not the path. The roots have a space in the name, like
- * `~/Library/Application Support`.
+ * `~/Library/Application Support`, and so do some file names, so the last
+ * path segment is checked too.
  */
 
 const AGENT = { agentId: 'outbound-offer-agent', profileRevision: 'profile-1' } as const;
@@ -98,7 +99,8 @@ async function runner(adapter: StubRuntimeAdapter, extra: Partial<TaskRunnerDeps
   return { runner: taskRunner, agentHome, sent, localRoots };
 }
 
-function expectNoLocalPath(reason: string, localRoots: readonly string[]): void {
+function expectNoLocalPath(reason: string, localRoots: readonly string[], fileName?: string): void {
+  if (fileName !== undefined) expect(reason).not.toContain(fileName);
   for (const root of localRoots) {
     expect(reason).not.toContain(root);
     expect(reason).not.toContain(path.basename(root));
@@ -110,7 +112,7 @@ describe('local paths in outbound handleOffer reasons', () => {
   it('runtime detection failed: a filesystem error from detect() names no local path', async () => {
     const adapter = new StubRuntimeAdapter('pi');
     const { runner: taskRunner, sent, localRoots } = await runner(adapter);
-    const missingBinary = path.join(localRoots[2]!, 'missing runtime', 'pi');
+    const missingBinary = path.join(localRoots[2]!, 'missing runtime', 'pi runtime');
     vi.spyOn(adapter, 'detect').mockImplementationOnce(async () => {
       await fs.access(missingBinary);
       throw new Error('the runtime binary unexpectedly exists');
@@ -120,13 +122,13 @@ describe('local paths in outbound handleOffer reasons', () => {
 
     const reason = reasonOf(sent, 'task.decline', 'detect-path');
     expect(reason).toBe("runtime detection failed: ENOENT: no such file or directory, access '<local path>'");
-    expectNoLocalPath(reason, localRoots);
+    expectNoLocalPath(reason, localRoots, 'pi runtime');
   });
 
   it('runtime preparation failed: a filesystem error from prepare() names no local path', async () => {
     const adapter = new StubRuntimeAdapter('pi');
     const { runner: taskRunner, sent, localRoots } = await runner(adapter);
-    const missingConfig = path.join(localRoots[2]!, 'missing runtime', 'config.json');
+    const missingConfig = path.join(localRoots[2]!, 'missing runtime', 'runtime config.json');
     vi.spyOn(adapter, 'prepare').mockImplementationOnce(async () => {
       await fs.writeFile(missingConfig, '{}');
       throw new Error('the runtime config directory unexpectedly exists');
@@ -136,7 +138,7 @@ describe('local paths in outbound handleOffer reasons', () => {
 
     const reason = reasonOf(sent, 'task.decline', 'prepare-path');
     expect(reason).toBe("runtime preparation failed: ENOENT: no such file or directory, open '<local path>'");
-    expectNoLocalPath(reason, localRoots);
+    expectNoLocalPath(reason, localRoots, 'config.json');
   });
 
   it('required Agent message helper preflight failed: a helper that cannot spawn names no local path', async () => {
@@ -222,7 +224,7 @@ describe('local paths in outbound handleOffer reasons', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
     await taskRunner.handleEnvelope(createEnvelope('task.offer', { instruction: 'outbound offer work' }, { taskId: 'artifact-path', seq: 1 }));
-    adapter.sessions[0]!.emit({ type: 'artifact', name: 'missing-report.txt', contentType: 'text/plain' });
+    adapter.sessions[0]!.emit({ type: 'artifact', name: 'missing report.txt', contentType: 'text/plain' });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(sent.some((entry) => entry.type === 'task.complete' && entry.task_id === 'artifact-path')).toBe(true));
 
@@ -232,7 +234,8 @@ describe('local paths in outbound handleOffer reasons', () => {
       .filter((event) => event.type === 'error')
       .map((event) => event.message!);
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toBe('artifact "missing-report.txt" could not be opened: ENOENT: no such file or directory, open \'<local path>\'');
-    expectNoLocalPath(errors[0]!, localRoots);
+    expect(errors[0]).toBe('artifact "missing report.txt" could not be opened: ENOENT: no such file or directory, open \'<local path>\'');
+    expect(errors[0]).not.toContain(' report.txt\'');
+    expectNoLocalPath(errors[0]!.replace('"missing report.txt"', ''), localRoots, 'report.txt');
   });
 });
