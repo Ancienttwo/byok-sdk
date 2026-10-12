@@ -146,8 +146,9 @@ describe('Agent memory guidance', () => {
     for (const adapter of adapters) {
       for (const session of adapter.sessions) session.emit({ type: 'turn_end' });
     }
-    // The three ordinary tasks finish only after their bounded Git observation
-    // (sequential git child processes), which exceeds the 1s default under host load.
+    // Ordinary tasks finish only after their Git observation, which spawns
+    // serial git processes and is bounded at 5s in TaskRunner. The 1s
+    // waitFor default is below that bound and fails on slow spawn hosts.
     await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0), { timeout: 5_000 });
     expect(consoleError).not.toHaveBeenCalled();
     if (isAgentMemorySecureFilesystemAvailable()) {
