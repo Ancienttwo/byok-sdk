@@ -20,7 +20,7 @@ import {
   UnpairNotConfirmedError,
   UnpairUnknownDaemonStateError,
 } from '../bin/commands/unpair';
-import { appendAuditEvent, auditLogPath } from '../bin/audit-log';
+import { appendAuditRecord, auditLogPath } from '../bin/audit-log';
 import { DeviceStore } from '../daemon/store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
@@ -114,9 +114,9 @@ describe('bin/commands/status: runStatusCommand', () => {
 
   it('reflects task state and last-known lifecycle derived from the audit log', async () => {
     const storeDir = await tmpDir('byok-cmd-status-audit-');
-    await appendAuditEvent(storeDir, { kind: 'lifecycle', ts: '2026-01-01T00:00:00.000Z', lifecycle: { phase: 'running', connection: 'open' } });
-    await appendAuditEvent(storeDir, { kind: 'offered', ts: '2026-01-01T00:00:01.000Z', taskId: 't1', runtime: 'pi' });
-    await appendAuditEvent(storeDir, { kind: 'claimed', ts: '2026-01-01T00:00:02.000Z', taskId: 't1' });
+    await appendAuditRecord(storeDir, { kind: 'lifecycle', ts: '2026-01-01T00:00:00.000Z', lifecycle: { phase: 'running', connection: 'open' } });
+    await appendAuditRecord(storeDir, { kind: 'offered', ts: '2026-01-01T00:00:01.000Z', taskId: 't1', runtime: 'pi' });
+    await appendAuditRecord(storeDir, { kind: 'claimed', ts: '2026-01-01T00:00:02.000Z', taskId: 't1' });
 
     const { log, lines } = collectLog();
     await runStatusCommand(baseConfig(storeDir), { log, adapters: [] });
@@ -201,43 +201,30 @@ describe('bin/commands/tasks: runTasksListCommand', () => {
 
   it('lists tasks reconstructed from the audit log', async () => {
     const storeDir = await tmpDir('byok-cmd-tasks-list-');
-    await appendAuditEvent(storeDir, { kind: 'offered', ts: '2026-01-01T00:00:00.000Z', taskId: 't1', runtime: 'pi' });
-    await appendAuditEvent(storeDir, { kind: 'claimed', ts: '2026-01-01T00:00:01.000Z', taskId: 't1' });
-    await appendAuditEvent(storeDir, { kind: 'started', ts: '2026-01-01T00:00:02.000Z', taskId: 't1' });
-    await appendAuditEvent(storeDir, { kind: 'completed', ts: '2026-01-01T00:00:03.000Z', taskId: 't1', summary: 'done', sessionRef: 's1' });
+    await appendAuditRecord(storeDir, { kind: 'offered', ts: '2026-01-01T00:00:00.000Z', taskId: 't1', runtime: 'pi' });
+    await appendAuditRecord(storeDir, { kind: 'claimed', ts: '2026-01-01T00:00:01.000Z', taskId: 't1' });
+    await appendAuditRecord(storeDir, { kind: 'started', ts: '2026-01-01T00:00:02.000Z', taskId: 't1' });
+    await appendAuditRecord(storeDir, { kind: 'completed', ts: '2026-01-01T00:00:03.000Z', taskId: 't1', summaryBytes: 4, sessionRef: 's1' });
 
     const { log, lines } = collectLog();
     await runTasksListCommand(baseConfig(storeDir), { log });
-    // Finding P1 #3: `summary` is redacted on disk (never the raw "done"
-    // text) — replayed from the audit log, this reconstructs to a
-    // `[redacted: N bytes]` placeholder, not the original text. Full-fidelity
-    // summaries are still available LIVE, directly off stdout, while
-    // `byok-agent start` is actually running (see `bin/commands/start.ts`).
+    // The audit log never holds the summary text, only its size (#395); the
+    // text is available live over the control socket (`tasks --follow`).
     expect(lines).toEqual([
-      't1 Complete runtime=pi updatedAt=2026-01-01T00:00:03.000Z sessionRef=s1 summary="[redacted: 4 bytes]"',
+      't1 Complete runtime=pi updatedAt=2026-01-01T00:00:03.000Z sessionRef=s1 summaryBytes=4',
     ]);
   });
 });
 
 describe('bin/commands/tasks: runTasksFollowCommand', () => {
-  it('tails the audit log from its current end and stops on abort', async () => {
+  it('needs a running daemon: with no reachable control socket it fails and prints nothing (no audit-log fallback, #395)', async () => {
     const storeDir = await tmpDir('byok-cmd-tasks-follow-');
-    // Pre-existing line before follow starts — must NOT be streamed (fromEnd semantics).
-    await appendAuditEvent(storeDir, { kind: 'lifecycle', ts: '2026-01-01T00:00:00.000Z', lifecycle: { phase: 'running', connection: 'open' } });
-
+    await appendAuditRecord(storeDir, { kind: 'offered', ts: '2026-01-01T00:00:01.000Z', taskId: 't1', runtime: 'pi' });
     const { log, lines } = collectLog();
-    const controller = new AbortController();
-    const followPromise = runTasksFollowCommand(baseConfig(storeDir), { log, signal: controller.signal, pollIntervalMs: 10 });
-
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(lines).toEqual([]); // pre-existing lifecycle line correctly skipped
-
-    await appendAuditEvent(storeDir, { kind: 'offered', ts: '2026-01-01T00:00:01.000Z', taskId: 't1', runtime: 'pi' });
-    await vi.waitFor(() => expect(lines.length).toBeGreaterThanOrEqual(1));
-    expect(lines[0]).toBe('[2026-01-01T00:00:01.000Z] offered taskId=t1 runtime=pi');
-
-    controller.abort();
-    await followPromise;
+    await expect(
+      runTasksFollowCommand(baseConfig(storeDir), { log, signal: new AbortController().signal, connectControl: fakeUnreachable('daemon is not running') }),
+    ).rejects.toThrow('tasks --follow needs a running daemon: control socket not reachable (daemon is not running)');
+    expect(lines).toEqual([]);
   });
 });
 
@@ -761,10 +748,10 @@ describe('bin/audit-log path used consistently by commands', () => {
     const storeDir = await tmpDir('byok-cmd-path-consistency-');
     const config = baseConfig(storeDir);
     expect(auditLogPath(storeDir)).toBe(path.join(storeDir, 'audit.jsonl'));
-    await appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' });
+    await appendAuditRecord(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' });
     const { log, lines } = collectLog();
     await runStatusCommand(config, { log, adapters: [] });
-    expect(lines.some((l) => l.includes('(1 event)'))).toBe(true);
+    expect(lines.some((l) => l.includes('(1 record)'))).toBe(true);
   });
 });
 

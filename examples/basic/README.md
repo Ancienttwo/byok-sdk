@@ -68,8 +68,9 @@ see `server.ts`); a mismatch is rejected by authenticated HTTP admission.
 
 1. Click **Create pairing code** and copy it into the daemon's `pair` command
    above.
-2. Once `byok-agent start` logs `daemon started: ...`, the machine appears
-   under **Connected machines** (polled every 2s).
+2. Once `byok-agent start` prints its `{"kind":"daemon-started",...}` line
+   (stdout is JSON Lines, one content-free record per line), the machine
+   appears under **Connected machines** (polled every 2s).
 3. Enter an instruction, pick a runtime (`pi` by default; `claude` and
    `codex` are available when that CLI is installed on the daemon's machine)
    and click **Dispatch**. The progress feed streams live via

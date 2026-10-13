@@ -192,19 +192,26 @@ To roll back operationally, remove `gitWorkspace` from the local configuration a
 | Device metadata projection | `<storeDir>/device.json` (0600), exactly `{deviceId, tenantId, devicePublicKey}` | Credential-blind CLI/status and diagnostics only. It is deterministically repaired from the OS authority and never authors enrollment or secret bytes. |
 | Pairing code | Server-side only, minted out of band by the SaaS's own auth/device-flow UI | Server mints it already bound to `{tenantId, productId}` (S1); single-use, ~10min TTL. `PairRequest` carries neither field, so a device can never choose or influence the tenant it lands in (`@byok-sdk/cloud` pairing authority, `docs/protocol.md` §6.1) |
 | Control-socket HMAC token | `<storeDir>/control.token` (0600) | Daemon (generates + holds) and any local process that can read it and speak the handshake (`packages/client/src/daemon/control-protocol.ts`) |
-| Audit log | `<storeDir>/audit.jsonl` (0600) | Daemon appends a **redacted** projection only — see below. `byok-agent start` stdout (a durable, unrotated file under launchd/systemd) follows the same rule: no model text, one sizes-and-counts line per turn (#395) |
+| Durable sinks: audit log and `start` stdout | `<storeDir>/audit.jsonl` (0600), and `byok-agent start` stdout (a durable, unrotated file under launchd/systemd) | Both hold the same content-free `DaemonRecord` JSON lines and nothing else (#395) — see below. Library stderr (the service's `err.log`) follows the same rule. Full task content travels only over the authenticated control socket |
 | The user's own runtime credentials (`~/.claude`, `~/.codex`, `~/.pi` auth state) | The user's home directory, owned entirely by the installed `claude`/`codex`/`pi` CLI | **The daemon never reads, proxies, or forwards these** — see the credential-isolation rule below and `docs/security-review-m4.md` for the empirical audit |
 | BYOK model-provider key | macOS Keychain or Windows Credential Manager, owned by `@byok-sdk/keys` | Only `@byok-sdk/keys` provider clients or the separate `byok-pi-provider-launcher` (or a host launcher executable built on `runPiProviderLauncher`) read it. Profile metadata may use a tenant-bound `TruthStore`, but truth bodies, hashes, labels, status, protocol, server, cloud provider code, and the client daemon never receive the value. The launcher keeps its explicit read-only SQLite profile composition and hands the key only to its Pi child: over private IPC into Pi's model memory for the rpc host and the durable worker, and through the environment only of the prepared host, which runs no native tool; `auth_mode: none` never constructs a keychain backend |
 | The daemon's own ambient environment (`process.env` — may hold secrets: provider API keys, `AWS_SECRET_ACCESS_KEY`, `DATABASE_URL`, `GITHUB_TOKEN`, etc.) | Whatever process/container/service manager launched the daemon | **Inherited by every task child, as in OAR (ADR-037 D2/D3).** `daemon/environment.ts`'s `buildRuntimeEnv` removes only `CLAUDECODE` and the SDK's own `BYOK_*` names — see the environment paragraph below |
 
-The audit log is itself worth calling out as a defended asset, not just a
-record: `packages/client/src/bin/audit-log.ts` deliberately never persists a
-task's raw instruction/tool output verbatim (tool input, shell output, file
-contents, inline artifact bytes are all `z.unknown()` at the protocol level)
-— only event type, taskId, timestamps, tool/runtime **names**, and
-sizes/counts. The module's own doc comment frames this exactly right:
-without redaction, "helpful audit trail" becomes "durable secret/credential/
-source leak" the moment anything else on the machine can read the file.
+Every sink that outlives the daemon process is a defended asset, not just a
+record. They all write one projection, `DaemonRecord`
+(`packages/client/src/daemon/daemon-record.ts`): lifecycle facts, ids, closed
+codes, configured identifiers (runtime/tool/toolset ids, the assertion
+audience allowlist), sizes, counts and timestamps. Model text, tool
+input/output (`z.unknown()` at the protocol level), artifact names and inline
+bytes, approval summaries, completed summaries and failure, cancel, shutdown
+and disposal reasons become byte counts; progress is one record per turn.
+`byok-agent start` prints each record to stdout as the very line it appends
+to `audit.jsonl`, and the library's own stderr never carries an artifact
+name, a disposal reason or an adapter's raw error object. Content is
+available only to an authenticated live view (`tasks --follow`, `approvals`
+over the control socket). Without this rule, "helpful audit trail" becomes
+"durable secret/credential/source leak" the moment anything else on the
+machine can read a service log.
 
 **Credential-isolation rule** (`packages/client/src/types.ts`'s
 `RuntimeAdapter` contract): subscription adapters spawn only the runtime's

@@ -11,7 +11,7 @@ import {
   runServiceStopCommand,
   runUninstallCommand,
 } from '../bin/commands/service';
-import { appendAuditEvent } from '../bin/audit-log';
+import { appendAuditRecord } from '../bin/audit-log';
 import { formatHaltRemedy } from '../bin/format';
 
 function baseConfig(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
@@ -170,7 +170,7 @@ describe('bin/commands/service: run*Command (DI lifecycle)', () => {
   it('#394: runServiceStatusCommand shows the last lifecycle from the audit log, with the remedy for a halt', async () => {
     const storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-service-status-store-'));
     try {
-      await appendAuditEvent(storeDir, {
+      await appendAuditRecord(storeDir, {
         kind: 'lifecycle',
         ts: '2026-10-13T00:00:00.000Z',
         lifecycle: { phase: 'halted', reason: 'device_revoked', at: '2026-10-13T00:00:00.000Z' },

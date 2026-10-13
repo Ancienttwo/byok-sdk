@@ -166,7 +166,7 @@ try {
   startChild.stderr.on('data', (chunk) => {
     startStderr += chunk.toString('utf8');
   });
-  await waitForStartupLine(startChild, 'daemon started:', 10000);
+  await waitForStartupLine(startChild, '"kind":"daemon-started"', 10000);
   log('PASS: daemon started and reported readiness on stdout');
 
   log('==> byok-agent status (separate short-lived invocation)');

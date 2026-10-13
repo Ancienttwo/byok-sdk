@@ -83,7 +83,7 @@ describe('examples/basic quickstart with default settings', () => {
     const { code } = (await pairing.json()) as { code: string };
     const { deviceId } = await daemon.pair(code);
 
-    // Step 2: `byok-agent start` logs `daemon started` once start() resolves;
+    // Step 2: `byok-agent start` prints its `daemon-started` record once start() resolves;
     // the connection then reports open through `lifecycle` (#391).
     const startedAt = Date.now();
     await daemon.start();

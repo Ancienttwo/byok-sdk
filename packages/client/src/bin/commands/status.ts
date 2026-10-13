@@ -1,12 +1,12 @@
 import { type DaemonConfig, type RuntimeAdapter } from '../../index';
 import { DeviceStore } from '../../daemon/store';
 import type { ControlStatusResult } from '../../daemon/control-protocol';
-import { auditLogPath, readAuditEvents, readLastEnvironmentRecord } from '../audit-log';
+import { auditLogPath, readAuditRecords, readLastEnvironmentRecord } from '../audit-log';
 import { connectControlClient } from '../control-client';
 import { resolveStoreDir } from '../config';
 import { formatLiveStatusLines, formatStatusLines, type StatusView } from '../format';
 import { defaultRuntimeAdapters, probeRuntimes } from '../runtime-probe';
-import { deriveTasksFromEvents, lastLifecycle, tallyTaskStates } from '../tasks-view';
+import { deriveTasksFromRecords, lastLifecycle, tallyTaskStates } from '../tasks-view';
 
 export interface StatusDeps {
   log?: (line: string) => void;
@@ -37,13 +37,13 @@ export async function runStatusCommand(config: DaemonConfig, deps: StatusDeps = 
   const adapters = deps.adapters ?? defaultRuntimeAdapters(config.runtimeAllowlist);
   const connectControl = deps.connectControl ?? connectControlClient;
 
-  const [record, events, runtimes, environment] = await Promise.all([
+  const [record, records, runtimes, environment] = await Promise.all([
     new DeviceStore(storeDir).load(),
-    readAuditEvents(storeDir),
+    readAuditRecords(storeDir),
     probeRuntimes(adapters),
     readLastEnvironmentRecord(storeDir),
   ]);
-  const tasks = deriveTasksFromEvents(events);
+  const tasks = deriveTasksFromRecords(records);
 
   const view: StatusView = {
     localAgentRelease: config.localAgentRelease,
@@ -52,11 +52,11 @@ export async function runStatusCommand(config: DaemonConfig, deps: StatusDeps = 
     branding: config.branding,
     paired: record !== undefined,
     deviceId: record?.deviceId,
-    lifecycle: lastLifecycle(events),
+    lifecycle: lastLifecycle(records),
     runtimes,
     taskCounts: tallyTaskStates(tasks),
     auditLogPath: auditLogPath(storeDir),
-    auditLogLineCount: events.length,
+    auditLogRecordCount: records.length,
     ...(environment ? { environment } : {}),
   };
   for (const line of formatStatusLines(view)) log(line);

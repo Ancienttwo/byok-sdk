@@ -58,9 +58,10 @@ import { runVersionCommand } from './version';
  *   freshly-constructed `Daemon` that never called `start()`/`pair()` in
  *   THIS process would otherwise always report `paired: false`, which would
  *   be actively wrong for an already-paired device) and
- *   `<storeDir>/audit.jsonl` (the audit log `start` appends every
- *   `DaemonEvent` to — see `bin/audit-log.ts` — replayed into a task list /
- *   last-known-connection-state via `bin/tasks-view.ts`). `status`
+ *   `<storeDir>/audit.jsonl` (the content-free `DaemonRecord`s `start`
+ *   appends — and prints to stdout as the same JSON lines — see
+ *   `bin/audit-log.ts`, reduced into a task list / last-known lifecycle via
+ *   `bin/tasks-view.ts`). `status`
  *   additionally tries the control socket afterward: if reachable, a
  *   clearly-marked `live-*` section (pid/uptime/transport/active tasks) is
  *   appended; if not, one line says so and the persisted view above stands
@@ -74,12 +75,10 @@ import { runVersionCommand } from './version';
  *   read a historical snapshot here instead. The control socket deliberately
  *   never duplicates this probe (see `control-protocol.ts`'s `status`
  *   method doc comment) — this CLI keeps owning it.
- * - `tasks --follow` prefers subscribing to the control socket's
- *   `tasks.subscribe` (a genuinely live feed, full fidelity, the same
- *   events `start`'s own stdout shows); falls back to tailing
- *   `audit.jsonl` from its CURRENT end forward (like `tail -f`) when the
- *   socket isn't reachable — see `bin/audit-log.ts`'s `followAuditLog`. Run
- *   plain `tasks` first for history either way.
+ * - `tasks --follow` subscribes to the control socket's `tasks.subscribe`
+ *   (a live feed, full fidelity). The control socket is the only channel
+ *   that carries task content (issue #395), so `--follow` needs a running
+ *   daemon and fails otherwise; plain `tasks` shows the recorded history.
  * - `unpair` tries the control socket first: if reachable, that's a
  *   DEFINITIVE "yes, a daemon is running against this store" (foreground or
  *   service, no distinction needed anymore) — it sends `shutdown

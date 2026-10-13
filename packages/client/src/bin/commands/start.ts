@@ -1,9 +1,10 @@
 import { createDaemon, type Daemon, type DaemonConfig } from '../../index';
 import { DaemonHaltError, type DaemonHaltReason } from '../../daemon/daemon-lifecycle';
+import { createDaemonRecordProjector, type DaemonRecord } from '../../daemon/daemon-record';
 import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../../lifecycle/service-environment';
-import { createAuditAppender } from '../audit-log';
+import { createAuditAppender, formatDaemonRecordLine } from '../audit-log';
 import { resolveStoreDir } from '../config';
-import { formatHaltRemedy, formatServiceEnvironment, StartStdoutProjector } from '../format';
+import { formatHaltRemedy, formatServiceEnvironment } from '../format';
 
 export interface StartDeps {
   log?: (line: string) => void;
@@ -48,54 +49,48 @@ export function startExitCode(outcome: StartOutcome, service: boolean): number {
 
 /**
  * Runs the daemon in the foreground until `deps.signal` aborts, a control
- * `shutdown` completes, or the daemon halts (`lifecycle` `halted`). Every
- * `DaemonEvent` it observes is (a) appended to `<storeDir>/audit.jsonl` —
- * the only channel a separate `status`/`tasks`/`runtimes` invocation has
- * into this process' state, see `byok-agent.ts`'s header comment — and (b)
- * projected to stdout by `StartStdoutProjector` (`bin/format.ts`): the
- * one-line formatter `tasks --follow` uses, with free-form text redacted and
- * each turn's progress folded into at most one sizes-and-counts line,
- * because this stdout is a service log (issue #395).
+ * `shutdown` completes, or the daemon halts (`lifecycle` `halted`).
+ *
+ * Issue #395: every `DaemonEvent` it observes is projected to content-free
+ * `DaemonRecord`s (`daemon/daemon-record.ts`), and each record is written to
+ * BOTH durable sinks as one identical JSON line: `<storeDir>/audit.jsonl` —
+ * the only channel a separate `status`/`tasks` invocation has into this
+ * process, see `byok-agent.ts`'s header comment — and stdout, which is a
+ * service log under launchd/systemd/WinSW. The process's own
+ * `environment-resolved`, `daemon-started` and `daemon-stopped` records go
+ * through the same path. Full content is only on the authenticated control
+ * socket (`tasks --follow`). Errors go to stderr as plain text.
  */
 export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Promise<StartOutcome> {
   const log = deps.log ?? ((line: string) => console.log(line));
   const error = deps.error ?? ((line: string) => console.error(line));
   const storeDir = resolveStoreDir(config);
   const daemon = deps.daemon ?? createDaemon(config);
-  const stdout = new StartStdoutProjector();
-
-  // Issue #392: where this process's environment came from. Printed first
-  // (the service log shows it even when start fails), and recorded for
-  // `status` only once start() succeeded — i.e. by the process that owns the
-  // store — so a rejected second `start` never overwrites what the running
-  // daemon sees.
-  const environment = deps.environment ?? serviceEnvironmentStatus();
-  log(`environment: ${formatServiceEnvironment(environment)}`);
-
-  const appendToAudit = createAuditAppender(storeDir, (err) =>
+  const projector = createDaemonRecordProjector();
+  const audit = createAuditAppender(storeDir, (err) =>
     error(`audit log append failed: ${err instanceof Error ? err.message : String(err)}`),
   );
+  const persist = (record: DaemonRecord): void => {
+    log(formatDaemonRecordLine(record));
+    audit.append(record);
+  };
+
+  // Issue #392: where this process's environment came from. Recorded only
+  // once start() succeeded — i.e. by the process that owns the store — so a
+  // rejected second `start` never overwrites what the running daemon sees;
+  // a start that fails prints it to stderr instead.
+  const environment = deps.environment ?? serviceEnvironmentStatus();
+
   // M4 Phase 2: the daemon's control socket (`shutdown` RPC — see
   // `create-daemon.ts`'s `performControlShutdown`) can stop the daemon from
-  // OUTSIDE this process (a separate `byok-agent unpair`/`service-stop`-like
-  // invocation), with no OS signal involved at all. Without reacting to
-  // that here, this function would hang forever awaiting `deps.signal`'s
-  // abort, which would never come — see the wait below.
+  // OUTSIDE this process, with no OS signal involved at all. Without reacting
+  // to that here, this function would hang forever awaiting `deps.signal`.
   //
-  // Gatekeeper-confirmed regression (fixed here): this used to wait for
-  // `shutdown-requested`, which fires SYNCHRONOUSLY at the very START of
-  // `performControlShutdown` — before it has even called
-  // `session.interrupt()` on an active task, let alone sent that task's
-  // `task.fail`. Waking up that early let this function's own
-  // `daemon.stop()` call below race ahead and close the connection
-  // (`ConnectionManager.stopped = true`, synchronously) before the
-  // still-in-flight `task.fail` send could reach the outbox drain,
-  // silently dropping it. `shutdown-complete` fires only once
-  // `performControlShutdown` has ALREADY finished its own internal
-  // `stop()` — waiting for that instead means this function's `daemon.stop()`
-  // below always runs strictly after the real teardown (interrupt -> send
-  // task.fail -> finish -> stop) has completed, so it can never race ahead
-  // of it; see `daemon-control-socket.test.ts`'s dedicated regression test.
+  // It waits for `shutdown-complete`, not `shutdown-requested`: the latter
+  // fires at the very START of `performControlShutdown`, and waking that early
+  // let this function's own `daemon.stop()` close the connection before an
+  // in-flight `task.fail` reached the outbox drain. `shutdown-complete` fires
+  // once that teardown has finished; see `daemon-control-socket.test.ts`.
   let controlShutdownComplete = false;
   let wake: (() => void) | undefined;
   // Issue #394: a halt the server causes (revocation, a rejected hello, a
@@ -104,31 +99,10 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
   // A crash after start (`lifecycle` `crashed`) also ends this process, as a
   // crash: exit 1, so the supervisor restarts it.
   let crashed = false;
-  // Stdout closes at shutdown (open turns are flushed first); the audit log
-  // keeps recording through `daemon.stop()`, so it ends on the final
-  // lifecycle the offline `status`/`doctor`/`service-status` read.
-  let stdoutOpen = true;
   // Subscribe BEFORE start() so the earliest events (runtimes-detected,
-  // lifecycle) are captured too — mirrors daemon-observer.test.ts's own
-  // "subscribe before pair()/start()" convention.
+  // lifecycle) are captured too.
   const unsubscribe = daemon.subscribe((event) => {
-    appendToAudit(event);
-    // Finding F8 (cross-model adversarial review): this stdout stream is
-    // captured verbatim by whatever's running `start` — a human's terminal,
-    // but ALSO launchd/systemd/WinSW service logs when installed as a
-    // background service. An `awaiting-approval` summary can carry the
-    // exact tool-call text (a shell command, a file's contents) a
-    // `confirm`-mode policy is gating; redact it here the same way
-    // `appendToAudit` above already redacts it on disk. The full summary
-    // stays available via the AUTHENTICATED control socket — the new
-    // `approvals` CLI command, `approvals.list`, or `tasks --follow`'s own
-    // `tasks.subscribe` path (`bin/commands/tasks.ts`, which does NOT set
-    // this flag).
-    //
-    // Issue #395 (minimal): the same rule now covers model text. Each turn's
-    // progress is folded into at most one sizes-and-counts line, and
-    // completed/failed/cancelled text is redacted — see `StartStdoutProjector`.
-    if (stdoutOpen) for (const line of stdout.accept(event)) log(line);
+    for (const record of projector.project(event)) persist(record);
     if (event.kind === 'shutdown-complete') {
       controlShutdownComplete = true;
       wake?.();
@@ -145,7 +119,7 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
 
   const halted = async (reason: DaemonHaltReason): Promise<StartOutcome> => {
     error(`daemon halted: reason=${reason} — ${formatHaltRemedy(reason)}`);
-    await appendToAudit.flush();
+    await audit.flush();
     return { kind: 'halted', reason };
   };
 
@@ -153,6 +127,9 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
     try {
       await daemon.start();
     } catch (err) {
+      // No record carries the environment of a start that did not succeed;
+      // the service's stderr log still shows it (closed values only, #392).
+      error(`environment: ${formatServiceEnvironment(environment)}`);
       if (!(err instanceof DaemonHaltError)) throw err;
       // start() has already torn its partial startup down; this stop() only
       // settles anything a caller-built daemon may still hold.
@@ -162,12 +139,8 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
       unsubscribe();
       return await halted(err.reason);
     }
-    await appendToAudit.appendEnvironment({ status: environment, ts: new Date().toISOString() });
-    // Exact "daemon started: ..." prefix preserved from the pre-M3-2b bin —
-    // examples/basic/README.md tells a human operator to watch stdout for
-    // this literal text.
-    const label = config.branding?.displayName ?? config.productName;
-    log(`daemon started: product=${label} (${config.productId}) server=${config.serverUrl}`);
+    persist({ kind: 'environment-resolved', ts: new Date().toISOString(), ...environment });
+    persist({ kind: 'daemon-started', ts: new Date().toISOString(), productId: config.productId });
     deps.onReady?.();
 
     if (!deps.signal.aborted && !controlShutdownComplete && haltReason === undefined && !crashed) {
@@ -177,17 +150,18 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
       });
     }
 
-    stdoutOpen = false;
-    for (const line of stdout.flush(new Date().toISOString())) log(line);
     await daemon.stop();
     unsubscribe();
-    log('daemon stopped');
+    // Turns still open when the daemon stopped, then the stop itself.
+    const stoppedAt = new Date().toISOString();
+    for (const record of projector.flush(stoppedAt)) persist(record);
+    persist({ kind: 'daemon-stopped', ts: stoppedAt });
     if (haltReason !== undefined) return await halted(haltReason);
     if (crashed) {
-      await appendToAudit.flush();
+      await audit.flush();
       throw new DaemonCrashedError();
     }
-    await appendToAudit.flush();
+    await audit.flush();
     return { kind: 'stopped' };
   } catch (err) {
     if (err instanceof DaemonCrashedError) throw err;

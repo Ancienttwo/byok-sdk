@@ -25,6 +25,32 @@
   `status` against a daemon that predates `lifecycle` prints
   `lifecycle unknown (daemon predates lifecycle)` instead of failing.
 
+- **Breaking (client, 0.x)** — every sink that outlives the process holds
+  only content-free records (#395, parent #384). `byok-agent start` now
+  writes one JSON Lines `DaemonRecord` per line to stdout, byte-identical to
+  the line it appends to `<storeDir>/audit.jsonl` (one serializer). A record
+  carries lifecycle facts, ids, closed codes, configured identifiers, sizes,
+  counts and timestamps — never progress or tool text, approval summaries,
+  completion summaries, failure/cancel/shutdown/disposal reasons, artifact
+  names or contents (each is a `*Bytes` size). Agent progress is aggregated
+  into one `turn` record per turn (`closedBy`: `turn_end` | `terminal` |
+  `stop` | `evicted`) with event, text-byte, tool, artifact, approval, error
+  and token counts. stdout also carries `environment-resolved`,
+  `daemon-started` and `daemon-stopped` records; the old
+  `daemon started:`/`daemon stopped` text lines are gone, and a start that
+  fails prints `environment: …` to stderr. Full content stays on the
+  authenticated control socket: `tasks --follow` now requires a running
+  daemon and no longer falls back to tailing the audit log. Library stderr
+  follows the same rule (artifact names, raw adapter errors and disposal
+  reasons are reported as sizes). New exports: `createDaemonRecordProjector`,
+  `DAEMON_RECORD_KINDS`, `isDaemonRecordKind` and the `DaemonRecord`,
+  `DaemonRecordKind`, `DaemonRecordProjector`, `DaemonTurnRecord` types.
+  **Migration:** parse service stdout as JSON Lines and wait for
+  `"kind":"daemon-started"` instead of the old text banner. Audit lines in
+  the old shape are dropped on read. Service log files written before this
+  release are not rewritten or removed; delete them by hand if they may hold
+  task content.
+
 - **Breaking (client, 0.x)** — daemon readiness and halts are one lifecycle
   model (#391, #394). `daemon.start()` now resolves once local startup is done
   and never waits for the network; the server accepting this session's lone

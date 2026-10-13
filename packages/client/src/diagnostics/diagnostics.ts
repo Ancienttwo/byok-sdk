@@ -19,7 +19,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { DaemonConfig, RuntimeAdapter } from '../index';
-import { readLastLifecycleEvent } from '../bin/audit-log';
+import { readLastLifecycleRecord } from '../bin/audit-log';
 import { connectControlClient } from '../bin/control-client';
 import { formatLifecycle, formatLifecycleRemedy } from '../bin/format';
 import { parseDaemonLifecycle } from '../daemon/daemon-lifecycle';
@@ -680,7 +680,7 @@ export async function collectDiagnostics(
     inspectWorkspace(config.workspaceRoot),
     inspectQuarantine(resolvedStoreDir),
     connectControl({ storeDir: resolvedStoreDir, productId: config.productId }),
-    readLastLifecycleEvent(resolvedStoreDir).catch(() => undefined),
+    readLastLifecycleRecord(resolvedStoreDir).catch(() => undefined),
   ]);
   const runtimes: DiagnosticsSnapshot['runtimes'] = probedRuntimes.map((runtime) => ({
     idHash: stableIdentifierHash(runtime.id),

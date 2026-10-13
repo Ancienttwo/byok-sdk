@@ -375,7 +375,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     const controller = new AbortController(); // deliberately never aborted
     const startPromise = runStartCommand(config, { daemon, log: (l) => lines.push(l), signal: controller.signal });
 
-    await vi.waitFor(() => expect(lines.some((l) => l.startsWith('daemon started:'))).toBe(true));
+    await vi.waitFor(() => expect(lines.some((l) => l.includes('"kind":"daemon-started"'))).toBe(true));
 
     const conn = await connectControlClient({ storeDir, productId: config.productId });
     if (!conn.ok) throw new Error('expected reachable');
@@ -383,7 +383,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     conn.client.close();
 
     await startPromise; // must resolve on its own — proves the process-hang gap is closed
-    expect(lines).toContain('daemon stopped');
+    expect(lines.at(-1)).toContain('"kind":"daemon-stopped"');
   }, 10000);
 
   it('REGRESSION (gatekeeper-caught): a control-socket shutdown through runStartCommand must not drop an active task\'s task.fail', async () => {
@@ -415,7 +415,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     const controller = new AbortController(); // deliberately never aborted — only the control socket drives this shutdown
     const startPromise = runStartCommand(config, { daemon, log: (l) => lines.push(l), signal: controller.signal });
 
-    await vi.waitFor(() => expect(lines.some((l) => l.startsWith('daemon started:'))).toBe(true));
+    await vi.waitFor(() => expect(lines.some((l) => l.includes('"kind":"daemon-started"'))).toBe(true));
 
     server.send(
       createEnvelope(
@@ -459,7 +459,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     expect(linesDown.some((l) => l.startsWith('live:'))).toBe(false);
   });
 
-  it('CLI fallback: runTasksFollowCommand subscribes live when reachable, and falls back to the audit tail once the daemon stops', async () => {
+  it('CLI: runTasksFollowCommand subscribes live when reachable, and refuses once the daemon stops (no audit tail, #395)', async () => {
     const adapter = new StubRuntimeAdapter('pi');
     const built = await pairedAndStarted('acme-ctl-tasks-cli', adapter);
     daemon = built.daemon;
@@ -493,10 +493,11 @@ describe('M4 Phase 2: control socket end-to-end', () => {
 
     const linesDown: string[] = [];
     const downController = new AbortController();
-    const downFollow = runTasksFollowCommand(built.config, { log: (l) => linesDown.push(l), signal: downController.signal, pollIntervalMs: 10 });
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    downController.abort();
-    await downFollow; // must complete via the audit-tail fallback, not hang
+    // The audit log holds no content, so there is nothing to tail: it fails fast instead of hanging.
+    await expect(
+      runTasksFollowCommand(built.config, { log: (l) => linesDown.push(l), signal: downController.signal }),
+    ).rejects.toThrow(/tasks --follow needs a running daemon/u);
+    expect(linesDown).toEqual([]);
   });
 
   /**

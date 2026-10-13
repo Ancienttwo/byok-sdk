@@ -7,7 +7,7 @@ import { freezeRuntimeAdapterDescriptor, type DaemonConfig, type RuntimeAdapter 
 import type { ConnectControlResult } from '../bin/control-client';
 import { runSupportBundleCommand } from '../bin/commands/support-bundle';
 import { runDoctorCommand } from '../bin/commands/doctor';
-import { appendAuditEvent, auditLogPath } from '../bin/audit-log';
+import { appendAuditRecord, auditLogPath } from '../bin/audit-log';
 import { DeviceStore } from '../daemon/store';
 import {
   createSupportBundle,
@@ -56,7 +56,7 @@ describe('support bundle privacy and bounds', () => {
     await fs.appendFile(
       auditLogPath(dir),
       `${JSON.stringify({ kind: 'SENTINEL_AUDIT_KIND', ts: '2026-08-09T00:00:00.000Z', raw: 'SENTINEL_PROMPT_TOOL_BODY' })}\n` +
-        `${JSON.stringify({ kind: 'progress', ts: '2026-08-09T00:00:01.000Z' })}\n`,
+        `${JSON.stringify({ kind: 'turn', ts: '2026-08-09T00:00:01.000Z' })}\n`,
     );
     const quarantineDir = path.join(dir, 'quarantine');
     await fs.mkdir(quarantineDir);
@@ -93,7 +93,7 @@ describe('support bundle privacy and bounds', () => {
       expect(serialized).not.toContain(sentinel);
       expect(doctorOutput).not.toContain(sentinel);
     }
-    expect(bundle.recentEvents.facts).toEqual([{ kind: 'progress', ts: '2026-08-09T00:00:01.000Z' }]);
+    expect(bundle.recentEvents.facts).toEqual([{ kind: 'turn', ts: '2026-08-09T00:00:01.000Z' }]);
     expect(bundle.redaction.policy).toBe('allowlist-v1');
   });
 
@@ -131,7 +131,7 @@ describe('support bundle privacy and bounds', () => {
   it('reads only a bounded audit tail and retains at most 200 facts', async () => {
     const dir = await tempDir();
     const lines = Array.from({ length: 2_000 }, (_, index) =>
-      JSON.stringify({ kind: 'progress', ts: new Date(1_800_000_000_000 + index).toISOString(), padding: 'x'.repeat(200) }),
+      JSON.stringify({ kind: 'turn', ts: new Date(1_800_000_000_000 + index).toISOString(), padding: 'x'.repeat(200) }),
     );
     await fs.writeFile(auditLogPath(dir), `${lines.join('\n')}\n`);
 
@@ -146,19 +146,19 @@ describe('support bundle privacy and bounds', () => {
     const dir = await tempDir();
     const outsideDir = await tempDir();
     const outside = path.join(outsideDir, 'external-audit.jsonl');
-    await fs.writeFile(outside, `${JSON.stringify({ kind: 'progress', ts: '2026-08-09T00:00:01.000Z' })}\n`);
+    await fs.writeFile(outside, `${JSON.stringify({ kind: 'turn', ts: '2026-08-09T00:00:01.000Z' })}\n`);
     await fs.symlink(outside, auditLogPath(dir));
 
     const bundle = await createSupportBundle(config(dir), dir, { adapters: [], connectControl: unreachable });
 
     expect(bundle.recentEvents).toMatchObject({ status: 'unavailable', included: 0, facts: [] });
-    expect(await fs.readFile(outside, 'utf8')).toContain('progress');
+    expect(await fs.readFile(outside, 'utf8')).toContain('"kind":"turn"');
   });
 
   it('#394: carries the last lifecycle as closed enums only', async () => {
     const dir = await tempDir();
     const at = '2026-10-13T00:00:00.000Z';
-    await appendAuditEvent(dir, { kind: 'lifecycle', ts: at, lifecycle: { phase: 'halted', reason: 'device_revoked', at } });
+    await appendAuditRecord(dir, { kind: 'lifecycle', ts: at, lifecycle: { phase: 'halted', reason: 'device_revoked', at } });
 
     const bundle = await createSupportBundle(config(dir), dir, { adapters: [], connectControl: unreachable });
 
