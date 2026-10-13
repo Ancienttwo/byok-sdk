@@ -1848,10 +1848,27 @@ duplicate ([§9](#9-at-least-once-delivery--idempotency)'s per-`(deviceId,
 id)` dedup window). It does not mean "freshly processed": a redelivered or
 retried envelope this device already sent once is counted `accepted` again
 on retry, even though no handler reran for it that second time. `rejected`
-is a separate, additive count — envelopes that failed the type-allow check
-above, or the ownership check (§9) — present in the response only when
-nonzero, so a batch with nothing rejected keeps the `{ accepted }`-only
-shape.
+is a separate, additive count — every envelope the server refused — present
+in the response only when nonzero, so a batch with nothing rejected keeps the
+`{ accepted }`-only shape. The type-allow check above and the ownership check
+(§9) are only two of the causes. An envelope is also rejected, among other
+reasons, for an unsupported protocol version; for a device that is revoked or lacks the
+capability the type requires; for a missing or mismatched Agent or harness
+identity; for a `task.claim` that does not win ownership or contradicts the
+sealed offer; for a `task.progress` events batch or approval event that is
+over its bound or invalid (for example `task.progress` events whose JSON
+exceeds 64 KiB); for a replayed reliable-egress or content receipt that
+conflicts with the stored one, or a content receipt for a request the server
+does not know; for an `agent.message.publish` the server refuses (binding
+mismatch, `byteCount` over `maxBytes`, a reservation conflict, or admission
+that cannot be confirmed); for a `task.fail` whose recovery report is
+refused; and for a `conn.hello` with a product mismatch or whose
+capabilities the server fails to record. These are examples, not an
+exhaustive list. The response carries only the count, not which
+check refused: a daemon cannot tell a size overrun from an identity mismatch
+from this response. A hosted deployment can observe the reason server-side
+through `ByokCloudObserver.onInboundRefused`; those reason names are not part
+of the wire contract.
 
 A daemon sends every D→S envelope this way; there is no alternate socket
 queue or transport selection to reconcile.
