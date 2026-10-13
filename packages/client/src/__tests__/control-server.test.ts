@@ -1085,9 +1085,16 @@ describe('control-server: finding F9 — a post-bind token-write failure must no
 
 describe('control-server: defensive hardening (gatekeeper advisories)', () => {
   let handle: ControlServerHandle | undefined;
+  const fallbackDirectories: string[] = [];
   afterEach(async () => {
-    await handle?.close();
-    handle = undefined;
+    try {
+      await handle?.close();
+    } finally {
+      handle = undefined;
+      for (const directory of fallbackDirectories.splice(0)) {
+        await fs.rm(directory, { recursive: true, force: true });
+      }
+    }
   });
 
   it('the tmpdir long-path fallback socket lives inside a subdirectory that is 0700 BEFORE the socket becomes reachable', async () => {
@@ -1095,6 +1102,8 @@ describe('control-server: defensive hardening (gatekeeper advisories)', () => {
     const longStoreDir = path.join(await tmpDir('byok-ctl-perms-'), 'x'.repeat(200));
     const socketPath = controlSocketPath(longStoreDir);
     expect(path.dirname(socketPath)).not.toBe(longStoreDir); // confirms this really is the nested-fallback path, not <storeDir>/control.sock
+    await expect(fs.lstat(path.dirname(socketPath))).rejects.toMatchObject({ code: 'ENOENT' });
+    fallbackDirectories.push(path.dirname(socketPath));
 
     handle = await startControlServer({ storeDir: longStoreDir, productId: 'acme', methods: noopMethods() });
     expect(handle.endpoint).toBe(socketPath);
@@ -1112,6 +1121,8 @@ describe('control-server: defensive hardening (gatekeeper advisories)', () => {
     const longStoreDir = path.join(await tmpDir('byok-ctl-symlink-'), 'x'.repeat(200));
     const socketPath = controlSocketPath(longStoreDir);
     const endpointDir = path.dirname(socketPath);
+    await expect(fs.lstat(endpointDir)).rejects.toMatchObject({ code: 'ENOENT' });
+    fallbackDirectories.push(endpointDir);
 
     // Simulate an attacker pre-creating the exact deterministic byok-<hash>
     // directory name as a symlink to somewhere else, BEFORE this daemon ever
@@ -1135,6 +1146,8 @@ describe('control-server: defensive hardening (gatekeeper advisories)', () => {
     const longStoreDir = path.join(await tmpDir('byok-ctl-uidmismatch-'), 'x'.repeat(200));
     const socketPath = controlSocketPath(longStoreDir);
     const endpointDir = path.dirname(socketPath);
+    await expect(fs.lstat(endpointDir)).rejects.toMatchObject({ code: 'ENOENT' });
+    fallbackDirectories.push(endpointDir);
     const realLstat = fs.lstat;
     const lstatSpy = vi.spyOn(fs, 'lstat').mockImplementation(async (target, ...rest) => {
       const real = await realLstat(target, ...(rest as []));
