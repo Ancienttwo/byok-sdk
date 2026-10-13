@@ -12,3 +12,9 @@ Claude supplied a bounded read-only plan through Herdr. Its durable decisions ar
 
 
 Refused terminal delivery preserves the local terminal task row (including restart replay with no prior row) via the same private terminalTaskPatch used for accepted terminal projection. It emits only outbound-rejected, carrying a closed taskState for audit/tasks reconstruction, so control status cannot keep a locally finished execution active. delivery=rejected describes terminal delivery; partial progress refusal remains an event/counter and does not mark terminal delivery. No rejected payload bytes enter the event or support bundle.
+
+CI consumer follow-up after PR #436 update-branch (31065cd0):
+
+- P1: the built adapter smoke independently observes server task events and daemon Host events; the packed recurring smoke crosses the installed cloud/embedded HTTP contract. The credential audit runs the same adapter smoke under strace; dataplane and migration jobs also run the packed smoke.
+- P2: server terminal mutation completes TaskHandle.result/events before POST returns and before the daemon journals settlement. Reading daemon events immediately after TaskHandle completion therefore races. Separately, the packed smoke still required the old exact `{ accepted: 1 }` response and old hello keys, rejecting the additive outcomes/ingress contract before its downstream checks could run.
+- P3: wait for the independently observed Host terminal event using the existing bounded wait, retaining every lifecycle/process/credential assertion. Require exact correlated settlement IDs and accepted/duplicate outcomes in the packed smoke, and assert the hello ingress advertisement. No product behavior, timeout, assertion removal, or skip changes are needed.
