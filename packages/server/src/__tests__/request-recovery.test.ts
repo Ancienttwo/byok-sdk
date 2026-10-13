@@ -42,6 +42,9 @@ describe('public facade request recovery', () => {
       await byok.tasks.cancel(cancellable.taskId, 'host cancellation after restart');
       expect((await byok.tasks.get(cancellable.taskId))?.result).toMatchObject({ state: 'Cancelled', reason: 'host cancellation after restart' });
       await expect(byok.tasks.cancel('unknown')).rejects.toMatchObject({ code: 'task_not_found' });
+      // #388: one SQLite file has one owning server, so the other product's
+      // reader opens the same file only after this owner has closed.
+      await stopServer(http.server); await byok.close();
       const foreign = createByokServer({ ...options, productId: 'other-product' });
       try {
         expect(await foreign.tasks.offer(input.taskId)).toBeUndefined();

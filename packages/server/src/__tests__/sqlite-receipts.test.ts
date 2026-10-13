@@ -9,6 +9,7 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { handleInboundEnvelope } from '../../../cloud/src/inbound';
 import { tenantStoresFor } from '../../../cloud/src/tenant-stores';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
+import { SqliteOwnershipError } from '../sqlite-support';
 
 const tenant = tenantId('receipts');
 const other = tenantId('other');
@@ -107,13 +108,16 @@ describe('SQLite receipt recovery', () => {
     } finally { await runtime.stores.close(); }
   });
 
-  it('keeps one immutable winner across independent connections, restart and tenants', async () => {
-    const { open } = fixture(); const a = open(); const b = open();
+  it('keeps one immutable winner across concurrent writers, restart and tenants', async () => {
+    // #388: one SQLite file has one owning composition, so a second independent
+    // connection is refused at open; concurrent writers share the owner.
+    const { open } = fixture(); const a = open();
+    expect(() => open()).toThrow(SqliteOwnershipError);
     const input = { key: 'same-key', body: 'original' };
-    const winners = await Promise.all([a.stores.cloud.receipts.record(tenant, input), b.stores.cloud.receipts.record(tenant, { ...input, body: 'other' })]);
+    const winners = await Promise.all([a.stores.cloud.receipts.record(tenant, input), a.stores.cloud.receipts.record(tenant, { ...input, body: 'other' })]);
     expect(winners.filter(result => result.created)).toHaveLength(1);
     expect(winners[0]?.receipt).toEqual(winners[1]?.receipt);
-    await a.stores.close(); await b.stores.close();
+    await a.stores.close();
     const reopened = open();
     try {
       expect(await reopened.stores.cloud.receipts.get(tenant, input.key)).toEqual(winners[0]?.receipt);

@@ -54,10 +54,12 @@ import {
 import { PROTOCOL_VERSION, byokBlobContentPath, type RuntimeCapabilities, type RuntimeId } from '@byok-sdk/protocol';
 import type { DatabaseSync } from 'node:sqlite';
 import {
+  acquireSqliteOwnership,
   closeSqliteDatabaseAfterInitializationFailure,
   openSqliteDatabase,
   secureSqliteFilePermissions,
   SqliteSchemaError,
+  type SqliteOwnership,
   type SqliteSchemaErrorCode,
 } from '../../sqlite-support';
 
@@ -174,17 +176,30 @@ export interface SqliteEmbeddedStores {
   readonly core: CoreStores;
   readonly cloud: CloudStores;
   readonly blobContentProxy: BlobContentProxy;
+  /**
+   * Visit every task attempt of `tenant` already in the file, synchronously.
+   * Only valid at composition time, before any store operation is queued, so
+   * the visit sees exactly the history no later observation will report.
+   */
+  scanTaskAttemptsAtOpen(tenant: TenantId, visit: (attempt: TaskAttempt) => void): void;
   close(): Promise<void>;
 }
 
 /** One serialized owner for the synchronous SQLite handle and every transaction on it. */
 class SqliteCoordinator {
   readonly db: DatabaseSync;
+  readonly #ownership: SqliteOwnership | undefined;
   #tail: Promise<void> = Promise.resolve();
+  #queued = false;
   #closing = false;
   #closePromise: Promise<void> | undefined;
 
-  constructor(path: string, migration?: 'v1-to-v4' | 'v2-to-v4' | 'v3-to-v4') {
+  constructor(
+    path: string,
+    migration: 'v1-to-v4' | 'v2-to-v4' | 'v3-to-v4' | undefined,
+    ownership: SqliteOwnership | undefined,
+  ) {
+    this.#ownership = ownership;
     this.db = openSqliteDatabase(path);
     let foundVersion: string | undefined;
     const schemaError = (code: SqliteSchemaErrorCode, message: string, options?: ErrorOptions) =>
@@ -298,8 +313,24 @@ class SqliteCoordinator {
     }
   }
 
+  /** Synchronous read before the first queued operation; see `scanTaskAttemptsAtOpen`. */
+  readAtOpen(operation: (db: DatabaseSync) => void): void {
+    if (this.#queued || this.#closing) throw new Error('SQLite open-time read after store operations began');
+    try {
+      operation(this.db);
+    } catch (error) {
+      this.#closing = true;
+      closeSqliteDatabaseAfterInitializationFailure(
+        this.db, error,
+        'SQLite history initialization failed and its ownership could not be released',
+        () => this.#closeHandle(),
+      );
+    }
+  }
+
   run<T>(operation: (db: DatabaseSync) => T | Promise<T>): Promise<T> {
     if (this.#closing) return Promise.reject(new Error('SQLite embedded composition is closed'));
+    this.#queued = true;
     const result = this.#tail.then(() => operation(this.db));
     this.#tail = result.then(() => undefined, () => undefined);
     return result;
@@ -326,8 +357,18 @@ class SqliteCoordinator {
   close(): Promise<void> {
     if (this.#closePromise !== undefined) return this.#closePromise;
     this.#closing = true;
-    this.#closePromise = this.#tail.then(() => this.db.close());
+    // Ownership outlives the handle by exactly the close: the next owner may
+    // open the moment it is released, never while this handle still writes.
+    this.#closePromise = this.#tail.then(() => this.#closeHandle());
     return this.#closePromise;
+  }
+
+  #closeHandle(): void {
+    try {
+      this.db.close();
+    } finally {
+      this.#ownership?.release();
+    }
   }
 }
 
@@ -1173,7 +1214,20 @@ export function createSqliteEmbeddedStores(
   options: SqliteEmbeddedStoreOptions,
   dependencies: { readonly clock: Clock; readonly crypto: CloudCrypto },
 ): SqliteEmbeddedStores {
-  const coordinator = new SqliteCoordinator(options.path, options.migration);
+  // One file, one owning server process: taken before the file is touched, so
+  // a refused open never migrates, validates or writes anything.
+  const ownership = options.path === ':memory:' ? undefined : acquireSqliteOwnership(options.path);
+  let coordinator: SqliteCoordinator;
+  try {
+    coordinator = new SqliteCoordinator(options.path, options.migration, ownership);
+  } catch (error) {
+    try {
+      ownership?.release();
+    } catch (releaseError) {
+      throw new AggregateError([error, releaseError], 'SQLite open failed and its ownership could not be released');
+    }
+    throw error;
+  }
   const objects = new SqliteObjectStore(coordinator, dependencies.clock);
   const mailbox = new SqliteMailboxStore(coordinator, dependencies.clock);
   const tasks = new SqliteTaskAttemptStore(coordinator, dependencies.clock);
@@ -1212,5 +1266,16 @@ export function createSqliteEmbeddedStores(
     cancellations,
     blobs,
   };
-  return { core, cloud, blobContentProxy, close: () => coordinator.close() };
+  return {
+    core,
+    cloud,
+    blobContentProxy,
+    scanTaskAttemptsAtOpen: (tenant, visit) =>
+      coordinator.readAtOpen((db) => {
+        for (const row of db.prepare('SELECT * FROM task_attempt WHERE tenant_id = ?').iterate(tenant)) {
+          visit(taskRow(row as TaskRow));
+        }
+      }),
+    close: () => coordinator.close(),
+  };
 }
