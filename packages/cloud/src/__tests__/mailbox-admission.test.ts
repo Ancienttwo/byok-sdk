@@ -182,9 +182,9 @@ describe('mailbox admission at the cloud surface', () => {
     await limitMailbox(harness, TENANT_A, 3n, 100_000_000n);
     const resent = await send();
     expect(resent.status).toBe(200);
-    expect(await resent.json()).toEqual({ accepted: 1 });
+    expect(await resent.json()).toEqual({ accepted: 1, outcomes: [{ id: event.id, outcome: 'duplicate' }] });
     const replayed = await send();
-    expect(await replayed.json()).toEqual({ accepted: 1 });
+    expect(await replayed.json()).toEqual({ accepted: 1, outcomes: [{ id: event.id, outcome: 'duplicate' }] });
 
     // Same receipt, one acknowledgement: the resend replayed the committed
     // fact instead of executing the event a second time.
