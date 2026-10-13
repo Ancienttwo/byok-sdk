@@ -178,8 +178,10 @@ describe.skipIf(!nativeWindowsSmoke)('Windows Credential Manager native smoke', 
 
   it('compiles the bridge under a non-ASCII temp directory', async () => {
     // The compiler learns its output path only from stdin. Read with the
-    // console code page, a non-ASCII temp directory is mangled to '?' and the
-    // compile writes nowhere (or somewhere else); read as UTF-8 it round-trips.
+    // console code page, a non-ASCII temp directory is decoded into garbled
+    // characters (cp437 turns U+8D26 into three box-drawing/symbol characters)
+    // and the compile writes nowhere (or somewhere else); read as UTF-8 it
+    // round-trips.
     const root = await mkdtemp(path.join(os.tmpdir(), 'byok-\u8d26\u6237-'));
     const saved = { TEMP: process.env.TEMP, TMP: process.env.TMP };
     // Children keep the ASCII temp directory their compiler already handles;

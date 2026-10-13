@@ -118,16 +118,63 @@ namespace ByokPreFixProbe {
     }
   }, REAL_BACKEND_TIMEOUT_MS);
 
+  /**
+   * Whether Credential Manager holds a generic credential under exactly this
+   * target string. Independent of the store under test: the script (and the
+   * target inside it) travels as UTF-16LE base64 on the command line, so the
+   * stdin code-page decoding the store depends on is not involved.
+   */
+  async function credentialExists(target: string): Promise<boolean> {
+    expect(target).not.toContain("'");
+    const script = String.raw`
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+namespace ByokUnicodeTargetProbe {
+  public static class Native {
+    [DllImport("Advapi32.dll", EntryPoint = "CredReadW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool CredRead(string target, UInt32 type, UInt32 flags, out IntPtr credential);
+    [DllImport("Advapi32.dll", SetLastError = true)]
+    private static extern void CredFree(IntPtr buffer);
+    public static int Probe(string target) {
+      IntPtr pointer;
+      if (!CredRead(target, 1, 0, out pointer)) return Marshal.GetLastWin32Error();
+      CredFree(pointer);
+      return 0;
+    }
+  }
+}
+"@
+[Console]::Out.Write([ByokUnicodeTargetProbe.Native]::Probe('${target}'))
+`;
+    const result = await runCommand('powershell.exe', [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64'),
+    ]);
+    expect(result.exitCode, result.stderr).toBe(0);
+    const outcome = result.stdout.trim();
+    // 0 = found, 1168 = ERROR_NOT_FOUND; anything else is a probe failure.
+    expect(outcome === '0' || outcome === '1168', outcome).toBe(true);
+    return outcome === '0';
+  }
+
   it('keeps non-ASCII request fields distinct across the stdin boundary', async () => {
-    // Two prefixes that differ only in a non-ASCII character. Decoded with the
-    // console code page both collapse to the same '?' target and the second
-    // write overwrites the first; read as UTF-8 each keeps its own credential.
+    // Decoded with the console code page the stdin bytes become garbled but
+    // still distinct strings (cp437: U+8D26 -> three symbol characters), so a
+    // set/get round trip through the same store passes on the old code too.
+    // The proof is therefore the target as Credential Manager holds it: read
+    // back without stdin, it must exist under the real Unicode string.
     const name = 'model-unicode-probe-api-key';
-    const first = new WindowsCredentialManagerSecretStore({ servicePrefix: `${prefix}-\u8d26`, account: 'local-\u8d26', commandRunner: recordingRunner });
-    const second = new WindowsCredentialManagerSecretStore({ servicePrefix: `${prefix}-\u6237`, account: 'local-\u6237', commandRunner: recordingRunner });
+    const firstPrefix = `${prefix}-账`;
+    const secondPrefix = `${prefix}-户`;
+    const first = new WindowsCredentialManagerSecretStore({ servicePrefix: firstPrefix, account: 'local-账', commandRunner: recordingRunner });
+    const second = new WindowsCredentialManagerSecretStore({ servicePrefix: secondPrefix, account: 'local-户', commandRunner: recordingRunner });
     try {
       await first.set(name, 'sk-wincred-unicode-first');
+      await expect(credentialExists(`${firstPrefix}.${name}`)).resolves.toBe(true);
+      await expect(credentialExists(`${secondPrefix}.${name}`)).resolves.toBe(false);
       await second.set(name, 'sk-wincred-unicode-second');
+      await expect(credentialExists(`${secondPrefix}.${name}`)).resolves.toBe(true);
       await expect(first.get(name)).resolves.toBe('sk-wincred-unicode-first');
       await expect(second.get(name)).resolves.toBe('sk-wincred-unicode-second');
     } catch (error) {

@@ -469,23 +469,47 @@ describe('committed Pi spawn boundary', () => {
 });
 
 /**
- * Statements of a PowerShell script that could invoke a command, so could
- * resolve through PSModulePath. The ACL script is .NET-only: every statement
- * must start with a variable, a type expression or a language keyword, and an
- * assignment's right-hand side must too. That rejects Verb-Noun cmdlets in any
- * case, aliases (gi, gci, %, ?, iex, select, where, ...) and pipeline stages,
- * without a denylist that the next alias would slip past.
+ * Positions in a PowerShell script where a command could be invoked, so could
+ * resolve through PSModulePath. The ACL script is .NET-only, and this guard
+ * enforces that structurally, without a denylist that the next alias would
+ * slip past:
+ * - every statement (split on newline, ';', '{', '}' and '|') starts with a
+ *   variable, a type expression, a try/catch/exit keyword or an if/while/foreach
+ *   condition; an `exit` takes only a literal, a variable or a parenthesis;
+ * - an assignment's right-hand side starts with a variable, type expression,
+ *   parenthesis, string, number or '@';
+ * - after every '(' (so also '$(' and '@('), and after every ',' (call
+ *   arguments, outside type brackets), the next token is a variable, type
+ *   expression, parenthesis, string, number or '@' (after '(' also ')'), never
+ *   a bare word, '&' or '.'.
+ * Single-quoted strings are inert, so their contents are blanked first;
+ * double-quoted strings stay in view because '$(...)' runs inside them.
+ * Rejects Verb-Noun cmdlets in any case and aliases (gi, gci, %, ?, iex,
+ * select, where, ...).
  */
 function powershellCommandFindings(script: string): string[] {
-  const statementStart = /^(?:\$|\[|(?:try|catch|exit)\b|(?:if|while|foreach)\s*\()/iu;
+  const code = script.replaceAll(/'[^']*'/gu, "''");
+  const statementStart = /^(?:\$|\[|(?:try|catch)\b|exit\b\s*(?:$|[\d$(]\S*)|(?:if|while|foreach)\s*\()/iu;
   const valueStart = /^(?:\$|\[|\(|'|"|\d|@)/u;
   const findings: string[] = [];
-  for (const statement of script.split(/[\n;{}|]/u).map((part) => part.trim()).filter((part) => part !== '')) {
+  for (const statement of code.split(/[\n;{}|]/u).map((part) => part.trim()).filter((part) => part !== '')) {
     if (!statementStart.test(statement)) findings.push(statement);
     const rhs = /^\$\w+(?:\['[^']*'\])?\s*=\s*(.*)$/u.exec(statement)?.[1];
     if (rhs !== undefined && !valueStart.test(rhs)) findings.push(statement);
   }
-  if (/\b[a-z]+-[a-z]+\b/iu.test(script.replaceAll(/\s-[a-z]+\b/giu, ' '))) findings.push('Verb-Noun');
+  for (const [, next] of code.matchAll(/\((?=\s*(\S?))/gu)) {
+    if (!/^[$[('"@)\d]$/u.test(next ?? '')) findings.push(`( followed by ${JSON.stringify(next)}`);
+  }
+  // Generic type arguments ([Dictionary[string, object]]) are not call arguments.
+  let untyped = code;
+  for (let previous = ''; previous !== untyped;) {
+    previous = untyped;
+    untyped = untyped.replaceAll(/\[[A-Za-z][^[\]]*\]/gu, '[T]');
+  }
+  for (const [, next] of untyped.matchAll(/,(?=\s*(\S?))/gu)) {
+    if (!/^[$[('"@\d]$/u.test(next ?? '')) findings.push(`, followed by ${JSON.stringify(next)}`);
+  }
+  if (/\b[a-z]+-[a-z]+\b/iu.test(code.replaceAll(/\s-[a-z]+\b/giu, ' '))) findings.push('Verb-Noun');
   return findings;
 }
 
@@ -534,6 +558,11 @@ describe('Windows projection ACL verification', () => {
       '$acl = Get-Acl $path', '$acl = get-acl $path', '$acl = GET-ACL $path',
       'gi $path', 'gci $path', '$x | select Name', '$x | where Name', '$x | % { $_ }',
       '$x | ? { $_ }', 'iex $text', '$x | foreach Name', '$acl = gi $path',
+      // Commands reached through a parenthesis, subexpression or argument.
+      '$acl = (gi $path).GetAccessControl()', '$acl = $(gi $path)', '$acl = @(gci $path)',
+      '[void](iex $text)', '$x = (& $cmd)', '$x = (. $script)', 'exit (gi $p)',
+      'if ((gi $p)) { exit 0 }', '$x = "$(gi $p)"', '$x.Add((gci $p))',
+      'exit gi $p', '$x.Add($a, gi $p)', '$x = ( gi $p)',
     ]) expect(powershellCommandFindings(script), script).not.toEqual([]);
   });
   it('loads the serializer assembly in its own try, outside the path_not_found mapping', async () => {
