@@ -110,8 +110,19 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
+      # Test suites create scratch dirs under a per-run root (vitest globalSetup,
+      # scripts/vitest/tmp-root.mjs). Anything new matching byok-* in the real
+      # TMPDIR is a leak; snapshot first so only this run's entries count.
+      - name: Snapshot TMPDIR before tests
+        id: tmpdir-snapshot
+        run: node scripts/ci/check-tmpdir-leaks.mjs snapshot "$RUNNER_TEMP/tmpdir-before.txt"
+
       - name: Test
         run: bun run test
+
+      - name: Check tests left no byok-* entries in TMPDIR
+        if: ${{ always() && steps.tmpdir-snapshot.outcome == 'success' }}
+        run: node scripts/ci/check-tmpdir-leaks.mjs verify "$RUNNER_TEMP/tmpdir-before.txt"
 
   # The Go helper is admitted only on macOS. Keep its toolchain and the
   # TypeScript-to-Go integration test in one independent job so the admission
