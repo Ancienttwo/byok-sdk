@@ -1,5 +1,6 @@
 import {
   BYOK_EVENTS_PATH,
+  EVENTS_POLL_NO_HOLD_PARAM,
   MAILBOX_READ_AHEAD_CAPABILITY,
   MAILBOX_READ_AHEAD_MAX_SEQS,
   BYOK_MESSAGES_PATH,
@@ -370,6 +371,12 @@ export class LongPollClient {
     let retryAttempt = 0;
     let readCursor: number | undefined;
     let readAheadSupported = false;
+    // The first poll of each (re)connect is the settle poll: it asks the
+    // server to answer after one read pass instead of holding, so an idle
+    // device learns the capabilities that settle the connection without
+    // waiting out a full server hold (~50s by default). Every failure path
+    // that withdraws capabilities re-arms it.
+    let settlePoll = true;
     let warnedWindowAt: number | undefined;
     while (this.running && !signal.aborted) {
       try {
@@ -400,6 +407,7 @@ export class LongPollClient {
         }
         const afterSeq = Math.max(ack, readCursor ?? ack);
         if (cursor !== undefined) url.searchParams.set('cursor', String(cursor));
+        if (settlePoll) url.searchParams.set(EVENTS_POLL_NO_HOLD_PARAM, '1');
         if (afterSeq > ack) {
           if (!readAheadSupported) {
             const error = new Error('server does not advertise mailbox-read-ahead; cannot read past unacknowledged work');
@@ -439,6 +447,7 @@ export class LongPollClient {
           // discipline and withdraw the advertisement immediately.
           readCursor = undefined;
           readAheadSupported = false;
+          settlePoll = true;
           this.opts.onServerCapabilitiesInvalidated?.();
           this.opts.onPollFailure?.();
           this.opts.onOperationalOutcome?.('failure');
@@ -464,6 +473,7 @@ export class LongPollClient {
           throw err;
         }
         readAheadSupported = parsed.capabilities.includes(MAILBOX_READ_AHEAD_CAPABILITY);
+        settlePoll = false;
         const madeReadProgress = parsed.cursor > afterSeq;
         readCursor = parsed.cursor;
         this.opts.onServerCapabilities?.(parsed.capabilities);
@@ -536,6 +546,7 @@ export class LongPollClient {
         // the mis-attribution this split removed.
         readCursor = undefined;
         readAheadSupported = false;
+        settlePoll = true;
         this.opts.onServerCapabilitiesInvalidated?.();
         if (this.noteRevoked(err)) return;
         if (!this.running || signal.aborted) return;
