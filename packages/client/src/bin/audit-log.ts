@@ -1,7 +1,8 @@
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { AgentEvent, BlobRef, RuntimeInfo } from '@byok-sdk/protocol';
-import { type ConnectionState, type DaemonEvent } from '../index';
+import { type DaemonEvent } from '../index';
+import { parseDaemonLifecycle, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { GIT_ERROR_CATEGORIES } from '../daemon/git-workspace';
 import {
   SERVICE_ENVIRONMENT_UNAVAILABLE_CODES,
@@ -292,8 +293,9 @@ function redactForAudit(event: DaemonEvent): Record<string, unknown> {
       };
     case 'cancelled':
       return { ...base, taskId: event.taskId, reasonSize: byteSize(event.reason) };
-    case 'connection':
-      return { ...base, state: event.state };
+    case 'lifecycle':
+      // Closed enums and a timestamp only.
+      return { ...base, lifecycle: event.lifecycle };
     case 'paired':
       return { ...base, deviceId: event.deviceId };
     case 'unpaired':
@@ -495,8 +497,10 @@ function reconstructDaemonEvent(raw: Record<string, unknown>): DaemonEvent | und
         reason: reasonSize === undefined ? undefined : placeholderFor(reasonSize),
       };
     }
-    case 'connection':
-      return { kind: 'connection', ts, state: str(raw.state) as ConnectionState };
+    case 'lifecycle': {
+      const lifecycle = parseDaemonLifecycle(raw.lifecycle);
+      return lifecycle === undefined ? undefined : { kind: 'lifecycle', ts, lifecycle };
+    }
     case 'paired':
       return { kind: 'paired', ts, deviceId: str(raw.deviceId) };
     case 'unpaired':
@@ -738,8 +742,12 @@ function compactPreservingLiveTasks(lines: readonly string[], targetLines: numbe
   // Issue #392: the latest environment-resolved record describes the running
   // daemon for as long as it runs; it survives rotation like a live task.
   let lastEnvironmentIndex: number | undefined;
+  // Issues #391/#394: so does the latest lifecycle event — offline `status`,
+  // `doctor` and `service-status` read it.
+  let lastLifecycleIndex: number | undefined;
   for (let i = 0; i < lines.length; i++) {
     if (parseEnvironmentLine(lines[i]) !== undefined) lastEnvironmentIndex = i;
+    if (lines[i] !== undefined && parseAuditLine(lines[i]!)?.kind === 'lifecycle') lastLifecycleIndex = i;
   }
   for (const [taskId, lastIndex] of lastIndexForTask) {
     if (hasTerminalEvent.has(taskId)) continue; // reconstructable from its own terminal event, wherever that falls
@@ -756,8 +764,8 @@ function compactPreservingLiveTasks(lines: readonly string[], targetLines: numbe
     );
   }
 
-  if (lastEnvironmentIndex !== undefined && lastEnvironmentIndex < cutIndex) {
-    anchorIndices = [...anchorIndices, lastEnvironmentIndex].sort((a, b) => a - b);
+  for (const index of [lastEnvironmentIndex, lastLifecycleIndex]) {
+    if (index !== undefined && index < cutIndex) anchorIndices = [...anchorIndices, index].sort((a, b) => a - b);
   }
   return [...anchorIndices.map((i) => lines[i]), ...lines.slice(cutIndex)].filter((l): l is string => l !== undefined);
 }
@@ -862,6 +870,34 @@ export async function readLastEnvironmentRecord(storeDir: string): Promise<Envir
 }
 
 /**
+ * The last `lifecycle` event (issue #394), for the offline readers
+ * (`doctor`, `service-status`). Opened like
+ * {@link readLastEnvironmentRecord}: non-blocking, no symlink, regular file
+ * only, so a FIFO or a missing log is `undefined` ("unknown"), never a hang.
+ */
+export async function readLastLifecycleEvent(storeDir: string): Promise<{ lifecycle: DaemonLifecycle; ts: string } | undefined> {
+  let handle: Awaited<ReturnType<typeof fs.open>>;
+  try {
+    handle = await fs.open(auditLogPath(storeDir), fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0) | (fsConstants.O_NOFOLLOW ?? 0));
+  } catch {
+    return undefined;
+  }
+  let raw: string;
+  try {
+    if (!(await handle.stat()).isFile()) return undefined;
+    raw = await handle.readFile('utf8');
+  } finally {
+    await handle.close();
+  }
+  const lines = completeLines(raw);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const event = parseAuditLine(lines[i]!);
+    if (event?.kind === 'lifecycle') return { lifecycle: event.lifecycle, ts: event.ts };
+  }
+  return undefined;
+}
+
+/**
  * Adapts {@link appendAuditEvent} into a `DaemonEventListener` for
  * `daemon.subscribe()` (used by the `start` command). `DaemonEventListener`
  * is synchronous — `observer.ts`'s `emit()` never awaits a listener (see its
@@ -888,7 +924,10 @@ export function createAuditAppender(storeDir: string, onError: (err: unknown) =>
     (event: DaemonEvent): void => {
       void enqueue(() => appendAuditEvent(storeDir, event));
     },
-    { appendEnvironment: (record: EnvironmentRecord) => enqueue(() => appendEnvironmentRecord(storeDir, record)) },
+    {
+      appendEnvironment: (record: EnvironmentRecord) => enqueue(() => appendEnvironmentRecord(storeDir, record)),
+      flush: () => chain,
+    },
   );
 }
 
@@ -897,6 +936,8 @@ export interface AuditAppender {
   (event: DaemonEvent): void;
   /** Queues the `environment-resolved` record behind every event already queued. Resolves once written; a failed write goes to `onError`. */
   appendEnvironment(record: EnvironmentRecord): Promise<void>;
+  /** Resolves once every append queued so far has been written (or reported to `onError`). */
+  flush(): Promise<void>;
 }
 
 function isAuditRecordShaped(value: unknown): value is Record<string, unknown> {

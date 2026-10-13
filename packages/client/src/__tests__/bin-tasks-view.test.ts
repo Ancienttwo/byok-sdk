@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DaemonEvent } from '../index';
-import { deriveTasksFromEvents, lastConnectionState, tallyTaskStates } from '../bin/tasks-view';
+import { deriveTasksFromEvents, lastLifecycle, tallyTaskStates } from '../bin/tasks-view';
 
 describe('bin/tasks-view: deriveTasksFromEvents', () => {
   it('replays offered -> claimed -> started -> progress -> completed into a single Complete task', () => {
@@ -189,9 +189,9 @@ describe('bin/tasks-view: deriveTasksFromEvents', () => {
     expect(tasks.find((t) => t.taskId === 'b')?.state).toBe('Offered');
   });
 
-  it('daemon-level events (connection/paired/unpaired/runtimes-detected/artifact) never create a phantom task', () => {
+  it('daemon-level events (lifecycle/paired/unpaired/runtimes-detected/artifact) never create a phantom task', () => {
     const events: DaemonEvent[] = [
-      { kind: 'connection', ts: '2026-01-01T00:00:00.000Z', state: 'open' },
+      { kind: 'lifecycle', ts: '2026-01-01T00:00:00.000Z', lifecycle: { phase: 'running', connection: 'open' } },
       { kind: 'paired', ts: '2026-01-01T00:00:01.000Z', deviceId: 'dev-1' },
       { kind: 'unpaired', ts: '2026-01-01T00:00:02.000Z' },
       { kind: 'runtimes-detected', ts: '2026-01-01T00:00:03.000Z', runtimes: [] },
@@ -205,18 +205,19 @@ describe('bin/tasks-view: deriveTasksFromEvents', () => {
   });
 });
 
-describe('bin/tasks-view: lastConnectionState', () => {
-  it('returns undefined when there are no connection events', () => {
-    expect(lastConnectionState([{ kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' }])).toBeUndefined();
+describe('bin/tasks-view: lastLifecycle', () => {
+  it('returns undefined when there are no lifecycle events', () => {
+    expect(lastLifecycle([{ kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' }])).toBeUndefined();
   });
 
-  it('returns the MOST RECENT connection event, not the first', () => {
+  it('returns the MOST RECENT lifecycle event, not the first', () => {
+    const halted = { phase: 'halted', reason: 'device_revoked', at: '2026-01-01T00:00:02.000Z' } as const;
     const events: DaemonEvent[] = [
-      { kind: 'connection', ts: '2026-01-01T00:00:00.000Z', state: 'connecting' },
-      { kind: 'connection', ts: '2026-01-01T00:00:01.000Z', state: 'open' },
-      { kind: 'connection', ts: '2026-01-01T00:00:02.000Z', state: 'closed' },
+      { kind: 'lifecycle', ts: '2026-01-01T00:00:00.000Z', lifecycle: { phase: 'running', connection: 'connecting' } },
+      { kind: 'lifecycle', ts: '2026-01-01T00:00:01.000Z', lifecycle: { phase: 'running', connection: 'open' } },
+      { kind: 'lifecycle', ts: '2026-01-01T00:00:02.000Z', lifecycle: halted },
     ];
-    expect(lastConnectionState(events)).toEqual({ state: 'closed', ts: '2026-01-01T00:00:02.000Z' });
+    expect(lastLifecycle(events)).toEqual({ lifecycle: halted, ts: '2026-01-01T00:00:02.000Z' });
   });
 });
 

@@ -1,6 +1,5 @@
 import {
   BYOK_EVENTS_PATH,
-  EVENTS_POLL_NO_HOLD_PARAM,
   MAILBOX_READ_AHEAD_CAPABILITY,
   MAILBOX_READ_AHEAD_MAX_SEQS,
   BYOK_MESSAGES_PATH,
@@ -65,10 +64,12 @@ export interface LongPollClientOptions {
    * An older responder omitting the additive field is reported as `[]`.
    */
   onServerCapabilities?: (capabilities: string[]) => void;
-  /** Called when a failed poll invalidates the preceding response's capability snapshot. */
-  onServerCapabilitiesInvalidated?: () => void;
-  /** Called after a poll fails and before the retry delay begins. */
-  onPollFailure?: () => void;
+  /**
+   * The poll failed — an HTTP status, a network failure, an unusable body or
+   * a credential failure. This loop generation has ended and does not retry:
+   * the caller's reconnect loop owns that (it handshakes again first).
+   */
+  onLoopFailure?: () => void;
   /** Called once the device is found to be revoked (401 surfaced through {@link AuthManager}) — the loop stops itself rather than retrying. */
   onRevoked?: () => void;
   /** Called when the server cannot replay the durable cursor supplied to this poll. */
@@ -91,7 +92,7 @@ export interface LongPollClientOptions {
    * `ConnectionManager` always supplies it.
    */
   isStalled?: () => boolean;
-  /** Backoff between failed poll attempts (network/HTTP errors), stalled cycles, and duplicate-only cycles that made no cursor progress. The reference server holds a genuinely idle request open ~50s itself (protocol §8). Default 2s. */
+  /** Backoff for stalled cycles and duplicate-only cycles that made no cursor progress, and for a full read-ahead window. The reference server holds a genuinely idle request open ~50s itself (protocol §8). Default 2s. */
   retryDelayMs?: number;
   /** Deterministic delay authority for automatic failed/stalled cycles. */
   retryDelayForAttempt?: (attempt: number, baseDelayMs: number) => number;
@@ -117,6 +118,8 @@ interface LooseEventsPollResponse {
 export interface MessageBatchPostResult {
   readonly accepted: number;
   readonly rejected?: number;
+  /** The server's advertisement, when it sent one (a handshake answer); absence means "no update". */
+  readonly capabilities?: readonly string[];
 }
 
 /** Finding R1: soft cap on `LongPollClient`'s own `warnedValidationFailureSeqs` bookkeeping — see that field's own doc comment for why this is a simple "clear outright" reset rather than an eviction policy: a rare/pathological path, not a hot one. */
@@ -210,9 +213,13 @@ function extractExecutableSeq(raw: unknown): number | undefined {
  * Design B (finding N4): this is a stateless drainer; it holds no outbound
  * queue of its own. `ConnectionManager` owns the single shared outbox;
  * `postBatch` is a single POST attempt, reporting only frozen-v1 accepted and
- * rejected counts after its response body has been read and validated. All
- * retry/backoff and rejection isolation policy lives in the caller
- * (`ConnectionManager.drainOutbox`).
+ * rejected counts (plus an advertisement, when the server sent one) after its
+ * response body has been read and validated. All retry/backoff and rejection
+ * isolation policy lives in the caller (`ConnectionManager`).
+ *
+ * The receive loop likewise never retries a failed poll: one loop generation
+ * runs from {@link start} until a failure ({@link LongPollClientOptions.onLoopFailure}),
+ * {@link stop}, revocation, or a lost replay cursor.
  */
 export class LongPollClient {
   private running = false;
@@ -313,8 +320,10 @@ export class LongPollClient {
    * envelope `id`s — the caller must never rebuild them) is deduped
    * server-side into a safe no-op rather than reprocessed (§9). Returns
    * validated frozen-v1 counts only after a readable response body.
+   * `signal` aborting is the caller's own lifecycle ending, not a route
+   * failure: it resolves `undefined` without a warning.
    */
-  async postBatch(envelopes: Envelope[]): Promise<MessageBatchPostResult | undefined> {
+  async postBatch(envelopes: Envelope[], signal?: AbortSignal): Promise<MessageBatchPostResult | undefined> {
     // Phase 1 — credentials. This happens BEFORE the route request exists, so
     // its failure can never be attributed to `/byok/messages`. Pre-flighting
     // the token here (rather than letting `authedFetch`'s own identical call
@@ -339,10 +348,12 @@ export class LongPollClient {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ messages: envelopes }),
+          ...(signal === undefined ? {} : { signal }),
         },
         this.opts.auth,
       );
     } catch (err) {
+      if (signal?.aborted) return undefined;
       // No response was ever produced (the `fetch` itself rejected) — the one
       // case where `status: undefined` is structurally true.
       if (!this.noteRevoked(err)) this.warnRouteFailure(this.messagesEndpoint, undefined, err);
@@ -359,6 +370,7 @@ export class LongPollClient {
       }
       return response;
     } catch (err) {
+      if (signal?.aborted) return undefined;
       // The response DID exist and the server DID accept the request line —
       // it is its body that is unusable, so this carries that response's own
       // status with the read/parse error in `cause`.
@@ -371,12 +383,6 @@ export class LongPollClient {
     let retryAttempt = 0;
     let readCursor: number | undefined;
     let readAheadSupported = false;
-    // The first poll of each (re)connect is the settle poll: it asks the
-    // server to answer after one read pass instead of holding, so an idle
-    // device learns the capabilities that settle the connection without
-    // waiting out a full server hold (~50s by default). Every failure path
-    // that withdraws capabilities re-arms it.
-    let settlePoll = true;
     let warnedWindowAt: number | undefined;
     while (this.running && !signal.aborted) {
       try {
@@ -407,7 +413,6 @@ export class LongPollClient {
         }
         const afterSeq = Math.max(ack, readCursor ?? ack);
         if (cursor !== undefined) url.searchParams.set('cursor', String(cursor));
-        if (settlePoll) url.searchParams.set(EVENTS_POLL_NO_HOLD_PARAM, '1');
         if (afterSeq > ack) {
           if (!readAheadSupported) {
             const error = new Error('server does not advertise mailbox-read-ahead; cannot read past unacknowledged work');
@@ -441,19 +446,8 @@ export class LongPollClient {
             return;
           }
           this.warnRouteFailure(this.eventsEndpoint, res.status, undefined);
-          // Long-poll has no persistent peer identity: a failed request no
-          // longer proves that the responder behind the NEXT request supports
-          // what the last successful one advertised. Match WS disconnect
-          // discipline and withdraw the advertisement immediately.
-          readCursor = undefined;
-          readAheadSupported = false;
-          settlePoll = true;
-          this.opts.onServerCapabilitiesInvalidated?.();
-          this.opts.onPollFailure?.();
-          this.opts.onOperationalOutcome?.('failure');
-          const baseMs = this.opts.retryDelayMs ?? 2000;
-          await sleep(this.opts.retryDelayForAttempt?.(retryAttempt++, baseMs) ?? baseMs, signal);
-          continue;
+          this.failLoop(signal);
+          return;
         }
 
         // Validate each executable envelope independently. Both unknown types
@@ -473,7 +467,6 @@ export class LongPollClient {
           throw err;
         }
         readAheadSupported = parsed.capabilities.includes(MAILBOX_READ_AHEAD_CAPABILITY);
-        settlePoll = false;
         const madeReadProgress = parsed.cursor > afterSeq;
         readCursor = parsed.cursor;
         this.opts.onServerCapabilities?.(parsed.capabilities);
@@ -540,22 +533,22 @@ export class LongPollClient {
       } catch (err) {
         // Whichever phase failed has already warned (or deliberately not
         // warned) with its own accurate attribution — this block is only the
-        // shared "withdraw capabilities, then stop or back off" tail. It never
-        // warns itself: it cannot tell a route failure apart from a credential
-        // failure or a throwing `onEnvelope` handler, and guessing is exactly
-        // the mis-attribution this split removed.
-        readCursor = undefined;
-        readAheadSupported = false;
-        settlePoll = true;
-        this.opts.onServerCapabilitiesInvalidated?.();
+        // shared "stop, or end this generation" tail. It never warns itself:
+        // it cannot tell a route failure apart from a credential failure or a
+        // throwing `onEnvelope` handler, and guessing is exactly the
+        // mis-attribution this split removed.
         if (this.noteRevoked(err)) return;
-        if (!this.running || signal.aborted) return;
-        this.opts.onPollFailure?.();
-        this.opts.onOperationalOutcome?.('failure');
-        const baseMs = this.opts.retryDelayMs ?? 2000;
-        await sleep(this.opts.retryDelayForAttempt?.(retryAttempt++, baseMs) ?? baseMs, signal);
+        this.failLoop(signal);
+        return;
       }
     }
+  }
+
+  /** Ends this loop generation on a failure; a stopped generation ends silently. */
+  private failLoop(signal: AbortSignal): void {
+    if (!this.running || signal.aborted) return;
+    this.opts.onOperationalOutcome?.('failure');
+    this.opts.onLoopFailure?.();
   }
 }
 

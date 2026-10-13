@@ -9,16 +9,23 @@ import {
   type RuntimeInfo,
   type ToolsetId,
 } from '@byok-sdk/protocol';
-import { AuthManager, DeviceRevokedError } from './auth-manager';
+import { AuthManager } from './auth-manager';
 import type { CursorStore } from './cursor-store';
+import type { DaemonHaltReason } from './daemon-lifecycle';
 import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
-import { LongPollClient } from './long-poll-transport';
-import { ReplayCursorTooOldError } from './replay-cursor';
+import { LongPollClient, type MessageBatchPostResult } from './long-poll-transport';
 
 export { ReplayCursorTooOldError } from './replay-cursor';
 
-/** The lifecycle of the daemon's one long-poll connection. */
-export type ConnectionState = 'connecting' | 'open' | 'closed' | 'revoked';
+/**
+ * The daemon's one long-poll session: `open` from the moment the server
+ * accepts this session's `conn.hello` until any route fails, `connecting`
+ * otherwise.
+ */
+export type ConnectionState = 'connecting' | 'open';
+
+/** The remote conditions that end a session for good. */
+export type ConnectionHaltReason = Extract<DaemonHaltReason, 'device_revoked' | 'handshake_rejected' | 'replay_cursor_too_old'>;
 
 /**
  * Server work requiring durable handler completion before acknowledgement.
@@ -69,19 +76,27 @@ export interface ConnectionManagerOptions {
    * below). A handler that throws/rejects is caught here, not propagated.
    */
   onEnvelope: (envelope: Envelope) => void | Promise<void>;
+  /** Every transition between `connecting` and `open`, starting with `connecting` from {@link ConnectionManager.start}. */
   onStateChange?: (state: ConnectionState) => void;
+  /**
+   * Called each time the server's advertisement newly carries a capability
+   * the previous one did not — after every reconnect, the first advertisement
+   * is new in full. Hooks that retry capability-gated sends wait here.
+   */
+  onCapabilitiesAdvertised?: (added: readonly string[]) => void;
   /** Await durable disposition before retiring the exact accepted/rejected bytes. */
   onOutboundAccepted?: (envelopes: readonly Envelope[]) => Promise<void>;
   onOutboundRejected?: (envelope: Envelope) => Promise<void>;
   onOutboundQueued?: (envelope: Envelope) => void;
   beforeOutboundPost?: (envelopes: readonly Envelope[]) => void;
-  /** Backoff between failed long-poll HTTP attempts. Default 2s. */
+  /** Base delay before each reconnect handshake, and for stalled-cycle and local-disposition backoff. Default 2s. */
   longPollRetryDelayMs?: number;
   /** Minimum delay before the next long-poll request after an empty (no-events) response. Default 250ms. */
   longPollIdleDelayMs?: number;
   fleetJitter?: FleetJitter;
   onOperationalOutcome?: (outcome: 'success' | 'failure', source: 'reconnect' | 'upload') => void;
-  onTerminalError?: (error: ReplayCursorTooOldError) => void;
+  /** The session ended for good; nothing reconnects after this. Called once. */
+  onHalted?: (reason: ConnectionHaltReason) => void;
 }
 
 export interface RejectedOutboundEnvelope {
@@ -92,10 +107,20 @@ export interface RejectedOutboundEnvelope {
 const MAX_REJECTED_OUTBOX_ENTRIES = 1_000;
 
 /**
- * Owns the daemon's one authenticated long-poll connection to the server.
+ * Owns the daemon's one authenticated long-poll session with the server.
  * Every received envelope passes through the same cursor-dedupe/persistence
- * logic (protocol §9), so redelivery remains safe after an HTTP retry or a
+ * logic (protocol §9), so redelivery remains safe after a reconnect or a
  * daemon restart.
+ *
+ * One reconnect loop (`run`) owns the session. Each pass POSTs a lone
+ * `conn.hello`; the server accepting it is what `open` means — it proves the
+ * credentials, the device's enrollment, and the product and protocol match in
+ * one round trip, without waiting for work or a held poll. Only an open
+ * session polls and drains the outbox, so `conn.hello` is the first message
+ * of every session, including after a reconnect (protocol §8). Any route
+ * failure returns the session to `connecting` and the loop handshakes again
+ * after `fleetJitter('reconnect')`. A rejected hello, a revoked device or a
+ * lost replay cursor halts it instead.
  *
  * `send()` (Design B, finding N4) pushes onto a single shared outbox this
  * class owns and drains through `POST /byok/messages`; long-poll is a full
@@ -105,19 +130,15 @@ export class ConnectionManager {
   private readonly fleetJitter: FleetJitter;
   private readonly longPoll: LongPollClient;
   private uploadRetryAttempt = 0;
+  private reconnectAttempt = 0;
   private started = false;
-  private connected = false;
-  /**
-   * Settle needs both halves of the handshake: the start `conn.hello` has
-   * been answered by `POST /byok/messages` (so the server holds this device's
-   * capability snapshot), and the current long-poll stream has answered with
-   * the server's capabilities. The no-hold settle poll can return before the
-   * concurrent hello POST does; settling on the poll alone would report a
-   * device open that the server would still refuse Agent work for.
-   */
-  private startHello: Envelope | undefined;
-  private startHelloAnswered = false;
-  private capabilitiesCurrent = false;
+  private state: ConnectionState | undefined;
+  /** Aborts the reconnect loop's in-flight handshake and backoff on stop or halt. */
+  private readonly lifetime = new AbortController();
+  /** Ends the current open session; set only while one is open. */
+  private endSession: (() => void) | undefined;
+  /** Counts open sessions, so a request from an ended session cannot end the next one. */
+  private sessionGeneration = 0;
   private cursor: number | undefined;
   /**
    * Finding F3 (at-most-once redelivery): the lowest `task.*` envelope `seq`
@@ -158,9 +179,7 @@ export class ConnectionManager {
   private inFlightBatchSize = 0;
   private draining = false;
   private stopped = false;
-  private revoked = false;
-  private terminalError: ReplayCursorTooOldError | undefined;
-  private settledWaiters: Array<(err?: unknown) => void> = [];
+  private haltReason: ConnectionHaltReason | undefined;
   private pendingCursorSave: Promise<void> = Promise.resolve();
   /** Admission dedup while an individual handler is running. */
   private readonly inFlightSeqs = new Set<number>();
@@ -170,19 +189,17 @@ export class ConnectionManager {
   /** Received work lacking a successful handler receipt, including malformed frames. */
   private readonly unresolvedSeqs = new Set<number>();
   /**
-   * Finding P3: the pending `drainOutbox` long-poll retry backoff, if any —
-   * cancellable so `enterRevoked()` can unblock it immediately instead of
-   * waiting out the rest of the delay before the loop notices `revoked` and
-   * exits. See `drainRetryDelay`.
+   * Finding P3: the pending local-disposition retry backoff in `drainOutbox`,
+   * if any — cancellable so a halt or stop can unblock it immediately. See
+   * `drainRetryDelay`.
    */
   private cancelPendingDrainRetry: (() => void) | undefined;
   /**
    * The capabilities the current server response advertised — untyped
    * `string[]` for forward compatibility. An advertisement is scoped to the
-   * current long-poll response stream and is cleared after an HTTP failure,
-   * terminal shutdown, or revocation. This keeps capability-gated outbound
-   * messages fail-closed until the current server has explicitly advertised
-   * support.
+   * current session and is cleared when it ends (a route failure, stop, or
+   * halt). This keeps capability-gated outbound messages fail-closed until
+   * the current server has explicitly advertised support.
    */
   private serverCapabilities: string[] = [];
 
@@ -198,18 +215,13 @@ export class ConnectionManager {
       // failure impossible to redeliver.
       getCursor: () => this.cursor,
       onEnvelope: (envelope) => this.deliver(envelope),
-      onServerCapabilities: (capabilities) => {
-        this.serverCapabilities = capabilities;
-        this.capabilitiesCurrent = true;
-        this.noteConnected();
+      onServerCapabilities: (capabilities) => this.applyServerCapabilities(capabilities),
+      onLoopFailure: () => this.breakSession(),
+      onRevoked: () => this.halt('device_revoked'),
+      onReplayCursorTooOld: (error) => {
+        console.error(`[byok/client] ${error.message}`);
+        this.halt('replay_cursor_too_old');
       },
-      onServerCapabilitiesInvalidated: () => {
-        this.serverCapabilities = [];
-        this.capabilitiesCurrent = false;
-      },
-      onPollFailure: () => this.noteDisconnected(),
-      onRevoked: () => this.enterRevoked(),
-      onReplayCursorTooOld: (error) => this.enterReplayCursorTooOld(error),
       // Unknown and malformed executable work use the same ordered stall.
       onValidationFailedSeq: (seq) => this.noteValidationFailure(seq),
       // Finding P2 (Fix 2a): lets the long-poll loop distinguish "this
@@ -220,20 +232,102 @@ export class ConnectionManager {
       isStalled: () => this.stalledAtSeq !== undefined,
       retryDelayMs: opts.longPollRetryDelayMs,
       retryDelayForAttempt: (attempt, baseMs) => this.fleetJitter.delay('reconnect', attempt, baseMs),
-      onOperationalOutcome: (outcome) => opts.onOperationalOutcome?.(outcome, 'reconnect'),
+      onOperationalOutcome: (outcome) => {
+        if (outcome === 'success') this.reconnectAttempt = 0;
+        opts.onOperationalOutcome?.(outcome, 'reconnect');
+      },
       idleDelayMs: opts.longPollIdleDelayMs,
     });
   }
 
+  /**
+   * Loads the durable cursor and starts the reconnect loop. Resolves without
+   * waiting for the server: {@link ConnectionManagerOptions.onStateChange}
+   * reports `open`, and {@link ConnectionManagerOptions.onHalted} a halt.
+   */
   async start(): Promise<void> {
-    if (this.terminalError) throw this.terminalError;
+    if (this.started) return;
     this.cursor = await this.opts.cursorStore.load(this.opts.serverUrl, this.opts.deviceId);
     this.started = true;
-    this.opts.onStateChange?.('connecting');
+    void this.run();
+  }
+
+  /**
+   * The one reconnect loop. Each pass handshakes with a lone `conn.hello`,
+   * then serves an open session until it ends, then backs off with
+   * `fleetJitter('reconnect')` before the next handshake.
+   */
+  private async run(): Promise<void> {
+    const signal = this.lifetime.signal;
+    while (!this.isEnded()) {
+      this.setState('connecting');
+      const hello = createConnectionHelloEnvelope(this.opts, () => this.cursor);
+      const answer = await this.longPoll.postBatch([hello], signal);
+      if (this.isEnded()) return;
+      if (answer !== undefined && (answer.rejected ?? 0) > 0) {
+        console.error('[byok/client] the server rejected this device\'s conn.hello; the daemon halts (re-pair, or check product and protocol version)');
+        this.halt('handshake_rejected');
+        return;
+      }
+      if (answer === undefined) {
+        this.opts.onOperationalOutcome?.('failure', 'reconnect');
+      } else {
+        await this.serveSession(answer);
+        if (this.isEnded()) return;
+      }
+      const baseMs = this.opts.longPollRetryDelayMs ?? 2000;
+      await sleep(this.fleetJitter.delay('reconnect', this.reconnectAttempt++, baseMs), signal);
+    }
+  }
+
+  /** One open session: from an accepted handshake until a route failure, stop, or halt ends it. */
+  private async serveSession(handshake: MessageBatchPostResult): Promise<void> {
+    const ended = new Promise<void>((resolve) => {
+      this.endSession = resolve;
+    });
+    this.sessionGeneration += 1;
+    // Capabilities first: work an `open` observer queues sees them already.
+    if (handshake.capabilities !== undefined) this.applyServerCapabilities(handshake.capabilities);
+    this.setState('open');
     this.longPoll.start();
-    this.startHello = createConnectionHelloEnvelope(this.opts, () => this.cursor);
-    this.outbox.unshift(this.startHello);
     void this.drainOutbox();
+    await ended;
+    this.endSession = undefined;
+    this.longPoll.stop();
+    // Long-poll has no persistent peer identity: once a route failed, the
+    // responder behind the next request need not support what this one
+    // advertised. Withdraw the advertisement with the session.
+    this.serverCapabilities = [];
+  }
+
+  /**
+   * A route failed: back to `connecting` synchronously, so nothing queued in
+   * the meantime is sent ahead of the next session's handshake.
+   */
+  private breakSession(): void {
+    const end = this.endSession;
+    if (end === undefined || this.isEnded()) return;
+    this.endSession = undefined;
+    this.setState('connecting');
+    this.serverCapabilities = [];
+    this.longPoll.stop();
+    end();
+  }
+
+  private applyServerCapabilities(capabilities: readonly string[]): void {
+    const added = capabilities.filter((flag) => !this.serverCapabilities.includes(flag));
+    this.serverCapabilities = [...capabilities];
+    if (added.length > 0) this.opts.onCapabilitiesAdvertised?.(added);
+  }
+
+  private setState(state: ConnectionState): void {
+    if (this.state === state) return;
+    this.state = state;
+    this.opts.onStateChange?.(state);
+  }
+
+  private isEnded(): boolean {
+    return this.stopped || this.haltReason !== undefined;
   }
 
   /**
@@ -249,7 +343,7 @@ export class ConnectionManager {
 
   /** Publish a fresh local configuration snapshot while this daemon is running. */
   refreshHello(): void {
-    if (!this.started || this.stopped || this.revoked || this.terminalError) return;
+    if (!this.started || this.isEnded()) return;
     this.send(createConnectionHelloEnvelope(this.opts, () => this.cursor));
   }
 
@@ -265,35 +359,46 @@ export class ConnectionManager {
    * (more may still be queued, or the next chunk still needs sending), on
    * failure that SAME chunk is unshifted back (order-preserving, same
    * Envelope objects/ids — never rebuilt, so a retry is exactly the resend
-   * Wave 1's server-side dedup expects) and retried after a short backoff,
-   * Re-entrancy is guarded by `draining`: a call arriving while a drain is
-   * already in progress just returns — the in-progress loop's own
-   * `while (this.outbox.length > 0)` check picks up anything newly pushed.
+   * Wave 1's server-side dedup expects). A route failure ends the session —
+   * the reconnect loop handshakes again and the next open session resumes
+   * the drain; a local durable-disposition failure is retried within the
+   * session after a short backoff.
+   * Runs only while the session is open, so it never sends ahead of the
+   * session's `conn.hello`. Re-entrancy is guarded by `draining`: a call
+   * arriving while a drain is already in progress just returns — the
+   * in-progress loop's own `while (this.outbox.length > 0)` check picks up
+   * anything newly pushed.
    */
   private async drainOutbox(): Promise<void> {
-    if (!this.started || this.draining) return;
+    if (this.state !== 'open' || this.isEnded() || this.draining) return;
     this.draining = true;
     // Frozen v1 has no rejected ids. A finite FIFO therefore replays an
     // immutable rejected segment by halves; accepted replays are server-dedup
     // success and a rejected singleton reaches bounded quarantine. A missing
     // response returns the same current segment plus untouched siblings for
     // the ordinary backoff path below. At most 2n - 1 POSTs occur per batch.
-    const isolateRejectedBatch = async (batch: readonly Envelope[]): Promise<Envelope[] | undefined> => {
+    type Retained = { readonly envelopes: Envelope[]; readonly cause: 'route' | 'local' };
+    const isolateRejectedBatch = async (batch: readonly Envelope[]): Promise<Retained | undefined> => {
       const pending: Envelope[][] = [[...batch]];
       while (pending.length > 0) {
-        if (this.stopped || this.revoked) return pending.flat();
+        if (this.isEnded()) return { envelopes: pending.flat(), cause: 'route' };
 
         const segment = pending.shift()!;
         try {
           this.opts.beforeOutboundPost?.(segment);
           const result = await this.longPoll.postBatch(segment);
-          if (result === undefined) return [...segment, ...pending.flat()];
-          this.noteStartHelloAnswered(segment);
+          if (result === undefined) return { envelopes: [...segment, ...pending.flat()], cause: 'route' };
+          if (result.capabilities !== undefined) this.applyServerCapabilities(result.capabilities);
           if ((result.rejected ?? 0) === 0) {
             await this.opts.onOutboundAccepted?.(segment);
             continue;
           }
           if (segment.length === 1) {
+            if (segment[0]!.type === 'conn.hello') {
+              // A refreshed snapshot is a handshake like any other.
+              this.halt('handshake_rejected');
+              return undefined;
+            }
             await this.opts.onOutboundRejected?.(segment[0]!);
             this.quarantineRejectedOutbound(segment[0]!, 'inbound_rejected');
             continue;
@@ -302,7 +407,7 @@ export class ConnectionManager {
           // A committed cloud receipt with a lost local confirmation is still
           // pending locally. Retry the SAME bytes; never drop them in finally.
           console.error('[byok/client] outbound durable disposition failed; retaining exact batch', error);
-          return [...segment, ...pending.flat()];
+          return { envelopes: [...segment, ...pending.flat()], cause: 'local' };
         }
 
         const midpoint = Math.floor(segment.length / 2);
@@ -312,13 +417,10 @@ export class ConnectionManager {
     };
     try {
       while (this.outbox.length > 0) {
-        if (this.stopped || this.revoked) return;
+        if (this.state !== 'open' || this.isEnded()) return;
 
-        // The start hello travels alone: settle waits for its answer, so it
-        // must not share a batch whose response waits on work queued behind it
-        // (a recovered terminal replayed before start, for example).
-        const helloAlone = this.outbox[0] === this.startHello && !this.startHelloAnswered;
-        const batch = this.outbox.splice(0, helloAlone ? 1 : MAX_MESSAGES_PER_BATCH);
+        const generation = this.sessionGeneration;
+        const batch = this.outbox.splice(0, MAX_MESSAGES_PER_BATCH);
         // Finding F5(b): tracked for the DURATION of the `postBatch` await —
         // `batch` has already left `this.outbox` (spliced out above) but
         // isn't confirmed delivered yet, so a plain `this.outbox.length`
@@ -326,13 +428,14 @@ export class ConnectionManager {
         // a stalled/hung `postBatch` call means: neither queued nor
         // delivered, just stuck). See `outboxLength`'s own doc comment.
         this.inFlightBatchSize = batch.length;
-        let retrySegments: Envelope[] | undefined;
+        let retained: Retained | undefined;
         try {
-          retrySegments = await isolateRejectedBatch(batch);
+          retained = await isolateRejectedBatch(batch);
         } finally {
           this.inFlightBatchSize = 0;
         }
-        if (retrySegments === undefined) {
+        if (retained === undefined) {
+          if (this.isEnded()) return;
           this.uploadRetryAttempt = 0;
           this.opts.onOperationalOutcome?.('success', 'upload');
           continue;
@@ -340,15 +443,22 @@ export class ConnectionManager {
 
         this.opts.onOperationalOutcome?.('failure', 'upload');
 
-        this.outbox.unshift(...retrySegments); // retry, preserving order — same objects, same ids (finding F1)
-        // Finding P3: a revoked device can never recover without a fresh
-        // pair() — retrying (and thus scheduling another backoff timer)
-        // would spin forever and keep the process alive for no reason.
-        // `postBatch`'s own DeviceRevokedError handling has already called
-        // `enterRevoked()` (synchronously, before `postBatch` resolves) by
-        // the time `ok` is `false` for that reason, so this check catches
-        // it on the very next iteration rather than sleeping first.
-        if (this.stopped || this.revoked) return;
+        this.outbox.unshift(...retained.envelopes); // retry, preserving order — same objects, same ids (finding F1)
+        // Finding P3: a halted session (a revoked device, say) can never
+        // recover without operator action — retrying would spin forever and
+        // keep the process alive for no reason. `postBatch`'s own
+        // DeviceRevokedError handling has already halted the session
+        // (synchronously, before `postBatch` resolves), so this check catches
+        // it before any backoff is scheduled.
+        if (this.isEnded()) return;
+        if (retained.cause === 'route') {
+          // A request of an earlier session failed after a newer one opened:
+          // that session's handshake has already gone first, so retry now.
+          if (generation !== this.sessionGeneration) continue;
+          // The next session's handshake goes first, then the drain resumes.
+          this.breakSession();
+          return;
+        }
         const baseMs = this.opts.longPollRetryDelayMs ?? 2000;
         await this.drainRetryDelay(this.fleetJitter.delay('upload', this.uploadRetryAttempt++, baseMs));
       }
@@ -358,11 +468,11 @@ export class ConnectionManager {
   }
 
   /**
-   * Finding P3: backoff delay for `drainOutbox`'s long-poll retry loop.
+   * Finding P3: backoff delay for `drainOutbox`'s local-disposition retry.
    * Unlike a plain `setTimeout`-based wait, this is (a) cancellable —
-   * `enterRevoked()` calls `cancelPendingDrainRetry()` to unblock an
+   * `halt()` and `stop()` call `cancelPendingDrainRetry()` to unblock an
    * in-flight wait immediately instead of leaving `drainOutbox` parked here
-   * for up to the rest of the delay before it next checks `this.revoked` —
+   * for up to the rest of the delay before it next checks the session —
    * and (b) unref'd, so the timer never keeps the Node process alive by
    * itself while nothing else (such as the live long-poll GET) legitimately is.
    */
@@ -382,54 +492,27 @@ export class ConnectionManager {
   }
 
   /**
-   * The capabilities the latest successful `GET /byok/events` response
-   * advertised. Empty before a successful response and after a failed one.
+   * The capabilities the current session's server advertised — on the
+   * handshake answer or a poll response. Empty before either and after the
+   * session ends.
    */
   getServerCapabilities(): readonly string[] {
     return this.serverCapabilities;
   }
 
-  getTerminalError(): ReplayCursorTooOldError | undefined {
-    return this.terminalError;
+  /** True while the server has accepted this session's `conn.hello` and no route has failed since. */
+  isOpen(): boolean {
+    return this.state === 'open' && !this.isEnded();
   }
 
-  isConnected(): boolean {
-    return this.connected;
+  /** Why the session ended for good, if it did. */
+  getHaltReason(): ConnectionHaltReason | undefined {
+    return this.haltReason;
   }
 
-  isRevoked(): boolean {
-    return this.revoked;
-  }
-
-  /**
-   * Resolves once the start `conn.hello` has been answered and a successful
-   * long-poll response has established the authenticated connection with the
-   * server's capabilities. That response answers the transport's no-hold
-   * settle poll, so an idle device settles in about one round trip rather
-   * than one full server hold.
-   *
-   * Rejects with {@link DeviceRevokedError} — instead of hanging until
-   * `timeoutMs` — if the device turns out to be revoked while settling (or
-   * already was): a cold `daemon.start()` against an already-revoked device
-   * must fail fast, not surface a generic timeout (protocol §6.3).
-   */
-  waitForConnection(timeoutMs = 10_000): Promise<void> {
-    if (this.connected) return Promise.resolve();
-    if (this.terminalError) return Promise.reject(this.terminalError);
-    if (this.revoked) return Promise.reject(new DeviceRevokedError());
-    return new Promise((resolve, reject) => {
-      let settle: (err?: unknown) => void = () => {};
-      const timer = setTimeout(() => {
-        this.settledWaiters = this.settledWaiters.filter((w) => w !== settle);
-        reject(new Error('Timed out waiting for the long-poll connection to settle'));
-      }, timeoutMs);
-      settle = (err?: unknown) => {
-        clearTimeout(timer);
-        if (err) reject(err);
-        else resolve();
-      };
-      this.settledWaiters.push(settle);
-    });
+  /** The device was found revoked outside this session's own requests (proactive token renewal). */
+  noteDeviceRevoked(): void {
+    this.halt('device_revoked');
   }
 
   /**
@@ -469,9 +552,10 @@ export class ConnectionManager {
     // server last advertised no longer applies to anything (there's nothing
     // left to send to). See `serverCapabilities`'s own doc comment.
     this.serverCapabilities = [];
+    this.lifetime.abort();
     this.longPoll.stop();
-    this.connected = false;
-    this.opts.onStateChange?.('closed');
+    this.cancelPendingDrainRetry?.();
+    this.endSession?.();
     await this.processingChain;
     await this.pendingCursorSave;
   }
@@ -526,7 +610,7 @@ export class ConnectionManager {
     return new Promise((resolve) => {
       const deadline = Date.now() + timeoutMs;
       const poll = (): void => {
-        if (this.outboxLength() === 0 || this.stopped || this.revoked || Date.now() >= deadline) {
+        if (this.outboxLength() === 0 || this.isEnded() || Date.now() >= deadline) {
           resolve();
           return;
         }
@@ -682,64 +766,32 @@ export class ConnectionManager {
     );
   }
 
-  private notifySettled(err?: unknown): void {
-    for (const waiter of this.settledWaiters.splice(0)) waiter(err);
-  }
-
-  /** Any server answer counts (accepted, or isolated as rejected): the hello was processed. */
-  private noteStartHelloAnswered(segment: readonly Envelope[]): void {
-    if (this.startHelloAnswered || this.startHello === undefined || !segment.includes(this.startHello)) return;
-    this.startHelloAnswered = true;
-    this.noteConnected();
-  }
-
-  private noteConnected(): void {
-    if (!this.startHelloAnswered || !this.capabilitiesCurrent) return;
-    if (this.connected || this.stopped || this.revoked || this.terminalError) return;
-    this.connected = true;
-    this.opts.onStateChange?.('open');
-    this.notifySettled();
-  }
-
-  private noteDisconnected(): void {
-    if (!this.connected || this.stopped || this.revoked || this.terminalError) return;
-    this.connected = false;
-    this.opts.onStateChange?.('connecting');
-  }
-
-  private enterReplayCursorTooOld(error: ReplayCursorTooOldError): void {
-    if (this.terminalError) return;
-    this.terminalError = error;
-    this.stopped = true;
+  /**
+   * Ends the session for good: stops the loop, the poll and the drain, then
+   * reports the reason once. The outbox keeps whatever it held, so
+   * `outboxLength()` stays an honest count of what never left.
+   */
+  private halt(reason: ConnectionHaltReason): void {
+    if (this.isEnded()) return;
+    this.haltReason = reason;
     this.serverCapabilities = [];
+    this.lifetime.abort();
     this.longPoll.stop();
-    this.connected = false;
     this.cancelPendingDrainRetry?.();
-    this.notifySettled(error);
-    this.opts.onStateChange?.('closed');
-    this.opts.onTerminalError?.(error);
+    this.endSession?.();
+    this.opts.onHalted?.(reason);
   }
+}
 
-  private enterRevoked(): void {
-    if (this.revoked) return;
-    this.revoked = true;
-    this.serverCapabilities = [];
-    this.longPoll.stop();
-    this.connected = false;
-    // Finding P3: the outbox drain must stop too, not just the receive
-    // side — otherwise a queued send keeps retrying (and re-arming a
-    // backoff timer) forever, since a revoked device can never recover
-    // without a fresh pair(). `drainOutbox`'s own `this.revoked` check
-    // (now true) stops it from scheduling another retry, but if it's
-    // ALREADY parked inside `drainRetryDelay` from a previous cycle,
-    // cancel that wait immediately rather than leaving it queued for up to
-    // the rest of the delay.
-    this.cancelPendingDrainRetry?.();
-    this.opts.onStateChange?.('revoked');
-    // Unblock a cold start()'s pending waitForConnection() immediately with
-    // the typed error instead of leaving it to time out. A
-    // no-op if the connection already settled earlier (settledWaiters empty)
-    // — e.g. revocation discovered while already connected/running.
-    this.notifySettled(new DeviceRevokedError());
-  }
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const finish = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    signal.addEventListener('abort', finish, { once: true });
+  });
 }

@@ -6,7 +6,7 @@ import { connectControlClient } from '../control-client';
 import { resolveStoreDir } from '../config';
 import { formatLiveStatusLines, formatStatusLines, type StatusView } from '../format';
 import { defaultRuntimeAdapters, probeRuntimes } from '../runtime-probe';
-import { deriveTasksFromEvents, lastConnectionState, tallyTaskStates } from '../tasks-view';
+import { deriveTasksFromEvents, lastLifecycle, tallyTaskStates } from '../tasks-view';
 
 export interface StatusDeps {
   log?: (line: string) => void;
@@ -27,7 +27,7 @@ export interface StatusDeps {
  * M4 Phase 2: after the persisted-state view above, this ALSO tries the
  * control socket (see `control-client.ts`) — if a `byok-agent start` (or
  * the installed service) is actually running right now, its live pid/
- * uptime/transport/active-tasks are appended, clearly marked `live-`; if
+ * uptime/lifecycle/active-tasks are appended, clearly marked `live-`; if
  * not reachable, one line says so and the persisted view above stands on
  * its own, exactly as before this feature existed.
  */
@@ -52,7 +52,7 @@ export async function runStatusCommand(config: DaemonConfig, deps: StatusDeps = 
     branding: config.branding,
     paired: record !== undefined,
     deviceId: record?.deviceId,
-    connection: lastConnectionState(events),
+    lifecycle: lastLifecycle(events),
     runtimes,
     taskCounts: tallyTaskStates(tasks),
     auditLogPath: auditLogPath(storeDir),

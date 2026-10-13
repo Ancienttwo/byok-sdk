@@ -15,6 +15,7 @@ import { runTasksFollowCommand } from '../bin/commands/tasks';
 import { runUnpairCommand } from '../bin/commands/unpair';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { waitForDaemonOpen } from './fixtures/lifecycle-barrier';
 import type { McpToolsetReloadReceipt } from '../types';
 
 async function tmpDir(prefix: string): Promise<string> {
@@ -65,6 +66,8 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     const built = createDaemonWithAdapters(config, [adapter], overrides);
     await built.pair('pairing-code');
     await built.start();
+    // #391: start() no longer waits for the server; these tests drive an open session.
+    await waitForDaemonOpen(built);
     return { daemon: built, config, storeDir };
   }
 
@@ -88,7 +91,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     if (!enrollment.ok) throw new Error('expected enrollment control endpoint');
     const before = await enrollment.client.request<ControlStatusResult>('status');
     expect(before.paired).toBe(false);
-    expect(before.transport).toBe('closed');
+    expect(before.lifecycle).toEqual({ phase: 'awaiting-enrollment' });
     await expect(enrollment.client.request('toolsets.reload', {})).rejects.toMatchObject({ code: 'unknown_method' });
     await expect(enrollment.client.request('enrollment.pair', { pairingCode: '', extra: true })).rejects.toMatchObject({
       code: 'bad_request',
@@ -105,7 +108,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
       try {
         const status = await conn.client.request<ControlStatusResult>('status');
         expect(status.paired).toBe(true);
-        expect(status.transport).toBe('open');
+        expect(status.lifecycle).toEqual({ phase: 'running', connection: 'open' });
       } finally {
         conn.client.close();
       }
@@ -115,7 +118,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     expect(projection?.deviceId).toBe(receipt.deviceId);
   }, 10000);
 
-  it('status reports live pid/uptime/transport/activeTasks/runtimeIds', async () => {
+  it('status reports live pid/uptime/lifecycle/activeTasks/runtimeIds', async () => {
     const adapter = new StubRuntimeAdapter('pi');
     const built = await pairedAndStarted('acme-ctl-status', adapter);
     daemon = built.daemon;
@@ -129,7 +132,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     expect(status.uptimeMs).toBeGreaterThanOrEqual(0);
     expect(status.paired).toBe(true);
     expect(typeof status.deviceId).toBe('string');
-    expect(status.transport).toBe('open');
+    expect(status.lifecycle).toEqual({ phase: 'running', connection: 'open' });
     expect(status.activeTasks).toEqual([]);
     expect(status.runtimeIds).toEqual(['pi']);
     // M4 Phase 4 (part B.3): queue watermarks, empty with no active tasks.

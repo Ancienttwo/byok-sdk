@@ -9,6 +9,7 @@ import { CursorStore } from '../daemon/cursor-store';
 import { LongPollClient } from '../daemon/long-poll-transport';
 import { DeviceStore } from '../daemon/store';
 import { TestServer } from './fixtures/test-server';
+import { waitForOpen } from './fixtures/lifecycle-barrier';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -65,7 +66,7 @@ describe('a revoked device stops draining its outbox instead of retrying forever
     });
 
     await connection.start();
-    await connection.waitForConnection();
+    await waitForOpen(connection);
     expect(connection.getServerCapabilities()).toEqual(['approval_resolved', 'mailbox-read-ahead']);
 
     // Revoke server-side, THEN queue outbound envelopes — the drain's very
@@ -75,7 +76,7 @@ describe('a revoked device stops draining its outbox instead of retrying forever
     connection.send(createEnvelope('task.claim', { deviceId: record.deviceId }, { taskId: 'task-revoked-1' }));
     connection.send(createEnvelope('task.claim', { deviceId: record.deviceId }, { taskId: 'task-revoked-2' }));
 
-    await vi.waitFor(() => expect(connection?.isRevoked()).toBe(true), { timeout: 2000 });
+    await vi.waitFor(() => expect(connection?.getHaltReason()).toBe('device_revoked'), { timeout: 2000 });
     await vi.waitFor(() => expect(postBatchSpy.mock.calls.length).toBeGreaterThanOrEqual(1));
     expect(connection.getServerCapabilities()).toEqual([]);
 

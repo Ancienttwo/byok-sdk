@@ -5,6 +5,7 @@ import {
   handleInboundEnvelope,
   tenantStoresFor,
 } from '..';
+import { CLOUD_PROTOCOL_CAPABILITIES } from '../handlers/events';
 import { TENANT_A, createHarness, type CloudHarness } from './support/harness';
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'profile-r1' } as const;
@@ -198,7 +199,7 @@ describe('hosted Agent-home contract', () => {
       body: JSON.stringify({ messages: [hello] }),
     });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ accepted: 1 });
+    expect(await response.json()).toEqual({ accepted: 1, capabilities: [...CLOUD_PROTOCOL_CAPABILITIES] });
     expect((await harness.stores.devices.get(TENANT_A, device.deviceId))?.capabilities).toEqual([
       AGENT_HOME_CONTRACT_CAPABILITY,
     ]);

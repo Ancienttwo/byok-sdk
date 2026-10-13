@@ -573,7 +573,11 @@ console.log('[release-pack] recurring public imports, strict submission and inde
     });
     const helloResponse = await publishAgentMessage(embedded.hono, embeddedAuthorization, helloEnvelope);
     assert.equal(helloResponse.status, 200);
-    assert.deepEqual(await helloResponse.json(), { accepted: 1 });
+    // An accepted hello's answer carries the poll's capability advertisement (#391 Phase 2).
+    const helloAnswer = await helloResponse.json();
+    assert.deepEqual(Object.keys(helloAnswer).sort(), ['accepted', 'capabilities']);
+    assert.equal(helloAnswer.accepted, 1);
+    assert.ok(helloAnswer.capabilities.includes('agent-message-egress'), 'the handshake answer advertises agent-message-egress');
     const embeddedSubmit = (taskId) => embedded.recurring.submit(recurringInput(taskId, embeddedPaired.deviceId, `resolve embedded ${taskId}`, agentRef));
 
     // Accepted, end-to-end on the embedded surface.

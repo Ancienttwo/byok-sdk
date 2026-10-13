@@ -1,12 +1,11 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, EVENTS_POLL_NO_HOLD_PARAM } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ConnectionManager } from '../daemon/connection-manager';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { startRealServer, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
+import { OPEN_LIFECYCLE, waitForDaemonOpen } from './fixtures/lifecycle-barrier';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -30,34 +29,44 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
     await real.close();
   });
 
-  /** Records every `GET /byok/events` URL; `respond` may answer one in place of the server. */
-  function recordEventPolls(respond?: (pollIndex: number) => Response | undefined): URL[] {
+  /** Records every `GET /byok/events` URL and every `POST /byok/messages` batch; `respond` may answer a poll in place of the server. */
+  function recordTraffic(respond?: (pollIndex: number) => Response | undefined): {
+    polls: URL[];
+    posts: Array<{ types: string[] }>;
+    failedPolls: () => number;
+  } {
     const nativeFetch = globalThis.fetch;
     const polls: URL[] = [];
-    vi.stubGlobal('fetch', ((input: string | URL | Request, init?: RequestInit) => {
+    const posts: Array<{ types: string[] }> = [];
+    let failed = 0;
+    vi.stubGlobal('fetch', (async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname === '/byok/messages' && typeof init?.body === 'string') {
+        const body = JSON.parse(init.body) as { messages: Array<{ type: string }> };
+        posts.push({ types: body.messages.map((message) => message.type) });
+      }
       if (url.pathname === '/byok/events') {
         polls.push(url);
         const injected = respond?.(polls.length - 1);
-        if (injected) return Promise.resolve(injected);
+        if (injected) return injected;
+        const response = await nativeFetch(input, init);
+        if (!response.ok) failed += 1;
+        return response;
       }
       return nativeFetch(input, init);
     }) as typeof fetch);
-    return polls;
+    return { polls, posts, failedPolls: () => failed };
   }
 
-  const isSettlePoll = (url: URL) => url.searchParams.get(EVENTS_POLL_NO_HOLD_PARAM) === '1';
-
-  it('#384: an idle cold start settles under the DEFAULT long-poll hold and stays connected', async () => {
+  it('#391: an idle cold start opens under the DEFAULT long-poll hold and stays open past it', async () => {
     // No `longPollHoldMs` and no daemon long-poll overrides: the server holds
-    // an empty poll for its ~50s default, five times the 10s settle timeout.
-    // Only the no-hold settle poll can settle this idle device in time.
+    // an empty poll for its ~50s default. Readiness is the accepted handshake
+    // `conn.hello`, so it does not wait for a poll at all.
     real = await startRealServer({ productId: 'test-product' });
     const workspaceRoot = await tmpDir('byok-coldstart-workspace-');
     const storeDir = await tmpDir('byok-coldstart-store-');
     const adapter = new StubRuntimeAdapter();
-    const polls = recordEventPolls();
-    const capabilityReads = vi.spyOn(ConnectionManager.prototype, 'getServerCapabilities');
+    const traffic = recordTraffic();
     daemon = createDaemonWithAdapters(
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
@@ -66,61 +75,66 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
 
     const startedAt = Date.now();
     await daemon.start();
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
+    await waitForDaemonOpen(daemon, 5_000);
     expect(Date.now() - startedAt).toBeLessThan(5_000);
-    expect(daemon.status().connected).toBe(true);
-    // start()'s capability-gated reliable-egress retry is its last read; it
-    // saw the server's advertisement, not the empty pre-settle list.
-    expect(capabilityReads.mock.results.at(-1)?.value).toContain(AGENT_EGRESS_RELIABLE_ACK_CAPABILITY);
-    expect(isSettlePoll(polls[0]!)).toBe(true);
+    expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE);
+    // The session opened with a lone handshake hello.
+    expect(traffic.posts[0]).toEqual({ types: ['conn.hello'] });
 
-    // The follow-up poll is an ordinary held one, and holding it does not
-    // drop the settled connection on either side.
-    await vi.waitFor(() => expect(polls.length).toBeGreaterThanOrEqual(2), { timeout: 2_000 });
-    expect(polls.slice(1).some(isSettlePoll)).toBe(false);
-    await new Promise((resolve) => setTimeout(resolve, 1_000));
-    expect(daemon.status().connected).toBe(true);
-    expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
-    expect(polls.length).toBe(2);
-
-    // Work enqueued during that held poll is still delivered by it.
+    // Work dispatched after open is delivered promptly by the held poll.
+    const dispatchedAt = Date.now();
     const handle = await real.byok.dispatch({ instruction: 'delivered by the held poll' });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
-    expect(polls.slice(1).some(isSettlePoll)).toBe(false);
-  }, 15_000);
+    expect(Date.now() - dispatchedAt).toBeLessThan(1_500);
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await handle.result();
 
-  it('#384: re-arms the no-hold settle poll after a failed poll under the default hold', async () => {
-    real = await startRealServer({ productId: 'test-product' });
+    // Past one full default hold: still open on both sides, and no poll failed.
+    await new Promise((resolve) => setTimeout(resolve, 56_000));
+    expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE);
+    expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
+    expect(traffic.failedPolls()).toBe(0);
+    expect(traffic.posts.filter((post) => post.types.includes('conn.hello'))).toHaveLength(1);
+  }, 75_000);
+
+  it('#391: every reconnect after a failed route handshakes with a fresh conn.hello before anything else', async () => {
+    real = await startRealServer({ productId: 'test-product', longPollHoldMs: 200 });
     const workspaceRoot = await tmpDir('byok-resettle-workspace-');
     const storeDir = await tmpDir('byok-resettle-store-');
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    // The first held poll fails; the transport withdraws capabilities and reconnects.
-    const polls = recordEventPolls((index) => (index === 1 ? new Response('unavailable', { status: 503 }) : undefined));
-    const states: string[] = [];
+    // The second poll fails; the session drops back to connecting and reconnects.
+    const traffic = recordTraffic((index) => (index === 1 ? new Response('unavailable', { status: 503 }) : undefined));
+    const lifecycles: unknown[] = [];
     daemon = createDaemonWithAdapters(
       { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter()],
       { longPoll: { retryDelayMs: 20, idleDelayMs: 20 } },
     );
     daemon.subscribe((event) => {
-      if (event.kind === 'connection') states.push(event.state);
+      if (event.kind === 'lifecycle') lifecycles.push(event.lifecycle);
     });
     await daemon.pair((await real.createPairingCode()).code);
     await daemon.start();
 
-    await vi.waitFor(() => expect(polls.length).toBeGreaterThanOrEqual(3), { timeout: 2_000 });
-    expect(polls.slice(0, 3).map(isSettlePoll)).toEqual([true, false, true]);
-    await vi.waitFor(() => expect(states).toEqual(['connecting', 'open', 'connecting', 'open']), { timeout: 2_000 });
-    expect(daemon.status().connected).toBe(true);
+    const connecting = { phase: 'running', connection: 'connecting' };
+    await vi.waitFor(() => expect(lifecycles).toEqual([connecting, OPEN_LIFECYCLE, connecting, OPEN_LIFECYCLE]), { timeout: 5_000 });
+    expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE);
+    // Two sessions, each opened by a lone hello: the first POST of each.
+    const hellos = traffic.posts.filter((post) => post.types.includes('conn.hello'));
+    expect(hellos).toEqual([{ types: ['conn.hello'] }, { types: ['conn.hello'] }]);
+    expect(traffic.posts[0]).toEqual({ types: ['conn.hello'] });
   }, 15_000);
 
-  it('#384: settles only after the start conn.hello is answered, so Agent dispatch is admitted at once', async () => {
+  it('#391: opens only once the conn.hello is accepted, so Agent dispatch is admitted at once', async () => {
     real = await startRealServer({ productId: 'test-product' });
     const workspaceRoot = await tmpDir('byok-hello-gate-workspace-');
     const storeDir = await tmpDir('byok-hello-gate-store-');
     const hostStorageRoot = await tmpDir('byok-hello-gate-home-');
     const nativeFetch = globalThis.fetch;
     let helloAnsweredAt: number | undefined;
-    // Hold the first POST (the start conn.hello) well past the no-hold settle poll.
+    // Hold the first POST (the handshake conn.hello) for a while.
     vi.stubGlobal('fetch', (async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
       if (url.pathname !== '/byok/messages' || helloAnsweredAt !== undefined) return nativeFetch(input, init);
@@ -144,13 +158,16 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
     const record = await daemon.pair((await real.createPairingCode()).code);
 
     await daemon.start();
-    const startedAt = Date.now();
+    // start() does not wait for the server (#391).
+    expect(helloAnsweredAt).toBeUndefined();
+    await waitForDaemonOpen(daemon, 5_000);
+    const openedAt = Date.now();
     expect(helloAnsweredAt).toBeDefined();
-    expect(startedAt).toBeGreaterThanOrEqual(helloAnsweredAt!);
+    expect(openedAt).toBeGreaterThanOrEqual(helloAnsweredAt!);
     // No retry loop: the server already holds the device's Agent capabilities.
     await expect(real.byok.dispatch({
       deviceId: record.deviceId,
-      instruction: 'admitted right after start',
+      instruction: 'admitted right after open',
       agentRef: { agentId: 'agent-hello-gate', profileRevision: 'profile-1' },
     })).resolves.toBeDefined();
   }, 15_000);
@@ -213,7 +230,8 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
     await daemon.start();
 
     // The daemon settled through the long-poll path.
-    expect(daemon.status().connected).toBe(true);
+    await waitForDaemonOpen(daemon);
+    expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE);
 
     // Wait until the server observes the first events poll before dispatching.
     await vi.waitFor(async () => {
@@ -227,7 +245,7 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
     // (there is no other path for it to have arrived).
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
-    expect(daemon.status().connected).toBe(true); // still true throughout — WS never came up
+    expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE); // still true throughout — WS never came up
 
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const session = adapter.sessions[0]!;
@@ -238,7 +256,7 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
     expect(result.state).toBe('Complete');
     expect(result.summary).toBe('working over long-poll');
 
-    expect(daemon.status().connected).toBe(true);
+    expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE);
   }, 15000);
 
   it('publishes agent-home-contract over long-poll before Agent dispatch admission', async () => {

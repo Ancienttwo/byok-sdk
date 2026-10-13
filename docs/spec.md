@@ -395,6 +395,33 @@ Hosts consume the aggregate; they must not re-join `listDevices()` and
 only from U4a `localAgentRelease`; runtime version/auth fields are emitted only
 when a real local probe supplied them, and missing facts stay omitted.
 
+## Local daemon lifecycle
+
+`daemon.start()` resolves once local startup is done; it never waits for the
+network. Whether the server accepted this device is reported through one
+lifecycle model, `status().lifecycle` and the `{kind:'lifecycle'}` event:
+`stopped`, `awaiting-enrollment`, `running` with `connection` `connecting` or
+`open`, or `halted` with a reason from one closed set (`DaemonHaltReason`:
+`unpaired`, `re_pair_required`, `store_owned`, `device_revoked`,
+`handshake_rejected`, `replay_cursor_too_old`, `config_invalid`). `open` means
+the server accepted this session's `conn.hello` (protocol §8.1). Network
+failures never fail `start()` or end the run: the daemon's one reconnect loop
+retries with deterministic fleet jitter. A condition a restart cannot fix ends
+the run as `halted`, whenever it is found; `start()` throws `DaemonHaltError`
+for one it finds locally. `store_owned` and `config_invalid` are found before
+the process owns the store and are thrown only, never reported through
+`lifecycle`. Every other start failure is a crash: it is thrown as is and
+recorded as a `lifecycle` operational-health failure.
+
+`byok-agent start` maps the run's end to its exit code: 0 for a normal stop,
+78 for a halt, 1 for a crash. Under `--service` a halt exits 0, the one status
+launchd, systemd and WinSW all leave stopped; a crash still exits 1 and is
+restarted by the OS supervisor, which is the only crash retry. `byok-agent
+install` writes `--service` into the launchd plist, systemd unit and WinSW
+XML. The last `lifecycle` event is kept in `audit.jsonl` (also across
+rotation); offline `status`, `service-status` and the `doctor` `lifecycle`
+check read it, and a halted daemon fails that check with its remedy.
+
 ## Runtime operation authority
 
 ### Local runtime probe observation

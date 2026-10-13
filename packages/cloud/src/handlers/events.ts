@@ -1,9 +1,4 @@
-import {
-  EVENTS_POLL_NO_HOLD_PARAM,
-  isTaskOfferType,
-  MAILBOX_READ_AHEAD_CAPABILITY,
-  MAILBOX_READ_AHEAD_MAX_SEQS,
-} from '@byok-sdk/protocol';
+import { isTaskOfferType, MAILBOX_READ_AHEAD_CAPABILITY, MAILBOX_READ_AHEAD_MAX_SEQS } from '@byok-sdk/protocol';
 /**
  * `GET /byok/events?cursor=N` — the long-poll receive half (§8).
  *
@@ -24,10 +19,7 @@ import {
  *   so an idle daemon is not a busy-loop. The hold is a bounded re-read, not a
  *   registered waiter: a waiter map is exactly the cross-request state a
  *   stateless handler may not keep (S3.5 boxes 14-15), and a second cloud
- *   instance would not see it anyway. The daemon's settle poll (`noHold=1`,
- *   the first poll after each (re)connect) skips the hold: one read pass
- *   under the same rules, then an immediate answer carrying capabilities, so
- *   an idle device settles without waiting out a full hold.
+ *   instance would not see it anyway.
  * - **A lost cursor fails closed.** A cursor below the mailbox's retained
  *   window is answered `409 { error: 'cursor_too_old', recoverableFrom }`, the
  *   same body the reference server returns (`packages/server/src/http.ts:386`)
@@ -72,7 +64,7 @@ import { authenticateDevice, type DeviceRouteDeps } from './shared';
  *
  * Exact-list drift guard: `packages/cloud/src/__tests__/protocol-capabilities.test.ts`.
  */
-const CLOUD_PROTOCOL_CAPABILITIES = [
+export const CLOUD_PROTOCOL_CAPABILITIES = [
   'custom-harness',
   MAILBOX_READ_AHEAD_CAPABILITY,
   'result-document',
@@ -129,10 +121,6 @@ export function eventsHandler(deps: EventsRouteDeps) {
     if (!Number.isSafeInteger(afterSeq) || afterSeq < cursor || afterSeq - cursor > MAILBOX_READ_AHEAD_MAX_SEQS) {
       return c.json({ error: 'invalid read-ahead offset' }, 400);
     }
-    const noHoldRaw = c.req.query(EVENTS_POLL_NO_HOLD_PARAM);
-    if (noHoldRaw !== undefined && noHoldRaw !== '1') {
-      return c.json({ error: `invalid ${EVENTS_POLL_NO_HOLD_PARAM}` }, 400);
-    }
     const acked = await stores.mailbox.readCursor(device.deviceId);
     if (afterRaw !== undefined && afterSeq > acked.deliveredSeq) return c.json({ error: 'read offset exceeds delivered watermark' }, 409);
     if (cursor > acked.ackedSeq) {
@@ -146,7 +134,7 @@ export function eventsHandler(deps: EventsRouteDeps) {
       }
     }
 
-    const attempts = noHoldRaw === undefined ? Math.max(1, Math.ceil(deps.longPollHoldMs / deps.longPollIntervalMs)) : 1;
+    const attempts = Math.max(1, Math.ceil(deps.longPollHoldMs / deps.longPollIntervalMs));
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       let scanCursor = afterSeq;
       while (true) {

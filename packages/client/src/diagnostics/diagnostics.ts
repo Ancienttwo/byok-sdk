@@ -19,7 +19,10 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { DaemonConfig, RuntimeAdapter } from '../index';
+import { readLastLifecycleEvent } from '../bin/audit-log';
 import { connectControlClient } from '../bin/control-client';
+import { formatHaltRemedy, formatLifecycle } from '../bin/format';
+import { parseDaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { defaultRuntimeAdapters, probeRuntimes } from '../bin/runtime-probe';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import { JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from '../daemon/journal/sqlite-journal';
@@ -611,8 +614,9 @@ function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>): DiagnosticChe
     {
       id: 'control',
       status: snapshot.control.status === 'online' ? 'pass' : 'warn',
-      summary: snapshot.control.status === 'online' ? `online transport=${snapshot.control.transport}` : 'daemon offline',
+      summary: snapshot.control.status === 'online' ? 'online' : 'daemon offline',
     },
+    lifecycleCheck(snapshot.lifecycle),
     {
       id: 'health',
       status:
@@ -651,6 +655,16 @@ function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>): DiagnosticChe
   ];
 }
 
+/** Issue #394: a halted daemon fails this check, and the summary says what fixes it. */
+function lifecycleCheck(lifecycle: DiagnosticsSnapshot['lifecycle']): DiagnosticCheck {
+  if (lifecycle.status === 'unknown') return { id: 'lifecycle', status: 'warn', summary: 'unknown (no lifecycle event yet)' };
+  const summary = `${lifecycle.source} ${formatLifecycle(lifecycle.lifecycle)}`;
+  if (lifecycle.lifecycle.phase === 'halted') {
+    return { id: 'lifecycle', status: 'fail', summary: `${summary}; ${formatHaltRemedy(lifecycle.lifecycle.reason)}` };
+  }
+  return { id: 'lifecycle', status: 'pass', summary };
+}
+
 export async function collectDiagnostics(
   config: DaemonConfig,
   storeDir: string,
@@ -659,7 +673,7 @@ export async function collectDiagnostics(
   const resolvedStoreDir = path.resolve(storeDir);
   const adapters = options.adapters ?? defaultRuntimeAdapters(config.runtimeAllowlist);
   const connectControl = options.connectControl ?? connectControlClient;
-  const [device, probedRuntimes, health, journal, workspace, quarantine, controlConnection] = await Promise.all([
+  const [device, probedRuntimes, health, journal, workspace, quarantine, controlConnection, lastAudited] = await Promise.all([
     inspectDevice(resolvedStoreDir),
     probeRuntimes(adapters, { timeoutMs: options.runtimeProbeTimeoutMs }),
     inspectOperationalHealthFile(resolvedStoreDir),
@@ -667,6 +681,7 @@ export async function collectDiagnostics(
     inspectWorkspace(config.workspaceRoot),
     inspectQuarantine(resolvedStoreDir),
     connectControl({ storeDir: resolvedStoreDir, productId: config.productId }),
+    readLastLifecycleEvent(resolvedStoreDir).catch(() => undefined),
   ]);
   const runtimes: DiagnosticsSnapshot['runtimes'] = probedRuntimes.map((runtime) => ({
     idHash: stableIdentifierHash(runtime.id),
@@ -680,16 +695,17 @@ export async function collectDiagnostics(
   }));
 
   let control: DiagnosticsSnapshot['control'];
+  let liveLifecycle: ReturnType<typeof parseDaemonLifecycle>;
   if (!controlConnection.ok) {
     control = { status: 'offline', reason: 'daemon control socket unavailable' };
   } else {
     try {
       const live = await controlConnection.client.request<ControlStatusResult>('status');
+      liveLifecycle = parseDaemonLifecycle(live.lifecycle);
       control = {
         status: 'online',
         pid: live.pid,
         uptimeMs: live.uptimeMs,
-        transport: live.transport,
         activeTaskCount: live.activeTasks.length,
         pendingApprovalCount: live.approvalsPending,
         operationalHealth: live.operationalHealth,
@@ -701,6 +717,12 @@ export async function collectDiagnostics(
       controlConnection.client.close();
     }
   }
+
+  const lifecycle: DiagnosticsSnapshot['lifecycle'] = liveLifecycle !== undefined
+    ? { status: 'known', source: 'live', lifecycle: liveLifecycle }
+    : lastAudited !== undefined
+      ? { status: 'known', source: 'audit', lifecycle: lastAudited.lifecycle }
+      : { status: 'unknown' };
 
   const withoutChecks: Omit<DiagnosticsSnapshot, 'checks'> = {
     version: 1,
@@ -716,6 +738,7 @@ export async function collectDiagnostics(
     device,
     runtimes,
     control,
+    lifecycle,
     health,
     journal,
     workspace,

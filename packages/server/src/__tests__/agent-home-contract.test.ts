@@ -97,7 +97,9 @@ describe('agent-home-contract reference server', () => {
       body: JSON.stringify({ messages: [hello] }),
     });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ accepted: 1 });
+    // The accepted hello's answer carries the poll's capability advertisement (#391 Phase 2).
+    const answer = (await response.json()) as { accepted: number; capabilities?: string[] };
+    expect(answer).toEqual({ accepted: 1, capabilities: expect.arrayContaining(['agent-home-contract']) });
     await expect(
       started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'agent over long-poll', agentRef }),
     ).resolves.toMatchObject({ taskId: expect.any(String) });

@@ -13443,10 +13443,6 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
-        },
-        "noHold": {
-          "type": "number",
-          "const": 1
         }
       },
       "additionalProperties": false
@@ -27117,6 +27113,12 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [

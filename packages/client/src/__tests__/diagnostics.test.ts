@@ -8,6 +8,8 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DaemonConfig } from '../index';
 import type { ConnectControlResult, ControlClient } from '../bin/control-client';
+import { appendAuditEvent } from '../bin/audit-log';
+import { formatHaltRemedy } from '../bin/format';
 import {
   DoctorConfirmationRequiredError,
   DoctorDaemonRunningError,
@@ -62,7 +64,7 @@ function connected(): Promise<ConnectControlResult> {
       pid: 1,
       uptimeMs: 1,
       paired: false,
-      transport: 'open',
+      lifecycle: { phase: 'running', connection: 'open' },
       activeTasks: [],
       runtimeIds: [],
       queueWatermarks: [],
@@ -95,6 +97,27 @@ async function unusedLoopbackPort(): Promise<number> {
 }
 
 describe('diagnostics collector', () => {
+  it('#394: the lifecycle check warns when unknown, fails a halted daemon with its remedy, and prefers the live answer', async () => {
+    const dir = await tempDir();
+    const unknown = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(unknown.lifecycle).toEqual({ status: 'unknown' });
+    expect(unknown.checks.find((check) => check.id === 'lifecycle')?.status).toBe('warn');
+
+    const at = '2026-10-13T00:00:00.000Z';
+    await appendAuditEvent(dir, { kind: 'lifecycle', ts: at, lifecycle: { phase: 'halted', reason: 'device_revoked', at } });
+    const halted = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(halted.lifecycle).toEqual({ status: 'known', source: 'audit', lifecycle: { phase: 'halted', reason: 'device_revoked', at } });
+    expect(halted.checks.find((check) => check.id === 'lifecycle')).toEqual({
+      id: 'lifecycle',
+      status: 'fail',
+      summary: `audit phase=halted reason=device_revoked; ${formatHaltRemedy('device_revoked')}`,
+    });
+
+    const live = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: connected });
+    expect(live.lifecycle).toEqual({ status: 'known', source: 'live', lifecycle: { phase: 'running', connection: 'open' } });
+    expect(live.checks.find((check) => check.id === 'lifecycle')?.status).toBe('pass');
+  });
+
   it('reports a strict Agent daemon without workspaceRoot as not-configured, not missing (#319)', async () => {
     const dir = await tempDir();
     const { workspaceRoot: _unused, ...rest } = config(dir);

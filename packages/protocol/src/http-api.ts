@@ -197,23 +197,11 @@ export type BlobDownloadUrlResponse = z.infer<typeof BlobDownloadUrlResponseSche
 // at-least-once/cursor semantics (see docs/protocol.md "At-least-once delivery").
 // ---------------------------------------------------------------------------
 
-/**
- * Query parameter of the daemon's settle poll: the first `GET /byok/events`
- * after each (re)connect sends `noHold=1`. The server then makes exactly one
- * read pass under every ordinary rule (cursor validation, replay floor,
- * delivery recording) and answers at once with its `capabilities`, empty page
- * or not, instead of holding an empty poll. `1` is the only accepted value. A
- * server that predates the flag ignores it and holds as usual.
- */
-export const EVENTS_POLL_NO_HOLD_PARAM = 'noHold';
-
 export const EventsPollQuerySchema = z.object({
   /** Volatile navigation within the advertised read-ahead window; never acknowledges work. */
   afterSeq: z.number().int().nonnegative().optional(),
   /** Last reliably processed seq; the only acknowledgement. Omitted on the first poll. */
   cursor: z.number().int().nonnegative().optional(),
-  /** Settle poll: answer after one read pass instead of holding (see {@link EVENTS_POLL_NO_HOLD_PARAM}). */
-  [EVENTS_POLL_NO_HOLD_PARAM]: z.literal(1).optional(),
 });
 export type EventsPollQuery = z.infer<typeof EventsPollQuerySchema>;
 
@@ -261,10 +249,18 @@ export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
  * success even though the business mutation did not run a second time.
  * `rejected` is additive and omitted when zero, preserving frozen v1's
  * `{ accepted }` response shape.
+ *
+ * `capabilities` (additive) is the same server capability advertisement a
+ * `GET /byok/events` response carries. A server includes it when the batch
+ * carries `conn.hello`: the daemon's handshake is a lone `conn.hello` POST,
+ * so its answer carries readiness and capabilities in one round trip.
+ * Absence means "no update" — the daemon keeps the advertisement it already
+ * holds — never an empty list.
  */
 export const MessagesSendResponseSchema = z.object({
   accepted: z.number().int().nonnegative(),
   rejected: z.number().int().nonnegative().optional(),
+  capabilities: z.array(z.string()).optional(),
 });
 export type MessagesSendResponse = z.infer<typeof MessagesSendResponseSchema>;
 

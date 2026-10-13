@@ -8,7 +8,7 @@
  * daemon crashed between receiving an envelope and journaling it.
  */
 import { createMutableClock, isCoreConflictError, type CoreStores } from '@byok-sdk/core';
-import { decodeEnvelope, MAILBOX_READ_AHEAD_CAPABILITY, type EventsPollResponse } from '@byok-sdk/protocol';
+import { decodeEnvelope, type EventsPollResponse } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { createHmacTokenSigner } from '../auth/tokens';
 import { fullCapabilityDeclaration } from '../capabilities';
@@ -21,11 +21,8 @@ async function poll(
   harness: ReturnType<typeof createHarness>,
   authorization: { authorization: string },
   cursor?: number,
-  extra: Record<string, string> = {},
 ): Promise<EventsPollResponse> {
-  const params = new URLSearchParams(extra);
-  if (cursor !== undefined) params.set('cursor', String(cursor));
-  const query = params.size === 0 ? '' : `?${params}`;
+  const query = cursor === undefined ? '' : `?cursor=${cursor}`;
   const response = await harness.request(`/byok/events${query}`, { headers: authorization });
   expect(response.status).toBe(200);
   return (await response.json()) as EventsPollResponse;
@@ -209,74 +206,6 @@ describe('GET /byok/events cursor semantics', () => {
 
     expect(empty.events).toEqual([]);
     expect(elapsed).toBeGreaterThanOrEqual(80);
-  });
-
-  it('answers a noHold settle poll after one read pass, with capabilities, instead of holding', async () => {
-    const harness = createHarness({ longPollHoldMs: 5_000, longPollIntervalMs: 20 });
-    const device = await harness.pairDevice(TENANT_A);
-    const startedAt = Date.now();
-    const settle = await poll(harness, device.authorization, undefined, { noHold: '1' });
-    const elapsed = Date.now() - startedAt;
-
-    expect(settle.events).toEqual([]);
-    expect(settle.cursor).toBe(0);
-    expect(settle.capabilities).toEqual(expect.arrayContaining([MAILBOX_READ_AHEAD_CAPABILITY, 'result-document']));
-    expect(elapsed).toBeLessThan(1_000);
-  });
-
-  it('applies every ordinary read rule to a noHold settle poll', async () => {
-    const harness = createHarness({ eventsPageLimit: 1, longPollHoldMs: 5_000, longPollIntervalMs: 20 });
-    const device = await harness.pairDevice(TENANT_A);
-    const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    await harness.cloud.cancelTask(TENANT_A, offer.taskId, 'stop before lease');
-
-    // The cancelled offer fills a one-row page; the settle pass still scans past it.
-    const page = await poll(harness, device.authorization, undefined, { noHold: '1' });
-    expect(page.events).toHaveLength(1);
-    expect(page.events[0]).toMatchObject({ type: 'task.cancel', task_id: offer.taskId, seq: 2 });
-    expect(page.capabilities).toContain(MAILBOX_READ_AHEAD_CAPABILITY);
-    const cursor = await harness.core.mailbox.readCursor(TENANT_A, device.deviceId);
-    expect(cursor).toMatchObject({ ackedSeq: 0, deliveredSeq: 2 });
-
-    // The ack still rides the cursor, and a past-delivery cursor still fails closed.
-    expect((await poll(harness, device.authorization, 2, { noHold: '1' })).events).toEqual([]);
-    expect((await harness.core.mailbox.readCursor(TENANT_A, device.deviceId)).ackedSeq).toBe(2);
-    const ahead = await harness.json('/byok/events?cursor=3&noHold=1', { headers: device.authorization });
-    expect(ahead.status).toBe(409);
-  });
-
-  it('keeps the replay floor on a noHold settle poll', async () => {
-    const clock = createMutableClock();
-    const harness = createHarness({ clock, longPollHoldMs: 5_000, longPollIntervalMs: 20 });
-    const device = await harness.pairDevice(TENANT_A);
-    await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload('one') });
-    clock.advance(1_000);
-    const cutoff = clock.now().toISOString();
-    const two = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload('two') });
-    await poll(harness, device.authorization, undefined, { noHold: '1' });
-    await harness.core.mailbox.collectRetired(TENANT_A, {
-      deviceId: device.deviceId,
-      ackedBefore: cutoff,
-      expireUnackedBefore: cutoff,
-    });
-
-    const lost = await harness.json('/byok/events?cursor=0&noHold=1', { headers: device.authorization });
-    expect(lost.status).toBe(409);
-    expect(lost.body).toEqual({ error: 'cursor_too_old', recoverableFrom: two.seq });
-  });
-
-  it('400s any noHold value other than 1 before acknowledging anything', async () => {
-    const harness = createHarness({ longPollHoldMs: 0 });
-    const device = await harness.pairDevice(TENANT_A);
-    await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    await poll(harness, device.authorization);
-
-    for (const value of ['0', 'true', '', '2']) {
-      const refused = await harness.json(`/byok/events?cursor=1&noHold=${value}`, { headers: device.authorization });
-      expect(refused.status).toBe(400);
-      expect(refused.body).toEqual({ error: 'invalid noHold' });
-    }
-    expect((await harness.core.mailbox.readCursor(TENANT_A, device.deviceId)).ackedSeq).toBe(0);
   });
 
   it('returns an envelope that still round-trips through the frozen v1 decoder', async () => {

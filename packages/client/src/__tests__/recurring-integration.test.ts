@@ -8,6 +8,7 @@ import { startServer, stopServer } from '../../../server/src/__tests__/test-supp
 import { createDaemonWithAdapters } from '@byok-sdk/client';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { OPEN_LIFECYCLE } from './fixtures/lifecycle-barrier';
 
 it('runs two recurring executions through real HTTP and TaskRunner with distinct fresh sessions', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-recurring-integration-'));
@@ -26,7 +27,7 @@ it('runs two recurring executions through real HTTP and TaskRunner with distinct
     const pairing = await sdk.pairing.createPairingCode({ productId: 'recurring-integration' });
     const { deviceId } = await daemon.pair(pairing.code);
     await daemon.start();
-    await vi.waitFor(() => expect(daemon.status().connected).toBe(true));
+    await vi.waitFor(() => expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE));
     for (let index = 0; index < 2; index++) {
       const taskId = `recurring-${index}`;
       // Host context fixture; this test does not implement the product's transcript builder.
@@ -105,7 +106,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
     const pairing = await sdk.pairing.createPairingCode({ productId: options.productId });
     const { deviceId } = await daemon.pair(pairing.code);
     await daemon.start();
-    await vi.waitFor(() => expect(daemon.status().connected).toBe(true));
+    await vi.waitFor(() => expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE));
     if (precedingTurns) {
       const instruction = 'Remember the constraint: 中文 🐝, no external tools.';
       frozenInstructions.set('preceding-user-turn', instruction);

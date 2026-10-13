@@ -178,7 +178,7 @@ for (const disposal of ['delayed', 'failed'] as const) test(`Salesko + installed
       maxInlineBytes: 1_000_000n, mailboxLimitBytes: 100_000_000n, retentionPolicyId: 'lifecycle-test' });
     const pairing = await sdk.cloud.createPairingCode(tenant, { productId });
     const { deviceId } = await daemon.pair(pairing.code); await daemon.start();
-    await until(() => daemon.status().connected, 'daemon connection');
+    await until(() => daemon.status().lifecycle.phase === 'running' && daemon.status().lifecycle.connection === 'open', 'daemon connection');
     await until(async () => (await sdk.cloud.listDevices(tenant))[0]?.capabilities?.includes('agent-message-egress') === true, 'device capabilities');
     const binding = { agentRef: { agentId: '7bf9cf51-8c51-4a67-b8f3-4f11de2cecb1', profileRevision: '1' }, deviceId,
       placementRevision: '3', runtime: 'claude', cwd: 'byok-agent-home', egressPolicy: C.PrivateAgentEgressPolicy, tools: C.PrivateAgentChatToolBinding };
@@ -350,7 +350,7 @@ for (const ending of ['cancel', 'fail'] as const) test(`Salesko + installed Task
       maxInlineBytes: 1_000_000n, mailboxLimitBytes: 100_000_000n, retentionPolicyId: 'accepted-ending-test' });
     const pairing = await sdk.cloud.createPairingCode(tenant, { productId });
     const { deviceId } = await daemon.pair(pairing.code); await daemon.start();
-    await until(() => daemon.status().connected, 'daemon connection');
+    await until(() => daemon.status().lifecycle.phase === 'running' && daemon.status().lifecycle.connection === 'open', 'daemon connection');
     await until(async () => (await sdk.cloud.listDevices(tenant))[0]?.capabilities?.includes('agent-message-egress') === true, 'device capabilities');
     const binding = { agentRef: { agentId: '7bf9cf51-8c51-4a67-b8f3-4f11de2cecb1', profileRevision: '1' }, deviceId,
       placementRevision: '3', runtime: 'claude', cwd: 'byok-agent-home', egressPolicy: C.PrivateAgentEgressPolicy, tools: C.PrivateAgentChatToolBinding };
@@ -542,6 +542,9 @@ for (const cut of ['before_host_commit', 'after_host_commit', 'held', 'refused']
     expect(ready.pid).toBe(process.pid); child.url = ready.url;
     return { child, deviceId: ready.deviceId };
   };
+  // #391: the daemon is ready once its lifecycle reports an open session.
+  const isOpen = (status: { lifecycle?: { phase?: string; connection?: string } }) =>
+    status.lifecycle?.phase === 'running' && status.lifecycle.connection === 'open';
   const control = async (child: typeof children[number], path: string, method = 'GET') => {
     if (child.exited) throw new Error(`Daemon child exited: ${await readFile(child.stderrPath, 'utf8')}`);
     const response = await fetch(child.url + path, { method, headers: { 'x-test-control': controlToken }, signal: AbortSignal.timeout(10000) });
@@ -591,7 +594,7 @@ for (const cut of ['before_host_commit', 'after_host_commit', 'held', 'refused']
       const count = publications.length;
       const second = await start(); expect(second.deviceId).toBe(first.deviceId);
       await deadline(async () => (await sdk.cloud.readDeviceTerminal(tenant, taskId))?.envelope.type === 'task.fail', 'retained outcome terminal');
-      await deadline(async () => (await control(second.child, '/status')).status.connected, 'recovered daemon connected');
+      await deadline(async () => isOpen((await control(second.child, '/status')).status), 'recovered daemon connected');
       expect(await control(second.child, '/status')).toMatchObject({ preparations: 0, starts: 0, status: { activeTaskCount: 0 } });
       const at = now();
       expect(await runPrivateAgentChatRecovery(new InMemoryPrivateAgentChatRepository(), dispatcher, {
@@ -620,7 +623,7 @@ for (const cut of ['before_host_commit', 'after_host_commit', 'held', 'refused']
         const audit = await readFile(join(archiveDirectory, archived.archiveFileName), 'utf8');
         expect(audit).toContain(original.messageId); expect(audit).toContain('A1');
       }
-      const third = await start(); await deadline(async () => (await control(third.child, '/status')).status.connected, 'retained third daemon');
+      const third = await start(); await deadline(async () => isOpen((await control(third.child, '/status')).status), 'retained third daemon');
       expect(await control(third.child, '/status')).toMatchObject({ preparations: 0, starts: 0 }); await stop(third.child);
       expect(new Set(children.map(child => child.pid)).size).toBe(3);
       expect(publications).toHaveLength(count); expect(committed).toEqual(['task.fail']); expect(submissions).toBe(1);
@@ -679,7 +682,7 @@ for (const cut of ['before_host_commit', 'after_host_commit', 'held', 'refused']
     const accepted = await sdk.cloud.readAgentMessageDisposition(tenant, first.deviceId, taskId, original);
     const third = await start();
     expect(new Set(children.map(child => child.pid)).size).toBe(3); expect(third.deviceId).toBe(first.deviceId);
-    await deadline(async () => (await control(third.child, '/status')).status.connected, 'third daemon connected');
+    await deadline(async () => isOpen((await control(third.child, '/status')).status), 'third daemon connected');
     expect(await control(third.child, '/status')).toMatchObject({ preparations: 0, starts: 0, status: { activeTaskCount: 0 } });
     await stop(third.child);
     expect(publications).toHaveLength(count); expect(committed).toEqual(['task.fail']); expect(submissions).toBe(1);
