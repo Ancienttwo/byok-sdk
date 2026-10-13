@@ -10,7 +10,6 @@ import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { serve } from '@hono/node-server';
 import { createByokServer, createHmacTokenSigner } from '@byok-sdk/server';
-import { createDaemonWithAdapters, freezeRuntimeAdapterDescriptor, readDeviceEnrollmentStatus } from '@byok-sdk/client';
 import { encodeEnvelope } from '@byok-sdk/protocol';
 import { validateStarts, hasAcknowledgedOffer } from './evidence.mjs';
 
@@ -108,6 +107,11 @@ async function observation(root, config, serverUrl, deviceId, selectServer) {
 }
 
 async function child(stage, root) {
+  // This repository-only integration probe uses the built client workspace.
+  // Load it only for the daemon stage: server's isolated dependency graph does
+  // not include client, and owner-observation checks need no daemon or Keychain.
+  const { createDaemonWithAdapters, freezeRuntimeAdapterDescriptor, readDeviceEnrollmentStatus } =
+    await import(new URL('../../../../client/dist/index.js', import.meta.url).href);
   const config = JSON.parse(await fs.readFile(path.join(root, 'config.json'), 'utf8'));
   const serverUrl = stage === 'first' ? config.firstUrl : config.recoverUrl;
   let order = 0; let tail = Promise.resolve(); let fatal;
