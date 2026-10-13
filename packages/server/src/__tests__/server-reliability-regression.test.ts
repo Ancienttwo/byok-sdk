@@ -35,6 +35,15 @@ function cloudWithFirstMailboxAppendFailure() {
   const clock = fixedClock();
   const crypto = createWebCrypto();
   const base = createInMemoryCoreStores({ clock }).stores;
+  // A limited append is admitted against the tenant entitlement (#411).
+  void base.quota.writeEntitlement(TENANT, {
+    version: 1n,
+    hardLimitBytes: 1_000_000_000n,
+    maxObjectBytes: 100_000_000n,
+    maxInlineBytes: 1_000_000n,
+    mailboxLimitBytes: 100_000_000n,
+    retentionPolicyId: 'test',
+  });
   const composition = createInMemoryCloudStores(clock, crypto, base.objects, base.mailbox);
   let fail = true;
   const mailbox: MailboxStore = {
@@ -45,6 +54,7 @@ function cloudWithFirstMailboxAppendFailure() {
       }
       return base.mailbox.append(tenant, input);
     },
+    readUsage: (tenant) => base.mailbox.readUsage(tenant),
     readAfter: (tenant, input) => base.mailbox.readAfter(tenant, input),
     recordDelivery: (tenant, input) => base.mailbox.recordDelivery(tenant, input),
     advanceCursor: (tenant, input) => base.mailbox.advanceCursor(tenant, input),

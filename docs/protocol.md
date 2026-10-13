@@ -1921,6 +1921,30 @@ of the wire contract.
 A daemon sends every D→S envelope this way; there is no alternate socket
 queue or transport selection to reconcile.
 
+**A full mailbox answers 507 `{ "error": "storage_quota_exceeded" }`.** Some
+envelopes make the server append a reply to this device's mailbox (an
+`agent.egress.ack` for reliable egress or a content receipt, an
+`agent.message.disposition` for a published message). That append is admitted
+against the tenant's `mailboxLimitBytes`; when it does not fit, the whole
+request answers HTTP 507 with that body, which is the storage error mapping of
+§12.7.7. Envelopes earlier in the batch, and the envelope whose reply was
+refused, may already have taken effect — the same no-rollback rule as the 429
+above. Resending the same batch is safe: each already-processed envelope is
+counted `accepted` as a duplicate (§9) and its idempotent reply is appended
+once the mailbox has room, so nothing executes twice. The remainder of the
+batch waits until there is room.
+
+**A tenant with no storage entitlement answers 409
+`{ "error": "storage_entitlement_missing" }`.** The same reply append is
+refused closed when the Host never issued the tenant a storage entitlement (the
+status the blob routes use for the same condition, §7). Unlike 507 this does not
+clear with time: it needs operator action, because the Host has to issue the
+tenant a storage entitlement. The daemon keeps the batch unchanged and resends
+it with backoff; resending is safe for the same reason as for 507, and it
+succeeds once the entitlement exists. The distinct status lets operators and
+Hosts tell this case apart from a full mailbox (507) and from a server fault
+(500).
+
 **Chunking an oversized outbound queue is a client-side implementation
 detail, not a new wire rule.** A daemon that has accumulated more than
 `MAX_MESSAGES_PER_BATCH` queued envelopes (e.g. after an extended outage)

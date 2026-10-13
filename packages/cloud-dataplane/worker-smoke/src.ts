@@ -115,10 +115,21 @@ async function mailboxProbe(connectionString: string) {
     const who = tenant();
     const deviceId = `device-${globalThis.crypto.randomUUID()}`;
     const stores = createPostgresCoreStores({ pool, clock });
+    // A limited append is admitted against the tenant's mailbox limit, so the
+    // probe seeds an entitlement the way a host would before its first offer.
+    await stores.quota.writeEntitlement(who, {
+      version: 1n,
+      hardLimitBytes: 10_000n,
+      maxObjectBytes: 5_000n,
+      maxInlineBytes: 1_000n,
+      mailboxLimitBytes: 1_000n,
+      retentionPolicyId: 'default',
+    });
     const body = 'worker-smoke-mailbox';
     const appended = await stores.mailbox.append(who, {
       deviceId,
       messageId: `msg-${globalThis.crypto.randomUUID()}`,
+      admission: 'limited',
       materialize: async () => ({
         body,
         bodyHash: (await crypto.sha256(new TextEncoder().encode(body))) as ContentHash,

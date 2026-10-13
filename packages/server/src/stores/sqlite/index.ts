@@ -18,12 +18,14 @@ import {
   type MailboxRetentionInput,
   type MailboxRetentionResult,
   type MailboxStore,
+  type MailboxUsage,
   type ObjectCommitInput,
   type ObjectListQuery,
   type ObjectManifestEntry,
   type ObjectManifestInput,
   type ObjectReferenceInput,
   type ObjectStore,
+  type QuotaStore,
   type StorageReservation,
   type TenantId,
 } from '@byok-sdk/core';
@@ -700,9 +702,31 @@ function readCursor(db: DatabaseSync, clock: Clock, tenant: TenantId, deviceId: 
       };
 }
 
+/** The mailbox reads its limit from quota; quota never reads the mailbox. */
+type MailboxQuota = Pick<QuotaStore, 'readEntitlement'>;
+
+/**
+ * Mailbox bytes are the retained rows, so usage is recomputed from the durable
+ * table on every read and stays correct across a restart. `byte_size` is TEXT;
+ * the sum is rendered back to TEXT so it never passes through a JS number.
+ */
+function mailboxUsedBytes(db: DatabaseSync, tenant: TenantId): bigint {
+  const row = db.prepare(
+    `SELECT CAST(COALESCE(SUM(CAST(byte_size AS INTEGER)), 0) AS TEXT) AS bytes
+       FROM mailbox_message WHERE tenant_id = ?`,
+  ).get(tenant) as { bytes: string };
+  return BigInt(row.bytes);
+}
+
+/**
+ * The one SQLite mailbox row writer. It runs inside the coordinator's
+ * transaction, which serializes every writer globally, so reading the
+ * entitlement, summing and inserting cannot be interleaved by another append.
+ */
 async function appendMailbox(
   db: DatabaseSync,
   clock: Clock,
+  quota: MailboxQuota,
   tenant: TenantId,
   input: MailboxAppendInput,
 ): Promise<MailboxMessage> {
@@ -711,11 +735,33 @@ async function appendMailbox(
     `SELECT * FROM mailbox_message WHERE tenant_id = ? AND device_id = ? AND message_id = ?`,
   ).get(tenant, input.deviceId, input.messageId) as MailboxRow | undefined;
   if (existing !== undefined) return mailboxMessage(existing);
+  // Anything but the one exempt class is limited: an unknown admission fails
+  // closed instead of skipping the check.
+  let limit: bigint | undefined;
+  if (input.admission !== 'cancellation') {
+    const entitlement = await quota.readEntitlement(tenant);
+    if (entitlement === undefined) {
+      throw new ByokCoreError(
+        'storage_entitlement_missing',
+        'No storage entitlement has been issued for this tenant.',
+      );
+    }
+    limit = entitlement.mailboxLimitBytes;
+  }
   const cursor = db.prepare(
     `SELECT next_seq FROM mailbox_cursor WHERE tenant_id = ? AND device_id = ?`,
   ).get(tenant, input.deviceId) as { next_seq: number };
   const seq = Number(cursor.next_seq);
   const materialized = await input.materialize(seq);
+  if (limit !== undefined) {
+    const used = mailboxUsedBytes(db, tenant);
+    if (used + materialized.byteSize > limit) {
+      throw new ByokCoreError(
+        'storage_quota_exceeded',
+        `Mailbox would reach ${String(used + materialized.byteSize)} bytes, over the limit of ${String(limit)} bytes.`,
+      );
+    }
+  }
   db.prepare(
     `INSERT INTO mailbox_message
      (tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at)
@@ -739,10 +785,18 @@ async function appendMailbox(
 }
 
 export class SqliteMailboxStore implements MailboxStore {
-  constructor(private readonly coordinator: SqliteCoordinator, private readonly clock: Clock) {}
+  constructor(
+    private readonly coordinator: SqliteCoordinator,
+    private readonly clock: Clock,
+    private readonly quota: MailboxQuota,
+  ) {}
 
   append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage> {
-    return this.coordinator.transaction((db) => appendMailbox(db, this.clock, tenant, input));
+    return this.coordinator.transaction((db) => appendMailbox(db, this.clock, this.quota, tenant, input));
+  }
+
+  readUsage(tenant: TenantId): Promise<MailboxUsage> {
+    return this.coordinator.run((db) => ({ bytes: mailboxUsedBytes(db, tenant) }));
   }
 
   readAfter(tenant: TenantId, query: MailboxReadQuery): Promise<MailboxPage> {
@@ -843,7 +897,11 @@ export class SqliteMailboxStore implements MailboxStore {
 }
 
 export class SqliteTaskCancellationStore implements TaskCancellationStore {
-  constructor(private readonly coordinator: SqliteCoordinator, private readonly clock: Clock) {}
+  constructor(
+    private readonly coordinator: SqliteCoordinator,
+    private readonly clock: Clock,
+    private readonly quota: MailboxQuota,
+  ) {}
 
   request(tenant: TenantId, input: TaskCancellationRequest): Promise<TaskCancellationMutation | undefined> {
     return this.coordinator.transaction(async (db) => {
@@ -868,10 +926,11 @@ export class SqliteTaskCancellationStore implements TaskCancellationStore {
         return { attempt: existing, message: mailboxMessage(row) };
       }
 
-      const message = await appendMailbox(db, this.clock, tenant, {
+      const message = await appendMailbox(db, this.clock, this.quota, tenant, {
         deviceId: existing.deviceId,
         messageId: input.proposedMessageId,
         materialize: (seq) => input.materialize(seq, input.proposedMessageId),
+        admission: 'cancellation',
       });
       const requestedAt = this.clock.now().toISOString();
       db.prepare(
@@ -1229,9 +1288,10 @@ export function createSqliteEmbeddedStores(
     throw error;
   }
   const objects = new SqliteObjectStore(coordinator, dependencies.clock);
-  const mailbox = new SqliteMailboxStore(coordinator, dependencies.clock);
+  const quota = new InMemoryQuotaStore(dependencies.clock, objects);
+  const mailbox = new SqliteMailboxStore(coordinator, dependencies.clock, quota);
   const tasks = new SqliteTaskAttemptStore(coordinator, dependencies.clock);
-  const cancellations = new SqliteTaskCancellationStore(coordinator, dependencies.clock);
+  const cancellations = new SqliteTaskCancellationStore(coordinator, dependencies.clock, quota);
   const registry = new SqliteBlobRegistry(
     coordinator,
     dependencies.clock,
@@ -1246,7 +1306,7 @@ export function createSqliteEmbeddedStores(
     ...inMemoryCore,
     mailbox,
     objects,
-    quota: new InMemoryQuotaStore(dependencies.clock, objects),
+    quota,
   };
   const inMemoryCloud = createInMemoryCloudStores(
     dependencies.clock,
