@@ -168,7 +168,8 @@ idle cost is in the
 includes three planned breaking cuts: `executions.submit` replaces
 `recurring.submit` and `dispatchFreshAgentEgress`, home-busy declines carry a
 typed `code`, and the reserved `submit_result` tool replaces the device-side
-result-document extractor.
+result-document extractor. The last cut moves the wire to protocol v3 with no
+v2 reader, so servers and daemons drain first and upgrade together.
 
 ## Agent-first local homes and egress
 

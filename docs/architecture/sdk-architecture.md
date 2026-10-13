@@ -1916,7 +1916,7 @@ SaaS 侧策划的声明式内容（agentskills.io 兼容的 `SKILL.md` + 静态�
 - Bot 的三种触发来源（用户输入、routine、其他 Bot）共用 Host 执行核心；执行核心是 Host 复制后自有的参考实现（copy-and-own），SDK 不为它新增 authority。
 - Bot 协作由 Host 编排一次次 fresh execution（ADR-036 D1 的方案 A）；Local TeamWorkspace 不作为 Bot 协作底座。
 - routine 时钟在设备上（K2 wake 队列），hosted 真相层不计时；不计量执行，超额存储是收费单位。
-- SDK 侧计划重构：K5 `executions.submit`、K6 typed busy decline、K7 `submit_result` 结构化 outcome。
+- SDK 侧计划重构：K5 `executions.submit`、K6 typed busy decline、K7 `submit_result` 结构化 outcome（wire major 升到 3，先排空再一起升级）。
 
 ## 13. RAFT 受限参考
 
@@ -2180,7 +2180,7 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-035 | 保留 `@byok-sdk/server` 的 self-hosted Node/Hono deployment boundary；无独立能力的 `byok-sdk` umbrella 在另行批准的 breaking cutover 中退出，public artifacts 由 10 降为 9 | Accepted；implemented in 0.21.0（umbrella 删除，同 release `@byok-sdk/testkit` 转 private，public artifacts 实际由 11 降为 9；详见 `adr-2026-09-05-public-package-topology.md`） |
 | ADR-036 | 云端 Generic Agent：Bot 模式每次唤醒 = 新执行（方案 A）；云端模型 key 只由平台持有、BYOK 永远只在本地（每请求 key / 信封加密托管作废）；云端不支持官方 CLI / Keychain / 本地文件 / stdio MCP；云端工具 / 作业调用基于 Durable Objects；byok-sdk 拥有云端 backend，Aiphabee 为首个消费方；Aiphabee chat Workflow 直接替换（无并行 / flag / shadow）；DO 同时承载工具与长作业且保持最简；云端只读数据工具与 skill 加载器 `replay:'safe'`（冻结清单），本地全 unsafe | Accepted（2026-10-03，decided by Aimpact）；`@byok-sdk/cloud-do` 自 0.24.0 起发布，其余切片的落地情况本表未核实；D7 对真相层的约束由 ADR-038 修订（详见 `adr-2026-10-03-cloud-generic-agent.md`） |
 | ADR-037 | 最小 guardrail：删除 `PermissionPolicy`（protocol v2）、MCP readonly/grants、strict MCP、env allowlist 与 key 剥离、egress sanitizer、trusted launch cwd、attestation 与 custody；session 在用户指定 workspace 中以 YOLO 运行，继承用户 agent 配置；SDK 只保留自有不变量 | Accepted（owner 2026-10-07）；implemented in slices 1–5（详见 `adr-2026-10-07-minimal-guardrails.md`） |
-| ADR-038 | BYOK Bot 平台——成本模型、部署目标、routine 时钟与 Bot 协作：不计量执行，超额存储是收费单位；真相层 VPS 优先、Workers 继续支持；cloud-do 只在 Cloudflare；routine 时钟在设备（K2 wake 队列），hosted 真相层不计时；Bot 的三种触发来源（用户输入、routine、其他 Bot）共用 Host 执行核心；Bot 协作由 Host 编排 fresh execution，Local TeamWorkspace 不作为 Bot 协作底座；SDK 重构 K5 `executions.submit`、K6 typed busy decline、K7 `submit_result` 结构化 outcome | 决策 1、2、3、5 Accepted（owner，2026-10-13）；4、6–13 Proposed，PR 合并即视为 owner 接受；实现未开始（详见 [`adr-2026-10-13-bot-platform.md`](adr-2026-10-13-bot-platform.md)，PRD [`2026-10-13_bot-platform-prd.md`](../researches/2026-10-13_bot-platform-prd.md)） |
+| ADR-038 | BYOK Bot 平台——成本模型、部署目标、routine 时钟与 Bot 协作：不计量执行，超额存储是收费单位；真相层 VPS 优先、Workers 继续支持；cloud-do 只在 Cloudflare；routine 时钟在设备（K2 wake 队列），hosted 真相层不计时；Bot 的三种触发来源（用户输入、routine、其他 Bot）共用 Host 执行核心；Bot 协作由 Host 编排 fresh execution，Local TeamWorkspace 不作为 Bot 协作底座；SDK 重构 K5 `executions.submit`、K6 typed busy decline、K7 `submit_result` 结构化 outcome（wire v3） | 决策 1、2、3、5 Accepted（owner，2026-10-13）；4、6–13 Proposed，PR 合并即视为 owner 接受；实现未开始（详见 [`adr-2026-10-13-bot-platform.md`](adr-2026-10-13-bot-platform.md)，PRD [`2026-10-13_bot-platform-prd.md`](../researches/2026-10-13_bot-platform-prd.md)） |
 
 帐本状态注记（2026-10-13 核对，基线 `b597b93e`）：
 

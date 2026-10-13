@@ -62,7 +62,7 @@ owner 已定（2026-10-13）：
 | O13 | 上下文进，outcome 出。Bot 要读的内容（花名册、群记录、可用模型、团队笔记）由 Host 放进 ContextPack。Bot 的意图（委派、点名、PASS、提问、建 Bot、改 Bot、建群、团队笔记）在执行结束时以结构化 outcome 提交，Host 按 `taskId` 只应用一次。不从模型正文推导语义。缺 outcome 或执行失败都不算 PASS。运行中往返 Host 的动作通道推迟为 K9（§13.1）。 |
 | O14 | K5：`executions.submit` 取代 `recurring.submit` 和 `dispatchFreshAgentEgress`，`messageEgress` 改为可选（§8.1）。 |
 | O15 | K6：home busy 的 decline 带 typed `code`。Host 只看 `code`，不再解析 `agent home busy:` 前缀（§8.2）。 |
-| O16 | K7：结构化 outcome 由 SDK 保留的 MCP 工具 `submit_result` 提交，按 offer 里冻结的 JSON Schema 校验。删除 `DaemonConfig.resultDocument.extract`，durable Pi 用同一个校验入口（§8.3）。 |
+| O16 | K7：结构化 outcome 由 SDK 保留的 MCP 工具 `submit_result` 提交，按 offer 里冻结的 JSON Schema 校验。只有已落盘的成功 terminal 才交付 outcome。删除 `DaemonConfig.resultDocument.extract`，durable Pi 用同一个校验入口。K7 把 wire major 升到 3，没有 v2 reader，先排空，server 和 client 再一起升级（§8.3）。 |
 
 ## 3. 目标用户与成功标准
 
@@ -418,35 +418,56 @@ interface ByokServer {
 - 例子对整段最终文本做 `JSON.parse`（`examples/basic/clarification.ts:85-87`），文本前面多一个字就失败。
 - runtime 没调用 `send_agent_message` 时，daemon 用同一段最终文本代写回复（`task-runner.ts:3960-3980`），回复和结果文档抢同一段文本。
 - durable Pi 另有一套：自己写 `{text}` 结果文档。
+- result-document 的 `terminalProjection` 是 `.strict()` 的 discriminated union（`packages/protocol/src/terminal-projection.ts:13-19`）。wire 只接受 major 2（`packages/protocol/src/version.ts:38`）：cloud 拒绝其他 major 的 envelope，也拒绝不含 2 的 hello（`packages/cloud/src/inbound.ts:499,521`）。
+- daemon 解不开一条可执行消息时冻结 mailbox 游标，后面的消息也不确认（`packages/client/src/daemon/long-poll-transport.ts:498-510`）。
+- daemon 重启时，没有落盘 terminal 的任务一律记为 `task.fail{reason:'daemon_interrupted', retryable:false}`（`packages/client/src/daemon/create-daemon.ts:2069-2088`）。已落盘的 terminal 按原字节重发（`create-daemon.ts:2443-2455`）。
 
 契约：
 
 - offer：result-document 的 `terminalProjection` 增加必填字段 `schema`，形状是 `{ mode: 'result-document', contract, schema }`。
+- wire：这改了现有的 strict schema，按冻结规则属于破坏性变更。K7 把 wire major 从 2 升到 3（`PROTOCOL_VERSION = 3`），没有 v2 reader，做法和 v1→v2 相同（[docs/protocol.md](../protocol.md) 开头一段）。freeze-guard golden 按 v3 重新生成。不用 capability 协商，也不新增 mode：那样新旧两种 result-document 会同时存在，违反 O10。
 - `schema` 是 JSON Schema 2020-12 的受限子集，最大 16 KiB。允许的关键字：`type`、`properties`、`required`、`additionalProperties`（只能为 `false`）、`items`、`enum`、`const`、`oneOf`、`minLength`、`maxLength`、`minItems`、`maxItems`、`minimum`、`maximum`、`description`。其他关键字在提交时（Host 侧）和 daemon 准入时都拒绝。
 - outcome 文档最大 64 KiB，在现有 `task.complete.document` 的 1 MiB 上限之内。
 - 设备：SDK 新增保留的 MCP server `byokagentresult`，只有一个工具 `submit_result`，`inputSchema` 就是 offer 里的 `schema`。
-  - daemon 校验通过后，先把 outcome 持久化到 `.byok/`（fsync），再确认这次工具调用。
+  - daemon 校验通过后，先把 outcome 持久化到 `.byok/`（fsync），再确认这次工具调用。确认表示 outcome 已暂存，不表示执行成功：runtime 之后还会继续，可能失败或被中断。
   - 同一个执行再交一份不同的 outcome 被拒绝；交同样的内容返回同一个回执。规则和 message draft 相同。
   - 校验失败时工具返回错误详情，没有存任何东西，模型可以改了重交。
-- terminal：执行结束时，存好的 outcome 作为 `task.complete.document` 发出。没有提交 outcome 就结束：`task.fail`，不可重试。outcome 已存、terminal 未发时进程崩溃：恢复后同一份文档只发一次。
-- durable Pi：注册同一个工具，走同一个校验入口。删除它自己写 `{text}` 的路径。
+- terminal：
+  - runtime 成功结束且有暂存的 outcome：daemon 生成带 `document` 的 `task.complete`，按现有 journal 规则先落盘再发出。崩溃后只重放这个已落盘的 terminal，同一份文档只投递一次。
+  - runtime 成功结束但没有暂存 outcome：`task.fail`，不可重试。
+  - runtime 失败、被取消，或者成功 terminal 落盘之前 daemon 中断：按现有规则产生失败、取消或 `daemon_interrupted` 的 terminal，不带 `document`。暂存的 outcome 只作本地审计记录，跟随这个 task 的本地记录保留和清理，不交给 Host。
+- durable Pi：注册同一个工具，走同一个校验入口，terminal 规则相同。删除它自己写 `{text}` 的路径。
 - 删除：`DaemonConfig.resultDocument`、`ResultDocumentExtractor`。`createDaemon` 遇到这个字段抛出带类型的错误。
-- prepared lane：SummaryJob 现在是零工具记录（spec「Explicit internal result projection under Agent egress」）。改为一个工具的记录，`submit_result` 计入冻结的工具面，按 prepared 记录现有的版本规则切一次。
+- prepared lane：SummaryJob 现在是零工具记录（spec「Explicit internal result projection under Agent egress」）。改为一个工具的记录，`submit_result` 计入冻结的工具面，按 prepared 记录现有的版本规则切一次。这次切换和 wire v3 在同一次升级里完成，共用一次排空。
 - 校验库：仓库里现在没有 JSON Schema 校验器。K7 的 issue 选定实现（第三方库或自写子集校验），并在 package.json 声明依赖。本节列出的子集和拒绝规则是规范。
 - 迁移：`examples/basic` 的 clarification 和 goal-btw（含测试和使用文档）、SummaryJob、durable Pi、spec 的 result projection 和 prepared lane 段落、下游 Salesko 的 SummaryJob（不在本仓库）。
 
+升级与排空（K7 发布时）：
+
+- 准入：v3 的 server 只接受 `v: 3` 的 envelope 和声明了 3 的 hello。v2 daemon 在握手时被拒（`hello_protocol_version_unsupported`），收不到 v3 offer；v3 daemon 也连不上 v2 server。
+- 顺序：先在旧版本上停止提交新执行，等所有 pending 行被处理并确认、在途执行都有 terminal、daemon 的 pending terminal 都已被 server 确认。然后升级 server 侧（embedded server、`@byok-sdk/cloud`、`@byok-sdk/cloud-dataplane`），再升级 daemon。Topology L 的 Host 同时升级 embedded server 和 daemon，在应用更新前停止提交并等待排空。Topology H 的设备在升级之前一直被拒绝连接。
+- 启动检查。三处都 fail closed，不改写也不删除任何行：
+  - embedded server：现有的 SQLite 检查（`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`，`packages/server/src/stores/sqlite/index.ts:291-301`）以 `PROTOCOL_VERSION` 为准，升到 3 后自动拒绝 pending 的 v2 行。
+  - cloud-dataplane：现在没有这项检查。K7 补上同样的 pending 行检查：有 pending 的 v2 行时，组合在初始化阶段失败。
+  - daemon：现在也没有。v3 解码器会在恢复循环里抛出泛化的解析错误（`create-daemon.ts:2069-2074`）。K7 增加带类型的启动错误：未结清的恢复任务或 pending terminal 里有非 v3 的 envelope 时拒绝启动。
+- 检查失败时：保留数据库或 store，用旧 SDK 完成排空（SQLite 的检查语句见 [docs/protocol.md](../protocol.md#sqlite-startup-check-for-wire-major-upgrades)）；或者换新的状态目录并重新 enrollment，由 Host 按自己的 intent 重新提交没完成的工作。
+
 验收：
 
-- 校验通过后、terminal 发出前 SIGKILL daemon：恢复后同一份文档只投递一次。
+- outcome 已暂存、runtime 还没结束时 SIGKILL daemon：恢复后是 `task.fail{reason:'daemon_interrupted'}`，不带 document；暂存的 outcome 只在本地审计记录里。
+- runtime 成功结束、带 outcome 的 `task.complete` 已落盘、发出之前 SIGKILL daemon：恢复后这个 terminal 只投递一次。
+- outcome 暂存之后 runtime 失败或被取消：terminal 不带 document。
 - 不调用 `submit_result`：`task.fail`，不可重试。
 - schema 不符：工具返回错误，模型重交后只有一份 outcome；第二份不同的 outcome 被拒绝。
 - durable Pi 和 prepared lane 交出的文档形状相同。
 - 只跑 CLI daemon、没有任何 Host 代码的设备上，带 outcome 的执行跑通（Topology H 冒烟）。
 - `createDaemon({ resultDocument })` 抛出带类型的错误；api-surface 里 `DaemonConfig` 没有 `resultDocument`。
+- v2 daemon 连接 v3 server：hello 被拒，没有 offer 投递给它。
+- 有 pending v2 行的 SQLite 或 Postgres、有未结清 v2 journal 的 daemon store：启动失败并返回带类型的错误，没有行被改写或删除。
 
 ### 8.4 顺序
 
-K5 和 K6 可以并行，也可以和 K1–K3 并行。K7 在两者之后：它用 K5 的提交 schema，并且和 K6 改同一个协议文件。
+K5 和 K6 可以并行，也可以和 K1–K3 并行。K7 在两者之后：它用 K5 的提交 schema，并且和 K6 改同一个协议文件。K7 是 wire major 切换，发布时按 §8.3 的顺序先排空再升级。
 
 ## 9. Bot 协作契约
 
@@ -510,7 +531,7 @@ Host 按这次执行的情况生成 schema：
 | `team_note` | `text`（≤ 300 字） | Main Bot | 追加团队笔记 |
 
 - `actions` 可以为空，表示只有回复。
-- 执行没交 outcome 就结束是 `task.fail`（K7）：回复照常显示，动作一个都不应用。
+- 执行没交 outcome 就结束是 `task.fail`（K7）：回复照常显示，动作一个都不应用。执行失败、被取消或中断时，即使暂存过 outcome，terminal 也不带它，动作同样一个都不应用。
 - 同一份 outcome 里引用新建的 Bot，用 `localId`。
 
 ### 9.4 委派
@@ -676,7 +697,7 @@ D7 写在 cloud generic agent 的 ADR 里，原文是"Cloudflare 优先（DO / D
 ### 12.6 结果
 
 - `executions.submit` 要求 payload 带 `runtime` 和 `terminalProjection`。`messageEgress` 可选，选了就是 `required` 模式（K5）。给用户看的结果走 `messageEgress`，结构化结果走 `submit_result`（K7）。选了 `messageEgress` 也不保证 Host 一定收到消息：执行可能在发布消息之前就以失败结束。例如回复超过 `maxBytes` 时，daemon 的 outbox 拒绝这条消息（`packages/client/src/daemon/agent-message-outbox.ts`）。
-- Host 用两条路径结算 occurrence：收到消息时，按消息结算；没有消息时，用 `server.tasks.deviceTerminal(taskId)` 读到失败 terminal，按失败结算。不能只等消息，否则 occurrence 会一直悬空，并显示为 `missed`。带结构化结果的执行以设备 terminal 为准，outcome 在 terminal 里（K7）。
+- Host 用两条路径结算 occurrence：收到消息时，按消息结算；没有消息时，用 `server.tasks.deviceTerminal(taskId)` 读到失败 terminal，按失败结算。不能只等消息，否则 occurrence 会一直悬空，并显示为 `missed`。带结构化结果的执行以设备 terminal 为准，outcome 在 terminal 里（K7）。只有成功的 terminal 带 outcome；失败、取消和 `daemon_interrupted` 不带。
 - "没有变化就不通知"是 Host 的投递过滤。
 - 结果和待上传记录在一个事务里写入 outbox。上传可以重试，服务端按稳定的投影 id 去重。
 
@@ -793,7 +814,7 @@ K1 和 K3 的 dataplane 测试还需要 `docker compose -f docker-compose.test.y
 - K4：README 链接 Host 指南。
 - K5：把 [Recurring Host composition requirements](../spec.md#recurring-host-composition-requirements) 改为统一提交，并修改 [Host exact Agent message disposition readback](../spec.md#host-exact-agent-message-disposition-readback) 里关于 recurring 提交的段落。
 - K6：`task.decline` 的 `code` 及其投影。
-- K7：result projection 和 prepared lane 的段落；新增保留名 `byokagentresult`。
+- K7：result projection 和 prepared lane 的段落；新增保留名 `byokagentresult`；`docs/protocol.md` 的 wire major 和升级排空步骤。
 - K8：只改 `examples/` 和文档。参考实现暴露出 SDK 缺口时另开 issue，不在 K8 里改 SDK。
 
 回滚：
@@ -801,7 +822,7 @@ K1 和 K3 的 dataplane 测试还需要 `docker compose -f docker-compose.test.y
 - K1、K3：按各自 issue 的迁移说明回滚。#410 写明部署顺序不影响正确性：没有 trigger 时，新代码退化为兜底间隔读取。
 - K2：恢复 adoption 前的备份。旧版本拒绝 schema 5。
 - K4、K8：只有参考实现、文档和测试，直接回退。
-- K5、K6、K7：发布前直接 revert。发布后不提供兼容层（O10），按 release notes 的升级步骤处理。
+- K5、K6、K7：发布前直接 revert。发布后不提供兼容层（O10），按 release notes 的升级步骤处理。K7 发布后回退也是一次 wire major 切换，同样先排空。
 
 ### 13.2 下游接入：Aiphabee（不在本仓库）
 
@@ -856,7 +877,7 @@ K8 参考实现，Topology L 和 H 各跑一遍：
 | 错误 | B 的 terminal 或消息重复投递 | B 的 Turn 只结算一次，A 只收到一个回传 |
 | 错误 | B 的设备离线 | B 的 Turn 显示等待设备；超过等待上限后取消未认领的 offer，结论 `expired`，A 收到一次 |
 | 错误 | B 运行中掉线，取消后读不到 terminal | 显示不确定，不重派；用户结束后结论 `abandoned`；之后到达的 terminal 只进审计 |
-| 错误 | B 执行失败，或没调用 `submit_result` | 结论 `failed`，A 收到一次；B 的动作一个都不应用 |
+| 错误 | B 执行失败或中断（即使已暂存 outcome），或没调用 `submit_result` | 结论 `failed`，A 收到一次；B 的动作一个都不应用 |
 | 错误 | outcome 不符合 schema | 工具返回错误，模型重交后只有一份 outcome |
 | 边界 | 委派链超过 hop 上限 | 结论 `refused`，A 收到一次 |
 | 边界 | 一条用户输入派生的 Bot 执行超过预算 | 后续委派 `refused`，并显示原因 |
@@ -876,9 +897,13 @@ K8 参考实现，Topology L 和 H 各跑一遍：
 | K5 | 已经投递的 `taskId` 再提交 | 冲突加读回，没有第二个执行 |
 | K5 | 只有 result-document、没有 `messageEgress` 的提交 | 被接受 |
 | K6 | home busy 的 decline | 带 `code`；其他 decline 不带 |
-| K7 | outcome 已存、terminal 未发时 SIGKILL daemon | 恢复后同一份文档只投递一次 |
+| K7 | outcome 已暂存、runtime 未结束时 SIGKILL daemon | 恢复后是 `daemon_interrupted` 失败，不带 document |
+| K7 | 带 outcome 的 `task.complete` 已落盘、发出前 SIGKILL daemon | 恢复后这个 terminal 只投递一次 |
+| K7 | outcome 暂存后 runtime 失败或被取消 | terminal 不带 document |
 | K7 | `createDaemon({ resultDocument })` | 抛出带类型的错误 |
 | K7 | 只跑 CLI daemon 的设备 | 带 outcome 的执行跑通 |
+| K7 | v2 daemon 连接 v3 server | hello 被拒，没有 offer 投递 |
+| K7 | 未排空的 v2 数据（SQLite、Postgres、daemon journal） | 启动失败，带类型的错误，不改写也不删除 |
 
 ## 15. 风险与最脆弱的假设
 
@@ -892,6 +917,7 @@ K8 参考实现，Topology L 和 H 各跑一遍：
 - Topology L 的跨设备委派经 Host 服务端同步。R3 限制了空闲调用，所以每一跳最多多等一个同步间隔。
 - 热门 Bot 在 terminal 到 home 释放之间可能反复被 busy 拒绝，每次消耗一个 `taskId` 代际和一行 mailbox。Host 保持每个 Agent 只有一个 writer 在途来限制它。
 - K5–K7 是破坏性变更。Salesko 的 recurring 测试和 SummaryJob、durable Pi、examples 都要在对应 PR 里迁移；下游升级没有兼容期。
+- K7 升 wire major。跳过排空直接升级时，server、cloud-dataplane 或 daemon 启动失败，要用旧 SDK 排空，或者换新的状态目录并重新 enrollment。离线设备上的 pending 行会拖住排空。
 - 两个 Bot 写同一个共享仓库没有保护（ADR-031 的 WorkspaceRef 没有实现）。
 
 ## 16. 实施与上线门槛
