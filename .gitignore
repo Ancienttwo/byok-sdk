@@ -27,18 +27,6 @@ coverage/
 
 # External references
 _ref/
-.archcontext/*
-!.archcontext/manifest.yaml
-!.archcontext/product.yaml
-!.archcontext/model/
-.archcontext/model/*
-!.archcontext/model/nodes/
-!.archcontext/model/relations/
-!.archcontext/model/flows/
-!.archcontext/decisions/
-!.archcontext/policies/
-!.archcontext/practices/
-!.archcontext/projections/
 .codegraph/
 
 # Local operations state
@@ -130,10 +118,6 @@ Thumbs.db
 # Harness architecture event archives (sibling of ignored .ai/harness/archive/)
 .ai/harness/architecture/archive/
 
-# Accidental probe dumps; intentional c07 launch-cwd evidence stays tracked
-.artifacts/*
-!.artifacts/c07-launch-cwd/
-!.artifacts/c07-launch-cwd/**
 
 # Broader wrangler local state (package-level rules already cover cloud-do/dataplane)
 **/.wrangler/
@@ -141,3 +125,34 @@ Thumbs.db
 # Local key material (fixtures do not ship .pem today)
 *.pem
 # END: gitignore-cleanup common gaps
+
+# BEGIN: internal agent/process state (never product source)
+/.ai/
+/.archcontext/
+/.claude/
+/.codex/
+/agents/
+/.artifacts/
+/_ops/
+/results/
+/tasks/
+/plans/
+/ARCHITECTURE-PROPOSAL-byok-platform.md
+/scripts/experiments/
+/docs/architecture/requests/archive/
+# Internal research: only files linked from README / spec / package READMEs stay tracked
+/docs/researches/**
+!/docs/researches/**/
+!/docs/researches/s4a-dataplane-design.md
+!/docs/researches/2026-10-06-native-interaction-sources.json
+!/docs/researches/2026-09-09-g1c-facade/public-consumer-probe.mjs
+!/docs/researches/HANDOFF-byok-keys.md
+!/docs/researches/2026-08-12-salesko-integration-handoff.md
+!/docs/researches/2026-09-09_conversation-turn-mode-design.md
+!/docs/researches/2026-09-09_conversation-turn-mode-host-reliability-addendum.md
+!/docs/researches/2026-09-09_conversation-turn-fresh-mvp-prd.md
+# Process output anywhere
+*.jsonl
+**/evidence/
+*.evidence.json
+# END: internal agent/process state
