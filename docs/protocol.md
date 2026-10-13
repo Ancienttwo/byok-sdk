@@ -54,7 +54,32 @@ does not apply to the `instruction` blob-ref shape (`{ blobRef: BlobRef }`)
 or to the strict offer and control payloads — see the asymmetry below. They
 are built with zod's `.strict()`, not the default strip-unknown-keys behavior
 every other schema in this bullet list gets, so adding a field to one is
-itself a breaking change requiring a version bump, by design.
+not an unconditional additive change, by design. A strict payload gains a
+field by exactly one of two legal paths:
+
+1. **Version bump.** Bump `PROTOCOL_VERSION`; server and client upgrade
+   together under "Server supports N and N-1" below.
+2. **Capability-gated additive field.** Introduce a new capability flag
+   together with the field. The server and the hosted cloud inbound gate
+   refuse a message carrying the field for a device that has not durably
+   declared the flag, before they create the task or append to the mailbox.
+   A daemon that did not declare the flag therefore never receives the field,
+   so its strict decoder never sees it. `homeAccess` on the Agent offers
+   (`agent-home-readers`) is the worked example.
+
+The second path is checked by an executable test, not by author judgment, for
+the decoder half only: `packages/protocol/src/__tests__/released-compat.test.ts`
+decodes the current envelope corpus with the oldest released decoder, and every
+envelope that decoder rejects must be listed with the capability flag that
+protects it. A structural case also requires every top-level key a strict
+payload gained since that release to appear in at least one live corpus line,
+so a new key cannot hide from the decoding cases by being absent from the
+corpus. Limits: nested strict schemas are not checked, and a new message type
+is not a payload key. The released decoder rejects an unknown type with
+`UnknownMessageTypeError`, so a new message type needs a `{ field: null,
+capability }` gate entry. That the server and hosted cloud actually refuse an
+undeclared device is tested elsewhere (for example
+`packages/cloud/src/__tests__/agent-home-readers.test.ts`), not by this file.
 
 **What IS breaking, and requires a `v` bump instead:** changing an existing
 field's type, removing a field, making an optional field required (or vice
@@ -108,8 +133,10 @@ observability data, but FAIL-CLOSED for control/security data:
   outright, not silently discarded. A strict offer that still carries the
   removed `policy` is therefore rejected, not stripped. **Consequence:**
   adding a new field to one of these schemas post-freeze is a BREAKING change
-  requiring a `PROTOCOL_VERSION` bump — the one explicit exception to "a new
-  optional field is always non-breaking" noted above.
+  unless it takes one of the two legal paths in the Freeze rule above (a
+  `PROTOCOL_VERSION` bump, or a capability-gated additive field) — the one
+  explicit exception to "a new optional field is always non-breaking" noted
+  above.
 
 This asymmetry is enforced by the freeze-guard regression test
 (`packages/protocol/src/__tests__/freeze-guard.test.ts`), not just documented

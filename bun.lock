@@ -214,6 +214,9 @@
       "dependencies": {
         "zod": "^4.4.3",
       },
+      "devDependencies": {
+        "@byok-sdk/protocol-released": "npm:@byok-sdk/protocol@0.25.0",
+      },
     },
     "packages/server": {
       "name": "@byok-sdk/server",
@@ -325,6 +328,8 @@
     "@byok-sdk/keys": ["@byok-sdk/keys@workspace:packages/keys"],
 
     "@byok-sdk/protocol": ["@byok-sdk/protocol@workspace:packages/protocol"],
+
+    "@byok-sdk/protocol-released": ["@byok-sdk/protocol@0.25.0", "", { "dependencies": { "zod": "^4.4.3" } }, "sha512-EZs2QbBFlPLgYMJyQpfCKWBcTnwSwoJ2sC7gYHtKmnYQIXJc3aUvVbY+vMoHDSv/S1YjxmOtzwmsMOr3w2Q1+g=="],
 
     "@byok-sdk/server": ["@byok-sdk/server@workspace:packages/server"],
 

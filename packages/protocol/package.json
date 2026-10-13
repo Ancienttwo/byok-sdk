@@ -49,5 +49,8 @@
   },
   "dependencies": {
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@byok-sdk/protocol-released": "npm:@byok-sdk/protocol@0.25.0"
   }
 }
