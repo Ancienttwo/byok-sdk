@@ -569,7 +569,8 @@ rc files cannot set SDK control variables; task children still receive no
 `BYOK_*` at all. Only the source, a closed failure code and the shell's
 basename are recorded (`environment-resolved` in `audit.jsonl`, shown by
 `status`, `doctor` and the support bundle) — never variable names, values or
-paths. WinSW does not pass `--service`.
+paths. WinSW also passes `--service`; on Windows the capture is not run and
+the result is `inherited`, so a service account sees only its own environment.
 
 One place the "same-user" framing itself shifts: a WinSW-installed Windows
 Service commonly runs under a distinct service account (e.g. `SYSTEM`), not
