@@ -30,8 +30,10 @@ import { taskOfferMessageId, hashOfferBytes } from './offer-identity';
  * anything. Only `rejected`/`rate_limited` are excluded from `accepted`.
  *
  * 5. **observe** — an optional {@link ByokCloudObserver} is told, once, about
- *    each envelope whose write committed. It runs after step 4 has returned,
- *    it cannot change the outcome, and it is not the admission hook.
+ *    each envelope whose write committed (`onInboundCommitted`) and about each
+ *    envelope the gate refused, with a closed {@link InboundRefusalReason}
+ *    (`onInboundRefused`). It runs after the outcome is fixed, it cannot
+ *    change it, and it is not the admission hook.
  */
 import {
   AGENT_CONTENT_ARTIFACT_READ_CAPABILITY,
@@ -76,6 +78,78 @@ import type { TenantStores } from './tenant-stores';
 export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limited';
 
 /**
+ * Why the gate answered `rejected`. Closed on purpose: every rejection path in
+ * this file goes through {@link refuse}, whose parameter is this union, and the
+ * gate's internal result type has no `rejected` member without a reason — so a
+ * new rejection path that does not name one fails typecheck rather than
+ * disappearing into an uncounted `rejected`.
+ *
+ * Observation vocabulary only. It never reaches the wire: `POST /byok/messages`
+ * still answers `{ accepted, rejected }`, and these names are free to be
+ * refined without a protocol revision. `rate_limited` is a separate outcome,
+ * not a refusal reason.
+ */
+export type InboundRefusalReason =
+  // envelope-level
+  | 'protocol_version_unsupported'
+  | 'type_not_allowed'
+  | 'task_id_missing'
+  | 'device_not_eligible'
+  // conn.hello capability snapshot
+  | 'hello_device_mismatch'
+  | 'hello_harnesses_without_capability'
+  | 'hello_protocol_version_unsupported'
+  | 'hello_product_mismatch'
+  | 'hello_capabilities_not_recorded'
+  // agent.message.publish
+  | 'agent_message_attempt_mismatch'
+  | 'agent_message_offer_binding_missing'
+  | 'agent_message_binding_corrupt'
+  | 'agent_message_binding_mismatch'
+  | 'agent_message_too_large'
+  | 'agent_message_already_deduplicated'
+  | 'agent_message_reservation_conflict'
+  | 'agent_message_admission_unconfirmed'
+  // agent.egress.reliable / agent.content.receipt
+  | 'egress_conflict'
+  | 'content_receipt_event_request_mismatch'
+  | 'content_receipt_request_unknown'
+  | 'content_receipt_request_mismatch'
+  | 'content_receipt_conflict'
+  // task ownership
+  | 'task_not_found_for_device'
+  | 'task_owned_by_other_device'
+  | 'agent_identity_mismatch'
+  | 'terminal_harness_mismatch'
+  // task.claim
+  | 'claim_device_mismatch'
+  | 'claim_harness_and_runtime_conflict'
+  | 'claim_harness_mismatch'
+  | 'claim_harness_unavailable'
+  | 'claim_offer_mismatch'
+  | 'claim_not_won'
+  // task.fail recovery
+  | 'recovery_report_invalid'
+  | 'recovery_offer_mismatch'
+  // bounded payloads
+  | 'activity_batch_too_large'
+  | 'activity_batch_invalid'
+  | 'approval_event_invalid';
+
+/** The only way to build a rejection: the reason is required and closed. */
+interface Refused {
+  readonly outcome: 'rejected';
+  readonly reason: InboundRefusalReason;
+}
+
+function refuse(reason: InboundRefusalReason): Refused {
+  return { outcome: 'rejected', reason };
+}
+
+/** The gate's internal result. `rejected` cannot be expressed without a reason. */
+type GateResult = Refused | { readonly outcome: Exclude<InboundOutcome, 'rejected'> };
+
+/**
  * One envelope whose write COMMITTED, handed to {@link ByokCloudObserver}.
  *
  * `outcome` is constant by construction — `accepted` is the only outcome that
@@ -106,6 +180,24 @@ export interface InboundCommitted {
  */
 export interface ByokCloudObserver {
   onInboundCommitted(input: InboundCommitted): void;
+  /**
+   * One envelope the gate refused, with the reason. Same rules as
+   * {@link onInboundCommitted}: synchronous, called inside a `try`, a throw is
+   * swallowed, and it can never change the response (`rejected` is already
+   * counted on the wire). `rate_limited` is not a refusal and is not reported
+   * here. `envelopeId` and `type` come from the device's own envelope, so they
+   * are claims, not authority.
+   */
+  onInboundRefused?(input: InboundRefused): void;
+}
+
+/** One refused envelope, handed to {@link ByokCloudObserver.onInboundRefused}. */
+export interface InboundRefused {
+  readonly tenantId: TenantId;
+  readonly deviceId: string;
+  readonly envelopeId: string;
+  readonly type: MessageType;
+  readonly reason: InboundRefusalReason;
 }
 
 export async function handleAgentMessagePublish(
@@ -121,27 +213,31 @@ export async function handleAgentMessagePublish(
     readonly payload: AgentMessagePublishPayload;
   }) => Promise<{ readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string }>) | undefined,
   alreadyDeduplicated: boolean,
-): Promise<{ readonly outcome: InboundOutcome; readonly disposition?: AgentMessageDispositionPayload }> {
+): Promise<Refused | { readonly outcome: Exclude<InboundOutcome, 'rejected'>; readonly disposition?: AgentMessageDispositionPayload }> {
   const device = await stores.devices.get(deviceId);
   const attempt = await stores.tasks.get(taskId);
   const binding = await stores.receipts.get(`agent-message-offer:${deviceId}:${taskId}`);
   if (
     device === undefined || device.revoked ||
-    !hasCapabilities(device.capabilities, [AGENT_MESSAGE_EGRESS_CAPABILITY]) ||
-    attempt === undefined || attempt.deviceId !== deviceId || binding === undefined ||
-    attempt.agentRef === undefined || !sameAgentRef(attempt.agentRef, payload.agentRef)
-  ) return { outcome: 'rejected' };
+    !hasCapabilities(device.capabilities, [AGENT_MESSAGE_EGRESS_CAPABILITY])
+  ) return refuse('device_not_eligible');
+  if (attempt === undefined || attempt.deviceId !== deviceId) return refuse('task_not_found_for_device');
+  if (binding === undefined) return refuse('agent_message_offer_binding_missing');
+  if (attempt.agentRef === undefined || !sameAgentRef(attempt.agentRef, payload.agentRef)) {
+    return refuse('agent_message_attempt_mismatch');
+  }
 
   let frozen: { agentRef?: AgentRef; sessionRef?: string; requirement?: { contract?: string; contentType?: string; maxBytes?: number }; context?: AgentMessageServerContext };
-  try { frozen = JSON.parse(binding.body) as typeof frozen; } catch { return { outcome: 'rejected' }; }
+  try { frozen = JSON.parse(binding.body) as typeof frozen; } catch { return refuse('agent_message_binding_corrupt'); }
   if (
     !sameAgentRef(frozen.agentRef!, payload.agentRef) ||
     frozen.context === undefined ||
     frozen.requirement?.contract !== payload.contract ||
     (frozen.sessionRef !== undefined && frozen.sessionRef !== payload.sessionRef) ||
     frozen.requirement.contentType !== payload.contentType ||
-    typeof frozen.requirement.maxBytes !== 'number' || payload.byteCount > frozen.requirement.maxBytes
-  ) return { outcome: 'rejected' };
+    typeof frozen.requirement.maxBytes !== 'number'
+  ) return refuse('agent_message_binding_mismatch');
+  if (payload.byteCount > frozen.requirement.maxBytes) return refuse('agent_message_too_large');
 
   // Terminal receipt replay is intentionally before the live-state reservation:
   // an already-consumed side effect remains a replay even when the task has
@@ -149,7 +245,7 @@ export async function handleAgentMessagePublish(
   const priorDisposition = await readAgentMessageDisposition(stores, deviceId, taskId, payload);
   if (priorDisposition !== undefined) return { outcome: 'duplicate', disposition: priorDisposition };
 
-  if (alreadyDeduplicated) return { outcome: 'rejected' };
+  if (alreadyDeduplicated) return refuse('agent_message_already_deduplicated');
 
   const payloadBody = JSON.stringify(payload);
   const reservation = await stores.tasks.reserveAgentMessage({
@@ -164,7 +260,7 @@ export async function handleAgentMessagePublish(
   // crash window where that product commit succeeded but our terminal CAS did
   // not. A conflicting or newly lifecycle-ineligible reservation still fails
   // closed in the store.
-  if (reservation !== 'reserved' && reservation !== 'pending') return { outcome: 'rejected' };
+  if (reservation !== 'reserved' && reservation !== 'pending') return refuse('agent_message_reservation_conflict');
 
   let decision: { readonly outcome: 'accepted' | 'held' | 'refused'; readonly reasonCode?: string };
   if (consume === undefined) {
@@ -189,7 +285,7 @@ export async function handleAgentMessagePublish(
   const terminal = admission?.terminalBody === undefined
     ? undefined
     : parseAgentMessageDisposition(payload, admission.terminalBody);
-  return terminal === undefined ? { outcome: 'rejected' } : { outcome: 'accepted', disposition: terminal };
+  return terminal === undefined ? refuse('agent_message_admission_unconfirmed') : { outcome: 'accepted', disposition: terminal };
 }
 
 function agentMessageDisposition(
@@ -358,30 +454,50 @@ export async function handleInboundEnvelope(
   agentMessageConsume?: Parameters<typeof handleAgentMessagePublish>[4],
   observer?: ByokCloudObserver,
 ): Promise<InboundOutcome> {
-  // This exported entrypoint can be called without the HTTP schema boundary.
-  // Refuse before reserving an envelope identity or mutating task lifecycle.
-  if (envelope.v !== PROTOCOL_VERSION) return 'rejected';
-  const outcome = await applyInboundGate(
-    stores,
-    deviceId,
-    envelope,
-    activityBounds,
-    agentMessageConsume,
-  );
-  // One notification per envelope whose write committed, at the ONE exit the
-  // gate has. Firing from the gate's own return points instead would have to
-  // be repeated at each of them and would be one edit away from firing twice
-  // or not at all.
-  if (outcome === 'accepted' && observer !== undefined) {
-    try {
-      observer.onInboundCommitted({ tenantId: stores.tenant, deviceId, envelope, outcome });
-    } catch {
-      // The write already committed. A relay that throws is the host's problem
-      // to see in its own instrumentation; it cannot retract a durable fact, so
-      // it does not get to change what this route answers either.
+  // Everything that decides the outcome lives in a helper typed Promise<GateResult>,
+  // so a 'rejected' cannot reach the exit below without a reason for the observer.
+  const result = await resolveInboundResult(stores, deviceId, envelope, activityBounds, agentMessageConsume);
+  const { outcome } = result;
+  // One notification per envelope, at the ONE exit the gate has. Firing from
+  // the gate's own return points instead would have to be repeated at each of
+  // them and would be one edit away from firing twice or not at all.
+  if (observer !== undefined) {
+    if (outcome === 'accepted') {
+      try {
+        observer.onInboundCommitted({ tenantId: stores.tenant, deviceId, envelope, outcome });
+      } catch {
+        // The write already committed. A relay that throws is the host's problem
+        // to see in its own instrumentation; it cannot retract a durable fact, so
+        // it does not get to change what this route answers either.
+      }
+    } else if (result.outcome === 'rejected') {
+      try {
+        observer.onInboundRefused?.({
+          tenantId: stores.tenant,
+          deviceId,
+          envelopeId: envelope.id,
+          type: envelope.type,
+          reason: result.reason,
+        });
+      } catch {
+        // Same contract: the answer is already fixed and counted on the wire.
+      }
     }
   }
   return outcome;
+}
+
+async function resolveInboundResult(
+  stores: TenantStores,
+  deviceId: string,
+  envelope: Envelope,
+  activityBounds: ActivityBounds,
+  agentMessageConsume: Parameters<typeof handleAgentMessagePublish>[4] | undefined,
+): Promise<GateResult> {
+  // This exported entrypoint can be called without the HTTP schema boundary.
+  // Refuse before reserving an envelope identity or mutating task lifecycle.
+  if (envelope.v !== PROTOCOL_VERSION) return refuse('protocol_version_unsupported');
+  return applyInboundGate(stores, deviceId, envelope, activityBounds, agentMessageConsume);
 }
 
 async function applyInboundGate(
@@ -390,28 +506,29 @@ async function applyInboundGate(
   envelope: Envelope,
   activityBounds: ActivityBounds,
   agentMessageConsume: Parameters<typeof handleAgentMessagePublish>[4] | undefined,
-): Promise<InboundOutcome> {
-  if (!(await stores.rateLimiter.consume(deviceId))) return 'rate_limited';
+): Promise<GateResult> {
+  if (!(await stores.rateLimiter.consume(deviceId))) return { outcome: 'rate_limited' };
 
   // Long-poll has no live WS handshake. A bearer-authenticated conn.hello is
   // therefore accepted only as a capability snapshot for the same device
   // principal, and is persisted in the durable device row. This is the sole
   // cloud path that admits the target capability; presence is not consulted.
   if (envelope.type === 'conn.hello') {
-    if (envelope.payload.deviceId !== deviceId) return 'rejected';
-    if (envelope.payload.harnesses !== undefined && !envelope.payload.capabilities.includes('custom-harness')) return 'rejected';
-    if (!envelope.payload.protocolVersions.includes(PROTOCOL_VERSION)) return 'rejected';
-    const device = await stores.devices.get(deviceId);
-    if (device === undefined || device.revoked || device.productId !== envelope.payload.productId) {
-      return 'rejected';
+    if (envelope.payload.deviceId !== deviceId) return refuse('hello_device_mismatch');
+    if (envelope.payload.harnesses !== undefined && !envelope.payload.capabilities.includes('custom-harness')) {
+      return refuse('hello_harnesses_without_capability');
     }
+    if (!envelope.payload.protocolVersions.includes(PROTOCOL_VERSION)) return refuse('hello_protocol_version_unsupported');
+    const device = await stores.devices.get(deviceId);
+    if (device === undefined || device.revoked) return refuse('device_not_eligible');
+    if (device.productId !== envelope.payload.productId) return refuse('hello_product_mismatch');
     if ((await stores.devices.recordCapabilities({ capabilities: envelope.payload.capabilities, ...(envelope.payload.harnesses === undefined ? {} : { harnesses: envelope.payload.harnesses }) })) === undefined) {
-      return 'rejected';
+      return refuse('hello_capabilities_not_recorded');
     }
     return completeInboundEnvelope(stores, deviceId, envelope.id, undefined);
   }
 
-  if (!(DAEMON_TO_SERVER_TYPES as readonly MessageType[]).includes(envelope.type)) return 'rejected';
+  if (!(DAEMON_TO_SERVER_TYPES as readonly MessageType[]).includes(envelope.type)) return refuse('type_not_allowed');
 
   if (envelope.type === 'agent.message.publish') {
     const message = await handleAgentMessagePublish(
@@ -423,7 +540,7 @@ async function applyInboundGate(
       false,
     );
     return message.outcome === 'rejected'
-      ? 'rejected'
+      ? message
       : completeInboundEnvelope(stores, deviceId, envelope.id, envelope.payload.agentRef);
   }
 
@@ -434,29 +551,27 @@ async function applyInboundGate(
       device.revoked ||
       !hasCapabilities(device.capabilities, [AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY])
     ) {
-      return 'rejected';
+      return refuse('device_not_eligible');
     }
-    const outcome = await stores.egress.record({
+    const recorded = await stores.egress.record({
       deviceId,
       payload: envelope.payload,
       receiptId: crypto.randomUUID(),
     });
-    if (!outcome.created && !sameReliableEgress(outcome.record.payload, envelope.payload)) return 'rejected';
+    if (!recorded.created && !sameReliableEgress(recorded.record.payload, envelope.payload)) return refuse('egress_conflict');
     return completeInboundEnvelope(stores, deviceId, envelope.id, envelope.payload.agentRef);
   }
 
   if (envelope.type === 'agent.content.receipt') {
     const device = await stores.devices.get(deviceId);
-    if (
-      device === undefined ||
-      device.revoked ||
-      envelope.payload.eventId !== envelope.payload.requestId ||
-      !hasCapabilities(device.capabilities, [contentReadCapability(envelope.payload.surface), AGENT_EGRESS_RELIABLE_ACK_CAPABILITY])
-    ) {
-      return 'rejected';
+    if (device === undefined || device.revoked) return refuse('device_not_eligible');
+    if (envelope.payload.eventId !== envelope.payload.requestId) return refuse('content_receipt_event_request_mismatch');
+    if (!hasCapabilities(device.capabilities, [contentReadCapability(envelope.payload.surface), AGENT_EGRESS_RELIABLE_ACK_CAPABILITY])) {
+      return refuse('device_not_eligible');
     }
     const request = await readContentRequest(stores, deviceId, envelope.payload.agentRef, envelope.payload.requestId);
-    if (request === undefined || !matchesContentReadReceipt(request, envelope.payload)) return 'rejected';
+    if (request === undefined) return refuse('content_receipt_request_unknown');
+    if (!matchesContentReadReceipt(request, envelope.payload)) return refuse('content_receipt_request_mismatch');
     const key = contentReceiptKey(deviceId, envelope.payload.agentRef, envelope.payload.requestId);
     // The durable fact is the protocol-validated payload, not a transport
     // envelope whose id/timestamp changes when the Agent replays its spool.
@@ -465,58 +580,58 @@ async function applyInboundGate(
     // BlobRef metadata is rejected as a conflicting second receipt.
     const body = JSON.stringify(envelope.payload);
     const receipt = await stores.receipts.record({ key, body });
-    if (!receipt.created && receipt.receipt.body !== body) return 'rejected';
+    if (!receipt.created && receipt.receipt.body !== body) return refuse('content_receipt_conflict');
     return completeInboundEnvelope(stores, deviceId, envelope.id, envelope.payload.agentRef);
   }
 
   const taskId = envelope.task_id;
   // Every `DAEMON_TO_SERVER_TYPES` member requires `task_id` at the schema
   // level; this is the defensive restatement, not a second contract.
-  if (taskId === undefined) return 'rejected';
+  if (taskId === undefined) return refuse('task_id_missing');
 
   const attempt = await stores.tasks.get(taskId);
   // The offered target is immutable for every execution kind. This check is
   // repeated inside the claim store's ownership CAS so a stale pre-read cannot
   // authorize a claim, while all other lifecycle writes remain fenced by this
   // immutable attempt binding.
-  if (attempt === undefined || attempt.deviceId !== deviceId) return 'rejected';
-  if (attempt?.ownerDeviceId !== undefined && attempt.ownerDeviceId !== deviceId) return 'rejected';
-  if (envelope.type === 'task.claim' && envelope.payload.deviceId !== deviceId) return 'rejected';
+  if (attempt === undefined || attempt.deviceId !== deviceId) return refuse('task_not_found_for_device');
+  if (attempt?.ownerDeviceId !== undefined && attempt.ownerDeviceId !== deviceId) return refuse('task_owned_by_other_device');
+  if (envelope.type === 'task.claim' && envelope.payload.deviceId !== deviceId) return refuse('claim_device_mismatch');
   if (envelope.type === 'task.claim') {
     const harnessId = envelope.payload.harnessId;
-    if (harnessId !== undefined && envelope.payload.runtime !== undefined) return 'rejected';
+    if (harnessId !== undefined && envelope.payload.runtime !== undefined) return refuse('claim_harness_and_runtime_conflict');
     if (attempt.ownerDeviceId !== undefined && (harnessId !== undefined || attempt.claimedHarnessId !== undefined)
-      && harnessId !== attempt.claimedHarnessId) return 'rejected';
+      && harnessId !== attempt.claimedHarnessId) return refuse('claim_harness_mismatch');
     const device = await stores.devices.get(deviceId);
     if (harnessId !== undefined && (!device?.capabilities?.includes('custom-harness')
-      || !device.harnesses?.some(harness => harness.id === harnessId))) return 'rejected';
+      || !device.harnesses?.some(harness => harness.id === harnessId))) return refuse('claim_harness_unavailable');
     const messageId = await taskOfferMessageId(stores.tenant, taskId, deviceId, attempt.agentRef, hashOfferBytes);
     const offer = await stores.receipts.get(`task-offer:${messageId}`);
     if (offer !== undefined) {
       const sealed = JSON.parse(offer.body) as { payload: { harnessId?: string; runtime?: string; dispatchSelection?: unknown } };
-      if (harnessId !== undefined && (sealed.payload.runtime !== undefined || sealed.payload.dispatchSelection !== undefined)) return 'rejected';
-      if (sealed.payload.harnessId !== undefined && sealed.payload.harnessId !== harnessId) return 'rejected';
-    } else if (harnessId !== undefined) return 'rejected';
+      if (harnessId !== undefined && (sealed.payload.runtime !== undefined || sealed.payload.dispatchSelection !== undefined)) return refuse('claim_offer_mismatch');
+      if (sealed.payload.harnessId !== undefined && sealed.payload.harnessId !== harnessId) return refuse('claim_offer_mismatch');
+    } else if (harnessId !== undefined) return refuse('claim_offer_mismatch');
   }
   let unclaimedInterruption = false;
   if (envelope.type === 'task.fail' && envelope.payload.recovery !== undefined) {
     // Recovery reports a local decision interrupted across the claim boundary.
     // It cannot manufacture cloud execution ownership, nor loosen claimed identity.
-    if (envelope.payload.reason !== 'daemon_interrupted' || envelope.payload.retryable !== false) return 'rejected';
+    if (envelope.payload.reason !== 'daemon_interrupted' || envelope.payload.retryable !== false) return refuse('recovery_report_invalid');
     const messageId = await taskOfferMessageId(stores.tenant, taskId, deviceId, attempt.agentRef, hashOfferBytes);
-    if (envelope.payload.recovery.offerId !== messageId) return 'rejected';
+    if (envelope.payload.recovery.offerId !== messageId) return refuse('recovery_offer_mismatch');
     const offer = await stores.receipts.get(`task-offer:${messageId}`);
-    if (offer === undefined) return 'rejected';
+    if (offer === undefined) return refuse('recovery_offer_mismatch');
     const sealed = JSON.parse(offer.body) as { payload: { harnessId?: string; runtime?: string; dispatchSelection?: unknown } };
     const harnessId = envelope.payload.harnessId;
-    if (sealed.payload.harnessId !== undefined && sealed.payload.harnessId !== harnessId) return 'rejected';
-    if (harnessId !== undefined && (sealed.payload.runtime !== undefined || sealed.payload.dispatchSelection !== undefined)) return 'rejected';
+    if (sealed.payload.harnessId !== undefined && sealed.payload.harnessId !== harnessId) return refuse('recovery_offer_mismatch');
+    if (harnessId !== undefined && (sealed.payload.runtime !== undefined || sealed.payload.dispatchSelection !== undefined)) return refuse('recovery_offer_mismatch');
     // For automatic selection the target device reports its sealed local
     // admission. Inventory is mutable and is not historical claim authority.
     unclaimedInterruption = attempt.ownerDeviceId === undefined && attempt.claimedHarnessId === undefined;
   }
   if ((envelope.type === 'task.complete' || envelope.type === 'task.fail' || envelope.type === 'task.cancelled')
-    && !unclaimedInterruption && envelope.payload.harnessId !== attempt.claimedHarnessId) return 'rejected';
+    && !unclaimedInterruption && envelope.payload.harnessId !== attempt.claimedHarnessId) return refuse('terminal_harness_mismatch');
 
   // Agent identity is an exact-match boundary. A missing echo is a mismatch
   // just like a different id or profile revision; accepting it would let an
@@ -526,7 +641,7 @@ async function applyInboundGate(
     agentRefEchoRequired(envelope) &&
     !sameAgentRef(attempt.agentRef, inboundAgentRef(envelope))
   ) {
-    return 'rejected';
+    return refuse('agent_identity_mismatch');
   }
   if (envelope.type === 'task.progress' && envelope.payload.events.length > 0) {
     try {
@@ -541,12 +656,8 @@ async function applyInboundGate(
         activityBounds,
       );
     } catch (caught) {
-      if (
-        isCloudError(caught, 'activity_batch_too_large') ||
-        isCloudError(caught, 'coordination_input_invalid')
-      ) {
-        return 'rejected';
-      }
+      if (isCloudError(caught, 'activity_batch_too_large')) return refuse('activity_batch_too_large');
+      if (isCloudError(caught, 'coordination_input_invalid')) return refuse('activity_batch_invalid');
       throw caught;
     }
   }
@@ -556,13 +667,13 @@ async function applyInboundGate(
     try {
       validateApprovalTimelineAppend(approvalInput);
     } catch (caught) {
-      if (isCloudError(caught, 'coordination_input_invalid')) return 'rejected';
+      if (isCloudError(caught, 'coordination_input_invalid')) return refuse('approval_event_invalid');
       throw caught;
     }
   }
 
-  const lifecycleOutcome = await applyLifecycle(stores, deviceId, taskId, envelope, activityBounds, attempt?.agentRef);
-  if (lifecycleOutcome === 'rejected') return 'rejected';
+  const lifecycleRefusal = await applyLifecycle(stores, deviceId, taskId, envelope, activityBounds, attempt?.agentRef);
+  if (lifecycleRefusal !== undefined) return lifecycleRefusal;
   return completeInboundEnvelope(stores, deviceId, envelope.id, attempt?.agentRef);
 }
 
@@ -572,11 +683,11 @@ async function completeInboundEnvelope(
   deviceId: string,
   envelopeId: string,
   agentRef: AgentRef | undefined,
-): Promise<InboundOutcome> {
+): Promise<GateResult> {
   const duplicate = agentRef === undefined
     ? await stores.dedup.checkAndRecord(deviceId, envelopeId)
     : await stores.dedup.checkAndRecordAgent(deviceId, agentRef, envelopeId);
-  return duplicate ? 'duplicate' : 'accepted';
+  return { outcome: duplicate ? 'duplicate' : 'accepted' };
 }
 
 /**
@@ -593,7 +704,7 @@ async function applyLifecycle(
   envelope: Envelope,
   activityBounds: ActivityBounds,
   persistedAgentRef: AgentRef | undefined,
-): Promise<'rejected' | void> {
+): Promise<Refused | undefined> {
   switch (envelope.type) {
     case 'task.claim': {
       // The claiming adapter's own self-report, carried straight through as
@@ -615,8 +726,8 @@ async function applyLifecycle(
       // this execution won ownership (or is an exact-identity replay).
       if (claimed === undefined || claimed.ownerDeviceId !== deviceId
         || claimed.claimedRuntime !== envelope.payload.runtime
-        || claimed.claimedHarnessId !== envelope.payload.harnessId) return 'rejected';
-      return;
+        || claimed.claimedHarnessId !== envelope.payload.harnessId) return refuse('claim_not_won');
+      return undefined;
     }
     case 'task.started':
       await stores.tasks.recordStatus({

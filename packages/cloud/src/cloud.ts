@@ -186,7 +186,7 @@ import {
   truthManifestHandler,
   truthPutHandler,
 } from './handlers/truth';
-import { CloudRouteRegistry, type RouteDescriptor } from './router/registry';
+import { CloudRouteRegistry, type CloudRouteHandler, type RouteDescriptor } from './router/registry';
 import { readAgentMessageDisposition, terminalReceiptKey, type ByokCloudObserver } from './inbound';
 import {
   agentHomeProjectionRequestKey,
@@ -330,6 +330,19 @@ export interface ByokCloudOptions {
    * a write, deciding whether it happens at all.
    */
   readonly observer?: ByokCloudObserver;
+  /**
+   * Admission hook for the unauthenticated auth routes (`POST /byok/pair`,
+   * `/byok/challenge`, `/byok/token`), called BEFORE their handler runs and
+   * before any store is touched. `false` answers 429 and the handler never
+   * runs. Absent means no limit: the SDK ships no policy here, so an edge
+   * limiter is the deployment's responsibility (see `deploy/runbooks/hosted-operations.md`,
+   * "Public routes and edge rate limits"). A limiter that throws or rejects
+   * fails the request with a 500 rather than letting it through.
+   *
+   * Authenticated routes are not covered: they already have the per-device
+   * `InboundRateLimiter`.
+   */
+  readonly publicRouteLimiter?: PublicRouteLimiter;
   /** Embedder-owned grant and consent authority for optional hosted Agent-memory projection. */
   readonly agentMemoryProjectionAuthorizer?: AgentMemoryProjectionAuthorizer;
   /** Durable snapshot + immutable metering receipt authority for optional hosted Agent-memory projection. */
@@ -355,6 +368,18 @@ export interface ByokCloudOptions {
   readonly maxTruthRequestBytes?: number;
   readonly skillPackPageLimit?: number;
 }
+
+/** The unauthenticated routes {@link ByokCloudOptions.publicRouteLimiter} guards. */
+export type LimitedPublicRoute =
+  | { readonly method: 'POST'; readonly path: typeof BYOK_PAIR_PATH }
+  | { readonly method: 'POST'; readonly path: typeof BYOK_CHALLENGE_PATH }
+  | { readonly method: 'POST'; readonly path: typeof BYOK_TOKEN_PATH };
+
+/** `true` admits the request; `false` answers 429 before the handler or any store runs. */
+export type PublicRouteLimiter = (
+  route: LimitedPublicRoute,
+  request: Request,
+) => boolean | Promise<boolean>;
 
 export interface EnqueueOfferInput {
   /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
@@ -839,9 +864,29 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   };
 
   // Auth v2 (§6) — always mounted: without pairing there is no deployment.
-  registry.register({ method: 'POST', path: BYOK_PAIR_PATH, class: 'public' }, pairHandler({ auth }));
-  registry.register({ method: 'POST', path: BYOK_CHALLENGE_PATH, class: 'public' }, challengeHandler({ auth }));
-  registry.register({ method: 'POST', path: BYOK_TOKEN_PATH, class: 'public' }, tokenHandler({ auth }));
+  const limitPublic = (
+    route: LimitedPublicRoute,
+    handler: CloudRouteHandler,
+  ): CloudRouteHandler => {
+    const limiter = options.publicRouteLimiter;
+    if (limiter === undefined) return handler;
+    return async (c) => {
+      if (!(await limiter(route, c.req.raw))) return c.json({ error: 'rate limit exceeded' }, 429);
+      return handler(c);
+    };
+  };
+  registry.register(
+    { method: 'POST', path: BYOK_PAIR_PATH, class: 'public' },
+    limitPublic({ method: 'POST', path: BYOK_PAIR_PATH }, pairHandler({ auth })),
+  );
+  registry.register(
+    { method: 'POST', path: BYOK_CHALLENGE_PATH, class: 'public' },
+    limitPublic({ method: 'POST', path: BYOK_CHALLENGE_PATH }, challengeHandler({ auth })),
+  );
+  registry.register(
+    { method: 'POST', path: BYOK_TOKEN_PATH, class: 'public' },
+    limitPublic({ method: 'POST', path: BYOK_TOKEN_PATH }, tokenHandler({ auth })),
+  );
 
   // ADR-010 — the declaration itself is always readable; a client that cannot
   // read it has no way to learn anything else without probing status codes.
