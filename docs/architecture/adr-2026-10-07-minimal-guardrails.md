@@ -104,3 +104,7 @@ Native-interaction 模式是 Host 显式 opt-in 的本地 seam，不属于 YOLO 
 ## Status
 
 **Accepted（owner，2026-10-07）**。已实现于 slices 1–5。取代 `sdk-architecture.md` §9.2、ADR-011 与 ADR-015。
+
+## 修订说明（2026-10-13）
+
+- 来源行引用的计划 `plans/plan-20261007-1340-minimal-guardrails.md` 在 #390 后不再跟踪，干净 checkout 中该链接失效。决策以本 ADR 正文为准。
