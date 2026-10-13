@@ -157,6 +157,19 @@ invariants it owns. See
 [ADR-037](docs/architecture/adr-2026-10-07-minimal-guardrails.md) and
 [the security model](docs/security.md).
 
+The SDK meters no execution. Storage above the tenant storage entitlement is
+the paid unit. The hosted profile is optimized for VPS deployment (Node,
+Postgres and S3-compatible object storage) and stays supported on Cloudflare
+Workers. See
+[ADR-038](docs/architecture/adr-2026-10-13-bot-platform.md).
+The planned work for Bot routines, Bot collaboration, storage accounting and
+idle cost is in the
+[Bot platform PRD](docs/researches/2026-10-13_bot-platform-prd.md). It
+includes three planned breaking cuts: `executions.submit` replaces
+`recurring.submit` and `dispatchFreshAgentEgress`, home-busy declines carry a
+typed `code`, and the reserved `submit_result` tool replaces the device-side
+result-document extractor.
+
 ## Agent-first local homes and egress
 
 The additive Agent execution path treats a task as one run of a durable Agent.
@@ -211,7 +224,7 @@ second acceptance ledger:
 | Host composition requirements (approved) | [Conversation-turn Fresh MVP PRD](docs/researches/2026-09-09_conversation-turn-fresh-mvp-prd.md) and the [Host Reliability Addendum](docs/researches/2026-09-09_conversation-turn-mode-host-reliability-addendum.md) |
 | Design history | [Original design draft](docs/researches/2026-09-09_conversation-turn-mode-design.md) — historical draft; its open questions, hybrid/resume outlook, and simplified completion bridge are superseded (see the qualifier at its top) |
 | Sole acceptance ledger | [Salesko Host reliability Sprint plan](https://github.com/Ancienttwo/salesko-new/blob/codex/recurring-sdk-adoption-test/plans/plan-20260909-private-agent-chat-host-reliability-sprints.md) (external repo, draft branch), with the internal SDK-first plan (`plans/plan-20260910-conversation-turn-sdk-first.md`, not tracked in this repository) as the stage entry |
-| Active PRs | byok-sdk: #191 (open, unmerged); Salesko integration: draft PR #241 |
+| Active PRs | byok-sdk: none (#191 was closed without merging); Salesko integration: draft PR #241 (external, not re-checked here) |
 
 Historical adoption checkpoints below are bound to their recorded source SHA,
 artifact or CI evidence; they are not a live main/PR/registry status report. See
