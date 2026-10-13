@@ -50,6 +50,7 @@ A plist along these lines (see `packages/client/src/lifecycle/launchd.ts`'s
     <string>start</string>
     <string>--config</string>
     <string>/absolute/path/to/config.json</string>
+    <string>--service</string>
   </array>
   <key>WorkingDirectory</key>
   <string>/Users/you</string>
@@ -74,6 +75,15 @@ A plist along these lines (see `packages/client/src/lifecycle/launchd.ts`'s
   restarts the job only when it exits non-zero/is killed, not after a clean
   `exit(0)`. This is delegated entirely to launchd — the SDK never runs its
   own in-process supervisor.
+- **`--service`** (added by `byok-agent install`, or by
+  `nodeAgentProgram({ service: true })`; the lifecycle itself never changes
+  a program's arguments) makes `byok-agent
+  start` capture your login shell's environment once (passwd shell, `-ilc`,
+  10 s / 1 MiB caps) before it loads its config, so `claude`/`codex` and rc
+  settings on your PATH reach the service. If the capture fails (the rc hangs, prints
+  more than 1 MiB or exits non-zero; the shell is not sh/bash/zsh/ksh/dash), the daemon starts with launchd's inherited
+  environment and `status`/`doctor` report `environment: unavailable
+  code=<code>`. Reinstall an existing service to pick the flag up.
 - **`RunAtLoad`** starts it immediately on `launchctl bootstrap`, and again on
   every login.
 - Logs land under `~/.byok/<productId>/service-logs/` alongside the daemon's

@@ -1,85 +1,43 @@
+import { PI_PROVIDER_ENV_KEY_NAMES } from './pi/pi-provider-env.generated';
+
 /**
- * Provider credential names. The Pi BYOK key lanes and the Pi MCP servers
- * must not inherit them (BYOK key custody).
+ * The env name `@byok-sdk/keys` projects the resolved key under. Restated, not
+ * imported: the client has no keys dependency (`check-package-graph.mjs`);
+ * `prepared-provider-consent.test.ts` pins the restatement. The keys launcher
+ * deletes any ambient copy and injects only the credential it just resolved
+ * from OS custody, so it must never be inherited from the daemon.
  */
-export const PROVIDER_CREDENTIAL_ENV_DENY_NAMES = Object.freeze([
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_OAUTH_TOKEN',
-  // Official pi sends this as `Authorization: Bearer` for the anthropic provider.
-  'ANTHROPIC_AUTH_TOKEN',
-  // Path to a federation identity token that official pi's anthropic provider reads.
+export const PI_PROJECTED_KEY_ENV = 'PI_PROVIDER_API_KEY';
+
+/** Credentials pi reads from the ambient environment outside its provider key map. */
+export const PI_AMBIENT_CREDENTIAL_ENV_NAMES = Object.freeze([
   'ANTHROPIC_IDENTITY_TOKEN_FILE',
-  'OPENAI_API_KEY',
-  // Codex 0.159.2 auth inputs; CLI-owned login discovery (e.g. CODEX_HOME)
-  // is configuration and deliberately not part of this bounded credential set.
-  'CODEX_API_KEY',
-  'CODEX_ACCESS_TOKEN',
-  'GEMINI_API_KEY',
-  'AZURE_OPENAI_API_KEY',
-  'DEEPSEEK_API_KEY',
-  'GROQ_API_KEY',
-  'MISTRAL_API_KEY',
-  'OPENROUTER_API_KEY',
-  'XAI_API_KEY',
-  'ZAI_API_KEY',
-  'ANT_LING_API_KEY',
-  'NVIDIA_API_KEY',
-  'CEREBRAS_API_KEY',
-  'CLOUDFLARE_API_KEY',
-  'AI_GATEWAY_API_KEY',
-  'ZAI_CODING_CN_API_KEY',
-  'OPENCODE_API_KEY',
-  'RADIUS_API_KEY',
-  'FIREWORKS_API_KEY',
-  'TOGETHER_API_KEY',
-  'BASETEN_API_KEY',
-  'KIMI_API_KEY',
-  'HF_TOKEN',
-  'MOONSHOT_API_KEY',
-  'MINIMAX_API_KEY',
-  'MINIMAX_CN_API_KEY',
-  'QWEN_TOKEN_PLAN_API_KEY',
-  'QWEN_TOKEN_PLAN_CN_API_KEY',
-  'XIAOMI_API_KEY',
-  'XIAOMI_TOKEN_PLAN_CN_API_KEY',
-  'XIAOMI_TOKEN_PLAN_AMS_API_KEY',
-  'XIAOMI_TOKEN_PLAN_SGP_API_KEY',
-  'COPILOT_GITHUB_TOKEN',
-  'GOOGLE_CLOUD_API_KEY',
-  'META_API_KEY',
-  'TYPESAFE_API_KEY',
   'AWS_ACCESS_KEY_ID',
   'AWS_SECRET_ACCESS_KEY',
   'AWS_SESSION_TOKEN',
   'AWS_BEARER_TOKEN_BEDROCK',
   'AWS_WEB_IDENTITY_TOKEN_FILE',
   'GOOGLE_APPLICATION_CREDENTIALS',
-  // Reserved by the keys-owned Pi projection. It must never be inherited
-  // from the daemon; the launcher deletes any ambient copy and injects only
-  // the exact credential it just resolved from OS custody.
-  'PI_PROVIDER_API_KEY',
 ] as const);
 
 /**
- * Provider credential names that the daemon may explicitly admit for the
- * legacy direct-Pi path. The Pi BYOK custody launcher must not inherit them.
- *
- * This list contains names only. Credential values remain owned by the
- * caller's environment or by the separate keys launcher.
+ * Codex 0.159.2 auth inputs; CLI-owned login discovery (e.g. CODEX_HOME) is
+ * configuration and deliberately not part of this bounded credential set.
  */
-export const PROVIDER_CREDENTIAL_ENV_NAMES = [
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_OAUTH_TOKEN',
-  'OPENAI_API_KEY',
-  'GEMINI_API_KEY',
-  'AZURE_OPENAI_API_KEY',
-  'DEEPSEEK_API_KEY',
-  'GROQ_API_KEY',
-  'MISTRAL_API_KEY',
-  'OPENROUTER_API_KEY',
-  'XAI_API_KEY',
-  'ZAI_API_KEY',
-] as const;
+export const CODEX_AUTH_ENV_NAMES = Object.freeze(['CODEX_API_KEY', 'CODEX_ACCESS_TOKEN'] as const);
+
+/**
+ * Provider credential names. The Pi BYOK key lanes and the Pi MCP servers
+ * must not inherit them (BYOK key custody): every name the pinned pi reads for
+ * a provider (generated, so a pi upgrade cannot leave one out), plus the
+ * explicitly justified extras above.
+ */
+export const PROVIDER_CREDENTIAL_ENV_DENY_NAMES: readonly string[] = Object.freeze([
+  ...PI_PROVIDER_ENV_KEY_NAMES,
+  ...PI_AMBIENT_CREDENTIAL_ENV_NAMES,
+  ...CODEX_AUTH_ENV_NAMES,
+  PI_PROJECTED_KEY_ENV,
+]);
 
 const credentialNames = new Set<string>(PROVIDER_CREDENTIAL_ENV_DENY_NAMES);
 

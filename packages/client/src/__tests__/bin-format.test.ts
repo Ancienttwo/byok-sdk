@@ -10,6 +10,8 @@ import {
   formatTaskLine,
   formatTaskListLines,
   formatToolsetsReloadReceiptLines,
+  formatTurnProgressLine,
+  StartStdoutProjector,
   type StatusView,
 } from '../bin/format';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
@@ -576,5 +578,103 @@ describe('bin/format: formatApprovalsListLines (finding F4)', () => {
   it('never emits ANSI escape sequences', () => {
     const lines = formatApprovalsListLines([approval()], Date.now());
     for (const line of lines) expect(line).not.toMatch(ANSI_ESCAPE_RE);
+  });
+});
+
+describe('bin/format: start stdout projection (issue #384 item 5)', () => {
+  it('redactTaskText replaces completed/failed/cancelled/stale-approval text with the audit-log byte-count placeholder', () => {
+    const events: DaemonEvent[] = [
+      { kind: 'completed', ts: 'T', taskId: 't1', summary: 'model says hi', sessionRef: 'sess-1' },
+      { kind: 'failed', ts: 'T', taskId: 't1', reason: 'boom', retryable: true, preClaim: true },
+      { kind: 'cancelled', ts: 'T', taskId: 't1', reason: 'user cancelled' },
+      { kind: 'cancelled', ts: 'T', taskId: 't1' },
+      { kind: 'stale-approval-decision', ts: 'T', taskId: 't1', decision: 'reject', reason: 'not now' },
+    ];
+    expect(events.map((event) => formatDaemonEventLine(event, { redactTaskText: true }))).toEqual([
+      '[T] completed taskId=t1 sessionRef=sess-1 summary="[redacted: 13 bytes]"',
+      '[T] failed taskId=t1 retryable=true preClaim=true reason="[redacted: 4 bytes]"',
+      '[T] cancelled taskId=t1 reason="[redacted: 14 bytes]"',
+      '[T] cancelled taskId=t1',
+      '[T] stale-approval-decision taskId=t1 decision=reject reason="[redacted: 7 bytes]"',
+    ]);
+  });
+
+  it('formats one turn summary line with sizes and counts only', () => {
+    const summary = { events: 4, text: 2, textBytes: 11, toolUses: 1, toolResults: 0, artifacts: 0, approvals: 0, errors: 1 };
+    expect(formatTurnProgressLine('T', 't1', summary, 'end')).toBe(
+      '[T] progress taskId=t1 turn=end events=4 text=2 textBytes=11 tool_use=1 tool_result=0 artifact=0 needs_approval=0 error=1',
+    );
+    expect(formatTurnProgressLine('T', 't1', { ...summary, usage: { outputTokens: 7 } }, 'open')).toBe(
+      '[T] progress taskId=t1 turn=open events=4 text=2 textBytes=11 tool_use=1 tool_result=0 artifact=0 needs_approval=0 error=1 usage=out:7',
+    );
+  });
+
+  it('StartStdoutProjector: at most one progress line per turn, per task, and never the model text', () => {
+    const projector = new StartStdoutProjector();
+    const progress = (taskId: string, event: Parameters<typeof formatAgentEvent>[0]): DaemonEvent => ({ kind: 'progress', ts: 'T', taskId, event });
+    const out: string[] = [];
+    for (const event of [
+      progress('a', { type: 'progress', text: 'héllo' }),
+      progress('b', { type: 'progress', text: 'other task' }),
+      progress('a', { type: 'needs_approval', summary: 'rm -rf /' }),
+      progress('a', { type: 'error', message: 'model error text' }),
+      progress('a', { type: 'artifact', name: 'out.txt', contentType: 'text/plain' }),
+      progress('a', { type: 'turn_end' }),
+      progress('a', { type: 'progress', text: 'second turn' }),
+      progress('a', { type: 'turn_end' }),
+      { kind: 'awaiting-approval', ts: 'T', taskId: 'b', approvalId: 'ap-1', summary: 'secret tool input' },
+    ] satisfies DaemonEvent[]) {
+      out.push(...projector.accept(event));
+    }
+    expect(out).toEqual([
+      `[T] progress taskId=a turn=end events=5 text=1 textBytes=${Buffer.byteLength('héllo')} tool_use=0 tool_result=0 artifact=1 needs_approval=1 error=1`,
+      '[T] progress taskId=a turn=end events=2 text=1 textBytes=11 tool_use=0 tool_result=0 artifact=0 needs_approval=0 error=0',
+      '[T] awaiting-approval taskId=b approvalId=ap-1 summary="[redacted: 17 bytes]"',
+    ]);
+    // Task b's turn is still open: a terminal event prints its summary first, then the redacted terminal line.
+    expect(projector.accept({ kind: 'cancelled', ts: 'T2', taskId: 'b', reason: 'stop' })).toEqual([
+      '[T2] progress taskId=b turn=open events=1 text=1 textBytes=10 tool_use=0 tool_result=0 artifact=0 needs_approval=0 error=0',
+      '[T2] cancelled taskId=b reason="[redacted: 4 bytes]"',
+    ]);
+    expect(projector.flush('T3')).toEqual([]);
+    projector.accept(progress('c', { type: 'progress', text: 'x' }));
+    expect(projector.flush('T3')).toEqual([
+      '[T3] progress taskId=c turn=open events=1 text=1 textBytes=1 tool_use=0 tool_result=0 artifact=0 needs_approval=0 error=0',
+    ]);
+    for (const line of out) {
+      expect(line).not.toMatch(/héllo|other task|rm -rf|model error text|second turn|secret tool input/u);
+    }
+  });
+
+  it('tasks --follow formatting is unchanged: formatDaemonEventLine without options still renders full fidelity', () => {
+    expect(formatDaemonEventLine({ kind: 'progress', ts: 'T', taskId: 't1', event: { type: 'progress', text: 'doing the thing' } })).toBe(
+      '[T] progress taskId=t1 progress: "doing the thing"',
+    );
+    expect(formatDaemonEventLine({ kind: 'completed', ts: 'T', taskId: 't1', summary: 'done', sessionRef: 's' })).toBe(
+      '[T] completed taskId=t1 sessionRef=s summary="done"',
+    );
+  });
+
+  it('status renders the environment record with closed values only, or unknown', () => {
+    const view: StatusView = {
+      localAgentRelease: { version: '1.0.0' },
+      productName: 'Acme',
+      productId: 'acme',
+      paired: true,
+      deviceId: 'dev-1',
+      runtimes: [],
+      taskCounts: { total: 0, Offered: 0, Claimed: 0, Running: 0, AwaitApproval: 0, Complete: 0, Failed: 0, Cancelled: 0 },
+      auditLogPath: '/x/audit.jsonl',
+      auditLogLineCount: 0,
+    };
+    expect(formatStatusLines(view)).toContain('environment: unknown (no environment-resolved record yet)');
+    const at = '2026-10-13T00:00:00.000Z';
+    expect(formatStatusLines({ ...view, environment: { ts: at, status: { source: 'login-shell', shell: 'zsh', durationMs: 530 } } })).toContain(
+      `environment: login-shell shell=zsh durationMs=530 at=${at}`,
+    );
+    expect(formatStatusLines({ ...view, environment: { ts: at, status: { source: 'unavailable', code: 'timeout' } } })).toContain(
+      `environment: unavailable code=timeout at=${at}`,
+    );
+    expect(formatStatusLines({ ...view, environment: { ts: at, status: { source: 'inherited' } } })).toContain(`environment: inherited at=${at}`);
   });
 });

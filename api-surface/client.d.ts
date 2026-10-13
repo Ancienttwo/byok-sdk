@@ -9868,6 +9868,8 @@ export type { NodeAgentProgramOptions, ServiceDefinition, ServiceInstallOptions,
 export { generateLaunchdPlist } from './lifecycle/launchd';
 export { generateSystemdUnit } from './lifecycle/systemd';
 export { generateWinswXml } from './lifecycle/winsw';
+export { applyLoginShellEnvironment, serviceEnvironmentStatus } from './lifecycle/service-environment';
+export type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './lifecycle/service-environment';
 export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './util/secure-dir';
 export type { EnsureSecureDirOptions } from './util/secure-dir';
 export { PiAdapter } from './adapters/pi/pi-adapter';
@@ -11122,6 +11124,92 @@ export declare function generateLaunchdPlist(def: {
  * an ALREADY-loaded job.
  */
 export declare function createLaunchdLifecycle(def: ServiceDefinition, deps?: LaunchdDeps): ServiceLifecycle;
+// ==== @byok-sdk/client dist/lifecycle/service-environment.d.ts ====
+/**
+ * Issue #392 (parent #384 item 2): a daemon started by launchd or systemd
+ * gets the service manager's minimal environment (launchd's default PATH is
+ * `/usr/bin:/bin:/usr/sbin:/sbin`), not the user's. ADR-037 D2 lets every
+ * runtime inherit the daemon's environment, which assumes the daemon's
+ * environment IS the user's — so under a service, `claude`/`codex` installed
+ * by Homebrew, nvm, bun or an official installer are `not-found`, and
+ * rc-only settings (proxies, `ANTHROPIC_BASE_URL`, `CODEX_HOME`, ...) are
+ * missing.
+ *
+ * D2 itself is unchanged: a child's environment is still the daemon's minus
+ * `CLAUDECODE` and `BYOK_*` (`daemon/environment.ts`). This module only
+ * changes where the daemon's environment comes from, once per process:
+ * {@link applyLoginShellEnvironment} runs the passwd login shell
+ * (`os.userInfo().shell`, never `$SHELL`) once as
+ * `<shell> -i -l -c 'printf %s B; /usr/bin/env -0; printf %s E'`, with B and
+ * E random per-run nonces, and replaces `process.env` with the NUL-separated
+ * entries found between them. Bytes outside the frame — rc chatter on stdout
+ * — are ignored. The capture is complete once the shell has exited and the
+ * end nonce has been read; a background job the rc started may keep stdout
+ * open, so the capture never waits for EOF after that. Caps:
+ * {@link LOGIN_SHELL_ENV_TIMEOUT_MS} and {@link LOGIN_SHELL_ENV_MAX_BYTES}.
+ * However the capture ends, the shell's whole process group is SIGKILLed.
+ *
+ * The shell gets this process's environment minus `BYOK_*`, so rc files
+ * never see SDK control variables. `BYOK_*` names found in the capture are
+ * dropped and the `BYOK_*` values this process had before the capture are
+ * put back: rc files never set SDK control variables either.
+ *
+ * `byok-agent start --service` calls it first ({@link SERVICE_FLAG}; the
+ * launchd plist and systemd unit pass that flag). An embedding Host started
+ * outside a terminal (an Electron app launched from the Dock has launchd's
+ * PATH too) calls the same function at its own startup.
+ *
+ * Every report of the result — `start` stdout, `audit.jsonl`, `status` —
+ * carries only {@link ServiceEnvironmentStatus}: a source, a closed code,
+ * the shell's basename and a duration. Never a variable name, value or path.
+ */
+/** The `byok-agent start` flag the launchd plist and the systemd unit pass. */
+export declare const SERVICE_FLAG = "--service";
+export declare const LOGIN_SHELL_ENV_TIMEOUT_MS = 10000;
+export declare const LOGIN_SHELL_ENV_MAX_BYTES: number;
+export declare const SERVICE_ENVIRONMENT_UNAVAILABLE_CODES: readonly ['unsupported-shell', 'spawn-failed', 'timeout', 'output-too-large', 'bad-frame', 'shell-exit-nonzero'];
+export type ServiceEnvironmentUnavailableCode = (typeof SERVICE_ENVIRONMENT_UNAVAILABLE_CODES)[number];
+export type ServiceEnvironmentStatus = {
+    source: 'login-shell';
+    shell: string;
+    durationMs: number;
+} | {
+    source: 'inherited';
+} | {
+    source: 'unavailable';
+    code: ServiceEnvironmentUnavailableCode;
+};
+/**
+ * Test seams for {@link captureAndApply}. Not part of the public API:
+ * {@link applyLoginShellEnvironment} takes no options.
+ *
+ * @internal
+ */
+export interface ApplyLoginShellEnvironmentOptions {
+    /** Test seam: an absolute shell path instead of the passwd shell. */
+    shell?: string;
+    /** Test seam: the environment to replace. Defaults to `process.env`. */
+    env?: NodeJS.ProcessEnv;
+    timeoutMs?: number;
+    maxBytes?: number;
+    platform?: NodeJS.Platform;
+}
+/** What {@link applyLoginShellEnvironment} did in this process; `inherited` until it has run. */
+export declare function serviceEnvironmentStatus(): ServiceEnvironmentStatus;
+/**
+ * Captures the login-shell environment and replaces `process.env` with it.
+ * Runs once per process: later calls return the first call's result. On
+ * failure `process.env` is left exactly as inherited. Never throws. win32
+ * has no login shell: the result is `inherited`.
+ */
+export declare function applyLoginShellEnvironment(): Promise<ServiceEnvironmentStatus>;
+/**
+ * The capture-and-replace step without the once-per-process latch; for
+ * tests and for {@link applyLoginShellEnvironment} only.
+ *
+ * @internal
+ */
+export declare function captureAndApply(options: ApplyLoginShellEnvironmentOptions): Promise<ServiceEnvironmentStatus>;
 // ==== @byok-sdk/client dist/lifecycle/service-types.d.ts ====
 /**
  * What the OS service manager should actually execute to run the daemon in
@@ -11145,6 +11233,10 @@ export interface ServiceProgram {
      * untouched — `winsw.ts` emits one `<argument>` element per entry rather
      * than a single shell-quoted string specifically so a path containing
      * spaces never needs manual escaping (see that file's doc comment).
+     *
+     * The lifecycles never add or change an argument: a Host's own binary
+     * gets exactly these. Issue #392: `byok-agent install` builds its program
+     * with {@link NodeAgentProgramOptions.service} on macOS and Linux.
      */
     args: string[];
     /** Working directory for the running service process. Each platform generator has its own documented default (see `launchd.ts`/`systemd.ts`/`winsw.ts`) when omitted. */
@@ -11158,6 +11250,13 @@ export interface NodeAgentProgramOptions {
     /** Node executable to invoke `agentBin` with. Defaults to `process.execPath` (the currently running node) — always an absolute, real path, unlike a bare `node` on PATH. */
     nodeBin?: string;
     cwd?: string;
+    /**
+     * Issue #392: append {@link SERVICE_FLAG}, so `byok-agent start` replaces
+     * the service manager's minimal environment with the user's login-shell
+     * environment (`service-environment.ts`). For a program launchd or
+     * systemd will run; `byok-agent install` sets it on macOS and Linux only.
+     */
+    service?: boolean;
 }
 /**
  * Convenience builder for the common case: run `node <agentBin> start

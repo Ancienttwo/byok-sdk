@@ -22,8 +22,11 @@ import officialClosure from '../adapters/pi/official-pi-closure.json';
  *    a string literal.
  * 3. No trace of the refused graph: `ajv`, `pi-coding-agent`, `@earendil-works`,
  *    `jiti`, `photon`, `@modelcontextprotocol/client`.
- * 4. Every static import specifier is a node builtin, `@byok-sdk/core`,
- *    `@byok-sdk/protocol`, its schema-free preparation version entry, or a relative path.
+ * 4. Every static import specifier is a node builtin, a relative path, or a
+ *    bare specifier that entry is individually allowed (`allowedBareImports`).
+ *    Only the `@byok-sdk/protocol` main entry carries the zod schemas, so the
+ *    entries that do not need them are not allowed it: one non-type import of
+ *    it in `adapters/index.js` would bring zod back into the adapters bundle.
  *
  * Rules 1-4 are applied to the guarded entry AND to every file it reaches by a
  * relative import that resolves inside `dist/`, each visited once, so a shared
@@ -78,6 +81,11 @@ import { describe, expect, it } from 'vitest';
 const PACKAGE_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const DIST = path.join(PACKAGE_ROOT, 'dist');
 
+/** Bare specifiers that carry no zod schema: the adapters bundle may import only these. */
+const SCHEMA_FREE_BARE_IMPORTS: ReadonlySet<string> = new Set(['@byok-sdk/core', '@byok-sdk/protocol/input-preparation-version']);
+/** Entries that need the protocol schemas additionally keep its main entry. */
+const PROTOCOL_BARE_IMPORTS: ReadonlySet<string> = new Set([...SCHEMA_FREE_BARE_IMPORTS, '@byok-sdk/protocol']);
+
 /**
  * The entries a host may import without the daemon composition.
  *
@@ -90,19 +98,20 @@ const DIST = path.join(PACKAGE_ROOT, 'dist');
  * a module edge` below asserts the exception itself so it cannot quietly widen
  * into a real import.
  */
-const GUARDED: readonly { readonly file: string; readonly allowedSubstrings: readonly string[] }[] = [
-  { file: 'bin/pi-todo-runtime.js', allowedSubstrings: [] },
-  { file: 'assertion-client/index.js', allowedSubstrings: [] },
-  { file: 'mcp-server/index.js', allowedSubstrings: [] },
-  { file: 'adapters/index.js', allowedSubstrings: ['pi-coding-agent', '@earendil-works'] },
-  { file: 'agent-memory/index.js', allowedSubstrings: [] },
-  { file: 'bin/byok-agent-message-mcp.js', allowedSubstrings: [] },
-  { file: 'bin/byok-agent-memory-mcp.js', allowedSubstrings: [] },
-  { file: 'bin/byok-agent-team-mcp.js', allowedSubstrings: [] },
+const GUARDED: readonly {
+  readonly file: string;
+  readonly allowedSubstrings: readonly string[];
+  readonly allowedBareImports: ReadonlySet<string>;
+}[] = [
+  { file: 'bin/pi-todo-runtime.js', allowedSubstrings: [], allowedBareImports: SCHEMA_FREE_BARE_IMPORTS },
+  { file: 'assertion-client/index.js', allowedSubstrings: [], allowedBareImports: PROTOCOL_BARE_IMPORTS },
+  { file: 'mcp-server/index.js', allowedSubstrings: [], allowedBareImports: SCHEMA_FREE_BARE_IMPORTS },
+  { file: 'adapters/index.js', allowedSubstrings: ['pi-coding-agent', '@earendil-works'], allowedBareImports: SCHEMA_FREE_BARE_IMPORTS },
+  { file: 'agent-memory/index.js', allowedSubstrings: [], allowedBareImports: PROTOCOL_BARE_IMPORTS },
+  { file: 'bin/byok-agent-message-mcp.js', allowedSubstrings: [], allowedBareImports: PROTOCOL_BARE_IMPORTS },
+  { file: 'bin/byok-agent-memory-mcp.js', allowedSubstrings: [], allowedBareImports: PROTOCOL_BARE_IMPORTS },
+  { file: 'bin/byok-agent-team-mcp.js', allowedSubstrings: [], allowedBareImports: PROTOCOL_BARE_IMPORTS },
 ];
-
-/** The only bare specifiers a guarded entry may statically import. */
-const ALLOWED_BARE_IMPORTS = new Set(['@byok-sdk/core', '@byok-sdk/protocol', '@byok-sdk/protocol/input-preparation-version']);
 
 const FORBIDDEN_SUBSTRINGS = [
   'ajv',
@@ -213,10 +222,10 @@ function staticImportSpecifiers(source: string): string[] {
   return [...specifiers].sort();
 }
 
-function disallowedSpecifiers(source: string): string[] {
+function disallowedSpecifiers(source: string, allowedBareImports: ReadonlySet<string>): string[] {
   return staticImportSpecifiers(source).filter(
     (specifier) =>
-      !specifier.startsWith('.') && !isBuiltin(specifier) && !ALLOWED_BARE_IMPORTS.has(specifier),
+      !specifier.startsWith('.') && !isBuiltin(specifier) && !allowedBareImports.has(specifier),
   );
 }
 
@@ -320,7 +329,7 @@ describe.skipIf(!DIST_PRESENT)('the daemon-free dist sub-path closures', () => {
     expect(root).toMatch(/import\(["']#byok-pi-runtime-host["']\)/);
   });
 
-  for (const { file, allowedSubstrings } of GUARDED) {
+  for (const { file, allowedSubstrings, allowedBareImports } of GUARDED) {
     describe(`dist/${file}`, () => {
       // The entry plus every dist-internal file it reaches by a relative
       // import. Both assertions below apply the same rules to the whole
@@ -336,9 +345,9 @@ describe.skipIf(!DIST_PRESENT)('the daemon-free dist sub-path closures', () => {
         expect(report).toBe('');
       });
 
-      it('statically imports only node builtins, @byok-sdk/core, @byok-sdk/protocol, or relative paths', () => {
+      it(`statically imports only node builtins, relative paths, or ${[...allowedBareImports].join(', ')}`, () => {
         const report = closure
-          .map(({ file: member, source }) => ({ member, bad: disallowedSpecifiers(source) }))
+          .map(({ file: member, source }) => ({ member, bad: disallowedSpecifiers(source, allowedBareImports) }))
           .filter(({ bad }) => bad.length > 0)
           .map(({ member, bad }) => `dist/${member}: ${bad.join(', ')}`);
         expect(report).toEqual([]);
@@ -404,10 +413,23 @@ describe.skipIf(!DIST_PRESENT)('the daemon-free dist sub-path closures', () => {
       'pi-coding-agent': piHits.length > 0,
     }).toEqual({ '@modelcontextprotocol/client': true, 'pi-coding-agent': true });
     const decisive = [...mcpClientHits, ...piHits];
-    expect(disallowedSpecifiers(rootSource)).toContain('@modelcontextprotocol/client');
+    expect(disallowedSpecifiers(rootSource, PROTOCOL_BARE_IMPORTS)).toContain('@modelcontextprotocol/client');
     console.log(
       `[dist-subpath-closure] negative control: dist/index.js reports ${hits.length} hit(s); ` +
         `${decisive.length} decisive:\n${describeHits(decisive.slice(0, 6))}`,
     );
+  });
+});
+
+describe('the per-entry bare import allowance', () => {
+  it('refuses the protocol main entry (which carries zod) for the adapters bundle, and only that bundle class', () => {
+    const adapters = GUARDED.find(({ file }) => file === 'adapters/index.js')!;
+    expect(adapters.allowedBareImports.has('@byok-sdk/protocol')).toBe(false);
+    const nonTypeImport = `import { PROTOCOL_VERSION } from '@byok-sdk/protocol';\nimport { x } from '@byok-sdk/protocol/input-preparation-version';`;
+    expect(disallowedSpecifiers(nonTypeImport, adapters.allowedBareImports)).toEqual(['@byok-sdk/protocol']);
+    for (const file of ['bin/byok-agent-message-mcp.js', 'bin/byok-agent-memory-mcp.js', 'bin/byok-agent-team-mcp.js']) {
+      const entry = GUARDED.find((guarded) => guarded.file === file)!;
+      expect(disallowedSpecifiers(nonTypeImport, entry.allowedBareImports), file).toEqual([]);
+    }
   });
 });

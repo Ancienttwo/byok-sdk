@@ -2,6 +2,7 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import type { ConnectionState, DaemonBranding, DaemonEvent, DaemonTaskInfo, LocalAgentReleaseIdentity } from '../index';
 import { GIT_ERROR_CATEGORIES } from '../daemon/git-workspace';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
+import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 import type { McpToolsetReloadReceipt, McpToolsetStatus } from '../types';
 import type { ProbedRuntime } from './runtime-probe';
 import type { TaskCounts, DerivedTaskInfo } from './tasks-view';
@@ -96,6 +97,19 @@ export interface FormatDaemonEventLineOptions {
    * sets this to `true`.
    */
   redactApprovalSummary?: boolean;
+  /**
+   * Issue #384 item 5: redact the remaining free-form task text — a
+   * `completed` summary (the model's own final text), a `failed`/`cancelled`
+   * reason, a `stale-approval-decision` reason — to the same
+   * `[redacted: N bytes]` placeholder, matching what `bin/audit-log.ts`
+   * persists for those fields. Only `bin/commands/start.ts` sets it: its
+   * stdout is a service log. Independent of `redactApprovalSummary`.
+   */
+  redactTaskText?: boolean;
+}
+
+function taskText(text: string, options: FormatDaemonEventLineOptions): string {
+  return options.redactTaskText ? redactedByteCountPlaceholder(text) : text;
 }
 
 /**
@@ -129,11 +143,11 @@ export function formatDaemonEventLine(event: DaemonEvent, options: FormatDaemonE
       return `${prefix} awaiting-approval taskId=${event.taskId}${event.approvalId ? ` approvalId=${event.approvalId}` : ''} summary=${quote(summary)}`;
     }
     case 'completed':
-      return `${prefix} completed taskId=${event.taskId} sessionRef=${event.sessionRef} summary=${quote(event.summary)}`;
+      return `${prefix} completed taskId=${event.taskId} sessionRef=${event.sessionRef} summary=${quote(taskText(event.summary, options))}`;
     case 'failed':
-      return `${prefix} failed taskId=${event.taskId} retryable=${event.retryable}${event.preClaim ? ' preClaim=true' : ''} reason=${quote(event.reason)}`;
+      return `${prefix} failed taskId=${event.taskId} retryable=${event.retryable}${event.preClaim ? ' preClaim=true' : ''} reason=${quote(taskText(event.reason, options))}`;
     case 'cancelled':
-      return `${prefix} cancelled taskId=${event.taskId}${event.reason ? ` reason=${quote(event.reason)}` : ''}`;
+      return `${prefix} cancelled taskId=${event.taskId}${event.reason ? ` reason=${quote(taskText(event.reason, options))}` : ''}`;
     case 'connection':
       return `${prefix} connection state=${event.state}`;
     case 'paired':
@@ -152,7 +166,7 @@ export function formatDaemonEventLine(event: DaemonEvent, options: FormatDaemonE
       // predates this fix and simply has no such field at all.
       return `${prefix} shutdown-complete reason=${quote(event.reason)}${event.undeliveredOutboxCount !== undefined ? ` undeliveredOutboxCount=${event.undeliveredOutboxCount}` : ''}`;
     case 'stale-approval-decision':
-      return `${prefix} stale-approval-decision taskId=${event.taskId} decision=${event.decision}${event.reason ? ` reason=${quote(event.reason)}` : ''}`;
+      return `${prefix} stale-approval-decision taskId=${event.taskId} decision=${event.decision}${event.reason ? ` reason=${quote(taskText(event.reason, options))}` : ''}`;
     case 'agent-memory-intent-integrity':
       return `${prefix} agent-memory-intent-integrity intentId=${event.intentId} disposition=${event.disposition}`;
     case 'runtime-disposal-failed':
@@ -201,6 +215,130 @@ export function formatDaemonEventLine(event: DaemonEvent, options: FormatDaemonE
             ].filter((part): part is string => part !== undefined);
       return parts.join(' ');
     }
+  }
+}
+
+/** Per-turn progress tally `start` prints instead of one line per `AgentEvent`. Sizes and counts only. */
+export interface TurnProgressSummary {
+  events: number;
+  /** `progress` (model text) events, and their UTF-8 byte total — the audit log's `textSize`, summed. */
+  text: number;
+  textBytes: number;
+  toolUses: number;
+  toolResults: number;
+  artifacts: number;
+  approvals: number;
+  errors: number;
+  /** The last `usage` event's token counts, when the turn reported one. */
+  usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number };
+}
+
+function emptyTurnProgress(): TurnProgressSummary {
+  return { events: 0, text: 0, textBytes: 0, toolUses: 0, toolResults: 0, artifacts: 0, approvals: 0, errors: 0 };
+}
+
+function tallyAgentEvent(summary: TurnProgressSummary, event: AgentEvent): void {
+  summary.events += 1;
+  switch (event.type) {
+    case 'progress':
+      summary.text += 1;
+      summary.textBytes += Buffer.byteLength(event.text, 'utf8');
+      return;
+    case 'tool_use':
+      summary.toolUses += 1;
+      return;
+    case 'tool_result':
+      summary.toolResults += 1;
+      return;
+    case 'artifact':
+      summary.artifacts += 1;
+      return;
+    case 'needs_approval':
+      summary.approvals += 1;
+      return;
+    case 'error':
+      summary.errors += 1;
+      return;
+    case 'usage':
+      summary.usage = { inputTokens: event.inputTokens, outputTokens: event.outputTokens, totalTokens: event.totalTokens };
+      return;
+    case 'turn_end':
+      return;
+  }
+}
+
+/**
+ * Issue #384 item 5: the single stdout line one turn's progress produces.
+ * `turn=end` when the runtime reported `turn_end`; `turn=open` when the
+ * task reached a terminal state (or `start` stopped) first.
+ */
+export function formatTurnProgressLine(ts: string, taskId: string, summary: TurnProgressSummary, turn: 'end' | 'open'): string {
+  const usage = summary.usage;
+  const usageParts = usage
+    ? [
+        usage.inputTokens !== undefined ? `in:${usage.inputTokens}` : undefined,
+        usage.outputTokens !== undefined ? `out:${usage.outputTokens}` : undefined,
+        usage.totalTokens !== undefined ? `total:${usage.totalTokens}` : undefined,
+      ].filter((part): part is string => part !== undefined)
+    : [];
+  return [
+    `[${ts}] progress taskId=${taskId} turn=${turn}`,
+    `events=${summary.events}`,
+    `text=${summary.text}`,
+    `textBytes=${summary.textBytes}`,
+    `tool_use=${summary.toolUses}`,
+    `tool_result=${summary.toolResults}`,
+    `artifact=${summary.artifacts}`,
+    `needs_approval=${summary.approvals}`,
+    `error=${summary.errors}`,
+    usage ? `usage=${usageParts.length ? usageParts.join(',') : 'none'}` : undefined,
+  ].filter((part): part is string => part !== undefined).join(' ');
+}
+
+/**
+ * Issue #384 item 5: `byok-agent start`'s stdout projection. `start` stdout
+ * is a service log (launchd/systemd/WinSW keep it verbatim), so it never
+ * carries model text: every `progress` event of a turn is tallied, and the
+ * turn produces at most ONE line — at its `turn_end`, or, when the task ends
+ * or `start` stops first, just before that. Every other event is one line
+ * with free-form text redacted (`redactApprovalSummary` + `redactTaskText`).
+ *
+ * `tasks --follow` does not use this: it stays one line per event over the
+ * authenticated control socket (full fidelity) or the already-redacted audit
+ * log.
+ */
+export class StartStdoutProjector {
+  readonly #turns = new Map<string, TurnProgressSummary>();
+
+  /** Lines to print for `event`, in order (zero, one or two). */
+  accept(event: DaemonEvent): string[] {
+    if (event.kind === 'progress') {
+      const summary = this.#turns.get(event.taskId) ?? emptyTurnProgress();
+      tallyAgentEvent(summary, event.event);
+      if (event.event.type !== 'turn_end') {
+        this.#turns.set(event.taskId, summary);
+        return [];
+      }
+      this.#turns.delete(event.taskId);
+      return [formatTurnProgressLine(event.ts, event.taskId, summary, 'end')];
+    }
+    const lines: string[] = [];
+    if (event.kind === 'completed' || event.kind === 'failed' || event.kind === 'cancelled') {
+      const open = this.#turns.get(event.taskId);
+      if (open) {
+        this.#turns.delete(event.taskId);
+        lines.push(formatTurnProgressLine(event.ts, event.taskId, open, 'open'));
+      }
+    }
+    lines.push(formatDaemonEventLine(event, { redactApprovalSummary: true, redactTaskText: true }));
+    return lines;
+  }
+
+  /** Lines for every turn still open — `start` prints them when it stops. */
+  flush(ts: string): string[] {
+    const lines = [...this.#turns].map(([taskId, summary]) => formatTurnProgressLine(ts, taskId, summary, 'open'));
+    this.#turns.clear();
+    return lines;
   }
 }
 
@@ -262,6 +400,20 @@ export interface StatusView {
   taskCounts: TaskCounts;
   auditLogPath: string;
   auditLogLineCount: number;
+  /** Issue #392: the environment the last `start` resolved, from its `environment-resolved` audit record. */
+  environment?: { status: ServiceEnvironmentStatus; ts: string };
+}
+
+/** Issue #392: `login-shell shell=zsh durationMs=530`, `inherited`, or `unavailable code=timeout` — closed values and a shell basename only. */
+export function formatServiceEnvironment(status: ServiceEnvironmentStatus): string {
+  switch (status.source) {
+    case 'login-shell':
+      return `login-shell shell=${status.shell} durationMs=${status.durationMs}`;
+    case 'inherited':
+      return 'inherited';
+    case 'unavailable':
+      return `unavailable code=${status.code}`;
+  }
 }
 
 export function formatStatusLines(view: StatusView): string[] {
@@ -277,6 +429,11 @@ export function formatStatusLines(view: StatusView): string[] {
     view.connection
       ? `connection: last-known=${view.connection.state} at=${view.connection.ts}`
       : 'connection: unknown (no audit log yet — run `byok-agent start` at least once to begin observing)',
+  );
+  lines.push(
+    view.environment
+      ? `environment: ${formatServiceEnvironment(view.environment.status)} at=${view.environment.ts}`
+      : 'environment: unknown (no environment-resolved record yet)',
   );
   const runtimeSummary = view.runtimes.map((r) => `${r.id}=${r.present ? 'present' : r.outcome === 'refused' ? `refused:${r.reason}` : r.outcome}`).join(' ');
   lines.push(`runtimes: ${runtimeSummary || '(none configured)'}`);

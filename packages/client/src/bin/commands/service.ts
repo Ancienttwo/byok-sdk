@@ -37,8 +37,16 @@ export interface ServiceCommandDeps {
  * environment and working directory, not the operator's interactive shell
  * — a relative path here would resolve against whatever cwd the service
  * manager happens to choose, not where the operator ran `install` from.
+ *
+ * `platform` (default `process.platform`) only decides whether the program
+ * carries `--service` (macOS and Linux) — a test seam.
  */
-export function buildServiceDefinition(config: DaemonConfig, configPath: string, rest: string[]): ServiceDefinition {
+export function buildServiceDefinition(
+  config: DaemonConfig,
+  configPath: string,
+  rest: string[],
+  platform: NodeJS.Platform = process.platform,
+): ServiceDefinition {
   const name = argValue(rest, '--name') ?? config.productId;
   const agentBin = argValue(rest, '--agent-bin') ?? process.argv[1] ?? 'byok-agent';
   const nodeBin = argValue(rest, '--node-bin') ?? process.execPath;
@@ -48,7 +56,10 @@ export function buildServiceDefinition(config: DaemonConfig, configPath: string,
   const definition: ServiceDefinition = {
     name,
     displayName: config.branding?.displayName ?? config.productName,
-    program: nodeAgentProgram({ agentBin, configPath: absoluteConfigPath, nodeBin }),
+    // Issue #392: launchd and systemd start the daemon with their own
+    // minimal environment; `--service` makes `start` adopt the user's
+    // login-shell environment. WinSW is unchanged (owner decision pending).
+    program: nodeAgentProgram({ agentBin, configPath: absoluteConfigPath, nodeBin, service: platform !== 'win32' }),
     logDir,
   };
 
