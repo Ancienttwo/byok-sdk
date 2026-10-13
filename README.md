@@ -157,6 +157,14 @@ invariants it owns. See
 [ADR-037](docs/architecture/adr-2026-10-07-minimal-guardrails.md) and
 [the security model](docs/security.md).
 
+The SDK meters no execution. Storage above the tenant storage entitlement is
+the paid unit. The hosted profile is optimized for VPS deployment (Node,
+Postgres and S3-compatible object storage) and stays supported on Cloudflare
+Workers. See
+[ADR-038](docs/architecture/adr-2026-10-13-byok-cost-and-deployment.md).
+The planned work for Bot routines, storage accounting and idle cost is in the
+[Bot routines PRD](docs/researches/2026-10-13_bot-routines-cost-deployment-prd.md).
+
 ## Agent-first local homes and egress
 
 The additive Agent execution path treats a task as one run of a durable Agent.

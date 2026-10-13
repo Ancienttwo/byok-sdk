@@ -20,7 +20,7 @@ Aiphabee 并非首次引入 byok-sdk：其本地通路已经通过 `packages/byo
 4. **D4 已作废（superseded）**：研究稿早期提出的「每请求携带用户 key」与「信封加密托管用户 key（KEK 在 Secrets Store）」两种云端用户凭据方案，以及对应开放问题（原 Q9）与 `needs_credential` 暂停态，全部作废。
 5. **D5 云端不支持**：官方 CLI（Claude Code / Codex 等子进程）、OS Keychain、本地文件、stdio MCP。官方 CLI 仅本地。Workers/DO 上的准入集合为直连 HTTPS provider + pi 引擎 + 远程 MCP。
 6. **D6 使用 Durable Objects 实现工作调用（tool/job invocation）**：「工作调用」= 模型发起的工具调用 + 由工具派生的后台作业（job），均通过 Durable Object 派发、执行并持久化结果；云端以 `ToolInvocationBackend` 取代原 `ExecutionEnvBackend` 的角色。
-7. **D7 前序决定维持**：byok-sdk 拥有 SDK 云端支持（storage 等 backend 接口 + 云端 backend adapter，本地 / 云端同一 API）；Aiphabee 为首个消费方，部署在其自有 Cloudflare 账号；云端在 Aiphabee 现有 serverless agent（Worker + Workflow + DO）基础上演进；Cloudflare 优先（DO / DO SQLite）；Node + Postgres 仅预留接口、不实现。
+7. **D7 前序决定维持**：byok-sdk 拥有 SDK 云端支持（storage 等 backend 接口 + 云端 backend adapter，本地 / 云端同一 API）；Aiphabee 为首个消费方，部署在其自有 Cloudflare 账号；云端在 Aiphabee 现有 serverless agent（Worker + Workflow + DO）基础上演进；Cloudflare 优先（DO / DO SQLite）；Node + Postgres 仅预留接口、不实现。**2026-10-13 修订**：真相层（`@byok-sdk/cloud`、`@byok-sdk/cloud-dataplane`）的部署目标改由 [ADR-038](adr-2026-10-13-byok-cost-and-deployment.md) 决定：VPS 优先，Workers 继续支持。本条只约束 `cloud-do` 的 backend。
 8. **D8 Aiphabee 尚无用户 → 干净重构**：Generic Agent 直接替换现有 chat Workflow 路径（`AiphaBeeChatWorkflow` + `ChatConversationsDO` 驱动的聊天）。不并行运行、不加 feature flag、无 shadow 期。
 9. **D9 DO 同时承载工具调用与长作业，但不引入不必要的复杂度**：设计保持最小，非严格必要的一律删去；在出现真实需求前，不拆独立 job Worker/script、不做结果分块。
 10. **D10 云端只读工具可重放**：Aiphabee 的只读数据工具与 skill 加载器在云端重启后可重放（`replay:'safe'`），以固定清单（冻结表）+ 测试守护；本地仍全部 `replay:'unsafe'`。

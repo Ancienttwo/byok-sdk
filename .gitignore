@@ -151,6 +151,7 @@ Thumbs.db
 !/docs/researches/2026-09-09_conversation-turn-mode-design.md
 !/docs/researches/2026-09-09_conversation-turn-mode-host-reliability-addendum.md
 !/docs/researches/2026-09-09_conversation-turn-fresh-mvp-prd.md
+!/docs/researches/2026-10-13_bot-routines-cost-deployment-prd.md
 # Process output anywhere
 *.jsonl
 **/evidence/
