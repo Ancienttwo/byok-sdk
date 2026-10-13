@@ -38,6 +38,13 @@ describe('bin/audit-log: appendAuditEvent / readAuditEvents', () => {
     await appendAuditEvent(storeDir, event);
     expect(await readAuditEvents(storeDir)).toEqual([event]);
   });
+  it('round-trips a crashed lifecycle', async () => {
+    const storeDir = await tmpDir('byok-audit-crashed-');
+    const crashed: DaemonEvent = { kind: 'lifecycle', ts: '2026-10-14T00:00:00.000Z', lifecycle: { phase: 'crashed', at: '2026-10-14T00:00:00.000Z' } };
+    await appendAuditEvent(storeDir, crashed);
+    expect(await readAuditEvents(storeDir)).toEqual([crashed]);
+  });
+
   it('#394: round-trips a halted lifecycle, and drops pre-lifecycle connection lines and malformed lifecycles', async () => {
     const storeDir = await tmpDir('byok-audit-lifecycle-');
     const halted: DaemonEvent = {

@@ -263,6 +263,9 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
       [poisonSecond.id],
       [acceptedBeforePoison.id, laterValid.id],
     ]);
+    // Both handshakes, the start's and the reconnect's, are a lone conn.hello.
+    expect(postBatch.mock.calls[0]![0].map((envelope) => envelope.type)).toEqual(['conn.hello']);
+    expect(postBatch.mock.calls[2]![0].map((envelope) => envelope.type)).toEqual(['conn.hello']);
     // The first mixed response is deliberately unreadable after the server's
     // business effects. Its identical retry and the later accepted sub-batch
     // are deduped, so each valid business envelope executes once.
