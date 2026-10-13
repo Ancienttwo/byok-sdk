@@ -1924,9 +1924,12 @@ batch waits until there is room.
 `{ "error": "storage_entitlement_missing" }`.** The same reply append is
 refused closed when the Host never issued the tenant a storage entitlement (the
 status the blob routes use for the same condition, §7). Unlike 507 this does not
-clear by itself: resending cannot succeed until the Host issues an entitlement,
-so a daemon must treat it as a terminal configuration error for the batch, not a
-backpressure signal.
+clear with time: it needs operator action, because the Host has to issue the
+tenant a storage entitlement. The daemon keeps the batch unchanged and resends
+it with backoff; resending is safe for the same reason as for 507, and it
+succeeds once the entitlement exists. The distinct status lets operators and
+Hosts tell this case apart from a full mailbox (507) and from a server fault
+(500).
 
 **Chunking an oversized outbound queue is a client-side implementation
 detail, not a new wire rule.** A daemon that has accumulated more than

@@ -947,9 +947,10 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
               STORAGE_ERROR_HTTP_STATUS.storage_quota_exceeded,
             );
           }
-          // A tenant the Host never issued an entitlement to: no resend can
-          // succeed until it does, so answer the typed 409 the blob routes use
-          // rather than a 500 the client retries forever.
+          // A tenant the Host never issued an entitlement to: the client keeps
+          // the batch and retries with backoff until the Host issues one. The
+          // typed 409 the blob routes use makes the cause visible, instead of
+          // an opaque 500, so operators can tell it from a full mailbox (507).
           if (isCoreError(cause, 'storage_entitlement_missing')) {
             return c.json({ error: cause.code }, 409);
           }
