@@ -35,8 +35,9 @@ import {
 import type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
 import { DeviceConnections } from './connections';
 import { pickFirstConnectedDevice, type DeviceCandidate } from './device-selection';
+import { emptyTaskCounts, LiveTaskIndex } from './live-tasks';
 import { TaskEventRelay } from './relay';
-import { toMachineInfo, toTaskResult, toTaskSnapshot, type DispatchFacts } from './snapshot';
+import { toMachineInfo, toTaskResult, toTaskSnapshot } from './snapshot';
 import { composeFacadeStores, serverTenantId, DEFAULT_MAX_BLOB_SIZE_BYTES } from './stores';
 import { createTaskHandle } from './task-handle';
 import type {
@@ -104,13 +105,19 @@ export type { AccessTokenClaims, DeviceRecord, PairingCodeInfo, TenantId, TokenS
 export { createHmacTokenSigner } from '@byok-sdk/cloud';
 /** Cutoffs and result of {@link ByokServer.mailbox.collectRetired}, owned by `@byok-sdk/core`. */
 export type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
-export { SqliteSchemaError, SqliteUnavailableError } from './sqlite-support';
+export { SqliteOwnershipError, SqliteSchemaError, SqliteUnavailableError } from './sqlite-support';
 export type { SqliteSchemaErrorCode } from './sqlite-support';
 export type { RateLimiterOptions } from './rate-limiter';
 export { DEFAULT_TASK_EVENT_BUFFER_LIMIT, DEFAULT_TASK_EVENT_RETENTION_MS } from './relay';
 
 /** `GET /byok/events` hold duration (§8): ~50s unless overridden (e.g. for tests). */
 const DEFAULT_LONG_POLL_HOLD_MS = 50_000;
+/**
+ * Default presence lease beyond one long-poll hold: a poll renews presence once,
+ * when it starts, so a device must re-poll within this slack after a full hold
+ * (reconnect, retry jitter) to stay connected.
+ */
+const DEFAULT_PRESENCE_GRACE_MS = 15_000;
 /** Ceiling on how often a held poll re-reads the mailbox, ms. */
 const MAX_LONG_POLL_INTERVAL_MS = 250;
 /** Floor on the same, so a short test hold still re-reads several times. */
@@ -277,11 +284,13 @@ export interface ByokServer {
    * A plain, serializable snapshot of this server's current state. See
    * {@link HubStats} for the field-by-field contract.
    *
-   * Async because `taskCountsByState` is COMPUTED from the durable task store
-   * on every call rather than mirrored into a counter this package would then
-   * have to keep in agreement with it — that mirror was the second task
-   * authority the fold exists to remove. Deliberately in-process only: never
-   * exposed over HTTP by this SDK itself (see
+   * Async because the non-terminal part of `taskCountsByState` is re-read from
+   * the durable task store on every call. Terminal states are absorbing, so a
+   * task is read until it settles and then only tallied: the cost of a call
+   * follows the tasks still in flight, not history (`live-tasks.ts`). A SQLite
+   * server accounts the file's existing tasks once, at open.
+   *
+   * Deliberately in-process only: never exposed over HTTP by this SDK itself (see
    * `CreateByokServerOptions.healthzRoute`); an embedder that wants any of it
    * surfaced remotely builds its own authenticated route around this method.
    */
@@ -310,8 +319,21 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   const tenant = serverTenantId(opts.productId);
   const maxBlobSizeBytes = opts.maxBlobSizeBytes ?? DEFAULT_MAX_BLOB_SIZE_BYTES;
   const longPollHoldMs = opts.longPollHoldMs ?? DEFAULT_LONG_POLL_HOLD_MS;
+  const presenceTtlMs = opts.presenceTtlMs ?? longPollHoldMs + DEFAULT_PRESENCE_GRACE_MS;
+  // A lease no longer than one hold would expire a healthy device mid-poll.
+  if (!Number.isSafeInteger(presenceTtlMs) || presenceTtlMs <= longPollHoldMs) {
+    throw new Error(
+      `presenceTtlMs must be an integer greater than longPollHoldMs (${longPollHoldMs}); got ${presenceTtlMs}`,
+    );
+  }
 
-  const connections = new DeviceConnections();
+  const connections = new DeviceConnections({ presenceTtlMs });
+  /**
+   * Non-terminal tasks plus terminal counts, and the dispatch input the kernel
+   * does not persist (`DispatchFacts`) for tasks still in flight. Sized by live
+   * tasks, never by history — see `live-tasks.ts`.
+   */
+  const tasks = new LiveTaskIndex();
   const relay = new TaskEventRelay({
     connections,
     ...(opts.taskEventBufferLimit === undefined ? {} : { taskEventBufferLimit: opts.taskEventBufferLimit }),
@@ -324,6 +346,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     ...(opts.storage === undefined ? {} : { storage: opts.storage }),
     ...(opts.rateLimit === undefined ? {} : { rateLimit: opts.rateLimit }),
     connections,
+    tasks,
     onRateLimited: (deviceId, at) => relay.emitServerEvent({ kind: 'device.rate_limited', deviceId, at }),
   });
 
@@ -352,12 +375,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     longPollIntervalMs: longPollInterval(longPollHoldMs),
   });
 
-  /**
-   * Dispatch input the kernel does not persist. See `DispatchFacts` for why
-   * this exists and why it is not TTL-reclaimed.
-   */
-  const dispatched = new Map<string, DispatchFacts>();
-
   const hono = new Hono();
   if (opts.healthzRoute === true) {
     // Deliberately UNAUTHENTICATED and minimal: a liveness probe must not need
@@ -380,7 +397,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
   async function projectTask(attempt: TaskAttempt): Promise<TaskSnapshot> {
     const [pending, terminal] = await Promise.all([readPending(attempt.taskId), readTerminal(attempt.taskId)]);
-    return toTaskSnapshot(attempt, pending, terminal, dispatched.get(attempt.taskId));
+    return toTaskSnapshot(attempt, pending, terminal, tasks.facts(attempt.taskId));
   }
 
   /**
@@ -677,7 +694,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     // The offer envelope's own timestamp, so the feed and the snapshot agree on
     // when the task began rather than each stamping its own "now".
     const createdAt = enqueued.envelope.ts;
-    dispatched.set(enqueued.taskId, {
+    tasks.attachFacts(enqueued.taskId, {
       createdAt,
       ...(sessionRef === undefined ? {} : { sessionRef }),
     });
@@ -828,7 +845,9 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     machines: {
       async list(): Promise<MachineInfo[]> {
         const devices = await cloud.listDevices(tenant);
-        return devices.map((device) => toMachineInfo(device, connections.get(device.deviceId)));
+        return devices.map((device) =>
+          toMachineInfo(device, connections.get(device.deviceId), connections.isConnected(device.deviceId)),
+        );
       },
     },
 
@@ -854,32 +873,31 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
     stop(): void {
       relay.stop();
-      dispatched.clear();
+      tasks.clearFacts();
       void composition.close();
     },
 
     async close(): Promise<void> {
       relay.stop();
-      dispatched.clear();
+      tasks.clearFacts();
       await composition.close();
     },
 
     async stats(): Promise<HubStats> {
-      const taskCountsByState = Object.fromEntries(TASK_STATES.map((state) => [state, 0])) as Record<
-        TaskState,
-        number
-      >;
-      let cursor: string | undefined;
-      do {
-        const page = await cloud.listTaskAttempts(tenant, {
-          limit: DEFAULT_TASK_PAGE_LIMIT,
-          ...(cursor === undefined ? {} : { cursor }),
-        });
-        for (const attempt of page.attempts) {
-          taskCountsByState[toStateForCount(attempt, await readPending(attempt.taskId))] += 1;
-        }
-        cursor = page.nextCursor;
-      } while (cursor !== undefined);
+      // Only the live set is re-read: one batched attempt read plus one
+      // approval-timeline read per live task. A task that turns out terminal
+      // leaves the live set and joins its count here, exactly once.
+      const attempts = await composition.cloud.tasks.getMany(tenant, tasks.liveTaskIds());
+      for (const attempt of attempts) tasks.observe(attempt);
+      const live = attempts.filter((attempt) => tasks.isLive(attempt.taskId));
+      const pending = await Promise.all(live.map((attempt) => readPending(attempt.taskId)));
+      // Synchronous from here: a task settled by a transition that committed
+      // while the timelines were read sits in its terminal count, not in both.
+      const taskCountsByState = emptyTaskCounts();
+      live.forEach((attempt, index) => {
+        if (tasks.isLive(attempt.taskId)) taskCountsByState[toStateForCount(attempt, pending[index])] += 1;
+      });
+      for (const state of TASK_STATES) taskCountsByState[state] += tasks.terminalCount(state);
 
       return {
         connectedDeviceCount: connections.connectedCount(),

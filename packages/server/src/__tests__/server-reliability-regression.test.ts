@@ -112,7 +112,7 @@ describe('issues #141-#144 server reliability regressions', () => {
   });
 
   it('#142 result() returns an already-durable terminal without waiting for a relay notification', async () => {
-    const relay = new TaskEventRelay({ connections: new DeviceConnections() });
+    const relay = new TaskEventRelay({ connections: new DeviceConnections({ presenceTtlMs: 65_000 }) });
     const handle = createTaskHandle('task-terminal-before-handle', {
       tenant: TENANT,
       cloud: {} as ByokCloud,
@@ -131,7 +131,7 @@ describe('issues #141-#144 server reliability regressions', () => {
   });
 
   it('#142 buffers a terminal committed during provisional enqueue and replays it after offer activation', async () => {
-    const relay = new TaskEventRelay({ connections: new DeviceConnections() });
+    const relay = new TaskEventRelay({ connections: new DeviceConnections({ presenceTtlMs: 65_000 }) });
     const taskId = 'task-provisional-terminal';
     relay.provision(taskId);
     relay.onInboundCommitted({
