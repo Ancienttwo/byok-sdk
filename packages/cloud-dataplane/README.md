@@ -45,8 +45,12 @@ createByokCloud({
 
 Two of those nine are not tables. `rateLimiter` is the allow-all reference and
 gets no table by design: persisting an allow-all would be a table that is always
-empty, and a real limiter is edge work rather than a per-request write. `blobs`
-is the R2 adapter described below.
+empty, and a real limiter is edge work rather than a per-request write. That
+limiter only covers authenticated devices; the unauthenticated pair, challenge
+and token routes reach Postgres on every request and need an edge limit (or
+`createByokCloud`'s `publicRouteLimiter`) — see
+`deploy/runbooks/hosted-operations.md`, "Public routes and edge rate limits".
+`blobs` is the R2 adapter described below.
 
 ## Deployment compositions
 

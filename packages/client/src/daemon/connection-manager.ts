@@ -107,6 +107,17 @@ export class ConnectionManager {
   private uploadRetryAttempt = 0;
   private started = false;
   private connected = false;
+  /**
+   * Settle needs both halves of the handshake: the start `conn.hello` has
+   * been answered by `POST /byok/messages` (so the server holds this device's
+   * capability snapshot), and the current long-poll stream has answered with
+   * the server's capabilities. The no-hold settle poll can return before the
+   * concurrent hello POST does; settling on the poll alone would report a
+   * device open that the server would still refuse Agent work for.
+   */
+  private startHello: Envelope | undefined;
+  private startHelloAnswered = false;
+  private capabilitiesCurrent = false;
   private cursor: number | undefined;
   /**
    * Finding F3 (at-most-once redelivery): the lowest `task.*` envelope `seq`
@@ -189,10 +200,12 @@ export class ConnectionManager {
       onEnvelope: (envelope) => this.deliver(envelope),
       onServerCapabilities: (capabilities) => {
         this.serverCapabilities = capabilities;
+        this.capabilitiesCurrent = true;
         this.noteConnected();
       },
       onServerCapabilitiesInvalidated: () => {
         this.serverCapabilities = [];
+        this.capabilitiesCurrent = false;
       },
       onPollFailure: () => this.noteDisconnected(),
       onRevoked: () => this.enterRevoked(),
@@ -218,7 +231,8 @@ export class ConnectionManager {
     this.started = true;
     this.opts.onStateChange?.('connecting');
     this.longPoll.start();
-    this.outbox.unshift(createConnectionHelloEnvelope(this.opts, () => this.cursor));
+    this.startHello = createConnectionHelloEnvelope(this.opts, () => this.cursor);
+    this.outbox.unshift(this.startHello);
     void this.drainOutbox();
   }
 
@@ -274,6 +288,7 @@ export class ConnectionManager {
           this.opts.beforeOutboundPost?.(segment);
           const result = await this.longPoll.postBatch(segment);
           if (result === undefined) return [...segment, ...pending.flat()];
+          this.noteStartHelloAnswered(segment);
           if ((result.rejected ?? 0) === 0) {
             await this.opts.onOutboundAccepted?.(segment);
             continue;
@@ -299,7 +314,11 @@ export class ConnectionManager {
       while (this.outbox.length > 0) {
         if (this.stopped || this.revoked) return;
 
-        const batch = this.outbox.splice(0, MAX_MESSAGES_PER_BATCH);
+        // The start hello travels alone: settle waits for its answer, so it
+        // must not share a batch whose response waits on work queued behind it
+        // (a recovered terminal replayed before start, for example).
+        const helloAlone = this.outbox[0] === this.startHello && !this.startHelloAnswered;
+        const batch = this.outbox.splice(0, helloAlone ? 1 : MAX_MESSAGES_PER_BATCH);
         // Finding F5(b): tracked for the DURATION of the `postBatch` await —
         // `batch` has already left `this.outbox` (spliced out above) but
         // isn't confirmed delivered yet, so a plain `this.outbox.length`
@@ -383,8 +402,11 @@ export class ConnectionManager {
   }
 
   /**
-   * Resolves after the first successful long-poll response establishes the
-   * authenticated connection.
+   * Resolves once the start `conn.hello` has been answered and a successful
+   * long-poll response has established the authenticated connection with the
+   * server's capabilities. That response answers the transport's no-hold
+   * settle poll, so an idle device settles in about one round trip rather
+   * than one full server hold.
    *
    * Rejects with {@link DeviceRevokedError} — instead of hanging until
    * `timeoutMs` — if the device turns out to be revoked while settling (or
@@ -664,7 +686,15 @@ export class ConnectionManager {
     for (const waiter of this.settledWaiters.splice(0)) waiter(err);
   }
 
+  /** Any server answer counts (accepted, or isolated as rejected): the hello was processed. */
+  private noteStartHelloAnswered(segment: readonly Envelope[]): void {
+    if (this.startHelloAnswered || this.startHello === undefined || !segment.includes(this.startHello)) return;
+    this.startHelloAnswered = true;
+    this.noteConnected();
+  }
+
   private noteConnected(): void {
+    if (!this.startHelloAnswered || !this.capabilitiesCurrent) return;
     if (this.connected || this.stopped || this.revoked || this.terminalError) return;
     this.connected = true;
     this.opts.onStateChange?.('open');

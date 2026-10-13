@@ -1,4 +1,3 @@
-// BYOK change: Modified from OAR 0804b91 for the SDK ES2022 lib (Apache-2.0).
 /* oxlint-disable import/prefer-default-export -- Shared named helper. */
 import type { SessionOptions } from "../contracts/session.js";
 import { redactText } from "./redact-text.js";
@@ -50,13 +49,13 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
       if (authorization) { add(/^\s*\S+\s+(.+?)\s*$/u.exec(value)?.[1]); }
     }
   }
-  let values = [...known].sort((left, right) => right.length - left.length); // BYOK change: ES2022 lib; the spread is already a copy.
+  let values = [...known].toSorted((left, right) => right.length - left.length);
   const redact = (text: string): string => values.reduce((result, value) => result.replaceAll(value, "[redacted]"), text);
   return {
     add(value) {
       if (credentialValue(value) && !known.has(value)) {
         known.add(value);
-        values = [...known].sort((left, right) => right.length - left.length); // BYOK change: ES2022 lib; the spread is already a copy.
+        values = [...known].toSorted((left, right) => right.length - left.length);
       }
     },
     redact,

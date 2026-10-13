@@ -83,6 +83,8 @@ export interface InMemoryByokCloudOptions {
   readonly agentMessage?: ByokCloudOptions['agentMessage'];
   /** Post-commit relay; absent means nothing is watching. */
   readonly observer?: ByokCloudOptions['observer'];
+  /** Unauthenticated-route admission; absent means no limit. */
+  readonly publicRouteLimiter?: ByokCloudOptions['publicRouteLimiter'];
   readonly agentMemoryProjectionAuthorizer?: AgentMemoryProjectionAuthorizer;
   readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
 }
@@ -137,6 +139,7 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
       : { instanceProductId: options.instanceProductId }),
     ...(options.agentMessage === undefined ? {} : { agentMessage: options.agentMessage }),
     ...(options.observer === undefined ? {} : { observer: options.observer }),
+    ...(options.publicRouteLimiter === undefined ? {} : { publicRouteLimiter: options.publicRouteLimiter }),
     ...(options.agentMemoryProjectionAuthorizer === undefined
       ? {}
       : { agentMemoryProjectionAuthorizer: options.agentMemoryProjectionAuthorizer }),

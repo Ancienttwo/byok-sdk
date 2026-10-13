@@ -26,9 +26,8 @@ const PRODUCT_ID = process.env.BYOK_EXAMPLE_PRODUCT_ID ?? 'byok-example-basic';
 // `productId` at construction, so `createPairingCode` takes only the product.
 // `BYOK_EXAMPLE_TENANT_ID` is therefore no longer read.
 
-// `RuntimeId` from @byok-sdk/protocol is 'pi' | 'claude' | 'codex'; M0 only ships
-// the pi adapter (see plan: 里程碑 M0), but the wire/select still names all
-// three so the demo is representative of the full protocol shape. Mirrors
+// `RuntimeId` from @byok-sdk/protocol is 'pi' | 'claude' | 'codex'; the daemon
+// ships an adapter for each, and the page's runtime select offers all three. Mirrors
 // the same literal allowlist `packages/server/src/hub.ts` keeps locally
 // rather than pulling in @byok-sdk/protocol just for this one array.
 const KNOWN_RUNTIMES = new Set(['pi', 'claude', 'codex']);
