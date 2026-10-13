@@ -486,7 +486,8 @@ these fields is rendered as `unknown` (a transition branch removed in the next
 minor). Fresh local `runtimes` is the explicit probe of the current shell and
 shows failure kinds. `doctor` and the support bundle use the daemon's runtimes
 when it answers and otherwise the local probe, labelled `runtimesSource:
-local-shell`; both carry the closed outcome and finite refusal reason in JSON,
+local-shell`; both carry the closed outcome in JSON (the finite refusal reason
+only for `local-shell`, because the daemon does not report it),
 count them in text, and add an `environment` check (the daemon's, else the
 last event). Only closed values and the shell basename appear, never variable
 values or paths. The existing any-present pass/warn rule remains unchanged. Display `present` is a deterministic

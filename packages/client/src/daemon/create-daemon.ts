@@ -2211,6 +2211,8 @@ export function buildDaemonWithAdapters(
     // embedding Host that called `applyLoginShellEnvironment()` itself is
     // reported the same way.
     resolvedEnvironment = serviceEnvironmentStatus();
+    // A re-paired start re-detects; never report the previous start's outcomes meanwhile.
+    runtimeOutcomes = [];
     observer.noteEnvironmentResolved(resolvedEnvironment);
 
     if (gitWorkspaceManager) {
