@@ -1,12 +1,12 @@
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { codexSession } from '../../vendor/oar/bb98cbc/runtimes/codex/session';
-import * as projection from '../../vendor/oar/bb98cbc/runtimes/codex/projection';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/bb98cbc/runtimes/codex/app-server-client';
-import { SessionNotFoundError } from '../../vendor/oar/bb98cbc/contracts/session-not-found-error';
-import { SessionUnavailableError } from '../../vendor/oar/bb98cbc/contracts/session-unavailable-error';
-import { UnsupportedOptionError } from '../../vendor/oar/bb98cbc/contracts/errors';
-import { inputImagesRefusal } from '../../vendor/oar/bb98cbc/shared/input-images';
+import { codexSession } from '../../vendor/oar/bf55fd6/runtimes/codex/session';
+import * as projection from '../../vendor/oar/bf55fd6/runtimes/codex/projection';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/bf55fd6/runtimes/codex/app-server-client';
+import { SessionNotFoundError } from '../../vendor/oar/bf55fd6/contracts/session-not-found-error';
+import { SessionUnavailableError } from '../../vendor/oar/bf55fd6/contracts/session-unavailable-error';
+import { UnsupportedOptionError } from '../../vendor/oar/bf55fd6/contracts/errors';
+import { inputImagesRefusal } from '../../vendor/oar/bf55fd6/shared/input-images';
 
 function fakeServer(openReply: Record<string, unknown> = {}) {
   let receive!: (line: string) => void;

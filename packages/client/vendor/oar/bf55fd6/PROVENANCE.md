@@ -1,6 +1,6 @@
-# OAR bb98cbc private runtime fork
+# OAR bf55fd6 private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.59.1, fixed commit `bb98cbc1e383ea7192da0c87ce777d799669a7a9`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.62.1, fixed commit `bf55fd68f19749cab8ed2d5a234238af7adbd4b0`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
 `source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 55 source files plus LICENSE. Fifty source files keep upstream bytes. Five source files contain BYOK changes. The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls. No Cursor, ACP, CLI, arena, executable manager, other runtime or branded resources are included.
 
@@ -286,4 +286,14 @@ The maintained set falls from six files to five: `app-server-client.ts`, `open.t
 The SDK Codex adapter never passes `name`, and the bridge does not expose it. Without a name, `nameThread` sends no request. A resume that codex refuses as archived or held by another writer now throws `SessionUnavailableError` instead of a plain `Error`, with the same message and cause. The SDK adapter tests only `SessionNotFoundError`, so such a resume still fails as a retryable infrastructure start failure with the same reason text.
 Upstream 0.58.0 to 0.59.1 also adds `ListModelsOptions.cwd`, the Pi theme fix and session names for Claude and Pi. These modules remain outside the selected closure.
 
-Build assets copy this source's LICENSE, PROVENANCE.md and source-manifest.json to `dist/assets/provenance/oar/bb98cbc/`.
+
+### 0.59.1 → 0.62.1 re-vendor
+
+The new base is tag v0.62.1, commit `bf55fd68f19749cab8ed2d5a234238af7adbd4b0`.
+No selected path changed upstream. All 55 selected source files and LICENSE have the same upstream bytes at both commits, so the import closure does not change.
+
+The five maintained files keep their BYOK deltas. Only their change notices name the new base.
+
+Upstream 0.60.0 to 0.62.1 changes the MCP tool server, Claude context usage and projection, and the Grok, Pi and Pi Durable runtimes. These modules remain outside the selected closure. No upstream npm dependency enters the SDK.
+
+Build assets copy this source's LICENSE, PROVENANCE.md and source-manifest.json to `dist/assets/provenance/oar/bf55fd6/`.
