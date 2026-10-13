@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, realpath, stat } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, realpath, rm, stat } from 'node:fs/promises';
 import { createConnection, createServer, type Server, type Socket } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,10 +26,12 @@ import { acquireDaemonOwner, DaemonOwnerActiveError, storeMutexEndpoint } from '
 
 const servers: Server[] = [];
 const sockets: Socket[] = [];
+const fallbackDirectories: string[] = [];
 
 afterEach(async () => {
   for (const s of sockets.splice(0)) s.destroy();
   await Promise.all(servers.splice(0).map((s) => new Promise<void>((r) => s.close(() => r()))));
+  for (const directory of fallbackDirectories.splice(0)) await rm(directory, { recursive: true, force: true });
 });
 
 const tmpDir = (): Promise<string> => mkdtemp(path.join(os.tmpdir(), 'byok-mutex-collision-')).then((d) => realpath(d));
@@ -163,6 +165,8 @@ describe('daemon owner store mutex: a store-scoped lock, immune to foreign liste
     try {
       const endpoint = storeMutexEndpoint(storeDir, createHash('sha256').update(storeDir).digest('hex'));
       expect(Buffer.byteLength(endpoint, 'utf8')).toBeLessThanOrEqual(100);
+      await expect(lstat(path.dirname(endpoint))).rejects.toMatchObject({ code: 'ENOENT' });
+      fallbackDirectories.push(path.dirname(endpoint));
 
       const held = await acquireDaemonOwner(storeDir, 'doctor');
       try {

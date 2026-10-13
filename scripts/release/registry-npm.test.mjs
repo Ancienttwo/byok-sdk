@@ -35,8 +35,8 @@ test('installed npm against a loopback registry preserves first-publication/tag 
       [version]: { name, version },
     } }));
   });
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   try {
+    await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
     writeFileSync(path.join(temp, 'userconfig'), '');
     writeFileSync(path.join(temp, 'globalconfig'), '');
     const env = {

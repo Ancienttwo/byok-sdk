@@ -6,6 +6,8 @@ import { defineConfig } from 'vitest/config';
 // never receives this flag from DaemonConfig.
 export default defineConfig({
   test: {
+    // One short per-run TMPDIR, removed in teardown; see scripts/vitest/tmp-root.mjs.
+    globalSetup: ['../../scripts/vitest/tmp-root.mjs'],
     env: { BYOK_TEST_DEVICE_CREDENTIAL_STORE: '1' },
     testTimeout: 10_000,
   },

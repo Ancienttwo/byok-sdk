@@ -6,6 +6,8 @@ import { defineConfig } from 'vitest/config';
 // other vitest default is left untouched on purpose.
 export default defineConfig({
   test: {
+    // One short per-run TMPDIR, removed in teardown; see scripts/vitest/tmp-root.mjs.
+    globalSetup: ['../../scripts/vitest/tmp-root.mjs'],
     setupFiles: ['./src/__tests__/support/disable-fetch-keepalive.ts'],
   },
 });
