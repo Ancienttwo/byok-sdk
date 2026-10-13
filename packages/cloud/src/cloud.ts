@@ -19,7 +19,9 @@ import { HarnessIdSchema } from '@byok-sdk/protocol';
  * `src/__tests__/constraints.test.ts`.
  */
 import {
+  STORAGE_ERROR_HTTP_STATUS,
   contentHash,
+  isCoreError,
   parseCapabilityDeclaration,
   type BoardItem,
   type BoardItemInput,
@@ -919,17 +921,42 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   }
 
   if (declares(declaration, CLOUD_CAPABILITIES.messagesBatch)) {
+    // The batch appends server replies (acks, dispositions) to the device's
+    // mailbox. A full mailbox refuses them with `storage_quota_exceeded`, and
+    // the route answers its wire-stable 507 (§8.2) instead of a 500: resending
+    // the same batch is safe, because its duplicates re-append the same
+    // idempotent replies once the mailbox has room.
+    const messages = messagesHandler({
+      ...deviceRouteDeps,
+      activityBounds,
+      appendReliableEgressAck: enqueueReliableEgressAck,
+      appendContentReceiptAck: enqueueContentReceiptAck,
+      agentMessage: options.agentMessage,
+      appendAgentMessageDisposition: enqueueAgentMessageDisposition,
+      observer: options.observer,
+    });
     registry.register(
       { method: 'POST', path: BYOK_MESSAGES_PATH, class: 'device' },
-      messagesHandler({
-        ...deviceRouteDeps,
-        activityBounds,
-        appendReliableEgressAck: enqueueReliableEgressAck,
-        appendContentReceiptAck: enqueueContentReceiptAck,
-        agentMessage: options.agentMessage,
-        appendAgentMessageDisposition: enqueueAgentMessageDisposition,
-        observer: options.observer,
-      }),
+      async (c) => {
+        try {
+          return await messages(c);
+        } catch (cause) {
+          if (isCoreError(cause, 'storage_quota_exceeded')) {
+            return c.json(
+              { error: cause.code },
+              STORAGE_ERROR_HTTP_STATUS.storage_quota_exceeded,
+            );
+          }
+          // A tenant the Host never issued an entitlement to: the client keeps
+          // the batch and retries with backoff until the Host issues one. The
+          // typed 409 the blob routes use makes the cause visible, instead of
+          // an opaque 500, so operators can tell it from a full mailbox (507).
+          if (isCoreError(cause, 'storage_entitlement_missing')) {
+            return c.json({ error: cause.code }, 409);
+          }
+          throw cause;
+        }
+      },
     );
   }
 
@@ -1216,6 +1243,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     await beforeMailbox?.(stores, taskId);
     const message = await stores.mailbox.append({
+      admission: 'limited',
       deviceId,
       messageId,
       materialize: async (seq) => {
@@ -1312,6 +1340,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   ): Promise<EnqueuedAgentControl> {
     const stores = tenantStoresFor(controlPlane(tenant), root);
     const message = await stores.mailbox.append({
+      admission: 'limited',
       deviceId,
       messageId,
       materialize: async (seq) => {
@@ -1818,6 +1847,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       receiptId: record.receiptId,
     });
     const message = await stores.mailbox.append({
+      admission: 'limited',
       deviceId: record.deviceId,
       messageId: record.receiptId,
       materialize: async (seq) => {
@@ -1862,6 +1892,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       receiptId: exactReceipt.requestId,
     });
     const message = await stores.mailbox.append({
+      admission: 'limited',
       deviceId,
       // The request itself already occupies its bare request id in this
       // mailbox. A namespaced producer key keeps the ack idempotent without
@@ -1897,6 +1928,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     payload: AgentMessageDispositionPayload,
   ): Promise<void> {
     const message = await stores.mailbox.append({
+      admission: 'limited',
       deviceId,
       messageId: `agent-message-disposition:${payload.receiptId}`,
       materialize: async (seq) => {

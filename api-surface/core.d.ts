@@ -1216,13 +1216,16 @@ export declare function createInMemoryCoreCompositionWithClock(): {
     readonly clock: MutableClock;
 };
 // ==== @byok-sdk/core dist/in-memory/mailbox.d.ts ====
-import type { MailboxAdvanceCursorInput, MailboxAppendInput, MailboxCursorState, MailboxMessage, MailboxPage, MailboxReadQuery, MailboxRecordDeliveryInput, MailboxRetentionInput, MailboxRetentionResult, MailboxStore } from '../mailbox';
+import type { MailboxAdvanceCursorInput, MailboxAppendInput, MailboxCursorState, MailboxMessage, MailboxPage, MailboxReadQuery, MailboxRecordDeliveryInput, MailboxRetentionInput, MailboxRetentionResult, MailboxStore, MailboxUsage } from '../mailbox';
+import type { QuotaStore } from '../quota';
 import type { Clock } from '../stores';
 import { type TenantId } from '../tenant';
 export declare class InMemoryMailboxStore implements MailboxStore {
     #private;
-    constructor(clock: Clock);
+    /** The mailbox reads its limit from quota; quota never reads the mailbox. */
+    constructor(clock: Clock, quota: Pick<QuotaStore, 'readEntitlement'>);
     append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage>;
+    readUsage(tenant: TenantId): Promise<MailboxUsage>;
     readAfter(tenant: TenantId, query: MailboxReadQuery): Promise<MailboxPage>;
     advanceCursor(tenant: TenantId, input: MailboxAdvanceCursorInput): Promise<MailboxCursorState>;
     recordDelivery(tenant: TenantId, input: MailboxRecordDeliveryInput): Promise<MailboxCursorState>;
@@ -1242,7 +1245,7 @@ export declare class InMemoryPresenceStore implements PresenceStore {
 }
 // ==== @byok-sdk/core dist/in-memory/quota.d.ts ====
 import type { ObjectStore } from '../blob';
-import type { MailboxUsageDeltaInput, StorageFinalizeInput, StorageFinalizeResult, StorageReservation, StorageReservationInput, StorageStatus, QuotaStore, TenantStorageEntitlement, TenantStorageEntitlementInput, TenantStorageUsage } from '../quota';
+import type { StorageFinalizeInput, StorageFinalizeResult, StorageReservation, StorageReservationInput, StorageStatus, QuotaStore, TenantStorageEntitlement, TenantStorageEntitlementInput, TenantStorageUsage } from '../quota';
 import type { Clock } from '../stores';
 import { type TenantId } from '../tenant';
 export declare class InMemoryQuotaStore implements QuotaStore {
@@ -1257,7 +1260,6 @@ export declare class InMemoryQuotaStore implements QuotaStore {
     finalizeReservation(tenant: TenantId, input: StorageFinalizeInput): Promise<StorageFinalizeResult>;
     abortReservation(tenant: TenantId, reservationId: string): Promise<StorageReservation>;
     expireReservations(tenant: TenantId): Promise<readonly StorageReservation[]>;
-    applyMailboxDelta(tenant: TenantId, input: MailboxUsageDeltaInput): Promise<TenantStorageUsage>;
 }
 // ==== @byok-sdk/core dist/in-memory/skill-pack.d.ts ====
 /**
@@ -1320,7 +1322,7 @@ export { ByokCoreError, CoreConflictError, CORE_ERROR_CODES, isCoreError, isCore
 export type { CoreErrorCode } from './errors';
 export { CANONICAL_TIMESTAMP_PATTERN, assertCanonicalTimestamp, isCanonicalTimestamp, } from './time';
 export { MAILBOX_MESSAGE_STATES } from './mailbox';
-export type { MailboxAdvanceCursorInput, MailboxAppendInput, MailboxBody, MailboxCursorState, MailboxMessage, MailboxMessageState, MailboxPage, MailboxReadQuery, MailboxRecordDeliveryInput, MailboxRetentionInput, MailboxRetentionResult, MailboxStore, } from './mailbox';
+export type { MailboxAdmission, MailboxAdvanceCursorInput, MailboxAppendInput, MailboxBody, MailboxCursorState, MailboxMessage, MailboxMessageState, MailboxPage, MailboxReadQuery, MailboxRecordDeliveryInput, MailboxRetentionInput, MailboxRetentionResult, MailboxStore, MailboxUsage, } from './mailbox';
 export { BOARD_STATUSES, BOARD_TRANSITIONS, isLegalBoardTransition } from './board';
 export type { BoardAssignee, BoardClaimInput, BoardItem, BoardItemInput, BoardListQuery, BoardPage, BoardStatus, BoardStatusUpdateInput, BoardStore, BoardUnclaimInput, } from './board';
 export { TRUTH_RECORD_KINDS } from './truth';
@@ -1330,7 +1332,7 @@ export type { PresenceHint, PresenceHintInput, PresenceLevel, PresenceRuntimeFac
 export { CONTENT_HASH_PATTERN, OBJECT_KEY_PREFIX_PATTERN, OBJECT_STATES, OBJECT_STATE_TRANSITIONS, contentHash, isContentHash, isLegalObjectTransition, objectKeyPrefix, tenantObjectKey, } from './blob';
 export type { ContentHash, ObjectCommitInput, ObjectKeyPrefix, ObjectListQuery, ObjectManifestEntry, ObjectManifestInput, ObjectReference, ObjectReferenceInput, ObjectState, ObjectStore, } from './blob';
 export { STORAGE_ERROR_CODES, STORAGE_ERROR_HTTP_STATUS, STORAGE_RESERVATION_STATES, STORAGE_WRITE_KINDS, STORAGE_WRITE_POSTURES, } from './quota';
-export type { MailboxUsageDeltaInput, QuotaStore, StorageErrorCode, StorageFinalizeInput, StorageFinalizeResult, StorageReservation, StorageReservationInput, StorageReservationState, StorageStatus, StorageWriteKind, StorageWritePosture, TenantStorageEntitlement, TenantStorageEntitlementInput, TenantStorageUsage, } from './quota';
+export type { QuotaStore, StorageErrorCode, StorageFinalizeInput, StorageFinalizeResult, StorageReservation, StorageReservationInput, StorageReservationState, StorageStatus, StorageWriteKind, StorageWritePosture, TenantStorageEntitlement, TenantStorageEntitlementInput, TenantStorageUsage, } from './quota';
 export { CAPABILITY_DECLARATION_SCHEMA_ID, CAPABILITY_NAME_PATTERN, CapabilityDeclarationSchema, assertCapability, hasCapability, parseCapabilityDeclaration, } from './capabilities';
 export type { CapabilityDeclaration } from './capabilities';
 export { SKILL_FRONTMATTER_FIELDS, SKILL_PACK_DESCRIPTION_MAX_LENGTH, SKILL_PACK_ENTRY_PATH, SKILL_PACK_FILE_MAX_BYTES, SKILL_PACK_FILE_PATH_MAX_LENGTH, SKILL_PACK_FILE_PATH_PATTERN, SKILL_PACK_FORBIDDEN_FIELDS, SKILL_PACK_MANIFEST_SCHEMA_ID, SKILL_PACK_MAX_BYTES, SKILL_PACK_MAX_FILES, SKILL_PACK_NAME_MAX_LENGTH, SKILL_PACK_NAME_PATTERN, SKILL_PACK_REJECTIONS, SKILL_PACK_VERSION_PATTERN, SkillPackFileSchema, SkillPackManifestSchema, checkSkillPackEntry, checkSkillPackFileContent, checkSkillPackManifest, isSkillPackPathSafe, parseSkillFrontmatter, parseSkillPackManifest, skillPackContentHashInput, } from './skill-pack';
@@ -1394,6 +1396,22 @@ export interface MailboxBody {
     readonly bodyHash: ContentHash;
     readonly byteSize: bigint;
 }
+/**
+ * How an append is admitted against the tenant's `mailboxLimitBytes`.
+ *
+ * Mailbox bytes have one authority: the retained rows. Usage is the tenant's
+ * `SUM(byteSize)` over every retained row in any state, and the limit is
+ * checked in the same serialized unit that inserts the row — there is no
+ * counter for a writer to forget, so deleting a row needs no accounting.
+ *
+ * - `limited`: refused with `storage_quota_exceeded` when `used + byteSize`
+ *   exceeds the limit, and with `storage_entitlement_missing` when the tenant
+ *   has no entitlement. A refused append consumes no `seq`.
+ * - `cancellation`: always admitted and still counted. Reserved for the one
+ *   cancellation row a task can own, so a full mailbox never blocks
+ *   `cancelTask`.
+ */
+export type MailboxAdmission = 'limited' | 'cancellation';
 export interface MailboxAppendInput {
     readonly deviceId: string;
     /**
@@ -1410,6 +1428,16 @@ export interface MailboxAppendInput {
      * out of order and let an ack skip a late lower sequence.
      */
     readonly materialize: (seq: number) => MailboxBody | Promise<MailboxBody>;
+    /**
+     * Limit admission for a NEW row. An existing `messageId` returns its row
+     * before any check, so a retry is never refused for capacity.
+     */
+    readonly admission: MailboxAdmission;
+}
+/** Tenant mailbox usage, derived from the retained rows on every read. */
+export interface MailboxUsage {
+    /** `SUM(byteSize)` over every retained row (`pending`, `acked`, `expired`). */
+    readonly bytes: bigint;
 }
 export interface MailboxReadQuery {
     readonly deviceId: string;
@@ -1486,6 +1514,7 @@ export interface MailboxRetentionInput {
 export interface MailboxRetentionResult {
     readonly deletedCount: number;
     readonly expiredCount: number;
+    /** Report value only: usage is derived from rows, so nothing is released. */
     readonly releasedBytes: bigint;
 }
 /**
@@ -1496,10 +1525,13 @@ export interface MailboxRetentionResult {
  * `mailbox_cursor_ahead_of_delivery` (an ack beyond the highest cursor the
  * server has returned to that device),
  * `timestamp_not_canonical` (a retention cutoff that is not a canonical
- * ISO-8601 UTC instant).
+ * ISO-8601 UTC instant), `storage_quota_exceeded` and
+ * `storage_entitlement_missing` (a `limited` append refused at admission).
  */
 export interface MailboxStore {
     append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage>;
+    /** The tenant's mailbox bytes, summed from the retained rows. */
+    readUsage(tenant: TenantId): Promise<MailboxUsage>;
     /** Pure read. Never advances the cursor, never deletes, never marks acked. */
     readAfter(tenant: TenantId, query: MailboxReadQuery): Promise<MailboxPage>;
     /** Records the highest cursor a device-facing response is about to return. */
@@ -1805,7 +1837,6 @@ export interface TenantStorageUsage {
     committedObjectBytes: bigint;
     committedInlineBytes: bigint;
     reservedBytes: bigint;
-    mailboxBytes: bigint;
     objectCount: bigint;
     updatedAt: string;
 }
@@ -1904,10 +1935,6 @@ export declare const STORAGE_ERROR_HTTP_STATUS: {
     readonly storage_integrity_mismatch: 422;
     readonly storage_write_suspended: 423;
 };
-export interface MailboxUsageDeltaInput {
-    /** Signed. Negative deltas release bytes after retention deletes rows. */
-    readonly deltaBytes: bigint;
-}
 /**
  * Quota port. Tenant-first, async.
  *
@@ -1942,8 +1969,6 @@ export interface QuotaStore {
     abortReservation(tenant: TenantId, reservationId: string): Promise<StorageReservation>;
     /** Cleanup hook: expires reservations past their TTL and releases their bytes. */
     expireReservations(tenant: TenantId): Promise<readonly StorageReservation[]>;
-    /** Mailbox bytes are platform-protection accounting, bounded by `mailboxLimitBytes`. */
-    applyMailboxDelta(tenant: TenantId, input: MailboxUsageDeltaInput): Promise<TenantStorageUsage>;
 }
 // ==== @byok-sdk/core dist/sealed-provider-secret.d.ts ====
 /**

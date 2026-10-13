@@ -386,7 +386,16 @@ if (crashReplayHandoffPath !== undefined) {
 // ---------------------------------------------------------------------------
 const tenant = tenantId('packed-recurring');
 const deviceId = 'packed-device';
-const { cloud, stores } = createInMemoryByokCloud({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+const { cloud, stores, core } = createInMemoryByokCloud({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
+// Limited mailbox appends are admitted against the tenant entitlement (#411).
+await core.quota.writeEntitlement(tenant, {
+  version: 1n,
+  hardLimitBytes: 1_000_000_000n,
+  maxObjectBytes: 100_000_000n,
+  maxInlineBytes: 1_000_000n,
+  mailboxLimitBytes: 100_000_000n,
+  retentionPolicyId: 'packed',
+});
 await stores.devices.register(tenant, { deviceId, productId: 'packed', deviceName: 'fixture', devicePublicKey: 'fixture-key', proofKeyId: 'fixture-proof', proofKeyEpoch: 1 });
 await stores.devices.recordCapabilities(tenant, { deviceId, capabilities: AGENT_MESSAGE_CAPABILITIES });
 const input = recurringInput('packed-execution', deviceId, 'persisted current input');

@@ -137,6 +137,41 @@
   marker `byok:rpc-ipc` for a keyed profile instead of `$PI_PROVIDER_API_KEY`,
   so a caller that relied on the default must state the entry it projects for
   (`'pi-prepared'` keeps the environment reference).
+- **Fixed / Breaking (core, cloud, cloud-dataplane, server)** — mailbox bytes
+  now have one authority, the retained mailbox rows (#411). Production appends
+  never maintained `storage_usage.mailbox_bytes`, so hosted
+  `PostgresCloudCleanup.runTenant` failed with `cleanup_accounting_drift` on any
+  tenant with an acked row past retention (rolling back the whole retention
+  transaction), and `mailboxLimitBytes` was never enforced. Usage is now
+  `MailboxStore.readUsage(tenant)` (`SUM(byteSize)` over every retained row),
+  and every `limited` append is admitted against `mailboxLimitBytes` in the
+  same serialized unit that inserts the row, in all three drivers. Migration
+  for embedders:
+  - `MailboxAppendInput.admission: 'limited' | 'cancellation'` is required.
+    Only a task's cancellation row is `cancellation` (exempt, still counted).
+  - A `limited` append is refused with `storage_quota_exceeded`, or with
+    `storage_entitlement_missing` when the tenant has no entitlement (fail
+    closed): issue an entitlement before the first offer. A refused append
+    consumes no seq; an existing `messageId` still returns its row.
+  - `enqueue*`, `submitRecurringExecution`, `approveTask`, `rejectTask` and
+    `steerTask` throw `ByokCoreError('storage_quota_exceeded')` on a full
+    mailbox; retrying the same `taskId` converges. `cancelTask` is never
+    blocked. `POST /byok/messages` answers 507 `{ error:
+    'storage_quota_exceeded' }` when a reply cannot be appended
+    (`docs/protocol.md` §8.2).
+  - Removed `QuotaStore.applyMailboxDelta`, `MailboxUsageDeltaInput` and
+    `TenantStorageUsage.mailboxBytes`; added `MailboxStore.readUsage` and
+    `MailboxUsage`. `InMemoryMailboxStore` now takes `(clock, quota)`.
+  - `PostgresCloudCleanup`: `runTenant` and `discardDeadLetter` no longer
+    raise `cleanup_accounting_drift` for the mailbox; `replayDeadLetter`
+    without an entitlement raises `storage_entitlement_missing` (was
+    `cleanup_policy_missing`). `runTenant` no longer deletes request receipts
+    until the receipt classification (#412) lands, so `ttl_rows_deleted` no
+    longer counts receipts.
+  - New migration `deploy/sql/0023_mailbox_usage_index.sql` (covering index,
+    blocks outbox writes while it builds). `storage_usage.mailbox_bytes` stays
+    for one release, unread and unwritten. Run the pre-upgrade audit in
+    `deploy/runbooks/cloud-cleanup.md` first.
 
 ## 0.26.1 / @byok-sdk/keys 0.11.1 (published, 2026-10-12)
 

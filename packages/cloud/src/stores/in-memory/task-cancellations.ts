@@ -52,6 +52,7 @@ export class InMemoryTaskCancellationStore implements TaskCancellationStore {
         deviceId: existing.deviceId,
         messageId,
         materialize: (seq) => input.materialize(seq, messageId),
+        admission: 'cancellation',
       });
       const requestedAt = this.#state.now();
       const attempt = existing.cancellation === undefined

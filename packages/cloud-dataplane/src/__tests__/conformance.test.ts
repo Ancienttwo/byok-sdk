@@ -133,6 +133,15 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres offer delivery composition', () => {
         },
       });
 
+      // A limited append is admitted against the tenant entitlement (#411).
+      await core.quota.writeEntitlement(OFFER_TENANT, {
+        version: 1n,
+        hardLimitBytes: 1_000_000_000n,
+        maxObjectBytes: 100_000_000n,
+        maxInlineBytes: 1_000_000n,
+        mailboxLimitBytes: 100_000_000n,
+        retentionPolicyId: 'test',
+      });
       const first = await cloud.enqueueOffer(OFFER_TENANT, 'device-offer-sequence', {
         payload: { instruction: 'prove the sequence boundary' },
       });

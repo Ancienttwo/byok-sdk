@@ -217,6 +217,7 @@ function countingDedup(inner: InboundDedupStore): CountingDedupStore {
 function observingMailbox(inner: MailboxStore, connections: DeviceConnections): MailboxStore {
   return {
     append: (tenant, input) => inner.append(tenant, input),
+    readUsage: (tenant) => inner.readUsage(tenant),
     readAfter: (tenant, query) => inner.readAfter(tenant, query),
     recordDelivery: (tenant, input) => inner.recordDelivery(tenant, input),
     advanceCursor: (tenant, input) => inner.advanceCursor(tenant, input),
