@@ -44,7 +44,6 @@ import {
   assertCanonicalTimestamp,
   type Clock,
   type ContentHash,
-  type MailboxUsageDeltaInput,
   type QuotaStore,
   type StorageFinalizeInput,
   type StorageFinalizeResult,
@@ -103,7 +102,6 @@ interface UsageRow {
   readonly committed_object_bytes: bigint;
   readonly committed_inline_bytes: bigint;
   readonly reserved_bytes: bigint;
-  readonly mailbox_bytes: bigint;
   readonly object_count: bigint;
   readonly updated_at: string;
 }
@@ -143,7 +141,6 @@ function toUsage(row: UsageRow): TenantStorageUsage {
     committedObjectBytes: row.committed_object_bytes,
     committedInlineBytes: row.committed_inline_bytes,
     reservedBytes: row.reserved_bytes,
-    mailboxBytes: row.mailbox_bytes,
     objectCount: row.object_count,
     updatedAt: row.updated_at,
   };
@@ -158,7 +155,6 @@ const USAGE_SQL = `
   SELECT
     COALESCE(u.committed_object_bytes, 0)::bigint AS committed_object_bytes,
     COALESCE(u.committed_inline_bytes, 0)::bigint AS committed_inline_bytes,
-    COALESCE(u.mailbox_bytes, 0)::bigint          AS mailbox_bytes,
     COALESCE(u.object_count, 0)::bigint           AS object_count,
     COALESCE(u.updated_at, $2)                    AS updated_at,
     COALESCE((SELECT SUM(r.expected_bytes) FROM storage_reservation r
@@ -574,40 +570,6 @@ export class PostgresQuotaStore implements QuotaStore {
     return expired.rows
       .map(toReservation)
       .sort((left, right) => left.reservationId.localeCompare(right.reservationId));
-  }
-
-  async applyMailboxDelta(
-    tenant: TenantId,
-    input: MailboxUsageDeltaInput,
-  ): Promise<TenantStorageUsage> {
-    // Mailbox bytes are platform-protection accounting, not user capacity: the
-    // bound is its own entitlement field. A release (negative delta) is never
-    // refused and clamps at zero, so a retention sweep that double-reports
-    // cannot drive the counter negative.
-    const applied = await this.#pool.query(
-      `WITH ent AS (
-         SELECT mailbox_limit_bytes FROM storage_entitlement WHERE tenant_id = $1
-       )
-       UPDATE storage_usage u
-          SET mailbox_bytes = GREATEST(u.mailbox_bytes + $2::bigint, 0::bigint),
-              updated_at    = $3
-         FROM ent
-        WHERE u.tenant_id = $1
-          AND ($2::bigint <= 0 OR u.mailbox_bytes + $2::bigint <= ent.mailbox_limit_bytes)
-       RETURNING 1`,
-      [tenant, input.deltaBytes, this.#now()],
-    );
-
-    if (applied.rowCount === 0) {
-      const entitlement = await this.readEntitlement(tenant);
-      if (entitlement === undefined) throw this.#entitlementMissing();
-      const usage = await this.readUsage(tenant);
-      throw new ByokCoreError(
-        'storage_quota_exceeded',
-        `Mailbox would reach ${String(usage.mailboxBytes + input.deltaBytes)} bytes, over the limit of ${String(entitlement.mailboxLimitBytes)} bytes.`,
-      );
-    }
-    return this.readUsage(tenant);
   }
 
   async #lockEntitlement(

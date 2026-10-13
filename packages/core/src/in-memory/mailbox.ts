@@ -5,6 +5,10 @@
  * read is not "denied" — it addresses a different key space and finds nothing.
  * That is the in-memory expression of §12.6.2 layer 3: there is no bare device
  * index to accidentally query.
+ *
+ * Mailbox bytes are never counted: usage is the sum over the retained rows,
+ * and a `limited` append sums, checks and inserts without yielding, so no
+ * append on another device of the same tenant can interleave with the check.
  */
 import { ByokCoreError, CoreConflictError } from '../errors';
 import type {
@@ -18,7 +22,9 @@ import type {
   MailboxRetentionInput,
   MailboxRetentionResult,
   MailboxStore,
+  MailboxUsage,
 } from '../mailbox';
+import type { QuotaStore } from '../quota';
 import type { Clock } from '../stores';
 import { tenantKey, type TenantId } from '../tenant';
 import { assertCanonicalTimestamp } from '../time';
@@ -38,9 +44,12 @@ interface DeviceMailbox {
 export class InMemoryMailboxStore implements MailboxStore {
   readonly #devices = new Map<string, DeviceMailbox>();
   readonly #clock: Clock;
+  readonly #quota: Pick<QuotaStore, 'readEntitlement'>;
 
-  constructor(clock: Clock) {
+  /** The mailbox reads its limit from quota; quota never reads the mailbox. */
+  constructor(clock: Clock, quota: Pick<QuotaStore, 'readEntitlement'>) {
     this.#clock = clock;
+    this.#quota = quota;
   }
 
   async append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage> {
@@ -49,8 +58,23 @@ export class InMemoryMailboxStore implements MailboxStore {
       const existing = device.byMessageId.get(input.messageId);
       if (existing !== undefined) return existing;
 
+      // Anything but the one exempt class is limited: an unknown admission
+      // fails closed instead of skipping the check.
+      const limit =
+        input.admission === 'cancellation' ? undefined : await this.#mailboxLimit(tenant);
       const seq = device.nextSeq;
       const materialized = await input.materialize(seq);
+      // No await from here to the push: the sum, the check and the insert are
+      // one synchronous step, so the check is exact across devices.
+      if (limit !== undefined) {
+        const used = this.#usedBytes(tenant);
+        if (used + materialized.byteSize > limit) {
+          throw new ByokCoreError(
+            'storage_quota_exceeded',
+            `Mailbox would reach ${String(used + materialized.byteSize)} bytes, over the limit of ${String(limit)} bytes.`,
+          );
+        }
+      }
       const message: MailboxMessage = {
         tenantId: tenant,
         deviceId: input.deviceId,
@@ -72,6 +96,10 @@ export class InMemoryMailboxStore implements MailboxStore {
       () => undefined,
     );
     return appended;
+  }
+
+  async readUsage(tenant: TenantId): Promise<MailboxUsage> {
+    return { bytes: this.#usedBytes(tenant) };
   }
 
   async readAfter(tenant: TenantId, query: MailboxReadQuery): Promise<MailboxPage> {
@@ -204,6 +232,28 @@ export class InMemoryMailboxStore implements MailboxStore {
     }
 
     return { deletedCount, expiredCount, releasedBytes };
+  }
+
+  async #mailboxLimit(tenant: TenantId): Promise<bigint> {
+    const entitlement = await this.#quota.readEntitlement(tenant);
+    if (entitlement === undefined) {
+      throw new ByokCoreError(
+        'storage_entitlement_missing',
+        'No storage entitlement has been issued for this tenant.',
+      );
+    }
+    return entitlement.mailboxLimitBytes;
+  }
+
+  /** Every retained row of the tenant, in any state, on any device. */
+  #usedBytes(tenant: TenantId): bigint {
+    const prefix = tenantKey(tenant, '');
+    let bytes = 0n;
+    for (const [key, device] of this.#devices.entries()) {
+      if (!key.startsWith(prefix)) continue;
+      for (const message of device.messages) bytes += message.byteSize;
+    }
+    return bytes;
   }
 
   #device(tenant: TenantId, deviceId: string): DeviceMailbox {
