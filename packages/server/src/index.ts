@@ -37,7 +37,7 @@ import { DeviceConnections } from './connections';
 import { pickFirstConnectedDevice, type DeviceCandidate } from './device-selection';
 import { emptyTaskCounts, LiveTaskIndex } from './live-tasks';
 import { TaskEventRelay } from './relay';
-import { toMachineInfo, toTaskResult, toTaskSnapshot } from './snapshot';
+import { toMachineInfo, toTaskResult, toTaskSnapshot, toTaskState } from './snapshot';
 import { composeFacadeStores, serverTenantId, DEFAULT_MAX_BLOB_SIZE_BYTES } from './stores';
 import { createTaskHandle } from './task-handle';
 import type {
@@ -329,9 +329,8 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
   const connections = new DeviceConnections({ presenceTtlMs });
   /**
-   * Non-terminal tasks plus terminal counts, and the dispatch input the kernel
-   * does not persist (`DispatchFacts`) for tasks still in flight. Sized by live
-   * tasks, never by history — see `live-tasks.ts`.
+   * Non-terminal task IDs plus absorbing terminal counts. Dispatch input is
+   * read from the kernel's immutable offer receipt, never retained here.
    */
   const tasks = new LiveTaskIndex();
   const relay = new TaskEventRelay({
@@ -396,8 +395,12 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   }
 
   async function projectTask(attempt: TaskAttempt): Promise<TaskSnapshot> {
-    const [pending, terminal] = await Promise.all([readPending(attempt.taskId), readTerminal(attempt.taskId)]);
-    return toTaskSnapshot(attempt, pending, terminal, tasks.facts(attempt.taskId));
+    const [pending, terminal, offer] = await Promise.all([
+      readPending(attempt.taskId),
+      readTerminal(attempt.taskId),
+      cloud.readTaskOffer(tenant, attempt.taskId),
+    ]);
+    return toTaskSnapshot(attempt, pending, terminal, offer);
   }
 
   /**
@@ -691,13 +694,9 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       throw error;
     }
 
-    // The offer envelope's own timestamp, so the feed and the snapshot agree on
-    // when the task began rather than each stamping its own "now".
+    // The feed reports the original delivery timestamp. Snapshots use the
+    // immutable offer receipt's creation instant, even after a restart.
     const createdAt = enqueued.envelope.ts;
-    tasks.attachFacts(enqueued.taskId, {
-      createdAt,
-      ...(sessionRef === undefined ? {} : { sessionRef }),
-    });
     relay.noteDispatched(enqueued.taskId, createdAt);
     return handleFor(enqueued.taskId);
   }
@@ -873,13 +872,11 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
     stop(): void {
       relay.stop();
-      tasks.clearFacts();
       void composition.close();
     },
 
     async close(): Promise<void> {
       relay.stop();
-      tasks.clearFacts();
       await composition.close();
     },
 
@@ -913,7 +910,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
 /** Same projection `tasks.get` uses; named so the count and the snapshot can never disagree. */
 function toStateForCount(attempt: TaskAttempt, pending: PendingApproval | undefined): TaskState {
-  return toTaskSnapshot(attempt, pending, undefined, undefined).state;
+  return toTaskState(attempt, pending);
 }
 
 /**

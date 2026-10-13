@@ -360,10 +360,8 @@ export interface TaskSnapshot {
   /** Exact Agent identity for an Agent-bound task; absent for legacy tasks. */
   agentRef?: AgentRef;
   /**
-   * The offer's timestamp while the task is live in the process that
-   * dispatched it. Dispatch input is not persisted by the kernel, so a terminal
-   * task, or one dispatched before a restart, reports its `updatedAt` here and
-   * `sessionRef` only from its terminal result.
+   * Creation time from the immutable offer receipt, preserved after terminal
+   * transitions and SQLite restart. Independent of mailbox delivery time.
    */
   createdAt: string;
   updatedAt: string;

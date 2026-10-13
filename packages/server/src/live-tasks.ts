@@ -1,6 +1,6 @@
 import type { TaskAttempt } from '@byok-sdk/cloud';
 import { TASK_STATES, TASK_TRANSITIONS, type TaskState } from '@byok-sdk/protocol';
-import { toTaskState, type DispatchFacts } from './snapshot';
+import { toTaskState } from './snapshot';
 
 /**
  * This process's account of its tenant's tasks, sized by the tasks that can
@@ -14,20 +14,15 @@ import { toTaskState, type DispatchFacts } from './snapshot';
  * never read again. Nothing here is an authority: the live set only says which
  * attempts to re-read, and every state reported is projected from a fresh store
  * read by the same `toTaskState` that `tasks.get` uses.
- *
- * Dispatch facts ride on the live entry and leave with it. They are the
- * dispatch input the kernel does not persist (`DispatchFacts`); a terminal
- * task's snapshot therefore reports the same fallback a restarted process
- * always has, instead of this process keeping one entry per task forever.
  */
 export class LiveTaskIndex {
-  readonly #live = new Map<string, DispatchFacts | undefined>();
+  readonly #live = new Set<string>();
   readonly #terminalCounts = new Map<TaskState, number>();
 
   /** Account an attempt that already existed when this process opened its store. */
   seed(attempt: TaskAttempt): void {
     const terminal = terminalStateOf(attempt);
-    if (terminal === undefined) this.#live.set(attempt.taskId, undefined);
+    if (terminal === undefined) this.#live.add(attempt.taskId);
     else this.#count(terminal);
   }
 
@@ -38,7 +33,7 @@ export class LiveTaskIndex {
    */
   opened(attempt: TaskAttempt): void {
     if (terminalStateOf(attempt) !== undefined || this.#live.has(attempt.taskId)) return;
-    this.#live.set(attempt.taskId, undefined);
+    this.#live.add(attempt.taskId);
   }
 
   /** Any fresh read or write result. A now-terminal live attempt is counted exactly once. */
@@ -62,19 +57,6 @@ export class LiveTaskIndex {
 
   terminalCount(state: TaskState): number {
     return this.#terminalCounts.get(state) ?? 0;
-  }
-
-  /** Attach dispatch facts to a still-live task; a task already terminal keeps none. */
-  attachFacts(taskId: string, facts: DispatchFacts): void {
-    if (this.#live.has(taskId)) this.#live.set(taskId, facts);
-  }
-
-  facts(taskId: string): DispatchFacts | undefined {
-    return this.#live.get(taskId);
-  }
-
-  clearFacts(): void {
-    for (const taskId of this.#live.keys()) this.#live.set(taskId, undefined);
   }
 
   #count(state: TaskState): void {

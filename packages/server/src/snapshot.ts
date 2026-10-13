@@ -1,4 +1,4 @@
-import type { DeviceRecord, PendingApproval, TaskAttempt, TerminalResult } from '@byok-sdk/cloud';
+import type { DeviceRecord, PendingApproval, TaskAttempt, TaskOfferReadback, TerminalResult } from '@byok-sdk/cloud';
 import type { TaskState } from '@byok-sdk/protocol';
 import type { DeviceConnection } from './connections';
 import type { MachineInfo, TaskResult, TaskSnapshot } from './types';
@@ -71,41 +71,31 @@ export function toTaskResult(terminal: TerminalResult | undefined): TaskResult |
 }
 
 /**
- * The dispatch-time facts the kernel does not persist.
- *
- * `TaskAttempt` records ownership and disposition, not the request that opened
- * it — it carries no `createdAt` and no `sessionRef`. Both are needed by the
- * public snapshot, and both are known exactly once, at dispatch, so this
- * process keeps them keyed by task id rather than inventing a durable column.
- * They are held only while the task is live (`LiveTaskIndex`, `live-tasks.ts`)
- * so this process does not grow with every task it ever ran: once a task is
- * terminal its snapshot reports `createdAt` as the attempt's `updatedAt` and
- * only the terminal's own `sessionRef` — exactly what a restarted process
- * reports for every task it did not dispatch itself.
+ * Dispatch facts come from the immutable executable offer receipt. Its
+ * recordedAt is the creation instant, independent of mailbox delivery,
+ * terminal transitions and process restarts. No per-task dispatch map or
+ * mutation timestamp is needed to reconstruct a dispatched task's facts.
+ * An attempt opened before its offer receipt exists retains the existing
+ * attempt-only projection; it has no requested session to report.
  */
-export interface DispatchFacts {
-  readonly createdAt: string;
-  readonly sessionRef?: string;
-}
-
 export function toTaskSnapshot(
   attempt: TaskAttempt,
   pending: PendingApproval | undefined,
   terminal: TerminalResult | undefined,
-  dispatched: DispatchFacts | undefined,
+  offer: TaskOfferReadback | undefined,
 ): TaskSnapshot {
   const result = toTaskResult(terminal);
   // The terminal's own `sessionRef` wins: a runtime that resumed or minted a
   // session is reporting the one the work actually ran under, which is a
   // stronger fact than whatever the offer asked for.
-  const sessionRef = result?.sessionRef ?? dispatched?.sessionRef;
+  const sessionRef = result?.sessionRef ?? (offer !== undefined && 'sessionRef' in offer.payload ? offer.payload.sessionRef : undefined);
   return {
     taskId: attempt.taskId,
     state: toTaskState(attempt, pending),
     deviceId: attempt.deviceId,
     sessionRef,
     ...(attempt.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),
-    createdAt: dispatched?.createdAt ?? attempt.updatedAt,
+    createdAt: offer?.recordedAt ?? attempt.updatedAt,
     updatedAt: attempt.updatedAt,
     ...(result === undefined ? {} : { result }),
     ...(pending?.approvalId === undefined ? {} : { pendingApprovalId: pending.approvalId }),

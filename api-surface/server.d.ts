@@ -528,7 +528,7 @@ export declare class TaskEventRelay implements ByokCloudObserver {
     /**
      * Open the relay for a task this server just dispatched, and publish its
      * `Offered` origin on both feeds. `at` is the offer envelope's own timestamp,
-     * so the feed and the snapshot agree on when the task began.
+     * so the feed preserves the original delivery time.
      */
     noteDispatched(taskId: string, at: string): void;
     /** The per-task feed backing `TaskHandle.events()`, replayed from the start of what is retained. */
@@ -1110,10 +1110,8 @@ export interface TaskSnapshot {
     /** Exact Agent identity for an Agent-bound task; absent for legacy tasks. */
     agentRef?: AgentRef;
     /**
-     * The offer's timestamp while the task is live in the process that
-     * dispatched it. Dispatch input is not persisted by the kernel, so a terminal
-     * task, or one dispatched before a restart, reports its `updatedAt` here and
-     * `sessionRef` only from its terminal result.
+     * Creation time from the immutable offer receipt, preserved after terminal
+     * transitions and SQLite restart. Independent of mailbox delivery time.
      */
     createdAt: string;
     updatedAt: string;

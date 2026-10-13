@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { linkSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -93,6 +93,32 @@ describeSqlite('SQLite single-process ownership', () => {
     expect(() => open(path)).toThrow(SqliteOwnershipError);
   });
 
+  it('uses one ownership lock through a symlink to the database', async () => {
+    const path = databasePath();
+    const first = open(path);
+    const alias = join(path, '..', 'alias.sqlite');
+    symlinkSync(path, alias);
+    try {
+      expect(() => open(alias)).toThrow(SqliteOwnershipError);
+    } finally {
+      await first.close();
+    }
+    const next = open(alias);
+    await next.close();
+  });
+
+  it('refuses hard-linked database paths whose sibling locks would split ownership', async () => {
+    const path = databasePath();
+    const first = open(path);
+    const alias = join(path, '..', 'hardlink.sqlite');
+    linkSync(path, alias);
+    try {
+      expect(() => open(alias)).toThrow(/hard link/);
+    } finally {
+      await first.close();
+    }
+  });
+
   it('lets the next process open after the owner is SIGKILLed', async () => {
     const path = databasePath();
     const owner = await ownInChild(path, 'hold');
@@ -129,6 +155,21 @@ describeSqlite('SQLite single-process ownership', () => {
     expect(() => open(path)).toThrow(SqliteSchemaError);
     // Refused again for the same reason — not for an ownership the failed open leaked.
     expect(() => open(path)).toThrow(SqliteSchemaError);
+  });
+
+  it('releases ownership when the initial task-history read fails', async () => {
+    const path = databasePath();
+    const first = open(path);
+    await first.close();
+    const corrupt = new DatabaseSync(path);
+    corrupt.prepare(`INSERT INTO task_attempt
+      (tenant_id, task_id, device_id, status, agent_ref_json, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)`)
+      .run('product:sqlite-owner', 'bad-task', 'device', 'offered', 'invalid-json', '2026-10-13T00:00:00.000Z');
+    corrupt.close();
+    expect(() => open(path)).toThrow(SyntaxError);
+    // A repeated open must report the original bad data, never a leaked owner.
+    expect(() => open(path)).toThrow(SyntaxError);
   });
 
   it('leaves the lock sibling at owner-only permissions', async () => {

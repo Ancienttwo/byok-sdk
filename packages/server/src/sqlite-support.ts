@@ -1,6 +1,6 @@
-import { chmodSync, existsSync, mkdirSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
 
 export type SqliteOpenStep = 'after-open' | 'after-wal';
@@ -283,7 +283,17 @@ export interface SqliteOwnership {
 export function acquireSqliteOwnership(path: string): SqliteOwnership {
   const { DatabaseSync } = loadSqliteModule();
   mkdirSync(dirname(path), { recursive: true, mode: SECURE_DIR_MODE });
-  const lockPath = `${path}-lock`;
+  // SQLite opens a symlink's target. Ownership must use that same identity,
+  // including when only the parent exists on the first open of a new file.
+  const databasePath = existsSync(path)
+    ? realpathSync(path)
+    : join(realpathSync(dirname(path)), basename(path));
+  // A hard link has no unique canonical name for the sibling lock or WAL.
+  // Reject it before either SQLite handle opens instead of splitting writers.
+  if (existsSync(databasePath) && statSync(databasePath).nlink !== 1) {
+    throw new Error('SQLite ownership requires a database file with exactly one hard link');
+  }
+  const lockPath = `${databasePath}-lock`;
   const lock = new DatabaseSync(lockPath, { timeout: 0 });
   try {
     chmodSync(lockPath, SECURE_FILE_MODE);

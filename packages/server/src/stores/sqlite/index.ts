@@ -316,7 +316,16 @@ class SqliteCoordinator {
   /** Synchronous read before the first queued operation; see `scanTaskAttemptsAtOpen`. */
   readAtOpen(operation: (db: DatabaseSync) => void): void {
     if (this.#queued || this.#closing) throw new Error('SQLite open-time read after store operations began');
-    operation(this.db);
+    try {
+      operation(this.db);
+    } catch (error) {
+      this.#closing = true;
+      closeSqliteDatabaseAfterInitializationFailure(
+        this.db, error,
+        'SQLite history initialization failed and its ownership could not be released',
+        () => this.#closeHandle(),
+      );
+    }
   }
 
   run<T>(operation: (db: DatabaseSync) => T | Promise<T>): Promise<T> {
@@ -350,14 +359,16 @@ class SqliteCoordinator {
     this.#closing = true;
     // Ownership outlives the handle by exactly the close: the next owner may
     // open the moment it is released, never while this handle still writes.
-    this.#closePromise = this.#tail.then(() => {
-      try {
-        this.db.close();
-      } finally {
-        this.#ownership?.release();
-      }
-    });
+    this.#closePromise = this.#tail.then(() => this.#closeHandle());
     return this.#closePromise;
+  }
+
+  #closeHandle(): void {
+    try {
+      this.db.close();
+    } finally {
+      this.#ownership?.release();
+    }
   }
 }
 

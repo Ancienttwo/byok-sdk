@@ -21,7 +21,8 @@ import {
 /**
  * Issue #388 item 3: `stats()` re-reads only tasks still in flight, its counts
  * match the full-history projection `tasks.list()` reports, and the per-task
- * dispatch facts are not retained once a task is terminal.
+ * live-task bookkeeping is reclaimed at terminal while dispatch facts remain
+ * readable from immutable offer receipts.
  *
  * Store reads are counted at the kernel surface the façade calls, by wrapping
  * the one `createByokCloud` it constructs.
@@ -114,6 +115,7 @@ describe('stats() over live tasks only', () => {
   const roots: string[] = [];
 
   afterEach(async () => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     if (server) await stopServer(server);
     server = undefined;
@@ -158,15 +160,15 @@ describe('stats() over live tasks only', () => {
     expect(large.readApprovalTimeline).toBe(3);
   });
 
-  it('drops dispatch facts when a task turns terminal, so they do not grow with completed tasks', async () => {
-    const attach = vi.spyOn(LiveTaskIndex.prototype, 'attachFacts');
+  it('drops live task IDs when a task turns terminal, so bookkeeping does not grow with completed tasks', async () => {
+    const opened = vi.spyOn(LiveTaskIndex.prototype, 'opened');
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
     const live = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'still live', sessionRef: 'sess-live' });
     await nextEnvelope(daemon);
-    // The server's own index, captured as the receiver of its first attachFacts call.
-    const tracked = attach.mock.contexts[0] as LiveTaskIndex;
+    // The server's own index, captured as the receiver of its first opened call.
+    const tracked = opened.mock.contexts[0] as LiveTaskIndex;
     expect(tracked.size).toBe(1);
     expect((await started.byok.tasks.get(live.taskId))?.sessionRef).toBe('sess-live');
 
@@ -202,6 +204,33 @@ describe('stats() over live tasks only', () => {
     expect(reads.listTaskAttempts).toBe(0);
     expect(reads.readApprovalTimeline).toBe(3);
   });
+
+  it('keeps immutable offer facts after terminal cleanup and SQLite restart', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const openedAt = '2026-10-13T00:00:00.000Z';
+    vi.setSystemTime(new Date(openedAt));
+    const root = mkdtempSync(join(tmpdir(), 'byok-snapshot-'));
+    roots.push(root);
+    const storage = { kind: 'sqlite' as const, path: join(root, 'server.sqlite') };
+    const first = await start(storage);
+    const daemon = await connectFakeDaemonLongPoll(first.baseUrl, first.byok, { productId: PRODUCT_ID });
+    const handle = await first.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'resume', sessionRef: 'requested-session' });
+    await nextEnvelope(daemon);
+    expect(await first.byok.tasks.get(handle.taskId)).toMatchObject({ createdAt: openedAt, sessionRef: 'requested-session' });
+
+    vi.setSystemTime(new Date('2026-10-13T00:00:02.000Z'));
+    await claimAndStart(first.byok, daemon, handle);
+    expect(await sendOne(daemon, createEnvelope('task.fail', { reason: 'failed', retryable: false }, { taskId: handle.taskId })))
+      .toEqual({ status: 200, body: { accepted: 1 } });
+    expect(await first.byok.tasks.get(handle.taskId)).toMatchObject({ state: 'Failed', createdAt: openedAt, sessionRef: 'requested-session' });
+
+    await stopServer(server!);
+    server = undefined;
+    await first.byok.close();
+    byok = undefined;
+    const second = await start(storage);
+    expect(await second.byok.tasks.get(handle.taskId)).toMatchObject({ state: 'Failed', createdAt: openedAt, sessionRef: 'requested-session' });
+  });
 });
 
 describe('LiveTaskIndex', () => {
@@ -220,7 +249,6 @@ describe('LiveTaskIndex', () => {
     index.seed(attempt('old-done', 'complete'));
     index.seed(attempt('old-live', 'running'));
     index.opened(attempt('new', 'offered'));
-    index.attachFacts('new', { createdAt: '2026-10-13T00:00:00.000Z' });
     expect(index.liveTaskIds().sort()).toEqual(['new', 'old-live']);
 
     index.observe(attempt('new', 'running', true));
@@ -230,7 +258,6 @@ describe('LiveTaskIndex', () => {
     index.observe(attempt('old-done', 'complete')); // already counted by seed
 
     expect(index.size).toBe(0);
-    expect(index.facts('new')).toBeUndefined();
     expect(index.terminalCount('Cancelled')).toBe(1);
     expect(index.terminalCount('Failed')).toBe(1);
     expect(index.terminalCount('Complete')).toBe(1);
