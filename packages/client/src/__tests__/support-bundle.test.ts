@@ -233,3 +233,53 @@ describe('support bundle privacy and bounds', () => {
     expect(lines.some((line) => line.startsWith('redaction policy: allowlist-v1'))).toBe(true);
   });
 });
+
+
+describe('outbound rejection diagnostics #397', () => {
+  it('reports failed terminal count from SQLite without copying payload bytes', async () => {
+    const { SqliteLocalTaskJournal } = await import('../daemon/journal/sqlite-journal');
+    const { journalHash } = await import('../daemon/journal/journal');
+    const { createEnvelope, encodeEnvelope } = await import('@byok-sdk/protocol');
+    const dir = await tempDir();
+    const journal = new SqliteLocalTaskJournal({ storeDir: dir });
+    const offer = createEnvelope('task.offer', { instruction: 'SECRET_PAYLOAD_BYTES' }, { taskId: 'rejected-task', seq: 1 });
+    const bytes = encodeEnvelope(offer);
+    await journal.appendEnvelope({ identity: { tenantId: 'tenant', productId: 'product', deviceId: 'device' },
+      envelopeId: offer.id, seq: 1, taskId: 'rejected-task', bytes, bytesHash: journalHash(bytes), receivedAt: new Date().toISOString(), opensTask: true });
+    const terminal = encodeEnvelope(createEnvelope('task.complete', { summary: 'SECRET_PAYLOAD_BYTES', sessionRef: 'session' }, { taskId: 'rejected-task' }));
+    await journal.recordTerminal({ taskId: 'rejected-task', terminalType: 'complete', bytes: terminal, payloadHash: journalHash(terminal), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
+    await journal.rejectTerminal('rejected-task', journalHash(terminal), 'not_permitted');
+    await journal.close();
+    const bundle = await createSupportBundle(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(bundle.journal).toMatchObject({ status: 'present', failedTerminalCount: 1 });
+    expect(JSON.stringify(bundle)).not.toContain('SECRET_PAYLOAD_BYTES');
+  });
+
+  it('projects rejection audit to tasks without retaining payload fields', async () => {
+    const { readAuditEvents } = await import('../bin/audit-log');
+    const { deriveTasksFromEvents } = await import('../bin/tasks-view');
+    const { formatTaskLine } = await import('../bin/format');
+    const dir = await tempDir();
+    await appendAuditEvent(dir, { kind: 'offered', ts: new Date().toISOString(), taskId: 'task' });
+    await appendAuditEvent(dir, { kind: 'outbound-rejected', ts: new Date().toISOString(), envelopeId: crypto.randomUUID(), type: 'task.progress', taskId: 'task', reason: 'limit_exceeded', terminal: false });
+    const events = await readAuditEvents(dir);
+    expect(events.some((event) => event.kind === 'outbound-rejected' && event.reason === 'limit_exceeded')).toBe(true);
+    expect(formatTaskLine(deriveTasksFromEvents(events)[0]!)).toContain('delivery=rejected');
+  });
+});
+
+
+it('includes live outbound counters while excluding last-rejection identity and payload', async () => {
+  const dir = await tempDir();
+  const counters = { accepted: 2, duplicate: 1, rejected: 1, rejectedByReason: { limit_exceeded: 1 }, rejectedTerminals: 1 };
+  const connectControl = async () => ({ ok: true, client: { close() {}, async request() {
+    return { pid: 1, uptimeMs: 2, activeTasks: [], approvalsPending: 0,
+      lifecycle: { phase: 'running', connection: 'open' },
+      operationalHealth: { availability: 'available', state: 'healthy', failureCount: 0, windowMs: 1000, failureThreshold: 3, crashCount: 0 },
+      outbound: { ...counters, lastRejection: { envelopeId: 'PRIVATE_ID_SENTINEL', type: 'task.complete', reason: 'limit_exceeded', terminal: true, payload: 'SECRET_PAYLOAD_SENTINEL' } } };
+  } } }) as unknown as ConnectControlResult;
+  const bundle = await createSupportBundle(config(dir), dir, { adapters: [], connectControl });
+  expect(bundle.control).toMatchObject({ status: 'online', outbound: counters });
+  expect(JSON.stringify(bundle)).not.toContain('PRIVATE_ID_SENTINEL');
+  expect(JSON.stringify(bundle)).not.toContain('SECRET_PAYLOAD_SENTINEL');
+});

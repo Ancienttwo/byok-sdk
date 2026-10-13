@@ -111,6 +111,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     // (matches daemon-task-loop.test.ts's identical assertion) — the
     // observer emits one `progress` DaemonEvent per normalized AgentEvent,
     // so that single envelope yields two local `progress` events here.
+    await vi.waitFor(() => expect(taskEvents(events, 'task-seq-1').some((event) => event.kind === 'completed')).toBe(true));
     const kinds = taskEvents(events, 'task-seq-1').map((e) => e.kind);
     expect(kinds).toEqual(['offered', 'claimed', 'started', 'progress', 'progress', 'completed']);
 
@@ -181,6 +182,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const [session] = adapter.sessions;
 
+    await vi.waitFor(() => expect(d.tasks().find((task) => task.taskId === 'task-list-1')?.state).toBe('Running'));
     const inFlight = d.tasks().find((t) => t.taskId === 'task-list-1');
     expect(inFlight?.state).toBe('Running');
 
@@ -188,6 +190,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     session?.emit({ type: 'turn_end' });
     await server.waitFor((e) => e.type === 'task.complete');
 
+    await vi.waitFor(() => expect(d.tasks().find((task) => task.taskId === 'task-list-1')?.state).toBe('Complete'));
     const done = d.tasks().find((t) => t.taskId === 'task-list-1');
     expect(done?.state).toBe('Complete');
     expect(done?.summary).toBe('partial summary');
@@ -425,7 +428,7 @@ describe('daemon local observability (DaemonObserver)', () => {
         observer.subscribe((e) => events.push(e));
 
         observer.noteApprovalDispatched('task-a', 'appr-1');
-        observer.handleOutboundEnvelope(createEnvelope('task.await_approval', { summary: 'Bash: rm -rf /tmp' }, { taskId: 'task-a' }));
+        { const queued = createEnvelope('task.await_approval', { summary: 'Bash: rm -rf /tmp' }, { taskId: 'task-a' }); observer.captureOutboundApproval(queued); observer.handleOutboundEnvelope(queued); }
 
         const awaiting = events.find((e) => e.kind === 'awaiting-approval');
         if (awaiting?.kind !== 'awaiting-approval') throw new Error('unreachable');
@@ -438,8 +441,8 @@ describe('daemon local observability (DaemonObserver)', () => {
         observer.subscribe((e) => events.push(e));
 
         observer.noteApprovalDispatched('task-a', 'appr-1');
-        observer.handleOutboundEnvelope(createEnvelope('task.await_approval', { summary: 'first' }, { taskId: 'task-a' }));
-        observer.handleOutboundEnvelope(createEnvelope('task.await_approval', { summary: 'second' }, { taskId: 'task-a' }));
+        { const queued = createEnvelope('task.await_approval', { summary: 'first' }, { taskId: 'task-a' }); observer.captureOutboundApproval(queued); observer.handleOutboundEnvelope(queued); }
+        { const queued = createEnvelope('task.await_approval', { summary: 'second' }, { taskId: 'task-a' }); observer.captureOutboundApproval(queued); observer.handleOutboundEnvelope(queued); }
 
         const awaitingEvents = events.filter((e) => e.kind === 'awaiting-approval');
         expect(awaitingEvents).toHaveLength(2);
@@ -456,7 +459,7 @@ describe('daemon local observability (DaemonObserver)', () => {
         observer.subscribe((e) => events.push(e));
 
         observer.noteApprovalDispatched('task-other', 'appr-other');
-        observer.handleOutboundEnvelope(createEnvelope('task.await_approval', { summary: 'x' }, { taskId: 'task-b' }));
+        { const queued = createEnvelope('task.await_approval', { summary: 'x' }, { taskId: 'task-b' }); observer.captureOutboundApproval(queued); observer.handleOutboundEnvelope(queued); }
 
         const awaiting = events.find((e) => e.kind === 'awaiting-approval');
         if (awaiting?.kind !== 'awaiting-approval') throw new Error('unreachable');
@@ -525,4 +528,18 @@ describe('daemon local observability (DaemonObserver)', () => {
       await expect(daemon.reject('task-x')).rejects.toThrow(/not started/i);
     });
   });
+});
+
+
+it('freezes approval identity at queue time across delayed settlement and a newer dispatch', () => {
+  const observer = new DaemonObserver();
+  const events: DaemonEvent[] = [];
+  observer.subscribe((event) => events.push(event));
+  const first = createEnvelope('task.await_approval', { summary: 'first' }, { taskId: 'task' });
+  const second = createEnvelope('task.await_approval', { summary: 'second' }, { taskId: 'task' });
+  observer.noteApprovalDispatched('task', 'approval-first'); observer.captureOutboundApproval(first);
+  observer.noteApprovalDispatched('task', 'approval-second'); observer.captureOutboundApproval(second);
+  expect(events).toEqual([]);
+  observer.handleOutboundEnvelope(first); observer.handleOutboundEnvelope(second);
+  expect(events.filter((event) => event.kind === 'awaiting-approval').map((event) => event.approvalId)).toEqual(['approval-first', 'approval-second']);
 });

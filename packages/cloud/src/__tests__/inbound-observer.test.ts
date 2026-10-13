@@ -65,10 +65,10 @@ describe('observer.onInboundCommitted', () => {
     const claimSecond = claim(second.taskId, device.deviceId);
 
     expect(
-      await handleInboundEnvelope(stores, device.deviceId, claimFirst, undefined, undefined, observer),
+      await handleInboundEnvelope(stores, device.deviceId, claimFirst, undefined, undefined, observer).then((result) => result.outcome),
     ).toBe('accepted');
     expect(
-      await handleInboundEnvelope(stores, device.deviceId, claimSecond, undefined, undefined, observer),
+      await handleInboundEnvelope(stores, device.deviceId, claimSecond, undefined, undefined, observer).then((result) => result.outcome),
     ).toBe('accepted');
 
     expect(seen).toEqual([
@@ -88,10 +88,10 @@ describe('observer.onInboundCommitted', () => {
     const envelope = claim(taskId, device.deviceId);
 
     expect(
-      await handleInboundEnvelope(stores, device.deviceId, envelope, undefined, undefined, observer),
+      await handleInboundEnvelope(stores, device.deviceId, envelope, undefined, undefined, observer).then((result) => result.outcome),
     ).toBe('accepted');
     expect(
-      await handleInboundEnvelope(stores, device.deviceId, envelope, undefined, undefined, observer),
+      await handleInboundEnvelope(stores, device.deviceId, envelope, undefined, undefined, observer).then((result) => result.outcome),
     ).toBe('duplicate');
 
     // The redelivery is a wire-level success that re-ran nothing. Firing here
@@ -109,7 +109,7 @@ describe('observer.onInboundCommitted', () => {
     // A server -> daemon type arriving inbound: refused before any write.
     const wrongDirection = createEnvelope('task.cancel', {}, { taskId: 'task-1', seq: 1 });
     expect(
-      await handleInboundEnvelope(stores, device.deviceId, wrongDirection, undefined, undefined, observer),
+      await handleInboundEnvelope(stores, device.deviceId, wrongDirection, undefined, undefined, observer).then((result) => result.outcome),
     ).toBe('rejected');
     expect(seen).toEqual([]);
   });
@@ -132,7 +132,7 @@ describe('observer.onInboundCommitted', () => {
         undefined,
         undefined,
         observer,
-      ),
+      ).then((result) => result.outcome),
     ).toBe('rate_limited');
     expect(seen).toEqual([]);
   });
@@ -159,7 +159,7 @@ describe('observer.onInboundCommitted', () => {
       undefined,
       undefined,
       thrower,
-    );
+    ).then((result) => result.outcome);
 
     expect(calls).toBe(1);
     expect(outcome).toBe('accepted');
@@ -187,7 +187,7 @@ describe('observer.onInboundCommitted', () => {
       body: JSON.stringify({ messages }),
     });
 
-    expect(await response.json()).toEqual({ accepted: 3 });
+    expect(await response.json()).toMatchObject({ accepted: 3 });
     expect(seen.map((input) => input.envelope.id)).toEqual(messages.map((message) => message.id));
     expect(seen.map((input) => input.tenantId)).toEqual([TENANT_A, TENANT_A, TENANT_A]);
     expect(seen.map((input) => input.deviceId)).toEqual(Array(3).fill(device.deviceId));
@@ -218,11 +218,13 @@ describe('observer.onInboundCommitted', () => {
         headers: { ...device.authorization, 'content-type': 'application/json' },
         body: JSON.stringify({ messages }),
       });
-      return { status: response.status, body: await response.json() };
+      const body = await response.json() as { accepted: number; rejected: number; outcomes: Array<{ id: string; outcome: string; reason?: string }> };
+      expect(body.outcomes.map((outcome) => outcome.id)).toEqual(messages.map((message) => message.id));
+      return { status: response.status, body: { ...body, outcomes: body.outcomes.map(({ id: _id, ...decision }) => decision) } };
     }
 
     expect(await runBatch(thrower)).toEqual(await runBatch(undefined));
-    expect(await runBatch(thrower)).toEqual({ status: 200, body: { accepted: 1, rejected: 1 } });
+    expect(await runBatch(thrower)).toEqual({ status: 200, body: { accepted: 1, rejected: 1, outcomes: [{ outcome: 'accepted' }, { outcome: 'rejected', reason: 'unsupported' }] } });
   });
 
   it('is absent by default: nothing observes and nothing changes', async () => {
@@ -233,7 +235,7 @@ describe('observer.onInboundCommitted', () => {
       payload: offerPayload(),
     });
 
-    expect(await handleInboundEnvelope(stores, device.deviceId, claim(taskId, device.deviceId))).toBe(
+    expect(await handleInboundEnvelope(stores, device.deviceId, claim(taskId, device.deviceId)).then((result) => result.outcome)).toBe(
       'accepted',
     );
     expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.ownerDeviceId).toBe(device.deviceId);
@@ -260,7 +262,7 @@ describe('observer.onInboundCommitted', () => {
       undefined,
       undefined,
       observer,
-    );
+    ).then((result) => result.outcome);
     await handleInboundEnvelope(
       tenantStoresFor(devicePrincipal(other, deviceB.deviceId), {
         core: harness.core,
@@ -271,7 +273,7 @@ describe('observer.onInboundCommitted', () => {
       undefined,
       undefined,
       observer,
-    );
+    ).then((result) => result.outcome);
 
     expect(seen.map((input) => input.tenantId)).toEqual([TENANT_A, other]);
   });

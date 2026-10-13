@@ -1,3 +1,4 @@
+import { OUTBOUND_REFUSAL_REASONS, type OutboundRefusalReason } from '@byok-sdk/protocol';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { AgentEvent, BlobRef, RuntimeInfo } from '@byok-sdk/protocol';
@@ -251,6 +252,8 @@ function redactAgentEvent(event: AgentEvent): Record<string, unknown> {
 function redactForAudit(event: DaemonEvent): Record<string, unknown> {
   const base = { kind: event.kind, ts: event.ts };
   switch (event.kind) {
+    case 'outbound-rejected':
+      return { ...base, envelopeId: event.envelopeId, type: event.type, taskId: event.taskId, reason: event.reason, terminal: event.terminal };
     case 'offered':
       return { ...base, taskId: event.taskId, runtime: event.runtime };
     case 'claimed':
@@ -435,6 +438,11 @@ function reconstructDaemonEvent(raw: Record<string, unknown>): DaemonEvent | und
   const kind = str(raw.kind);
   const ts = str(raw.ts);
   switch (kind) {
+    case 'outbound-rejected': {
+      const reason = raw.reason;
+      if (typeof reason !== 'string' || ![...OUTBOUND_REFUSAL_REASONS, 'unknown', 'unspecified'].includes(reason) || typeof raw.envelopeId !== 'string' || typeof raw.type !== 'string' || typeof raw.terminal !== 'boolean') return undefined;
+      return { kind, ts, envelopeId: raw.envelopeId, type: raw.type, ...(typeof raw.taskId === 'string' ? { taskId: raw.taskId } : {}), reason: reason as OutboundRefusalReason, terminal: raw.terminal };
+    }
     case 'offered':
       return { kind: 'offered', ts, taskId: str(raw.taskId), runtime: typeof raw.runtime === 'string' ? raw.runtime : undefined };
     case 'claimed': {

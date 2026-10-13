@@ -20207,6 +20207,26 @@
           "items": {
             "type": "string"
           }
+        },
+        "ingress": {
+          "type": "object",
+          "properties": {
+            "activityMaxEvents": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "activityMaxBytes": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "activityMaxEvents",
+            "activityMaxBytes"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -27118,6 +27138,57 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "ingress": {
+          "type": "object",
+          "properties": {
+            "activityMaxEvents": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "activityMaxBytes": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "activityMaxEvents",
+            "activityMaxBytes"
+          ],
+          "additionalProperties": false
+        },
+        "outcomes": {
+          "maxItems": 256,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": [
+                  "accepted",
+                  "duplicate",
+                  "rejected"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "required": [
+              "id",
+              "outcome"
+            ],
+            "additionalProperties": false
           }
         }
       },

@@ -1,3 +1,4 @@
+import { DEFAULT_ACTIVITY_INGRESS } from '@byok-sdk/protocol';
 import { readTaskAgentMessage, type TaskAgentMessage } from './task-agent-message';
 import { RecurringExecutionInputSchema, type RecurringExecutionInput } from './recurring';
 import { uuidFromSha256, taskOfferMessageId } from './offer-identity';
@@ -136,8 +137,6 @@ import { CLOUD_CAPABILITIES, declares } from './capabilities';
 import {
   assertBoardLabels,
   DEFAULT_ACTIVITY_CAPACITY,
-  DEFAULT_ACTIVITY_MAX_BYTES,
-  DEFAULT_ACTIVITY_MAX_EVENTS,
   DEFAULT_ACTIVITY_TTL_MS,
   DEFAULT_BOARD_CHANNEL_MAX_BYTES,
   DEFAULT_BOARD_TITLE_MAX_BYTES,
@@ -859,8 +858,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
   const registry = new CloudRouteRegistry();
   const activityBounds: ActivityBounds = {
-    maxEvents: options.activityMaxEvents ?? DEFAULT_ACTIVITY_MAX_EVENTS,
-    maxBytes: options.activityMaxBytes ?? DEFAULT_ACTIVITY_MAX_BYTES,
+    maxEvents: options.activityMaxEvents ?? DEFAULT_ACTIVITY_INGRESS.maxEvents,
+    maxBytes: options.activityMaxBytes ?? DEFAULT_ACTIVITY_INGRESS.maxBytes,
     capacity: options.activityCapacity ?? DEFAULT_ACTIVITY_CAPACITY,
     ttlMs: options.activityTtlMs ?? DEFAULT_ACTIVITY_TTL_MS,
   };
@@ -913,6 +912,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       { method: 'GET', path: BYOK_EVENTS_PATH, class: 'device' },
       eventsHandler({
         ...deviceRouteDeps,
+        activityBounds,
         longPollHoldMs: options.longPollHoldMs ?? DEFAULT_LONG_POLL_HOLD_MS,
         longPollIntervalMs: options.longPollIntervalMs ?? DEFAULT_LONG_POLL_INTERVAL_MS,
         pageLimit: options.eventsPageLimit ?? DEFAULT_EVENTS_PAGE_LIMIT,

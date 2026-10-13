@@ -140,7 +140,7 @@ describe('POST /byok/messages (§8, finding F6)', () => {
     const res = await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }));
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ accepted: 1 });
+    expect(await res.json()).toMatchObject({ accepted: 1 });
 
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');
     expect((await instance.tasks.get(handle.taskId))?.state).toBe('Claimed');

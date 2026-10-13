@@ -1,0 +1,11 @@
+# Outbound envelope settlement (#397)
+
+P1: protocol owns response schemas and coarse observation vocabulary; cloud inbound owns the decision and deployment bounds; client transport validates correlation; ConnectionManager owns the exact outbound queue; daemon projects settled delivery to journal, events, status and diagnostics. Server composes the cloud handler. No change to health persistence or task/auth authority.
+
+P2: TaskRunner -> ProgressBatcher -> sendEnvelope -> journal terminal commit (when terminal) -> ConnectionManager -> POST messages -> cloud inbound result -> correlated outcomes -> awaited onOutboundSettled -> terminal confirmation/refusal fsync -> observer/status -> retire. A local settlement failure retains the same envelope bytes. Poll and hello advertisements share the cloud activityBounds authority. Approval IDs are frozen per envelope when queued so delayed settlement cannot borrow a newer approval.
+
+P3: Keep v2 counts and add optional response-only outcomes/ingress. Internal refusal names map exhaustively to five coarse codes; task existence and identity mismatches share not_permitted. Unknown outcome fails closed; unknown observation maps to unknown. Each callback commits every terminal before any count/event is published. Health describes liveness; partial rejection is a separate delivery fact. At 10x traffic, response and settlement work stay linear per capped batch; counts-only bisection remains the explicit temporary exception (at most 2n-1 POSTs), removed at v3.
+
+The hello also advertises ingress: otherwise a custom deployment limit could be missed before the first poll. Activity bytes use the same JSON-array accounting as cloud. Text splits at code point boundaries; summaries/final output are accumulated before batching. Grapheme clusters can span events. A budget shrink with already buffered events can produce an explicitly reported rejection; no local semantic fallback is added. Agent latest-value projection selects an unchanged member or returns a subset, so it does not enlarge a batch.
+
+Claude supplied a bounded read-only plan through Herdr. Its durable decisions are preserved here; execution and validation evidence are in the PR.

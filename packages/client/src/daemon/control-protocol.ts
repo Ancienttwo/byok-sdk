@@ -468,6 +468,7 @@ export interface ControlStatusResult {
   storage?: ControlStorageStatus;
   /** Local retry budget. This is not the lifecycle above. */
   operationalHealth: OperationalHealthSnapshot;
+  outbound: import('./outbound-settlement').OutboundStatus;
   /** Redacted content-addressed status from the daemon's single local registry. */
   toolsets: McpToolsetRegistryStatus;
   /**

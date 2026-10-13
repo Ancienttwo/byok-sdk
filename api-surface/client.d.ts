@@ -2854,7 +2854,7 @@ export declare class BlobClient implements BlobResolver {
 }
 // ==== @byok-sdk/client dist/daemon/connection-manager.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
-import { type CapabilityFlag, type Envelope, type RuntimeInfo, type ToolsetId } from '@byok-sdk/protocol';
+import { type OutboundRefusalReason, type MessageSendOutcome, type ActivityIngress, type CapabilityFlag, type Envelope, type RuntimeInfo, type ToolsetId } from '@byok-sdk/protocol';
 import { AuthManager } from './auth-manager';
 import type { CursorStore } from './cursor-store';
 import type { DaemonHaltReason } from './daemon-lifecycle';
@@ -2896,8 +2896,7 @@ export interface ConnectionManagerOptions {
      */
     onCapabilitiesAdvertised?: (added: readonly string[]) => void;
     /** Await durable disposition before retiring the exact accepted/rejected bytes. */
-    onOutboundAccepted?: (envelopes: readonly Envelope[]) => Promise<void>;
-    onOutboundRejected?: (envelope: Envelope) => Promise<void>;
+    onOutboundSettled?: (settlements: readonly OutboundSettlement[]) => Promise<void>;
     onOutboundQueued?: (envelope: Envelope) => void;
     beforeOutboundPost?: (envelopes: readonly Envelope[]) => void;
     /** Base delay before each reconnect handshake, and for stalled-cycle and local-disposition backoff. Default 2s. */
@@ -2915,9 +2914,10 @@ export interface ConnectionManagerOptions {
      */
     onCrashed?: (error: unknown) => void;
 }
-export interface RejectedOutboundEnvelope {
+export interface OutboundSettlement {
     readonly envelope: Envelope;
-    readonly reason: 'inbound_rejected';
+    readonly outcome: MessageSendOutcome['outcome'];
+    readonly reason?: OutboundRefusalReason;
 }
 /**
  * Owns the daemon's one authenticated long-poll session with the server.
@@ -2982,7 +2982,7 @@ export declare class ConnectionManager {
      */
     private readonly outbox;
     /** Terminally rejected outbound envelopes, retained as a bounded observable quarantine. */
-    private readonly rejectedOutboundEnvelopes;
+    private ingressBudget;
     /**
      * Finding F5(b): how many envelopes `drainOutbox` has
      * currently spliced OUT of `this.outbox` for an in-flight (not yet
@@ -3147,8 +3147,7 @@ export declare class ConnectionManager {
      * for the one case (a hung POST) this finding exists to catch honestly.
      */
     outboxLength(): number;
-    /** A bounded terminal quarantine for operator inspection; these entries are never retried. */
-    rejectedOutbox(): readonly RejectedOutboundEnvelope[];
+    getIngressBudget(): Readonly<ActivityIngress>;
     /**
      * Finding F5(b): polls {@link outboxLength} (not `this.outbox.length`
      * alone — see that method's own doc comment for why a spliced-out,
@@ -3198,7 +3197,6 @@ export declare class ConnectionManager {
     /** Recorded synchronously at receive, before a later successful receipt can commit. */
     private noteValidationFailure;
     private advanceCursor;
-    private quarantineRejectedOutbound;
     /**
      * Ends the session for good: stops the loop, the poll and the drain, then
      * reports the reason once. The outbox keeps whatever it held, so
@@ -3488,6 +3486,7 @@ export interface ControlStatusResult {
     storage?: ControlStorageStatus;
     /** Local retry budget. This is not the lifecycle above. */
     operationalHealth: OperationalHealthSnapshot;
+    outbound: import('./outbound-settlement').OutboundStatus;
     /** Redacted content-addressed status from the daemon's single local registry. */
     toolsets: McpToolsetRegistryStatus;
     /**
@@ -3814,6 +3813,7 @@ export declare function parseInputPreparationLookupParams(value: unknown): Input
 /** Strict shape gate for `input_preparation.cancel`. Same two fields as lookup, and no third. */
 export declare function parseInputPreparationCancelParams(value: unknown): InputPreparationCancelParamsV1 | undefined;
 // ==== @byok-sdk/client dist/daemon/create-daemon.d.ts ====
+import type { OutboundStatus } from './outbound-settlement';
 import type { AgentEgressPolicy, RuntimeId } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, GitWorkspaceConfig, McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types';
 import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agent-home';
@@ -4127,7 +4127,7 @@ export interface DaemonConfig {
      *
      * This is a per-event bound, orthogonal to `maxTaskOutputBytes` (a
      * whole-task total, counted AFTER spilling) and to
-     * `progressBatch.maxBatchBytes` (a per-batch wire budget).
+     * the server-advertised activity ingress budget.
      *
      * **Consumer contract:** `spill`'s presence is the only signal that the
      * inline field is a preview. A consumer that renders `tool_result.output`
@@ -4144,11 +4144,7 @@ export interface DaemonConfig {
      */
     maxInlineEventBytes?: number;
     /**
-     * Host-owned batching policy for normalized `task.progress` events.
-     * `maxBatchBytes`, when set, measures exactly the UTF-8 bytes of
-     * `JSON.stringify(events)` and must match the deployment's activity-ingress
-     * budget. It is deliberately unset by default because that ingress ceiling
-     * is deployment policy, not a frozen protocol constant.
+     * Timing and event-count batching policy. The server owns the byte ceiling.
      */
     progressBatch?: ProgressBatcherOptions;
     /**
@@ -4417,6 +4413,7 @@ export interface DaemonStatus {
     toolsets: McpToolsetRegistryStatus;
     /** Content-free egress lane watermarks and typed last-drop facts. */
     egress: AgentEgressStatus;
+    outbound: OutboundStatus;
     /** WP0: per-canonical-Agent-home execution serialization — see {@link AgentHomeExecutionStatus}. */
     agentHomeExecution: AgentHomeExecutionStatus;
 }
@@ -6898,7 +6895,11 @@ import type { DaemonLifecycle } from './daemon-lifecycle';
  */
 /** Every local event kind this daemon can emit — see {@link DaemonEvent}. */
 export type DaemonEventKind = DaemonEvent['kind'];
-export type DaemonEvent = {
+import type { OutboundRejection } from './outbound-settlement';
+export type DaemonEvent = ({
+    kind: 'outbound-rejected';
+    ts: string;
+} & OutboundRejection) | {
     kind: 'offered';
     ts: string;
     taskId: string;
@@ -7156,6 +7157,7 @@ export interface DaemonTaskInfo {
     sessionRef?: string;
     /** `true` only when `state === 'Failed'` resulted from a pre-claim `task.decline` rather than a post-claim `task.fail` — see the `DaemonEvent` `failed` variant's doc comment. */
     declined?: boolean;
+    delivery?: 'rejected';
     updatedAt: string;
 }
 /**
@@ -7192,6 +7194,7 @@ export declare class DaemonObserver {
      * long-lived daemon's lifetime the way an evict-on-schedule cache would
      * need explicit bookkeeping to avoid.
      */
+    private readonly approvalIdByEnvelope;
     private readonly pendingApprovalIdByTask;
     subscribe(listener: DaemonEventListener): Unsubscribe;
     /** Current locally-known tasks, in first-seen order. */
@@ -7212,7 +7215,9 @@ export declare class DaemonObserver {
      * calls `deps.send(...)` for each of these at exactly the moment its own
      * state machine decides the transition happened.
      */
+    captureOutboundApproval(envelope: Envelope): void;
     handleOutboundEnvelope(envelope: Envelope): void;
+    noteOutboundRejected(rejection: OutboundRejection): void;
     noteLifecycle(lifecycle: DaemonLifecycle): void;
     notePaired(deviceId: string): void;
     noteUnpaired(): void;
@@ -7424,6 +7429,24 @@ declare function inspectOperationalHealthHandle(handle: Awaited<ReturnType<typeo
  */
 export declare function inspectOperationalHealthFile(storeDir: string): Promise<OperationalHealthFileInspection>;
 export { inspectOperationalHealthHandle };
+// ==== @byok-sdk/client dist/daemon/outbound-settlement.d.ts ====
+import type { OutboundRefusalReason } from '@byok-sdk/protocol';
+export interface OutboundRejection {
+    readonly envelopeId: string;
+    readonly type: string;
+    readonly taskId?: string;
+    readonly reason: OutboundRefusalReason;
+    readonly terminal: boolean;
+}
+/** Counts for this daemon run; payload bytes are never part of this projection. */
+export interface OutboundStatus {
+    accepted: number;
+    duplicate: number;
+    rejected: number;
+    rejectedByReason: Partial<Record<OutboundRefusalReason, number>>;
+    rejectedTerminals: number;
+    lastRejection?: OutboundRejection;
+}
 // ==== @byok-sdk/client dist/daemon/prepared-agent-memory.d.ts ====
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import { type PreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
@@ -7446,24 +7469,18 @@ export declare function preparedMemoryProjection(mode: PreparedAgentMemoryMode, 
 };
 export declare function parsePreparedMemoryState(raw: unknown): PreparedAgentMemoryState | null;
 // ==== @byok-sdk/client dist/daemon/progress-batcher.d.ts ====
-import type { AgentEvent } from '@byok-sdk/protocol';
+import { type ActivityIngress, type AgentEvent } from '@byok-sdk/protocol';
 export type ProgressEmitter = (seq: number, events: AgentEvent[]) => void;
 export interface ProgressBatcherOptions {
     /** Flush immediately once this many events are buffered. Default 10. */
     maxBatchSize?: number;
     /** Otherwise flush at most this often (ms) while events are pending. Default 250 (~4/sec). */
     flushIntervalMs?: number;
-    /**
-     * Optional deployment-owned ceiling for the UTF-8 bytes in the serialized
-     * `events[]` array. Unset means no byte ceiling; hosts should inject the
-     * same value their activity ingress enforces.
-     */
-    maxBatchBytes?: number;
 }
 export declare class ProgressEventTooLargeError extends Error {
     readonly actualBytes: number;
-    readonly maxBatchBytes: number;
-    constructor(actualBytes: number, maxBatchBytes: number);
+    readonly maxBytes: number;
+    constructor(actualBytes: number, maxBytes: number);
 }
 export declare function validateProgressBatcherOptions(options?: ProgressBatcherOptions): void;
 /**
@@ -7474,13 +7491,14 @@ export declare function validateProgressBatcherOptions(options?: ProgressBatcher
  */
 export declare class ProgressBatcher {
     private readonly emit;
+    private readonly ingress;
     private buffer;
     private seq;
     private timer;
     private readonly maxBatchSize;
     private readonly flushIntervalMs;
-    private readonly maxBatchBytes;
-    constructor(emit: ProgressEmitter, options?: ProgressBatcherOptions);
+    private bufferBytes;
+    constructor(emit: ProgressEmitter, options?: ProgressBatcherOptions, ingress?: () => Readonly<ActivityIngress>);
     push(event: AgentEvent): void;
     /** M4 Phase 4 (part B.3, observability): events buffered right now, not yet flushed as a `task.progress` batch — a cheap per-task queue-depth watermark for the daemon's control-socket `status` result (see `task-runner.ts`'s `getQueueWatermarks`). */
     get pendingCount(): number;
@@ -7932,6 +7950,7 @@ export declare function readDeviceEnrollmentStatus(options: DeviceEnrollmentStat
  */
 export declare function readDeviceEnrollmentIdentity(options: DeviceEnrollmentStatusOptions): Promise<DeviceEnrollmentIdentityStatus>;
 // ==== @byok-sdk/client dist/daemon/task-runner.d.ts ====
+import { type ActivityIngress } from '@byok-sdk/protocol';
 import { type AgentMessageContentType, type AgentEgressPolicy, type Envelope, type RuntimeId, type TerminalProjectionSelection, type TaskOfferPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferPreparedPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import { type McpStdioServerConfig, type McpToolsetConfig, type RuntimeAdapter } from '../types';
 import type { InputPreparationStore } from './input-preparation-store';
@@ -8046,7 +8065,7 @@ export declare const MAX_DURATION_EXCEEDED_REASON_PREFIX = "resource limit excee
 /** M5 batch-3 (workstream 2): same contract as {@link MAX_DURATION_EXCEEDED_REASON_PREFIX}, for `DaemonConfig.maxTaskOutputBytes` — see `TaskRunner.pump`'s own per-event byte counting. */
 export declare const MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX = "resource limit exceeded: maxTaskOutputBytes";
 /** Stable fail-closed reason for one normalized event that cannot fit the configured activity batch budget. */
-export declare const MAX_PROGRESS_BATCH_BYTES_EXCEEDED_REASON_PREFIX = "resource limit exceeded: progressBatch.maxBatchBytes";
+export declare const ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX = "resource limit exceeded: activity ingress budget";
 /**
  * additive-minor (`task.complete.document`): same stable-PREFIX contract as
  * {@link MAX_DURATION_EXCEEDED_REASON_PREFIX} above, carried by every
@@ -8354,6 +8373,7 @@ export interface TaskRunnerDeps {
      * capabilities" when absent, so a minimal test harness that doesn't care
      * about this gate isn't forced to supply one — see `sendApprovalResolved`.
      */
+    getIngressBudget?: () => Readonly<ActivityIngress>;
     getServerCapabilities?: () => readonly string[];
     /**
      * Contract §8.1 / §8.3: is the task lane's capability gate in place right
@@ -8663,6 +8683,7 @@ export declare class TaskRunner {
     get activeTaskCount(): number;
     /** M5 batch-3 (workstream 2): effective `maxTaskOutputBytes` cap for this daemon — see {@link DEFAULT_MAX_TASK_OUTPUT_BYTES}'s own doc comment. */
     private get maxTaskOutputBytes();
+    private get ingressBudget();
     /** Effective per-event inline ceiling for this daemon — see `DaemonConfig.maxInlineEventBytes`. */
     private get maxInlineEventBytes();
     /** Effective per-canonical-Agent-home reader cap — see {@link DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME}. */
@@ -9850,6 +9871,7 @@ export interface DiagnosticsSnapshot {
         activeTaskCount: number;
         pendingApprovalCount: number;
         operationalHealth: ControlStatusResult['operationalHealth'];
+        outbound?: ControlStatusResult['outbound'];
         storage?: ControlStatusResult['storage'];
     };
     /**
@@ -9869,6 +9891,7 @@ export interface DiagnosticsSnapshot {
         sizeBytes?: number;
         walBytes?: number;
         integrity?: 'ok' | 'not-checked';
+        failedTerminalCount?: number;
         reason?: string;
     };
     /** `not-configured`: a strict Agent daemon has no `workspaceRoot`; each Agent offer runs in its SDK-owned home. */
@@ -10044,6 +10067,7 @@ export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAg
 export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, ExportDeviceSupportBundleInput, DeviceSupportBundleExportResult, ArchiveAgentTerminalMessagesInput, AgentTerminalMessagesArchiveResult, DeviceOperatorErrorCode } from './diagnostics/operator-actions';
 export { NativeInteractionController, NativeInteractionError } from './native-interactions';
 export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from './native-interactions';
+export type { OutboundStatus, OutboundRejection } from './daemon/outbound-settlement';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';

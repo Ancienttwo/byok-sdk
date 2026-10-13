@@ -203,23 +203,19 @@ validated registry. Only those logical IDs are advertised in `conn.hello`
 and hosted presence; command, args, environment, headers, and credentials
 remain local.
 
-Hosted deployments that enforce an activity-ingress byte ceiling should inject
-the same ceiling into the daemon. The byte count is the UTF-8 length of
-`JSON.stringify(events)`; it does not include envelope or transport overhead.
-One event that cannot fit fails the task locally without truncation or network
-delivery.
+The server advertises activity limits in its hello and poll responses. The daemon
+follows those limits, measuring UTF-8 `JSON.stringify(events)`, and splits oversized
+progress text at Unicode code point boundaries without changing the final summary.
+`progressBatch` configures `maxBatchSize` and `flushIntervalMs`; `maxBatchBytes` has
+been removed. Unsplittable events over the advertised limit fail explicitly.
 
-```ts
-createDaemon({
-  // ...normal device and transport configuration
-  progressBatch: {
-    maxBatchBytes: 64 * 1024,
-  },
-});
-```
-
-The value is intentionally host-owned and has no SDK default because it is a
-deployment/read-model policy, not a frozen protocol limit.
+Outbound rejections are visible through `daemon.subscribe()` (`outbound-rejected`),
+`daemon.status().outbound`, control status, support bundles and `tasks` rows marked
+`delivery=rejected`. Terminal refusals are durable journal failures with their wire
+reason. These events and counters contain no envelope payload. Activity observer
+events are emitted after successful settlement; partial refusal leaves liveness
+health healthy. Older counts-only v2 responders use `unspecified` refusal reasons
+and bisection until protocol v3.
 
 ## Durable Agent homes
 

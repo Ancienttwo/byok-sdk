@@ -15,6 +15,23 @@
   `status` against a daemon that predates `lifecycle` prints
   `lifecycle unknown (daemon predates lifecycle)` instead of failing.
 
+- **Outbound settlement (#397)** — protocol v2 keeps aggregate counts and adds
+  optional per-envelope `outcomes` plus server-owned `ingress` advertisements.
+  Unknown refusal observations become `unknown`; invalid control outcomes or
+  inconsistent ids/counts retain the original bytes for retry. Counts-only v2
+  bisection uses `unspecified` and is removed with the ingress default at v3.
+- **Breaking (client/cloud, 0.x)** — replace outbound quarantine and accepted/
+  rejected callbacks with awaited `onOutboundSettled`; local activity events now
+  follow successful settlement. Inspect rejection via `outbound-rejected`,
+  daemon/control `outbound`, journal terminal reason, support bundle counts and
+  `tasks delivery=rejected`. Remove `progressBatch.maxBatchBytes`; the server owns
+  byte limits and large progress text splits losslessly. Replace
+  `MAX_PROGRESS_BATCH_BYTES_EXCEEDED_REASON_PREFIX` with
+  `ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX`. `handleInboundEnvelope` returns
+  discriminated `InboundResult` (read `.outcome` and rejected `.reason`);
+  `DEFAULT_ACTIVITY_MAX_*` cloud exports are removed; use protocol
+  `DEFAULT_ACTIVITY_INGRESS` only before server advertisement.
+
 - **Breaking (client, 0.x)** — daemon readiness and halts are one lifecycle
   model (#391, #394). `daemon.start()` now resolves once local startup is done
   and never waits for the network; the server accepting this session's lone

@@ -49,7 +49,7 @@ describe('POST /byok/messages', () => {
 
     expect(response.status).toBe(200);
     const body = MessagesSendResponseSchema.parse(await response.json());
-    expect(body).toEqual({ accepted: 2 });
+    expect(body).toMatchObject({ accepted: 2 });
   });
 
   it('counts a duplicate as accepted and a gate rejection separately', async () => {
@@ -65,7 +65,7 @@ describe('POST /byok/messages', () => {
     ]);
 
     const body = MessagesSendResponseSchema.parse(await response.json());
-    expect(body).toEqual({ accepted: 1, rejected: 1 });
+    expect(body).toMatchObject({ accepted: 1, rejected: 1 });
   });
 
   it('answers the WHOLE request 429 the moment one envelope is rate limited', async () => {
@@ -119,7 +119,7 @@ describe('POST /byok/messages', () => {
 
     const response = await send(harness, device.authorization, batch);
     expect(response.status).toBe(200);
-    expect(MessagesSendResponseSchema.parse(await response.json())).toEqual({ accepted: MAX_MESSAGES_PER_BATCH });
+    expect(MessagesSendResponseSchema.parse(await response.json())).toMatchObject({ accepted: MAX_MESSAGES_PER_BATCH });
   });
 
   it('401s without a bearer token', async () => {

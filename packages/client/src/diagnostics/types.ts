@@ -42,6 +42,7 @@ export interface DiagnosticsSnapshot {
         activeTaskCount: number;
         pendingApprovalCount: number;
         operationalHealth: ControlStatusResult['operationalHealth'];
+        outbound?: ControlStatusResult['outbound'];
         storage?: ControlStatusResult['storage'];
       };
   /**
@@ -55,6 +56,7 @@ export interface DiagnosticsSnapshot {
     sizeBytes?: number;
     walBytes?: number;
     integrity?: 'ok' | 'not-checked';
+    failedTerminalCount?: number;
     reason?: string;
   };
   /** `not-configured`: a strict Agent daemon has no `workspaceRoot`; each Agent offer runs in its SDK-owned home. */

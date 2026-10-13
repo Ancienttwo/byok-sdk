@@ -16,10 +16,10 @@ const SHORT_HOLD_MS = 150;
 /** Offered -> Claimed -> Running over the long-poll send path, asserting each hop landed. */
 async function claimAndStart(byok: ByokServer, daemon: FakeLongPollDaemon, handle: TaskHandle): Promise<void> {
   const claim = await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }));
-  expect(await claim.json()).toEqual({ accepted: 1 });
+  expect(await claim.json()).toMatchObject({ accepted: 1 });
   expect((await byok.tasks.get(handle.taskId))?.state).toBe('Claimed');
   const started = await daemon.send(createEnvelope('task.started', {}, { taskId: handle.taskId }));
-  expect(await started.json()).toEqual({ accepted: 1 });
+  expect(await started.json()).toMatchObject({ accepted: 1 });
   expect((await byok.tasks.get(handle.taskId))?.state).toBe('Running');
 }
 

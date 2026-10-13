@@ -42,7 +42,10 @@ import type { DaemonLifecycle } from './daemon-lifecycle';
 /** Every local event kind this daemon can emit — see {@link DaemonEvent}. */
 export type DaemonEventKind = DaemonEvent['kind'];
 
+import type { OutboundRejection } from './outbound-settlement';
+
 export type DaemonEvent =
+  | ({ kind: 'outbound-rejected'; ts: string } & OutboundRejection)
   | { kind: 'offered'; ts: string; taskId: string; runtime?: string }
   | { kind: 'claimed'; ts: string; taskId: string; claimedRuntime?: string }
   | { kind: 'started'; ts: string; taskId: string }
@@ -207,6 +210,7 @@ export interface DaemonTaskInfo {
   sessionRef?: string;
   /** `true` only when `state === 'Failed'` resulted from a pre-claim `task.decline` rather than a post-claim `task.fail` — see the `DaemonEvent` `failed` variant's doc comment. */
   declined?: boolean;
+  delivery?: 'rejected';
   updatedAt: string;
 }
 
@@ -257,6 +261,7 @@ export class DaemonObserver {
    * long-lived daemon's lifetime the way an evict-on-schedule cache would
    * need explicit bookkeeping to avoid.
    */
+  private readonly approvalIdByEnvelope = new Map<string, string>();
   private readonly pendingApprovalIdByTask = new Map<string, string>();
 
   subscribe(listener: DaemonEventListener): Unsubscribe {
@@ -309,6 +314,13 @@ export class DaemonObserver {
    * calls `deps.send(...)` for each of these at exactly the moment its own
    * state machine decides the transition happened.
    */
+  captureOutboundApproval(envelope: Envelope): void {
+    if (envelope.type !== 'task.await_approval') return;
+    const approvalId = this.pendingApprovalIdByTask.get(envelope.task_id);
+    if (approvalId !== undefined) this.approvalIdByEnvelope.set(envelope.id, approvalId);
+    this.pendingApprovalIdByTask.delete(envelope.task_id);
+  }
+
   handleOutboundEnvelope(envelope: Envelope): void {
     const ts = nowIso();
     switch (envelope.type) {
@@ -359,8 +371,8 @@ export class DaemonObserver {
         const taskId = envelope.task_id;
         // Finding F4: read-and-delete — see `pendingApprovalIdByTask`'s own
         // doc comment for why this never needs a separate eviction policy.
-        const approvalId = this.pendingApprovalIdByTask.get(taskId);
-        this.pendingApprovalIdByTask.delete(taskId);
+        const approvalId = this.approvalIdByEnvelope.get(envelope.id);
+        this.approvalIdByEnvelope.delete(envelope.id);
         this.upsertTask(taskId, { state: 'AwaitApproval', summary: envelope.payload.summary });
         this.emit({ kind: 'awaiting-approval', ts, taskId, summary: envelope.payload.summary, approvalId });
         return;
@@ -404,6 +416,15 @@ export class DaemonObserver {
       default:
         return; // conn.* and every server->daemon-only type never flow through the outbound `send` hook
     }
+  }
+
+  noteOutboundRejected(rejection: OutboundRejection): void {
+    this.approvalIdByEnvelope.delete(rejection.envelopeId);
+    if (rejection.taskId !== undefined) {
+      const task = this.taskInfo.get(rejection.taskId);
+      if (task !== undefined) this.taskInfo.set(rejection.taskId, { ...task, delivery: 'rejected', updatedAt: nowIso() });
+    }
+    this.emit({ kind: 'outbound-rejected', ts: nowIso(), ...rejection });
   }
 
   noteLifecycle(lifecycle: DaemonLifecycle): void {

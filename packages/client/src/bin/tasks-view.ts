@@ -86,6 +86,11 @@ export function deriveTasksFromEvents(events: readonly DaemonEvent[]): DerivedTa
 
   for (const event of events) {
     switch (event.kind) {
+      case 'outbound-rejected': {
+        const existing = event.taskId === undefined ? undefined : tasks.get(event.taskId);
+        if (existing && event.taskId !== undefined) tasks.set(event.taskId, { ...existing, delivery: 'rejected', updatedAt: event.ts });
+        break;
+      }
       case 'offered':
         upsert(event.taskId, event.ts, { state: 'Offered', runtime: event.runtime });
         break;

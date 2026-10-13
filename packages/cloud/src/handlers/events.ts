@@ -88,6 +88,7 @@ export const CLOUD_PROTOCOL_CAPABILITIES = [
 ];
 
 export interface EventsRouteDeps extends DeviceRouteDeps {
+  readonly activityBounds: import('../coordination').ActivityBounds;
   /** How long an empty poll is held open, ms. */
   readonly longPollHoldMs: number;
   /** How often the mailbox is re-read while holding, ms. */
@@ -184,6 +185,7 @@ export function eventsHandler(deps: EventsRouteDeps) {
           events,
           cursor: page.nextSeq,
           capabilities: CLOUD_PROTOCOL_CAPABILITIES,
+      ingress: { activityMaxEvents: deps.activityBounds.maxEvents, activityMaxBytes: deps.activityBounds.maxBytes },
         };
         await stores.mailbox.recordDelivery({
           deviceId: device.deviceId,
@@ -198,6 +200,7 @@ export function eventsHandler(deps: EventsRouteDeps) {
       events: [],
       cursor: afterSeq,
       capabilities: CLOUD_PROTOCOL_CAPABILITIES,
+      ingress: { activityMaxEvents: deps.activityBounds.maxEvents, activityMaxBytes: deps.activityBounds.maxBytes },
     };
     return c.json(response, 200);
   };

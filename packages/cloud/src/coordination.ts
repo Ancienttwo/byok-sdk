@@ -5,13 +5,12 @@ import {
   type ActivityAppendInput,
   type ActivityTail,
 } from './activity';
+import { DEFAULT_ACTIVITY_INGRESS } from '@byok-sdk/protocol';
 import { ByokCloudError } from './errors';
 import type { TenantBoundActivity } from './tenant-stores';
 
 export const DEFAULT_BOARD_CHANNEL_MAX_BYTES = 128;
 export const DEFAULT_BOARD_TITLE_MAX_BYTES = 512;
-export const DEFAULT_ACTIVITY_MAX_EVENTS = 50;
-export const DEFAULT_ACTIVITY_MAX_BYTES = 64 * 1024;
 export { DEFAULT_ACTIVITY_CAPACITY } from './activity';
 export const DEFAULT_ACTIVITY_TTL_MS = 10 * 60_000;
 export const DEFAULT_PRESENCE_TTL_MS = 90_000;
@@ -28,8 +27,8 @@ export interface ActivityBounds {
 }
 
 export const DEFAULT_ACTIVITY_BOUNDS: ActivityBounds = {
-  maxEvents: DEFAULT_ACTIVITY_MAX_EVENTS,
-  maxBytes: DEFAULT_ACTIVITY_MAX_BYTES,
+  maxEvents: DEFAULT_ACTIVITY_INGRESS.maxEvents,
+  maxBytes: DEFAULT_ACTIVITY_INGRESS.maxBytes,
   capacity: DEFAULT_ACTIVITY_CAPACITY,
   ttlMs: DEFAULT_ACTIVITY_TTL_MS,
 };
