@@ -65,9 +65,11 @@ describe('pi-rpc BYOK key custody (#385)', () => {
     const control = path.join(root, 'control'), home = path.join(root, 'home'); await fs.mkdir(control); await fs.mkdir(home);
     await prepareHome?.(home);
     const launcherRoot = path.join(root, 'launcher'); await fs.mkdir(launcherRoot);
-    await fs.symlink(path.resolve(clientRoot, '../keys/node_modules'), path.join(launcherRoot, 'node_modules'), 'junction');
     const launcher = path.join(launcherRoot, 'launcher.mjs');
-    await build(BUN_BIN!, ['build', path.resolve(import.meta.dirname, 'fixtures/pi-rpc-custody-launcher.ts'), '--target=node', '--packages=external', '--outfile', launcher]);
+    // Self-contained: zod and @byok-sdk/core are bundled, so the launcher
+    // resolves nothing from a node_modules tree outside the repo (no symlink,
+    // which does not resolve the same way on Windows). Only node: builtins stay external.
+    await build(BUN_BIN!, ['build', path.resolve(import.meta.dirname, 'fixtures/pi-rpc-custody-launcher.ts'), '--target=node', '--outfile', launcher]);
 
     const received: Array<{ authorization: unknown; body: string }> = [];
     const hostEnvironments: string[] = [];
