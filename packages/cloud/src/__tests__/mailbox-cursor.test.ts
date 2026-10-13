@@ -332,6 +332,10 @@ describe('enqueueOffer', () => {
       mailboxLimitBytes: 100_000_000n,
       retentionPolicyId: 'test',
     });
+    await base.stores.devices.register(TENANT_A, {
+      deviceId: 'dev_whoever', productId: 'probe', deviceName: 'fixture',
+      devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1,
+    });
     await expect(
       skewed.enqueueOffer(TENANT_A, 'dev_whoever', { payload: offerPayload() }),
     ).rejects.toSatisfy((error: unknown) => isCloudError(error, 'mailbox_seq_mismatch'));
