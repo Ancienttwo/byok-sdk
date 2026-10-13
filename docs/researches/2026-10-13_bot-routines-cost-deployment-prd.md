@@ -95,7 +95,7 @@ owner 已定（2026-10-13）：
 
 - I1：用户 key 只在设备上（ADR-036 D3）。
 - I2：周期规则只在 Host。SDK 只接收时间点。spec 已经写明 "Recurring schedules remain Host-driven; the device does not interpret cron"（[Durable Pi lane](../spec.md#durable-pi-lane-experimental-flag-gated)）。
-- I3：每个 occurrence 只有一个 execution identity。只在 §10.4 第 9 条列出的情况下换新一代 `taskId`。
+- I3：每个 occurrence 只有一个 execution identity。只有原 task 已经有设备 terminal，并且符合 §10.4 第 9 条时，才换新一代 `taskId`。
 - I4：唤醒只是提示，持久化的行才是事实。唤醒丢失只会推迟工作，不会丢失或重复工作。#410 用同一条规则。
 - I5：mailbox 字节只有一个权威：保留的行（#411）。
 - I6：推理用量只是遥测，不作为 billing、quota 或 entitlement 的依据（[Terminal inference usage observation](../spec.md#terminal-inference-usage-observation)）。
@@ -162,8 +162,8 @@ wake hook 是 `createByokServer` 的选项，形状和 `agentMessage` 一致：�
 
 ```ts
 interface CreateByokServerOptions {
-  /** 至少投递一次。Host 必须按 dedupKey 或自己的 occurrence key 持久去重。 */
-  wake?: (wake: DueWake) => Promise<void>;
+  /** 至少投递一次，可能并发重投。Host 必须按 dedupKey 或自己的 occurrence key 持久去重。 */
+  wake?: (wake: DueWake, signal: AbortSignal) => Promise<void>;
 }
 
 interface ByokServer {
@@ -229,10 +229,11 @@ interface WakeRecord {
    - 到期的 wake 按 (投递时间, `wakeId`) 的顺序逐个投递给 hook。
    - hook resolve：wake 完成。
    - hook reject：wake 回到 `queued`。SDK 把 `retryAt` 设为 60 秒后，不修改 `availableAt`。其他到期的 wake 照常投递。SDK 不限制投递次数，只记录 `deliveries` 和 `lastError`。重试上限和放弃由 Host 的账本决定。
+   - 投递期限：每次投递最多 60 秒。到期时，SDK 中止传给 hook 的 `signal`，按 reject 处理这次投递，然后继续投递下一个 wake。所以一个挂起的 hook 不会卡住整个队列。这个 promise 之后再 settle，属于旧的投递编号，SDK 忽略它。同一个 wake 因此可能同时有两个 hook 调用。Host 的去重必须覆盖并发调用，和 `agentMessage` 的要求相同。
 3. 崩溃恢复：启动时，`delivering` 状态的 wake 回到 `queued`，然后重新投递。投递语义是至少一次。hook 必须幂等：Host 用 occurrence key 去重；`recurring.submit` 遇到已经投递的重复输入时返回冲突，要求精确读回，不创建新的执行（[Host exact Agent message disposition readback](../spec.md#host-exact-agent-message-disposition-readback)）。
 4. 过期的 wake：SDK 不丢弃过期的 wake。设备醒来后立即投递，`deliveredAt - availableAt` 就是延迟。是否补跑，是否记为 missed，都由 Host 决定。
 5. 取消：`cancel(dedupKey)` 只删除 `queued` 的 wake。`delivering` 的 wake 不中断，所以 hook 要自己检查 routine 是否已经暂停。
-6. hook 不能等待执行结束。它只写账本、调度下一次 wake、提交执行，然后返回。否则逐个投递会阻塞其他 routine。
+6. hook 不能等待执行结束。它只写账本、调度下一次 wake、提交执行，然后返回。投递期限只用来隔离故障，不是正常的执行时间。
 7. 清理：wake 端口提供有界的 `collectExpired(now, limit)`，删除完成超过 7 天的记录。server 在启动时和每批投递后调用它。#412 的 `runMaintenance` 落地后，也调用同一个方法。
 
 ### 7.4 与研究稿 §8.2、cloud-do 的差异
@@ -257,6 +258,7 @@ interface WakeRecord {
 - 没有 wake hook 时，`schedule` 抛出 `WakeHookMissingError`，不写行。
 - 到期的 wake 按顺序逐个投递。
 - hook reject 后，60 秒后再次投递（假时钟）。
+- hook 60 秒内没有 settle：`signal` 被中止，wake 回到 `queued`，下一个到期的 wake 照常投递；旧的 promise 之后 resolve，不改变 wake 的状态。
 - 进程在 `delivering` 状态被 SIGKILL：重启后再投递一次；Host 按 occurrence key 去重，只有一个 execution。
 - 墙钟前跳 3 天、单调时钟不动（注入时钟）：60 秒内投递一次，`availableAt` 保持原值。
 - 队列为空时没有定时器，也没有周期唤醒。
@@ -353,10 +355,11 @@ D7 写在 cloud generic agent 的 ADR 里，原文是"Cloudflare 优先（DO / D
 6. 时区存在定义里。用一个纯函数计算时点，设备和服务端共用。这样两边算出同样的期望时间。
 7. `taskId` 由 occurrence 和 pass 派生，不含尝试次数。提交前持久化完整输入。
 8. 不确定提交是否成功时，用 `server.tasks.offer(taskId)` 读回，和持久化的输入比较，然后用同样的输入恢复。不生成新的 `taskId`。
-9. 只在以下情况换新一代 `taskId`：
-   - daemon 拒绝执行，原因以 `agent home busy:` 开头；
-   - 取消超时，并且没有结果；
-   - execution 以失败结束，并且尝试策略允许再试一次。
+9. 只有原 task 已经有设备 terminal 时，才换新一代 `taskId`。用 `server.tasks.deviceTerminal(taskId)` 读取。允许换代的 terminal 只有两种：
+   - decline，原因以 `agent home busy:` 开头；
+   - 失败，并且尝试策略允许再试一次。
+
+   只取消、读不到 terminal 时，不换新一代。只取消不会产生设备 terminal，原 task 仍可能在设备恢复连接后运行（[Host exact Agent message disposition readback](../spec.md#host-exact-agent-message-disposition-readback)）。这时 occurrence 保持未结算，Host 继续读回，直到读到 terminal。
 
 ### 10.5 并发
 
@@ -365,7 +368,9 @@ D7 写在 cloud generic agent 的 ADR 里，原文是"Cloudflare 优先（DO / D
 
 ### 10.6 结果
 
-- recurring 提交要求 payload 带 `runtime`、`messageEgress` 和 `terminalProjection`（`packages/cloud/src/recurring.ts`）。所以每次执行都会给 Host 的 message consumer 产生一条消息。"没有变化就不通知"是 Host 的投递过滤，Agent 本身不能保持沉默。
+- recurring 提交要求 payload 带 `runtime`、`messageEgress` 和 `terminalProjection`（`packages/cloud/src/recurring.ts`），`messageEgress` 的 mode 是 `required`。这不保证 Host 一定收到消息：执行可能在发布消息之前就以失败结束。例如回复超过 `maxBytes` 时，daemon 的 outbox 拒绝这条消息（`packages/client/src/daemon/agent-message-outbox.ts`）。
+- Host 用两条路径结算 occurrence：收到消息时，按消息结算；没有消息时，用 `server.tasks.deviceTerminal(taskId)` 读到失败 terminal，按失败结算。不能只等消息，否则 occurrence 会一直悬空，并显示为 `missed`。
+- "没有变化就不通知"是 Host 的投递过滤。
 - 结果和待上传记录在一个事务里写入 outbox。上传可以重试，服务端按稳定的投影 id 去重。
 
 ### 10.7 Lifecycle
@@ -415,9 +420,11 @@ D7 写在 cloud generic agent 的 ADR 里，原文是"Cloudflare 优先（DO / D
 - [ ] 尝试次数有上限，旧的重试会作废。
 - [ ] `taskId` 由 occurrence 和 pass 派生。提交前持久化完整输入。
 - [ ] 不确定的提交用读回恢复，不生成新的 `taskId`。
+- [ ] 只有读到设备 terminal 后才换新一代 `taskId`。只取消不算。
 - [ ] 每个 Agent 有 FIFO 队列，等待时间有上限。
 - [ ] 暂停阻止新的 occurrence，取消正在执行的工作需要显式调用。
 - [ ] 结果和上传在同一个 outbox 事务里。
+- [ ] 没有消息的执行用 terminal 读回结算。
 - [ ] 同步、离线和错过状态在读取时推导。
 - [ ] 每台空闲设备每 60 秒最多一次轻量服务器调用。
 - [ ] 没有官方 key，没有服务端 key 托管，没有执行计量。
@@ -494,6 +501,9 @@ Topology L，在 K2 和 A2 之后执行：
 | 错误 | 两个客户端修改同一个版本 | 第一个成功，第二个返回 `409` |
 | 错误 | 提交的响应丢失 | 读回同一个 offer，没有第二个 execution |
 | 错误 | wake hook 抛错 | 60 秒后再次投递，最终只有一个 execution |
+| 错误 | wake hook 挂起 | 60 秒后中止这次投递，其他 routine 照常投递 |
+| 错误 | 执行在发布消息之前失败 | Host 读到失败 terminal，按失败结算，occurrence 不悬空 |
+| 错误 | 取消超时，读不到 terminal | 不换新一代 `taskId`；occurrence 保持未结算，直到读到 terminal |
 | 边界 | 进程在投递中被杀 | 重启后再次投递；occurrence 去重，只有一个 execution |
 | 边界 | 设备休眠三天 | 醒来后 60 秒内只补跑一次 |
 | 边界 | 时点落在 quiet hours 内 | quiet hours 结束时运行 |
