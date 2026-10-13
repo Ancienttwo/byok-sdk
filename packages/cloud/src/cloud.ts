@@ -941,11 +941,19 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         try {
           return await messages(c);
         } catch (cause) {
-          if (!isCoreError(cause, 'storage_quota_exceeded')) throw cause;
-          return c.json(
-            { error: cause.code },
-            STORAGE_ERROR_HTTP_STATUS.storage_quota_exceeded,
-          );
+          if (isCoreError(cause, 'storage_quota_exceeded')) {
+            return c.json(
+              { error: cause.code },
+              STORAGE_ERROR_HTTP_STATUS.storage_quota_exceeded,
+            );
+          }
+          // A tenant the Host never issued an entitlement to: no resend can
+          // succeed until it does, so answer the typed 409 the blob routes use
+          // rather than a 500 the client retries forever.
+          if (isCoreError(cause, 'storage_entitlement_missing')) {
+            return c.json({ error: cause.code }, 409);
+          }
+          throw cause;
         }
       },
     );

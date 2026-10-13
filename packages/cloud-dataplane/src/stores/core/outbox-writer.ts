@@ -24,6 +24,13 @@
  *   it before insertion would let seq N+1 become visible before N; a daemon
  *   could then ack N+1 and permanently skip the late N row.
  *
+ * - The guarded limit check needs READ COMMITTED: its snapshot must start
+ *   after the tenant lock is granted. Under REPEATABLE READ the snapshot is
+ *   taken by the transaction's first statement, before the lock, and the sum
+ *   misses rows committed while it waited. A pooled session whose default
+ *   isolation was raised would silently oversell, so callers open with
+ *   `BEGIN_OUTBOX_WRITE` and this function refuses any other level.
+ *
  * Nothing here calls SQL `now()`: the caller passes its clock's instant.
  */
 import {
@@ -39,6 +46,9 @@ import type { PoolClient } from 'pg';
  * session lock namespace, so a running cleanup never blocks an append.
  */
 const MAILBOX_ADMISSION_LOCK_NAMESPACE = 1_298_756_948;
+
+/** The `BEGIN` every transaction that reaches `insertOutboxRow` must open with. */
+export const BEGIN_OUTBOX_WRITE = 'BEGIN ISOLATION LEVEL READ COMMITTED';
 
 export const OUTBOX_WRITE_COLUMNS =
   'tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at, replay_source_seq';
@@ -78,6 +88,17 @@ export async function insertOutboxRow(
   tenant: TenantId,
   input: OutboxWriteInput,
 ): Promise<OutboxWriteResult> {
+  // Fail closed: the limit check below is only a serialized decision under
+  // READ COMMITTED, whatever the session default was when the caller began.
+  const isolation = await client.query<{ readonly level: string }>(
+    "SELECT current_setting('transaction_isolation') AS level",
+  );
+  if (isolation.rows[0]?.level !== 'read committed') {
+    throw new Error(
+      `insertOutboxRow requires a READ COMMITTED transaction, found ${String(isolation.rows[0]?.level)}.`,
+    );
+  }
+
   // Anything but the one exempt class is limited: an unknown admission fails
   // closed instead of skipping the check.
   const exempt = input.admission === 'cancellation';

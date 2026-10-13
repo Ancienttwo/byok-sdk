@@ -22,7 +22,7 @@ import {
   type R2BlobStoreOptions,
   type R2ObjectMaintenance,
 } from './stores/r2-blobs';
-import { insertOutboxRow } from './stores/core/outbox-writer';
+import { BEGIN_OUTBOX_WRITE, insertOutboxRow } from './stores/core/outbox-writer';
 
 const DEFAULT_BATCH_SIZE = 100;
 const MAX_BATCH_SIZE = 1000;
@@ -404,7 +404,7 @@ export class PostgresCloudCleanup {
     let result: MailboxMessage | undefined;
     let rejection: Error | undefined;
     try {
-      await client.query('BEGIN');
+      await client.query(BEGIN_OUTBOX_WRITE);
       const originalResult = await client.query<OutboxRow>(
         `SELECT ${OUTBOX_COLUMNS} FROM outbox
           WHERE tenant_id = $1 AND device_id = $2 AND seq = $3::bigint

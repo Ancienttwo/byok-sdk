@@ -44,7 +44,7 @@ import {
   type TenantId,
 } from '@byok-sdk/core';
 import type { Pool } from 'pg';
-import { insertOutboxRow, readMailboxBytes } from './outbox-writer';
+import { BEGIN_OUTBOX_WRITE, insertOutboxRow, readMailboxBytes } from './outbox-writer';
 
 const DEFAULT_READ_LIMIT = 50;
 
@@ -105,7 +105,7 @@ export class PostgresMailboxStore implements MailboxStore {
     this.#requireDeviceId(input.deviceId);
     const client = await this.#pool.connect();
     try {
-      await client.query('BEGIN');
+      await client.query(BEGIN_OUTBOX_WRITE);
 
       // An existing `messageId` answers before any lock or admission check, so
       // a retry against a full mailbox is never refused.

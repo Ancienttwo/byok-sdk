@@ -10,7 +10,7 @@ import {
   type OutboxRow,
   toMailboxMessage,
 } from './core/mailbox';
-import { insertOutboxRow } from './core/outbox-writer';
+import { BEGIN_OUTBOX_WRITE, insertOutboxRow } from './core/outbox-writer';
 import {
   TASK_SELECT_COLUMNS,
   type TaskRow,
@@ -33,7 +33,7 @@ export class PostgresTaskCancellationStore implements TaskCancellationStore {
   ): Promise<TaskCancellationMutation | undefined> {
     const client = await this.#pool.connect();
     try {
-      await client.query('BEGIN');
+      await client.query(BEGIN_OUTBOX_WRITE);
       const selected = await client.query<TaskRow>(
         `SELECT ${TASK_SELECT_COLUMNS} FROM task
           WHERE tenant_id = $1 AND task_id = $2

@@ -192,3 +192,19 @@ SELECT u.tenant_id,
 
 A tenant at exactly its limit is not returned but will refuse its next limited
 append too; compare `mailbox_bytes` with `mailbox_limit_bytes` for headroom.
+
+The query above only sees tenants that already hold retained rows. A tenant with
+paired devices but no entitlement and an empty mailbox is not in it, yet its
+first limited append is refused with `storage_entitlement_missing` too. Audit
+those separately:
+
+```sql
+SELECT d.tenant_id, count(*) AS devices
+  FROM device d
+  LEFT JOIN storage_entitlement e ON e.tenant_id = d.tenant_id
+ WHERE e.tenant_id IS NULL
+ GROUP BY d.tenant_id
+ ORDER BY d.tenant_id;
+```
+
+Issue each returned tenant an entitlement before upgrading.

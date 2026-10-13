@@ -1919,6 +1919,14 @@ counted `accepted` as a duplicate (§9) and its idempotent reply is appended
 once the mailbox has room, so nothing executes twice. The remainder of the
 batch waits until there is room.
 
+**A tenant with no storage entitlement answers 409
+`{ "error": "storage_entitlement_missing" }`.** The same reply append is
+refused closed when the Host never issued the tenant a storage entitlement (the
+status the blob routes use for the same condition, §7). Unlike 507 this does not
+clear by itself: resending cannot succeed until the Host issues an entitlement,
+so a daemon must treat it as a terminal configuration error for the batch, not a
+backpressure signal.
+
 **Chunking an oversized outbound queue is a client-side implementation
 detail, not a new wire rule.** A daemon that has accumulated more than
 `MAX_MESSAGES_PER_BATCH` queued envelopes (e.g. after an extended outage)

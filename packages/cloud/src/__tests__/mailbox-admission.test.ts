@@ -14,7 +14,7 @@ import {
   type AgentEgressPolicy,
   type EventsPollResponse,
 } from '@byok-sdk/protocol';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   TENANT_A,
   createHarness,
@@ -200,5 +200,51 @@ describe('mailbox admission at the cloud surface', () => {
       .filter((envelope) => envelope.type === 'agent.egress.ack');
     expect(acknowledgements).toHaveLength(1);
     expect(acknowledgements[0]).toMatchObject({ payload: { receiptId: committed?.receiptId } });
+  });
+
+  it('answers a typed 409 when the reply cannot be appended for lack of an entitlement', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await harness.stores.devices.recordCapabilities(TENANT_A, {
+      deviceId: device.deviceId,
+      capabilities: [
+        'agent-home-contract',
+        'agent-egress-policy',
+        'agent-egress-reliable-ack',
+        'agent-content-workspace-read',
+        'agent-message-egress',
+        'terminal-projection-selection',
+      ],
+    });
+    await harness.cloud.enqueueAgentEgressOffer(TENANT_A, device.deviceId, {
+      taskId: 'admission-no-entitlement',
+      payload: {
+        instruction: 'emit one reliable event',
+        agentRef: AGENT_REF,
+        sessionRef: 'session-no-entitlement',
+        egressPolicy: POLICY,
+      },
+    });
+    // The harness issues an entitlement at pairing; from here the store
+    // reports none, as for a tenant the Host never provisioned.
+    vi.spyOn(harness.core.quota, 'readEntitlement').mockResolvedValue(undefined);
+
+    const event = createEnvelope('agent.egress.reliable', {
+      agentRef: AGENT_REF,
+      sessionRef: 'session-no-entitlement',
+      policyRevision: POLICY.policyRevision,
+      eventId: '10000000-0000-4000-8000-000000000412',
+      cursor: 1,
+      payload: { status: 'ready' },
+      contentHash: `sha256:${'a'.repeat(64)}`,
+      byteCount: 18,
+    });
+    const response = await harness.request('/byok/messages', {
+      method: 'POST',
+      headers: { ...device.authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [event] }),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'storage_entitlement_missing' });
   });
 });
