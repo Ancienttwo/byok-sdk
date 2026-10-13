@@ -71,7 +71,7 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;

@@ -52,20 +52,34 @@ receipts: immutable offer, delivered and canonical terminal facts remain for the
 lifetime of the database. There is no receipt TTL or automatic pruning. Monitor
 disk usage; exhaustion is an error, not permission to delete identity fences.
 
-One SQLite file serves exactly one server process. Opening takes an OS lock on
-the canonical database path's `<path>-lock` sibling for the lifetime of the server;
-symlink aliases resolve to that same lock. A second open of the
-same file, from another process or another instance in this one, throws
-`SqliteOwnershipError` (`code: 'SQLITE_DATABASE_OWNED'`) before touching the
-database. The lock is released by `close()` and by the operating system when the
-owning process exits for any reason, including SIGKILL, so a crashed owner never
-blocks the next start. Token signing keys (unless you pass `tokenSigner`),
-presence, the task-event relay and live-task accounting are process-local, which
-is why the file is not shareable. Running several server instances behind a load
-balancer needs external stores (`@byok-sdk/cloud` with `@byok-sdk/cloud-dataplane`)
-and one shared `tokenSigner`.
-Hard-linked database paths are refused before open, since they have no unique
-sibling lock or WAL path.
+One SQLite file serves exactly one server process. The actual database connection
+sets `PRAGMA locking_mode=EXCLUSIVE` before entering WAL mode and retains its
+SQLite lock until `await server.close()` or process exit, including SIGKILL.
+A second open, in this process or another, waits for the existing 5-second busy
+grace and then throws `SqliteOwnershipError` (`code: 'SQLITE_DATABASE_OWNED'`).
+External SQLite readers and writers are excluded while the server is open;
+inspection, backup and raw test mutations require the owner to close first.
+EXCLUSIVE WAL needs no shared-memory file. No sibling ownership file is created.
+Symlink aliases use SQLite's canonical database identity. Hard-linked paths are
+refused before open because distinct WAL names cannot safely recover one file.
+Token signing keys (unless you pass `tokenSigner`), presence, the task-event relay
+and live-task accounting remain process-local. Multiple instances need external
+stores (`@byok-sdk/cloud` with `@byok-sdk/cloud-dataplane`) and one shared
+`tokenSigner`.
+
+### Migration from sibling-lock ownership (#403)
+
+This is a breaking 0.x API change: replace `server.stop()` with
+`await server.close()`. `close()` is the sole server shutdown path; await it before
+reopening storage. `SqliteOwnershipError` and its error code remain unchanged.
+Stop every old server and external SQLite connection, take a consistent backup,
+and only then start the new owner. An idle old NORMAL-mode connection can still
+block the new EXCLUSIVE owner. Do not run old and new writers together: the old
+sibling lock is no longer an ownership authority. After all old owners have
+stopped, operators may remove their leftover `<path>-lock` files; the SDK neither
+opens nor automatically deletes them. Schema v4, persisted data and wire contracts
+are unchanged. Use the server facade for live reads, or close the owner before
+external inspection or backup.
 
 `stats()` re-reads only live attempts and their approval timelines; absorbing
 terminal states are counted once. SQLite history is scanned once at startup,

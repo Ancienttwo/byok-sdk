@@ -33,7 +33,7 @@ describe('authenticated enrollment tenant projection (reference server)', () => 
 
   afterEach(async () => {
     for (const server of servers.splice(0)) await stopServer(server);
-    for (const instance of instances.splice(0)) instance.stop();
+    for (const instance of instances.splice(0)) await instance.close();
   });
 
   async function start(productId: string): Promise<{ byok: ByokServer; baseUrl: string }> {

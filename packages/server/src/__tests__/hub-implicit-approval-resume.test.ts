@@ -54,7 +54,7 @@ describe('M4 Phase 3: implicit approval resume (daemon traffic while the read mo
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;

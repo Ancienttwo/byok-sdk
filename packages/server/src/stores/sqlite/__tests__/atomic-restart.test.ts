@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import {
   contentHash,
   createMutableClock,
@@ -12,7 +13,7 @@ import {
 import { createWebCrypto } from '@byok-sdk/cloud';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createSqliteEmbeddedStores } from '..';
-import { isSqliteAvailable, openSqliteDatabase, SqliteSchemaError } from '../../../sqlite-support';
+import { isSqliteAvailable, SqliteSchemaError } from '../../../sqlite-support';
 
 const describeSqlite = isSqliteAvailable() ? describe : describe.skip;
 const TENANT = tenantId('tenant-restart');
@@ -35,10 +36,12 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
   it('rolls back both cancellation sides when the task update fails', async () => {
     const path = databasePath();
     const clock = createMutableClock();
-    const composition = createSqliteEmbeddedStores({ path }, { clock, crypto: createWebCrypto() });
+    const crypto = createWebCrypto();
+    let composition = createSqliteEmbeddedStores({ path }, { clock, crypto });
     await composition.cloud.tasks.open(TENANT, { taskId: 'task-rollback', deviceId: 'device-1' });
 
-    const fault = openSqliteDatabase(path);
+    await composition.close();
+    const fault = new DatabaseSync(path);
     fault.exec(`
       CREATE TRIGGER fail_cancel_update
       BEFORE UPDATE OF cancellation_requested_at ON task_attempt
@@ -47,6 +50,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
       END;
     `);
     fault.close();
+    composition = createSqliteEmbeddedStores({ path }, { clock, crypto });
 
     await expect(
       composition.cloud.cancellations.request(TENANT, {
@@ -72,7 +76,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
 
   it('fails closed on an unsupported schema version', () => {
     const path = databasePath();
-    const db = openSqliteDatabase(path);
+    const db = new DatabaseSync(path);
     db.exec('CREATE TABLE byok_sqlite_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
     db.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('schema_version', '999')").run();
     db.close();
