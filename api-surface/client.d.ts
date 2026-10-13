@@ -1058,9 +1058,10 @@ export declare class AgentHomeExecutionLeaseManager {
      * `release()`, which the task runner calls after the attempt is terminal
      * AND `Session.close()` resolved. A failed disposal never reaches
      * `release()`, so the slot stays held — fail closed, the same posture as
-     * `runtime-disposal-failed`. Crash residue needs nothing extra here: a
-     * restarted daemon starts with an empty registry and reclaims the on-disk
-     * marker only under the same stable owner identity (`openLeaseMarker`).
+     * `runtime-disposal-failed`. Crash residue: a restarted daemon starts with
+     * an empty registry and reclaims the on-disk marker only under the same
+     * stable owner identity (`openLeaseMarker`), after its start ended the
+     * crashed run's owned runtime processes (`OwnedProcessLedger.reconcile`).
      *
      * Counted regardless of which lease manager owns the group: the invariant
      * being protected is the filesystem path (`MEMORY.md`, `notes/`, `.git`),
@@ -9598,6 +9599,7 @@ declare const MESSAGES: {
     readonly 'daemon-running': 'Stop the host daemon before local maintenance.';
     readonly 'store-busy': 'Another operation owns the device store.';
     readonly 'agent-busy': 'Another operation owns the Agent home.';
+    readonly 'owned-process-residue': 'Runtime processes a crashed daemon left could not be ended. Start the daemon to see the record path, verify the processes are gone, then delete that record from the owned-processes directory of the device store.';
     readonly 'target-mismatch': 'The stored device or Agent records do not match the authorized target.';
     readonly 'source-unavailable': 'The local source cannot be accessed safely; preserve it for inspection.';
     readonly 'output-exists': 'The selected output already exists; it will not be overwritten.';

@@ -1,4 +1,5 @@
-import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { execFileSync, spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { walkTaskkillPidSet } from './taskkill-pid-set';
 // OAR 0.37.0 `shared/executable/process-tree.ts`, vendored with upstream bytes.
@@ -143,6 +144,83 @@ export const __hostExitBackstopForTests = {
   },
 };
 
+/**
+ * POSIX only: what a daemon must remember about one adopted tree to end it
+ * after the daemon itself was SIGKILLed or OOM-killed. Deliberately nothing
+ * that names a command line or a path:
+ *
+ * - `pgid` and `rootStart`: the owned group and its root's start time from the
+ *   process table, which tells the root from a later process given its pid;
+ * - `bootId`: the boot the record was written in ({@link readBootId}). Start times are only
+ *   comparable within one boot (Linux reports clock ticks since boot), and a
+ *   record from an earlier boot names processes that are all gone;
+ * - `writerPid` and `writerStart`: the process that adopted the tree. While
+ *   that process still runs the tree is its live one, not a crash residue.
+ */
+export interface OwnedProcessGroupRecord {
+  readonly pgid: number;
+  readonly rootStart: string;
+  readonly bootId: string;
+  readonly writerPid: number;
+  readonly writerStart: string;
+}
+
+/**
+ * The durable side of {@link OwnedProcessGroupRecord}: `adopted` once a tree is
+ * owned, `disposed` once {@link disposeOwnedProcessTree} has proved its group
+ * gone. Implementations own their persistence errors; a rejection here would
+ * fail the adoption or the disposal it reports.
+ */
+export interface OwnedProcessGroupLedger {
+  adopted(record: OwnedProcessGroupRecord): Promise<void>;
+  disposed(record: OwnedProcessGroupRecord): Promise<void>;
+}
+
+let cachedBootId: string | undefined;
+
+/**
+ * Read one boot's identity. Linux: `boot_id`. Other POSIX (darwin): the
+ * per-boot `kern.bootsessionuuid` — not `kern.boottime`, which XNU shifts when
+ * the calendar clock is stepped, and which would then pass a live orphan's
+ * record off as an earlier boot's. Unreadable, empty or oversized throws:
+ * a record nothing can date is never written, and nothing is declared ended
+ * on a guess. Exported with its read seams for tests only.
+ */
+export function readBootId(
+  platform: NodeJS.Platform,
+  deps: { readFile: (file: string) => string; sysctl: (key: string) => string } = {
+    readFile: (file) => readFileSync(file, 'utf8'),
+    sysctl: (key) => execFileSync('sysctl', ['-n', key], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 }),
+  },
+): string {
+  let id: string;
+  try {
+    id = (platform === 'linux' ? deps.readFile('/proc/sys/kernel/random/boot_id') : deps.sysctl('kern.bootsessionuuid')).trim();
+  } catch (cause) {
+    throw new Error('the boot identity could not be read', { cause });
+  }
+  if (id.length === 0 || id.length > 64) throw new Error('the boot identity could not be read');
+  return id;
+}
+
+/** This boot's identity ({@link readBootId}), read once per process. */
+export function currentBootId(): string {
+  cachedBootId ??= readBootId(process.platform);
+  return cachedBootId;
+}
+
+/** Module level for the same reason as {@link hostExitTargets}: what a daemon death orphans is every tree THIS process adopted. */
+const ownedGroupLedgers = new Set<OwnedProcessGroupLedger>();
+const ownedGroupRecords = new WeakMap<ChildProcess, OwnedProcessGroupRecord>();
+
+/** Report every POSIX tree adopted from now on to `ledger`, until the returned detach runs. */
+export function attachOwnedProcessGroupLedger(ledger: OwnedProcessGroupLedger): () => void {
+  ownedGroupLedgers.add(ledger);
+  return () => {
+    ownedGroupLedgers.delete(ledger);
+  };
+}
+
 export interface AdoptOwnedProcessTreeOptions {
   child: ChildProcess;
   label: string;
@@ -154,6 +232,8 @@ export interface AdoptOwnedProcessTreeOptions {
   killFn?: KillFn;
   /** DI seam for the win32 host-exit sweep — defaults to `node:child_process`'s `spawnSync`. */
   spawnSyncFn?: typeof spawnSync;
+  /** DI seam for the POSIX ledger record's process-table read — defaults to the vendored `readProcessTable`. */
+  readProcessTableFn?: () => ProcessTable;
 }
 
 /**
@@ -192,7 +272,10 @@ const defaultJobObject = {
  * `spawn` returns, so a grandchild forked inside that window is outside the
  * job; and neither backstop can run when the daemon itself is SIGKILLed or
  * OOM-killed on POSIX, where only the job object's kernel guarantee — which
- * POSIX does not have — would help.
+ * POSIX does not have — would help. For that case POSIX adoption also hands
+ * the attached ledgers an {@link OwnedProcessGroupRecord}, which the next
+ * daemon start ends with {@link reapOwnedProcessGroups}. A root that already
+ * exited leaves no record; a record that cannot be written fails adoption.
  */
 export async function adoptOwnedProcessTree(options: AdoptOwnedProcessTreeOptions): Promise<void> {
   const pid = positivePid(options.child, options.label);
@@ -217,8 +300,162 @@ export async function adoptOwnedProcessTree(options: AdoptOwnedProcessTreeOption
   options.child.once('close', forget);
   options.child.once('exit', forget);
 
-  if (platform !== 'win32') return;
+  if (platform !== 'win32') {
+    await recordOwnedGroup(options.child, pid, options.label, options.readProcessTableFn ?? readProcessTable);
+    return;
+  }
   await (options.jobObject ?? defaultJobObject).assign(pid);
+}
+
+async function recordOwnedGroup(child: ChildProcess, pid: number, label: string, read: () => ProcessTable): Promise<void> {
+  if (ownedGroupLedgers.size === 0) return;
+  const table = read();
+  const writer = table.get(process.pid);
+  // Fail closed: an owned tree whose record could not be written is refused,
+  // like a win32 tree whose job assignment failed.
+  if (writer === undefined) throw new Error(`${label} runtime process group could not be recorded: the process table is unreadable`);
+  const root = table.get(pid);
+  if (root === undefined) {
+    // Our own child stays in the table until Node reaps it, and Node sets the
+    // exit status in the same step: absent and not exited cannot both hold.
+    if (!isRunning(child)) return;
+    throw new Error(`${label} runtime process group could not be recorded: its root is missing from the process table`);
+  }
+  if (root.pgid !== pid) throw new Error(`${label} runtime root is not its own process-group leader`);
+  const record: OwnedProcessGroupRecord = {
+    pgid: pid, rootStart: root.start, bootId: currentBootId(), writerPid: process.pid, writerStart: writer.start,
+  };
+  ownedGroupRecords.set(child, record);
+  await Promise.all([...ownedGroupLedgers].map((ledger) => ledger.adopted(record)));
+}
+
+/** The disposal receipt for the durable record: called only once the owned group is proved gone. */
+async function forgetOwnedGroup(child: ChildProcess): Promise<void> {
+  const record = ownedGroupRecords.get(child);
+  if (record === undefined) return;
+  ownedGroupRecords.delete(child);
+  await Promise.all([...ownedGroupLedgers].map((ledger) => ledger.disposed(record)));
+}
+
+export interface OwnedProcessGroupReap {
+  /** Recorded groups that still held a process from the run that recorded them. */
+  found: number;
+  /** Of `found`, those gone after the SIGKILL. */
+  terminated: number;
+  /** Of `found`, those still holding a process at the deadline. */
+  survived: number;
+  /** Records whose writer process still runs: its live trees, left alone. */
+  liveWriter: number;
+  /** The records confirmed ended — already gone, or terminated here. Only these may be dropped. */
+  ended: OwnedProcessGroupRecord[];
+  /** The records counted in `survived`. */
+  survivors: OwnedProcessGroupRecord[];
+}
+
+/** Same boot only: Linux start times are clock ticks, elsewhere `ps` `lstart` to the second. Unparseable is never "after". */
+function startedAtOrAfter(start: string, rootStart: string): boolean {
+  if (/^\d+$/u.test(start) && /^\d+$/u.test(rootStart)) return BigInt(start) >= BigInt(rootStart);
+  const at = Date.parse(start);
+  const root = Date.parse(rootStart);
+  return Number.isFinite(at) && Number.isFinite(root) && at >= root;
+}
+
+/**
+ * POSIX: end the owned groups a previous daemon process recorded and could no
+ * longer dispose (it was SIGKILLed or OOM-killed). One read of the process
+ * table decides each record:
+ *
+ * - written in an earlier boot: everything it named is gone — ended, nothing
+ *   signalled;
+ * - its writer process still runs (same pid and start time): that process's
+ *   live tree — left alone and kept;
+ * - its leader pid is held by a process with a different start time: the pid
+ *   was reused, so the recorded group is already empty (a pid is never handed
+ *   out while a group of that id exists) — ended, nothing signalled;
+ * - its leader is the recorded root: SIGKILL the group, and the root's
+ *   descendants that left it, with their groups;
+ * - its leader is gone and processes still carry its pgid: they are the
+ *   root's only if every one started no earlier than the root (the root led a
+ *   session of its own, so nothing older can have joined its group). A group
+ *   holding an older process is someone else's — ended, nothing signalled.
+ *   Otherwise SIGKILL them.
+ *
+ * Every signal goes through OAR `killEntries`, which re-checks each pid's
+ * start time and never signals this process or its group. Then the table is
+ * read until no killed process and no member of a found group remains, or
+ * `killGraceMs` passes. win32 records nothing and reaps nothing. An
+ * unreadable table or boot identity fails closed: nothing can be proved gone.
+ *
+ * Residual, stated: a recorded group that emptied, whose pgid then went to a
+ * new process that made a group of it and left only younger members behind
+ * (a double-fork daemon), is indistinguishable from the root's orphans.
+ */
+export async function reapOwnedProcessGroups(
+  groups: readonly OwnedProcessGroupRecord[],
+  options: { platform?: NodeJS.Platform; killGraceMs?: number } = {},
+): Promise<OwnedProcessGroupReap> {
+  const platform = options.platform ?? process.platform;
+  if (platform === 'win32' || groups.length === 0) return { found: 0, terminated: 0, survived: 0, liveWriter: 0, ended: [], survivors: [] };
+  const killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
+  const readable = (table: ProcessTable): boolean => table.has(process.pid);
+  const table = readProcessTable();
+  if (!readable(table)) {
+    throw new RuntimeDisposalFailure({
+      stage: 'quiescence',
+      reason: 'the process table could not be read to end the previous daemon run\u2019s owned runtime process groups',
+    });
+  }
+  const bootId = currentBootId();
+  const ended: OwnedProcessGroupRecord[] = [];
+  let liveWriter = 0;
+  type Found = { record: OwnedProcessGroupRecord; entries: ProcessEntry[] };
+  const found: Found[] = [];
+  for (const group of groups) {
+    if (group.bootId !== bootId) {
+      ended.push(group);
+      continue;
+    }
+    if (table.get(group.writerPid)?.start === group.writerStart) {
+      liveWriter += 1;
+      continue;
+    }
+    const leader = table.get(group.pgid);
+    if (leader !== undefined && leader.start !== group.rootStart) {
+      ended.push(group);
+      continue;
+    }
+    const members = [...table.values()].filter((entry) => entry.pgid === group.pgid);
+    if (leader === undefined && members.some((entry) => !startedAtOrAfter(entry.start, group.rootStart))) {
+      ended.push(group);
+      continue;
+    }
+    const entries = new Map<number, ProcessEntry>(members.map((entry) => [entry.pid, entry]));
+    if (leader !== undefined) {
+      entries.set(leader.pid, leader);
+      for (const descendant of descendantsOf(table, leader.pid)) entries.set(descendant.pid, descendant);
+    }
+    if (entries.size === 0) ended.push(group);
+    else found.push({ record: group, entries: [...entries.values()] });
+  }
+  for (const group of found) killEntries(group.entries, table);
+  const held = (group: Found, current: ProcessTable): boolean =>
+    group.entries.some((entry) => current.get(entry.pid)?.start === entry.start) ||
+    [...current.values()].some((entry) => entry.pgid === group.record.pgid && startedAtOrAfter(entry.start, group.record.rootStart));
+  let live = found;
+  const deadline = Date.now() + killGraceMs;
+  while (live.length > 0) {
+    const current = readProcessTable();
+    if (readable(current)) live = live.filter((group) => held(group, current));
+    if (live.length === 0 || Date.now() >= deadline) break;
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, POLL_MS);
+    });
+  }
+  for (const group of found) if (!live.includes(group)) ended.push(group.record);
+  return {
+    found: found.length, terminated: found.length - live.length, survived: live.length, liveWriter, ended,
+    survivors: live.map((group) => group.record),
+  };
 }
 
 function positivePid(child: ChildProcess, label: string): number | undefined {
@@ -480,7 +717,9 @@ export async function requestOwnedProcessTreeTermination(options: OwnedProcessTr
  * and on win32 a kernel-owned kill-on-close Job Object. Their own residuals
  * remain: the tiny window between `spawn` returning and the job assignment,
  * and a daemon SIGKILL/OOM on POSIX, where no in-process listener can run and
- * there is no job object to fall back on.
+ * there is no job object to fall back on — that case is ended by the next
+ * daemon start from the record adoption wrote ({@link reapOwnedProcessGroups}),
+ * not earlier. Success here is that record's disposal receipt.
  */
 export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions): Promise<void> {
   const pid = positivePid(options.child, options.label);
@@ -574,4 +813,5 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
       reason: `${options.label} runtime root did not emit close after its process group exited`,
     });
   }
+  await forgetOwnedGroup(options.child);
 }

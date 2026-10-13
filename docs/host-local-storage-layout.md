@@ -43,6 +43,14 @@ Daemon startup materializes and write-probes the canonical
 root/`agents` namespace before advertising `agent-home-contract`; a configured
 but unusable root therefore never admits a cloud Agent offer.
 
+On POSIX, every runtime process group the daemon owns is recorded in
+`<storeDir>/owned-processes/` until its disposal proves it gone. Daemon start
+and the `archive-terminal-messages` operator action first end the groups a
+crashed daemon left there; only then can a crashed run's Agent home lease
+marker be reclaimed. If a group survives SIGKILL, start is refused and the
+error names the record file: verify the processes are gone, then delete that
+file.
+
 `agentHome` and legacy `gitWorkspace` are mutually exclusive daemon
 authorities. Agent execution never silently inherits task-scoped Git workspace
 semantics or creates a second durable workspace owner.

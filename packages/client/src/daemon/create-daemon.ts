@@ -63,6 +63,8 @@ import {
 } from '../release-identity';
 import { PiAdapter, validatePiByokLauncherConfig } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
+import { attachOwnedProcessGroupLedger } from '../adapters/process-tree';
+import { OwnedProcessLedger } from './owned-process-ledger';
 import { assertCodexSandboxSetting, CodexAdapter, type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
 import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
 import { AuthManager } from './auth-manager';
@@ -1564,6 +1566,8 @@ export function buildDaemonWithAdapters(
   const teamWorkspaces = new LocalTeamWorkspace(storeDir);
   const store = new DeviceStore(storeDir, undefined, config.productId);
   const operationalHealth = new OperationalHealthTracker(storeDir);
+  const ownedProcessLedger = new OwnedProcessLedger(storeDir);
+  let detachOwnedProcessGroupLedger: (() => void) | undefined;
   let fleetJitter: FleetJitter | undefined;
   let maintenanceSequence = 0;
   const cursorStore = new CursorStore(storeDir);
@@ -1972,6 +1976,23 @@ export function buildDaemonWithAdapters(
     terminalCommits.resume();
     if (!daemonOwnerLease) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
     try {
+    // #384 item 3 / #393: on POSIX a SIGKILLed or OOM-killed daemon leaves its
+    // owned runtime groups running, and a tool process in one could still be
+    // writing the Agent home or Git workspace a recovered task is handed back
+    // for. With the owner lease held, every ledger record is such a residue:
+    // end it before anything else here — before `daemon_interrupted` is
+    // recorded, before admission, and so before any Agent home lease marker is
+    // reclaimed as crash residue — and refuse to start while one survives.
+    // Only then does this run's own ledger begin. win32 records none: its job
+    // object already ended them.
+    const reconciliation = await ownedProcessLedger.reconcile();
+    if (reconciliation.recorded > 0) {
+      console.warn(
+        `[byok/client] previous daemon run left owned runtime process groups: recorded=${reconciliation.recorded} found=${reconciliation.found} terminated=${reconciliation.terminated} survived=${reconciliation.survived} liveWriter=${reconciliation.liveWriter}`,
+      );
+    }
+    detachOwnedProcessGroupLedger?.();
+    detachOwnedProcessGroupLedger = attachOwnedProcessGroupLedger(ownedProcessLedger);
     // Initialization is one instance promise, including refusal. Even the
     // enrollment-only control endpoint must not expose a half-initialized service.
     await initializeInputPreparation();
@@ -3133,6 +3154,8 @@ export function buildDaemonWithAdapters(
     await attempt(async () => {
       await controlServerHandle?.stopServing();
     }, true);
+    detachOwnedProcessGroupLedger?.();
+    detachOwnedProcessGroupLedger = undefined;
     if (mutationBarrierComplete && daemonOwnerLease) {
       await attempt(() => operationalHealth.markCleanStop(), false);
       await attempt(async () => {

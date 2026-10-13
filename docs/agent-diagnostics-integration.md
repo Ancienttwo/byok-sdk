@@ -163,7 +163,7 @@ const archiveReceipt = await archiveAgentTerminalMessages(config, {
 - Archive 需要 device owner 和 Agent-home writer lease。它从 config 唯一 root 选择已有 Agent home，不执行 projection hook、不初始化业务文件。设备 metadata 必须匹配 expected tenant/device；所有 outbox records 必须匹配同 tenant 与 Agent ID。`agentRef` 选择当前授权的 Agent；历史 profile revisions 原样保留，不被改成当前 revision。
 - Archive 只退休 refused/locally revoked 终结证据，held/draft 仍 live。输出是**敏感完整审计材料**，不是 support bundle；目录必须是已有 parent 下的新目录，private ACL 在写正文前建立。原有 outbox 64 MiB 边界继续生效；先 sync 审计副本、后替换 live log。同步失败保留 live evidence，不自动删输出目录或重试。archive 不成为 replay 输入。
 - 三个 API 不启动/停止 supervisor，不读取 OS/provider 凭据、不重跑任务。Host 必须分别展示 action receipt、服务恢复和独立 Agent 验证；释放 lease 失败也拒绝报告完整成功。
-- `DeviceOperatorError.code` 是封闭的 `confirmation-required`、`invalid-input`、`daemon-running`、`store-busy`、`agent-busy`、`target-mismatch`、`source-unavailable`、`output-exists`、`operation-failed`。不解析 message，也不从错误反推成功。错误不附带任意 OS 文本、路径或 cause。
+- `DeviceOperatorError.code` 是封闭的 `confirmation-required`、`invalid-input`、`daemon-running`、`store-busy`、`agent-busy`、`owned-process-residue`、`target-mismatch`、`source-unavailable`、`output-exists`、`operation-failed`。不解析 message，也不从错误反推成功。错误不附带任意 OS 文本、路径或 cause。
 
 ## 7. P3：SDK 后续能力缺口与实施边界
 
