@@ -9583,6 +9583,7 @@ declare const MESSAGES: {
     readonly 'daemon-running': 'Stop the host daemon before local maintenance.';
     readonly 'store-busy': 'Another operation owns the device store.';
     readonly 'agent-busy': 'Another operation owns the Agent home.';
+    readonly 'owned-process-residue': 'Runtime processes a crashed daemon left could not be ended. Start the daemon to see the record path, verify the processes are gone, then delete that record from the owned-processes directory of the device store.';
     readonly 'target-mismatch': 'The stored device or Agent records do not match the authorized target.';
     readonly 'source-unavailable': 'The local source cannot be accessed safely; preserve it for inspection.';
     readonly 'output-exists': 'The selected output already exists; it will not be overwritten.';

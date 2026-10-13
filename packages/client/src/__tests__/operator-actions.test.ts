@@ -14,7 +14,7 @@ import { AgentMessageOutbox } from '../daemon/agent-message-outbox';
 import { OPERATIONAL_HEALTH_FILENAME } from '../daemon/operational-health';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { currentBootId } from '../adapters/process-tree';
-import { OWNED_PROCESSES_DIRECTORY, OwnedProcessLedger } from '../daemon/owned-process-ledger';
+import { OWNED_PROCESSES_DIRECTORY, OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger';
 import { readProcessTable } from '../runtime/oar-process-tree.js';
 
 vi.mock('../bin/control-client', () => ({ connectControlClient: vi.fn() }));
@@ -133,6 +133,19 @@ describe('public device operator boundaries', () => {
     await fs.writeFile(outbox.outboxPath, foreign);
     await expect(archiveAgentTerminalMessages(config, { ...target, archiveDirectory: path.join(root, 'new') })).rejects.toMatchObject({ code: 'target-mismatch' });
     expect(await fs.readFile(outbox.outboxPath, 'utf8')).toBe(foreign);
+  });
+
+  it('#393: a surviving crash residue refuses the archive with its own closed code and the operator remedy', async () => {
+    const { outbox, before } = await seed();
+    vi.spyOn(OwnedProcessLedger.prototype, 'reconcile').mockRejectedValueOnce(new OwnedProcessResidueError(
+      { recorded: 1, found: 1, terminated: 0, survived: 1, liveWriter: 0 }, [path.join(config.storeDir!, OWNED_PROCESSES_DIRECTORY, 'record.json')],
+    ));
+    const refusal = await archiveAgentTerminalMessages(config, { ...target, archiveDirectory: path.join(root, 'audit') }).catch((error: unknown) => error);
+    expect(refusal).toMatchObject({ code: 'owned-process-residue' });
+    expect((refusal as Error).message).toContain('verify the processes are gone, then delete that record from the owned-processes directory');
+    // Closed code: no path leaves the operator boundary.
+    expect((refusal as Error).message).not.toContain(root);
+    expect(await fs.readFile(outbox.outboxPath, 'utf8')).toBe(before);
   });
 
   it('#393: refuses on an unreadable owned-process record before touching the Agent home', async () => {

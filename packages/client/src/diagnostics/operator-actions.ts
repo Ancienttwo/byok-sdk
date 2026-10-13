@@ -20,6 +20,7 @@ const MESSAGES = {
   'daemon-running': 'Stop the host daemon before local maintenance.',
   'store-busy': 'Another operation owns the device store.',
   'agent-busy': 'Another operation owns the Agent home.',
+  'owned-process-residue': 'Runtime processes a crashed daemon left could not be ended. Start the daemon to see the record path, verify the processes are gone, then delete that record from the owned-processes directory of the device store.',
   'target-mismatch': 'The stored device or Agent records do not match the authorized target.',
   'source-unavailable': 'The local source cannot be accessed safely; preserve it for inspection.',
   'output-exists': 'The selected output already exists; it will not be overwritten.',
@@ -64,7 +65,8 @@ function requireConfirmation(input: ConfirmDeviceMaintenanceInput): void {
 function closedError(error: unknown): DeviceOperatorError {
   if (error instanceof DeviceOperatorError) return error;
   if (error instanceof DaemonOwnerActiveError) return new DeviceOperatorError('store-busy');
-  if (error instanceof AgentHomeBusyError || error instanceof OwnedProcessResidueError) return new DeviceOperatorError('agent-busy');
+  if (error instanceof AgentHomeBusyError) return new DeviceOperatorError('agent-busy');
+  if (error instanceof OwnedProcessResidueError) return new DeviceOperatorError('owned-process-residue');
   return new DeviceOperatorError('operation-failed');
 }
 async function requireOffline(config: DaemonConfig, storeDir: string): Promise<void> {

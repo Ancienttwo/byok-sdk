@@ -7,6 +7,7 @@ import {
   adoptOwnedProcessTree,
   attachOwnedProcessGroupLedger,
   currentBootId,
+  readBootId,
   disposeOwnedProcessTree,
   reapOwnedProcessGroups,
   requestOwnedProcessTreeTermination,
@@ -15,6 +16,7 @@ import {
 } from '../adapters/process-tree';
 import { OWNED_PROCESSES_DIRECTORY, OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger';
 import { readProcessTable } from '../runtime/oar-process-tree.js';
+import { execFileSync } from 'node:child_process';
 
 /**
  * #384 item 3 / #393: what a SIGKILLed daemon's owned runtime groups leave
@@ -134,6 +136,33 @@ async function ledgerFiles(): Promise<string[]> {
     throw error;
   }
 }
+
+describe('boot identity (#393)', () => {
+  const fail = (): never => { throw new Error('unexpected source'); };
+
+  it('darwin reads the per-boot kern.bootsessionuuid, never the clock-adjusted kern.boottime', () => {
+    const keys: string[] = [];
+    expect(readBootId('darwin', { readFile: fail, sysctl: (key) => { keys.push(key); return 'A1B2C3D4-0000-4000-8000-000000000000\n'; } }))
+      .toBe('A1B2C3D4-0000-4000-8000-000000000000');
+    expect(keys).toEqual(['kern.bootsessionuuid']);
+  });
+
+  it('linux reads boot_id', () => {
+    const files: string[] = [];
+    expect(readBootId('linux', { sysctl: fail, readFile: (file) => { files.push(file); return 'f00d\n'; } })).toBe('f00d');
+    expect(files).toEqual(['/proc/sys/kernel/random/boot_id']);
+  });
+
+  it('fails closed when the identity is unreadable, empty or oversized', () => {
+    expect(() => readBootId('darwin', { readFile: fail, sysctl: () => { throw new Error('no sysctl'); } })).toThrow('the boot identity could not be read');
+    expect(() => readBootId('darwin', { readFile: fail, sysctl: () => '\n' })).toThrow('the boot identity could not be read');
+    expect(() => readBootId('darwin', { readFile: fail, sysctl: () => 'x'.repeat(65) })).toThrow('the boot identity could not be read');
+  });
+
+  it.skipIf(process.platform !== 'darwin')('on this darwin host it is the kernel\u2019s boot session uuid', () => {
+    expect(currentBootId()).toBe(execFileSync('sysctl', ['-n', 'kern.bootsessionuuid'], { encoding: 'utf8' }).trim());
+  });
+});
 
 describe.skipIf(process.platform === 'win32')('owned runtime process groups after a daemon SIGKILL (#384, #393)', () => {
   it('adoption records only the group id and root start time, and the disposal receipt removes it', async () => {

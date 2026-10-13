@@ -151,7 +151,7 @@ export const __hostExitBackstopForTests = {
  *
  * - `pgid` and `rootStart`: the owned group and its root's start time from the
  *   process table, which tells the root from a later process given its pid;
- * - `bootId`: the boot the record was written in. Start times are only
+ * - `bootId`: the boot the record was written in ({@link readBootId}). Start times are only
  *   comparable within one boot (Linux reports clock ticks since boot), and a
  *   record from an earlier boot names processes that are all gone;
  * - `writerPid` and `writerStart`: the process that adopted the tree. While
@@ -178,24 +178,35 @@ export interface OwnedProcessGroupLedger {
 
 let cachedBootId: string | undefined;
 
-/** This boot's identity: Linux `boot_id`, otherwise `kern.boottime`. Throws when it cannot be read. */
-export function currentBootId(): string {
-  if (cachedBootId !== undefined) return cachedBootId;
-  let id: string | undefined;
+/**
+ * Read one boot's identity. Linux: `boot_id`. Other POSIX (darwin): the
+ * per-boot `kern.bootsessionuuid` — not `kern.boottime`, which XNU shifts when
+ * the calendar clock is stepped, and which would then pass a live orphan's
+ * record off as an earlier boot's. Unreadable, empty or oversized throws:
+ * a record nothing can date is never written, and nothing is declared ended
+ * on a guess. Exported with its read seams for tests only.
+ */
+export function readBootId(
+  platform: NodeJS.Platform,
+  deps: { readFile: (file: string) => string; sysctl: (key: string) => string } = {
+    readFile: (file) => readFileSync(file, 'utf8'),
+    sysctl: (key) => execFileSync('sysctl', ['-n', key], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 }),
+  },
+): string {
+  let id: string;
   try {
-    if (process.platform === 'linux') {
-      id = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
-    } else {
-      const raw = execFileSync('sysctl', ['-n', 'kern.boottime'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
-      const match = /sec\s*=\s*(\d+),\s*usec\s*=\s*(\d+)/u.exec(raw);
-      id = match === null ? undefined : `${match[1]}.${match[2]}`;
-    }
+    id = (platform === 'linux' ? deps.readFile('/proc/sys/kernel/random/boot_id') : deps.sysctl('kern.bootsessionuuid')).trim();
   } catch (cause) {
     throw new Error('the boot identity could not be read', { cause });
   }
-  if (id === undefined || id.length === 0 || id.length > 64) throw new Error('the boot identity could not be read');
-  cachedBootId = id;
+  if (id.length === 0 || id.length > 64) throw new Error('the boot identity could not be read');
   return id;
+}
+
+/** This boot's identity ({@link readBootId}), read once per process. */
+export function currentBootId(): string {
+  cachedBootId ??= readBootId(process.platform);
+  return cachedBootId;
 }
 
 /** Module level for the same reason as {@link hostExitTargets}: what a daemon death orphans is every tree THIS process adopted. */
