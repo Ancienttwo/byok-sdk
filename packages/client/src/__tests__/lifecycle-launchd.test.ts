@@ -2,7 +2,7 @@ import os from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import { createLaunchdLifecycle, generateLaunchdPlist } from '../lifecycle/launchd';
 import type { RunResult, Runner } from '../lifecycle/exec-runner';
-import type { ServiceDefinition } from '../lifecycle/service-types';
+import { nodeAgentProgram, type ServiceDefinition } from '../lifecycle/service-types';
 
 function ok(stdout = ''): RunResult {
   return { code: 0, stdout, stderr: '' };
@@ -119,6 +119,27 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     await lifecycle.install({ program: { command: '/other/node', args: ['x'] } });
     const written = fs.writeFile.mock.calls[0]?.[1] as string;
     expect(written).toContain('<string>/other/node</string>');
+  });
+
+  it('issue #392: a Host program is written verbatim; nodeAgentProgram({ service: true }) carries --service last', async () => {
+    const run = vi.fn<Runner>().mockResolvedValue(ok());
+    const fs = fakeFs();
+    const lifecycle = createLaunchdLifecycle(
+      def({ program: { command: '/opt/host/bin/host-agent', args: ['run', '--profile', 'default'] } }),
+      { run, fs, homedir: () => '/h', getuid: () => 501 },
+    );
+    await lifecycle.install();
+    const written = fs.writeFile.mock.calls[0]?.[1] as string;
+    expect(written).toContain(
+      '<string>/opt/host/bin/host-agent</string>\n    <string>run</string>\n    <string>--profile</string>\n    <string>default</string>\n  </array>',
+    );
+    expect(written).not.toContain('--service');
+
+    await lifecycle.install({ program: nodeAgentProgram({ agentBin: '/opt/agent.js', configPath: '/etc/agent.json', nodeBin: '/usr/bin/node', service: true }) });
+    const rewritten = fs.writeFile.mock.calls[1]?.[1] as string;
+    expect(rewritten).toContain(
+      '<string>start</string>\n    <string>--config</string>\n    <string>/etc/agent.json</string>\n    <string>--service</string>\n  </array>',
+    );
   });
 
   it('uninstall() bootouts (idempotent "not loaded") and removes the plist file', async () => {

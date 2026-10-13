@@ -6,6 +6,7 @@ import { runTeamRelayCommand } from './commands/team-relay';
 import { createDaemon, createServiceLifecycle, type ServiceLifecycle } from '../index';
 import { DeviceRevokedError } from '../daemon/auth-manager';
 import { argValue, hasFlag, loadConfig, positionalArgs, resolveStoreDir } from './config';
+import { applyLoginShellEnvironment, SERVICE_FLAG } from '../lifecycle/service-environment';
 import { runApprovalsCommand } from './commands/approvals';
 import { runApproveCommand, runRejectCommand } from './commands/approve-reject';
 import { runPairCommand } from './commands/pair';
@@ -125,7 +126,7 @@ function usage(): never {
       'Usage:',
       '  byok-agent --version',
       '  byok-agent pair <code> --server <url> [--config <path>]',
-      '  byok-agent start [--config <path>]                        (or BYOK_CONFIG env var)',
+      '  byok-agent start [--config <path>] [--service]            (or BYOK_CONFIG env var; launchd/systemd pass --service)',
       '  byok-agent status [--config <path>]',
       '  byok-agent doctor [--json] [--fix --yes] [--config <path>]',
       '  byok-agent doctor --repair restore-enrollment-metadata --expected-device-id <id> --expected-tenant-id <id> --yes [--json] [--config <path>]',
@@ -194,6 +195,10 @@ async function main(): Promise<void> {
   }
 
   if (command === 'start') {
+    // Issue #392: under a service manager, adopt the user's login-shell
+    // environment BEFORE anything reads process.env (BYOK_CONFIG, the config
+    // file, adapter resolution). This process's own BYOK_* values survive.
+    if (hasFlag(rest, SERVICE_FLAG)) await applyLoginShellEnvironment();
     const configPath = configPathFrom(rest);
     if (!configPath) {
       console.error('start requires --config <path> or a BYOK_CONFIG env var');
