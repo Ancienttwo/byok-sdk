@@ -148,6 +148,8 @@ Thumbs.db
 !/docs/researches/2026-09-09-g1c-facade/public-consumer-probe.mjs
 !/docs/researches/HANDOFF-byok-keys.md
 !/docs/researches/2026-08-12-salesko-integration-handoff.md
+!/docs/researches/2026-09-28-prepared-agent-memory-contract.md
+!/docs/researches/agent-local-cloud-projection-contract.md
 !/docs/researches/2026-09-09_conversation-turn-mode-design.md
 !/docs/researches/2026-09-09_conversation-turn-mode-host-reliability-addendum.md
 !/docs/researches/2026-09-09_conversation-turn-fresh-mvp-prd.md

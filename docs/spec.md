@@ -2186,7 +2186,7 @@ admission limit; on the prepared lane that task can run with zero tools. Host co
 summary quality must be validated separately from the SDK result primitive.
 
 Requirements and local acceptance have separate authorities: the existing
-[SDK-first plan](../plans/plan-20260910-conversation-turn-sdk-first.md) links the
+internal SDK-first plan (`plans/plan-20260910-conversation-turn-sdk-first.md`, not tracked in this repository) links the
 sole detailed Host Sprint ledger. Public source and packed evidence do not imply
 complete ContextPack/Summary, native-runtime, migration or production acceptance.
 

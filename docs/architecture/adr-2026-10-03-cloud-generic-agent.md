@@ -1,6 +1,6 @@
 # ADR-036：云端 Generic Agent —— 平台 key only、BYOK 仅本地、DO 工作调用（最简）、Bot 模式方案 A、直接替换 Aiphabee chat Workflow
 
-> **来源**：Owner Aimpact 于 2026-10-03 04:53–05:01 HKT（D1–D7）与 05:16 HKT（D8–D10） 对 #258（`pi-1.0-durable` durable slice 1）vs Cloudflare PiHarness 差距分析的裁决；完整分析与证据见 [`docs/researches/2026-10-03_pi-harness-cf-gap-and-cloud-generic-agent.md`](../researches/2026-10-03_pi-harness-cf-gap-and-cloud-generic-agent.md)（「D. 已定决策」节为本 ADR 的逐字来源）。
+> **来源**：Owner Aimpact 于 2026-10-03 04:53–05:01 HKT（D1–D7）与 05:16 HKT（D8–D10） 对 #258（`pi-1.0-durable` durable slice 1）vs Cloudflare PiHarness 差距分析的裁决；完整分析与证据见内部研究稿 `docs/researches/2026-10-03_pi-harness-cf-gap-and-cloud-generic-agent.md`（未纳入版本库；「D. 已定决策」节为本 ADR 的逐字来源）。
 > **关联**：ADR-035（public package topology，DO adapter 的包归属待其框架内另定）、Draft PR #258（`pi-1.0-durable`）、cloudflare/agents PR #2451（pi harness → pi-durable 1.0）、`docs/researches/2026-10-02_pi-durable-slice2-prep.md`。
 > **范围**：本 ADR 只记录已定决策 D1–D10；不授权任何切片（2a–2e、3a–3d、4a–4e）的实现，不修改代码、spec、manifest 或 lockfile。研究稿中其余建议与开放问题（§11）不属于本 ADR。
 
