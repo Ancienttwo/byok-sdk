@@ -573,31 +573,19 @@ jobs:
             # its own summary file and writes to it untouched.
             Remove-Item Env:GITHUB_STEP_SUMMARY -ErrorAction SilentlyContinue
 
-            # Second administrator-parent leak. The inherited PSModulePath carries
-            # the runneradmin and packer profile module directories, which this
-            # token cannot traverse; PS 5.1 auto-load inside the keys suite's
-            # -EncodedCommand query then fails (CommandNotFoundException) while
-            # plain -Command probes against the same env succeed. Rounds 1-3 and
-            # 5-6 failed with it inherited; round 4 passed only because a probe
-            # block unset it. Unsetting it lets PS 5.1 reconstruct the machine
-            # defaults -- the same class of fix as the summary-file unset above.
-            Remove-Item Env:PSModulePath -ErrorAction SilentlyContinue
-
-            # Cold-start latency prepay, separate from the env fix above: a fresh
-            # local account also pays first-use PS 5.1 module analysis (~2-4s) on
-            # its first powershell.exe spawn. Round 7 with the env fix alone left
-            # the positive keys test at 5004ms against vitest's 5s default; paying
-            # the cold cost here keeps every test inside its own budget. Round 4
-            # (unset + warm-up) is the only green configuration observed so far.
-            # The warm-up must NOT Import-Module explicitly: that skips PS 5.1
-            # module auto-load, so the per-user analysis cache for the probe's own
-            # cmdlets (pi-provider-launcher-core.ts: ConvertFrom-Json, Get-Item,
-            # Get-Acl, ConvertTo-Json) was never built and the first real probe
-            # stayed cold. Exercise the same cmdlets via auto-load instead, in this
-            # same identity and LOCALAPPDATA as the test step below.
-            & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') `
-              -NoProfile -NonInteractive -Command '$ErrorActionPreference = ''Stop''; ''{}'' | ConvertFrom-Json | Out-Null; Get-Item -LiteralPath $env:TEMP | Out-Null; Get-Acl -LiteralPath $env:TEMP | Out-Null; @{ a = 1 } | ConvertTo-Json | Out-Null'
-            if ($LASTEXITCODE -ne 0) { Fail 92 'PS 5.1 module warm-up failed under the standard-user token' }
+            # The inherited PSModulePath is deliberately KEPT. It starts with the
+            # parent pwsh's PowerShell 7 module directories: the condition under
+            # which the keys Pi projection ACL query used to fail
+            # (CouldNotAutoloadMatchingModule for Get-Acl). The query invokes no
+            # cmdlet now, and the keys suite and the custody lane below must pass
+            # with it inherited, as a user's PowerShell 7 session would pass it.
+            #
+            # Fresh-account prepay: the first powershell.exe this new local account
+            # starts pays a one-time ~3s first-use cost even with no module loaded,
+            # which the positive keys test would otherwise spend out of its 4.8s
+            # evidence budget. One empty spawn in this same identity pays it here.
+            & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -NonInteractive -Command 'exit 0'
+            if ($LASTEXITCODE -ne 0) { Fail 92 'Windows PowerShell first-use prepay failed under the standard-user token' }
 
             # git compares safe.directory against its own forward-slash spelling of
             # this exact checkout. Never '*'.
@@ -629,6 +617,16 @@ jobs:
             #    step adds no acceptance of either.
             node scripts/release/pack-and-smoke.mjs --out-dir .ci-artifacts/release-pack
             if ($LASTEXITCODE -ne 0) { Fail $LASTEXITCODE 'pack-and-smoke.mjs failed under the standard-user token' }
+
+            # #385 on Windows: the real keys launch sequence and the built pi-rpc
+            # host, on the workspace pack-and-smoke.mjs just built. It runs under
+            # this standard-user token because an elevated token's new directories
+            # are owned by BUILTIN\Administrators, which the launcher refuses
+            # (pi_projection_owner_mismatch).
+            $env:BYOK_REQUIRE_BUN = '1'
+            $env:BYOK_TEST_BUN_BIN = Join-Path $ScratchRoot 'tools\bun.exe'
+            bun run --filter @byok-sdk/client test -- src/__tests__/pi-rpc-key-custody.test.ts
+            if ($LASTEXITCODE -ne 0) { Fail $LASTEXITCODE 'pi-rpc key custody lane failed under the standard-user token' }
 
             Write-Host '[lowpriv] release pack completed under a non-administrator token'
             exit 0

@@ -213,4 +213,41 @@ describe.skipIf(process.platform !== 'win32')('real Windows keys projection ACL'
       await expect(assertPiProjectionDirectory(junction)).rejects.toThrow('pi_projection_not_directory_or_symlink');
     } finally { await fs.rm(root, { recursive: true, force: true }); }
   });
+  // The request travels on stdin as UTF-8; a console code page must not
+  // turn a non-ASCII profile or temp path into a missing one.
+  it('accepts a private directory under a non-ASCII path', async () => {
+    const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pi-acl 空間 ü-')));
+    try {
+      await createPrivateFixture(directory);
+      await expect(assertPiProjectionDirectory(directory)).resolves.toBeUndefined();
+    } finally { await fs.rm(directory, { recursive: true, force: true }); }
+  });
+  // A PowerShell 7 session exports a PSModulePath whose first entries hold its
+  // own Microsoft.PowerShell.Security; Windows PowerShell 5.1 cannot load it.
+  // This fixture shadows the module the same way, deterministically.
+  it('is not steered by an inherited PSModulePath that shadows Microsoft.PowerShell.Security', async () => {
+    const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pi-acl-modpath-')));
+    const directory = path.join(root, 'projection');
+    const shadow = path.join(root, 'modules', 'Microsoft.PowerShell.Security');
+    const inherited = process.env.PSModulePath;
+    try {
+      await createPrivateFixture(directory);
+      await fs.mkdir(shadow, { recursive: true });
+      await fs.writeFile(path.join(shadow, 'Microsoft.PowerShell.Security.psm1'), "throw 'shadowed Microsoft.PowerShell.Security'\n");
+      await fs.writeFile(path.join(shadow, 'Microsoft.PowerShell.Security.psd1'),
+        "@{ ModuleVersion = '99.0.0'; RootModule = 'Microsoft.PowerShell.Security.psm1'; FunctionsToExport = @('Get-Acl', 'Set-Acl'); CmdletsToExport = @() }\n");
+      process.env.PSModulePath = [path.join(root, 'modules'), inherited].filter(Boolean).join(';');
+      await expect(assertPiProjectionDirectory(directory)).resolves.toBeUndefined();
+    } finally {
+      if (inherited === undefined) delete process.env.PSModulePath; else process.env.PSModulePath = inherited;
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+  it('reports a missing directory with a closed cause and no path', async () => {
+    const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pi-acl-missing-')));
+    try {
+      const failure = await assertWindowsPiProjectionAcl(path.join(root, 'absent')).then(() => undefined, (error: unknown) => error);
+      expect((failure as Error).message).toBe('pi_projection_acl_query_failed: Pi projection ACL query failed (cause=path_not_found, exit=3)');
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+  });
 });
