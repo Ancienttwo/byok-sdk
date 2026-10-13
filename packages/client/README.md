@@ -125,7 +125,7 @@ mode, or to `inherit` to apply the user's own `config.toml`. Any other value
 makes `createDaemon` throw a `TypeError`.
 
 Pi `detect()` reports `authPresent` from pi's own login state, with or without
-`sdkHelperHost`. It is `true` when a known provider credential env-var name is
+`sdkHelperHost`. It is `true` when any provider credential env-var name the pinned pi reads is
 set, or when pi's agent directory (`PI_CODING_AGENT_DIR`, else `~/.pi/agent`)
 holds a credential for the global `settings.json` `defaultProvider`, or for any
 provider when `settings.json` is absent or sets no default. Either an
