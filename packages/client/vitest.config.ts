@@ -13,6 +13,8 @@ export default defineConfig({
     __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version),
   },
   test: {
+    // One short per-run TMPDIR, removed in teardown; see scripts/vitest/tmp-root.mjs.
+    globalSetup: ['../../scripts/vitest/tmp-root.mjs'],
     env: {
       // Test-only in-memory credential authority. Product construction never
       // gets this flag from public DaemonConfig and has no filesystem fallback.
