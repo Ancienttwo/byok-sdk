@@ -135,7 +135,10 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
     const { home, storeDir, configPath } = await fixture('http://127.0.0.1:9');
     // Unpaired, so start halts right after the capture; the CLI wiring is what is under test.
     const run = spawnSync(process.execPath, [path.resolve('dist/bin/byok-agent.js'), 'start', '--config', configPath, '--service'], {
-      env: minimalEnv(home),
+      // The test credential store makes the unpaired halt reachable on hosts
+      // without an OS credential provider (Linux CI), where start would
+      // otherwise crash on the missing provider first (#394 tells the two apart).
+      env: minimalEnv(home, { BYOK_TEST_DEVICE_CREDENTIAL_STORE: '1' }),
       encoding: 'utf8',
       timeout: 30_000,
     });

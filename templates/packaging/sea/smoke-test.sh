@@ -126,9 +126,9 @@ assert_probe() {
     echo "FAIL [$label]: expected ok=true piDetect.kind=$expected_kind, got: $json"
     exit 1
   fi
-  daemon_status_ok="$(node -e 'const status = JSON.parse(process.argv[1]).daemonStatus; console.log(status !== null && typeof status === "object" && status.paired === false && status.connected === false)' "$json")"
+  daemon_status_ok="$(node -e 'const status = JSON.parse(process.argv[1]).daemonStatus; console.log(status !== null && typeof status === "object" && status.paired === false && status.lifecycle !== null && typeof status.lifecycle === "object" && status.lifecycle.phase === "stopped")' "$json")"
   if [ "$daemon_status_ok" != "true" ]; then
-    echo "FAIL [$label]: expected daemonStatus paired=false connected=false, got: $json"
+    echo "FAIL [$label]: expected daemonStatus paired=false lifecycle.phase=stopped, got: $json"
     exit 1
   fi
   echo "PASS [$label]: piDetect.kind=$kind ($json)"
