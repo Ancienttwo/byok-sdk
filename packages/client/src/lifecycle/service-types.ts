@@ -1,3 +1,5 @@
+import { SERVICE_FLAG } from './service-environment';
+
 /**
  * What the OS service manager should actually execute to run the daemon in
  * the background. Deliberately requires an explicit `command` (an absolute
@@ -20,6 +22,10 @@ export interface ServiceProgram {
    * untouched — `winsw.ts` emits one `<argument>` element per entry rather
    * than a single shell-quoted string specifically so a path containing
    * spaces never needs manual escaping (see that file's doc comment).
+   *
+   * The lifecycles never add or change an argument: a Host's own binary
+   * gets exactly these. Issue #392: `byok-agent install` builds its program
+   * with {@link NodeAgentProgramOptions.service} on macOS and Linux.
    */
   args: string[];
   /** Working directory for the running service process. Each platform generator has its own documented default (see `launchd.ts`/`systemd.ts`/`winsw.ts`) when omitted. */
@@ -34,6 +40,13 @@ export interface NodeAgentProgramOptions {
   /** Node executable to invoke `agentBin` with. Defaults to `process.execPath` (the currently running node) — always an absolute, real path, unlike a bare `node` on PATH. */
   nodeBin?: string;
   cwd?: string;
+  /**
+   * Issue #392: append {@link SERVICE_FLAG}, so `byok-agent start` replaces
+   * the service manager's minimal environment with the user's login-shell
+   * environment (`service-environment.ts`). For a program launchd or
+   * systemd will run; `byok-agent install` sets it on macOS and Linux only.
+   */
+  service?: boolean;
 }
 
 /**
@@ -45,7 +58,7 @@ export interface NodeAgentProgramOptions {
 export function nodeAgentProgram(opts: NodeAgentProgramOptions): ServiceProgram {
   const program: ServiceProgram = {
     command: opts.nodeBin ?? process.execPath,
-    args: [opts.agentBin, 'start', '--config', opts.configPath],
+    args: [opts.agentBin, 'start', '--config', opts.configPath, ...(opts.service === true ? [SERVICE_FLAG] : [])],
   };
   if (opts.cwd !== undefined) program.cwd = opts.cwd;
   return program;

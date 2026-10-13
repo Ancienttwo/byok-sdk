@@ -2,7 +2,7 @@ import os from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
 import { createSystemdLifecycle, generateSystemdUnit } from '../lifecycle/systemd';
 import type { RunResult, Runner } from '../lifecycle/exec-runner';
-import { sanitizeServiceName, type ServiceDefinition } from '../lifecycle/service-types';
+import { nodeAgentProgram, sanitizeServiceName, type ServiceDefinition } from '../lifecycle/service-types';
 
 function ok(stdout = ''): RunResult {
   return { code: 0, stdout, stderr: '' };
@@ -187,6 +187,23 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
     const lifecycle = createSystemdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h' });
     await expect(lifecycle.install()).rejects.toThrow(/systemctl daemon-reload failed/);
     expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('issue #392: a Host program is written verbatim; nodeAgentProgram({ service: true }) carries --service last', async () => {
+    const run = vi.fn<Runner>().mockResolvedValue(ok());
+    const fs = fakeFs();
+    const lifecycle = createSystemdLifecycle(
+      def({ program: { command: '/opt/host/bin/host-agent', args: ['run', '--profile', 'default'] } }),
+      { run, fs, homedir: () => '/h' },
+    );
+    await lifecycle.install();
+    const written = fs.writeFile.mock.calls[0]?.[1] as string;
+    expect(written).toContain('ExecStart="/opt/host/bin/host-agent" "run" "--profile" "default"\n');
+    expect(written).not.toContain('--service');
+
+    await lifecycle.install({ program: nodeAgentProgram({ agentBin: '/opt/agent.js', configPath: '/etc/agent.json', nodeBin: '/usr/bin/node', service: true }) });
+    const rewritten = fs.writeFile.mock.calls[1]?.[1] as string;
+    expect(rewritten).toContain('ExecStart="/usr/bin/node" "/opt/agent.js" "start" "--config" "/etc/agent.json" "--service"\n');
   });
 
   it('install() opts.program overrides the definition program for that call only', async () => {

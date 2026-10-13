@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { DaemonConfig, DaemonEvent } from '../index';
-import { auditLogPath } from '../bin/audit-log';
+import { auditLogPath, readLastEnvironmentRecord, type EnvironmentRecord } from '../bin/audit-log';
 import { atomicWriteFile } from '../util/atomic-write';
 import { ensureSecureDir, ensureSecureFile, type EnsureSecureDirOptions } from '../util/secure-dir';
 import {
@@ -51,6 +51,8 @@ export interface SupportBundle {
         storagePresent: boolean;
       };
   health: DiagnosticsSnapshot['health'];
+  /** Issue #392: the last `start`'s `environment-resolved` record — closed values and a shell basename only. */
+  environment: EnvironmentRecord | { status: 'unknown' };
   journal: DiagnosticsSnapshot['journal'];
   workspace: DiagnosticsSnapshot['workspace'];
   quarantine: {
@@ -218,7 +220,11 @@ export async function createSupportBundle(
   storeDir: string,
   options: CollectDiagnosticsOptions = {},
 ): Promise<SupportBundle> {
-  const [snapshot, recentEvents] = await Promise.all([collectDiagnostics(config, storeDir, options), recentAuditFacts(storeDir)]);
+  const [snapshot, recentEvents, environment] = await Promise.all([
+    collectDiagnostics(config, storeDir, options),
+    recentAuditFacts(storeDir),
+    readLastEnvironmentRecord(storeDir).catch(() => undefined),
+  ]);
   return {
     version: 1,
     generatedAt: snapshot.generatedAt,
@@ -237,6 +243,7 @@ export async function createSupportBundle(
     runtimes: snapshot.runtimes,
     control: projectControl(snapshot.control),
     health: snapshot.health,
+    environment: environment ?? { status: 'unknown' },
     journal: snapshot.journal,
     workspace: snapshot.workspace,
     quarantine: {
