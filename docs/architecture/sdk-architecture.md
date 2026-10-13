@@ -148,6 +148,7 @@ flowchart LR
   Testkit --> Core
   Testkit --> Protocol
   Client -.->|"devDependency<br/>integration tests only"| Server
+  CloudDo -.->|"devDependency<br/>type-compat tests only"| Keys
   Basic --> Server
   Packaging --> Client
 
@@ -165,7 +166,7 @@ flowchart LR
 | core | 23 / 3,467 | 5 / 1,019 | S2 契约层；InMemory 参考实现，consumer 是 `cloud` 与 `client`；共享 conformance 已移到独立 package |
 | cloud | 42 / 5,045 | 10 / 3,003 | async domain kernel + stateless hosted surface；device/board/truth handlers + InMemory 组合，消费 `core` 与 `protocol` |
 | cloud-dataplane | 22 / 6,309 | 14 / 3,533 | production Postgres + R2 composition；事务、quota、GC 与 reconciliation authority |
-| cloud-do | 19 / 3,849 | 0 / 0（测试在包根 `test/`：34 files / 6,772 LOC） | 只在 Cloudflare workerd 运行的 Durable Object session host；只用平台 key，不依赖其他 workspace package（ADR-036、ADR-038 决策 4） |
+| cloud-do | 19 / 3,849 | 0 / 0（测试在包根 `test/`：34 files / 6,772 LOC） | 只在 Cloudflare workerd 运行的 Durable Object session host；只用平台 key；runtime 不依赖其他 workspace package，`@byok-sdk/keys` 只作为 test-only devDependency（ADR-036、ADR-038 决策 4） |
 | ui-runtime | 5 / 930 | 4 / 559 | React-free 的确定性 Live Activity Timeline 投影；消费 `cloud` 与 `protocol` |
 | conformance | 26 / 2,842 | 2 / 84 | private shared assertion authority；不得进入发布依赖树 |
 
@@ -179,7 +180,7 @@ find "$SDK_SRC" -type f \( -name '*.test.ts' -o -name '*.spec.ts' -o -path '*/__
 
 对两组结果分别执行 `wc -l` 得 file count，执行 `xargs wc -l` 取合计 LOC；替换 `SDK_SRC` 即可复算其余 package。
 
-强依赖是 `server → cloud/core/protocol`、`client → protocol/core`、`cloud → core/protocol`、`cloud-dataplane → cloud/core`、`ui-runtime → cloud/protocol`；`cloud-do` 的 runtime 依赖只有 pinned pi-durable / pi-ai / chord，没有 workspace edge；弱依赖是 `client -dev→ server` 与 production packages 对 private conformance 的 test-only edge。当前的依赖 invariant 清单：
+强依赖是 `server → cloud/core/protocol`、`client → protocol/core`、`cloud → core/protocol`、`cloud-dataplane → cloud/core`、`ui-runtime → cloud/protocol`；`cloud-do` 的 runtime 依赖只有 pinned pi-durable / pi-ai / chord，没有 workspace edge；弱依赖是 `client -dev→ server`、`cloud-do -dev→ keys`（结构类型兼容测试）与 production packages 对 private conformance 的 test-only edge。当前的依赖 invariant 清单：
 
 - `core !→ protocol`、`core !→ node`：core 必须保持 protocol-free、Node-free，由包内 constraint test 执行（ADR-003）。
 - `client → core`（S6-c 当前事实）：只消费 proof canonicalizer 与 truth selector contracts，不依赖 cloud implementation。

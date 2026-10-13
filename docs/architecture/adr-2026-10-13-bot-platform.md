@@ -1,6 +1,6 @@
 # ADR-038：BYOK Bot 平台——成本模型、部署目标、routine 时钟与 Bot 协作
 
-> **来源**：owner 2026-10-13 的决定，整理在 [PRD：BYOK Bot 平台——routine、Bot 协作、成本与部署](../researches/2026-10-13_bot-platform-prd.md) §2。决策 1、2、3、5 对应 PRD 的 O1–O4。决策 4、6 对应 PRD 的 O5–O8。决策 7–13 对应 PRD 的 O11–O16，依据 owner 同日的两项决定：O9（加 Bot 协作层）和 O10（项目未上线，该重构的直接重构，不留兼容层）。决策 4、6–13 由同一个 PR 提出。
+> **来源**：owner 2026-10-13 的决定，整理在 [PRD：BYOK Bot 平台——routine、Bot 协作、成本与部署](../researches/2026-10-13_bot-platform-prd.md) §2。决策 1、2、3、5 对应 PRD 的 O1–O4。决策 4、6 对应 PRD 的 O5–O8。决策 7–12 对应 PRD 的 O11–O16，决策 13 对应 PRD §9.4–§9.5（I8、I10、I12）。决策 7–13 依据 owner 同日的两项决定：O9（加 Bot 协作层）和 O10（项目未上线，该重构的直接重构，不留兼容层）。决策 4、6–13 由同一个 PR 提出。
 > **取代**：[ADR-036](adr-2026-10-03-cloud-generic-agent.md) D7 中"Cloudflare 优先（DO / DO SQLite）；Node + Postgres 仅预留接口、不实现"对真相层的约束。D7 的其余内容不变。
 > **关联**：ADR-036 D1（Bot 模式：每次唤醒都是新的执行）是决策 7–9、13 的基础。ADR-027 的权威表把「Run intent 与 policy」划给 SaaS，所以 per-Agent 队列留在 Host。ADR-037 的最小 guardrail 不变。
 > **范围**：只记录决策。不授权实现、发布、issue 修改或下游迁移。实现切片见 PRD §13。
