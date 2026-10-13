@@ -6,47 +6,66 @@ Operational contract for S4B-c on the Postgres + R2 composition. Authorities:
 
 ## Preconditions and scheduler
 
-1. Apply all ordered migrations. Never edit `0001`/`0002`; `0003` is additive
-   and forward-only.
-2. Write a `tenant_retention_policy`, then point the tenant's versioned
-   entitlement at its `policyId`. Missing policy makes cleanup fail closed.
-3. The host scheduler calls `runTenant(tenant, uniqueJobId)`. The SDK starts no
-   timer. One tenant is advisory-locked at a time; work is page/batch bounded
-   (default 100, maximum 1000).
+1. Apply the ordered migrations and write the tenant's retention policy.
+   `storage_entitlement.retention_policy_id` selects that policy. A missing
+   policy fails with `cleanup_policy_missing`; a stored zero duration fails
+   `runMaintenance` with `maintenance_invalid_input`.
+2. Bind real bytes into the serving core composition:
+   `createPostgresCoreStores({ pool, clock, objectStorage })` accepts the same
+   immutable R2 configuration/key prefix as the blob store. Standalone
+   `PostgresObjectStore` construction requires a physical deletion authority.
+3. Call the kernel from one hosted scheduler per tenant:
 
-The policy has four explicit durations: acknowledged mailbox retention,
-unacknowledged mailbox expiry, request-receipt retention, and object-orphan
-grace. Use at least 24 hours for object grace unless a reviewed deployment
-contract says otherwise. Receipt retention must cover proof skew plus the full
-client retry/redelivery horizon. `runTenant` currently deletes **no** request
-receipt (see below), so the receipt duration is stored but not yet applied.
+```ts
+const policy = await maintenance.readRetentionPolicy(tenant);
+const report = await cloud.runMaintenance({ tenant, now, policy, limit: 500 });
+```
 
-## What one job may delete
+There is no policy translator: `TenantRetentionPolicyInput` extends the kernel
+`RetentionPolicy`. Its fields are positive bigint milliseconds:
+`mailboxAckedRetentionMs` (default 24h), `mailboxUnackedRetentionMs` (7d),
+`requestReceiptRetentionMs` (24h), `objectOrphanGraceMs` (24h). The reference
+server uses these defaults every 5 minutes ±20%, always enabled. Hosted code
+supplies the stored policy directly and owns scheduling.
 
-- acknowledged mailbox rows past policy. Mailbox usage is the sum of the
-  retained `outbox` rows, so deleting a row is the whole release; there is no
-  counter to reduce and no `cleanup_accounting_drift` from the mailbox;
-- used/expired auth nonces and pairing codes, expired presence/activity rows
-  and expired approval-timeline tails;
-- expired reservations (a state change; reserved bytes are derived, not a
-  counter);
-- R2 objects whose tenant-scoped manifest has no reference rows, no active
-  reservation, has aged past grace, and was durably changed to
-  `delete_pending` first.
+The fixed steps are mailbox, receipts, nonces, pairing codes, presence,
+activity, approvals, device assertion replay, quota and objects. Each receives
+one positive limit (kernel range 1–5000, default 500), mutates at most that many
+distinct rows/objects, and reports an actual eligible remainder. Steps commit
+independently; one failure does not suppress the others. The kernel does not
+loop on `more`; the Host may schedule further bounded passes.
 
-It never deletes request receipts. Every receipt family the SDK writes is
-either a task-identity fence (`task-offer:`, `task-offer-delivered:`,
-`task:<id>:terminal`, `agent-message-offer:`), an Agent request/completion
-record (`agent-content-*`, `agent-home-projection-*`,
-`agent-input-preparation-*`), or the enrollment authority
-`pairing-completion:v1:`. Deleting one by TTL turns a retry into
-`claim_offer_mismatch`/`recovery_offer_mismatch` or lets a completed task id
-run again. Hosted cleanup resumes receipt expiry only for the prefixes the
-receipt classification (#412) registers as TTL-bound requests.
+`runTenant` and its job writer are removed. The installed `cleanup_job` schema
+has no writer and is not maintenance authority. Drop it only in a later forward
+migration after no supported Host consumes its historical rows.
 
-It never deletes durable truth, board, memory, profile or terminal data to make
-room. Hard-limit pressure changes admission only. Reads, reference removal,
-exports, usage reads and entitlement updates remain available.
+## What a pass may collect
+
+- Acked mailbox rows past policy are deleted; old pending rows become retained
+  dead letters. Mailbox collection reports `releasedBytes: 0n` and touches no
+  usage counter.
+- Spent or strictly expired nonces, strictly expired **unused** pairing codes,
+  and expired presence/activity/approval tails are deleted. Redeemed pairing
+  codes remain protected identity state: all drivers require the code row to
+  reach their completion fence. They are removed by tenant erasure.
+- The quota step expires reserved admissions first, reporting their released
+  `expectedBytes`, then removes old eligible settled rows with the remaining
+  budget. Deleting a settled row releases no additional bytes.
+- The object step retries tombstones and fills remaining slots with eligible
+  orphans. It deletes bytes and settles accounted object bytes/count once.
+  Its `expired` count is zero and `removed` counts settled objects.
+
+Receipt classification has one frozen kernel table: all 11 SDK families and
+unknown keys are `identity`. `REQUEST_RECEIPT_PREFIXES` is derived and empty,
+so production receipt collection removes zero rows. There is no caller prefix
+argument, registration hook or constructor injection. Request/completion names
+alone do not make a receipt disposable. Tasks, egress, truth, board, memory,
+profile and terminal history remain outside automatic collection.
+
+Device assertion replay lives outside the ordinary cloud store bundle. Pass
+the exact auth authority as `ByokCloudOptions.deviceAssertionReplay` to collect
+it. An absent authority reports `not-configured` without count fields; it does
+not report fake zero success or make the overall maintenance event fail.
 
 ## Tombstone and crash recovery
 
@@ -55,11 +74,13 @@ The state sequence remains the four existing states:
 `pending|committed → delete_pending → deleted`
 
 At tombstone time, Postgres records whether the manifest contributed committed
-bytes/object count. R2 DELETE runs next; only then does one Postgres statement
-move the tombstone to `deleted` and reduce usage. A zero-byte committed object
-still reduces object count once.
+bytes/object count. The collector holds that manifest row under `FOR UPDATE` across R2 DELETE; only then does one Postgres statement
+move the tombstone to `deleted` and reduce usage. A zero-byte committed object still reduces object count once. Same-hash state
+writers/recreation wait on this lock; unrelated tenant admission does not. The
+maintenance R2 adapter aborts each HTTP attempt after `requestTimeoutMs`
+(default 10000ms), with the existing three-attempt retry/backoff bound.
 
-| Crash | Durable readback | Next job |
+| Crash | Durable readback | Next pass |
 | --- | --- | --- |
 | before tombstone | original manifest and R2 object | re-evaluate eligibility |
 | after tombstone, before DELETE | `delete_pending`, usage unchanged | retry DELETE |
@@ -75,39 +96,41 @@ drift and requires operator action; cleanup will not invent a hash identity.
 
 Manifest scan uses HEAD to detect missing objects and observed size/type drift.
 R2 scan uses tenant-prefixed ListObjectsV2 and an opaque persisted cursor. A
-truncated XML page without a continuation token fails the job; there is no
+truncated XML page without a continuation token fails the operator call; there is no
 restart-from-page-one or alternate-parser fallback.
 
 HEAD does not verify SHA-256. The worker does not read bytes back, does not add
 checksum headers/fallbacks, and cannot detect a same-size/type substitution.
 That is the accepted tenant-internal risk in ADR-024.
 
-## Metrics and alerts
+## Reports, fairness and operator reconciliation
 
-`cleanup_job` is the provider-neutral metric/readback source. Export these
-counters with tenant and job kind labels, never object keys or bodies:
+Use `MaintenanceReport.steps` and `observer.onMaintenance` as the current
+counts-only readback. The server emits `maintenance.completed`, or
+`maintenance.failed` if any step failed. Failed object collection includes
+committed partial counts plus `failures`; failed deletions retain tombstones.
+Report tenant, step, counts, bytes and typed error code, never object keys or
+bodies. Alert on any expired mailbox work, repeated failed steps, or a growing
+`more` backlog that the configured schedule cannot drain.
 
-| Column | Metric meaning | Alert condition |
-| --- | --- | --- |
-| `mailbox_expired_count` | unacknowledged work moved to dead-letter | any non-zero |
-| `mailbox_deleted_count`, `mailbox_released_bytes` | acknowledged retention | unexpected sustained zero with mailbox growth |
-| `reservations_expired` | abandoned admissions released | sustained rise |
-| `ttl_rows_deleted` | nonce/pairing/presence/activity/approval TTL reclaim | informational |
-| `objects_tombstoned`, `objects_deleted`, `object_released_bytes` | GC progress | tombstoned grows while deleted stays zero |
-| `orphan_witnesses_created` | R2 key had no live manifest | any unexplained non-zero |
-| `missing_objects` | committed manifest has no R2 bytes | any non-zero, page immediately |
-| `shape_drift` | HEAD size/type disagrees with manifest | any non-zero, page immediately |
-| `invalid_object_keys` | tenant prefix contains a non-canonical key | any non-zero |
-| `operation_errors` / `state=failed` | R2/SQL/accounting failure | any non-zero/failed |
+Object work uses one distinct-object budget. It tries `delete_pending` hashes
+after the delete cursor, then fresh orphans, then wrapped tombstones with any
+unused slots. The cursor advances only over retries, or resets when no retry
+was selected. This gives both poisoned tombstones and fresh orphans progress,
+even at limit one. PG persists the existing `gc_cursor`; embedded cursors are
+process-local.
+
+`maintenance.reconcileObjectStorage(tenant)` remains an explicit operator
+API. It scans manifests with HEAD, scans R2 with its persisted LIST cursor,
+and returns missing/shape-drift/untracked-key counters. Missing or malformed
+keys do not authorize deletion; an untracked valid object becomes a fresh
+pending witness and waits grace before kernel GC can collect it. Reconciliation
+is distinct from the scheduled ten-step pass. `rebuildObjectUsage` and the
+list/replay/discard dead-letter APIs remain explicit operator operations.
 
 Support inspection:
 
 ```sql
-SELECT * FROM cleanup_job
- WHERE tenant_id = $1
- ORDER BY started_at DESC
- LIMIT 20;
-
 SELECT hash, state, ref_count, updated_at, delete_pending_at,
        gc_accounted_bytes, gc_accounted_object
   FROM object_manifest
@@ -208,3 +231,5 @@ SELECT d.tenant_id, count(*) AS devices
 ```
 
 Issue each returned tenant an entitlement before upgrading.
+
+Committed reservations of both kinds remain protected accounting identity: PG uses them as dedup witnesses and stored finalize-replay answers. The settled-row collector deletes only old expired/aborted rows. Removing a committed row would change later accounting while leaving the committed byte counter intact. No new accounting table or fallback is added. Cross-kind dedup differences between drivers are a pre-existing boundary, not corrected by this maintenance change.

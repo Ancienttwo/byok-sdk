@@ -264,8 +264,7 @@ describe('enqueueOffer', () => {
       deviceId: device.deviceId,
       ackedSeq: first.seq,
     });
-    await harness.core.mailbox.collectRetired(TENANT_A, {
-      deviceId: device.deviceId,
+    await harness.core.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
       ackedBefore: '2999-01-01T00:00:00.000Z',
       expireUnackedBefore: '2999-01-01T00:00:00.000Z',
     });

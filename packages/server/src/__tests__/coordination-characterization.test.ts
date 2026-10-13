@@ -1,3 +1,4 @@
+import { runMaintenanceAt } from './test-support';
 import type { Server as HttpServer } from 'node:http';
 import { serve } from '@hono/node-server';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -404,7 +405,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
   //     authority for the same rows.
   //
   // Every assertion below is on the same public surface as before
-  // (`GET /byok/events` status + body). `byok.mailbox.collectRetired` is the
+  // (`GET /byok/events` status + body). `byok.maintenance.runNow` is the
   // host control-plane sweep core defines and this façade forwards verbatim —
   // it names no policy, and nothing in the stack runs it on a timer.
   // -------------------------------------------------------------------
@@ -461,12 +462,9 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     // it are deleted, which is not a loss and moves nothing); the cutoff is a
     // timestamp, so a canonical far-future instant retires everything appended
     // so far and nothing appended later.
-    const swept = await started.byok.mailbox.collectRetired({
-      deviceId: daemon.deviceId,
-      ackedBefore: SWEEP_EVERYTHING_BEFORE,
-      expireUnackedBefore: SWEEP_EVERYTHING_BEFORE,
-    });
-    expect(swept.expiredCount).toBe(1);
+    const report = await runMaintenanceAt(started.byok, SWEEP_EVERYTHING_BEFORE);
+    const swept = report.steps.find(step => step.step === 'mailbox');
+    expect(swept).toMatchObject({ status: 'ok', expired: 1 });
 
     // A row that arrives after the sweep is inside the retained window.
     const afterSweep = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'after-sweep' });

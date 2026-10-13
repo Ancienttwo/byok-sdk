@@ -1,3 +1,4 @@
+import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 /**
  * Postgres {@link PresenceStore} (§12.3).
  *
@@ -101,6 +102,21 @@ export class PostgresPresenceStore implements PresenceStore {
   constructor(pool: Pool, clock: Clock) {
     this.#pool = pool;
     this.#clock = clock;
+  }
+
+  async collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    const result = await this.#pool.query<{removed: string; more: boolean}>(
+      `WITH candidates AS MATERIALIZED (
+         SELECT ctid FROM device_presence WHERE tenant_id = $1 AND (expires_at <= $2)
+         ORDER BY expires_at LIMIT $3 + 1 FOR UPDATE SKIP LOCKED
+       ), deleted AS (
+         DELETE FROM device_presence WHERE ctid IN (SELECT ctid FROM candidates LIMIT $3) RETURNING 1
+       ) SELECT (SELECT count(*) FROM deleted)::text AS removed,
+                EXISTS(SELECT 1 FROM candidates OFFSET $3) AS more`,
+      [tenant, input.now, input.limit],
+    );
+    return { removed: Number(result.rows[0]!.removed), expired: 0, releasedBytes: 0n, more: result.rows[0]!.more };
   }
 
   async publish(tenant: TenantId, input: PresenceHintInput): Promise<PresenceHint> {

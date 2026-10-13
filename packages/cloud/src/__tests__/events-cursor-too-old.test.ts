@@ -43,12 +43,11 @@ describe('GET /byok/events cursor_too_old', () => {
     // first two rows to the retention sweep before it can report a cursor.
     const delivered = await harness.request('/byok/events', { headers: device.authorization });
     expect(delivered.status).toBe(200);
-    const swept = await harness.core.mailbox.collectRetired(TENANT_A, {
-      deviceId: device.deviceId,
+    const swept = await harness.core.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
       ackedBefore: cutoff,
       expireUnackedBefore: cutoff,
     });
-    expect(swept.expiredCount).toBe(2);
+    expect(swept.expired).toBe(2);
 
     const lost = await harness.json('/byok/events?cursor=0', { headers: device.authorization });
     expect(lost.status).toBe(409);
@@ -84,12 +83,11 @@ describe('GET /byok/events cursor_too_old', () => {
     });
     expect(acked.status).toBe(200);
     expect((acked.body as EventsPollResponse).events).toEqual([]);
-    const swept = await harness.core.mailbox.collectRetired(TENANT_A, {
-      deviceId: device.deviceId,
+    const swept = await harness.core.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
       ackedBefore: '2999-01-01T00:00:00.000Z',
       expireUnackedBefore: '2999-01-01T00:00:00.000Z',
     });
-    expect(swept).toMatchObject({ deletedCount: 2, expiredCount: 0 });
+    expect(swept).toMatchObject({ removed: 2, expired: 0 });
 
     // Consumed is not lost. A daemon that re-polls from an old cursor is doing
     // what at-least-once permits, and answering it 409 would turn the frozen

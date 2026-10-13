@@ -1769,7 +1769,7 @@ task admission 必须按 `limits.maxOutputBytes` 或产品给定预算预留 ter
 | 达 hard limit | 拒绝新的 durable object/inline write；允许读、删、导出、usage 查询、套餐更新与已预留的提交 |
 | 套餐降级后超限 | 进入配置的 grace；不删现有数据；grace 结束后阻止新写，直到用户删除或扩容 |
 
-自动 cleanup 只回收：expired hints/nonces/receipts、已 ack mailbox、expired reservation、R2 orphan，以及明确过期的 cache/temporary object。用户的 durable truth、board、memory、profile 与 terminal 不因为 quota 满而被自动删除。
+自动 cleanup 只回收：expired hints/nonces、分类表中的 request receipts（当前为空）、已 ack mailbox、expired reservation、R2 orphan，以及明确过期的 cache/temporary object。用户的 durable truth、board、memory、profile 与 terminal 不因为 quota 满而被自动删除。
 
 R2 GC 使用 tombstone 加 reconcile：
 
@@ -1780,13 +1780,25 @@ R2 GC 使用 tombstone 加 reconcile：
 5. `HEAD` 可发现对象缺失与 observed size/type 漂移，但无法发现同 size/type 的字节替换；GC 不读回重算摘要，也不加入 checksum fallback；
 6. 只靠 refcount 不够，周期性 reference scan 是第二道保护。
 
-S4B-c 的 current implementation 是 `PostgresCloudCleanup` +
-`R2ObjectMaintenanceStore`，schema authority 为 `0003_cloud_cleanup.sql`。
-host 以 tenant/job id 显式调度；每 tenant advisory serialization、bounded
-batch 与 `gc_cursor` 限制 10x 时的 LIST/HEAD 成本。`cleanup_job` 保存 quota/
-retention/GC counters 供 metrics 与 support readback。未追踪但 key 合法的
-R2 object 先投影为 `pending` witness 并重新等待 grace，绝不因 LIST 一次
-观测而直接删除。完整 crash/rollback/usage rebuild 流程见
+当前 retention 入口是 `ByokCloud.runMaintenance`，按固定十步调用各端口
+的 tenant-first `collectExpired`；每步共享一个 limit，独立 commit，错误保留
+partial counts 后继续其他步骤。reference server 默认每 5 分钟 ±20% 调度一次，
+`maintenance.runNow()` 加入正在运行的 pass；close 等待 pass 后释放 SQLite。
+Host 调度同一 kernel 入口并显式读取已有 bigint retention policy。
+
+receipt 的唯一分类表保护全部 11 个 SDK families 和未知 key；request class
+为空。redeemed pairing code 是 completion fence 的入口，因此保留到 tenant
+ erasure。quota 先 expire reserved，再按剩余 budget 清理过期的 expired/aborted rows；
+committed rows 是 accounting/replay identity，不能被 TTL 清除。
+mailbox 只删 acked；unacked 只标 expired，`releasedBytes` 恒为 0，不读写 usage。
+对象的 tombstone、retry、physical delete 和 settle 共享一个 distinct-object
+budget；PG 在删除期间持有 manifest row lock，SQLite 同步 commit SQL 与 ledger
+release，避免同 hash 重建或 reservation 插入观察到半完成状态。
+
+`PostgresCloudCleanup` 保留显式 policy、dead-letter、`reconcileObjectStorage`
+与 `rebuildObjectUsage` operator APIs；`runTenant` 和 `cleanup_job` writers 已移除，
+历史 schema 保留到后续 forward migration。未追踪但 key 合法的 R2 object 先成为
+`pending` witness 并重新等待 grace。完整 reports、crash/rollback/rebuild 流程见
 `deploy/runbooks/cloud-cleanup.md`。
 
 #### 12.7.9 储存控制面端点（目标设计）

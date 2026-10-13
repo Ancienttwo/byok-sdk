@@ -60,8 +60,7 @@ export type {
   MailboxPage,
   MailboxReadQuery,
   MailboxRecordDeliveryInput,
-  MailboxRetentionInput,
-  MailboxRetentionResult,
+  MailboxCollectExpiredInput,
   MailboxStore,
   MailboxUsage,
 } from './mailbox';
@@ -384,3 +383,11 @@ export {
   createMutableClock,
 } from './in-memory/index';
 export type { InMemoryCoreComposition, InMemoryCoreOptions } from './in-memory/index';
+
+export { assertCollectExpiredInput, CollectExpiredFailure } from './retention';
+export type { CollectExpiredInput, CollectExpiredResult } from './retention';
+export type { QuotaCollectExpiredInput } from './quota';
+export type { ObjectCollectExpiredInput } from './blob';
+
+export { InMemoryStorageLedger } from './in-memory/storage-ledger';
+export type { InMemoryObjectBytes } from './in-memory/blob';

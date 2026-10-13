@@ -1,3 +1,5 @@
+import { assertCollectExpiredInput, InMemoryStorageLedger, type ObjectCollectExpiredInput, CollectExpiredFailure } from '@byok-sdk/core';
+import { REQUEST_RECEIPT_PREFIXES, createInMemoryBlobBytes, type ReceiptCollectExpiredInput } from '@byok-sdk/cloud';
 import {
   ByokCoreError,
   CoreConflictError,
@@ -15,8 +17,8 @@ import {
   type MailboxReadQuery,
   type MailboxRecordDeliveryInput,
   type MailboxAdvanceCursorInput,
-  type MailboxRetentionInput,
-  type MailboxRetentionResult,
+  type MailboxCollectExpiredInput,
+  type CollectExpiredResult,
   type MailboxStore,
   type MailboxUsage,
   type ObjectCommitInput,
@@ -352,6 +354,18 @@ class SqliteCoordinator {
     });
   }
 
+  transactionSync<T>(body: (db: DatabaseSync) => T, afterCommit: (result: T) => void): Promise<T> {
+    return this.run((db) => {
+      db.exec('BEGIN IMMEDIATE');
+      let result: T;
+      try { result = body(db); db.exec('COMMIT'); }
+      catch (cause) { try { db.exec('ROLLBACK'); } catch {} throw cause; }
+      // No await splits the committed SQL state from its process-local ledger.
+      afterCommit(result);
+      return result;
+    });
+  }
+
   close(): Promise<void> {
     if (this.#closePromise !== undefined) return this.#closePromise;
     this.#closing = true;
@@ -423,6 +437,22 @@ function sameAgentRef(left: AgentRef | undefined, right: AgentRef | undefined): 
 /** Receipts are lifetime facts: mailbox retirement must never delete them. */
 class SqliteRequestReceiptStore implements RequestReceiptStore {
   constructor(private readonly coordinator: SqliteCoordinator, private readonly clock: Clock) {}
+
+  collectExpired(tenant: TenantId, input: ReceiptCollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    assertCanonicalTimestamp(input.requestBefore, 'requestBefore');
+    return this.coordinator.transaction((db) => {
+      if (REQUEST_RECEIPT_PREFIXES.length === 0) return { removed: 0, expired: 0, releasedBytes: 0n, more: false };
+      const predicate = REQUEST_RECEIPT_PREFIXES.map(() => 'substr(key, 1, length(?)) = ?').join(' OR ');
+      const parameters = REQUEST_RECEIPT_PREFIXES.flatMap(prefix => [prefix, prefix]);
+      const removed = Number(db.prepare(`DELETE FROM request_receipt WHERE rowid IN
+        (SELECT rowid FROM request_receipt WHERE tenant_id = ? AND recorded_at < ? AND (${predicate}) ORDER BY recorded_at, key LIMIT ?)`)
+        .run(tenant, input.requestBefore, ...parameters, input.limit).changes);
+      const more = db.prepare(`SELECT 1 FROM request_receipt WHERE tenant_id = ? AND recorded_at < ? AND (${predicate}) LIMIT 1`)
+        .get(tenant, input.requestBefore, ...parameters) !== undefined;
+      return { removed, expired: 0, releasedBytes: 0n, more };
+    });
+  }
 
   record(tenant: TenantId, input: { key: string; body: string }): Promise<{ receipt: RequestReceipt; created: boolean }> {
     // The INSERT is atomic; rows are immutable and never deleted, so the
@@ -880,31 +910,25 @@ export class SqliteMailboxStore implements MailboxStore {
     return this.coordinator.run((db) => readCursor(db, this.clock, tenant, deviceId));
   }
 
-  async collectRetired(tenant: TenantId, input: MailboxRetentionInput): Promise<MailboxRetentionResult> {
+  async collectExpired(tenant: TenantId, input: MailboxCollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
     assertCanonicalTimestamp(input.ackedBefore, 'ackedBefore');
     assertCanonicalTimestamp(input.expireUnackedBefore, 'expireUnackedBefore');
     return this.coordinator.transaction((db) => {
-      const deviceClause = input.deviceId === undefined ? '' : ' AND device_id = ?';
-      const params = input.deviceId === undefined ? [tenant] : [tenant, input.deviceId];
-      const acked = db.prepare(
-        `SELECT byte_size FROM mailbox_message
-         WHERE tenant_id = ?${deviceClause} AND state = 'acked' AND appended_at < ?`,
-      ).all(...params, input.ackedBefore) as unknown as Array<{ byte_size: string }>;
-      const deleted = db.prepare(
-        `DELETE FROM mailbox_message
-         WHERE tenant_id = ?${deviceClause} AND state = 'acked' AND appended_at < ?`,
-      ).run(...params, input.ackedBefore);
-      const expired = db.prepare(
-        `UPDATE mailbox_message SET state = 'expired'
-         WHERE tenant_id = ?${deviceClause} AND state = 'pending' AND appended_at < ?`,
-      ).run(...params, input.expireUnackedBefore);
-      return {
-        deletedCount: Number(deleted.changes),
-        expiredCount: Number(expired.changes),
-        releasedBytes: acked.reduce((sum, row) => sum + BigInt(row.byte_size), 0n),
-      };
+      const removed = Number(db.prepare(`DELETE FROM mailbox_message WHERE rowid IN
+        (SELECT rowid FROM mailbox_message WHERE tenant_id = ? AND state = 'acked' AND appended_at < ? ORDER BY appended_at, rowid LIMIT ?)`)
+        .run(tenant, input.ackedBefore, input.limit).changes);
+      const remaining = input.limit - removed;
+      const expired = Number(db.prepare(`UPDATE mailbox_message SET state = 'expired' WHERE rowid IN
+        (SELECT rowid FROM mailbox_message WHERE tenant_id = ? AND state = 'pending' AND appended_at < ? ORDER BY appended_at, rowid LIMIT ?)`)
+        .run(tenant, input.expireUnackedBefore, remaining).changes);
+      const more = db.prepare(`SELECT 1 FROM mailbox_message WHERE tenant_id = ? AND
+        ((state = 'acked' AND appended_at < ?) OR (state = 'pending' AND appended_at < ?)) LIMIT 1`)
+        .get(tenant, input.ackedBefore, input.expireUnackedBefore) !== undefined;
+      return { removed, expired, releasedBytes: 0n, more };
     });
   }
+
 }
 
 export class SqliteTaskCancellationStore implements TaskCancellationStore {
@@ -1018,7 +1042,56 @@ function putManifest(db: DatabaseSync, clock: Clock, tenant: TenantId, input: Ob
 }
 
 export class SqliteObjectStore implements ObjectStore {
-  constructor(private readonly coordinator: SqliteCoordinator, private readonly clock: Clock) {}
+  constructor(private readonly coordinator: SqliteCoordinator, private readonly clock: Clock, private readonly ledger: InMemoryStorageLedger) {}
+  readonly #deleteCursor = new Map<TenantId, string>();
+
+  async collectExpired(tenant: TenantId, input: ObjectCollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    assertCanonicalTimestamp(input.orphanBefore, 'orphanBefore');
+    const predicate = `m.tenant_id = ? AND m.state IN ('pending', 'committed', 'delete_pending')
+      AND (m.state = 'delete_pending' OR m.updated_at < ?)
+      AND NOT EXISTS (SELECT 1 FROM object_reference r WHERE r.tenant_id = m.tenant_id AND r.hash = m.hash)
+      AND m.hash NOT IN (SELECT value FROM json_each(?))`;
+    const cursor = this.#deleteCursor.get(tenant) ?? '';
+    const candidates = await this.coordinator.run(db => db.prepare(`SELECT m.hash, m.state FROM object_manifest m WHERE ${predicate}
+      ORDER BY CASE WHEN m.state = 'delete_pending' AND m.hash > ? THEN 0 WHEN m.state <> 'delete_pending' THEN 1 ELSE 2 END, CASE WHEN m.state <> 'delete_pending' THEN m.updated_at ELSE '' END, m.hash LIMIT ?`)
+      .all(tenant, input.orphanBefore, JSON.stringify(this.ledger.reservedObjectHashes(tenant)), cursor, input.limit + 1) as Array<{hash: string; state: string}>);
+    let removed = 0, releasedBytes = 0n, failures = 0;
+    let firstFailure: unknown;
+    for (const { hash } of candidates.slice(0, input.limit)) {
+
+      try {
+        const tombstoned = await this.coordinator.transactionSync((db) => {
+          const entry = readManifest(db, tenant, hash as ContentHash);
+          if (entry === undefined || entry.refCount !== 0 || this.ledger.hasReservedObject(tenant, entry.hash)
+            || !(entry.state === 'delete_pending' || ((entry.state === 'pending' || entry.state === 'committed') && entry.updatedAt < input.orphanBefore))) return false;
+          if (entry.state !== 'delete_pending') db.prepare("UPDATE object_manifest SET state = 'delete_pending', delete_pending_at = ?, updated_at = ? WHERE tenant_id = ? AND hash = ?")
+            .run(input.now, input.now, tenant, hash);
+          return true;
+        }, () => {});
+        if (!tombstoned) continue;
+        const result = await this.coordinator.transactionSync((db) => {
+          const entry = readManifest(db, tenant, hash as ContentHash);
+          if (entry === undefined || entry.refCount !== 0 || this.ledger.hasReservedObject(tenant, entry.hash)
+            || entry.state !== 'delete_pending') return undefined;
+          const release = this.ledger.prepareCollectedObjectRelease(tenant, entry.hash, entry.byteSize, input.now);
+          db.prepare('DELETE FROM blob WHERE tenant_id = ? AND content_hash = ?').run(tenant, hash);
+          db.prepare("UPDATE object_manifest SET state = 'deleted', updated_at = ? WHERE tenant_id = ? AND hash = ?").run(input.now, tenant, hash);
+          return release;
+        }, release => release?.commit());
+        if (result !== undefined) { removed++; releasedBytes += result.releasedBytes; }
+      } catch (cause) { failures++; firstFailure ??= cause; }
+    }
+    const selected = candidates.slice(0, input.limit).filter(row => row.state === 'delete_pending');
+    const wrapped = selected.filter(row => row.hash <= cursor);
+    const first = selected.filter(row => row.hash > cursor);
+    this.#deleteCursor.set(tenant, wrapped.at(-1)?.hash ?? first.at(-1)?.hash ?? '');
+    const more = await this.coordinator.run(db => db.prepare(`SELECT 1 FROM object_manifest m WHERE ${predicate} LIMIT 1`)
+      .get(tenant, input.orphanBefore, JSON.stringify(this.ledger.reservedObjectHashes(tenant))) !== undefined);
+    const result = { removed, expired: 0, releasedBytes, more };
+    if (failures > 0) throw new CollectExpiredFailure(result, { cause: firstFailure }, failures);
+    return result;
+  }
 
   putManifest(tenant: TenantId, input: ObjectManifestInput): Promise<ObjectManifestEntry> {
     return this.coordinator.transaction((db) => putManifest(db, this.clock, tenant, input));
@@ -1285,8 +1358,9 @@ export function createSqliteEmbeddedStores(
   dependencies: { readonly clock: Clock; readonly crypto: CloudCrypto; readonly wake?: WakeConsumer },
 ): SqliteEmbeddedStores {
   const coordinator = new SqliteCoordinator(options.path, options.migration, dependencies.wake);
-  const objects = new SqliteObjectStore(coordinator, dependencies.clock);
-  const quota = new InMemoryQuotaStore(dependencies.clock, objects);
+  const ledger = new InMemoryStorageLedger(dependencies.clock);
+  const objects = new SqliteObjectStore(coordinator, dependencies.clock, ledger);
+  const quota = new InMemoryQuotaStore(dependencies.clock, objects, ledger);
   const mailbox = new SqliteMailboxStore(coordinator, dependencies.clock, quota);
   const tasks = new SqliteTaskAttemptStore(coordinator, dependencies.clock);
   const cancellations = new SqliteTaskCancellationStore(coordinator, dependencies.clock, quota);
@@ -1299,7 +1373,7 @@ export function createSqliteEmbeddedStores(
   const blobs = new SqliteCloudBlobStore(registry);
   const blobContentProxy = new SqliteBlobContentProxy(registry);
 
-  const inMemoryCore = createInMemoryCoreStores({ clock: dependencies.clock }).stores;
+  const inMemoryCore = createInMemoryCoreStores({ clock: dependencies.clock, objectBytes: 'metadata-only' }).stores;
   const core: CoreStores = {
     ...inMemoryCore,
     mailbox,
@@ -1311,13 +1385,14 @@ export function createSqliteEmbeddedStores(
     dependencies.crypto,
     objects,
     mailbox,
+    createInMemoryBlobBytes(dependencies.clock, dependencies.crypto),
   );
   const devices = new SqliteDeviceDirectory(coordinator);
   const pairing = new InMemoryPairingCodeStore(dependencies.clock, devices);
   const cloud: CloudStores = {
     ...inMemoryCloud.stores,
     devices,
-    pairingCodes: { issue: pairing.issue.bind(pairing) },
+    pairingCodes: { issue: pairing.issue.bind(pairing), collectExpired: pairing.collectExpired.bind(pairing) },
     pairing: { redeemAndRegister: pairing.redeemAndRegister.bind(pairing) },
     tasks,
     receipts: new SqliteRequestReceiptStore(coordinator, dependencies.clock),

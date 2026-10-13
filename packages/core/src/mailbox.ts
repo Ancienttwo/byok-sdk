@@ -1,3 +1,4 @@
+import type { CollectExpiredInput, CollectExpiredResult } from './retention';
 /**
  * Hosted mailbox contract (§12.7.3).
  *
@@ -124,7 +125,7 @@ export interface MailboxPage {
    * retained, which §12.7.5 requires.
    *
    * This is a READ of the retained window, never a second retention authority:
-   * `collectRetired` decides what is retained, this reports what it cost.
+   * `collectExpired` decides what is retained, this reports what it cost.
    */
   readonly recoverableFrom: number;
 }
@@ -161,20 +162,14 @@ export interface MailboxCursorState {
  * `timestamptz` comparison read differently is the worst place to guess — see
  * `time.ts`.
  */
-export interface MailboxRetentionInput {
-  readonly deviceId?: string;
+export interface MailboxCollectExpiredInput extends CollectExpiredInput {
   /** Acked rows appended before this instant are deleted. */
   readonly ackedBefore: string;
   /** Unacked rows appended before this instant move to `expired`, never deleted here. */
   readonly expireUnackedBefore: string;
 }
 
-export interface MailboxRetentionResult {
-  readonly deletedCount: number;
-  readonly expiredCount: number;
-  /** Report value only: usage is derived from rows, so nothing is released. */
-  readonly releasedBytes: bigint;
-}
+
 
 /**
  * Mailbox port. Tenant-first, async.
@@ -205,8 +200,8 @@ export interface MailboxStore {
   ): Promise<MailboxCursorState>;
   readCursor(tenant: TenantId, deviceId: string): Promise<MailboxCursorState>;
   /** Retention hook: delete acked rows, dead-letter unacked ones. */
-  collectRetired(
+  collectExpired(
     tenant: TenantId,
-    input: MailboxRetentionInput,
-  ): Promise<MailboxRetentionResult>;
+    input: MailboxCollectExpiredInput,
+  ): Promise<CollectExpiredResult>;
 }

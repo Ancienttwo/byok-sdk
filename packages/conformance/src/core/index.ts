@@ -14,3 +14,5 @@
  */
 export { runCoreConformance, withComposition } from './harness';
 export type { CoreCompositionFactory, CoreCompositionHandle } from './harness';
+
+export { runCoreRetentionConformance } from './retention';

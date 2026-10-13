@@ -9,6 +9,8 @@
  */
 
 export const CLOUD_ERROR_CODES = {
+  maintenance_invalid_input: 'maintenance_invalid_input',
+  maintenance_result_invalid: 'maintenance_result_invalid',
   /** A pairing code that is unknown, expired, or already redeemed (§6.1). */
   pairing_code_invalid: 'pairing_code_invalid',
   /** The composition handed a device row whose tenant is not a mintable `TenantId`. */

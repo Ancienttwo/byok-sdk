@@ -2,6 +2,8 @@ import { WakeScheduler } from './wakes/scheduler';
 import type { WakeRecord, WakeScheduleInput, WakeScheduleResult } from './wakes/types';
 export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedError } from './wakes/types';
 export type { DueWake, WakeRecord, WakeScheduleInput, WakeScheduleResult, WakeConsumer, WakeInputErrorCode } from './wakes/types';
+import { MaintenanceScheduler, assertMaintenanceInterval, DEFAULT_MAINTENANCE_INTERVAL_MS } from './maintenance-scheduler';
+import { resolveRetentionPolicy, DEFAULT_MAINTENANCE_LIMIT, ByokCloudError, type MaintenanceReport } from '@byok-sdk/cloud';
 import { Hono } from 'hono';
 import {
   agentHomeProjectionRequestKey,
@@ -40,7 +42,6 @@ import {
   type AgentMessageDispositionPayload,
   type TaskState,
 } from '@byok-sdk/protocol';
-import type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
 import { TaskEventRelay } from './relay';
 import { toMachineInfo, toTaskResult, toTaskSnapshot, taskStateOf } from './snapshot';
 import { composeFacadeStores, serverTenantId, DEFAULT_MAX_BLOB_SIZE_BYTES } from './stores';
@@ -108,8 +109,6 @@ export type { SteerRejectionCode } from '@byok-sdk/cloud';
  */
 export type { AccessTokenClaims, DeviceRecord, PairingCodeInfo, TenantId, TokenSigner } from '@byok-sdk/cloud';
 export { createHmacTokenSigner } from '@byok-sdk/cloud';
-/** Cutoffs and result of {@link ByokServer.mailbox.collectRetired}, owned by `@byok-sdk/core`. */
-export type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
 export { SqliteOwnershipError, SqliteSchemaError, SqliteUnavailableError } from './sqlite-support';
 export type { SqliteSchemaErrorCode } from './sqlite-support';
 export type { RateLimiterOptions } from './rate-limiter';
@@ -261,27 +260,7 @@ export interface ByokServer {
   devices: {
     revoke(deviceId: string): Promise<void>;
   };
-  /**
-   * Mailbox retention for this server's tenant — the host control-plane
-   * operation core defines (`MailboxStore.collectRetired`), forwarded verbatim.
-   *
-   * A pass-through, deliberately, and NOT a retention policy: the caller names
-   * both cutoffs, so this package invents no TTL, runs no timer, and holds no
-   * second opinion about when a device's undelivered work is declared lost.
-   * Nothing in `@byok-sdk/core`, `@byok-sdk/cloud` or this façade drives the
-   * sweep on its own, which is exactly why an embedder needs a way to reach it:
-   * without one, an embedded server retires nothing, ever, and the
-   * `cursor_too_old` floor can never move.
-   *
-   * Acked rows appended before `ackedBefore` are DELETED; unacked rows appended
-   * before `expireUnackedBefore` are dead-lettered as `expired` and stay
-   * visible, which is what moves `recoverableFrom` and turns a device polling
-   * from a lost cursor into a `409 cursor_too_old` resync instead of a silently
-   * short page. Both cutoffs must be canonical ISO-8601 UTC.
-   */
-  mailbox: {
-    collectRetired(input: MailboxRetentionInput): Promise<MailboxRetentionResult>;
-  };
+  maintenance: { runNow(): Promise<MaintenanceReport> };
   /**
    * Release what this instance holds: the relay's per-task feeds and their
    * reclamation timers, and the connection observations. Call it on shutdown so
@@ -323,6 +302,11 @@ export interface ByokServer {
  * ports remain process-local.
  */
 export function createByokServer(opts: CreateByokServerOptions): ByokServer {
+  const policy = resolveRetentionPolicy(opts.maintenance?.policy);
+  const maintenanceIntervalMs = opts.maintenance?.intervalMs ?? DEFAULT_MAINTENANCE_INTERVAL_MS;
+  assertMaintenanceInterval(maintenanceIntervalMs);
+  const maintenanceLimit = opts.maintenance?.limit ?? DEFAULT_MAINTENANCE_LIMIT;
+  if (!Number.isSafeInteger(maintenanceLimit) || maintenanceLimit < 1 || maintenanceLimit > 5000) throw new ByokCloudError('maintenance_invalid_input', 'Maintenance limit must be from 1 to 5000.');
   const startedAtMs = Date.now();
   const tenant = serverTenantId(opts.productId);
   const maxBlobSizeBytes = opts.maxBlobSizeBytes ?? DEFAULT_MAX_BLOB_SIZE_BYTES;
@@ -384,6 +368,15 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     longPollIntervalMs: longPollInterval(longPollHoldMs),
   });
 
+  const scheduler = new MaintenanceScheduler(async () => {
+    const report = await cloud.runMaintenance({ tenant, now: composition.clock.now().toISOString(), policy, limit: maintenanceLimit });
+    relay.emitServerEvent(report.steps.some(step => step.status === 'failed') ? { kind: 'maintenance.failed', report } : { kind: 'maintenance.completed', report });
+    return report;
+  }, maintenanceIntervalMs, (error) => relay.emitServerEvent({ kind: 'maintenance.failed', errorCode: error instanceof ByokCloudError ? error.code : 'maintenance_step_failed' }));
+  let closePromise: Promise<void> | undefined;
+  function close(): Promise<void> {
+    return closePromise ??= scheduler.close().finally(async () => { relay.stop(); await wakes.close(); await composition.close(); });
+  }
   const hono = new Hono();
   if (opts.healthzRoute === true) {
     // Deliberately UNAUTHENTICATED and minimal: a liveness probe must not need
@@ -835,17 +828,8 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       },
     },
 
-    mailbox: {
-      collectRetired(input: MailboxRetentionInput): Promise<MailboxRetentionResult> {
-        return composition.core.mailbox.collectRetired(tenant, input);
-      },
-    },
-
-    async close(): Promise<void> {
-      relay.stop();
-      await wakes.close();
-      await composition.close();
-    },
+    maintenance: { runNow: () => scheduler.runNow() },
+    close,
 
     async stats(): Promise<HubStats> {
       // Aggregate settled rows FIRST. A kernel-settled row cannot subsequently

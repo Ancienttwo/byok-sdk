@@ -1,3 +1,4 @@
+import { runMaintenanceAt } from './test-support';
 import { createHash } from 'node:crypto';
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -205,12 +206,9 @@ describe('Issues #112/#114/#115/#116/#117/#118/#120 reference-server regressions
     // volume — the count-bounded replay ring that used to move it is deleted,
     // not rebuilt (WP3B Step 0 case 7, packet §5 item 7).
     expect((await daemon.replay(0)).status).toBe(200);
-    const swept = await started.byok.mailbox.collectRetired({
-      deviceId: daemon.deviceId,
-      ackedBefore: '2999-01-01T00:00:00.000Z',
-      expireUnackedBefore: '2999-01-01T00:00:00.000Z',
-    });
-    expect(swept.expiredCount).toBe(1);
+    const report = await runMaintenanceAt(started.byok, '2999-01-01T00:00:00.000Z');
+    const swept = report.steps.find(step => step.step === 'mailbox');
+    expect(swept).toMatchObject({ status: 'ok', expired: 1 });
     expect(owed.taskId).toBeTruthy();
 
     const response = await daemon.replay(0);

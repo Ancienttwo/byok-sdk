@@ -41,8 +41,9 @@ function countingStores(stores: CloudStores, calls: string[]): CloudStores {
 function composeCloud(publicRouteLimiter: PublicRouteLimiter | undefined, calls: string[]) {
   const clock = createMutableClock();
   const crypto = createWebCrypto();
-  const core = createInMemoryCoreStores({ clock }).stores;
-  const composition = createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox);
+  const objectBytes = createInMemoryBlobBytes(clock, crypto);
+  const core = createInMemoryCoreStores({ clock, objectBytes }).stores;
+  const composition = createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox, objectBytes);
   return createByokCloud({
     core,
     cloud: countingStores(composition.stores, calls),

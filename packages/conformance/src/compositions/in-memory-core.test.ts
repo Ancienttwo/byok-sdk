@@ -12,7 +12,7 @@ import { runCoreConformance, type CoreCompositionFactory } from '../core/harness
 const inMemoryFactory: CoreCompositionFactory = {
   create() {
     const clock = createMutableClock();
-    const { stores } = createInMemoryCoreStores({ clock });
+    const { stores } = createInMemoryCoreStores({ clock, objectBytes: 'metadata-only' });
     return {
       stores,
       now: () => clock.now().toISOString(),

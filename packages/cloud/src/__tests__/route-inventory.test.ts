@@ -276,12 +276,14 @@ function declaration(...capabilities: CloudCapability[]): CapabilityDeclaration 
 function cloudWith(options: { readonly capabilities: CapabilityDeclaration; readonly withProxy: boolean }) {
   const clock = createMutableClock();
   const crypto = createWebCrypto();
-  const core = createInMemoryCoreStores({ clock }).stores;
+  const objectBytes = createInMemoryBlobBytes(clock, crypto);
+  const core = createInMemoryCoreStores({ clock, objectBytes }).stores;
   const composition = createInMemoryCloudStores(
     clock,
     crypto,
     core.objects,
     core.mailbox,
+    objectBytes,
   );
   return createByokCloud({
     core,

@@ -61,9 +61,8 @@ export {
 } from './cleanup';
 
 export type {
-  CleanupJobState,
   CloudCleanupErrorCode,
-  CloudCleanupResult,
+  ObjectStorageReconcileResult,
   DeadLetterPage,
   DeadLetterQuery,
   DeadLetterRef,

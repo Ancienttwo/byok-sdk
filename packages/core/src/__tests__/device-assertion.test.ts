@@ -740,9 +740,9 @@ describe('authenticateDeviceAssertion', () => {
       expiresAt: '2026-08-12T04:47:00.000Z',
     } as const;
     await expect(replay.consume(input)).resolves.toBe(true);
-    await expect(replay.deleteExpired(new Date('2026-08-12T04:46:59.999Z'), 1)).resolves.toBe(0);
+    await expect(replay.collectExpired(input.tenantId, { now: new Date('2026-08-12T04:46:59.999Z').toISOString(), limit: 1 })).resolves.toMatchObject({ removed: 0 });
     await expect(replay.consume(input)).resolves.toBe(false);
-    await expect(replay.deleteExpired(new Date(input.expiresAt), 1)).resolves.toBe(1);
+    await expect(replay.collectExpired(input.tenantId, { now: new Date(input.expiresAt).toISOString(), limit: 1 })).resolves.toMatchObject({ removed: 1 });
     await expect(replay.consume(input)).resolves.toBe(true);
   });
 });

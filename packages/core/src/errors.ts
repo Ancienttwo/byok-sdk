@@ -30,6 +30,8 @@
  * - the five `storage_*` codes (§12.7.7, see `quota.ts`)
  */
 export const CORE_ERROR_CODES = {
+  retention_input_invalid: 'retention_input_invalid',
+  retention_collect_failed: 'retention_collect_failed',
   // identity + content addressing
   tenant_id_invalid: 'tenant_id_invalid',
   content_hash_invalid: 'content_hash_invalid',

@@ -1,3 +1,4 @@
+import type { CollectExpiredInput, CollectExpiredResult } from '@byok-sdk/core';
 import { tenantKey, type TenantId } from '@byok-sdk/core';
 import { AgentEventOrUnknownSchema, type AgentEventOrUnknown } from '@byok-sdk/protocol';
 import { z } from 'zod';
@@ -62,6 +63,7 @@ export interface ActivityAppendInput {
 }
 
 export interface ActivityStore {
+  collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
   /**
    * `sourceEnvelopeId` is the per-envelope idempotency authority. Repeating
    * its exact canonical batch returns the existing tail; changing any batch

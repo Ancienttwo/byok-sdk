@@ -159,13 +159,21 @@ composition. It intentionally does not add methods to the conformance-certified
 `CloudBlobStore`: LIST/HEAD/DELETE, retention policy, dead-letter replay and
 usage rebuild are host operations, not device blob capabilities.
 
-The host calls `runTenant(tenant, jobId)` from its scheduler. Postgres stores the
-job/cursor readback, eligible objects are tombstoned before R2 DELETE, and
-manifest plus usage settle once after deletion. An R2 key without a manifest is
-first recorded as a pending witness and waits the tenant's orphan grace; it is
-never deleted from a single LIST observation. See
-`deploy/runbooks/cloud-cleanup.md` for metrics, alerts, replay/discard,
-crash recovery and rollback.
+The Host scheduler calls `cloud.runMaintenance({ tenant, now, policy, limit })`.
+Read the existing policy with `maintenance.readRetentionPolicy(tenant)` and
+pass it directly: its four fields use the kernel's bigint milliseconds.
+`createPostgresCoreStores` requires the real `objectStorage` configuration;
+standalone `PostgresObjectStore` requires a physical deletion authority.
+Each port has one bounded `collectExpired`, and each object consumes one
+shared retry/tombstone/delete budget. PG holds the same-hash manifest row
+across physical deletion and accounting settlement to prevent concurrent
+recreation from losing bytes. `cleanup_job` remains installed without writers.
+
+`reconcileObjectStorage(tenant)` is an explicit operator API. A previously
+untracked R2 key first becomes a pending witness and waits fresh orphan grace.
+See `deploy/runbooks/cloud-cleanup.md` for reports, scheduling, replay/discard,
+crash recovery and accounting repair. Identity receipts and redeemed pairing
+code rows remain protected; the production request receipt class is empty.
 
 `@byok-sdk/cloud` is a stateless handler package — it serves the frozen v1 device
 wire contract over ports and owns no storage. This package is one composition of

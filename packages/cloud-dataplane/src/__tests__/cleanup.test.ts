@@ -1,3 +1,6 @@
+import { createByokCloud, createWebCrypto, createHmacTokenSigner, type MaintenanceReport } from '@byok-sdk/cloud';
+import { createPostgresCoreStores } from '../stores/core';
+import { createPostgresCloudStores } from '../stores';
 /** S4B-c retention, tombstone, crash and reconciliation matrix. */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
@@ -181,7 +184,7 @@ async function configurePolicy(cleanup: PostgresCloudCleanup): Promise<void> {
 function interceptCleanupDelete(pool: Pool, beforeDelete: () => Promise<void>): Pool {
   let intercepted = false;
   return interceptClientQueries(pool, async (sql) => {
-    if (!intercepted && sql.includes('WITH deleted AS')) {
+    if (!intercepted && sql.includes('WITH acked AS')) {
       intercepted = true;
       await beforeDelete();
     }
@@ -193,7 +196,7 @@ function interceptClientQueries(
   beforeQuery: (sql: string) => Promise<void>,
 ): Pool {
   return {
-    query: pool.query.bind(pool),
+    query: async (...args: unknown[]) => { const query = args[0]; const sql = typeof query === 'string' ? query : ((query as { text?: string } | undefined)?.text ?? ''); await beforeQuery(sql); return Reflect.apply(pool.query, pool, args); },
     connect: async (): Promise<PoolClient> => {
       const client = await pool.connect();
       return new Proxy(client, {
@@ -216,6 +219,24 @@ function interceptClientQueries(
     },
   } as unknown as Pool;
 }
+
+async function maintenanceCloud(pool: Pool, clock: Clock, storage: R2ObjectMaintenance) {
+  const objectStorage = (await createObjectStorageScope()).config;
+  const core = createPostgresCoreStores({ pool, clock, objectStorage });
+  return createByokCloud({
+    core: { ...core, objects: new PostgresObjectStore(pool, clock, storage) },
+    cloud: createPostgresCloudStores({ pool, clock, crypto: createWebCrypto(), objectStorage }),
+    clock, crypto: createWebCrypto(), tokenSigner: createHmacTokenSigner(new Uint8Array(32).fill(7), clock),
+    capabilities: { schema: 'byok-capabilities-v1', version: 1, capabilities: [] },
+  });
+}
+function step(report: MaintenanceReport, name: string) {
+  const result = report.steps.find(entry => entry.step === name);
+  if (result === undefined) throw new Error('Missing maintenance step ' + name);
+  return result;
+}
+const bounds = (clock: Clock) => ({ now: clock.now().toISOString(), limit: 100, ackedBefore: new Date(clock.now().getTime() - 1000).toISOString(), expireUnackedBefore: new Date(clock.now().getTime() - 1000).toISOString() });
+const objectBounds = (clock: Clock, limit = 100) => ({ now: clock.now().toISOString(), limit, orphanBefore: new Date(clock.now().getTime() - 1000).toISOString() });
 
 describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
   it('retires acked mail atomically and exposes explicit dead-letter replay/discard', async () => {
@@ -274,13 +295,12 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       );
       clock.set('2026-01-01T00:00:02.000Z');
 
-      const result = await cleanup.runTenant(TENANT, 'retention-1');
-      expect(result.mailboxDeletedCount).toBe(1n);
-      expect(result.mailboxExpiredCount).toBe(1n);
-      expect(result.mailboxReleasedBytes).toBe(first.byteSize);
+      const cloud = await maintenanceCloud(scope.pool, clock, storage);
+      const result = await cloud.runMaintenance({ tenant: TENANT, now: clock.now().toISOString(), policy: await cleanup.readRetentionPolicy(TENANT) });
+      expect(step(result, 'mailbox')).toMatchObject({ removed: 1, expired: 1, releasedBytes: 0n });
       // Nonce, presence and approval tail. Request receipts are no longer
       // swept by hosted cleanup (#411), so `old-receipt` is retained below.
-      expect(result.ttlRowsDeleted).toBe(3n);
+      for (const name of ['nonces', 'presence', 'approvals']) expect(step(result, name)).toMatchObject({ status: 'ok', removed: 1 });
       expect((await mailbox.readUsage(TENANT)).bytes).toBe(second.byteSize);
       await expect(scope.pool.query(
         `SELECT key FROM device_request_receipts
@@ -330,7 +350,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
     }
   });
 
-  it('derives released mailbox bytes from the rows deleted after a concurrent ACK', async () => {
+  it('reports zero released mailbox bytes while deleting rows after a concurrent ACK', async () => {
     const scope = await createDataplaneScope(4);
     const clock = new MutableClock('2026-01-01T00:00:00.000Z');
     const storage = new FakeObjectMaintenance();
@@ -355,8 +375,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       await mailbox.recordDelivery(TENANT, { deviceId: 'device-race', deliveredSeq: first.seq });
       await mailbox.advanceCursor(TENANT, { deviceId: 'device-race', ackedSeq: first.seq });
 
-      const cleanup = new PostgresCloudCleanup({
-        pool: interceptCleanupDelete(scope.pool, async () => {
+      const collector = new PostgresMailboxStore( interceptCleanupDelete(scope.pool, async () => {
           await scope.pool.query(
             `UPDATE outbox SET state = 'acked'
               WHERE tenant_id = $1 AND device_id = 'device-race' AND seq = $2`,
@@ -364,14 +383,12 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
           );
         }),
         clock,
-        objectStorage: storage,
-      });
-      await configurePolicy(cleanup);
+      );
       clock.set('2026-01-01T00:00:02.000Z');
 
-      const result = await cleanup.runTenant(TENANT, 'retention-concurrent-ack');
-      expect(result.mailboxDeletedCount).toBe(2n);
-      expect(result.mailboxReleasedBytes).toBe(6n);
+      const result = await collector.collectExpired(TENANT, bounds(clock));
+      expect(result.removed).toBe(2);
+      expect(result.releasedBytes).toBe(0n);
       expect((await mailbox.readUsage(TENANT)).bytes).toBe(0n);
     } finally {
       await scope.dispose();
@@ -420,7 +437,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       });
       await configurePolicy(cleanup);
       clock.set('2026-01-01T00:00:02.000Z');
-      await cleanup.runTenant(TENANT, 'expire-replay-race');
+      await mailbox.collectExpired(TENANT, bounds(clock));
 
       const outcomes = await Promise.allSettled([
         cleanup.replayDeadLetter(TENANT, {
@@ -480,7 +497,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       const expirer = new PostgresCloudCleanup({ pool: scope.pool, clock, objectStorage: storage });
       await configurePolicy(expirer);
       clock.set('2026-01-01T00:00:02.000Z');
-      await expirer.runTenant(TENANT, 'expire-append-replay-race');
+      await mailbox.collectExpired(TENANT, bounds(clock));
 
       const cleanup = new PostgresCloudCleanup({
         pool: interceptClientQueries(scope.pool, async (sql) => {
@@ -528,7 +545,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
     try {
       await migrate(scope.pool, DEPLOY_SQL);
       const quota = new PostgresQuotaStore(scope.pool, clock);
-      const objects = new PostgresObjectStore(scope.pool, clock);
+      const objects = new PostgresObjectStore(scope.pool, clock, storage);
       await seedEntitlement(quota, 100n);
       await objects.putManifest(TENANT, {
         hash: HASH_A,
@@ -560,7 +577,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
     try {
       await migrate(scope.pool, DEPLOY_SQL);
       const quota = new PostgresQuotaStore(scope.pool, clock);
-      const objects = new PostgresObjectStore(scope.pool, clock);
+      const objects = new PostgresObjectStore(scope.pool, clock, storage);
       const cleanup = new PostgresCloudCleanup({
         pool: scope.pool,
         clock,
@@ -576,14 +593,14 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       storage.failingDeletes.add(HASH_A);
       clock.set('2026-01-01T00:00:02.000Z');
 
-      const first = await cleanup.runTenant(TENANT, 'poison-delete-1');
-      expect(first.objectsTombstoned).toBe(1n);
-      expect(first.operationErrors).toBeGreaterThan(0n);
+      const collector = new PostgresObjectStore(scope.pool, clock, storage);
+      await expect(collector.collectExpired(TENANT, objectBounds(clock, 1))).rejects.toMatchObject({ failures: 1, partial: { removed: 0, more: true } });
       expect(await objects.get(TENANT, HASH_A)).toMatchObject({ state: 'delete_pending' });
 
-      const second = await cleanup.runTenant(TENANT, 'poison-delete-2');
-      expect(second.objectsTombstoned).toBe(1n);
-      expect(second.objectsDeleted).toBe(1n);
+      const retry = await collector.collectExpired(TENANT, objectBounds(clock, 1)).catch(error => error.partial);
+      // The first pass selected a fresh row, so one failed retry precedes the fresh-only pass.
+      expect(retry).toMatchObject({ removed: 0, more: true });
+      expect(await collector.collectExpired(TENANT, objectBounds(clock, 1))).toMatchObject({ removed: 1, releasedBytes: 5n, more: true });
       expect(await objects.get(TENANT, HASH_A)).toMatchObject({ state: 'delete_pending' });
       expect(await objects.get(TENANT, HASH_B)).toMatchObject({ state: 'deleted' });
       expect(storage.objects.has(`${TENANT}/${HASH_B}`)).toBe(false);
@@ -599,7 +616,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
     try {
       await migrate(scope.pool, DEPLOY_SQL);
       const quota = new PostgresQuotaStore(scope.pool, clock);
-      const objects = new PostgresObjectStore(scope.pool, clock);
+      const objects = new PostgresObjectStore(scope.pool, clock, storage);
       const cleanup = new PostgresCloudCleanup({ pool: scope.pool, clock, objectStorage: storage });
       await seedEntitlement(quota, 10n);
       await configurePolicy(cleanup);
@@ -636,9 +653,9 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       });
 
       clock.set('2026-01-01T00:00:02.000Z');
-      const result = await cleanup.runTenant(TENANT, 'gc-hard-limit');
-      expect(result.objectsTombstoned).toBe(1n);
-      expect(result.objectsDeleted).toBe(1n);
+      const collector = new PostgresObjectStore(scope.pool, clock, storage);
+      const result = await collector.collectExpired(TENANT, objectBounds(clock));
+      expect(result).toMatchObject({ removed: 1, releasedBytes: 5n });
       expect(await objects.get(TENANT, HASH_A)).toMatchObject({ state: 'committed', refCount: 1 });
       expect(await objects.get(TENANT, HASH_B)).toMatchObject({ state: 'deleted' });
       expect(storage.objects.has(`${TENANT}/${HASH_A}`)).toBe(true);
@@ -648,8 +665,8 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
         objectCount: 1n,
       });
 
-      const replay = await cleanup.runTenant(TENANT, 'gc-hard-limit');
-      expect(replay).toEqual(result);
+      const replay = await collector.collectExpired(TENANT, objectBounds(clock));
+      expect(replay).toEqual({ removed: 0, expired: 0, releasedBytes: 0n, more: false });
       expect((await quota.readUsage(TENANT)).committedObjectBytes).toBe(5n);
 
       await scope.pool.query(
@@ -674,7 +691,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
     try {
       await migrate(scope.pool, DEPLOY_SQL);
       const quota = new PostgresQuotaStore(scope.pool, clock);
-      const objects = new PostgresObjectStore(scope.pool, clock);
+      const objects = new PostgresObjectStore(scope.pool, clock, storage);
       const cleanup = new PostgresCloudCleanup({ pool: scope.pool, clock, objectStorage: storage });
       await seedEntitlement(quota, 100n);
       await configurePolicy(cleanup);
@@ -684,28 +701,27 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
 
       storage.deleteThenFail = true;
       storage.inspectionFailure = true;
-      await expect(cleanup.runTenant(TENANT, 'crash-delete')).rejects.toThrow('injected HEAD outage');
+      const collector = new PostgresObjectStore(scope.pool, clock, storage);
+      await expect(collector.collectExpired(TENANT, objectBounds(clock))).rejects.toMatchObject({ failures: 1, partial: { removed: 0 } });
       expect(await objects.get(TENANT, HASH_A)).toMatchObject({ state: 'delete_pending' });
       expect((await quota.readUsage(TENANT)).committedObjectBytes).toBe(7n);
 
       storage.deleteThenFail = false;
       storage.inspectionFailure = false;
-      const recovered = await cleanup.runTenant(TENANT, 'recover-delete');
-      expect(recovered.objectsDeleted).toBe(1n);
+      const recovered = await collector.collectExpired(TENANT, objectBounds(clock));
+      expect(recovered.removed).toBe(1);
       expect(await objects.get(TENANT, HASH_A)).toMatchObject({ state: 'deleted' });
       expect((await quota.readUsage(TENANT)).committedObjectBytes).toBe(0n);
 
       storage.put(TENANT, HASH_C, 11n, 'application/octet-stream');
-      const witnessed = await cleanup.runTenant(TENANT, 'witness-orphan');
+      const witnessed = await cleanup.reconcileObjectStorage(TENANT);
       expect(witnessed.orphanWitnessesCreated).toBe(1n);
       expect(await objects.get(TENANT, HASH_C)).toMatchObject({ state: 'pending' });
       expect(storage.objects.has(`${TENANT}/${HASH_C}`)).toBe(true);
 
       clock.set('2026-01-01T00:00:04.000Z');
-      const collected = await cleanup.runTenant(TENANT, 'collect-witness');
-      expect(collected.objectsTombstoned).toBe(1n);
-      expect(collected.objectsDeleted).toBe(1n);
-      expect(collected.objectReleasedBytes).toBe(0n);
+      const collected = await collector.collectExpired(TENANT, objectBounds(clock));
+      expect(collected).toMatchObject({ removed: 1, releasedBytes: 0n });
       expect(await objects.get(TENANT, HASH_C)).toMatchObject({ state: 'deleted' });
     } finally {
       await scope.dispose();
@@ -719,14 +735,14 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
     try {
       await migrate(scope.pool, DEPLOY_SQL);
       const quota = new PostgresQuotaStore(scope.pool, clock);
-      const objects = new PostgresObjectStore(scope.pool, clock);
+      const objects = new PostgresObjectStore(scope.pool, clock, storage);
       const cleanup = new PostgresCloudCleanup({ pool: scope.pool, clock, objectStorage: storage });
       await seedEntitlement(quota, 100n);
       await configurePolicy(cleanup);
       await seedCommittedObject(quota, objects, HASH_A, 7n, 'reservation-a');
       await objects.addReference(TENANT, { hash: HASH_A, refKind: 'truth', refId: 'truth-a' });
 
-      const result = await cleanup.runTenant(TENANT, 'missing-object');
+      const result = await cleanup.reconcileObjectStorage(TENANT);
       expect(result.missingObjects).toBe(1n);
       expect(await objects.get(TENANT, HASH_A)).toMatchObject({ state: 'committed' });
       expect((await quota.readUsage(TENANT)).committedObjectBytes).toBe(7n);
@@ -765,12 +781,9 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       await mailbox.advanceCursor(TENANT, { deviceId: 'device-production', ackedSeq: first.seq });
       clock.set('2026-01-01T00:00:02.000Z');
 
-      const result = await cleanup.runTenant(TENANT, 'production-path');
+      const result = await mailbox.collectExpired(TENANT, bounds(clock));
       expect(result).toMatchObject({
-        state: 'completed',
-        mailboxDeletedCount: 1n,
-        mailboxExpiredCount: 1n,
-        mailboxReleasedBytes: first.byteSize,
+        removed: 1, expired: 1, releasedBytes: 0n,
       });
       // The dead letter still counts until an operator discards it.
       expect((await mailbox.readUsage(TENANT)).bytes).toBe(second.byteSize);
@@ -887,8 +900,10 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       await mailbox.advanceCursor(TENANT, { deviceId: 'device-a', ackedSeq: acked.seq });
       clock.set('2026-01-01T00:00:02.000Z');
 
-      const result = await cleanup.runTenant(TENANT, 'receipt-families');
-      expect(result).toMatchObject({ state: 'completed', mailboxDeletedCount: 1n });
+      const cloud = await maintenanceCloud(scope.pool, clock, storage);
+      const result = await cloud.runMaintenance({ tenant: TENANT, now: clock.now().toISOString(), policy: await cleanup.readRetentionPolicy(TENANT) });
+      expect(step(result, 'mailbox')).toMatchObject({ status: 'ok', removed: 1 });
+      expect(step(result, 'receipts')).toMatchObject({ status: 'ok', removed: 0 });
       const retained = await scope.pool.query<{ readonly key: string }>(
         'SELECT key FROM device_request_receipts WHERE tenant_id = $1 ORDER BY key',
         [TENANT],
@@ -917,7 +932,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
         materialize: replayableOffer(15),
       });
       clock.set('2026-01-01T00:00:02.000Z');
-      await cleanup.runTenant(TENANT, 'replay-limit-expire');
+      await mailbox.collectExpired(TENANT, bounds(clock));
 
       // The dead letter fills the mailbox, so its clone cannot fit.
       await quota.writeEntitlement(TENANT, {

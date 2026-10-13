@@ -1,3 +1,4 @@
+import { assertCollectExpiredInput, type CollectExpiredResult } from '../retention';
 /**
  * In-memory {@link MailboxStore} reference (§12.7.3).
  *
@@ -19,8 +20,7 @@ import type {
   MailboxPage,
   MailboxReadQuery,
   MailboxRecordDeliveryInput,
-  MailboxRetentionInput,
-  MailboxRetentionResult,
+  MailboxCollectExpiredInput,
   MailboxStore,
   MailboxUsage,
 } from '../mailbox';
@@ -193,45 +193,39 @@ export class InMemoryMailboxStore implements MailboxStore {
     return this.#cursorState(tenant, deviceId, device);
   }
 
-  async collectRetired(
-    tenant: TenantId,
-    input: MailboxRetentionInput,
-  ): Promise<MailboxRetentionResult> {
-    // Both cutoffs are compared against `appendedAt` as strings; the canonical
-    // form is what makes that a time comparison. Validate before the sweep so a
-    // malformed cutoff deletes nothing rather than a wrong prefix of history.
+  async collectExpired(tenant: TenantId, input: MailboxCollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
     assertCanonicalTimestamp(input.ackedBefore, 'ackedBefore');
     assertCanonicalTimestamp(input.expireUnackedBefore, 'expireUnackedBefore');
-
-    let deletedCount = 0;
-    let expiredCount = 0;
-    let releasedBytes = 0n;
-
-    for (const [key, device] of this.#devices.entries()) {
-      if (!key.startsWith(tenantKey(tenant, ''))) continue;
-      if (input.deviceId !== undefined && key !== tenantKey(tenant, input.deviceId)) continue;
-
-      for (let index = device.messages.length - 1; index >= 0; index -= 1) {
-        const message = device.messages[index]!;
-        if (message.state === 'acked' && message.appendedAt < input.ackedBefore) {
-          device.messages.splice(index, 1);
-          device.byMessageId.delete(message.messageId);
-          deletedCount += 1;
-          releasedBytes += message.byteSize;
-          continue;
-        }
-        if (message.state === 'pending' && message.appendedAt < input.expireUnackedBefore) {
-          // Dead-letter, never delete: §12.7.5 requires an unacked row that
-          // aged out to stay visible instead of disappearing silently.
-          const expired: MailboxMessage = { ...message, state: 'expired' };
-          device.messages[index] = expired;
-          device.byMessageId.set(expired.messageId, expired);
-          expiredCount += 1;
-        }
+    let removed = 0, expired = 0, more = false;
+    phases: for (const phase of ['acked', 'pending'] as const) {
+      for (const [key, device] of this.#devices) {
+        if (!key.startsWith(tenantKey(tenant, ''))) continue;
+        const collected = device.mutationTail.then(() => {
+          for (let index = 0; index < device.messages.length;) {
+            const message = device.messages[index]!;
+            const cutoff = phase === 'acked' ? input.ackedBefore : input.expireUnackedBefore;
+            if (message.state !== phase || message.appendedAt >= cutoff) { index++; continue; }
+            if (removed + expired === input.limit) { more = true; return; }
+            if (phase === 'acked') {
+              device.messages.splice(index, 1);
+              device.byMessageId.delete(message.messageId);
+              removed++;
+            } else {
+              const retired: MailboxMessage = { ...message, state: 'expired' };
+              device.messages[index] = retired;
+              device.byMessageId.set(retired.messageId, retired);
+              expired++; index++;
+            }
+          }
+        });
+        device.mutationTail = collected.then(() => undefined, () => undefined);
+        await collected;
+        if (more) break phases;
       }
     }
-
-    return { deletedCount, expiredCount, releasedBytes };
+    // Mailbox usage is the retained rows, never a mutable accounting counter.
+    return { removed, expired, releasedBytes: 0n, more };
   }
 
   async #mailboxLimit(tenant: TenantId): Promise<bigint> {
