@@ -1,6 +1,6 @@
 # ADR-036：云端 Generic Agent —— 平台 key only、BYOK 仅本地、DO 工作调用（最简）、Bot 模式方案 A、直接替换 Aiphabee chat Workflow
 
-> **来源**：Owner Aimpact 于 2026-10-03 04:53–05:01 HKT（D1–D7）与 05:16 HKT（D8–D10） 对 #258（`pi-1.0-durable` durable slice 1）vs Cloudflare PiHarness 差距分析的裁决；完整分析与证据见 [`docs/researches/2026-10-03_pi-harness-cf-gap-and-cloud-generic-agent.md`](../researches/2026-10-03_pi-harness-cf-gap-and-cloud-generic-agent.md)（「D. 已定决策」节为本 ADR 的逐字来源）。
+> **来源**：Owner Aimpact 于 2026-10-03 04:53–05:01 HKT（D1–D7）与 05:16 HKT（D8–D10） 对 #258（`pi-1.0-durable` durable slice 1）vs Cloudflare PiHarness 差距分析的裁决；完整分析与证据见内部研究稿 `docs/researches/2026-10-03_pi-harness-cf-gap-and-cloud-generic-agent.md`（未纳入版本库；「D. 已定决策」节为本 ADR 的逐字来源）。
 > **关联**：ADR-035（public package topology，DO adapter 的包归属待其框架内另定）、Draft PR #258（`pi-1.0-durable`）、cloudflare/agents PR #2451（pi harness → pi-durable 1.0）、`docs/researches/2026-10-02_pi-durable-slice2-prep.md`。
 > **范围**：本 ADR 只记录已定决策 D1–D10；不授权任何切片（2a–2e、3a–3d、4a–4e）的实现，不修改代码、spec、manifest 或 lockfile。研究稿中其余建议与开放问题（§11）不属于本 ADR。
 
@@ -43,7 +43,7 @@ Aiphabee 并非首次引入 byok-sdk：其本地通路已经通过 `packages/byo
 
 ## 修订说明（2026-10-13）
 
-- 来源行与关联行引用的研究稿（`docs/researches/2026-10-03_pi-harness-cf-gap-and-cloud-generic-agent.md`、`docs/researches/2026-10-02_pi-durable-slice2-prep.md`）在 #390 后不再跟踪，干净 checkout 中这些链接失效。决策以本 ADR 正文为准。
+- 来源行与关联行引用的研究稿（`docs/researches/2026-10-03_pi-harness-cf-gap-and-cloud-generic-agent.md`、`docs/researches/2026-10-02_pi-durable-slice2-prep.md`）在 #390 后不再跟踪，来源行已改为纯文本路径。决策以本 ADR 正文为准。
 - Status 中的「实现未开始」已过时：`@byok-sdk/cloud-do` 自 0.24.0 起作为公开 package 发布（`packages/cloud-do/package.json` 带 `publishConfig.access: public`，见 `docs/releases/v0.24.0.md`）。其余切片的落地情况没有核实。
 - D7 的内联修订链接改指 [ADR-038](adr-2026-10-13-bot-platform.md)（文件已从 `adr-2026-10-13-byok-cost-and-deployment.md` 改名）。
 - D1 的 Bot 模式（每次唤醒 = 新执行）是 ADR-038 中 Bot 协作决策的基础：Bot 协作由 Host 编排 fresh execution。
