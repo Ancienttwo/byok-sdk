@@ -53,7 +53,19 @@
   unreleased `noHold` events-poll flag (`EVENTS_POLL_NO_HOLD_PARAM`, added
   after 0.26.1) is removed: readiness no longer waits on a poll, so nothing
   sends it. Freeze golden regenerated; `PROTOCOL_VERSION` is unchanged.
-
+- **Fixed (client, Windows)** — every owned runtime tree now gets its own
+  kill-on-close Job Object, held until disposal proves the tree gone, instead
+  of one job per daemon. An empty job nests under the job its first process is
+  in, and a Node or Bun root puts itself into a private job of its own at its
+  first spawn; when the first assignment landed after that (the cold `koffi`
+  load took 44.6 ms on windows-latest), the shared job sat under that root's
+  private job, and after that root exited every later runtime start failed with
+  `Win32JobObjectFailure { step: 'AssignProcessToJobObject', win32Code: 87 }`.
+  A failed assignment of a live root is still refused, and a daemon death still
+  closes every job and kills every live owned tree. **Public type change:** the
+  `jobObject` seam on `ClaudeProcessClientOptions` and `PiRpcClientOptions` now
+  returns the tree's job, `assign(pid): Promise<{ release(): void }>` (was
+  `Promise<void>`).
 - **Changed (client, cloud-do)** — update the official Pi closure from 1.1.0 to
   1.2.0 (all nine `@earendil-works` packages, upstream commit
   `06a466935536f8c9bcacb2d5efc0fc021be1bdff`, provenance re-attested).

@@ -381,11 +381,14 @@ export function buildPiProviderChildEnvironment(options: {
 // PowerShell 7 session puts its own Microsoft.PowerShell.Security first)
 // therefore cannot break the query, and no per-user module analysis runs. The
 // request is decoded from stdin as UTF-8 explicitly, independent of the console
-// code page, so a non-ASCII path reaches the API unchanged.
+// code page, so a non-ASCII path reaches the API unchanged. The serializer
+// assembly loads in its own try: a missing assembly throws FileNotFoundException,
+// which the outer mapping would misreport as path_not_found, so it exits 5 and
+// takes the generic 'unexpected' cause.
 const WINDOWS_PROJECTION_ACL_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
+try { [void][System.Reflection.Assembly]::Load('System.Web.Extensions, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35') } catch { exit 5 }
 try {
-  [void][System.Reflection.Assembly]::Load('System.Web.Extensions, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35')
   $serializer = [System.Web.Script.Serialization.JavaScriptSerializer]::new()
   $requestText = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false, $true)).ReadToEnd()
   try { $request = $serializer.DeserializeObject($requestText) } catch { exit 2 }

@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -36,6 +38,9 @@ type NativePhase =
   | 'cleanup_clear';
 
 let activePhase: NativePhase | undefined;
+// The environment child processes inherit; a test may pin it before it moves
+// this process's own TEMP.
+let childEnvironment: NodeJS.ProcessEnv = process.env;
 
 function commandTimeoutMs(phase: NativePhase): number {
   return phase === 'initial_read' ? COLD_COMMAND_TIMEOUT_MS : COMMAND_TIMEOUT_MS;
@@ -57,7 +62,7 @@ const runBoundedNativeCommand: DeviceCommandRunner = (executable, args, stdin) =
 
     const commandTimeout = commandTimeoutMs(phase);
     const child = spawn(executable, [...args], {
-      env: process.env,
+      env: childEnvironment,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -170,4 +175,32 @@ describe.skipIf(!nativeWindowsSmoke)('Windows Credential Manager native smoke', 
       }
     }
   }, TEST_TIMEOUT_MS);
+
+  it('compiles the bridge under a non-ASCII temp directory', async () => {
+    // The compiler learns its output path only from stdin. Read with the
+    // console code page, a non-ASCII temp directory is decoded into garbled
+    // characters (cp437 turns U+8D26 into three box-drawing/symbol characters)
+    // and the compile writes nowhere (or somewhere else); read as UTF-8 it
+    // round-trips.
+    const root = await mkdtemp(path.join(os.tmpdir(), 'byok-\u8d26\u6237-'));
+    const saved = { TEMP: process.env.TEMP, TMP: process.env.TMP };
+    // Children keep the ASCII temp directory their compiler already handles;
+    // only the bridge output path, which reaches the compiler on stdin, is non-ASCII.
+    childEnvironment = { ...process.env };
+    process.env.TEMP = root;
+    process.env.TMP = root;
+    try {
+      expect(os.tmpdir()).toBe(root);
+      const productId = `windows-credential-native-unicode-${process.pid}-${Date.now()}`;
+      const store = new DeviceCredentialStore({ productId, commandRunner: runBoundedNativeCommand });
+      expect(await runPhase('initial_read', () => store.read(), COLD_PHASE_TIMEOUT_MS)).toBeUndefined();
+    } finally {
+      childEnvironment = process.env;
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      await rm(root, { recursive: true, force: true });
+    }
+  }, COLD_PHASE_TIMEOUT_MS + 30_000);
 });

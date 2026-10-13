@@ -126,6 +126,19 @@ describe('WindowsCredentialManagerSecretStore.get', () => {
     expect(script).not.toMatch(/Exception\.Message|Out-String|ErrorText/u);
   });
 
+  it('reads the request from stdin as UTF-8, not the console code page', () => {
+    runner.queue({ exitCode: 44 });
+    void store().get('model-openai-api-key');
+    const script = Buffer.from(
+      runner.invocations[0]?.args[4] ?? '',
+      'base64',
+    ).toString('utf16le');
+    expect(script).toContain(
+      '$request = ([System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false, $true)).ReadToEnd() | ConvertFrom-Json)',
+    );
+    expect(script).not.toContain('[Console]::In');
+  });
+
   it('treats exit code 44 as an absent secret', async () => {
     runner.queue({ exitCode: 44 });
     await expect(store().get('model-openai-api-key')).resolves.toBeUndefined();

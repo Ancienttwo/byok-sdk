@@ -13,10 +13,10 @@ import path from 'node:path';
  *   `it.skipIf` themselves, so a developer without bun sees a visible skip,
  *   not a body that returns early and reports as a pass.
  * - `BYOK_REQUIRE_BUN=1` → absence is a hard failure thrown from the
- *   importing suite's module scope instead. That flag is set by exactly one
- *   CI job (build-test, which also resolves the real bun path into
- *   `BYOK_TEST_BUN_BIN`), so the skip path can never be how that job stays
- *   green.
+ *   importing suite's module scope instead. That flag is set only by CI
+ *   jobs that also resolve the real bun path into `BYOK_TEST_BUN_BIN`
+ *   (build-test and the Windows standard-user leg), so the skip path can never
+ *   be how those jobs stay green.
  * - `BYOK_REQUIRE_BUN=1` with `BYOK_TEST_BUN_BIN` set is strict: the named
  *   path is the entire candidate set. Missing or not a file → a throw naming
  *   that exact path. The helper must never scan on from a bad explicit path

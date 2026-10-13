@@ -192,7 +192,7 @@ describe('host-exit registry', () => {
       child,
       label: 'win32-target',
       platform: 'win32',
-      jobObject: { assign: () => Promise.resolve() },
+      jobObject: { assign: () => Promise.resolve({ release() {} }) },
       spawnSyncFn: ((command: string, args: readonly string[], options: unknown) => {
         invocations.push({ command, args, options });
         return { status: 0 } as never;

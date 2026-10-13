@@ -76,7 +76,7 @@ interface FailClosedClient {
   /** stdout the fake runtime emits at once: the frame the client would otherwise treat as ready. */
   readyFrame: string;
   /** Drives the client to its first awaited start operation and returns whatever it settles with. */
-  start(spawnFn: unknown, jobObject: { assign(pid: number): Promise<void> }): Promise<unknown>;
+  start(spawnFn: unknown, jobObject: { assign(pid: number): Promise<{ release(): void }> }): Promise<unknown>;
 }
 
 const owned: ChildProcess[] = [];
@@ -156,7 +156,7 @@ describe('runtime clients fail closed when the win32 job object cannot take the 
     const pids: number[] = [];
 
     const settled = await start(fakeRuntimeSpawn(readyFrame, pids), {
-      assign: () => new Promise<void>((_resolve, reject) => {
+      assign: () => new Promise<{ release(): void }>((_resolve, reject) => {
         setTimeout(() => reject(failure), ADOPTION_REJECT_DELAY_MS);
       }),
     });

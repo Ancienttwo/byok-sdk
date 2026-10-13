@@ -25,8 +25,8 @@ export interface ClaudeProcessClientOptions {
    * must never silently reroute the taskkill sweep on a real host.
    */
   platform?: NodeJS.Platform;
-  /** DI seam for the win32 job-object backstop; see `../win32-job-object.ts`. */
-  jobObject?: { assign(pid: number): Promise<void> };
+  /** DI seam for the win32 job-object backstop; see `../win32-job-object.ts`. `release()` is called by this client's disposal once the tree is proved gone. */
+  jobObject?: { assign(pid: number): Promise<{ release(): void }> };
 }
 
 // Option-owned hooks keep control-plane state out of the public client API.
