@@ -89,7 +89,7 @@ post-freeze the way pre-freeze M0→M1 had (§10) — a change of this shape is 
 new major version, full stop.
 
 **Scoped input-preparation cut:** the Owner-approved
-prepared memory contract（`docs/researches/2026-09-28-prepared-agent-memory-contract.md`）（#390 后不再跟踪）
+prepared memory contract (`docs/researches/2026-09-28-prepared-agent-memory-contract.md`, untracked since #390)
 extends the earlier official-Pi exception to input-preparation v8. The strict
 preparation request, receipt binding and `task.offer_prepared` require explicit
 `agentMemory: 'none' | 'read' | 'read-write'`. `INPUT_PREPARATION_WIRE_VERSION` and
@@ -178,7 +178,7 @@ of stripping it. Full contract, cap semantics, and the
 `document`-vs-`artifactRefs` boundary: §7.2. The golden fixtures
 (`packages/protocol/src/__tests__/golden/v1.frozen.json`, since replaced by `v2.frozen.json`) were regenerated
 deliberately for the fingerprint change, with the additive-only diff
-recorded in `tasks/notes/20260812-0351-result-document-channel.notes.md`（#390 后不再跟踪）;
+recorded in `tasks/notes/20260812-0351-result-document-channel.notes.md` (untracked since #390);
 the historical envelope corpus (`v1.envelopes.ndjson`) was NOT touched,
 since a pre-`document` peer's committed bytes must keep parsing unchanged —
 which is exactly what proves the change additive.
@@ -781,7 +781,7 @@ operation, revisions and content never ride the mailbox or the device journal.
 The daemon consumes the notice ahead of the journal append and never records
 it there. `agentRef` only routes the Agent-home lease and the local ledger; it
 must equal the fetched intent's `agentRef`. Design record:
-device memory CAS contract（`docs/researches/2026-09-28-hermes-device-memory-cas-contract.md`）（#390 后不再跟踪）.
+device memory CAS contract (`docs/researches/2026-09-28-hermes-device-memory-cas-contract.md`, untracked since #390).
 
 **Intent and digest.** The immutable intent (`AgentMemoryIntentV1Schema`) is
 `{ intentId, agentRef, path, operation: replace | delete, baseRevision,
