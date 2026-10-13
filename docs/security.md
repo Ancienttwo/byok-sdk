@@ -235,7 +235,13 @@ test runs Pi's real bash `env` in the launched host and reads the host's
 `ps eww` / `/proc/<pid>/environ`; neither contains the key. Only the prepared
 host receives `PI_PROVIDER_API_KEY` in its environment, and it registers MCP
 tools only. Extensions loaded into the rpc host share its process and are not
-isolated from Pi's in-memory key.
+isolated from Pi's in-memory key. Pi subagents are unavailable in this lane:
+the vendored subagents extension starts each child itself, with a copy of the
+host environment and its own stdio, so the SDK has no private channel to hand
+the key across. A subagent print or runner child that finds the `byok:rpc-ipc`
+marker in its projection refuses with `byok_subagent_credential_unavailable`
+before any session or provider request exists, so it never sends the marker
+as a key.
 The stable Pi session path is host configuration: the launcher creates a
 missing directory owner-only, but never changes permissions on an existing
 directory, so a mistaken path cannot become a chmod sink. On POSIX, an

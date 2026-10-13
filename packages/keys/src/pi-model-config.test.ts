@@ -19,7 +19,7 @@ const profileInput = {
 describe('explicit Pi model authority', () => {
   it('projects exact settings and chooses the declared thinking level', () => {
     const profile = parseModelProviderProfile(profileInput);
-    const projection = buildPiProviderProjection(profile) as any;
+    const projection = buildPiProviderProjection(profile, 'pi-rpc') as any;
     const { thinkingLevel, ...settings } = PI_MODEL_FIXTURE;
     expect(projection.providers['byok-sdk-test-zai'].models).toEqual([
       { id: profile.model, name: profile.display_name, input: ['text'], ...settings },
@@ -32,7 +32,7 @@ describe('explicit Pi model authority', () => {
   it('rejects Pi admission without explicit settings rather than applying native defaults', () => {
     const { pi_model: _, ...directProfile } = profileInput;
     const profile = parseModelProviderProfile(directProfile);
-    expect(() => buildPiProviderProjection(profile)).toThrow(/requires explicit pi_model/);
+    expect(() => buildPiProviderProjection(profile, 'pi-rpc')).toThrow(/requires explicit pi_model/);
     expect(() => buildPiProviderArgs(profile, ['--mode', 'rpc'])).toThrow(/requires explicit pi_model/);
   });
 

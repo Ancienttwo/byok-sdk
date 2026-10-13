@@ -57,9 +57,13 @@ describe('pi-rpc BYOK key custody (#385)', () => {
     expect(projection.providers['byok-sdk-probe']!.apiKey).toBe(PI_RPC_IPC_KEY_MARKER);
   });
 
-  it.skipIf(BUN_BIN === undefined || process.platform === 'win32')('real Pi bash `env` and the host process environment never see the provider key, and the provider still authenticates with it', async () => {
+  type Respond = (res: ServerResponse, ordinal: number) => void;
+
+  /** One BYOK pi-rpc operation through the adapter, the real keys launch sequence and the built host. */
+  async function runLane(instruction: string, respond: Respond, prepareHome?: (home: string) => Promise<void>) {
     const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-385-'))); roots.push(root);
     const control = path.join(root, 'control'), home = path.join(root, 'home'); await fs.mkdir(control); await fs.mkdir(home);
+    await prepareHome?.(home);
     const launcherRoot = path.join(root, 'launcher'); await fs.mkdir(launcherRoot);
     await fs.symlink(path.resolve(clientRoot, '../keys/node_modules'), path.join(launcherRoot, 'node_modules'), 'junction');
     const launcher = path.join(launcherRoot, 'launcher.mjs');
@@ -72,14 +76,12 @@ describe('pi-rpc BYOK key custody (#385)', () => {
       let body = ''; req.on('data', chunk => { body += chunk; });
       req.on('end', () => {
         received.push({ authorization: req.headers.authorization, body });
-        // The host is alive while it waits on this response: read the environment
-        // any same-user process can introspect.
-        hostEnvironments.push(process.platform === 'darwin'
-          ? execFileSync('ps', ['eww', '-p', String(hostPid())], { encoding: 'utf8' })
-          : readFileSync(`/proc/${hostPid()}/environ`, 'utf8'));
-        if (received.length === 1) {
-          stream(res, { role: 'assistant', tool_calls: [{ index: 0, id: 'call-env', type: 'function', function: { name: 'bash', arguments: JSON.stringify({ command: 'env' }) } }] }, 'tool_calls');
-        } else stream(res, { role: 'assistant', content: 'done' }, 'stop');
+        // The host is alive while it waits on this response: read the
+        // environment any same-user process can introspect. Windows has no
+        // equivalent of `ps eww` / /proc/<pid>/environ without native code.
+        if (process.platform === 'darwin') hostEnvironments.push(execFileSync('ps', ['eww', '-p', String(hostPid())], { encoding: 'utf8' }));
+        else if (process.platform === 'linux') hostEnvironments.push(readFileSync(`/proc/${hostPid()}/environ`, 'utf8'));
+        respond(res, received.length);
       });
     });
     servers.push(server); await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -92,15 +94,27 @@ describe('pi-rpc BYOK key custody (#385)', () => {
 
     const adapter = new PiAdapter({ byokLauncher: { command: process.execPath, args: [launcher], profileDbPath, sessionDir: path.join(root, 'sessions') } });
     const session = await startPreparedOperation(adapter, {
-      instruction: 'Print the environment.',
+      instruction,
       dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'probe', modelId: 'probe' },
     }, { workspaceDir: home, env: buildRuntimeEnv({ ambient: process.env }) });
     sessions.push(session);
     const events: AgentEvent[] = [];
     for await (const event of session.events) { events.push(event); if (event.type === 'turn_end' || event.type === 'error') break; }
+    const launches = readFileSync(path.join(control, 'launches.jsonl'), 'utf8').trim().split('\n')
+      .map(line => JSON.parse(line) as { args: string[]; env: Record<string, string>; stdio: unknown });
+    return { events, received, hostEnvironments, launches };
+  }
+
+  const toolCall = (name: string, args: Record<string, unknown>): Respond => (res, ordinal) => {
+    if (ordinal === 1) stream(res, { role: 'assistant', tool_calls: [{ index: 0, id: `call-${name}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }] }, 'tool_calls');
+    else stream(res, { role: 'assistant', content: 'done' }, 'stop');
+  };
+
+  // F2: everything but process-environment introspection runs on Windows too.
+  it.skipIf(BUN_BIN === undefined)('real Pi bash `env` and the host process environment never see the provider key, and the provider still authenticates with it', async () => {
+    const { events, received, hostEnvironments, launches } = await runLane('Print the environment.', toolCall('bash', { command: 'env' }));
 
     expect(events.filter(event => event.type === 'error')).toEqual([]);
-    const launches = readFileSync(path.join(control, 'launches.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line) as { args: string[]; env: Record<string, string>; stdio: unknown });
     expect(launches).toHaveLength(1);
     expect(launches[0]!.args[0]).toBe(path.join(clientRoot, 'dist/bin/byok-pi-rpc.js'));
     expect(launches[0]!.stdio).toEqual(['inherit', 'inherit', 'inherit', 'ipc']);
@@ -117,7 +131,7 @@ describe('pi-rpc BYOK key custody (#385)', () => {
     expect(JSON.stringify(events)).not.toContain(CANARY);
 
     // The host process environment, as `ps eww` / /proc/<pid>/environ show it.
-    expect(hostEnvironments).toHaveLength(2);
+    expect(hostEnvironments).toHaveLength(process.platform === 'win32' ? 0 : 2);
     for (const environment of hostEnvironments) {
       expect(environment).toContain('PI_CODING_AGENT_DIR');
       expect(environment).not.toContain(CANARY);
@@ -132,5 +146,54 @@ describe('pi-rpc BYOK key custody (#385)', () => {
       expect(request.body).not.toContain(CANARY);
       expect(request.body).not.toContain(PI_RPC_IPC_KEY_MARKER);
     }
+  }, 60_000);
+
+  // The vendored subagents extension spawns its child with a copy of the host
+  // environment and its own stdio, so the key cannot follow it. The child must
+  // refuse instead of sending the projection marker as the key.
+  it.skipIf(BUN_BIN === undefined)('a subagent call in the lane never sends the IPC marker as a key', async () => {
+    const { events, received } = await runLane('Delegate a task.', toolCall('subagent', { agent: 'probe-worker', task: 'Reply with OK.', async: false }), async (home) => {
+      // A project agent in the session cwd, so the vendored extension really spawns its child.
+      await fs.mkdir(path.join(home, '.agents'));
+      await fs.writeFile(path.join(home, '.agents', 'probe-worker.md'), '---\nname: probe-worker\ndescription: Custody probe worker.\n---\n\nReply with OK.\n');
+    });
+
+    expect(events.filter(event => event.type === 'error')).toEqual([]);
+    const result = events.find(event => event.type === 'tool_result');
+    expect(result?.type).toBe('tool_result');
+    expect(JSON.stringify(result)).toContain('byok_subagent_credential_unavailable');
+    // Only the parent's two turns reached the provider, both with the real key.
+    expect(received.map(request => request.authorization)).toEqual([`Bearer ${CANARY}`, `Bearer ${CANARY}`]);
+    for (const request of received) {
+      expect(JSON.stringify(request)).not.toContain(PI_RPC_IPC_KEY_MARKER);
+      expect(request.body).not.toContain(CANARY);
+    }
+  }, 90_000);
+
+  it.skipIf(BUN_BIN === undefined)('the built subagent print and runner children refuse a marker projection before any request', async () => {
+    const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-385-sub-'))); roots.push(root);
+    let requests = 0;
+    const server = createServer((req, res) => { requests += 1; req.resume(); res.writeHead(500).end(); });
+    servers.push(server); await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address(); if (!address || typeof address === 'string') throw new Error('no provider port');
+    const agentDir = path.join(root, 'projection'); await fs.mkdir(agentDir);
+    const profile = parseModelProviderProfile({ adapter: 'openai_compatible', auth_mode: 'bearer', base_url: `http://127.0.0.1:${address.port}/v1`, capabilities: [],
+      created_at: '2026-10-13T00:00:00.000Z', updated_at: '2026-10-13T00:00:00.000Z', display_name: 'Probe', enabled: true, kind: 'model',
+      model: 'probe', profile_ref: 'probe', provider_kind: 'custom', pi_model: { ...PI_MODEL_FIXTURE, reasoning: false, thinkingLevel: 'off' } });
+    await fs.writeFile(path.join(agentDir, 'models.json'), JSON.stringify(buildPiProviderProjection(profile, 'pi-rpc')));
+    const runnerConfig = path.join(root, 'runner.json'); await fs.writeFile(runnerConfig, '{}');
+    const entry = path.join(clientRoot, 'dist/bin/byok-pi-rpc.js');
+    for (const tail of [['pi-subagent-print', '-p', '--model', 'byok-sdk-probe/probe', 'Reply with OK.'], ['pi-subagent-runner', runnerConfig]]) {
+      const child = spawn(process.execPath, [entry, '__byok_sdk_helper', ...tail], {
+        cwd: root, env: { PATH: process.env.PATH!, HOME: root, PI_CODING_AGENT_DIR: agentDir, ...(process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot!, USERPROFILE: root } : {}) }, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk; });
+      const code = await new Promise<number | null>(resolve => child.once('close', resolve));
+      expect(code, tail[0]).not.toBe(0);
+      expect(stderr, tail[0]).toContain('byok_subagent_credential_unavailable');
+    }
+    // The runner refused before the vendored entry read (and deleted) its config.
+    expect(readFileSync(runnerConfig, 'utf8')).toBe('{}');
+    expect(requests).toBe(0);
   }, 60_000);
 });

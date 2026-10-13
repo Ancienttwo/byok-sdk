@@ -55,7 +55,7 @@ export function piProjectionProviderId(profileRef: string): string {
  * declared local configuration is the only authority; nothing is inferred from
  * the model name or base URL.
  */
-export function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry = 'pi-rpc'): object {
+export function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry): object {
   const { thinkingLevel: _, ...modelSettings } = requirePiModelConfig(profile);
   const projectedProviderId = piProjectionProviderId(profile.profile_ref);
   return {

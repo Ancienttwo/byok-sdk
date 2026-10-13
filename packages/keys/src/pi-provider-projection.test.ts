@@ -111,7 +111,7 @@ describe('buildPiProviderProjection', () => {
 
   /** Pi's Anthropic SDK requests `${baseUrl}/v1/messages`; the keys client requests `modelApiUrl(base_url, 'messages')`. */
   const piAnthropicEndpoint = (profile: ReturnType<typeof parseModelProviderProfile>) => {
-    const projection = buildPiProviderProjection(profile) as { providers: Record<string, { baseUrl: string }> };
+    const projection = buildPiProviderProjection(profile, 'pi-rpc') as { providers: Record<string, { baseUrl: string }> };
     return `${projection.providers[`byok-sdk-${profile.profile_ref}`]!.baseUrl}/v1/messages`;
   };
   const anthropicProfile = (provider_kind: string, base_url: string) => parseModelProviderProfile({
@@ -142,7 +142,7 @@ describe('buildPiProviderProjection', () => {
   it.each(['https://gateway.example/anthropic', 'https://api.anthropic.com', 'https://gateway.example/v2'])(
     'refuses a custom Anthropic base_url %s that Pi cannot reach exactly',
     (baseUrl) => {
-      expect(() => buildPiProviderProjection(anthropicProfile('custom', baseUrl)))
+      expect(() => buildPiProviderProjection(anthropicProfile('custom', baseUrl), 'pi-rpc'))
         .toThrow(expect.objectContaining({ code: 'PROVIDER_URL_INVALID' }));
     },
   );
@@ -199,6 +199,7 @@ describe('buildPiProviderProjection', () => {
           profile_ref,
           provider_kind: 'custom',
         }),
+        'pi-rpc',
       ) as { providers: Record<string, { models: Array<{ input: string[] }> }> };
 
     const primary = build('openrouter-primary', ['image-input']);

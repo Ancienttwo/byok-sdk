@@ -28,6 +28,7 @@ import {
 import { subagentsExtension } from './pi-extension-factories.js';
 import { readFileSync } from 'node:fs';
 import { parsePiPrintArgv } from '../subagents/print-argv';
+import { assertSubagentProviderCredential } from '../subagents/credential-guard';
 
 /** Options for one delegated print-mode task, read from the vendor argv. */
 interface PrintPayloadPlan {
@@ -63,8 +64,10 @@ function planPrintPayload(argv: readonly string[]): PrintPayloadPlan {
  * partial result.
  */
 export async function runSubagentPrint(argv: readonly string[]): Promise<number> {
-  const plan = planPrintPayload(argv);
   const agentDir = getAgentDir();
+  // Before the session, its extensions or any request exist (#385).
+  assertSubagentProviderCredential(agentDir);
+  const plan = planPrintPayload(argv);
   const sessionManager = plan.sessionFile
     ? SessionManager.open(plan.sessionFile, plan.sessionDir)
     : SessionManager.create(plan.cwd, plan.sessionDir);

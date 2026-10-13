@@ -285,7 +285,7 @@ await runtime.dispose();
   await mkdir(directEnv.PI_CODING_AGENT_DIR,{recursive:true});
   // The direct leg models an operator models.json with no configured auth, so
   // it drops the keys-only auth_mode:none placeholder apiKey from the projection.
-  const directModels = buildPiProviderProjection(profile);
+  const directModels = buildPiProviderProjection(profile, 'pi-rpc');
   for (const provider of Object.values(directModels.providers)) delete provider.apiKey;
   await writeFile(path.join(directEnv.PI_CODING_AGENT_DIR,'models.json'),JSON.stringify(directModels));
   await writeFile(path.join(directEnv.PI_CODING_AGENT_DIR,'settings.json'),JSON.stringify({defaultProvider:'byok-sdk-packed-zai',defaultModel:profile.model}));
