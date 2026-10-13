@@ -1,8 +1,8 @@
 // Quickstart smoke test (#389 item 2, #384 item 1): the README's "Run it" loop
 // against the example server exactly as `dev` starts it, with every default
 // left alone. No `longPollHoldMs` override anywhere: the server holds an empty
-// poll ~50s, so an idle daemon only settles in time through its no-hold
-// settle poll.
+// poll ~50s, and the daemon still reaches `lifecycle` open promptly because
+// readiness is the accepted `conn.hello`, not a returned poll (#391).
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -18,6 +18,7 @@ const tsxCli = createRequire(import.meta.url).resolve('tsx/cli');
 // The README's daemon config uses this product id; `server.ts` defaults to it too.
 const PRODUCT_ID = 'byok-example-basic';
 const SETTLE_BOUND_MS = 5_000;
+const OPEN = { phase: 'running', connection: 'open' } as const;
 
 /** Start `server.ts` the way `bun run dev` does and resolve its listening URL. */
 function startExampleServer(): Promise<{ child: ChildProcess; url: string }> {
@@ -82,17 +83,20 @@ describe('examples/basic quickstart with default settings', () => {
     const { code } = (await pairing.json()) as { code: string };
     const { deviceId } = await daemon.pair(code);
 
-    // Step 2: `byok-agent start` logs `daemon started` once start() resolves.
+    // Step 2: `byok-agent start` logs `daemon started` once start() resolves;
+    // the connection then reports open through `lifecycle` (#391).
     const startedAt = Date.now();
     await daemon.start();
     expect(Date.now() - startedAt).toBeLessThan(SETTLE_BOUND_MS);
-    expect(daemon.status().connected).toBe(true);
+    await vi.waitFor(() => {
+      expect(daemon!.status().lifecycle).toEqual(OPEN);
+    }, { timeout: SETTLE_BOUND_MS - (Date.now() - startedAt), interval: 50 });
 
     // ...and the machine appears under "Connected machines".
     await vi.waitFor(async () => {
       const machines = (await (await fetch(`${server!.url}/api/machines`)).json()) as Array<{ deviceId: string; connected: boolean }>;
       expect(machines.find((machine) => machine.deviceId === deviceId)?.connected).toBe(true);
     }, { timeout: 2_000, interval: 100 });
-    expect(daemon.status().connected).toBe(true);
+    expect(daemon.status().lifecycle).toEqual(OPEN);
   }, 30_000);
 });

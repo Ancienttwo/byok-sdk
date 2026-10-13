@@ -24,8 +24,8 @@ export interface ServiceProgram {
    * spaces never needs manual escaping (see that file's doc comment).
    *
    * The lifecycles never add or change an argument: a Host's own binary
-   * gets exactly these. Issue #392: `byok-agent install` builds its program
-   * with {@link NodeAgentProgramOptions.service} on macOS and Linux.
+   * gets exactly these. Issues #392/#394: `byok-agent install` builds its
+   * program with {@link NodeAgentProgramOptions.service} on every platform.
    */
   args: string[];
   /** Working directory for the running service process. Each platform generator has its own documented default (see `launchd.ts`/`systemd.ts`/`winsw.ts`) when omitted. */
@@ -41,10 +41,12 @@ export interface NodeAgentProgramOptions {
   nodeBin?: string;
   cwd?: string;
   /**
-   * Issue #392: append {@link SERVICE_FLAG}, so `byok-agent start` replaces
-   * the service manager's minimal environment with the user's login-shell
-   * environment (`service-environment.ts`). For a program launchd or
-   * systemd will run; `byok-agent install` sets it on macOS and Linux only.
+   * Append {@link SERVICE_FLAG}: `byok-agent start` then replaces the service
+   * manager's minimal environment with the user's login-shell environment
+   * (issue #392, `service-environment.ts`; win32 has none) and exits 0 on a
+   * halt, so the supervisor does not restart it (issue #394). For a program
+   * a service manager will run; `byok-agent install` sets it on every
+   * platform.
    */
   service?: boolean;
 }

@@ -8,6 +8,7 @@ import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { DeviceStore } from '../daemon/store';
 import { startRealServer, type RealServerHandle } from './fixtures/real-server';
+import { waitForOpen } from './fixtures/lifecycle-barrier';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -105,7 +106,7 @@ describe('drainOutbox chunks outbound sends to the server batch cap (finding P1,
     });
 
     await connection.start();
-    await connection.waitForConnection();
+    await waitForOpen(connection);
 
     const totalEnvelopes = MAX_MESSAGES_PER_BATCH + 44; // comfortably over the cap — forces >= 2 chunked POSTs
     const sentIds = new Set<string>();

@@ -124,7 +124,7 @@ describe('authenticated enrollment tenant projection', () => {
       [new StubRuntimeAdapter('pi')],
     );
 
-    await expect(daemon.start()).rejects.toThrow(/re-pair required/);
+    await expect(daemon.start()).rejects.toMatchObject({ reason: 're_pair_required', cause: expect.objectContaining({ message: expect.stringMatching(/re-pair required/) }) });
     const repaired = await daemon.pair('repair-code');
     expect(repaired).toEqual({ deviceId: expect.any(String) });
     expect(await new DeviceStore(storeDir).load()).toMatchObject({
@@ -168,7 +168,7 @@ describe('authenticated enrollment tenant projection', () => {
       },
       [new StubRuntimeAdapter('pi')],
     );
-    await expect(daemon.start()).rejects.toThrow(/re-pair required/);
+    await expect(daemon.start()).rejects.toMatchObject({ reason: 're_pair_required', cause: expect.objectContaining({ message: expect.stringMatching(/re-pair required/) }) });
     expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toEqual(legacy);
   });
 
@@ -294,7 +294,7 @@ describe('authenticated enrollment tenant projection', () => {
     const replacement = await daemon.pair('active-replacement-code');
     expect(first).toEqual({ deviceId: expect.any(String) });
     expect(replacement).toEqual({ deviceId: expect.any(String) });
-    expect(daemon.status().connected).toBe(false);
+    expect(daemon.status().lifecycle).toEqual({ phase: 'stopped' });
     expect((await new DeviceStore(storeDir).load())?.tenantId).toBe('tenant-active-replacement');
     expect(server.httpRequests.filter((request) => request.pathname === '/byok/pair')).toHaveLength(2);
     await expect(daemon.publishReliableAgentEgress?.({

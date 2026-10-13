@@ -417,7 +417,6 @@ export {
   CreateBlobRequestSchema,
   CreateBlobResponseSchema,
   BlobDownloadUrlResponseSchema,
-  EVENTS_POLL_NO_HOLD_PARAM,
   EventsPollQuerySchema,
   EventsPollResponseSchema,
   MessagesSendRequestSchema,

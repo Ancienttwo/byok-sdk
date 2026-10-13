@@ -190,7 +190,7 @@ Linux and macOS; see that workflow's comments for the current Windows-SEA
 status.
 
 Both scenarios also require `daemonStatus.paired === false` and
-`daemonStatus.connected === false`, preserving real daemon construction and
+`daemonStatus.lifecycle.phase === 'stopped'`, preserving real daemon construction and
 status coverage alongside runtime detection. The absent-sidecar scenario
 requires that the invoking environment has no `BYOK_PI_BIN` set.
 

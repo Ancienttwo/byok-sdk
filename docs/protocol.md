@@ -89,7 +89,8 @@ post-freeze the way pre-freeze M0→M1 had (§10) — a change of this shape is 
 new major version, full stop.
 
 **Scoped input-preparation cut:** the Owner-approved
-prepared memory contract (`docs/researches/2026-09-28-prepared-agent-memory-contract.md`, untracked since #390)
+[prepared memory contract](researches/2026-09-28-prepared-agent-memory-contract.md)
+(superseded in part by [ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md); see [the spec](spec.md#prepared-operations))
 extends the earlier official-Pi exception to input-preparation v8. The strict
 preparation request, receipt binding and `task.offer_prepared` require explicit
 `agentMemory: 'none' | 'read' | 'read-write'`. `INPUT_PREPARATION_WIRE_VERSION` and
@@ -1742,18 +1743,13 @@ path.
 
 ```
 GET /byok/events?cursor=N
-  Query    (EventsPollQuerySchema):    { cursor?, afterSeq?, noHold?: 1 }
+  Query    (EventsPollQuerySchema):    { cursor?, afterSeq? }
   Response (EventsPollResponseSchema): { events: Envelope[], cursor, capabilities?: string[] }
 ```
 
 Authed (bearer access token); holds the request open for ~50 seconds waiting
-for new events before returning an empty `events` array. The exception is the
-settle poll: the daemon's first poll after each (re)connect sends `noHold=1`
-(`EVENTS_POLL_NO_HOLD_PARAM`), and the server makes exactly one read pass under
-every rule below (cursor validation, replay floor, delivery recording) and
-answers at once with `capabilities`, empty page or not. Any other `noHold`
-value is `400`. Every later poll holds. A server that predates the flag
-ignores it and holds, so the daemon settles only after that hold. `cursor` in the query
+for new events before returning an empty `events` array. Every poll holds;
+readiness never waits on a poll (see the handshake below). `cursor` in the query
 is the last reliably processed sequence and is the sole durable ACK.
 `afterSeq` selects the next read position without acknowledging it; omission
 reads from the ACK. The response `cursor` is a navigation position only.
@@ -1765,17 +1761,30 @@ page), then backs off and replays from ACK if the gap persists. At mailbox head
 and after reconnect/failure it also resets navigation to ACK. Controls inside
 this window can reach unfinished offers; a full window remains an observable
 capacity limit, not a promise of unbounded control bypass. Retention validation
-always uses ACK, so navigating ahead cannot conceal an expired replay gap. The daemon establishes its per-device session through the HTTP
-layer's bearer auth and sends the bounded `conn.hello` capability snapshot as
-the first `POST /byok/messages` envelope. The route accepts that one non-task
+always uses ACK, so navigating ahead cannot conceal an expired replay gap.
+
+**Handshake and readiness.** The daemon establishes each session through the
+HTTP layer's bearer auth and a lone `POST /byok/messages` carrying only the
+bounded `conn.hello` capability snapshot. The route accepts that one non-task
 envelope only when its device, product, and protocol version exactly match the
-authenticated principal; it is ordered ahead of queued task messages.
-`capabilities` is the server capability advertisement for THIS response, is
-refreshed on every successful poll, and is applied before the response's
-events are delivered. The field is additive and optional only for N/N-1 wire
+authenticated principal. The server accepting it is what "open" means: it
+proves the credentials, the enrollment, and the product and protocol match in
+one round trip, without waiting for work or a held poll. The answer carries
+the same `capabilities` advertisement a poll does (§8.2). Only an open session
+polls and sends other messages, so `conn.hello` is the first message of every
+session, including after every reconnect. Any route failure (a failed or
+unusable poll, a failed send) ends the session; the daemon's one reconnect
+loop handshakes again after a deterministic fleet-jittered delay. A rejected
+hello, a revoked device (§6.3), or a lost replay cursor (§9) ends the
+daemon's run as halted instead; it does not reconnect.
+
+`capabilities` on a poll is the server capability advertisement for THIS
+response, is refreshed on every successful poll, and is applied before the
+response's events are delivered. The field is additive and optional only for N/N-1 wire
 tolerance; a new daemon reads absence as `[]`, never as an assumed default.
-An HTTP/network/response-validation failure withdraws the last advertisement
-immediately: no earlier request remains authoritative after that failure.
+An HTTP/network/response-validation failure ends the session and withdraws
+the last advertisement immediately: no earlier request remains authoritative
+after that failure.
 Anything a server needs for a per-task decision must therefore
 travel on a `task.*` message, not be inferred from connection state — this is
 exactly why claim-time capabilities ride `task.claim` (§11.5) rather than
@@ -1806,8 +1815,14 @@ Presence remains a lossy TTL hint and is not an execution or admission signal.
 ```
 POST /byok/messages
   Request  (MessagesSendRequestSchema):  { messages: Envelope[] }   // capped at 256 per batch
-  Response (MessagesSendResponseSchema): { accepted: number, rejected?: number }
+  Response (MessagesSendResponseSchema): { accepted: number, rejected?: number, capabilities?: string[] }
 ```
+
+`capabilities` is present only on the answer to a batch whose `conn.hello`
+the server accepted (the §8.1 handshake), and carries the same advertisement a
+poll response does. Every other answer omits it, and absence means "no
+update", never an empty list. The field is additive and optional; the schema
+is non-strict, so an N-1 daemon ignores it.
 
 Authed (bearer access token). Each envelope in `messages` is routed through
 the server's single inbound gate (the reference implementation's

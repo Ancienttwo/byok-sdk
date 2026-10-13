@@ -189,18 +189,28 @@ describe('LongPollRouteError names the failing route', () => {
     fetchMock.mockResolvedValue({ ok: false, status: 500, text: async () => '' } as unknown as Response);
     const staleAuth = await expiredTokenAuth();
     const outcomes: string[] = [];
+    let finished = false;
 
-    const client = new LongPollClient({
+    const client: LongPollClient = new LongPollClient({
       serverUrl: 'http://example.invalid',
       auth: staleAuth,
       getCursor: () => undefined,
       onEnvelope: vi.fn(),
       onOperationalOutcome: (outcome) => outcomes.push(outcome),
+      // #391: a failed poll ends this loop generation; the reconnect loop
+      // (here, this stand-in) starts the next one.
+      onLoopFailure: () => {
+        client.stop();
+        setTimeout(() => {
+          if (!finished) client.start();
+        }, 20);
+      },
       retryDelayMs: 20,
       idleDelayMs: 20,
     });
     client.start();
     await vi.waitFor(() => expect(outcomes.filter((o) => o === 'failure').length).toBeGreaterThan(1));
+    finished = true;
     client.stop();
 
     expect(warnedRouteErrors()).toHaveLength(0);

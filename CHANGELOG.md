@@ -2,6 +2,58 @@
 
 ## Unreleased
 
+- **Breaking (client, 0.x)** — daemon readiness and halts are one lifecycle
+  model (#391, #394). `daemon.start()` now resolves once local startup is done
+  and never waits for the network; the server accepting this session's lone
+  `conn.hello` POST is what "open" means. `status().lifecycle`
+  (`DaemonLifecycle`: `stopped` | `awaiting-enrollment` | `running` with
+  `connection` `connecting`/`open` | `halted` with a `DaemonHaltReason`)
+  replaces `status().connected` and `status().revoked`; the
+  `{kind:'lifecycle'}` event replaces `{kind:'connection'}`; the control
+  `status` answer carries `lifecycle` instead of `transport`. One reconnect
+  loop with deterministic fleet jitter is the only network retry, and every
+  reconnect sends a fresh `conn.hello` before any other message. A rejected
+  hello halts as `handshake_rejected`; a revoked device halts as
+  `device_revoked` (a cold start against a revoked device resolves and then
+  halts instead of throwing `DeviceRevokedError`); a lost replay cursor halts
+  as `replay_cursor_too_old`. `start()` throws `DaemonHaltError { reason,
+  cause }` for halts it finds locally (`unpaired`, `re_pair_required`,
+  `store_owned`, `config_invalid` — the latter wraps `InsecureServerUrlError`,
+  and `DaemonOwnerActiveError`/`AnotherControlServerRunningError` are wrapped
+  as `store_owned`); any other start failure is a crash, rethrown as is and
+  recorded as a `lifecycle` operational-health failure. Reliable Agent egress
+  held for `capability_missing` is sent as soon as an advertisement carries
+  `agent-egress-reliable-ack`, including after a reconnect. Removed:
+  `ConnectionManager.waitForConnection`, `isConnected`, `isRevoked`,
+  `getTerminalError`, the `onTerminalError` option (now `onHalted`), and the
+  `closed`/`revoked` `ConnectionState` values. New exports:
+  `DAEMON_HALT_REASONS`, `DaemonHaltError`, `isDaemonHaltReason`, and the
+  `DaemonHaltReason`/`DaemonLifecycle` types.
+  **Host migration:** do not treat a resolved `start()` as connected.
+  Subscribe to `{kind:'lifecycle'}` events (or read `status().lifecycle`)
+  and wait for `{phase:'running', connection:'open'}`; treat
+  `{phase:'halted'}` as terminal for the run (show `reason`, do not restart
+  in a loop), and catch `DaemonHaltError` from `start()` by `reason`
+  instead of matching error messages.
+- **Changed (client CLI)** — `byok-agent start` exit codes (#394): 0 normal
+  stop, 78 halt (a missing or invalid config is `config_invalid`), 1 crash.
+  Under `--service` a halt exits 0 so launchd, systemd and WinSW leave the
+  service stopped; a crash still exits 1 and is restarted. `byok-agent
+  install` now writes `--service` on every platform, WinSW XML included.
+  `status`, `service-status` and the new `doctor` `lifecycle` check show the
+  last lifecycle (a halted daemon fails the check and prints its remedy); the
+  support bundle carries the lifecycle phase and reason as closed enums; the
+  last lifecycle line survives `audit.jsonl` rotation; older `connection`
+  audit lines are ignored. Installed services keep their old program
+  arguments, and so keep restarting on a halt, until `byok-agent install` is
+  run again.
+- **Changed (protocol, cloud)** — `POST /byok/messages` answers a batch whose
+  `conn.hello` was accepted with the poll's `capabilities` advertisement
+  (optional, additive; absent means "no update", never an empty list). The
+  unreleased `noHold` events-poll flag (`EVENTS_POLL_NO_HOLD_PARAM`, added
+  after 0.26.1) is removed: readiness no longer waits on a poll, so nothing
+  sends it. Freeze golden regenerated; `PROTOCOL_VERSION` is unchanged.
+
 - **Changed (client, cloud-do)** — update the official Pi closure from 1.1.0 to
   1.2.0 (all nine `@earendil-works` packages, upstream commit
   `06a466935536f8c9bcacb2d5efc0fc021be1bdff`, provenance re-attested).

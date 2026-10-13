@@ -2853,11 +2853,17 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
 import { type CapabilityFlag, type Envelope, type RuntimeInfo, type ToolsetId } from '@byok-sdk/protocol';
 import { AuthManager } from './auth-manager';
 import type { CursorStore } from './cursor-store';
+import type { DaemonHaltReason } from './daemon-lifecycle';
 import { type FleetJitter } from './deterministic-jitter';
-import { ReplayCursorTooOldError } from './replay-cursor';
 export { ReplayCursorTooOldError } from './replay-cursor';
-/** The lifecycle of the daemon's one long-poll connection. */
-export type ConnectionState = 'connecting' | 'open' | 'closed' | 'revoked';
+/**
+ * The daemon's one long-poll session: `open` from the moment the server
+ * accepts this session's `conn.hello` until any route fails, `connecting`
+ * otherwise.
+ */
+export type ConnectionState = 'connecting' | 'open';
+/** The remote conditions that end a session for good. */
+export type ConnectionHaltReason = Extract<DaemonHaltReason, 'device_revoked' | 'handshake_rejected' | 'replay_cursor_too_old'>;
 export interface ConnectionManagerOptions {
     serverUrl: string;
     deviceId: string;
@@ -2877,29 +2883,47 @@ export interface ConnectionManagerOptions {
      * below). A handler that throws/rejects is caught here, not propagated.
      */
     onEnvelope: (envelope: Envelope) => void | Promise<void>;
+    /** Every transition between `connecting` and `open`, starting with `connecting` from {@link ConnectionManager.start}. */
     onStateChange?: (state: ConnectionState) => void;
+    /**
+     * Called each time the server's advertisement newly carries a capability
+     * the previous one did not — after every reconnect, the first advertisement
+     * is new in full. Hooks that retry capability-gated sends wait here.
+     */
+    onCapabilitiesAdvertised?: (added: readonly string[]) => void;
     /** Await durable disposition before retiring the exact accepted/rejected bytes. */
     onOutboundAccepted?: (envelopes: readonly Envelope[]) => Promise<void>;
     onOutboundRejected?: (envelope: Envelope) => Promise<void>;
     onOutboundQueued?: (envelope: Envelope) => void;
     beforeOutboundPost?: (envelopes: readonly Envelope[]) => void;
-    /** Backoff between failed long-poll HTTP attempts. Default 2s. */
+    /** Base delay before each reconnect handshake, and for stalled-cycle and local-disposition backoff. Default 2s. */
     longPollRetryDelayMs?: number;
     /** Minimum delay before the next long-poll request after an empty (no-events) response. Default 250ms. */
     longPollIdleDelayMs?: number;
     fleetJitter?: FleetJitter;
     onOperationalOutcome?: (outcome: 'success' | 'failure', source: 'reconnect' | 'upload') => void;
-    onTerminalError?: (error: ReplayCursorTooOldError) => void;
+    /** The session ended for good; nothing reconnects after this. Called once. */
+    onHalted?: (reason: ConnectionHaltReason) => void;
 }
 export interface RejectedOutboundEnvelope {
     readonly envelope: Envelope;
     readonly reason: 'inbound_rejected';
 }
 /**
- * Owns the daemon's one authenticated long-poll connection to the server.
+ * Owns the daemon's one authenticated long-poll session with the server.
  * Every received envelope passes through the same cursor-dedupe/persistence
- * logic (protocol §9), so redelivery remains safe after an HTTP retry or a
+ * logic (protocol §9), so redelivery remains safe after a reconnect or a
  * daemon restart.
+ *
+ * One reconnect loop (`run`) owns the session. Each pass POSTs a lone
+ * `conn.hello`; the server accepting it is what `open` means — it proves the
+ * credentials, the device's enrollment, and the product and protocol match in
+ * one round trip, without waiting for work or a held poll. Only an open
+ * session polls and drains the outbox, so `conn.hello` is the first message
+ * of every session, including after a reconnect (protocol §8). Any route
+ * failure returns the session to `connecting` and the loop handshakes again
+ * after `fleetJitter('reconnect')`. A rejected hello, a revoked device or a
+ * lost replay cursor halts it instead.
  *
  * `send()` (Design B, finding N4) pushes onto a single shared outbox this
  * class owns and drains through `POST /byok/messages`; long-poll is a full
@@ -2910,19 +2934,15 @@ export declare class ConnectionManager {
     private readonly fleetJitter;
     private readonly longPoll;
     private uploadRetryAttempt;
+    private reconnectAttempt;
     private started;
-    private connected;
-    /**
-     * Settle needs both halves of the handshake: the start `conn.hello` has
-     * been answered by `POST /byok/messages` (so the server holds this device's
-     * capability snapshot), and the current long-poll stream has answered with
-     * the server's capabilities. The no-hold settle poll can return before the
-     * concurrent hello POST does; settling on the poll alone would report a
-     * device open that the server would still refuse Agent work for.
-     */
-    private startHello;
-    private startHelloAnswered;
-    private capabilitiesCurrent;
+    private state;
+    /** Aborts the reconnect loop's in-flight handshake and backoff on stop or halt. */
+    private readonly lifetime;
+    /** Ends the current open session; set only while one is open. */
+    private endSession;
+    /** Counts open sessions, so a request from an ended session cannot end the next one. */
+    private sessionGeneration;
     private cursor;
     /**
      * Finding F3 (at-most-once redelivery): the lowest `task.*` envelope `seq`
@@ -2963,9 +2983,7 @@ export declare class ConnectionManager {
     private inFlightBatchSize;
     private draining;
     private stopped;
-    private revoked;
-    private terminalError;
-    private settledWaiters;
+    private haltReason;
     private pendingCursorSave;
     /** Admission dedup while an individual handler is running. */
     private readonly inFlightSeqs;
@@ -2975,23 +2993,42 @@ export declare class ConnectionManager {
     /** Received work lacking a successful handler receipt, including malformed frames. */
     private readonly unresolvedSeqs;
     /**
-     * Finding P3: the pending `drainOutbox` long-poll retry backoff, if any —
-     * cancellable so `enterRevoked()` can unblock it immediately instead of
-     * waiting out the rest of the delay before the loop notices `revoked` and
-     * exits. See `drainRetryDelay`.
+     * Finding P3: the pending local-disposition retry backoff in `drainOutbox`,
+     * if any — cancellable so a halt or stop can unblock it immediately. See
+     * `drainRetryDelay`.
      */
     private cancelPendingDrainRetry;
     /**
      * The capabilities the current server response advertised — untyped
      * `string[]` for forward compatibility. An advertisement is scoped to the
-     * current long-poll response stream and is cleared after an HTTP failure,
-     * terminal shutdown, or revocation. This keeps capability-gated outbound
-     * messages fail-closed until the current server has explicitly advertised
-     * support.
+     * current session and is cleared when it ends (a route failure, stop, or
+     * halt). This keeps capability-gated outbound messages fail-closed until
+     * the current server has explicitly advertised support.
      */
     private serverCapabilities;
     constructor(opts: ConnectionManagerOptions);
+    /**
+     * Loads the durable cursor and starts the reconnect loop. Resolves without
+     * waiting for the server: {@link ConnectionManagerOptions.onStateChange}
+     * reports `open`, and {@link ConnectionManagerOptions.onHalted} a halt.
+     */
     start(): Promise<void>;
+    /**
+     * The one reconnect loop. Each pass handshakes with a lone `conn.hello`,
+     * then serves an open session until it ends, then backs off with
+     * `fleetJitter('reconnect')` before the next handshake.
+     */
+    private run;
+    /** One open session: from an accepted handshake until a route failure, stop, or halt ends it. */
+    private serveSession;
+    /**
+     * A route failed: back to `connecting` synchronously, so nothing queued in
+     * the meantime is sent ahead of the next session's handshake.
+     */
+    private breakSession;
+    private applyServerCapabilities;
+    private setState;
+    private isEnded;
     /**
      * Design B (finding N4): push onto the single shared outbox and try to
      * drain it now. Never routes directly to either transport itself — see
@@ -3012,43 +3049,39 @@ export declare class ConnectionManager {
      * (more may still be queued, or the next chunk still needs sending), on
      * failure that SAME chunk is unshifted back (order-preserving, same
      * Envelope objects/ids — never rebuilt, so a retry is exactly the resend
-     * Wave 1's server-side dedup expects) and retried after a short backoff,
-     * Re-entrancy is guarded by `draining`: a call arriving while a drain is
-     * already in progress just returns — the in-progress loop's own
-     * `while (this.outbox.length > 0)` check picks up anything newly pushed.
+     * Wave 1's server-side dedup expects). A route failure ends the session —
+     * the reconnect loop handshakes again and the next open session resumes
+     * the drain; a local durable-disposition failure is retried within the
+     * session after a short backoff.
+     * Runs only while the session is open, so it never sends ahead of the
+     * session's `conn.hello`. Re-entrancy is guarded by `draining`: a call
+     * arriving while a drain is already in progress just returns — the
+     * in-progress loop's own `while (this.outbox.length > 0)` check picks up
+     * anything newly pushed.
      */
     private drainOutbox;
     /**
-     * Finding P3: backoff delay for `drainOutbox`'s long-poll retry loop.
+     * Finding P3: backoff delay for `drainOutbox`'s local-disposition retry.
      * Unlike a plain `setTimeout`-based wait, this is (a) cancellable —
-     * `enterRevoked()` calls `cancelPendingDrainRetry()` to unblock an
+     * `halt()` and `stop()` call `cancelPendingDrainRetry()` to unblock an
      * in-flight wait immediately instead of leaving `drainOutbox` parked here
-     * for up to the rest of the delay before it next checks `this.revoked` —
+     * for up to the rest of the delay before it next checks the session —
      * and (b) unref'd, so the timer never keeps the Node process alive by
      * itself while nothing else (such as the live long-poll GET) legitimately is.
      */
     private drainRetryDelay;
     /**
-     * The capabilities the latest successful `GET /byok/events` response
-     * advertised. Empty before a successful response and after a failed one.
+     * The capabilities the current session's server advertised — on the
+     * handshake answer or a poll response. Empty before either and after the
+     * session ends.
      */
     getServerCapabilities(): readonly string[];
-    getTerminalError(): ReplayCursorTooOldError | undefined;
-    isConnected(): boolean;
-    isRevoked(): boolean;
-    /**
-     * Resolves once the start `conn.hello` has been answered and a successful
-     * long-poll response has established the authenticated connection with the
-     * server's capabilities. That response answers the transport's no-hold
-     * settle poll, so an idle device settles in about one round trip rather
-     * than one full server hold.
-     *
-     * Rejects with {@link DeviceRevokedError} — instead of hanging until
-     * `timeoutMs` — if the device turns out to be revoked while settling (or
-     * already was): a cold `daemon.start()` against an already-revoked device
-     * must fail fast, not surface a generic timeout (protocol §6.3).
-     */
-    waitForConnection(timeoutMs?: number): Promise<void>;
+    /** True while the server has accepted this session's `conn.hello` and no route has failed since. */
+    isOpen(): boolean;
+    /** Why the session ended for good, if it did. */
+    getHaltReason(): ConnectionHaltReason | undefined;
+    /** The device was found revoked outside this session's own requests (proactive token renewal). */
+    noteDeviceRevoked(): void;
     /**
      * Stops the long-poll transport and waits for every in-flight envelope handler
      * (the F3 FIFO chain) and the most recent cursor write to actually land on
@@ -3149,13 +3182,12 @@ export declare class ConnectionManager {
     private noteValidationFailure;
     private advanceCursor;
     private quarantineRejectedOutbound;
-    private notifySettled;
-    /** Any server answer counts (accepted, or isolated as rejected): the hello was processed. */
-    private noteStartHelloAnswered;
-    private noteConnected;
-    private noteDisconnected;
-    private enterReplayCursorTooOld;
-    private enterRevoked;
+    /**
+     * Ends the session for good: stops the loop, the poll and the drain, then
+     * reports the reason once. The outbox keeps whatever it held, so
+     * `outboxLength()` stays an honest count of what never left.
+     */
+    private halt;
 }
 // ==== @byok-sdk/client dist/daemon/control-protocol.d.ts ====
 import type { TaskState } from '@byok-sdk/protocol';
@@ -3163,6 +3195,7 @@ import type { ApprovalDecision, PendingApproval } from './approvals';
 import type { StorageCategory } from './journal/journal';
 import type { StoragePressureState } from './journal/storage-policy';
 import type { OperationalHealthSnapshot } from './operational-health';
+import type { DaemonLifecycle } from './daemon-lifecycle';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
 import type { AgentHomeExecutionStatus } from '../agent-home';
@@ -3414,8 +3447,8 @@ export interface ControlStatusResult {
     uptimeMs: number;
     paired: boolean;
     deviceId?: string;
-    /** The connection state machine's current value: `'open'`, `'revoked'`, `'closed'`, or `'connecting'`. */
-    transport: string;
+    /** Issues #391/#394: the same value as `Daemon.status().lifecycle`. */
+    lifecycle: DaemonLifecycle;
     activeTasks: ControlActiveTask[];
     runtimeIds: string[];
     /** M4 Phase 4 (part B.3): per-active-task queue watermarks — see {@link TaskQueueWatermark}. */
@@ -3434,7 +3467,7 @@ export interface ControlStatusResult {
     approvalsPending: number;
     /** S3b (L-003): local storage usage + pressure — see {@link ControlStorageStatus}. Absent unless a storage policy is configured. */
     storage?: ControlStorageStatus;
-    /** Local lifecycle/retry budget. This is not the transport state above. */
+    /** Local retry budget. This is not the lifecycle above. */
     operationalHealth: OperationalHealthSnapshot;
     /** Redacted content-addressed status from the daemon's single local registry. */
     toolsets: McpToolsetRegistryStatus;
@@ -3768,6 +3801,7 @@ import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agen
 import type { AgentRef } from '../agent-home';
 import { type LocalAgentReleaseIdentity } from '../release-identity';
 import { type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
+import { type DaemonLifecycle } from './daemon-lifecycle';
 import { type InputPreparationAuthorityResolver, type InputPreparationCounterAdapter, type InputPreparationLimitsPolicyV1 } from '../input-preparation';
 import { type OperationalHealthSnapshot } from './operational-health';
 import { type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
@@ -4345,9 +4379,13 @@ export interface DaemonStatus {
     /** Process-immutable Local Agent application release captured at construction. */
     localAgentRelease: Readonly<LocalAgentReleaseIdentity>;
     paired: boolean;
-    connected: boolean;
-    /** True once the server has revoked this device (401 on challenge/token, protocol §6.3). The only recourse is calling `pair()` again — the daemon does not keep retrying on its own. */
-    revoked: boolean;
+    /**
+     * Issues #391/#394: where this daemon is in its lifecycle, including whether
+     * the server has accepted it (`running` + `connection: 'open'`) and why a
+     * run ended for good (`halted`). The same value every `lifecycle` event
+     * carries.
+     */
+    lifecycle: DaemonLifecycle;
     deviceId?: string;
     activeTaskCount: number;
     /** Exact terminal results retained for journal retry; nonzero requires recovery. */
@@ -4366,6 +4404,14 @@ export interface DaemonStatus {
 export interface Daemon {
     /** Pairing result is intentionally credential-blind. */
     pair(pairingCode: string): Promise<DeviceEnrollment>;
+    /**
+     * Resolves once local startup is done — store ownership, storage, journal
+     * recovery, the control socket and the task runner — with the reconnect
+     * loop running. It does not wait for the server: `status().lifecycle` and
+     * `lifecycle` events report the connection, and a halt the server causes.
+     * Throws {@link DaemonHaltError} for a halt found locally; any other throw
+     * is a crash.
+     */
     start(): Promise<void>;
     stop(): Promise<void>;
     status(): DaemonStatus;
@@ -4556,6 +4602,73 @@ export declare class CursorStore {
     /** Remove any persisted cursor for (serverUrl, deviceId) — a no-op if none exists. Called from `pair()` (finding F5) so a device that's about to be replaced never leaves a cursor a future, unrelated device could somehow inherit. */
     clear(serverUrl: string, deviceId: string): Promise<void>;
 }
+// ==== @byok-sdk/client dist/daemon/daemon-lifecycle.d.ts ====
+/**
+ * The daemon's one lifecycle model (issues #391 and #394).
+ *
+ * `start()` resolves once local startup is done; whether the server has
+ * accepted this device is a network fact, reported here and nowhere else. A
+ * condition that a restart cannot fix ends the run as `halted` with a reason
+ * from one closed set, whether it is found 100 ms or 10 days after start.
+ */
+/** Why a daemon run ended and must not be restarted automatically. Closed set. */
+export declare const DAEMON_HALT_REASONS: readonly [
+/** No device record: `pair` first. */
+'unpaired', 
+/** The device record on disk is unusable and only a fresh `pair` replaces it. */
+'re_pair_required', 
+/** Another daemon owns this store. Thrown by `start()`; never reported through `lifecycle`. */
+'store_owned', 
+/** The server revoked this device. */
+'device_revoked', 
+/** The server answered this device's `conn.hello` with a rejection. */
+'handshake_rejected', 
+/** The server no longer retains the history after this device's acknowledged cursor. */
+'replay_cursor_too_old', 
+/** The configuration cannot work; a restart with the same configuration fails the same way. Thrown by `start()`; never reported through `lifecycle`. */
+'config_invalid'];
+export type DaemonHaltReason = (typeof DAEMON_HALT_REASONS)[number];
+export declare function isDaemonHaltReason(value: unknown): value is DaemonHaltReason;
+/**
+ * - `stopped`: not started, or stopped normally.
+ * - `awaiting-enrollment`: a service-enrollment daemon waiting for its first `enrollment.pair`.
+ * - `running`: local startup is done; `connection` is `open` once the server
+ *   accepted this run's `conn.hello` and `connecting` otherwise.
+ * - `halted`: the run ended on a {@link DaemonHaltReason}. It stays halted
+ *   (also after `stop()`) until the next `start()`.
+ */
+export type DaemonLifecycle = {
+    phase: 'stopped';
+} | {
+    phase: 'awaiting-enrollment';
+} | {
+    phase: 'running';
+    connection: 'connecting' | 'open';
+} | {
+    phase: 'halted';
+    reason: DaemonHaltReason;
+    at: string;
+};
+/**
+ * `start()` throws this for a halt it finds locally. `store_owned` and
+ * `config_invalid` are found before this process owns the store, so they
+ * leave `lifecycle` unchanged: the run they describe never began, and the
+ * store's owner (if any) is still the authority on its own lifecycle. Every
+ * other reason is also reported as `lifecycle.halted`.
+ */
+export declare class DaemonHaltError extends Error {
+    readonly reason: DaemonHaltReason;
+    constructor(reason: DaemonHaltReason, options?: {
+        cause?: unknown;
+    });
+}
+/**
+ * Strict read of a persisted or transported {@link DaemonLifecycle} (an
+ * `audit.jsonl` line, a control `status` answer). Anything outside the closed
+ * shape is `undefined`: an unreadable value is reported as unknown, never
+ * guessed.
+ */
+export declare function parseDaemonLifecycle(value: unknown): DaemonLifecycle | undefined;
 // ==== @byok-sdk/client dist/daemon/deterministic-jitter.d.ts ====
 export type JitterDomain = 'reconnect' | 'upload' | 'maintenance';
 export interface DeterministicJitterInput {
@@ -6725,7 +6838,7 @@ export declare function prependAgentMemoryGuidance(instruction: string): string;
 export declare function prependAgentMemoryReaderGuidance(instruction: string): string;
 // ==== @byok-sdk/client dist/daemon/observer.d.ts ====
 import { type AgentEvent, type BlobRef, type Envelope, type RuntimeInfo, type TaskState } from '@byok-sdk/protocol';
-import type { ConnectionState } from './connection-manager';
+import type { DaemonLifecycle } from './daemon-lifecycle';
 /**
  * M3-2a: local observability for the daemon — the seam a CLI (M3-2b) drives a
  * live task feed, a task list, and approve/reject/unpair from, all LOCALLY
@@ -6745,9 +6858,9 @@ import type { ConnectionState } from './connection-manager';
  *   out. See `handleOutboundEnvelope`.
  * - `ConnectionManagerOptions.onEnvelope`/`onStateChange` — likewise already
  *   `create-daemon.ts`'s own closures (`(envelope) =>
- *   runner?.handleEnvelope(envelope)`, `(state) => { connectionState = state;
- *   }`). `onEnvelope` additionally exposes the raw INBOUND offer variants —
- *   the one event class with no corresponding outbound envelope of its own — see
+ *   runner?.handleEnvelope(envelope)`, `(state) => setLifecycle(...)`).
+ *   `onEnvelope` additionally exposes the raw INBOUND offer variants — the
+ *   one event class with no corresponding outbound envelope of its own — see
  *   `handleInboundEnvelope`.
  *
  * Neither seam required adding anything to `TaskRunnerDeps`/`TaskRunner`
@@ -6832,10 +6945,12 @@ export type DaemonEvent = {
     ts: string;
     taskId: string;
     reason?: string;
-} | {
-    kind: 'connection';
+}
+/** Issues #391/#394: every `Daemon.status().lifecycle` change, as it happens. */
+ | {
+    kind: 'lifecycle';
     ts: string;
-    state: ConnectionState;
+    lifecycle: DaemonLifecycle;
 } | {
     kind: 'paired';
     ts: string;
@@ -7070,7 +7185,7 @@ export declare class DaemonObserver {
      * state machine decides the transition happened.
      */
     handleOutboundEnvelope(envelope: Envelope): void;
-    noteConnectionState(state: ConnectionState): void;
+    noteLifecycle(lifecycle: DaemonLifecycle): void;
     notePaired(deviceId: string): void;
     noteUnpaired(): void;
     noteRuntimesDetected(runtimes: RuntimeInfo[]): void;
@@ -9657,9 +9772,10 @@ export {};
 import type { RuntimeDetectResult, RuntimeDetectionRefusalReason } from '../types';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import type { OperationalHealthFileInspection } from '../daemon/operational-health';
+import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 export interface DiagnosticCheck {
-    id: 'config' | 'device' | 'runtimes' | 'control' | 'health' | 'journal' | 'workspace' | 'quarantine';
+    id: 'config' | 'device' | 'runtimes' | 'control' | 'lifecycle' | 'health' | 'journal' | 'workspace' | 'quarantine';
     status: DiagnosticStatus;
     summary: string;
 }
@@ -9703,11 +9819,21 @@ export interface DiagnosticsSnapshot {
         status: 'online';
         pid: number;
         uptimeMs: number;
-        transport: string;
         activeTaskCount: number;
         pendingApprovalCount: number;
         operationalHealth: ControlStatusResult['operationalHealth'];
         storage?: ControlStatusResult['storage'];
+    };
+    /**
+     * Issue #394: the running daemon's lifecycle (`live`), else the last
+     * `lifecycle` event in `audit.jsonl` (`audit`), else `unknown`.
+     */
+    lifecycle: {
+        status: 'unknown';
+    } | {
+        status: 'known';
+        source: 'live' | 'audit';
+        lifecycle: DaemonLifecycle;
     };
     health: OperationalHealthFileInspection;
     journal: {
@@ -9858,6 +9984,8 @@ export type { InstallSkillPacksOptions, InstalledSkillPack, ProjectedSkillPack, 
 export { TruthMemoryClient, TruthMemoryClientError } from './daemon/truth-memory-client';
 export type { LocalMemoryFilter, MemorySelector, TruthManifestQueryInput, TruthManifestRecord, TruthMemoryClientErrorCode, TruthMemoryClientOptions, TruthMemoryMetric, TruthSnapshotCandidateInput, TruthSnapshotWriteInput, TruthTerminalWriteInput, TruthWriteBody, TruthWriteResult, VerifiedTruthRecord, } from './daemon/truth-memory-client';
 export type { ConnectionState } from './daemon/connection-manager';
+export { DAEMON_HALT_REASONS, DaemonHaltError, isDaemonHaltReason } from './daemon/daemon-lifecycle';
+export type { DaemonHaltReason, DaemonLifecycle } from './daemon/daemon-lifecycle';
 export { ReplayCursorTooOldError } from './daemon/replay-cursor';
 export { BlobClient, BlobRequestAbortedError } from './daemon/blob-client';
 export type { BlobClientOptions, BlobRequestAbortReason, BlobRequestOptions, BlobResolver } from './daemon/blob-client';
@@ -11237,8 +11365,8 @@ export interface ServiceProgram {
      * spaces never needs manual escaping (see that file's doc comment).
      *
      * The lifecycles never add or change an argument: a Host's own binary
-     * gets exactly these. Issue #392: `byok-agent install` builds its program
-     * with {@link NodeAgentProgramOptions.service} on macOS and Linux.
+     * gets exactly these. Issues #392/#394: `byok-agent install` builds its
+     * program with {@link NodeAgentProgramOptions.service} on every platform.
      */
     args: string[];
     /** Working directory for the running service process. Each platform generator has its own documented default (see `launchd.ts`/`systemd.ts`/`winsw.ts`) when omitted. */
@@ -11253,10 +11381,12 @@ export interface NodeAgentProgramOptions {
     nodeBin?: string;
     cwd?: string;
     /**
-     * Issue #392: append {@link SERVICE_FLAG}, so `byok-agent start` replaces
-     * the service manager's minimal environment with the user's login-shell
-     * environment (`service-environment.ts`). For a program launchd or
-     * systemd will run; `byok-agent install` sets it on macOS and Linux only.
+     * Append {@link SERVICE_FLAG}: `byok-agent start` then replaces the service
+     * manager's minimal environment with the user's login-shell environment
+     * (issue #392, `service-environment.ts`; win32 has none) and exits 0 on a
+     * halt, so the supervisor does not restart it (issue #394). For a program
+     * a service manager will run; `byok-agent install` sets it on every
+     * platform.
      */
     service?: boolean;
 }

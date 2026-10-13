@@ -395,6 +395,33 @@ Hosts consume the aggregate; they must not re-join `listDevices()` and
 only from U4a `localAgentRelease`; runtime version/auth fields are emitted only
 when a real local probe supplied them, and missing facts stay omitted.
 
+## Local daemon lifecycle
+
+`daemon.start()` resolves once local startup is done; it never waits for the
+network. Whether the server accepted this device is reported through one
+lifecycle model, `status().lifecycle` and the `{kind:'lifecycle'}` event:
+`stopped`, `awaiting-enrollment`, `running` with `connection` `connecting` or
+`open`, or `halted` with a reason from one closed set (`DaemonHaltReason`:
+`unpaired`, `re_pair_required`, `store_owned`, `device_revoked`,
+`handshake_rejected`, `replay_cursor_too_old`, `config_invalid`). `open` means
+the server accepted this session's `conn.hello` (protocol §8.1). Network
+failures never fail `start()` or end the run: the daemon's one reconnect loop
+retries with deterministic fleet jitter. A condition a restart cannot fix ends
+the run as `halted`, whenever it is found; `start()` throws `DaemonHaltError`
+for one it finds locally. `store_owned` and `config_invalid` are found before
+the process owns the store and are thrown only, never reported through
+`lifecycle`. Every other start failure is a crash: it is thrown as is and
+recorded as a `lifecycle` operational-health failure.
+
+`byok-agent start` maps the run's end to its exit code: 0 for a normal stop,
+78 for a halt, 1 for a crash. Under `--service` a halt exits 0, the one status
+launchd, systemd and WinSW all leave stopped; a crash still exits 1 and is
+restarted by the OS supervisor, which is the only crash retry. `byok-agent
+install` writes `--service` into the launchd plist, systemd unit and WinSW
+XML. The last `lifecycle` event is kept in `audit.jsonl` (also across
+rotation); offline `status`, `service-status` and the `doctor` `lifecycle`
+check read it, and a halted daemon fails that check with its remedy.
+
 ## Runtime operation authority
 
 ### Local runtime probe observation
@@ -654,7 +681,9 @@ and terminal envelopes go to the Host as is, as for fresh Agent egress offers.
 The message tool never enters D.
 
 **Prepared Agent memory (scoped v8 cut).**
-Prepared Agent Memory Contract (`docs/researches/2026-09-28-prepared-agent-memory-contract.md`, untracked since #390)
+[Prepared Agent Memory Contract](researches/2026-09-28-prepared-agent-memory-contract.md)
+(superseded in part: [ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md) removed its helper attestation, and this
+spec admits tool-less records; where they differ, this spec governs)
 requires `agentMemory: 'none' | 'read' | 'read-write'` on local/remote preparation,
 receipt bindings and prepared offers. A trusted device authority grants a ceiling;
 preparation and execution both check it. Memory-only preparation uses
@@ -1750,7 +1779,9 @@ channel. The wire receipt contains only identity, decision, hash/size/type and
 `BlobRef`, never inline content. Cloud admission and readback preserve that
 exact fact; neither the blob nor the receipt becomes a complete local
 transcript or shared-history authority. See
-Agent local/cloud projection contract (`docs/researches/agent-local-cloud-projection-contract.md`, untracked since #390).
+[Agent local/cloud projection contract](researches/agent-local-cloud-projection-contract.md)
+(superseded in part: [ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md) removed its egress sanitizer and
+`metadata-status` default projection; where they differ, this spec governs).
 
 The host selects the branded root, authors stable identity plus redacted
 profile projection content, and selects an SDK-valid egress/content-read
@@ -2186,7 +2217,7 @@ admission limit; on the prepared lane that task can run with zero tools. Host co
 summary quality must be validated separately from the SDK result primitive.
 
 Requirements and local acceptance have separate authorities: the existing
-SDK-first plan (`plans/plan-20260910-conversation-turn-sdk-first.md`, untracked since #390) links the
+internal SDK-first plan (`plans/plan-20260910-conversation-turn-sdk-first.md`, not tracked in this repository) links the
 sole detailed Host Sprint ledger. Public source and packed evidence do not imply
 complete ContextPack/Summary, native-runtime, migration or production acceptance.
 
@@ -2235,7 +2266,7 @@ Indirect Pi ruling (2026-10-07, owner, ADR-037): upstream published all nine `@e
 ### 0.22.0 Host calibration and upgrade boundary
 
 The completed official-runtime M5 calibration is retained in
-`tasks/runs/20260925-official-pi-c-reprobe.json` with its `.sha256` sidecar (untracked since #390).
+`tasks/runs/20260925-official-pi-c-reprobe.json` with its `.sha256` sidecar (not tracked in this repository).
 It recommends C=1024 for the recorded official 0.87.1 closure, compiler 4,
 wire 7 and envelope v4 with ruledResidualKeys=[]. Three samples observed zero
 uncovered amount under max(0, prompt_tokens-requestBytes); the prepared fixture

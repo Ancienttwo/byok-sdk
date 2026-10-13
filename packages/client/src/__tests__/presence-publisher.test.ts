@@ -488,7 +488,7 @@ describe('presence re-discovery on reconnect', () => {
     expect(seen.discoveries()).toBe(1);
     expect(seen.presenceRequests()).toBe(0);
     server.setFailEventsPolls(true);
-    await vi.waitFor(() => expect(daemon?.status().connected).toBe(false), { timeout: 5_000 });
+    await vi.waitFor(() => expect(daemon?.status().lifecycle).toEqual({ phase: 'running', connection: 'connecting' }), { timeout: 5_000 });
     server.setFailEventsPolls(false);
     await vi.waitFor(() => expect(seen.presenceRequests()).toBeGreaterThan(0), { timeout: 5_000 });
   }, 20000);
@@ -502,7 +502,7 @@ describe('presence re-discovery on reconnect', () => {
 
     await vi.waitFor(() => expect(seen.presenceRequests()).toBeGreaterThan(0), { timeout: 5_000 });
     server.setFailEventsPolls(true);
-    await vi.waitFor(() => expect(daemon?.status().connected).toBe(false), { timeout: 5_000 });
+    await vi.waitFor(() => expect(daemon?.status().lifecycle).toEqual({ phase: 'running', connection: 'connecting' }), { timeout: 5_000 });
     server.setFailEventsPolls(false);
     await vi.waitFor(() => expect(seen.discoveries()).toBeGreaterThanOrEqual(2), { timeout: 5_000 });
 
@@ -522,7 +522,7 @@ describe('presence re-discovery on reconnect', () => {
 
     await vi.waitFor(() => expect(seen.presenceRequests()).toBe(2), { timeout: 5_000 });
     server.setFailEventsPolls(true);
-    await vi.waitFor(() => expect(daemon?.status().connected).toBe(false), { timeout: 5_000 });
+    await vi.waitFor(() => expect(daemon?.status().lifecycle).toEqual({ phase: 'running', connection: 'connecting' }), { timeout: 5_000 });
     server.setFailEventsPolls(false);
     await vi.waitFor(() => expect(seen.discoveries()).toBeGreaterThanOrEqual(2), { timeout: 5_000 });
 

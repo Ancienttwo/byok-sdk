@@ -9,6 +9,7 @@ import { CursorStore } from '../daemon/cursor-store';
 import { LongPollClient } from '../daemon/long-poll-transport';
 import { DeviceStore } from '../daemon/store';
 import { TestServer } from './fixtures/test-server';
+import { waitForOpen } from './fixtures/lifecycle-barrier';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -60,7 +61,7 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
       onEnvelope: () => {},
     });
     await connection.start();
-    await connection.waitForConnection();
+    await waitForOpen(connection);
   }
 
   it('capabilities are present immediately after a real poll response advertises them', async () => {
@@ -89,7 +90,7 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
     await vi.waitFor(() => expect(connection!.getServerCapabilities()).toEqual([]));
     server.setAdvertiseLongPollCapabilities(true);
     await vi.waitFor(() => expect(connection!.getServerCapabilities()).toEqual(['approval_resolved', 'mailbox-read-ahead']), { timeout: 5000 });
-    expect(connection!.isConnected()).toBe(true);
+    expect(connection!.isOpen()).toBe(true);
   });
 
   it('an events response publishes capabilities before its envelopes reach the handler', async () => {
@@ -123,7 +124,7 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
       longPollIdleDelayMs: 20,
     });
     await connection.start();
-    await connection.waitForConnection();
+    await waitForOpen(connection);
     await vi.waitFor(() => expect(capabilitiesSeenByHandler).toEqual(['approval_resolved', 'mailbox-read-ahead']));
     expect(connection.getServerCapabilities()).toEqual(['approval_resolved', 'mailbox-read-ahead']);
 
@@ -151,7 +152,7 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
       longPollIdleDelayMs: 20,
     });
     await connection.start();
-    await connection.waitForConnection();
+    await waitForOpen(connection);
     connection.send(createEnvelope('task.fail', { reason: 'ordered after hello' }, { taskId: 'task-after-hello' }));
 
     await vi.waitFor(() => {
@@ -193,7 +194,7 @@ describe('ConnectionManager.getServerCapabilities follows the current transport 
       longPollIdleDelayMs: 20,
     });
     await connection.start();
-    await connection.waitForConnection();
+    await waitForOpen(connection);
     await vi.waitFor(() =>
       expect(server.httpRequests.some((request) => request.pathname === '/byok/events')).toBe(true),
     );
