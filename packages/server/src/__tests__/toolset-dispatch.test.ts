@@ -66,6 +66,20 @@ describe('logical MCP toolset dispatch', () => {
     expect(JSON.stringify(offer)).not.toMatch(/command|args|secret/i);
   });
 
+  it('queues declared toolsets without using an advertised inventory as admission authority', async () => {
+    const started = await start();
+    const daemon = await connect(started, { capabilities: ['toolset-selection'] });
+    const handle = await started.byok.dispatch({
+      deviceId: daemon.deviceId,
+      instruction: 'validate local tools when claimed',
+      requiredToolsets: ['salesko'],
+    });
+    expect(await nextEnvelope(daemon)).toMatchObject({
+      type: 'task.offer_with_toolsets', payload: { requiredToolsets: ['salesko'] },
+    });
+    expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Offered');
+  });
+
   it('rejects before task creation when the device did not advertise toolset-selection', async () => {
     const started = await start();
     const daemon = await connect(started, { capabilities: [] });
