@@ -497,6 +497,28 @@ describe('Windows projection ACL verification', () => {
     await expect(assertWindowsPiProjectionAcl('C:\\projection',{systemRoot:'C:\\Windows',run})).rejects.toThrow();
     expect(run).toHaveBeenCalledOnce();
   });
+  it('runs a query that invokes no PowerShell command, so no module is ever auto-loaded', async () => {
+    const run = vi.fn(async () => ({exitCode:0,stdout:JSON.stringify(good),stderr:''}));
+    await assertWindowsPiProjectionAcl('C:\\projection',{systemRoot:'C:\\Windows',run});
+    const [,args] = run.mock.calls[0] as unknown as [string,string[]];
+    const script = Buffer.from(args[3]!, 'base64').toString('utf16le');
+    expect(script).toContain('GetAccessControl');
+    // A Verb-Noun command resolves through PSModulePath; an inherited
+    // PowerShell 7 module path then shadows Microsoft.PowerShell.Security.
+    expect(script).not.toMatch(/\b[A-Z][A-Za-z]+-[A-Z][A-Za-z]+\b/u);
+  });
+  it.each([
+    [2, 'invalid_request'], [3, 'path_not_found'], [4, 'access_denied'],
+    [127, 'powershell_unavailable'], [1, 'unexpected'], [-196608, 'unexpected'],
+  ])('fails closed on query exit %i with the closed cause %s and no host detail', async (exitCode, cause) => {
+    const stderr = 'C:\\Users\\someone\\secret-dir: System.UnauthorizedAccessException';
+    const run = vi.fn(async () => ({exitCode,stdout:JSON.stringify(good),stderr}));
+    const failure = await assertWindowsPiProjectionAcl('C:\\Users\\someone\\projection',{systemRoot:'C:\\Windows',run})
+      .then(() => undefined, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message)
+      .toBe(`pi_projection_acl_query_failed: Pi projection ACL query failed (cause=${cause}, exit=${exitCode})`);
+  });
 });
 
 describe('the required runtime entry', () => {
