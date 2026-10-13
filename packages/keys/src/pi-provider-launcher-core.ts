@@ -376,33 +376,60 @@ export function buildPiProviderChildEnvironment(options: {
   return result;
 }
 
+// Cmdlet-free on purpose: every value comes from .NET APIs, so Windows
+// PowerShell 5.1 never auto-loads a module. An inherited PSModulePath (a
+// PowerShell 7 session puts its own Microsoft.PowerShell.Security first)
+// therefore cannot break the query, and no per-user module analysis runs. The
+// request is decoded from stdin as UTF-8 explicitly, independent of the console
+// code page, so a non-ASCII path reaches the API unchanged.
 const WINDOWS_PROJECTION_ACL_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
 try {
-  $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
-  $acl = Get-Acl -LiteralPath ([string]$request.path)
+  [void][System.Reflection.Assembly]::Load('System.Web.Extensions, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35')
+  $serializer = [System.Web.Script.Serialization.JavaScriptSerializer]::new()
+  $requestText = [System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false, $true)).ReadToEnd()
+  try { $request = $serializer.DeserializeObject($requestText) } catch { exit 2 }
+  if ($request -isnot [System.Collections.Generic.IDictionary[string, object]] -or $request.Count -ne 1 -or $request['path'] -isnot [string]) { exit 2 }
+  $path = [string]$request['path']
   $sidType = [System.Security.Principal.SecurityIdentifier]
-  $rules = @($acl.Access | ForEach-Object {
-    $sid = if ($_.IdentityReference -is [System.Security.Principal.SecurityIdentifier]) { $_.IdentityReference.Value } else { try { $_.IdentityReference.Translate($sidType).Value } catch { $null } }
-    [ordered]@{
-      sid = $sid
-      allow = $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow
-      fullControl = ($_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq [System.Security.AccessControl.FileSystemRights]::FullControl
-      inherits = ($_.InheritanceFlags -band 3) -eq 3 -and $_.PropagationFlags -eq [System.Security.AccessControl.PropagationFlags]::None
-    }
-  })
-  [ordered]@{
-    reparsePoint = ((Get-Item -LiteralPath ([string]$request.path) -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
-    owner = $acl.GetOwner($sidType).Value
-    currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-    protected = $acl.AreAccessRulesProtected
-    rules = $rules
-  } | ConvertTo-Json -Depth 4 -Compress
+  $reparsePoint = ([System.IO.File]::GetAttributes($path) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
+  $acl = [System.IO.Directory]::GetAccessControl($path)
+  $rules = [System.Collections.Generic.List[object]]::new()
+  foreach ($rule in $acl.GetAccessRules($true, $true, $sidType)) {
+    $entry = [System.Collections.Generic.Dictionary[string, object]]::new()
+    $entry['sid'] = [string]$rule.IdentityReference.Value
+    $entry['allow'] = [bool]($rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow)
+    $entry['fullControl'] = [bool](($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq [System.Security.AccessControl.FileSystemRights]::FullControl)
+    $entry['inherits'] = [bool](($rule.InheritanceFlags -band 3) -eq 3 -and $rule.PropagationFlags -eq [System.Security.AccessControl.PropagationFlags]::None)
+    $rules.Add($entry)
+  }
+  $result = [System.Collections.Generic.Dictionary[string, object]]::new()
+  $result['reparsePoint'] = [bool]$reparsePoint
+  $result['owner'] = [string]$acl.GetOwner($sidType).Value
+  $result['currentUser'] = [string][System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  $result['protected'] = [bool]$acl.AreAccessRulesProtected
+  $result['rules'] = $rules.ToArray()
+  [Console]::Out.Write($serializer.Serialize($result))
+  exit 0
 } catch {
-  [Console]::Error.WriteLine('Pi projection ACL query failed')
+  $failure = $_.Exception
+  while ($failure -is [System.Management.Automation.MethodInvocationException] -and $null -ne $failure.InnerException) { $failure = $failure.InnerException }
+  if ($failure -is [System.IO.FileNotFoundException] -or $failure -is [System.IO.DirectoryNotFoundException]) { exit 3 }
+  if ($failure -is [System.UnauthorizedAccessException] -or $failure -is [System.Security.AccessControl.PrivilegeNotHeldException]) { exit 4 }
   exit 1
 }
 `;
+
+/**
+ * The closed cause of a failed ACL query, from the query's exit code alone:
+ * stderr is never echoed, so no path or host detail reaches the error.
+ */
+const WINDOWS_PROJECTION_ACL_QUERY_CAUSES: Readonly<Record<number, string>> = Object.freeze({
+  2: 'invalid_request',
+  3: 'path_not_found',
+  4: 'access_denied',
+  127: 'powershell_unavailable',
+});
 
 /** Read-only Windows equivalent of uid + 0700; never repairs host ACLs. */
 export async function assertWindowsPiProjectionAcl(
@@ -418,7 +445,10 @@ export async function assertWindowsPiProjectionAcl(
     ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(WINDOWS_PROJECTION_ACL_SCRIPT, 'utf16le').toString('base64')],
     JSON.stringify({ path: directory }),
   );
-  if (result.exitCode !== 0) throw new Error('Pi projection ACL query failed');
+  if (result.exitCode !== 0) {
+    const cause = WINDOWS_PROJECTION_ACL_QUERY_CAUSES[result.exitCode] ?? 'unexpected';
+    throw new Error(`pi_projection_acl_query_failed: Pi projection ACL query failed (cause=${cause}, exit=${result.exitCode})`);
+  }
   let acl: unknown;
   try { acl = JSON.parse(result.stdout); }
   catch { throw new Error('pi_projection_acl_invalid_json'); }
