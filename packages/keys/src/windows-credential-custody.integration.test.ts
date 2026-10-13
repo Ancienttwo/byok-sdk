@@ -118,6 +118,26 @@ namespace ByokPreFixProbe {
     }
   }, REAL_BACKEND_TIMEOUT_MS);
 
+  it('keeps non-ASCII request fields distinct across the stdin boundary', async () => {
+    // Two prefixes that differ only in a non-ASCII character. Decoded with the
+    // console code page both collapse to the same '?' target and the second
+    // write overwrites the first; read as UTF-8 each keeps its own credential.
+    const name = 'model-unicode-probe-api-key';
+    const first = new WindowsCredentialManagerSecretStore({ servicePrefix: `${prefix}-\u8d26`, account: 'local-\u8d26', commandRunner: recordingRunner });
+    const second = new WindowsCredentialManagerSecretStore({ servicePrefix: `${prefix}-\u6237`, account: 'local-\u6237', commandRunner: recordingRunner });
+    try {
+      await first.set(name, 'sk-wincred-unicode-first');
+      await second.set(name, 'sk-wincred-unicode-second');
+      await expect(first.get(name)).resolves.toBe('sk-wincred-unicode-first');
+      await expect(second.get(name)).resolves.toBe('sk-wincred-unicode-second');
+    } catch (error) {
+      throw withEvidence(error);
+    } finally {
+      await first.delete(name).catch(() => false);
+      await second.delete(name).catch(() => false);
+    }
+  }, REAL_BACKEND_TIMEOUT_MS);
+
   it('creates the sealing key, applies configure/replace/delete, and the launcher reads only consistent pairs', async () => {
     try {
       await roundTrip();

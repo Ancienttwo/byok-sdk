@@ -468,6 +468,27 @@ describe('committed Pi spawn boundary', () => {
   });
 });
 
+/**
+ * Statements of a PowerShell script that could invoke a command, so could
+ * resolve through PSModulePath. The ACL script is .NET-only: every statement
+ * must start with a variable, a type expression or a language keyword, and an
+ * assignment's right-hand side must too. That rejects Verb-Noun cmdlets in any
+ * case, aliases (gi, gci, %, ?, iex, select, where, ...) and pipeline stages,
+ * without a denylist that the next alias would slip past.
+ */
+function powershellCommandFindings(script: string): string[] {
+  const statementStart = /^(?:\$|\[|(?:try|catch|exit)\b|(?:if|while|foreach)\s*\()/iu;
+  const valueStart = /^(?:\$|\[|\(|'|"|\d|@)/u;
+  const findings: string[] = [];
+  for (const statement of script.split(/[\n;{}|]/u).map((part) => part.trim()).filter((part) => part !== '')) {
+    if (!statementStart.test(statement)) findings.push(statement);
+    const rhs = /^\$\w+(?:\['[^']*'\])?\s*=\s*(.*)$/u.exec(statement)?.[1];
+    if (rhs !== undefined && !valueStart.test(rhs)) findings.push(statement);
+  }
+  if (/\b[a-z]+-[a-z]+\b/iu.test(script.replaceAll(/\s-[a-z]+\b/giu, ' '))) findings.push('Verb-Noun');
+  return findings;
+}
+
 describe('Windows projection ACL verification', () => {
   const owner = 'S-1-5-21-1000';
   const good = { owner, currentUser:owner, protected:true, reparsePoint:false, rules:[
@@ -503,13 +524,30 @@ describe('Windows projection ACL verification', () => {
     const [,args] = run.mock.calls[0] as unknown as [string,string[]];
     const script = Buffer.from(args[3]!, 'base64').toString('utf16le');
     expect(script).toContain('GetAccessControl');
-    // A Verb-Noun command resolves through PSModulePath; an inherited
-    // PowerShell 7 module path then shadows Microsoft.PowerShell.Security.
-    expect(script).not.toMatch(/\b[A-Z][A-Za-z]+-[A-Z][A-Za-z]+\b/u);
+    // A Verb-Noun command (or an alias for one) resolves through PSModulePath;
+    // an inherited PowerShell 7 module path then shadows
+    // Microsoft.PowerShell.Security.
+    expect(powershellCommandFindings(script)).toEqual([]);
+  });
+  it('rejects every command form the cmdlet guard exists to keep out', () => {
+    for (const script of [
+      '$acl = Get-Acl $path', '$acl = get-acl $path', '$acl = GET-ACL $path',
+      'gi $path', 'gci $path', '$x | select Name', '$x | where Name', '$x | % { $_ }',
+      '$x | ? { $_ }', 'iex $text', '$x | foreach Name', '$acl = gi $path',
+    ]) expect(powershellCommandFindings(script), script).not.toEqual([]);
+  });
+  it('loads the serializer assembly in its own try, outside the path_not_found mapping', async () => {
+    const run = vi.fn(async () => ({exitCode:0,stdout:JSON.stringify(good),stderr:''}));
+    await assertWindowsPiProjectionAcl('C:\\projection',{systemRoot:'C:\\Windows',run});
+    const [,args] = run.mock.calls[0] as unknown as [string,string[]];
+    const script = Buffer.from(args[3]!, 'base64').toString('utf16le');
+    // A missing System.Web.Extensions throws FileNotFoundException; inside the
+    // main try it would be mapped to exit 3 (path_not_found).
+    expect(script).toMatch(/^try \{ \[void\]\[System\.Reflection\.Assembly\]::Load\('System\.Web\.Extensions,[^']*'\) \} catch \{ exit 5 \}$/mu);
   });
   it.each([
     [2, 'invalid_request'], [3, 'path_not_found'], [4, 'access_denied'],
-    [127, 'powershell_unavailable'], [1, 'unexpected'], [-196608, 'unexpected'],
+    [127, 'powershell_unavailable'], [1, 'unexpected'], [5, 'unexpected'], [-196608, 'unexpected'],
   ])('fails closed on query exit %i with the closed cause %s and no host detail', async (exitCode, cause) => {
     const stderr = 'C:\\Users\\someone\\secret-dir: System.UnauthorizedAccessException';
     const run = vi.fn(async () => ({exitCode,stdout:JSON.stringify(good),stderr}));
