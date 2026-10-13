@@ -97,7 +97,7 @@ function projectedApiKey(provider: string): unknown {
  */
 async function receiveKeysProfileCredential(args: PiRpcHostArgs): Promise<{ provider: string; apiKey: string } | undefined> {
   if (args.provider === undefined) fail('keys-profile launch requires the launcher-bound --provider');
-  if (PROVIDER_CREDENTIAL_ENV_DENY_NAMES.some((name) => Object.hasOwn(process.env, name)) || Object.hasOwn(process.env, 'PI_PROVIDER_API_KEY')) {
+  if (PROVIDER_CREDENTIAL_ENV_DENY_NAMES.some((name) => Object.hasOwn(process.env, name))) {
     fail('keys-profile credential environment refused');
   }
   const projected = projectedApiKey(args.provider);

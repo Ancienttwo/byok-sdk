@@ -1,11 +1,14 @@
 import { PI_PROVIDER_ENV_KEY_NAMES } from './pi/pi-provider-env.generated';
 
 /**
- * The env name `@byok-sdk/keys` projects the resolved key under. Restated, not
- * imported: the client has no keys dependency (`check-package-graph.mjs`);
- * `prepared-provider-consent.test.ts` pins the restatement. The keys launcher
- * deletes any ambient copy and injects only the credential it just resolved
- * from OS custody, so it must never be inherited from the daemon.
+ * The env name `@byok-sdk/keys` delivers the resolved key under, to the
+ * prepared host only. The rpc host and the durable worker run tools that copy
+ * their environment, so the launcher hands them the key over private IPC
+ * instead (#385). Restated, not imported: the client has no keys dependency
+ * (`check-package-graph.mjs`); `prepared-provider-consent.test.ts` pins the
+ * restatement. The keys launcher deletes any ambient copy and sets it only for
+ * a prepared child, from the credential it just resolved from OS custody, so
+ * it must never be inherited from the daemon.
  */
 export const PI_PROJECTED_KEY_ENV = 'PI_PROVIDER_API_KEY';
 
