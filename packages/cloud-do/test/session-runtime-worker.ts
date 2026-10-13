@@ -1,6 +1,7 @@
 import { BACKGROUND_CONTEXT as context } from '@earendil-works/chord/context';
 import { Harness, GenerationTask, ToolTask, LiveDoc, UserEntry, AssistantEntry, SystemEntry, hook,
-  type Registry, type JsonObject, type ConversationId } from '@earendil-works/pi-durable';
+  type Registry, type JsonObject, type TaskId, type ConversationId } from '@earendil-works/pi-durable';
+import type { JsonValue } from '@earendil-works/chord';
 import { AgentDO } from '../src/agent-do';
 import { agentObjectName, sessionObjectName, getSessionObject, type SessionIdentity } from '../src/identity';
 import type { InvocationTerminalState } from '../src/invocation-ledger';
@@ -192,7 +193,7 @@ export class SessionAuditDO extends AgentDO {
         content: [{ type: 'toolCall', id: callId, name, arguments: args as JsonObject }], stopReason: 'toolUse', timestamp: Date.now(), usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } }] });
       const taskId = input.phase === 'request'
         ? await tx.createTask(GenerationTask, {}, { ownership: { kind: 'conversation' } })
-        : await tx.createTask(ToolTask, { assistant: assistant!.id, callId }, { ownership: { kind: 'conversation' } });
+        : await tx.createTask(ToolTask, { kind: 'model', assistant: assistant!.id, callId }, { ownership: { kind: 'conversation' } });
       const live = await tx.doc(LiveDoc, conversation.id);
       if (input.phase === 'request') {
         live.run = { taskId, inputs: [] };
@@ -205,7 +206,7 @@ export class SessionAuditDO extends AgentDO {
       else live.tools = [{ callId, name, taskId, status: 'running' }];
       return { taskId, userId: user.id, assistantEntryId: assistant?.id };
     }, context);
-    const record = await harness.getTask(seeded.taskId, context);
+    const record = await harness.getTask(seeded.taskId as TaskId<JsonValue>, context);
     if (!record) throw new Error('Missing native seed task');
     const storage = await openDurableObjectStorage(this.ctx.storage);
     await storage.commit([{ type: 'task', value: { ...record, state: { status: 'running', checkpoint: input.phase === 'request'

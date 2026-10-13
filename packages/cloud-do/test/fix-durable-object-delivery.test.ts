@@ -8,6 +8,7 @@ import { Miniflare, Log, LogLevel } from 'miniflare';
 let mf: Miniflare;
 let persist: string;
 let serial = 0;
+let storageFaultRequests = 0;
 const sse = (delta: Record<string, unknown>, finish: string | null = null) => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
 interface Status { liveOwner: boolean; busy: boolean; closedResponses: number; settled?: boolean; aborted?: boolean;
   runs: { state: string; errorCode: string | null }[]; invocations: { state: string }[] }
@@ -25,6 +26,7 @@ beforeAll(async () => {
   }, dev: { outboundService: { type: 'node-handler', handler: async (request, response) => {
     let body = ''; for await (const chunk of request) body += chunk.toString();
     const input = JSON.parse(body) as { messages: { role: string; content: unknown }[] };
+    if (input.messages.some(message => message.role === 'user' && JSON.stringify(message.content).includes('storage fault turn'))) storageFaultRequests++;
     const pause = input.messages.some(message => message.role === 'user' && JSON.stringify(message.content).includes('pause'));
     const text = input.messages.some(message => message.role === 'user' && JSON.stringify(message.content).includes('complete text'));
     response.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -146,4 +148,30 @@ describe('F06-1 submit delivery ownership in real workerd', () => {
     } finally { await json(name, 'discard'); }
   });
 
+  it('reopens a failed Pi Session from storage so repair settles the run and the next submit runs', async () => {
+    const name = await setup(5000);
+    try {
+      await json(name, 'failPiStorage');
+      const response = await rpc(name, 'submit', { instruction: 'storage fault turn' });
+      expect(response.status).toBe(200);
+      const text = await Promise.race([response.text(), new Promise<string>(resolve => setTimeout(() => resolve('HUNG'), 4000))]);
+      // Pi 1.2: the storage error fails the Session. submission.wait() rejects with SessionFailed and the
+      // catch path delivers the fixed error code; the run is never reported done or completed.
+      expect(text).toBe('data: {"type":"error","code":"CLOUD_MODEL_REQUEST_FAILED","retryable":false}\n\n');
+      expect((await status(name)).liveOwner).toBe(false);
+      await json(name, 'healPiStorage');
+      // Before the fix every alarm reused the failed Session: CLOUD_MODEL_REQUEST_FAILED, the run stayed
+      // `running`, and the next submit got 409 CLOUD_TOOL_BUSY until isolate restart.
+      await vi.waitFor(async () => {
+        expect(await json(name, 'alarm')).toEqual({ alarm: 'ok' });
+        expect(await status(name)).toMatchObject({ liveOwner: false, busy: false,
+          runs: [{ state: 'interrupted', errorCode: 'CLOUD_EXECUTION_INTERRUPTED' }] });
+      }, { timeout: 3000 });
+      await nextSubmit(name);
+      expect((await status(name)).runs).toMatchObject([{ state: 'completed' },
+        { state: 'interrupted', errorCode: 'CLOUD_EXECUTION_INTERRUPTED' }]);
+      // The reopened Session aborts the failed turn. Its model request is never sent again.
+      expect(storageFaultRequests).toBe(1);
+    } finally { await json(name, 'discard'); }
+  });
 });

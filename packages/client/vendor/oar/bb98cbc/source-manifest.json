@@ -2,9 +2,9 @@
   "format": "byok.vendor-source",
   "version": 1,
   "package": "@botiverse/oar",
-  "packageVersion": "0.57.0",
+  "packageVersion": "0.59.1",
   "repository": "https://github.com/botiverse/oar",
-  "commit": "0804b915ef511d2880e07d5329450c2484d8d62e",
+  "commit": "bb98cbc1e383ea7192da0c87ce777d799669a7a9",
   "license": "Apache-2.0",
   "files": [
     {
@@ -18,6 +18,12 @@
       "sourcePath": "packages/oar/src/contracts/account-usage.ts",
       "upstreamSha256": "607bd19bc8d387534457fca380fb73f17c3bc1548de741a9a8e30f079a18e66e",
       "vendoredSha256": "607bd19bc8d387534457fca380fb73f17c3bc1548de741a9a8e30f079a18e66e"
+    },
+    {
+      "path": "contracts/brand.ts",
+      "sourcePath": "packages/oar/src/contracts/brand.ts",
+      "upstreamSha256": "2fb5d087f79b387b3122526996a878c6548bd816ea7d420505a11988febc63f6",
+      "vendoredSha256": "2fb5d087f79b387b3122526996a878c6548bd816ea7d420505a11988febc63f6"
     },
     {
       "path": "contracts/context-breakdown.ts",
@@ -56,16 +62,52 @@
       "vendoredSha256": "db10b988dc5024b428408b012c83a3f65f94c5d3eeab611bdf269505954f4251"
     },
     {
+      "path": "contracts/install.ts",
+      "sourcePath": "packages/oar/src/contracts/install.ts",
+      "upstreamSha256": "593a236b838961e6bb9450b7ba6a3f46eef0e26a8b997c35467f780f48125cae",
+      "vendoredSha256": "593a236b838961e6bb9450b7ba6a3f46eef0e26a8b997c35467f780f48125cae"
+    },
+    {
       "path": "contracts/installation.ts",
       "sourcePath": "packages/oar/src/contracts/installation.ts",
       "upstreamSha256": "1a1c236d9d231138c623df578ac475789c609ec41d42c3971b3c443d1b85d971",
       "vendoredSha256": "1a1c236d9d231138c623df578ac475789c609ec41d42c3971b3c443d1b85d971"
     },
     {
+      "path": "contracts/inventory.ts",
+      "sourcePath": "packages/oar/src/contracts/inventory.ts",
+      "upstreamSha256": "2b0d7f4b7949a53c6e5ba3ed87f32dd8071a3d420d9781b969e493ab78873e7f",
+      "vendoredSha256": "2b0d7f4b7949a53c6e5ba3ed87f32dd8071a3d420d9781b969e493ab78873e7f"
+    },
+    {
+      "path": "contracts/list-models.ts",
+      "sourcePath": "packages/oar/src/contracts/list-models.ts",
+      "upstreamSha256": "05354453789d82be5734d39f2ea76972a6e99193c6824fbf1bd62fd38a5fc326",
+      "vendoredSha256": "05354453789d82be5734d39f2ea76972a6e99193c6824fbf1bd62fd38a5fc326"
+    },
+    {
+      "path": "contracts/login.ts",
+      "sourcePath": "packages/oar/src/contracts/login.ts",
+      "upstreamSha256": "23d6434984c6e8cf8a98f48d8c4edbe5ac3702949a5c3ad92de836adf4539a6f",
+      "vendoredSha256": "23d6434984c6e8cf8a98f48d8c4edbe5ac3702949a5c3ad92de836adf4539a6f"
+    },
+    {
+      "path": "contracts/provider-auth.ts",
+      "sourcePath": "packages/oar/src/contracts/provider-auth.ts",
+      "upstreamSha256": "178e08a55b4376fa5fffb1241dc5b5bc1a80c950da2593e33045471a0ef061f3",
+      "vendoredSha256": "178e08a55b4376fa5fffb1241dc5b5bc1a80c950da2593e33045471a0ef061f3"
+    },
+    {
       "path": "contracts/records.ts",
       "sourcePath": "packages/oar/src/contracts/records.ts",
       "upstreamSha256": "8902f47ad98aefd5c5b48b5975c032f6c4aa6340b519cfc46f39ed7d97367018",
       "vendoredSha256": "8902f47ad98aefd5c5b48b5975c032f6c4aa6340b519cfc46f39ed7d97367018"
+    },
+    {
+      "path": "contracts/runtime.ts",
+      "sourcePath": "packages/oar/src/contracts/runtime.ts",
+      "upstreamSha256": "d66e6ad82cec7bba1dbe241285a987c0c561a15f9346880be6e6c754d37a7cab",
+      "vendoredSha256": "d66e6ad82cec7bba1dbe241285a987c0c561a15f9346880be6e6c754d37a7cab"
     },
     {
       "path": "contracts/session-not-found-error.ts",
@@ -76,8 +118,14 @@
     {
       "path": "contracts/session-options.ts",
       "sourcePath": "packages/oar/src/contracts/session-options.ts",
-      "upstreamSha256": "34efb2d9bd85a39eef4b43cf51fc55ec7d7db8c98fc90a419b60e9992a7dec86",
-      "vendoredSha256": "34efb2d9bd85a39eef4b43cf51fc55ec7d7db8c98fc90a419b60e9992a7dec86"
+      "upstreamSha256": "f02438cb529d793cbb5b75e3da5636b66d7bb4a554460cc47990038d7e86d395",
+      "vendoredSha256": "f02438cb529d793cbb5b75e3da5636b66d7bb4a554460cc47990038d7e86d395"
+    },
+    {
+      "path": "contracts/session-unavailable-error.ts",
+      "sourcePath": "packages/oar/src/contracts/session-unavailable-error.ts",
+      "upstreamSha256": "2de35957992686a737559e1a4b1b690d328b2c6fc7ab4d2308e092c529faaa8c",
+      "vendoredSha256": "2de35957992686a737559e1a4b1b690d328b2c6fc7ab4d2308e092c529faaa8c"
     },
     {
       "path": "contracts/session.ts",
@@ -110,6 +158,12 @@
       "vendoredSha256": "e46eea431a6720333c1eeb0ac3d6f5207da9a5422b63dd1d297e77ce29fdb7e9"
     },
     {
+      "path": "contracts/update.ts",
+      "sourcePath": "packages/oar/src/contracts/update.ts",
+      "upstreamSha256": "8069971ce02855d800d86c345b708ff3e1b0cfcbbc78b6fd4456f656fba78f5c",
+      "vendoredSha256": "8069971ce02855d800d86c345b708ff3e1b0cfcbbc78b6fd4456f656fba78f5c"
+    },
+    {
       "path": "observe/graph.ts",
       "sourcePath": "packages/oar/src/observe/graph.ts",
       "upstreamSha256": "57abde5fa583c7470620f89e2c3023b07f314c96fb5e8c9306594e85055fb8cd",
@@ -119,8 +173,8 @@
       "path": "runtimes/codex/app-server-client.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/app-server-client.ts",
       "upstreamSha256": "6cfb2582a9beb597e5621e299a0463cdb234c808fab03f6874a509852dd62956",
-      "vendoredSha256": "b6e60924fa1fe813d1cc3a6331e6e0e69e4751dff6f736b19ba1d0de04982aef",
-      "delta": "Inject caller-owned line-process spawn; pass explicit env unchanged; preserve server ids and support replies; default/per-request timeouts; bounded held and pending state with fatal overflow; release timers on settlement, failed write, exit and kill. S2b: settlement consumer errors reject already-dequeued waiters; no uncaught timer failure. Re-vendor: omit upstream home queue and executable diagnostics; preserve direct injected ownership and bounded exitError; retain handled spawned promise. Native replies await acknowledged stdin writes under bounded ownership. 0.33.1 re-vendor: MCP credential redaction of error and exit text through the caller-owned exitError. 0.37.0 re-vendor: killTree is not passed, because the caller-owned spawn owns tree termination; an exit or kill settles pending requests as exited (budget overflow stays error) and the owned transport reports the exit after stdout closes, so pending entries are not kept for late replies; error replies carry the redacted native error. 0.44.0 re-vendor: keep the explicit string env without the upstream sessionEnvironment merge; omit upstream resources, because the injected LineProcess has no resources reader. 0.54.3 re-vendor: take the upstream Pending method, the undefined-waiter guard and the nativeErrorCause error cause (method and redacted native error); the BYOK transport seams stay."
+      "vendoredSha256": "95f2beaf7e5f3f3b12c3f6cbc347b4464fad763f906e6d079846f413b8b73503",
+      "delta": "Caller-owned process: the injected LineProcess spawn receives exactly the explicit filtered env, cwd and launch arguments; no ambient env merge, home-initialization queue, executable manager, resources reader or killTree option. Bounded RPCs: 30000ms default and per-request deadlines (RpcTimeoutError), maxHeld=256 and maxPending=128 count budgets whose overflow fails and kills, timers cleared on reply, timeout, write failure, exit and kill. Server requests: numeric and string ids preserved; result and error replies go through the acknowledged stdin write. Terminal state: sticky terminal error with the bounded, redacted exitError of the BYOK transport; settlement-consumer errors reject already-dequeued waiters and never escape a timer."
     },
     {
       "path": "runtimes/codex/failure.ts",
@@ -143,9 +197,9 @@
     {
       "path": "runtimes/codex/open.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/open.ts",
-      "upstreamSha256": "0a7410a16a5a0fb4a8650c5f6df28ded5972c522e6ff02e5cfe342d316ead5b6",
-      "vendoredSha256": "e267267c229a32d27acc114d7ea7354d5e311d4d0e6f00d07ffc9a1f3055d8fe",
-      "delta": " Native interactions: explicit on-request policy with readback, opt-in caller-owned request lifecycle, one-shot typed replies and local cancellation records; no fallback allow or persistence. Native replies await acknowledged stdin writes under bounded ownership. 0.54.3 re-vendor: take the upstream sessionCredentialRedactor in place of mcpCredentialRedactor; the approval policy option stays. 0.56.0 re-vendor: take the upstream additionalDirectories as runtimeWorkspaceRoots (cwd first) on start and resume, and the open refusal when the reply does not confirm them; the approval policy option stays."
+      "upstreamSha256": "353974f7722640a45a5f790b8a78cc2a630b3342e198c301a64eba5443023ac9",
+      "vendoredSha256": "c9fcdf08c2f3fcbede9b519e389eb7c97b90dbd8304d4e621b2c7308d6031331",
+      "delta": "Caller-owned interaction opt-in: codexThreadOpen accepts approvalPolicy \"never\" | \"on-request\" and sends it on thread/start and thread/resume; the default stays \"never\"."
     },
     {
       "path": "runtimes/codex/projection.ts",
@@ -162,16 +216,16 @@
     {
       "path": "runtimes/codex/rpc-control.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/rpc-control.ts",
-      "upstreamSha256": "17f8ca0da6900e9590e0c7aa0c6426d5d2962b3dd02562ad1d4fe1c5643fcc0b",
-      "vendoredSha256": "0d47d59532fd21c314d6c2946c3c445659da0bbf1d87221126187eab85ccf8e0",
-      "delta": "Pass configurable control deadline (default 30000ms) and record typed RPC timeouts as rejected responses. Use an equivalent deferred Promise compatible with the SDK ES2022 lib. S2b: replace the redundant deferred response waiter with synchronous response capture to avoid hanging on required-consumer/budget failure. 0.37.0 re-vendor: keep the synchronous capture with the upstream fallback takeover, exited outcome and late-reply frame; a failed takeover record rejects the control and never escapes the fallback timer. 0.54.3 re-vendor: take the upstream SessionNotFoundError for a thread/resume that codex answers -32600 \"no rollout found for thread id\", the resumeId parameter and the direct native cause; the timeout and synchronous response capture stay."
+      "upstreamSha256": "89a001c616461df6b8c24c1d2201c3036b276aaf53fa8fc47fa90a18213778c1",
+      "vendoredSha256": "7ab801c96a160f96180743cde1039738ba4b9f195f91d52755aa739dd5bfc817",
+      "delta": "Bounded controls: every control RPC has a deadline (timeoutMs, default 30000ms), and an RpcTimeoutError is always one rejected response with code error, independent of the plan error mapper. Synchronous response capture through the client request callback instead of a second deferred waiter, so a failed kernel append or budget overflow rejects the control and never strands a waiter; a failed fallback takeover record rejects the control and never escapes the fallback timer."
     },
     {
       "path": "runtimes/codex/session.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/session.ts",
-      "upstreamSha256": "f59cb0742a1a12af00063505529ddf778b87dfd7bdca15f1e2c3dcc4081c61a6",
-      "vendoredSha256": "ba11c6f0cebf5c83416928e4dfc2b6a25e9826724841a5b31fb9010756f599a6",
-      "delta": "BYOK S2a: injected spawn and explicit filtered env; caller-selected sandbox (danger-full-access default, inherit passes no override); raw AdapterSession without sealSession/input-images; native-first frame capture with visible fold failure/kill; bounded server request decline/reject using 0.159.2 response schemas; ES2022 deferred Promise. S2b: explicit body.origin=byok-native; inject required consumer/budget before registration. Re-vendor: remove capabilities.steer; refine optional generic steer to a required Codex method; no withdraw or derived deliver. Native interactions: explicit on-request policy with readback, opt-in caller-owned request lifecycle, one-shot typed replies and local cancellation records; no fallback allow or persistence. Native replies await acknowledged stdin writes under bounded ownership. 0.33.1 re-vendor: build the open request before the owned spawn and pass its redactor to the client. 0.37.0 re-vendor: take the upstream abort fallback; its kill and the server-request deadline timer never throw out of the timer. 0.44.0 re-vendor: take the upstream input-delivery fold, steer acceptance record and MCP tool denials; options.env stays a complete string environment, so no value is a null removal; steer keeps caller-owned image admission; omit upstream resources. 0.54.3 re-vendor: build sessionCredentialRedactor once per open in place of upstream withSessionCredentials/sealSession; redact retained records through the kernel hook, errors thrown from the open path and from prompt, steer, queue, abort and dispose; pass options.resume to openThread; derive graph nodes from record envelopes and carry kernel.link events on the derived frame, with no kernel.node. 0.56.0 re-vendor: take the upstream outputSchema on turn/start and the unsupported queue refusal while a schema is set; queue keeps caller-owned image admission, so no image gate is added. 0.57.0 re-vendor: take the upstream newSessionLinks, so a derived frame carries session_linked only for an edge that is new to the record stream; the BYOK imports and the native-first frame stay."
+      "upstreamSha256": "b07c31ed744abe598c6121c3ad471f830014a7a08471a14941da7c327ff875a0",
+      "vendoredSha256": "85176e1a6c4b8ca6374e950c76014a11ce831708b22c39b633a692614315338e",
+      "delta": "Raw adapter for the SDK: injected spawn and a required explicit filtered env; caller-selected sandboxMode (danger-full-access default, inherit passes no override) instead of ambient OAR_CODEX_SANDBOX; returns AdapterSession without sealSession/withSessionCredentials/observe, building one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control. Native-first recording: each notification is retained as a body.origin=\"byok-native\" frame before the fold; a fold failure kills the process visibly. Server requests: caller-owned bounded native interaction lifecycle when configured, else synchronous decline/-32601 rejection under a 1000ms dispatch deadline; on-request approval policy is verified in the open reply. Owned process lifetime: spawn/adoption settles before the first write, failed initialization kills, the abort-fallback kill and deadline timers never throw. Codex steer is a required member."
     },
     {
       "path": "runtimes/codex/tasks.ts",
@@ -213,8 +267,7 @@
       "path": "shared/credential-redactor.ts",
       "sourcePath": "packages/oar/src/shared/credential-redactor.ts",
       "upstreamSha256": "1a1394edb6948e2b7fad06bb144bcfe159cda07a162c435cc8c620641094cf7b",
-      "vendoredSha256": "f01eb3a0384fda559b021b971d2ce41fa15e56078bf18f7583a9e9b402f80de9",
-      "delta": "ES2022 lib: sort the spread copy instead of toSorted (twice)."
+      "vendoredSha256": "1a1394edb6948e2b7fad06bb144bcfe159cda07a162c435cc8c620641094cf7b"
     },
     {
       "path": "shared/executable/process-tree.ts",
@@ -227,6 +280,12 @@
       "sourcePath": "packages/oar/src/shared/failure-class.ts",
       "upstreamSha256": "b499c00723b79fbbd8bea072cc1d6a1e9221d711c388a9f3ddd5956c741a7f2a",
       "vendoredSha256": "b499c00723b79fbbd8bea072cc1d6a1e9221d711c388a9f3ddd5956c741a7f2a"
+    },
+    {
+      "path": "shared/input-images.ts",
+      "sourcePath": "packages/oar/src/shared/input-images.ts",
+      "upstreamSha256": "bc789ad8e1b456d58410c6ebae3bf88d7c8da13f3533e945fda71bce10939f3a",
+      "vendoredSha256": "bc789ad8e1b456d58410c6ebae3bf88d7c8da13f3533e945fda71bce10939f3a"
     },
     {
       "path": "shared/instant.ts",
@@ -262,14 +321,20 @@
       "path": "shared/session-kernel.ts",
       "sourcePath": "packages/oar/src/shared/session-kernel.ts",
       "upstreamSha256": "cac17f1f61fbd9adf83a5eb853ae62319ff718c82bbd60a7296b2591165708be",
-      "vendoredSha256": "9af270465c084ff8a52c0e14915357f0fefa976973ec69a6eca5258e8c2e77d0",
-      "delta": "BYOK S2b: fatal serialized retained-record byte budget; required consumer runs after append outside best-effort observers. 0.48.0 re-vendor: take the upstream globalThis.crypto.randomUUID in place of the node:crypto import; the byte budget and required consumer stay. 0.54.3 re-vendor: take the upstream record redactor as a hooks member (redact before the byte budget, retention, graph, required consumer and observers), the record-derived graph via observe/graph.js, link() returning session_linked and settle with the native request body."
+      "vendoredSha256": "b882d729e92cf5566ca85e1ca341e9d8448df7b86905d969dbe5535fc4ab3911",
+      "delta": "Fatal serialized retained-record byte budget (maxBytes, onLimit) measured after redaction; required onRecord consumer runs after append, outside best-effort observers; the redact hook is a member of the hooks object."
     },
     {
       "path": "shared/session-links.ts",
       "sourcePath": "packages/oar/src/shared/session-links.ts",
       "upstreamSha256": "659fec8b908c70c97b744cfa1a16e2faee956c1fbb685a8f7258a2bf2bb19509",
       "vendoredSha256": "659fec8b908c70c97b744cfa1a16e2faee956c1fbb685a8f7258a2bf2bb19509"
+    },
+    {
+      "path": "shared/session-options.ts",
+      "sourcePath": "packages/oar/src/shared/session-options.ts",
+      "upstreamSha256": "b99bd6b26fffa00cae177bb042189d5630fb4735bbba560519d4724417039223",
+      "vendoredSha256": "b99bd6b26fffa00cae177bb042189d5630fb4735bbba560519d4724417039223"
     },
     {
       "path": "shared/token-totals.ts",
