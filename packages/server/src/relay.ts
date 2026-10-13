@@ -128,7 +128,7 @@ export class TaskEventRelay implements ByokCloudObserver {
   /**
    * Open the relay for a task this server just dispatched, and publish its
    * `Offered` origin on both feeds. `at` is the offer envelope's own timestamp,
-   * so the feed and the snapshot agree on when the task began.
+   * so the feed preserves the original delivery time.
    */
   noteDispatched(taskId: string, at: string): void {
     const existing = this.#tasks.get(taskId);
