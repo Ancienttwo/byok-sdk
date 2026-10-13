@@ -189,4 +189,5 @@ containment, MIME/text/size checks, per-Agent audit persistence and transport
 fidelity. Salesko owns tenant/actor authorization and cloud retention. Neither
 side treats a full runtime transcript, `MEMORY.md`, `notes/`, or opaque Agent
 files as implicitly uploadable. The design rationale and acceptance boundary
-remain in Agent local/cloud projection contract (`docs/researches/agent-local-cloud-projection-contract.md`, untracked since #390).
+remain in [Agent local/cloud projection contract](researches/agent-local-cloud-projection-contract.md)
+(superseded in part by [ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md); [`docs/spec.md`](spec.md) governs).
