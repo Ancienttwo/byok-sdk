@@ -21,6 +21,7 @@ import {
 } from '../../types';
 
 interface Config {
+  readonly scratchRoot: string;
   readonly productId: string;
   readonly serverUrl: string;
   readonly storeDir: string;
@@ -208,7 +209,7 @@ const daemon = createDaemonWithAdapters(
     productId: config.productId,
     serverUrl: config.serverUrl,
     workspaceRoot: config.workspaceRoot,
-    storeDir: config.storeDir,
+    storage: { scratchRoot: config.scratchRoot }, storeDir: config.storeDir,
     hostedJournal: { mode: 'sqlite' },
     sdkHelperHost: { mode: 'self-executable' },
     ...(config.agentHome === true ? { agentHome: { hostStorageRoot: path.join(config.storeDir, 'agent-home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } } : {}),

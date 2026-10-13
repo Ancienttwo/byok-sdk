@@ -1,3 +1,4 @@
+import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, type RetentionClassId, type RetentionTrigger } from '../daemon/retention/registry';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { AgentEvent, BlobRef } from '@byok-sdk/protocol';
@@ -252,6 +253,11 @@ function redactAgentEvent(event: AgentEvent): Record<string, unknown> {
 function redactForAudit(event: DaemonEvent): Record<string, unknown> {
   const base = { kind: event.kind, ts: event.ts };
   switch (event.kind) {
+    case 'retention-sweep':
+      return { ...base, trigger: event.trigger, at: event.at, deleted: event.deleted, bytesReclaimed: event.bytesReclaimed,
+        failures: event.failures, truncated: event.truncated, durationMs: event.durationMs };
+    case 'retention-failure':
+      return { ...base, trigger: event.trigger, classId: event.classId, count: event.count, code: event.code };
     case 'offered':
       return { ...base, taskId: event.taskId, runtime: event.runtime };
     case 'claimed':
@@ -546,6 +552,21 @@ function reconstructDaemonEvent(raw: Record<string, unknown>): DaemonEvent | und
         intentId: str(raw.intentId),
         disposition: str(raw.disposition) as 'conflict' | 'host_terminal',
       };
+    case 'retention-sweep': {
+      if (!['startup', 'periodic', 'pressure', 'home-lease'].includes(str(raw.trigger))
+        || !['deleted', 'bytesReclaimed', 'failures', 'durationMs'].every(key => typeof raw[key] === 'number' && Number.isFinite(raw[key]) && (raw[key] as number) >= 0)
+        || typeof raw.truncated !== 'boolean' || raw.at !== ts) return undefined;
+      return { kind: 'retention-sweep', ts, trigger: raw.trigger as RetentionTrigger, at: raw.at,
+        deleted: raw.deleted as number, bytesReclaimed: raw.bytesReclaimed as number, failures: raw.failures as number,
+        truncated: raw.truncated, durationMs: raw.durationMs as number };
+    }
+    case 'retention-failure': {
+      if (!['startup', 'periodic', 'pressure', 'home-lease'].includes(str(raw.trigger))
+        || ![...EXPIRING_CLASS_IDS, ...PROTECTED_CLASS_IDS].includes(raw.classId as RetentionClassId)
+        || !['sweep_failed', 'measurement_failed'].includes(str(raw.code)) || !Number.isSafeInteger(raw.count) || (raw.count as number) < 0) return undefined;
+      return { kind: 'retention-failure', ts, trigger: raw.trigger as RetentionTrigger, classId: raw.classId as RetentionClassId,
+        code: raw.code as string, count: raw.count as number };
+    }
     case 'runtime-disposal-failed':
       return {
         kind: 'runtime-disposal-failed',

@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -63,7 +64,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     const workspaceRoot = await tmpDir(`byok-ctl-e2e-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-ctl-e2e-${productId}-store-`);
     const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId, serverUrl: server.url, workspaceRoot, storeDir };
-    const built = createDaemonWithAdapters(config, [adapter], overrides);
+    const built = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter], overrides);
     await built.pair('pairing-code');
     await built.start();
     // #391: start() no longer waits for the server; these tests drive an open session.
@@ -84,7 +85,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
       storeDir,
       serviceEnrollment: { enabled: true },
     };
-    daemon = createDaemonWithAdapters(config, [adapter]);
+    daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter]);
 
     await daemon.start();
     const enrollment = await connectControlClient({ storeDir, productId: config.productId });
@@ -202,8 +203,8 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     adapter.sessions[0]?.emit({ type: 'turn_end' });
     await server.waitFor((e) => e.type === 'task.complete');
 
-    const statusAfter = await conn.client.request<ControlStatusResult>('status');
-    expect(statusAfter.activeTasks).toEqual([]);
+    let statusAfter!: ControlStatusResult;
+    await vi.waitFor(async () => { statusAfter = await conn.client.request<ControlStatusResult>('status'); expect(statusAfter.activeTasks).toEqual([]); expect(statusAfter.queueWatermarks).toEqual([]); expect(statusAfter.approvalsPending).toBe(0); });
     expect(statusAfter.queueWatermarks).toEqual([]);
     expect(statusAfter.approvalsPending).toBe(0);
     conn.client.close();
@@ -369,7 +370,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     const workspaceRoot = await tmpDir('byok-ctl-e2e-startcmd-ws-');
     const storeDir = await tmpDir('byok-ctl-e2e-startcmd-store-');
     const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-ctl-startcmd', serverUrl: server.url, workspaceRoot, storeDir };
-    daemon = createDaemonWithAdapters(config, [adapter]);
+    daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter]);
     await daemon.pair('pairing-code');
 
     const lines: string[] = [];
@@ -409,7 +410,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
       workspaceRoot,
       storeDir,
     };
-    daemon = createDaemonWithAdapters(config, [adapter]);
+    daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter]);
     await daemon.pair('pairing-code');
 
     const lines: string[] = [];

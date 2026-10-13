@@ -1,3 +1,4 @@
+import { unmeasuredRetentionSnapshot } from '../daemon/retention/sweeper';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { renameSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -61,6 +62,7 @@ function unreachable(): Promise<ConnectControlResult> {
 function connected(overrides: Record<string, unknown> = {}): Promise<ConnectControlResult> {
   const client: ControlClient = {
     request: vi.fn().mockResolvedValue({
+      storage: unmeasuredRetentionSnapshot(),
       pid: 1,
       uptimeMs: 1,
       paired: false,
@@ -295,7 +297,7 @@ describe('diagnostics collector', () => {
     const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
     expect(snapshot.journal).toMatchObject({ status: 'corrupt' });
     expect(await digest(journalPath)).toBe(before);
-    expect(await fs.readdir(dir)).toEqual(['daemon.db']);
+    expect(await fs.readdir(dir)).toEqual(['daemon.db', 'tmp']);
   });
 
   it.skipIf(!isSqliteAvailable())('checks a WAL snapshot without creating or changing store sidecars', async () => {
@@ -307,7 +309,7 @@ describe('diagnostics collector', () => {
       const beforeNames = (await fs.readdir(dir)).sort();
       const before = new Map(await Promise.all(beforeNames.map(async (name) => [name, await digest(path.join(dir, name))] as const)));
       await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
-      const afterNames = (await fs.readdir(dir)).sort();
+      const afterNames = (await fs.readdir(dir)).filter(name => name !== 'tmp').sort();
       expect(afterNames).toEqual(beforeNames);
       for (const name of afterNames) expect(await digest(path.join(dir, name))).toBe(before.get(name));
     } finally {

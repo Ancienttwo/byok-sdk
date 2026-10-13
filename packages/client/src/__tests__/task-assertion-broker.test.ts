@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createPublicKey, verify as edVerify } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -135,7 +136,7 @@ describe('task assertion broker: task_assertion.issue', () => {
       ...config,
     };
     const signer = { count: 0 };
-    const built = buildDaemonWithAdapters(full, [adapter], {}, {
+    const built = buildDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(full) }, [adapter], {}, {
       onIssued: () => {
         signer.count += 1;
       },
@@ -209,7 +210,7 @@ describe('task assertion broker: task_assertion.issue', () => {
       ...config,
     };
     const signer = { count: 0 };
-    const built = buildDaemonWithAdapters(full, [adapter], {}, {
+    const built = buildDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(full) }, [adapter], {}, {
       onIssued: () => {
         signer.count += 1;
       },

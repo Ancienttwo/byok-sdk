@@ -1,3 +1,4 @@
+import { testExecutionScratch } from './fixtures/execution-scratch';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
@@ -29,10 +30,11 @@ async function fixture(plan: WorkerPlan[]) {
   await writeFile(path.join(root, 'plan.json'), JSON.stringify(plan));
   const journal: string[] = [];
   const children: ChildProcess[] = [];
-  const release = vi.fn(async () => {});
+  const scratch = await testExecutionScratch();
+  const release = vi.fn(() => scratch.release());
   // The injected spawn launches only our inert fixture, never Pi.
   const session = await startDurablePi({
-    input: {
+    input: { scratch,
       instruction: 'synthetic instruction', mcpEnv: {},
       manifest: { taskId: 'task', cwd: home,
         agentRef: { agentId: 'agent', profileRevision: 'revision' },
@@ -41,7 +43,7 @@ async function fixture(plan: WorkerPlan[]) {
       durableContext: { tenantId: 'tenant', lifecycle: { ownsLease: () => true,
         record: async (kind: string, count: number) => { journal.push(`${kind}:${count}`); } } },
     } as DurableStart['input'],
-    runtimeLaunch: { kind: 'pi-durable', credentialSource: 'keys-profile', command: process.execPath, fixedArgs: [], cwd: root,
+    runtimeLaunch: { scratch, kind: 'pi-durable', credentialSource: 'keys-profile', command: process.execPath, fixedArgs: [], cwd: root,
       projectionDir: path.join(root, 'projection'), env: {}, release, sessionCwd: home },
     replicaRoot: path.join(root, 'replica'),
     launcher: { command: 'inert-test-launcher', profileDbPath: path.join(root, 'unused-profiles'), sessionDir: path.join(root, 'unused-sessions') },

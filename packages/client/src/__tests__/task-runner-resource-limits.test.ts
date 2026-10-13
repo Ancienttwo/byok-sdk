@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -54,7 +55,7 @@ async function makeRunner(
   sent: Envelope[],
   overrides: Partial<Pick<TaskRunnerDeps, 'shutdownInterruptTimeoutMs' | 'maxTaskOutputBytes' | 'batcherOptions'>> = {},
 ): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = {
+  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-taskrunner-limits-workspace-'),
     deviceId: 'device-1',
@@ -101,7 +102,7 @@ describe('TaskRunner: maxDurationMs wall-clock enforcement (M5 batch-3, workstre
     await vi.advanceTimersByTimeAsync(5000);
 
     expect(session?.interruptCalled).toBe(true);
-    expect(runner.activeTaskCount).toBe(0);
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
     const fail = sent.find((e) => e.type === 'task.fail' && e.task_id === 'task-1');
     expect(fail).toBeDefined();
     expect(fail?.payload).toMatchObject({ retryable: false });
@@ -137,7 +138,7 @@ describe('TaskRunner: maxDurationMs wall-clock enforcement (M5 batch-3, workstre
     await vi.advanceTimersByTimeAsync(20); // margin for the hard-kill's own close() to settle
 
     expect(session?.closeCalled).toBe(true);
-    expect(runner.activeTaskCount).toBe(0);
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
     const fail = sent.find((e) => e.type === 'task.fail' && e.task_id === 'task-hang');
     expect(fail).toBeDefined();
     expect(fail?.payload).toMatchObject({ retryable: false });
@@ -166,7 +167,7 @@ describe('TaskRunner: maxDurationMs wall-clock enforcement (M5 batch-3, workstre
     await vi.advanceTimersByTimeAsync(0);
 
     expect(sent.some((e) => e.type === 'task.complete' && e.task_id === 'task-ok')).toBe(true);
-    expect(runner.activeTaskCount).toBe(0);
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
 
     await vi.advanceTimersByTimeAsync(5000);
 
@@ -210,7 +211,7 @@ describe('TaskRunner: maxTaskOutputBytes enforcement (M5 batch-3, workstream 2)'
       expect(sent.some((e) => e.type === 'task.fail' && e.task_id === 'task-flood')).toBe(true);
     });
 
-    expect(runner.activeTaskCount).toBe(0);
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
     const fail = sent.find((e) => e.type === 'task.fail' && e.task_id === 'task-flood');
     expect(fail?.payload).toMatchObject({ retryable: false });
     expect((fail?.payload as { reason: string }).reason.startsWith(MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX)).toBe(true);
@@ -300,7 +301,7 @@ describe('TaskRunner: progressBatch.maxBatchBytes enforcement', () => {
     ).toBe(true);
     expect(session?.interruptCalled).toBe(true);
     expect(session?.closeCalled).toBe(true);
-    expect(runner.activeTaskCount).toBe(0);
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
     expect(diagnostic).not.toHaveBeenCalled();
     diagnostic.mockRestore();
   });
@@ -341,7 +342,7 @@ describe('TaskRunner: clean custom Session termination', () => {
       reason: 'runtime adapter contract violation during run',
     });
     expect(sent.some((e) => e.type === 'task.decline' && e.task_id === 'task-crash')).toBe(false);
-    expect(runner.activeTaskCount).toBe(0);
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
     expect(diagnostic).toHaveBeenCalledOnce();
     diagnostic.mockRestore();
   });

@@ -14,7 +14,6 @@ import {
   AGENT_HOME_READER_RUN_MAX_RETAINED,
   AGENT_HOME_READER_RUNS_DIRECTORY,
   isReaderRunName,
-  pruneReaderRuns,
   type AgentHomeAccessMode,
 } from './agent-home-readers';
 import {
@@ -317,6 +316,9 @@ export class AgentHomeLayout {
     this.hostStorageRootInput = path.resolve(hostStorageRoot);
   }
 
+  /** Configured root, for read-only maintenance discovery; does not materialize a home. */
+  hostRootInput(): string { return this.canonicalRoot ?? this.hostStorageRootInput; }
+
   async resolve(agentRefInput: AgentRef): Promise<AgentHomeResolution> {
     const gate = await this.acquireRootMutationGate();
     try {
@@ -614,6 +616,43 @@ export class AgentHomeLeaseManager {
         return releaseAttempt;
       },
     };
+  }
+
+  /** No AgentRef is minted: this lease owns filesystem mutation, not a product profile. */
+  async acquireMaintenance(agentsRoot: string, canonicalHome: string): Promise<{ release(): Promise<void> }> {
+    if (AgentHomeLeaseManager.held.has(canonicalHome)) throw new AgentHomeBusyError('Agent home has an active base lease');
+    const leaseId = randomUUID();
+    AgentHomeLeaseManager.held.set(canonicalHome, leaseId);
+    let gate: PathMutationGate | undefined;
+    try {
+      gate = await acquirePathMutationGate({ scope: 'agent-home-root', targetPath: agentsRoot });
+      await assertRealDirectoryIfPresent(agentsRoot);
+      await assertRealDirectoryIfPresent(canonicalHome);
+      const stat = await fs.lstat(canonicalHome);
+      if (!stat.isDirectory() || await fs.realpath(canonicalHome) !== canonicalHome || path.dirname(canonicalHome) !== agentsRoot) throw new AgentHomeResolutionError('invalid maintenance home');
+      await assertRealDirectoryIfPresent(path.join(canonicalHome, AGENT_HOME_INTERNAL_DIRECTORY));
+      const marker = path.join(canonicalHome, AGENT_HOME_INTERNAL_DIRECTORY, 'agent-home.lease');
+      const markerStat = await fs.lstat(marker).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
+      if (markerStat !== undefined) {
+        if (!markerStat.isFile() || markerStat.isSymbolicLink()) throw new AgentHomeLeaseCorruptError('invalid maintenance lease marker');
+        const prior = parseLeaseMarker(await fs.readFile(marker, 'utf8'), marker);
+        if (prior.ownerId !== this.ownerId || prior.canonicalHome !== canonicalHome || prior.agentRef.agentId !== path.basename(canonicalHome)) throw new AgentHomeBusyError('Agent home belongs to another writer');
+        // Same-owner crash residue is retained. The daemon already reconciled its processes.
+      }
+    } catch (error) {
+      try { await gate?.release(); }
+      finally { if (AgentHomeLeaseManager.held.get(canonicalHome) === leaseId) AgentHomeLeaseManager.held.delete(canonicalHome); }
+      if (error instanceof PathMutationGateBusyError) throw new AgentHomeBusyError('Agent-home root is reserved for another writer');
+      throw error;
+    }
+    const heldGate = gate;
+    let released = false;
+    return { release: async () => {
+      if (released) return;
+      await heldGate.release();
+      if (AgentHomeLeaseManager.held.get(canonicalHome) === leaseId) AgentHomeLeaseManager.held.delete(canonicalHome);
+      released = true;
+    } };
   }
 
   private async openLeaseMarker(lockPath: string, canonicalHome: string, agentId: string): Promise<fs.FileHandle> {
@@ -1048,6 +1087,18 @@ export class AgentHomeManager {
     this.layout.preflightSync();
   }
 
+  /** Maintenance uses the base writer registry and holds its root gate until work settles. */
+  async withIdleHomeLease(agentId: string, work: (home: string) => Promise<void>): Promise<boolean> {
+    if (path.basename(agentId) !== agentId || agentId === '.' || agentId === '..') throw new AgentHomeResolutionError('invalid maintenance Agent segment');
+    const agentsRoot = path.join(this.layout.hostRootInput(), AGENT_HOME_DIRECTORY);
+    const home = path.join(agentsRoot, agentId);
+    let lease: { release(): Promise<void> };
+    try { lease = await this.leaseManager.acquireMaintenance(agentsRoot, home); }
+    catch (error) { if (error instanceof AgentHomeBusyError) return false; throw error; }
+    try { await work(home); return true; }
+    finally { await lease.release(); }
+  }
+
   /** Resolve and lease without applying downstream projection side effects. */
   async acquire(agentRef: AgentRef): Promise<AgentHomeBinding> {
     const resolution = await this.layout.resolve(agentRef);
@@ -1092,16 +1143,13 @@ export class AgentHomeManager {
    * directory. A resumed reader requires its recorded directory to exist and
    * throws {@link AgentHomeReaderRunMissingError} when it does not.
    *
-   * Retention never removes the directory of an active reader.
-   * `referencedRuns` maps run directories to the last update time of the
-   * reader session handoff that points to them; `undefined` skips retention
-   * for this start. A retention failure does not block the Attempt: it is
-   * returned as `retentionError`.
+   * Reader directories remain after the terminal. The unified sweeper prunes
+   * only under an idle home base lease and preserves recent handoff references.
    */
   async prepareReaderRun(
     binding: AgentHomeExecutionBinding,
-    input: { readonly fresh: boolean; readonly referencedRuns?: ReadonlyMap<string, number>; readonly nowMs: number },
-  ): Promise<{ readonly retentionError?: unknown }> {
+    input: { readonly fresh: boolean },
+  ): Promise<void> {
     const { resolution, lease } = binding;
     if (lease.homeAccess !== 'memory-reader') throw new AgentHomeError('only a reader execution lease has a run directory');
     return this.mutateExecution(binding, async () => {
@@ -1117,20 +1165,9 @@ export class AgentHomeManager {
         if (await fs.realpath(lease.cwd) !== lease.cwd) {
           throw new AgentHomeResolutionError('the reader run directory resolves through a symlink');
         }
-        return {};
+        return;
       }
       const runsRoot = await ensureDirectoryNoSymlink(resolution.canonicalHome, path.dirname(lease.cwd));
-      let retentionError: unknown;
-      if (input.referencedRuns !== undefined) {
-        await pruneReaderRuns({
-          runsRoot,
-          active: this.executionLeaseManager.activeReaderRunDirectories(resolution.canonicalHome),
-          referenced: input.referencedRuns,
-          nowMs: input.nowMs,
-          // Leave room for the directory this start creates next.
-          maxRetained: AGENT_HOME_READER_RUN_MAX_RETAINED - 1,
-        }).catch((error: unknown) => { retentionError = error; });
-      }
       const created = await fs.mkdir(lease.cwd, { mode: 0o700 }).then(() => true, (error: NodeJS.ErrnoException) => {
         if (error.code === 'EEXIST') return false;
         throw error;
@@ -1139,7 +1176,7 @@ export class AgentHomeManager {
       if (await fs.realpath(lease.cwd) !== lease.cwd) {
         throw new AgentHomeResolutionError('the reader run directory changed through a symlink while it was created');
       }
-      return retentionError === undefined ? {} : { retentionError };
+      return;
     });
   }
 

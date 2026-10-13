@@ -41,10 +41,6 @@ import {
   JournalUnavailableError,
   JournalUnknownTaskError,
   type AdmissionRecord,
-  type CategoryUsage,
-  type CleanableCategory,
-  type CleanupCandidate,
-  type CleanupResult,
   type CompactOptions,
   type CompactResult,
   type JournalReceipt,
@@ -55,7 +51,6 @@ import {
   type RecoverableTask,
   type RecoveryOutcome,
   type ReceivedEnvelopeRecord,
-  type StorageCategory,
 } from './journal';
 import {
   isSqliteAvailable,
@@ -147,15 +142,9 @@ export interface SqliteLocalTaskJournalOptions {
  * - `journal_terminal` — terminal payload hash, truth write state, last
  *   retry/error;
  * - `journal_idempotency` — outbound request / envelope / receipt ids;
- * - `local_artifact_ref` — path/hash/size/ref state of filesystem objects,
- *   never the payload itself;
- * - `local_cleanup_candidate` — `eligible_at`, reason, class, attempt/error,
- *   for safe GC;
- * - `local_storage_usage` — measured or approximate bytes per category.
  *
- * `CREATE TABLE IF NOT EXISTS` only, matching the repo's existing SQLite store
- * (there is no migration machinery here, and this schema has no shipped
- * predecessor to migrate from).
+ * Opening permanently drops the three unused candidate/usage/artifact tables.
+ * Actual artifact producers and policy live in daemon/retention.
  *
  * The foreign keys are load-bearing rather than decorative: with
  * `foreign_keys=ON`, a transition or terminal for a task whose offer envelope
@@ -229,46 +218,16 @@ CREATE TABLE IF NOT EXISTS journal_idempotency (
   PRIMARY KEY (scope, key)
 );
 
-CREATE TABLE IF NOT EXISTS local_artifact_ref (
-  ref_id     TEXT PRIMARY KEY,
-  task_id    TEXT,
-  path       TEXT NOT NULL,
-  hash       TEXT,
-  size_bytes INTEGER NOT NULL,
-  ref_state  TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS local_cleanup_candidate (
-  candidate_id TEXT PRIMARY KEY,
-  category     TEXT NOT NULL,
-  ref          TEXT NOT NULL,
-  eligible_at  TEXT NOT NULL,
-  reason       TEXT NOT NULL,
-  attempts     INTEGER NOT NULL DEFAULT 0,
-  last_error   TEXT,
-  outcome      TEXT,
-  resolved_at  TEXT
-);
-CREATE INDEX IF NOT EXISTS local_cleanup_candidate_eligible
-  ON local_cleanup_candidate (resolved_at, eligible_at);
-
-CREATE TABLE IF NOT EXISTS local_storage_usage (
-  category    TEXT PRIMARY KEY,
-  bytes       INTEGER NOT NULL,
-  approximate INTEGER NOT NULL,
-  measured_at TEXT NOT NULL
-);
+DROP TABLE IF EXISTS local_artifact_ref;
+DROP TABLE IF EXISTS local_cleanup_candidate;
+DROP TABLE IF EXISTS local_storage_usage;
+CREATE INDEX IF NOT EXISTS journal_terminal_retention ON journal_terminal (truth_state, updated_at);
 `;
 
 /** `local_state` for a task whose admission declined it — terminal for local purposes, and NOT something recovery should re-offer. */
 const DECLINED_STATE = 'declined';
 /** `local_state` a task starts in: its offer envelope is durable, nothing has been decided yet. */
 const RECEIVED_STATE = 'received';
-
-/** The categories `measureUsage` reports. Host-reported ones default to zero-approximate rather than being guessed at. */
-const HOST_REPORTED_CATEGORIES: readonly StorageCategory[] = ['cache', 'log', 'workspace'];
 
 function byteLength(value: string): number {
   return Buffer.byteLength(value, 'utf8');
@@ -866,162 +825,34 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     });
   }
 
-  /**
-   * Per-category bytes (§12.7.2.1). `journal` and `quarantine` are MEASURED
-   * off the filesystem — they are this object's own footprint, so guessing
-   * would be inexcusable. `cache`/`log`/`workspace` are owned by other
-   * subsystems, so they come from whatever they last reported into
-   * `local_storage_usage`; with nothing reported the answer is an explicit
-   * zero-marked-approximate, never a fabricated estimate.
-   */
+  /** Physical journal/quarantine footprint and confirmed-row inventory. */
   measureUsage(): Promise<LocalStorageUsage> {
     return this.#enqueue('measureUsage', () => {
-      const reported = new Map(
-        (
-          this.#db.prepare('SELECT category, bytes, approximate FROM local_storage_usage').all() as Array<
-            Record<string, unknown>
-          >
-        ).map((row) => [
-          row.category as string,
-          { bytes: Number(row.bytes), approximate: Number(row.approximate) === 1 } satisfies CategoryUsage,
-        ]),
-      );
-
-      const journalBytes =
-        fileBytes(this.#dbPath) + fileBytes(`${this.#dbPath}-wal`) + fileBytes(`${this.#dbPath}-shm`);
-      const categories: Record<StorageCategory, CategoryUsage> = {
-        journal: { bytes: journalBytes, approximate: false },
-        quarantine: {
-          bytes: directoryBytes(join(this.#storeDir, JOURNAL_QUARANTINE_DIRNAME)),
-          approximate: false,
-        },
-        cache: reported.get('cache') ?? { bytes: 0, approximate: true },
-        log: reported.get('log') ?? { bytes: 0, approximate: true },
-        workspace: reported.get('workspace') ?? { bytes: 0, approximate: true },
+      const rows = this.#db.prepare(`SELECT COUNT(*) AS entries FROM journal_envelope`).get() as { entries: number };
+      const confirmed = this.#db.prepare(`SELECT COUNT(*) AS entries, MIN(term.updated_at) AS oldest
+        FROM journal_terminal term JOIN journal_task task ON task.task_id = term.task_id
+        WHERE term.truth_state = 'confirmed' AND task.recovery_marker IS NULL`).get() as { entries: number; oldest: string | null };
+      return {
+        measuredAt: this.#clock().toISOString(),
+        journalBytes: fileBytes(this.#dbPath) + fileBytes(`${this.#dbPath}-wal`) + fileBytes(`${this.#dbPath}-shm`),
+        quarantineBytes: directoryBytes(join(this.#storeDir, JOURNAL_QUARANTINE_DIRNAME)),
+        journalEntries: Number(rows.entries), confirmedEntries: Number(confirmed.entries),
+        ...(confirmed.oldest === null ? {} : { oldestConfirmedAt: confirmed.oldest }),
       };
-      const totalBytes = Object.values(categories).reduce((sum, usage) => sum + usage.bytes, 0);
-      return { measuredAt: this.#clock().toISOString(), totalBytes, categories };
     });
   }
 
-  /**
-   * Record what another subsystem measured for a category it owns. Beyond
-   * S3.3's minimum API and deliberately restricted to the three categories
-   * this journal does NOT measure itself — reporting a number for `journal`
-   * or `quarantine` would let a stale figure override a measured one.
-   */
-  reportCategoryUsage(category: (typeof HOST_REPORTED_CATEGORIES)[number], usage: CategoryUsage): Promise<void> {
-    return this.#enqueue('reportCategoryUsage', () => {
-      this.#db
-        .prepare(
-          `INSERT INTO local_storage_usage (category, bytes, approximate, measured_at) VALUES (?, ?, ?, ?)
-             ON CONFLICT (category) DO UPDATE SET bytes = excluded.bytes, approximate = excluded.approximate,
-                                                  measured_at = excluded.measured_at`,
-        )
-        .run(category, usage.bytes, usage.approximate ? 1 : 0, this.#clock().toISOString());
+  listPrunableConfirmedTasks(cutoff: Date, limit: number): Promise<string[]> {
+    if (!Number.isFinite(cutoff.getTime()) || !Number.isSafeInteger(limit) || limit <= 0) return Promise.reject(new TypeError('invalid journal retention bounds'));
+    return this.#enqueue('listPrunableConfirmedTasks', () => {
+      const rows = this.#db.prepare(`SELECT task.task_id FROM journal_task task
+        JOIN journal_terminal term ON term.task_id = task.task_id
+        WHERE term.truth_state = 'confirmed' AND task.recovery_marker IS NULL AND term.updated_at < ?
+        ORDER BY term.updated_at, task.task_id LIMIT ?`).all(cutoff.toISOString(), limit) as { task_id: string }[];
+      return rows.map(row => row.task_id);
     });
   }
 
-  /**
-   * Register something the cleanup worker may act on. Beyond S3.3's minimum
-   * API (which has no producer for the candidate table), and the only way a
-   * row gets in: `category` is typed {@link CleanableCategory}, so protected
-   * data has no spelling that would let it be enqueued in the first place.
-   */
-  enqueueCleanupCandidate(candidate: {
-    readonly candidateId: string;
-    readonly category: CleanableCategory;
-    readonly ref: string;
-    readonly eligibleAt: string;
-    readonly reason: string;
-  }): Promise<void> {
-    return this.#enqueue('enqueueCleanupCandidate', () => {
-      this.#db
-        .prepare(
-          `INSERT OR IGNORE INTO local_cleanup_candidate (candidate_id, category, ref, eligible_at, reason, attempts)
-           VALUES (?, ?, ?, ?, ?, 0)`,
-        )
-        .run(candidate.candidateId, candidate.category, candidate.ref, candidate.eligibleAt, candidate.reason);
-    });
-  }
-
-  listCleanupCandidates(now: Date, limit: number): Promise<CleanupCandidate[]> {
-    return this.#enqueue('listCleanupCandidates', () => {
-      const rows = this.#db
-        .prepare(
-          `SELECT candidate_id, category, ref, eligible_at, reason, attempts, last_error
-             FROM local_cleanup_candidate
-            WHERE resolved_at IS NULL AND eligible_at <= ?
-            ORDER BY eligible_at ASC, candidate_id ASC
-            LIMIT ?`,
-        )
-        .all(now.toISOString(), limit) as Array<Record<string, unknown>>;
-      return rows.map((row): CleanupCandidate => {
-        const lastError = row.last_error as string | null;
-        return {
-          candidateId: row.candidate_id as string,
-          category: row.category as CleanableCategory,
-          ref: row.ref as string,
-          eligibleAt: row.eligible_at as string,
-          reason: row.reason as string,
-          attempts: Number(row.attempts),
-          ...(lastError === null ? {} : { lastError }),
-        };
-      });
-    });
-  }
-
-  /**
-   * `deleted`/`skipped` resolve the candidate; `failed` does NOT — it bumps
-   * the attempt count and records the error, leaving the row eligible again.
-   * That asymmetry is what makes a cleanup worker crash safe in either order:
-   * crash after deleting the file but before marking, and the candidate is
-   * retried against a file that is already gone (a no-op the worker reports as
-   * `deleted`); crash after marking but before deleting, and the metadata says
-   * resolved for something still on disk, which the next reference scan
-   * re-enqueues. Neither order can lose protected data, because protected data
-   * cannot be a candidate at all.
-   */
-  markCleanupResult(result: CleanupResult): Promise<void> {
-    return this.#enqueue('markCleanupResult', () => {
-      this.#transaction(() => {
-        this.#db
-          .prepare(
-            `UPDATE local_cleanup_candidate
-                SET attempts = attempts + 1,
-                    last_error = ?,
-                    outcome = ?,
-                    resolved_at = ?
-              WHERE candidate_id = ?`,
-          )
-          .run(result.error ?? null, result.outcome, result.outcome === 'failed' ? null : result.at, result.candidateId);
-        this.#fault('cleanup:before-commit');
-      });
-    });
-  }
-
-  /**
-   * §12.7.2.1's cleanup step 3: drop one task's journal rows, but ONLY when
-   * the cloud has confirmed its terminal and it carries no recovery marker.
-   *
-   * Beyond S3.3's minimum API, and the ONLY deletion path this journal has.
-   * The eligibility test is the first statement INSIDE the transaction that
-   * would delete, so "is this row protected?" and "delete it" cannot be
-   * separated by another writer marking it recovered in between — a check
-   * performed outside the write lock is a check that can go stale, and the row
-   * it goes stale on is recovery evidence.
-   *
-   * The idempotency receipt goes with the rows. That is deliberate and it is
-   * what `retentionMs['confirmed-journal']` exists to protect: once the receipt
-   * is gone, a redelivery of that envelope would be appended as new, so the
-   * candidate's retention MUST outlast the mailbox redelivery window
-   * (`storage-policy.ts`'s `DEFAULT_RETENTION_MS` carries the longest default
-   * of the five for exactly this reason). Keeping the receipt forever would
-   * trade that risk for an unbounded table, which is the growth this step is
-   * here to stop.
-   *
-   * Returns `false` — having deleted nothing — when the guard refuses.
-   */
   pruneConfirmedJournalTask(taskId: string): Promise<boolean> {
     return this.#enqueue('pruneConfirmedJournalTask', () =>
       this.#transaction(() => {
@@ -1042,7 +873,6 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
         // itself rejects is a deletion order that was never reviewed.
         this.#db.prepare('DELETE FROM journal_transition WHERE task_id = ?').run(taskId);
         this.#db.prepare('DELETE FROM journal_terminal WHERE task_id = ?').run(taskId);
-        this.#db.prepare('DELETE FROM local_artifact_ref WHERE task_id = ?').run(taskId);
         this.#db.prepare('DELETE FROM journal_task WHERE task_id = ?').run(taskId);
         this.#db.prepare('DELETE FROM journal_idempotency WHERE task_id = ?').run(taskId);
         this.#db.prepare('DELETE FROM journal_envelope WHERE task_id = ?').run(taskId);

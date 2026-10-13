@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -47,7 +48,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: cloud.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: cloud.url, workspaceRoot, storeDir },
       [adapter],
       {
         // Keep retries short while exercising the only daemon transport.
@@ -113,7 +114,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     const hostStorageRoot = await tmpDir('byok-cloud-agent-home-');
     const adapter = new StubRuntimeAdapter('pi');
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' },
         productName: 'Test',
         productId: 'test-product',
@@ -163,7 +164,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' },
         productName: 'Test',
         productId: 'test-product',

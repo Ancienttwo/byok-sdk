@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createPublicKey, generateKeyPairSync, sign as edSign, verify as edVerify } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -138,7 +139,7 @@ describe('device assertion broker: assertion.issue', () => {
       ...config,
     };
     const signer = { count: 0 };
-    const built = buildDaemonWithAdapters(full, [adapter], overrides, {
+    const built = buildDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(full) }, [adapter], overrides, {
       onIssued: () => {
         signer.count += 1;
       },
@@ -813,7 +814,7 @@ describe('device assertion broker: config validation is a construction error', (
       storeDir: path.join(os.tmpdir(), `byok-assert-config-store-${unique}`),
       deviceAssertion,
     } as DaemonConfig;
-    return () => createDaemonWithAdapters(config, [new StubRuntimeAdapter('pi')]);
+    return () => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')]);
   }
 
   const negatives: readonly (readonly [string, unknown])[] = [

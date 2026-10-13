@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, promises as fs, readFileSync } from 'node:fs';
 import os from 'node:os';
@@ -1939,7 +1940,7 @@ describe('WP2I-S2 daemon routing', () => {
     const workspaceRoot = await tempRoot('bk-s2-ws-');
     const hostStorageRoot = await tempRoot('bk-s2-agents-');
     const daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' },
         productName: 'Test',
         productId: 'test-product',

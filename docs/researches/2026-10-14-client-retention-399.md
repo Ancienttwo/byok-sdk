@@ -1,0 +1,21 @@
+# #399 implementation trace and authority decision
+
+P1: TaskRunner is the execution allocation owner; adapters own process disposal; create-daemon owns store lease, reconciliation, journal, home leases, observer and shutdown. Retention uses those existing boundaries without crossing to cloud/server (#412).
+
+P2: An admitted offer allocates ExecutionScratch, overlays its env after login environment capture, shares it with MCP probes and Pi launch resources, then passes it to operation.start. Child disposal precedes SDK cleanup receipt; runtime output remains until its TTL. On restart, owned-process reconciliation precedes scratch cleanup and capability publication. Journal pruning discovers confirmed closure directly and revalidates in a single transaction.
+
+P3: One closed registry removes duplicate GC/candidate authority and serves pressure measurement and status. Protected IDs cannot sweep. Root claims prevent cross-store deletion; no aliases or unknown journal identities are inferred. Home maintenance reserves the same static base-lease registry while holding the existing agents-root socket gate per home. Marker absence under that gate proves no live writer or reader because every Attempt owns the base lease; corrupt/foreign markers refuse. The 250ms cooperative home budget and persistent dir cursors bound contention. The one-hour home-temp mtime grace protects egress/audit writers that do not own an execution lease.
+
+At 10x residue volume, scanning/time limits truncate passes rather than widening authority. Secret-bearing incomplete startup cleanup refuses publication. Physical usage scanning is bounded and reports measurement failure with an honest last timestamp; configured budget fails closed if startup measurement is unavailable. Host workspaces, Pi sessionDir, current skills and Agent content remain protected.
+
+Planning evidence: Claude planner session 07f7c2af-340c-4b8a-9087-d1445ed57aba; file-backed plan plans/plan-20261014-399-retention.md. Its maintenance lease proof was confirmed with no counterexample and incorporated before execution. This is planning evidence, not a code-review or release acceptance claim.
+
+Initial implementation validation (before the subsequent main rebase): all five root required commands passed. Client: 3,817 passed, 28 skipped, including real Pi truncation, real SIGKILL recovery, exclusive replica locks, protected journal closure, home gate refusal/release and process-disposal receipts. Cloud, server, core, protocol, keys, examples and UI baseline suites also passed; Docker substrate suites remain skipped by baseline configuration. Public API golden was regenerated only for client.
+
+## Rebase and fixture verification boundary
+
+The branch is independently rebased onto `main@0913402c`. Runtime/artifact candidate `67a3716b` passes root build/typecheck/API/version, focused client 146/2 skip, installed-package acceptance, and actual macOS Bun packageability. The remaining packageability consumer now supplies a short canonical private scratch root and cleans it afterward; production socket-length validation is unchanged.
+
+A full pass at that candidate exposed 17 cascading startup-fixture failures and one pagination-fixture failure. A one-second startup poll before try/finally could leave the global start spy installed; the next spy captured itself and recursed. Fixture startup now uses its actual start receipt, restores every spy on failure, and waits for the runtime's owned-start settlement before asserting quiescence. The two corrected files pass 49 tests with cancellation/disposal assertions intact. The sole outside-scope correction is the directly blocking MCP pagination fixture: a controlled 100ms initialization plus two 500ms pages reaches the unchanged 1100ms observation budget, while elapsed wall time, typed failure and child exit remain asserted.
+
+Latest required full-workspace validation and remote CI are recorded against the frozen candidate in PR437. The installed artifact evidence remains bound to `67a3716b`; subsequent corrections affect excluded test files and this plan/research only. TaskRunner product startup cancellation is separately owned by PR436; no code was copied from that branch. No merge or release is implied.

@@ -1562,76 +1562,24 @@ compaction hook。本节只陈述 `codex/agent-memory-phase2` 的 source 与本�
 
 #### 12.7.2 Durable local journal：SQLite 为生产 canonical（已实现 S3b）
 
-**已实现（S3b，2026-08-08）**：`LocalTaskJournal` port 与 `SqliteLocalTaskJournal` 落在 `packages/client/src/daemon/journal/`（`journal.ts` / `sqlite-journal.ts` / `sqlite-support.ts` / `storage-policy.ts`），单库 `<storeDir>/daemon.db` 与下述八表、PRAGMA 一致；no-silent-downgrade 由构造期 typed error 执行——当前 runtime 没有合格 `node:sqlite` 时 hosted journal 构造抛 `JournalUnavailableError`（Node 20 实测），不存在退回文件实现的路径。该 journal 是 opt-in 的 hosted 配置项（`DaemonConfig.hostedJournal`）：未配置时 daemon 不构造 journal，默认自托管路径零改动。
+**#399 source contract**：client 的 `daemon/retention/` 统一拥有 scratch、封闭类别表、用量与 sweeper。每个 daemon 在 store owner lease 和 owned-process reconciliation 后、capability publication 前执行启动清扫；默认每 15 分钟按既有 maintenance jitter 算法运行，pressure 每 5 分钟。等待 enrollment 的服务也运行文件维护，但不提前打开 hosted journal writer。配置是 `DaemonConfig.storage`，budget 可选；无 budget 仍维护、测量并上报。
 
-hosted production daemon **必须使用 SQLite，或使用满足同一 durability contract 的注入式实现**。默认实现命名为 `SqliteLocalTaskJournal`；普通 JSON/JSONL file store 只可用于迁移、开发或兼容模式，在未证明 fsync/transaction 语义前不能作为 hosted mailbox ack 的 authority。
+水位按最坏优先求值：
 
-单库 `<storeDir>/daemon.db`，八表：
-
-- `journal_envelope`：tenant/product/device、seq、envelope id、task id、原始 bytes 与 hash、commit/ack 时间；
-- `journal_task`：admission、claimed runtime、effective policy hash、workspace ref、当前本机状态、recovery marker；
-- `journal_transition`：transition id、from/to、`occurred_at`，按 transition id 幂等；
-- `journal_terminal`：terminal payload hash、truth 写入状态、最后一次 retry/error；
-- `journal_idempotency`：outbound request / envelope / receipt ids；
-- `local_artifact_ref`：文件系统对象的 path/hash/size/ref state，不保存大 payload；
-- `local_cleanup_candidate`：`eligible_at`、reason、class、attempt/error，供安全 GC 使用；
-- `local_storage_usage`：journal、cache、logs、workspace、quarantine 各自的近似或实测 bytes。
-
-SQLite durability 设置（实现见 `sqlite-support.ts` 的 `openJournalDatabase`，PRAGMA 顺序是 load-bearing）：
-
-- `PRAGMA auto_vacuum=INCREMENTAL`，且**必须先于建表**执行——schema 已存在后再设会被静默忽略，`compact()` 的 `PRAGMA incremental_vacuum` 就变成报告成功的 no-op；
-- `PRAGMA journal_mode=WAL`；
-- `PRAGMA foreign_keys=ON`；
-- `PRAGMA synchronous=FULL`：语义上是 ack-critical transaction 的要求，实现上按 database-wide 施加——journal 存在的理由就是 ack-critical 写入，不需要 FULL 的维护路径（checkpoint、incremental vacuum）本来就不在热路径；
-- 明确 `busy_timeout`（有界，锁竞争以 error 浮出而不是无界阻塞 envelope 路径）与单 writer queue；
-- envelope append、idempotency receipt 与「可推进 cursor」的 receipt 必须落在同一个 transaction；多表事务统一用 `BEGIN IMMEDIATE`（开头就取写锁）＋ 任何抛出即 `ROLLBACK`；
-- WAL checkpoint、batch delete 与 incremental vacuum 在后台维护，不在 active task 热路径执行。
-
-SQLite driver 是 composition 细节，但不得静默降级：当前 Node/runtime 无法提供合格 SQLite backend 时，宿主必须注入一个通过 conformance 的实现，否则 hosted production mode 拒绝启动。为兼容 Node 20 而退回的普通文件实现不能冒充 production durability。
-
-SQLite 只存可靠性 metadata 与小型 bounded bytes。以下继续留在文件系统：workspace、Git repository、artifact/blob cache、runtime session files、轮转日志与 quarantine。Provider secret 仍然只进 OS credential store，绝不进 SQLite。
-
-最小 journal 事实集：
-
-- tenant / product / device
-- task id
-- 原始 envelope bytes 与 hash
-- received cursor
-- admission result
-- claimed runtime
-- effective policy hash
-- workspace reference
-- execution state transitions
-- terminal payload hash
-- outbound idempotency ids
-- recovery marker
-
-journal 不是 debug log，它是 mailbox ack 的正确性前置条件。
-
-#### 12.7.2.1 本地积压、磁盘水位与清理顺序（已实现 S3b）
-
-**已实现（S3b，2026-08-08）**：`LocalStoragePolicy`、水位状态机与分类 GC 落在 `packages/client/src/daemon/journal/storage-policy.ts`；usage 按 journal/cache/log/workspace/quarantine 五类分别上报，hard pressure 由 TaskRunner 的 admission guard 变成对新 offer 的 retryable decline，状态与用量出现在 control-socket status 的 `storage*` 字段（与 `queueWatermarks` 是两个概念，命名不复用）。
-
-`LocalStoragePolicy` 由 host/daemon config 注入，至少包含 `maxStoreBytes`、`minFreeBytes`、soft/hard watermark、各数据类别的 retention、workspace policy 与 log rotation。水位状态按**最坏优先**求值（emergency 不是「压力很大」，是另一个类别的失败）：
-
-| 状态 | 触发 | 行为 |
+| 状态 | 条件 | 行为 |
 | --- | --- | --- |
-| normal | 低于 soft watermark | 常规低频 GC/compaction |
-| pressure | 达到约 80% budget，或剩余空间低于 soft minimum | 发出告警；只清 expired temp 与 rotated logs 这类可重建物；加快 journal compaction |
-| hard pressure | 达到约 90% budget，或剩余空间低于 hard minimum | 停止接收新的普通 task（retryable decline）；仍允许 terminal/truth flush、删除、导出、doctor 与恢复操作 |
-| emergency | 一次 ack-critical 写入已经失败（latch，不自愈），或剩余空间低于 ack-critical reserve | fail-closed，不 ack 新 mailbox row；保留现有 recovery evidence |
+| normal | 低于 soft watermark | 全部 expiring 类别；journal passive checkpoint + 最多 64 页 incremental vacuum 每小时 |
+| pressure | 达到 80% budget，或低于 soft free minimum | 只清 SDK residue、daemon temp、到期 runtime、已终态且可锁定 replica、过期 input preparation；compaction 每 5 分钟 |
+| hard-pressure | 达到 90% budget，或低于 hard free minimum | 同上；新 offer retryable decline，仍允许 terminal/truth flush、导出与恢复 |
+| emergency | ack-critical failure latch 或低于 reserve | 拒绝 ack；保留 recovery evidence；有效的 normal 水位测量才能解除 latch |
 
-自动清理的完整顺序是：
+每轮先测量水位，再做到期 checkpoint，再按 registry 顺序清理。启动 SDK secrets 清理是 publication 前置条件：删除数量/耗时上限若使扫描不完整，启动失败，不能带残留继续接受 offer。其他类别限制每轮 256 次删除、8192 次检查与 10 秒软期限，目录 cursor 跨轮 round-robin；阻塞的单次 OS I/O 不可抢占。stop 取消 timer，等待进行中的 pass，再关闭 journal。
 
-1. expired upload/download temp 与可重建 cache；
-2. 已轮转且超过 retention 的日志；
-3. 云端已确认 terminal/truth、且无 recovery marker 的旧 journal transitions/envelopes——先 compact 再 batch delete；
-4. host 明确标记为 ephemeral、且 task 已终态的生成式 workspace；
-5. orphan local artifacts，须经过 reference scan 加 grace period。
+`ExpiringClassId` 有 sweep；`ProtectedClassId` 只有 measure，不能表达删除。自动 journal prune 只查超过默认 30 天、已确认且无 recovery marker 的 task，事务再次验证后一起删除 envelope/transition/idempotency/terminal。旧 candidate/report APIs 与三张无生产者的 GC 表已删除，打开数据库时 drop。压力下不 prune journal，不清 reader/home/skill revision。
 
-只有 `normal` 态跑完整五步。`pressure` 及以上把顺序**截断**到第 1–2 步而不是延长它：3–5 步要 reference scan、compact 与 grace period，磁盘快满时最贵、回收最慢，而 1–2 步是纯可重建垃圾、立刻还空间。这是实现的刻意选择（`cleanupOrderFor`），不是简化。
+Agent content、`.byok` 权威记录、lease、terminal evidence、workspace、retired namespace、Host Pi sessionDir、当前 skill revision、quarantine 与 owned-process ledger 永不自动删除。home 维护拿同一 base lease 和 agents-root gate，每个 home 临界区最多 250ms 软期限；不生成 profile authority，不缩短 1 小时 home-temp mtime TTL。未知/非法 lease marker 拒绝该 home 并释放 gate。
 
-**永不自动删除**：未 ack envelope、`Running`/`AwaitApproval` task、truth 尚未确认的 terminal、带 recovery marker 的记录、用户指定的 workspace、provider secret、quarantine evidence。这一条由 `CleanableCategory` 型别构造性强制——保护类别在该型别里没有名字，清理执行器无法表达删除它们，不是运行期过滤。quarantine 只由明确的 `doctor --fix` 或 operator policy 清理（§14.3.3）。
+status 的 storage 始终存在，含每类 bytes/entries/oldestAgeMs/protected/measured、measuredAt 与 lastSweep。physical 文件只计一次；confirmed-journal 行计 logical entries，bytes 为 0，DB footprint 属于 protected journal。测量失败保留上一次明确时间，不能把未知 scope 的 0 说成已测量。observer 只记录 closed class/trigger 和计数；support bundle 使用同一 projection，offline 显式 unmeasured。
 
 #### 12.7.3 Mailbox read/ack 与 crash matrix
 

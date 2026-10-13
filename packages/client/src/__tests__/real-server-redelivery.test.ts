@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -54,7 +55,7 @@ describe('redelivery across a real receive outage (finding F2, real @byok-sdk/se
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
         longPoll: { retryDelayMs: 20, idleDelayMs: 20 },

@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -47,7 +48,7 @@ describe('DaemonConfig.branding', () => {
     const branding = { displayName: 'Acme Coder', supportUrl: 'https://acme.example/support', accent: '#336699' };
 
     daemon = createDaemonWithAdapters(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-product', serverUrl: server.url, workspaceRoot, storeDir, branding },
+      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-product', serverUrl: server.url, workspaceRoot, storeDir, branding },
       [new StubRuntimeAdapter('pi')],
     );
     await daemon.pair('pairing-code');
@@ -61,7 +62,7 @@ describe('DaemonConfig.branding', () => {
     const storeDir = await tmpDir('byok-branding-store-');
 
     daemon = createDaemonWithAdapters(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-product-nobrand', serverUrl: server.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-product-nobrand', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter('pi')],
     );
     await daemon.pair('pairing-code');
@@ -107,7 +108,7 @@ describe('createDaemon — runtimeAllowlist-driven bundled adapter set', () => {
     const workspaceRoot = await tmpDir('byok-allowlist-workspace-');
     const storeDir = await tmpDir('byok-allowlist-store-');
 
-    daemon = createDaemon({
+    daemon = createDaemon({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
       productId: 'test-product-claude-codex',
       serverUrl: server.url,
@@ -128,7 +129,7 @@ describe('createDaemon — runtimeAllowlist-driven bundled adapter set', () => {
     const workspaceRoot = await tmpDir('byok-allowlist-workspace-');
     const storeDir = await tmpDir('byok-allowlist-store-');
 
-    daemon = createDaemon({
+    daemon = createDaemon({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
       productId: 'test-product-default',
       serverUrl: server.url,
@@ -170,7 +171,7 @@ describe('runtimeAllowlist enforcement regression (TaskRunner.pickAdapter, uncha
     const storeDir = await tmpDir('byok-allowlist-enforce-store-');
 
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-enforce',
         serverUrl: server.url,

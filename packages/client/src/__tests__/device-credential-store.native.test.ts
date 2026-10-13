@@ -1,3 +1,4 @@
+import { testScratchRoot } from './fixtures/execution-scratch';
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -153,7 +154,7 @@ const record = {
 describe.skipIf(!nativeWindowsSmoke)('Windows Credential Manager native smoke', () => {
   it('round-trips a unique enrollment through fresh provider processes', async () => {
     const productId = `windows-credential-native-ci-${process.pid}-${Date.now()}`;
-    const writer = new DeviceCredentialStore({ productId, commandRunner: runBoundedNativeCommand });
+    const writer = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId, commandRunner: runBoundedNativeCommand });
     let mayExist = false;
 
     try {
@@ -162,12 +163,12 @@ describe.skipIf(!nativeWindowsSmoke)('Windows Credential Manager native smoke', 
       mayExist = true;
       await runPhase('replace', () => writer.replace(record));
 
-      const reader = new DeviceCredentialStore({ productId, commandRunner: runBoundedNativeCommand });
+      const reader = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId, commandRunner: runBoundedNativeCommand });
       expect(await runPhase('fresh_read', () => reader.read())).toEqual(record);
       expect(await runPhase('clear', () => reader.clear(), CLEAR_PHASE_TIMEOUT_MS)).toBe(true);
       mayExist = false;
 
-      const verifier = new DeviceCredentialStore({ productId, commandRunner: runBoundedNativeCommand });
+      const verifier = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId, commandRunner: runBoundedNativeCommand });
       expect(await runPhase('final_read', () => verifier.read())).toBeUndefined();
     } finally {
       if (mayExist) {
@@ -192,7 +193,7 @@ describe.skipIf(!nativeWindowsSmoke)('Windows Credential Manager native smoke', 
     try {
       expect(os.tmpdir()).toBe(root);
       const productId = `windows-credential-native-unicode-${process.pid}-${Date.now()}`;
-      const store = new DeviceCredentialStore({ productId, commandRunner: runBoundedNativeCommand });
+      const store = new DeviceCredentialStore({ productId, storeDir: root, commandRunner: runBoundedNativeCommand });
       expect(await runPhase('initial_read', () => store.read(), COLD_PHASE_TIMEOUT_MS)).toBeUndefined();
     } finally {
       childEnvironment = process.env;

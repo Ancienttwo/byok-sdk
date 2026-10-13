@@ -1,3 +1,4 @@
+import { testExecutionScratch } from './execution-scratch';
 // Test-only native capture fixture adapted from pi-prepared-launcher.test.ts.
 // No production authority: receipt remains ready=false/test_fixture. HTTP only loopback.
 import { createHash } from 'node:crypto';
@@ -294,12 +295,13 @@ export async function startPrepared(prepared: Prepared, overrides: { taskId: str
     workspace: { workspaceDir: prepared.workspaceDir },
     forwardedEnvironmentNames: Object.keys(prepared.childEnv).sort(),
   });
+  const scratch = await testExecutionScratch();
   const runtimeLaunch = await result.operation.resolveRuntimeLaunch!({
     kind: 'prepared', cwd: prepared.workspaceDir, env: prepared.childEnv,
-    projectionRoot: path.join(prepared.workspaceDir, '.unused-projections'),
+    scratch,
   });
   try {
-    const session = await result.operation.start({
+    const session = await result.operation.start({ scratch,
       runtimeLaunch,
       kind: 'prepared',
       mcpEnv: projectPiMcpEnvironment(prepared.childEnv),

@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,7 +24,7 @@ const unusedBlobClient: BlobResolver = {
 };
 
 async function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[]): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = {
+  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-taskrunner-bounded-workspace-'),
     deviceId: 'device-1',
@@ -275,7 +276,9 @@ describe('TaskRunner: bounded finishedTaskIds/pendingCancelled (M3-B)', () => {
     await vi.waitFor(() => expect(adapter.sessions[0]?.closeCalled).toBe(true), { timeout: 3_000 });
     expect(adapter.sessions[0]?.interruptCalled).toBe(true);
     expect(adapter.sessions[0]?.closeCalled).toBe(true);
-    expect(runner.activeTaskCount).toBe(0);
+    // Process close precedes the SDK scratch cleanup receipt. Keep ownership
+    // visible until both complete; cancellation still never publishes started.
+    await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0), { timeout: 3_000 });
     expect(rn.pendingCancelled.has(taskId)).toBe(false); // consumed by checkpoint 2, not evicted
   });
 });

@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -29,7 +30,7 @@ describe('S11-F1 daemon status-read lifetime', () => {
     const server = await TestServer.start();
     cleanup.push(() => server.close());
     server.setPairingTenantId('fixture-code', 'tenant');
-    const daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot: path.join(dir, 'workspace'), storeDir: path.join(dir, 'store') }, [new StubRuntimeAdapter()]);
+    const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot: path.join(dir, 'workspace'), storeDir: path.join(dir, 'store') }, [new StubRuntimeAdapter()]);
     cleanup.push(() => daemon.stop());
     const device = await daemon.pair('fixture-code');
     const originalFetch = globalThis.fetch;

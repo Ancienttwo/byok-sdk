@@ -1,3 +1,4 @@
+import { testScratchRoot } from './fixtures/execution-scratch';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { promises as fs, readFileSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
@@ -9,6 +10,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { decodeEnvelope } from '@byok-sdk/protocol';
 
 interface ChildConfig {
+  readonly scratchRoot: string;
   readonly productId: string;
   readonly serverUrl: string;
   readonly storeDir: string;
@@ -333,7 +335,7 @@ beforeEach(async () => {
     port,
     cloudDb,
     cloudConfig,
-    daemonBase: {
+    daemonBase: { scratchRoot: testScratchRoot(),
       productId,
       serverUrl: `http://127.0.0.1:${port}`,
       storeDir: path.join(root, 'daemon-store'),

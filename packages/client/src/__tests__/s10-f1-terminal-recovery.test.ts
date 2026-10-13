@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -52,7 +53,7 @@ async function cancellationFixture(overrides: Partial<TaskRunnerDeps> = {}) {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const deps: TaskRunnerDeps = {
+    const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: await temporary('byok-publish-cancel-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }), agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-cancel',

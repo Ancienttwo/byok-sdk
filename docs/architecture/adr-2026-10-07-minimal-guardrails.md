@@ -42,7 +42,7 @@ Owner rulings（2026-10-07）：
 Owner 对 open items 的决定（2026-10-07）：
 
 - **D1 Codex sandbox**：跟随 OAR。`approvalPolicy: never`，sandbox 默认 `danger-full-access`。daemon 配置 `codexSandbox` 对应 `OAR_CODEX_SANDBOX`：取一个 sandbox mode，或取 `inherit`，让用户的 `config.toml` 生效。
-- **D2 环境**：跟随 OAR。继承完整环境，只移除 `CLAUDECODE`。保留 `BYOK_*` deny（SDK key custody）。
+- **D2 环境**：跟随 OAR。继承完整环境，移除 `CLAUDECODE`；#399 owner-approved amendment：最后覆盖 `TMPDIR`/`TEMP`/`TMP` 到该 Execution 的受管 runtime 目录，保留默认 24 小时 disposal 后 TTL，不限制 detached shell 语义。保留 `BYOK_*` deny（SDK key custody）。
 - **D3 API keys**：跟随 OAR。Claude 与 Codex 不剥离 provider key。Pi BYOK lane 保留它的 key custody。
 - **D4 Agent egress**：跟随 OAR（「nothing gated, nothing dropped」）。记录原样发给 Host。删除 egress sanitizer 与默认内容省略。保留 spool 与 backpressure。
 - **D5 MCP `tools/list` probe**：只为 Pi 保留。

@@ -1,3 +1,4 @@
+import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry';
 import { isTaskOfferType,
   partitionAgentEvents,
   TASK_TRANSITIONS,
@@ -44,6 +45,8 @@ import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment'
 export type DaemonEventKind = DaemonEvent['kind'];
 
 export type DaemonEvent =
+  | ({ kind: 'retention-sweep'; ts: string } & SweepReport)
+  | { kind: 'retention-failure'; ts: string; trigger: RetentionTrigger; classId: RetentionClassId; count: number; code: string }
   | { kind: 'offered'; ts: string; taskId: string; runtime?: string }
   | { kind: 'claimed'; ts: string; taskId: string; claimedRuntime?: string }
   | { kind: 'started'; ts: string; taskId: string }
@@ -603,6 +606,11 @@ export class DaemonObserver {
    * must never make a subscriber's own async work a precondition for
    * cursor advancement or the next envelope being processed.
    */
+  noteRetentionSweep(report: SweepReport): void { this.emit({ kind: 'retention-sweep', ts: report.at, ...report }); }
+  noteRetentionFailure(trigger: RetentionTrigger, classId: RetentionClassId, code: string): void {
+    this.emit({ kind: 'retention-failure', ts: nowIso(), trigger, classId, code, count: 1 });
+  }
+
   private emit(event: DaemonEvent): void {
     for (const listener of this.listeners) {
       try {

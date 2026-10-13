@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,7 +28,7 @@ describe('TaskRunner metering at the cancellation boundary', () => {
     const sent: Envelope[] = [];
     let enteredUpload!: () => void;
     const uploading = new Promise<void>(resolve => { enteredUpload = resolve; });
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: path.join(dir, 'workspace'),
       deviceId: 'cancel-usage-device', send: event => { sent.push(event); },
       blobClient: {

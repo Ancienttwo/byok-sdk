@@ -1,3 +1,4 @@
+import { testScratchRoot, testScratchOwner } from "./fixtures/execution-scratch";
 /**
  * L-002: the durable journal wired into the daemon.
  *
@@ -142,10 +143,8 @@ class RecordingJournal implements LocalTaskJournal {
   async measureUsage(): Promise<never> {
     throw new Error('not used in this test');
   }
-  async listCleanupCandidates(): Promise<[]> {
-    return [];
-  }
-  async markCleanupResult(): Promise<void> {}
+  async listPrunableConfirmedTasks(): Promise<string[]> { return []; }
+  async pruneConfirmedJournalTask(): Promise<boolean> { return false; }
   async compact(): Promise<never> {
     throw new Error('not used in this test');
   }
@@ -175,7 +174,7 @@ describe('hosted journal integration (L-002)', () => {
     const workspaceRoot = await tmpDir('byok-journal-int-workspace-');
     const storeDir = await tmpDir('byok-journal-int-store-');
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-journal',
         serverUrl: server.url,
@@ -280,7 +279,7 @@ describe('hosted journal integration (L-002)', () => {
       };
 
       expect(() =>
-        createDaemonWithAdapters({ ...base, hostedJournal: { mode: 'jsonl' as 'sqlite' } }, []),
+        createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  ...base, hostedJournal: { mode: 'jsonl' as 'sqlite' } }, []),
       ).toThrow(/must be "sqlite"/);
       // Nothing was constructed on the rejected path.
       expect(journalConstructions.storeDirs).toEqual([]);
@@ -382,7 +381,7 @@ describe('hosted journal integration (L-002)', () => {
 
         const adapter = new StubRuntimeAdapter('pi');
         daemon = createDaemonWithAdapters(
-          {
+          { storage: { scratchRoot: testScratchRoot() },
             localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
             productId: 'test-product-journal',
             serverUrl: server.url,
@@ -452,7 +451,7 @@ async function makeRunner(
   sent: Envelope[],
   admissionGuard?: TaskRunnerDeps['admissionGuard'],
 ): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = {
+  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-guard-workspace-'),
     deviceId: 'device-1',

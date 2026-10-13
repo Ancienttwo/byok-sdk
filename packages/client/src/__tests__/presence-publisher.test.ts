@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -284,7 +285,7 @@ describe('daemon presence wiring against the real @byok-sdk/cloud', () => {
     const storeDir = await tmpDir('byok-presence-store-');
     const adapter = new StubRuntimeAdapter();
     const started = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test',
         productId: 'test-product',
         serverUrl: handle.url,
@@ -458,7 +459,7 @@ describe('presence re-discovery on reconnect', () => {
     const workspaceRoot = await tmpDir('byok-presence-reconnect-workspace-');
     const storeDir = await tmpDir('byok-presence-reconnect-store-');
     const started = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test',
         productId: 'test-product',
         serverUrl: url,

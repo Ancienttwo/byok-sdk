@@ -1,3 +1,4 @@
+import { testScratchOwner, testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -68,7 +69,7 @@ describe('Agent memory guidance', () => {
         throw new Error('not used in this test');
       },
     };
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters,
       workspaceRoot,
       agentHome: new AgentHomeManager({ hostStorageRoot }),
@@ -161,7 +162,7 @@ describe('Agent memory guidance', () => {
     const hostStorageRoot = await makeRoot();
     const workspaceRoot = await makeRoot();
 
-    expect(() => createDaemonWithAdapters({
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Agent memory unsupported platform test',
       productId: 'agent-memory-unsupported-platform-test',
@@ -190,10 +191,10 @@ describe('Agent memory guidance', () => {
     } as const;
 
     if (process.platform === 'darwin') {
-      expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter('pi')])).not.toThrow();
+      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')])).not.toThrow();
       expect(resolveAgentMemoryMcpBin(true)).toBeDefined();
     } else {
-      expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter('pi')])).toThrow('is not admitted on this platform');
+      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')])).toThrow('is not admitted on this platform');
       expect(resolveAgentMemoryMcpBin(true)).toBeUndefined();
     }
   });

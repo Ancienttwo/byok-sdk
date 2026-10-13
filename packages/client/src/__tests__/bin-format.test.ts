@@ -355,6 +355,7 @@ describe('bin/format: formatStatusLines', () => {
 describe('bin/format: formatLiveStatusLines', () => {
   function baseLive(overrides: Partial<ControlStatusResult> = {}): ControlStatusResult {
     return {
+      storage: { measuredAt: null, usedBytes: 0, freeBytes: null, classes: [], lastSweep: null },
       pid: 123,
       uptimeMs: 4567,
       localAgentRelease: { version: '1.1.0', buildId: 'live-build' },

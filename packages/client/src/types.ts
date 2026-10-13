@@ -1,3 +1,4 @@
+import type { ExecutionScratch } from './daemon/retention/scratch';
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
@@ -404,8 +405,9 @@ export interface DurableLifecycle {
 
 /** Runtime resources shared by every start variant. */
 interface RuntimeOperationStartBase {
+  readonly scratch: ExecutionScratch;
   /** Trusted parent-only recovery authority; never serialized into the worker. */
-  readonly durableContext?: { readonly tenantId: string; readonly lifecycle: DurableLifecycle };
+  readonly durableContext?: { readonly tenantId: string; readonly lifecycle: DurableLifecycle; readonly replicaRoot: string };
 
   readonly runtimeLaunch?: PiRuntimeLaunchResources;
   /** Exact daemon MCP admission environment; Pi requires it and never inherits runtime credentials. */
@@ -459,7 +461,7 @@ export interface PreparedRuntimeOperation {
   /** Resource phase after workspace resolution and before claim; never reads a credential. */
   resolveRuntimeLaunch?(input: {
     kind: 'instruction' | 'prepared'; cwd: string; env: Readonly<Record<string, string | undefined>>;
-    projectionRoot: string;
+    scratch: ExecutionScratch;
   }): Promise<PiRuntimeLaunchResources>;
   start(input: RuntimeOperationStartInput): Promise<Session>;
 }

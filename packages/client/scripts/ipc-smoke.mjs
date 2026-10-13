@@ -76,7 +76,7 @@ const { createByokServer } = await import(pathToFileURL(serverDistIndex).href);
 const { serve } = await import(honoNodeServerSpecifier);
 
 const productId = `byok-ipc-smoke-${process.pid}`;
-const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-ipc-smoke-'));
+const workDir = await fs.realpath(await fs.mkdtemp(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'byok-ipc-smoke-')));
 const storeDir = path.join(workDir, 'store');
 const workspaceRoot = path.join(workDir, 'workspace');
 const configPath = path.join(workDir, 'config.json');

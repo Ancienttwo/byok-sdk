@@ -1,3 +1,4 @@
+import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions';
 import { CodexNativeInteractions } from './native-interactions';
 import { execFile, type spawn as nodeSpawn } from 'node:child_process';
@@ -189,6 +190,7 @@ export class CodexAdapter implements RuntimeAdapter {
       spawnFn: this.options.spawnFn,
     });
     const session = new CodexSession(
+      input.scratch,
       workspace,
       model,
       this.options.interruptTimeoutMs ?? 1000,
@@ -210,7 +212,7 @@ export class CodexAdapter implements RuntimeAdapter {
         { kind: 'available', via: 'executable', command },
         {
           cwd,
-          env: input.env as Record<string, string>,
+          env: { ...input.env, ...input.scratch.env } as Record<string, string>,
           ...(model === undefined ? {} : { model }),
           ...(this.options.nativeInteractions === undefined ? {} : { approvalPolicy: "on-request" as const }),
           sandboxMode: this.options.sandbox ?? 'danger-full-access',
@@ -301,6 +303,7 @@ class CodexSession implements Session {
   private readonly native?: CodexNativeInteractions;
   declare readonly interactions?: NativeInteractionChannel;
   constructor(
+    private readonly scratch: ExecutionScratch,
     private readonly workspace: string,
     private readonly model: string | undefined,
     private readonly interruptMs: number,
@@ -464,6 +467,7 @@ class CodexSession implements Session {
             if (!this.failure) throw error;
           } finally {
             await this.child?.dispose();
+            await this.scratch.release();
           }
         } finally {
           // Stdout may contain final native frames after the interrupt ACK.

@@ -1,7 +1,7 @@
+import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome';
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { AgentEvent, TaskOfferPayload } from '@byok-sdk/protocol';
@@ -35,21 +35,8 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Task-owned cleanup is part of the close receipt and must fail visibly. */
-async function cleanupMcpConfigDir(dir: string | undefined): Promise<void> {
-  if (!dir) return;
-  try {
-    await fs.rm(dir, { recursive: true, force: true });
-  } catch (cause) {
-    throw new RuntimeDisposalFailure({
-      stage: 'cleanup',
-      reason: 'claude task-scoped MCP configuration could not be removed',
-    }, { cause });
-  }
-}
-
 /** One owner covers process teardown and task config on every failed start. */
-async function rejectOwnedStartup(cause: unknown, client: ClaudeProcessClient | undefined, mcpConfigDir: string | undefined, retainPendingDisposal = false): Promise<never> {
+async function rejectOwnedStartup(cause: unknown, client: ClaudeProcessClient | undefined, scratch: ExecutionScratch, retainPendingDisposal = false): Promise<never> {
   const failure = isRuntimeExecutionFailure(cause) ? cause : new RuntimeExecutionFailure({
     phase: 'start', category: 'infrastructure', retry: 'retryable',
     reason: 'claude runtime startup failed',
@@ -63,7 +50,7 @@ async function rejectOwnedStartup(cause: unknown, client: ClaudeProcessClient | 
         // that a thrown constructor means no process was spawned.
         if (isRuntimeStartupDisposalFailure(cause)) await cause.retryDisposal();
         else await client?.dispose();
-        await cleanupMcpConfigDir(mcpConfigDir);
+        await scratch.release();
       })();
       disposalAttempt = attempt.catch(error => { disposalAttempt = undefined; throw error; });
     }
@@ -228,7 +215,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       const needsMcpConfig = Object.keys(taskMcpServers).length > 0;
 
       if (needsMcpConfig) {
-        mcpConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-mcp-'));
+        mcpConfigDir = startInput.scratch.sdkDir;
         throwIfCancelled();
         await fs.chmod(mcpConfigDir, 0o700).catch(() => {});
         throwIfCancelled();
@@ -306,7 +293,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
           command: bin.command,
           args,
           cwd: manifestCwd,
-          env: startInput.env,
+          env: { ...startInput.env, ...startInput.scratch.env },
           spawnFn: this.options.spawnFn,
           control: native === undefined ? control : {
             bind: write => { control.bind(write); native.bind(write); },
@@ -400,12 +387,12 @@ export class ClaudeAdapter implements RuntimeAdapter {
         client,
         manifestCwd,
         control,
-        mcpConfigDir,
+        startInput.scratch,
         manifestModelId,
         native,
       );
     } catch (cause) {
-      return rejectOwnedStartup(cause, client, mcpConfigDir, cancellation !== undefined);
+      return rejectOwnedStartup(cause, client, startInput.scratch, cancellation !== undefined);
     } finally {
       signal?.removeEventListener('abort', onAbort);
     }
@@ -470,7 +457,7 @@ class ClaudeSession implements Session {
     private readonly workspaceDir: string,
     private readonly control: ReturnType<typeof createClaudeControlChannel>,
     /** Task-scoped temp `--mcp-config` directory, if any — removed in `close()`. */
-    private readonly mcpConfigDir?: string,
+    private readonly scratch: ExecutionScratch,
     private readonly modelId?: string,
     private readonly native?: ClaudeNativeInteractionBridge,
   ) { if (native !== undefined) this.interactions = native.channel; }
@@ -631,7 +618,7 @@ class ClaudeSession implements Session {
     if (!this.closeAttempt) {
       const attempt = (async () => {
         await this.client.dispose();
-        await cleanupMcpConfigDir(this.mcpConfigDir);
+        await this.scratch.release();
       })();
       this.closeAttempt = attempt.catch((error: unknown) => {
         this.closeAttempt = undefined;
