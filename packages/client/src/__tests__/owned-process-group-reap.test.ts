@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   adoptOwnedProcessTree,
   attachOwnedProcessGroupLedger,
+  currentBootId,
   disposeOwnedProcessTree,
   reapOwnedProcessGroups,
   requestOwnedProcessTreeTermination,
@@ -97,11 +98,24 @@ async function spawnOrphanedTree(): Promise<{ pgid: number; toolPid: number; ses
   }
 }
 
+/** A dead writer: no process holds this pid with this start time. */
+const DEAD_WRITER = { writerPid: 999_999, writerStart: 'not a start time' };
+
+/** What a SIGKILLed daemon's ledger holds for `pgid`. */
 function recordFor(pgid: number): OwnedProcessGroupRecord {
   const entry = readProcessTable().get(pgid);
   if (entry === undefined) throw new Error('fixture root is not in the process table');
-  return { pgid, rootStart: entry.start };
+  return { pgid, rootStart: entry.start, bootId: currentBootId(), ...DEAD_WRITER };
 }
+
+/** A start time later than any process now running, in this platform's table format. */
+const FUTURE_START = process.platform === 'linux' ? '999999999999999' : 'Fri Jan  1 00:00:00 2100';
+
+function synthetic(pgid: number, rootStart: string): OwnedProcessGroupRecord {
+  return { pgid, rootStart, bootId: currentBootId(), ...DEAD_WRITER };
+}
+
+const NOTHING = { found: 0, terminated: 0, survived: 0, liveWriter: 0, survivors: [] };
 
 function attachRecorder(): { adopted: OwnedProcessGroupRecord[]; disposed: OwnedProcessGroupRecord[] } {
   const seen = { adopted: [] as OwnedProcessGroupRecord[], disposed: [] as OwnedProcessGroupRecord[] };
@@ -126,8 +140,11 @@ describe.skipIf(process.platform === 'win32')('owned runtime process groups afte
     const seen = attachRecorder();
     const tree = await spawnOwnedTree();
     await adoptOwnedProcessTree({ child: tree.child, label: 'fixture' });
-    expect(seen.adopted).toEqual([recordFor(tree.pgid)]);
-    expect(Object.keys(seen.adopted[0]!).sort()).toEqual(['pgid', 'rootStart']);
+    const table = readProcessTable();
+    expect(seen.adopted).toEqual([{
+      pgid: tree.pgid, rootStart: table.get(tree.pgid)!.start, bootId: currentBootId(),
+      writerPid: process.pid, writerStart: table.get(process.pid)!.start,
+    }]);
     expect(seen.disposed).toEqual([]);
 
     const options = { child: tree.child, waitClosed: () => tree.closed, isClosed: () => tree.child.exitCode !== null || tree.child.signalCode !== null, label: 'fixture' };
@@ -135,6 +152,26 @@ describe.skipIf(process.platform === 'win32')('owned runtime process groups afte
     await disposeOwnedProcessTree(options);
     expect(groupAlive(tree.pgid)).toBe(false);
     expect(seen.disposed).toEqual(seen.adopted);
+  });
+
+  it('an unreadable process table fails the adoption instead of skipping the record', async () => {
+    attachRecorder();
+    const tree = await spawnOwnedTree();
+    await expect(adoptOwnedProcessTree({ child: tree.child, label: 'fixture', readProcessTableFn: () => new Map() }))
+      .rejects.toThrow('the process table is unreadable');
+  });
+
+  it('a running root missing from the table fails the adoption; an exited one records nothing', async () => {
+    const seen = attachRecorder();
+    const running = await spawnOwnedTree();
+    const withoutRoot = () => new Map([...readProcessTable()].filter(([pid]) => pid !== running.pgid));
+    await expect(adoptOwnedProcessTree({ child: running.child, label: 'fixture', readProcessTableFn: withoutRoot }))
+      .rejects.toThrow('its root is missing from the process table');
+
+    const exited = spawn('/bin/sh', ['-c', 'exit 0'], withOwnedProcessTree({ stdio: 'ignore' }));
+    await new Promise<void>((resolve) => exited.once('exit', () => resolve()));
+    await adoptOwnedProcessTree({ child: exited, label: 'fixture' });
+    expect(seen.adopted).toEqual([]);
   });
 
   it('a ledger write failure fails the adoption', async () => {
@@ -156,7 +193,7 @@ describe.skipIf(process.platform === 'win32')('owned runtime process groups afte
     expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
     expect((await fs.stat(path.dirname(file))).mode & 0o777).toBe(0o700);
     const raw = await fs.readFile(file, 'utf8');
-    expect(Object.keys(JSON.parse(raw)).sort()).toEqual(['pgid', 'recordedAt', 'rootStart', 'version']);
+    expect(Object.keys(JSON.parse(raw)).sort()).toEqual(['bootId', 'pgid', 'recordedAt', 'rootStart', 'version', 'writerPid', 'writerStart']);
     expect(raw).not.toContain(root);
     expect(raw).not.toMatch(/sleep|\/bin\/sh|fixture/u);
 
@@ -173,7 +210,7 @@ describe.skipIf(process.platform === 'win32')('owned runtime process groups afte
     // The root ignored EOF and is not this process's child: nothing here owns it.
     expect(readProcessTable().get(tree.pgid)?.ppid).not.toBe(process.pid);
 
-    expect(await ledger.reconcile()).toEqual({ recorded: 1, found: 1, terminated: 1, survived: 0 });
+    expect(await ledger.reconcile()).toEqual({ recorded: 1, found: 1, terminated: 1, survived: 0, liveWriter: 0 });
     expect(groupAlive(tree.pgid)).toBe(false);
     expect(processAlive(tree.toolPid)).toBe(false);
     expect(processAlive(tree.sessionPid)).toBe(false);
@@ -188,24 +225,51 @@ describe.skipIf(process.platform === 'win32')('owned runtime process groups afte
     expect(processAlive(tree.toolPid)).toBe(true);
     expect(groupAlive(tree.pgid)).toBe(true);
 
-    expect(await reapOwnedProcessGroups([record])).toEqual({ found: 1, terminated: 1, survived: 0 });
+    expect(await reapOwnedProcessGroups([record])).toEqual({ ...NOTHING, found: 1, terminated: 1, ended: [record] });
     expect(groupAlive(tree.pgid)).toBe(false);
+  });
+
+  it('a leaderless group holding a process older than the recorded root is not ours: no signal', async () => {
+    const tree = await spawnOrphanedTree();
+    process.kill(tree.pgid, 'SIGKILL');
+    await expect.poll(() => readProcessTable().has(tree.pgid)).toBe(false);
+    // The recorded root claims to have started after every process now in the group.
+    const record = synthetic(tree.pgid, FUTURE_START);
+    expect(await reapOwnedProcessGroups([record])).toEqual({ ...NOTHING, ended: [record] });
+    expect(processAlive(tree.toolPid)).toBe(true);
+    expect(groupAlive(tree.pgid)).toBe(true);
+  });
+
+  it('a record from an earlier boot is declared ended without any signal', async () => {
+    const tree = await spawnOrphanedTree();
+    const record = { ...recordFor(tree.pgid), bootId: 'an-earlier-boot' };
+    const ledger = new OwnedProcessLedger(root);
+    await ledger.adopted(record);
+    expect(await ledger.reconcile()).toEqual({ recorded: 1, found: 0, terminated: 0, survived: 0, liveWriter: 0 });
+    expect(processAlive(tree.pgid)).toBe(true);
+    expect(processAlive(tree.toolPid)).toBe(true);
+    expect(await ledgerFiles()).toEqual([]);
   });
 
   it('signals nothing when the leader pid now belongs to a different process', async () => {
     const tree = await spawnOrphanedTree();
     // Same pid, different start time: what a reused pid looks like.
-    const reused = { pgid: tree.pgid, rootStart: 'Thu Jan  1 00:00:00 1970' };
-    expect(await reapOwnedProcessGroups([reused])).toEqual({ found: 0, terminated: 0, survived: 0 });
+    const reused = synthetic(tree.pgid, 'Thu Jan  1 00:00:00 1970');
+    expect(await reapOwnedProcessGroups([reused])).toEqual({ ...NOTHING, ended: [reused] });
     expect(processAlive(tree.pgid)).toBe(true);
     expect(processAlive(tree.toolPid)).toBe(true);
     expect(processAlive(tree.sessionPid)).toBe(true);
   });
 
-  it('never signals a group whose root is a live child of this process', async () => {
-    const tree = await spawnOwnedTree();
-    expect(await reapOwnedProcessGroups([recordFor(tree.pgid)])).toEqual({ found: 0, terminated: 0, survived: 0 });
+  it('a record whose writer process still runs is left alone and kept, even in another store\u2019s ledger', async () => {
+    const tree = await spawnOrphanedTree();
+    const table = readProcessTable();
+    const live = { ...recordFor(tree.pgid), writerPid: process.pid, writerStart: table.get(process.pid)!.start };
+    const ledger = new OwnedProcessLedger(root);
+    await ledger.adopted(live);
+    expect(await ledger.reconcile()).toEqual({ recorded: 1, found: 0, terminated: 0, survived: 0, liveWriter: 1 });
     expect(groupAlive(tree.pgid)).toBe(true);
+    expect(await ledgerFiles()).toHaveLength(1);
   });
 
   it('a group that is already gone is confirmed ended and its record dropped', async () => {
@@ -214,31 +278,40 @@ describe.skipIf(process.platform === 'win32')('owned runtime process groups afte
     await ledger.adopted(recordFor(tree.pgid));
     process.kill(-tree.pgid, 'SIGKILL');
     await expect.poll(() => groupAlive(tree.pgid)).toBe(false);
-    expect(await ledger.reconcile()).toEqual({ recorded: 1, found: 0, terminated: 0, survived: 0 });
+    expect(await ledger.reconcile()).toEqual({ recorded: 1, found: 0, terminated: 0, survived: 0, liveWriter: 0 });
     expect(await ledgerFiles()).toEqual([]);
   });
 
   it('a surviving group refuses reconciliation and keeps every record for the next attempt', async () => {
-    const records = [{ pgid: 4242, rootStart: 'Tue Oct 13 10:00:00 2026' }, { pgid: 4343, rootStart: 'Tue Oct 13 10:00:01 2026' }];
-    const refusing = new OwnedProcessLedger(root, { reap: async () => ({ found: 2, terminated: 1, survived: 1 }) });
+    const records = [synthetic(4242, 'Tue Oct 13 10:00:00 2026'), synthetic(4343, 'Tue Oct 13 10:00:01 2026')];
+    const refusing = new OwnedProcessLedger(root, {
+      reap: async () => ({ found: 2, terminated: 1, survived: 1, liveWriter: 0, ended: [records[0]!], survivors: [records[1]!] }),
+    });
     for (const record of records) await refusing.adopted(record);
     const before = (await ledgerFiles()).sort();
-    await expect(refusing.reconcile()).rejects.toBeInstanceOf(OwnedProcessResidueError);
+    const refusal = await refusing.reconcile().catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(OwnedProcessResidueError);
+    // The message names the surviving record by full path and the operator remedy.
+    expect((refusal as Error).message).toContain(path.join(root, OWNED_PROCESSES_DIRECTORY));
+    expect((refusal as Error).message).toContain('Verify the processes are gone, then delete');
     expect((await ledgerFiles()).sort()).toEqual(before);
 
     const reaped: Array<readonly OwnedProcessGroupRecord[]> = [];
-    const next = new OwnedProcessLedger(root, { reap: async (groups) => { reaped.push(groups); return { found: 0, terminated: 0, survived: 0 }; } });
-    expect(await next.reconcile()).toEqual({ recorded: 2, found: 0, terminated: 0, survived: 0 });
+    const next = new OwnedProcessLedger(root, {
+      reap: async (groups) => { reaped.push(groups); return { ...NOTHING, ended: [...groups] }; },
+    });
+    expect(await next.reconcile()).toEqual({ recorded: 2, found: 0, terminated: 0, survived: 0, liveWriter: 0 });
     expect([...reaped[0]!].sort((a, b) => a.pgid - b.pgid)).toEqual(records);
     expect(await ledgerFiles()).toEqual([]);
   });
 
   it('a corrupt record fails closed', async () => {
     const ledger = new OwnedProcessLedger(root);
-    await ledger.adopted({ pgid: 4242, rootStart: 'Tue Oct 13 10:00:00 2026' });
+    await ledger.adopted(synthetic(4242, 'Tue Oct 13 10:00:00 2026'));
     const [name] = await ledgerFiles();
-    await fs.writeFile(path.join(root, OWNED_PROCESSES_DIRECTORY, name!), '{"pgid":4242}');
-    await expect(ledger.reconcile()).rejects.toThrow('is corrupt');
+    const file = path.join(root, OWNED_PROCESSES_DIRECTORY, name!);
+    await fs.writeFile(file, '{"pgid":4242}');
+    await expect(ledger.reconcile()).rejects.toThrow(`${file} is corrupt; verify the recorded processes are gone, then delete ${file}`);
     expect(await ledgerFiles()).toEqual([name]);
   });
 
@@ -255,7 +328,7 @@ describe.skipIf(process.platform === 'win32')('owned runtime process groups afte
     expect(assigned).toEqual([tree.pgid]);
     expect(seen.adopted).toEqual([]);
     const orphan = await spawnOrphanedTree();
-    expect(await reapOwnedProcessGroups([recordFor(orphan.pgid)], { platform: 'win32' })).toEqual({ found: 0, terminated: 0, survived: 0 });
+    expect(await reapOwnedProcessGroups([recordFor(orphan.pgid)], { platform: 'win32' })).toEqual({ ...NOTHING, ended: [] });
     expect(groupAlive(orphan.pgid)).toBe(true);
   });
 });

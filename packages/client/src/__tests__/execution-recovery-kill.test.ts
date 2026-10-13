@@ -390,7 +390,10 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
     await waitForAttempt(cloud, offer.taskId, 'running');
     const recorded = await ownedProcessRecords();
     // The record is the group id and the root's start time; nothing names a command or a path.
-    expect(recorded.map(({ record }) => record)).toEqual([{ version: 1, pgid: tree.rootPid, rootStart: expect.any(String), recordedAt: expect.any(String) }]);
+    expect(recorded.map(({ record }) => record)).toEqual([{
+      version: 1, pgid: tree.rootPid, rootStart: expect.any(String), bootId: expect.any(String),
+      writerPid: daemon.child.pid, writerStart: expect.any(String), recordedAt: expect.any(String),
+    }]);
     expect(recorded[0]!.raw).not.toContain(current!.root);
     expect(recorded[0]!.raw).not.toContain('sleep');
 

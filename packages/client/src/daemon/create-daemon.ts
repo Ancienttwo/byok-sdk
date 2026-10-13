@@ -1988,7 +1988,7 @@ export function buildDaemonWithAdapters(
     const reconciliation = await ownedProcessLedger.reconcile();
     if (reconciliation.recorded > 0) {
       console.warn(
-        `[byok/client] previous daemon run left owned runtime process groups: recorded=${reconciliation.recorded} found=${reconciliation.found} terminated=${reconciliation.terminated} survived=${reconciliation.survived}`,
+        `[byok/client] previous daemon run left owned runtime process groups: recorded=${reconciliation.recorded} found=${reconciliation.found} terminated=${reconciliation.terminated} survived=${reconciliation.survived} liveWriter=${reconciliation.liveWriter}`,
       );
     }
     detachOwnedProcessGroupLedger?.();

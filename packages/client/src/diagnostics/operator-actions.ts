@@ -5,6 +5,7 @@ import { AgentRefSchema, type AgentRef } from '@byok-sdk/protocol';
 import { AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeBusyError, AgentHomeLeaseManager, AgentHomeManager, stableAgentHomeOwnerId } from '../agent-home';
 import { connectControlClient } from '../bin/control-client';
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../daemon/daemon-owner';
+import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger';
 import { AgentMessageOutbox, AGENT_MESSAGE_DIRECTORY, AGENT_MESSAGE_OUTBOX_FILENAME } from '../daemon/agent-message-outbox';
 import { DeviceStore } from '../daemon/store';
 import type { DaemonConfig } from '../daemon/create-daemon';
@@ -63,7 +64,7 @@ function requireConfirmation(input: ConfirmDeviceMaintenanceInput): void {
 function closedError(error: unknown): DeviceOperatorError {
   if (error instanceof DeviceOperatorError) return error;
   if (error instanceof DaemonOwnerActiveError) return new DeviceOperatorError('store-busy');
-  if (error instanceof AgentHomeBusyError) return new DeviceOperatorError('agent-busy');
+  if (error instanceof AgentHomeBusyError || error instanceof OwnedProcessResidueError) return new DeviceOperatorError('agent-busy');
   return new DeviceOperatorError('operation-failed');
 }
 async function requireOffline(config: DaemonConfig, storeDir: string): Promise<void> {
@@ -143,6 +144,10 @@ export async function archiveAgentTerminalMessages(
     await requireOffline(config, storeDir);
     const owner = await acquireDaemonOwner(storeDir, 'doctor');
     try {
+      // The same-owner Agent home lease below reclaims a crashed daemon's
+      // marker; its runtime processes must be proved gone first, exactly as
+      // daemon start does (#393).
+      await new OwnedProcessLedger(storeDir).reconcile();
       // Credential-blind metadata; callers supply an authenticated target, never infer it here.
       const metadata = await new DeviceStore(storeDir, undefined, config.productId).load();
       if (!metadata || metadata.deviceId !== input.expectedDeviceId || metadata.tenantId !== input.expectedTenantId) {

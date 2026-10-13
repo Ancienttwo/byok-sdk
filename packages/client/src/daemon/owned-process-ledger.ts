@@ -25,27 +25,42 @@ import { ensureSecureDir } from '../util/secure-dir';
  * {@link OwnedProcessLedger.reconcile} runs was written by a daemon process
  * that is gone. One file per group, written with fsync before the runtime
  * receives any input; removed once its disposal proved the group gone. A
- * record holds the group id and its root's start time — never a command line,
- * a cwd or any other path.
+ * record holds the group id, its root's start time, the boot it was written
+ * in and the writing process's pid and start time — never a command line, a
+ * cwd or any other path.
+ *
+ * Operator remedy for a refused start: confirm the recorded group's processes
+ * are gone (`ps -o pid,pgid,lstart,command -g <pgid>`), then delete that
+ * record file.
  */
 export const OWNED_PROCESSES_DIRECTORY = 'owned-processes';
+
+const REMEDY = 'verify the recorded processes are gone, then delete';
 
 interface OwnedProcessLedgerFileV1 {
   version: 1;
   pgid: number;
   rootStart: string;
+  bootId: string;
+  writerPid: number;
+  writerStart: string;
   recordedAt: string;
 }
 
-export interface OwnedProcessReconciliation extends OwnedProcessGroupReap {
-  /** Records the previous daemon run left. */
+const FILE_KEYS = 'bootId,pgid,recordedAt,rootStart,version,writerPid,writerStart';
+
+export interface OwnedProcessReconciliation extends Omit<OwnedProcessGroupReap, 'ended' | 'survivors'> {
+  /** Records found in the ledger. */
   recorded: number;
 }
 
 /** A crashed run's group could not be ended; this store must not get a second writer. */
 export class OwnedProcessResidueError extends Error {
-  constructor(readonly reconciliation: OwnedProcessReconciliation) {
-    super(`${reconciliation.survived} owned runtime process group(s) from the previous daemon run survived SIGKILL; refusing to start a second writer`);
+  constructor(readonly reconciliation: OwnedProcessReconciliation, readonly survivingRecords: readonly string[]) {
+    super(
+      `${reconciliation.survived} owned runtime process group(s) from the previous daemon run survived SIGKILL; refusing to start a second writer. ` +
+      `Verify the processes are gone, then delete: ${survivingRecords.join(', ')}`,
+    );
     this.name = 'OwnedProcessResidueError';
   }
 }
@@ -62,7 +77,10 @@ export class OwnedProcessLedger implements OwnedProcessGroupLedger {
   /** A rejection fails the adoption, which terminates the tree and refuses the task. */
   async adopted(record: OwnedProcessGroupRecord): Promise<void> {
     await ensureSecureDir(this.#dir);
-    const body: OwnedProcessLedgerFileV1 = { version: 1, pgid: record.pgid, rootStart: record.rootStart, recordedAt: new Date().toISOString() };
+    const body: OwnedProcessLedgerFileV1 = {
+      version: 1, pgid: record.pgid, rootStart: record.rootStart, bootId: record.bootId,
+      writerPid: record.writerPid, writerStart: record.writerStart, recordedAt: new Date().toISOString(),
+    };
     await atomicWriteFile(this.#file(record), JSON.stringify(body), { mode: 0o600, fsync: true });
   }
 
@@ -72,17 +90,18 @@ export class OwnedProcessLedger implements OwnedProcessGroupLedger {
   }
 
   /**
-   * End every group a previous run recorded, then drop the records. Any group
-   * still holding a process at the deadline throws {@link OwnedProcessResidueError}
-   * and leaves every record in place for the next attempt.
+   * End every group a crashed run recorded, then drop exactly the records
+   * confirmed ended; a live writer's records stay. Any group still holding a
+   * process at the deadline throws {@link OwnedProcessResidueError} naming the
+   * record files, and leaves every record in place for the next attempt.
    */
   async reconcile(): Promise<OwnedProcessReconciliation> {
     const residue = await this.#residue();
-    if (residue.length === 0) return { recorded: 0, found: 0, terminated: 0, survived: 0 };
-    const reap = await this.#reap(residue.map(({ record }) => record));
-    const reconciliation = { recorded: residue.length, ...reap };
-    if (reap.survived > 0) throw new OwnedProcessResidueError(reconciliation);
-    for (const { file } of residue) await fs.rm(file, { force: true });
+    if (residue.length === 0) return { recorded: 0, found: 0, terminated: 0, survived: 0, liveWriter: 0 };
+    const { ended, survivors, ...counts } = await this.#reap(residue.map(({ record }) => record));
+    const reconciliation = { recorded: residue.length, ...counts };
+    if (survivors.length > 0) throw new OwnedProcessResidueError(reconciliation, survivors.map((record) => this.#file(record)));
+    for (const record of ended) await fs.rm(this.#file(record), { force: true });
     return reconciliation;
   }
 
@@ -101,16 +120,16 @@ export class OwnedProcessLedger implements OwnedProcessGroupLedger {
       // record it would have published was never one a runtime was told about.
       if (!/^[0-9a-f]{32}\.json$/u.test(name)) continue;
       const stat = await fs.lstat(file);
-      if (!stat.isFile()) throw new Error(`owned process record ${name} is not a regular file`);
+      if (!stat.isFile()) throw new Error(`owned process record ${file} is not a regular file; ${REMEDY} ${file}`);
       const parsed = parseRecord(await fs.readFile(file, 'utf8'));
-      if (parsed === undefined || this.#file(parsed) !== file) throw new Error(`owned process record ${name} is corrupt`);
+      if (parsed === undefined || this.#file(parsed) !== file) throw new Error(`owned process record ${file} is corrupt; ${REMEDY} ${file}`);
       residue.push({ file, record: parsed });
     }
     return residue;
   }
 
   #file(record: OwnedProcessGroupRecord): string {
-    const id = createHash('sha256').update(`${record.pgid}\0${record.rootStart}`).digest('hex').slice(0, 32);
+    const id = createHash('sha256').update(`${record.bootId}\0${record.pgid}\0${record.rootStart}`).digest('hex').slice(0, 32);
     return path.join(this.#dir, `${id}.json`);
   }
 }
@@ -124,9 +143,17 @@ function parseRecord(raw: string): OwnedProcessGroupRecord | undefined {
   }
   if (typeof value !== 'object' || value === null) return undefined;
   const file = value as Partial<OwnedProcessLedgerFileV1>;
-  if (Object.keys(file).sort().join(',') !== 'pgid,recordedAt,rootStart,version') return undefined;
+  if (Object.keys(file).sort().join(',') !== FILE_KEYS) return undefined;
   if (file.version !== 1 || typeof file.recordedAt !== 'string') return undefined;
-  if (typeof file.pgid !== 'number' || !Number.isSafeInteger(file.pgid) || file.pgid <= 1) return undefined;
-  if (typeof file.rootStart !== 'string' || file.rootStart.length === 0 || file.rootStart.length > 64) return undefined;
-  return { pgid: file.pgid, rootStart: file.rootStart };
+  if (!isPid(file.pgid) || !isPid(file.writerPid)) return undefined;
+  if (!isIdentity(file.rootStart) || !isIdentity(file.bootId) || !isIdentity(file.writerStart)) return undefined;
+  return { pgid: file.pgid, rootStart: file.rootStart, bootId: file.bootId, writerPid: file.writerPid, writerStart: file.writerStart };
+}
+
+function isPid(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 1;
+}
+
+function isIdentity(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 64;
 }
