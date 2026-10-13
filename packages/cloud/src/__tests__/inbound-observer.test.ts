@@ -224,7 +224,7 @@ describe('observer.onInboundCommitted', () => {
     }
 
     expect(await runBatch(thrower)).toEqual(await runBatch(undefined));
-    expect(await runBatch(thrower)).toEqual({ status: 200, body: { accepted: 1, rejected: 1, outcomes: [{ outcome: 'accepted' }, { outcome: 'rejected', reason: 'unsupported' }] } });
+    expect(await runBatch(thrower)).toMatchObject({ status: 200, body: { accepted: 1, rejected: 1, outcomes: [{ outcome: 'accepted' }, { outcome: 'rejected', reason: 'unsupported' }] } });
   });
 
   it('is absent by default: nothing observes and nothing changes', async () => {

@@ -45,7 +45,10 @@ export type DaemonEventKind = DaemonEvent['kind'];
 import type { OutboundRejection } from './outbound-settlement';
 
 export type DaemonEvent =
-  | ({ kind: 'outbound-rejected'; ts: string } & OutboundRejection)
+  | ({ kind: 'outbound-rejected'; ts: string } & OutboundRejection & (
+      | { terminal: true; taskState: TaskState }
+      | { terminal: false }
+    ))
   | { kind: 'offered'; ts: string; taskId: string; runtime?: string }
   | { kind: 'claimed'; ts: string; taskId: string; claimedRuntime?: string }
   | { kind: 'started'; ts: string; taskId: string }
@@ -214,6 +217,19 @@ export interface DaemonTaskInfo {
   updatedAt: string;
 }
 
+type TerminalTaskPatch = Partial<Pick<DaemonTaskInfo, 'summary' | 'sessionRef' | 'declined' | 'delivery'>> & { state: TaskState };
+
+/** One projection of the local terminal envelope, shared by accepted and refused delivery. */
+function terminalTaskPatch(envelope: Envelope): TerminalTaskPatch | undefined {
+  switch (envelope.type) {
+    case 'task.complete': return { state: 'Complete', summary: envelope.payload.summary, sessionRef: envelope.payload.sessionRef };
+    case 'task.fail': return { state: 'Failed', summary: envelope.payload.reason };
+    case 'task.decline': return { state: 'Failed', summary: envelope.payload.reason, declined: true };
+    case 'task.cancelled': return { state: 'Cancelled', summary: envelope.payload.reason };
+    default: return undefined;
+  }
+}
+
 /**
  * M3-B parity (see `task-runner.ts`'s `MAX_TRACKED_TASK_IDS` doc comment,
  * same rationale): this daemon is meant to run as a long-lived background
@@ -379,11 +395,7 @@ export class DaemonObserver {
       }
       case 'task.complete': {
         const taskId = envelope.task_id;
-        this.upsertTask(taskId, {
-          state: 'Complete',
-          summary: envelope.payload.summary,
-          sessionRef: envelope.payload.sessionRef,
-        });
+        this.upsertTask(taskId, terminalTaskPatch(envelope)!);
         this.emit({
           kind: 'completed',
           ts,
@@ -396,20 +408,20 @@ export class DaemonObserver {
       case 'task.fail': {
         const taskId = envelope.task_id;
         const retryable = envelope.payload.retryable ?? false;
-        this.upsertTask(taskId, { state: 'Failed', summary: envelope.payload.reason });
+        this.upsertTask(taskId, terminalTaskPatch(envelope)!);
         this.emit({ kind: 'failed', ts, taskId, reason: envelope.payload.reason, retryable });
         return;
       }
       case 'task.decline': {
         const taskId = envelope.task_id;
         const retryable = envelope.payload.retryable ?? false;
-        this.upsertTask(taskId, { state: 'Failed', summary: envelope.payload.reason, declined: true });
+        this.upsertTask(taskId, terminalTaskPatch(envelope)!);
         this.emit({ kind: 'failed', ts, taskId, reason: envelope.payload.reason, retryable, preClaim: true });
         return;
       }
       case 'task.cancelled': {
         const taskId = envelope.task_id;
-        this.upsertTask(taskId, { state: 'Cancelled', summary: envelope.payload.reason });
+        this.upsertTask(taskId, terminalTaskPatch(envelope)!);
         this.emit({ kind: 'cancelled', ts, taskId, reason: envelope.payload.reason });
         return;
       }
@@ -418,13 +430,16 @@ export class DaemonObserver {
     }
   }
 
-  noteOutboundRejected(rejection: OutboundRejection): void {
+  noteOutboundRejected(envelope: Envelope, rejection: OutboundRejection): void {
     this.approvalIdByEnvelope.delete(rejection.envelopeId);
-    if (rejection.taskId !== undefined) {
-      const task = this.taskInfo.get(rejection.taskId);
-      if (task !== undefined) this.taskInfo.set(rejection.taskId, { ...task, delivery: 'rejected', updatedAt: nowIso() });
+    if (rejection.terminal) {
+      const patch = terminalTaskPatch(envelope);
+      if (patch === undefined || rejection.taskId === undefined) throw new Error('terminal rejection has no local terminal envelope');
+      this.upsertTask(rejection.taskId, { ...patch, delivery: 'rejected' });
+      this.emit({ kind: 'outbound-rejected', ts: nowIso(), ...rejection, terminal: true, taskState: patch.state });
+    } else {
+      this.emit({ kind: 'outbound-rejected', ts: nowIso(), ...rejection, terminal: false });
     }
-    this.emit({ kind: 'outbound-rejected', ts: nowIso(), ...rejection });
   }
 
   noteLifecycle(lifecycle: DaemonLifecycle): void {
@@ -545,7 +560,7 @@ export class DaemonObserver {
 
   private upsertTask(
     taskId: string,
-    patch: Partial<Pick<DaemonTaskInfo, 'runtime' | 'claimedRuntime' | 'summary' | 'sessionRef' | 'declined'>> & { state: TaskState },
+    patch: Partial<Pick<DaemonTaskInfo, 'runtime' | 'claimedRuntime' | 'summary' | 'sessionRef' | 'declined' | 'delivery'>> & { state: TaskState },
   ): void {
     const existing = this.taskInfo.get(taskId);
     const next: DaemonTaskInfo = {

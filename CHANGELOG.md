@@ -24,7 +24,10 @@
   rejected callbacks with awaited `onOutboundSettled`; local activity events now
   follow successful settlement. Inspect rejection via `outbound-rejected`,
   daemon/control `outbound`, journal terminal reason, support bundle counts and
-  `tasks delivery=rejected`. Remove `progressBatch.maxBatchBytes`; the server owns
+  `tasks delivery=rejected` for refused terminals. Rejected terminal rows preserve
+  local terminal state (including restart replay); partial progress refusal stays
+  an event/counter. The content-free rejection record includes the terminal
+  `taskState` for audit projection. Remove `progressBatch.maxBatchBytes`; the server owns
   byte limits and large progress text splits losslessly. Replace
   `MAX_PROGRESS_BATCH_BYTES_EXCEEDED_REASON_PREFIX` with
   `ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX`. `handleInboundEnvelope` returns

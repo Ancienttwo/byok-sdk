@@ -261,7 +261,7 @@ describe('outbound rejection diagnostics #397', () => {
     const { formatTaskLine } = await import('../bin/format');
     const dir = await tempDir();
     await appendAuditEvent(dir, { kind: 'offered', ts: new Date().toISOString(), taskId: 'task' });
-    await appendAuditEvent(dir, { kind: 'outbound-rejected', ts: new Date().toISOString(), envelopeId: crypto.randomUUID(), type: 'task.progress', taskId: 'task', reason: 'limit_exceeded', terminal: false });
+    await appendAuditEvent(dir, { kind: 'outbound-rejected', ts: new Date().toISOString(), envelopeId: crypto.randomUUID(), type: 'task.complete', taskId: 'task', reason: 'limit_exceeded', terminal: true, taskState: 'Complete' });
     const events = await readAuditEvents(dir);
     expect(events.some((event) => event.kind === 'outbound-rejected' && event.reason === 'limit_exceeded')).toBe(true);
     expect(formatTaskLine(deriveTasksFromEvents(events)[0]!)).toContain('delivery=rejected');

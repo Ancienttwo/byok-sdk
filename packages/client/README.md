@@ -211,7 +211,8 @@ been removed. Unsplittable events over the advertised limit fail explicitly.
 
 Outbound rejections are visible through `daemon.subscribe()` (`outbound-rejected`),
 `daemon.status().outbound`, control status, support bundles and `tasks` rows marked
-`delivery=rejected`. Terminal refusals are durable journal failures with their wire
+`delivery=rejected` for terminal refusal. Partial progress refusal remains an
+event/counter rather than a terminal delivery mark. Terminal refusals are durable journal failures with their wire
 reason. These events and counters contain no envelope payload. Activity observer
 events are emitted after successful settlement; partial refusal leaves liveness
 health healthy. Older counts-only v2 responders use `unspecified` refusal reasons

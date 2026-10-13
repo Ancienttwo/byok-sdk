@@ -2814,7 +2814,7 @@ export function buildDaemonWithAdapters(
           outbound.rejectedByReason[rejection.reason] = (outbound.rejectedByReason[rejection.reason] ?? 0) + 1;
           if (rejection.terminal) outbound.rejectedTerminals += 1;
           outbound.lastRejection = rejection;
-          observer.noteOutboundRejected(rejection);
+          observer.noteOutboundRejected(envelope, rejection);
         }
       },
       onStateChange: (state) => {

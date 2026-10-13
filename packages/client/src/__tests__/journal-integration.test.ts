@@ -203,7 +203,7 @@ describe('hosted journal integration (L-002)', () => {
           ? { id: envelope.id, outcome: 'rejected' as const, reason: 'state_conflict' }
           : { id: envelope.id, outcome: 'accepted' as const }) };
     });
-    const { adapter } = await startDaemon({ hostedJournal: { mode: 'sqlite' } }, journal);
+    const { adapter, storeDir } = await startDaemon({ hostedJournal: { mode: 'sqlite' } }, journal);
     const rejected: import('../daemon/observer').DaemonEvent[] = [];
     daemon!.subscribe((event) => {
       if (event.kind === 'outbound-rejected') {
@@ -219,8 +219,12 @@ describe('hosted journal integration (L-002)', () => {
     expect(journal.terminals[0]).toMatchObject({ truthState: 'failed', lastError: 'state_conflict' });
     expect(daemon!.status().outbound).toMatchObject({ rejected: 1, rejectedByReason: { state_conflict: 1 }, rejectedTerminals: 1 });
     expect(daemon!.status().operationalHealth).toMatchObject({ availability: 'available', state: 'healthy' });
-    expect(daemon!.tasks().find((task) => task.taskId === 'terminal-rejected')).toMatchObject({ delivery: 'rejected' });
+    expect(daemon!.tasks().find((task) => task.taskId === 'terminal-rejected')).toMatchObject({ state: 'Complete', delivery: 'rejected', summary: 'PAYLOAD_SENTINEL' });
     expect(JSON.stringify(rejected)).not.toContain('PAYLOAD_SENTINEL');
+    const { connectControlClient } = await import('../bin/control-client');
+    const connected = await connectControlClient({ storeDir, productId: 'test-product-journal' });
+    if (!connected.ok) throw new Error('control unavailable');
+    try { expect((await connected.client.request<import('../daemon/control-protocol').ControlStatusResult>('status')).activeTasks).toEqual([]); } finally { connected.client.close(); }
   });
 
   it('keeps exact successful terminal bytes and active ownership through a journal write outage', async () => {

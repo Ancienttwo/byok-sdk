@@ -6899,7 +6899,12 @@ import type { OutboundRejection } from './outbound-settlement';
 export type DaemonEvent = ({
     kind: 'outbound-rejected';
     ts: string;
-} & OutboundRejection) | {
+} & OutboundRejection & ({
+    terminal: true;
+    taskState: TaskState;
+} | {
+    terminal: false;
+})) | {
     kind: 'offered';
     ts: string;
     taskId: string;
@@ -7217,7 +7222,7 @@ export declare class DaemonObserver {
      */
     captureOutboundApproval(envelope: Envelope): void;
     handleOutboundEnvelope(envelope: Envelope): void;
-    noteOutboundRejected(rejection: OutboundRejection): void;
+    noteOutboundRejected(envelope: Envelope, rejection: OutboundRejection): void;
     noteLifecycle(lifecycle: DaemonLifecycle): void;
     notePaired(deviceId: string): void;
     noteUnpaired(): void;

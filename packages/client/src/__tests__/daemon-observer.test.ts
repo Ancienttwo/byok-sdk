@@ -543,3 +543,19 @@ it('freezes approval identity at queue time across delayed settlement and a newe
   observer.handleOutboundEnvelope(first); observer.handleOutboundEnvelope(second);
   expect(events.filter((event) => event.kind === 'awaiting-approval').map((event) => event.approvalId)).toEqual(['approval-first', 'approval-second']);
 });
+
+
+it('projects a refused terminal after restart without an accepted lifecycle event; progress refusal is not terminal delivery', () => {
+  const observer = new DaemonObserver();
+  const events: DaemonEvent[] = [];
+  observer.subscribe((event) => events.push(event));
+  const terminal = createEnvelope('task.complete', { summary: 'local terminal truth', sessionRef: 'session' }, { taskId: 'recovered' });
+  observer.noteOutboundRejected(terminal, { envelopeId: terminal.id, type: terminal.type, taskId: 'recovered', reason: 'not_permitted', terminal: true });
+  expect(observer.tasks()).toMatchObject([{ taskId: 'recovered', state: 'Complete', delivery: 'rejected', summary: 'local terminal truth' }]);
+  expect(events.map((event) => event.kind)).toEqual(['outbound-rejected']);
+  const offer = createEnvelope('task.offer', { instruction: 'new' }, { taskId: 'active', seq: 1 });
+  observer.handleInboundEnvelope(offer);
+  const progress = createEnvelope('task.progress', { seq: 1, events: [{ type: 'progress', text: 'partial' }] }, { taskId: 'active' });
+  observer.noteOutboundRejected(progress, { envelopeId: progress.id, type: progress.type, taskId: 'active', reason: 'limit_exceeded', terminal: false });
+  expect(observer.tasks().find((task) => task.taskId === 'active')?.delivery).toBeUndefined();
+});

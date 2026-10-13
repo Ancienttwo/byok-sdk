@@ -9,3 +9,6 @@ P3: Keep v2 counts and add optional response-only outcomes/ingress. Internal ref
 The hello also advertises ingress: otherwise a custom deployment limit could be missed before the first poll. Activity bytes use the same JSON-array accounting as cloud. Text splits at code point boundaries; summaries/final output are accumulated before batching. Grapheme clusters can span events. A budget shrink with already buffered events can produce an explicitly reported rejection; no local semantic fallback is added. Agent latest-value projection selects an unchanged member or returns a subset, so it does not enlarge a batch.
 
 Claude supplied a bounded read-only plan through Herdr. Its durable decisions are preserved here; execution and validation evidence are in the PR.
+
+
+Refused terminal delivery preserves the local terminal task row (including restart replay with no prior row) via the same private terminalTaskPatch used for accepted terminal projection. It emits only outbound-rejected, carrying a closed taskState for audit/tasks reconstruction, so control status cannot keep a locally finished execution active. delivery=rejected describes terminal delivery; partial progress refusal remains an event/counter and does not mark terminal delivery. No rejected payload bytes enter the event or support bundle.

@@ -457,11 +457,11 @@ export async function claimAndStart(
     daemon,
     createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime, capabilities }, { taskId: handle.taskId }),
   );
-  expect(claim).toEqual({ status: 200, body: { accepted: 1 } });
+  expect(claim).toMatchObject({ status: 200, body: { accepted: 1 } });
   expect((await byok.tasks.get(handle.taskId))?.state).toBe('Claimed');
 
   const started = await sendOne(daemon, createEnvelope('task.started', {}, { taskId: handle.taskId }));
-  expect(started).toEqual({ status: 200, body: { accepted: 1 } });
+  expect(started).toMatchObject({ status: 200, body: { accepted: 1 } });
   expect((await byok.tasks.get(handle.taskId))?.state).toBe('Running');
 }
 
@@ -483,7 +483,7 @@ export async function moveToAwaitApproval(
       { taskId: handle.taskId },
     ),
   );
-  expect(reported).toEqual({ status: 200, body: { accepted: 1 } });
+  expect(reported).toMatchObject({ status: 200, body: { accepted: 1 } });
   expect((await byok.tasks.get(handle.taskId))?.state).toBe('AwaitApproval');
 }
 

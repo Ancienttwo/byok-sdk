@@ -91,14 +91,14 @@ describe('SQLite receipt recovery', () => {
       const fault = new DatabaseSync(path);
       fault.exec("CREATE TRIGGER fail_message_finalize BEFORE UPDATE OF terminal_body ON agent_message_admission BEGIN SELECT RAISE(ABORT, 'injected finalize fault'); END;");
       fault.close();
-      await expect(handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume)).rejects.toThrow('injected finalize fault');
+      await expect(handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume).then((result) => result.outcome)).rejects.toThrow('injected finalize fault');
       expect(calls).toBe(1);
       expect(await read()).toBeUndefined();
       await runtime.stores.close(); runtime = open();
       expect(await read()).toBeUndefined();
       expect(await discover()).toEqual({ payload: message.payload, context: execution.agentMessageContext });
       const repair = new DatabaseSync(path); repair.exec('DROP TRIGGER fail_message_finalize'); repair.close();
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume)).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume).then((result) => result.outcome)).toBe('accepted');
       expect(calls).toBe(2);
       const receipt = await read();
       expect(receipt).toMatchObject({ outcome, messageId: message.payload.messageId, agentRef });
@@ -112,7 +112,7 @@ describe('SQLite receipt recovery', () => {
       expect(await runtime.cloud.readAgentMessageDisposition(other, deviceId, taskId, message.payload)).toBeUndefined();
       expect(await runtime.cloud.readAgentMessageDisposition(tenant, 'other-device', taskId, message.payload)).toBeUndefined();
       // Envelope dedup is process-local; durable message replay must still skip the consumer.
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume)).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume).then((result) => result.outcome)).toBe('accepted');
       expect(calls).toBe(2);
       expect(await read()).toEqual(receipt);
     } finally { await runtime.stores.close(); }
@@ -141,8 +141,8 @@ describe('SQLite receipt recovery', () => {
     const taskId = 'completed-task'; const input = { taskId, payload };
     try {
       const first = await runtime.cloud.enqueueOffer(tenant, deviceId, input);
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', { deviceId }, { taskId }))).toBe('accepted');
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { summary: 'first', sessionRef: 'session-first' }, { taskId }))).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', { deviceId }, { taskId })).then((result) => result.outcome)).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { summary: 'first', sessionRef: 'session-first' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
       const receipt = await runtime.cloud.readTerminalReceipt(tenant, taskId);
       const result = await runtime.cloud.readTaskResult(tenant, taskId);
       const deviceTerminal = await runtime.cloud.readDeviceTerminal(tenant, taskId);
@@ -157,7 +157,7 @@ describe('SQLite receipt recovery', () => {
         await expect(runtime.cloud.enqueueOffer(tenant, deviceId, retry)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
       }
       expect((await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages).toEqual([]);
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { summary: 'conflict', sessionRef: 'session-other' }, { taskId }))).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { summary: 'conflict', sessionRef: 'session-other' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
       expect(await runtime.cloud.readTerminalReceipt(tenant, taskId)).toEqual(receipt);
       expect(await runtime.cloud.readTaskResult(tenant, taskId)).toEqual(result);
     } finally { await runtime.stores.close(); }

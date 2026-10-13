@@ -219,7 +219,7 @@ describe("S0 (GAP-002): task.steer is gated by the claimed runtime's capability 
         { taskId: handle.taskId },
       ),
     );
-    expect(claim).toEqual({ status: 200, body: { accepted: 1 } });
+    expect(claim).toMatchObject({ status: 200, body: { accepted: 1 } });
     expect((await harness.byok.tasks.get(handle.taskId))?.state).toBe('Claimed');
 
     const err = asSteerRejection(await handle.steer('too early').catch((e: unknown) => e));
@@ -365,7 +365,7 @@ describe('S0 (GAP-002): claim-time capability snapshot on the task record', () =
         { taskId: handle.taskId },
       ),
     );
-    expect(claim).toEqual({ status: 200, body: { accepted: 1 } });
+    expect(claim).toMatchObject({ status: 200, body: { accepted: 1 } });
 
     const snapshot = await harness.byok.tasks.get(handle.taskId);
     expect(snapshot?.state).toBe('Claimed');

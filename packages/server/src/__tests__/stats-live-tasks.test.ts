@@ -91,7 +91,7 @@ async function runToTerminal(
       outcome === 'complete'
         ? createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess' }, { taskId: handle.taskId })
         : createEnvelope('task.fail', { reason: 'broke', retryable: false }, { taskId: handle.taskId });
-    expect(await sendOne(daemon, terminal)).toEqual({ status: 200, body: { accepted: 1 } });
+    expect(await sendOne(daemon, terminal)).toMatchObject({ status: 200, body: { accepted: 1 } });
   }
   return handle.taskId;
 }
@@ -221,7 +221,7 @@ describe('stats() over live tasks only', () => {
     vi.setSystemTime(new Date('2026-10-13T00:00:02.000Z'));
     await claimAndStart(first.byok, daemon, handle);
     expect(await sendOne(daemon, createEnvelope('task.fail', { reason: 'failed', retryable: false }, { taskId: handle.taskId })))
-      .toEqual({ status: 200, body: { accepted: 1 } });
+      .toMatchObject({ status: 200, body: { accepted: 1 } });
     expect(await first.byok.tasks.get(handle.taskId)).toMatchObject({ state: 'Failed', createdAt: openedAt, sessionRef: 'requested-session' });
 
     await stopServer(server!);

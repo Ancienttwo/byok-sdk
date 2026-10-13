@@ -1,4 +1,4 @@
-import { OUTBOUND_REFUSAL_REASONS, type OutboundRefusalReason } from '@byok-sdk/protocol';
+import { TASK_STATES, type TaskState, OUTBOUND_REFUSAL_REASONS, type OutboundRefusalReason } from '@byok-sdk/protocol';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { AgentEvent, BlobRef, RuntimeInfo } from '@byok-sdk/protocol';
@@ -253,7 +253,7 @@ function redactForAudit(event: DaemonEvent): Record<string, unknown> {
   const base = { kind: event.kind, ts: event.ts };
   switch (event.kind) {
     case 'outbound-rejected':
-      return { ...base, envelopeId: event.envelopeId, type: event.type, taskId: event.taskId, reason: event.reason, terminal: event.terminal };
+      return { ...base, envelopeId: event.envelopeId, type: event.type, taskId: event.taskId, reason: event.reason, terminal: event.terminal, ...(event.terminal ? { taskState: event.taskState } : {}) };
     case 'offered':
       return { ...base, taskId: event.taskId, runtime: event.runtime };
     case 'claimed':
@@ -441,7 +441,12 @@ function reconstructDaemonEvent(raw: Record<string, unknown>): DaemonEvent | und
     case 'outbound-rejected': {
       const reason = raw.reason;
       if (typeof reason !== 'string' || ![...OUTBOUND_REFUSAL_REASONS, 'unknown', 'unspecified'].includes(reason) || typeof raw.envelopeId !== 'string' || typeof raw.type !== 'string' || typeof raw.terminal !== 'boolean') return undefined;
-      return { kind, ts, envelopeId: raw.envelopeId, type: raw.type, ...(typeof raw.taskId === 'string' ? { taskId: raw.taskId } : {}), reason: reason as OutboundRefusalReason, terminal: raw.terminal };
+      const base = { kind: 'outbound-rejected' as const, ts, envelopeId: raw.envelopeId, type: raw.type, ...(typeof raw.taskId === 'string' ? { taskId: raw.taskId } : {}), reason: reason as OutboundRefusalReason };
+      if (raw.terminal) {
+        if (typeof raw.taskState !== 'string' || !(TASK_STATES as readonly string[]).includes(raw.taskState)) return undefined;
+        return { ...base, terminal: true, taskState: raw.taskState as TaskState };
+      }
+      return { ...base, terminal: false };
     }
     case 'offered':
       return { kind: 'offered', ts, taskId: str(raw.taskId), runtime: typeof raw.runtime === 'string' ? raw.runtime : undefined };
