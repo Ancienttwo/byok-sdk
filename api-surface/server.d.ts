@@ -94,7 +94,7 @@ import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispos
 import type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
 import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, TaskHandle, TaskSnapshot } from './types';
 export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskHandle, TaskResult, TaskSnapshot, } from './types';
-export type { TaskOfferReadback } from '@byok-sdk/cloud';
+export type { InboundRefusalReason, TaskOfferReadback } from '@byok-sdk/cloud';
 /**
  * M5 (approval targeting, docs/protocol.md §5.3): `TaskHandle.approve`/`reject`'s
  * `opts.approvalId` targeting throws this when the id names an approval the
@@ -277,11 +277,9 @@ export interface ByokServer {
      * A plain, serializable snapshot of this server's current state. See
      * {@link HubStats} for the field-by-field contract.
      *
-     * Async because the non-terminal part of `taskCountsByState` is re-read from
-     * the durable task store on every call. Terminal states are absorbing, so a
-     * task is read until it settles and then only tallied: the cost of a call
-     * follows the tasks still in flight, not history (`live-tasks.ts`). A SQLite
-     * server accounts the file's existing tasks once, at open.
+     * One store aggregate, an active-attempt page walk, then one approval read
+     * per active attempt. No process-local task counts or startup history scan.
+     * This is a multi-read observation, not a transaction snapshot; see HubStats.
      *
      * Deliberately in-process only: never exposed over HTTP by this SDK itself (see
      * `CreateByokServerOptions.healthzRoute`); an embedder that wants any of it
@@ -751,7 +749,7 @@ export declare function createTaskHandle(taskId: string, deps: TaskHandleDeps): 
 // ==== @byok-sdk/server dist/types.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
 import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, RuntimeInfo, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess } from '@byok-sdk/protocol';
-import type { TenantId, TokenSigner } from '@byok-sdk/cloud';
+import type { InboundRefusalReason, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { RateLimiterOptions } from './rate-limiter';
 /** Mutually-exclusive storage authority for the embedded reference server. */
 export type ByokServerStorage = {
@@ -1283,14 +1281,21 @@ export type ByokServerEvent = {
 export interface HubStats {
     /** Devices whose presence lease is live right now — see {@link MachineInfo.connected}. */
     connectedDeviceCount: number;
-    /** Every {@link TaskState} mapped to how many known tasks currently sit in it. */
+    /**
+     * Store-aggregated settled counts plus active task/approval projections.
+     * Exact at quiescence; a task settling between reads can be temporarily absent.
+     * This is not a transaction snapshot. SQLite persists attempts/cancellation;
+     * its in-memory approval timeline resets at reopen, so AwaitApproval resets.
+     */
     taskCountsByState: Record<TaskState, number>;
-    /** Total inbound daemon->server envelopes the cloud kernel's inbound gate has been handed (every outcome, including rejected/rate-limited), counted at the gate's own step 0. */
+    /** Total inbound daemon->server envelopes since this server instance was created (every outcome, including rejected/rate-limited), counted at the gate's own step 0. Resets on SQLite reopen. */
     envelopesIn: number;
-    /** Inbound envelopes recognized as an already-seen `(deviceId, id)` pair (N3) — a no-op wire-level success, counted here for observability. */
+    /** Inbound dedup hits since this server instance was created; a no-op wire-level success. Resets on SQLite reopen. */
     dedupDrops: number;
-    /** Inbound envelopes rejected for exceeding a device's rate limit — see `device.rate_limited` on {@link ByokServerEvent}. */
+    /** Rate-limited envelopes since this server instance was created — see `device.rate_limited` on {@link ByokServerEvent}. Resets on SQLite reopen. */
     rateLimitEvents: number;
+    /** Every closed refusal reason, zero-filled; counted since this server instance was created. Rate limiting is separate. */
+    inboundRefusals: Record<InboundRefusalReason, number>;
     /** Milliseconds since `createByokServer` returned this instance. */
     uptimeMs: number;
 }
