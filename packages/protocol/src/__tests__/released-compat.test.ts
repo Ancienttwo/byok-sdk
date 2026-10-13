@@ -4,12 +4,14 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   decodeEnvelope as decodeWithReleased,
+  MESSAGE_PAYLOAD_SCHEMAS as RELEASED_PAYLOAD_SCHEMAS,
   UnknownMessageTypeError as ReleasedUnknownMessageTypeError,
 } from '@byok-sdk/protocol-released';
 import {
   AGENT_HOME_READERS_CAPABILITY,
   CAPABILITY_FLAGS,
   decodeEnvelope,
+  MESSAGE_PAYLOAD_SCHEMAS,
   type CapabilityFlag,
 } from '../index';
 
@@ -21,8 +23,13 @@ import {
  * decodes the current envelope corpus with the oldest client release the
  * server must still support (the `@byok-sdk/protocol-released` devDependency
  * alias in package.json) and fails on any envelope that decoder rejects unless
- * a capability flag is named for it below. See "Freeze rule" in
- * docs/protocol.md and "Protocol compatibility baseline" in
+ * a capability flag is named for it below. A structural case closes the blind
+ * spot that a field no corpus line carries is invisible to that decoding: every
+ * new top-level key of a strict payload must appear in the live corpus. This
+ * file checks only the decoder half; that the server and hosted cloud refuse
+ * an undeclared device is tested elsewhere (for example
+ * packages/cloud/src/__tests__/agent-home-readers.test.ts). See "Freeze rule"
+ * in docs/protocol.md and "Protocol compatibility baseline" in
  * docs/releases/README.md.
  */
 
@@ -63,8 +70,11 @@ const liveLines = CORPUS_FILES.flatMap((file) => readLines(`${goldenDir}${file}`
  * it, so the type itself is the gate). `capability` is the flag a device must
  * durably declare before a server or the hosted cloud may send the message:
  * they refuse undeclared devices before creating the task or appending to the
- * mailbox. Removing an entry makes Part 1 fail; adding a strict field with no
- * entry makes Part 1 fail too.
+ * mailbox. Removing an entry makes Part 1 fail; adding a top-level strict
+ * payload key with no entry makes Part 1 fail too (the key must appear in the
+ * live corpus, and the released decoder then rejects that line). A message
+ * type the released decoder does not know is rejected with
+ * UnknownMessageTypeError, so a new message type needs a `field: null` entry.
  */
 interface GateEntry {
   readonly type: string;
@@ -78,6 +88,22 @@ const RELEASED_BASELINE_GATES: readonly GateEntry[] = [
   { type: 'task.offer_for_agent_with_egress_fresh', field: 'homeAccess', capability: AGENT_HOME_READERS_CAPABILITY },
   { type: 'task.offer_prepared', field: 'homeAccess', capability: AGENT_HOME_READERS_CAPABILITY },
 ];
+
+/**
+ * Top-level keys of a payload schema's strict object shapes (a discriminated
+ * union contributes the keys of every strict branch). A payload that is not
+ * strict strips unknown keys, so the released decoder tolerates a new key and
+ * it needs no gate. A schema of an unexpected kind fails loudly.
+ */
+function strictPayloadKeys(schema: unknown): Set<string> {
+  const def = (schema as { _zod: { def: { type: string; catchall?: { _zod: { def: { type: string } } }; options?: unknown[] } } })._zod.def;
+  if (def.type === 'union') {
+    return new Set((def.options ?? []).flatMap((option) => [...strictPayloadKeys(option)]));
+  }
+  if (def.type !== 'object') throw new Error(`unsupported payload schema kind: ${def.type}`);
+  if (def.catchall?._zod.def.type !== 'never') return new Set();
+  return new Set(Object.keys((schema as { shape: Record<string, unknown> }).shape));
+}
 
 function releasedAccepts(raw: string): boolean {
   try {
@@ -123,7 +149,8 @@ describe('released-compat: the released decoder against the current corpus', () 
         gate,
         `the released decoder rejects ${line.file}:${line.index} (${line.type}): ${String(rejection)}. ` +
           'Gate the new field or message type with a capability flag that the server and hosted cloud check before ' +
-          'task creation or mailbox append, then list it in RELEASED_BASELINE_GATES (docs/protocol.md "Freeze rule"); ' +
+          'task creation or mailbox append, then list it in RELEASED_BASELINE_GATES (docs/protocol.md "Freeze rule"; ' +
+          'a new message type needs a `field: null` entry because the released decoder rejects an unknown type); ' +
           'otherwise bump PROTOCOL_VERSION.',
       ).toBeDefined();
     },
@@ -146,6 +173,28 @@ describe('released-compat: the released decoder against the current corpus', () 
     const sample = liveLines.find((line) => line.type === 'task.offer_for_agent' && 'homeAccess' in line.payload);
     expect(sample).toBeDefined();
     expect(releasedAccepts((sample as CorpusLine).raw)).toBe(false);
+  });
+
+  it('every top-level key a strict payload gained since the released baseline appears in the live corpus', () => {
+    const missing: string[] = [];
+    for (const [type, schema] of Object.entries(MESSAGE_PAYLOAD_SCHEMAS)) {
+      const releasedSchema = (RELEASED_PAYLOAD_SCHEMAS as Record<string, unknown>)[type];
+      // A type the released decoder does not know is gated as a whole by a `field: null` entry.
+      if (releasedSchema === undefined) continue;
+      const releasedKeys = strictPayloadKeys(releasedSchema);
+      const corpusKeys = new Set(liveLines.filter((line) => line.type === type).flatMap((line) => Object.keys(line.payload)));
+      for (const key of strictPayloadKeys(schema)) {
+        if (releasedKeys.has(key) || corpusKeys.has(key)) continue;
+        missing.push(`${type}.${key}`);
+      }
+    }
+    expect(
+      missing,
+      'these strict payload keys are new since the released baseline and no live corpus line carries them, so ' +
+        'the decoding cases above cannot see them. Add a corpus line with the key to golden/v2.gated.ndjson and gate ' +
+        'it with a capability flag in RELEASED_BASELINE_GATES (docs/protocol.md "Freeze rule"). Only top-level ' +
+        'keys of a strict payload are checked; nested strict schemas are not.',
+    ).toEqual([]);
   });
 
   it('the current decoder accepts every gated sample', () => {

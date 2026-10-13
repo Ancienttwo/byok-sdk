@@ -47,5 +47,8 @@ the previous major, or the owner ends support for an older client line). Then:
 3. Record the change and the reason in the release notes.
 
 A new capability-gated strict field needs a gate-table entry and a corpus line
-in `golden/v2.gated.ndjson` in the same change. See "Freeze rule" in
-`docs/protocol.md`.
+in `golden/v2.gated.ndjson` in the same change; the test fails if a new
+top-level strict payload key has no corpus line (nested strict schemas are not
+checked). A new message type is rejected by the released decoder with
+`UnknownMessageTypeError`, so it needs a `{ field: null, capability }` gate
+entry too. See "Freeze rule" in `docs/protocol.md`.

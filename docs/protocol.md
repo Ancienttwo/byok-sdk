@@ -67,11 +67,19 @@ field by exactly one of two legal paths:
    so its strict decoder never sees it. `homeAccess` on the Agent offers
    (`agent-home-readers`) is the worked example.
 
-The second path is checked by an executable test, not by author judgment:
-`packages/protocol/src/__tests__/released-compat.test.ts` decodes the current
-envelope corpus with the oldest released decoder, and every envelope that
-decoder rejects must be listed with the capability flag that protects it. A
-strict field with no such flag fails that test.
+The second path is checked by an executable test, not by author judgment, for
+the decoder half only: `packages/protocol/src/__tests__/released-compat.test.ts`
+decodes the current envelope corpus with the oldest released decoder, and every
+envelope that decoder rejects must be listed with the capability flag that
+protects it. A structural case also requires every top-level key a strict
+payload gained since that release to appear in at least one live corpus line,
+so a new key cannot hide from the decoding cases by being absent from the
+corpus. Limits: nested strict schemas are not checked, and a new message type
+is not a payload key. The released decoder rejects an unknown type with
+`UnknownMessageTypeError`, so a new message type needs a `{ field: null,
+capability }` gate entry. That the server and hosted cloud actually refuse an
+undeclared device is tested elsewhere (for example
+`packages/cloud/src/__tests__/agent-home-readers.test.ts`), not by this file.
 
 **What IS breaking, and requires a `v` bump instead:** changing an existing
 field's type, removing a field, making an optional field required (or vice
