@@ -18,15 +18,16 @@ import type { RuntimeInfo, ToolsetId } from '@byok-sdk/protocol';
  * its lifetime: restart the server and it is gone, exactly like the connection
  * it describes.
  *
- * `connected` is therefore "observed alive and not since forgotten", not "a
- * socket is open" — there are no sockets any more. Two observations set it: the
- * device's own `conn.hello` over `POST /byok/messages`, and a `GET /byok/events`
- * poll (a device that is polling is present even if it never announced). One
- * clears it: revocation, which deletes the device row and everything scoped to
- * it.
+ * Presence is an expiring LEASE over `lastSeen`, not a stored flag and not "a
+ * socket is open" — there are no sockets any more. Two observations renew it:
+ * the device's own `conn.hello` over `POST /byok/messages`, and a
+ * `GET /byok/events` poll (a device that is polling is present even if it never
+ * announced). It lapses on its own once nothing has renewed it for
+ * `presenceTtlMs` (see {@link DeviceConnections.isConnected}), and revocation
+ * deletes the observation outright together with everything else scoped to the
+ * device.
  */
 export interface DeviceConnection {
-  connected: boolean;
   /** ISO-8601 instant of the most recent observation. */
   lastSeen: string;
   clientVersion?: string;
@@ -41,6 +42,17 @@ export interface DeviceAnnouncement {
   readonly configuredToolsets?: readonly ToolsetId[];
 }
 
+export interface DeviceConnectionsOptions {
+  /**
+   * How long one observation keeps a device present, ms. Must outlast a full
+   * long-poll hold plus the gap before the next poll: a poll renews the lease
+   * once, when it starts, and nothing renews it while the poll is held.
+   */
+  readonly presenceTtlMs: number;
+  /** Epoch-ms clock the lease is judged against. Defaults to `Date.now`. */
+  readonly now?: () => number;
+}
+
 /**
  * In-process device observations, in first-observation order.
  *
@@ -50,6 +62,13 @@ export interface DeviceAnnouncement {
  */
 export class DeviceConnections {
   readonly #devices = new Map<string, DeviceConnection>();
+  readonly #presenceTtlMs: number;
+  readonly #now: () => number;
+
+  constructor(options: DeviceConnectionsOptions) {
+    this.#presenceTtlMs = options.presenceTtlMs;
+    this.#now = options.now ?? Date.now;
+  }
 
   /**
    * Record an accepted `conn.hello`. Discovery fields are REPLACED wholesale,
@@ -58,7 +77,6 @@ export class DeviceConnections {
    */
   announce(deviceId: string, announcement: DeviceAnnouncement, at: string): void {
     this.#devices.set(deviceId, {
-      connected: true,
       lastSeen: at,
       ...(announcement.clientVersion === undefined ? {} : { clientVersion: announcement.clientVersion }),
       ...(announcement.runtimes === undefined ? {} : { runtimes: [...announcement.runtimes] }),
@@ -70,17 +88,16 @@ export class DeviceConnections {
 
   /**
    * Record any other sign of life (an inbound envelope, a long-poll read).
-   * Deliberately additive: it refreshes `lastSeen` and marks the device present
+   * Deliberately additive: it renews the lease by refreshing `lastSeen`
    * without touching the discovery block, because none of those signals carry
    * one and clearing it would lose what the last hello said.
    */
   touch(deviceId: string, at: string): void {
     const existing = this.#devices.get(deviceId);
     if (existing === undefined) {
-      this.#devices.set(deviceId, { connected: true, lastSeen: at });
+      this.#devices.set(deviceId, { lastSeen: at });
       return;
     }
-    existing.connected = true;
     existing.lastSeen = at;
   }
 
@@ -88,14 +105,25 @@ export class DeviceConnections {
     return this.#devices.get(deviceId);
   }
 
+  /**
+   * The one presence rule: observed within the last `presenceTtlMs`. Every
+   * reader — `MachineInfo.connected`, ambient selection, the dispatch gate and
+   * `stats().connectedDeviceCount` — asks this, so none can disagree.
+   */
   isConnected(deviceId: string): boolean {
-    return this.#devices.get(deviceId)?.connected === true;
+    const connection = this.#devices.get(deviceId);
+    return connection !== undefined && this.#present(connection, this.#now());
   }
 
   connectedCount(): number {
+    const now = this.#now();
     let count = 0;
-    for (const connection of this.#devices.values()) if (connection.connected) count += 1;
+    for (const connection of this.#devices.values()) if (this.#present(connection, now)) count += 1;
     return count;
+  }
+
+  #present(connection: DeviceConnection, now: number): boolean {
+    return now - Date.parse(connection.lastSeen) <= this.#presenceTtlMs;
   }
 
   /** Device ids in first-observation order — the order ambient selection walks. */

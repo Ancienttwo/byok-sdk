@@ -1,8 +1,24 @@
 # @byok-sdk/server
 
 The self-hosted SaaS-side reference coordinator: pairing, authenticated device
-HTTP/WebSocket/long-poll transport, task leasing, approvals, and in-memory
-stores over the frozen v1 protocol.
+transport over HTTP long-poll (`POST /byok/messages`, `GET /byok/events`; there
+is no WebSocket transport), task leasing, approvals, and device presence over
+protocol v2. State is in memory by default; `storage: { kind: 'sqlite', path }`
+persists enrollment, receipts and the coordination interfaces (see below).
+
+## Device presence
+
+`machines.list()[].connected`, ambient device selection for a `dispatch()`
+without `deviceId`, the `device ... is not connected` dispatch gate, and
+`stats().connectedDeviceCount` all apply one rule: a device is connected while
+its last observation (`conn.hello`, any accepted envelope, or the start of a
+`GET /byok/events` poll) is at most `presenceTtlMs` old. The default is
+`longPollHoldMs + 15_000` (65 seconds with the default 50 second hold), so a
+device sitting in a normal held poll stays connected and one that stops polling
+reads offline about 15 seconds after its last hold would have ended.
+`presenceTtlMs` is configurable and must exceed `longPollHoldMs`, because a held
+poll does not renew presence. `lastSeen` is reported alongside. Revoking a device
+removes its presence immediately.
 
 Use `@byok-sdk/cloud` plus `@byok-sdk/cloud-dataplane` for the durable hosted
 composition.
@@ -35,6 +51,31 @@ first-write-wins across connections and restart. Mailbox retention never deletes
 receipts: immutable offer, delivered and canonical terminal facts remain for the
 lifetime of the database. There is no receipt TTL or automatic pruning. Monitor
 disk usage; exhaustion is an error, not permission to delete identity fences.
+
+One SQLite file serves exactly one server process. Opening takes an OS lock on
+the canonical database path's `<path>-lock` sibling for the lifetime of the server;
+symlink aliases resolve to that same lock. A second open of the
+same file, from another process or another instance in this one, throws
+`SqliteOwnershipError` (`code: 'SQLITE_DATABASE_OWNED'`) before touching the
+database. The lock is released by `close()` and by the operating system when the
+owning process exits for any reason, including SIGKILL, so a crashed owner never
+blocks the next start. Token signing keys (unless you pass `tokenSigner`),
+presence, the task-event relay and live-task accounting are process-local, which
+is why the file is not shareable. Running several server instances behind a load
+balancer needs external stores (`@byok-sdk/cloud` with `@byok-sdk/cloud-dataplane`)
+and one shared `tokenSigner`.
+Hard-linked database paths are refused before open, since they have no unique
+sibling lock or WAL path.
+
+`stats()` re-reads only live attempts and their approval timelines; absorbing
+terminal states are counted once. SQLite history is scanned once at startup,
+so repeated stats calls cost O(live tasks), independent of terminal history.
+Snapshots read creation time (`recordedAt`) and requested session from the
+immutable offer receipt; the canonical terminal's session takes precedence.
+These facts survive completion and SQLite restart without a dispatch Map.
+Attempts opened before an offer receipt was committed retain the existing
+attempt-only snapshot (`createdAt: updatedAt`, no requested session). Malformed
+receipts are rejected by the kernel's readback contract.
 
 Unredeemed pairing codes, presence and other unmodified ports remain ephemeral.
 Keep daemon OS credentials, server URL and token signer stable across restart.

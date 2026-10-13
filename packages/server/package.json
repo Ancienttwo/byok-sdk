@@ -1,7 +1,7 @@
 {
   "name": "@byok-sdk/server",
   "version": "0.26.1",
-  "description": "BYOK SDK server: in-memory M0 reference implementation of the SaaS-side coordinator",
+  "description": "BYOK SDK server: embedded SaaS-side reference coordinator over the cloud kernel (protocol v2, HTTP long-poll transport, in-memory or single-process SQLite storage)",
   "type": "module",
   "license": "MIT",
   "repository": {
