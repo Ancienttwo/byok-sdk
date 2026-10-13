@@ -144,6 +144,8 @@ describe('daemon lifecycle (#391)', () => {
     const sessionRef = adapter.sessions[0]!.sessionRef;
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await server.waitFor((envelope) => envelope.type === 'task.complete' && envelope.task_id === taskId);
+    // The task releases its Agent-home writer lease after the terminal.
+    await vi.waitFor(() => expect(daemon!.status().activeTaskCount).toBe(0));
 
     const appended = await daemon.publishReliableAgentEgress!({
       agentRef,
@@ -162,9 +164,9 @@ describe('daemon lifecycle (#391)', () => {
 
     // Break the session; the server gains the capability while the daemon is
     // reconnecting.
+    const hellosBeforeBreak = hellos().length;
     server.setFailEventsPolls(true);
     await vi.waitFor(() => expect(daemon!.status().lifecycle).toEqual({ phase: 'running', connection: 'connecting' }));
-    const hellosBeforeRecovery = hellos().length;
     server.setAckCapabilities(['agent-egress-reliable-ack']);
     server.setFailEventsPolls(false);
 
@@ -172,10 +174,12 @@ describe('daemon lifecycle (#391)', () => {
       envelope.type === 'agent.egress.reliable' && envelope.payload.eventId === appended.record.eventId,
     );
     expect(reliable.type).toBe('agent.egress.reliable');
-    // It went out on a later session of the same run, after a fresh hello.
-    expect(hellos().length).toBeGreaterThan(hellosBeforeRecovery);
-    const firstRecoveryHello = hellos()[hellosBeforeRecovery]!;
-    expect(server.received.indexOf(firstRecoveryHello)).toBeLessThan(server.received.indexOf(reliable));
+    // It went out on a later session of the same run, after a reconnect's
+    // fresh hello (a hello already in flight when the capability changed may
+    // be the one whose answer carries it).
+    expect(hellos().length).toBeGreaterThan(hellosBeforeBreak);
+    const firstReconnectHello = hellos()[hellosBeforeBreak]!;
+    expect(server.received.indexOf(firstReconnectHello)).toBeLessThan(server.received.indexOf(reliable));
   });
 
   it('a start failure that is not a halt is a crash: start() throws it and operational health records a lifecycle failure (#394)', async () => {
