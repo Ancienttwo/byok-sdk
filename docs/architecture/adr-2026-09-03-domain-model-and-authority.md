@@ -176,3 +176,15 @@
 **Consequences**　WP4 承担，内部拆 v2.1 身份与消息形状、v2.2 Attempt 与 fencing、v2.3 Session 本地绑定、v2.4 凭证分层（后置，不阻塞首发），但对外只有一个 cutover release。ADR-023（`workspaceHint` 维持 reserved）随 v1 一并退场，其能力由 v2 的 `workspaceRef` 承接。Salesko 的一次性迁移授权仍需 owner 单独点头（review §8 D2）。
 
 **Status**　Accepted (owner-delegated 2026-09-03)
+
+---
+
+## 修订说明（2026-10-13）
+
+核对基线：`b597b93e`。以下只记录现状与后续裁定的关系，不改写上面的原始决定。
+
+- 来源行与输入稿行引用的 `docs/researches/2026-09-03_architecture-review.md`、`docs/researches/20260903-GPT-review.md`、`docs/researches/20260903-GPT-review-2.md` 在 #390 后不再跟踪。决策以本文件正文为准。
+- ADR-031 与 ADR-037：ADR-037 保留 Agent-home 单写者 lease 与 Git workspace lease；session cwd 是用户指定的 workspace（`workspaceRoot` / task `workspaceDir`）或 Agent home。ADR-034 设想的 v2 `workspaceRef` 没有实现：protocol 中没有该字段，client journal 里的同名字段只是本机路径记录。
+- ADR-033 与 ADR-037 D4：ADR-037 让 Agent egress 原样发给 Host，删除了 egress sanitizer 与 `metadata-status` 默认投影。这与 ADR-033「`local-first-v1` 下 ActivityStore 只接受无内容 status event」冲突。`local-first-v1`、`shared-observability-v1`、`SessionResultCommitter` 在 `packages/` 源码中都没有出现。如何取舍待 owner 裁定。
+- ADR-034：wire v2 随 ADR-037 落地（`PROTOCOL_VERSION = 2`），本 ADR 设想的那次 cutover 没有发生。列出的删除项也没有执行：legacy `task.offer` / `task.offer_with_toolsets` 仍在 `packages/protocol/src/envelope.ts`，`strictAgentOnly` 仍在 `packages/client/src/daemon/create-daemon.ts`。是否继续执行待 owner 裁定。
+- ADR-027 权威表：[ADR-038](adr-2026-10-13-bot-platform.md) 新增的都是 Host 拥有的事实（Bot profile / roster、Conversation / Turn、Room、Delegation、Host 执行核心），没有新增 SDK 权威。

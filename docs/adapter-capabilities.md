@@ -139,7 +139,7 @@ to succeed.
 
 - Source contract: `packages/client/src/types.ts`.
 - Adapter evidence: `claude-adapter.test.ts` and `codex-adapter.test.ts`.
-- Host recovery boundary: [Host reconnect next step](researches/2026-10-06-host-reconnect-boundary.md).
+- Host recovery boundary: Host reconnect next step (`docs/researches/2026-10-06-host-reconnect-boundary.md`, untracked since #390).
 - Architecture: [SDK architecture](architecture/sdk-architecture.md), especially
   the adapter and embedded server boundaries.
 - Design reference: [T3 pinned revision](https://github.com/pingdotgg/t3code/tree/3e6b45028ceec5820dacb37dc3852470ebdc9411).
