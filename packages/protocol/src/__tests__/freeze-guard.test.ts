@@ -329,7 +329,7 @@ if (process.env['BYOK_PROTOCOL_UPDATE_GOLDEN'] === '1') {
 }
 
 const FREEZE_DIFF_MESSAGE =
-  'v2 frozen schema fingerprint drifted from golden/v2.frozen.json. If this diff is purely additive (a new optional field, a new message type, a new AgentEvent variant, a new capability flag), regenerate the golden and say so — with justification — in the commit message. If it changes, removes, or retypes anything that already existed, that is a breaking change and needs a PROTOCOL_VERSION bump instead, per docs/protocol.md "Freeze rule" — do not just regenerate the golden to make this pass.';
+  'v2 frozen schema fingerprint drifted from golden/v2.frozen.json. If this diff is purely additive (a new optional field, a new message type, a new AgentEvent variant, a new capability flag), regenerate the golden and say so — with justification — in the commit message. If it adds a field to a strict payload, regenerating is legal only on the capability-gated path: a new capability flag, with server and hosted cloud refusing undeclared devices before task creation or mailbox append, and the gate recorded in released-compat.test.ts. If it changes, removes, or retypes anything that already existed, or adds a strict field with no capability gate, that is a breaking change and needs a PROTOCOL_VERSION bump instead, per docs/protocol.md "Freeze rule" — do not just regenerate the golden to make this pass.';
 
 describe('freeze guard: v2 schema fingerprint snapshot', () => {
   it('matches the committed golden/v2.frozen.json exactly', () => {
