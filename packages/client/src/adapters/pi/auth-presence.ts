@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PROVIDER_CREDENTIAL_ENV_NAMES } from '../provider-credential-environment';
+import { PI_PROVIDER_ENV_KEY_NAMES } from './pi-provider-env.generated';
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -88,7 +88,7 @@ function hasConfiguredApiKey(provider: unknown): boolean {
  * This never throws and never returns, logs, or keeps any credential value.
  */
 export async function probePiAuthPresent(env: Env): Promise<boolean> {
-  if (PROVIDER_CREDENTIAL_ENV_NAMES.some((name) => env[name] !== undefined)) return true;
+  if (PI_PROVIDER_ENV_KEY_NAMES.some((name) => env[name] !== undefined)) return true;
   try {
     const agentDir = resolvePiAgentDir(env);
     const auth = await readJsonObject(path.join(agentDir, 'auth.json'));

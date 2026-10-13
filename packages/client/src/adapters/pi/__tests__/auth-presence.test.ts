@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { PROVIDER_CREDENTIAL_ENV_NAMES } from '../../provider-credential-environment';
+import { PI_PROVIDER_ENV_KEY_NAMES } from '../pi-provider-env.generated';
 import { probePiAuthPresent, resolvePiAgentDir } from '../auth-presence';
 import { PiAdapter } from '../pi-adapter';
 
@@ -42,6 +42,13 @@ describe('probePiAuthPresent', () => {
   test('a provider credential env-var name is enough, without any file', async () => {
     await expect(probe({ ZAI_API_KEY: '' })).resolves.toBe(true);
     await expect(probe()).resolves.toBe(false);
+  });
+
+  test('every provider env name pi reads counts, including ones outside the original hand-written list (#384)', async () => {
+    await expect(probe({ MOONSHOT_API_KEY: 'x' })).resolves.toBe(true);
+    for (const name of ['KIMI_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'HF_TOKEN', 'TOGETHER_API_KEY', 'FIREWORKS_API_KEY']) {
+      await expect(probe({ [name]: 'x' }), name).resolves.toBe(true);
+    }
   });
 
   test('an auth.json login record of pi\'s oauth or api_key shape is login state', async () => {
@@ -176,7 +183,7 @@ describe('probePiAuthPresent: models.json provider apiKey', () => {
 
 describe('PiAdapter.detect() authPresent', () => {
   beforeEach(() => {
-    for (const name of PROVIDER_CREDENTIAL_ENV_NAMES) vi.stubEnv(name, undefined);
+    for (const name of PI_PROVIDER_ENV_KEY_NAMES) vi.stubEnv(name, undefined);
     vi.stubEnv('PI_CODING_AGENT_DIR', agentDir);
   });
 

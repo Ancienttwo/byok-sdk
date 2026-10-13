@@ -16,6 +16,7 @@ import type { InputPreparationModelV1 } from '../input-preparation';
 // as SHIPPED dependencies, and a test is the one place both authorities can be
 // looked at together.
 import { PI_PROJECTED_KEY_ENV, buildPiProviderProjection } from '../../../keys/src/pi-provider-projection';
+import { PI_PROJECTED_KEY_ENV as CLIENT_PI_PROJECTED_KEY_ENV } from '../adapters/provider-credential-environment';
 import { parseModelProviderProfile } from '../../../keys/src/provider-profile';
 import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
 
@@ -100,6 +101,7 @@ describe('the consent gate’s compared-field list', () => {
 
   it('names the same launcher-delivered credential variable the keys projection references', () => {
     expect(PI_PROJECTED_KEY_ENV).toBe('PI_PROVIDER_API_KEY');
+    expect(CLIENT_PI_PROJECTED_KEY_ENV).toBe(PI_PROJECTED_KEY_ENV);
     const provider = (buildPiProviderProjection(profile) as Projection)
       .providers[PROVIDER_ID] as unknown as { apiKey: string };
     expect(provider.apiKey).toBe(`$${PI_PROJECTED_KEY_ENV}`);

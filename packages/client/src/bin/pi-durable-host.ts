@@ -51,7 +51,7 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
   const instruction = config.instruction;
   const expectedProvider = string(config.provider), expectedModel = string(config.model);
   const { provider, entry, digest: projectionDigest } = projection(expectedProvider, expectedModel);
-  if (PROVIDER_CREDENTIAL_ENV_DENY_NAMES.some(name => Object.hasOwn(process.env, name)) || Object.hasOwn(process.env, 'PI_PROVIDER_API_KEY')) throw new Error('durable credential environment refused');
+  if (PROVIDER_CREDENTIAL_ENV_DENY_NAMES.some(name => Object.hasOwn(process.env, name))) throw new Error('durable credential environment refused');
   const key = await receiveDurableCredential(digest);
   if (process.connected) throw new Error('durable custody IPC still connected before tool construction');
   if (provider.apiKey !== undefined && !key) throw new Error('durable launcher credential missing');

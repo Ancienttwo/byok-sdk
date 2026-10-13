@@ -40,6 +40,18 @@
   text: each turn's progress becomes at most one line of sizes and counts, and
   completed/failed/cancelled/stale-approval text is redacted to a byte count
   like the audit log. `tasks --follow` is unchanged (#395, partial).
+- **Fixed (client)** — Pi credential env names now come from the pinned pi, in
+  one generated file. `detect().authPresent` and the prepared lane on the pi
+  auth store admitted only 11 of the 38 names pi reads (for example
+  `MOONSHOT_API_KEY`, `KIMI_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `HF_TOKEN`), so a
+  user logged in through one of the others looked logged out and the prepared
+  lane dropped the key. The hand-written admit list is gone; the deny list is
+  the generated set plus named extras and is unchanged in content. A drift test
+  fails when the generated data, or the classification of a name pi reads,
+  stops matching the pinned pi. Refs #384, #396.
+- **Tests (client)** — the dist closure guard allows the `@byok-sdk/protocol`
+  main entry (which carries zod) per entry instead of for every entry; the
+  adapters bundle may import only schema-free subpaths. Refs #384, #398.
 
 ## 0.26.1 / @byok-sdk/keys 0.11.1 (published, 2026-10-12)
 
