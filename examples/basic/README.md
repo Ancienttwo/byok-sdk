@@ -70,8 +70,9 @@ see `server.ts`); a mismatch is rejected by authenticated HTTP admission.
    above.
 2. Once `byok-agent start` logs `daemon started: ...`, the machine appears
    under **Connected machines** (polled every 2s).
-3. Enter an instruction (runtime defaults to `pi`, the only adapter M0
-   implements) and click **Dispatch**. The progress feed streams live via
+3. Enter an instruction, pick a runtime (`pi` by default; `claude` and
+   `codex` are available when that CLI is installed on the daemon's machine)
+   and click **Dispatch**. The progress feed streams live via
    SSE; approve/cancel buttons call the task's `TaskHandle` directly.
 
 ## Optional local Git checkpoint workspaces

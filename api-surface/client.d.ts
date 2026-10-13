@@ -2912,6 +2912,17 @@ export declare class ConnectionManager {
     private uploadRetryAttempt;
     private started;
     private connected;
+    /**
+     * Settle needs both halves of the handshake: the start `conn.hello` has
+     * been answered by `POST /byok/messages` (so the server holds this device's
+     * capability snapshot), and the current long-poll stream has answered with
+     * the server's capabilities. The no-hold settle poll can return before the
+     * concurrent hello POST does; settling on the poll alone would report a
+     * device open that the server would still refuse Agent work for.
+     */
+    private startHello;
+    private startHelloAnswered;
+    private capabilitiesCurrent;
     private cursor;
     /**
      * Finding F3 (at-most-once redelivery): the lowest `task.*` envelope `seq`
@@ -3026,8 +3037,11 @@ export declare class ConnectionManager {
     isConnected(): boolean;
     isRevoked(): boolean;
     /**
-     * Resolves after the first successful long-poll response establishes the
-     * authenticated connection.
+     * Resolves once the start `conn.hello` has been answered and a successful
+     * long-poll response has established the authenticated connection with the
+     * server's capabilities. That response answers the transport's no-hold
+     * settle poll, so an idle device settles in about one round trip rather
+     * than one full server hold.
      *
      * Rejects with {@link DeviceRevokedError} — instead of hanging until
      * `timeoutMs` — if the device turns out to be revoked while settling (or
@@ -3136,6 +3150,8 @@ export declare class ConnectionManager {
     private advanceCursor;
     private quarantineRejectedOutbound;
     private notifySettled;
+    /** Any server answer counts (accepted, or isolated as rejected): the hello was processed. */
+    private noteStartHelloAnswered;
     private noteConnected;
     private noteDisconnected;
     private enterReplayCursorTooOld;

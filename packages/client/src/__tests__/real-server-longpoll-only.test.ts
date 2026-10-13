@@ -1,7 +1,9 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, EVENTS_POLL_NO_HOLD_PARAM } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ConnectionManager } from '../daemon/connection-manager';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { startRealServer, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
@@ -27,6 +29,131 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
     await daemon?.stop();
     await real.close();
   });
+
+  /** Records every `GET /byok/events` URL; `respond` may answer one in place of the server. */
+  function recordEventPolls(respond?: (pollIndex: number) => Response | undefined): URL[] {
+    const nativeFetch = globalThis.fetch;
+    const polls: URL[] = [];
+    vi.stubGlobal('fetch', ((input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname === '/byok/events') {
+        polls.push(url);
+        const injected = respond?.(polls.length - 1);
+        if (injected) return Promise.resolve(injected);
+      }
+      return nativeFetch(input, init);
+    }) as typeof fetch);
+    return polls;
+  }
+
+  const isSettlePoll = (url: URL) => url.searchParams.get(EVENTS_POLL_NO_HOLD_PARAM) === '1';
+
+  it('#384: an idle cold start settles under the DEFAULT long-poll hold and stays connected', async () => {
+    // No `longPollHoldMs` and no daemon long-poll overrides: the server holds
+    // an empty poll for its ~50s default, five times the 10s settle timeout.
+    // Only the no-hold settle poll can settle this idle device in time.
+    real = await startRealServer({ productId: 'test-product' });
+    const workspaceRoot = await tmpDir('byok-coldstart-workspace-');
+    const storeDir = await tmpDir('byok-coldstart-store-');
+    const adapter = new StubRuntimeAdapter();
+    const polls = recordEventPolls();
+    const capabilityReads = vi.spyOn(ConnectionManager.prototype, 'getServerCapabilities');
+    daemon = createDaemonWithAdapters(
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      [adapter],
+    );
+    const record = await daemon.pair((await real.createPairingCode()).code);
+
+    const startedAt = Date.now();
+    await daemon.start();
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+    expect(daemon.status().connected).toBe(true);
+    // start()'s capability-gated reliable-egress retry is its last read; it
+    // saw the server's advertisement, not the empty pre-settle list.
+    expect(capabilityReads.mock.results.at(-1)?.value).toContain(AGENT_EGRESS_RELIABLE_ACK_CAPABILITY);
+    expect(isSettlePoll(polls[0]!)).toBe(true);
+
+    // The follow-up poll is an ordinary held one, and holding it does not
+    // drop the settled connection on either side.
+    await vi.waitFor(() => expect(polls.length).toBeGreaterThanOrEqual(2), { timeout: 2_000 });
+    expect(polls.slice(1).some(isSettlePoll)).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    expect(daemon.status().connected).toBe(true);
+    expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
+    expect(polls.length).toBe(2);
+
+    // Work enqueued during that held poll is still delivered by it.
+    const handle = await real.byok.dispatch({ instruction: 'delivered by the held poll' });
+    await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
+    expect(polls.slice(1).some(isSettlePoll)).toBe(false);
+  }, 15_000);
+
+  it('#384: re-arms the no-hold settle poll after a failed poll under the default hold', async () => {
+    real = await startRealServer({ productId: 'test-product' });
+    const workspaceRoot = await tmpDir('byok-resettle-workspace-');
+    const storeDir = await tmpDir('byok-resettle-store-');
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // The first held poll fails; the transport withdraws capabilities and reconnects.
+    const polls = recordEventPolls((index) => (index === 1 ? new Response('unavailable', { status: 503 }) : undefined));
+    const states: string[] = [];
+    daemon = createDaemonWithAdapters(
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      [new StubRuntimeAdapter()],
+      { longPoll: { retryDelayMs: 20, idleDelayMs: 20 } },
+    );
+    daemon.subscribe((event) => {
+      if (event.kind === 'connection') states.push(event.state);
+    });
+    await daemon.pair((await real.createPairingCode()).code);
+    await daemon.start();
+
+    await vi.waitFor(() => expect(polls.length).toBeGreaterThanOrEqual(3), { timeout: 2_000 });
+    expect(polls.slice(0, 3).map(isSettlePoll)).toEqual([true, false, true]);
+    await vi.waitFor(() => expect(states).toEqual(['connecting', 'open', 'connecting', 'open']), { timeout: 2_000 });
+    expect(daemon.status().connected).toBe(true);
+  }, 15_000);
+
+  it('#384: settles only after the start conn.hello is answered, so Agent dispatch is admitted at once', async () => {
+    real = await startRealServer({ productId: 'test-product' });
+    const workspaceRoot = await tmpDir('byok-hello-gate-workspace-');
+    const storeDir = await tmpDir('byok-hello-gate-store-');
+    const hostStorageRoot = await tmpDir('byok-hello-gate-home-');
+    const nativeFetch = globalThis.fetch;
+    let helloAnsweredAt: number | undefined;
+    // Hold the first POST (the start conn.hello) well past the no-hold settle poll.
+    vi.stubGlobal('fetch', (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname !== '/byok/messages' || helloAnsweredAt !== undefined) return nativeFetch(input, init);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const response = await nativeFetch(input, init);
+      helloAnsweredAt = Date.now();
+      return response;
+    }) as typeof fetch);
+    daemon = createDaemonWithAdapters(
+      {
+        localAgentRelease: { version: '0.0.0-test' },
+        productName: 'Test',
+        productId: 'test-product',
+        serverUrl: real.url,
+        workspaceRoot,
+        storeDir,
+        agentHome: { hostStorageRoot },
+      },
+      [new StubRuntimeAdapter('pi')],
+    );
+    const record = await daemon.pair((await real.createPairingCode()).code);
+
+    await daemon.start();
+    const startedAt = Date.now();
+    expect(helloAnsweredAt).toBeDefined();
+    expect(startedAt).toBeGreaterThanOrEqual(helloAnsweredAt!);
+    // No retry loop: the server already holds the device's Agent capabilities.
+    await expect(real.byok.dispatch({
+      deviceId: record.deviceId,
+      instruction: 'admitted right after start',
+      agentRef: { agentId: 'agent-hello-gate', profileRevision: 'profile-1' },
+    })).resolves.toBeDefined();
+  }, 15_000);
 
   it('aborts the active held GET when the daemon stops', async () => {
     real = await startRealServer({ productId: 'test-product', longPollHoldMs: 5_000 });

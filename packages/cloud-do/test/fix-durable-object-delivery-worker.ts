@@ -42,6 +42,19 @@ export class DeliveryAuditDO extends AgentDO {
     void reader.closed.then(() => { this.closedResponses++; }, () => { this.closedResponses++; });
     return { status: response.status };
   }
+  /** Real pi DO SQLite storage: the commit persisting the assistant entry throws once armed. */
+  async failPiStorage() {
+    await this.sessionRuntime().ready();
+    this.ctx.storage.sql.exec(`CREATE TRIGGER fixture_pi_storage_failure
+      BEFORE INSERT ON pi_entries WHEN json_extract(NEW.record, '$.kind')='pi.assistant'
+      BEGIN SELECT RAISE(ABORT, 'fixture pi storage unavailable'); END`);
+  }
+  healPiStorage() { this.ctx.storage.sql.exec('DROP TRIGGER fixture_pi_storage_failure'); }
+  /** One platform alarm delivery; its fixed error code stands in for the platform's retry. */
+  async deliverAlarm() {
+    try { await this.alarm(); return { alarm: 'ok' }; }
+    catch (error) { return { alarm: error instanceof CloudDoError ? error.code : 'raw' }; }
+  }
   async discard() {
     await Promise.all(this.held.splice(0).map(reader => reader.cancel().catch(() => undefined)));
   }
@@ -72,6 +85,9 @@ export default { async fetch(request: Request, env: Env) {
     case 'cancel': return agent.cancelActiveRun();
     case 'repair': await agent.repair(); return Response.json({ repaired: true });
     case 'discard': await agent.discard(); return Response.json({ discarded: true });
+    case 'failPiStorage': await agent.failPiStorage(); return Response.json({ armed: true });
+    case 'healPiStorage': await agent.healPiStorage(); return Response.json({ healed: true });
+    case 'alarm': return Response.json(await agent.deliverAlarm());
     case 'submit': return agent.submit({ instruction: body.instruction });
     default: return new Response('Unknown fixture operation', { status: 400 });
   }
