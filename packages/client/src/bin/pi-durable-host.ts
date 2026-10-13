@@ -6,7 +6,7 @@ import { createModels, createProvider } from '@earendil-works/pi-ai/models';
 import type { Model, ProviderStreams, TSchema } from '@earendil-works/pi-ai';
 import { type ToolRegistration } from '@earendil-works/pi-durable';
 import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
-import { receiveDurableCredential } from '../adapters/pi-durable/credential';
+import { receiveLauncherCredential } from '../adapters/pi/launcher-credential';
 import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment';
 import { admitReplica, type DurableReplicaBinding } from '../adapters/pi-durable/replica';
 import { openDurableEngine } from '../adapters/pi-durable/engine';
@@ -52,7 +52,7 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
   const expectedProvider = string(config.provider), expectedModel = string(config.model);
   const { provider, entry, digest: projectionDigest } = projection(expectedProvider, expectedModel);
   if (PROVIDER_CREDENTIAL_ENV_DENY_NAMES.some(name => Object.hasOwn(process.env, name))) throw new Error('durable credential environment refused');
-  const key = await receiveDurableCredential(digest);
+  const key = await receiveLauncherCredential('durable', digest);
   if (process.connected) throw new Error('durable custody IPC still connected before tool construction');
   if (provider.apiKey !== undefined && !key) throw new Error('durable launcher credential missing');
   const api = provider.api as 'openai-completions' | 'anthropic-messages';

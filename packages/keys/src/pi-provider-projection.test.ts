@@ -66,7 +66,8 @@ describe('buildPiProviderProjection', () => {
       profile_ref: 'openai',
       provider_kind: 'openai',
     });
-    const projection = buildPiProviderProjection(profile);
+    // The `$PI_PROVIDER_API_KEY` reference is the prepared entry's alone (#385).
+    const projection = buildPiProviderProjection(profile, 'pi-prepared');
     expect(projection).toEqual({
       providers: {
         'byok-sdk-openai': {
@@ -96,7 +97,7 @@ describe('buildPiProviderProjection', () => {
       profile_ref: 'anthropic',
       provider_kind: 'anthropic',
     });
-    expect(buildPiProviderProjection(profile)).toEqual({
+    expect(buildPiProviderProjection(profile, 'pi-prepared')).toEqual({
       providers: {
         'byok-sdk-anthropic': {
           baseUrl: 'https://api.anthropic.com',
@@ -158,6 +159,22 @@ describe('buildPiProviderProjection', () => {
         },
       },
     });
+  });
+
+  // #385: the rpc host and the durable worker run model-callable tools that
+  // copy their process environment, so their projection names no environment
+  // variable; the launcher delivers their key over private IPC.
+  it.each([
+    ['pi-rpc', 'byok:rpc-ipc'],
+    ['pi-durable', 'byok:durable-ipc'],
+    ['pi-prepared', `$${PI_PROJECTED_KEY_ENV}`],
+  ] as const)('projects the %s key channel as %s for a keyed profile', (entry, apiKey) => {
+    const keyed = parseModelProviderProfile({ ...timestamps, pi_model: PI_MODEL_FIXTURE, adapter: 'openai_compatible',
+      auth_mode: 'bearer', base_url: 'https://api.openai.com/v1', capabilities: [], display_name: 'GPT', enabled: true,
+      kind: 'model', model: 'gpt-5.2', profile_ref: 'openai', provider_kind: 'openai' });
+    const provider = (buildPiProviderProjection(keyed, entry) as { providers: Record<string, { apiKey: string }> }).providers['byok-sdk-openai']!;
+    expect(provider.apiKey).toBe(apiKey);
+    if (entry !== 'pi-prepared') expect(JSON.stringify(provider)).not.toContain(PI_PROJECTED_KEY_ENV);
   });
 
   it.each(['pi-prepared', 'pi-durable'] as const)('refuses a keyless profile for the %s entry, which requires a credential', (entry) => {

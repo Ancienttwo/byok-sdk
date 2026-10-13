@@ -72,8 +72,13 @@ Three consequences hold today and are the package's standing constraints:
    configuration lock, only for the exact profile it projected, and never while
    a credential change is pending — writes a private
    process-scoped Pi projection, reconstructs the Pi child environment from a
-   closed platform/proxy baseline plus the exact key, and inherits stdio. It
-   opens no listener and never returns the key to the daemon.
+   closed platform/proxy baseline, and inherits stdio. It hands the exact key
+   to the rpc host and the durable worker over a private IPC channel, which
+   the child closes before it builds any tool; Pi then holds the key only in
+   memory, so no tool shell and no process environment of those children
+   contains it. Only the prepared host, which runs no native tool, receives
+   the key in its environment. It opens no listener and never returns the key
+   to the daemon.
 4. `@byok-sdk/keys` may depend on protocol-free `@byok-sdk/core` for
    `TruthStore`; it must not depend on `protocol`, `client`, `server`, `cloud`,
    or `cloud-dataplane`, and none of those packages may depend on `keys`.
@@ -204,8 +209,9 @@ guarantee that the key does not leave the machine.**
 With the page gone, `@byok-sdk/keys` guarantees only its own half: the key goes
 into the OS credential store, it is never written to the profile store, it is
 never present in any `ProviderStatus`, and it leaves custody only in the
-`authorization` / `x-api-key` header of an explicit client request or in the
-environment of the pinned Pi child launched for that exact profile.
+`authorization` / `x-api-key` header of an explicit client request or toward
+the pinned Pi child launched for that exact profile (over private IPC to the
+rpc host and the durable worker, in the environment of a prepared host).
 **Everything between the user's keystroke and
 `configure(configuration, secret)` is now yours.** If your settings page posts
 the key to your own backend before handing it to this package, or renders it

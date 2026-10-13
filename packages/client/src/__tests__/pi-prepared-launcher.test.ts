@@ -750,7 +750,7 @@ type ProjectionShape = {
  * the same declaration — not because the fixture restated it consistently.
  */
 function byokModel(profile: ModelProviderProfile): InputPreparationModelV1 {
-  const projection = buildPiProviderProjection(profile) as ProjectionShape;
+  const projection = buildPiProviderProjection(profile, 'pi-prepared') as ProjectionShape;
   const provider = projection.providers[BYOK_PROVIDER_ID]!;
   const entry = provider.models[0]!;
   return {
@@ -866,7 +866,7 @@ function launcherSpawn(options: {
       sessionDir: parsed.sessionDir,
       secret: options.secret,
     });
-    const projection = buildPiProviderProjection(options.profile) as ProjectionShape;
+    const projection = buildPiProviderProjection(options.profile, 'pi-prepared') as ProjectionShape;
     options.mutateProjection?.(projection);
     const projectionDir = env.PI_CODING_AGENT_DIR!;
     record.projectionDir = projectionDir;

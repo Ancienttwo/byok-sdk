@@ -800,8 +800,9 @@ export declare const KEYS_PI_WINDOWS_ENV_NAMES: readonly ["SystemRoot", "COMSPEC
 export declare function projectKeysPiInheritedEnvironment(ambient: Readonly<Record<string, string | undefined>>, platform?: NodeJS.Platform): Record<string, string>;
 /**
  * The Pi child environment: the inherited names (with `PI_PACKAGE_DIR`), then
- * the two Pi directories this launch owns, then the projected key. No ambient
- * agent or session directory survives.
+ * the two Pi directories this launch owns, then the projected key when one is
+ * given. Only a prepared host is given one; the rpc and durable entries take
+ * theirs over IPC. No ambient agent or session directory survives.
  */
 export declare function buildPiProviderChildEnvironment(options: {
     ambient: NodeJS.ProcessEnv;
@@ -869,6 +870,13 @@ export interface PiProviderLauncherHost {
 export declare function runPiProviderLauncher(options: PiProviderLauncherOptions, host: PiProviderLauncherHost): Promise<number>;
 // ==== @byok-sdk/keys dist/pi-provider-projection.d.ts ====
 import type { ModelProviderProfile } from './provider-profile';
+/**
+ * The environment name the launcher delivers the key under to a prepared host,
+ * and the `$` reference that host's projection uses. Only the prepared entry
+ * receives its key this way. The rpc and durable entries run model-callable
+ * tools that inherit their process environment, so the launcher hands them
+ * the key over a private IPC channel instead.
+ */
 export declare const PI_PROJECTED_KEY_ENV = "PI_PROVIDER_API_KEY";
 /**
  * The fixed, non-secret `apiKey` projected for an `auth_mode: 'none'` profile.

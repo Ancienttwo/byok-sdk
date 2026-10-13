@@ -495,7 +495,12 @@ export class PiAdapter implements RuntimeAdapter {
             // What is written is the START observation, already compared
             // above with the one this operation was admitted with.
             const serialized = serializePiHostConfig({
-              format: 'byok.pi.rpc-launch', version: 4, cwd: runtimeLaunch.sessionCwd,
+              format: 'byok.pi.rpc-launch', version: 5,
+              // Digest-bound, as in the prepared lane: under `keys-profile`
+              // the host takes the provider key over the launcher's private
+              // IPC channel and refuses to start without it.
+              credentialSource: runtimeLaunch.credentialSource,
+              cwd: runtimeLaunch.sessionCwd,
               mcp: {
                 mcpEnv,
                 mcpServers: taskMcpServers,

@@ -41,7 +41,7 @@ function fixture() {
   const entry = join(root, 'host-entry.ts');
   writeFileSync(entry, `import {runPiRpcHost} from ${JSON.stringify(resolve(import.meta.dirname, '../../dist/bin/pi-runtime-host.js'))}; runPiRpcHost(process.argv.slice(2)).catch(error=>{console.error(String(error));process.exit(1)});`);
   const command = spawnSync(bun, ['--print', 'process.execPath'], {encoding:'utf8'}).stdout.trim();
-  const config = { format: 'byok.pi.rpc-launch', version: 4, cwd,
+  const config = { format: 'byok.pi.rpc-launch', version: 5, credentialSource: 'pi-auth-store', cwd,
     mcp: { mcpEnv: {}, mcpServers: {}, observation: {} } };
   const configPath = join(root, 'config.json');
   const serialized=serializePiHostConfig(config);
@@ -68,13 +68,58 @@ describe('SDK ordinary Pi RPC entry', () => {
       for (const argv of [[], ['--config','relative','--mode','rpc'], ['--config','/x','--mode','rpc','--extension','/x'], ['--config','/x','--mode','rpc','--config','/y'], ['--config','/x','--mode','rpc','--thinking','bogus']]) {
         try { host.parsePiRpcHostArgs(['--config-digest='+'a'.repeat(64),...argv]); rejected.push(false); } catch { rejected.push(true); }
       }
-      for (const cfg of [{...base, version:1}, {...base, version:3}, {...base, cwd:'relative'}, {...base, extra:true}, {...base, policy:{mode:'auto'}}, {...base, binding:{}}, {...base, descendantPlan:null}]) {
+      const {credentialSource:_, ...withoutSource} = base;
+      for (const cfg of [{...base, version:1}, {...base, version:3}, {...base, cwd:'relative'}, {...base, extra:true}, {...base, policy:{mode:'auto'}}, {...base, binding:{}}, {...base, descendantPlan:null},
+        {...base, version:4}, withoutSource, {...base, credentialSource:'env'}]) {
         try { host.parsePiRpcHostConfig(cfg); rejected.push(false); } catch { rejected.push(true); }
       }
       console.log(JSON.stringify(rejected));
     `);
-    expect(result).toEqual(Array(12).fill(true));
+    expect(result).toEqual(Array(15).fill(true));
   });
+
+  // #385: a keys-profile launch takes its provider key only over the
+  // launcher's private IPC channel; a device-auth launch has no such channel.
+  function custodyFixture(credentialSource: 'keys-profile' | 'pi-auth-store') {
+    const f = fixture();
+    const config = { ...f.config, credentialSource };
+    const serialized = serializePiHostConfig(config);
+    writeFileSync(f.configPath, serialized.bytes);
+    const agent = join(f.root, 'agent');
+    mkdirSync(agent, { recursive: true });
+    writeFileSync(join(agent, 'models.json'), JSON.stringify({ providers: { 'byok-sdk-probe': {
+      baseUrl: 'http://127.0.0.1:9/v1', api: 'openai-completions', apiKey: 'byok:rpc-ipc', models: [{ id: 'probe' }] } } }));
+    const argv = [f.entry, `--config-digest=${serialized.digest}`, '--config', f.configPath, '--mode', 'rpc', '--provider', 'byok-sdk-probe', '--model', 'probe'];
+    return { ...f, argv };
+  }
+
+  it('refuses a keys-profile launch without the launcher custody channel, before any session', () => {
+    const f = custodyFixture('keys-profile');
+    const result = spawnSync(bun, f.argv, { cwd: f.sealed, env: f.env, encoding: 'utf8', timeout: 15_000 });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('rpc custody IPC unavailable');
+    expect(result.stdout).toBe('');
+    expect(existsSync(join(f.root, 'agent', 'sessions'))).toBe(false);
+  });
+
+  it.each(['PI_PROVIDER_API_KEY', 'OPENAI_API_KEY'])('refuses a keys-profile launch environment that carries %s', (name) => {
+    const f = custodyFixture('keys-profile');
+    const result = spawnSync(bun, f.argv, { cwd: f.sealed, env: { ...f.env, [name]: 'sk-env-canary' }, encoding: 'utf8', timeout: 15_000 });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('keys-profile credential environment refused');
+    expect(result.stderr).not.toContain('sk-env-canary');
+    expect(result.stdout).toBe('');
+  });
+
+  it('refuses a device-auth launch that was given an undeclared custody channel', async () => {
+    const f = custodyFixture('pi-auth-store');
+    const child = spawn(bun, f.argv, { cwd: f.sealed, env: f.env, stdio: ['pipe', 'pipe', 'pipe', 'ipc'] });
+    let stderr = '';
+    child.stderr!.on('data', (data) => { stderr += data; });
+    const code = await new Promise<number | null>((done) => child.once('exit', done));
+    expect(code).toBe(1);
+    expect(stderr).toContain('an undeclared custody IPC channel is open');
+  }, 20_000);
 
   it('resumes only an exact native session id and rejects a mismatched header cwd', () => {
     const f = fixture();

@@ -194,7 +194,7 @@ To roll back operationally, remove `gitWorkspace` from the local configuration a
 | Control-socket HMAC token | `<storeDir>/control.token` (0600) | Daemon (generates + holds) and any local process that can read it and speak the handshake (`packages/client/src/daemon/control-protocol.ts`) |
 | Audit log | `<storeDir>/audit.jsonl` (0600) | Daemon appends a **redacted** projection only — see below. `byok-agent start` stdout (a durable, unrotated file under launchd/systemd) follows the same rule: no model text, one sizes-and-counts line per turn (#395) |
 | The user's own runtime credentials (`~/.claude`, `~/.codex`, `~/.pi` auth state) | The user's home directory, owned entirely by the installed `claude`/`codex`/`pi` CLI | **The daemon never reads, proxies, or forwards these** — see the credential-isolation rule below and `docs/security-review-m4.md` for the empirical audit |
-| BYOK model-provider key | macOS Keychain or Windows Credential Manager, owned by `@byok-sdk/keys` | Only `@byok-sdk/keys` provider clients or the separate `byok-pi-provider-launcher` (or a host launcher executable built on `runPiProviderLauncher`) read it. Profile metadata may use a tenant-bound `TruthStore`, but truth bodies, hashes, labels, status, protocol, server, cloud provider code, and the client daemon never receive the value. The launcher keeps its explicit read-only SQLite profile composition and injects the key only into the Pi child environment; `auth_mode: none` never constructs a keychain backend |
+| BYOK model-provider key | macOS Keychain or Windows Credential Manager, owned by `@byok-sdk/keys` | Only `@byok-sdk/keys` provider clients or the separate `byok-pi-provider-launcher` (or a host launcher executable built on `runPiProviderLauncher`) read it. Profile metadata may use a tenant-bound `TruthStore`, but truth bodies, hashes, labels, status, protocol, server, cloud provider code, and the client daemon never receive the value. The launcher keeps its explicit read-only SQLite profile composition and hands the key only to its Pi child: over private IPC into Pi's model memory for the rpc host and the durable worker, and through the environment only of the prepared host, which runs no native tool; `auth_mode: none` never constructs a keychain backend |
 | The daemon's own ambient environment (`process.env` — may hold secrets: provider API keys, `AWS_SECRET_ACCESS_KEY`, `DATABASE_URL`, `GITHUB_TOKEN`, etc.) | Whatever process/container/service manager launched the daemon | **Inherited by every task child, as in OAR (ADR-037 D2/D3).** `daemon/environment.ts`'s `buildRuntimeEnv` removes only `CLAUDECODE` and the SDK's own `BYOK_*` names — see the environment paragraph below |
 
 The audit log is itself worth calling out as a defended asset, not just a
@@ -218,10 +218,24 @@ dispatch path. The profile's `enabled` bit selects the registry default; an
 explicit dispatch may select any configured exact profile and never rewrites
 that default.
 The launcher also reconstructs the Pi child environment from a closed
-platform/proxy baseline and the single resolved projection key; it does not
-copy its own ambient environment. Direct launcher use therefore cannot leak
-an unrelated cloud/provider credential into Pi merely because the parent
-process had one.
+platform/proxy baseline; it does not copy its own ambient environment. Direct
+launcher use therefore cannot leak an unrelated cloud/provider credential into
+Pi merely because the parent process had one.
+The ordinary rpc host (`byok-pi-rpc` under `credentialSource: keys-profile`)
+gets no key in that environment either (#385). Pi's built-in bash tool copies
+its process environment, so a key there would reach `tool_result` and from
+there the protocol, server, cloud and Host. The launcher transfers the key
+over the same private one-shot JSON IPC channel as the durable lane, bound to
+the config digest. The host refuses a launch environment that carries a
+provider key, closes IPC before any extension, tool or session exists, and
+gives the key to Pi only through its non-persistent in-memory credential
+overlay (`ModelRuntime.setRuntimeApiKey`). Its projection carries the
+non-secret marker `byok:rpc-ipc`, never `$PI_PROVIDER_API_KEY`. A regression
+test runs Pi's real bash `env` in the launched host and reads the host's
+`ps eww` / `/proc/<pid>/environ`; neither contains the key. Only the prepared
+host receives `PI_PROVIDER_API_KEY` in its environment, and it registers MCP
+tools only. Extensions loaded into the rpc host share its process and are not
+isolated from Pi's in-memory key.
 The stable Pi session path is host configuration: the launcher creates a
 missing directory owner-only, but never changes permissions on an existing
 directory, so a mistaken path cannot become a chmod sink. On POSIX, an
@@ -253,8 +267,8 @@ children must not put it in the daemon's environment.
 
 Two Pi lanes use the narrow form `buildAllowlistedEnv`: the durable Pi tool
 shell and the prepared Pi lane. The `@byok-sdk/keys` launcher also rebuilds
-its Pi child environment from a closed list and the single resolved key (see
-the credential-isolation rule above). These are the BYOK key-custody lanes.
+its Pi child environment from a closed list, and adds the resolved key only for
+the prepared host (see the credential-isolation rule above). These are the BYOK key-custody lanes.
 
 **Proxy variables pass through, deliberately (M5, finding F3)**:
 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`/`ALL_PROXY`, plus their lowercase
