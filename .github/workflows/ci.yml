@@ -384,17 +384,6 @@ jobs:
             src/__tests__/daemon-auth.test.ts `
             src/__tests__/daemon-stop-shutdown-parity.test.ts
 
-      # #385: the pi-rpc BYOK key travels launcher -> host over Node IPC, which
-      # is a named pipe on Windows. Run the custody e2e here so that path has
-      # Windows evidence; only process-environment introspection is POSIX-only.
-      - name: Run pi-rpc BYOK key custody tests on Windows
-        run: |
-          $env:BYOK_REQUIRE_BUN = '1'
-          $env:BYOK_TEST_BUN_BIN = (Get-Command bun).Source
-          bun run --filter @byok-sdk/client test -- `
-            src/__tests__/pi-rpc-key-custody.test.ts `
-            src/__tests__/subagent-credential-guard.test.ts
-
   # M3-K packageability guarantee smoke: proves the daemon CAN be compiled
   # into a single-file executable (bun build --compile / Node SEA) while
   # runtime CLIs remain external subprocesses. A single-file bundle without
