@@ -2908,6 +2908,12 @@ export interface ConnectionManagerOptions {
     onOperationalOutcome?: (outcome: 'success' | 'failure', source: 'reconnect' | 'upload') => void;
     /** The session ended for good; nothing reconnects after this. Called once. */
     onHalted?: (reason: ConnectionHaltReason) => void;
+    /**
+     * An observer callback ({@link onStateChange}, {@link onCapabilitiesAdvertised})
+     * or the reconnect loop itself threw. The session ends for good, as for a
+     * halt: nothing reconnects. Called once, never for a halt or a stop.
+     */
+    onCrashed?: (error: unknown) => void;
 }
 export interface RejectedOutboundEnvelope {
     readonly envelope: Envelope;
@@ -2988,6 +2994,7 @@ export declare class ConnectionManager {
     private draining;
     private stopped;
     private haltReason;
+    private crashed;
     private pendingCursorSave;
     /** Admission dedup while an individual handler is running. */
     private readonly inFlightSeqs;
@@ -3032,6 +3039,12 @@ export declare class ConnectionManager {
     private breakSession;
     private applyServerCapabilities;
     private setState;
+    /**
+     * Observer callbacks run inside the reconnect loop, the poll loop and the
+     * drain. A throw there is a crash of this connection, never a route
+     * failure to retry or an unhandled rejection.
+     */
+    private notify;
     private isEnded;
     /**
      * Design B (finding N4): push onto the single shared outbox and try to
@@ -3192,6 +3205,8 @@ export declare class ConnectionManager {
      * `outboxLength()` stays an honest count of what never left.
      */
     private halt;
+    /** The defined end for an unexpected error: stop like a halt, then report it once. */
+    private crash;
 }
 // ==== @byok-sdk/client dist/daemon/control-protocol.d.ts ====
 import type { TaskState } from '@byok-sdk/protocol';
@@ -4671,6 +4686,12 @@ export declare function isDaemonHaltReason(value: unknown): value is DaemonHaltR
  *   accepted this run's `conn.hello` and `connecting` otherwise.
  * - `halted`: the run ended on a {@link DaemonHaltReason}. It stays halted
  *   (also after `stop()`) until the next `start()`.
+ * - `crashed`: the run ended on an unexpected error after `start()` resolved
+ *   (an observer callback or the reconnect loop threw). The connection
+ *   stops and a `lifecycle` operational-health failure is recorded; unlike a
+ *   halt, a restart may fix it, so `byok-agent start` exits 1 and the OS
+ *   supervisor restarts it. It stays crashed (also after `stop()`) until the
+ *   next `start()`.
  */
 export type DaemonLifecycle = {
     phase: 'stopped';
@@ -4682,6 +4703,9 @@ export type DaemonLifecycle = {
 } | {
     phase: 'halted';
     reason: DaemonHaltReason;
+    at: string;
+} | {
+    phase: 'crashed';
     at: string;
 };
 /**

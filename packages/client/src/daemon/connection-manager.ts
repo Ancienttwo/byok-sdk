@@ -97,6 +97,12 @@ export interface ConnectionManagerOptions {
   onOperationalOutcome?: (outcome: 'success' | 'failure', source: 'reconnect' | 'upload') => void;
   /** The session ended for good; nothing reconnects after this. Called once. */
   onHalted?: (reason: ConnectionHaltReason) => void;
+  /**
+   * An observer callback ({@link onStateChange}, {@link onCapabilitiesAdvertised})
+   * or the reconnect loop itself threw. The session ends for good, as for a
+   * halt: nothing reconnects. Called once, never for a halt or a stop.
+   */
+  onCrashed?: (error: unknown) => void;
 }
 
 export interface RejectedOutboundEnvelope {
@@ -180,6 +186,7 @@ export class ConnectionManager {
   private draining = false;
   private stopped = false;
   private haltReason: ConnectionHaltReason | undefined;
+  private crashed = false;
   private pendingCursorSave: Promise<void> = Promise.resolve();
   /** Admission dedup while an individual handler is running. */
   private readonly inFlightSeqs = new Set<number>();
@@ -249,7 +256,7 @@ export class ConnectionManager {
     if (this.started) return;
     this.cursor = await this.opts.cursorStore.load(this.opts.serverUrl, this.opts.deviceId);
     this.started = true;
-    void this.run();
+    void this.run().catch((error: unknown) => this.crash(error));
   }
 
   /**
@@ -261,6 +268,7 @@ export class ConnectionManager {
     const signal = this.lifetime.signal;
     while (!this.isEnded()) {
       this.setState('connecting');
+      if (this.isEnded()) return;
       const hello = createConnectionHelloEnvelope(this.opts, () => this.cursor);
       const answer = await this.longPoll.postBatch([hello], signal);
       if (this.isEnded()) return;
@@ -289,8 +297,11 @@ export class ConnectionManager {
     // Capabilities first: work an `open` observer queues sees them already.
     if (handshake.capabilities !== undefined) this.applyServerCapabilities(handshake.capabilities);
     this.setState('open');
-    this.longPoll.start();
-    void this.drainOutbox();
+    // An `open` observer that threw has already ended the session.
+    if (!this.isEnded()) {
+      this.longPoll.start();
+      void this.drainOutbox();
+    }
     await ended;
     this.endSession = undefined;
     this.longPoll.stop();
@@ -317,17 +328,30 @@ export class ConnectionManager {
   private applyServerCapabilities(capabilities: readonly string[]): void {
     const added = capabilities.filter((flag) => !this.serverCapabilities.includes(flag));
     this.serverCapabilities = [...capabilities];
-    if (added.length > 0) this.opts.onCapabilitiesAdvertised?.(added);
+    if (added.length > 0) this.notify(() => this.opts.onCapabilitiesAdvertised?.(added));
   }
 
   private setState(state: ConnectionState): void {
     if (this.state === state) return;
     this.state = state;
-    this.opts.onStateChange?.(state);
+    this.notify(() => this.opts.onStateChange?.(state));
+  }
+
+  /**
+   * Observer callbacks run inside the reconnect loop, the poll loop and the
+   * drain. A throw there is a crash of this connection, never a route
+   * failure to retry or an unhandled rejection.
+   */
+  private notify(callback: () => void): void {
+    try {
+      callback();
+    } catch (error) {
+      this.crash(error);
+    }
   }
 
   private isEnded(): boolean {
-    return this.stopped || this.haltReason !== undefined;
+    return this.stopped || this.haltReason !== undefined || this.crashed;
   }
 
   /**
@@ -780,6 +804,23 @@ export class ConnectionManager {
     this.cancelPendingDrainRetry?.();
     this.endSession?.();
     this.opts.onHalted?.(reason);
+  }
+
+  /** The defined end for an unexpected error: stop like a halt, then report it once. */
+  private crash(error: unknown): void {
+    if (this.isEnded()) return;
+    this.crashed = true;
+    this.serverCapabilities = [];
+    this.lifetime.abort();
+    this.longPoll.stop();
+    this.cancelPendingDrainRetry?.();
+    this.endSession?.();
+    console.error('[byok/client] the connection crashed on an unexpected error and stops', error);
+    try {
+      this.opts.onCrashed?.(error);
+    } catch (reportError) {
+      console.error('[byok/client] reporting the connection crash failed', reportError);
+    }
   }
 }
 

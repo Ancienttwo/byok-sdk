@@ -21,7 +21,7 @@ import path from 'node:path';
 import type { DaemonConfig, RuntimeAdapter } from '../index';
 import { readLastAuditEvent, readLastLifecycleEvent } from '../bin/audit-log';
 import { connectControlClient } from '../bin/control-client';
-import { formatHaltRemedy, formatLifecycle, formatServiceEnvironment } from '../bin/format';
+import { formatLifecycle, formatLifecycleRemedy, formatServiceEnvironment } from '../bin/format';
 import { parseDaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { defaultRuntimeAdapters, probeRuntimes } from '../bin/runtime-probe';
 import type { PeerControlStatusResult } from '../daemon/control-protocol';
@@ -657,13 +657,12 @@ function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>): DiagnosticChe
   ];
 }
 
-/** Issue #394: a halted daemon fails this check, and the summary says what fixes it. */
+/** Issue #394: a halted or crashed daemon fails this check, and the summary says what fixes it. */
 function lifecycleCheck(lifecycle: DiagnosticsSnapshot['lifecycle']): DiagnosticCheck {
   if (lifecycle.status === 'unknown') return { id: 'lifecycle', status: 'warn', summary: 'unknown (no lifecycle event yet)' };
   const summary = `${lifecycle.source} ${formatLifecycle(lifecycle.lifecycle)}`;
-  if (lifecycle.lifecycle.phase === 'halted') {
-    return { id: 'lifecycle', status: 'fail', summary: `${summary}; ${formatHaltRemedy(lifecycle.lifecycle.reason)}` };
-  }
+  const remedy = formatLifecycleRemedy(lifecycle.lifecycle);
+  if (remedy !== undefined) return { id: 'lifecycle', status: 'fail', summary: `${summary}; ${remedy}` };
   return { id: 'lifecycle', status: 'pass', summary };
 }
 

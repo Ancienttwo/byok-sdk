@@ -17,11 +17,20 @@ export interface StartDeps {
 }
 
 /**
- * How a `start` ended without crashing (issue #394). A crash is a throw.
+ * How a `start` ended without crashing (issue #394). A crash is a throw
+ * (including {@link DaemonCrashedError} for a crash after start).
  * `byok-agent.ts` maps these to exit codes: `stopped` 0, `halted` 78
  * (0 under `--service`), a throw 1.
  */
 export type StartOutcome = { kind: 'stopped' } | { kind: 'halted'; reason: DaemonHaltReason };
+
+/** The run crashed after start (`lifecycle` `crashed`); the cause was logged when it happened. */
+export class DaemonCrashedError extends Error {
+  constructor() {
+    super('daemon crashed after start; see the error logged above');
+    this.name = 'DaemonCrashedError';
+  }
+}
 
 /**
  * Issue #394, the `start` exit-code contract: 0 a normal stop, 78 a halt
@@ -90,6 +99,9 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
   // Issue #394: a halt the server causes (revocation, a rejected hello, a
   // lost replay cursor) ends this process too: nothing reconnects after it.
   let haltReason: DaemonHaltReason | undefined;
+  // A crash after start (`lifecycle` `crashed`) also ends this process, as a
+  // crash: exit 1, so the supervisor restarts it.
+  let crashed = false;
   // Stdout closes at shutdown (open turns are flushed first); the audit log
   // keeps recording through `daemon.stop()`, so it ends on the final
   // lifecycle the offline `status`/`doctor`/`service-status` read.
@@ -123,6 +135,10 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
       haltReason = event.lifecycle.reason;
       wake?.();
     }
+    if (event.kind === 'lifecycle' && event.lifecycle.phase === 'crashed') {
+      crashed = true;
+      wake?.();
+    }
   });
 
   const halted = async (reason: DaemonHaltReason): Promise<StartOutcome> => {
@@ -151,7 +167,7 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
     log(`daemon started: product=${label} (${config.productId}) server=${config.serverUrl}`);
     deps.onReady?.();
 
-    if (!deps.signal.aborted && !controlShutdownComplete && haltReason === undefined) {
+    if (!deps.signal.aborted && !controlShutdownComplete && haltReason === undefined && !crashed) {
       await new Promise<void>((resolve) => {
         wake = resolve;
         deps.signal.addEventListener('abort', () => resolve(), { once: true });
@@ -164,9 +180,14 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
     unsubscribe();
     log('daemon stopped');
     if (haltReason !== undefined) return await halted(haltReason);
+    if (crashed) {
+      await appendToAudit.flush();
+      throw new DaemonCrashedError();
+    }
     await appendToAudit.flush();
     return { kind: 'stopped' };
   } catch (err) {
+    if (err instanceof DaemonCrashedError) throw err;
     unsubscribe();
     await daemon.stop().catch((cleanupErr: unknown) => {
       error(`cleanup failed during shutdown: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`);

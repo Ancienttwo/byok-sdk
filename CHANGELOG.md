@@ -32,6 +32,18 @@
   instead of a separate top-level `environment`. `byok-agent runtimes` remains
   the explicit probe of the current shell. Reinstall the service
   (`byok-agent install`) so it runs with `--service` (#392).
+- **Changed (client)** — an unexpected error after `daemon.start()` resolved
+  (a `ConnectionManager` observer callback such as the `open` hook, or the
+  reconnect loop itself) is now a crash through one defined path instead of
+  an unhandled rejection: the connection stops, a `lifecycle`
+  operational-health failure is recorded, and `status().lifecycle` becomes
+  the new `{phase:'crashed', at}` (`ConnectionManagerOptions.onCrashed`).
+  `byok-agent start` stops the daemon and exits 1 on it, so the supervisor
+  restarts it; `status`, `service-status` and `doctor` show it with a remedy.
+  `byok-agent start` now sets `process.exitCode` instead of calling
+  `process.exit()`, so piped output (the halt remedy line) drains. A live
+  `status` against a daemon that predates `lifecycle` prints
+  `lifecycle unknown (daemon predates lifecycle)` instead of failing.
 
 - **Breaking (client, 0.x)** — daemon readiness and halts are one lifecycle
   model (#391, #394). `daemon.start()` now resolves once local startup is done

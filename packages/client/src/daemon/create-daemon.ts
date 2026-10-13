@@ -2012,6 +2012,18 @@ export function buildDaemonWithAdapters(
     setLifecycle({ phase: 'halted', reason, at: new Date().toISOString() });
   }
 
+  /**
+   * #394's crash path for a run that already started: the connection has
+   * stopped itself; record the `lifecycle` health failure and report the
+   * crash. Like a halt, the daemon stays up for its owner to stop.
+   */
+  function crashed(): void {
+    setLifecycle({ phase: 'crashed', at: new Date().toISOString() });
+    void operationalHealth.recordFailure('lifecycle').catch((err: unknown) => {
+      console.warn(`[byok/client] failed to persist operational health: ${err instanceof Error ? err.message : String(err)}`);
+    });
+  }
+
   async function start(): Promise<void> {
     try {
       checkServerUrl();
@@ -2037,8 +2049,8 @@ export function buildDaemonWithAdapters(
 
   async function startUnderLease(): Promise<void> {
     terminalCommits.resume();
-    // A new run begins; a previous run's halt no longer describes it.
-    if (lifecycle.phase === 'halted') setLifecycle({ phase: 'stopped' });
+    // A new run begins; a previous run's halt or crash no longer describes it.
+    if (lifecycle.phase === 'halted' || lifecycle.phase === 'crashed') setLifecycle({ phase: 'stopped' });
     if (!daemonOwnerLease) {
       try {
         daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
@@ -2837,6 +2849,7 @@ export function buildDaemonWithAdapters(
         }
       },
       onHalted: (reason) => halted(reason),
+      onCrashed: () => crashed(),
       // Reliable records held for `capability_missing` go out as soon as an
       // advertisement carries the ack capability — on every reconnect, not
       // only at start.
@@ -3226,8 +3239,8 @@ export function buildDaemonWithAdapters(
       mutationBarrierComplete = false;
     }
     await attempt(() => auth.stop(), true);
-    // A halt stays visible after teardown, until the next start().
-    if (lifecycle.phase !== 'halted') setLifecycle({ phase: 'stopped' });
+    // A halt or crash stays visible after teardown, until the next start().
+    if (lifecycle.phase !== 'halted' && lifecycle.phase !== 'crashed') setLifecycle({ phase: 'stopped' });
     // M4 Phase 2: stop the control socket in every shutdown path — this is
     // the single lifecycle choke point every caller (a foreground abort via
     // `bin/commands/start.ts`, `unpair()` below, and the control socket's

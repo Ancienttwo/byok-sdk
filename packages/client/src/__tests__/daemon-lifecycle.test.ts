@@ -8,6 +8,7 @@ import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DaemonHaltError, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { OPERATIONAL_HEALTH_FILENAME } from '../daemon/operational-health';
+import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { OPEN_LIFECYCLE, waitForDaemonOpen } from './fixtures/lifecycle-barrier';
@@ -204,5 +205,55 @@ describe('daemon lifecycle (#391)', () => {
       failures: Array<{ source: string }>;
     };
     expect(health.failures.map((entry) => entry.source)).toEqual(['lifecycle']);
+  });
+
+  it('a throwing open hook crashes the run through the defined path: lifecycle crashed, a lifecycle health failure, no unhandled rejection', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    const hook = vi.spyOn(TaskRunner.prototype, 'retryRecoveredAgentMessages').mockImplementation(() => {
+      throw new Error('open hook failed');
+    });
+    try {
+      server = await TestServer.start();
+      const workspaceRoot = await tmpDir('byok-lifecycle-workspace-');
+      const storeDir = await tmpDir('byok-lifecycle-store-');
+      daemon = createDaemonWithAdapters(
+        { localAgentRelease: { version: '0.0.0-lifecycle-test' }, productName: 'Lifecycle test', productId: 'lifecycle-test', serverUrl: server.url, workspaceRoot, storeDir },
+        [new StubRuntimeAdapter('pi')],
+        { longPoll: { retryDelayMs: 20, idleDelayMs: 20 } },
+      );
+      const lifecycles: DaemonLifecycle[] = [];
+      daemon.subscribe((event) => {
+        if (event.kind === 'lifecycle') lifecycles.push(event.lifecycle);
+      });
+      await daemon.pair('lifecycle-pair-code');
+      await daemon.start();
+
+      await vi.waitFor(() => expect(daemon!.status().lifecycle).toMatchObject({ phase: 'crashed' }), { timeout: 5_000 });
+      expect(hook).toHaveBeenCalledTimes(1);
+      expect(lifecycles.map((lifecycle) => lifecycle.phase)).toEqual(['running', 'running', 'crashed']);
+      await vi.waitFor(async () => {
+        const health = JSON.parse(await fs.readFile(path.join(storeDir, OPERATIONAL_HEALTH_FILENAME), 'utf8')) as {
+          failures: Array<{ source: string }>;
+        };
+        expect(health.failures.map((entry) => entry.source)).toEqual(['lifecycle']);
+      });
+      // The connection stopped: no session polls or reconnects after the crash.
+      const pollsAtCrash = eventsPolls();
+      const hellosAtCrash = hellos().length;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(eventsPolls()).toBe(pollsAtCrash);
+      expect(hellos()).toHaveLength(hellosAtCrash);
+      // A crash stays visible after stop(), until the next start().
+      await daemon.stop();
+      expect(daemon.status().lifecycle).toMatchObject({ phase: 'crashed' });
+      expect(unhandled).toEqual([]);
+    } finally {
+      hook.mockRestore();
+      process.off('unhandledRejection', onUnhandled);
+    }
   });
 });
