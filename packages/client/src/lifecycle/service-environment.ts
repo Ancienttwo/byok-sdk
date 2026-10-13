@@ -21,12 +21,16 @@ import path from 'node:path';
  * `<shell> -i -l -c 'printf %s B; /usr/bin/env -0; printf %s E'`, with B and
  * E random per-run nonces, and replaces `process.env` with the NUL-separated
  * entries found between them. Bytes outside the frame — rc chatter on stdout
- * — are ignored. Caps: {@link LOGIN_SHELL_ENV_TIMEOUT_MS} (the shell's whole
- * process group is SIGKILLed) and {@link LOGIN_SHELL_ENV_MAX_BYTES}.
+ * — are ignored. The capture is complete once the shell has exited and the
+ * end nonce has been read; a background job the rc started may keep stdout
+ * open, so the capture never waits for EOF after that. Caps:
+ * {@link LOGIN_SHELL_ENV_TIMEOUT_MS} and {@link LOGIN_SHELL_ENV_MAX_BYTES}.
+ * However the capture ends, the shell's whole process group is SIGKILLed.
  *
- * `BYOK_*` names found in the capture are dropped and the `BYOK_*` values
- * this process had before the capture are put back: rc files never set SDK
- * control variables.
+ * The shell gets this process's environment minus `BYOK_*`, so rc files
+ * never see SDK control variables. `BYOK_*` names found in the capture are
+ * dropped and the `BYOK_*` values this process had before the capture are
+ * put back: rc files never set SDK control variables either.
  *
  * `byok-agent start --service` calls it first ({@link SERVICE_FLAG}; the
  * launchd plist and systemd unit pass that flag). An embedding Host started
@@ -66,6 +70,12 @@ export type ServiceEnvironmentStatus =
   | { source: 'inherited' }
   | { source: 'unavailable'; code: ServiceEnvironmentUnavailableCode };
 
+/**
+ * Test seams for {@link captureAndApply}. Not part of the public API:
+ * {@link applyLoginShellEnvironment} takes no options.
+ *
+ * @internal
+ */
 export interface ApplyLoginShellEnvironmentOptions {
   /** Test seam: an absolute shell path instead of the passwd shell. */
   shell?: string;
@@ -90,8 +100,8 @@ export function serviceEnvironmentStatus(): ServiceEnvironmentStatus {
  * failure `process.env` is left exactly as inherited. Never throws. win32
  * has no login shell: the result is `inherited`.
  */
-export function applyLoginShellEnvironment(options: ApplyLoginShellEnvironmentOptions = {}): Promise<ServiceEnvironmentStatus> {
-  applied ??= captureAndApply(options).then((status) => {
+export function applyLoginShellEnvironment(): Promise<ServiceEnvironmentStatus> {
+  applied ??= captureAndApply({}).then((status) => {
     resolved = status;
     return status;
   });
@@ -143,57 +153,85 @@ function capture(
 ): Promise<{ entries: Array<[string, string]> } | { code: ServiceEnvironmentUnavailableCode }> {
   const begin = `B${randomBytes(16).toString('hex')}`;
   const end = `E${randomBytes(16).toString('hex')}`;
+  const endBytes = Buffer.from(end, 'utf8');
   // Nonces are hex, so they need no quoting in any POSIX shell. `/usr/bin/env`
   // by absolute path: the rc may rearrange PATH; the point is to print what
   // the rc produced, not to depend on it.
   const script = `printf %s ${begin}; /usr/bin/env -0; printf %s ${end}`;
+  // The daemon's own `BYOK_*` values never reach the rc; they are put back
+  // after the capture (`captureAndApply`).
+  const shellEnv: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (!name.startsWith('BYOK_')) shellEnv[name] = value;
+  }
   return new Promise((resolve) => {
     let settled = false;
-    let size = 0;
-    const chunks: Buffer[] = [];
+    let output = Buffer.alloc(0);
+    // The end nonce has been read: the dump is complete, stop reading.
+    let framed = false;
+    // stdout reached EOF without the end nonce.
+    let drained = false;
+    // `undefined` until the shell itself has exited.
+    let exitCode: number | null | undefined;
     let child: ReturnType<typeof spawn> | undefined;
     const finish = (result: { entries: Array<[string, string]> } | { code: ServiceEnvironmentUnavailableCode }): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve(result);
-    };
-    const killGroup = (): void => {
-      // `detached` made the shell a process-group leader; this reaches
-      // whatever the rc started in that group too.
+      // `detached` made the shell a process-group leader: this reaches
+      // whatever the rc started in that group and left running — a
+      // background job still holding stdout open, or one that outlived the
+      // shell — on every outcome, success included.
       try {
         if (child?.pid !== undefined) process.kill(-child.pid, 'SIGKILL');
       } catch {
         // Already gone.
       }
       child?.stdout?.destroy();
+      resolve(result);
     };
-    const timer = setTimeout(() => {
-      killGroup();
-      finish({ code: 'timeout' });
-    }, timeoutMs);
+    // The result is known once the shell has exited AND the frame is either
+    // complete or can no longer arrive. Waiting for stdout `close` instead
+    // would wait for every process sharing the pipe — an rc's `sleep 30 &`
+    // would turn a complete dump into a timeout.
+    const settle = (): void => {
+      if (exitCode === undefined) return;
+      if (exitCode !== 0) {
+        finish({ code: 'shell-exit-nonzero' });
+        return;
+      }
+      if (!framed && !drained) return;
+      finish(parseFrame(output.toString('utf8'), begin, end));
+    };
+    const timer = setTimeout(() => finish({ code: 'timeout' }), timeoutMs);
     try {
-      child = spawn(shell, ['-i', '-l', '-c', script], { env, stdio: ['ignore', 'pipe', 'ignore'], detached: true });
+      child = spawn(shell, ['-i', '-l', '-c', script], { env: shellEnv, stdio: ['ignore', 'pipe', 'ignore'], detached: true });
     } catch {
       finish({ code: 'spawn-failed' });
       return;
     }
     child.on('error', () => finish({ code: 'spawn-failed' }));
     child.stdout!.on('data', (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > maxBytes) {
-        killGroup();
+      if (framed || settled) return;
+      if (output.length + chunk.length > maxBytes) {
         finish({ code: 'output-too-large' });
         return;
       }
-      chunks.push(chunk);
-    });
-    child.on('close', (code) => {
-      if (code !== 0) {
-        finish({ code: 'shell-exit-nonzero' });
-        return;
+      // Search only the bytes that can contain a nonce ending in this chunk.
+      const from = Math.max(0, output.length - endBytes.length + 1);
+      output = Buffer.concat([output, chunk]);
+      if (output.indexOf(endBytes, from) >= 0) {
+        framed = true;
+        settle();
       }
-      finish(parseFrame(Buffer.concat(chunks).toString('utf8'), begin, end));
+    });
+    child.stdout!.on('end', () => {
+      drained = true;
+      settle();
+    });
+    child.on('exit', (code) => {
+      exitCode = code;
+      settle();
     });
   });
 }

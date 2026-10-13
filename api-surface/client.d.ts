@@ -9869,7 +9869,7 @@ export { generateLaunchdPlist } from './lifecycle/launchd';
 export { generateSystemdUnit } from './lifecycle/systemd';
 export { generateWinswXml } from './lifecycle/winsw';
 export { applyLoginShellEnvironment, serviceEnvironmentStatus } from './lifecycle/service-environment';
-export type { ApplyLoginShellEnvironmentOptions, ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode, } from './lifecycle/service-environment';
+export type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './lifecycle/service-environment';
 export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './util/secure-dir';
 export type { EnsureSecureDirOptions } from './util/secure-dir';
 export { PiAdapter } from './adapters/pi/pi-adapter';
@@ -11143,12 +11143,16 @@ export declare function createLaunchdLifecycle(def: ServiceDefinition, deps?: La
  * `<shell> -i -l -c 'printf %s B; /usr/bin/env -0; printf %s E'`, with B and
  * E random per-run nonces, and replaces `process.env` with the NUL-separated
  * entries found between them. Bytes outside the frame — rc chatter on stdout
- * — are ignored. Caps: {@link LOGIN_SHELL_ENV_TIMEOUT_MS} (the shell's whole
- * process group is SIGKILLed) and {@link LOGIN_SHELL_ENV_MAX_BYTES}.
+ * — are ignored. The capture is complete once the shell has exited and the
+ * end nonce has been read; a background job the rc started may keep stdout
+ * open, so the capture never waits for EOF after that. Caps:
+ * {@link LOGIN_SHELL_ENV_TIMEOUT_MS} and {@link LOGIN_SHELL_ENV_MAX_BYTES}.
+ * However the capture ends, the shell's whole process group is SIGKILLed.
  *
- * `BYOK_*` names found in the capture are dropped and the `BYOK_*` values
- * this process had before the capture are put back: rc files never set SDK
- * control variables.
+ * The shell gets this process's environment minus `BYOK_*`, so rc files
+ * never see SDK control variables. `BYOK_*` names found in the capture are
+ * dropped and the `BYOK_*` values this process had before the capture are
+ * put back: rc files never set SDK control variables either.
  *
  * `byok-agent start --service` calls it first ({@link SERVICE_FLAG}; the
  * launchd plist and systemd unit pass that flag). An embedding Host started
@@ -11175,6 +11179,12 @@ export type ServiceEnvironmentStatus = {
     source: 'unavailable';
     code: ServiceEnvironmentUnavailableCode;
 };
+/**
+ * Test seams for {@link captureAndApply}. Not part of the public API:
+ * {@link applyLoginShellEnvironment} takes no options.
+ *
+ * @internal
+ */
 export interface ApplyLoginShellEnvironmentOptions {
     /** Test seam: an absolute shell path instead of the passwd shell. */
     shell?: string;
@@ -11192,7 +11202,7 @@ export declare function serviceEnvironmentStatus(): ServiceEnvironmentStatus;
  * failure `process.env` is left exactly as inherited. Never throws. win32
  * has no login shell: the result is `inherited`.
  */
-export declare function applyLoginShellEnvironment(options?: ApplyLoginShellEnvironmentOptions): Promise<ServiceEnvironmentStatus>;
+export declare function applyLoginShellEnvironment(): Promise<ServiceEnvironmentStatus>;
 /**
  * The capture-and-replace step without the once-per-process latch; for
  * tests and for {@link applyLoginShellEnvironment} only.
@@ -11224,23 +11234,14 @@ export interface ServiceProgram {
      * than a single shell-quoted string specifically so a path containing
      * spaces never needs manual escaping (see that file's doc comment).
      *
-     * Issue #392: the launchd and systemd lifecycles append `--service`
-     * ({@link withServiceFlag}) when they write the plist/unit, so the
-     * service's `byok-agent start` adopts the user's login-shell environment
-     * (`service-environment.ts`). WinSW does not.
+     * The lifecycles never add or change an argument: a Host's own binary
+     * gets exactly these. Issue #392: `byok-agent install` builds its program
+     * with {@link NodeAgentProgramOptions.service} on macOS and Linux.
      */
     args: string[];
     /** Working directory for the running service process. Each platform generator has its own documented default (see `launchd.ts`/`systemd.ts`/`winsw.ts`) when omitted. */
     cwd?: string;
 }
-/**
- * The program a launchd plist or systemd unit actually runs: `program` with
- * {@link SERVICE_FLAG} appended (once). Both service managers start the
- * daemon with their own minimal environment, so `byok-agent start` captures
- * the user's login-shell environment when it sees the flag — see
- * `service-environment.ts`. WinSW never calls this.
- */
-export declare function withServiceFlag(program: ServiceProgram): ServiceProgram;
 export interface NodeAgentProgramOptions {
     /** Absolute path to the `byok-agent` entry script to run. No auto-detection — see `create-service-lifecycle.ts`'s doc comment. */
     agentBin: string;
@@ -11249,6 +11250,13 @@ export interface NodeAgentProgramOptions {
     /** Node executable to invoke `agentBin` with. Defaults to `process.execPath` (the currently running node) — always an absolute, real path, unlike a bare `node` on PATH. */
     nodeBin?: string;
     cwd?: string;
+    /**
+     * Issue #392: append {@link SERVICE_FLAG}, so `byok-agent start` replaces
+     * the service manager's minimal environment with the user's login-shell
+     * environment (`service-environment.ts`). For a program launchd or
+     * systemd will run; `byok-agent install` sets it on macOS and Linux only.
+     */
+    service?: boolean;
 }
 /**
  * Convenience builder for the common case: run `node <agentBin> start

@@ -61,6 +61,17 @@ describe.runIf(posix)('lifecycle/service-environment (issue #392)', () => {
     await vi.waitFor(() => expect(() => process.kill(-pid, 0)).toThrow(), { timeout: 2_000 });
   });
 
+  it('an rc background job holding stdout open does not delay a complete capture; the job is killed', async () => {
+    // `sleep 30 &` inherits the stdout pipe, so EOF would not come for 30 s.
+    const { home, env } = await fixtureHome('sleep 30 &\necho $! > "$HOME/bg.pid"\nexport RC_SET=1\n');
+    const started = Date.now();
+    expect(await captureAndApply({ shell, env, timeoutMs: 10_000 })).toMatchObject({ source: 'login-shell', shell: 'sh' });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(env.RC_SET).toBe('1');
+    const pid = Number((await fs.readFile(path.join(home, 'bg.pid'), 'utf8')).trim());
+    await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 2_000 });
+  });
+
   it('2 MiB of output: unavailable:output-too-large', async () => {
     // A single 2 MiB *export* cannot reach the cap on macOS: exec of
     // /usr/bin/env fails with E2BIG first (ARG_MAX is 1 MiB for argv+env),
@@ -95,6 +106,14 @@ describe.runIf(posix)('lifecycle/service-environment (issue #392)', () => {
     expect(env.BYOK_CLAUDE_BIN).toBeUndefined();
     expect(env.RC_SET).toBe('1');
     expect(Object.keys(buildRuntimeEnv({ ambient: env, platform: 'darwin' })).filter((name) => name.startsWith('BYOK_'))).toEqual([]);
+  });
+
+  it('the login shell never sees this process\'s BYOK_* values; they are restored afterwards', async () => {
+    const { env } = await fixtureHome('export SAW_BYOK="${BYOK_TEST_SECRET-unset}"\n');
+    env.BYOK_TEST_SECRET = 's3cret';
+    expect(await captureAndApply({ shell, env })).toMatchObject({ source: 'login-shell' });
+    expect(env.SAW_BYOK).toBe('unset');
+    expect(env.BYOK_TEST_SECRET).toBe('s3cret');
   });
 
   it('the passwd shell is used when none is injected (zsh/bash hosts only)', async (ctx) => {

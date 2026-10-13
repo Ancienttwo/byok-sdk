@@ -71,7 +71,9 @@ WantedBy=default.target
 - **`Restart=on-failure` + `RestartSec=10`** is the crash-restart mechanism,
   delegated entirely to systemd — the SDK never runs its own in-process
   supervisor.
-- **`--service`** (appended by the lifecycle) makes `byok-agent
+- **`--service`** (added by `byok-agent install`, or by
+  `nodeAgentProgram({ service: true })`; the lifecycle itself never changes
+  a program's arguments) makes `byok-agent
   start` capture your login shell's environment once (passwd shell, `-ilc`,
   10 s / 1 MiB caps) before it loads its config, so `claude`/`codex` and rc
   settings on your PATH reach the service. If the capture fails (the rc hangs, prints

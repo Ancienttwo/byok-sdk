@@ -12,6 +12,7 @@ import {
   auditLogPath,
   MAX_AUDIT_LOG_BYTES,
   appendAuditEvent,
+  createAuditAppender,
   readAuditEvents,
   readLastEnvironmentRecord,
 } from '../bin/audit-log';
@@ -164,5 +165,27 @@ describe('bin/audit-log: environment-resolved record (issue #392)', () => {
     const size = (await fs.stat(auditLogPath(storeDir))).size;
     expect(size).toBeLessThan(MAX_AUDIT_LOG_BYTES);
     expect(await readLastEnvironmentRecord(storeDir)).toEqual({ ts: '2026-10-13T00:00:00.000Z', status: { source: 'unavailable', code: 'timeout' } });
+  });
+
+  it('start writes it through the event appender\'s chain: queued behind pending appends and a rotation, never lost', async () => {
+    const storeDir = await tmpDir('byok-envrec-chain-');
+    // Over the cap, so the next event append rotates the log.
+    const padding = 'x'.repeat(Math.ceil(MAX_AUDIT_LOG_BYTES / (AUDIT_LOG_TRIM_TARGET_LINES * 2)));
+    const filler = Array.from({ length: AUDIT_LOG_TRIM_TARGET_LINES * 3 }, (_, i) =>
+      JSON.stringify({ kind: 'connection', ts: `2026-10-13T00:01:00.${String(i % 1000).padStart(3, '0')}Z`, state: 'open', pad: padding }),
+    );
+    await fs.writeFile(auditLogPath(storeDir), `${filler.join('\n')}\n`);
+    const errors: unknown[] = [];
+    const appender = createAuditAppender(storeDir, (err) => errors.push(err));
+    for (let i = 0; i < 20; i++) appender({ kind: 'connection', ts: `2026-10-13T00:02:00.${String(i).padStart(3, '0')}Z`, state: 'open' });
+    await appender.appendEnvironment({ ts: '2026-10-13T00:03:00.000Z', status: { source: 'inherited' } });
+
+    expect(errors).toEqual([]);
+    const lines = (await fs.readFile(auditLogPath(storeDir), 'utf8')).trimEnd().split('\n');
+    expect(JSON.parse(lines.at(-1)!)).toEqual({ kind: 'environment-resolved', ts: '2026-10-13T00:03:00.000Z', source: 'inherited' });
+    expect(lines.slice(-21, -1).map((line) => (JSON.parse(line) as { ts: string }).ts)).toEqual(
+      Array.from({ length: 20 }, (_, i) => `2026-10-13T00:02:00.${String(i).padStart(3, '0')}Z`),
+    );
+    expect(await readLastEnvironmentRecord(storeDir)).toEqual({ ts: '2026-10-13T00:03:00.000Z', status: { source: 'inherited' } });
   });
 });

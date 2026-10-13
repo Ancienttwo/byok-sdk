@@ -22,11 +22,14 @@
   The client TypeScript `lib` is raised to ES2024; the emit target stays es2022
   and the emitted declarations are byte-identical. See
   `docs/notes/2026-10-13-oar-0.59-upgrade.md`.
-- **Changed (client service)** — the launchd plist and systemd unit now run
-  `byok-agent start --service`: the daemon captures the user's login-shell
+- **Changed (client service)** — on macOS and Linux, `byok-agent install`
+  now writes a launchd plist or systemd unit that runs `byok-agent start
+  --service` (`nodeAgentProgram({ service: true })`; a Host program given to
+  `createServiceLifecycle` is written unchanged): the daemon captures the user's login-shell
   environment once (passwd shell, `-i -l -c`, 10 s / 1 MiB caps), replaces
-  `process.env` with it and keeps its own `BYOK_*` values; rc output outside
-  the nonce frame is ignored. A failed capture is a typed
+  `process.env` with it and keeps its own `BYOK_*` values, which the shell
+  never sees; rc output outside the nonce frame is ignored, and an rc
+  background job holding stdout does not delay the capture. A failed capture is a typed
   `unavailable:<code>` and the inherited environment stays in effect.
   `start` records an `environment-resolved` line in `audit.jsonl`; `status`,
   `doctor` and the support bundle show it (source, closed code, shell

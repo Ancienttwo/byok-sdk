@@ -1,6 +1,6 @@
 import { createDaemon, type Daemon, type DaemonConfig } from '../../index';
 import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../../lifecycle/service-environment';
-import { appendEnvironmentRecord, createAuditAppender } from '../audit-log';
+import { createAuditAppender } from '../audit-log';
 import { resolveStoreDir } from '../config';
 import { formatServiceEnvironment, StartStdoutProjector } from '../format';
 
@@ -97,9 +97,7 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
 
   try {
     await daemon.start();
-    await appendEnvironmentRecord(storeDir, { status: environment, ts: new Date().toISOString() }).catch((err: unknown) => {
-      error(`audit log append failed: ${err instanceof Error ? err.message : String(err)}`);
-    });
+    await appendToAudit.appendEnvironment({ status: environment, ts: new Date().toISOString() });
     // Exact "daemon started: ..." prefix preserved from the pre-M3-2b bin —
     // examples/basic/README.md tells a human operator to watch stdout for
     // this literal text.

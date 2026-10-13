@@ -23,26 +23,13 @@ export interface ServiceProgram {
    * than a single shell-quoted string specifically so a path containing
    * spaces never needs manual escaping (see that file's doc comment).
    *
-   * Issue #392: the launchd and systemd lifecycles append `--service`
-   * ({@link withServiceFlag}) when they write the plist/unit, so the
-   * service's `byok-agent start` adopts the user's login-shell environment
-   * (`service-environment.ts`). WinSW does not.
+   * The lifecycles never add or change an argument: a Host's own binary
+   * gets exactly these. Issue #392: `byok-agent install` builds its program
+   * with {@link NodeAgentProgramOptions.service} on macOS and Linux.
    */
   args: string[];
   /** Working directory for the running service process. Each platform generator has its own documented default (see `launchd.ts`/`systemd.ts`/`winsw.ts`) when omitted. */
   cwd?: string;
-}
-
-/**
- * The program a launchd plist or systemd unit actually runs: `program` with
- * {@link SERVICE_FLAG} appended (once). Both service managers start the
- * daemon with their own minimal environment, so `byok-agent start` captures
- * the user's login-shell environment when it sees the flag — see
- * `service-environment.ts`. WinSW never calls this.
- */
-export function withServiceFlag(program: ServiceProgram): ServiceProgram {
-  if (program.args.includes(SERVICE_FLAG)) return program;
-  return { ...program, args: [...program.args, SERVICE_FLAG] };
 }
 
 export interface NodeAgentProgramOptions {
@@ -53,6 +40,13 @@ export interface NodeAgentProgramOptions {
   /** Node executable to invoke `agentBin` with. Defaults to `process.execPath` (the currently running node) — always an absolute, real path, unlike a bare `node` on PATH. */
   nodeBin?: string;
   cwd?: string;
+  /**
+   * Issue #392: append {@link SERVICE_FLAG}, so `byok-agent start` replaces
+   * the service manager's minimal environment with the user's login-shell
+   * environment (`service-environment.ts`). For a program launchd or
+   * systemd will run; `byok-agent install` sets it on macOS and Linux only.
+   */
+  service?: boolean;
 }
 
 /**
@@ -64,7 +58,7 @@ export interface NodeAgentProgramOptions {
 export function nodeAgentProgram(opts: NodeAgentProgramOptions): ServiceProgram {
   const program: ServiceProgram = {
     command: opts.nodeBin ?? process.execPath,
-    args: [opts.agentBin, 'start', '--config', opts.configPath],
+    args: [opts.agentBin, 'start', '--config', opts.configPath, ...(opts.service === true ? [SERVICE_FLAG] : [])],
   };
   if (opts.cwd !== undefined) program.cwd = opts.cwd;
   return program;

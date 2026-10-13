@@ -534,13 +534,17 @@ generated service definition.
 | Same-user local process | Install/uninstall/start/stop the service — equivalent to running the CLI directly; by design | — |
 | Other local user | — | Install into this user's launchd per-user domain or `systemd --user` namespace (both inherently per-uid) |
 
-**Login-shell environment (#392).** The launchd plist and systemd unit run
-`byok-agent start --service`, which runs the user's passwd login shell once
-per daemon start (`-i -l -c`, 10 s and 1 MiB caps, the shell's process group
-SIGKILLed on timeout) and replaces the daemon's `process.env` with the
-captured environment. This executes the user's interactive rc code at every
-service start — the same code a new terminal runs. Captured `BYOK_*` names
-are dropped and the daemon's own pre-capture `BYOK_*` values are restored, so
+**Login-shell environment (#392).** On macOS and Linux, `byok-agent install`
+writes a launchd plist or systemd unit that runs `byok-agent start
+--service` (a Host program passed to `createServiceLifecycle` is written
+unchanged). `--service` runs the user's passwd login shell once per daemon
+start (`-i -l -c`, 10 s and 1 MiB caps) and replaces the daemon's
+`process.env` with the captured environment; the capture ends when the shell
+has exited and the end-of-dump nonce has been read, and the shell's process
+group is then SIGKILLed, including anything the rc left running. This
+executes the user's interactive rc code at every service start — the same
+code a new terminal runs. The shell never receives the daemon's `BYOK_*`
+values. Captured `BYOK_*` names are dropped and the daemon's own pre-capture `BYOK_*` values are restored, so
 rc files cannot set SDK control variables; task children still receive no
 `BYOK_*` at all. Only the source, a closed failure code and the shell's
 basename are recorded (`environment-resolved` in `audit.jsonl`, shown by

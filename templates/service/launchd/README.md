@@ -75,7 +75,9 @@ A plist along these lines (see `packages/client/src/lifecycle/launchd.ts`'s
   restarts the job only when it exits non-zero/is killed, not after a clean
   `exit(0)`. This is delegated entirely to launchd — the SDK never runs its
   own in-process supervisor.
-- **`--service`** (appended by the lifecycle) makes `byok-agent
+- **`--service`** (added by `byok-agent install`, or by
+  `nodeAgentProgram({ service: true })`; the lifecycle itself never changes
+  a program's arguments) makes `byok-agent
   start` capture your login shell's environment once (passwd shell, `-ilc`,
   10 s / 1 MiB caps) before it loads its config, so `claude`/`codex` and rc
   settings on your PATH reach the service. If the capture fails (the rc hangs, prints

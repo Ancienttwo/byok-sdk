@@ -1,7 +1,7 @@
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { AgentEvent, BlobRef, RuntimeInfo } from '@byok-sdk/protocol';
-import { type ConnectionState, type DaemonEvent, type DaemonEventListener } from '../index';
+import { type ConnectionState, type DaemonEvent } from '../index';
 import { GIT_ERROR_CATEGORIES } from '../daemon/git-workspace';
 import {
   SERVICE_ENVIRONMENT_UNAVAILABLE_CODES,
@@ -873,12 +873,30 @@ export async function readLastEnvironmentRecord(storeDir: string): Promise<Envir
  * async/non-blocking from the listener's point of view) so writes always
  * land in emission order, and a failed write (reported via `onError`) never
  * breaks the chain for subsequent events.
+ *
+ * Issue #392: {@link AuditAppender.appendEnvironment} writes the
+ * `environment-resolved` record through the same chain, so it can never
+ * interleave with an event append's rotation and lose a line.
  */
-export function createAuditAppender(storeDir: string, onError: (err: unknown) => void = () => {}): DaemonEventListener {
+export function createAuditAppender(storeDir: string, onError: (err: unknown) => void = () => {}): AuditAppender {
   let chain: Promise<void> = Promise.resolve();
-  return (event: DaemonEvent) => {
-    chain = chain.then(() => appendAuditEvent(storeDir, event)).catch(onError);
+  const enqueue = (write: () => Promise<void>): Promise<void> => {
+    chain = chain.then(write).catch(onError);
+    return chain;
   };
+  return Object.assign(
+    (event: DaemonEvent): void => {
+      void enqueue(() => appendAuditEvent(storeDir, event));
+    },
+    { appendEnvironment: (record: EnvironmentRecord) => enqueue(() => appendEnvironmentRecord(storeDir, record)) },
+  );
+}
+
+/** A `DaemonEventListener` that appends to `audit.jsonl` in call order; see {@link createAuditAppender}. */
+export interface AuditAppender {
+  (event: DaemonEvent): void;
+  /** Queues the `environment-resolved` record behind every event already queued. Resolves once written; a failed write goes to `onError`. */
+  appendEnvironment(record: EnvironmentRecord): Promise<void>;
 }
 
 function isAuditRecordShaped(value: unknown): value is Record<string, unknown> {
