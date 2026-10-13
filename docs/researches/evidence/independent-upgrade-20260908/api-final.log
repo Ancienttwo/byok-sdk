@@ -1,2 +1,0 @@
-$ node scripts/api-surface/check-api-surface.mjs
-api-surface: 9 package golden(s) match the built declarations
