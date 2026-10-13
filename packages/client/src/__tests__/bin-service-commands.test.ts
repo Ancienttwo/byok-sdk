@@ -28,9 +28,24 @@ describe('bin/commands/service: buildServiceDefinition', () => {
     expect(def.name).toBe('acme-product');
     expect(def.displayName).toBe('Acme');
     expect(def.program.command).toBe(process.execPath);
-    expect(def.program.args).toEqual([process.argv[1], 'start', '--config', path.resolve('/config/acme.json')]);
+    // Issue #392 adds `--service` on macOS/Linux (see the platform test below).
+    expect(def.program.args).toEqual([
+      process.argv[1],
+      'start',
+      '--config',
+      path.resolve('/config/acme.json'),
+      ...(process.platform === 'win32' ? [] : ['--service']),
+    ]);
     expect(def.logDir).toBe(path.join('/tmp/acme-store', 'service-logs'));
     expect(def.windows).toBeUndefined();
+  });
+
+  it('issue #392: the program runs start --service on darwin and linux, and is unchanged on win32', () => {
+    for (const platform of ['darwin', 'linux'] as const) {
+      expect(buildServiceDefinition(baseConfig(), '/c.json', [], platform).program.args.at(-1)).toBe('--service');
+    }
+    const windows = buildServiceDefinition(baseConfig(), '/c.json', [], 'win32');
+    expect(windows.program.args).toEqual([process.argv[1], 'start', '--config', path.resolve('/c.json')]);
   });
 
   it('uses branding.displayName over productName when present', () => {

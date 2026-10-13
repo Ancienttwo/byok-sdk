@@ -1,3 +1,4 @@
+import { PI_PROJECTED_KEY_ENV } from '../adapters/provider-credential-environment';
 import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
@@ -257,17 +258,8 @@ export function parsePreparedExpectedModel(value: unknown): InputPreparationMode
 // The BYOK consent gate
 // ---------------------------------------------------------------------------
 
-/**
- * The environment name the keys launcher — and nothing else — delivers the
- * device secret under, and the reference the projection uses to name it.
- *
- * Restated rather than imported: `@byok-sdk/client` has no `@byok-sdk/keys`
- * dependency (`scripts/release/check-package-graph.mjs` keeps the device-local
- * key authority and the dispatch packages disjoint). The restatement is pinned
- * by a test that can see both.
- */
-const PREPARED_PROVIDER_KEY_ENV = 'PI_PROVIDER_API_KEY';
-const PREPARED_PROVIDER_KEY_REFERENCE = `$${PREPARED_PROVIDER_KEY_ENV}`;
+/** The reference the projection uses to name the env var the keys launcher delivers the device secret under. */
+const PREPARED_PROVIDER_KEY_REFERENCE = `$${PI_PROJECTED_KEY_ENV}`;
 
 /**
  * Every model field the consent gate compares between the durable record and
@@ -699,9 +691,9 @@ export async function runPiPreparedHost(argv: readonly string[]): Promise<void> 
     // Presence only. The value is never read into a message, a log line, a
     // configuration file or an argument — the runtime resolves the `$`
     // reference from this environment when it builds the request.
-    const delivered = process.env[PREPARED_PROVIDER_KEY_ENV];
+    const delivered = process.env[PI_PROJECTED_KEY_ENV];
     if (typeof delivered !== 'string' || delivered.length === 0) {
-      fail(`prepared_provider_credential_unavailable: the credential-custody launcher delivered no ${PREPARED_PROVIDER_KEY_ENV}`);
+      fail(`prepared_provider_credential_unavailable: the credential-custody launcher delivered no ${PI_PROJECTED_KEY_ENV}`);
     }
   }
 

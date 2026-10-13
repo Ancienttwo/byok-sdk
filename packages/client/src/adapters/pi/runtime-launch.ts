@@ -1,5 +1,5 @@
 import { buildAllowlistedEnv } from '../../daemon/environment';
-import { PROVIDER_CREDENTIAL_ENV_NAMES } from '../provider-credential-environment';
+import { PI_PROVIDER_ENV_KEY_NAMES } from './pi-provider-env.generated';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { ensureSecureDir } from '../../util/secure-dir';
@@ -88,7 +88,7 @@ export async function resolvePiRuntimeLaunch(options: {
   // the platform baseline, the Pi directories and the provider names. In the
   // keys lane the launcher also narrows the environment of its own Pi child.
   const env = options.kind === 'pi-prepared'
-    ? buildAllowlistedEnv({ ambient: original, allow: [...CONTROLLED_PI_DIRECTORY_ENV_NAMES, ...PROVIDER_CREDENTIAL_ENV_NAMES] })
+    ? buildAllowlistedEnv({ ambient: original, allow: [...CONTROLLED_PI_DIRECTORY_ENV_NAMES, ...PI_PROVIDER_ENV_KEY_NAMES] })
     : original;
   let projectionDir: string | undefined;
   let released = false;

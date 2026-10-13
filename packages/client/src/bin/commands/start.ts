@@ -1,7 +1,8 @@
 import { createDaemon, type Daemon, type DaemonConfig } from '../../index';
+import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../../lifecycle/service-environment';
 import { createAuditAppender } from '../audit-log';
 import { resolveStoreDir } from '../config';
-import { formatDaemonEventLine } from '../format';
+import { formatServiceEnvironment, StartStdoutProjector } from '../format';
 
 export interface StartDeps {
   log?: (line: string) => void;
@@ -12,6 +13,8 @@ export interface StartDeps {
   onReady?: () => void;
   /** Required: there is no sane default "never stop" signal. The real CLI entry (`byok-agent.ts`) wires this to SIGINT/SIGTERM; tests wire their own `AbortController`. */
   signal: AbortSignal;
+  /** Issue #392: where this process's environment came from. Defaults to {@link serviceEnvironmentStatus} (`byok-agent.ts` applied it for `--service`). */
+  environment?: ServiceEnvironmentStatus;
 }
 
 /**
@@ -19,15 +22,25 @@ export interface StartDeps {
  * `DaemonEvent` it observes is (a) appended to `<storeDir>/audit.jsonl` —
  * the only channel a separate `status`/`tasks`/`runtimes` invocation has
  * into this process' state, see `byok-agent.ts`'s header comment — and (b)
- * printed as one line to stdout via the SAME formatter `tasks --follow`
- * uses when tailing that log, so watching `start`'s own stdout and tailing
- * the audit log show identical text.
+ * projected to stdout by `StartStdoutProjector` (`bin/format.ts`): the
+ * one-line formatter `tasks --follow` uses, with free-form text redacted and
+ * each turn's progress folded into at most one sizes-and-counts line,
+ * because this stdout is a service log (issue #395).
  */
 export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Promise<void> {
   const log = deps.log ?? ((line: string) => console.log(line));
   const error = deps.error ?? ((line: string) => console.error(line));
   const storeDir = resolveStoreDir(config);
   const daemon = deps.daemon ?? createDaemon(config);
+  const stdout = new StartStdoutProjector();
+
+  // Issue #392: where this process's environment came from. Printed first
+  // (the service log shows it even when start fails), and recorded for
+  // `status` only once start() succeeded — i.e. by the process that owns the
+  // store — so a rejected second `start` never overwrites what the running
+  // daemon sees.
+  const environment = deps.environment ?? serviceEnvironmentStatus();
+  log(`environment: ${formatServiceEnvironment(environment)}`);
 
   const appendToAudit = createAuditAppender(storeDir, (err) =>
     error(`audit log append failed: ${err instanceof Error ? err.message : String(err)}`),
@@ -71,7 +84,11 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
     // `approvals` CLI command, `approvals.list`, or `tasks --follow`'s own
     // `tasks.subscribe` path (`bin/commands/tasks.ts`, which does NOT set
     // this flag).
-    log(formatDaemonEventLine(event, { redactApprovalSummary: true }));
+    //
+    // Issue #395 (minimal): the same rule now covers model text. Each turn's
+    // progress is folded into at most one sizes-and-counts line, and
+    // completed/failed/cancelled text is redacted — see `StartStdoutProjector`.
+    for (const line of stdout.accept(event)) log(line);
     if (event.kind === 'shutdown-complete') {
       controlShutdownComplete = true;
       notifyControlShutdown?.();
@@ -80,6 +97,7 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
 
   try {
     await daemon.start();
+    await appendToAudit.appendEnvironment({ status: environment, ts: new Date().toISOString() });
     // Exact "daemon started: ..." prefix preserved from the pre-M3-2b bin —
     // examples/basic/README.md tells a human operator to watch stdout for
     // this literal text.
@@ -95,6 +113,7 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
     }
 
     unsubscribe();
+    for (const line of stdout.flush(new Date().toISOString())) log(line);
     await daemon.stop();
     log('daemon stopped');
   } catch (err) {

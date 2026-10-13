@@ -164,3 +164,16 @@ it('prepared launch retains only explicitly allowed env, excluding all six OpenA
     expect(resources.env.PATH).toBe(env.PATH);
   } finally { await resources.release(); }
 });
+
+it('prepared launch on the Pi auth store keeps every provider credential name pi reads, and nothing else (#384)', async () => {
+  const f = await fixture();
+  const { keysSessionDir: _unused, ...options } = f.options;
+  const env = { PATH: process.env.PATH!, HOME: options.sessionCwd, MOONSHOT_API_KEY: 'ambient-moonshot', ANTHROPIC_AUTH_TOKEN: 'ambient-bearer', UNRELATED_SECRET: 'x' };
+  const resources = await resolvePiRuntimeLaunch({ ...options, kind: 'pi-prepared', env });
+  try {
+    expect(resources.credentialSource).toBe('pi-auth-store');
+    expect(resources.env.MOONSHOT_API_KEY).toBe('ambient-moonshot');
+    expect(resources.env.ANTHROPIC_AUTH_TOKEN).toBe('ambient-bearer');
+    expect(resources.env).not.toHaveProperty('UNRELATED_SECRET');
+  } finally { await resources.release(); }
+});

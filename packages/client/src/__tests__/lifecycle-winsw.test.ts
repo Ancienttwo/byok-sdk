@@ -124,6 +124,15 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     expect(calls).toEqual(['C:\\acme\\logs/Acme-Agent-.exe install', 'C:\\acme\\logs/Acme-Agent-.exe start']);
   });
 
+  it('issue #392: the WinSW config does NOT carry --service (WinSW is unchanged pending the owner decision)', async () => {
+    const fs = fakeFs();
+    const lifecycle = createWinswLifecycle(def(), { run: vi.fn<Runner>().mockResolvedValue(ok()), fs });
+    await lifecycle.install();
+    const written = fs.writeFile.mock.calls[0]?.[1] as string;
+    expect(written).toContain('<argument>start</argument>');
+    expect(written).not.toContain('--service');
+  });
+
   it('install() uses windows.installDir when given instead of logDir', async () => {
     const fs = fakeFs();
     const lifecycle = createWinswLifecycle(def({ windows: { winswBin: 'C:\\bundled\\WinSW.exe', installDir: 'C:\\svc' } }), {

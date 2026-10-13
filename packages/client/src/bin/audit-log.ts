@@ -1,8 +1,13 @@
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { AgentEvent, BlobRef, RuntimeInfo } from '@byok-sdk/protocol';
-import { type ConnectionState, type DaemonEvent, type DaemonEventListener } from '../index';
+import { type ConnectionState, type DaemonEvent } from '../index';
 import { GIT_ERROR_CATEGORIES } from '../daemon/git-workspace';
+import {
+  SERVICE_ENVIRONMENT_UNAVAILABLE_CODES,
+  type ServiceEnvironmentStatus,
+  type ServiceEnvironmentUnavailableCode,
+} from '../lifecycle/service-environment';
 import { atomicWriteFile } from '../util/atomic-write';
 
 /**
@@ -36,11 +41,11 @@ import { atomicWriteFile } from '../util/atomic-write';
  *    placeholder wherever real content used to be — so a replayed
  *    `tasks`/`status`/`tasks --follow` view degrades to showing sizes
  *    instead of content, which is the correct, honest trade-off for a
- *    broadly-readable-by-default durable file. The LIVE human-facing stdout
- *    stream (`bin/commands/start.ts`, fed directly from the in-memory
- *    `DaemonEvent` before it ever reaches this module) is unaffected and
- *    keeps full fidelity — this redaction applies ONLY to what's written to
- *    disk.
+ *    broadly-readable-by-default durable file. `start`'s stdout is a
+ *    durable file too once installed as a service (launchd/systemd do not
+ *    rotate it), so it is redacted by the same rule in `bin/format.ts`'s
+ *    `StartStdoutProjector` (issue #395); only the authenticated control
+ *    socket (`tasks --follow`) carries full content.
  * 2. **Permissions**: the file is tightened to 0600 BEFORE any new content
  *    is written, on every single append (mirrors `util/atomic-write.ts`'s
  *    own defensive re-chmod, for the identical reason: `open()`'s own
@@ -601,6 +606,10 @@ function reconstructDaemonEvent(raw: Record<string, unknown>): DaemonEvent | und
  * replace the whole file, and does use it).
  */
 export async function appendAuditEvent(storeDir: string, event: DaemonEvent): Promise<void> {
+  await appendAuditRecord(storeDir, redactForAudit(event));
+}
+
+async function appendAuditRecord(storeDir: string, record: Record<string, unknown>): Promise<void> {
   await fs.mkdir(storeDir, { recursive: true, mode: AUDIT_STORE_DIR_MODE });
   // `mkdir`'s own `mode` only applies at CREATION time — a pre-existing
   // storeDir (predating this fix, or created by something else with a more
@@ -612,7 +621,7 @@ export async function appendAuditEvent(storeDir: string, event: DaemonEvent): Pr
   await fs.chmod(storeDir, AUDIT_STORE_DIR_MODE).catch(() => {});
 
   const filePath = auditLogPath(storeDir);
-  const line = `${JSON.stringify(redactForAudit(event))}\n`;
+  const line = `${JSON.stringify(record)}\n`;
   const handle = await fs.open(filePath, 'a', AUDIT_LOG_MODE);
   try {
     // Finding P1 #3b: chmod BEFORE appending, not after. `open()`'s own
@@ -726,6 +735,12 @@ function compactPreservingLiveTasks(lines: readonly string[], targetLines: numbe
   }
 
   let anchorIndices: number[] = [];
+  // Issue #392: the latest environment-resolved record describes the running
+  // daemon for as long as it runs; it survives rotation like a live task.
+  let lastEnvironmentIndex: number | undefined;
+  for (let i = 0; i < lines.length; i++) {
+    if (parseEnvironmentLine(lines[i]) !== undefined) lastEnvironmentIndex = i;
+  }
   for (const [taskId, lastIndex] of lastIndexForTask) {
     if (hasTerminalEvent.has(taskId)) continue; // reconstructable from its own terminal event, wherever that falls
     if (lastIndex < cutIndex) anchorIndices.push(lastIndex); // otherwise about to be fully evicted
@@ -741,6 +756,9 @@ function compactPreservingLiveTasks(lines: readonly string[], targetLines: numbe
     );
   }
 
+  if (lastEnvironmentIndex !== undefined && lastEnvironmentIndex < cutIndex) {
+    anchorIndices = [...anchorIndices, lastEnvironmentIndex].sort((a, b) => a - b);
+  }
   return [...anchorIndices.map((i) => lines[i]), ...lines.slice(cutIndex)].filter((l): l is string => l !== undefined);
 }
 
@@ -765,6 +783,85 @@ async function rotateIfNeeded(filePath: string): Promise<void> {
 }
 
 /**
+ * Issue #392: `byok-agent start` appends one `environment-resolved` record
+ * per process, before the daemon starts: where `process.env` came from
+ * (`lifecycle/service-environment.ts`). It is not a `DaemonEvent` — the
+ * library daemon never sees how its host process built its environment — so
+ * `readAuditEvents` skips it like any unknown kind. Closed values and a
+ * shell basename only; {@link parseEnvironmentLine} rejects anything else.
+ */
+export const ENVIRONMENT_RECORD_KIND = 'environment-resolved';
+
+export interface EnvironmentRecord {
+  status: ServiceEnvironmentStatus;
+  ts: string;
+}
+
+export async function appendEnvironmentRecord(storeDir: string, record: EnvironmentRecord): Promise<void> {
+  await appendAuditRecord(storeDir, { kind: ENVIRONMENT_RECORD_KIND, ts: record.ts, ...record.status });
+}
+
+const UNAVAILABLE_CODES = new Set<string>(SERVICE_ENVIRONMENT_UNAVAILABLE_CODES);
+
+function parseEnvironmentLine(line: string | undefined): EnvironmentRecord | undefined {
+  if (line === undefined || !line.includes(ENVIRONMENT_RECORD_KIND)) return undefined;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  const record = asRecord(raw);
+  if (record.kind !== ENVIRONMENT_RECORD_KIND || typeof record.ts !== 'string' || !Number.isFinite(Date.parse(record.ts))) return undefined;
+  const keys = Object.keys(record);
+  const only = (...allowed: string[]): boolean => keys.every((key) => ['kind', 'ts', 'source', ...allowed].includes(key));
+  if (record.source === 'inherited' && only()) return { ts: record.ts, status: { source: 'inherited' } };
+  if (record.source === 'unavailable' && only('code') && typeof record.code === 'string' && UNAVAILABLE_CODES.has(record.code)) {
+    return { ts: record.ts, status: { source: 'unavailable', code: record.code as ServiceEnvironmentUnavailableCode } };
+  }
+  if (
+    record.source === 'login-shell' &&
+    only('shell', 'durationMs') &&
+    typeof record.shell === 'string' &&
+    /^[A-Za-z0-9._-]{1,64}$/u.test(record.shell) &&
+    typeof record.durationMs === 'number' &&
+    Number.isSafeInteger(record.durationMs) &&
+    record.durationMs >= 0
+  ) {
+    return { ts: record.ts, status: { source: 'login-shell', shell: record.shell, durationMs: record.durationMs } };
+  }
+  return undefined;
+}
+
+/**
+ * The most recent valid `environment-resolved` record, or `undefined` when
+ * there is none, no log, or the log is not a regular file. Opened
+ * non-blocking and without following a symlink: doctor and the support
+ * bundle call this too, and must not hang on a FIFO planted at the path.
+ */
+export async function readLastEnvironmentRecord(storeDir: string): Promise<EnvironmentRecord | undefined> {
+  let handle: Awaited<ReturnType<typeof fs.open>>;
+  try {
+    handle = await fs.open(auditLogPath(storeDir), fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0) | (fsConstants.O_NOFOLLOW ?? 0));
+  } catch {
+    return undefined;
+  }
+  let raw: string;
+  try {
+    if (!(await handle.stat()).isFile()) return undefined;
+    raw = await handle.readFile('utf8');
+  } finally {
+    await handle.close();
+  }
+  const lines = completeLines(raw);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const record = parseEnvironmentLine(lines[i]);
+    if (record) return record;
+  }
+  return undefined;
+}
+
+/**
  * Adapts {@link appendAuditEvent} into a `DaemonEventListener` for
  * `daemon.subscribe()` (used by the `start` command). `DaemonEventListener`
  * is synchronous — `observer.ts`'s `emit()` never awaits a listener (see its
@@ -776,12 +873,30 @@ async function rotateIfNeeded(filePath: string): Promise<void> {
  * async/non-blocking from the listener's point of view) so writes always
  * land in emission order, and a failed write (reported via `onError`) never
  * breaks the chain for subsequent events.
+ *
+ * Issue #392: {@link AuditAppender.appendEnvironment} writes the
+ * `environment-resolved` record through the same chain, so it can never
+ * interleave with an event append's rotation and lose a line.
  */
-export function createAuditAppender(storeDir: string, onError: (err: unknown) => void = () => {}): DaemonEventListener {
+export function createAuditAppender(storeDir: string, onError: (err: unknown) => void = () => {}): AuditAppender {
   let chain: Promise<void> = Promise.resolve();
-  return (event: DaemonEvent) => {
-    chain = chain.then(() => appendAuditEvent(storeDir, event)).catch(onError);
+  const enqueue = (write: () => Promise<void>): Promise<void> => {
+    chain = chain.then(write).catch(onError);
+    return chain;
   };
+  return Object.assign(
+    (event: DaemonEvent): void => {
+      void enqueue(() => appendAuditEvent(storeDir, event));
+    },
+    { appendEnvironment: (record: EnvironmentRecord) => enqueue(() => appendEnvironmentRecord(storeDir, record)) },
+  );
+}
+
+/** A `DaemonEventListener` that appends to `audit.jsonl` in call order; see {@link createAuditAppender}. */
+export interface AuditAppender {
+  (event: DaemonEvent): void;
+  /** Queues the `environment-resolved` record behind every event already queued. Resolves once written; a failed write goes to `onError`. */
+  appendEnvironment(record: EnvironmentRecord): Promise<void>;
 }
 
 function isAuditRecordShaped(value: unknown): value is Record<string, unknown> {
