@@ -6,7 +6,7 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import type { DaemonEventListener } from '../daemon/observer';
 import { readAuditEvents } from '../bin/audit-log';
-import { runStartCommand, startExitCode } from '../bin/commands/start';
+import { DaemonCrashedError, runStartCommand, startExitCode } from '../bin/commands/start';
 import { DaemonHaltError } from '../daemon/daemon-lifecycle';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -288,6 +288,43 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     expect(stop).toHaveBeenCalledTimes(1);
     expect(listeners.size).toBe(0);
     expect(errors.some((line) => line.startsWith('daemon halted: reason=unpaired'))).toBe(true);
+  });
+});
+
+describe('bin/commands/start: a crash after start (#394)', () => {
+  it('stops the daemon, unsubscribes, and throws DaemonCrashedError (exit 1) when lifecycle reports crashed', async () => {
+    const listeners = new Set<DaemonEventListener>();
+    const stop = vi.fn().mockResolvedValue(undefined);
+    const fakeDaemon: Daemon = {
+      pair: vi.fn(),
+      start: vi.fn().mockImplementation(async () => {
+        setTimeout(() => {
+          for (const listener of listeners) listener({ kind: 'lifecycle', ts: 'T', lifecycle: { phase: 'crashed', at: 'T' } });
+        }, 10);
+      }),
+      stop,
+      status: vi.fn().mockReturnValue({ paired: true, lifecycle: { phase: 'running', connection: 'open' }, activeTaskCount: 0 }),
+      reloadMcpToolsets: vi.fn(),
+      reportMcpToolsetObservation: vi.fn(),
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      tasks: () => [],
+      unpair: vi.fn(),
+      approve: vi.fn(),
+      reject: vi.fn(),
+    };
+    const storeDir = await tmpDir('byok-start-store-crashed-');
+
+    await expect(runStartCommand(
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-crashed', serverUrl: 'http://example.invalid', workspaceRoot: '/ws', storeDir },
+      { daemon: fakeDaemon, log: () => {}, error: () => {}, signal: new AbortController().signal },
+    )).rejects.toBeInstanceOf(DaemonCrashedError);
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(listeners.size).toBe(0);
+    const audit = await readAuditEvents(storeDir);
+    expect(audit.filter((event) => event.kind === 'lifecycle').at(-1)).toMatchObject({ lifecycle: { phase: 'crashed' } });
   });
 });
 

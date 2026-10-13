@@ -35,7 +35,8 @@ export function waitForDaemonOpen(daemon: { status(): Pick<DaemonStatus, 'lifecy
     },
     () => {
       const lifecycle = daemon.status().lifecycle;
-      return lifecycle.phase === 'halted' ? lifecycle.reason : undefined;
+      if (lifecycle.phase === 'halted') return lifecycle.reason;
+      return lifecycle.phase === 'crashed' ? 'crashed' : undefined;
     },
     timeoutMs,
     'the daemon',

@@ -1,6 +1,6 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { DaemonBranding, DaemonEvent, DaemonTaskInfo, LocalAgentReleaseIdentity } from '../index';
-import type { DaemonHaltReason, DaemonLifecycle } from '../daemon/daemon-lifecycle';
+import { parseDaemonLifecycle, type DaemonHaltReason, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { GIT_ERROR_CATEGORIES } from '../daemon/git-workspace';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
 import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
@@ -129,6 +129,13 @@ export function formatLifecycle(lifecycle: DaemonLifecycle): string {
     default:
       return `phase=${lifecycle.phase}`;
   }
+}
+
+/** What an operator does about a run that ended (`halted` or `crashed`); `undefined` otherwise. */
+export function formatLifecycleRemedy(lifecycle: DaemonLifecycle): string | undefined {
+  if (lifecycle.phase === 'halted') return formatHaltRemedy(lifecycle.reason);
+  if (lifecycle.phase === 'crashed') return 'the run crashed on an unexpected error: see the daemon log (a supervised service is restarted)';
+  return undefined;
 }
 
 /** Issue #394: what an operator does about each halt. A restart alone fixes none of them. */
@@ -464,7 +471,8 @@ export function formatStatusLines(view: StatusView): string[] {
       ? `lifecycle: last-known ${formatLifecycle(view.lifecycle.lifecycle)} at=${view.lifecycle.ts}`
       : 'lifecycle: unknown (no lifecycle event yet — run `byok-agent start` at least once to begin observing)',
   );
-  if (view.lifecycle?.lifecycle.phase === 'halted') lines.push(`lifecycle-remedy: ${formatHaltRemedy(view.lifecycle.lifecycle.reason)}`);
+  const remedy = view.lifecycle ? formatLifecycleRemedy(view.lifecycle.lifecycle) : undefined;
+  if (remedy !== undefined) lines.push(`lifecycle-remedy: ${remedy}`);
   lines.push(
     view.environment
       ? `environment: ${formatServiceEnvironment(view.environment.status)} at=${view.environment.ts}`
@@ -488,10 +496,20 @@ export function formatStatusLines(view: StatusView): string[] {
  * unambiguous which lines are a live snapshot of a running process versus
  * the historical/persisted view above them.
  */
+/**
+ * The control `status` answer comes from another process, possibly an older
+ * daemon that reports `transport` and no `lifecycle`: read it strictly, as
+ * `doctor` does, and say so instead of failing the whole live view.
+ */
+function formatLiveLifecycle(value: unknown): string {
+  const lifecycle = parseDaemonLifecycle(value);
+  return lifecycle ? formatLifecycle(lifecycle) : 'lifecycle unknown (daemon predates lifecycle)';
+}
+
 export function formatLiveStatusLines(live: ControlStatusResult): string[] {
   const liveRelease = live.localAgentRelease;
   const lines: string[] = [
-    `live: pid=${live.pid} uptimeMs=${live.uptimeMs} ${formatLifecycle(live.lifecycle)}`,
+    `live: pid=${live.pid} uptimeMs=${live.uptimeMs} ${formatLiveLifecycle(live.lifecycle)}`,
     liveRelease
       ? `live-local-agent-release: ${liveRelease.version}${liveRelease.buildId ? ` buildId=${liveRelease.buildId}` : ''}`
       : 'live-local-agent-release: unknown',
