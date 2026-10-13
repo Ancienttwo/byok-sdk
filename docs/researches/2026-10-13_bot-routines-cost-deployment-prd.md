@@ -21,7 +21,7 @@ BYOK Host 需要定期运行的 Bot 工作，下文称 routine。例如每个交
 | 判断 | 状态 |
 |---|---|
 | 方向成立 | 是。符合 ADR-036 D3：BYOK key 只在本地。 |
-| 可以开始实现 | K1 和 K3 已有 issue，范围清楚。K2 要先按 §7 开新 issue。每个切片的实现仍由 owner 逐个放行。 |
+| 可以开始实现 | K1 和 K3 已有 issue，范围清楚。K2 已开 [#420]。每个切片的实现仍由 owner 逐个放行。 |
 | 可以上线 | 否。需要 K1–K3 落地，并且首个下游通过 §12 的验收。 |
 
 ## 2. Owner 决策
@@ -65,7 +65,7 @@ owner 已定（2026-10-13）：
 ### 纳入
 
 - K1：存储记账与保留（[#411]、[#412]）。
-- K2：embedded server 的设备端 wake 队列（新 issue，契约见 §7）。
+- K2：embedded server 的设备端 wake 队列（[#420]，契约见 §7）。
 - K3：空闲成本（[#410]、[#391]）。
 - K4：routine 冒烟测试、Host 指南独立成文、设备端中间产物保留（扩展 [#418]、[#399]）。
 - ADR-038：成本模型与部署目标。它部分取代 ADR-036 D7。
@@ -158,12 +158,14 @@ Host 服务端（定义真相）             设备上的 Host 进程（embedded
 
 ### 7.2 API
 
-wake hook 是 `createByokServer` 的选项，形状和 `agentMessage` 一致：异步，至少投递一次，由产品持久去重。
+wake hook 是 `createByokServer` 的 `wake` 选项，形状和 `agentMessage` 一致：一个异步的 `consume` 方法，至少投递一次，由产品持久去重。
 
 ```ts
 interface CreateByokServerOptions {
   /** 至少投递一次，可能并发重投。Host 必须按 dedupKey 或自己的 occurrence key 持久去重。 */
-  wake?: (wake: DueWake, signal: AbortSignal) => Promise<void>;
+  wake?: {
+    consume(wake: DueWake, signal: AbortSignal): Promise<void>;
+  };
 }
 
 interface ByokServer {
@@ -449,7 +451,7 @@ K1、K2、K3 互不依赖，可以并行。每个阶段单独合并后，系统�
 | 阶段 | 范围 | 依赖 | 验收 |
 |---|---|---|---|
 | K1 存储记账与保留 | [#411]（P1）、[#412]（P2） | 无 | 成功标准 5 |
-| K2 设备端 wake 队列 | 新 issue，正文取 §7 | [#403]（已合并） | §7.5 |
+| K2 设备端 wake 队列 | [#420] | [#403]（已合并） | §7.5 |
 | K3 空闲成本 | [#410]（建议从 P3 提到 P1）、[#391] | 无 | 成功标准 4；空 mailbox 的设备能冷启动，不等待 long-poll |
 | K4 收尾 | routine 冒烟测试（扩展 [#418]）、Host 指南独立成文、[#399] | K2 | 用默认配置跑通一个 routine 的调度、补跑和崩溃恢复；README 链接 Host 指南 |
 
@@ -527,7 +529,7 @@ Topology L，在 K2 和 A2 之后执行：
 
 实施入口：
 
-- 每个阶段先有 issue（K2 按 §7 开新 issue），再开 PR。
+- 每个阶段先有 issue（K2 是 [#420]），再开 PR。
 - 每个 PR 同时修改 spec，并通过 §11.1 的检查。
 
 上线门槛：
@@ -545,3 +547,4 @@ Topology L，在 K2 和 A2 之后执行：
 [#413]: https://github.com/Ancienttwo/byok-sdk/issues/413
 [#414]: https://github.com/Ancienttwo/byok-sdk/issues/414
 [#418]: https://github.com/Ancienttwo/byok-sdk/issues/418
+[#420]: https://github.com/Ancienttwo/byok-sdk/issues/420
