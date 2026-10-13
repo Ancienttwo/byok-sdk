@@ -352,7 +352,7 @@ describe.skipIf(process.platform === 'win32')('owned runtime process groups afte
       child: tree.child,
       label: 'fixture',
       platform: 'win32',
-      jobObject: { assign: async (pid) => { assigned.push(pid); } },
+      jobObject: { assign: async (pid) => { assigned.push(pid); return { release() {} }; } },
     });
     expect(assigned).toEqual([tree.pgid]);
     expect(seen.adopted).toEqual([]);
