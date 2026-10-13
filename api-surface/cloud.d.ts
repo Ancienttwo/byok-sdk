@@ -923,7 +923,7 @@ import { type RecurringExecutionInput } from './recurring';
 import { type BoardItem, type BoardItemInput, type BoardListQuery, type BoardPage, type CapabilityDeclaration, type Clock, type CoreStores, type PresenceHint, type SkillPackStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { ActivityTail } from './activity';
 import type { ApprovalTimelineTail } from './approval-timeline';
-import { type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
+import { BYOK_CHALLENGE_PATH, BYOK_PAIR_PATH, BYOK_TOKEN_PATH, type Envelope, type TaskOfferType, type AgentRef, type AgentContentReadPayload, type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type AgentHomeProjectionCompletionRequest, type AgentHomeProjectionPayload, type AgentHomeProjectionReadback, type AgentInputPreparationPayload, type ProviderProvisioningAvailablePayload, type AgentMemoryIntentAvailablePayload, type InputPreparationCompletionRequest, type InputPreparationReadback, type AgentMemoryProjectionEraseResult, type TaskOfferPayload, type TaskSteerPayload, type TaskOfferForAgentPayload, type TaskOfferPreparedPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import type { TokenSigner } from './auth/tokens';
 import type { CloudCrypto } from './crypto/port';
 import { type RouteDescriptor } from './router/registry';
@@ -1013,6 +1013,19 @@ export interface ByokCloudOptions {
      * a write, deciding whether it happens at all.
      */
     readonly observer?: ByokCloudObserver;
+    /**
+     * Admission hook for the unauthenticated auth routes (`POST /byok/pair`,
+     * `/byok/challenge`, `/byok/token`), called BEFORE their handler runs and
+     * before any store is touched. `false` answers 429 and the handler never
+     * runs. Absent means no limit: the SDK ships no policy here, so an edge
+     * limiter is the deployment's responsibility (see `deploy/runbooks/hosted-operations.md`,
+     * "Public routes and edge rate limits"). A limiter that throws or rejects
+     * fails the request with a 500 rather than letting it through.
+     *
+     * Authenticated routes are not covered: they already have the per-device
+     * `InboundRateLimiter`.
+     */
+    readonly publicRouteLimiter?: PublicRouteLimiter;
     /** Embedder-owned grant and consent authority for optional hosted Agent-memory projection. */
     readonly agentMemoryProjectionAuthorizer?: AgentMemoryProjectionAuthorizer;
     /** Durable snapshot + immutable metering receipt authority for optional hosted Agent-memory projection. */
@@ -1038,6 +1051,19 @@ export interface ByokCloudOptions {
     readonly maxTruthRequestBytes?: number;
     readonly skillPackPageLimit?: number;
 }
+/** The unauthenticated routes {@link ByokCloudOptions.publicRouteLimiter} guards. */
+export type LimitedPublicRoute = {
+    readonly method: 'POST';
+    readonly path: typeof BYOK_PAIR_PATH;
+} | {
+    readonly method: 'POST';
+    readonly path: typeof BYOK_CHALLENGE_PATH;
+} | {
+    readonly method: 'POST';
+    readonly path: typeof BYOK_TOKEN_PATH;
+};
+/** `true` admits the request; `false` answers 429 before the handler or any store runs. */
+export type PublicRouteLimiter = (route: LimitedPublicRoute, request: Request) => boolean | Promise<boolean>;
 export interface EnqueueOfferInput {
     /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
     readonly taskId?: string;
@@ -1454,6 +1480,8 @@ export interface InMemoryByokCloudOptions {
     readonly agentMessage?: ByokCloudOptions['agentMessage'];
     /** Post-commit relay; absent means nothing is watching. */
     readonly observer?: ByokCloudOptions['observer'];
+    /** Unauthenticated-route admission; absent means no limit. */
+    readonly publicRouteLimiter?: ByokCloudOptions['publicRouteLimiter'];
     readonly agentMemoryProjectionAuthorizer?: AgentMemoryProjectionAuthorizer;
     readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
 }
@@ -1940,14 +1968,34 @@ export declare function truthPutHandler(deps: TruthRouteDeps): (c: Context) => P
  * anything. Only `rejected`/`rate_limited` are excluded from `accepted`.
  *
  * 5. **observe** — an optional {@link ByokCloudObserver} is told, once, about
- *    each envelope whose write committed. It runs after step 4 has returned,
- *    it cannot change the outcome, and it is not the admission hook.
+ *    each envelope whose write committed (`onInboundCommitted`) and about each
+ *    envelope the gate refused, with a closed {@link InboundRefusalReason}
+ *    (`onInboundRefused`). It runs after the outcome is fixed, it cannot
+ *    change it, and it is not the admission hook.
  */
-import { type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type Envelope } from '@byok-sdk/protocol';
+import { type AgentMessageDispositionPayload, type AgentMessagePublishPayload, type AgentMessageServerContext, type Envelope, type MessageType } from '@byok-sdk/protocol';
 import type { TenantId } from '@byok-sdk/core';
 import { type ActivityBounds } from './coordination';
 import type { TenantStores } from './tenant-stores';
 export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limited';
+/**
+ * Why the gate answered `rejected`. Closed on purpose: every rejection path in
+ * this file goes through {@link refuse}, whose parameter is this union, and the
+ * gate's internal result type has no `rejected` member without a reason — so a
+ * new rejection path that does not name one fails typecheck rather than
+ * disappearing into an uncounted `rejected`.
+ *
+ * Observation vocabulary only. It never reaches the wire: `POST /byok/messages`
+ * still answers `{ accepted, rejected }`, and these names are free to be
+ * refined without a protocol revision. `rate_limited` is a separate outcome,
+ * not a refusal reason.
+ */
+export type InboundRefusalReason = 'protocol_version_unsupported' | 'type_not_allowed' | 'task_id_missing' | 'device_not_eligible' | 'hello_device_mismatch' | 'hello_harnesses_without_capability' | 'hello_protocol_version_unsupported' | 'hello_product_mismatch' | 'hello_capabilities_not_recorded' | 'agent_message_attempt_mismatch' | 'agent_message_offer_binding_missing' | 'agent_message_binding_corrupt' | 'agent_message_binding_mismatch' | 'agent_message_too_large' | 'agent_message_already_deduplicated' | 'agent_message_reservation_conflict' | 'agent_message_admission_unconfirmed' | 'egress_conflict' | 'content_receipt_event_request_mismatch' | 'content_receipt_request_unknown' | 'content_receipt_request_mismatch' | 'content_receipt_conflict' | 'task_not_found_for_device' | 'task_owned_by_other_device' | 'agent_identity_mismatch' | 'terminal_harness_mismatch' | 'claim_device_mismatch' | 'claim_harness_and_runtime_conflict' | 'claim_harness_mismatch' | 'claim_harness_unavailable' | 'claim_offer_mismatch' | 'claim_not_won' | 'recovery_report_invalid' | 'recovery_offer_mismatch' | 'activity_batch_too_large' | 'activity_batch_invalid' | 'approval_event_invalid';
+/** The only way to build a rejection: the reason is required and closed. */
+interface Refused {
+    readonly outcome: 'rejected';
+    readonly reason: InboundRefusalReason;
+}
 /**
  * One envelope whose write COMMITTED, handed to {@link ByokCloudObserver}.
  *
@@ -1978,6 +2026,23 @@ export interface InboundCommitted {
  */
 export interface ByokCloudObserver {
     onInboundCommitted(input: InboundCommitted): void;
+    /**
+     * One envelope the gate refused, with the reason. Same rules as
+     * {@link onInboundCommitted}: synchronous, called inside a `try`, a throw is
+     * swallowed, and it can never change the response (`rejected` is already
+     * counted on the wire). `rate_limited` is not a refusal and is not reported
+     * here. `envelopeId` and `type` come from the device's own envelope, so they
+     * are claims, not authority.
+     */
+    onInboundRefused?(input: InboundRefused): void;
+}
+/** One refused envelope, handed to {@link ByokCloudObserver.onInboundRefused}. */
+export interface InboundRefused {
+    readonly tenantId: TenantId;
+    readonly deviceId: string;
+    readonly envelopeId: string;
+    readonly type: MessageType;
+    readonly reason: InboundRefusalReason;
 }
 export declare function handleAgentMessagePublish(stores: TenantStores, deviceId: string, taskId: string, payload: AgentMessagePublishPayload, consume: ((input: {
     readonly tenant: TenantStores['tenant'];
@@ -1988,8 +2053,8 @@ export declare function handleAgentMessagePublish(stores: TenantStores, deviceId
 }) => Promise<{
     readonly outcome: 'accepted' | 'held' | 'refused';
     readonly reasonCode?: string;
-}>) | undefined, alreadyDeduplicated: boolean): Promise<{
-    readonly outcome: InboundOutcome;
+}>) | undefined, alreadyDeduplicated: boolean): Promise<Refused | {
+    readonly outcome: Exclude<InboundOutcome, 'rejected'>;
     readonly disposition?: AgentMessageDispositionPayload;
 }>;
 /** Reads only a terminal immutable admission; pending rows have no disposition to acknowledge. */
@@ -1998,6 +2063,7 @@ export declare function parseAgentMessageDisposition(payload: AgentMessagePublis
 /** Receipt key a task's terminal is recorded under — the idempotency seam S3b's journal will share. */
 export declare function terminalReceiptKey(taskId: string): string;
 export declare function handleInboundEnvelope(stores: TenantStores, deviceId: string, envelope: Envelope, activityBounds?: ActivityBounds, agentMessageConsume?: Parameters<typeof handleAgentMessagePublish>[4], observer?: ByokCloudObserver): Promise<InboundOutcome>;
+export {};
 // ==== @byok-sdk/cloud dist/index.d.ts ====
 /**
  * `@byok-sdk/cloud` — the hosted device surface.
@@ -2017,7 +2083,7 @@ export { isTenantId, tenantId } from '@byok-sdk/core';
 export type { TenantId } from '@byok-sdk/core';
 export { createByokCloud } from './cloud';
 export type { TaskAgentMessage } from './task-agent-message';
-export type { ByokCloud, ByokCloudOptions, AgentDispatchInput, AgentEgressDispatchInput, AgentEgressFreshSessionDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, ProviderProvisioningNoticeInput, AgentMemoryIntentNoticeInput, AgentHomeProjectionStatusInput, InputPreparationInput, InputPreparationStatusInput, ApproveTaskOptions, EnqueueOfferInput, EnqueueToolsetOfferInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedInputPreparation, EnqueuedOffer, TaskOfferReadback, } from './cloud';
+export type { ByokCloud, ByokCloudOptions, LimitedPublicRoute, PublicRouteLimiter, AgentDispatchInput, AgentEgressDispatchInput, AgentEgressFreshSessionDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, ProviderProvisioningNoticeInput, AgentMemoryIntentNoticeInput, AgentHomeProjectionStatusInput, InputPreparationInput, InputPreparationStatusInput, ApproveTaskOptions, EnqueueOfferInput, EnqueueToolsetOfferInput, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedInputPreparation, EnqueuedOffer, TaskOfferReadback, } from './cloud';
 export { agentHomeProjectionCompletionKey, agentHomeProjectionRequestKey, readAgentHomeProjectionStatus, recordAgentHomeProjectionCompletion, } from './agent-home-projections';
 export type { AgentHomeProjectionReceiptInput } from './agent-home-projections';
 export { inputPreparationCompletionKey, inputPreparationRequestKey, readInputPreparationStatus, recordInputPreparationCompletion, sameInputPreparationRequest, } from './input-preparations';
@@ -2049,7 +2115,7 @@ export type { AuthPlane, AuthPlaneDeps, MintedAccessToken, PairInput } from './a
 export { createWebCrypto } from './crypto/web-crypto';
 export type { CloudCrypto } from './crypto/port';
 export { handleInboundEnvelope, terminalReceiptKey } from './inbound';
-export type { ByokCloudObserver, InboundCommitted, InboundOutcome } from './inbound';
+export type { ByokCloudObserver, InboundCommitted, InboundOutcome, InboundRefusalReason, InboundRefused, } from './inbound';
 export { projectTerminalResult } from './terminal-result';
 export type { TerminalResult } from './terminal-result';
 export { tenantStoresFor } from './tenant-stores';
