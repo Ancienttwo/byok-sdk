@@ -411,16 +411,21 @@ the run as `halted`, whenever it is found; `start()` throws `DaemonHaltError`
 for one it finds locally. `store_owned` and `config_invalid` are found before
 the process owns the store and are thrown only, never reported through
 `lifecycle`. Every other start failure is a crash: it is thrown as is and
-recorded as a `lifecycle` operational-health failure.
+recorded as a `lifecycle` operational-health failure. An unexpected error
+after `start()` resolved (an observer callback or the reconnect loop throwing)
+is a crash too: the connection stops, the same health failure is recorded,
+and `lifecycle` becomes `crashed` (it stays so, also after `stop()`, until the
+next `start()`); it is never an unhandled rejection.
 
 `byok-agent start` maps the run's end to its exit code: 0 for a normal stop,
-78 for a halt, 1 for a crash. Under `--service` a halt exits 0, the one status
+78 for a halt, 1 for a crash (a `crashed` lifecycle included). Under `--service` a halt exits 0, the one status
 launchd, systemd and WinSW all leave stopped; a crash still exits 1 and is
 restarted by the OS supervisor, which is the only crash retry. `byok-agent
 install` writes `--service` into the launchd plist, systemd unit and WinSW
 XML. The last `lifecycle` event is kept in `audit.jsonl` (also across
 rotation); offline `status`, `service-status` and the `doctor` `lifecycle`
-check read it, and a halted daemon fails that check with its remedy.
+check read it, and a halted or crashed daemon fails that check with its
+remedy.
 
 ## Runtime operation authority
 
