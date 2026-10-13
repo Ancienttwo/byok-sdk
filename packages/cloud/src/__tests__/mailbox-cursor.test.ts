@@ -371,6 +371,15 @@ describe('enqueueOffer', () => {
       capabilities: fullCapabilityDeclaration(),
     });
 
+    // A limited append is admitted against the tenant entitlement (#411).
+    await base.core.quota.writeEntitlement(TENANT_A, {
+      version: 1n,
+      hardLimitBytes: 1_000_000_000n,
+      maxObjectBytes: 100_000_000n,
+      maxInlineBytes: 1_000_000n,
+      mailboxLimitBytes: 100_000_000n,
+      retentionPolicyId: 'test',
+    });
     await expect(
       skewed.enqueueOffer(TENANT_A, 'dev_whoever', { payload: offerPayload() }),
     ).rejects.toSatisfy((error: unknown) => isCloudError(error, 'mailbox_seq_mismatch'));

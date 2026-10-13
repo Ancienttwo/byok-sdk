@@ -15,8 +15,12 @@ statement:
 
 | Row state | Cutoff | Action | Reported as |
 | --- | --- | --- | --- |
-| `acked` | `ackedBefore` | **deleted** | `deletedCount`, `releasedBytes` |
+| `acked` | `ackedBefore` | **deleted** | `deletedCount`, `releasedBytes` (report only) |
 | `pending` | `expireUnackedBefore` | **marked `expired`** | `expiredCount` |
+
+Mailbox usage is the sum over the retained rows (`MailboxStore.readUsage`), so
+a deleted row stops counting by itself; `releasedBytes` reports what left, it
+is not an accounting step. An `expired` row is retained and keeps counting.
 
 The asymmetry is the contract, not an optimization. A row the device
 acknowledged has been durably journaled on the device, so deleting it loses
@@ -111,8 +115,8 @@ second queue. S4B-c adds a Postgres maintenance surface:
 - `replayDeadLetter` requires a new operator idempotency key and clones the
   bytes to a new monotonic sequence; `replay_source_seq` binds that key to the
   exact expired row while retaining the original evidence;
-- `discardDeadLetter` explicitly removes one expired row and releases mailbox
-  accounting in the same transaction.
+- `discardDeadLetter` explicitly removes one expired row; with usage derived
+  from the retained rows, removing it is what frees its bytes.
 
 Automatic retention calls none of the latter two. A non-zero
 `mailbox_expired_count`/`expiredCount` means work was dropped and must alert.

@@ -10,7 +10,7 @@ import {
   type OutboxRow,
   toMailboxMessage,
 } from './core/mailbox';
-import { allocateMailboxSequence } from './core/mailbox-sequence';
+import { insertOutboxRow } from './core/outbox-writer';
 import {
   TASK_SELECT_COLUMNS,
   type TaskRow,
@@ -78,23 +78,16 @@ export class PostgresTaskCancellationStore implements TaskCancellationStore {
 
       const now = this.#clock.now().toISOString();
       const messageId = input.proposedMessageId;
-      const seq = await allocateMailboxSequence(client, tenant, current.device_id, now);
-      const materialized = await input.materialize(seq, messageId);
-      const insertedMessage = await client.query<OutboxRow>(
-        `INSERT INTO outbox (${OUTBOX_COLUMNS})
-         VALUES ($1, $2, $3::bigint, $4, $5, $6, $7::bigint, 'pending', $8)
-         RETURNING ${OUTBOX_COLUMNS}`,
-        [
-          tenant,
-          current.device_id,
-          seq,
-          messageId,
-          materialized.body,
-          materialized.bodyHash,
-          materialized.byteSize,
-          now,
-        ],
-      );
+      // Exempt from the mailbox limit, still counted: a full mailbox must never
+      // block the cancellation that would stop further work. The task row lock
+      // above bounds this to one cancellation row per task.
+      const written = await insertOutboxRow(client, tenant, {
+        deviceId: current.device_id,
+        messageId,
+        admission: 'cancellation',
+        now,
+        materialize: (seq) => input.materialize(seq, messageId),
+      });
       const updated = await client.query<TaskRow>(
         `UPDATE task
             SET status = CASE WHEN owner_device_id IS NULL THEN 'cancelled' ELSE 'cancel_requested' END,
@@ -109,7 +102,7 @@ export class PostgresTaskCancellationStore implements TaskCancellationStore {
       await client.query('COMMIT');
       return {
         attempt: taskRowToAttempt(updated.rows[0]!),
-        message: toMailboxMessage(insertedMessage.rows[0]!),
+        message: toMailboxMessage(written.row),
       };
     } catch (cause) {
       await client.query('ROLLBACK').catch(() => {});

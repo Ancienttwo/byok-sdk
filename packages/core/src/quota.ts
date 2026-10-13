@@ -50,7 +50,6 @@ export interface TenantStorageUsage {
   committedObjectBytes: bigint;
   committedInlineBytes: bigint;
   reservedBytes: bigint;
-  mailboxBytes: bigint;
   objectCount: bigint;
   updatedAt: string;
 }
@@ -173,11 +172,6 @@ export const STORAGE_ERROR_HTTP_STATUS = {
   storage_write_suspended: 423,
 } as const satisfies Record<StorageErrorCode, number>;
 
-export interface MailboxUsageDeltaInput {
-  /** Signed. Negative deltas release bytes after retention deletes rows. */
-  readonly deltaBytes: bigint;
-}
-
 /**
  * Quota port. Tenant-first, async.
  *
@@ -218,9 +212,4 @@ export interface QuotaStore {
   abortReservation(tenant: TenantId, reservationId: string): Promise<StorageReservation>;
   /** Cleanup hook: expires reservations past their TTL and releases their bytes. */
   expireReservations(tenant: TenantId): Promise<readonly StorageReservation[]>;
-  /** Mailbox bytes are platform-protection accounting, bounded by `mailboxLimitBytes`. */
-  applyMailboxDelta(
-    tenant: TenantId,
-    input: MailboxUsageDeltaInput,
-  ): Promise<TenantStorageUsage>;
 }

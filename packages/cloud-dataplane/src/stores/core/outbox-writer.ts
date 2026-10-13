@@ -1,0 +1,182 @@
+/**
+ * The one Postgres writer of mailbox rows: the only `INSERT INTO outbox`.
+ *
+ * Mailbox bytes have one authority, the retained rows. Usage is the tenant's
+ * `SUM(byte_size)` over every retained row in any state, so there is no counter
+ * a writer could forget to move and no release step when retention deletes a
+ * row. What has to be serialized instead is the limit check against that sum,
+ * and that is this file's job. Append, cancellation and dead-letter replay all
+ * call it, so admission and sequence allocation cannot drift between writers.
+ *
+ * The caller must already be in a transaction and keeps it open until it
+ * commits; a refusal throws, and the caller's rollback undoes everything this
+ * function did, including the sequence it allocated.
+ *
+ * Lock order, the same for every writer: the tenant mailbox lock (limited
+ * admission only), then the per-device `device_stream` row.
+ *
+ * - The tenant lock is a transaction-scoped advisory lock. A `limited` limit
+ *   check reads an aggregate over other devices' rows, and under READ
+ *   COMMITTED a single statement cannot serialize against inserts it does not
+ *   see. Taking the lock first means the guarded `INSERT` below starts its
+ *   snapshot after every earlier limited append has committed.
+ * - The device row lock serializes allocate -> materialize -> insert. Releasing
+ *   it before insertion would let seq N+1 become visible before N; a daemon
+ *   could then ack N+1 and permanently skip the late N row.
+ *
+ * Nothing here calls SQL `now()`: the caller passes its clock's instant.
+ */
+import {
+  ByokCoreError,
+  type MailboxAdmission,
+  type MailboxBody,
+  type TenantId,
+} from '@byok-sdk/core';
+import type { PoolClient } from 'pg';
+
+/**
+ * Seed for the tenant mailbox lock key. Distinct from the cleanup job's
+ * session lock namespace, so a running cleanup never blocks an append.
+ */
+const MAILBOX_ADMISSION_LOCK_NAMESPACE = 1_298_756_948;
+
+export const OUTBOX_WRITE_COLUMNS =
+  'tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at, replay_source_seq';
+
+export interface WrittenOutboxRow {
+  readonly tenant_id: string;
+  readonly device_id: string;
+  readonly seq: bigint;
+  readonly message_id: string;
+  readonly body: string;
+  readonly body_hash: string;
+  readonly byte_size: bigint;
+  readonly state: string;
+  readonly appended_at: string;
+  readonly replay_source_seq: bigint | null;
+}
+
+export interface OutboxWriteInput {
+  readonly deviceId: string;
+  readonly messageId: string;
+  readonly admission: MailboxAdmission;
+  /** The caller's clock instant, used for the row and a newly created stream. */
+  readonly now: string;
+  readonly materialize: (seq: number) => MailboxBody | Promise<MailboxBody>;
+  /** Dead-letter replay only: the expired row this delivery re-sends. */
+  readonly replaySourceSeq?: bigint;
+}
+
+export interface OutboxWriteResult {
+  readonly row: WrittenOutboxRow;
+  /** False when `messageId` already had a row; nothing was written. */
+  readonly inserted: boolean;
+}
+
+export async function insertOutboxRow(
+  client: PoolClient,
+  tenant: TenantId,
+  input: OutboxWriteInput,
+): Promise<OutboxWriteResult> {
+  // Anything but the one exempt class is limited: an unknown admission fails
+  // closed instead of skipping the check.
+  const exempt = input.admission === 'cancellation';
+  if (!exempt) {
+    await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, $2))', [
+      tenant,
+      MAILBOX_ADMISSION_LOCK_NAMESPACE,
+    ]);
+  }
+
+  // A no-op upsert takes the device row lock and reads the next sequence in
+  // one statement. The sequence is only advanced after the row is inserted,
+  // so an idempotent return or a refusal consumes no number.
+  const stream = await client.query<{ readonly next_seq: bigint }>(
+    `INSERT INTO device_stream (tenant_id, device_id, next_seq, acked_seq, acked_at)
+     VALUES ($1, $2, 1, 0, $3)
+     ON CONFLICT (tenant_id, device_id) DO UPDATE
+        SET next_seq = device_stream.next_seq
+     RETURNING next_seq`,
+    [tenant, input.deviceId, input.now],
+  );
+  const seq = stream.rows[0]!.next_seq;
+
+  // Re-read the idempotency key behind both locks. A caller's earlier
+  // lock-free check can lose to a writer that committed while it waited.
+  const existing = await client.query<WrittenOutboxRow>(
+    `SELECT ${OUTBOX_WRITE_COLUMNS} FROM outbox
+      WHERE tenant_id = $1 AND device_id = $2 AND message_id = $3`,
+    [tenant, input.deviceId, input.messageId],
+  );
+  if (existing.rows[0] !== undefined) return { row: existing.rows[0], inserted: false };
+
+  const materialized = await input.materialize(Number(seq));
+  // The admission decision lives in this guard. A tenant without an
+  // entitlement compares against NULL and inserts nothing.
+  const inserted = await client.query<WrittenOutboxRow>(
+    `INSERT INTO outbox (${OUTBOX_WRITE_COLUMNS})
+     SELECT $1, $2, $3::bigint, $4, $5, $6, $7::bigint, 'pending', $8, $9::bigint
+      WHERE $10::boolean
+         OR (SELECT COALESCE(SUM(o.byte_size), 0) FROM outbox o WHERE o.tenant_id = $1)
+              + $7::bigint
+            <= (SELECT e.mailbox_limit_bytes FROM storage_entitlement e WHERE e.tenant_id = $1)
+     RETURNING ${OUTBOX_WRITE_COLUMNS}`,
+    [
+      tenant,
+      input.deviceId,
+      seq,
+      input.messageId,
+      materialized.body,
+      materialized.bodyHash,
+      materialized.byteSize,
+      input.now,
+      input.replaySourceSeq ?? null,
+      exempt,
+    ],
+  );
+  const row = inserted.rows[0];
+  if (row === undefined) throw await explainRefusal(client, tenant, materialized.byteSize);
+
+  await client.query(
+    `UPDATE device_stream SET next_seq = $3::bigint + 1
+      WHERE tenant_id = $1 AND device_id = $2`,
+    [tenant, input.deviceId, seq],
+  );
+  return { row, inserted: true };
+}
+
+/** The tenant's mailbox bytes: every retained row, in any state. */
+export async function readMailboxBytes(
+  queryable: Pick<PoolClient, 'query'>,
+  tenant: TenantId,
+): Promise<bigint> {
+  const used = await queryable.query<{ readonly bytes: bigint }>(
+    'SELECT COALESCE(SUM(byte_size), 0)::bigint AS bytes FROM outbox WHERE tenant_id = $1',
+    [tenant],
+  );
+  return used.rows[0]!.bytes;
+}
+
+/** Names the refusal. Runs inside the same locked transaction that refused. */
+async function explainRefusal(
+  client: PoolClient,
+  tenant: TenantId,
+  byteSize: bigint,
+): Promise<ByokCoreError> {
+  const entitlement = await client.query<{ readonly mailbox_limit_bytes: bigint }>(
+    'SELECT mailbox_limit_bytes FROM storage_entitlement WHERE tenant_id = $1',
+    [tenant],
+  );
+  const limit = entitlement.rows[0]?.mailbox_limit_bytes;
+  if (limit === undefined) {
+    return new ByokCoreError(
+      'storage_entitlement_missing',
+      'No storage entitlement has been issued for this tenant.',
+    );
+  }
+  const used = await readMailboxBytes(client, tenant);
+  return new ByokCoreError(
+    'storage_quota_exceeded',
+    `Mailbox would reach ${String(used + byteSize)} bytes, over the limit of ${String(limit)} bytes.`,
+  );
+}

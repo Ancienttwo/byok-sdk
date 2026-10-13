@@ -7,7 +7,6 @@
  */
 import { createHash } from 'node:crypto';
 import {
-  ByokCoreError,
   contentHash,
   tenantId,
   type Clock,
@@ -23,7 +22,7 @@ import {
   type R2BlobStoreOptions,
   type R2ObjectMaintenance,
 } from './stores/r2-blobs';
-import { allocateMailboxSequence } from './stores/core/mailbox-sequence';
+import { insertOutboxRow } from './stores/core/outbox-writer';
 
 const DEFAULT_BATCH_SIZE = 100;
 const MAX_BATCH_SIZE = 1000;
@@ -169,7 +168,6 @@ interface RetentionResultRow {
   readonly mailbox_deleted_count: bigint;
   readonly mailbox_expired_count: bigint;
   readonly mailbox_released_bytes: bigint;
-  readonly usage_accounted: bigint;
   readonly reservations_expired: bigint;
   readonly ttl_rows_deleted: bigint;
 }
@@ -389,7 +387,13 @@ export class PostgresCloudCleanup {
     };
   }
 
-  /** Clone an expired row to a new monotonic seq. The original remains evidence. */
+  /**
+   * Clone an expired row to a new monotonic seq. The original remains evidence.
+   *
+   * The clone is a `limited` mailbox append: it goes through the one outbox
+   * writer, so it is admitted against `mailboxLimitBytes` like any other new
+   * row and is ordered with live offers by the same locks.
+   */
   async replayDeadLetter(
     tenant: TenantId,
     input: DeadLetterReplayInput,
@@ -399,7 +403,6 @@ export class PostgresCloudCleanup {
     const client = await this.#pool.connect();
     let result: MailboxMessage | undefined;
     let rejection: Error | undefined;
-    let rollbackAllocation = false;
     try {
       await client.query('BEGIN');
       const originalResult = await client.query<OutboxRow>(
@@ -418,120 +421,31 @@ export class PostgresCloudCleanup {
             WHERE tenant_id = $1 AND device_id = $2 AND message_id = $3`,
           [tenant, input.deviceId, input.replayMessageId],
         );
-        const existing = existingResult.rows[0];
-        if (existing !== undefined) {
-          if (!replayMatches(existing, original)) {
-            rejection = new CloudCleanupError(
-              'cleanup_invalid_input',
-              `Replay id ${input.replayMessageId} already binds a different replay delivery.`,
-            );
-          } else {
-            result = toMailboxMessage(existing);
-          }
+        // A different dead-letter row, or a normal append, may race on the
+        // same operator-issued id. The writer re-reads the key behind its
+        // locks, so the loser resolves here instead of a raw unique violation.
+        const bound =
+          existingResult.rows[0] ??
+          (
+            await insertOutboxRow(client, tenant, {
+              deviceId: input.deviceId,
+              messageId: input.replayMessageId,
+              admission: 'limited',
+              now: this.#now(),
+              materialize: (seq) => materializeReplayBody(original, seq),
+              replaySourceSeq: original.seq,
+            })
+          ).row;
+        if (!replayMatches(bound, original)) {
+          rejection = new CloudCleanupError(
+            'cleanup_invalid_input',
+            `Replay id ${input.replayMessageId} already binds a different replay delivery.`,
+          );
         } else {
-          const entitlement = await client.query<{
-            readonly mailbox_limit_bytes: bigint;
-            readonly mailbox_bytes: bigint;
-          }>(
-            `SELECT e.mailbox_limit_bytes, u.mailbox_bytes
-               FROM storage_entitlement e
-               JOIN storage_usage u ON u.tenant_id = e.tenant_id
-              WHERE e.tenant_id = $1
-              FOR UPDATE OF e, u`,
-            [tenant],
-          );
-          const capacity = entitlement.rows[0];
-          // A different dead-letter row may race on the same operator-issued
-          // replay id. The usage lock above is the serialization point; read
-          // the idempotency key again after acquiring it so the loser returns
-          // the winner instead of surfacing a raw unique violation.
-          const serializedExisting = await client.query<OutboxRow>(
-            `SELECT ${OUTBOX_COLUMNS} FROM outbox
-              WHERE tenant_id = $1 AND device_id = $2 AND message_id = $3`,
-            [tenant, input.deviceId, input.replayMessageId],
-          );
-          const winner = serializedExisting.rows[0];
-          if (winner !== undefined) {
-            if (!replayMatches(winner, original)) {
-              rejection = new CloudCleanupError(
-                'cleanup_invalid_input',
-                `Replay id ${input.replayMessageId} already binds a different replay delivery.`,
-              );
-            } else {
-              result = toMailboxMessage(winner);
-            }
-          } else if (capacity === undefined) {
-            rejection = new CloudCleanupError(
-              'cleanup_policy_missing',
-              `Tenant ${tenant} has no storage entitlement/usage row.`,
-            );
-          } else {
-            // Hold the same per-device allocator lock as normal mailbox append
-            // until the rebound envelope row is inserted. This keeps replay
-            // commits ordered with live offers.
-            const seq = await allocateMailboxSequence(
-              client,
-              tenant,
-              input.deviceId,
-              this.#now(),
-            );
-            // Normal mailbox append uses this same device lock. Recheck after
-            // acquiring it so an append that won between the usage check and
-            // allocation resolves through typed idempotency rather than a raw
-            // unique violation. Roll back the unused allocation either way.
-            const afterAllocation = await client.query<OutboxRow>(
-              `SELECT ${OUTBOX_COLUMNS} FROM outbox
-                WHERE tenant_id = $1 AND device_id = $2 AND message_id = $3`,
-              [tenant, input.deviceId, input.replayMessageId],
-            );
-            const appendWinner = afterAllocation.rows[0];
-            if (appendWinner !== undefined) {
-              rollbackAllocation = true;
-              if (!replayMatches(appendWinner, original)) {
-                rejection = new CloudCleanupError(
-                  'cleanup_invalid_input',
-                  `Replay id ${input.replayMessageId} already binds a different replay delivery.`,
-                );
-              } else {
-                result = toMailboxMessage(appendWinner);
-              }
-            } else {
-              const rebound = materializeReplayBody(original, seq);
-              if (capacity.mailbox_bytes + rebound.byteSize > capacity.mailbox_limit_bytes) {
-                rejection = new ByokCoreError(
-                  'storage_quota_exceeded',
-                  `Replaying the dead letter would exceed tenant ${tenant}'s mailbox limit.`,
-                );
-              } else {
-                const inserted = await client.query<OutboxRow>(
-                  `INSERT INTO outbox (${OUTBOX_COLUMNS})
-                   VALUES ($1, $2, $3::bigint, $4, $5, $6, $7::bigint, 'pending', $8, $9)
-                   RETURNING ${OUTBOX_COLUMNS}`,
-                  [
-                    tenant,
-                    input.deviceId,
-                    seq,
-                    input.replayMessageId,
-                    rebound.body,
-                    rebound.bodyHash,
-                    rebound.byteSize,
-                    this.#now(),
-                    original.seq,
-                  ],
-                );
-                await client.query(
-                  `UPDATE storage_usage
-                      SET mailbox_bytes = mailbox_bytes + $2::bigint, updated_at = $3
-                    WHERE tenant_id = $1`,
-                  [tenant, rebound.byteSize, this.#now()],
-                );
-                result = toMailboxMessage(inserted.rows[0]!);
-              }
-            }
-          }
+          result = toMailboxMessage(bound);
         }
       }
-      if (rejection === undefined && !rollbackAllocation) await client.query('COMMIT');
+      if (rejection === undefined) await client.query('COMMIT');
       else await client.query('ROLLBACK');
     } catch (cause) {
       await client.query('ROLLBACK').catch(() => {});
@@ -543,65 +457,29 @@ export class PostgresCloudCleanup {
     return result!;
   }
 
-  /** Explicit operator discard. Automatic retention never deletes dead letters. */
+  /**
+   * Explicit operator discard. Automatic retention never deletes dead letters.
+   * Mailbox usage is the sum over retained rows, so deleting one is the whole
+   * operation.
+   */
   async discardDeadLetter(tenant: TenantId, ref: DeadLetterRef): Promise<MailboxMessage> {
     assertDeadLetterRef(ref);
-    const client = await this.#pool.connect();
-    let row: OutboxRow | undefined;
-    let rejection: Error | undefined;
-    try {
-      await client.query('BEGIN');
-      const existing = await client.query<OutboxRow>(
-        `SELECT ${OUTBOX_COLUMNS} FROM outbox
-          WHERE tenant_id = $1 AND device_id = $2 AND seq = $3::bigint
-            AND state = 'expired'
-          FOR UPDATE`,
-        [tenant, ref.deviceId, ref.seq],
-      );
-      const deadLetter = existing.rows[0];
-      const usage = await client.query<{ readonly mailbox_bytes: bigint }>(
-        'SELECT mailbox_bytes FROM storage_usage WHERE tenant_id = $1 FOR UPDATE',
-        [tenant],
-      );
-      if (deadLetter === undefined) {
-        rejection = deadLetterMissing(ref);
-      } else if (usage.rows[0] === undefined || usage.rows[0].mailbox_bytes < deadLetter.byte_size) {
-        rejection = new CloudCleanupError(
-          'cleanup_accounting_drift',
-          `Mailbox accounting cannot release dead letter ${ref.deviceId}/${String(ref.seq)}.`,
-        );
-      } else {
-        const removed = await client.query<OutboxRow>(
-          `DELETE FROM outbox
-            WHERE tenant_id = $1 AND device_id = $2 AND seq = $3::bigint
-              AND state = 'expired'
-            RETURNING ${OUTBOX_COLUMNS}`,
-          [tenant, ref.deviceId, ref.seq],
-        );
-        await client.query(
-          `UPDATE storage_usage
-              SET mailbox_bytes = mailbox_bytes - $2::bigint, updated_at = $3
-            WHERE tenant_id = $1`,
-          [tenant, deadLetter.byte_size, this.#now()],
-        );
-        row = removed.rows[0];
-      }
-      if (rejection === undefined) await client.query('COMMIT');
-      else await client.query('ROLLBACK');
-    } catch (cause) {
-      await client.query('ROLLBACK').catch(() => {});
-      throw cause;
-    } finally {
-      client.release();
-    }
-    if (rejection !== undefined) throw rejection;
-    return toMailboxMessage(row!);
+    const removed = await this.#pool.query<OutboxRow>(
+      `DELETE FROM outbox
+        WHERE tenant_id = $1 AND device_id = $2 AND seq = $3::bigint
+          AND state = 'expired'
+        RETURNING ${OUTBOX_COLUMNS}`,
+      [tenant, ref.deviceId, ref.seq],
+    );
+    const row = removed.rows[0];
+    if (row === undefined) throw deadLetterMissing(ref);
+    return toMailboxMessage(row);
   }
 
   /**
    * Explicit recovery operation: rebuild object accounting from committed
    * Postgres manifests. Reconciliation must run first; R2 LIST is never used as
-   * billing authority and inline/mailbox usage is left untouched.
+   * billing authority and inline usage is left untouched.
    */
   async rebuildObjectUsage(tenant: TenantId): Promise<ObjectUsageRebuildResult> {
     const client = await this.#pool.connect();
@@ -706,17 +584,23 @@ export class PostgresCloudCleanup {
   ): Promise<RetentionResultRow> {
     const ackedBefore = cutoff(this.#clock.now(), policy.mailboxAckedRetentionMs);
     const expireBefore = cutoff(this.#clock.now(), policy.mailboxUnackedRetentionMs);
-    const receiptBefore = cutoff(this.#clock.now(), policy.requestReceiptRetentionMs);
     const now = this.#now();
     try {
       await client.query('BEGIN');
+      // Mailbox usage is derived from the retained rows, so deleting acked
+      // rows releases their bytes by itself; `mailbox_released_bytes` is a
+      // report, not an accounting step.
+      //
+      // Request receipts are deliberately absent. Every SDK receipt family is
+      // either a task-identity fence or an agent request/completion record
+      // whose loss turns a retry into a mismatch or a re-execution; none is
+      // TTL-bound until the receipt classification (#412) names which
+      // prefixes may expire. Until then hosted cleanup deletes no receipt.
       const swept = await client.query<RetentionResultRow>(
         `WITH deleted AS (
            DELETE FROM outbox
             WHERE tenant_id = $1 AND state = 'acked' AND appended_at < $2
            RETURNING byte_size
-         ), released AS MATERIALIZED (
-           SELECT COALESCE(SUM(byte_size), 0)::bigint AS bytes FROM deleted
          ), expired AS (
            UPDATE outbox SET state = 'expired'
             WHERE tenant_id = $1 AND state = 'pending' AND appended_at < $3
@@ -734,14 +618,6 @@ export class PostgresCloudCleanup {
             WHERE tenant_id = $1
               AND (redeemed_at IS NOT NULL OR expires_at <= $4::timestamptz)
            RETURNING 1
-         ), receipts AS (
-           DELETE FROM device_request_receipts
-            WHERE tenant_id = $1 AND recorded_at < $5::timestamptz
-              -- Pairing completion is an immutable enrollment authority, not
-              -- a TTL-bound request receipt. Removing it would turn an exact
-              -- bearer-code retry into a new/failed enrollment after cleanup.
-              AND key NOT LIKE 'pairing-completion:v1:%'
-           RETURNING 1
          ), presence AS (
            DELETE FROM device_presence
             WHERE tenant_id = $1 AND expires_at <= $4
@@ -754,35 +630,20 @@ export class PostgresCloudCleanup {
            DELETE FROM approval_timeline_tail
             WHERE tenant_id = $1 AND expires_at <= $4
            RETURNING 1
-         ), accounted AS (
-           UPDATE storage_usage u
-              SET mailbox_bytes = u.mailbox_bytes - released.bytes, updated_at = $4
-             FROM released
-            WHERE u.tenant_id = $1 AND u.mailbox_bytes >= released.bytes
-           RETURNING released.bytes
          )
          SELECT (SELECT count(*) FROM deleted)::bigint AS mailbox_deleted_count,
                 (SELECT count(*) FROM expired)::bigint AS mailbox_expired_count,
-                (SELECT bytes FROM released)::bigint AS mailbox_released_bytes,
-                (SELECT count(*) FROM accounted)::bigint AS usage_accounted,
+                (SELECT COALESCE(SUM(byte_size), 0) FROM deleted)::bigint AS mailbox_released_bytes,
                 (SELECT count(*) FROM reservations)::bigint AS reservations_expired,
                 ((SELECT count(*) FROM nonces)
                  + (SELECT count(*) FROM pairing_codes)
-                 + (SELECT count(*) FROM receipts)
                  + (SELECT count(*) FROM presence)
                  + (SELECT count(*) FROM activity)
                  + (SELECT count(*) FROM approvals))::bigint AS ttl_rows_deleted`,
-        [tenant, ackedBefore, expireBefore, now, receiptBefore],
+        [tenant, ackedBefore, expireBefore, now],
       );
-      const result = swept.rows[0]!;
-      if (result.usage_accounted !== 1n) {
-        throw new CloudCleanupError(
-          'cleanup_accounting_drift',
-          `Mailbox accounting cannot release ${String(result.mailbox_released_bytes)} deleted bytes for tenant ${tenant}.`,
-        );
-      }
       await client.query('COMMIT');
-      return result;
+      return swept.rows[0]!;
     } catch (cause) {
       await client.query('ROLLBACK').catch(() => {});
       throw cause;
