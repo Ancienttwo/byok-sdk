@@ -1075,7 +1075,7 @@ export interface MachineInfo {
      */
     connected: boolean;
     lastSeen?: string;
-    /** Process-immutable Local Agent release from the current/last WS hello; omission means legacy/unknown. */
+    /** Process-immutable Local Agent release from the current/last `conn.hello`; omission means legacy/unknown. */
     clientVersion?: string;
     /** Runtimes detected on this device, as reported in its last `conn.hello` (M1: typed, replaces the old untyped `agents`). */
     runtimes?: RuntimeInfo[];
