@@ -1715,12 +1715,18 @@ path.
 
 ```
 GET /byok/events?cursor=N
-  Query    (EventsPollQuerySchema):    { cursor?, afterSeq? }
+  Query    (EventsPollQuerySchema):    { cursor?, afterSeq?, noHold?: 1 }
   Response (EventsPollResponseSchema): { events: Envelope[], cursor, capabilities?: string[] }
 ```
 
 Authed (bearer access token); holds the request open for ~50 seconds waiting
-for new events before returning an empty `events` array. `cursor` in the query
+for new events before returning an empty `events` array. The exception is the
+settle poll: the daemon's first poll after each (re)connect sends `noHold=1`
+(`EVENTS_POLL_NO_HOLD_PARAM`), and the server makes exactly one read pass under
+every rule below (cursor validation, replay floor, delivery recording) and
+answers at once with `capabilities`, empty page or not. Any other `noHold`
+value is `400`. Every later poll holds. A server that predates the flag
+ignores it and holds, so the daemon settles only after that hold. `cursor` in the query
 is the last reliably processed sequence and is the sole durable ACK.
 `afterSeq` selects the next read position without acknowledging it; omission
 reads from the ACK. The response `cursor` is a navigation position only.
