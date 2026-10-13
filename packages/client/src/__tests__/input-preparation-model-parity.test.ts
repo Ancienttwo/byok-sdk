@@ -261,7 +261,7 @@ interface ProjectedProvider {
 }
 
 function projected(): { providerId: string; provider: ProjectedProvider; entry: Record<string, unknown> } {
-  const projection = buildPiProviderProjection(PROFILE) as { providers: Record<string, ProjectedProvider> };
+  const projection = buildPiProviderProjection(PROFILE, 'pi-prepared') as { providers: Record<string, ProjectedProvider> };
   const providerId = piProjectionProviderId(PROFILE.profile_ref);
   const provider = projection.providers[providerId]!;
   return { providerId, provider, entry: provider.models[0]! };

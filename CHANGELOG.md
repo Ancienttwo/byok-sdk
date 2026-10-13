@@ -52,6 +52,22 @@
 - **Tests (client)** — the dist closure guard allows the `@byok-sdk/protocol`
   main entry (which carries zod) per entry instead of for every entry; the
   adapters bundle may import only schema-free subpaths. Refs #384, #398.
+- **Security (keys, client)** — the pi-rpc BYOK lane no longer puts the
+  provider key in the Pi host's environment, where Pi's built-in bash tool
+  could print it into a `tool_result` (#385). The keys launcher hands the key
+  to the rpc host over the durable lane's private IPC channel, and the host
+  gives it to Pi only in memory (`ModelRuntime.setRuntimeApiKey`). The rpc
+  launch config moves to `byok.pi.rpc-launch` version 5 with
+  `credentialSource`. Only the prepared host still receives
+  `PI_PROVIDER_API_KEY`. Pi subagents are unavailable in the BYOK pi-rpc lane:
+  a subagent child refuses with `byok_subagent_credential_unavailable` before
+  any request, because the vendored subagents extension starts children with a
+  copy of the parent environment and no private channel for the key.
+- **Breaking (keys)** — `buildPiProviderProjection(profile, runtimeEntry)` now
+  requires `runtimeEntry`. The former default `'pi-rpc'` now projects the IPC
+  marker `byok:rpc-ipc` for a keyed profile instead of `$PI_PROVIDER_API_KEY`,
+  so a caller that relied on the default must state the entry it projects for
+  (`'pi-prepared'` keeps the environment reference).
 
 ## 0.26.1 / @byok-sdk/keys 0.11.1 (published, 2026-10-12)
 

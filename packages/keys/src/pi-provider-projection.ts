@@ -4,6 +4,13 @@ import { ByokKeysError } from './errors';
 import { modelApiUrl } from './http';
 import { PiModelConfigSchema } from './pi-model-config';
 
+/**
+ * The environment name the launcher delivers the key under to a prepared host,
+ * and the `$` reference that host's projection uses. Only the prepared entry
+ * receives its key this way. The rpc and durable entries run model-callable
+ * tools that inherit their process environment, so the launcher hands them
+ * the key over a private IPC channel instead.
+ */
 export const PI_PROJECTED_KEY_ENV = 'PI_PROVIDER_API_KEY';
 
 /**
@@ -48,7 +55,7 @@ export function piProjectionProviderId(profileRef: string): string {
  * declared local configuration is the only authority; nothing is inferred from
  * the model name or base URL.
  */
-export function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry = 'pi-rpc'): object {
+export function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry): object {
   const { thinkingLevel: _, ...modelSettings } = requirePiModelConfig(profile);
   const projectedProviderId = piProjectionProviderId(profile.profile_ref);
   return {
@@ -100,13 +107,22 @@ function piAnthropicBaseUrl(profile: ModelProviderProfile): string {
 }
 
 /**
+ * The non-secret marker an IPC entry's projection carries in place of a key.
+ * The rpc host and the durable worker receive the key from the launcher over
+ * a private IPC channel and give it to Pi only in memory, so no environment
+ * name a model-callable tool inherits ever holds it. Each host checks its own
+ * marker against what the launcher delivered.
+ */
+const PI_IPC_KEY_MARKERS = Object.freeze({ 'pi-rpc': 'byok:rpc-ipc', 'pi-durable': 'byok:durable-ipc' } as const);
+
+/**
  * The projected key reference. Only the rpc entry serves a keyless profile:
  * the prepared host and the durable worker both require a launcher-delivered
  * credential, so a keyless profile fails here, before a child exists.
  */
 function piApiKey(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry): string {
   if (profile.auth_mode !== 'none') {
-    return runtimeEntry === 'pi-durable' ? 'byok:durable-ipc' : `$${PI_PROJECTED_KEY_ENV}`;
+    return runtimeEntry === 'pi-prepared' ? `$${PI_PROJECTED_KEY_ENV}` : PI_IPC_KEY_MARKERS[runtimeEntry];
   }
   if (runtimeEntry !== 'pi-rpc') {
     throw new ByokKeysError(

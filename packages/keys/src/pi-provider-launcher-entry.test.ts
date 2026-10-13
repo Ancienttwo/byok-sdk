@@ -19,7 +19,9 @@ import { isSqliteAvailable } from './sqlite-support';
 /**
  * The public launcher entry (#323) and the keyless launch (#325), through a
  * real on-disk profile database and a real child process. The child stands in
- * for Pi: it records the key it received and the projection it was given.
+ * for the rpc host: it records the key it found in its environment, the key it
+ * received over the launcher's private IPC channel (#385), and the projection
+ * it was given.
  */
 
 const HOST_PREFIX = 'aiphabee-b64-v1:';
@@ -30,8 +32,15 @@ const CHILD_SOURCE = `
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 const out = process.argv[process.argv.indexOf('--config') + 1];
+const configDigest = process.argv.find((arg) => arg.startsWith('--config-digest=')).slice('--config-digest='.length);
+const receipt = await new Promise((resolve) => {
+  process.once('message', resolve);
+  process.send({ type: 'byok.pi.rpc.credential-request', configDigest });
+});
+process.disconnect();
 writeFileSync(out, JSON.stringify({
-  key: process.env.${PI_PROJECTED_KEY_ENV} ?? null,
+  envKey: process.env.${PI_PROJECTED_KEY_ENV} ?? null,
+  receipt,
   models: JSON.parse(readFileSync(path.join(process.env.PI_CODING_AGENT_DIR, 'models.json'), 'utf8')),
 }));
 process.exit(${CHILD_EXIT_CODE});
@@ -74,7 +83,8 @@ async function fixture(overrides: Partial<ModelProviderProfileInput> = {}) {
   ]);
   const validate = (extra: string[] = []) => parsePiProviderLauncherOptions([...base, ...extra, '--validate-only', 'true']);
   const childOutput = async () => JSON.parse(await fs.readFile(output, 'utf8')) as {
-    key: string | null;
+    envKey: string | null;
+    receipt: { type: string; configDigest: string; secret: string | null };
     models: { providers: Record<string, { apiKey?: string; authHeader?: boolean }> };
   };
   return { root, profile, profileDb, projection, launch, validate, childOutput };
@@ -104,7 +114,10 @@ describe.skipIf(!isSqliteAvailable())('runPiProviderLauncher with a host-built s
     const createSecretStore = vi.fn(() => host.store);
     await expect(runPiProviderLauncher(f.launch(), { createSecretStore })).resolves.toBe(CHILD_EXIT_CODE);
     expect(createSecretStore).toHaveBeenCalledTimes(1);
-    expect((await f.childOutput()).key).toBe(CANARY);
+    const output = await f.childOutput();
+    expect(output.envKey).toBeNull();
+    expect(output.receipt).toEqual({ type: 'byok.pi.rpc.credential', configDigest: 'a'.repeat(64), secret: CANARY });
+    expect(JSON.stringify(output.models)).not.toContain(CANARY);
     expect(await fs.readdir(f.projection)).toEqual([]);
   });
 
@@ -157,7 +170,8 @@ describe.skipIf(!isSqliteAvailable())('keyless (auth_mode none) launch', () => {
     const createSecretStore = vi.fn(() => hostKeychain(HOST_PREFIX).store);
     await expect(runPiProviderLauncher(f.launch(), { createSecretStore })).resolves.toBe(CHILD_EXIT_CODE);
     const output = await f.childOutput();
-    expect(output.key).toBeNull();
+    expect(output.envKey).toBeNull();
+    expect(output.receipt).toEqual({ type: 'byok.pi.rpc.credential', configDigest: 'a'.repeat(64), secret: null });
     expect(output.models.providers['byok-sdk-local']).toMatchObject({ apiKey: PI_AUTH_NONE_API_KEY });
     expect(output.models.providers['byok-sdk-local']?.authHeader).toBeUndefined();
     expect(createSecretStore).not.toHaveBeenCalled();

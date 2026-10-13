@@ -356,8 +356,9 @@ export function projectKeysPiInheritedEnvironment(
 
 /**
  * The Pi child environment: the inherited names (with `PI_PACKAGE_DIR`), then
- * the two Pi directories this launch owns, then the projected key. No ambient
- * agent or session directory survives.
+ * the two Pi directories this launch owns, then the projected key when one is
+ * given. Only a prepared host is given one; the rpc and durable entries take
+ * theirs over IPC. No ambient agent or session directory survives.
  */
 export function buildPiProviderChildEnvironment(options: {
   ambient: NodeJS.ProcessEnv;
@@ -487,12 +488,17 @@ export async function startPiProvider(
   if (options.runtimeEntry === 'pi-durable' && process.platform === 'win32') throw new Error('durable Pi is unavailable on Windows until parent-death Job Object recovery is validated');
   const runtimeEntry = options.runtimeEntry;
   const durable = runtimeEntry === 'pi-durable';
+  // The rpc host and the durable worker run model-callable tools that inherit
+  // their process environment, so their key travels over a private IPC
+  // channel. Only the prepared host, which runs no native tool, takes it from
+  // its environment.
+  const ipcLane = runtimeEntry === 'pi-prepared' ? undefined : durable ? 'durable' : 'rpc';
   const configDigest = options.piConfigDigest!;
   const projection = buildPiProviderProjection(profile, runtimeEntry);
-  // The ONE place the two child grammars diverge. Everything after it —
+  // The ONE place the child grammars diverge. Everything after it —
   // projection write, layout assertion, secret resolution and the spawn
-  // itself — is shared, because custody does not depend on which entry
-  // consumes the projected provider.
+  // itself — is shared; only the key's delivery channel (`ipcLane`) depends
+  // on which entry consumes the projected provider.
   const delegated = (runtimeEntry === 'pi-prepared' || durable)
     ? buildPiPreparedArgs(options.piArgs)
     : buildPiProviderArgs(profile, options.piArgs);
@@ -520,22 +526,22 @@ export async function startPiProvider(
       profile,
       createSecretStore: dependencies.createSecretStore,
     });
-    if (!durable && secret !== undefined) env[PI_PROJECTED_KEY_ENV] = secret;
+    if (ipcLane === undefined && secret !== undefined) env[PI_PROJECTED_KEY_ENV] = secret;
     const childArgs = [...(options.piEntry === undefined ? [] : [options.piEntry]), ...options.piFixedArgs, `--config-digest=${configDigest}`, ...delegated];
     const spawnChild = dependencies.spawn ?? spawn;
     const child = spawnChild(options.piBin, childArgs, { env, cwd: piCwd,
-      stdio: durable ? ['inherit', 'inherit', 'inherit', 'ipc'] : 'inherit',
-      ...(durable ? { serialization: 'json' as const } : {}),
+      stdio: ipcLane === undefined ? 'inherit' : ['inherit', 'inherit', 'inherit', 'ipc'],
+      ...(ipcLane === undefined ? {} : { serialization: 'json' as const }),
     });
-    if (durable) {
-      // Private launcher->worker channel. stdio belongs exclusively to the blind daemon.
+    if (ipcLane !== undefined) {
+      // Private launcher->host channel. stdio belongs exclusively to the blind daemon.
       child.once('message', message => {
         if (!message || typeof message !== 'object' || Array.isArray(message)
           || Object.keys(message).length !== 2
-          || (message as {type?: unknown}).type !== 'byok.pi.durable.credential-request'
+          || (message as {type?: unknown}).type !== `byok.pi.${ipcLane}.credential-request`
           || (message as {configDigest?: unknown}).configDigest !== configDigest
           || !child.send || !child.connected) { child.kill(); return; }
-        child.send({ type: 'byok.pi.durable.credential', configDigest, secret: secret ?? null }, error => { if (error) child.kill(); });
+        child.send({ type: `byok.pi.${ipcLane}.credential`, configDigest, secret: secret ?? null }, error => { if (error) child.kill(); });
       });
     }
     return { child, cleanup };

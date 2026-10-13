@@ -59,7 +59,7 @@ type Projection = {
 };
 
 function countedModel(): InputPreparationModelV1 {
-  const provider = (buildPiProviderProjection(profile) as Projection).providers[PROVIDER_ID]!;
+  const provider = (buildPiProviderProjection(profile, 'pi-prepared') as Projection).providers[PROVIDER_ID]!;
   const entry = provider.models[0]!;
   return {
     id: entry.id as string,
@@ -102,7 +102,7 @@ describe('the consent gate’s compared-field list', () => {
   it('names the same launcher-delivered credential variable the keys projection references', () => {
     expect(PI_PROJECTED_KEY_ENV).toBe('PI_PROVIDER_API_KEY');
     expect(CLIENT_PI_PROJECTED_KEY_ENV).toBe(PI_PROJECTED_KEY_ENV);
-    const provider = (buildPiProviderProjection(profile) as Projection)
+    const provider = (buildPiProviderProjection(profile, 'pi-prepared') as Projection)
       .providers[PROVIDER_ID] as unknown as { apiKey: string };
     expect(provider.apiKey).toBe(`$${PI_PROJECTED_KEY_ENV}`);
   });
@@ -130,7 +130,7 @@ describe('provider resolution in the installed fork', () => {
     // have made a `byok-sdk-<ref>` model resolvable.
     await expect(rt.getAuth(model as never)).resolves.toBeUndefined();
 
-    const provider = (buildPiProviderProjection(profile) as Projection).providers[PROVIDER_ID]!;
+    const provider = (buildPiProviderProjection(profile, 'pi-prepared') as Projection).providers[PROVIDER_ID]!;
     rt.registerProvider(PROVIDER_ID, provider as never);
     const resolved = await rt.getAuth(model as never) as
       { auth: { apiKey?: string; baseUrl?: string; headers?: Record<string, string> } } | undefined;
@@ -199,7 +199,7 @@ describe('provider resolution in the installed fork', () => {
         authPath: path.join(dir, 'auth.json'), modelsPath: null,
         allowModelNetwork: false, refreshOnCreate: false,
       });
-      const provider = (buildPiProviderProjection(profile) as Projection).providers[PROVIDER_ID]!;
+      const provider = (buildPiProviderProjection(profile, 'pi-prepared') as Projection).providers[PROVIDER_ID]!;
       expect(JSON.stringify(provider)).not.toContain(PROBE_SECRET);
       rt.registerProvider(PROVIDER_ID, provider as never);
       // `registerProvider` ends with a floating `refresh({allowNetwork:false})`;

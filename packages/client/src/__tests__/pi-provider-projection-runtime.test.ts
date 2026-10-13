@@ -19,9 +19,16 @@ import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
  * as the launcher writes it, with one real request to a loopback provider.
  * This proves what Pi itself sends for the projected URL and key; the keys
  * suite proves only the projection bytes.
+ *
+ * The rpc entry's key never enters the environment (#385): the rpc host hands
+ * the launcher-delivered key to Pi's in-memory overlay with
+ * `setRuntimeApiKey`, exactly as `runPiSessionRuntime` does. The environment
+ * variable is stubbed with a different value so a request that read it would
+ * be caught.
  */
 
 const SECRET = 'sk-projection-runtime-0001';
+const ENV_DECOY = 'sk-projection-env-decoy-0002';
 const dirs: string[] = [];
 const servers: Server[] = [];
 afterEach(async () => {
@@ -78,7 +85,7 @@ async function provider(reply: (res: ServerResponse) => void): Promise<{ port: n
 }
 
 /** Write the projection where the launcher writes it, then send one prompt through Pi. */
-async function completeThroughPi(input: Partial<ModelProviderProfileInput>) {
+async function completeThroughPi(input: Partial<ModelProviderProfileInput>, runtimeKey?: string) {
   const profile = parseModelProviderProfile({
     created_at: '2026-10-09T00:00:00.000Z', updated_at: '2026-10-09T00:00:00.000Z',
     pi_model: { ...PI_MODEL_FIXTURE, reasoning: false, thinkingLevel: 'off' },
@@ -92,6 +99,10 @@ async function completeThroughPi(input: Partial<ModelProviderProfileInput>) {
   const runtime = await ModelRuntime.create({
     authPath: path.join(dir, 'auth.json'), modelsPath, allowModelNetwork: false, refreshOnCreate: false,
   });
+  if (runtimeKey !== undefined) {
+    await runtime.setRuntimeApiKey('byok-sdk-probe', runtimeKey);
+    expect(runtime.getProviderAuthStatus('byok-sdk-probe').source).toBe('runtime');
+  }
   const model = runtime.getModel('byok-sdk-probe', profile.model);
   if (model === undefined) throw new Error('projected model was not loaded by Pi');
   return runtime.complete(model, { messages: [{ role: 'user', content: 'ping', timestamp: 0 }] });
@@ -106,14 +117,28 @@ const text = (message: { content: Array<{ type: string; text?: string }> }) =>
 describe('keys Pi projection through the pinned Pi model runtime', () => {
   it('sends an Anthropic-dialect profile to the single /v1/messages endpoint the keys client uses', async () => {
     const server = await provider(anthropicReply);
-    vi.stubEnv(PI_PROJECTED_KEY_ENV, SECRET);
+    vi.stubEnv(PI_PROJECTED_KEY_ENV, ENV_DECOY);
     const reply = await completeThroughPi({
       adapter: 'anthropic', auth_mode: 'x_api_key', base_url: `http://127.0.0.1:${server.port}/v1`, model: 'messages-model',
-    });
+    }, SECRET);
     expect(reply.stopReason, reply.errorMessage).toBe('stop');
     expect(text(reply)).toBe('pong');
     expect(requests(server.seen)).toEqual(['POST /v1/messages']);
     expect(server.seen[0]!.headers['x-api-key']).toBe(SECRET);
+    expect(JSON.stringify(server.seen)).not.toContain(ENV_DECOY);
+  });
+
+  it('authenticates a bearer profile with the in-memory key and never sends the IPC marker or the environment', async () => {
+    const server = await provider(openAiReply);
+    vi.stubEnv(PI_PROJECTED_KEY_ENV, ENV_DECOY);
+    const reply = await completeThroughPi({
+      adapter: 'openai_compatible', auth_mode: 'bearer', base_url: `http://127.0.0.1:${server.port}/v1`, model: 'local-model',
+    }, SECRET);
+    expect(reply.stopReason, reply.errorMessage).toBe('stop');
+    expect(requests(server.seen)).toEqual(['POST /v1/chat/completions']);
+    expect(server.seen[0]!.headers.authorization).toBe(`Bearer ${SECRET}`);
+    expect(JSON.stringify(server.seen)).not.toContain(ENV_DECOY);
+    expect(JSON.stringify(server.seen)).not.toContain('byok:rpc-ipc');
   });
 
   it('runs a keyless (auth_mode none) profile with the fixed non-secret placeholder', async () => {

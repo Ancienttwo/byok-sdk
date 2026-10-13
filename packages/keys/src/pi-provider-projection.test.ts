@@ -66,7 +66,8 @@ describe('buildPiProviderProjection', () => {
       profile_ref: 'openai',
       provider_kind: 'openai',
     });
-    const projection = buildPiProviderProjection(profile);
+    // The `$PI_PROVIDER_API_KEY` reference is the prepared entry's alone (#385).
+    const projection = buildPiProviderProjection(profile, 'pi-prepared');
     expect(projection).toEqual({
       providers: {
         'byok-sdk-openai': {
@@ -96,7 +97,7 @@ describe('buildPiProviderProjection', () => {
       profile_ref: 'anthropic',
       provider_kind: 'anthropic',
     });
-    expect(buildPiProviderProjection(profile)).toEqual({
+    expect(buildPiProviderProjection(profile, 'pi-prepared')).toEqual({
       providers: {
         'byok-sdk-anthropic': {
           baseUrl: 'https://api.anthropic.com',
@@ -110,7 +111,7 @@ describe('buildPiProviderProjection', () => {
 
   /** Pi's Anthropic SDK requests `${baseUrl}/v1/messages`; the keys client requests `modelApiUrl(base_url, 'messages')`. */
   const piAnthropicEndpoint = (profile: ReturnType<typeof parseModelProviderProfile>) => {
-    const projection = buildPiProviderProjection(profile) as { providers: Record<string, { baseUrl: string }> };
+    const projection = buildPiProviderProjection(profile, 'pi-rpc') as { providers: Record<string, { baseUrl: string }> };
     return `${projection.providers[`byok-sdk-${profile.profile_ref}`]!.baseUrl}/v1/messages`;
   };
   const anthropicProfile = (provider_kind: string, base_url: string) => parseModelProviderProfile({
@@ -141,7 +142,7 @@ describe('buildPiProviderProjection', () => {
   it.each(['https://gateway.example/anthropic', 'https://api.anthropic.com', 'https://gateway.example/v2'])(
     'refuses a custom Anthropic base_url %s that Pi cannot reach exactly',
     (baseUrl) => {
-      expect(() => buildPiProviderProjection(anthropicProfile('custom', baseUrl)))
+      expect(() => buildPiProviderProjection(anthropicProfile('custom', baseUrl), 'pi-rpc'))
         .toThrow(expect.objectContaining({ code: 'PROVIDER_URL_INVALID' }));
     },
   );
@@ -158,6 +159,22 @@ describe('buildPiProviderProjection', () => {
         },
       },
     });
+  });
+
+  // #385: the rpc host and the durable worker run model-callable tools that
+  // copy their process environment, so their projection names no environment
+  // variable; the launcher delivers their key over private IPC.
+  it.each([
+    ['pi-rpc', 'byok:rpc-ipc'],
+    ['pi-durable', 'byok:durable-ipc'],
+    ['pi-prepared', `$${PI_PROJECTED_KEY_ENV}`],
+  ] as const)('projects the %s key channel as %s for a keyed profile', (entry, apiKey) => {
+    const keyed = parseModelProviderProfile({ ...timestamps, pi_model: PI_MODEL_FIXTURE, adapter: 'openai_compatible',
+      auth_mode: 'bearer', base_url: 'https://api.openai.com/v1', capabilities: [], display_name: 'GPT', enabled: true,
+      kind: 'model', model: 'gpt-5.2', profile_ref: 'openai', provider_kind: 'openai' });
+    const provider = (buildPiProviderProjection(keyed, entry) as { providers: Record<string, { apiKey: string }> }).providers['byok-sdk-openai']!;
+    expect(provider.apiKey).toBe(apiKey);
+    if (entry !== 'pi-prepared') expect(JSON.stringify(provider)).not.toContain(PI_PROJECTED_KEY_ENV);
   });
 
   it.each(['pi-prepared', 'pi-durable'] as const)('refuses a keyless profile for the %s entry, which requires a credential', (entry) => {
@@ -182,6 +199,7 @@ describe('buildPiProviderProjection', () => {
           profile_ref,
           provider_kind: 'custom',
         }),
+        'pi-rpc',
       ) as { providers: Record<string, { models: Array<{ input: string[] }> }> };
 
     const primary = build('openrouter-primary', ['image-input']);

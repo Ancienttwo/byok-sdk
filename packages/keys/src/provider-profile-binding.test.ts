@@ -35,7 +35,7 @@ describe('Agent-scoped provider profile binding', () => {
       provider_kind: 'custom',
       updated_at: '2026-08-26T00:00:00.000Z',
     });
-    const projection = keys.buildPiProviderProjection(profile) as {
+    const projection = keys.buildPiProviderProjection(profile, 'pi-rpc') as {
       providers: Record<string, { models: Array<{ input?: string[] }> }>;
     };
 

@@ -29,6 +29,12 @@ export async function runPiSessionRuntime(options: {
   provider?: string; model?: string;
   thinking?: CreateAgentSessionOptions['thinkingLevel'];
   tools?: string[]; excludeTools?: string[]; noTools?: 'all' | 'builtin';
+  /**
+   * A launcher-delivered key, handed to Pi only in memory. It lives in the
+   * model runtime's non-persistent overlay, never in this process's
+   * environment, so no tool shell this session spawns can inherit it.
+   */
+  providerApiKey?: { readonly provider: string; readonly apiKey: string };
   resourceLoaderOptions: NonNullable<Parameters<typeof createAgentSessionServices>[0]>['resourceLoaderOptions'];
   /** The CLI RPC contract permits no-model startup; daemon admission does not. */
   initialModel: 'required' | 'on-prompt';
@@ -51,6 +57,14 @@ export async function runPiSessionRuntime(options: {
       ...services.resourceLoader.getExtensions().errors.map(({ path, error }) => `${path}: ${error}`),
     ];
     if (errors.length > 0) options.reject(errors.join('\n'));
+    if (options.providerApiKey !== undefined) {
+      const { provider, apiKey } = options.providerApiKey;
+      // A fixed refusal: a foreign error from this call may carry the key.
+      const registered = await services.modelRuntime.setRuntimeApiKey(provider, apiKey).then(() => true, () => false);
+      if (!registered || services.modelRuntime.getProviderAuthStatus(provider).source !== 'runtime') {
+        options.reject('launcher provider key could not be registered in memory');
+      }
+    }
     const resolved = options.model === undefined ? undefined : resolveCliModel({
       cliProvider: options.provider, cliModel: options.model, cliThinking: options.thinking, modelRuntime: services.modelRuntime,
     });

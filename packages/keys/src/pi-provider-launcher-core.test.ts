@@ -391,25 +391,52 @@ describe('committed Pi spawn boundary', () => {
       expect(kill).not.toHaveBeenCalled(); await launched.cleanup();
     } finally { await fs.rm(f.root,{recursive:true,force:true}); }
   });
-  it('injects exactly one secret after layout checks and spawns the requested argv/cwd', async () => {
+  // #385: the rpc host runs Pi's own bash tool, which copies process.env, so
+  // its key travels over the same private IPC channel as the durable worker's.
+  it('reads exactly one secret after layout checks, keeps it out of the rpc environment, and spawns the requested argv/cwd', async () => {
     const f = await fixture();
     try {
       const order: string[] = [];
       const read = f.store.get.bind(f.store);
       vi.spyOn(f.store, 'get').mockImplementation(async (name) => { order.push('secret'); return read(name); });
-      const spawn = vi.fn(() => {order.push('spawn'); return new ChildProcess();});
-      const launched = await startPiProvider(f.provider, f.options, {ambient:{PATH:'/usr/bin', OPENAI_API_KEY:'ambient-secret'}, createSecretStore:() => f.store, spawn, profiles:f.profiles});
+      const child = new ChildProcess(); const send = vi.fn((_frame: unknown) => true); const kill = vi.spyOn(child,'kill').mockReturnValue(true);
+      Object.assign(child, { connected: true, send });
+      const spawn = vi.fn(() => {order.push('spawn'); return child;});
+      const launched = await startPiProvider(f.provider, f.options, {ambient:{PATH:'/usr/bin', OPENAI_API_KEY:'ambient-secret', PI_PROVIDER_API_KEY:'ambient-key'}, createSecretStore:() => f.store, spawn, profiles:f.profiles});
       expect(order).toEqual(['secret','spawn']);
-      const [command, args, spawnOptions] = spawn.mock.calls[0] as unknown as [string,string[],{cwd:string;env:Record<string,string>}];
+      const [command, args, spawnOptions] = spawn.mock.calls[0] as unknown as [string,string[],{cwd:string;env:Record<string,string>;stdio:unknown;serialization:unknown}];
       expect(command).toBe(f.launch.command);
       expect(args.slice(0,2)).toEqual([f.launch.entry,`--config-digest=${'a'.repeat(64)}`]);
       expect(spawnOptions.cwd).toBe(f.launch.cwd);
-      expect(spawnOptions.env).toEqual({PATH:'/usr/bin', PI_CODING_AGENT_DIR:f.projection, PI_CODING_AGENT_SESSION_DIR:f.sessions, PI_PROVIDER_API_KEY:CANARY});
+      expect(spawnOptions.env).toEqual({PATH:'/usr/bin', PI_CODING_AGENT_DIR:f.projection, PI_CODING_AGENT_SESSION_DIR:f.sessions});
+      expect(spawnOptions.stdio).toEqual(['inherit','inherit','inherit','ipc']);
+      expect(spawnOptions.serialization).toBe('json');
+      expect(send).not.toHaveBeenCalled();
+      child.emit('message', { type:'byok.pi.rpc.credential-request', configDigest:'a'.repeat(64) });
+      expect(send.mock.calls[0]![0]).toEqual({ type:'byok.pi.rpc.credential', configDigest:'a'.repeat(64), secret:CANARY });
+      child.emit('message', { type:'byok.pi.rpc.credential-request', configDigest:'a'.repeat(64) }); expect(send).toHaveBeenCalledTimes(1);
+      expect(kill).not.toHaveBeenCalled();
       expect(JSON.stringify(args)).not.toContain(CANARY);
       expect(JSON.stringify(f.options)).not.toContain(CANARY);
       expect(await fs.readFile(path.join(f.projection,'models.json'),'utf8')).not.toContain(CANARY);
       await launched.cleanup();
       expect(await fs.readdir(f.projection)).toEqual([]);
+    } finally { await fs.rm(f.root,{recursive:true,force:true}); }
+  });
+
+  it.each([
+    ['another lane', { type:'byok.pi.durable.credential-request', configDigest:'a'.repeat(64) }],
+    ['another digest', { type:'byok.pi.rpc.credential-request', configDigest:'b'.repeat(64) }],
+    ['extra fields', { type:'byok.pi.rpc.credential-request', configDigest:'a'.repeat(64), secret:'x' }],
+  ])('kills the rpc child instead of answering a credential request for %s', async (_name, request) => {
+    const f = await fixture();
+    try {
+      const child = new ChildProcess(); const send = vi.fn((_frame: unknown) => true); const kill = vi.spyOn(child,'kill').mockReturnValue(true);
+      Object.assign(child, { connected: true, send });
+      const launched = await startPiProvider(f.provider, f.options, {ambient:{}, createSecretStore:() => f.store, spawn:() => child, profiles:f.profiles});
+      child.emit('message', request);
+      expect(send).not.toHaveBeenCalled(); expect(kill).toHaveBeenCalledOnce();
+      await launched.cleanup();
     } finally { await fs.rm(f.root,{recursive:true,force:true}); }
   });
 
@@ -532,7 +559,7 @@ describe('the prepared runtime entry spawn', () => {
       expect(JSON.stringify(args)).not.toContain(CANARY);
       expect(spawnOptions.env.PI_PROVIDER_API_KEY).toBe(CANARY);
       const written = JSON.parse(await fs.readFile(path.join(projection, 'models.json'), 'utf8')) as Record<string, unknown>;
-      expect(written).toEqual(buildPiProviderProjection(provider));
+      expect(written).toEqual(buildPiProviderProjection(provider, 'pi-prepared'));
       expect(JSON.stringify(written)).not.toContain(CANARY);
       await launched.cleanup();
       expect(await fs.readdir(projection)).toEqual([]);

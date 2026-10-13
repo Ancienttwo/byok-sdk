@@ -1,6 +1,9 @@
 import { extractPiConfigDigest, readPiHostConfig } from '../adapters/pi/runtime-host-binding';
-import { isAbsolute, resolve } from 'node:path';
-import type { CreateAgentSessionOptions } from '@earendil-works/pi-coding-agent';
+import { readFileSync } from 'node:fs';
+import { isAbsolute, join, resolve } from 'node:path';
+import { getAgentDir, type CreateAgentSessionOptions } from '@earendil-works/pi-coding-agent';
+import { PI_RPC_IPC_KEY_MARKER, receiveLauncherCredential } from '../adapters/pi/launcher-credential';
+import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment';
 import { runPiSessionRuntime } from './pi-session-runtime';
 export { openPiRpcSession } from './pi-session-runtime';
 import { webExtension, subagentsExtension } from './pi-extension-factories.js';
@@ -8,9 +11,17 @@ import { bundledAssetRoot, verifyTodoLocaleAssets } from '../adapters/pi/todo-lo
 import { createByokMcpExtension } from '../adapters/pi/mcp-extension';
 import { parseTaskScopedMcpConfig, type TaskScopedMcpConfig } from '../adapters/pi/mcp-server-pool';
 
+const CREDENTIAL_SOURCES = ['pi-auth-store', 'keys-profile'] as const;
+
 export interface PiRpcHostConfig {
   readonly format: 'byok.pi.rpc-launch';
-  readonly version: 4;
+  readonly version: 5;
+  /**
+   * `keys-profile`: the keys launcher parents this host, and the provider key
+   * arrives over its private IPC channel. `pi-auth-store`: the device's own
+   * Pi auth store is the credential, and no custody channel may exist.
+   */
+  readonly credentialSource: (typeof CREDENTIAL_SOURCES)[number];
   /** The session cwd. */
   readonly cwd: string;
   readonly mcp: TaskScopedMcpConfig;
@@ -39,16 +50,65 @@ function failUsage(message: string): never {
 export function parsePiRpcHostConfig(value: unknown): PiRpcHostConfig {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('config must be an object');
   const raw = value as Record<string, unknown>;
-  const keys = ['format', 'version', 'cwd', 'mcp'];
+  const keys = ['format', 'version', 'credentialSource', 'cwd', 'mcp'];
   if (Object.keys(raw).some((key) => !keys.includes(key)) || keys.some((key) => !(key in raw))) {
-    fail('config must contain exactly format, version, cwd, mcp');
+    fail('config must contain exactly format, version, credentialSource, cwd, mcp');
   }
-  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 4) fail('unsupported config format/version');
+  if (raw.format !== 'byok.pi.rpc-launch' || raw.version !== 5) fail('unsupported config format/version');
+  const credentialSource = raw.credentialSource;
+  if (typeof credentialSource !== 'string' || !(CREDENTIAL_SOURCES as readonly string[]).includes(credentialSource)) {
+    fail(`config.credentialSource must be one of [${CREDENTIAL_SOURCES.join(', ')}]`);
+  }
   if (typeof raw.cwd !== 'string' || !isAbsolute(raw.cwd) || resolve(raw.cwd) !== raw.cwd) {
     fail('config.cwd must be a normalized absolute path');
   }
   const mcp = parseTaskScopedMcpConfig(raw.mcp, fail);
-  return { format: 'byok.pi.rpc-launch', version: 4, cwd: raw.cwd, mcp };
+  return {
+    format: 'byok.pi.rpc-launch', version: 5,
+    credentialSource: credentialSource as PiRpcHostConfig['credentialSource'], cwd: raw.cwd, mcp,
+  };
+}
+
+/** The `apiKey` the launcher-written projection declares for `provider`; never a secret. */
+function projectedApiKey(provider: string): unknown {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(join(getAgentDir(), 'models.json'), 'utf8'));
+  } catch {
+    fail('keys-profile launch requires the launcher-written provider projection');
+  }
+  const record = (value: unknown): value is Record<string, unknown> =>
+    value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (!record(parsed) || !record(parsed.providers) || !Object.hasOwn(parsed.providers, provider)) {
+    fail('provider projection does not declare the launcher-bound provider');
+  }
+  const entry = parsed.providers[provider];
+  if (!record(entry)) fail('provider projection entry must be an object');
+  return entry.apiKey;
+}
+
+/**
+ * The keys-profile custody sequence, as the durable worker runs it: refuse a
+ * launch environment that carries a provider key, take the key over the
+ * launcher's private IPC channel, and require that channel closed before any
+ * extension, tool or session exists. The key is returned for Pi's in-memory
+ * auth overlay only; it is never written to `process.env`, which every Pi
+ * tool shell copies.
+ */
+async function receiveKeysProfileCredential(args: PiRpcHostArgs): Promise<{ provider: string; apiKey: string } | undefined> {
+  if (args.provider === undefined) fail('keys-profile launch requires the launcher-bound --provider');
+  if (PROVIDER_CREDENTIAL_ENV_DENY_NAMES.some((name) => Object.hasOwn(process.env, name))) {
+    fail('keys-profile credential environment refused');
+  }
+  const projected = projectedApiKey(args.provider);
+  const key = await receiveLauncherCredential('rpc', args.configDigest);
+  if (process.connected) fail('rpc custody IPC still connected before tool construction');
+  // The launcher delivers a key exactly for a profile that projects the IPC
+  // marker; a keyless profile projects its fixed non-secret placeholder.
+  if ((projected === PI_RPC_IPC_KEY_MARKER) !== (key !== undefined)) {
+    fail('launcher credential does not match the provider projection');
+  }
+  return key === undefined ? undefined : { provider: args.provider, apiKey: key };
 }
 
 export function parsePiRpcHostArgs(
@@ -88,6 +148,9 @@ export function parsePiRpcHostArgs(
 export async function runPiRpcHost(argv: readonly string[], packaging: 'installed' | 'bundled' = 'installed'): Promise<void> {
   const args = parsePiRpcHostArgs(argv, failUsage);
   const config = parsePiRpcHostConfig(readPiHostConfig(args.configPath, args.configDigest));
+  let providerApiKey: { provider: string; apiKey: string } | undefined;
+  if (config.credentialSource === 'keys-profile') providerApiKey = await receiveKeysProfileCredential(args);
+  else if (process.connected) fail('an undeclared custody IPC channel is open');
   const localeAnchor = packaging === 'bundled' ? verifyTodoLocaleAssets(bundledAssetRoot) : verifyTodoLocaleAssets();
   const { createTodoExtension } = await import('#byok-pi-todo-runtime');
   const todoExtension = createTodoExtension(localeAnchor);
@@ -99,6 +162,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
     resourceLoaderOptions: {
       extensionFactories: [webExtension, createByokMcpExtension(config.mcp), subagentsExtension, todoExtension],
     },
+    ...(providerApiKey === undefined ? {} : { providerApiKey }),
     initialModel: 'required', label: 'byok-pi-rpc', reject: fail,
   });
 }
