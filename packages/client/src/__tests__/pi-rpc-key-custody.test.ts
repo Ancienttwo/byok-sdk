@@ -79,10 +79,15 @@ describe('pi-rpc BYOK key custody (#385)', () => {
       req.on('end', () => {
         received.push({ authorization: req.headers.authorization, body });
         // The host is alive while it waits on this response: read the
-        // environment any same-user process can introspect.
-        hostEnvironments.push(process.platform === 'darwin'
-          ? execFileSync('ps', ['eww', '-p', String(hostPid())], { encoding: 'utf8' })
-          : readFileSync(`/proc/${hostPid()}/environ`, 'utf8'));
+        // environment any same-user process can introspect. Windows has no
+        // such reader without native code; there the spawn env recorded in
+        // launches.jsonl is the host's initial block, and Pi's own `env` tool
+        // output below is the block the host hands on at runtime.
+        if (process.platform !== 'win32') {
+          hostEnvironments.push(process.platform === 'darwin'
+            ? execFileSync('ps', ['eww', '-p', String(hostPid())], { encoding: 'utf8' })
+            : readFileSync(`/proc/${hostPid()}/environ`, 'utf8'));
+        }
         respond(res, received.length);
       });
     });
@@ -112,12 +117,10 @@ describe('pi-rpc BYOK key custody (#385)', () => {
     else stream(res, { role: 'assistant', content: 'done' }, 'stop');
   };
 
-  // Not on Windows: under an elevated runner token the keys launcher refuses
-  // the projection directory in `assertWindowsPiProjectionAcl` ("Pi projection
-  // ACL query failed") before any key handling, so the lane cannot start there.
-  // Keys launches on Windows are exercised only by the non-administrator
-  // release-pack job. Windows IPC key delivery is a recorded residual risk.
-  it.skipIf(BUN_BIN === undefined || process.platform === 'win32')('real Pi bash `env` and the host process environment never see the provider key, and the provider still authenticates with it', async () => {
+  // On Windows this runs in the non-administrator release-pack lane: an
+  // elevated token's new directories are owned by BUILTIN\Administrators, and
+  // the keys launcher refuses such a projection (`pi_projection_owner_mismatch`).
+  it.skipIf(BUN_BIN === undefined)('real Pi bash `env` and the host process environment never see the provider key, and the provider still authenticates with it', async () => {
     const { events, received, hostEnvironments, launches } = await runLane('Print the environment.', toolCall('bash', { command: 'env' }));
 
     expect(events.filter(event => event.type === 'error')).toEqual([]);
@@ -137,7 +140,7 @@ describe('pi-rpc BYOK key custody (#385)', () => {
     expect(JSON.stringify(events)).not.toContain(CANARY);
 
     // The host process environment, as `ps eww` / /proc/<pid>/environ show it.
-    expect(hostEnvironments).toHaveLength(2);
+    expect(hostEnvironments).toHaveLength(process.platform === 'win32' ? 0 : 2);
     for (const environment of hostEnvironments) {
       expect(environment).toContain('PI_CODING_AGENT_DIR');
       expect(environment).not.toContain(CANARY);
@@ -157,8 +160,7 @@ describe('pi-rpc BYOK key custody (#385)', () => {
   // The vendored subagents extension spawns its child with a copy of the host
   // environment and its own stdio, so the key cannot follow it. The child must
   // refuse instead of sending the projection marker as the key.
-  // Not on Windows, for the same launcher ACL reason as above.
-  it.skipIf(BUN_BIN === undefined || process.platform === 'win32')('a subagent call in the lane never sends the IPC marker as a key', async () => {
+  it.skipIf(BUN_BIN === undefined)('a subagent call in the lane never sends the IPC marker as a key', async () => {
     const { events, received } = await runLane('Delegate a task.', toolCall('subagent', { agent: 'probe-worker', task: 'Reply with OK.', async: false }), async (home) => {
       // A project agent in the session cwd, so the vendored extension really spawns its child.
       await fs.mkdir(path.join(home, '.agents'));
