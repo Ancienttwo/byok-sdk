@@ -53,7 +53,7 @@ describe('logical MCP toolset dispatch', () => {
       ],
     });
 
-    await started.byok.dispatch({
+    await started.byok.dispatch({ deviceId: daemon.deviceId,
       instruction: 'find qualified leads',
       runtime: 'claude',
       requiredToolsets: ['salesko'],
@@ -80,46 +80,15 @@ describe('logical MCP toolset dispatch', () => {
     expect((await started.byok.tasks.list()).tasks).toHaveLength(0);
   });
 
-  it('rejects before task creation when the device inventory is unknown', async () => {
+  it('runtime-validates malformed and duplicate ids before task creation', async () => {
     const started = await start();
     const daemon = await connect(started, { capabilities: ['toolset-selection'] });
 
     await expect(
-      started.byok.dispatch({
-        deviceId: daemon.deviceId,
-        instruction: 'must use Salesko',
-        requiredToolsets: ['salesko'],
-      }),
-    ).rejects.toThrow(/did not advertise its configured toolset inventory/);
-    expect((await started.byok.tasks.list()).tasks).toHaveLength(0);
-  });
-
-  it('rejects before task creation when the device is missing a required id', async () => {
-    const started = await start();
-    const daemon = await connect(started, {
-      capabilities: ['toolset-selection'],
-      configuredToolsets: ['crm.readonly'],
-    });
-
-    await expect(
-      started.byok.dispatch({
-        deviceId: daemon.deviceId,
-        instruction: 'must use Salesko',
-        requiredToolsets: ['salesko'],
-      }),
-    ).rejects.toThrow(/missing required MCP toolset/);
-    expect((await started.byok.tasks.list()).tasks).toHaveLength(0);
-  });
-
-  it('runtime-validates malformed and duplicate ids before task creation', async () => {
-    const started = await start();
-    await connect(started, { capabilities: ['toolset-selection'] });
-
-    await expect(
-      started.byok.dispatch({ instruction: 'x', requiredToolsets: ['Salesko'] as never }),
+      started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'x', requiredToolsets: ['Salesko'] as never }),
     ).rejects.toThrow();
     await expect(
-      started.byok.dispatch({ instruction: 'x', requiredToolsets: ['salesko', 'salesko'] }),
+      started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'x', requiredToolsets: ['salesko', 'salesko'] }),
     ).rejects.toThrow();
     expect((await started.byok.tasks.list()).tasks).toHaveLength(0);
   });

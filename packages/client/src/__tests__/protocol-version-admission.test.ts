@@ -75,7 +75,7 @@ describe('protocol-version admission at real long-poll receive', () => {
     });
     await connection.start();
     await waitForOpen(connection);
-    await real.byok.dispatch({ instruction: 'known v1 offer must not run' });
+    await real.byok.dispatch({ deviceId: record.deviceId, instruction: 'known v1 offer must not run' });
 
     await vi.waitFor(() => expect(rewroteKnownOffer).toBe(true));
     // The next poll starts only after LongPollClient has completed the prior

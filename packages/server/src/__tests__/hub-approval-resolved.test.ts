@@ -91,7 +91,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
   it('AwaitApproval -> Running on task.approval_resolved, and emits a task.approval_resolved embedder event carrying approvalId/decision/resolvedBy', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
     await claimAndStart(daemon, handle);
     await moveToAwaitApproval(daemon, handle, 'appr-1');
 
@@ -126,7 +126,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
     // treating the task as AwaitApproval.
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
     await claimAndStart(daemon, handle);
     await moveToAwaitApproval(daemon, handle, 'appr-2');
 
@@ -146,7 +146,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
   it('idempotent no-op when the task already resumed (the implicit path beat the message to it)', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
     await claimAndStart(daemon, handle);
     await moveToAwaitApproval(daemon, handle, 'appr-3');
 
@@ -168,7 +168,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
   it('stale no-op when the task is already terminal — never force-failed, never resurrected', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
     await claimAndStart(daemon, handle);
     await moveToAwaitApproval(daemon, handle, 'appr-4');
     // A server-side decision crosses in flight and wins first (the residual
@@ -188,7 +188,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
   it('stale no-op when the task never reached AwaitApproval at all (e.g. still Claimed) — a genuinely out-of-sequence report', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ instruction: 'x' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'x' });
     await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }));
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Claimed');
 
@@ -203,7 +203,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
   it('M5 (approval targeting): await_approval(A) stored, await_approval(B) re-delivered for the SAME task while still AwaitApproval, then approval_resolved(A) arrives — task stays AwaitApproval, never Running', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
     await claimAndStart(daemon, handle);
 
     // A: the first await_approval, the task's pending approval.
@@ -231,7 +231,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
   it("S2 (cross-model review finding, P1): await_approval(B) re-delivered while already AwaitApproval re-emits the await_approval ServerTaskEvent carrying B's summary — previously the same-state branch updated the stored id and returned silently, leaving an operator watching TaskHandle.events() still showing A's summary", async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
     await claimAndStart(daemon, handle);
     await moveToAwaitApproval(daemon, handle, 'appr-A', 'first (A)');
 
@@ -257,7 +257,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
   it.skip('a redelivery carrying the SAME approvalId does not re-emit another await_approval event', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
     await claimAndStart(daemon, handle);
     await moveToAwaitApproval(daemon, handle, 'appr-B', 'second (B)');
 
@@ -279,7 +279,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
     // A second, real task used only to prove the transport and the gate are
     // still alive and processing traffic normally after the unknown-taskId
     // message.
-    const handle = await instance.dispatch({ instruction: 'still alive' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'still alive' });
     await claimAndStart(daemon, handle);
     expect((await instance.tasks.get(handle.taskId))?.state).toBe('Running');
   });
@@ -299,7 +299,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
     it('a daemon reporting a locally-resolved approval produces targeted: false on the emitted event', async () => {
       const { byok: instance, daemon } = await start();
 
-      const handle = await instance.dispatch({ instruction: 'needs a human ok' });
+      const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
       await claimAndStart(daemon, handle);
       await moveToAwaitApproval(daemon, handle, 'appr-legacy');
       expect((await instance.tasks.get(handle.taskId))?.state).toBe('AwaitApproval');

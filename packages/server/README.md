@@ -49,17 +49,17 @@ What a restart does not keep:
 
 ## Device presence
 
-`machines.list()[].connected`, ambient device selection for a `dispatch()`
-without `deviceId`, the `device ... is not connected` dispatch gate, and
-`stats().connectedDeviceCount` all apply one rule: a device is connected while
-its last observation (`conn.hello`, any accepted envelope, or the start of a
-`GET /byok/events` poll) is at most `presenceTtlMs` old. The default is
-`longPollHoldMs + 15_000` (65 seconds with the default 50 second hold), so a
-device sitting in a normal held poll stays connected and one that stops polling
-reads offline about 15 seconds after its last hold would have ended.
-`presenceTtlMs` is configurable and must exceed `longPollHoldMs`, because a held
-poll does not renew presence. `lastSeen` is reported alongside. Revoking a device
-removes its presence immediately.
+`machines.list()[].connected` projects the core store's unexpired TTL
+observation, joined to the durable device directory. Authenticated hello, accepted envelopes,
+long-poll starts and heartbeat publications renew this same lease. Its default
+TTL remains `longPollHoldMs + 15_000` (65 seconds with the default 50 second
+hold); `presenceTtlMs` must exceed `longPollHoldMs`. Expiry sets `connected` to false and removes live discovery facts
+from the read model, and revocation removes the device entirely.
+
+Every dispatch requires an explicit `deviceId`. Presence never gates dispatch:
+registered offline targets receive queued offers; unknown or revoked legacy
+targets fail with `device_not_found` before task/mailbox creation. Durable
+capabilities remain admission authority; the daemon validates local toolsets.
 
 ## Mailbox retention
 
@@ -94,10 +94,9 @@ const task = await server.dispatch({
 });
 ```
 
-The self-hosted coordinator rejects this call before task creation unless the
-live device advertises `toolset-selection` and its `configuredToolsets`
-inventory contains every required ID. `machines.list()` projects that same
-logical-ID-only inventory; MCP commands and credentials remain device-local.
+The coordinator requires the durable `toolset-selection` capability before
+creating the task. The daemon validates its actual configured inventory when
+it accepts the offer; presence discovery does not gate admission.
 
 ## SQLite receipts, ownership and schema adoption
 
@@ -221,8 +220,8 @@ Before enqueue, durably bind the authenticated scope and external execution key
 (including cycle/pass where applicable) to one taskId, explicit deviceId and
 immutable dispatch input. Pass that taskId to `dispatch` or
 `dispatchFreshAgentEgress`. Omitting taskId retains fresh-task semantics.
-A caller taskId requires an explicit device; the façade never reselects an
-ambient device for that identity. Initial dispatch still requires a connected
+A caller taskId requires an explicit device; the façade never reselects a
+missing device for that identity. Initial dispatch requires a registered
 device. Concurrent calls for one caller identity in one façade are rejected
 while the first is in flight.
 

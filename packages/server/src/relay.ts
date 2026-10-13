@@ -1,7 +1,6 @@
 import type { InboundCommitted, ByokCloudObserver } from '@byok-sdk/cloud';
 import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
 import { AsyncEventQueue } from './event-queue';
-import type { DeviceConnections } from './connections';
 import type { ByokServerEvent, ServerTaskEvent } from './types';
 
 /** Per-task {@link ServerTaskEvent} retention before drop-oldest engages. */
@@ -31,7 +30,6 @@ interface TaskRelayState {
 }
 
 export interface TaskEventRelayOptions {
-  readonly connections: DeviceConnections;
   readonly taskEventBufferLimit?: number;
   readonly taskEventRetentionMs?: number;
 }
@@ -71,7 +69,6 @@ export interface TaskEventRelayOptions {
 export class TaskEventRelay implements ByokCloudObserver {
   readonly #tasks = new Map<string, TaskRelayState>();
   readonly #serverEvents: AsyncEventQueue<ByokServerEvent>;
-  readonly #connections: DeviceConnections;
   readonly #bufferLimit: number;
   readonly #retentionMs: number;
   #stopped = false;
@@ -89,7 +86,6 @@ export class TaskEventRelay implements ByokCloudObserver {
   ) => void) | undefined;
 
   constructor(options: TaskEventRelayOptions) {
-    this.#connections = options.connections;
     this.#bufferLimit = positiveLimit(options.taskEventBufferLimit ?? DEFAULT_TASK_EVENT_BUFFER_LIMIT, 'taskEventBufferLimit');
     this.#retentionMs = positiveLimit(options.taskEventRetentionMs ?? DEFAULT_TASK_EVENT_RETENTION_MS, 'taskEventRetentionMs');
     // The cross-task feed is long-lived and never closed, so it is bounded on
@@ -171,25 +167,8 @@ export class TaskEventRelay implements ByokCloudObserver {
 
   onInboundCommitted(input: InboundCommitted): void {
     if (this.#stopped) return;
-    const { deviceId, envelope } = input;
+    const { envelope } = input;
     const at = new Date().toISOString();
-
-    if (envelope.type === 'conn.hello') {
-      this.#connections.announce(
-        deviceId,
-        {
-          ...(envelope.payload.clientVersion === undefined ? {} : { clientVersion: envelope.payload.clientVersion }),
-          ...(envelope.payload.runtimes === undefined ? {} : { runtimes: envelope.payload.runtimes }),
-          ...(envelope.payload.configuredToolsets === undefined
-            ? {}
-            : { configuredToolsets: envelope.payload.configuredToolsets }),
-        },
-        at,
-      );
-      return;
-    }
-    // Any committed envelope is a sign of life from an authenticated device.
-    this.#connections.touch(deviceId, at);
 
     const taskId = envelope.task_id;
     if (taskId === undefined) return;
@@ -292,7 +271,6 @@ export class TaskEventRelay implements ByokCloudObserver {
     }
     this.#tasks.clear();
     this.#serverEvents.close();
-    this.#connections.clear();
   }
 
   #transition(state: TaskRelayState, taskId: string, next: TaskState, at: string): void {

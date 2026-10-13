@@ -356,8 +356,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
       productId: PRODUCT_ID,
       runtimes: [PI_RUNTIME_INFO, CLAUDE_RUNTIME_INFO],
     });
-    expect((await started.byok.machines.list())[0]?.runtimes).toEqual([PI_RUNTIME_INFO, CLAUDE_RUNTIME_INFO]);
-    expect((await started.byok.machines.list())[0]?.runtimes?.some((info) => info.capabilities?.steer === true)).toBe(true);
+    expect((await started.byok.machines.list())[0]?.runtimes).toEqual([{ id: 'pi' }, { id: 'claude' }]);
 
     const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'steer me' });
     await daemon.next();
