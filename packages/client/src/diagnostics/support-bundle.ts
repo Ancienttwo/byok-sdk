@@ -3,7 +3,7 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { DaemonConfig, DaemonEvent } from '../index';
 import type { DaemonHaltReason, DaemonLifecycle } from '../daemon/daemon-lifecycle';
-import { auditLogPath, readLastEnvironmentRecord, type EnvironmentRecord } from '../bin/audit-log';
+import { auditLogPath } from '../bin/audit-log';
 import { atomicWriteFile } from '../util/atomic-write';
 import { ensureSecureDir, ensureSecureFile, type EnsureSecureDirOptions } from '../util/secure-dir';
 import {
@@ -27,6 +27,8 @@ export interface SupportBundle {
     runtimeAllowlistCount?: number;
   };
   device: { status: DiagnosticsSnapshot['device']['status']; deviceIdHash?: string };
+  /** Issue #392: `daemon`, or `local-shell` when no daemon answered and this process probed — see `DiagnosticsSnapshot.runtimesSource`. */
+  runtimesSource: DiagnosticsSnapshot['runtimesSource'];
   runtimes: DiagnosticsSnapshot['runtimes'];
   control:
     | { status: 'offline' }
@@ -55,8 +57,8 @@ export interface SupportBundle {
     | { status: 'unknown' }
     | { status: 'known'; source: 'live' | 'audit'; phase: DaemonLifecycle['phase']; connection?: 'connecting' | 'open'; reason?: DaemonHaltReason };
   health: DiagnosticsSnapshot['health'];
-  /** Issue #392: the last `start`'s `environment-resolved` record — closed values and a shell basename only. */
-  environment: EnvironmentRecord | { status: 'unknown' };
+  /** Issue #392: the running daemon's environment source, else the last `environment-resolved` event — closed values and a shell basename only. */
+  environment: DiagnosticsSnapshot['environment'];
   journal: DiagnosticsSnapshot['journal'];
   workspace: DiagnosticsSnapshot['workspace'];
   quarantine: {
@@ -87,6 +89,7 @@ const AUDIT_KINDS = new Set<DaemonEvent['kind']>([
   'cancelled',
   'claimed',
   'completed',
+  'environment-resolved',
   'failed',
   'git-workspace',
   'lifecycle',
@@ -232,10 +235,9 @@ export async function createSupportBundle(
   storeDir: string,
   options: CollectDiagnosticsOptions = {},
 ): Promise<SupportBundle> {
-  const [snapshot, recentEvents, environment] = await Promise.all([
+  const [snapshot, recentEvents] = await Promise.all([
     collectDiagnostics(config, storeDir, options),
     recentAuditFacts(storeDir),
-    readLastEnvironmentRecord(storeDir).catch(() => undefined),
   ]);
   return {
     version: 1,
@@ -252,11 +254,12 @@ export async function createSupportBundle(
       status: snapshot.device.status,
       ...(snapshot.device.deviceIdHash ? { deviceIdHash: snapshot.device.deviceIdHash } : {}),
     },
+    runtimesSource: snapshot.runtimesSource,
     runtimes: snapshot.runtimes,
     control: projectControl(snapshot.control),
     lifecycle: projectLifecycle(snapshot.lifecycle),
     health: snapshot.health,
-    environment: environment ?? { status: 'unknown' },
+    environment: snapshot.environment,
     journal: snapshot.journal,
     workspace: snapshot.workspace,
     quarantine: {

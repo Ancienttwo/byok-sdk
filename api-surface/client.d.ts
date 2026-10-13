@@ -3201,7 +3201,8 @@ import type { StoragePressureState } from './journal/storage-policy';
 import type { OperationalHealthSnapshot } from './operational-health';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
-import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
+import type { McpToolsetConfig, McpToolsetRegistryStatus, RuntimeDetectResult } from '../types';
+import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 import type { AgentHomeExecutionStatus } from '../agent-home';
 import type { InputPreparationCancelParamsV1, InputPreparationLookupParamsV1, InputPreparationReceiptV1, InputPreparationRequestV1 } from '../input-preparation';
 /**
@@ -3443,6 +3444,18 @@ export interface ControlStorageCompaction {
     durationMs: number;
     at: string;
 }
+/**
+ * Issue #392: one configured adapter's outcome from the daemon's single
+ * startup detection (`create-daemon.ts`'s `detectRuntimes`) — including the
+ * runtimes that are not available (`not-found`, `timeout`, ...), which
+ * `conn.hello` never lists. No paths and no diagnostics.
+ */
+export interface ControlRuntimeStatus {
+    id: string;
+    outcome: RuntimeDetectResult['kind'];
+    version?: string;
+    authPresent?: boolean;
+}
 /** Result shape for the `status` method — see `create-daemon.ts`'s control-method wiring for how each field is sourced, and `bin/format.ts`'s `formatLiveStatusLines` for how the CLI renders it. */
 export interface ControlStatusResult {
     /** Process-immutable Local Agent application release; absent only for an older control peer. */
@@ -3454,7 +3467,10 @@ export interface ControlStatusResult {
     /** Issues #391/#394: the same value as `Daemon.status().lifecycle`. */
     lifecycle: DaemonLifecycle;
     activeTasks: ControlActiveTask[];
-    runtimeIds: string[];
+    /** Issue #392: per configured adapter, what this daemon's startup detection found. Empty until that detection has finished. */
+    runtimes: ControlRuntimeStatus[];
+    /** Issue #392: where this daemon's environment came from — the same value as `Daemon.status().environment`. */
+    environment: ServiceEnvironmentStatus;
     /** M4 Phase 4 (part B.3): per-active-task queue watermarks — see {@link TaskQueueWatermark}. */
     queueWatermarks: TaskQueueWatermark[];
     /**
@@ -3482,6 +3498,13 @@ export interface ControlStatusResult {
      */
     agentHomeExecution?: AgentHomeExecutionStatus;
 }
+/**
+ * Issue #392 transition only: a daemon from before #392 that is still running
+ * after a CLI upgrade answers `status` without `runtimes` and `environment`.
+ * `byok-agent status`, `doctor` and the support bundle report both as
+ * `unknown` for it. This type and that branch are removed in the next minor.
+ */
+export type PeerControlStatusResult = Omit<ControlStatusResult, 'runtimes' | 'environment'> & Partial<Pick<ControlStatusResult, 'runtimes' | 'environment'>>;
 export interface ToolsetsReloadParams {
     expectedRevision: string;
     mcpToolsets: Record<string, McpToolsetConfig>;
@@ -3799,6 +3822,7 @@ export declare function parseInputPreparationLookupParams(value: unknown): Input
 /** Strict shape gate for `input_preparation.cancel`. Same two fields as lookup, and no third. */
 export declare function parseInputPreparationCancelParams(value: unknown): InputPreparationCancelParamsV1 | undefined;
 // ==== @byok-sdk/client dist/daemon/create-daemon.d.ts ====
+import { type ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 import type { AgentEgressPolicy, RuntimeId } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, GitWorkspaceConfig, McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types';
 import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agent-home';
@@ -4404,6 +4428,13 @@ export interface DaemonStatus {
     egress: AgentEgressStatus;
     /** WP0: per-canonical-Agent-home execution serialization — see {@link AgentHomeExecutionStatus}. */
     agentHomeExecution: AgentHomeExecutionStatus;
+    /**
+     * Issue #392: where this daemon's environment came from — what
+     * `serviceEnvironmentStatus()` reported at the last `start()` (before the
+     * first `start()`, at construction). The same value the
+     * `environment-resolved` event carries.
+     */
+    environment: ServiceEnvironmentStatus;
 }
 export interface Daemon {
     /** Pairing result is intentionally credential-blind. */
@@ -6843,6 +6874,7 @@ export declare function prependAgentMemoryReaderGuidance(instruction: string): s
 // ==== @byok-sdk/client dist/daemon/observer.d.ts ====
 import { type AgentEvent, type BlobRef, type Envelope, type RuntimeInfo, type TaskState } from '@byok-sdk/protocol';
 import type { DaemonLifecycle } from './daemon-lifecycle';
+import { type ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 /**
  * M3-2a: local observability for the daemon — the seam a CLI (M3-2b) drives a
  * live task feed, a task list, and approve/reject/unpair from, all LOCALLY
@@ -6967,6 +6999,18 @@ export type DaemonEvent = {
     ts: string;
     runtimes: RuntimeInfo[];
 }
+/**
+ * Issue #392: where this daemon's environment came from
+ * (`lifecycle/service-environment.ts`), emitted once per `start()` after
+ * the single-owner bind and before runtime detection — so it precedes the
+ * `runtimes-detected` it explains, and a rejected second daemon never emits
+ * it. Flat {@link ServiceEnvironmentStatus}: closed values and a shell
+ * basename only, never a variable name, value or path.
+ */
+ | ({
+    kind: 'environment-resolved';
+    ts: string;
+} & ServiceEnvironmentStatus)
 /** M4 Phase 2: the control socket's `shutdown` RPC was invoked — emitted once, before this daemon starts tearing itself down, so it lands in the audit log via the exact same subscribe->append plumbing every other event already uses (see `bin/commands/start.ts`). Informational only — do NOT gate any teardown decision on this event; see `shutdown-complete`. */
  | {
     kind: 'shutdown-requested';
@@ -7193,6 +7237,8 @@ export declare class DaemonObserver {
     notePaired(deviceId: string): void;
     noteUnpaired(): void;
     noteRuntimesDetected(runtimes: RuntimeInfo[]): void;
+    /** Issue #392: see the `environment-resolved` `DaemonEvent` variant's own doc comment. */
+    noteEnvironmentResolved(status: ServiceEnvironmentStatus): void;
     /** M4 Phase 2: see the `shutdown-requested` `DaemonEvent` variant's own doc comment. */
     noteShutdownRequested(reason: string): void;
     /** M4 Phase 2: see the `shutdown-complete` `DaemonEvent` variant's own doc comment (finding F5(b): `undeliveredOutboxCount`). */
@@ -9777,9 +9823,10 @@ import type { RuntimeDetectResult, RuntimeDetectionRefusalReason } from '../type
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import type { OperationalHealthFileInspection } from '../daemon/operational-health';
 import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
+import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 export interface DiagnosticCheck {
-    id: 'config' | 'device' | 'runtimes' | 'control' | 'lifecycle' | 'health' | 'journal' | 'workspace' | 'quarantine';
+    id: 'config' | 'device' | 'runtimes' | 'control' | 'lifecycle' | 'environment' | 'health' | 'journal' | 'workspace' | 'quarantine';
     status: DiagnosticStatus;
     summary: string;
 }
@@ -9806,15 +9853,26 @@ export interface DiagnosticsSnapshot {
         status: 'paired' | 'unpaired' | 'unavailable';
         deviceIdHash?: string;
     };
+    /**
+     * Issue #392: where {@link DiagnosticsSnapshot.runtimes} came from. `daemon`:
+     * the running daemon's own startup detection, in its environment.
+     * `local-shell`: no daemon answered, so this process probed in ITS
+     * environment, which need not be the service's. `unknown`: a daemon from
+     * before #392 answered without runtimes (transition only; removed in the
+     * next minor), and `runtimes` is empty.
+     */
+    runtimesSource: 'daemon' | 'local-shell' | 'unknown';
     runtimes: Array<{
         idHash: string;
         present: boolean;
         outcome: RuntimeDetectResult['kind'];
+        /** `local-shell` only: the daemon reports no refusal reason. */
         reason?: RuntimeDetectionRefusalReason;
         versionPresent: boolean;
         authPresent?: boolean;
-        steer: boolean;
-        resume: boolean;
+        /** `local-shell` only: adapter capabilities, which the daemon does not report. */
+        steer?: boolean;
+        resume?: boolean;
     }>;
     control: {
         status: 'offline';
@@ -9838,6 +9896,24 @@ export interface DiagnosticsSnapshot {
         status: 'known';
         source: 'live' | 'audit';
         lifecycle: DaemonLifecycle;
+    };
+    /**
+     * Issue #392: where the daemon's environment came from — the running
+     * daemon's (`live`), else the last `environment-resolved` event in
+     * `audit.jsonl` (`audit`, with its time), else `unknown`. Closed values and
+     * a shell basename only.
+     */
+    environment: {
+        status: 'unknown';
+    } | {
+        status: 'known';
+        source: 'live';
+        environment: ServiceEnvironmentStatus;
+    } | {
+        status: 'known';
+        source: 'audit';
+        ts: string;
+        environment: ServiceEnvironmentStatus;
     };
     health: OperationalHealthFileInspection;
     journal: {
@@ -11313,6 +11389,14 @@ export type ServiceEnvironmentStatus = {
     source: 'unavailable';
     code: ServiceEnvironmentUnavailableCode;
 };
+/**
+ * Exactly the {@link ServiceEnvironmentStatus} fields of `status`, nothing
+ * else — for writers that receive a status inside a wider object (the
+ * `environment-resolved` event, its audit line, status and diagnostics).
+ *
+ * @internal
+ */
+export declare function serviceEnvironmentFields(status: ServiceEnvironmentStatus): ServiceEnvironmentStatus;
 /**
  * Test seams for {@link captureAndApply}. Not part of the public API:
  * {@link applyLoginShellEnvironment} takes no options.

@@ -2,6 +2,7 @@ import { terminalIdentity } from './terminal-identity';
 import { HarnessIdSchema, type HarnessInfo } from '@byok-sdk/protocol';
 import { TerminalCommitQueue } from './terminal-commit-queue';
 import { observeRuntimeDetection } from '../runtime-detection';
+import { serviceEnvironmentFields, serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 import {
   DEVICE_ASSERTION_AUDIENCE_MAX_BYTES,
   DEVICE_ASSERTION_DEFAULT_TTL_MS,
@@ -108,6 +109,7 @@ import {
   TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES,
   type AssertionIssueResult,
   type ControlActiveTask,
+  type ControlRuntimeStatus,
   type ControlStatusResult,
   type ControlStorageStatus,
   type ShutdownReason,
@@ -820,6 +822,13 @@ export interface DaemonStatus {
   egress: AgentEgressStatus;
   /** WP0: per-canonical-Agent-home execution serialization — see {@link AgentHomeExecutionStatus}. */
   agentHomeExecution: AgentHomeExecutionStatus;
+  /**
+   * Issue #392: where this daemon's environment came from — what
+   * `serviceEnvironmentStatus()` reported at the last `start()` (before the
+   * first `start()`, at construction). The same value the
+   * `environment-resolved` event carries.
+   */
+  environment: ServiceEnvironmentStatus;
 }
 
 export interface Daemon {
@@ -1013,11 +1022,21 @@ function isRuntimeId(id: string): id is RuntimeId {
   return id === 'pi' || id === 'claude' || id === 'codex';
 }
 
-/** Runtimes actually detected as present on this device, typed per protocol §10 gap #4 (`ConnHelloPayload.runtimes`). Computed once at `start()` — re-probing on every reconnect would mean re-spawning each runtime's `--version` check for no real benefit within one daemon lifetime. */
-async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{ runtimes: RuntimeInfo[]; harnesses: HarnessInfo[] }> {
+/**
+ * Runtimes actually detected as present on this device, typed per protocol §10 gap #4 (`ConnHelloPayload.runtimes`). Computed once at `start()` — re-probing on every reconnect would mean re-spawning each runtime's `--version` check for no real benefit within one daemon lifetime.
+ *
+ * Issue #392: `outcomes` keeps that same detection's result for EVERY configured adapter, unavailable ones included, for the control `status` method — so `byok-agent status` reports what this daemon saw instead of probing again in its own environment.
+ */
+async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{ runtimes: RuntimeInfo[]; harnesses: HarnessInfo[]; outcomes: ControlRuntimeStatus[] }> {
   const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: await observeRuntimeDetection(adapter) })));
   const runtimes: RuntimeInfo[] = [];
   const harnesses: HarnessInfo[] = [];
+  const outcomes: ControlRuntimeStatus[] = detections.map(({ adapter, detected }) => ({
+    id: adapter.descriptor.id,
+    outcome: detected.kind,
+    ...(detected.kind === 'available' && detected.version !== undefined ? { version: detected.version } : {}),
+    ...(detected.kind === 'available' && detected.authPresent !== undefined ? { authPresent: detected.authPresent } : {}),
+  }));
   for (const { adapter, detected } of detections) {
     if (detected.kind !== 'available') continue;
     if (detected.advisory !== undefined) {
@@ -1040,7 +1059,7 @@ async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{ runtimes: R
     info.capabilities = toRuntimeInfoCapabilities(adapter.descriptor.capabilities);
     runtimes.push(info);
   }
-  return { runtimes, harnesses };
+  return { runtimes, harnesses, outcomes };
 }
 
 /**
@@ -1761,6 +1780,10 @@ export function buildDaemonWithAdapters(
   // asynchronous to start(); only Agent offers with host toolsets wait for it.
   let presencePublisher: PresencePublisher | undefined;
   let detectedRuntimeFacts: readonly RuntimeInfo[] = [];
+  // Issue #392: the last start()'s detection outcomes and environment source,
+  // reported by `status` (control) and `status()`.
+  let runtimeOutcomes: readonly ControlRuntimeStatus[] = [];
+  let resolvedEnvironment: ServiceEnvironmentStatus = serviceEnvironmentStatus();
   let presenceDiscovery: AbortController | undefined;
   // One active read per connection generation; stale completions cannot publish.
   let presenceDiscoveryPass: {
@@ -2171,6 +2194,12 @@ export function buildDaemonWithAdapters(
     // a rejected second process overwrite the live daemon's marker and create
     // a false crash record on the next restart.
     await operationalHealth.startRun();
+    // Issue #392: past the single-owner bind, so a rejected second daemon
+    // never reports an environment; before detection, which runs in it. An
+    // embedding Host that called `applyLoginShellEnvironment()` itself is
+    // reported the same way.
+    resolvedEnvironment = serviceEnvironmentStatus();
+    observer.noteEnvironmentResolved(resolvedEnvironment);
 
     if (gitWorkspaceManager) {
       await gitWorkspaceManager.preflight();
@@ -2179,7 +2208,7 @@ export function buildDaemonWithAdapters(
     }
 
     blobLifecycleAbort = new AbortController();
-    const [{ runtimes, harnesses }, blobClient] = await Promise.all([
+    const [{ runtimes, harnesses, outcomes }, blobClient] = await Promise.all([
       detectRuntimes(adapters),
       Promise.resolve(new BlobClient(config.serverUrl, auth, { signal: blobLifecycleAbort.signal })),
     ]);
@@ -2188,6 +2217,7 @@ export function buildDaemonWithAdapters(
     // own doc comment on why this isn't re-probed on every reconnect).
     observer.noteRuntimesDetected(runtimes);
     detectedRuntimeFacts = runtimes;
+    runtimeOutcomes = outcomes;
     const agentMemoryIntentBackend = await provenAgentMemoryIntentBackend();
     const capabilities = computeCapabilities(
       adapters,
@@ -3445,7 +3475,8 @@ export function buildDaemonWithAdapters(
       deviceId: auth.deviceId,
       lifecycle,
       activeTasks,
-      runtimeIds: adapters.map((adapter) => adapter.descriptor.id),
+      runtimes: runtimeOutcomes.map((runtime) => ({ ...runtime })),
+      environment: serviceEnvironmentFields(resolvedEnvironment),
       // M4 Phase 4 (part B.3): queue watermarks come from TaskRunner's own
       // active-task map (distinct from `observer.tasks()` above, which is
       // derived from the envelope feed) — see `TaskRunner.getQueueWatermarks`'s
@@ -4207,6 +4238,7 @@ export function buildDaemonWithAdapters(
       toolsets: toolsetRegistry.status(),
       egress: agentEgress.status(),
       agentHomeExecution: agentHomeExecutionStatus(),
+      environment: serviceEnvironmentFields(resolvedEnvironment),
     };
   }
 

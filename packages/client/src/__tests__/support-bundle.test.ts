@@ -2,9 +2,9 @@ import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { freezeRuntimeAdapterDescriptor, type DaemonConfig, type RuntimeAdapter } from '../index';
-import type { ConnectControlResult } from '../bin/control-client';
+import type { ConnectControlResult, ControlClient } from '../bin/control-client';
 import { runSupportBundleCommand } from '../bin/commands/support-bundle';
 import { runDoctorCommand } from '../bin/commands/doctor';
 import { appendAuditEvent, auditLogPath } from '../bin/audit-log';
@@ -126,6 +126,64 @@ describe('support bundle privacy and bounds', () => {
     expect(doctorLines.join('\n')).not.toContain('SENTINEL_RUNTIME');
     expect(bundle.runtimes).toMatchObject([{ present: true, versionPresent: true }]);
     expect(serialized.length).toBeLessThan(64 * 1024);
+  });
+
+  it('#392: offline, runtimes are labelled local-shell and the environment is the last environment-resolved event', async () => {
+    const dir = await tempDir();
+    await appendAuditEvent(dir, { kind: 'environment-resolved', ts: '2026-10-13T00:00:00.000Z', source: 'login-shell', shell: 'zsh', durationMs: 530 });
+    const bundle = await createSupportBundle(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(bundle.runtimesSource).toBe('local-shell');
+    expect(bundle.environment).toEqual({
+      status: 'known',
+      source: 'audit',
+      ts: '2026-10-13T00:00:00.000Z',
+      environment: { source: 'login-shell', shell: 'zsh', durationMs: 530 },
+    });
+    expect(bundle.recentEvents.facts).toEqual([{ kind: 'environment-resolved', ts: '2026-10-13T00:00:00.000Z' }]);
+    const serialized = JSON.stringify(bundle);
+    expect(serialized).not.toContain(dir);
+    if (process.env.PATH) expect(serialized).not.toContain(process.env.PATH);
+    if (process.env.HOME) expect(serialized).not.toContain(process.env.HOME);
+  });
+
+  it('#392: online, runtimes and the environment come from the daemon and no adapter is probed', async () => {
+    const dir = await tempDir();
+    const detect = vi.fn(async () => ({ kind: 'available' as const }));
+    const runtime: RuntimeAdapter = {
+      descriptor: freezeRuntimeAdapterDescriptor({
+        id: 'claude',
+        supportsDispatchSelection: false,
+        capabilities: { steer: false, resume: false, approvalInteractive: false },
+      }),
+      detect,
+      prepare: async () => ({ kind: 'reject', reason: 'not used', retryable: false }),
+    };
+    const client: ControlClient = {
+      request: vi.fn().mockResolvedValue({
+        pid: 1,
+        uptimeMs: 1,
+        paired: true,
+        lifecycle: { phase: 'running', connection: 'open' },
+        activeTasks: [],
+        runtimes: [{ id: 'claude', outcome: 'not-found' }],
+        environment: { source: 'inherited' },
+        queueWatermarks: [],
+        approvals: [],
+        approvalsPending: 0,
+        operationalHealth: { availability: 'available', state: 'healthy', failureCount: 0, windowMs: 60_000, failureThreshold: 3, crashCount: 0 },
+      }),
+      subscribe: () => ({ close: vi.fn() }),
+      close: vi.fn(),
+    };
+    const bundle = await createSupportBundle(config(dir), dir, {
+      adapters: [runtime],
+      connectControl: () => Promise.resolve({ ok: true, client }),
+    });
+    expect(detect).not.toHaveBeenCalled();
+    expect(bundle.runtimesSource).toBe('daemon');
+    expect(bundle.runtimes).toMatchObject([{ present: false, outcome: 'not-found', versionPresent: false }]);
+    expect(bundle.environment).toEqual({ status: 'known', source: 'live', environment: { source: 'inherited' } });
+    expect(JSON.stringify(bundle)).not.toContain('"claude"');
   });
 
   it('reads only a bounded audit tail and retains at most 200 facts', async () => {

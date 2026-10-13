@@ -64,6 +64,8 @@ describe('bin/format: formatDaemonEventLine', () => {
       { kind: 'paired', ts: 'T', deviceId: 'dev-1' },
       { kind: 'unpaired', ts: 'T' },
       { kind: 'runtimes-detected', ts: 'T', runtimes: [{ id: 'pi' }, { id: 'claude' }] },
+      { kind: 'environment-resolved', ts: 'T', source: 'login-shell', shell: 'zsh', durationMs: 530 },
+      { kind: 'environment-resolved', ts: 'T', source: 'unavailable', code: 'timeout' },
       { kind: 'shutdown-complete', ts: 'T', reason: 'operator' },
       { kind: 'shutdown-complete', ts: 'T', reason: 'operator', undeliveredOutboxCount: 0 },
       { kind: 'shutdown-complete', ts: 'T', reason: 'operator', undeliveredOutboxCount: 2 },
@@ -98,6 +100,8 @@ describe('bin/format: formatDaemonEventLine', () => {
       '[T] paired deviceId=dev-1',
       '[T] unpaired',
       '[T] runtimes-detected ids=pi,claude',
+      '[T] environment-resolved login-shell shell=zsh durationMs=530',
+      '[T] environment-resolved unavailable code=timeout',
       '[T] shutdown-complete reason="operator"',
       '[T] shutdown-complete reason="operator" undeliveredOutboxCount=0',
       '[T] shutdown-complete reason="operator" undeliveredOutboxCount=2',
@@ -260,7 +264,6 @@ describe('bin/format: formatStatusLines', () => {
       productId: 'acme-product',
       localAgentRelease: { version: '1.2.3', buildId: 'build-a' },
       paired: false,
-      runtimes: [],
       taskCounts: { total: 0, Offered: 0, Claimed: 0, Running: 0, AwaitApproval: 0, Complete: 0, Failed: 0, Cancelled: 0 },
       auditLogPath: '/store/audit.jsonl',
       auditLogLineCount: 0,
@@ -309,16 +312,17 @@ describe('bin/format: formatStatusLines', () => {
     expect(lines.some((l) => l.startsWith('lifecycle-remedy: device revoked — re-pair needed'))).toBe(true);
   });
 
-  it('summarizes runtimes as presence and failure outcomes', () => {
+  it('#392 offline: renders the last runtimes-detected event with its time, or unknown', () => {
     const lines = formatStatusLines(
-      baseView({
-        runtimes: [
-          { id: 'pi', present: true, outcome: 'available', steer: true, resume: true },
-          { id: 'claude', present: false, outcome: 'not-found', steer: true, resume: true },
-        ],
-      }),
+      baseView({ lastStart: { runtimesDetected: { kind: 'runtimes-detected', ts: '2026-10-13T00:00:00.000Z', runtimes: [{ id: 'pi' }, { id: 'claude' }] } } }),
     );
-    expect(lines).toContain('runtimes: pi=present claude=not-found');
+    expect(lines).toContain('runtimes: last-known available=pi,claude at=2026-10-13T00:00:00.000Z');
+    expect(formatStatusLines(baseView({ lastStart: {} }))).toContain('runtimes: unknown (no runtimes-detected event yet)');
+  });
+
+  it('#392 online: leaves environment and runtimes to the live section', () => {
+    const lines = formatStatusLines(baseView());
+    expect(lines.some((l) => l.startsWith('runtimes:') || l.startsWith('environment:'))).toBe(false);
   });
 
   it('renders full task counts', () => {
@@ -344,7 +348,10 @@ describe('bin/format: formatStatusLines', () => {
         paired: true,
         deviceId: 'dev-1',
         lifecycle: { lifecycle: { phase: 'running', connection: 'open' }, ts: 'T' },
-        runtimes: [{ id: 'pi', present: true, outcome: 'available', version: '1.0', authPresent: true, steer: true, resume: true }],
+        lastStart: {
+          environment: { kind: 'environment-resolved', ts: 'T', source: 'login-shell', shell: 'zsh', durationMs: 1 },
+          runtimesDetected: { kind: 'runtimes-detected', ts: 'T', runtimes: [{ id: 'pi', version: '1.0', authPresent: true }] },
+        },
       }),
     );
     for (const line of lines) expect(line).not.toMatch(ANSI_ESCAPE_RE);
@@ -360,7 +367,8 @@ describe('bin/format: formatLiveStatusLines', () => {
       paired: true,
       lifecycle: { phase: 'running', connection: 'open' },
       activeTasks: [],
-      runtimeIds: ['pi'],
+      runtimes: [{ id: 'pi', outcome: 'available' }],
+      environment: { source: 'inherited' },
       queueWatermarks: [],
       approvals: [],
       approvalsPending: 0,
@@ -377,12 +385,33 @@ describe('bin/format: formatLiveStatusLines', () => {
     };
   }
 
-  it('renders pid/uptime/lifecycle, paired+deviceId, and runtimes on their own lines', () => {
-    const lines = formatLiveStatusLines(baseLive({ deviceId: 'dev-1', runtimeIds: ['pi', 'claude'] }));
+  it('renders pid/uptime/lifecycle, paired+deviceId, environment and per-runtime outcomes on their own lines', () => {
+    const lines = formatLiveStatusLines(baseLive({
+      deviceId: 'dev-1',
+      runtimes: [
+        { id: 'pi', outcome: 'available', version: '1.0.0', authPresent: true },
+        { id: 'claude', outcome: 'not-found' },
+      ],
+      environment: { source: 'login-shell', shell: 'zsh', durationMs: 530 },
+    }));
     expect(lines).toContain('live: pid=123 uptimeMs=4567 phase=running connection=open');
     expect(lines).toContain('live-paired: yes deviceId=dev-1');
-    expect(lines).toContain('live-runtimes: pi,claude');
+    expect(lines).toContain('live-environment: login-shell shell=zsh durationMs=530');
+    expect(lines).toContain('live-runtime: pi available version=1.0.0 authPresent=true');
+    expect(lines).toContain('live-runtime: claude not-found');
+    expect(lines.some((l) => l.startsWith('live-runtimes:'))).toBe(false);
     expect(lines).toContain('live-local-agent-release: 1.1.0 buildId=live-build');
+  });
+
+  it('#392: says so while detection has not finished', () => {
+    expect(formatLiveStatusLines(baseLive({ runtimes: [] }))).toContain('live-runtime: (none detected yet)');
+  });
+
+  it('#392 transition: a daemon that predates runtimes/environment renders both as unknown', () => {
+    const { runtimes: _runtimes, environment: _environment, ...old } = baseLive();
+    const lines = formatLiveStatusLines(old);
+    expect(lines).toContain('live-environment: unknown (daemon predates environment reporting)');
+    expect(lines).toContain('live-runtime: unknown (daemon predates runtime outcome reporting)');
   });
 
   it('renders explicit toolset observations and marks absent evidence unobserved without executable bytes', () => {
@@ -663,26 +692,28 @@ describe('bin/format: start stdout projection (issue #384 item 5)', () => {
     );
   });
 
-  it('status renders the environment record with closed values only, or unknown', () => {
+  it('offline status renders the last environment-resolved event with closed values only, or unknown', () => {
     const view: StatusView = {
       localAgentRelease: { version: '1.0.0' },
       productName: 'Acme',
       productId: 'acme',
       paired: true,
       deviceId: 'dev-1',
-      runtimes: [],
       taskCounts: { total: 0, Offered: 0, Claimed: 0, Running: 0, AwaitApproval: 0, Complete: 0, Failed: 0, Cancelled: 0 },
       auditLogPath: '/x/audit.jsonl',
       auditLogLineCount: 0,
+      lastStart: {},
     };
-    expect(formatStatusLines(view)).toContain('environment: unknown (no environment-resolved record yet)');
+    expect(formatStatusLines(view)).toContain('environment: unknown (no environment-resolved event yet)');
     const at = '2026-10-13T00:00:00.000Z';
-    expect(formatStatusLines({ ...view, environment: { ts: at, status: { source: 'login-shell', shell: 'zsh', durationMs: 530 } } })).toContain(
-      `environment: login-shell shell=zsh durationMs=530 at=${at}`,
+    expect(formatStatusLines({ ...view, lastStart: { environment: { kind: 'environment-resolved', ts: at, source: 'login-shell', shell: 'zsh', durationMs: 530 } } })).toContain(
+      `environment: last-known login-shell shell=zsh durationMs=530 at=${at}`,
     );
-    expect(formatStatusLines({ ...view, environment: { ts: at, status: { source: 'unavailable', code: 'timeout' } } })).toContain(
-      `environment: unavailable code=timeout at=${at}`,
+    expect(formatStatusLines({ ...view, lastStart: { environment: { kind: 'environment-resolved', ts: at, source: 'unavailable', code: 'timeout' } } })).toContain(
+      `environment: last-known unavailable code=timeout at=${at}`,
     );
-    expect(formatStatusLines({ ...view, environment: { ts: at, status: { source: 'inherited' } } })).toContain(`environment: inherited at=${at}`);
+    expect(formatStatusLines({ ...view, lastStart: { environment: { kind: 'environment-resolved', ts: at, source: 'inherited' } } })).toContain(
+      `environment: last-known inherited at=${at}`,
+    );
   });
 });

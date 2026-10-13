@@ -1,5 +1,4 @@
 import { createEnvelope } from '@byok-sdk/protocol';
-import { runStatusCommand } from '../bin/commands/status';
 import { runDoctorCommand } from '../bin/commands/doctor';
 import { diagnoseDevice } from '../diagnostics/device-doctor';
 import { promises as fs } from 'node:fs';
@@ -74,11 +73,10 @@ it.each(['explicit', 'automatic'] as const)('real TaskRunner %s selection declin
   expect(vi.mocked(adapter.detect).mock.calls.length).toBe(before + 1);
   expect(adapter.startCalls).toHaveLength(0);
 });
-it('projects finite refusal through status and public doctor without private information', async () => {
+it('projects finite refusal through public doctor without private information', async () => {
+  // Issue #392: `status` no longer probes, so it no longer shows a local refusal; the runtimes test above covers the probe.
   const cfg = await config(); const adapter = refusingAdapter();
-  const lines: string[] = []; const connectControl = async () => ({ ok: false as const, reason: 'offline' });
-  await runStatusCommand(cfg, { adapters: [adapter], log: line => lines.push(line), connectControl });
-  expect(lines).toContain('runtimes: codex=refused:app_server_unavailable');
+  const connectControl = async () => ({ ok: false as const, reason: 'offline' });
   const snapshot = await diagnoseDevice(cfg, { adapters: [adapter] });
   expect(snapshot.runtimes[0]).toMatchObject({ outcome: 'refused', reason: 'app_server_unavailable', present: false });
   expect(snapshot.checks.find(c => c.id === 'runtimes')?.summary).toContain('refused:app_server_unavailable=1');

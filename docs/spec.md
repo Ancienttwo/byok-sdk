@@ -464,9 +464,27 @@ malformed `auth.json` or `settings.json` observes `false`. A missing
 credential. The probe inspects only presence and shape; it never returns, logs
 or retains a credential value.
 
-Fresh local `runtimes` and `status` show failure kinds; `doctor` carries the same
-closed outcome and finite refusal reason in JSON and counts them in text. Its existing
-any-present pass/warn rule remains unchanged. Display `present` is a deterministic
+The daemon keeps, per configured adapter, the outcome of its one startup
+detection (`{ id, outcome, version?, authPresent? }`, unavailable runtimes
+included) and reports it as `runtimes` in the authenticated control `status`,
+together with `environment`, the `ServiceEnvironmentStatus` it started with
+(also `Daemon.status().environment`). `conn.hello` still lists only available
+runtimes. Each `start()` emits one `environment-resolved` event after the
+single-owner bind and before `runtimes-detected`, so a rejected second daemon
+never reports one; both reach `audit.jsonl` like every other event.
+
+`byok-agent status` never probes runtimes: this CLI's environment is not the
+service's. With a daemon online it shows the daemon's `environment` and each
+runtime's outcome; offline it shows the last `environment-resolved` and
+`runtimes-detected` events with their times. A still-running daemon older than
+these fields is rendered as `unknown` (a transition branch removed in the next
+minor). Fresh local `runtimes` is the explicit probe of the current shell and
+shows failure kinds. `doctor` and the support bundle use the daemon's runtimes
+when it answers and otherwise the local probe, labelled `runtimesSource:
+local-shell`; both carry the closed outcome and finite refusal reason in JSON,
+count them in text, and add an `environment` check (the daemon's, else the
+last event). Only closed values and the shell basename appear, never variable
+values or paths. The existing any-present pass/warn rule remains unchanged. Display `present` is a deterministic
 projection of `kind === 'available'`, never independent adapter authority.
 Custom-adapter throw/malformed results are observed as `probe-failed`; the local
 probe wrapper's deadline is observed as `timeout`. This outer deadline does not

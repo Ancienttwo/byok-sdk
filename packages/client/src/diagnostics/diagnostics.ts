@@ -19,12 +19,13 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { DaemonConfig, RuntimeAdapter } from '../index';
-import { readLastLifecycleEvent } from '../bin/audit-log';
+import { readLastAuditEvent, readLastLifecycleEvent } from '../bin/audit-log';
 import { connectControlClient } from '../bin/control-client';
-import { formatHaltRemedy, formatLifecycle } from '../bin/format';
+import { formatHaltRemedy, formatLifecycle, formatServiceEnvironment } from '../bin/format';
 import { parseDaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { defaultRuntimeAdapters, probeRuntimes } from '../bin/runtime-probe';
-import type { ControlStatusResult } from '../daemon/control-protocol';
+import type { PeerControlStatusResult } from '../daemon/control-protocol';
+import { serviceEnvironmentFields } from '../lifecycle/service-environment';
 import { JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from '../daemon/journal/sqlite-journal';
 import { isSqliteAvailable, loadSqliteModule } from '../daemon/journal/sqlite-support';
 import {
@@ -603,7 +604,7 @@ function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>): DiagnosticChe
     {
       id: 'runtimes',
       status: snapshot.runtimes.some((runtime) => runtime.present) ? 'pass' : 'warn',
-      summary: `${snapshot.runtimes.filter((runtime) => runtime.present).length}/${snapshot.runtimes.length} present; `
+      summary: `${snapshot.runtimesSource} ${snapshot.runtimes.filter((runtime) => runtime.present).length}/${snapshot.runtimes.length} present; `
         + RUNTIME_DETECTION_FAILURE_KINDS
            .filter(kind => kind !== 'refused' || snapshot.runtimes.some(runtime => runtime.outcome === 'refused'))
           .map((kind) => `${kind}=${snapshot.runtimes.filter((runtime) => runtime.outcome === kind).length}`).concat(
@@ -617,6 +618,7 @@ function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>): DiagnosticChe
       summary: snapshot.control.status === 'online' ? 'online' : 'daemon offline',
     },
     lifecycleCheck(snapshot.lifecycle),
+    environmentCheck(snapshot.environment),
     {
       id: 'health',
       status:
@@ -665,42 +667,43 @@ function lifecycleCheck(lifecycle: DiagnosticsSnapshot['lifecycle']): Diagnostic
   return { id: 'lifecycle', status: 'pass', summary };
 }
 
+/**
+ * Issue #392: `unavailable` (the login-shell capture failed, so the daemon
+ * runs in the service manager's environment) and `unknown` warn; a
+ * `login-shell` or `inherited` environment passes.
+ */
+function environmentCheck(environment: DiagnosticsSnapshot['environment']): DiagnosticCheck {
+  if (environment.status === 'unknown') return { id: 'environment', status: 'warn', summary: 'unknown (no environment-resolved event yet)' };
+  const summary = `${environment.source} ${formatServiceEnvironment(environment.environment)}${environment.source === 'audit' ? ` at=${environment.ts}` : ''}`;
+  return { id: 'environment', status: environment.environment.source === 'unavailable' ? 'warn' : 'pass', summary };
+}
+
 export async function collectDiagnostics(
   config: DaemonConfig,
   storeDir: string,
   options: CollectDiagnosticsOptions = {},
 ): Promise<DiagnosticsSnapshot> {
   const resolvedStoreDir = path.resolve(storeDir);
-  const adapters = options.adapters ?? defaultRuntimeAdapters(config.runtimeAllowlist);
   const connectControl = options.connectControl ?? connectControlClient;
-  const [device, probedRuntimes, health, journal, workspace, quarantine, controlConnection, lastAudited] = await Promise.all([
+  const [device, health, journal, workspace, quarantine, controlConnection, lastAudited, lastEnvironment] = await Promise.all([
     inspectDevice(resolvedStoreDir),
-    probeRuntimes(adapters, { timeoutMs: options.runtimeProbeTimeoutMs }),
     inspectOperationalHealthFile(resolvedStoreDir),
     inspectJournal(resolvedStoreDir),
     inspectWorkspace(config.workspaceRoot),
     inspectQuarantine(resolvedStoreDir),
     connectControl({ storeDir: resolvedStoreDir, productId: config.productId }),
     readLastLifecycleEvent(resolvedStoreDir).catch(() => undefined),
+    readLastAuditEvent(resolvedStoreDir, 'environment-resolved').catch(() => undefined),
   ]);
-  const runtimes: DiagnosticsSnapshot['runtimes'] = probedRuntimes.map((runtime) => ({
-    idHash: stableIdentifierHash(runtime.id),
-    present: runtime.present,
-    outcome: runtime.outcome,
-    ...(runtime.outcome === 'refused' ? { reason: runtime.reason } : {}),
-    versionPresent: runtime.version !== undefined,
-    ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
-    steer: runtime.steer,
-    resume: runtime.resume,
-  }));
 
   let control: DiagnosticsSnapshot['control'];
   let liveLifecycle: ReturnType<typeof parseDaemonLifecycle>;
+  let live: PeerControlStatusResult | undefined;
   if (!controlConnection.ok) {
     control = { status: 'offline', reason: 'daemon control socket unavailable' };
   } else {
     try {
-      const live = await controlConnection.client.request<ControlStatusResult>('status');
+      live = await controlConnection.client.request<PeerControlStatusResult>('status');
       liveLifecycle = parseDaemonLifecycle(live.lifecycle);
       control = {
         status: 'online',
@@ -712,11 +715,53 @@ export async function collectDiagnostics(
         ...(live.storage ? { storage: live.storage } : {}),
       };
     } catch {
+      live = undefined;
       control = { status: 'offline', reason: 'daemon status request failed' };
     } finally {
       controlConnection.client.close();
     }
   }
+
+  // Issue #392: a running daemon's runtimes are the ones it detected in its
+  // own environment; only with no daemon does this process probe, in ITS
+  // environment, and says so (`local-shell`).
+  let runtimesSource: DiagnosticsSnapshot['runtimesSource'];
+  let runtimes: DiagnosticsSnapshot['runtimes'];
+  if (live !== undefined) {
+    // Transition: a daemon from before #392 reports no runtimes. Removed in the next minor.
+    runtimesSource = live.runtimes === undefined ? 'unknown' : 'daemon';
+    runtimes = (live.runtimes ?? []).map((runtime) => ({
+      idHash: stableIdentifierHash(runtime.id),
+      present: runtime.outcome === 'available',
+      outcome: runtime.outcome,
+      versionPresent: runtime.version !== undefined,
+      ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
+    }));
+  } else {
+    const probedRuntimes = await probeRuntimes(options.adapters ?? defaultRuntimeAdapters(config.runtimeAllowlist), {
+      timeoutMs: options.runtimeProbeTimeoutMs,
+    });
+    runtimesSource = 'local-shell';
+    runtimes = probedRuntimes.map((runtime) => ({
+      idHash: stableIdentifierHash(runtime.id),
+      present: runtime.present,
+      outcome: runtime.outcome,
+      ...(runtime.outcome === 'refused' ? { reason: runtime.reason } : {}),
+      versionPresent: runtime.version !== undefined,
+      ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
+      steer: runtime.steer,
+      resume: runtime.resume,
+    }));
+  }
+
+  // Same transition for an old daemon's missing environment.
+  const environment: DiagnosticsSnapshot['environment'] = live !== undefined
+    ? live.environment === undefined
+      ? { status: 'unknown' }
+      : { status: 'known', source: 'live', environment: serviceEnvironmentFields(live.environment) }
+    : lastEnvironment !== undefined
+      ? { status: 'known', source: 'audit', ts: lastEnvironment.ts, environment: serviceEnvironmentFields(lastEnvironment) }
+      : { status: 'unknown' };
 
   const lifecycle: DiagnosticsSnapshot['lifecycle'] = liveLifecycle !== undefined
     ? { status: 'known', source: 'live', lifecycle: liveLifecycle }
@@ -736,9 +781,11 @@ export async function collectDiagnostics(
       ...(config.runtimeAllowlist ? { runtimeAllowlistCount: config.runtimeAllowlist.length } : {}),
     },
     device,
+    runtimesSource,
     runtimes,
     control,
     lifecycle,
+    environment,
     health,
     journal,
     workspace,

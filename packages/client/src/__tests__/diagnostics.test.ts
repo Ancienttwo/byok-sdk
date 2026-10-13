@@ -58,24 +58,49 @@ function unreachable(): Promise<ConnectControlResult> {
   return Promise.resolve({ ok: false, reason: 'offline' });
 }
 
-function connected(): Promise<ConnectControlResult> {
-  const client: ControlClient = {
-    request: vi.fn().mockResolvedValue({
-      pid: 1,
-      uptimeMs: 1,
-      paired: false,
-      lifecycle: { phase: 'running', connection: 'open' },
-      activeTasks: [],
-      runtimeIds: [],
-      queueWatermarks: [],
-      approvals: [],
-      approvalsPending: 0,
-      operationalHealth: { availability: 'available', state: 'healthy', failureCount: 0, windowMs: 60_000, failureThreshold: 3, crashCount: 0 },
-    }),
-    subscribe: () => ({ close: vi.fn() }),
-    close: vi.fn(),
+const LIVE_STATUS = {
+  pid: 1,
+  uptimeMs: 1,
+  paired: false,
+  lifecycle: { phase: 'running', connection: 'open' },
+  activeTasks: [],
+  runtimes: [
+    { id: 'claude', outcome: 'available', version: '2.1.0', authPresent: true },
+    { id: 'codex', outcome: 'not-found' },
+  ],
+  environment: { source: 'login-shell', shell: 'zsh', durationMs: 530 },
+  queueWatermarks: [],
+  approvals: [],
+  approvalsPending: 0,
+  operationalHealth: { availability: 'available', state: 'healthy', failureCount: 0, windowMs: 60_000, failureThreshold: 3, crashCount: 0 },
+};
+
+function connectedWith(status: Record<string, unknown>): () => Promise<ConnectControlResult> {
+  return () => {
+    const client: ControlClient = {
+      request: vi.fn().mockResolvedValue(status),
+      subscribe: () => ({ close: vi.fn() }),
+      close: vi.fn(),
+    };
+    return Promise.resolve({ ok: true, client });
   };
-  return Promise.resolve({ ok: true, client });
+}
+
+const connected = connectedWith(LIVE_STATUS);
+
+/** An adapter whose construction is fine but whose probe fails the test: online diagnostics must never call it. */
+function forbiddenProbe(id: string): RuntimeAdapter {
+  return {
+    descriptor: freezeRuntimeAdapterDescriptor({
+      id,
+      supportsDispatchSelection: false,
+      capabilities: { steer: false, resume: false, approvalInteractive: false },
+    }),
+    detect: () => {
+      throw new Error(`${id} was probed while the daemon was online`);
+    },
+    prepare: async () => ({ kind: 'reject', reason: 'not used', retryable: false }),
+  };
 }
 
 async function digest(filePath: string): Promise<string> {
@@ -116,6 +141,65 @@ describe('diagnostics collector', () => {
     const live = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: connected });
     expect(live.lifecycle).toEqual({ status: 'known', source: 'live', lifecycle: { phase: 'running', connection: 'open' } });
     expect(live.checks.find((check) => check.id === 'lifecycle')?.status).toBe('pass');
+  });
+
+  it('#392: online, runtimes and the environment are the daemon\'s own and nothing is probed', async () => {
+    const dir = await tempDir();
+    const probe = forbiddenProbe('claude');
+    const detect = vi.spyOn(probe, 'detect');
+    const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [probe], connectControl: connected });
+    expect(detect).not.toHaveBeenCalled();
+    expect(snapshot.runtimesSource).toBe('daemon');
+    expect(snapshot.runtimes).toEqual([
+      { idHash: createHash('sha256').update('claude').digest('hex'), present: true, outcome: 'available', versionPresent: true, authPresent: true },
+      { idHash: createHash('sha256').update('codex').digest('hex'), present: false, outcome: 'not-found', versionPresent: false },
+    ]);
+    expect(snapshot.environment).toEqual({ status: 'known', source: 'live', environment: { source: 'login-shell', shell: 'zsh', durationMs: 530 } });
+    expect(snapshot.checks.find((check) => check.id === 'runtimes')?.summary).toMatch(/^daemon 1\/2 present; /u);
+    expect(snapshot.checks.find((check) => check.id === 'environment')).toEqual({ id: 'environment', status: 'pass', summary: 'live login-shell shell=zsh durationMs=530' });
+  });
+
+  it('#392: offline, the local probe is labelled local-shell and the environment is the last event; no values or paths', async () => {
+    const dir = await tempDir();
+    const unknown = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(unknown.runtimesSource).toBe('local-shell');
+    expect(unknown.environment).toEqual({ status: 'unknown' });
+    expect(unknown.checks.find((check) => check.id === 'environment')?.status).toBe('warn');
+
+    const at = '2026-10-13T00:00:00.000Z';
+    await appendAuditEvent(dir, { kind: 'environment-resolved', ts: at, source: 'unavailable', code: 'timeout' });
+    const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(snapshot.environment).toEqual({ status: 'known', source: 'audit', ts: at, environment: { source: 'unavailable', code: 'timeout' } });
+    expect(snapshot.checks.find((check) => check.id === 'environment')).toEqual({
+      id: 'environment',
+      status: 'warn',
+      summary: `audit unavailable code=timeout at=${at}`,
+    });
+    expect(snapshot.checks.find((check) => check.id === 'runtimes')?.summary).toMatch(/^local-shell 0\/0 present; /u);
+
+    const lines: string[] = [];
+    await runDoctorCommand(config(dir), { adapters: [], connectControl: unreachable, log: (line) => lines.push(line) });
+    expect(lines.some((line) => line.startsWith('check runtimes: warn (local-shell '))).toBe(true);
+    expect(lines).toContain(`check environment: warn (audit unavailable code=timeout at=${at})`);
+    const json: string[] = [];
+    await runDoctorCommand(config(dir), { json: true, adapters: [], connectControl: unreachable, log: (line) => json.push(line) });
+    const parsed = JSON.parse(json.join('\n')) as { diagnostics: { runtimesSource: string; environment: unknown } };
+    expect(parsed.diagnostics.runtimesSource).toBe('local-shell');
+    expect(json.join('\n')).not.toContain(dir);
+    if (process.env.PATH) expect(json.join('\n')).not.toContain(process.env.PATH);
+    if (process.env.HOME) expect(json.join('\n')).not.toContain(process.env.HOME);
+  });
+
+  it('#392 transition: a daemon that predates runtimes/environment reports both as unknown, without a local probe', async () => {
+    const dir = await tempDir();
+    const { runtimes: _runtimes, environment: _environment, ...old } = LIVE_STATUS;
+    const probe = forbiddenProbe('claude');
+    const detect = vi.spyOn(probe, 'detect');
+    const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [probe], connectControl: connectedWith(old) });
+    expect(detect).not.toHaveBeenCalled();
+    expect(snapshot.runtimesSource).toBe('unknown');
+    expect(snapshot.runtimes).toEqual([]);
+    expect(snapshot.environment).toEqual({ status: 'unknown' });
   });
 
   it('reports a strict Agent daemon without workspaceRoot as not-configured, not missing (#319)', async () => {

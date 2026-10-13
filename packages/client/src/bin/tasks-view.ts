@@ -133,8 +133,8 @@ export function deriveTasksFromEvents(events: readonly DaemonEvent[]): DerivedTa
       }
       // 'artifact' carries no task-STATE transition of its own (observer.ts
       // never calls its own upsertTask for it either); 'lifecycle'/
-      // 'paired'/'unpaired'/'runtimes-detected' are daemon-level, not
-      // per-task.
+      // 'paired'/'unpaired'/'runtimes-detected'/'environment-resolved' are
+      // daemon-level, not per-task.
       default:
         break;
     }
@@ -156,6 +156,15 @@ export function lastLifecycle(events: readonly DaemonEvent[]): { lifecycle: Daem
     if (event.kind === 'lifecycle') last = { lifecycle: event.lifecycle, ts: event.ts };
   }
   return last;
+}
+
+/** Issue #392: the most recent event of `kind` — offline `status` reads the last `environment-resolved` and `runtimes-detected` this way. */
+export function lastEventOfKind<K extends DaemonEvent['kind']>(events: readonly DaemonEvent[], kind: K): Extract<DaemonEvent, { kind: K }> | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i]!;
+    if (event.kind === kind) return event as Extract<DaemonEvent, { kind: K }>;
+  }
+  return undefined;
 }
 
 export type TaskCounts = Record<TaskState, number> & { total: number };

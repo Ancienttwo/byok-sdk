@@ -37,7 +37,7 @@ async function detectWithTimeout(adapter: RuntimeAdapter, timeoutMs: number): Re
   }
 }
 
-/** The bundled adapter set `byok-agent status`/`byok-agent runtimes` probe by default — same unset-vs-set allowlist contract as `createDaemon` itself. */
+/** The bundled adapter set `byok-agent runtimes` (and an offline `doctor`, as `local-shell`) probes by default — same unset-vs-set allowlist contract as `createDaemon` itself. */
 export function defaultRuntimeAdapters(runtimeAllowlist: string[] | undefined): RuntimeAdapter[] {
   const ids = runtimeAllowlist ? ALL_RUNTIME_IDS.filter((id) => runtimeAllowlist.includes(id)) : ALL_RUNTIME_IDS;
   return ids.map((id) => {
@@ -53,7 +53,7 @@ export function defaultRuntimeAdapters(runtimeAllowlist: string[] | undefined): 
 }
 
 /**
- * What `byok-agent status`/`byok-agent runtimes` show per runtime — a
+ * What `byok-agent runtimes` shows per runtime — a
  * flattened, display-ready merge of `RuntimeDetectResult` and
  * `RuntimeCapabilities` (see `../types.ts`). Always probed fresh (this
  * module never reads from the daemon or the audit log) — see

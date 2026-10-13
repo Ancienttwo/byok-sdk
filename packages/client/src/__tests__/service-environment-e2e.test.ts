@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { readLastEnvironmentRecord } from '../bin/audit-log';
+import { readLastAuditEvent } from '../bin/audit-log';
+import { connectControlClient } from '../bin/control-client';
+import type { ControlStatusResult } from '../daemon/control-protocol';
 import { TestServer } from './fixtures/test-server';
 
 /**
@@ -95,6 +97,17 @@ async function runChild(home: string, configPath: string, service: boolean): Pro
   return { report: JSON.parse(stdout.split('\n').find((line) => line.includes('"ready":true'))!) as ChildReport, child };
 }
 
+/** The running child daemon's own control `status` — what `byok-agent status` shows online. */
+async function controlStatus(storeDir: string): Promise<ControlStatusResult> {
+  const conn = await connectControlClient({ storeDir, productId: 'acme-login-shell' });
+  if (!conn.ok) throw new Error(`control socket not reachable: ${conn.reason}`);
+  try {
+    return await conn.client.request<ControlStatusResult>('status');
+  } finally {
+    conn.client.close();
+  }
+}
+
 async function stop(child: ChildProcess): Promise<number | null> {
   const exited = new Promise<number | null>((resolve) => child.once('exit', (code) => resolve(code)));
   child.kill('SIGTERM');
@@ -105,7 +118,7 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
   it('--service: login-shell environment, conn.hello lists claude, rc BYOK_* dropped, own BYOK_* kept', async () => {
     const server = await TestServer.start();
     cleanups.push(() => server.close());
-    const { home, configPath } = await fixture(server.url);
+    const { home, storeDir, configPath } = await fixture(server.url);
     const { report, child } = await runChild(home, configPath, true);
 
     expect(report.environment).toMatchObject({ source: 'login-shell', shell: path.basename(passwdShell!) });
@@ -114,13 +127,17 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
     expect(report.byokNames).toEqual(['BYOK_TEST_DEVICE_CREDENTIAL_STORE']);
     const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello', 10_000);
     expect((hello.payload as { runtimes: Array<{ id: string }> }).runtimes.map((runtime) => runtime.id)).toEqual(['claude']);
+    const status = await controlStatus(storeDir);
+    expect(status.environment).toMatchObject({ source: 'login-shell', shell: path.basename(passwdShell!) });
+    expect(status.runtimes).toEqual([expect.objectContaining({ id: 'claude', outcome: 'available' })]);
+    expect(JSON.stringify(status)).not.toContain(home);
     expect(await stop(child)).toBe(0);
   }, 60_000);
 
   it('without --service: inherited, and claude stays not-found', async () => {
     const server = await TestServer.start();
     cleanups.push(() => server.close());
-    const { home, configPath } = await fixture(server.url);
+    const { home, storeDir, configPath } = await fixture(server.url);
     const { report, child } = await runChild(home, configPath, false);
 
     expect(report.environment).toEqual({ source: 'inherited' });
@@ -128,6 +145,9 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
     expect(report.detected).toEqual([]);
     const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello', 10_000);
     expect((hello.payload as { runtimes: unknown[] }).runtimes).toEqual([]);
+    const status = await controlStatus(storeDir);
+    expect(status.environment).toEqual({ source: 'inherited' });
+    expect(status.runtimes).toEqual([{ id: 'claude', outcome: 'not-found' }]);
     expect(await stop(child)).toBe(0);
   }, 60_000);
 
@@ -148,7 +168,7 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
     // so the supervisor leaves it stopped.
     expect(run.stderr).toContain('daemon halted: reason=unpaired');
     expect(run.status).toBe(0);
-    // Only a daemon that actually started (owns the store) records the environment.
-    expect(await readLastEnvironmentRecord(storeDir)).toBeUndefined();
+    // Only a daemon past the single-owner bind emits the environment-resolved event.
+    expect(await readLastAuditEvent(storeDir, 'environment-resolved')).toBeUndefined();
   }, 60_000);
 });

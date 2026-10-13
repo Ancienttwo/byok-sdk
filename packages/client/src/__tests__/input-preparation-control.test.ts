@@ -15,6 +15,7 @@ import {
   NdjsonLineReader,
   controlEndpointPath,
   encodeFrame,
+  type ControlStatusResult,
 } from '../daemon/control-protocol';
 import {
   cancelInputPreparation,
@@ -369,7 +370,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     expect(receipt.readinessReasons).not.toContain('projection_unknown');
 
     // Task-free: nothing entered the runner.
-    const status = await client!.request<{ activeTasks: unknown[]; runtimeIds: string[] }>('status');
+    const status = await client!.request<Pick<ControlStatusResult, 'activeTasks'>>('status');
     expect(status.activeTasks).toEqual([]);
 
     // The retained artifact is on disk, 0600, under the daemon's own store.

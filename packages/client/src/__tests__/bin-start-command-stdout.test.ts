@@ -8,13 +8,12 @@ import type { Daemon } from '../daemon/create-daemon';
 import type { DaemonEvent, DaemonEventListener } from '../daemon/observer';
 import {
   AUDIT_LOG_TRIM_TARGET_LINES,
-  appendEnvironmentRecord,
   auditLogPath,
   MAX_AUDIT_LOG_BYTES,
   appendAuditEvent,
   createAuditAppender,
   readAuditEvents,
-  readLastEnvironmentRecord,
+  readLastAuditEvent,
 } from '../bin/audit-log';
 import { runStartCommand } from '../bin/commands/start';
 import { runDoctorCommand } from '../bin/commands/doctor';
@@ -123,39 +122,53 @@ describe('bin/commands/start: stdout carries no model text (issue #395, minimal)
   });
 });
 
-describe('bin/audit-log: environment-resolved record (issue #392)', () => {
-  it('start records inherited by default; status/doctor/bundle read it back without paths', async () => {
+describe('environment-resolved is a DaemonEvent in the audit log (issue #392)', () => {
+  it('reaches audit.jsonl through start\'s subscribe->append; status/doctor/bundle read it back without paths', async () => {
     const storeDir = await tmpDir('byok-envrec-');
-    const { daemon } = fakeDaemon();
+    const { daemon, emit } = fakeDaemon();
+    vi.mocked(daemon.start).mockImplementation(async () => {
+      emit({ kind: 'environment-resolved', ts: '2026-10-13T00:00:00.000Z', source: 'inherited' });
+    });
     const lines: string[] = [];
     const controller = new AbortController();
-    const run = runStartCommand(config(storeDir), { daemon, log: (l) => lines.push(l), signal: controller.signal, onReady: () => controller.abort() });
-    await run;
+    await runStartCommand(config(storeDir), { daemon, log: (l) => lines.push(l), signal: controller.signal, onReady: () => controller.abort() });
     expect(lines[0]).toBe('environment: inherited');
-    expect(await readLastEnvironmentRecord(storeDir)).toMatchObject({ status: { source: 'inherited' } });
+    expect(lines).toContain('[2026-10-13T00:00:00.000Z] environment-resolved inherited');
+    expect(await readAuditEvents(storeDir)).toEqual([{ kind: 'environment-resolved', ts: '2026-10-13T00:00:00.000Z', source: 'inherited' }]);
     const status: string[] = [];
-    await runStatusCommand(config(storeDir), { adapters: [], connectControl: offline, log: (l) => status.push(l) });
-    expect(status.some((l) => /^environment: inherited at=\d{4}-/u.test(l))).toBe(true);
+    await runStatusCommand(config(storeDir), { connectControl: offline, log: (l) => status.push(l) });
+    expect(status).toContain('environment: last-known inherited at=2026-10-13T00:00:00.000Z');
 
-    await appendEnvironmentRecord(storeDir, { ts: '2026-10-13T00:00:00.000Z', status: { source: 'login-shell', shell: 'zsh', durationMs: 530 } });
+    await appendAuditEvent(storeDir, { kind: 'environment-resolved', ts: '2026-10-13T00:00:01.000Z', source: 'login-shell', shell: 'zsh', durationMs: 530 });
     const doctor: string[] = [];
     await runDoctorCommand(config(storeDir), { adapters: [], connectControl: offline, log: (l) => doctor.push(l) });
-    expect(doctor).toContain('environment: login-shell shell=zsh durationMs=530 at=2026-10-13T00:00:00.000Z');
+    expect(doctor).toContain('check environment: pass (audit login-shell shell=zsh durationMs=530 at=2026-10-13T00:00:01.000Z)');
     const bundle = await createSupportBundle(config(storeDir), storeDir, { adapters: [], connectControl: offline });
-    expect(bundle.environment).toEqual({ ts: '2026-10-13T00:00:00.000Z', status: { source: 'login-shell', shell: 'zsh', durationMs: 530 } });
+    expect(bundle.environment).toEqual({
+      status: 'known',
+      source: 'audit',
+      ts: '2026-10-13T00:00:01.000Z',
+      environment: { source: 'login-shell', shell: 'zsh', durationMs: 530 },
+    });
     expect(JSON.stringify(bundle)).not.toContain(storeDir);
   });
 
-  it('is not a DaemonEvent, rejects open-ended values, and survives audit rotation', async () => {
+  it('parses #409-era lines, drops forged values instead of echoing them, and survives audit rotation', async () => {
     const storeDir = await tmpDir('byok-envrec-rot-');
-    await appendEnvironmentRecord(storeDir, { ts: '2026-10-13T00:00:00.000Z', status: { source: 'unavailable', code: 'timeout' } });
-    expect(await readAuditEvents(storeDir)).toEqual([]);
-    // A forged record with a path or an unknown code is ignored, not echoed.
+    // The line #409's bin-side writer produced has exactly the event's flat shape.
+    await fs.appendFile(auditLogPath(storeDir), `${JSON.stringify({ kind: 'environment-resolved', ts: '2026-10-13T00:00:00.000Z', source: 'unavailable', code: 'timeout' })}\n`);
+    expect(await readAuditEvents(storeDir)).toEqual([{ kind: 'environment-resolved', ts: '2026-10-13T00:00:00.000Z', source: 'unavailable', code: 'timeout' }]);
+    // A forged line with a path for a code, or a path-shaped shell, is dropped.
     await fs.appendFile(auditLogPath(storeDir), `${JSON.stringify({ kind: 'environment-resolved', ts: '2026-10-13T00:00:01.000Z', source: 'unavailable', code: '/Users/me/.zshrc' })}\n`);
-    await fs.appendFile(auditLogPath(storeDir), `${JSON.stringify({ kind: 'environment-resolved', ts: '2026-10-13T00:00:02.000Z', source: 'login-shell', shell: 'zsh', durationMs: 1, PATH: '/x' })}\n`);
-    expect(await readLastEnvironmentRecord(storeDir)).toEqual({ ts: '2026-10-13T00:00:00.000Z', status: { source: 'unavailable', code: 'timeout' } });
+    await fs.appendFile(auditLogPath(storeDir), `${JSON.stringify({ kind: 'environment-resolved', ts: '2026-10-13T00:00:02.000Z', source: 'login-shell', shell: '/bin/zsh', durationMs: 1 })}\n`);
+    expect(await readLastAuditEvent(storeDir, 'environment-resolved')).toEqual({ kind: 'environment-resolved', ts: '2026-10-13T00:00:00.000Z', source: 'unavailable', code: 'timeout' });
+    // An extra field is never carried into the event.
+    await fs.appendFile(auditLogPath(storeDir), `${JSON.stringify({ kind: 'environment-resolved', ts: '2026-10-13T00:00:03.000Z', source: 'inherited', PATH: '/secret/bin' })}\n`);
+    const extra = await readLastAuditEvent(storeDir, 'environment-resolved');
+    expect(extra).toEqual({ kind: 'environment-resolved', ts: '2026-10-13T00:00:03.000Z', source: 'inherited' });
+    expect(JSON.stringify(extra)).not.toContain('/secret/bin');
 
-    // Push the log past the rotation cap with ordinary events; the environment record is kept.
+    // Push the log past the rotation cap with ordinary events; the environment event is kept.
     const padding = 'x'.repeat(Math.ceil(MAX_AUDIT_LOG_BYTES / (AUDIT_LOG_TRIM_TARGET_LINES * 2)));
     const filler = Array.from({ length: AUDIT_LOG_TRIM_TARGET_LINES * 3 }, (_, i) =>
       JSON.stringify({ kind: 'lifecycle', ts: `2026-10-13T00:01:00.${String(i % 1000).padStart(3, '0')}Z`, lifecycle: { phase: 'running', connection: 'open' }, pad: padding }),
@@ -164,10 +177,10 @@ describe('bin/audit-log: environment-resolved record (issue #392)', () => {
     await appendAuditEvent(storeDir, { kind: 'lifecycle', ts: '2026-10-13T00:02:00.000Z', lifecycle: { phase: 'running', connection: 'open' } });
     const size = (await fs.stat(auditLogPath(storeDir))).size;
     expect(size).toBeLessThan(MAX_AUDIT_LOG_BYTES);
-    expect(await readLastEnvironmentRecord(storeDir)).toEqual({ ts: '2026-10-13T00:00:00.000Z', status: { source: 'unavailable', code: 'timeout' } });
+    expect(await readLastAuditEvent(storeDir, 'environment-resolved')).toEqual({ kind: 'environment-resolved', ts: '2026-10-13T00:00:03.000Z', source: 'inherited' });
   });
 
-  it('start writes it through the event appender\'s chain: queued behind pending appends and a rotation, never lost', async () => {
+  it('goes through the appender\'s chain like every event: queued behind pending appends and a rotation, never lost', async () => {
     const storeDir = await tmpDir('byok-envrec-chain-');
     // Over the cap, so the next event append rotates the log.
     const padding = 'x'.repeat(Math.ceil(MAX_AUDIT_LOG_BYTES / (AUDIT_LOG_TRIM_TARGET_LINES * 2)));
@@ -178,7 +191,8 @@ describe('bin/audit-log: environment-resolved record (issue #392)', () => {
     const errors: unknown[] = [];
     const appender = createAuditAppender(storeDir, (err) => errors.push(err));
     for (let i = 0; i < 20; i++) appender({ kind: 'lifecycle', ts: `2026-10-13T00:02:00.${String(i).padStart(3, '0')}Z`, lifecycle: { phase: 'running', connection: 'open' } });
-    await appender.appendEnvironment({ ts: '2026-10-13T00:03:00.000Z', status: { source: 'inherited' } });
+    appender({ kind: 'environment-resolved', ts: '2026-10-13T00:03:00.000Z', source: 'inherited' });
+    await appender.flush();
 
     expect(errors).toEqual([]);
     const lines = (await fs.readFile(auditLogPath(storeDir), 'utf8')).trimEnd().split('\n');
@@ -186,6 +200,6 @@ describe('bin/audit-log: environment-resolved record (issue #392)', () => {
     expect(lines.slice(-21, -1).map((line) => (JSON.parse(line) as { ts: string }).ts)).toEqual(
       Array.from({ length: 20 }, (_, i) => `2026-10-13T00:02:00.${String(i).padStart(3, '0')}Z`),
     );
-    expect(await readLastEnvironmentRecord(storeDir)).toEqual({ ts: '2026-10-13T00:03:00.000Z', status: { source: 'inherited' } });
+    expect(await readLastAuditEvent(storeDir, 'environment-resolved')).toEqual({ kind: 'environment-resolved', ts: '2026-10-13T00:03:00.000Z', source: 'inherited' });
   });
 });

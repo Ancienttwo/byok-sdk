@@ -118,7 +118,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     expect(projection?.deviceId).toBe(receipt.deviceId);
   }, 10000);
 
-  it('status reports live pid/uptime/lifecycle/activeTasks/runtimeIds', async () => {
+  it('status reports live pid/uptime/lifecycle/activeTasks/runtimes/environment', async () => {
     const adapter = new StubRuntimeAdapter('pi');
     const built = await pairedAndStarted('acme-ctl-status', adapter);
     daemon = built.daemon;
@@ -134,11 +134,67 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     expect(typeof status.deviceId).toBe('string');
     expect(status.lifecycle).toEqual({ phase: 'running', connection: 'open' });
     expect(status.activeTasks).toEqual([]);
-    expect(status.runtimeIds).toEqual(['pi']);
+    expect(status.runtimes).toEqual([{ id: 'pi', outcome: 'available', version: '0.0.0' }]);
+    expect(status.environment).toEqual({ source: 'inherited' });
     // M4 Phase 4 (part B.3): queue watermarks, empty with no active tasks.
     expect(status.queueWatermarks).toEqual([]);
     expect(status.approvalsPending).toBe(0);
     conn.client.close();
+  });
+
+  it('#392: status.runtimes keeps every configured adapter\'s startup outcome, not-found included; a plain start is inherited', async () => {
+    const workspaceRoot = await tmpDir('byok-ctl-outcomes-ws-');
+    const storeDir = await tmpDir('byok-ctl-outcomes-store-');
+    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-ctl-outcomes', serverUrl: server.url, workspaceRoot, storeDir };
+    daemon = createDaemonWithAdapters(config, [
+      new StubRuntimeAdapter('pi', { kind: 'available', version: '1.2.3', authPresent: true }),
+      new StubRuntimeAdapter('claude', { kind: 'not-found' }),
+      new StubRuntimeAdapter('codex', { kind: 'timeout' }),
+    ]);
+    await daemon.pair('pairing-code');
+    await daemon.start();
+    await waitForDaemonOpen(daemon);
+
+    const conn = await connectControlClient({ storeDir, productId: config.productId });
+    if (!conn.ok) throw new Error('expected reachable');
+    const status = await conn.client.request<ControlStatusResult>('status');
+    conn.client.close();
+    expect(status.runtimes).toEqual([
+      { id: 'pi', outcome: 'available', version: '1.2.3', authPresent: true },
+      { id: 'claude', outcome: 'not-found' },
+      { id: 'codex', outcome: 'timeout' },
+    ]);
+    expect(status.environment).toEqual({ source: 'inherited' });
+    expect(daemon.status().environment).toEqual({ source: 'inherited' });
+    // conn.hello still lists only what is available.
+    const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello');
+    expect((hello.payload as { runtimes: Array<{ id: string }> }).runtimes.map((runtime) => runtime.id)).toEqual(['pi']);
+  });
+
+  it('#392: environment-resolved is emitted once per start, before runtimes-detected, and never by a rejected second daemon', async () => {
+    const workspaceRoot = await tmpDir('byok-ctl-envevent-ws-');
+    const storeDir = await tmpDir('byok-ctl-envevent-store-');
+    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-ctl-envevent', serverUrl: server.url, workspaceRoot, storeDir };
+    daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter('pi')]);
+    const events: DaemonEvent[] = [];
+    daemon.subscribe((event) => events.push(event));
+    await daemon.pair('pairing-code');
+    await daemon.start();
+    await waitForDaemonOpen(daemon);
+
+    const environmentEvents = events.filter((event) => event.kind === 'environment-resolved');
+    expect(environmentEvents).toEqual([{ kind: 'environment-resolved', ts: expect.any(String), source: 'inherited' }]);
+    expect(events.findIndex((event) => event.kind === 'environment-resolved')).toBeLessThan(
+      events.findIndex((event) => event.kind === 'runtimes-detected'),
+    );
+
+    const second = createDaemonWithAdapters(config, [new StubRuntimeAdapter('pi')]);
+    const secondEvents: DaemonEvent[] = [];
+    second.subscribe((event) => secondEvents.push(event));
+    await expect(second.start()).rejects.toMatchObject({ reason: 'store_owned' });
+    await second.stop();
+    expect(secondEvents.some((event) => event.kind === 'environment-resolved')).toBe(false);
+    expect(events.filter((event) => event.kind === 'environment-resolved')).toHaveLength(1);
   });
 
   it('reloads the registry with CAS and reports only explicit, redacted lifecycle evidence', async () => {
@@ -449,7 +505,10 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     await runStatusCommand(built.config, { log: (l) => linesLive.push(l) });
     expect(linesLive.some((l) => l.startsWith('live: pid='))).toBe(true);
     expect(linesLive.some((l) => l === 'live-active-tasks: (none)')).toBe(true);
-    expect(linesLive.some((l) => l === 'live-runtimes: pi')).toBe(true);
+    expect(linesLive).toContain('live-runtime: pi available version=0.0.0');
+    expect(linesLive).toContain('live-environment: inherited');
+    // Online, the persisted view leaves environment and runtimes to the live section.
+    expect(linesLive.some((l) => l.startsWith('runtimes:') || l.startsWith('environment:'))).toBe(false);
 
     await daemon.stop();
 

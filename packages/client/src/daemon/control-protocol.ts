@@ -8,7 +8,8 @@ import type { StoragePressureState } from './journal/storage-policy';
 import type { OperationalHealthSnapshot } from './operational-health';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
-import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
+import type { McpToolsetConfig, McpToolsetRegistryStatus, RuntimeDetectResult } from '../types';
+import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 import type { AgentHomeExecutionStatus } from '../agent-home';
 import type {
   InputPreparationAccountingPolicyRefV1,
@@ -438,6 +439,19 @@ export interface ControlStorageCompaction {
   at: string;
 }
 
+/**
+ * Issue #392: one configured adapter's outcome from the daemon's single
+ * startup detection (`create-daemon.ts`'s `detectRuntimes`) — including the
+ * runtimes that are not available (`not-found`, `timeout`, ...), which
+ * `conn.hello` never lists. No paths and no diagnostics.
+ */
+export interface ControlRuntimeStatus {
+  id: string;
+  outcome: RuntimeDetectResult['kind'];
+  version?: string;
+  authPresent?: boolean;
+}
+
 /** Result shape for the `status` method — see `create-daemon.ts`'s control-method wiring for how each field is sourced, and `bin/format.ts`'s `formatLiveStatusLines` for how the CLI renders it. */
 export interface ControlStatusResult {
   /** Process-immutable Local Agent application release; absent only for an older control peer. */
@@ -449,7 +463,10 @@ export interface ControlStatusResult {
   /** Issues #391/#394: the same value as `Daemon.status().lifecycle`. */
   lifecycle: DaemonLifecycle;
   activeTasks: ControlActiveTask[];
-  runtimeIds: string[];
+  /** Issue #392: per configured adapter, what this daemon's startup detection found. Empty until that detection has finished. */
+  runtimes: ControlRuntimeStatus[];
+  /** Issue #392: where this daemon's environment came from — the same value as `Daemon.status().environment`. */
+  environment: ServiceEnvironmentStatus;
   /** M4 Phase 4 (part B.3): per-active-task queue watermarks — see {@link TaskQueueWatermark}. */
   queueWatermarks: TaskQueueWatermark[];
   /**
@@ -477,6 +494,15 @@ export interface ControlStatusResult {
    */
   agentHomeExecution?: AgentHomeExecutionStatus;
 }
+
+/**
+ * Issue #392 transition only: a daemon from before #392 that is still running
+ * after a CLI upgrade answers `status` without `runtimes` and `environment`.
+ * `byok-agent status`, `doctor` and the support bundle report both as
+ * `unknown` for it. This type and that branch are removed in the next minor.
+ */
+export type PeerControlStatusResult = Omit<ControlStatusResult, 'runtimes' | 'environment'> &
+  Partial<Pick<ControlStatusResult, 'runtimes' | 'environment'>>;
 
 export interface ToolsetsReloadParams {
   expectedRevision: string;

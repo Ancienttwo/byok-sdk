@@ -61,19 +61,19 @@ import { runVersionCommand } from './version';
  *   `<storeDir>/audit.jsonl` (the audit log `start` appends every
  *   `DaemonEvent` to — see `bin/audit-log.ts` — replayed into a task list /
  *   last-known-connection-state via `bin/tasks-view.ts`). `status`
- *   additionally tries the control socket afterward: if reachable, a
- *   clearly-marked `live-*` section (pid/uptime/transport/active tasks) is
- *   appended; if not, one line says so and the persisted view above stands
- *   on its own, never faked as "live".
- * - `runtimes` (and the compact runtime summary inside `status`) is a FRESH
- *   STANDALONE PROBE instead: it constructs the same bundled pi/claude/codex
- *   adapter set `createDaemon` would (see `bin/runtime-probe.ts`) and calls
- *   `detect()` and descriptor capabilities directly, independent of whether any daemon
- *   is running. "What's on this machine right now" is more useful live than
- *   stale, and detection is cheap/side-effect-free, so there's no reason to
- *   read a historical snapshot here instead. The control socket deliberately
- *   never duplicates this probe (see `control-protocol.ts`'s `status`
- *   method doc comment) — this CLI keeps owning it.
+ *   additionally tries the control socket: if reachable, a clearly-marked
+ *   `live-*` section (pid/uptime/transport/active tasks, and — issue #392 —
+ *   the daemon's environment source and its own startup runtime detection
+ *   outcomes) is appended; if not, one line says so and the persisted view
+ *   above stands on its own, with the last `environment-resolved` and
+ *   `runtimes-detected` events, never faked as "live". `status` never probes
+ *   runtimes itself: this CLI's environment is not the service's.
+ * - `runtimes` is a FRESH STANDALONE PROBE of the current shell instead: it
+ *   constructs the same bundled pi/claude/codex adapter set `createDaemon`
+ *   would (see `bin/runtime-probe.ts`) and calls `detect()` and descriptor
+ *   capabilities directly, independent of whether any daemon is running —
+ *   "what this shell can run right now". `doctor` and the support bundle use
+ *   the same probe only when no daemon answers, labelled `local-shell`.
  * - `tasks --follow` prefers subscribing to the control socket's
  *   `tasks.subscribe` (a genuinely live feed, full fidelity, the same
  *   events `start`'s own stdout shows); falls back to tailing

@@ -7,8 +7,6 @@ import {
   type OperationalHealthFixResult,
 } from '../../diagnostics/diagnostics';
 import { resolveStoreDir } from '../config';
-import { readLastEnvironmentRecord, type EnvironmentRecord } from '../audit-log';
-import { formatServiceEnvironment } from '../format';
 import { repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from '../../diagnostics/device-doctor';
 
 export interface DoctorOptions extends CollectDiagnosticsOptions {
@@ -35,12 +33,10 @@ export class DoctorDaemonRunningError extends Error {
   }
 }
 
-function formatDoctorLines(snapshot: DiagnosticsSnapshot, environment: EnvironmentRecord | undefined, fixResult?: OperationalHealthFixResult): string[] {
+function formatDoctorLines(snapshot: DiagnosticsSnapshot, fixResult?: OperationalHealthFixResult): string[] {
   const lines = [
     `doctor: productHash=${snapshot.product.nameHash} generatedAt=${snapshot.generatedAt}`,
     `system: node=${snapshot.system.node} platform=${snapshot.system.platform} arch=${snapshot.system.arch} sqlite=${snapshot.system.sqliteAvailable ? 'available' : 'unavailable'}`,
-    // Issue #392: the environment the last `start` resolved (closed values only).
-    environment ? `environment: ${formatServiceEnvironment(environment.status)} at=${environment.ts}` : 'environment: unknown',
   ];
   for (const check of snapshot.checks) lines.push(`check ${check.id}: ${check.status} (${check.summary})`);
   if (snapshot.health.status === 'corrupt' || snapshot.health.status === 'unavailable') {
@@ -93,10 +89,9 @@ export async function runDoctorCommand(config: DaemonConfig, options: DoctorOpti
     snapshot = await collectDiagnostics(config, storeDir, options);
   }
   const log = options.log ?? ((line: string) => console.log(line));
-  const environment = await readLastEnvironmentRecord(storeDir).catch(() => undefined);
   if (options.json) {
-    log(JSON.stringify({ diagnostics: snapshot, environment: environment ?? { status: 'unknown' }, ...(fixResult ? { fix: fixResult } : {}) }, null, 2));
+    log(JSON.stringify({ diagnostics: snapshot, ...(fixResult ? { fix: fixResult } : {}) }, null, 2));
     return;
   }
-  for (const line of formatDoctorLines(snapshot, environment, fixResult)) log(line);
+  for (const line of formatDoctorLines(snapshot, fixResult)) log(line);
 }

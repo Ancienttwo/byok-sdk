@@ -1,6 +1,6 @@
 import { createDaemon, type Daemon, type DaemonConfig } from '../../index';
 import { DaemonHaltError, type DaemonHaltReason } from '../../daemon/daemon-lifecycle';
-import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../../lifecycle/service-environment';
+import { serviceEnvironmentStatus } from '../../lifecycle/service-environment';
 import { createAuditAppender } from '../audit-log';
 import { resolveStoreDir } from '../config';
 import { formatHaltRemedy, formatServiceEnvironment, StartStdoutProjector } from '../format';
@@ -14,8 +14,6 @@ export interface StartDeps {
   onReady?: () => void;
   /** Required: there is no sane default "never stop" signal. The real CLI entry (`byok-agent.ts`) wires this to SIGINT/SIGTERM; tests wire their own `AbortController`. */
   signal: AbortSignal;
-  /** Issue #392: where this process's environment came from. Defaults to {@link serviceEnvironmentStatus} (`byok-agent.ts` applied it for `--service`). */
-  environment?: ServiceEnvironmentStatus;
 }
 
 /**
@@ -55,13 +53,13 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
   const daemon = deps.daemon ?? createDaemon(config);
   const stdout = new StartStdoutProjector();
 
-  // Issue #392: where this process's environment came from. Printed first
-  // (the service log shows it even when start fails), and recorded for
-  // `status` only once start() succeeded — i.e. by the process that owns the
-  // store — so a rejected second `start` never overwrites what the running
-  // daemon sees.
-  const environment = deps.environment ?? serviceEnvironmentStatus();
-  log(`environment: ${formatServiceEnvironment(environment)}`);
+  // Issue #392: where this process's environment came from
+  // (`byok-agent.ts` applied the login shell for `--service`). Printed first,
+  // so the service log shows it even when start fails. The record `status`
+  // reads is the daemon's own `environment-resolved` event, which reaches the
+  // audit log below like every other event — and only from a daemon that got
+  // past the single-owner bind.
+  log(`environment: ${formatServiceEnvironment(serviceEnvironmentStatus())}`);
 
   const appendToAudit = createAuditAppender(storeDir, (err) =>
     error(`audit log append failed: ${err instanceof Error ? err.message : String(err)}`),
@@ -96,8 +94,8 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
   // keeps recording through `daemon.stop()`, so it ends on the final
   // lifecycle the offline `status`/`doctor`/`service-status` read.
   let stdoutOpen = true;
-  // Subscribe BEFORE start() so the earliest events (runtimes-detected,
-  // lifecycle) are captured too — mirrors daemon-observer.test.ts's own
+  // Subscribe BEFORE start() so the earliest events (environment-resolved,
+  // runtimes-detected, lifecycle) are captured too — mirrors daemon-observer.test.ts's own
   // "subscribe before pair()/start()" convention.
   const unsubscribe = daemon.subscribe((event) => {
     appendToAudit(event);
@@ -146,7 +144,6 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
       unsubscribe();
       return await halted(err.reason);
     }
-    await appendToAudit.appendEnvironment({ status: environment, ts: new Date().toISOString() });
     // Exact "daemon started: ..." prefix preserved from the pre-M3-2b bin —
     // examples/basic/README.md tells a human operator to watch stdout for
     // this literal text.

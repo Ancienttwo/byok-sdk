@@ -8,6 +8,7 @@ import { isTaskOfferType,
   type TaskState,
 } from '@byok-sdk/protocol';
 import type { DaemonLifecycle } from './daemon-lifecycle';
+import { serviceEnvironmentFields, type ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 
 /**
  * M3-2a: local observability for the daemon — the seam a CLI (M3-2b) drives a
@@ -78,6 +79,15 @@ export type DaemonEvent =
   | { kind: 'paired'; ts: string; deviceId: string }
   | { kind: 'unpaired'; ts: string }
   | { kind: 'runtimes-detected'; ts: string; runtimes: RuntimeInfo[] }
+  /**
+   * Issue #392: where this daemon's environment came from
+   * (`lifecycle/service-environment.ts`), emitted once per `start()` after
+   * the single-owner bind and before runtime detection — so it precedes the
+   * `runtimes-detected` it explains, and a rejected second daemon never emits
+   * it. Flat {@link ServiceEnvironmentStatus}: closed values and a shell
+   * basename only, never a variable name, value or path.
+   */
+  | ({ kind: 'environment-resolved'; ts: string } & ServiceEnvironmentStatus)
   /** M4 Phase 2: the control socket's `shutdown` RPC was invoked — emitted once, before this daemon starts tearing itself down, so it lands in the audit log via the exact same subscribe->append plumbing every other event already uses (see `bin/commands/start.ts`). Informational only — do NOT gate any teardown decision on this event; see `shutdown-complete`. */
   | { kind: 'shutdown-requested'; ts: string; reason: string }
   /**
@@ -420,6 +430,11 @@ export class DaemonObserver {
 
   noteRuntimesDetected(runtimes: RuntimeInfo[]): void {
     this.emit({ kind: 'runtimes-detected', ts: nowIso(), runtimes });
+  }
+
+  /** Issue #392: see the `environment-resolved` `DaemonEvent` variant's own doc comment. */
+  noteEnvironmentResolved(status: ServiceEnvironmentStatus): void {
+    this.emit({ kind: 'environment-resolved', ts: nowIso(), ...serviceEnvironmentFields(status) });
   }
 
   /** M4 Phase 2: see the `shutdown-requested` `DaemonEvent` variant's own doc comment. */

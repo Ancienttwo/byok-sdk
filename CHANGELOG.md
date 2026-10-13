@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+- **Breaking (client, 0.x)** — the control `status` answer replaces
+  `runtimeIds` (the configured adapter ids, not a detection result) with
+  `runtimes: { id, outcome, version?, authPresent? }[]`: the daemon's own
+  startup detection outcome for every configured adapter, `not-found`,
+  `timeout` and `refused` included (empty until detection has finished).
+  `conn.hello` still lists only available runtimes. The control answer and
+  `Daemon.status()` gain `environment` (`ServiceEnvironmentStatus`: where the
+  daemon's environment came from). **Host migration:** replace
+  `status.runtimeIds` with `status.runtimes.map((r) => r.id)` (the same
+  configured set, once detection has finished), and filter on
+  `r.outcome === 'available'` for what the daemon can actually run (#392).
+- **Changed (client)** — `environment-resolved` is now a `DaemonEvent`
+  (`{ kind, ts, source, shell?, code?, durationMs? }`), emitted once per
+  `start()` after the single-owner bind and before `runtimes-detected`; a Host
+  that calls `applyLoginShellEnvironment()` itself gets the same event. It
+  reaches `audit.jsonl` through the ordinary event append (the separate
+  bin-side record is gone; existing lines of that record parse as the event)
+  and is listed in the support bundle's event kinds (#392).
+- **Changed (client CLI)** — `byok-agent status` no longer probes runtimes in
+  its own environment. Online it shows the daemon's `live-environment` and one
+  `live-runtime` line per runtime with its outcome (the `live-runtimes` id
+  list is gone); offline it shows the last `environment-resolved` and
+  `runtimes-detected` events with their times. A still-running daemon from
+  before this change shows `unknown` until it is restarted. `doctor` and the
+  support bundle use the daemon's runtimes when it is online and otherwise the
+  local probe, labelled `runtimesSource: local-shell`, and add an
+  `environment` check; `doctor --json` carries it in `diagnostics.environment`
+  instead of a separate top-level `environment`. `byok-agent runtimes` remains
+  the explicit probe of the current shell. Reinstall the service
+  (`byok-agent install`) so it runs with `--service` (#392).
+
 - **Breaking (client, 0.x)** — daemon readiness and halts are one lifecycle
   model (#391, #394). `daemon.start()` now resolves once local startup is done
   and never waits for the network; the server accepting this session's lone
@@ -100,9 +131,9 @@
   never sees; rc output outside the nonce frame is ignored, and an rc
   background job holding stdout does not delay the capture. A failed capture is a typed
   `unavailable:<code>` and the inherited environment stays in effect.
-  `start` records an `environment-resolved` line in `audit.jsonl`; `status`,
-  `doctor` and the support bundle show it (source, closed code, shell
-  basename only). New exports: `applyLoginShellEnvironment`,
+  The daemon reports it as an `environment-resolved` event in `audit.jsonl`;
+  `status`, `doctor` and the support bundle show it (source, closed code,
+  shell basename only). New exports: `applyLoginShellEnvironment`,
   `serviceEnvironmentStatus`. WinSW is unchanged. Existing services pick this
   up on reinstall (#392).
 - **Changed (client CLI)** — `byok-agent start` stdout no longer prints model

@@ -71,6 +71,24 @@ export type ServiceEnvironmentStatus =
   | { source: 'unavailable'; code: ServiceEnvironmentUnavailableCode };
 
 /**
+ * Exactly the {@link ServiceEnvironmentStatus} fields of `status`, nothing
+ * else — for writers that receive a status inside a wider object (the
+ * `environment-resolved` event, its audit line, status and diagnostics).
+ *
+ * @internal
+ */
+export function serviceEnvironmentFields(status: ServiceEnvironmentStatus): ServiceEnvironmentStatus {
+  switch (status.source) {
+    case 'login-shell':
+      return { source: 'login-shell', shell: status.shell, durationMs: status.durationMs };
+    case 'inherited':
+      return { source: 'inherited' };
+    case 'unavailable':
+      return { source: 'unavailable', code: status.code };
+  }
+}
+
+/**
  * Test seams for {@link captureAndApply}. Not part of the public API:
  * {@link applyLoginShellEnvironment} takes no options.
  *

@@ -2,7 +2,7 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import type { DaemonBranding, DaemonEvent, DaemonTaskInfo, LocalAgentReleaseIdentity } from '../index';
 import type { DaemonHaltReason, DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { GIT_ERROR_CATEGORIES } from '../daemon/git-workspace';
-import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
+import type { ControlRuntimeStatus, PeerControlStatusResult, PendingApproval } from '../daemon/control-protocol';
 import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 import type { McpToolsetReloadReceipt, McpToolsetStatus } from '../types';
 import type { ProbedRuntime } from './runtime-probe';
@@ -189,6 +189,8 @@ export function formatDaemonEventLine(event: DaemonEvent, options: FormatDaemonE
       return `${prefix} unpaired`;
     case 'runtimes-detected':
       return `${prefix} runtimes-detected ids=${event.runtimes.map((r) => r.id).join(',') || '(none)'}`;
+    case 'environment-resolved':
+      return `${prefix} environment-resolved ${formatServiceEnvironment(event)}`;
     case 'shutdown-requested':
       return `${prefix} shutdown-requested reason=${quote(event.reason)}`;
     case 'shutdown-complete':
@@ -430,12 +432,30 @@ export interface StatusView {
   deviceId?: string;
   /** Issues #391/#394: the last `lifecycle` event the audit log holds. */
   lifecycle?: { lifecycle: DaemonLifecycle; ts: string };
-  runtimes: readonly ProbedRuntime[];
   taskCounts: TaskCounts;
   auditLogPath: string;
   auditLogLineCount: number;
-  /** Issue #392: the environment the last `start` resolved, from its `environment-resolved` audit record. */
-  environment?: { status: ServiceEnvironmentStatus; ts: string };
+  /**
+   * Issue #392: set only when no live daemon answered — the last
+   * `environment-resolved` and `runtimes-detected` events the audit log
+   * holds (either may be absent). A live daemon's own `live-environment`/
+   * `live-runtime` lines report both instead; `status` never probes runtimes
+   * itself.
+   */
+  lastStart?: {
+    environment?: Extract<DaemonEvent, { kind: 'environment-resolved' }>;
+    runtimesDetected?: Extract<DaemonEvent, { kind: 'runtimes-detected' }>;
+  };
+}
+
+/** Issue #392: `live-runtime: claude available version=2.1.0 authPresent=true`, `live-runtime: codex not-found` — the daemon's own startup detection. */
+function formatLiveRuntimeLine(runtime: ControlRuntimeStatus): string {
+  const parts = [
+    `live-runtime: ${runtime.id} ${runtime.outcome}`,
+    runtime.version !== undefined ? `version=${runtime.version}` : undefined,
+    runtime.authPresent !== undefined ? `authPresent=${runtime.authPresent}` : undefined,
+  ].filter((part): part is string => part !== undefined);
+  return parts.join(' ');
 }
 
 /** Issue #392: `login-shell shell=zsh durationMs=530`, `inherited`, or `unavailable code=timeout` — closed values and a shell basename only. */
@@ -465,13 +485,19 @@ export function formatStatusLines(view: StatusView): string[] {
       : 'lifecycle: unknown (no lifecycle event yet — run `byok-agent start` at least once to begin observing)',
   );
   if (view.lifecycle?.lifecycle.phase === 'halted') lines.push(`lifecycle-remedy: ${formatHaltRemedy(view.lifecycle.lifecycle.reason)}`);
-  lines.push(
-    view.environment
-      ? `environment: ${formatServiceEnvironment(view.environment.status)} at=${view.environment.ts}`
-      : 'environment: unknown (no environment-resolved record yet)',
-  );
-  const runtimeSummary = view.runtimes.map((r) => `${r.id}=${r.present ? 'present' : r.outcome === 'refused' ? `refused:${r.reason}` : r.outcome}`).join(' ');
-  lines.push(`runtimes: ${runtimeSummary || '(none configured)'}`);
+  if (view.lastStart) {
+    const { environment, runtimesDetected } = view.lastStart;
+    lines.push(
+      environment
+        ? `environment: last-known ${formatServiceEnvironment(environment)} at=${environment.ts}`
+        : 'environment: unknown (no environment-resolved event yet)',
+    );
+    lines.push(
+      runtimesDetected
+        ? `runtimes: last-known available=${runtimesDetected.runtimes.map((r) => r.id).join(',') || '(none)'} at=${runtimesDetected.ts}`
+        : 'runtimes: unknown (no runtimes-detected event yet)',
+    );
+  }
   const c = view.taskCounts;
   lines.push(
     `tasks: total=${c.total} offered=${c.Offered} claimed=${c.Claimed} running=${c.Running} awaitApproval=${c.AwaitApproval} complete=${c.Complete} failed=${c.Failed} cancelled=${c.Cancelled}`,
@@ -488,7 +514,7 @@ export function formatStatusLines(view: StatusView): string[] {
  * unambiguous which lines are a live snapshot of a running process versus
  * the historical/persisted view above them.
  */
-export function formatLiveStatusLines(live: ControlStatusResult): string[] {
+export function formatLiveStatusLines(live: PeerControlStatusResult): string[] {
   const liveRelease = live.localAgentRelease;
   const lines: string[] = [
     `live: pid=${live.pid} uptimeMs=${live.uptimeMs} ${formatLifecycle(live.lifecycle)}`,
@@ -496,9 +522,14 @@ export function formatLiveStatusLines(live: ControlStatusResult): string[] {
       ? `live-local-agent-release: ${liveRelease.version}${liveRelease.buildId ? ` buildId=${liveRelease.buildId}` : ''}`
       : 'live-local-agent-release: unknown',
     `live-paired: ${live.paired ? 'yes' : 'no'}${live.deviceId ? ` deviceId=${live.deviceId}` : ''}`,
-    `live-runtimes: ${live.runtimeIds.length ? live.runtimeIds.join(',') : '(none)'}`,
-    `live-toolsets: revision=${live.toolsets.revision} count=${live.toolsets.toolsets.length}`,
+    // Issue #392 transition: a daemon from before #392 reports neither
+    // field. This `unknown` branch is removed in the next minor.
+    live.environment ? `live-environment: ${formatServiceEnvironment(live.environment)}` : 'live-environment: unknown (daemon predates environment reporting)',
   ];
+  if (live.runtimes === undefined) lines.push('live-runtime: unknown (daemon predates runtime outcome reporting)');
+  else if (live.runtimes.length === 0) lines.push('live-runtime: (none detected yet)');
+  else for (const runtime of live.runtimes) lines.push(formatLiveRuntimeLine(runtime));
+  lines.push(`live-toolsets: revision=${live.toolsets.revision} count=${live.toolsets.toolsets.length}`);
   for (const toolset of live.toolsets.toolsets) lines.push(formatToolsetStatusLine('live-toolset', toolset));
   const health = live.operationalHealth;
   if (health.availability === 'unavailable') {

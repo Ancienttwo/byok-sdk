@@ -10,7 +10,6 @@ import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { probeRuntimes } from '../bin/runtime-probe';
 import { runRuntimesCommand } from '../bin/commands/runtimes';
-import { runStatusCommand } from '../bin/commands/status';
 import { runDoctorCommand } from '../bin/commands/doctor';
 import { collectDiagnostics } from '../diagnostics/diagnostics';
 import { validateRuntimeDetectResult } from '../runtime-detection';
@@ -223,7 +222,7 @@ describe('one runtime detection authoring contract', () => {
   });
 });
 
-it('carries failure outcomes through runtimes/status and doctor JSON/text without private diagnostics', async () => {
+it('carries failure outcomes through runtimes and an offline (local-shell) doctor JSON/text without private diagnostics', async () => {
   const dir = await directory();
   const config: DaemonConfig = {
     localAgentRelease: { version: '0.0.0-test' }, productName: 'Probe', productId: 'probe-product',
@@ -234,17 +233,16 @@ it('carries failure outcomes through runtimes/status and doctor JSON/text withou
   const lines: string[] = [];
   const log = (line: string) => { lines.push(line); };
   await runRuntimesCommand(config, { adapters, log });
-  await runStatusCommand(config, { adapters, log, connectControl });
+  // Issue #392: `status` no longer probes (its runtimes are the daemon's); `runtimes` is the explicit probe.
   for (const kind of kinds.filter((kind) => kind !== 'available')) {
     expect(lines).toContain(`${kind}: ${kind}`);
-    expect(lines.find((line) => line.startsWith('runtimes:'))).toContain(`${kind}=${kind}`);
   }
   const snapshot = await collectDiagnostics(config, dir, { adapters, connectControl });
   expect(snapshot.runtimes.map(({ outcome }) => outcome)).toEqual(kinds);
   expect(snapshot.runtimes.map(({ present }) => present)).toEqual([true, false, false, false, false]);
   const check = snapshot.checks.find(({ id }) => id === 'runtimes');
   expect(check?.status).toBe('pass');
-  expect(check?.summary).toBe('1/5 present; not-found=1 not-executable=1 timeout=1 probe-failed=1');
+  expect(check?.summary).toBe('local-shell 1/5 present; not-found=1 not-executable=1 timeout=1 probe-failed=1');
   await runDoctorCommand(config, { adapters, connectControl, log });
   expect(lines.some((line) => line.includes(check!.summary))).toBe(true);
   const json: string[] = [];
