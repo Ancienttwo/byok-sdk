@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { DaemonConfig, DaemonEvent } from '../index';
+import type { DaemonHaltReason, DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { auditLogPath, readLastEnvironmentRecord, type EnvironmentRecord } from '../bin/audit-log';
 import { atomicWriteFile } from '../util/atomic-write';
 import { ensureSecureDir, ensureSecureFile, type EnsureSecureDirOptions } from '../util/secure-dir';
@@ -33,7 +34,6 @@ export interface SupportBundle {
         status: 'online';
         pid: number;
         uptimeMs: number;
-        transport: 'connecting' | 'open' | 'closed' | 'revoked' | 'unavailable';
         activeTaskCount: number;
         pendingApprovalCount: number;
         operationalHealth:
@@ -50,6 +50,10 @@ export interface SupportBundle {
             };
         storagePresent: boolean;
       };
+  /** Issue #394: phase, connection and halt reason — closed enums only. */
+  lifecycle:
+    | { status: 'unknown' }
+    | { status: 'known'; source: 'live' | 'audit'; phase: DaemonLifecycle['phase']; connection?: 'connecting' | 'open'; reason?: DaemonHaltReason };
   health: DiagnosticsSnapshot['health'];
   /** Issue #392: the last `start`'s `environment-resolved` record — closed values and a shell basename only. */
   environment: EnvironmentRecord | { status: 'unknown' };
@@ -83,9 +87,9 @@ const AUDIT_KINDS = new Set<DaemonEvent['kind']>([
   'cancelled',
   'claimed',
   'completed',
-  'connection',
   'failed',
   'git-workspace',
+  'lifecycle',
   'offered',
   'paired',
   'progress',
@@ -189,9 +193,6 @@ async function recentAuditFacts(storeDir: string): Promise<SupportBundle['recent
 
 function projectControl(control: DiagnosticsSnapshot['control']): SupportBundle['control'] {
   if (control.status === 'offline') return { status: 'offline' };
-  const transport = ['connecting', 'open', 'closed', 'revoked'].includes(control.transport)
-    ? (control.transport as 'connecting' | 'open' | 'closed' | 'revoked')
-    : 'unavailable';
   const operationalHealth =
     control.operationalHealth.availability === 'available'
       ? {
@@ -207,11 +208,22 @@ function projectControl(control: DiagnosticsSnapshot['control']): SupportBundle[
     status: 'online',
     pid: control.pid,
     uptimeMs: control.uptimeMs,
-    transport,
     activeTaskCount: control.activeTaskCount,
     pendingApprovalCount: control.pendingApprovalCount,
     operationalHealth,
     storagePresent: control.storage !== undefined,
+  };
+}
+
+function projectLifecycle(lifecycle: DiagnosticsSnapshot['lifecycle']): SupportBundle['lifecycle'] {
+  if (lifecycle.status === 'unknown') return { status: 'unknown' };
+  const value = lifecycle.lifecycle;
+  return {
+    status: 'known',
+    source: lifecycle.source,
+    phase: value.phase,
+    ...(value.phase === 'running' ? { connection: value.connection } : {}),
+    ...(value.phase === 'halted' ? { reason: value.reason } : {}),
   };
 }
 
@@ -242,6 +254,7 @@ export async function createSupportBundle(
     },
     runtimes: snapshot.runtimes,
     control: projectControl(snapshot.control),
+    lifecycle: projectLifecycle(snapshot.lifecycle),
     health: snapshot.health,
     environment: environment ?? { status: 'unknown' },
     journal: snapshot.journal,

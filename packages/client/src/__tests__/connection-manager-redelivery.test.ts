@@ -8,6 +8,7 @@ import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { DeviceStore } from '../daemon/store';
 import { TestServer } from './fixtures/test-server';
+import { waitForOpen } from './fixtures/lifecycle-barrier';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -74,7 +75,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     });
 
     await connection.start();
-    await connection.waitForConnection();
+    await waitForOpen(connection);
 
     const taskId = 'task-flaky-handler';
     // `server.nextSeq()` (not a hardcoded literal): `conn.ack` already
@@ -135,7 +136,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
       },
     });
     await connection.start();
-    await connection.waitForConnection();
+    await waitForOpen(connection);
     const offers = [1, 2, 3].map(n => createEnvelope('task.offer', {
       instruction: 'finite backlog',
     }, { taskId: String(n), seq: server.nextSeq() }));
@@ -164,7 +165,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
       productId: 'test-product', capabilities: [], runtimes: [], auth, cursorStore,
       onEnvelope: async e => { if (e.type === 'task.offer') effect(); },
     });
-    await connection.start(); await connection.waitForConnection();
+    await connection.start(); await waitForOpen(connection);
     const offer = createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'a', seq: server.nextSeq() });
     server.send(offer);
     await vi.waitFor(() => expect(effect).toHaveBeenCalledTimes(1));
@@ -199,7 +200,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
       },
     });
     await connection.start();
-    await connection.waitForConnection();
+    await waitForOpen(connection);
 
     // The handshake's conn.ack has a seq but must never be cursor-tracked.
     await expect(cursorStore.load(server.url, record.deviceId)).resolves.toBeUndefined();

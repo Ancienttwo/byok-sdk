@@ -122,13 +122,23 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
     });
 
     const retryDelayMs = 150;
-    const client = new LongPollClient({
+    let finished = false;
+    const client: LongPollClient = new LongPollClient({
       serverUrl: 'http://example.invalid',
       auth,
       getCursor: () => (stalledAtSeq !== undefined ? 1 : undefined),
       onEnvelope,
       onValidationFailedSeq,
       isStalled: () => stalledAtSeq !== undefined,
+      // #391: the cycle after the stall finds no read-ahead advertisement and
+      // ends this loop generation; the reconnect loop (here, this stand-in)
+      // starts the next one after its own backoff.
+      onLoopFailure: () => {
+        client.stop();
+        setTimeout(() => {
+          if (!finished) client.start();
+        }, retryDelayMs);
+      },
       retryDelayMs,
       idleDelayMs: 20,
     });
@@ -152,6 +162,7 @@ describe('LongPollClient: validation-failure backoff (finding R1, Codex P2)', ()
     // Past retryDelayMs (generous margin) — the second cycle's fetch fires.
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2), { timeout: 5000 });
 
+    finished = true;
     client.stop();
   });
 

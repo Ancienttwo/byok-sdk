@@ -31,6 +31,7 @@ import { handleInboundEnvelope, readAgentMessageDisposition, type ByokCloudObser
 import type { ActivityBounds } from '../coordination';
 import type { AgentEgressRecord } from '../stores/ports';
 import type { TenantStores } from '../tenant-stores';
+import { CLOUD_PROTOCOL_CAPABILITIES } from './events';
 import { authenticateDevice, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
 
 const MESSAGES_JSON_BODY_MAX_BYTES = 2 * 1024 * 1024;
@@ -85,6 +86,7 @@ export function messagesHandler(deps: MessagesRouteDeps) {
 
     let accepted = 0;
     let rejected = 0;
+    let handshake = false;
     for (const envelope of parsed.data.messages) {
       const outcome = await handleInboundEnvelope(
         stores,
@@ -115,9 +117,19 @@ export function messagesHandler(deps: MessagesRouteDeps) {
       // even though its business mutation did not execute a second time.
       if (outcome === 'rejected') rejected += 1;
       else accepted += 1;
+      if (envelope.type === 'conn.hello' && outcome !== 'rejected') handshake = true;
     }
 
-    const response: MessagesSendResponse = rejected > 0 ? { accepted, rejected } : { accepted };
+    // A batch whose `conn.hello` was accepted is the daemon's handshake: its
+    // answer carries the same advertisement `GET /byok/events` does, so the
+    // device learns the server's capabilities in that one round trip instead
+    // of waiting out a held poll (§8.2). Every other answer, a rejected
+    // hello's included, omits it ("no update").
+    const response: MessagesSendResponse = {
+      accepted,
+      ...(rejected > 0 ? { rejected } : {}),
+      ...(handshake ? { capabilities: [...CLOUD_PROTOCOL_CAPABILITIES] } : {}),
+    };
     return c.json(response, 200);
   };
 }

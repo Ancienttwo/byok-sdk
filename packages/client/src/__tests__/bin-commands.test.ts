@@ -90,7 +90,7 @@ describe('bin/commands/status: runStatusCommand', () => {
 
     expect(lines[0]).toBe('product: Acme Coder (acme-product)');
     expect(lines.some((l) => l === 'paired: no')).toBe(true);
-    expect(lines.some((l) => l.startsWith('connection: unknown'))).toBe(true);
+    expect(lines.some((l) => l.startsWith('lifecycle: unknown'))).toBe(true);
     expect(lines.some((l) => l === 'tasks: total=0 offered=0 claimed=0 running=0 awaitApproval=0 complete=0 failed=0 cancelled=0')).toBe(
       true,
     );
@@ -112,16 +112,16 @@ describe('bin/commands/status: runStatusCommand', () => {
     expect(lines.some((l) => l === 'paired: yes deviceId=dev-123')).toBe(true);
   });
 
-  it('reflects task state and last-known connection derived from the audit log', async () => {
+  it('reflects task state and last-known lifecycle derived from the audit log', async () => {
     const storeDir = await tmpDir('byok-cmd-status-audit-');
-    await appendAuditEvent(storeDir, { kind: 'connection', ts: '2026-01-01T00:00:00.000Z', state: 'open' });
+    await appendAuditEvent(storeDir, { kind: 'lifecycle', ts: '2026-01-01T00:00:00.000Z', lifecycle: { phase: 'running', connection: 'open' } });
     await appendAuditEvent(storeDir, { kind: 'offered', ts: '2026-01-01T00:00:01.000Z', taskId: 't1', runtime: 'pi' });
     await appendAuditEvent(storeDir, { kind: 'claimed', ts: '2026-01-01T00:00:02.000Z', taskId: 't1' });
 
     const { log, lines } = collectLog();
     await runStatusCommand(baseConfig(storeDir), { log, adapters: [] });
 
-    expect(lines.some((l) => l === 'connection: last-known=open at=2026-01-01T00:00:00.000Z')).toBe(true);
+    expect(lines.some((l) => l === 'lifecycle: last-known phase=running connection=open at=2026-01-01T00:00:00.000Z')).toBe(true);
     expect(lines.some((l) => l === 'tasks: total=1 offered=0 claimed=1 running=0 awaitApproval=0 complete=0 failed=0 cancelled=0')).toBe(
       true,
     );
@@ -223,14 +223,14 @@ describe('bin/commands/tasks: runTasksFollowCommand', () => {
   it('tails the audit log from its current end and stops on abort', async () => {
     const storeDir = await tmpDir('byok-cmd-tasks-follow-');
     // Pre-existing line before follow starts — must NOT be streamed (fromEnd semantics).
-    await appendAuditEvent(storeDir, { kind: 'connection', ts: '2026-01-01T00:00:00.000Z', state: 'open' });
+    await appendAuditEvent(storeDir, { kind: 'lifecycle', ts: '2026-01-01T00:00:00.000Z', lifecycle: { phase: 'running', connection: 'open' } });
 
     const { log, lines } = collectLog();
     const controller = new AbortController();
     const followPromise = runTasksFollowCommand(baseConfig(storeDir), { log, signal: controller.signal, pollIntervalMs: 10 });
 
     await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(lines).toEqual([]); // pre-existing connection line correctly skipped
+    expect(lines).toEqual([]); // pre-existing lifecycle line correctly skipped
 
     await appendAuditEvent(storeDir, { kind: 'offered', ts: '2026-01-01T00:00:01.000Z', taskId: 't1', runtime: 'pi' });
     await vi.waitFor(() => expect(lines.length).toBeGreaterThanOrEqual(1));

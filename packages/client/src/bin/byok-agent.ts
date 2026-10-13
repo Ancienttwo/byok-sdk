@@ -4,8 +4,8 @@ import { PI_TEAM_OPERATOR_TOKEN } from './team-pi-operator-entry';
 import { runTeamPiRelayCommand } from './commands/team-pi-relay';
 import { runTeamRelayCommand } from './commands/team-relay';
 import { createDaemon, createServiceLifecycle, type ServiceLifecycle } from '../index';
-import { DeviceRevokedError } from '../daemon/auth-manager';
-import { argValue, hasFlag, loadConfig, positionalArgs, resolveStoreDir } from './config';
+import { argValue, ConfigError, hasFlag, loadConfig, positionalArgs, resolveStoreDir } from './config';
+import { formatHaltRemedy } from './format';
 import { applyLoginShellEnvironment, SERVICE_FLAG } from '../lifecycle/service-environment';
 import { runApprovalsCommand } from './commands/approvals';
 import { runApproveCommand, runRejectCommand } from './commands/approve-reject';
@@ -21,7 +21,7 @@ import {
   runServiceStopCommand,
   runUninstallCommand,
 } from './commands/service';
-import { runStartCommand } from './commands/start';
+import { runStartCommand, startExitCode, type StartOutcome } from './commands/start';
 import { runStatusCommand } from './commands/status';
 import { runSupportBundleCommand } from './commands/support-bundle';
 import { runTasksFollowCommand, runTasksListCommand } from './commands/tasks';
@@ -160,6 +160,23 @@ function usage(): never {
   process.exit(1);
 }
 
+/** A configuration that cannot load is the `config_invalid` halt: restarting with it fails the same way. */
+async function startOutcome(rest: string[]): Promise<StartOutcome> {
+  const configPath = configPathFrom(rest);
+  let config: ReturnType<typeof loadConfig>;
+  try {
+    if (!configPath) throw new ConfigError('start requires --config <path> or a BYOK_CONFIG env var');
+    config = loadConfig(configPath);
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    console.error(err.message);
+    console.error(`daemon halted: reason=config_invalid — ${formatHaltRemedy('config_invalid')}`);
+    return { kind: 'halted', reason: 'config_invalid' };
+  }
+  const controller = abortOnSignal();
+  return runStartCommand(config, { signal: controller.signal });
+}
+
 function configPathFrom(args: string[]): string | undefined {
   return argValue(args, '--config') ?? process.env.BYOK_CONFIG;
 }
@@ -195,18 +212,12 @@ async function main(): Promise<void> {
   }
 
   if (command === 'start') {
+    const service = hasFlag(rest, SERVICE_FLAG);
     // Issue #392: under a service manager, adopt the user's login-shell
     // environment BEFORE anything reads process.env (BYOK_CONFIG, the config
     // file, adapter resolution). This process's own BYOK_* values survive.
-    if (hasFlag(rest, SERVICE_FLAG)) await applyLoginShellEnvironment();
-    const configPath = configPathFrom(rest);
-    if (!configPath) {
-      console.error('start requires --config <path> or a BYOK_CONFIG env var');
-      process.exit(1);
-    }
-    const config = loadConfig(configPath);
-    const controller = abortOnSignal();
-    return runStartCommand(config, { signal: controller.signal });
+    if (service) await applyLoginShellEnvironment();
+    process.exit(startExitCode(await startOutcome(rest), service));
   }
 
   if (command === 'status') {
@@ -374,15 +385,8 @@ async function main(): Promise<void> {
   usage();
 }
 
+// Every throw is a crash: exit 1, which every supervisor restarts.
 main().catch((err: unknown) => {
-  if (err instanceof DeviceRevokedError) {
-    // A cold `daemon.start()` against an already-revoked device fails fast
-    // with this typed error (see ConnectionManager.waitForConnection) instead of
-    // hanging for the ack timeout — give the operator a clear, actionable
-    // message instead of a generic one.
-    console.error('device revoked — re-pair needed (run: byok-agent pair <code> --server <url>)');
-    process.exit(1);
-  }
   console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
 });

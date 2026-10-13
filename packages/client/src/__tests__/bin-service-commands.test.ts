@@ -1,3 +1,5 @@
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { DaemonConfig, ServiceLifecycle } from '../index';
@@ -9,6 +11,8 @@ import {
   runServiceStopCommand,
   runUninstallCommand,
 } from '../bin/commands/service';
+import { appendAuditEvent } from '../bin/audit-log';
+import { formatHaltRemedy } from '../bin/format';
 
 function baseConfig(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
   return {
@@ -28,24 +32,26 @@ describe('bin/commands/service: buildServiceDefinition', () => {
     expect(def.name).toBe('acme-product');
     expect(def.displayName).toBe('Acme');
     expect(def.program.command).toBe(process.execPath);
-    // Issue #392 adds `--service` on macOS/Linux (see the platform test below).
+    // Issues #392/#394 add `--service` on every platform.
     expect(def.program.args).toEqual([
       process.argv[1],
       'start',
       '--config',
       path.resolve('/config/acme.json'),
-      ...(process.platform === 'win32' ? [] : ['--service']),
+      '--service',
     ]);
     expect(def.logDir).toBe(path.join('/tmp/acme-store', 'service-logs'));
     expect(def.windows).toBeUndefined();
   });
 
-  it('issue #392: the program runs start --service on darwin and linux, and is unchanged on win32', () => {
-    for (const platform of ['darwin', 'linux'] as const) {
-      expect(buildServiceDefinition(baseConfig(), '/c.json', [], platform).program.args.at(-1)).toBe('--service');
-    }
-    const windows = buildServiceDefinition(baseConfig(), '/c.json', [], 'win32');
-    expect(windows.program.args).toEqual([process.argv[1], 'start', '--config', path.resolve('/c.json')]);
+  it('issue #394: the program runs start --service on every platform, WinSW included', () => {
+    expect(buildServiceDefinition(baseConfig(), '/c.json', []).program.args).toEqual([
+      process.argv[1],
+      'start',
+      '--config',
+      path.resolve('/c.json'),
+      '--service',
+    ]);
   });
 
   it('uses branding.displayName over productName when present', () => {
@@ -149,7 +155,7 @@ describe('bin/commands/service: run*Command (DI lifecycle)', () => {
     });
     const { log, lines } = collectLog();
     await runServiceStatusCommand(baseConfig(), '/c.json', [], { lifecycle, log });
-    expect(lines).toEqual(['installed: no', 'running: no', 'detail: (none)']);
+    expect(lines).toEqual(['installed: no', 'running: no', 'detail: (none)', 'lifecycle: unknown (no lifecycle event yet)']);
   });
 
   it('runServiceStatusCommand logs installed:yes/running:yes with real detail text', async () => {
@@ -158,7 +164,29 @@ describe('bin/commands/service: run*Command (DI lifecycle)', () => {
     });
     const { log, lines } = collectLog();
     await runServiceStatusCommand(baseConfig(), '/c.json', [], { lifecycle, log });
-    expect(lines).toEqual(['installed: yes', 'running: yes', 'detail: state = running']);
+    expect(lines).toEqual(['installed: yes', 'running: yes', 'detail: state = running', 'lifecycle: unknown (no lifecycle event yet)']);
+  });
+
+  it('#394: runServiceStatusCommand shows the last lifecycle from the audit log, with the remedy for a halt', async () => {
+    const storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-service-status-store-'));
+    try {
+      await appendAuditEvent(storeDir, {
+        kind: 'lifecycle',
+        ts: '2026-10-13T00:00:00.000Z',
+        lifecycle: { phase: 'halted', reason: 'device_revoked', at: '2026-10-13T00:00:00.000Z' },
+      });
+      const lifecycle = fakeLifecycle({
+        status: vi.fn().mockResolvedValue({ installed: true, running: false, determinate: true, detail: '' }),
+      });
+      const { log, lines } = collectLog();
+      await runServiceStatusCommand(baseConfig({ storeDir }), '/c.json', [], { lifecycle, log });
+      expect(lines.slice(3)).toEqual([
+        'lifecycle: last-known phase=halted reason=device_revoked at=2026-10-13T00:00:00.000Z',
+        `lifecycle-remedy: ${formatHaltRemedy('device_revoked')}`,
+      ]);
+    } finally {
+      await fs.rm(storeDir, { recursive: true, force: true });
+    }
   });
 
   it('finding P1 #2 (residual, round 3): runServiceStatusCommand logs "running: unknown (...)" rather than a confirmed "no" when the manager query was indeterminate', async () => {
@@ -176,6 +204,7 @@ describe('bin/commands/service: run*Command (DI lifecycle)', () => {
       'installed: yes',
       'running: unknown (could not query the service manager)',
       'detail: Failed to connect to bus: No such file or directory',
+      'lifecycle: unknown (no lifecycle event yet)',
     ]);
   });
 });

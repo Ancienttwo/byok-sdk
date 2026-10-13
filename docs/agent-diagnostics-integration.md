@@ -72,6 +72,8 @@ byok-agent support-bundle --output /absolute/new-support-bundle.json --config /a
 | runtime `not-executable` | 检查安装或执行权限 | 重新探测；不自动提升权限或放宽 sandbox |
 | runtime `timeout` / `probe-failed` | 显示探测失败，允许用户重新检查或导出材料 | 新探测提供新证据；不宣称 runtime 崩溃，不自动更换 runner |
 | control `offline` | 显示“无法连接本地服务”，引导检查服务 | control online 只证明可连接；offline 不能证明进程已退出 |
+| `lifecycle` 检查 `fail`（`phase=halted`） | 显示 `reason` 与检查给出的修复方法（例如 `device_revoked` 需重新配对），不自动重启服务 | 修复后重新 `start`；halt 不会因重启消失，`--service` 下进程以 0 退出并保持停止 |
+| `lifecycle` 检查 `warn`（unknown） | 显示“尚无生命周期记录” | 只表示 `audit.jsonl` 里没有 lifecycle 事件，不代表 daemon 健康或已停止 |
 | health `corrupt` | 提供“隔离损坏的健康记录” | 仅适用下一节流程，不宣称修复 Agent、journal 或业务任务 |
 | health/journal `unavailable` | 显示“无法完成检查”，导出材料并排查访问条件 | 不等同 corrupt，不启用破坏性修复 |
 | journal `corrupt` | 停止继续派发相关工作，保留证据并升级处理 | 无 doctor rebuild；需要明确的数据恢复方案，不能删库重配 |

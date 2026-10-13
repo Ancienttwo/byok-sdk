@@ -11,7 +11,15 @@ your target:
 | Windows | [`winsw/`](./winsw/) | [WinSW](https://github.com/winsw/winsw) service (SCM-integrated, `onfailure` restart) |
 
 Crash-restart is delegated entirely to the OS supervisor — the daemon runs no
-in-process supervisor of its own. Signing, notarization, and distribution of any
+in-process supervisor of its own. The generated program runs `byok-agent start
+--service`, whose exit code tells the supervisor what happened: 1 is a crash
+(restarted), 0 is a normal stop or a halt (a revoked device, an unpaired
+store, a rejected handshake, an invalid config: conditions a restart cannot
+fix, so the service stays stopped). `byok-agent service-status` and `doctor`
+show the halt reason and its remedy. Network outages never end the process:
+the daemon reconnects on its own. A service installed before this
+`--service` argument existed keeps restarting on a halt until `byok-agent
+install` is run again. Signing, notarization, and distribution of any
 bundled binary (e.g. `WinSW.exe`) are the product's responsibility, not the
 SDK's.
 

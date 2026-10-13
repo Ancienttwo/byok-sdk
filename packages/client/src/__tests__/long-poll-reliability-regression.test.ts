@@ -10,6 +10,7 @@ import { TestServer } from './fixtures/test-server';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { waitForOpen } from './fixtures/lifecycle-barrier';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -86,7 +87,7 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
       longPollIdleDelayMs: 15,
     });
     await connection.start();
-    await connection.waitForConnection();
+    await waitForOpen(connection);
     return { deviceId: paired.deviceId, pollCursors };
   }
 
@@ -219,7 +220,9 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
           continue;
         }
         acceptedCount += 1;
-        if (!businessDedup.has(envelope.id)) {
+        // The reconnect after the dropped response re-sends `conn.hello`
+        // (#391); it is admission, not a business effect.
+        if (envelope.type !== 'conn.hello' && !businessDedup.has(envelope.id)) {
           businessDedup.add(envelope.id);
           businessExecutions.push(envelope.id);
         }
@@ -251,6 +254,9 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     expect(postBatch.mock.calls.map(([batch]) => batch.map((envelope) => envelope.id))).toEqual([
       expect.any(Array),
       [poisonFirst.id, poisonSecond.id, acceptedBeforePoison.id, laterValid.id],
+      // #391: the unreadable response ends the session; the reconnect's own
+      // handshake hello goes first, then the identical batch is retried.
+      expect.any(Array),
       [poisonFirst.id, poisonSecond.id, acceptedBeforePoison.id, laterValid.id],
       [poisonFirst.id, poisonSecond.id],
       [poisonFirst.id],
@@ -292,6 +298,12 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
       onEnvelope: () => {},
       onValidationFailedSeq: skipped,
       onServerCapabilities: capabilities,
+      // #391: a failed poll ends this loop generation; the reconnect loop
+      // (here, this stand-in) starts the next one from the durable cursor.
+      onLoopFailure: () => {
+        client.stop();
+        setTimeout(() => client.start(), 15);
+      },
       retryDelayMs: 15,
     });
     client.start();
@@ -318,6 +330,12 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
       getCursor: () => cursor,
       onEnvelope: () => {},
       onValidationFailedSeq: skipped,
+      // #391: a failed poll ends this loop generation; the reconnect loop
+      // (here, this stand-in) starts the next one from the durable cursor.
+      onLoopFailure: () => {
+        client.stop();
+        setTimeout(() => client.start(), 15);
+      },
       retryDelayMs: 15,
     });
     client.start();

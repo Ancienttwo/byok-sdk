@@ -20,8 +20,8 @@ async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
-function connectionEvent(state: 'open' | 'closed' | 'connecting' | 'revoked', ts: string): DaemonEvent {
-  return { kind: 'connection', ts, state };
+function lifecycleEvent(connection: 'open' | 'connecting', ts: string): DaemonEvent {
+  return { kind: 'lifecycle', ts, lifecycle: { phase: 'running', connection } };
 }
 
 describe('bin/audit-log: appendAuditEvent / readAuditEvents', () => {
@@ -38,9 +38,26 @@ describe('bin/audit-log: appendAuditEvent / readAuditEvents', () => {
     await appendAuditEvent(storeDir, event);
     expect(await readAuditEvents(storeDir)).toEqual([event]);
   });
+  it('#394: round-trips a halted lifecycle, and drops pre-lifecycle connection lines and malformed lifecycles', async () => {
+    const storeDir = await tmpDir('byok-audit-lifecycle-');
+    const halted: DaemonEvent = {
+      kind: 'lifecycle',
+      ts: '2026-01-01T00:00:02.000Z',
+      lifecycle: { phase: 'halted', reason: 'device_revoked', at: '2026-01-01T00:00:02.000Z' },
+    };
+    const lines = [
+      JSON.stringify({ kind: 'connection', ts: '2026-01-01T00:00:00.000Z', state: 'open' }),
+      JSON.stringify({ kind: 'lifecycle', ts: '2026-01-01T00:00:01.000Z', lifecycle: { phase: 'halted', reason: 'made_up', at: 'x' } }),
+      JSON.stringify({ kind: 'lifecycle', ts: '2026-01-01T00:00:01.500Z', lifecycle: { phase: 'running', connection: 'closed' } }),
+    ];
+    await fs.writeFile(auditLogPath(storeDir), `${lines.join('\n')}\n`, { mode: 0o600 });
+    await appendAuditEvent(storeDir, halted);
+    expect(await readAuditEvents(storeDir)).toEqual([halted]);
+  });
+
   it('appends events as one JSON line each, oldest first, and reads them back', async () => {
     const storeDir = await tmpDir('byok-audit-');
-    const e1 = connectionEvent('open', '2026-01-01T00:00:00.000Z');
+    const e1 = lifecycleEvent('open', '2026-01-01T00:00:00.000Z');
     const e2: DaemonEvent = { kind: 'offered', ts: '2026-01-01T00:00:01.000Z', taskId: 't1', runtime: 'pi' };
 
     await appendAuditEvent(storeDir, e1);
@@ -839,7 +856,7 @@ describe('bin/audit-log: followAuditLog', () => {
   it('fromEnd: false replays existing lines, then streams newly appended ones, and stops promptly on abort', async () => {
     const storeDir = await tmpDir('byok-audit-follow-');
     const filePath = auditLogPath(storeDir);
-    await appendAuditEvent(storeDir, connectionEvent('open', '2026-01-01T00:00:00.000Z'));
+    await appendAuditEvent(storeDir, lifecycleEvent('open', '2026-01-01T00:00:00.000Z'));
 
     const seen: DaemonEvent[] = [];
     const controller = new AbortController();
@@ -850,7 +867,7 @@ describe('bin/audit-log: followAuditLog', () => {
     });
 
     await vi.waitFor(() => expect(seen.length).toBeGreaterThanOrEqual(1));
-    expect(seen[0]).toMatchObject({ kind: 'connection', state: 'open' });
+    expect(seen[0]).toMatchObject({ kind: 'lifecycle', lifecycle: { phase: 'running', connection: 'open' } });
 
     await appendAuditEvent(storeDir, { kind: 'offered', ts: '2026-01-01T00:00:01.000Z', taskId: 't1' });
     await vi.waitFor(() => expect(seen.length).toBeGreaterThanOrEqual(2));
@@ -868,7 +885,7 @@ describe('bin/audit-log: followAuditLog', () => {
   it('fromEnd: true (the default `tasks --follow` uses) ignores pre-existing lines and only streams new ones', async () => {
     const storeDir = await tmpDir('byok-audit-follow-fromend-');
     const filePath = auditLogPath(storeDir);
-    await appendAuditEvent(storeDir, connectionEvent('open', '2026-01-01T00:00:00.000Z'));
+    await appendAuditEvent(storeDir, lifecycleEvent('open', '2026-01-01T00:00:00.000Z'));
 
     const seen: DaemonEvent[] = [];
     const controller = new AbortController();

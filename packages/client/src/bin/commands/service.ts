@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { createServiceLifecycle, nodeAgentProgram, type DaemonConfig, type ServiceDefinition, type ServiceLifecycle } from '../../index';
+import { readLastLifecycleEvent } from '../audit-log';
 import { argValue, resolveStoreDir } from '../config';
+import { formatHaltRemedy, formatLifecycle } from '../format';
 
 export interface ServiceCommandDeps {
   log?: (line: string) => void;
@@ -38,14 +40,14 @@ export interface ServiceCommandDeps {
  * — a relative path here would resolve against whatever cwd the service
  * manager happens to choose, not where the operator ran `install` from.
  *
- * `platform` (default `process.platform`) only decides whether the program
- * carries `--service` (macOS and Linux) — a test seam.
+ * Every platform's program carries `--service`: issue #392 (login-shell
+ * environment on macOS and Linux; win32 has none) and issue #394 (a halt
+ * exits 0, the one exit status every supervisor treats as "do not restart").
  */
 export function buildServiceDefinition(
   config: DaemonConfig,
   configPath: string,
   rest: string[],
-  platform: NodeJS.Platform = process.platform,
 ): ServiceDefinition {
   const name = argValue(rest, '--name') ?? config.productId;
   const agentBin = argValue(rest, '--agent-bin') ?? process.argv[1] ?? 'byok-agent';
@@ -58,8 +60,9 @@ export function buildServiceDefinition(
     displayName: config.branding?.displayName ?? config.productName,
     // Issue #392: launchd and systemd start the daemon with their own
     // minimal environment; `--service` makes `start` adopt the user's
-    // login-shell environment. WinSW is unchanged (owner decision pending).
-    program: nodeAgentProgram({ agentBin, configPath: absoluteConfigPath, nodeBin, service: platform !== 'win32' }),
+    // login-shell environment. Issue #394: under `--service` a halt exits 0,
+    // so no supervisor restarts a daemon a restart cannot fix.
+    program: nodeAgentProgram({ agentBin, configPath: absoluteConfigPath, nodeBin, service: true }),
     logDir,
   };
 
@@ -132,4 +135,9 @@ export async function runServiceStatusCommand(config: DaemonConfig, configPath: 
   const runningLabel = status.running ? 'yes' : status.determinate ? 'no' : 'unknown (could not query the service manager)';
   log(`running: ${runningLabel}`);
   log(`detail: ${status.detail.trim() || '(none)'}`);
+  // Issue #394: a halted service exits 0 and stays stopped; its last
+  // lifecycle event says why and what to do.
+  const last = await readLastLifecycleEvent(resolveStoreDir(config));
+  log(last ? `lifecycle: last-known ${formatLifecycle(last.lifecycle)} at=${last.ts}` : 'lifecycle: unknown (no lifecycle event yet)');
+  if (last?.lifecycle.phase === 'halted') log(`lifecycle-remedy: ${formatHaltRemedy(last.lifecycle.reason)}`);
 }

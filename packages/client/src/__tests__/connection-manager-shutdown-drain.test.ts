@@ -9,6 +9,7 @@ import { CursorStore } from '../daemon/cursor-store';
 import { LongPollClient } from '../daemon/long-poll-transport';
 import { DeviceStore } from '../daemon/store';
 import { TestServer } from './fixtures/test-server';
+import { waitForOpen } from './fixtures/lifecycle-barrier';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -63,12 +64,11 @@ describe('ConnectionManager.stop(drainTimeoutMs) — bounded outbox drain before
     });
 
     await connection.start();
-    await connection.waitForConnection();
-    // `waitForConnection()` reflects the server capability snapshot carried by the
-    // poll response. Long-poll's own authenticated `conn.hello` is an
-    // independent outbound envelope, so freeze this test only after that
-    // opening snapshot has drained; the assertions below remain about the
-    // one shutdown terminal the test deliberately stalls.
+    await waitForOpen(connection);
+    // `waitForOpen()` means the session's handshake `conn.hello` was
+    // accepted; freeze this test only after anything queued behind it has
+    // drained, so the assertions below remain about the one shutdown
+    // terminal the test deliberately stalls.
     await vi.waitFor(() => expect(connection!.outboxLength()).toBe(0));
     return { deviceId: record.deviceId };
   }

@@ -269,10 +269,13 @@ try {
 
   await withTimeout(daemon.pair(pairingCode), 'pair');
   await withTimeout(daemon.start(), 'daemon start');
-  // `connected` means the first authenticated long-poll response completed.
+  // `lifecycle` open means the server accepted this run's `conn.hello` (#391).
   // Retain the independent server-side observation below so this public status
   // cannot become the smoke's only authority for a live transport.
-  await waitFor(() => daemon.status().connected, 'daemon long-poll transport');
+  await waitFor(
+    () => daemon.status().lifecycle.phase === 'running' && daemon.status().lifecycle.connection === 'open',
+    'daemon long-poll transport',
+  );
   const deviceId = daemon.status().deviceId;
   assert(deviceId !== undefined, 'daemon did not report a paired deviceId');
   await waitForAsync(
