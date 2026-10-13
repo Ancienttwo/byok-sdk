@@ -106,3 +106,38 @@ tasks/current.md
 
 # wrangler local-dev scratch (worker-smoke E2E); state itself goes to --persist-to tmp
 packages/cloud-dataplane/worker-smoke/.wrangler/
+
+# BEGIN: gitignore-cleanup common gaps
+# Build / tooling caches
+*.tsbuildinfo
+.eslintcache
+.nyc_output/
+.parcel-cache/
+
+# Editor local state (share deliberate configs via committed files, not these dirs)
+.vscode/
+.idea/
+
+# Local scratch and OS junk
+tmp/
+.tmp/
+Thumbs.db
+
+# Local databases (examples/basic/data/ already covered; tests use temp dirs)
+*.sqlite
+*.db
+
+# Harness architecture event archives (sibling of ignored .ai/harness/archive/)
+.ai/harness/architecture/archive/
+
+# Accidental probe dumps; intentional c07 launch-cwd evidence stays tracked
+.artifacts/*
+!.artifacts/c07-launch-cwd/
+!.artifacts/c07-launch-cwd/**
+
+# Broader wrangler local state (package-level rules already cover cloud-do/dataplane)
+**/.wrangler/
+
+# Local key material (fixtures do not ship .pem today)
+*.pem
+# END: gitignore-cleanup common gaps
