@@ -28,6 +28,16 @@ describe('SQLite custom-harness claim authority', () => {
     const crypto = createWebCrypto();
     const open = (migration?: SqliteEmbeddedStoreOptions['migration']) => {
       const stores = createSqliteEmbeddedStores({ path, ...(migration === undefined ? {} : { migration }) }, { clock, crypto });
+      // Quota is process memory here; issue the entitlement on every open, as the
+      // embedded server does, so limited mailbox appends are admitted (#411).
+      void stores.core.quota.writeEntitlement(tenant, {
+        version: 1n,
+        hardLimitBytes: 1_000_000_000n,
+        maxObjectBytes: 100_000_000n,
+        maxInlineBytes: 1_000_000n,
+        mailboxLimitBytes: 100_000_000n,
+        retentionPolicyId: 'test',
+      });
       const cloud = createByokCloud({ ...stores, clock, crypto,
         tokenSigner: createHmacTokenSigner(new Uint8Array(32), clock), capabilities: fullCapabilityDeclaration() });
       const bound = tenantStoresFor({ kind: 'device', tenantId: tenant, productId: 'probe', deviceId }, stores);

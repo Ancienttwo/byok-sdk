@@ -45,6 +45,23 @@ export interface MailboxBody {
   readonly byteSize: bigint;
 }
 
+/**
+ * How an append is admitted against the tenant's `mailboxLimitBytes`.
+ *
+ * Mailbox bytes have one authority: the retained rows. Usage is the tenant's
+ * `SUM(byteSize)` over every retained row in any state, and the limit is
+ * checked in the same serialized unit that inserts the row — there is no
+ * counter for a writer to forget, so deleting a row needs no accounting.
+ *
+ * - `limited`: refused with `storage_quota_exceeded` when `used + byteSize`
+ *   exceeds the limit, and with `storage_entitlement_missing` when the tenant
+ *   has no entitlement. A refused append consumes no `seq`.
+ * - `cancellation`: always admitted and still counted. Reserved for the one
+ *   cancellation row a task can own, so a full mailbox never blocks
+ *   `cancelTask`.
+ */
+export type MailboxAdmission = 'limited' | 'cancellation';
+
 export interface MailboxAppendInput {
   readonly deviceId: string;
   /**
@@ -61,6 +78,17 @@ export interface MailboxAppendInput {
    * out of order and let an ack skip a late lower sequence.
    */
   readonly materialize: (seq: number) => MailboxBody | Promise<MailboxBody>;
+  /**
+   * Limit admission for a NEW row. An existing `messageId` returns its row
+   * before any check, so a retry is never refused for capacity.
+   */
+  readonly admission: MailboxAdmission;
+}
+
+/** Tenant mailbox usage, derived from the retained rows on every read. */
+export interface MailboxUsage {
+  /** `SUM(byteSize)` over every retained row (`pending`, `acked`, `expired`). */
+  readonly bytes: bigint;
 }
 
 export interface MailboxReadQuery {
@@ -144,6 +172,7 @@ export interface MailboxRetentionInput {
 export interface MailboxRetentionResult {
   readonly deletedCount: number;
   readonly expiredCount: number;
+  /** Report value only: usage is derived from rows, so nothing is released. */
   readonly releasedBytes: bigint;
 }
 
@@ -155,10 +184,13 @@ export interface MailboxRetentionResult {
  * `mailbox_cursor_ahead_of_delivery` (an ack beyond the highest cursor the
  * server has returned to that device),
  * `timestamp_not_canonical` (a retention cutoff that is not a canonical
- * ISO-8601 UTC instant).
+ * ISO-8601 UTC instant), `storage_quota_exceeded` and
+ * `storage_entitlement_missing` (a `limited` append refused at admission).
  */
 export interface MailboxStore {
   append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage>;
+  /** The tenant's mailbox bytes, summed from the retained rows. */
+  readUsage(tenant: TenantId): Promise<MailboxUsage>;
   /** Pure read. Never advances the cursor, never deletes, never marks acked. */
   readAfter(tenant: TenantId, query: MailboxReadQuery): Promise<MailboxPage>;
   /** Records the highest cursor a device-facing response is about to return. */

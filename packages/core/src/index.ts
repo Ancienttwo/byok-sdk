@@ -50,6 +50,7 @@ export {
 // Mailbox (§12.7.3)
 export { MAILBOX_MESSAGE_STATES } from './mailbox';
 export type {
+  MailboxAdmission,
   MailboxAdvanceCursorInput,
   MailboxAppendInput,
   MailboxBody,
@@ -62,6 +63,7 @@ export type {
   MailboxRetentionInput,
   MailboxRetentionResult,
   MailboxStore,
+  MailboxUsage,
 } from './mailbox';
 
 // Board coordination (§12.3)
@@ -140,7 +142,6 @@ export {
   STORAGE_WRITE_POSTURES,
 } from './quota';
 export type {
-  MailboxUsageDeltaInput,
   QuotaStore,
   StorageErrorCode,
   StorageFinalizeInput,

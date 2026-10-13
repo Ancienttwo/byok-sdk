@@ -1714,11 +1714,12 @@ interface TenantStorageUsage {
   committedObjectBytes: bigint;
   committedInlineBytes: bigint;
   reservedBytes: bigint;
-  mailboxBytes: bigint;
   objectCount: bigint;
   updatedAt: string;
 }
 ```
+
+mailbox bytes 不在 `TenantStorageUsage` 里。它只有一个权威：保留的 mailbox 行。用量由 `MailboxStore.readUsage(tenant)` 对租户所有保留行（任何状态）求 `SUM(byteSize)`；`limited` 追加在插入行的同一个串行单元里检查 `mailboxLimitBytes`，超限返回 `storage_quota_exceeded`，没有 entitlement 返回 `storage_entitlement_missing`。只有任务的取消行（`cancellation`）豁免限额，但仍计入用量。删除行不做任何记账（#411）。
 
 计量与展示的边界：
 

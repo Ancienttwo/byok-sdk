@@ -326,23 +326,6 @@ export function runQuotaConformance(factory: CoreCompositionFactory): void {
       });
     });
 
-    it('bounds mailbox bytes by the entitlement', async () => {
-      await withComposition(factory, async ({ stores }) => {
-        await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
-
-        const usage = await stores.quota.applyMailboxDelta(TENANT_A, { deltaBytes: 500n });
-        expect(usage.mailboxBytes).toBe(500n);
-
-        const over = await captureError(
-          stores.quota.applyMailboxDelta(TENANT_A, { deltaBytes: 1n }),
-        );
-        expect(isCoreError(over, 'storage_quota_exceeded')).toBe(true);
-
-        const released = await stores.quota.applyMailboxDelta(TENANT_A, { deltaBytes: -500n });
-        expect(released.mailboxBytes).toBe(0n);
-      });
-    });
-
     it('reads reservations tenant-scoped and rejects id reuse with a different declaration', async () => {
       await withComposition(factory, async ({ stores }) => {
         await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);

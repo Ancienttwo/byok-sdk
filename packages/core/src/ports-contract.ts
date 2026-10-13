@@ -41,7 +41,15 @@ import { CORE_STORE_NAMES, type CoreStoreName } from './stores';
 export const CORE_NON_COMPOSITION_PORT_NAMES = [] as const;
 
 export const CORE_PORT_METHODS: Readonly<Record<CoreStoreName, readonly string[]>> = {
-  mailbox: ['append', 'readAfter', 'recordDelivery', 'advanceCursor', 'readCursor', 'collectRetired'],
+  mailbox: [
+    'append',
+    'readUsage',
+    'readAfter',
+    'recordDelivery',
+    'advanceCursor',
+    'readCursor',
+    'collectRetired',
+  ],
   board: ['create', 'get', 'list', 'claim', 'unclaim', 'updateStatus'],
   truth: ['writeTerminal', 'writeSnapshot', 'getRecord', 'listManifest'],
   presence: ['publish', 'read', 'list'],
@@ -65,7 +73,6 @@ export const CORE_PORT_METHODS: Readonly<Record<CoreStoreName, readonly string[]
     'finalizeReservation',
     'abortReservation',
     'expireReservations',
-    'applyMailboxDelta',
   ],
   skillPacks: ['publish', 'get', 'list', 'readFile'],
 };

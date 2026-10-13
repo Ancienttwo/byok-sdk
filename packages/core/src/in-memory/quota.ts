@@ -18,7 +18,6 @@
 import { ByokCoreError, CoreConflictError } from '../errors';
 import type { ObjectStore } from '../blob';
 import type {
-  MailboxUsageDeltaInput,
   StorageFinalizeInput,
   StorageFinalizeResult,
   StorageReservation,
@@ -312,23 +311,6 @@ export class InMemoryQuotaStore implements QuotaStore {
     return expired;
   }
 
-  async applyMailboxDelta(
-    tenant: TenantId,
-    input: MailboxUsageDeltaInput,
-  ): Promise<TenantStorageUsage> {
-    const entitlement = this.#requireEntitlement(tenant);
-    const usage = this.#usageOf(tenant);
-    const next = usage.mailboxBytes + input.deltaBytes;
-    if (input.deltaBytes > 0n && next > entitlement.mailboxLimitBytes) {
-      throw new ByokCoreError(
-        'storage_quota_exceeded',
-        `Mailbox would reach ${String(next)} bytes, over the limit of ${String(entitlement.mailboxLimitBytes)} bytes.`,
-      );
-    }
-    this.#setUsage(tenant, { ...usage, mailboxBytes: next < 0n ? 0n : next });
-    return this.#usageOf(tenant);
-  }
-
   #settle(
     tenant: TenantId,
     key: string,
@@ -381,7 +363,6 @@ export class InMemoryQuotaStore implements QuotaStore {
       committedObjectBytes: 0n,
       committedInlineBytes: 0n,
       reservedBytes: 0n,
-      mailboxBytes: 0n,
       objectCount: 0n,
       updatedAt: this.#now(),
     };

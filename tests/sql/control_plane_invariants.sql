@@ -24,6 +24,7 @@
 --   deploy/sql/0020_agent_ref_request_keys.sql (remove device-wide Agent message-id uniqueness)
 --   deploy/sql/0021_custom_harness_identity.sql (custom discovery and disjoint claim identity)
 --   deploy/sql/0022_task_assertion_replay_schema.sql (envelope-kind segment in the assertion replay key; no new table)
+--   deploy/sql/0023_mailbox_usage_index.sql (tenant-leading covering index for derived mailbox usage; no new table)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has

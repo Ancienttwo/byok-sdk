@@ -5,18 +5,67 @@
  * here is scaffolding around it: if a composition ever deletes or marks rows on
  * read, the frozen at-least-once contract the client's stall recovery depends
  * on is gone, and it goes silently — the happy path still looks fine.
+ *
+ * The admission group pins the one mailbox-byte authority (#411): usage is the
+ * sum over the retained rows, and a `limited` append is checked against
+ * `mailboxLimitBytes` in the same serialized unit that inserts it.
  */
 import { describe, expect, it } from 'vitest';
-import { isCoreConflictError, type CoreConflictError, type MailboxCursorState } from '@byok-sdk/core';
-import { hashOf, TENANT_A } from './fixtures';
-import { withComposition, type CoreCompositionFactory } from './harness';
+import {
+  isCoreConflictError,
+  isCoreError,
+  type CoreConflictError,
+  type CoreStores,
+  type MailboxCursorState,
+} from '@byok-sdk/core';
+import { ENTITLEMENT, hashOf, TENANT_A, TENANT_B } from './fixtures';
+import {
+  withComposition,
+  type CoreCompositionFactory,
+  type CoreCompositionHandle,
+} from './harness';
 
 const DEVICE = 'device-1';
+
+/** Roomy enough that no non-admission case is ever refused for capacity. */
+const MAILBOX_ENTITLEMENT = { ...ENTITLEMENT, mailboxLimitBytes: 1_000_000n } as const;
+
+/** A `limited` append is admitted against an entitlement; issue one first. */
+async function withMailbox(
+  factory: CoreCompositionFactory,
+  body: (handle: CoreCompositionHandle) => Promise<void>,
+): Promise<void> {
+  await withComposition(factory, async (handle) => {
+    await handle.stores.quota.writeEntitlement(TENANT_A, MAILBOX_ENTITLEMENT);
+    await body(handle);
+  });
+}
+
+async function limitMailbox(stores: CoreStores, version: bigint, mailboxLimitBytes: bigint) {
+  await stores.quota.writeEntitlement(TENANT_A, { ...ENTITLEMENT, version, mailboxLimitBytes });
+}
+
+async function captureError(promise: Promise<unknown>): Promise<unknown> {
+  return promise.then(
+    () => undefined,
+    (caught: unknown) => caught,
+  );
+}
+
+function fixedBody(deviceId: string, messageId: string, byteSize: number) {
+  return {
+    deviceId,
+    messageId,
+    admission: 'limited' as const,
+    materialize: () => ({ body: 'x'.repeat(byteSize), bodyHash: hashOf(byteSize), byteSize: BigInt(byteSize) }),
+  };
+}
 
 function offer(seed: number) {
   return {
     deviceId: DEVICE,
     messageId: `msg-${seed}`,
+    admission: 'limited' as const,
     materialize: (seq: number) => {
       const body = `{"type":"task.offer","n":${seed},"seq":${seq}}`;
       return {
@@ -31,7 +80,7 @@ function offer(seed: number) {
 export function runMailboxConformance(factory: CoreCompositionFactory): void {
   describe('mailbox', () => {
     it('assigns a monotonic per-device seq and binds the body to it', async () => {
-      await withComposition(factory, async ({ stores }) => {
+      await withMailbox(factory, async ({ stores }) => {
         const first = await stores.mailbox.append(TENANT_A, offer(1));
         const second = await stores.mailbox.append(TENANT_A, offer(2));
         const otherDevice = await stores.mailbox.append(TENANT_A, {
@@ -49,7 +98,7 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
     });
 
     it('serializes concurrent materialization in commit order', async () => {
-      await withComposition(factory, async ({ stores }) => {
+      await withMailbox(factory, async ({ stores }) => {
         const appended = await Promise.all(
           Array.from({ length: 16 }, (_unused, index) =>
             stores.mailbox.append(TENANT_A, offer(index + 1)),
@@ -77,11 +126,12 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
     });
 
     it('does not consume a sequence when materialization fails', async () => {
-      await withComposition(factory, async ({ stores }) => {
+      await withMailbox(factory, async ({ stores }) => {
         await expect(
           stores.mailbox.append(TENANT_A, {
             deviceId: DEVICE,
             messageId: 'broken',
+            admission: 'limited',
             materialize: () => {
               throw new Error('injected materialization failure');
             },
@@ -93,7 +143,7 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
     });
 
     it('is idempotent per messageId', async () => {
-      await withComposition(factory, async ({ stores }) => {
+      await withMailbox(factory, async ({ stores }) => {
         const first = await stores.mailbox.append(TENANT_A, offer(1));
         const replay = await stores.mailbox.append(TENANT_A, offer(1));
         expect(replay.seq).toBe(first.seq);
@@ -104,7 +154,7 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
     });
 
     it('materializes once under concurrent idempotent append', async () => {
-      await withComposition(factory, async ({ stores }) => {
+      await withMailbox(factory, async ({ stores }) => {
         const base = offer(1);
         let materializations = 0;
         const input = {
@@ -128,7 +178,7 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
     });
 
     it('does not ack on read', async () => {
-      await withComposition(factory, async ({ stores }) => {
+      await withMailbox(factory, async ({ stores }) => {
         await stores.mailbox.append(TENANT_A, offer(1));
         await stores.mailbox.append(TENANT_A, offer(2));
 
@@ -151,7 +201,7 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
     });
 
     it('acks only through advanceCursor', async () => {
-      await withComposition(factory, async ({ stores }) => {
+      await withMailbox(factory, async ({ stores }) => {
         await stores.mailbox.append(TENANT_A, offer(1));
         await stores.mailbox.append(TENANT_A, offer(2));
         await stores.mailbox.recordDelivery(TENANT_A, {
@@ -171,7 +221,7 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
     });
 
     it('preserves the zero cursor for a mailbox with no recorded delivery', async () => {
-      await withComposition(factory, async ({ stores }) => {
+      await withMailbox(factory, async ({ stores }) => {
         const cursor = await stores.mailbox.advanceCursor(TENANT_A, {
           deviceId: DEVICE,
           ackedSeq: 0,
@@ -181,7 +231,7 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
     });
 
     it('refuses an acknowledgement beyond the recorded delivery watermark without marking rows', async () => {
-      await withComposition(factory, async ({ stores }) => {
+      await withMailbox(factory, async ({ stores }) => {
         await stores.mailbox.append(TENANT_A, offer(1));
         await stores.mailbox.append(TENANT_A, offer(2));
         await stores.mailbox.recordDelivery(TENANT_A, {
@@ -208,7 +258,7 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
     });
 
     it('serializes cursor advancement behind an in-flight materializer', async () => {
-      await withComposition(factory, async ({ stores }) => {
+      await withMailbox(factory, async ({ stores }) => {
         let releaseMaterializer!: () => void;
         let materializerStarted!: () => void;
         const started = new Promise<void>((resolve) => {
@@ -245,7 +295,7 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
     });
 
     it('refuses to move the cursor backwards and returns the current cursor', async () => {
-      await withComposition(factory, async ({ stores }) => {
+      await withMailbox(factory, async ({ stores }) => {
         await stores.mailbox.append(TENANT_A, offer(1));
         await stores.mailbox.append(TENANT_A, offer(2));
         await stores.mailbox.recordDelivery(TENANT_A, {
@@ -269,7 +319,7 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
     });
 
     it('deletes acked rows on retention and dead-letters unacked ones', async () => {
-      await withComposition(factory, async ({ stores }) => {
+      await withMailbox(factory, async ({ stores }) => {
         await stores.mailbox.append(TENANT_A, offer(1));
         await stores.mailbox.append(TENANT_A, offer(2));
         await stores.mailbox.recordDelivery(TENANT_A, {
@@ -296,7 +346,7 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
     });
 
     it('moves the recoverable floor past rows lost to expiry', async () => {
-      await withComposition(factory, async (handle) => {
+      await withMailbox(factory, async (handle) => {
         const { stores } = handle;
         // A mailbox nobody has written to has lost nothing, so a fresh device's
         // cursor 0 is inside the window rather than behind a floor it could
@@ -341,7 +391,7 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
     });
 
     it('leaves the recoverable floor where it is when acked rows are retired', async () => {
-      await withComposition(factory, async ({ stores }) => {
+      await withMailbox(factory, async ({ stores }) => {
         await stores.mailbox.append(TENANT_A, offer(1));
         await stores.mailbox.append(TENANT_A, offer(2));
         await stores.mailbox.recordDelivery(TENANT_A, { deviceId: DEVICE, deliveredSeq: 2 });
@@ -360,6 +410,138 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
         const page = await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 });
         expect(page.messages).toHaveLength(0);
         expect(page.recoverableFrom).toBe(1);
+      });
+    });
+  });
+
+  describe('mailbox admission', () => {
+    it('counts every retained row in readUsage until it is deleted', async () => {
+      await withMailbox(factory, async ({ stores }) => {
+        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(0n);
+        const first = await stores.mailbox.append(TENANT_A, offer(1));
+        const second = await stores.mailbox.append(TENANT_A, offer(2));
+        const other = await stores.mailbox.append(TENANT_A, { ...offer(3), deviceId: 'device-2' });
+        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(
+          first.byteSize + second.byteSize + other.byteSize,
+        );
+
+        await stores.mailbox.recordDelivery(TENANT_A, { deviceId: DEVICE, deliveredSeq: 1 });
+        await stores.mailbox.advanceCursor(TENANT_A, { deviceId: DEVICE, ackedSeq: 1 });
+        // Acked-but-retained still counts; reading or acking releases nothing.
+        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(
+          first.byteSize + second.byteSize + other.byteSize,
+        );
+
+        const swept = await stores.mailbox.collectRetired(TENANT_A, {
+          deviceId: DEVICE,
+          ackedBefore: '2999-01-01T00:00:00.000Z',
+          expireUnackedBefore: '2999-01-01T00:00:00.000Z',
+        });
+        expect(swept).toMatchObject({ deletedCount: 1, expiredCount: 1, releasedBytes: first.byteSize });
+        // The deleted row leaves usage; the dead letter stays counted.
+        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(
+          second.byteSize + other.byteSize,
+        );
+      });
+    });
+
+    it('refuses a limited append over mailboxLimitBytes without consuming a seq', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        await limitMailbox(stores, 1n, 25n);
+        const first = await stores.mailbox.append(TENANT_A, fixedBody(DEVICE, 'fits', 20));
+        expect(first.seq).toBe(1);
+
+        const over = await captureError(
+          stores.mailbox.append(TENANT_A, fixedBody(DEVICE, 'over', 6)),
+        );
+        expect(isCoreError(over, 'storage_quota_exceeded')).toBe(true);
+        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(20n);
+
+        await limitMailbox(stores, 2n, 26n);
+        const next = await stores.mailbox.append(TENANT_A, fixedBody(DEVICE, 'after-raise', 6));
+        expect(next.seq).toBe(2);
+        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(26n);
+      });
+    });
+
+    it('returns the existing row for a replayed messageId when the mailbox is full', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        await limitMailbox(stores, 1n, 20n);
+        const first = await stores.mailbox.append(TENANT_A, fixedBody(DEVICE, 'full', 20));
+
+        const replay = await stores.mailbox.append(TENANT_A, fixedBody(DEVICE, 'full', 20));
+        expect(replay).toMatchObject({ seq: first.seq, messageId: 'full' });
+        const fresh = await captureError(
+          stores.mailbox.append(TENANT_A, fixedBody(DEVICE, 'fresh', 1)),
+        );
+        expect(isCoreError(fresh, 'storage_quota_exceeded')).toBe(true);
+      });
+    });
+
+    it('admits a cancellation over the limit and counts it', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        await limitMailbox(stores, 1n, 20n);
+        await stores.mailbox.append(TENANT_A, fixedBody(DEVICE, 'full', 20));
+
+        const cancellation = await stores.mailbox.append(TENANT_A, {
+          ...fixedBody(DEVICE, 'cancel', 7),
+          admission: 'cancellation',
+        });
+        expect(cancellation.seq).toBe(2);
+        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(27n);
+
+        const after = await captureError(
+          stores.mailbox.append(TENANT_A, fixedBody(DEVICE, 'after-cancel', 1)),
+        );
+        expect(isCoreError(after, 'storage_quota_exceeded')).toBe(true);
+      });
+    });
+
+    it('refuses a limited append when the tenant has no entitlement', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        const missing = await captureError(
+          stores.mailbox.append(TENANT_A, fixedBody(DEVICE, 'unentitled', 2)),
+        );
+        expect(isCoreError(missing, 'storage_entitlement_missing')).toBe(true);
+        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(0n);
+
+        // The cancellation exemption does not depend on an entitlement either.
+        const cancellation = await stores.mailbox.append(TENANT_A, {
+          ...fixedBody(DEVICE, 'unentitled-cancel', 2),
+          admission: 'cancellation',
+        });
+        expect(cancellation.seq).toBe(1);
+      });
+    });
+
+    it('does not oversell under concurrent appends across devices', async () => {
+      await withComposition(factory, async ({ stores }) => {
+        // Exactly ten 10-byte rows fit; forty race for them across 8 devices.
+        await limitMailbox(stores, 1n, 100n);
+        const outcomes = await Promise.allSettled(
+          Array.from({ length: 40 }, (_unused, index) =>
+            stores.mailbox.append(
+              TENANT_A,
+              fixedBody(`device-${index % 8}`, `race-${index}`, 10),
+            ),
+          ),
+        );
+
+        expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(10);
+        for (const outcome of outcomes) {
+          if (outcome.status === 'rejected') {
+            expect(isCoreError(outcome.reason, 'storage_quota_exceeded')).toBe(true);
+          }
+        }
+        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(100n);
+      });
+    });
+
+    it("keeps another tenant's usage at zero", async () => {
+      await withMailbox(factory, async ({ stores }) => {
+        await stores.mailbox.append(TENANT_A, offer(1));
+        expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBeGreaterThan(0n);
+        expect((await stores.mailbox.readUsage(TENANT_B)).bytes).toBe(0n);
       });
     });
   });
