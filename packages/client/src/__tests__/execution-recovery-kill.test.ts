@@ -20,6 +20,7 @@ interface ChildConfig {
   readonly recoveryFault?: string;
   readonly agentHome?: boolean;
   readonly holdTerminalConfirmation?: boolean;
+  readonly ownedRuntimeTree?: boolean;
 }
 
 interface JsonLine {
@@ -28,6 +29,7 @@ interface JsonLine {
   readonly deviceId?: string;
   readonly result?: unknown;
   readonly error?: string;
+  readonly stopped?: boolean;
 }
 
 class JsonChild {
@@ -233,6 +235,49 @@ async function waitForJournalTruth(state: string, timeoutMs = 10_000): Promise<v
   }
 }
 
+/** `kill(-pgid, 0)`: does any process still carry this group id? */
+function groupAlive(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    throw error;
+  }
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    throw error;
+  }
+}
+
+async function runtimeTree(): Promise<{ rootPid: number; toolPid: number; sessionPid: number }> {
+  const file = path.join(current!.daemonBase.controlDir, 'runtime-tree.json');
+  await waitForFile(file);
+  return JSON.parse(await fs.readFile(file, 'utf8')) as { rootPid: number; toolPid: number; sessionPid: number };
+}
+
+/** The store's owned-process ledger: one record per owned group not yet disposed. */
+async function ownedProcessRecords(): Promise<Array<{ raw: string; record: Record<string, unknown> }>> {
+  const dir = path.join(current!.daemonBase.storeDir, 'owned-processes');
+  let names: string[];
+  try {
+    names = await fs.readdir(dir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+  return Promise.all(names.map(async (name) => {
+    const raw = await fs.readFile(path.join(dir, name), 'utf8');
+    return { raw, record: JSON.parse(raw) as Record<string, unknown> };
+  }));
+}
+
 async function arm(name: string): Promise<void> {
   if (current === undefined) throw new Error('test context missing');
   await fs.writeFile(path.join(current.daemonBase.controlDir, `${name.replaceAll(':', '-')}.arm`), 'armed\n');
@@ -335,6 +380,70 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
     }
     await waitForAttempt(cloud, offer.taskId, 'complete');
     expect(starts()).toHaveLength(1);
+  }, 30_000);
+
+  it('#384/#393: ends a SIGKILLed run\u2019s owned runtime processes before its daemon_interrupted terminal is sent', async () => {
+    const cloud = await startCloud();
+    const { daemon, deviceId } = await pair(cloud, { ownedRuntimeTree: true });
+    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'own a runtime process group' }) as { taskId: string };
+    const tree = await runtimeTree();
+    await waitForAttempt(cloud, offer.taskId, 'running');
+    const recorded = await ownedProcessRecords();
+    // The record is the group id and the root's start time; nothing names a command or a path.
+    expect(recorded.map(({ record }) => record)).toEqual([{
+      version: 1, pgid: tree.rootPid, rootStart: expect.any(String), bootId: expect.any(String),
+      writerPid: daemon.child.pid, writerStart: expect.any(String), recordedAt: expect.any(String),
+    }]);
+    expect(recorded[0]!.raw).not.toContain(current!.root);
+    expect(recorded[0]!.raw).not.toContain('sleep');
+
+    daemon.kill();
+    expect((await daemon.exited()).signal).toBe('SIGKILL');
+    // Nothing ends them: the root ignores stdin EOF, and neither its in-group
+    // tool shell nor its own-session child is told.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(processAlive(tree.rootPid)).toBe(true);
+    expect(processAlive(tree.toolPid)).toBe(true);
+    expect(processAlive(tree.sessionPid)).toBe(true);
+    expect(journalRows('SELECT * FROM journal_terminal')).toHaveLength(0);
+
+    // The next daemon dies exactly where it would first send the recovered terminal.
+    await arm('terminal:before-send');
+    const second = await spawnDaemon({ ownedRuntimeTree: true, recoveryFault: 'terminal:before-send' });
+    expect((await second.exited()).signal).toBe('SIGKILL');
+    expect(groupAlive(tree.rootPid)).toBe(false);
+    expect(processAlive(tree.toolPid)).toBe(false);
+    expect(processAlive(tree.sessionPid)).toBe(false);
+    expect(second.stderr).toContain('recorded=1 found=1 terminated=1 survived=0');
+    expect((await cloud.rpc('readTaskAttempt', { taskId: offer.taskId }) as { status: string }).status).toBe('running');
+    expect(await ownedProcessRecords()).toEqual([]);
+
+    await fs.rm(path.join(current!.daemonBase.controlDir, 'terminal-before-send.arm'));
+    const third = await startDaemon({ ownedRuntimeTree: true });
+    const attempt = await waitForAttempt(cloud, offer.taskId, 'failed');
+    expect(attempt.terminalCause).toBe('daemon_interrupted');
+    // Nothing was recorded for the third start to end.
+    expect(third.stderr).not.toContain('owned runtime process groups');
+    expect(starts()).toHaveLength(1);
+  }, 30_000);
+
+  it('#384/#393: a normally stopped daemon leaves the owned-process ledger empty', async () => {
+    const cloud = await startCloud();
+    const { daemon, deviceId } = await pair(cloud, { ownedRuntimeTree: true });
+    const offer = await cloud.rpc('enqueueOffer', { deviceId, instruction: 'dispose an owned runtime process group' }) as { taskId: string };
+    const tree = await runtimeTree();
+    await waitForAttempt(cloud, offer.taskId, 'running');
+    expect(await ownedProcessRecords()).toHaveLength(1);
+    await finish(offer.taskId, 'disposed normally');
+    await waitForAttempt(cloud, offer.taskId, 'complete');
+    await waitForFile(path.join(current!.daemonBase.controlDir, `${offer.taskId}.closed`));
+    expect(groupAlive(tree.rootPid)).toBe(false);
+    expect(processAlive(tree.sessionPid)).toBe(false);
+    // The disposal receipt removed the record while the daemon still runs.
+    expect(await ownedProcessRecords()).toEqual([]);
+    daemon.child.stdin.write(`${JSON.stringify({ command: 'stop' })}\n`);
+    await daemon.waitFor((event) => event.stopped === true);
+    expect(await ownedProcessRecords()).toEqual([]);
   }, 30_000);
 
   it('recovers a never-admitted message through repeated SIGKILL before delivering its interrupted terminal', async () => {

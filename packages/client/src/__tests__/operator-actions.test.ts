@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,6 +13,9 @@ import { DeviceStore } from '../daemon/store';
 import { AgentMessageOutbox } from '../daemon/agent-message-outbox';
 import { OPERATIONAL_HEALTH_FILENAME } from '../daemon/operational-health';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { currentBootId } from '../adapters/process-tree';
+import { OWNED_PROCESSES_DIRECTORY, OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger';
+import { readProcessTable } from '../runtime/oar-process-tree.js';
 
 vi.mock('../bin/control-client', () => ({ connectControlClient: vi.fn() }));
 let root: string;
@@ -129,6 +133,50 @@ describe('public device operator boundaries', () => {
     await fs.writeFile(outbox.outboxPath, foreign);
     await expect(archiveAgentTerminalMessages(config, { ...target, archiveDirectory: path.join(root, 'new') })).rejects.toMatchObject({ code: 'target-mismatch' });
     expect(await fs.readFile(outbox.outboxPath, 'utf8')).toBe(foreign);
+  });
+
+  it('#393: a surviving crash residue refuses the archive with its own closed code and the operator remedy', async () => {
+    const { outbox, before } = await seed();
+    vi.spyOn(OwnedProcessLedger.prototype, 'reconcile').mockRejectedValueOnce(new OwnedProcessResidueError(
+      { recorded: 1, found: 1, terminated: 0, survived: 1, liveWriter: 0 }, [path.join(config.storeDir!, OWNED_PROCESSES_DIRECTORY, 'record.json')],
+    ));
+    const refusal = await archiveAgentTerminalMessages(config, { ...target, archiveDirectory: path.join(root, 'audit') }).catch((error: unknown) => error);
+    expect(refusal).toMatchObject({ code: 'owned-process-residue' });
+    expect((refusal as Error).message).toContain('verify the processes are gone, then delete that record from the owned-processes directory');
+    // Closed code: no path leaves the operator boundary.
+    expect((refusal as Error).message).not.toContain(root);
+    expect(await fs.readFile(outbox.outboxPath, 'utf8')).toBe(before);
+  });
+
+  it('#393: refuses on an unreadable owned-process record before touching the Agent home', async () => {
+    const { outbox, before } = await seed();
+    const ledger = new OwnedProcessLedger(config.storeDir!);
+    await ledger.adopted({ pgid: 4242, rootStart: 'Tue Oct 13 10:00:00 2026', bootId: 'boot', writerPid: 999_999, writerStart: 'gone' });
+    const [name] = await fs.readdir(path.join(config.storeDir!, OWNED_PROCESSES_DIRECTORY));
+    await fs.writeFile(path.join(config.storeDir!, OWNED_PROCESSES_DIRECTORY, name!), '{}');
+    await expect(archiveAgentTerminalMessages(config, { ...target, archiveDirectory: path.join(root, 'audit') })).rejects.toMatchObject({ code: 'operation-failed' });
+    expect(await fs.readFile(outbox.outboxPath, 'utf8')).toBe(before);
+    await expect(fs.stat(path.join(root, 'audit'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.skipIf(process.platform === 'win32')('#393: ends a crashed daemon\u2019s recorded runtime group before reclaiming its Agent home lease', async () => {
+    await seed();
+    // An orphaned group leader (re-parented, as after a daemon SIGKILL).
+    const pidFile = path.join(root, 'orphan.pid');
+    const launcher = spawn('/bin/sh', ['-c', `perl -e 'setpgrp(0, 0); exec @ARGV' /bin/sh -c 'echo $$ > "$0"; exec sleep 600' "$1" </dev/null >/dev/null 2>&1 &`, 'launcher', pidFile], { stdio: 'ignore' });
+    await new Promise<void>((resolve) => launcher.once('exit', () => resolve()));
+    await expect.poll(async () => (await fs.readFile(pidFile, 'utf8').catch(() => '')).trim()).not.toBe('');
+    const pgid = Number((await fs.readFile(pidFile, 'utf8')).trim());
+    const rootStart = readProcessTable().get(pgid)!.start;
+    try {
+      await new OwnedProcessLedger(config.storeDir!).adopted({ pgid, rootStart, bootId: currentBootId(), writerPid: 999_999, writerStart: 'gone' });
+      const receipt = await archiveAgentTerminalMessages(config, { ...target, archiveDirectory: path.join(root, 'audit') });
+      expect(receipt).toMatchObject({ status: 'archived' });
+      expect(readProcessTable().get(pgid)?.start === rootStart).toBe(false);
+      expect(await fs.readdir(path.join(config.storeDir!, OWNED_PROCESSES_DIRECTORY))).toEqual([]);
+    } finally {
+      if (readProcessTable().get(pgid)?.start === rootStart) process.kill(-pgid, 'SIGKILL');
+    }
   });
 
   it('refuses a symlinked outbox and hides filesystem failures', async () => {
