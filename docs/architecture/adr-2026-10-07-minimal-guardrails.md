@@ -1,6 +1,6 @@
 # ADR-037：最小 guardrail，继承用户自己的 agent 配置
 
-> **来源**：owner 于 2026-10-07 批准的计划 [`plans/plan-20261007-1340-minimal-guardrails.md`](../../plans/plan-20261007-1340-minimal-guardrails.md)（owner rulings 1–6，open items D1–D8）。
+> **来源**：owner 于 2026-10-07 批准的内部计划 `plans/plan-20261007-1340-minimal-guardrails.md`（未纳入版本库；owner rulings 1–6，open items D1–D8）。
 > **取代**：`sdk-architecture.md` §9.2「Permission bypass：REJECTED」、附录 A 的 ADR-011（runtime policy 必须精确表达，否则 fail-closed）与 ADR-015（runtime permission bypass / yolo flag）。
 > **范围**：本 ADR 记录已经落地的决策。实现在 slices 1–5 的五个 commit 中（见文末）。本 ADR 不授权发布、推送或下游迁移。
 
@@ -107,4 +107,4 @@ Native-interaction 模式是 Host 显式 opt-in 的本地 seam，不属于 YOLO 
 
 ## 修订说明（2026-10-13）
 
-- 来源行引用的计划 `plans/plan-20261007-1340-minimal-guardrails.md` 在 #390 后不再跟踪，干净 checkout 中该链接失效。决策以本 ADR 正文为准。
+- 来源行引用的计划 `plans/plan-20261007-1340-minimal-guardrails.md` 在 #390 后不再跟踪，来源行已改为纯文本路径。决策以本 ADR 正文为准。
