@@ -208,6 +208,29 @@ describe('GET /byok/events cursor semantics', () => {
     expect(elapsed).toBeGreaterThanOrEqual(80);
   });
 
+  it('ends a held poll as soon as the caller disconnects, without re-reading its mailbox until the hold expires', async () => {
+    // A 30s hold the test would notice if it were waited out.
+    const harness = createHarness({ longPollHoldMs: 30_000, longPollIntervalMs: 20 });
+    const device = await harness.pairDevice(TENANT_A);
+    const controller = new AbortController();
+    const reads: number[] = [];
+    const readAfter = harness.core.mailbox.readAfter.bind(harness.core.mailbox);
+    harness.core.mailbox.readAfter = (...args) => {
+      reads.push(Date.now());
+      return readAfter(...args);
+    };
+
+    const held = harness.request('/byok/events', { headers: device.authorization, signal: controller.signal });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(reads.length).toBeGreaterThan(1);
+    controller.abort();
+    // The handler stops reading once the request signal aborts.
+    await held.catch(() => undefined);
+    const readsAtAbort = reads.length;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(reads.length - readsAtAbort).toBeLessThanOrEqual(1);
+  });
+
   it('returns an envelope that still round-trips through the frozen v1 decoder', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
