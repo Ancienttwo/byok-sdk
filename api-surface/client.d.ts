@@ -1058,9 +1058,10 @@ export declare class AgentHomeExecutionLeaseManager {
      * `release()`, which the task runner calls after the attempt is terminal
      * AND `Session.close()` resolved. A failed disposal never reaches
      * `release()`, so the slot stays held — fail closed, the same posture as
-     * `runtime-disposal-failed`. Crash residue needs nothing extra here: a
-     * restarted daemon starts with an empty registry and reclaims the on-disk
-     * marker only under the same stable owner identity (`openLeaseMarker`).
+     * `runtime-disposal-failed`. Crash residue: a restarted daemon starts with
+     * an empty registry and reclaims the on-disk marker only under the same
+     * stable owner identity (`openLeaseMarker`), after its start ended the
+     * crashed run's owned runtime processes (`OwnedProcessLedger.reconcile`).
      *
      * Counted regardless of which lease manager owns the group: the invariant
      * being protected is the filesystem path (`MEMORY.md`, `notes/`, `.git`),

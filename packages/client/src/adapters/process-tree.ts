@@ -143,6 +143,41 @@ export const __hostExitBackstopForTests = {
   },
 };
 
+/**
+ * POSIX only: what a daemon must remember about one adopted tree to end it
+ * after the daemon itself was SIGKILLed or OOM-killed — the owned group's id
+ * and its root's start time from the process table, which tells the root from
+ * a later process given the same pid. Deliberately nothing that names a
+ * command line or a path.
+ */
+export interface OwnedProcessGroupRecord {
+  readonly pgid: number;
+  readonly rootStart: string;
+}
+
+/**
+ * The durable side of {@link OwnedProcessGroupRecord}: `adopted` once a tree is
+ * owned, `disposed` once {@link disposeOwnedProcessTree} has proved its group
+ * gone. Implementations own their persistence errors; a rejection here would
+ * fail the adoption or the disposal it reports.
+ */
+export interface OwnedProcessGroupLedger {
+  adopted(record: OwnedProcessGroupRecord): Promise<void>;
+  disposed(record: OwnedProcessGroupRecord): Promise<void>;
+}
+
+/** Module level for the same reason as {@link hostExitTargets}: what a daemon death orphans is every tree THIS process adopted. */
+const ownedGroupLedgers = new Set<OwnedProcessGroupLedger>();
+const ownedGroupRecords = new WeakMap<ChildProcess, OwnedProcessGroupRecord>();
+
+/** Report every POSIX tree adopted from now on to `ledger`, until the returned detach runs. */
+export function attachOwnedProcessGroupLedger(ledger: OwnedProcessGroupLedger): () => void {
+  ownedGroupLedgers.add(ledger);
+  return () => {
+    ownedGroupLedgers.delete(ledger);
+  };
+}
+
 export interface AdoptOwnedProcessTreeOptions {
   child: ChildProcess;
   label: string;
@@ -192,7 +227,10 @@ const defaultJobObject = {
  * `spawn` returns, so a grandchild forked inside that window is outside the
  * job; and neither backstop can run when the daemon itself is SIGKILLed or
  * OOM-killed on POSIX, where only the job object's kernel guarantee — which
- * POSIX does not have — would help.
+ * POSIX does not have — would help. For that case POSIX adoption also hands
+ * the attached ledgers an {@link OwnedProcessGroupRecord}, which the next
+ * daemon start ends with {@link reapOwnedProcessGroups}. A root that is no
+ * longer in the process table when it is read here leaves no record.
  */
 export async function adoptOwnedProcessTree(options: AdoptOwnedProcessTreeOptions): Promise<void> {
   const pid = positivePid(options.child, options.label);
@@ -217,8 +255,104 @@ export async function adoptOwnedProcessTree(options: AdoptOwnedProcessTreeOption
   options.child.once('close', forget);
   options.child.once('exit', forget);
 
-  if (platform !== 'win32') return;
+  if (platform !== 'win32') {
+    await recordOwnedGroup(options.child, pid);
+    return;
+  }
   await (options.jobObject ?? defaultJobObject).assign(pid);
+}
+
+async function recordOwnedGroup(child: ChildProcess, pid: number): Promise<void> {
+  if (ownedGroupLedgers.size === 0) return;
+  const root = readProcessTable().get(pid);
+  // `withOwnedProcessTree` made the root its group's leader; anything else is
+  // not a group this module owns.
+  if (root === undefined || root.pgid !== pid) return;
+  const record: OwnedProcessGroupRecord = { pgid: pid, rootStart: root.start };
+  ownedGroupRecords.set(child, record);
+  await Promise.all([...ownedGroupLedgers].map((ledger) => ledger.adopted(record)));
+}
+
+/** The disposal receipt for the durable record: called only once the owned group is proved gone. */
+async function forgetOwnedGroup(child: ChildProcess): Promise<void> {
+  const record = ownedGroupRecords.get(child);
+  if (record === undefined) return;
+  ownedGroupRecords.delete(child);
+  await Promise.all([...ownedGroupLedgers].map((ledger) => ledger.disposed(record)));
+}
+
+export interface OwnedProcessGroupReap {
+  /** Recorded groups that still held a process from the run that recorded them. */
+  found: number;
+  /** Of `found`, those gone after the SIGKILL. */
+  terminated: number;
+  /** Of `found`, those still holding a process at the deadline. */
+  survived: number;
+}
+
+/**
+ * POSIX: end the owned groups a previous daemon process recorded and could no
+ * longer dispose (it was SIGKILLed or OOM-killed). One read of the process
+ * table decides each group:
+ *
+ * - its leader pid is held by a process with a different start time: the pid
+ *   was reused, so the group recorded there is already empty (a pid is never
+ *   handed out while a group of that id exists) — skipped, nothing signalled;
+ * - its leader is this process's own child: owned by a live daemon here — skipped;
+ * - its leader is the recorded root, or processes still carry its pgid after
+ *   the root exited: SIGKILL them, their groups, and the live root's
+ *   descendants that left the group (OAR `killEntries`, which re-checks every
+ *   pid's start time and never signals this process or its group).
+ *
+ * Then the table is read until no killed process and no member of a found
+ * group remains, or `killGraceMs` passes. win32 records nothing and reaps
+ * nothing. An unreadable table fails closed: nothing can be proved gone.
+ */
+export async function reapOwnedProcessGroups(
+  groups: readonly OwnedProcessGroupRecord[],
+  options: { platform?: NodeJS.Platform; killGraceMs?: number } = {},
+): Promise<OwnedProcessGroupReap> {
+  const platform = options.platform ?? process.platform;
+  if (platform === 'win32' || groups.length === 0) return { found: 0, terminated: 0, survived: 0 };
+  const killGraceMs = options.killGraceMs ?? DEFAULT_KILL_GRACE_MS;
+  const readable = (table: ProcessTable): boolean => table.has(process.pid);
+  const table = readProcessTable();
+  if (!readable(table)) {
+    throw new RuntimeDisposalFailure({
+      stage: 'quiescence',
+      reason: 'the process table could not be read to end the previous daemon run’s owned runtime process groups',
+    });
+  }
+  const found: Array<{ pgid: number; entries: ProcessEntry[] }> = [];
+  for (const group of groups) {
+    const leader = table.get(group.pgid);
+    if (leader !== undefined && leader.start !== group.rootStart) continue;
+    // A root that is this process's own child is a live tree of a daemon in
+    // this process (another daemon sharing the host), never a crash residue.
+    if (leader !== undefined && leader.ppid === process.pid) continue;
+    const entries = new Map<number, ProcessEntry>();
+    for (const entry of table.values()) if (entry.pgid === group.pgid) entries.set(entry.pid, entry);
+    if (leader !== undefined) {
+      entries.set(leader.pid, leader);
+      for (const descendant of descendantsOf(table, leader.pid)) entries.set(descendant.pid, descendant);
+    }
+    if (entries.size > 0) found.push({ pgid: group.pgid, entries: [...entries.values()] });
+  }
+  for (const group of found) killEntries(group.entries, table);
+  const held = (group: { pgid: number; entries: ProcessEntry[] }, current: ProcessTable): boolean =>
+    group.entries.some((entry) => current.get(entry.pid)?.start === entry.start) ||
+    [...current.values()].some((entry) => entry.pgid === group.pgid);
+  let live = found;
+  const deadline = Date.now() + killGraceMs;
+  while (live.length > 0) {
+    const current = readProcessTable();
+    if (readable(current)) live = live.filter((group) => held(group, current));
+    if (live.length === 0 || Date.now() >= deadline) break;
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, POLL_MS);
+    });
+  }
+  return { found: found.length, terminated: found.length - live.length, survived: live.length };
 }
 
 function positivePid(child: ChildProcess, label: string): number | undefined {
@@ -480,7 +614,9 @@ export async function requestOwnedProcessTreeTermination(options: OwnedProcessTr
  * and on win32 a kernel-owned kill-on-close Job Object. Their own residuals
  * remain: the tiny window between `spawn` returning and the job assignment,
  * and a daemon SIGKILL/OOM on POSIX, where no in-process listener can run and
- * there is no job object to fall back on.
+ * there is no job object to fall back on — that case is ended by the next
+ * daemon start from the record adoption wrote ({@link reapOwnedProcessGroups}),
+ * not earlier. Success here is that record's disposal receipt.
  */
 export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions): Promise<void> {
   const pid = positivePid(options.child, options.label);
@@ -574,4 +710,5 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
       reason: `${options.label} runtime root did not emit close after its process group exited`,
     });
   }
+  await forgetOwnedGroup(options.child);
 }

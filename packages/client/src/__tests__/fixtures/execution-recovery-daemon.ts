@@ -1,7 +1,9 @@
+import { spawn, type ChildProcess } from 'node:child_process';
 import { appendFileSync, existsSync, promises as fs, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../../daemon/agent-egress-policy';
+import { adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree } from '../../adapters/process-tree';
 import { connectControlClient } from '../../bin/control-client';
 import { runSdkReservedHelperCommand } from '../../sdk-reserved-helper-host';
 import type { AgentEvent } from '@byok-sdk/protocol';
@@ -29,6 +31,8 @@ interface Config {
   readonly recoveryFault?: 'terminal:before-send' | 'terminal:queued' | 'outbound:before-post' | 'outbound:after-ack';
   readonly agentHome?: boolean;
   readonly holdTerminalConfirmation?: boolean;
+  /** #384: the runtime owns a real POSIX process group with an in-group tool shell and its grandchild. */
+  readonly ownedRuntimeTree?: boolean;
 }
 
 if (await runSdkReservedHelperCommand()) process.exit(0);
@@ -49,11 +53,25 @@ function recoveryFaultArmed(step: NonNullable<Config['recoveryFault']>): boolean
   return existsSync(path.join(config.controlDir, `${step.replaceAll(':', '-')}.arm`));
 }
 
+/**
+ * A runtime root for #384 / #393: a group leader that ignores stdin EOF (what
+ * a daemon SIGKILL delivers), with a tool shell (and that shell's own child)
+ * in its group and one child in a session of its own.
+ */
+async function spawnOwnedRuntimeTree(taskId: string): Promise<ChildProcess> {
+  const treeFile = path.join(config.controlDir, 'runtime-tree.json');
+  const child = spawn('/bin/sh', ['-c', `sh -c 'sleep 600; :' & tool=$!; perl -MPOSIX -e 'POSIX::setsid(); exec "sleep", "600"' & printf '{"rootPid":%d,"toolPid":%d,"sessionPid":%d}' $$ $tool $! > "$1.tmp"; mv "$1.tmp" "$1"; wait`, 'fixture-runtime', treeFile], withOwnedProcessTree({
+    stdio: ['pipe', 'ignore', 'ignore'],
+  }));
+  await adoptOwnedProcessTree({ child, label: `fixture ${taskId}` });
+  return child;
+}
+
 class ControlledSession implements Session {
   readonly sessionRef: string;
   private closed = false;
 
-  constructor(private readonly taskId: string, private readonly input: RuntimeOperationStartInput) {
+  constructor(private readonly taskId: string, private readonly input: RuntimeOperationStartInput, private readonly tree?: ChildProcess) {
     this.sessionRef = `fixture-${taskId}`;
   }
 
@@ -93,6 +111,16 @@ class ControlledSession implements Session {
 
   async close(): Promise<void> {
     this.closed = true;
+    const tree = this.tree;
+    if (tree !== undefined) {
+      const closed = new Promise<void>((resolve) => {
+        if (tree.exitCode !== null || tree.signalCode !== null) resolve();
+        else tree.once('close', () => resolve());
+      });
+      const options = { child: tree, waitClosed: () => closed, isClosed: () => tree.exitCode !== null || tree.signalCode !== null, label: `fixture ${this.taskId}` };
+      await requestOwnedProcessTreeTermination(options);
+      await disposeOwnedProcessTree(options);
+    }
     writeFileSync(path.join(config.controlDir, `${this.taskId}.closed`), 'closed\n');
   }
 
@@ -131,7 +159,7 @@ class ControlledAdapter implements RuntimeAdapter {
             path.join(config.controlDir, 'runtime-starts.jsonl'),
             `${JSON.stringify({ taskId, pid: process.pid, instruction: startInput.instruction })}\n`,
           );
-          return new ControlledSession(taskId, startInput);
+          return new ControlledSession(taskId, startInput, config.ownedRuntimeTree === true ? await spawnOwnedRuntimeTree(taskId) : undefined);
         },
       },
     };

@@ -632,7 +632,10 @@ export class AgentHomeLeaseManager {
     // A marker owned by this daemon identity but absent from the in-process
     // registry is crash residue. DaemonOwnerLease prevents two live daemon
     // processes for the same store/product identity, so exact-owner reclaim is
-    // the only permitted restart path.
+    // the only permitted restart path. The owner lease alone does not prove
+    // the crashed run's runtime processes are gone; daemon start does that
+    // first (`daemon/owned-process-ledger.ts` `reconcile()`), refusing to start
+    // while one survives, and leases are acquired only after it.
     await fs.rm(lockPath);
     try {
       return await fs.open(lockPath, 'wx', 0o600);
@@ -831,9 +834,10 @@ export class AgentHomeExecutionLeaseManager {
    * `release()`, which the task runner calls after the attempt is terminal
    * AND `Session.close()` resolved. A failed disposal never reaches
    * `release()`, so the slot stays held — fail closed, the same posture as
-   * `runtime-disposal-failed`. Crash residue needs nothing extra here: a
-   * restarted daemon starts with an empty registry and reclaims the on-disk
-   * marker only under the same stable owner identity (`openLeaseMarker`).
+   * `runtime-disposal-failed`. Crash residue: a restarted daemon starts with
+   * an empty registry and reclaims the on-disk marker only under the same
+   * stable owner identity (`openLeaseMarker`), after its start ended the
+   * crashed run's owned runtime processes (`OwnedProcessLedger.reconcile`).
    *
    * Counted regardless of which lease manager owns the group: the invariant
    * being protected is the filesystem path (`MEMORY.md`, `notes/`, `.git`),
