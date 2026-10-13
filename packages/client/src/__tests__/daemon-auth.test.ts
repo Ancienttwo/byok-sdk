@@ -10,9 +10,11 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DeviceStore } from '../daemon/store';
 import { acquireDaemonOwner, DaemonOwnerActiveError, storeMutexEndpoint } from '../daemon/daemon-owner';
 import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
+import { DaemonHaltError } from '../daemon/daemon-lifecycle';
 import { quarantineCorruptOperationalHealth } from '../diagnostics/diagnostics';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { OPEN_LIFECYCLE, waitForDaemonOpen } from './fixtures/lifecycle-barrier';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -511,15 +513,16 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
 
     const record = await daemon.pair('pairing-code');
     await daemon.start();
-    expect(daemon.status().connected).toBe(true);
+    await waitForDaemonOpen(daemon);
+    expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE);
 
     server.rotateDeviceToken(record.deviceId);
 
     await vi.waitFor(() => expect(server.httpRequests.some((r) => r.pathname === '/byok/challenge')).toBe(true), {
       timeout: 5000,
     });
-    await vi.waitFor(() => expect(daemon?.status().connected).toBe(true), { timeout: 5000 });
-    expect(daemon.status().revoked).toBe(false);
+    await vi.waitFor(() => expect(daemon?.status().lifecycle).toEqual(OPEN_LIFECYCLE), { timeout: 5000 });
+    expect(daemon.status().lifecycle.phase).not.toBe('halted');
   });
 
   it('a rejected second daemon never arms an uncovered proactive-renewal writer', async () => {
@@ -533,7 +536,10 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     const before = server.httpRequests.filter((r) => r.pathname === '/byok/challenge').length;
 
     const rejected = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
-    await expect(rejected.start()).rejects.toBeInstanceOf(DaemonOwnerActiveError);
+    const rejection = await rejected.start().then(() => undefined, (error: unknown) => error);
+    expect(rejection).toBeInstanceOf(DaemonHaltError);
+    expect((rejection as DaemonHaltError).reason).toBe('store_owned');
+    expect((rejection as DaemonHaltError).cause).toBeInstanceOf(DaemonOwnerActiveError);
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(server.httpRequests.filter((r) => r.pathname === '/byok/challenge')).toHaveLength(before);
     await rejected.stop();
@@ -796,7 +802,8 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
       releaseSave();
       await pairing;
       await starting;
-      expect(daemon.status().connected).toBe(true);
+      await waitForDaemonOpen(daemon);
+      expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE);
     } finally {
       releaseSave();
       save.mockRestore();
@@ -951,7 +958,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     }
   });
 
-  it('a revoked device surfaces status().revoked without retry-looping, then recovers via a fresh pair()', async () => {
+  it('a revoked device halts as device_revoked without retry-looping, then recovers via a fresh pair()', async () => {
     const workspaceRoot = await tmpDir('byok-client-workspace-');
     const storeDir = await tmpDir('byok-client-store-');
     daemon = createDaemonWithAdapters(
@@ -962,12 +969,13 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
 
     const record = await daemon.pair('pairing-code');
     await daemon.start();
-    expect(daemon.status().connected).toBe(true);
+    await waitForDaemonOpen(daemon);
+    expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE);
 
     server.revokeDevice(record.deviceId);
 
-    await vi.waitFor(() => expect(daemon?.status().revoked).toBe(true), { timeout: 5000 });
-    expect(daemon.status().connected).toBe(false);
+    await vi.waitFor(() => expect(daemon?.status().lifecycle).toMatchObject({ phase: 'halted', reason: 'device_revoked' }), { timeout: 5000 });
+    expect(daemon.status().lifecycle.phase).toBe('halted');
 
     // Never a retry loop: once revoked, events polls must stop.
     const pollsAfterRevoked = server.httpRequests.filter((request) => request.pathname === '/byok/events').length;
@@ -978,11 +986,11 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     // this must actually recover the device, not just clear the flag.
     await daemon.pair('a-fresh-pairing-code');
     await daemon.start();
-    await vi.waitFor(() => expect(daemon?.status().connected).toBe(true), { timeout: 5000 });
-    expect(daemon.status().revoked).toBe(false);
+    await vi.waitFor(() => expect(daemon?.status().lifecycle).toEqual(OPEN_LIFECYCLE), { timeout: 5000 });
+    expect(daemon.status().lifecycle.phase).not.toBe('halted');
   });
 
-  it('a cold start() against an already-revoked device fails fast with DeviceRevokedError instead of hanging for the ack timeout', async () => {
+  it('#391: a cold start() against an already-revoked device resolves, halts as device_revoked within 5s, and then polls nothing', async () => {
     const workspaceRoot = await tmpDir('byok-client-workspace-');
     const storeDir = await tmpDir('byok-client-store-');
     daemon = createDaemonWithAdapters(
@@ -993,15 +1001,15 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     const record = await daemon.pair('pairing-code');
     server.revokeDevice(record.deviceId); // revoked before the daemon ever attempts to connect
 
-    const startedAt = Date.now();
-    await expect(daemon.start()).rejects.toBeInstanceOf(DeviceRevokedError);
-    expect(Date.now() - startedAt).toBeLessThan(2000); // well under the startup timeout
+    // start() reports local startup only; the revocation is a lifecycle fact.
+    await daemon.start();
+    await vi.waitFor(() => expect(daemon?.status().lifecycle).toMatchObject({ phase: 'halted', reason: 'device_revoked' }), { timeout: 5_000 });
 
-    expect(daemon.status().revoked).toBe(true);
-
-    // Never a retry loop: once settled as revoked, no further events polls.
+    // Never a retry loop: once halted as revoked, no events polls and no further handshakes.
     const pollsAfterRevoked = server.httpRequests.filter((request) => request.pathname === '/byok/events').length;
+    const postsAfterRevoked = server.httpRequests.filter((request) => request.pathname === '/byok/messages').length;
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(server.httpRequests.filter((request) => request.pathname === '/byok/events')).toHaveLength(pollsAfterRevoked);
+    expect(server.httpRequests.filter((request) => request.pathname === '/byok/messages')).toHaveLength(postsAfterRevoked);
   });
 });

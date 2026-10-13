@@ -17,7 +17,7 @@
  * justified against the kernel's inbound, in both directions (a removal breaks
  * a daemon path; an addition promises acceptance the kernel may not implement).
  */
-import type { EventsPollResponse } from '@byok-sdk/protocol';
+import { createEnvelope, type EventsPollResponse, type MessagesSendResponse } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { TENANT_A, createHarness, offerPayload } from './support/harness';
 
@@ -68,6 +68,40 @@ describe('GET /byok/events protocol capability advertisement', () => {
     // A daemon that only ever sees non-empty polls must negotiate the same
     // contract as one that only ever sees empty ones.
     expect(body.capabilities).toEqual(EXPECTED_CAPABILITIES);
+  });
+
+  it('serves the same list on the answer to an accepted conn.hello, and only there (#391 Phase 2)', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const post = (messages: unknown[]) =>
+      harness.json('/byok/messages', {
+        method: 'POST',
+        headers: { ...device.authorization, 'content-type': 'application/json' },
+        body: JSON.stringify({ messages }),
+      });
+    const hello = (protocolVersions: number[]) =>
+      createEnvelope('conn.hello', {
+        protocolVersions,
+        capabilities: [],
+        deviceId: device.deviceId,
+        productId: 'test-product',
+      });
+
+    // The handshake answer is how a device learns the advertisement without
+    // waiting out a held poll.
+    const handshake = await post([hello([2])]);
+    expect(handshake.status).toBe(200);
+    expect(handshake.body as MessagesSendResponse).toEqual({ accepted: 1, capabilities: EXPECTED_CAPABILITIES });
+
+    // A batch without a hello carries no update: absence, never an empty list.
+    const other = await post([createEnvelope('task.started', {}, { taskId: 'no-such-task' })]);
+    expect(other.status).toBe(200);
+    expect(Object.hasOwn(other.body as object, 'capabilities')).toBe(false);
+
+    // A rejected hello opens nothing, so it advertises nothing.
+    const refused = await post([hello([1])]);
+    expect(refused.status).toBe(200);
+    expect(refused.body as MessagesSendResponse).toEqual({ accepted: 0, rejected: 1 });
   });
 
   it('advertises approval_resolved, which the kernel inbound accepts', async () => {

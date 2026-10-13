@@ -60,7 +60,7 @@ describe('bin/format: formatDaemonEventLine', () => {
       { kind: 'failed', ts: 'T', taskId: 't1', reason: 'declined', retryable: false, preClaim: true },
       { kind: 'cancelled', ts: 'T', taskId: 't1', reason: 'user cancelled' },
       { kind: 'cancelled', ts: 'T', taskId: 't1' },
-      { kind: 'connection', ts: 'T', state: 'open' },
+      { kind: 'lifecycle', ts: 'T', lifecycle: { phase: 'running', connection: 'open' } },
       { kind: 'paired', ts: 'T', deviceId: 'dev-1' },
       { kind: 'unpaired', ts: 'T' },
       { kind: 'runtimes-detected', ts: 'T', runtimes: [{ id: 'pi' }, { id: 'claude' }] },
@@ -94,7 +94,7 @@ describe('bin/format: formatDaemonEventLine', () => {
       '[T] failed taskId=t1 retryable=false preClaim=true reason="declined"',
       '[T] cancelled taskId=t1 reason="user cancelled"',
       '[T] cancelled taskId=t1',
-      '[T] connection state=open',
+      '[T] lifecycle phase=running connection=open',
       '[T] paired deviceId=dev-1',
       '[T] unpaired',
       '[T] runtimes-detected ids=pi,claude',
@@ -152,7 +152,7 @@ describe('bin/format: formatDaemonEventLine', () => {
     const events: DaemonEvent[] = [
       { kind: 'offered', ts: 'T', taskId: 't1', runtime: 'pi' },
       { kind: 'progress', ts: 'T', taskId: 't1', event: { type: 'progress', text: 'hi' } },
-      { kind: 'connection', ts: 'T', state: 'closed' },
+      { kind: 'lifecycle', ts: 'T', lifecycle: { phase: 'stopped' } },
     ];
     for (const line of events.map((event) => formatDaemonEventLine(event))) {
       expect(line).not.toMatch(ANSI_ESCAPE_RE);
@@ -291,14 +291,22 @@ describe('bin/format: formatStatusLines', () => {
     expect(lines).toContain('paired: yes deviceId=dev-1');
   });
 
-  it('shows an honest "unknown" connection line when no connection event has been observed', () => {
+  it('shows an honest "unknown" lifecycle line when no lifecycle event has been observed', () => {
     const lines = formatStatusLines(baseView());
-    expect(lines.some((l) => l.startsWith('connection: unknown'))).toBe(true);
+    expect(lines.some((l) => l.startsWith('lifecycle: unknown'))).toBe(true);
   });
 
-  it('shows the last-known connection state + timestamp when available', () => {
-    const lines = formatStatusLines(baseView({ connection: { state: 'open', ts: '2026-01-01T00:00:00.000Z' } }));
-    expect(lines).toContain('connection: last-known=open at=2026-01-01T00:00:00.000Z');
+  it('shows the last-known lifecycle + timestamp when available', () => {
+    const lines = formatStatusLines(baseView({ lifecycle: { lifecycle: { phase: 'running', connection: 'open' }, ts: '2026-01-01T00:00:00.000Z' } }));
+    expect(lines).toContain('lifecycle: last-known phase=running connection=open at=2026-01-01T00:00:00.000Z');
+  });
+
+  it('#394: a halted lifecycle shows its reason and the remedy', () => {
+    const lines = formatStatusLines(baseView({
+      lifecycle: { lifecycle: { phase: 'halted', reason: 'device_revoked', at: '2026-01-01T00:00:00.000Z' }, ts: '2026-01-01T00:00:00.000Z' },
+    }));
+    expect(lines).toContain('lifecycle: last-known phase=halted reason=device_revoked at=2026-01-01T00:00:00.000Z');
+    expect(lines.some((l) => l.startsWith('lifecycle-remedy: device revoked — re-pair needed'))).toBe(true);
   });
 
   it('summarizes runtimes as presence and failure outcomes', () => {
@@ -335,7 +343,7 @@ describe('bin/format: formatStatusLines', () => {
         branding: { displayName: 'Acme Coder', supportUrl: 'https://acme.example/support' },
         paired: true,
         deviceId: 'dev-1',
-        connection: { state: 'open', ts: 'T' },
+        lifecycle: { lifecycle: { phase: 'running', connection: 'open' }, ts: 'T' },
         runtimes: [{ id: 'pi', present: true, outcome: 'available', version: '1.0', authPresent: true, steer: true, resume: true }],
       }),
     );
@@ -350,7 +358,7 @@ describe('bin/format: formatLiveStatusLines', () => {
       uptimeMs: 4567,
       localAgentRelease: { version: '1.1.0', buildId: 'live-build' },
       paired: true,
-      transport: 'open',
+      lifecycle: { phase: 'running', connection: 'open' },
       activeTasks: [],
       runtimeIds: ['pi'],
       queueWatermarks: [],
@@ -369,9 +377,9 @@ describe('bin/format: formatLiveStatusLines', () => {
     };
   }
 
-  it('renders pid/uptime/transport, paired+deviceId, and runtimes on their own lines', () => {
+  it('renders pid/uptime/lifecycle, paired+deviceId, and runtimes on their own lines', () => {
     const lines = formatLiveStatusLines(baseLive({ deviceId: 'dev-1', runtimeIds: ['pi', 'claude'] }));
-    expect(lines).toContain('live: pid=123 uptimeMs=4567 transport=open');
+    expect(lines).toContain('live: pid=123 uptimeMs=4567 phase=running connection=open');
     expect(lines).toContain('live-paired: yes deviceId=dev-1');
     expect(lines).toContain('live-runtimes: pi,claude');
     expect(lines).toContain('live-local-agent-release: 1.1.0 buildId=live-build');

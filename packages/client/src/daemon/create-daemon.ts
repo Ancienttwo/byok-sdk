@@ -67,7 +67,7 @@ import { attachOwnedProcessGroupLedger } from '../adapters/process-tree';
 import { OwnedProcessLedger } from './owned-process-ledger';
 import { assertCodexSandboxSetting, CodexAdapter, type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
 import { ApprovalNotFoundError, ApprovalRegistry } from './approvals';
-import { AuthManager } from './auth-manager';
+import { AuthManager, DeviceRevokedError } from './auth-manager';
 import { BlobClient } from './blob-client';
 import { resolveMachineId } from './machine-id';
 import { declares, fetchCapabilityDeclaration, PRESENCE_HINTS_CAPABILITY } from './capabilities-client';
@@ -79,9 +79,9 @@ import {
   DEFAULT_PRESENCE_TTL_MS,
   PresencePublisher,
 } from './presence-publisher';
-import { assertServerUrlAllowed, formatServerUrl, toHttpBase } from './url';
+import { assertServerUrlAllowed, formatServerUrl, InsecureServerUrlError, toHttpBase } from './url';
 import { mintDeviceAssertion, mintTaskAssertion } from './device-assertion-signer';
-import type { ConnectionState } from './connection-manager';
+import { DaemonHaltError, type DaemonHaltReason, type DaemonLifecycle } from './daemon-lifecycle';
 import { AnotherControlServerRunningError, startControlServer } from './control-server';
 import type { ControlMethods, ControlServerHandle } from './control-server';
 import {
@@ -140,7 +140,7 @@ import { McpToolsetRegistry, McpToolsetRevisionConflictError } from './toolset-r
 import { ConnectionManager } from './connection-manager';
 import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
 import { OperationalHealthTracker, type OperationalHealthSnapshot } from './operational-health';
-import { acquireDaemonOwner, type DaemonOwnerLease } from './daemon-owner';
+import { acquireDaemonOwner, DaemonOwnerActiveError, type DaemonOwnerLease } from './daemon-owner';
 import { toRuntimeInfoCapabilities } from './runtime-capabilities';
 import { CursorStore } from './cursor-store';
 import { DaemonObserver, type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
@@ -799,9 +799,13 @@ export interface DaemonStatus {
   /** Process-immutable Local Agent application release captured at construction. */
   localAgentRelease: Readonly<LocalAgentReleaseIdentity>;
   paired: boolean;
-  connected: boolean;
-  /** True once the server has revoked this device (401 on challenge/token, protocol §6.3). The only recourse is calling `pair()` again — the daemon does not keep retrying on its own. */
-  revoked: boolean;
+  /**
+   * Issues #391/#394: where this daemon is in its lifecycle, including whether
+   * the server has accepted it (`running` + `connection: 'open'`) and why a
+   * run ended for good (`halted`). The same value every `lifecycle` event
+   * carries.
+   */
+  lifecycle: DaemonLifecycle;
   deviceId?: string;
   activeTaskCount: number;
   /** Exact terminal results retained for journal retry; nonzero requires recovery. */
@@ -821,6 +825,14 @@ export interface DaemonStatus {
 export interface Daemon {
   /** Pairing result is intentionally credential-blind. */
   pair(pairingCode: string): Promise<DeviceEnrollment>;
+  /**
+   * Resolves once local startup is done — store ownership, storage, journal
+   * recovery, the control socket and the task runner — with the reconnect
+   * loop running. It does not wait for the server: `status().lifecycle` and
+   * `lifecycle` events report the connection, and a halt the server causes.
+   * Throws {@link DaemonHaltError} for a halt found locally; any other throw
+   * is a crash.
+   */
   start(): Promise<void>;
   stop(): Promise<void>;
   status(): DaemonStatus;
@@ -1726,7 +1738,7 @@ export function buildDaemonWithAdapters(
   let connection: ConnectionManager | undefined;
   let blobLifecycleAbort: AbortController | undefined;
   let inputPreparationStatusAbort: AbortController | undefined;
-  let connectionState: ConnectionState = 'closed';
+  let lifecycle: DaemonLifecycle = { phase: 'stopped' };
   // A successful start owns tenant-bound egress and journal composition. A
   // re-pair during that lifetime is refused rather than leaving any active
   // closure on the previous record; stop() must complete first.
@@ -1801,9 +1813,8 @@ export function buildDaemonWithAdapters(
       store,
       deviceName: config.deviceName,
       machineId: config.machineId ?? (() => resolveMachineId({ productId: config.productId })),
-      onRevoked: () => {
-        connectionState = 'revoked';
-      },
+      // A proactive renewal can find the revocation while the poll is held.
+      onRevoked: () => connection?.noteDeviceRevoked(),
     });
   }
   let auth = buildAuthManager();
@@ -1967,14 +1978,52 @@ export function buildDaemonWithAdapters(
     }
   }
 
+  /** One report path per lifecycle fact: `status().lifecycle` and the `lifecycle` event change together. */
+  function setLifecycle(next: DaemonLifecycle): void {
+    if (JSON.stringify(next) === JSON.stringify(lifecycle)) return;
+    lifecycle = next;
+    observer.noteLifecycle(next);
+  }
+
+  function halted(reason: DaemonHaltReason): void {
+    setLifecycle({ phase: 'halted', reason, at: new Date().toISOString() });
+  }
+
   async function start(): Promise<void> {
-    checkServerUrl();
+    try {
+      checkServerUrl();
+    } catch (err) {
+      if (err instanceof InsecureServerUrlError) throw new DaemonHaltError('config_invalid', { cause: err });
+      throw err;
+    }
     await runLifecycleMutation(startUnderLease);
+  }
+
+  /**
+   * The halts a start can find locally. Anything else thrown from startup is
+   * a crash. `store_owned` is found before this process owns the store, so it
+   * is thrown only (see {@link DaemonHaltError}).
+   */
+  function startupHaltReason(err: unknown): DaemonHaltReason | undefined {
+    if (err instanceof DaemonHaltError) return err.reason;
+    if (err instanceof AnotherControlServerRunningError) return 'store_owned';
+    if (err instanceof DeviceRecordRePairRequiredError) return 're_pair_required';
+    if (err instanceof DeviceRevokedError) return 'device_revoked';
+    return undefined;
   }
 
   async function startUnderLease(): Promise<void> {
     terminalCommits.resume();
-    if (!daemonOwnerLease) daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
+    // A new run begins; a previous run's halt no longer describes it.
+    if (lifecycle.phase === 'halted') setLifecycle({ phase: 'stopped' });
+    if (!daemonOwnerLease) {
+      try {
+        daemonOwnerLease = await acquireDaemonOwner(storeDir, 'daemon');
+      } catch (err) {
+        if (err instanceof DaemonOwnerActiveError) throw new DaemonHaltError('store_owned', { cause: err });
+        throw err;
+      }
+    }
     try {
     // #384 item 3 / #393: on POSIX a SIGKILLed or OOM-killed daemon leaves its
     // owned runtime groups running, and a tool process in one could still be
@@ -2026,6 +2075,7 @@ export function buildDaemonWithAdapters(
         serviceEnrollmentWaiting = true;
         serviceEnrollmentTransitioning = false;
         await replaceControlServer(true, true);
+        setLifecycle({ phase: 'awaiting-enrollment' });
         return;
       }
     }
@@ -2038,7 +2088,7 @@ export function buildDaemonWithAdapters(
     initializeOwnedHostedStorage();
     record ??= await auth.loadExisting();
     if (!record) {
-      throw new Error('device is not paired yet; call pair(pairingCode) first');
+      throw new DaemonHaltError('unpaired');
     }
     const activeJournal = journal;
     const activePressureEngine = pressureEngine;
@@ -2747,14 +2797,24 @@ export function buildDaemonWithAdapters(
         }
       },
       onStateChange: (state) => {
+        setLifecycle({ phase: 'running', connection: state });
         // Discovery is armed before the first connection can deliver offers.
-        // Every later open replaces the read, so rollout/reconnect facts cannot
-        // be borrowed from a previous connection generation.
-        const wasSettled = connectionState === 'open';
-        connectionState = state;
-        observer.noteConnectionState(state);
-        if (!wasSettled && state === 'open') runner?.retryRecoveredAgentMessages();
-        if (!wasSettled && state === 'open') runPresenceDiscovery();
+        // Every open replaces the read, so rollout/reconnect facts cannot be
+        // borrowed from a previous connection generation.
+        if (state === 'open') {
+          runner?.retryRecoveredAgentMessages();
+          runPresenceDiscovery();
+        }
+      },
+      onHalted: (reason) => halted(reason),
+      // Reliable records held for `capability_missing` go out as soon as an
+      // advertisement carries the ack capability — on every reconnect, not
+      // only at start.
+      onCapabilitiesAdvertised: (added) => {
+        if (!added.includes(AGENT_EGRESS_RELIABLE_ACK_CAPABILITY) || connection === undefined) return;
+        for (const record of agentEgress.retryableReliableRecords(connection.getServerCapabilities())) {
+          dispatchReliableRecord(record);
+        }
       },
       longPollRetryDelayMs: overrides.longPoll?.retryDelayMs,
       longPollIdleDelayMs: overrides.longPoll?.idleDelayMs,
@@ -2771,22 +2831,31 @@ export function buildDaemonWithAdapters(
     await replayRecoveryTerminals();
     startPresenceProducer();
     await connection.start();
-    await connection.waitForConnection();
-    runner.retryRecoveredAgentMessages();
-    for (const record of agentEgress.retryableReliableRecords(connection.getServerCapabilities())) {
-      dispatchReliableRecord(record);
-    }
     daemonStarted = true;
     } catch (err) {
+      const haltReason = startupHaltReason(err);
+      if (haltReason === undefined) {
+        // #394: a crash, the one start failure a restart may fix. Recorded so
+        // that a crash loop degrades operational health.
+        try {
+          await operationalHealth.startRun();
+          await operationalHealth.recordFailure('lifecycle');
+        } catch (healthError) {
+          console.warn(`[byok/client] failed to persist operational health: ${healthError instanceof Error ? healthError.message : String(healthError)}`);
+        }
+      } else if (haltReason !== 'store_owned') {
+        halted(haltReason);
+      }
+      const thrown = haltReason === undefined || err instanceof DaemonHaltError ? err : new DaemonHaltError(haltReason, { cause: err });
       try {
         // startUnderLease already owns the process-local lifecycle slot. Run
         // teardown directly; queueing requestShutdown here would wait on this
         // operation itself and deadlock.
         await runShutdownSequence('startup failed', { drainTimeoutMs: 0 });
       } catch (cleanupError) {
-        throw new AggregateError([err, cleanupError], 'daemon startup failed and teardown was incomplete');
+        throw new AggregateError([thrown, cleanupError], 'daemon startup failed and teardown was incomplete');
       }
-      throw err;
+      throw thrown;
     }
   }
 
@@ -3127,7 +3196,8 @@ export function buildDaemonWithAdapters(
       mutationBarrierComplete = false;
     }
     await attempt(() => auth.stop(), true);
-    connectionState = 'closed';
+    // A halt stays visible after teardown, until the next start().
+    if (lifecycle.phase !== 'halted') setLifecycle({ phase: 'stopped' });
     // M4 Phase 2: stop the control socket in every shutdown path — this is
     // the single lifecycle choke point every caller (a foreground abort via
     // `bin/commands/start.ts`, `unpair()` below, and the control socket's
@@ -3323,7 +3393,7 @@ export function buildDaemonWithAdapters(
   // M4 Phase 2: control socket method registry (`control-server.ts` is
   // daemon-agnostic; this is the glue that closes over THIS daemon
   // instance's own state). Built once; every handler below reads `runner`/
-  // `connection`/`connectionState`/`auth` fresh at CALL time via normal JS
+  // `connection`/`lifecycle`/`auth` fresh at CALL time via normal JS
   // closure semantics, so it stays correct across this daemon's own
   // start()/stop() cycles.
   // -------------------------------------------------------------------------
@@ -3373,7 +3443,7 @@ export function buildDaemonWithAdapters(
       uptimeMs: startedAt !== undefined ? Date.now() - startedAt : 0,
       paired: auth.deviceId !== undefined,
       deviceId: auth.deviceId,
-      transport: connectionState,
+      lifecycle,
       activeTasks,
       runtimeIds: adapters.map((adapter) => adapter.descriptor.id),
       // M4 Phase 4 (part B.3): queue watermarks come from TaskRunner's own
@@ -4019,8 +4089,9 @@ export function buildDaemonWithAdapters(
       return;
     }
     if (!connection?.getServerCapabilities().includes(AGENT_EGRESS_RELIABLE_ACK_CAPABILITY)) {
-      // The append stays durable and is retried after the next acknowledged
-      // connection. It is never republished through latest-value activity.
+      // The append stays durable and is retried when an advertisement next
+      // carries the ack capability (`onCapabilitiesAdvertised`). It is never
+      // republished through latest-value activity.
       agentEgress.noteTransportDrop('capability_missing', record.agentRef);
       return;
     }
@@ -4127,8 +4198,7 @@ export function buildDaemonWithAdapters(
     return {
       localAgentRelease,
       paired: auth.deviceId !== undefined,
-      connected: connectionState === 'open',
-      revoked: connection?.isRevoked() ?? auth.isRevoked(),
+      lifecycle,
       deviceId: auth.deviceId,
       activeTaskCount: runner?.activeTaskCount ?? 0,
       pendingTerminalCommits: terminalCommits.pendingCount,

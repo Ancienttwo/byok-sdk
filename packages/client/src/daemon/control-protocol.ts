@@ -6,6 +6,7 @@ import type { ApprovalDecision, PendingApproval } from './approvals';
 import type { StorageCategory } from './journal/journal';
 import type { StoragePressureState } from './journal/storage-policy';
 import type { OperationalHealthSnapshot } from './operational-health';
+import type { DaemonLifecycle } from './daemon-lifecycle';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
 import type { AgentHomeExecutionStatus } from '../agent-home';
@@ -445,8 +446,8 @@ export interface ControlStatusResult {
   uptimeMs: number;
   paired: boolean;
   deviceId?: string;
-  /** The connection state machine's current value: `'open'`, `'revoked'`, `'closed'`, or `'connecting'`. */
-  transport: string;
+  /** Issues #391/#394: the same value as `Daemon.status().lifecycle`. */
+  lifecycle: DaemonLifecycle;
   activeTasks: ControlActiveTask[];
   runtimeIds: string[];
   /** M4 Phase 4 (part B.3): per-active-task queue watermarks — see {@link TaskQueueWatermark}. */
@@ -465,7 +466,7 @@ export interface ControlStatusResult {
   approvalsPending: number;
   /** S3b (L-003): local storage usage + pressure — see {@link ControlStorageStatus}. Absent unless a storage policy is configured. */
   storage?: ControlStorageStatus;
-  /** Local lifecycle/retry budget. This is not the transport state above. */
+  /** Local retry budget. This is not the lifecycle above. */
   operationalHealth: OperationalHealthSnapshot;
   /** Redacted content-addressed status from the daemon's single local registry. */
   toolsets: McpToolsetRegistryStatus;

@@ -10,6 +10,7 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type DaemonOverrides } from '../../daemon/create-daemon';
 import { SqliteLocalTaskJournal, type JournalFaultStep } from '../../daemon/journal/sqlite-journal';
 import { DeviceStore } from '../../daemon/store';
+import { waitForDaemonOpen } from './lifecycle-barrier';
 import {
   freezeRuntimeAdapterDescriptor,
   type RuntimeAdapter,
@@ -225,6 +226,8 @@ if (config.action === 'unpair') {
 
 const paired = config.pairingCode === undefined ? undefined : await daemon.pair(config.pairingCode);
 await daemon.start();
+// #391: start() is local startup only; "ready" means the cloud accepted this run's hello.
+await waitForDaemonOpen(daemon);
 const device = paired ?? await new DeviceStore(config.storeDir, undefined, config.productId).load();
 process.stdout.write(`${JSON.stringify({ ready: true, pid: process.pid, deviceId: device?.deviceId })}\n`);
 

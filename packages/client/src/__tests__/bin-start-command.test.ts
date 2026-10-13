@@ -6,7 +6,8 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import type { DaemonEventListener } from '../daemon/observer';
 import { readAuditEvents } from '../bin/audit-log';
-import { runStartCommand } from '../bin/commands/start';
+import { runStartCommand, startExitCode } from '../bin/commands/start';
+import { DaemonHaltError } from '../daemon/daemon-lifecycle';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
@@ -92,7 +93,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     });
 
     const auditEvents = await readAuditEvents(storeDir);
-    expect(auditEvents.some((e) => e.kind === 'connection')).toBe(true);
+    expect(auditEvents.some((e) => e.kind === 'lifecycle')).toBe(true);
     expect(auditEvents.some((e) => e.kind === 'runtimes-detected')).toBe(true);
     expect(auditEvents.some((e) => e.kind === 'claimed' && e.taskId === 'task-1')).toBe(true);
 
@@ -153,7 +154,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
       pair: vi.fn(),
       start: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn().mockResolvedValue(undefined),
-      status: vi.fn().mockReturnValue({ paired: true, connected: true, revoked: false, activeTaskCount: 1 }),
+      status: vi.fn().mockReturnValue({ paired: true, lifecycle: { phase: 'running', connection: 'open' }, activeTaskCount: 1 }),
       reloadMcpToolsets: vi.fn(),
       reportMcpToolsetObservation: vi.fn(),
       subscribe: (listener) => {
@@ -203,7 +204,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
       pair: vi.fn(),
       start: vi.fn().mockRejectedValue(new Error('boom-start')),
       stop,
-      status: vi.fn().mockReturnValue({ paired: true, connected: false, revoked: false, activeTaskCount: 0 }),
+      status: vi.fn().mockReturnValue({ paired: true, lifecycle: { phase: 'running', connection: 'connecting' }, activeTaskCount: 0 }),
       reloadMcpToolsets: vi.fn(),
       reportMcpToolsetObservation: vi.fn(),
       subscribe: (listener) => {
@@ -226,5 +227,77 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
 
     expect(stop).toHaveBeenCalledTimes(1);
     expect(listeners.size).toBe(0); // unsubscribed
+  });
+
+  it('#394: a revoked device ends start as halted/device_revoked after one authentication, recorded in the audit log', async () => {
+    const workspaceRoot = await tmpDir('byok-start-workspace-');
+    const storeDir = await tmpDir('byok-start-store-revoked-');
+    daemon = createDaemonWithAdapters(
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-revoked', serverUrl: server.url, workspaceRoot, storeDir },
+      [new StubRuntimeAdapter('pi')],
+    );
+    const record = await daemon.pair('pairing-code');
+    server.revokeDevice(record.deviceId);
+    const challengesBefore = server.httpRequests.filter((request) => request.pathname === '/byok/challenge').length;
+    const errors: string[] = [];
+
+    const outcome = await runStartCommand(
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-revoked', serverUrl: server.url, workspaceRoot, storeDir },
+      { daemon, log: () => {}, error: (line) => errors.push(line), signal: new AbortController().signal },
+    );
+
+    expect(outcome).toEqual({ kind: 'halted', reason: 'device_revoked' });
+    expect(startExitCode(outcome, false)).toBe(78);
+    expect(startExitCode(outcome, true)).toBe(0);
+    expect(server.httpRequests.filter((request) => request.pathname === '/byok/challenge').length - challengesBefore).toBe(1);
+    expect(errors.some((line) => line.startsWith('daemon halted: reason=device_revoked'))).toBe(true);
+    const audit = await readAuditEvents(storeDir);
+    expect(audit.filter((event) => event.kind === 'lifecycle').at(-1)).toMatchObject({
+      lifecycle: { phase: 'halted', reason: 'device_revoked' },
+    });
+  });
+
+  it('#394: a DaemonHaltError from start() is a halted outcome, not a throw, after stopping and unsubscribing', async () => {
+    const listeners = new Set<DaemonEventListener>();
+    const stop = vi.fn().mockResolvedValue(undefined);
+    const fakeDaemon: Daemon = {
+      pair: vi.fn(),
+      start: vi.fn().mockRejectedValue(new DaemonHaltError('unpaired')),
+      stop,
+      status: vi.fn().mockReturnValue({ paired: false, lifecycle: { phase: 'stopped' }, activeTaskCount: 0 }),
+      reloadMcpToolsets: vi.fn(),
+      reportMcpToolsetObservation: vi.fn(),
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      tasks: () => [],
+      unpair: vi.fn(),
+      approve: vi.fn(),
+      reject: vi.fn(),
+    };
+    const storeDir = await tmpDir('byok-start-store-unpaired-');
+    const errors: string[] = [];
+
+    const outcome = await runStartCommand(
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-unpaired', serverUrl: 'http://example.invalid', workspaceRoot: '/ws', storeDir },
+      { daemon: fakeDaemon, error: (line) => errors.push(line), log: () => {}, signal: new AbortController().signal },
+    );
+
+    expect(outcome).toEqual({ kind: 'halted', reason: 'unpaired' });
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(listeners.size).toBe(0);
+    expect(errors.some((line) => line.startsWith('daemon halted: reason=unpaired'))).toBe(true);
+  });
+});
+
+describe('bin/commands/start: startExitCode (#394)', () => {
+  it('maps stopped to 0 and a halt to 78 in the foreground, and both to 0 under --service', () => {
+    expect(startExitCode({ kind: 'stopped' }, false)).toBe(0);
+    expect(startExitCode({ kind: 'stopped' }, true)).toBe(0);
+    for (const reason of ['unpaired', 're_pair_required', 'store_owned', 'device_revoked', 'handshake_rejected', 'replay_cursor_too_old', 'config_invalid'] as const) {
+      expect(startExitCode({ kind: 'halted', reason }, false)).toBe(78);
+      expect(startExitCode({ kind: 'halted', reason }, true)).toBe(0);
+    }
   });
 });

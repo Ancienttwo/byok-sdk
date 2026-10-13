@@ -360,7 +360,7 @@ describe('device assertion broker: assertion.issue', () => {
     // it finds out on its next authenticated round trip, exactly as in
     // production. Dropping the connection is what forces that round trip now.
     server.revokeDevice(record.deviceId);
-    await vi.waitFor(() => expect(daemon?.status().revoked).toBe(true), { timeout: 10_000 });
+    await vi.waitFor(() => expect(daemon?.status().lifecycle).toMatchObject({ phase: 'halted', reason: 'device_revoked' }), { timeout: 10_000 });
 
     const err = await expectControlError(client.request('assertion.issue', { audience: ALLOWED_AUDIENCE }));
     expect(err.code).toBe('revoked');

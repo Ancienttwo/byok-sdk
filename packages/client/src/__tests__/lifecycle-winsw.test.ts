@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createWinswLifecycle, generateWinswXml } from '../lifecycle/winsw';
 import type { RunResult, Runner } from '../lifecycle/exec-runner';
-import type { ServiceDefinition } from '../lifecycle/service-types';
+import { nodeAgentProgram, type ServiceDefinition } from '../lifecycle/service-types';
 
 function ok(stdout = ''): RunResult {
   return { code: 0, stdout, stderr: '' };
@@ -124,13 +124,19 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     expect(calls).toEqual(['C:\\acme\\logs/Acme-Agent-.exe install', 'C:\\acme\\logs/Acme-Agent-.exe start']);
   });
 
-  it('issue #392: the WinSW config does NOT carry --service (WinSW is unchanged pending the owner decision)', async () => {
+  it('issue #394: a Host program is written verbatim; nodeAgentProgram({ service: true }) carries --service last', async () => {
     const fs = fakeFs();
     const lifecycle = createWinswLifecycle(def(), { run: vi.fn<Runner>().mockResolvedValue(ok()), fs });
     await lifecycle.install();
     const written = fs.writeFile.mock.calls[0]?.[1] as string;
     expect(written).toContain('<argument>start</argument>');
     expect(written).not.toContain('--service');
+
+    await lifecycle.install({
+      program: nodeAgentProgram({ agentBin: 'C:\\agent.js', configPath: 'C:\\agent.json', nodeBin: 'C:\\node.exe', service: true }),
+    });
+    const rewritten = fs.writeFile.mock.calls[1]?.[1] as string;
+    expect(rewritten).toContain('<argument>C:\\agent.json</argument>\n  <argument>--service</argument>');
   });
 
   it('install() uses windows.installDir when given instead of logDir', async () => {

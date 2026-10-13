@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { startRealCloud, type RealCloudHandle } from './fixtures/real-cloud';
+import { OPEN_LIFECYCLE, waitForDaemonOpen } from './fixtures/lifecycle-barrier';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -60,7 +61,8 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
 
     // The daemon settled through the ordinary long-poll path, with no
     // cloud-specific handling anywhere.
-    expect(daemon.status().connected).toBe(true);
+    await waitForDaemonOpen(daemon);
+    expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE);
 
     // The hosted control-plane input. Unlike the embedded server's
     // `dispatch()`, this returns no handle to await — the offer is bytes in a
@@ -78,7 +80,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
     await vi.waitFor(async () => {
       expect((await cloud.readTaskAttempt(offer.taskId))?.status).toBe('running');
     });
-    expect(daemon.status().connected).toBe(true); // stays connected across the long-poll task lifecycle
+    expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE); // stays connected across the long-poll task lifecycle
 
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const session = adapter.sessions[0]!;
@@ -101,7 +103,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
       expect(envelope.payload.summary).toBe('working over long-poll');
     }
 
-    expect(daemon.status().connected).toBe(true);
+    expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE);
   }, 15000);
 
   it('admits and runs an Agent offer only after long-poll publishes agent-home-contract', async () => {

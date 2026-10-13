@@ -55,7 +55,7 @@ function fakeDaemon(): { daemon: Daemon; emit: (event: DaemonEvent) => void } {
     pair: vi.fn(),
     start: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),
-    status: vi.fn().mockReturnValue({ paired: true, connected: true, revoked: false, activeTaskCount: 0 }),
+    status: vi.fn().mockReturnValue({ paired: true, lifecycle: { phase: 'running', connection: 'open' }, activeTaskCount: 0 }),
     reloadMcpToolsets: vi.fn(),
     reportMcpToolsetObservation: vi.fn(),
     subscribe: (listener) => {
@@ -158,10 +158,10 @@ describe('bin/audit-log: environment-resolved record (issue #392)', () => {
     // Push the log past the rotation cap with ordinary events; the environment record is kept.
     const padding = 'x'.repeat(Math.ceil(MAX_AUDIT_LOG_BYTES / (AUDIT_LOG_TRIM_TARGET_LINES * 2)));
     const filler = Array.from({ length: AUDIT_LOG_TRIM_TARGET_LINES * 3 }, (_, i) =>
-      JSON.stringify({ kind: 'connection', ts: `2026-10-13T00:01:00.${String(i % 1000).padStart(3, '0')}Z`, state: 'open', pad: padding }),
+      JSON.stringify({ kind: 'lifecycle', ts: `2026-10-13T00:01:00.${String(i % 1000).padStart(3, '0')}Z`, lifecycle: { phase: 'running', connection: 'open' }, pad: padding }),
     );
     await fs.appendFile(auditLogPath(storeDir), `${filler.join('\n')}\n`);
-    await appendAuditEvent(storeDir, { kind: 'connection', ts: '2026-10-13T00:02:00.000Z', state: 'open' });
+    await appendAuditEvent(storeDir, { kind: 'lifecycle', ts: '2026-10-13T00:02:00.000Z', lifecycle: { phase: 'running', connection: 'open' } });
     const size = (await fs.stat(auditLogPath(storeDir))).size;
     expect(size).toBeLessThan(MAX_AUDIT_LOG_BYTES);
     expect(await readLastEnvironmentRecord(storeDir)).toEqual({ ts: '2026-10-13T00:00:00.000Z', status: { source: 'unavailable', code: 'timeout' } });
@@ -172,12 +172,12 @@ describe('bin/audit-log: environment-resolved record (issue #392)', () => {
     // Over the cap, so the next event append rotates the log.
     const padding = 'x'.repeat(Math.ceil(MAX_AUDIT_LOG_BYTES / (AUDIT_LOG_TRIM_TARGET_LINES * 2)));
     const filler = Array.from({ length: AUDIT_LOG_TRIM_TARGET_LINES * 3 }, (_, i) =>
-      JSON.stringify({ kind: 'connection', ts: `2026-10-13T00:01:00.${String(i % 1000).padStart(3, '0')}Z`, state: 'open', pad: padding }),
+      JSON.stringify({ kind: 'lifecycle', ts: `2026-10-13T00:01:00.${String(i % 1000).padStart(3, '0')}Z`, lifecycle: { phase: 'running', connection: 'open' }, pad: padding }),
     );
     await fs.writeFile(auditLogPath(storeDir), `${filler.join('\n')}\n`);
     const errors: unknown[] = [];
     const appender = createAuditAppender(storeDir, (err) => errors.push(err));
-    for (let i = 0; i < 20; i++) appender({ kind: 'connection', ts: `2026-10-13T00:02:00.${String(i).padStart(3, '0')}Z`, state: 'open' });
+    for (let i = 0; i < 20; i++) appender({ kind: 'lifecycle', ts: `2026-10-13T00:02:00.${String(i).padStart(3, '0')}Z`, lifecycle: { phase: 'running', connection: 'open' } });
     await appender.appendEnvironment({ ts: '2026-10-13T00:03:00.000Z', status: { source: 'inherited' } });
 
     expect(errors).toEqual([]);

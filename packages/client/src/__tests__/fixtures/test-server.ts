@@ -80,6 +80,8 @@ export class TestServer {
   private messagesHold: { predicate: (envelope: Envelope) => boolean; gate: Promise<void> } | undefined;
   private readonly messagesHoldReleases = new Set<() => void>();
   private failEventsPolls = false;
+  private failMessagesSends = false;
+  private rejectHello = false;
   private failBlobUploads = false;
   private dropNextBlobFinalizeResponse = false;
   /** Capabilities advertised in every subsequent long-poll response. */
@@ -154,7 +156,7 @@ export class TestServer {
     this.capabilityDeclaration = declaration;
   }
 
-  /** Simulate an N-1 responder whose additive events response predates `capabilities`. */
+  /** Simulate an N-1 responder whose additive events and handshake responses predate `capabilities`. */
   setAdvertiseLongPollCapabilities(advertise: boolean): void {
     this.advertiseLongPollCapabilities = advertise;
   }
@@ -162,6 +164,16 @@ export class TestServer {
   /** Return 500 from every events poll while true, without changing auth. */
   setFailEventsPolls(fail: boolean): void {
     this.failEventsPolls = fail;
+  }
+
+  /** Return 503 from every `POST /byok/messages` while true: the server is unreachable for sends, the handshake included. */
+  setFailMessagesSends(fail: boolean): void {
+    this.failMessagesSends = fail;
+  }
+
+  /** Answer every `conn.hello` with `rejected` (and record it), as a server refusing this device's handshake would. */
+  setRejectHello(reject: boolean): void {
+    this.rejectHello = reject;
   }
 
   /** Make every blob content PUT fail with a 500 while `true` — used to test the client's handling of an upload failure (finding F7). */
@@ -578,16 +590,27 @@ export class TestServer {
     respondJson(res, 200, {
       events: entries,
       cursor: this.longPollCursor,
-      ...(this.advertiseLongPollCapabilities ? { capabilities: [...new Set([...this.ackCapabilities, 'mailbox-read-ahead'])] } : {}),
+      ...(this.advertiseLongPollCapabilities ? { capabilities: this.advertisedCapabilities() } : {}),
     });
+  }
+
+  /** What every poll response, and the answer to a `conn.hello` batch, advertises. */
+  private advertisedCapabilities(): string[] {
+    return [...new Set([...this.ackCapabilities, 'mailbox-read-ahead'])];
   }
 
   /** `POST /byok/messages`: the daemon's outbound send path. */
   private async handleMessagesSend(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!this.requireBearer(req, res)) return;
+    if (this.failMessagesSends) {
+      respondJson(res, 503, { error: 'unavailable' });
+      return;
+    }
     const body = (await readJsonBody(req)) as { messages?: unknown };
     const rawMessages = Array.isArray(body.messages) ? body.messages : [];
     let accepted = 0;
+    let rejected = 0;
+    let handshake = false;
     let holdGate: Promise<void> | undefined;
     for (const raw of rawMessages) {
       let envelope: Envelope;
@@ -597,7 +620,12 @@ export class TestServer {
         continue; // malformed entry — mirrors the real server's schema-validation gate
       }
       this.recordReceivedEnvelope(envelope);
+      if (envelope.type === 'conn.hello' && this.rejectHello) {
+        rejected += 1;
+        continue;
+      }
       accepted += 1;
+      if (envelope.type === 'conn.hello') handshake = true;
       if (this.messagesHold?.predicate(envelope)) {
         holdGate = this.messagesHold.gate;
         this.messagesHold = undefined;
@@ -605,7 +633,13 @@ export class TestServer {
     }
     // Test hook (see `holdNextMessagesResponse`): recorded above, acceptance held here.
     if (holdGate) await holdGate;
-    respondJson(res, 200, { accepted });
+    // Like the hosted cloud (#391 Phase 2): a handshake's answer carries the
+    // advertisement; an N-1 responder (`setAdvertiseLongPollCapabilities(false)`) omits it.
+    respondJson(res, 200, {
+      accepted,
+      ...(rejected > 0 ? { rejected } : {}),
+      ...(handshake && this.advertiseLongPollCapabilities ? { capabilities: this.advertisedCapabilities() } : {}),
+    });
   }
 
   private requireBearer(req: IncomingMessage, res: ServerResponse): boolean {

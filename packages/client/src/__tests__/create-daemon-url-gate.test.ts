@@ -132,7 +132,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
         storeDir: await tmpDir('byok-gate-start-fail-store-'),
       });
 
-      await expect(daemon.start()).rejects.toThrow(InsecureServerUrlError);
+      await expect(daemon.start()).rejects.toMatchObject({ reason: 'config_invalid', cause: expect.any(InsecureServerUrlError) });
       expect(warnSpy).not.toHaveBeenCalled();
     });
 
@@ -149,7 +149,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
       // Never paired — proves the gate passed and execution moved on to the
       // NEXT step (loadExisting()'s own "not paired" guard), rather than the
       // security gate itself blocking it.
-      await expect(daemon.start()).rejects.toThrow(/device is not paired yet/);
+      await expect(daemon.start()).rejects.toMatchObject({ reason: 'unpaired' });
       expect(warnSpy).toHaveBeenCalledTimes(1);
       const [warning] = warnSpy.mock.calls[0] as [string];
       expect(warning).toContain('dangerouslyAllowInsecureRemote');
@@ -166,7 +166,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
         storeDir: await tmpDir('byok-gate-start-loopback-store-'),
       });
 
-      await expect(daemon.start()).rejects.toThrow(/device is not paired yet/);
+      await expect(daemon.start()).rejects.toMatchObject({ reason: 'unpaired' });
       expect(warnSpy).not.toHaveBeenCalled();
     });
 
@@ -180,7 +180,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
         storeDir: await tmpDir('byok-gate-start-unsupported-store-'),
       });
 
-      await expect(daemon.start()).rejects.toThrow(InsecureServerUrlError);
+      await expect(daemon.start()).rejects.toMatchObject({ reason: 'config_invalid', cause: expect.any(InsecureServerUrlError) });
       expect(warnSpy).not.toHaveBeenCalled();
     });
   });

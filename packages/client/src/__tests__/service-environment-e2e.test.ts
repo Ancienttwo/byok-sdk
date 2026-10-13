@@ -133,7 +133,7 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
 
   it('dist byok-agent start --service applies the capture before anything else (service log line, no paths)', async () => {
     const { home, storeDir, configPath } = await fixture('http://127.0.0.1:9');
-    // Unpaired, so start fails right after the capture; the CLI wiring is what is under test.
+    // Unpaired, so start halts right after the capture; the CLI wiring is what is under test.
     const run = spawnSync(process.execPath, [path.resolve('dist/bin/byok-agent.js'), 'start', '--config', configPath, '--service'], {
       env: minimalEnv(home),
       encoding: 'utf8',
@@ -141,7 +141,10 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
     });
     expect(run.stdout.split('\n')[0]).toMatch(new RegExp(`^environment: login-shell shell=${path.basename(passwdShell!)} durationMs=\\d+$`, 'u'));
     expect(run.stdout).not.toContain(home);
-    expect(run.status).not.toBe(0);
+    // #394: an unpaired device is a halt, and a halt under --service exits 0
+    // so the supervisor leaves it stopped.
+    expect(run.stderr).toContain('daemon halted: reason=unpaired');
+    expect(run.status).toBe(0);
     // Only a daemon that actually started (owns the store) records the environment.
     expect(await readLastEnvironmentRecord(storeDir)).toBeUndefined();
   }, 60_000);

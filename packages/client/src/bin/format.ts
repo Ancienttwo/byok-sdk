@@ -1,5 +1,6 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { ConnectionState, DaemonBranding, DaemonEvent, DaemonTaskInfo, LocalAgentReleaseIdentity } from '../index';
+import type { DaemonBranding, DaemonEvent, DaemonTaskInfo, LocalAgentReleaseIdentity } from '../index';
+import type { DaemonHaltReason, DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { GIT_ERROR_CATEGORIES } from '../daemon/git-workspace';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
 import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
@@ -118,6 +119,38 @@ function taskText(text: string, options: FormatDaemonEventLineOptions): string {
  * of the audit log) so the two ways of watching the same feed read
  * identically.
  */
+/** `phase=running connection=open`, `phase=halted reason=device_revoked` — closed values only; the caller prints the time. */
+export function formatLifecycle(lifecycle: DaemonLifecycle): string {
+  switch (lifecycle.phase) {
+    case 'running':
+      return `phase=running connection=${lifecycle.connection}`;
+    case 'halted':
+      return `phase=halted reason=${lifecycle.reason}`;
+    default:
+      return `phase=${lifecycle.phase}`;
+  }
+}
+
+/** Issue #394: what an operator does about each halt. A restart alone fixes none of them. */
+export function formatHaltRemedy(reason: DaemonHaltReason): string {
+  switch (reason) {
+    case 'unpaired':
+      return 'this device is not paired: run `byok-agent pair <code> --server <url>`, then start again';
+    case 're_pair_required':
+      return 'the device record is unusable: run `byok-agent pair <code> --server <url>`, then start again';
+    case 'store_owned':
+      return 'another daemon owns this store: stop it first (`byok-agent service-stop`, or end the other `start`)';
+    case 'device_revoked':
+      return 'device revoked — re-pair needed: run `byok-agent pair <code> --server <url>`, then start again';
+    case 'handshake_rejected':
+      return 'the server rejected this device\'s hello: check productId and the SDK version, or pair again, then start again';
+    case 'replay_cursor_too_old':
+      return 'the server no longer holds this device\'s undelivered history: pair again (or run operator recovery), then start again';
+    case 'config_invalid':
+      return 'the configuration is invalid: fix it, then start again';
+  }
+}
+
 export function formatDaemonEventLine(event: DaemonEvent, options: FormatDaemonEventLineOptions = {}): string {
   const prefix = `[${event.ts}]`;
   switch (event.kind) {
@@ -148,8 +181,8 @@ export function formatDaemonEventLine(event: DaemonEvent, options: FormatDaemonE
       return `${prefix} failed taskId=${event.taskId} retryable=${event.retryable}${event.preClaim ? ' preClaim=true' : ''} reason=${quote(taskText(event.reason, options))}`;
     case 'cancelled':
       return `${prefix} cancelled taskId=${event.taskId}${event.reason ? ` reason=${quote(taskText(event.reason, options))}` : ''}`;
-    case 'connection':
-      return `${prefix} connection state=${event.state}`;
+    case 'lifecycle':
+      return `${prefix} lifecycle ${formatLifecycle(event.lifecycle)}`;
     case 'paired':
       return `${prefix} paired deviceId=${event.deviceId}`;
     case 'unpaired':
@@ -395,7 +428,8 @@ export interface StatusView {
   branding?: DaemonBranding;
   paired: boolean;
   deviceId?: string;
-  connection?: { state: ConnectionState; ts: string };
+  /** Issues #391/#394: the last `lifecycle` event the audit log holds. */
+  lifecycle?: { lifecycle: DaemonLifecycle; ts: string };
   runtimes: readonly ProbedRuntime[];
   taskCounts: TaskCounts;
   auditLogPath: string;
@@ -426,10 +460,11 @@ export function formatStatusLines(view: StatusView): string[] {
   if (view.branding?.supportUrl) lines.push(`support: ${view.branding.supportUrl}`);
   lines.push(`paired: ${view.paired ? 'yes' : 'no'}${view.deviceId ? ` deviceId=${view.deviceId}` : ''}`);
   lines.push(
-    view.connection
-      ? `connection: last-known=${view.connection.state} at=${view.connection.ts}`
-      : 'connection: unknown (no audit log yet — run `byok-agent start` at least once to begin observing)',
+    view.lifecycle
+      ? `lifecycle: last-known ${formatLifecycle(view.lifecycle.lifecycle)} at=${view.lifecycle.ts}`
+      : 'lifecycle: unknown (no lifecycle event yet — run `byok-agent start` at least once to begin observing)',
   );
+  if (view.lifecycle?.lifecycle.phase === 'halted') lines.push(`lifecycle-remedy: ${formatHaltRemedy(view.lifecycle.lifecycle.reason)}`);
   lines.push(
     view.environment
       ? `environment: ${formatServiceEnvironment(view.environment.status)} at=${view.environment.ts}`
@@ -456,7 +491,7 @@ export function formatStatusLines(view: StatusView): string[] {
 export function formatLiveStatusLines(live: ControlStatusResult): string[] {
   const liveRelease = live.localAgentRelease;
   const lines: string[] = [
-    `live: pid=${live.pid} uptimeMs=${live.uptimeMs} transport=${live.transport}`,
+    `live: pid=${live.pid} uptimeMs=${live.uptimeMs} ${formatLifecycle(live.lifecycle)}`,
     liveRelease
       ? `live-local-agent-release: ${liveRelease.version}${liveRelease.buildId ? ` buildId=${liveRelease.buildId}` : ''}`
       : 'live-local-agent-release: unknown',

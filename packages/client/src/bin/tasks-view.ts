@@ -1,5 +1,6 @@
 import { TASK_STATES, type TaskState } from '@byok-sdk/protocol';
-import { type ConnectionState, type DaemonEvent, type DaemonTaskInfo } from '../index';
+import { type DaemonEvent, type DaemonTaskInfo } from '../index';
+import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { GIT_ERROR_CATEGORIES, GIT_WORKSPACE_PHASES } from '../daemon/git-workspace';
 
 export interface TaskGitStatus {
@@ -131,7 +132,7 @@ export function deriveTasksFromEvents(events: readonly DaemonEvent[]): DerivedTa
         break;
       }
       // 'artifact' carries no task-STATE transition of its own (observer.ts
-      // never calls its own upsertTask for it either); 'connection'/
+      // never calls its own upsertTask for it either); 'lifecycle'/
       // 'paired'/'unpaired'/'runtimes-detected' are daemon-level, not
       // per-task.
       default:
@@ -143,16 +144,16 @@ export function deriveTasksFromEvents(events: readonly DaemonEvent[]): DerivedTa
 }
 
 /**
- * Most recent `connection` DaemonEvent, if the log has any — used by
- * `status` to show a best-effort "last known" transport state. Never a
- * live/current guarantee: if `start` isn't running right now, this is
- * simply whatever it last reported before exiting (or nothing, if it never
- * ran at all) — see `byok-agent.ts`'s header comment.
+ * Most recent `lifecycle` DaemonEvent, if the log has any — used by `status`,
+ * `doctor` and `service-status` to show the last-known lifecycle, including a
+ * halt and its reason. Never a live/current guarantee: if `start` isn't
+ * running right now, this is simply whatever it last reported before exiting
+ * (or nothing, if it never ran at all) — see `byok-agent.ts`'s header comment.
  */
-export function lastConnectionState(events: readonly DaemonEvent[]): { state: ConnectionState; ts: string } | undefined {
-  let last: { state: ConnectionState; ts: string } | undefined;
+export function lastLifecycle(events: readonly DaemonEvent[]): { lifecycle: DaemonLifecycle; ts: string } | undefined {
+  let last: { lifecycle: DaemonLifecycle; ts: string } | undefined;
   for (const event of events) {
-    if (event.kind === 'connection') last = { state: event.state, ts: event.ts };
+    if (event.kind === 'lifecycle') last = { lifecycle: event.lifecycle, ts: event.ts };
   }
   return last;
 }

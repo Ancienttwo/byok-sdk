@@ -7,7 +7,7 @@ import { freezeRuntimeAdapterDescriptor, type DaemonConfig, type RuntimeAdapter 
 import type { ConnectControlResult } from '../bin/control-client';
 import { runSupportBundleCommand } from '../bin/commands/support-bundle';
 import { runDoctorCommand } from '../bin/commands/doctor';
-import { auditLogPath } from '../bin/audit-log';
+import { appendAuditEvent, auditLogPath } from '../bin/audit-log';
 import { DeviceStore } from '../daemon/store';
 import {
   createSupportBundle,
@@ -153,6 +153,17 @@ describe('support bundle privacy and bounds', () => {
 
     expect(bundle.recentEvents).toMatchObject({ status: 'unavailable', included: 0, facts: [] });
     expect(await fs.readFile(outside, 'utf8')).toContain('progress');
+  });
+
+  it('#394: carries the last lifecycle as closed enums only', async () => {
+    const dir = await tempDir();
+    const at = '2026-10-13T00:00:00.000Z';
+    await appendAuditEvent(dir, { kind: 'lifecycle', ts: at, lifecycle: { phase: 'halted', reason: 'device_revoked', at } });
+
+    const bundle = await createSupportBundle(config(dir), dir, { adapters: [], connectControl: unreachable });
+
+    expect(bundle.lifecycle).toEqual({ status: 'known', source: 'audit', phase: 'halted', reason: 'device_revoked' });
+    expect(bundle.checks).toContainEqual({ id: 'lifecycle', status: 'fail' });
   });
 
   it.skipIf(process.platform === 'win32')('does not block when audit.jsonl is a FIFO', async () => {
