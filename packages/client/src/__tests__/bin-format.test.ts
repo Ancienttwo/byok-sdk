@@ -385,6 +385,18 @@ describe('bin/format: formatLiveStatusLines', () => {
     expect(lines).toContain('live-local-agent-release: 1.1.0 buildId=live-build');
   });
 
+  it('renders a live daemon that predates lifecycle (it reports transport) as lifecycle unknown instead of failing', () => {
+    const { lifecycle: _omitted, ...older } = baseLive();
+    const lines = formatLiveStatusLines({ ...older, transport: 'open' } as unknown as ControlStatusResult);
+    expect(lines).toContain('live: pid=123 uptimeMs=4567 lifecycle unknown (daemon predates lifecycle)');
+    expect(lines).toContain('live-paired: yes');
+  });
+
+  it('renders a crashed live daemon', () => {
+    const lines = formatLiveStatusLines(baseLive({ lifecycle: { phase: 'crashed', at: '2026-10-14T00:00:00.000Z' } }));
+    expect(lines).toContain('live: pid=123 uptimeMs=4567 phase=crashed');
+  });
+
   it('renders explicit toolset observations and marks absent evidence unobserved without executable bytes', () => {
     const revision = `sha256:${'1'.repeat(64)}`;
     const lines = formatLiveStatusLines(

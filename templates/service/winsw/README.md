@@ -84,6 +84,7 @@ unit-tested template):
   <argument>start</argument>
   <argument>--config</argument>
   <argument>C:\absolute\path\to\config.json</argument>
+  <argument>--service</argument>
   <logpath>C:\Users\you\.byok\your-product-id\service-logs</logpath>
   <log mode="roll"></log>
   <startmode>Automatic</startmode>
@@ -93,6 +94,9 @@ unit-tested template):
 </service>
 ```
 
+- **`--service`** makes a halt (a revoked device, an unpaired store, a
+  rejected handshake, an invalid config) exit 0, so WinSW leaves the service
+  stopped; a crash still exits non-zero and is restarted (#394).
 - **`<onfailure>`** is the crash-restart mechanism, delegated entirely to
   WinSW/the SCM — the SDK never runs its own in-process supervisor. Two
   entries give an escalating backoff (10s, then 30s on repeated failures);

@@ -38,12 +38,19 @@ export function isDaemonHaltReason(value: unknown): value is DaemonHaltReason {
  *   accepted this run's `conn.hello` and `connecting` otherwise.
  * - `halted`: the run ended on a {@link DaemonHaltReason}. It stays halted
  *   (also after `stop()`) until the next `start()`.
+ * - `crashed`: the run ended on an unexpected error after `start()` resolved
+ *   (an observer callback or the reconnect loop threw). The connection
+ *   stops and a `lifecycle` operational-health failure is recorded; unlike a
+ *   halt, a restart may fix it, so `byok-agent start` exits 1 and the OS
+ *   supervisor restarts it. It stays crashed (also after `stop()`) until the
+ *   next `start()`.
  */
 export type DaemonLifecycle =
   | { phase: 'stopped' }
   | { phase: 'awaiting-enrollment' }
   | { phase: 'running'; connection: 'connecting' | 'open' }
-  | { phase: 'halted'; reason: DaemonHaltReason; at: string };
+  | { phase: 'halted'; reason: DaemonHaltReason; at: string }
+  | { phase: 'crashed'; at: string };
 
 /**
  * `start()` throws this for a halt it finds locally. `store_owned` and
@@ -84,6 +91,8 @@ export function parseDaemonLifecycle(value: unknown): DaemonLifecycle | undefine
       return isDaemonHaltReason(raw.reason) && typeof raw.at === 'string'
         ? { phase: 'halted', reason: raw.reason, at: raw.at }
         : undefined;
+    case 'crashed':
+      return typeof raw.at === 'string' ? { phase: 'crashed', at: raw.at } : undefined;
     default:
       return undefined;
   }

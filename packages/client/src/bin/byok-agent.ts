@@ -217,7 +217,10 @@ async function main(): Promise<void> {
     // environment BEFORE anything reads process.env (BYOK_CONFIG, the config
     // file, adapter resolution). This process's own BYOK_* values survive.
     if (service) await applyLoginShellEnvironment();
-    process.exit(startExitCode(await startOutcome(rest), service));
+    // exitCode, not exit(): a piped stdout/stderr (a service log) drains the
+    // final lines, the halt remedy included, before the process ends.
+    process.exitCode = startExitCode(await startOutcome(rest), service);
+    return;
   }
 
   if (command === 'status') {
