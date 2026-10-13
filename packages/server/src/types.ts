@@ -55,6 +55,15 @@ export interface CreateByokServerOptions {
   storage?: ByokServerStorage;
   /** How long `GET /byok/events` holds an empty poll open before returning, ms (§8). Default ~50s; override for tests. */
   longPollHoldMs?: number;
+  /**
+   * Presence lease, ms: a device is connected while its last observation
+   * (`conn.hello`, any accepted envelope, or the start of a `GET /byok/events`
+   * poll) is at most this old. Default `longPollHoldMs + 15_000`. Must exceed
+   * `longPollHoldMs`, because a held poll does not renew the lease; construction
+   * throws otherwise. Governs `MachineInfo.connected`, ambient device selection,
+   * the "not connected" dispatch gate and `HubStats.connectedDeviceCount`.
+   */
+  presenceTtlMs?: number;
   /** Per-product blob size ceiling in bytes (§7). Default 100MB. */
   maxBlobSizeBytes?: number;
   /** Override the reference {@link TokenSigner} (e.g. an org-wide/KMS-backed signer). */
@@ -307,6 +316,12 @@ export interface TaskHandle {
 export interface MachineInfo {
   deviceId: string;
   deviceName: string;
+  /**
+   * Presence lease: `lastSeen` is at most `CreateByokServerOptions.presenceTtlMs`
+   * old (default `longPollHoldMs + 15s`). A device that stops polling reads
+   * `false` once the lease lapses; it is never cleared any other way except by
+   * revocation.
+   */
   connected: boolean;
   lastSeen?: string;
   /** Process-immutable Local Agent release from the current/last WS hello; omission means legacy/unknown. */
@@ -344,6 +359,10 @@ export interface TaskSnapshot {
   sessionRef?: string;
   /** Exact Agent identity for an Agent-bound task; absent for legacy tasks. */
   agentRef?: AgentRef;
+  /**
+   * Creation time from the immutable offer receipt, preserved after terminal
+   * transitions and SQLite restart. Independent of mailbox delivery time.
+   */
   createdAt: string;
   updatedAt: string;
   result?: TaskResult;
@@ -523,7 +542,7 @@ export type ByokServerEvent =
  * its own authenticated route around `ByokServer.stats()`.
  */
 export interface HubStats {
-  /** Devices this server has observed alive and not since forgotten — see {@link MachineInfo.connected}. */
+  /** Devices whose presence lease is live right now — see {@link MachineInfo.connected}. */
   connectedDeviceCount: number;
   /** Every {@link TaskState} mapped to how many known tasks currently sit in it. */
   taskCountsByState: Record<TaskState, number>;

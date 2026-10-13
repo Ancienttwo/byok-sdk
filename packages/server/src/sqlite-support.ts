@@ -1,6 +1,6 @@
-import { chmodSync, existsSync, mkdirSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
 
 export type SqliteOpenStep = 'after-open' | 'after-wal';
@@ -91,6 +91,35 @@ export class SqliteSchemaError extends Error {
     this.code = code;
     this.foundVersion = foundVersion;
     this.requiredVersion = requiredVersion;
+  }
+}
+
+/**
+ * Thrown when a SQLite database file is already owned by another open server —
+ * in another process, or another instance in this one. One file has exactly one
+ * owning process: token signing keys, presence, the task-event relay and
+ * dispatch bookkeeping are process-local, so a second process on the same file
+ * would split them. Run several instances only over external stores with a
+ * shared `tokenSigner`.
+ *
+ * Ownership is an OS advisory lock on the `<path>-lock` sibling, held for the
+ * lifetime of the open server. The kernel releases it when the owner closes or
+ * its process exits for any reason, including SIGKILL, so a stale owner never
+ * blocks the next open and no pid is ever compared (pid reuse cannot matter).
+ */
+export class SqliteOwnershipError extends Error {
+  readonly code = 'SQLITE_DATABASE_OWNED';
+  /** The database path whose ownership was refused. */
+  readonly path: string;
+
+  constructor(path: string, options?: ErrorOptions) {
+    super(
+      `SQLite database ${path} is already owned by another open BYOK server (this or another process). ` +
+        'Close that server first; one SQLite file serves exactly one server process.',
+      options,
+    );
+    this.name = 'SqliteOwnershipError';
+    this.path = path;
   }
 }
 
@@ -229,6 +258,66 @@ export function openSqliteDatabase(
       faults?.close,
     );
   }
+}
+
+/** SQLite's primary result code for a lock held elsewhere. */
+const SQLITE_BUSY = 5;
+
+/** Exclusive ownership of one database file; {@link SqliteOwnership.release} is idempotent. */
+export interface SqliteOwnership {
+  release(): void;
+}
+
+/**
+ * Take exclusive ownership of the database at `path`, or throw
+ * {@link SqliteOwnershipError} immediately (no busy wait) if it is held.
+ *
+ * The lock is SQLite's own: an EXCLUSIVE transaction held open on a dedicated
+ * `<path>-lock` file. SQLite maps it to an OS advisory lock, which conflicts
+ * across processes and — through SQLite's per-inode lock table — across
+ * connections in one process, and which the kernel drops when the holder's
+ * process dies. It is a sibling file rather than the database itself so the
+ * owner's own connection, and read-only inspection of the database, are never
+ * blocked by it. Nothing is ever written to it.
+ */
+export function acquireSqliteOwnership(path: string): SqliteOwnership {
+  const { DatabaseSync } = loadSqliteModule();
+  mkdirSync(dirname(path), { recursive: true, mode: SECURE_DIR_MODE });
+  // SQLite opens a symlink's target. Ownership must use that same identity,
+  // including when only the parent exists on the first open of a new file.
+  const databasePath = existsSync(path)
+    ? realpathSync(path)
+    : join(realpathSync(dirname(path)), basename(path));
+  // A hard link has no unique canonical name for the sibling lock or WAL.
+  // Reject it before either SQLite handle opens instead of splitting writers.
+  if (existsSync(databasePath) && statSync(databasePath).nlink !== 1) {
+    throw new Error('SQLite ownership requires a database file with exactly one hard link');
+  }
+  const lockPath = `${databasePath}-lock`;
+  const lock = new DatabaseSync(lockPath, { timeout: 0 });
+  try {
+    chmodSync(lockPath, SECURE_FILE_MODE);
+    lock.exec('BEGIN EXCLUSIVE');
+  } catch (error) {
+    const busy = (error as { errcode?: unknown }).errcode === SQLITE_BUSY;
+    closeSqliteDatabaseAfterInitializationFailure(
+      lock,
+      busy ? new SqliteOwnershipError(path, { cause: error }) : error,
+      'SQLite ownership acquisition failed and its lock handle could not be closed',
+    );
+  }
+  let released = false;
+  return {
+    release() {
+      if (released) return;
+      released = true;
+      try {
+        lock.exec('ROLLBACK');
+      } finally {
+        lock.close();
+      }
+    },
+  };
 }
 
 /**

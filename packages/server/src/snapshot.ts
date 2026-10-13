@@ -1,4 +1,4 @@
-import type { DeviceRecord, PendingApproval, TaskAttempt, TerminalResult } from '@byok-sdk/cloud';
+import type { DeviceRecord, PendingApproval, TaskAttempt, TaskOfferReadback, TerminalResult } from '@byok-sdk/cloud';
 import type { TaskState } from '@byok-sdk/protocol';
 import type { DeviceConnection } from './connections';
 import type { MachineInfo, TaskResult, TaskSnapshot } from './types';
@@ -71,40 +71,31 @@ export function toTaskResult(terminal: TerminalResult | undefined): TaskResult |
 }
 
 /**
- * The dispatch-time facts the kernel does not persist.
- *
- * `TaskAttempt` records ownership and disposition, not the request that opened
- * it — it carries no `createdAt` and no `sessionRef`. Both are needed by the
- * public snapshot, and both are known exactly once, at dispatch, so this
- * process keeps them keyed by task id rather than inventing a durable column or
- * quietly reporting the attempt's last-mutation time as its creation time.
- * Deliberately not TTL-reclaimed: it is the exact peer of the in-memory attempt
- * store this composition is built on, and it must not forget a task that store
- * still answers for.
+ * Dispatch facts come from the immutable executable offer receipt. Its
+ * recordedAt is the creation instant, independent of mailbox delivery,
+ * terminal transitions and process restarts. No per-task dispatch map or
+ * mutation timestamp is needed to reconstruct a dispatched task's facts.
+ * An attempt opened before its offer receipt exists retains the existing
+ * attempt-only projection; it has no requested session to report.
  */
-export interface DispatchFacts {
-  readonly createdAt: string;
-  readonly sessionRef?: string;
-}
-
 export function toTaskSnapshot(
   attempt: TaskAttempt,
   pending: PendingApproval | undefined,
   terminal: TerminalResult | undefined,
-  dispatched: DispatchFacts | undefined,
+  offer: TaskOfferReadback | undefined,
 ): TaskSnapshot {
   const result = toTaskResult(terminal);
   // The terminal's own `sessionRef` wins: a runtime that resumed or minted a
   // session is reporting the one the work actually ran under, which is a
   // stronger fact than whatever the offer asked for.
-  const sessionRef = result?.sessionRef ?? dispatched?.sessionRef;
+  const sessionRef = result?.sessionRef ?? (offer !== undefined && 'sessionRef' in offer.payload ? offer.payload.sessionRef : undefined);
   return {
     taskId: attempt.taskId,
     state: toTaskState(attempt, pending),
     deviceId: attempt.deviceId,
     sessionRef,
     ...(attempt.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),
-    createdAt: dispatched?.createdAt ?? attempt.updatedAt,
+    createdAt: offer?.recordedAt ?? attempt.updatedAt,
     updatedAt: attempt.updatedAt,
     ...(result === undefined ? {} : { result }),
     ...(pending?.approvalId === undefined ? {} : { pendingApprovalId: pending.approvalId }),
@@ -122,12 +113,18 @@ export function toTaskSnapshot(
  * The identity half is durable and tenant-owned; the connection half is an
  * in-process observation that dies with the server — see `connections.ts` for
  * why `conn.hello`'s runtime discovery block is deliberately not persisted.
+ * `connected` is passed in rather than derived here: presence is a lease judged
+ * against a clock, and `DeviceConnections.isConnected` is its only rule.
  */
-export function toMachineInfo(device: DeviceRecord, connection: DeviceConnection | undefined): MachineInfo {
+export function toMachineInfo(
+  device: DeviceRecord,
+  connection: DeviceConnection | undefined,
+  connected: boolean,
+): MachineInfo {
   return {
     deviceId: device.deviceId,
     deviceName: device.deviceName,
-    connected: connection?.connected ?? false,
+    connected,
     lastSeen: connection?.lastSeen,
     ...(connection?.clientVersion === undefined ? {} : { clientVersion: connection.clientVersion }),
     harnesses: device.harnesses,
