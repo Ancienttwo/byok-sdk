@@ -3,6 +3,7 @@
   "include": [
     "server.ts",
     "goal-btw*.ts",
-    "clarification*.ts"
+    "clarification*.ts",
+    "quickstart*.ts"
   ]
 }

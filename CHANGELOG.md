@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **Changed (client, cloud-do)** — update the official Pi closure from 1.1.0 to
+  1.2.0 (all nine `@earendil-works` packages, upstream commit
+  `06a466935536f8c9bcacb2d5efc0fc021be1bdff`, provenance re-attested).
+  Adaptations: cloud-do tool results use pi-durable 1.2
+  `ToolExecutionResult.output` (renamed from `content`). No public API change.
+- **Fixed (cloud-do)** — with Pi 1.2 a storage error fails the whole Session.
+  The Durable Object now drops a failed Session and reopens it from storage, so
+  the interrupted run settles as `interrupted / CLOUD_EXECUTION_INTERRUPTED` and
+  later submits run instead of returning 409 until isolate restart. The failed
+  model turn is not resent.
+- **Changed (client)** — update the private OAR source from 0.57.0 to 0.59.1
+  (`bb98cbc`). The maintained BYOK deltas shrink from 6 files to 5:
+  session-options, credential-redactor and the `Promise.withResolvers` hunk are
+  now upstream bytes, and the upstream image-input gates are restored.
+  `SessionOptions.name` is not exposed and never sent. A resume that codex
+  refuses as archived or in use now surfaces as `SessionUnavailableError` with
+  the same message and cause, still a retryable start failure in the adapter.
+  The client TypeScript `lib` is raised to ES2024; the emit target stays es2022
+  and the emitted declarations are byte-identical. See
+  `docs/notes/2026-10-13-oar-0.59-upgrade.md`.
+
 ## 0.26.1 / @byok-sdk/keys 0.11.1 (published, 2026-10-12)
 
 - **Client cleanup:** release the Git lease when runtime launch admission fails

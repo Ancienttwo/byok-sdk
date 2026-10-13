@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 0804b91 for explicit native interaction approval policy (Apache-2.0).
+// BYOK change: Modified from OAR bb98cbc for explicit native interaction approval policy (Apache-2.0).
 import { sessionCredentialRedactor } from "../../shared/credential-redactor.js";
 import path from "node:path";
 import { resolvedAdditionalDirectories } from "../../shared/additional-directories.js";
@@ -6,6 +6,7 @@ import { validateCodexToolDenials } from "./tool-denials.js";
 import type { McpServer, RuntimeEventBody, SessionOptions } from "../../contracts/session.js";
 import { asRecord, type JsonRecord } from "../../shared/json.js";
 import { checkMcpServerNames, givenMcpServers, isHttpMcpServer } from "../../shared/mcp-servers.js";
+import { checkSessionName } from "../../shared/session-options.js";
 
 /*
  * Opening a codex thread: the `thread/start` / `thread/resume` request built
@@ -62,6 +63,7 @@ function workspaceRoots(options: SessionOptions): string[] | null {
  */
 export function codexThreadOpen(options: SessionOptions & { readonly approvalPolicy?: "never" | "on-request" }): { readonly method: CodexOpenMethod; readonly params: JsonRecord; readonly redact: (text: string) => string } {
   validateCodexToolDenials(options);
+  checkSessionName(options);
   const { redact } = sessionCredentialRedactor(options);
   // System prompt seams (probed 2026-08-24 via the aimock journal):
   // baseInstructions REPLACES codex's base prompt; developerInstructions
@@ -131,6 +133,20 @@ export function codexThreadOpen(options: SessionOptions & { readonly approvalPol
       ...configParams(mcpConfig),
     },
   };
+}
+
+/**
+ * SessionOptions.name (#368): the name to give the opened thread, or null. A
+ * new thread gets it; a resumed one only when the resume reply shows no name,
+ * so a name the user gave in their app is kept. The name reads back on the
+ * thread ([env] codex 0.162.0, experiments/codex-session-name.ts).
+ */
+export function codexThreadName(method: CodexOpenMethod, options: SessionOptions, reply: JsonRecord): string | null {
+  if (options.name === undefined) {
+    return null;
+  }
+  const current = method === "thread/resume" ? asRecord(reply.thread)?.name : undefined;
+  return typeof current === "string" && current.length > 0 ? null : options.name;
 }
 
 /** A reply's `reasoningEffort` (or `threadSettings.effort`): null when codex runs no explicit level (the model's default). */

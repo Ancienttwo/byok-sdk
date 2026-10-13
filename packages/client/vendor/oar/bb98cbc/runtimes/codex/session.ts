@@ -1,4 +1,4 @@
-// BYOK change: Modified from OAR 0804b91 for injected processes, native-first recording, bounded request refusal, caller-selected sandbox and session credential redaction without sealSession (Apache-2.0).
+// BYOK change: Modified from OAR bb98cbc for injected processes, native-first recording, bounded request refusal, caller-selected sandbox and session credential redaction without sealSession (Apache-2.0).
 /* oxlint-disable import/max-dependencies -- The adapter composes protocol, input and process-lifetime mechanisms. */
 import type { AvailableInstallation } from "../../contracts/installation.js"; // BYOK change: direct type-only contract import.
 import { randomUUID } from "node:crypto";
@@ -11,7 +11,7 @@ import type {
 } from "../../contracts/session.js";
 import { createAbortFallback } from "../../shared/abort-fallback.js";
 import { acceptCodexSteer, codexUserInput } from "./input-delivery.js";
-// BYOK change: Image admission is owned by the BYOK caller, not vendored filesystem helpers.
+import { inputImagesRefusal } from "../../shared/input-images.js";
 import { asRecord, type JsonRecord } from "../../shared/json.js";
 // BYOK change: Return the raw adapter contract without best-effort observer projections.
 // BYOK change: Build the session credential redactor directly; upstream withSessionCredentials imports sealSession.
@@ -19,10 +19,10 @@ import { sessionCredentialRedactor, type CredentialRedactor } from "../../shared
 import { createSessionKernel } from "../../shared/session-kernel.js";
 import { newSessionLinks } from "../../shared/session-links.js";
 import { startAppServerClient, type RpcOutcome, type SpawnLineProcess } from "./app-server-client.js";
-import { CODEX_SETTINGS_REPORT_MS, codexOpenReadback, codexResumeEffortRefusal, codexThreadOpen } from "./open.js";
+import { CODEX_SETTINGS_REPORT_MS, codexOpenReadback, codexResumeEffortRefusal, codexThreadName, codexThreadOpen } from "./open.js";
 import { foldCodexNotification, initialCodexProjection, type CodexProjectionState } from "./projection.js";
 import { prepareCodexToolDenials } from "./tool-denials.js";
-import { openThread, rpcControl, type RpcControlPlan } from "./rpc-control.js";
+import { nameThread, openThread, rpcControl, type RpcControlPlan } from "./rpc-control.js";
 
 /*
  * App-server v2: RPC replies answer controls; notifications carry facts.
@@ -314,9 +314,7 @@ async function openCodexSession(
     // The resumed thread runs another level: set it on the loaded thread and
     // take codex's pushed settings (a recorded frame) as the word on it.
     const requested = readback.resumeEffort;
-    // BYOK change: Equivalent deferred promise under the SDK ES2022 library contract.
-    let resolve!: (params: JsonRecord | null) => void;
-    const reported = new Promise<JsonRecord | null>((complete) => { resolve = complete; });
+    const { promise: reported, resolve } = Promise.withResolvers<JsonRecord | null>();
     settingsWaiter = resolve;
     const timer = setTimeout(() => {
       resolve(null);
@@ -332,6 +330,8 @@ async function openCodexSession(
       throw new Error(refusal);
     }
   }
+  // Last, so an open refused above leaves the user's thread unrenamed.
+  await nameThread(client, threadId, codexThreadName(openMethod, options, started));
 
   /** Turn a plan builder into a Session control member. */
   const via = <Args extends unknown[]>(plan: (...args: Args) => RpcControlPlan) =>
@@ -347,7 +347,7 @@ async function openCodexSession(
   const promptPlan = (input: string, inputOptions?: InputOptions): RpcControlPlan => ({
     body: { kind: "prompt", input, ...inputOptions },
     gate: (request) => {
-      const refused = busy() ? { kind: "rejected", code: "busy", reason: "busy" } as const : null /* BYOK change: caller owns image admission. */;
+      const refused = busy() ? { kind: "rejected", code: "busy", reason: "busy" } as const : inputImagesRefusal(capabilities, inputOptions?.images);
       if (refused !== null) {
         return refused;
       }
@@ -375,7 +375,7 @@ async function openCodexSession(
     const expectedTurnId = state.codexTurnId;
     return {
       body: { kind: "steer", input, ...inputOptions },
-      gate: () => (!busy() || expectedTurnId === null ? { kind: "rejected", code: "no_active_turn", reason: "not_steerable: no active turn" } : null /* BYOK change: caller owns image admission. */),
+      gate: () => (!busy() || expectedTurnId === null ? { kind: "rejected", code: "no_active_turn", reason: "not_steerable: no active turn" } : inputImagesRefusal(capabilities, inputOptions?.images)),
       method: "turn/steer",
       params: () => ({ threadId, input: codexUserInput(input, inputOptions?.images), expectedTurnId, clientUserMessageId: inputOptions?.inputId }),
       onReply: (reply) => {
@@ -390,7 +390,7 @@ async function openCodexSession(
   // The reply carries the runtime's submission id; it is retained on the response.
   const queuePlan = (input: string, inputOptions?: InputOptions): RpcControlPlan => ({
     body: { kind: "queue", input, ...inputOptions },
-    gate: () => options.outputSchema === undefined ? null /* BYOK change: caller owns image admission. */
+    gate: () => options.outputSchema === undefined ? inputImagesRefusal(capabilities, inputOptions?.images)
       : { kind: "rejected", code: "unsupported", reason: "codex queued input cannot carry outputSchema; use prompt after the current turn ends" },
     method: "thread/queue/add",
     params: () => ({ threadId, input: codexUserInput(input, inputOptions?.images), clientUserMessageId: inputOptions?.inputId ?? randomUUID() }),

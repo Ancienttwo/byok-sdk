@@ -13443,6 +13443,10 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
+        },
+        "noHold": {
+          "type": "number",
+          "const": 1
         }
       },
       "additionalProperties": false
