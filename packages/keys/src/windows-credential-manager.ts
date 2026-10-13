@@ -131,7 +131,7 @@ namespace Byok {
 }
 
 try {
-  $request = ([Console]::In.ReadToEnd() | ConvertFrom-Json)
+  $request = ([System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false, $true)).ReadToEnd() | ConvertFrom-Json)
   if ($request.operation -eq "set") {
     [Byok.CredentialManager]::Write(
       [string]$request.target,
