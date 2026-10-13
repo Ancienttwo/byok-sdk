@@ -15,6 +15,22 @@
   `status` against a daemon that predates `lifecycle` prints
   `lifecycle unknown (daemon predates lifecycle)` instead of failing.
 
+- **Breaking (client, 0.x; #392)** — live status, doctor and support bundles use daemon
+  startup runtime observations (including unavailable outcomes) and the closed
+  environment projection without CLI-side probes. `DaemonStatus.runtimes`
+  and control `runtimes` expose `RuntimeObservation[]`; control `runtimeIds`
+  is removed. `environment-resolved` is a real `DaemonEvent`, recorded by the
+  ordinary audit subscriber with the existing content-free disk shape.
+  Offline status uses timestamped audit observations; explicit `runtimes`
+  and offline diagnostics still probe locally. A newer CLI reports unknown
+  for an older daemon's missing fields for the next minor. Login-shell
+  capture now accepts fish. Generated WinSW install XML uses `--service`
+  (already wired by #427); Windows retains its inherited environment.
+  **Host migration:** read `runtimes` observations instead of `runtimeIds`;
+  `runtimes-detected` now includes unavailable outcomes and uses the shared
+  flattened observation shape. Check `outcome` when selecting available
+  runtimes. Reinstall services created before `--service` was generated.
+
 - **Breaking (client, 0.x)** — daemon readiness and halts are one lifecycle
   model (#391, #394). `daemon.start()` now resolves once local startup is done
   and never waits for the network; the server accepting this session's lone

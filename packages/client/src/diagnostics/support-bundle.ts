@@ -3,7 +3,7 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { DaemonConfig, DaemonEvent } from '../index';
 import type { DaemonHaltReason, DaemonLifecycle } from '../daemon/daemon-lifecycle';
-import { auditLogPath, readLastEnvironmentRecord, type EnvironmentRecord } from '../bin/audit-log';
+import { auditLogPath } from '../bin/audit-log';
 import { atomicWriteFile } from '../util/atomic-write';
 import { ensureSecureDir, ensureSecureFile, type EnsureSecureDirOptions } from '../util/secure-dir';
 import {
@@ -28,6 +28,7 @@ export interface SupportBundle {
   };
   device: { status: DiagnosticsSnapshot['device']['status']; deviceIdHash?: string };
   runtimes: DiagnosticsSnapshot['runtimes'];
+  runtimeSource: DiagnosticsSnapshot['runtimeSource'];
   control:
     | { status: 'offline' }
     | {
@@ -56,7 +57,7 @@ export interface SupportBundle {
     | { status: 'known'; source: 'live' | 'audit'; phase: DaemonLifecycle['phase']; connection?: 'connecting' | 'open'; reason?: DaemonHaltReason };
   health: DiagnosticsSnapshot['health'];
   /** Issue #392: the last `start`'s `environment-resolved` record — closed values and a shell basename only. */
-  environment: EnvironmentRecord | { status: 'unknown' };
+  environment: DiagnosticsSnapshot['environment'];
   journal: DiagnosticsSnapshot['journal'];
   workspace: DiagnosticsSnapshot['workspace'];
   quarantine: {
@@ -94,6 +95,7 @@ const AUDIT_KINDS = new Set<DaemonEvent['kind']>([
   'paired',
   'progress',
   'runtimes-detected',
+  'environment-resolved',
   'shutdown-complete',
   'shutdown-requested',
   'stale-approval-decision',
@@ -232,10 +234,9 @@ export async function createSupportBundle(
   storeDir: string,
   options: CollectDiagnosticsOptions = {},
 ): Promise<SupportBundle> {
-  const [snapshot, recentEvents, environment] = await Promise.all([
+  const [snapshot, recentEvents] = await Promise.all([
     collectDiagnostics(config, storeDir, options),
     recentAuditFacts(storeDir),
-    readLastEnvironmentRecord(storeDir).catch(() => undefined),
   ]);
   return {
     version: 1,
@@ -253,10 +254,11 @@ export async function createSupportBundle(
       ...(snapshot.device.deviceIdHash ? { deviceIdHash: snapshot.device.deviceIdHash } : {}),
     },
     runtimes: snapshot.runtimes,
+    runtimeSource: snapshot.runtimeSource,
     control: projectControl(snapshot.control),
     lifecycle: projectLifecycle(snapshot.lifecycle),
     health: snapshot.health,
-    environment: environment ?? { status: 'unknown' },
+    environment: snapshot.environment,
     journal: snapshot.journal,
     workspace: snapshot.workspace,
     quarantine: {
