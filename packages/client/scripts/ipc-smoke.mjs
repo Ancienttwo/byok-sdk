@@ -82,12 +82,11 @@ const workspaceRoot = path.join(workDir, 'workspace');
 const configPath = path.join(workDir, 'config.json');
 await fs.mkdir(workspaceRoot, { recursive: true });
 
-// A short hold keeps the daemon's in-flight `GET /byok/events` from
-// outliving the shutdown this script asserts on: `LongPollClient.stop()`
-// ends the loop but does not abort the request already in flight, so with
-// the ~50s production default the `start` child would linger for the
-// remainder of that hold after the control socket confirmed its exit.
-const byok = createByokServer({ productId, longPollHoldMs: 500 });
+// Default long-poll hold (~50s) on purpose: the daemon stops by aborting its
+// in-flight `GET /byok/events` (`LongPollClient.stop()` aborts the loop's
+// signal), so the `start` child must exit within seconds of `unpair` even
+// while a poll is being held. A hold override here would hide a regression.
+const byok = createByokServer({ productId });
 /** @type {import('node:http').Server} */
 let httpServer;
 let startChild;
@@ -166,8 +165,8 @@ try {
   startChild.stderr.on('data', (chunk) => {
     startStderr += chunk.toString('utf8');
   });
-  await waitForStartupLine(startChild, 'daemon started:', 10000);
-  log('PASS: daemon started and reported readiness on stdout');
+  await waitForStartupLine(startChild, 'phase=running connection=open', 10000);
+  log('PASS: daemon reported the open connection on stdout');
 
   log('==> byok-agent status (separate short-lived invocation)');
   const statusOutput = await runCli(['status', '--config', configPath]);
@@ -189,7 +188,7 @@ try {
   log('PASS: unpair performed a live control-socket shutdown and confirmed exit');
 
   log('==> waiting for the start child process to actually terminate on its own (no signal sent)');
-  await waitForChildExit(startChild, 10000);
+  await waitForChildExit(startChild, 5000);
   log(`PASS: start child (pid=${startChild.pid}) exited on its own — exitCode=${startChild.exitCode}`);
 
   log('==> asserting the control socket/pipe and its token file are gone');
