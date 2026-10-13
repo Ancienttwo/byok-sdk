@@ -89,7 +89,8 @@ post-freeze the way pre-freeze M0→M1 had (§10) — a change of this shape is 
 new major version, full stop.
 
 **Scoped input-preparation cut:** the Owner-approved
-prepared memory contract (`docs/researches/2026-09-28-prepared-agent-memory-contract.md`, untracked since #390)
+[prepared memory contract](researches/2026-09-28-prepared-agent-memory-contract.md)
+(superseded in part by [ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md); see [the spec](spec.md#prepared-operations))
 extends the earlier official-Pi exception to input-preparation v8. The strict
 preparation request, receipt binding and `task.offer_prepared` require explicit
 `agentMemory: 'none' | 'read' | 'read-write'`. `INPUT_PREPARATION_WIRE_VERSION` and

@@ -654,7 +654,9 @@ and terminal envelopes go to the Host as is, as for fresh Agent egress offers.
 The message tool never enters D.
 
 **Prepared Agent memory (scoped v8 cut).**
-Prepared Agent Memory Contract (`docs/researches/2026-09-28-prepared-agent-memory-contract.md`, untracked since #390)
+[Prepared Agent Memory Contract](researches/2026-09-28-prepared-agent-memory-contract.md)
+(superseded in part: [ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md) removed its helper attestation, and this
+spec admits tool-less records; where they differ, this spec governs)
 requires `agentMemory: 'none' | 'read' | 'read-write'` on local/remote preparation,
 receipt bindings and prepared offers. A trusted device authority grants a ceiling;
 preparation and execution both check it. Memory-only preparation uses
@@ -1750,7 +1752,9 @@ channel. The wire receipt contains only identity, decision, hash/size/type and
 `BlobRef`, never inline content. Cloud admission and readback preserve that
 exact fact; neither the blob nor the receipt becomes a complete local
 transcript or shared-history authority. See
-Agent local/cloud projection contract (`docs/researches/agent-local-cloud-projection-contract.md`, untracked since #390).
+[Agent local/cloud projection contract](researches/agent-local-cloud-projection-contract.md)
+(superseded in part: [ADR-037](architecture/adr-2026-10-07-minimal-guardrails.md) removed its egress sanitizer and
+`metadata-status` default projection; where they differ, this spec governs).
 
 The host selects the branded root, authors stable identity plus redacted
 profile projection content, and selects an SDK-valid egress/content-read
@@ -2235,7 +2239,7 @@ Indirect Pi ruling (2026-10-07, owner, ADR-037): upstream published all nine `@e
 ### 0.22.0 Host calibration and upgrade boundary
 
 The completed official-runtime M5 calibration is retained in
-`tasks/runs/20260925-official-pi-c-reprobe.json` with its `.sha256` sidecar (untracked since #390).
+`tasks/runs/20260925-official-pi-c-reprobe.json` with its `.sha256` sidecar (not tracked in this repository).
 It recommends C=1024 for the recorded official 0.87.1 closure, compiler 4,
 wire 7 and envelope v4 with ruledResidualKeys=[]. Three samples observed zero
 uncovered amount under max(0, prompt_tokens-requestBytes); the prepared fixture

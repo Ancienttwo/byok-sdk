@@ -1,5 +1,14 @@
 # Agent local/cloud projection contract
 
+> **Historical — superseded in part.** This document is kept as design history,
+> unchanged below this note. It is not current authority.
+> [ADR-037](../architecture/adr-2026-10-07-minimal-guardrails.md) (2026-10-07,
+> D4) sends Agent egress records to the Host as is and deleted the egress
+> sanitizer and the `metadata-status` default projection, so those requirements
+> below no longer apply. The current rules are in
+> [`docs/spec.md`](../spec.md#durable-agent-homes); where this document
+> conflicts with the spec or ADR-037, those govern.
+
 > **Status:** implemented local candidate on
 > `codex/agent-local-cloud-egress-contract`; focused post-review regressions
 > and replacement-subject repository gates pass, while subject-bound

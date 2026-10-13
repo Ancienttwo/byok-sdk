@@ -43,7 +43,7 @@ Aiphabee 并非首次引入 byok-sdk：其本地通路已经通过 `packages/byo
 
 ## 修订说明（2026-10-13）
 
-- 来源行与关联行引用的研究稿（`docs/researches/2026-10-03_pi-harness-cf-gap-and-cloud-generic-agent.md`、`docs/researches/2026-10-02_pi-durable-slice2-prep.md`）在 #390 后不再跟踪，干净 checkout 中这些链接失效。决策以本 ADR 正文为准。
+- 来源行与关联行引用的研究稿（`docs/researches/2026-10-03_pi-harness-cf-gap-and-cloud-generic-agent.md`、`docs/researches/2026-10-02_pi-durable-slice2-prep.md`）在 #390 后不再跟踪，来源行已改为纯文本路径。决策以本 ADR 正文为准。
 - Status 中的「实现未开始」已过时：`@byok-sdk/cloud-do` 自 0.24.0 起作为公开 package 发布（`packages/cloud-do/package.json` 带 `publishConfig.access: public`，见 `docs/releases/v0.24.0.md`）。其余切片的落地情况没有核实。
 - D7 的内联修订链接改指 [ADR-038](adr-2026-10-13-bot-platform.md)（文件已从 `adr-2026-10-13-byok-cost-and-deployment.md` 改名）。
 - D1 的 Bot 模式（每次唤醒 = 新执行）是 ADR-038 中 Bot 协作决策的基础：Bot 协作由 Host 编排 fresh execution。

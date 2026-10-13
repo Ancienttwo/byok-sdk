@@ -1,5 +1,15 @@
 # Prepared Agent Memory Contract — WP1-I-C
 
+> **Historical — superseded in part.** This document is kept as design history,
+> unchanged below this note. It is not current authority.
+> [ADR-037](../architecture/adr-2026-10-07-minimal-guardrails.md) (2026-10-07)
+> deleted the attestation stack (D7) and the prepared lane's attestation binding
+> (D6), so the helper attestation and identity requirements below no longer
+> apply. The current spec also admits tool-less prepared records, so the
+> requirement that the combined tool surface be non-empty no longer applies.
+> The current rules are in [`docs/spec.md`](../spec.md#prepared-operations);
+> where this document conflicts with the spec or ADR-037, those govern.
+
 Status: accepted contract; SDK source implemented in `byok-sdk-wt-hermes-bot-adoption`. Current verification disposition is recorded in `tasks/reviews/20260928-0217-hermes-bot-adoption.review.md`. Host adoption and activation remain pending.
 
 Authority: `docs/spec.md` delegates the next-version memory-only amendment to this document. Current SDK source implements this contract as input-preparation wire/record version 8, with explicit memory-only selection in prepared execution. This contract takes effect only with the atomic implementation and consumer cut below. It creates no compatibility path in running code.
