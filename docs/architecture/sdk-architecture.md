@@ -6,7 +6,7 @@
 > 当前 workspace 的架构边界。
 > Verified against: 当前 checkout 的 source、public package surface 与 required docs checks
 > Verification scope: CURRENT sections + package graph + completed-slice status
-> Volatile workflow status: see tasks/current.md; not duplicated here
+> Volatile workflow status: tasks/current.md（#390 后不再跟踪）; not duplicated here
 > 面向对象：嵌入 BYOK 能力的 SaaS 开发者、SDK 维护者、安全审计与部署人员。
 > 事实优先级：实际源码与 package public surface > `docs/protocol.md` / `docs/security.md` > `docs/spec.md` > 最终平台提案。RAFT 只作为受限参考，不是产品真相源。
 
@@ -125,6 +125,8 @@ flowchart LR
   Core(["@byok-sdk/core<br/>zod-only composable contracts"]):::contract
   Cloud(["@byok-sdk/cloud<br/>stateless hosted surface + domain kernel"]):::runtime
   CloudPg(["@byok-sdk/cloud-dataplane<br/>Postgres + R2 composition"]):::runtime
+  CloudDo(["@byok-sdk/cloud-do<br/>Cloudflare-only DO session host<br/>platform key only"]):::runtime
+  UiRuntime(["@byok-sdk/ui-runtime<br/>React-free activity timeline projection"]):::runtime
   Conformance(["@byok-sdk/conformance<br/>private test authority"]):::dev
   Testkit(["@byok-sdk/testkit<br/>private device simulator"]):::dev
   Basic(["examples/basic<br/>E2E SaaS demo"]):::example
@@ -138,6 +140,8 @@ flowchart LR
   Cloud --> Protocol
   CloudPg --> Cloud
   CloudPg --> Core
+  UiRuntime --> Cloud
+  UiRuntime --> Protocol
   Conformance --> Cloud
   Conformance --> Core
   Conformance -.->|"devDependency"| Testkit
@@ -161,6 +165,8 @@ flowchart LR
 | core | 23 / 3,467 | 5 / 1,019 | S2 契约层；InMemory 参考实现，consumer 是 `cloud` 与 `client`；共享 conformance 已移到独立 package |
 | cloud | 42 / 5,045 | 10 / 3,003 | async domain kernel + stateless hosted surface；device/board/truth handlers + InMemory 组合，消费 `core` 与 `protocol` |
 | cloud-dataplane | 22 / 6,309 | 14 / 3,533 | production Postgres + R2 composition；事务、quota、GC 与 reconciliation authority |
+| cloud-do | 19 / 3,849 | 0 / 0（测试在包根 `test/`：34 files / 6,772 LOC） | 只在 Cloudflare workerd 运行的 Durable Object session host；只用平台 key，不依赖其他 workspace package（ADR-036、ADR-038 决策 4） |
+| ui-runtime | 5 / 930 | 4 / 559 | React-free 的确定性 Live Activity Timeline 投影；消费 `cloud` 与 `protocol` |
 | conformance | 26 / 2,842 | 2 / 84 | private shared assertion authority；不得进入发布依赖树 |
 
 统计口径：生产列排除 `*.test.ts`、`*.spec.ts` 与 `src/__tests__/` 整棵子树；test 列取 `src/*.test.ts`、`*.spec.ts` 与 `src/__tests__/` 下的全部 `.ts`，因此 `server` 的 test 列含 `src/__tests__/test-support.ts`、`client` 的含 `src/__tests__/fixtures/*.ts` 这类不含断言的测试支撑文件。各 package 的复算命令：
@@ -173,7 +179,7 @@ find "$SDK_SRC" -type f \( -name '*.test.ts' -o -name '*.spec.ts' -o -path '*/__
 
 对两组结果分别执行 `wc -l` 得 file count，执行 `xargs wc -l` 取合计 LOC；替换 `SDK_SRC` 即可复算其余 package。
 
-强依赖是 `server → cloud/core/protocol`、`client → protocol/core`、`cloud → core/protocol`、`cloud-dataplane → cloud/core`；弱依赖是 `client -dev→ server` 与 production packages 对 private conformance 的 test-only edge。当前的依赖 invariant 清单：
+强依赖是 `server → cloud/core/protocol`、`client → protocol/core`、`cloud → core/protocol`、`cloud-dataplane → cloud/core`、`ui-runtime → cloud/protocol`；`cloud-do` 的 runtime 依赖只有 pinned pi-durable / pi-ai / chord，没有 workspace edge；弱依赖是 `client -dev→ server` 与 production packages 对 private conformance 的 test-only edge。当前的依赖 invariant 清单：
 
 - `core !→ protocol`、`core !→ node`：core 必须保持 protocol-free、Node-free，由包内 constraint test 执行（ADR-003）。
 - `client → core`（S6-c 当前事实）：只消费 proof canonicalizer 与 truth selector contracts，不依赖 cloud implementation。
@@ -863,7 +869,7 @@ flowchart LR
   classDef gate fill:#0f766e,stroke:#99f6e4,stroke-width:2px,color:#fff
 
   Outbox[("Client single outbox")]:::store
-  Poll(["GET /events<br/>POST /messages frozen-v1 counts"]):::primary
+  Poll(["GET /events<br/>POST /messages frozen wire counts"]):::primary
   Cloud(["Same cloud-kernel inbound gate"]):::gate
   Cursor[("Persisted task-envelope cursor")]:::store
   Dedup[("Completed-envelope dedup<br/>plus resumable semantic writes")]:::store
@@ -877,7 +883,7 @@ flowchart LR
 long-poll 是唯一的完整双向 transport：`GET /byok/events` 读取 mailbox，
 `POST /byok/messages` 发送 `conn.hello` 与 daemon→server envelopes。cursor 只在
 handler 成功且同一 cursor 已成功落盘后才对下一次 GET 可见；save 失败或未完成时
-wire acknowledgement 保持旧值。POST 200 保留 frozen-v1 `accepted/rejected`
+wire acknowledgement 保持旧值。POST 200 保留 frozen wire（v2）的 `accepted/rejected`
 counts；mixed rejection 由 client 对 immutable envelope ids 做 bounded binary
 isolation，重复提交以 cloud dedup 收敛，最终只有 rejected singleton 进入 bounded
 observable quarantine，不阻塞后续 valid envelope。unknown `task.*`
@@ -1043,7 +1049,7 @@ GAP-001/002/003 在 S0 已收口，GAP-004/005 在 S1 已收口，GAP-007 在 S4
 
 ## 12. 平台架构（S0–S7 与 release/registry closeout 已落地）
 
-本节沿用 `ARCHITECTURE-PROPOSAL-byok-platform.md` 的 final 裁定并记录执行状态。`@byok-sdk/core`（S2）已实现并被 cloud/client 消费；`@byok-sdk/cloud` 已具无状态 device surface、board/presence/activity、S6 proof verifier 与 proof-only truth routes；`@byok-sdk/cloud-dataplane` 已具 Postgres+R2 数据面、quota/GC 与 atomic truth authority；S6-c 已在 client 侧落 proof signer、manifest selector、selected fetch/rehash/filter 与 proof-bound write。S7-a/S7-b 已交付 fleet health、doctor/quarantine/support bundle 与 operations runbook；S7-c 已交付 public identity、umbrella、跨平台 packageability 与 `v0.1.0` registry release，随后 adapter-only security closeout 已发布同一七包 dispatch graph 的 `v0.1.1` tag/Release。`@byok-sdk/keys` 仍独立为 `0.1.0`；wire v1 保持冻结。
+本节沿用 `ARCHITECTURE-PROPOSAL-byok-platform.md`（#390 后不再跟踪）的 final 裁定并记录执行状态。`@byok-sdk/core`（S2）已实现并被 cloud/client 消费；`@byok-sdk/cloud` 已具无状态 device surface、board/presence/activity、S6 proof verifier 与 proof-only truth routes；`@byok-sdk/cloud-dataplane` 已具 Postgres+R2 数据面、quota/GC 与 atomic truth authority；S6-c 已在 client 侧落 proof signer、manifest selector、selected fetch/rehash/filter 与 proof-bound write。S7-a/S7-b 已交付 fleet health、doctor/quarantine/support bundle 与 operations runbook；S7-c 已交付 public identity、umbrella、跨平台 packageability 与 `v0.1.0` registry release，随后 adapter-only security closeout 已发布同一七包 dispatch graph 的 `v0.1.1` tag/Release。`@byok-sdk/keys` 当时独立为 `0.1.0`，wire 当时是冻结的 v1。当前 wire 是 v2（ADR-037，`PROTOCOL_VERSION = 2`）；`byok-sdk` umbrella 已于 0.21.0 按 ADR-035 退役。
 
 ### 12.1 目标 package graph
 
@@ -1054,17 +1060,16 @@ flowchart TB
   classDef isolated fill:#9a3412,stroke:#fed7aa,stroke-width:2px,color:#fff
   classDef deploy fill:#0f766e,stroke:#99f6e4,stroke-width:2px,color:#fff
 
-  Protocol(["@byok-sdk/protocol<br/>existing, frozen v1"]):::existing
+  Protocol(["@byok-sdk/protocol<br/>existing, frozen wire v2"]):::existing
   Core(["@byok-sdk/core<br/>implemented, consumed by cloud<br/>zod-only, protocol-free, Node-free"]):::existing
   Cloud(["@byok-sdk/cloud<br/>stateless device + board + truth surface<br/>InMemory composition"]):::existing
   CloudPg(["@byok-sdk/cloud-dataplane<br/>Postgres + R2 production composition"]):::existing
   Client(["@byok-sdk/client<br/>existing local authority"]):::existing
   Server(["@byok-sdk/server<br/>self-hosted cloud façade"]):::existing
-  SDK(["byok-sdk<br/>six dispatch namespaces"]):::existing
   Conformance(["@byok-sdk/conformance<br/>private test authority"]):::planned
   Keys(["@byok-sdk/keys<br/>existing isolated key plane"]):::isolated
-  Node(["Node composition<br/>Postgres + R2（主生产）"]):::deploy
-  Workers(["Workers composition<br/>可选 D1 compatibility adapter"]):::deploy
+  Node(["Node/VPS composition<br/>Postgres + S3 兼容对象存储<br/>优化与主测试目标（ADR-038）"]):::deploy
+  Workers(["Workers composition<br/>runtime entry，Hyperdrive + R2<br/>继续支持（ADR-038）"]):::deploy
 
   Cloud --> Core
   Cloud --> Protocol
@@ -1077,20 +1082,14 @@ flowchart TB
   Server --> Protocol
   Keys -->|"P5: TruthStore contract"| Core
   Node --> CloudPg
-  Workers -.-> Cloud
+  Workers -->|"cloud-dataplane/runtime"| CloudPg
   Conformance --> Cloud
   Conformance --> Core
-  SDK --> Protocol
-  SDK --> Server
-  SDK --> Client
-  SDK --> Core
-  SDK --> Cloud
-  SDK --> CloudPg
 ```
 
-`Core` 节点是实线：该 package 已于 2026-08-07（S2）落地，protocol-free、Node-free（tsup `platform: 'neutral'`）、runtime 依赖只有 `zod`。`Cloud` 节点也是实线：S3a 落 stateless frozen device surface，S5 落 board/presence/activity，S6-a/S6-b 落 proof/truth；durable local journal 由 S3b 落在 client。`Server → Cloud/Core`、`CloudPostgres → Cloud/Core`、`Cloud → Core/Protocol` 与 `Client → Core/Protocol` 都是真实 import edge；client 的 core edge只用于 canonical proof bytes 与 truth contracts。`byok-sdk` 的六条边是 S7-c release distribution edge，`keys → core` 已由 post-RC P5 独立计划落地，且 package graph 明确禁止它继续穿透到 protocol。
+`Core` 节点是实线：该 package 已于 2026-08-07（S2）落地，protocol-free、Node-free（tsup `platform: 'neutral'`）、runtime 依赖只有 `zod`。`Cloud` 节点也是实线：S3a 落 stateless frozen device surface，S5 落 board/presence/activity，S6-a/S6-b 落 proof/truth；durable local journal 由 S3b 落在 client。`Server → Cloud/Core`、`CloudPostgres → Cloud/Core`、`Cloud → Core/Protocol` 与 `Client → Core/Protocol` 都是真实 import edge；client 的 core edge只用于 canonical proof bytes 与 truth contracts。S7-c 曾以 `byok-sdk` umbrella 的六条 release distribution edge 聚合 dispatch packages；该 umbrella 已于 0.21.0 按 ADR-035 退役，图中不再画它。`keys → core` 已由 post-RC P5 独立计划落地，且 package graph 明确禁止它继续穿透到 protocol。
 
-关键 invariant：`core` 必须 protocol-free，才能让现有 `keys → core` 不产生 `keys → protocol` 的间接依赖（S2 已把这条约束落成包内可执行的 constraint test）。`@byok-sdk/server` 是 `@byok-sdk/cloud` domain kernel 的 self-hosted façade；`@byok-sdk/cloud` 同时提供 hosted HTTP surface 与可复用 kernel。主生产 composition 已裁定为 **Postgres + R2**（§12.7），D1 只保留为可选 compatibility adapter，不承担主线的容量、计费与 GC 语义。
+关键 invariant：`core` 必须 protocol-free，才能让现有 `keys → core` 不产生 `keys → protocol` 的间接依赖（S2 已把这条约束落成包内可执行的 constraint test）。`@byok-sdk/server` 是 `@byok-sdk/cloud` domain kernel 的 self-hosted façade；`@byok-sdk/cloud` 同时提供 hosted HTTP surface 与可复用 kernel。主生产 composition 已裁定为 **Postgres + R2**（§12.7），D1 只保留为可选 compatibility adapter，不承担主线的容量、计费与 GC 语义。ADR-038 决策 3 进一步定了部署目标：VPS（Node + Postgres + S3 兼容对象存储）是优化与主测试目标，Workers composition（`@byok-sdk/cloud-dataplane/runtime`，Hyperdrive + R2）继续支持；新端口先做 Node 实现。当前源码没有 D1 adapter（`packages/cloud-dataplane/README.md` 的 Deployment compositions）。
 
 ### 12.2 `@byok-sdk/core` 与 `@byok-sdk/cloud` 职责与状态
 
@@ -1109,7 +1108,7 @@ core 各行已于 S2（2026-08-07）落地为 `@byok-sdk/core` 的契约 + InMem
 | cloud storage handlers | storage entitlement/usage/reservation 的执行面；reservation → presign → finalize/abort | **已实现（S4A/S4B）**：daemon 声明 hash authority；HEAD 只观测 existence/size/type（ADR-024） |
 | cloud cleanup workers | retention、tombstone、orphan GC 与 Postgres/R2 reconciliation | 当前实现（S4B-c） |
 | cloud hints | device presence TTL、task activity tail + explicit dropped count | **已实现（S5）**：store-authoritative minimum interval、ProgressBatcher-shaped bounded batch、cumulative producer/capacity dropped |
-| compositions | InMemory、Postgres + R2（主生产）、self-hosted server contract suites；可选 D1 adapter 另跑同一套件 | core 侧 InMemory composition 与参数化 conformance 套件**已实现（S2）**；cloud 侧 InMemory composition 与 tenant facade **已实现（S3a/S5）**；Postgres core/cloud ports 与 R2 主生产 adapter **已实现（S4A/S4B）**；D1 仍是 optional post-RC |
+| compositions | InMemory、Postgres + R2（主生产）、self-hosted server contract suites；可选 D1 adapter 另跑同一套件 | core 侧 InMemory composition 与参数化 conformance 套件**已实现（S2）**；cloud 侧 InMemory composition 与 tenant facade **已实现（S3a/S5）**；Postgres core/cloud ports 与 R2 主生产 adapter **已实现（S4A/S4B）**；Workers runtime entry（Hyperdrive + R2）由 `worker-smoke/` fixture 覆盖；D1 仍是 optional post-RC，当前未实现 |
 
 ### 12.3 三套状态词汇 + 一套 truth concurrency model
 
@@ -1214,7 +1213,7 @@ flowchart LR
   Presence[("presence + activity TTL<br/>lossy, dropped explicit")]:::ephemeral
 
   Board -->|"claim creates offer"| Mailbox
-  Mailbox -->|"poll v1 envelope"| Daemon
+  Mailbox -->|"poll v2 envelope"| Daemon
   Daemon -->|"ack only after durable local append"| Mailbox
   Daemon -->|"reserve bytes before durable write"| Quota
   Daemon -->|"signed terminal / profile / memory"| Truth
@@ -1242,7 +1241,7 @@ sequenceDiagram
   participant T as TruthStore plus ObjectStore
 
   SaaS->>Cloud: claim or enqueue work
-  Cloud->>Mail: append frozen-v1 task.offer bytes with tenant device seq
+  Cloud->>Mail: append frozen-v2 task.offer bytes with tenant device seq
   D->>Cloud: poll after cursor
   Cloud->>Mail: read without ack
   Mail-->>D: task.offer
@@ -1359,7 +1358,7 @@ canonical bytes 用 **RFC 8785（JCS，JSON Canonicalization Scheme）** 正规�
 
 S6-c client 先取得 metadata-only manifest，本地 `MemorySelector` 只返回 `(kind, recordKey)`；client 只 fetch 这些 key，并要求 GET metadata 与 selector 所见 manifest 完全一致，再对 inline/object bytes 验 byte size 与 SHA-256。object grant 只能访问 host 显式配置的 credential-free HTTP(S) origin，redirect 固定为 `manual`，未列入 allowlist 的 relative/absolute URL 在网络访问前拒绝。任何 list/get race、同 size 字节替换或 grant URL confusion 都在 local filter 之前 fail-closed。>1 MiB snapshot 只发 metric，不拒绝、不切 delta。filter 的泛型返回值是唯一对外 context，runtime prompt shape 继续由 host 决定。
 
-`terminal` body 对 cloud 是 opaque bytes/object ref；client 提供 proof-bound `writeTerminal`，caller/journal 负责选择要提交的 frozen-v1 terminal 来源，cloud 不做第二套 envelope 语义解析，S6-c 也不猜现有 task loop 的 prompt/flush policy。client 将成功 receipt 的 primary 与 ordered snapshots 逐项绑定到请求的 selector、next revision、content hash 与 byte size，结构合法但属于另一请求的 response 不能冒充提交成功。相同 `requestId + bodyHash` 重送回原结果；同 `taskId` 不同 terminal hash 回 `409 terminal_conflict`，不覆写第一份真相。
+`terminal` body 对 cloud 是 opaque bytes/object ref；client 提供 proof-bound `writeTerminal`，caller/journal 负责选择要提交的 frozen-v2 terminal 来源，cloud 不做第二套 envelope 语义解析，S6-c 也不猜现有 task loop 的 prompt/flush policy。client 将成功 receipt 的 primary 与 ordered snapshots 逐项绑定到请求的 selector、next revision、content hash 与 byte size，结构合法但属于另一请求的 response 不能冒充提交成功。相同 `requestId + bodyHash` 重送回原结果；同 `taskId` 不同 terminal hash 回 `409 terminal_conflict`，不覆写第一份真相。
 
 #### 12.6.5 Key rotation
 
@@ -1378,7 +1377,7 @@ S6-c client 先取得 metadata-only manifest，本地 `MemorySelector` 只返回
 - board claim 用 SQL CAS；N 个并发 claim 只允许 1 个成功，其余返回 holder snapshot。
 - status transition 带 `expectedStatus`；不允许 last-write-wins。
 - per-tenant `board_seq` 单调，不能跨 tenant 推进。
-- 同一 store contract suite 跑 InMemory、Postgres + R2（主生产）与 self-hosted server 三种 composition；可选 D1 adapter 若启用，用同一份套件另跑一次，断言零改动。
+- 同一 store contract suite 跑 InMemory、Postgres + R2（主生产）与 self-hosted server 三种 composition；可选 D1 adapter 若启用，用同一份套件另跑一次，断言零改动。部署上 VPS 是主测试目标，Workers 继续支持（ADR-038 决策 3）。
 - `committedBytes + reservedBytes` 不得超过有效 entitlement；所有直接上传 R2 的 durable write 先经 reservation（§12.7.7）。
 
 #### 12.6.7 Device、Agent、placement 与 runtime session
@@ -1397,7 +1396,7 @@ lifecycle。下面四个概念不得互换：
 未来 fleet slice 必须另设 `AgentObservation` 作为非权威运行态投影，并以
 generation/lease 拒绝 stale lifecycle command。显式 placement 不可用时禁止
 回退到 `pickFirstConnectedDevice()`；runtime discovery 也不得创建或迁移
-Agent。Protocol v1 保持冻结，Agent lifecycle 只能进入新 control-plane/API
+Agent。当前 wire（Protocol v2）保持冻结，Agent lifecycle 只能进入新 control-plane/API
 或明确批准的 versioned surface。完整裁定见 ADR-025。
 
 Agent local/cloud projection 使用 additive capability 和 distinct wire
@@ -1442,7 +1441,7 @@ Datum authority 必须保持单一且可追溯：
 | Egress policy/capability | host 选择的 typed policy + device 的 durable declaration | server/cloud 只按 capability admission；不由 presence 或 runtime guess |
 | Reliable event identity | public publisher 读取的 exact handoff + stable event/cursor | publisher 证明 Agent/task/session/runtime/cwd 后才 append/send；cloud receipt/ack 不 mint session |
 
-修复保持 Protocol v1 frozen，采用两个 additive facts：
+修复当时保持 Protocol v1 frozen（当前 wire 是 v2，ADR-037），采用两个 additive facts：
 
 - `task.offer_for_agent_with_egress_fresh` 是 fresh-only message，明确不带
   `sessionRef`；目标设备必须持久声明 `agent-egress-fresh-session`，旧 daemon
@@ -1542,13 +1541,13 @@ compaction hook。本节只陈述 `codex/agent-memory-phase2` 的 source 与本�
 
 ### 12.7 数据与存储架构（云端面为目标设计；本机 journal 面已实现）
 
-主生产 composition 固定为 **Postgres + R2**：Postgres 持有租户、mailbox、board、truth metadata、quota、usage、reservation 与 object manifest；R2 持有按 daemon 声明的 canonical hash 命名、且由 cloud 观测 size/content-type 的对象 bytes。Node API 与 R2 可以跨供应商组合——R2 只需要 S3-compatible 的 signing/client adapter，不要求 `@byok-sdk/cloud` 运行在 Workers。Postgres 是 quota reservation、usage 与 object manifest 的 transaction authority。D1 只保留为可选 contract adapter，不再影响主线的容量、计费或 GC 语义。
+主生产 composition 固定为 **Postgres + R2**：Postgres 持有租户、mailbox、board、truth metadata、quota、usage、reservation 与 object manifest；R2 持有按 daemon 声明的 canonical hash 命名、且由 cloud 观测 size/content-type 的对象 bytes。Node API 与 R2 可以跨供应商组合——R2 只需要 S3-compatible 的 signing/client adapter，不要求 `@byok-sdk/cloud` 运行在 Workers。Postgres 是 quota reservation、usage 与 object manifest 的 transaction authority。D1 只保留为可选 contract adapter，不再影响主线的容量、计费或 GC 语义。ADR-038 决策 3 把 VPS（Node + Postgres + S3 兼容对象存储）定为优化与主测试目标，Workers（Hyperdrive + R2）继续支持。
 
 #### 12.7.1 五类云端数据与一类本地连续态
 
 | 类别 | 典型内容 | 存储 | 生命周期 |
 | --- | --- | --- | --- |
-| mailbox | server→daemon 的 frozen-v1 envelope | Postgres | ack 且过 retention 后删除 |
+| mailbox | server→daemon 的 frozen wire（v2）envelope | Postgres | ack 且过 retention 后删除 |
 | board | title/channel/status/assignee/`board_seq` | Postgres | 长期，或宿主配置的 archive policy |
 | truth | terminal/profile/memory 的 metadata、hash、rev、proof | Postgres + R2 | durable；只按显式删除或 retention policy 回收 |
 | hints | presence/activity/dropped | TTL Postgres 或 KV | 分钟级 |
@@ -1654,7 +1653,7 @@ sequenceDiagram
 
 “领走即弃”是**游标推过即删**，不是**读到即删**。读到即删会直接打断已冻结的 at-least-once 语义：client 的整套 stall 机制建立在“未 ack 的 seq 会被反复重投”之上（§8.3）。删除的触发器是 client 下次带上来的 cursor，那才是它的持久化 ack。
 
-对 `task.offer` 而言，“成功处理到可 ack”= v1 bytes 与本机 task record 已在同一个**本机** transaction durable append，且工作已交给本机 scheduler；**不是**等 agent 跑到终态。cursor 不承担 running-state recovery。
+对 `task.offer` 而言，“成功处理到可 ack”= wire bytes（当前 v2）与本机 task record 已在同一个**本机** transaction durable append，且工作已交给本机 scheduler；**不是**等 agent 跑到终态。cursor 不承担 running-state recovery。
 
 | Crash 位置 | 结果 |
 | --- | --- |
@@ -1725,6 +1724,7 @@ interface TenantStorageUsage {
 - 用户容量 = tenant-scoped R2 committed object bytes 加 Postgres inline payload bytes；
 - 同 tenant 同 hash 多 reference 只计一次；跨 tenant 不共享计费对象；
 - Postgres 的普通 metadata 不伪装成精确 byte billing，改用 record count、row size、mailbox bytes 与 rate limit 做平台保护；
+- mailbox bytes 当前只是平台保护口径：mailbox append 路径不调用 `applyMailboxDelta`，`mailboxLimitBytes` 实际不生效。ADR-038 决策 2（超额存储是收费单位，存储用量只有一个权威）与 PRD K1（#411）计划把 mailbox 字节计入存储用量；这是计划项，尚未执行；
 - `storage_entitlement.version` 单调，套餐升级/降级由 control plane 更新；
 - SDK 返回 usage、limit、reserved 与 grace 状态，宿主 UI 决定如何显示与售卖。
 
@@ -1802,9 +1802,9 @@ R2 object 先投影为 `pending` witness 并重新等待 grace，绝不因 LIST 
 
 ### 12.8 交付路线与 S↔P crosswalk（目标设计）
 
-完整执行切片见 `plans/sprints/20260807-byok-platform-raft-aligned.sprint.md`。
+完整执行切片见 `plans/sprints/20260807-byok-platform-raft-aligned.sprint.md`（#390 后不再跟踪）。
 
-**P 线编号锚点。** 本文有两套互不相干的 P 记号，按出现位置区分：**章节标题**里的 `P1/P2/P3`（仅 §1、§8、§14 三处）是尽职调查框架的三层——P1 架构地图、P2 数据流追踪、P3 设计裁定，与交付无关；**正文**里的 `P0-P5` 一律取 `ARCHITECTURE-PROPOSAL-byok-platform.md:33-34,690-698` 的交付阶段语义，下表是这套记号的唯一定义处（§14.2 那格"P2 后再做 P3 board"属正文，按下表读）：
+**P 线编号锚点。** 本文有两套互不相干的 P 记号，按出现位置区分：**章节标题**里的 `P1/P2/P3`（仅 §1、§8、§14 三处）是尽职调查框架的三层——P1 架构地图、P2 数据流追踪、P3 设计裁定，与交付无关；**正文**里的 `P0-P5` 一律取 `ARCHITECTURE-PROPOSAL-byok-platform.md:33-34,690-698`（#390 后不再跟踪）的交付阶段语义，下表是这套记号的唯一定义处（§14.2 那格"P2 后再做 P3 board"属正文，按下表读）：
 
 | 编号 | 语义 |
 | --- | --- |
@@ -1860,8 +1860,8 @@ flowchart LR
 
 | RC profile | 范围 | 门禁 |
 | --- | --- | --- |
-| Dispatch Platform RC | 六个 dispatch packages（`protocol`、`server`、`client`、`cloud`、`core`、`cloud-dataplane`）与 `byok-sdk` namespace umbrella | S7 operations/release、full compositions、packageability、registry readback；umbrella runtime graph 不得到达 keys |
-| BYOK product-suite RC | Dispatch Platform RC + 独立 `@byok-sdk/keys` 的 K4/K4.1 host integration | 追加 K4 golden parity 与 keys graph invariant；这是 product-suite 验证集合，不表示 `byok-sdk` npm umbrella 依赖或导出 keys |
+| Dispatch Platform RC | 六个 dispatch packages（`protocol`、`server`、`client`、`cloud`、`core`、`cloud-dataplane`）与 `byok-sdk` namespace umbrella（umbrella 已于 0.21.0 按 ADR-035 退役，`check:release-graph` 拒绝它重新出现） | S7 operations/release、full compositions、packageability、registry readback；umbrella runtime graph 不得到达 keys（umbrella 退役前的门禁） |
+| BYOK product-suite RC | Dispatch Platform RC + 独立 `@byok-sdk/keys` 的 K4/K4.1 host integration | 追加 K4 golden parity 与 keys graph invariant；这是 product-suite 验证集合，不表示（已退役的）`byok-sdk` npm umbrella 依赖或导出 keys |
 
 排序原则：
 
@@ -1876,9 +1876,9 @@ flowchart LR
 
 ### 12.9 Skill pack 分发通道（`skills.pack`，Phase 1 已实现）
 
-SaaS 侧策划的声明式内容（agentskills.io 兼容的 `SKILL.md` + 静态资源）经 hosted HTTP 下发到已配对 device。拆解证据见 `docs/researches/2026-08-12_hermes-buzz-extraction-assessment.md` §3。
+SaaS 侧策划的声明式内容（agentskills.io 兼容的 `SKILL.md` + 静态资源）经 hosted HTTP 下发到已配对 device。拆解证据见 `docs/researches/2026-08-12_hermes-buzz-extraction-assessment.md` §3（#390 后不再跟踪）。
 
-**wire 边界。** 走 hosted HTTP + ADR-010 声明，不进 frozen v1 envelope，不新增 `MESSAGE_TYPES`——技能包是 device 读到声明后主动拉取的内容，不是 server 推进 task 流的消息。`packages/protocol` 零 diff 是本次交付的硬验收。
+**wire 边界。** 走 hosted HTTP + ADR-010 声明，不进 frozen wire envelope（交付时为 v1，当前为 v2），不新增 `MESSAGE_TYPES`——技能包是 device 读到声明后主动拉取的内容，不是 server 推进 task 流的消息。`packages/protocol` 零 diff 是本次交付的硬验收。
 
 | 路由 | class | 职责 |
 | --- | --- | --- |
@@ -1908,9 +1908,18 @@ SaaS 侧策划的声明式内容（agentskills.io 兼容的 `SKILL.md` + 静态�
 
 **port 契约的过渡形状。** `SkillPackStore` 已进 `CORE_PORT_INTERFACES`/`CORE_PORT_METHODS`，因而受 tenant-first + async 的源码扫描约束；但**尚未**进 `CORE_STORE_NAMES`/`CoreStores`：Postgres 实现属 Phase 2，Phase 1 就把它列入 composition 契约会要求所有既有 composition 同 slice 实现。这个差集由 `CORE_NON_COMPOSITION_PORT_NAMES` 显式记名，Phase 2 落地后该常量归空。
 
+### 12.10 Bot 平台（计划中，ADR-038）
+
+**状态：计划中，未实现。** [ADR-038](adr-2026-10-13-bot-platform.md) 与 [PRD](../researches/2026-10-13_bot-platform-prd.md) 定义 BYOK Bot 平台的方向，本节只做指引，不描述现状：
+
+- Bot 的三种触发来源（用户输入、routine、其他 Bot）共用 Host 执行核心；执行核心是 Host 复制后自有的参考实现（copy-and-own），SDK 不为它新增 authority。
+- Bot 协作由 Host 编排一次次 fresh execution（ADR-036 D1 的方案 A）；Local TeamWorkspace 不作为 Bot 协作底座。
+- routine 时钟在设备上（K2 wake 队列），hosted 真相层不计时；不计量执行，超额存储是收费单位。
+- SDK 侧计划重构：K5 `executions.submit`、K6 typed busy decline、K7 `submit_result` 结构化 outcome。
+
 ## 13. RAFT 受限参考
 
-完整静态证据与版本拓扑放在 `docs/researches/raft-architecture-reference.md`，本机动态边界与归因校正放在 `docs/researches/2026-08-10_research-raft-cli-dynamic-report.md`。SDK 架构只保留决策映射：
+完整静态证据与版本拓扑放在 `docs/researches/raft-architecture-reference.md`，本机动态边界与归因校正放在 `docs/researches/2026-08-10_research-raft-cli-dynamic-report.md`（两者 #390 后不再跟踪）。SDK 架构只保留决策映射：
 
 | RAFT 模式 | BYOK 决定 | 原因 |
 | --- | --- | --- |
@@ -1928,7 +1937,7 @@ SaaS 侧策划的声明式内容（agentskills.io 兼容的 `SKILL.md` + 静态�
 三处 authority 必须写清，否则这张表会把外部证据的强度说高：
 
 - **五个 activity 值存在于 RAFT，但 `presence` authority 属于 BYOK。** hash-matched bundle 定义 `AGENT_ACTIVITIES = online/thinking/working/error/offline`；RAFT 将其称为 agent activity。BYOK 自己拥有 device-level `presence` 抽象、TTL/non-authoritative 语义，以及它与 task activity、wire execution、billing、recovery 的隔离。共享词汇不构成 authority transfer。
-- **board 转移在 RAFT 侧是 `[unverified]`。** `raft-architecture-reference.md:1068` 原文明确：状态转移的约束在 server 侧 `[unverified]`，其转移图是依 status 语义绘制的合理路径，不是从实作提取的转移表。因此 §12.3 采纳的是 5 态**词汇与分权威**，不是一份已验证的转移表；`closed` 的原义同样仍标 unverified。
+- **board 转移在 RAFT 侧是 `[unverified]`。** `raft-architecture-reference.md:1068`（#390 后不再跟踪）原文明确：状态转移的约束在 server 侧 `[unverified]`，其转移图是依 status 语义绘制的合理路径，不是从实作提取的转移表。因此 §12.3 采纳的是 5 态**词汇与分权威**，不是一份已验证的转移表；`closed` 的原义同样仍标 unverified。
 - **assignment capability 不等于 BYOK invariant。** RAFT client 的 `task create --assignee` 支持 create-time assignment，而 `task claim` 仍代表 current-agent self-claim。BYOK 当前保持 authenticated device-derived claim 与 host-only review acceptance；是否新增 host assignment 必须另立 product contract，不能由外部 CLI surface 推导。
 
 RAFT 是带自家 cloud/workspace 的完整产品；BYOK 是供宿主产品组合的 SDK。可参考其填满的 operational semantics，不能把产品所有权边界一起搬进 SDK。
@@ -2092,8 +2101,8 @@ S7-a 落 operational health/crash authority；S7-b 已把它与 runtime/control/
 | current runtime behavior | `packages/server/src/*`、`packages/client/src/*`、tests |
 | security posture | `docs/security.md`、`docs/security-review-m5-pilot-entry.md` |
 | key plane | `packages/keys/src/index.ts`、registry/stores/transports/tests |
-| target platform | `ARCHITECTURE-PROPOSAL-byok-platform.md` |
-| RAFT reference | `docs/researches/raft-architecture-reference.md` |
+| target platform | `ARCHITECTURE-PROPOSAL-byok-platform.md`（#390 后不再跟踪） |
+| RAFT reference | `docs/researches/raft-architecture-reference.md`（#390 后不再跟踪） |
 | delivery proof | `.github/workflows/ci.yml`、`templates/*` smoke scripts |
 
 文档验证要求：抽取并渲染每个 Mermaid fence；随后运行仓库必需检查：
@@ -2107,7 +2116,7 @@ repo-harness run check-task-workflow --strict
 
 ### 16.1 Tenant isolation 入口闸 I1-I9（目标设计）
 
-hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落地；其中 I2/I5/I8/I9 随 T0 先行。这份清单与 `docs/researches/tenant-isolation-decision.md:235-243` 逐条对应，不作改写：
+hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落地；其中 I2/I5/I8/I9 随 T0 先行。这份清单与 `docs/researches/tenant-isolation-decision.md:235-243`（#390 后不再跟踪）逐条对应，不作改写：
 
 | # | 测试 | 断言 | 落点 |
 | --- | --- | --- | --- |
@@ -2134,9 +2143,9 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR | 决定 | 状态 |
 | --- | --- | --- |
 | ADR-001 | 双产品面、双安全模型（dispatch plane 与 key plane） | Accepted |
-| ADR-002 | protocol v1 冻结，新能力一律走 wire 外的 HTTP 面 | Accepted |
+| ADR-002 | protocol v1 冻结，新能力一律走 wire 外的 HTTP 面 | Superseded by ADR-034（v1 本身仍冻结；wire v2 实际经 ADR-037 落地） |
 | ADR-003 | `@byok-sdk/core` 保持 protocol-free 且 Node-free | Accepted |
-| ADR-004 | `@byok-sdk/server` 留作 self-hosted，不演化为 hosted Hub | Accepted |
+| ADR-004 | `@byok-sdk/server` 留作 self-hosted，不演化为 hosted Hub | Superseded by ADR-032 |
 | ADR-005 | mailbox ack 之前必须先完成本机 durable append | Accepted |
 | ADR-006 | board / wire / presence 分词并分权威 | Accepted |
 | ADR-007 | tenant-first 结构性隔离（§12.6.2 六层） | Accepted |
@@ -2152,8 +2161,8 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-017 | `TaskStore` 改 async | Deferred，self-hosted 需要远端 async SQL 时触发 |
 | ADR-018 | live / cold migration | Deferred，出现跨设备 workspace 迁移需求时触发 |
 | ADR-019 | hosted production 的本机 journal 以 SQLite 为 canonical；大对象留文件系统 | Accepted |
-| ADR-020 | 主生产云端 storage composition 为 Postgres + R2；D1 降为可选 adapter | Accepted |
-| ADR-021 | 套餐与计费归宿主所有；SDK 只执行版本化数值 entitlement、reservation 与 usage | Accepted |
+| ADR-020 | 主生产云端 storage composition 为 Postgres + R2；D1 降为可选 adapter | Accepted；部署目标见 ADR-038 决策 3（VPS 为优化与主测试目标，Workers 的 Hyperdrive + R2 继续支持）；D1 adapter 当前未实现 |
+| ADR-021 | 套餐与计费归宿主所有；SDK 只执行版本化数值 entitlement、reservation 与 usage | Accepted；ADR-038 决策 1、2 补充：不计量执行，超出 entitlement 的存储是收费单位 |
 | ADR-022 | quota 满不自动删除 durable user truth；先拒绝新写，并保留删除/导出/扩容路径 | Accepted |
 | ADR-023 | `workspaceHint` 维持 reserved，接线需另立 ADR 与明确 resolver 设计 | Accepted |
 | ADR-024 | R2 object 的 canonical SHA-256 以通过认证的 daemon 声明为权威；cloud `HEAD` 只观测存在性与 size/type | Accepted |
@@ -2163,17 +2172,25 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | ADR-028 | native session locator 永不上云；`sessionId` 由 SDK 铸造；云端 Session 不存运行时中间态 | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-029 | Attempt 由 store 原子铸造 `{attemptId, leaseEpoch}`；每次权威副作用校验当前 Attempt，旧 epoch 只进 audit | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-030 | capability 收敛为一个 FeatureRegistry + Deployment / Installation / Runtime 三个独立 authority，准入取交集 | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
-| ADR-031 | AgentHome / SessionState / Workspace 三分；mutable Workspace 单写者、同 Session Run 串行；backend 只有 plain-directory 与 git-worktree | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
+| ADR-031 | AgentHome / SessionState / Workspace 三分；mutable Workspace 单写者、同 Session Run 串行；backend 只有 plain-directory 与 git-worktree | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`）；ADR-037 保留 Agent-home 单写者 lease，cwd = 用户指定 workspace 或 Agent home；v2 `workspaceRef` 未实现（protocol 无此字段） |
 | ADR-032 | `@byok-sdk/server` 折叠为 cloud domain kernel 的 embedded façade，删除独立协调状态机与旧 transport | Accepted，Supersedes ADR-004（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-033 | `local-first-v1` 为默认数据 policy profile，contentful 进 `shared-observability-v1`；结果事务权威是 `SessionResultCommitter` | Accepted（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-034 | legacy `task.offer*` / `strictAgentOnly` / 旧 gitWorkspace authority / ambient 选设备在一次 v2 cutover 中删除，无双读双写 | Accepted，Supersedes ADR-002（详见 `adr-2026-09-03-domain-model-and-authority.md`） |
 | ADR-035 | 保留 `@byok-sdk/server` 的 self-hosted Node/Hono deployment boundary；无独立能力的 `byok-sdk` umbrella 在另行批准的 breaking cutover 中退出，public artifacts 由 10 降为 9 | Accepted；implemented in 0.21.0（umbrella 删除，同 release `@byok-sdk/testkit` 转 private，public artifacts 实际由 11 降为 9；详见 `adr-2026-09-05-public-package-topology.md`） |
-| ADR-036 | 云端 Generic Agent：Bot 模式每次唤醒 = 新执行（方案 A）；云端模型 key 只由平台持有、BYOK 永远只在本地（每请求 key / 信封加密托管作废）；云端不支持官方 CLI / Keychain / 本地文件 / stdio MCP；云端工具 / 作业调用基于 Durable Objects；byok-sdk 拥有云端 backend，Aiphabee 为首个消费方；Aiphabee chat Workflow 直接替换（无并行 / flag / shadow）；DO 同时承载工具与长作业且保持最简；云端只读数据工具与 skill 加载器 `replay:'safe'`（冻结清单），本地全 unsafe | Accepted（2026-10-03，decided by Aimpact）；未实现，切片未放行（详见 `adr-2026-10-03-cloud-generic-agent.md`） |
+| ADR-036 | 云端 Generic Agent：Bot 模式每次唤醒 = 新执行（方案 A）；云端模型 key 只由平台持有、BYOK 永远只在本地（每请求 key / 信封加密托管作废）；云端不支持官方 CLI / Keychain / 本地文件 / stdio MCP；云端工具 / 作业调用基于 Durable Objects；byok-sdk 拥有云端 backend，Aiphabee 为首个消费方；Aiphabee chat Workflow 直接替换（无并行 / flag / shadow）；DO 同时承载工具与长作业且保持最简；云端只读数据工具与 skill 加载器 `replay:'safe'`（冻结清单），本地全 unsafe | Accepted（2026-10-03，decided by Aimpact）；`@byok-sdk/cloud-do` 自 0.24.0 起发布，其余切片的落地情况本表未核实；D7 对真相层的约束由 ADR-038 修订（详见 `adr-2026-10-03-cloud-generic-agent.md`） |
 | ADR-037 | 最小 guardrail：删除 `PermissionPolicy`（protocol v2）、MCP readonly/grants、strict MCP、env allowlist 与 key 剥离、egress sanitizer、trusted launch cwd、attestation 与 custody；session 在用户指定 workspace 中以 YOLO 运行，继承用户 agent 配置；SDK 只保留自有不变量 | Accepted（owner 2026-10-07）；implemented in slices 1–5（详见 `adr-2026-10-07-minimal-guardrails.md`） |
+| ADR-038 | BYOK Bot 平台——成本模型、部署目标、routine 时钟与 Bot 协作：不计量执行，超额存储是收费单位；真相层 VPS 优先、Workers 继续支持；cloud-do 只在 Cloudflare；routine 时钟在设备（K2 wake 队列），hosted 真相层不计时；Bot 的三种触发来源（用户输入、routine、其他 Bot）共用 Host 执行核心；Bot 协作由 Host 编排 fresh execution，Local TeamWorkspace 不作为 Bot 协作底座；SDK 重构 K5 `executions.submit`、K6 typed busy decline、K7 `submit_result` 结构化 outcome | 决策 1、2、3、5 Accepted（owner，2026-10-13）；4、6–13 Proposed，PR 合并即视为 owner 接受；实现未开始（详见 [`adr-2026-10-13-bot-platform.md`](adr-2026-10-13-bot-platform.md)，PRD [`2026-10-13_bot-platform-prd.md`](../researches/2026-10-13_bot-platform-prd.md)） |
 
-- Completed workstream evidence: `tasks/workstreams/root/20260904-sdk-root.md`
+帐本状态注记（2026-10-13 核对，基线 `b597b93e`）：
 
-- `tasks/workstreams/root/20260905-sdk-root.md`
+- wire v2 随 ADR-037 落地（`PROTOCOL_VERSION = 2`，`packages/protocol/src/version.ts`）；ADR-034 设想的那次 cutover 没有发生。
+- ADR-034 列出的删除项尚未执行：legacy `task.offer` / `task.offer_with_toolsets` 仍在 `packages/protocol/src/envelope.ts`，`strictAgentOnly` 仍在 `packages/client/src/daemon/create-daemon.ts`。
+- ADR-028/029/030/033 看不到对应实现：`FeatureRegistry`、`SessionResultCommitter`、`local-first-v1`、`leaseEpoch` 在 `packages/` 源码中没有命中；ADR-028 的 `session.mode` 也没有出现在 protocol 中。
+- `Accepted` 不等于已实现。是否继续执行这些删除与实现，由 owner 决定。
+
+- Completed workstream evidence: `tasks/workstreams/root/20260904-sdk-root.md`（#390 后不再跟踪）
+
+- `tasks/workstreams/root/20260905-sdk-root.md`（#390 后不再跟踪）
 
 
 ## Local Codex team notification binding
@@ -2192,6 +2209,9 @@ session; tmux has no delivery role. Existing public workspace exports gain the
 additive snapshot method; native process/home lifecycle and other harness bindings
 are outside this slice. Queue errors stop with unknown delivery and no retry;
 restart watermarks are explicit operator input, not a second receipt authority.
+Local TeamWorkspace is local-only operator coordination (`docs/spec.md` "Local
+TeamWorkspace"); it is not a Bot collaboration path. Planned Bot collaboration is
+Host-orchestrated fresh executions (ADR-038 decision 8).
 
 
 The owned Pi lane enters through `bin/commands/team-pi-relay.ts` and

@@ -654,7 +654,7 @@ and terminal envelopes go to the Host as is, as for fresh Agent egress offers.
 The message tool never enters D.
 
 **Prepared Agent memory (scoped v8 cut).**
-[Prepared Agent Memory Contract](researches/2026-09-28-prepared-agent-memory-contract.md)
+Prepared Agent Memory Contract（`docs/researches/2026-09-28-prepared-agent-memory-contract.md`）（#390 后不再跟踪）
 requires `agentMemory: 'none' | 'read' | 'read-write'` on local/remote preparation,
 receipt bindings and prepared offers. A trusted device authority grants a ceiling;
 preparation and execution both check it. Memory-only preparation uses
@@ -1750,7 +1750,7 @@ channel. The wire receipt contains only identity, decision, hash/size/type and
 `BlobRef`, never inline content. Cloud admission and readback preserve that
 exact fact; neither the blob nor the receipt becomes a complete local
 transcript or shared-history authority. See
-[Agent local/cloud projection contract](researches/agent-local-cloud-projection-contract.md).
+Agent local/cloud projection contract（`docs/researches/agent-local-cloud-projection-contract.md`）（#390 后不再跟踪）.
 
 The host selects the branded root, authors stable identity plus redacted
 profile projection content, and selects an SDK-valid egress/content-read
@@ -2186,7 +2186,7 @@ admission limit; on the prepared lane that task can run with zero tools. Host co
 summary quality must be validated separately from the SDK result primitive.
 
 Requirements and local acceptance have separate authorities: the existing
-[SDK-first plan](../plans/plan-20260910-conversation-turn-sdk-first.md) links the
+SDK-first plan（`plans/plan-20260910-conversation-turn-sdk-first.md`）（#390 后不再跟踪） links the
 sole detailed Host Sprint ledger. Public source and packed evidence do not imply
 complete ContextPack/Summary, native-runtime, migration or production acceptance.
 
@@ -2235,7 +2235,7 @@ Indirect Pi ruling (2026-10-07, owner, ADR-037): upstream published all nine `@e
 ### 0.22.0 Host calibration and upgrade boundary
 
 The completed official-runtime M5 calibration is retained in
-`tasks/runs/20260925-official-pi-c-reprobe.json` with its `.sha256` sidecar.
+`tasks/runs/20260925-official-pi-c-reprobe.json` with its `.sha256` sidecar（#390 后不再跟踪）.
 It recommends C=1024 for the recorded official 0.87.1 closure, compiler 4,
 wire 7 and envelope v4 with ruledResidualKeys=[]. Three samples observed zero
 uncovered amount under max(0, prompt_tokens-requestBytes); the prepared fixture
