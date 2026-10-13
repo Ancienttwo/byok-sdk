@@ -12,6 +12,11 @@
   the interrupted run settles as `interrupted / CLOUD_EXECUTION_INTERRUPTED` and
   later submits run instead of returning 409 until isolate restart. The failed
   model turn is not resent.
+- **Changed (client)** — update the private OAR source from 0.59.1 to 0.62.1
+  (`bf55fd6`). No selected source file changed upstream, so the five
+  maintained BYOK deltas and the import closure stay the same. Only the vendor
+  directory, the manifest base and the change notices move. No behavior or
+  public API change. See `docs/notes/2026-10-13-oar-0.62-upgrade.md`.
 - **Changed (client)** — update the private OAR source from 0.57.0 to 0.59.1
   (`bb98cbc`). The maintained BYOK deltas shrink from 6 files to 5:
   session-options, credential-redactor and the `Promise.withResolvers` hunk are
