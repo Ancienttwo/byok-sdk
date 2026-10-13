@@ -507,6 +507,8 @@ export type {
   VerifiedTruthRecord,
 } from './daemon/truth-memory-client';
 export type { ConnectionState } from './daemon/connection-manager';
+export { DAEMON_HALT_REASONS, DaemonHaltError, isDaemonHaltReason } from './daemon/daemon-lifecycle';
+export type { DaemonHaltReason, DaemonLifecycle } from './daemon/daemon-lifecycle';
 export { ReplayCursorTooOldError } from './daemon/replay-cursor';
 export { BlobClient, BlobRequestAbortedError } from './daemon/blob-client';
 export type { BlobClientOptions, BlobRequestAbortReason, BlobRequestOptions, BlobResolver } from './daemon/blob-client';

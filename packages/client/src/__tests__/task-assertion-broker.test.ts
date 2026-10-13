@@ -685,7 +685,7 @@ describe('task assertion broker: task_assertion.issue', () => {
     let release!: () => void;
     server.setCapabilityResponseGate(new Promise<void>((resolve) => { release = resolve; }));
     server.setFailEventsPolls(true);
-    await vi.waitFor(() => expect(built.daemon.status().connected).toBe(false), { timeout: 5000 });
+    await vi.waitFor(() => expect(built.daemon.status().lifecycle).toEqual({ phase: 'running', connection: 'connecting' }), { timeout: 5000 });
     server.setFailEventsPolls(false);
     await vi.waitFor(() => expect(server.httpRequests.filter((r) => r.pathname === '/byok/capabilities').length).toBeGreaterThanOrEqual(2), { timeout: 5000 });
     const events: DaemonEvent[] = [];

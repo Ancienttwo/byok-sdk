@@ -8,6 +8,7 @@ import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { DeviceStore } from '../daemon/store';
 import { TestServer } from './fixtures/test-server';
+import { waitForOpen } from './fixtures/lifecycle-barrier';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -81,7 +82,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     });
 
     await connection.start();
-    await connection.waitForConnection();
+    await waitForOpen(connection);
     return { record, cursorStore, received };
   }
 
@@ -470,7 +471,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     });
 
     await connection.start();
-    await connection.waitForConnection();
+    await waitForOpen(connection);
 
     const realSeq1 = createEnvelope(
       'task.offer',

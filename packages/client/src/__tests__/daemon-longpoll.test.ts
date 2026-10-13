@@ -6,6 +6,7 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { OPEN_LIFECYCLE, waitForDaemonOpen } from './fixtures/lifecycle-barrier';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -68,7 +69,8 @@ describe('long-poll lifecycle (protocol §8)', () => {
     // connection and resolves startup.
     await daemon.start();
 
-    expect(daemon.status().connected).toBe(true);
+    await waitForDaemonOpen(daemon);
+    expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE);
 
     // --- receive path: an event queued for long-poll pickup must reach the task runner ---
     const offerSeq = server.nextSeq();

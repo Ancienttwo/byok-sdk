@@ -88,7 +88,7 @@ describe('daemon local observability (DaemonObserver)', () => {
 
     expect(events.some((e) => e.kind === 'paired')).toBe(true);
     expect(events.some((e) => e.kind === 'runtimes-detected')).toBe(true);
-    expect(events.some((e) => e.kind === 'connection')).toBe(true);
+    expect(events.some((e) => e.kind === 'lifecycle')).toBe(true);
 
     server.send(
       createEnvelope(
@@ -208,7 +208,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     expect(d.status().paired).toBe(false);
     expect(events.some((e) => e.kind === 'unpaired')).toBe(true);
     await expect(fs.readFile(path.join(storeDir, 'device.json'), 'utf8')).rejects.toThrow();
-    await expect(d.start()).rejects.toThrow(/not paired/i);
+    await expect(d.start()).rejects.toMatchObject({ reason: 'unpaired' });
 
     // Re-pairing after unpair still works (fresh device identity, same store dir).
     await d.pair('pairing-code-2');

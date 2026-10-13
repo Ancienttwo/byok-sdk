@@ -7,7 +7,7 @@ import { isTaskOfferType,
   type RuntimeInfo,
   type TaskState,
 } from '@byok-sdk/protocol';
-import type { ConnectionState } from './connection-manager';
+import type { DaemonLifecycle } from './daemon-lifecycle';
 
 /**
  * M3-2a: local observability for the daemon — the seam a CLI (M3-2b) drives a
@@ -28,9 +28,9 @@ import type { ConnectionState } from './connection-manager';
  *   out. See `handleOutboundEnvelope`.
  * - `ConnectionManagerOptions.onEnvelope`/`onStateChange` — likewise already
  *   `create-daemon.ts`'s own closures (`(envelope) =>
- *   runner?.handleEnvelope(envelope)`, `(state) => { connectionState = state;
- *   }`). `onEnvelope` additionally exposes the raw INBOUND offer variants —
- *   the one event class with no corresponding outbound envelope of its own — see
+ *   runner?.handleEnvelope(envelope)`, `(state) => setLifecycle(...)`).
+ *   `onEnvelope` additionally exposes the raw INBOUND offer variants — the
+ *   one event class with no corresponding outbound envelope of its own — see
  *   `handleInboundEnvelope`.
  *
  * Neither seam required adding anything to `TaskRunnerDeps`/`TaskRunner`
@@ -73,7 +73,8 @@ export type DaemonEvent =
    */
   | { kind: 'failed'; ts: string; taskId: string; reason: string; retryable: boolean; preClaim?: boolean }
   | { kind: 'cancelled'; ts: string; taskId: string; reason?: string }
-  | { kind: 'connection'; ts: string; state: ConnectionState }
+  /** Issues #391/#394: every `Daemon.status().lifecycle` change, as it happens. */
+  | { kind: 'lifecycle'; ts: string; lifecycle: DaemonLifecycle }
   | { kind: 'paired'; ts: string; deviceId: string }
   | { kind: 'unpaired'; ts: string }
   | { kind: 'runtimes-detected'; ts: string; runtimes: RuntimeInfo[] }
@@ -405,8 +406,8 @@ export class DaemonObserver {
     }
   }
 
-  noteConnectionState(state: ConnectionState): void {
-    this.emit({ kind: 'connection', ts: nowIso(), state });
+  noteLifecycle(lifecycle: DaemonLifecycle): void {
+    this.emit({ kind: 'lifecycle', ts: nowIso(), lifecycle });
   }
 
   notePaired(deviceId: string): void {

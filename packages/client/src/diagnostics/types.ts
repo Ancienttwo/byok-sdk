@@ -1,11 +1,12 @@
 import type { RuntimeDetectResult, RuntimeDetectionRefusalReason } from '../types';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import type { OperationalHealthFileInspection } from '../daemon/operational-health';
+import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
 
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 
 export interface DiagnosticCheck {
-  id: 'config' | 'device' | 'runtimes' | 'control' | 'health' | 'journal' | 'workspace' | 'quarantine';
+  id: 'config' | 'device' | 'runtimes' | 'control' | 'lifecycle' | 'health' | 'journal' | 'workspace' | 'quarantine';
   status: DiagnosticStatus;
   summary: string;
 }
@@ -38,12 +39,16 @@ export interface DiagnosticsSnapshot {
         status: 'online';
         pid: number;
         uptimeMs: number;
-        transport: string;
         activeTaskCount: number;
         pendingApprovalCount: number;
         operationalHealth: ControlStatusResult['operationalHealth'];
         storage?: ControlStatusResult['storage'];
       };
+  /**
+   * Issue #394: the running daemon's lifecycle (`live`), else the last
+   * `lifecycle` event in `audit.jsonl` (`audit`), else `unknown`.
+   */
+  lifecycle: { status: 'unknown' } | { status: 'known'; source: 'live' | 'audit'; lifecycle: DaemonLifecycle };
   health: OperationalHealthFileInspection;
   journal: {
     status: 'missing' | 'present' | 'corrupt' | 'unavailable';

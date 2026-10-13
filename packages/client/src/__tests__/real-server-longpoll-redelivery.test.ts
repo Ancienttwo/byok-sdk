@@ -7,6 +7,7 @@ import { CursorStore } from '../daemon/cursor-store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { SteerUnsupportedError } from '../types';
 import { startRealServer, waitForTaskEvent, type RealServerHandle } from './fixtures/real-server';
+import { OPEN_LIFECYCLE, waitForDaemonOpen } from './fixtures/lifecycle-barrier';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -69,7 +70,8 @@ describe('long-poll cursor is not advanced before the handler succeeds (Design A
 
     // WS never connects — settled via long-poll fallback, matching finding
     // F6's own test (`real-server-longpoll-only.test.ts`).
-    expect(daemon.status().connected).toBe(true);
+    await waitForDaemonOpen(daemon);
+    expect(daemon.status().lifecycle).toEqual(OPEN_LIFECYCLE);
     await vi.waitFor(async () => {
       expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });

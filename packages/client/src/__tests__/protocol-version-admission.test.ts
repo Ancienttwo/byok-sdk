@@ -7,6 +7,7 @@ import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { DeviceStore } from '../daemon/store';
 import { startRealServer, type RealServerHandle } from './fixtures/real-server';
+import { waitForOpen } from './fixtures/lifecycle-barrier';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -73,7 +74,7 @@ describe('protocol-version admission at real long-poll receive', () => {
       longPollIdleDelayMs: 10,
     });
     await connection.start();
-    await connection.waitForConnection();
+    await waitForOpen(connection);
     await real.byok.dispatch({ instruction: 'known v1 offer must not run' });
 
     await vi.waitFor(() => expect(rewroteKnownOffer).toBe(true));
