@@ -26,7 +26,7 @@ The SDK ships no policy for these routes. The data-plane composition uses `Allow
 - A request body cap at the edge no larger than the application's own cap (16 KiB on these three routes).
 - Alert on sustained 401 rates on `/byok/pair` and `/byok/token`.
 
-`publicRouteLimiter` is the in-application hook for the same three routes. It receives `{ method, path }` and the raw `Request`, runs before the handler, and `false` answers `429 { "error": "rate limit exceeded" }` without touching a store. Use it when the edge cannot key on what you need (a tenant-scoped allowlist, a shared counter), not instead of the edge limit: it runs inside the process the flood is already reaching. A limiter that throws fails the request with 500; it does not fail open.
+`publicRouteLimiter` is the in-application hook for the same three routes. It receives `{ method, path }` and the raw `Request`, runs before the handler, and `false` answers `429 { "error": "rate limit exceeded" }` without touching a store. Use it when the edge cannot key on what you need (a tenant-scoped allowlist, a shared counter), not instead of the edge limit: it runs inside the process the flood is already reaching. A limiter that throws fails the request with 500; it does not fail open. The limiter must not consume the request body (the handler reads it afterwards; clone the `Request` if you need to inspect it), and client IP is runtime-specific, so key on a header your edge sets (for example the CDN's connecting-IP header) rather than assuming the socket address.
 
 ## Routine checks
 

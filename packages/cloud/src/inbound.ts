@@ -454,11 +454,9 @@ export async function handleInboundEnvelope(
   agentMessageConsume?: Parameters<typeof handleAgentMessagePublish>[4],
   observer?: ByokCloudObserver,
 ): Promise<InboundOutcome> {
-  // This exported entrypoint can be called without the HTTP schema boundary.
-  // Refuse before reserving an envelope identity or mutating task lifecycle.
-  const result: GateResult = envelope.v !== PROTOCOL_VERSION
-    ? refuse('protocol_version_unsupported')
-    : await applyInboundGate(stores, deviceId, envelope, activityBounds, agentMessageConsume);
+  // Everything that decides the outcome lives in a helper typed Promise<GateResult>,
+  // so a 'rejected' cannot reach the exit below without a reason for the observer.
+  const result = await resolveInboundResult(stores, deviceId, envelope, activityBounds, agentMessageConsume);
   const { outcome } = result;
   // One notification per envelope, at the ONE exit the gate has. Firing from
   // the gate's own return points instead would have to be repeated at each of
@@ -487,6 +485,19 @@ export async function handleInboundEnvelope(
     }
   }
   return outcome;
+}
+
+async function resolveInboundResult(
+  stores: TenantStores,
+  deviceId: string,
+  envelope: Envelope,
+  activityBounds: ActivityBounds,
+  agentMessageConsume: Parameters<typeof handleAgentMessagePublish>[4] | undefined,
+): Promise<GateResult> {
+  // This exported entrypoint can be called without the HTTP schema boundary.
+  // Refuse before reserving an envelope identity or mutating task lifecycle.
+  if (envelope.v !== PROTOCOL_VERSION) return refuse('protocol_version_unsupported');
+  return applyInboundGate(stores, deviceId, envelope, activityBounds, agentMessageConsume);
 }
 
 async function applyInboundGate(
