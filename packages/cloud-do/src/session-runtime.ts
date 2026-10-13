@@ -103,6 +103,8 @@ export class SessionRuntime {
   #initializing = false;
   #deferredSettlements: InvocationRow[] = [];
   #opened?: Promise<Harness>;
+  /** Pi 1.2: the cached Harness's Session failed and closed. The next open() replaces it from Storage. */
+  #sessionFailed = false;
   #recovery?: Promise<void>;
   #recovered = false;
   #config?: CloudSessionConfig;
@@ -187,15 +189,25 @@ export class SessionRuntime {
   }
 
   open(selected?: PlatformProfileId): Promise<Harness> {
-    if (!this.#opened) {
+    if (!this.#opened || this.#sessionFailed) {
+      // Replace a failed Session in this synchronous step: no caller sees a half-reset runtime.
+      this.#sessionFailed = false;
+      let openGuard: CloudOperationGuard | undefined;
+      const disposeOpenGuard = () => {
+        openGuard?.dispose();
+        if (this.#recoveryGuard === openGuard) this.#recoveryGuard = undefined;
+      };
       // Credential reads must finish before entering the bounded initialization gate.
       const initialized = prepareCloudGuard(this.env, selected).then(guard => {
+        openGuard = guard;
         this.#recoveryGuard = guard;
         this.#initializing = true;
         return this.state.blockConcurrencyWhile(async () => {
           this.ledger.ensureSchema();
           this.cloud.ensureSchema();
           this.#sessionSchema();
+          this.#dispatcher = undefined;
+          this.#bootstrapFailure = undefined;
           this.#config = this.#storedConfig();
           if (!this.#config && this.ledger.pending().length) this.#bootstrapFailure = 'CLOUD_TOOL_NOT_AVAILABLE';
           if (this.#config) {
@@ -259,20 +271,24 @@ export class SessionRuntime {
         });
       });
       // This continuation runs after the initialization input gate was released.
-      this.#opened = initialized.then(({ harness, replay }) => {
+      const opened: Promise<Harness> = initialized.then(({ harness, replay }) => {
         this.#flushSettlements();
-        this.#recovery = this.#recover(harness, replay).finally(() => {
-          this.#recoveryGuard?.dispose();
-          this.#recoveryGuard = undefined;
+        // A failed Session closes itself, Storage included, before `closed` settles. Until a caller reopens,
+        // every call on it rejects with SessionFailed and no model request is admitted.
+        void harness.closed.then(end => {
+          if (end.reason !== 'failed' || this.#opened !== opened) return;
+          this.#recovered = false;
+          this.#sessionFailed = true;
         });
+        this.#recovery = this.#recover(harness, replay).finally(disposeOpenGuard);
         void this.#recovery.catch(() => undefined);
         return harness;
       }, error => {
         this.#flushSettlements();
-        this.#recoveryGuard?.dispose();
-        this.#recoveryGuard = undefined;
+        disposeOpenGuard();
         throw error;
       });
+      this.#opened = opened;
     }
     return this.#opened;
   }
@@ -466,7 +482,7 @@ export class SessionRuntime {
       this.#repairing = false;
       guard?.dispose();
       previousGuard?.dispose();
-      this.#recoveryGuard = undefined;
+      if (this.#recoveryGuard === guard) this.#recoveryGuard = undefined;
       if (this.#active) this.#active.guard = undefined;
     }
   }
@@ -689,11 +705,14 @@ export class SessionRuntime {
       await this.#runInvocation(row, undefined, true).catch(() => undefined);
     }
     await this.#adjudicateRuns(harness);
+    // After a Session failure, an owner that already exited left its lease for repair. Its run is settled now.
+    if (this.#active && !this.#active.liveOwner) {
+      clearTimeout(this.#active.timer);
+      this.#active = undefined;
+    }
     await this.#backfillTurns(harness);
     await this.cloud.rearmAlarm({ busy: false, repairRetrying: false });
     this.#recovered = true;
-    this.#recoveryGuard?.dispose();
-    this.#recoveryGuard = undefined;
   }
 
   async #backfillTurns(harness: Harness): Promise<void> {
@@ -764,18 +783,18 @@ export class SessionRuntime {
     const result = this.#result(row);
     const error = result.error as { code: string; data?: unknown } | undefined;
     if (Object.hasOwn(result, 'modelView')) return { isError: result.ok === false,
-      content: [{ type: 'text', text: JSON.stringify(result.modelView) }] };
+      output: [{ type: 'text', text: JSON.stringify(result.modelView) }] };
     if (result.ok === false) {
       if (this.#dispatcher?.domainErrors?.includes(error!.code)) return { isError: true,
-        content: [{ type: 'text', text: JSON.stringify({ ok: false, error }) }] };
+        output: [{ type: 'text', text: JSON.stringify({ ok: false, error }) }] };
       return this.#errorResult(error!.code as CloudDoErrorCode);
     }
-    return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    return { output: [{ type: 'text', text: JSON.stringify(result) }] };
   }
 
   #errorResult(code: CloudDoErrorCode): ToolExecutionResult {
     const fixed = safeCloudError(new Error(typeof code === 'string' ? code : 'CLOUD_TOOL_FAILED')).code;
-    return { isError: true, content: [{ type: 'text', text: JSON.stringify({ ok: false, error: { code: fixed } }) }] };
+    return { isError: true, output: [{ type: 'text', text: JSON.stringify({ ok: false, error: { code: fixed } }) }] };
   }
 
   #toolErrorCode(error: unknown): CloudDoErrorCode {

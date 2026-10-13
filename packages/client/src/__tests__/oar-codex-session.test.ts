@@ -1,9 +1,12 @@
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { codexSession } from '../../vendor/oar/0804b91/runtimes/codex/session';
-import * as projection from '../../vendor/oar/0804b91/runtimes/codex/projection';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/0804b91/runtimes/codex/app-server-client';
-import { SessionNotFoundError } from '../../vendor/oar/0804b91/contracts/session-not-found-error';
+import { codexSession } from '../../vendor/oar/bb98cbc/runtimes/codex/session';
+import * as projection from '../../vendor/oar/bb98cbc/runtimes/codex/projection';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/bb98cbc/runtimes/codex/app-server-client';
+import { SessionNotFoundError } from '../../vendor/oar/bb98cbc/contracts/session-not-found-error';
+import { SessionUnavailableError } from '../../vendor/oar/bb98cbc/contracts/session-unavailable-error';
+import { UnsupportedOptionError } from '../../vendor/oar/bb98cbc/contracts/errors';
+import { inputImagesRefusal } from '../../vendor/oar/bb98cbc/shared/input-images';
 
 function fakeServer(openReply: Record<string, unknown> = {}) {
   let receive!: (line: string) => void;
@@ -266,6 +269,78 @@ describe('unconnected OAR Codex adapter', () => {
     expect(error).not.toBeInstanceOf(SessionNotFoundError);
     expect(error).toMatchObject({ message: `codex thread/resume failed: ${native.message}`, cause: { method: 'thread/resume', native } });
     await fake.child.exited;
+  });
+
+  it.each([
+    { message: 'session gone-thread is archived. Unarchive it first.', reason: 'archived' },
+    { message: 'thread gone-thread already has an active writer', reason: 'in_use' },
+  ])('rejects a kept but unopenable resume target with SessionUnavailableError: $reason', async ({ message, reason }) => {
+    const fake = fakeServer();
+    const write = vi.mocked(fake.child.write).getMockImplementation()!;
+    vi.mocked(fake.child.write).mockImplementation(line => {
+      const frame = JSON.parse(line);
+      if (frame.method === 'thread/resume') fake.frame({ id: frame.id, error: { code: -32600, message } });
+      else write(line);
+    });
+    const error = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home' }, resume: 'gone-thread',
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(SessionUnavailableError);
+    expect(error).not.toBeInstanceOf(SessionNotFoundError);
+    expect(error).toMatchObject({
+      name: 'SessionUnavailableError', sessionId: 'gone-thread', reason,
+      message: `codex thread/resume failed: ${message}`,
+      cause: { method: 'thread/resume', native: { code: -32600, message } },
+    });
+    expect(fake.child.kill).toHaveBeenCalledTimes(1);
+    await fake.child.exited;
+  });
+
+  it('leaves text-only prompt, steer and queue to codex under the upstream image gates', async () => {
+    expect(inputImagesRefusal({ images: true }, undefined)).toBeNull();
+    expect(inputImagesRefusal({ images: true }, [])).toBeNull();
+    const fake = fakeServer(); const session = await fake.open();
+    expect((await session.prompt('hello')).response.body.kind).toBe('accepted');
+    expect(fake.writes.find(frame => frame.method === 'turn/start')?.params).toMatchObject({ input: [{ type: 'text', text: 'hello' }] });
+    fake.frame({ method: 'turn/started', params: { threadId: 'thread-root', turn: { id: 'turn-root' } } });
+    expect((await session.steer('more')).response.body.kind).not.toBe('rejected');
+    expect(fake.writes.some(frame => frame.method === 'turn/steer')).toBe(true);
+    expect((await session.queue('later')).response.body.kind).toBe('accepted');
+    await session.dispose();
+  });
+
+  it('refuses a prompt whose image is not a supported type before any turn/start', async () => {
+    const fake = fakeServer(); const session = await fake.open();
+    const result = await session.prompt('look', { images: [{ path: '/workspace/notes.txt' }] });
+    expect(result.response.body).toEqual({ kind: 'rejected', code: 'unsupported', reason: 'not a png, jpeg, gif or webp image: /workspace/notes.txt' });
+    expect(fake.writes.some(frame => frame.method === 'turn/start')).toBe(false);
+    await session.dispose();
+  });
+
+  it('sends thread/name/set only for a given name, and not over a resumed thread\'s own name', async () => {
+    const unnamed = fakeServer(); const plain = await unnamed.open();
+    expect(unnamed.writes.map(frame => frame.method)).not.toContain('thread/name/set');
+    await plain.dispose();
+    const named = fakeServer();
+    const session = await codexSession(named.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home' }, name: 'host chat',
+    });
+    expect(named.writes.find(frame => frame.method === 'thread/name/set')?.params).toEqual({ threadId: 'thread-root', name: 'host chat' });
+    await session.dispose();
+    const kept = fakeServer({ thread: { id: 'thread-root', name: 'user title' } });
+    const resumed = await codexSession(kept.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home' }, resume: 'thread-root', name: 'host chat',
+    });
+    expect(kept.writes.map(frame => frame.method)).not.toContain('thread/name/set');
+    await resumed.dispose();
+  });
+
+  it.each(['  ', 'a\0b'])('refuses a blank or NUL name before spawning: %j', async name => {
+    const fake = fakeServer();
+    await expect(codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { HOME: '/home' }, name,
+    })).rejects.toBeInstanceOf(UnsupportedOptionError);
+    expect(fake.spawn).not.toHaveBeenCalled();
   });
 
   it('redacts a credential-named env value from retained records and the required consumer, not from native inputs', async () => {

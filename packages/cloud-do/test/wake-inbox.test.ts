@@ -1105,9 +1105,9 @@ describe('4e-2 native text handoff, transcript paging and legacy history', () =>
     const rows = await dump(name); expect(calls).toHaveLength(0);
     expect(entries(rows).filter(entry => entry.kind === 'byok.run-input')).toHaveLength(0);
     expect(rows.cloud_inbox).toMatchObject([{ state: 'running', inputDurable: 0, payloadJson: JSON.stringify({ text: 'native commit failed text' }) }]);
-    await code(name, 'context', { id: rows.cloud_executions![0]!.conversationId }, 'CLOUD_MODEL_REQUEST_FAILED');
-    const rejected = await rpc(name, 'transcript'); expect(rejected.status).toBe(502);
-    expect(await rejected.json()).toEqual({ error: { code: 'CLOUD_MODEL_REQUEST_FAILED', retryable: false } });
+    // Pi 1.2: the commit failure failed the Session. The next access reopens it from storage and serves reads again.
+    await json(name, 'context', { id: rows.cloud_executions![0]!.conversationId });
+    await json(name, 'transcript');
     await sql(name, 'DROP TRIGGER fixture_input_commit_fail'); await restart('alarm'); await json(name, 'ready');
     const page = await transcript(name);
     expect(page.runs[0]!.turns).toHaveLength(0); expect(page.runs[0]!.claimedSeqs).toEqual([item.seq]);
