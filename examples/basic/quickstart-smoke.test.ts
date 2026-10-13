@@ -7,7 +7,6 @@
 // ipc-smoke job covers the CLI on all three OSes.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,7 +15,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BotStubAdapter } from './goal-btw.test-support';
 
 const exampleDir = path.dirname(fileURLToPath(import.meta.url));
-const tsxCli = createRequire(import.meta.url).resolve('tsx/cli');
 // The README's daemon config uses this product id; `server.ts` defaults to it too.
 const PRODUCT_ID = 'byok-example-basic';
 // Every deadline is at most a tenth of the 50s default hold, so a dependence on
@@ -25,10 +23,13 @@ const DEADLINE_MS = 5_000;
 const START_DEADLINE_MS = 2_000;
 const OPEN = { phase: 'running', connection: 'open' } as const;
 
-/** Start `server.ts` the way `bun run dev` does and resolve its listening URL. */
+/** Start the unmodified `server.ts` with the example's tsx and resolve its listening URL. */
 function startExampleServer(): Promise<{ child: ChildProcess; url: string }> {
   // Only PORT is set (0 = ephemeral), so parallel CI runs never collide on 8787.
-  const child = spawn(process.execPath, [tsxCli, 'server.ts'], {
+  // tsx is loaded with --import rather than through its CLI wrapper: the wrapper
+  // re-sends a signal when the child does not confirm it within 30 ms, which
+  // kills a server that is shutting down gracefully (exit 143) on a loaded runner.
+  const child = spawn(process.execPath, ['--import', 'tsx', 'server.ts'], {
     cwd: exampleDir,
     env: { ...process.env, PORT: '0', BYOK_STORE: undefined, BYOK_EXAMPLE_PRODUCT_ID: undefined },
     stdio: ['ignore', 'pipe', 'pipe'],
