@@ -2,7 +2,7 @@ import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from './exec-runner';
-import { sanitizeServiceName, type ServiceDefinition, type ServiceInstallOptions, type ServiceLifecycle, type ServiceProgram, type ServiceStatusResult } from './service-types';
+import { sanitizeServiceName, type ServiceDefinition, type ServiceInstallOptions, type ServiceLifecycle, type ServiceProgram, type ServiceStatusResult, withServiceFlag } from './service-types';
 
 /** DI seam for tests — see `exec-runner.ts`'s `Runner` doc comment. */
 export interface SystemdDeps {
@@ -216,7 +216,7 @@ export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps
   }
 
   async function writeUnit(program: ServiceProgram): Promise<void> {
-    const unit = generateSystemdUnit({ name, displayName: def.displayName ?? def.name, program, logDir: def.logDir });
+    const unit = generateSystemdUnit({ name, displayName: def.displayName ?? def.name, program: withServiceFlag(program), logDir: def.logDir });
     await fs.mkdir(path.dirname(unitPath()), { recursive: true });
     await fs.mkdir(def.logDir, { recursive: true });
     await fs.writeFile(unitPath(), unit, 'utf8');

@@ -189,6 +189,18 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it('issue #392: the installed unit runs start with --service as its last argument', async () => {
+    const run = vi.fn<Runner>().mockResolvedValue(ok());
+    const fs = fakeFs();
+    const lifecycle = createSystemdLifecycle(
+      def({ program: { command: '/usr/bin/node', args: ['/opt/agent.js', 'start', '--config', '/etc/agent.json'] } }),
+      { run, fs, homedir: () => '/h' },
+    );
+    await lifecycle.install();
+    const written = fs.writeFile.mock.calls[0]?.[1] as string;
+    expect(written).toContain('ExecStart="/usr/bin/node" "/opt/agent.js" "start" "--config" "/etc/agent.json" "--service"\n');
+  });
+
   it('install() opts.program overrides the definition program for that call only', async () => {
     const run = vi.fn<Runner>().mockResolvedValue(ok());
     const fs = fakeFs();

@@ -57,7 +57,7 @@ Description=Your Product Name
 
 [Service]
 Type=simple
-ExecStart="/path/to/node" "/path/to/byok-agent.js" "start" "--config" "/absolute/path/to/config.json"
+ExecStart="/path/to/node" "/path/to/byok-agent.js" "start" "--config" "/absolute/path/to/config.json" "--service"
 WorkingDirectory=/home/you
 Restart=on-failure
 RestartSec=10
@@ -71,6 +71,13 @@ WantedBy=default.target
 - **`Restart=on-failure` + `RestartSec=10`** is the crash-restart mechanism,
   delegated entirely to systemd — the SDK never runs its own in-process
   supervisor.
+- **`--service`** (appended by the lifecycle) makes `byok-agent
+  start` capture your login shell's environment once (passwd shell, `-ilc`,
+  10 s / 1 MiB caps) before it loads its config, so `claude`/`codex` and rc
+  settings on your PATH reach the service. If the capture fails (the rc hangs, prints
+  more than 1 MiB or exits non-zero; the shell is not sh/bash/zsh/ksh/dash), the daemon starts with systemd's inherited
+  environment and `status`/`doctor` report `environment: unavailable
+  code=<code>`. Reinstall an existing service to pick the flag up.
 - Every `ExecStart=` token is double-quoted (with embedded quotes/backslashes
   escaped) unconditionally, so a config path containing spaces is never
   misparsed.

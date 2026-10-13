@@ -121,6 +121,24 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     expect(written).toContain('<string>/other/node</string>');
   });
 
+  it('issue #392: the installed plist runs start with --service as its last argument', async () => {
+    const run = vi.fn<Runner>().mockResolvedValue(ok());
+    const fs = fakeFs();
+    const lifecycle = createLaunchdLifecycle(
+      def({ program: { command: '/usr/bin/node', args: ['/opt/agent.js', 'start', '--config', '/etc/agent.json'] } }),
+      { run, fs, homedir: () => '/h', getuid: () => 501 },
+    );
+    await lifecycle.install();
+    const written = fs.writeFile.mock.calls[0]?.[1] as string;
+    expect(written).toContain(
+      '<string>start</string>\n    <string>--config</string>\n    <string>/etc/agent.json</string>\n    <string>--service</string>\n  </array>',
+    );
+    // Reinstalling with a program that already carries the marker never duplicates it.
+    await lifecycle.install({ program: { command: '/usr/bin/node', args: ['/opt/agent.js', 'start', '--service'] } });
+    const rewritten = fs.writeFile.mock.calls[1]?.[1] as string;
+    expect(rewritten.match(/<string>--service<\/string>/g)).toHaveLength(1);
+  });
+
   it('uninstall() bootouts (idempotent "not loaded") and removes the plist file', async () => {
     const run = vi.fn<Runner>().mockResolvedValue(fail(3, 'not loaded'));
     const fs = fakeFs();

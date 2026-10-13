@@ -192,7 +192,7 @@ To roll back operationally, remove `gitWorkspace` from the local configuration a
 | Device metadata projection | `<storeDir>/device.json` (0600), exactly `{deviceId, tenantId, devicePublicKey}` | Credential-blind CLI/status and diagnostics only. It is deterministically repaired from the OS authority and never authors enrollment or secret bytes. |
 | Pairing code | Server-side only, minted out of band by the SaaS's own auth/device-flow UI | Server mints it already bound to `{tenantId, productId}` (S1); single-use, ~10min TTL. `PairRequest` carries neither field, so a device can never choose or influence the tenant it lands in (`@byok-sdk/cloud` pairing authority, `docs/protocol.md` §6.1) |
 | Control-socket HMAC token | `<storeDir>/control.token` (0600) | Daemon (generates + holds) and any local process that can read it and speak the handshake (`packages/client/src/daemon/control-protocol.ts`) |
-| Audit log | `<storeDir>/audit.jsonl` (0600) | Daemon appends a **redacted** projection only — see below |
+| Audit log | `<storeDir>/audit.jsonl` (0600) | Daemon appends a **redacted** projection only — see below. `byok-agent start` stdout (a durable, unrotated file under launchd/systemd) follows the same rule: no model text, one sizes-and-counts line per turn (#395) |
 | The user's own runtime credentials (`~/.claude`, `~/.codex`, `~/.pi` auth state) | The user's home directory, owned entirely by the installed `claude`/`codex`/`pi` CLI | **The daemon never reads, proxies, or forwards these** — see the credential-isolation rule below and `docs/security-review-m4.md` for the empirical audit |
 | BYOK model-provider key | macOS Keychain or Windows Credential Manager, owned by `@byok-sdk/keys` | Only `@byok-sdk/keys` provider clients or the separate `byok-pi-provider-launcher` (or a host launcher executable built on `runPiProviderLauncher`) read it. Profile metadata may use a tenant-bound `TruthStore`, but truth bodies, hashes, labels, status, protocol, server, cloud provider code, and the client daemon never receive the value. The launcher keeps its explicit read-only SQLite profile composition and injects the key only into the Pi child environment; `auth_mode: none` never constructs a keychain backend |
 | The daemon's own ambient environment (`process.env` — may hold secrets: provider API keys, `AWS_SECRET_ACCESS_KEY`, `DATABASE_URL`, `GITHUB_TOKEN`, etc.) | Whatever process/container/service manager launched the daemon | **Inherited by every task child, as in OAR (ADR-037 D2/D3).** `daemon/environment.ts`'s `buildRuntimeEnv` removes only `CLAUDECODE` and the SDK's own `BYOK_*` names — see the environment paragraph below |
@@ -533,6 +533,19 @@ generated service definition.
 | Remote network / malicious SaaS | — | Reach service install/uninstall/start/stop at all — purely a local operator action |
 | Same-user local process | Install/uninstall/start/stop the service — equivalent to running the CLI directly; by design | — |
 | Other local user | — | Install into this user's launchd per-user domain or `systemd --user` namespace (both inherently per-uid) |
+
+**Login-shell environment (#392).** The launchd plist and systemd unit run
+`byok-agent start --service`, which runs the user's passwd login shell once
+per daemon start (`-i -l -c`, 10 s and 1 MiB caps, the shell's process group
+SIGKILLed on timeout) and replaces the daemon's `process.env` with the
+captured environment. This executes the user's interactive rc code at every
+service start — the same code a new terminal runs. Captured `BYOK_*` names
+are dropped and the daemon's own pre-capture `BYOK_*` values are restored, so
+rc files cannot set SDK control variables; task children still receive no
+`BYOK_*` at all. Only the source, a closed failure code and the shell's
+basename are recorded (`environment-resolved` in `audit.jsonl`, shown by
+`status`, `doctor` and the support bundle) — never variable names, values or
+paths. WinSW does not pass `--service`.
 
 One place the "same-user" framing itself shifts: a WinSW-installed Windows
 Service commonly runs under a distinct service account (e.g. `SYSTEM`), not

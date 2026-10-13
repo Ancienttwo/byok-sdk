@@ -2,7 +2,7 @@ import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { defaultRunner, runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from './exec-runner';
-import { sanitizeServiceName, type ServiceDefinition, type ServiceInstallOptions, type ServiceLifecycle, type ServiceProgram, type ServiceStatusResult } from './service-types';
+import { sanitizeServiceName, type ServiceDefinition, type ServiceInstallOptions, type ServiceLifecycle, type ServiceProgram, type ServiceStatusResult, withServiceFlag } from './service-types';
 
 /**
  * Genuine-failure text that must NEVER be reclassified as "job already
@@ -164,7 +164,7 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
   }
 
   async function writePlist(program: ServiceProgram): Promise<void> {
-    const xml = generateLaunchdPlist({ label, program, logDir: def.logDir });
+    const xml = generateLaunchdPlist({ label, program: withServiceFlag(program), logDir: def.logDir });
     await fs.mkdir(path.dirname(plistPath()), { recursive: true });
     await fs.mkdir(def.logDir, { recursive: true });
     await fs.writeFile(plistPath(), xml, 'utf8');

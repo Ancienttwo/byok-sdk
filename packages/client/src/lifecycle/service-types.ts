@@ -1,3 +1,5 @@
+import { SERVICE_FLAG } from './service-environment';
+
 /**
  * What the OS service manager should actually execute to run the daemon in
  * the background. Deliberately requires an explicit `command` (an absolute
@@ -20,10 +22,27 @@ export interface ServiceProgram {
    * untouched — `winsw.ts` emits one `<argument>` element per entry rather
    * than a single shell-quoted string specifically so a path containing
    * spaces never needs manual escaping (see that file's doc comment).
+   *
+   * Issue #392: the launchd and systemd lifecycles append `--service`
+   * ({@link withServiceFlag}) when they write the plist/unit, so the
+   * service's `byok-agent start` adopts the user's login-shell environment
+   * (`service-environment.ts`). WinSW does not.
    */
   args: string[];
   /** Working directory for the running service process. Each platform generator has its own documented default (see `launchd.ts`/`systemd.ts`/`winsw.ts`) when omitted. */
   cwd?: string;
+}
+
+/**
+ * The program a launchd plist or systemd unit actually runs: `program` with
+ * {@link SERVICE_FLAG} appended (once). Both service managers start the
+ * daemon with their own minimal environment, so `byok-agent start` captures
+ * the user's login-shell environment when it sees the flag — see
+ * `service-environment.ts`. WinSW never calls this.
+ */
+export function withServiceFlag(program: ServiceProgram): ServiceProgram {
+  if (program.args.includes(SERVICE_FLAG)) return program;
+  return { ...program, args: [...program.args, SERVICE_FLAG] };
 }
 
 export interface NodeAgentProgramOptions {

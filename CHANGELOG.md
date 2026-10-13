@@ -22,6 +22,21 @@
   The client TypeScript `lib` is raised to ES2024; the emit target stays es2022
   and the emitted declarations are byte-identical. See
   `docs/notes/2026-10-13-oar-0.59-upgrade.md`.
+- **Changed (client service)** — the launchd plist and systemd unit now run
+  `byok-agent start --service`: the daemon captures the user's login-shell
+  environment once (passwd shell, `-i -l -c`, 10 s / 1 MiB caps), replaces
+  `process.env` with it and keeps its own `BYOK_*` values; rc output outside
+  the nonce frame is ignored. A failed capture is a typed
+  `unavailable:<code>` and the inherited environment stays in effect.
+  `start` records an `environment-resolved` line in `audit.jsonl`; `status`,
+  `doctor` and the support bundle show it (source, closed code, shell
+  basename only). New exports: `applyLoginShellEnvironment`,
+  `serviceEnvironmentStatus`. WinSW is unchanged. Existing services pick this
+  up on reinstall (#392).
+- **Changed (client CLI)** — `byok-agent start` stdout no longer prints model
+  text: each turn's progress becomes at most one line of sizes and counts, and
+  completed/failed/cancelled/stale-approval text is redacted to a byte count
+  like the audit log. `tasks --follow` is unchanged (#395, partial).
 
 ## 0.26.1 / @byok-sdk/keys 0.11.1 (published, 2026-10-12)
 
