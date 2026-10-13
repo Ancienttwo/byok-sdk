@@ -226,8 +226,8 @@ export interface AdoptOwnedProcessTreeOptions {
   label: string;
   /** DI seam — defaults to `process.platform`, mirroring {@link OwnedProcessTreeOptions}. */
   platform?: NodeJS.Platform;
-  /** DI seam for the win32 job-object backstop — defaults to the lazily imported `./win32-job-object`. */
-  jobObject?: { assign(pid: number): Promise<void> };
+  /** DI seam for the win32 job-object backstop — defaults to the lazily imported `./win32-job-object`. `release()` ends the tree's job; {@link disposeOwnedProcessTree} calls it once the tree is proved gone. */
+  jobObject?: { assign(pid: number): Promise<{ release(): void }> };
   /** DI seam for the POSIX host-exit sweep — defaults to `process.kill`. */
   killFn?: KillFn;
   /** DI seam for the win32 host-exit sweep — defaults to `node:child_process`'s `spawnSync`. */
@@ -243,11 +243,30 @@ export interface AdoptOwnedProcessTreeOptions {
  * only when its bindings are actually resolved.
  */
 const defaultJobObject = {
-  async assign(pid: number): Promise<void> {
+  async assign(pid: number): Promise<{ release(): void }> {
     const { assignOwnedProcessToJob } = await import('./win32-job-object');
-    await assignOwnedProcessToJob(pid);
+    return assignOwnedProcessToJob(pid);
   },
 };
+
+/**
+ * win32 only: each adopted tree's own kill-on-close job, held until
+ * {@link disposeOwnedProcessTree} proves that tree gone. Keyed by the child,
+ * like {@link ownedGroupRecords}, so every client's disposal of its own child
+ * is what releases its job. A job never released here stays open until the
+ * daemon exits, and the kernel then kills whatever is left in it.
+ */
+const treeJobs = new WeakMap<ChildProcess, { release(): void }>();
+/** Children whose disposal already proved the tree gone, for an assignment that settles after that proof. */
+const provenGone = new WeakSet<ChildProcess>();
+
+function releaseTreeJob(child: ChildProcess): void {
+  provenGone.add(child);
+  const job = treeJobs.get(child);
+  if (job === undefined) return;
+  treeJobs.delete(child);
+  job.release();
+}
 
 /**
  * Take ownership of a just-spawned runtime tree, beyond what disposal covers.
@@ -258,10 +277,10 @@ const defaultJobObject = {
  * 1. Every platform: the tree joins a registry a once-installed, synchronous
  *    `process` `exit` listener sweeps. This covers an ordinary daemon exit —
  *    the case where disposal simply never ran.
- * 2. win32 only: the root is assigned to the daemon-wide
- *    `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` job (see `./win32-job-object.ts`).
- *    That one is the kernel's, so it also covers the daemon deaths no listener
- *    can observe.
+ * 2. win32 only: the root is assigned to a `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
+ *    job of its own (see `./win32-job-object.ts`), held until disposal proves
+ *    the tree gone. That one is the kernel's, so it also covers the daemon
+ *    deaths no listener can observe: they close every job handle at once.
  *
  * Fail closed: a rejected assignment propagates, and the caller must terminate
  * the child and refuse to publish a run handle rather than run a tree nothing
@@ -304,7 +323,11 @@ export async function adoptOwnedProcessTree(options: AdoptOwnedProcessTreeOption
     await recordOwnedGroup(options.child, pid, options.label, options.readProcessTableFn ?? readProcessTable);
     return;
   }
-  await (options.jobObject ?? defaultJobObject).assign(pid);
+  const job = await (options.jobObject ?? defaultJobObject).assign(pid);
+  // A disposal that finished while the assignment was in flight already
+  // proved this tree gone, so its job holds nothing that may still live.
+  if (provenGone.has(options.child)) job.release();
+  else treeJobs.set(options.child, job);
 }
 
 async function recordOwnedGroup(child: ChildProcess, pid: number, label: string, read: () => ProcessTable): Promise<void> {
@@ -719,7 +742,9 @@ export async function requestOwnedProcessTreeTermination(options: OwnedProcessTr
  * and a daemon SIGKILL/OOM on POSIX, where no in-process listener can run and
  * there is no job object to fall back on — that case is ended by the next
  * daemon start from the record adoption wrote ({@link reapOwnedProcessGroups}),
- * not earlier. Success here is that record's disposal receipt.
+ * not earlier. Success here is that record's disposal receipt, and on win32
+ * the release of the tree's own kill-on-close job; a failure keeps that job
+ * open until the daemon exits.
  */
 export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions): Promise<void> {
   const pid = positivePid(options.child, options.label);
@@ -776,6 +801,9 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
         reason: `${options.label} runtime root did not emit close after its process tree quiesced`,
       });
     }
+    // Proved gone: closing the tree's job can no longer end anything live.
+    // Every failure above leaves it open for the daemon-exit backstop.
+    releaseTreeJob(options.child);
     return;
   }
 

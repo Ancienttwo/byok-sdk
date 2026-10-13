@@ -6,11 +6,23 @@
  * never re-parents orphans, so descendants of a daemon that died (crash,
  * SIGKILL, OOM) are unreachable to any later `taskkill /T`. A Job Object with
  * `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` moves that guarantee into the kernel —
- * ONE job is created per daemon process, every owned runtime root is assigned
- * to it right after spawn, and the job handle is deliberately never closed.
- * When the daemon's last handle to it goes away — for ANY reason, including a
- * kill the daemon cannot observe — Windows terminates every process in the
- * job.
+ * ONE job is created per owned tree, its root is assigned to it right after
+ * spawn, and the daemon keeps the job handle open until disposal has proved
+ * that tree gone. When the daemon's last handle to a job goes away — for ANY
+ * reason, including a daemon death the daemon cannot observe, which closes
+ * every handle it holds at once — Windows terminates every process in that
+ * job, so every live owned tree dies with the daemon.
+ *
+ * Why one job per tree and not one per daemon: an EMPTY job becomes, at its
+ * first assignment, a nested child of whatever job its first process is in at
+ * that moment. A Node or Bun runtime root assigns ITSELF to a fresh
+ * kill-on-close job of its own at its first spawn (libuv's global job), and
+ * the assignment here can land after that, because it follows an asynchronous
+ * module load. A shared daemon job could therefore nest under one root's
+ * private job, and every later assignment then fails with
+ * ERROR_INVALID_PARAMETER (87) once that root exits. A fresh job per tree can
+ * only ever nest under its OWN root's chain, which accepts a live root in
+ * every state.
  *
  * Fail-closed, no degraded path. `koffi` is an `optionalDependencies` entry of
  * this package precisely because npm has no other per-platform install
@@ -167,16 +179,6 @@ export async function loadBindings(): Promise<JobObjectBindings> {
   return cachedBindings;
 }
 
-/**
- * The daemon-wide job, keyed by the binding table that created it.
- *
- * Keyed rather than a bare module variable for one reason that is not test
- * convenience: the job's lifetime is the lifetime of the handles the table
- * owns, so a different table is a different job by construction. In
- * production exactly one table is ever cached, hence exactly one job.
- */
-const jobsByBindings = new WeakMap<JobObjectBindings, Win32Handle>();
-
 /** Build the extended-limit payload that makes the job kill-on-close. */
 function killOnCloseLimitInformation(): Buffer {
   const information = Buffer.alloc(JOBOBJECT_EXTENDED_LIMIT_SIZE);
@@ -185,23 +187,15 @@ function killOnCloseLimitInformation(): Buffer {
 }
 
 /**
- * Get (or create, once) the daemon-wide kill-on-close job.
- *
- * The returned handle is never closed on purpose: closing it is exactly what
- * terminates the tree, so it stays open for the daemon's whole lifetime and is
- * released by the kernel when the process object goes away. A job whose limit
- * could not be set is closed and NOT cached — an unlimited job would be a
- * silent downgrade to no backstop at all.
+ * Create one tree's kill-on-close job. A job whose limit could not be set is
+ * closed — an unlimited job would be a silent downgrade to no backstop at all.
  */
-function daemonJob(bindings: JobObjectBindings): Win32Handle {
-  const existing = jobsByBindings.get(bindings);
-  if (existing !== undefined) return existing;
-
+function createTreeJob(bindings: JobObjectBindings): Win32Handle {
   const job = bindings.createJobObjectW(null, null);
   if (isNullHandle(job)) {
     throw new Win32JobObjectFailure({
       step: 'CreateJobObjectW',
-      reason: 'win32 runtime process ownership could not create the daemon kill-on-close job object',
+      reason: 'win32 runtime process ownership could not create the tree kill-on-close job object',
       win32Code: bindings.getLastError(),
     });
   }
@@ -212,13 +206,21 @@ function daemonJob(bindings: JobObjectBindings): Win32Handle {
     bindings.closeHandle(job);
     throw new Win32JobObjectFailure({
       step: 'SetInformationJobObject',
-      reason: 'win32 runtime process ownership could not make the daemon job object kill-on-close',
+      reason: 'win32 runtime process ownership could not make the tree job object kill-on-close',
       win32Code,
     });
   }
-
-  jobsByBindings.set(bindings, job);
   return job;
+}
+
+/**
+ * One tree's job, owned by the daemon. `release()` closes the job handle,
+ * which TERMINATES whatever is still in the job: call it only once disposal
+ * has proved the tree gone. Never released, it is closed by the kernel when
+ * the daemon exits — the backstop itself.
+ */
+export interface OwnedTreeJob {
+  release(): void;
 }
 
 export interface AssignOwnedProcessToJobOptions {
@@ -227,35 +229,49 @@ export interface AssignOwnedProcessToJobOptions {
 }
 
 /**
- * Assign one owned runtime root to the daemon-wide kill-on-close job.
+ * Create a kill-on-close job for one owned runtime tree and assign its root.
  *
  * Every failure throws {@link Win32JobObjectFailure} naming the step and
- * carrying the Win32 error code. The process handle is opened solely to make
- * the assignment and is closed in a `finally`, including on the failure path —
- * the JOB holds the process afterwards, not this handle.
+ * carrying the Win32 error code; the job it created is closed first, which is
+ * harmless because no process was assigned to it. The process handle is
+ * opened solely to make the assignment and is closed in a `finally` — the JOB
+ * holds the process afterwards, not this handle.
  */
-export async function assignOwnedProcessToJob(pid: number, options?: AssignOwnedProcessToJobOptions): Promise<void> {
+export async function assignOwnedProcessToJob(pid: number, options?: AssignOwnedProcessToJobOptions): Promise<OwnedTreeJob> {
   const bindings = options?.bindings ?? (await loadBindings());
-  const job = daemonJob(bindings);
+  const job = createTreeJob(bindings);
 
   const processHandle = bindings.openProcess(OWNED_PROCESS_ACCESS, 0, pid);
   if (isNullHandle(processHandle)) {
+    const win32Code = bindings.getLastError();
+    bindings.closeHandle(job);
     throw new Win32JobObjectFailure({
       step: 'OpenProcess',
       reason: `win32 runtime process ownership could not open process ${pid} for job assignment`,
-      win32Code: bindings.getLastError(),
+      win32Code,
     });
   }
 
   try {
     if (bindings.assignProcessToJobObject(job, processHandle) === 0) {
+      const win32Code = bindings.getLastError();
+      bindings.closeHandle(job);
       throw new Win32JobObjectFailure({
         step: 'AssignProcessToJobObject',
-        reason: `win32 runtime process ownership could not assign process ${pid} to the daemon kill-on-close job object`,
-        win32Code: bindings.getLastError(),
+        reason: `win32 runtime process ownership could not assign process ${pid} to its tree kill-on-close job object`,
+        win32Code,
       });
     }
   } finally {
     bindings.closeHandle(processHandle);
   }
+
+  let released = false;
+  return {
+    release(): void {
+      if (released) return;
+      released = true;
+      bindings.closeHandle(job);
+    },
+  };
 }

@@ -9,7 +9,7 @@ const MAX_BUFFERED_BYTES = 4 * 1024 * 1024;
 interface SpawnDependencies {
   spawnFn?: (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
   platform?: NodeJS.Platform;
-  jobObject?: { assign(pid: number): Promise<void> };
+  jobObject?: { assign(pid: number): Promise<{ release(): void }> };
 }
 
 /** JSONL transport over the existing BYOK owned-tree adoption/disposal authority. */
