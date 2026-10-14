@@ -169,3 +169,38 @@ it, and a changed declaration remained refused. API surface, version authority
 and release graph passed. No full local suites were run under the patrol limit.
 Hosted Linux/Windows packed-install verification remains required on the
 published rebased tip.
+
+## Latest-main integration and unrelated CI race
+
+At `e3cc1a0b`, both push/PR dataplane, Ubuntu pack, Windows pack and packed
+Postgres migration jobs passed. Both baseline jobs and the push Node 26 job
+passed. The PR Node 26 job failed the existing cloud-do delivery assertion:
+expected `CLOUD_EXECUTION_TIMEOUT`, received `CLOUD_TOOL_TIMEOUT`.
+Cloud-do source and that test are byte-identical to main. The first invocation
+deadline guard hardcodes TOOL after taking the minimum of tool/execution
+deadlines, whereas later guards and the ledger classify the execution deadline.
+Its first-fatal-wins recording can race the lease callback. This is a pre-existing
+issue, not a claim that #398 fixed timeout behavior. Its unchanged targeted
+file passed all seven tests locally. No out-of-scope fix allowance was used.
+
+GitHub refused the same-SHA job rerun while its parent workflow had queued
+macOS jobs. This does not prove a persistent failure or a successful retry.
+The latest four completed main workflows were green. The accidental package
+test invocation (its composite script appended the filter to the second command)
+was interrupted and is not acceptance evidence; the seven-test result came
+from direct single-file Vitest execution.
+
+Main then advanced to `76e59b21` (#454), adding assertions in four client test
+files. The feature was rebased again. A complete-tree diff excluding exactly
+those four upstream test files was empty; no production or script bytes changed.
+All 212 tests in those four files passed with one Vitest worker. The earlier
+entry/pack repair evidence remains bound to identical product and gate inputs;
+new-tip hosted CI is required before reporting green. Test assertions, policies,
+budgets and goldens were not relaxed.
+
+Patrol concurrently used GitHub update-branch, creating `01301220` with main
+`76e59b21`. The expected-head lease refused to overwrite it. After fetching,
+only the unpublished evidence commit was rebased onto that remote tip, preserving
+the owner's merge. Its product tree matches the locally verified rebased tree.
+Subsequent publication uses an ordinary fast-forward push. No PR merge was
+performed by this worker.
