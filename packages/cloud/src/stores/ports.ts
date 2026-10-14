@@ -258,6 +258,17 @@ export const TASK_ATTEMPT_STATUSES = [
 ] as const;
 export type TaskAttemptStatus = (typeof TASK_ATTEMPT_STATUSES)[number];
 
+/** Attempts that can still be in flight, provided no host cancellation is recorded. */
+export const TASK_ATTEMPT_ACTIVE_STATUSES = ['offered', 'claimed', 'running'] as const satisfies readonly TaskAttemptStatus[];
+
+/** One store aggregate; host cancellation is counted separately because it outranks status. */
+export interface TaskAttemptCounts {
+  /** Every status is present. Rows carrying a cancellation marker are excluded. */
+  readonly byStatus: Readonly<Record<TaskAttemptStatus, number>>;
+  /** Rows carrying a host cancellation marker, regardless of their status. */
+  readonly cancellationRequested: number;
+}
+
 /** The durable first-message reservation and, once present, its terminal disposition. */
 export interface AgentMessageAdmission {
   readonly messageId: string;
@@ -346,6 +357,8 @@ export interface TaskAttemptListQuery {
    * not a lookup.
    */
   readonly cursor?: string;
+  /** Only TASK_ATTEMPT_ACTIVE_STATUSES without a cancellation marker; the same keyset order applies. */
+  readonly active?: true;
 }
 
 export interface TaskAttemptPage {
@@ -434,6 +447,8 @@ export interface TaskAttemptStore {
    * taskId LIMIT limit + 1`), never the whole tenant filtered in memory.
    */
   list(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
+  /** One aggregate over this tenant's stored rows, never an application-side page walk. */
+  countByStatus(tenant: TenantId): Promise<TaskAttemptCounts>;
   /**
    * First claim wins the ownership; a later claim by the same device is
    * idempotent. No-op (returns `undefined`) for a task this tenant never

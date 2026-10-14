@@ -1273,7 +1273,7 @@ export declare class PostgresRequestReceiptStore implements RequestReceiptStore 
  * `claim` and `recordStatus` on a task this tenant never offered write nothing
  * and return `undefined`.
  */
-import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '@byok-sdk/cloud';
+import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptCounts, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import type { Pool } from 'pg';
@@ -1338,6 +1338,7 @@ export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
     get(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
     getMany(tenant: TenantId, taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
     list(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
+    countByStatus(tenant: TenantId): Promise<TaskAttemptCounts>;
     claim(tenant: TenantId, input: {
         readonly taskId: string;
         readonly deviceId: string;

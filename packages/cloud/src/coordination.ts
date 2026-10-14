@@ -60,12 +60,15 @@ export function assertBoardLabels(
  * behind a plausible page. Enforced in the STORE rather than only at the
  * façade, because the port is reachable directly by a host composition.
  */
-export function assertTaskAttemptListLimit(limit: number): void {
+export function assertTaskAttemptListLimit(limit: number, active?: true): void {
   if (!Number.isSafeInteger(limit) || limit <= 0) {
     throw new ByokCloudError(
       'coordination_input_invalid',
       `Task attempt list limit must be a positive integer; received ${String(limit)}.`,
     );
+  }
+  if (active !== undefined && active !== true) {
+    throw new ByokCloudError('coordination_input_invalid', 'Task attempt active filter must be true or absent.');
   }
 }
 
