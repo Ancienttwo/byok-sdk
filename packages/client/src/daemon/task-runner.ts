@@ -42,6 +42,7 @@ import {
   type TaskOfferPreparedPayload,
   type TaskOfferWithToolsetsPayload,
   type InputPreparationOfferBinding,
+  requiredReceiverCapabilities,
 } from '@byok-sdk/protocol';
 import {
   SteerUnsupportedError,
@@ -4520,14 +4521,9 @@ export class TaskRunner {
    */
   private sendApprovalResolved(taskId: string, approvalId: string, decision: ApprovalDecision): void {
     const capabilities = this.deps.getServerCapabilities?.() ?? [];
-    if (!capabilities.includes('approval_resolved')) return;
-    this.deps.send(
-      createEnvelope(
-        'task.approval_resolved',
-        { approvalId, decision, resolvedBy: 'local', at: new Date().toISOString() },
-        { taskId },
-      ),
-    );
+    const payload = { approvalId, decision, resolvedBy: 'local', at: new Date().toISOString() } as const;
+    if (!requiredReceiverCapabilities('task.approval_resolved', payload).every((flag) => capabilities.includes(flag))) return;
+    this.deps.send(createEnvelope('task.approval_resolved', payload, { taskId }));
   }
 
   /**
@@ -5080,7 +5076,8 @@ export class TaskRunner {
    * "no capabilities", the fail-closed reading.
    */
   private hasResultDocumentCapability(): boolean {
-    return (this.deps.getServerCapabilities?.() ?? []).includes('result-document');
+    const capabilities = this.deps.getServerCapabilities?.() ?? [];
+    return requiredReceiverCapabilities('task.complete', { document: {} }).every((flag) => capabilities.includes(flag));
   }
 
   private async observeGit(active: ActiveTask, phase: GitWorkspacePhase): Promise<void> {

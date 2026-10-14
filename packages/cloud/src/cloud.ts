@@ -1,7 +1,7 @@
 import { readTaskAgentMessage, type TaskAgentMessage } from './task-agent-message';
 import { RecurringExecutionInputSchema, type RecurringExecutionInput } from './recurring';
 import { uuidFromSha256, taskOfferMessageId } from './offer-identity';
-import { HarnessIdSchema } from '@byok-sdk/protocol';
+import { HarnessIdSchema, requiredReceiverCapabilities } from '@byok-sdk/protocol';
 /**
  * `createByokCloud` — the hosted device surface, assembled.
  *
@@ -65,20 +65,8 @@ import {
   BYOK_SKILL_PACK_FILE_ROUTE,
   BYOK_SKILL_PACKS_PATH,
   BYOK_TOKEN_PATH,
-  AGENT_CONTENT_ARTIFACT_READ_CAPABILITY,
-  AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY,
-  AGENT_CONTENT_WORKSPACE_READ_CAPABILITY,
   AGENT_HOME_PROJECTION_CAPABILITY,
-  AGENT_HOME_READERS_CAPABILITY,
-  AGENT_INPUT_PREPARATION_CAPABILITY,
-  PROVIDER_PROVISIONING_CAPABILITY,
-  AGENT_MEMORY_INTENT_CAPABILITY,
-  AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
-  AGENT_EGRESS_POLICY_CAPABILITY,
-  AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
-  AGENT_MESSAGE_EGRESS_CAPABILITY,
   STRICT_AGENT_ONLY_CAPABILITY,
-  TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
@@ -1181,7 +1169,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     if (selection.harnessId !== undefined) {
       HarnessIdSchema.parse(selection.harnessId);
       if (selection.runtime !== undefined || selection.dispatchSelection !== undefined) throw new ByokCloudError('coordination_input_invalid', 'harnessId conflicts with built-in runtime selection');
-      await assertAgentCapabilities(tenant, deviceId, ['custom-harness']);
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities(proposed.type, proposed.payload));
       const device = await options.cloud.devices.get(tenant, deviceId);
       if (!device?.harnesses?.some(harness => harness.id === selection.harnessId)) throw new ByokCloudError('coordination_input_invalid', 'requested custom harness is not advertised by this device');
     }
@@ -1324,17 +1312,6 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         'agent_capability_missing',
         `Device ${deviceId} advertises strict-agent-only; refusing legacy offer before mailbox append.`,
       );
-    }
-  }
-
-  function contentReadCapability(surface: AgentContentReadPayload['surface']): string {
-    switch (surface) {
-      case 'workspace':
-        return AGENT_CONTENT_WORKSPACE_READ_CAPABILITY;
-      case 'transcript':
-        return AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY;
-      case 'artifact':
-        return AGENT_CONTENT_ARTIFACT_READ_CAPABILITY;
     }
   }
 
@@ -1984,15 +1961,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   async function enqueueFreshAgentEgressOffer(
     tenant: TenantId, deviceId: string, input: AgentEgressFreshSessionDispatchInput,
   ): Promise<EnqueuedOffer> {
-    await assertAgentCapabilities(tenant, deviceId, [
-      AGENT_HOME_CONTRACT_CAPABILITY,
-      AGENT_EGRESS_POLICY_CAPABILITY,
-      AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
-      AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
-      ...(input.payload.messageEgress === undefined ? [] : [AGENT_MESSAGE_EGRESS_CAPABILITY]),
-      ...(input.payload.terminalProjection === undefined ? [] : [TERMINAL_PROJECTION_SELECTION_CAPABILITY]),
-      ...(input.payload.homeAccess === undefined ? [] : [AGENT_HOME_READERS_CAPABILITY]),
-    ]);
+    await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_for_agent_with_egress_fresh', input.payload));
     const payload = TaskOfferForAgentWithEgressFreshPayloadSchema.parse(input.payload);
     const enqueued = await enqueueTaskEnvelope(
       tenant,
@@ -2030,11 +1999,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     },
 
     async enqueueAgentOffer(tenant, deviceId, input) {
-      await assertAgentCapabilities(tenant, deviceId, [
-        AGENT_HOME_CONTRACT_CAPABILITY,
-        ...(input.payload.terminalProjection === undefined ? [] : [TERMINAL_PROJECTION_SELECTION_CAPABILITY]),
-        ...(input.payload.homeAccess === undefined ? [] : [AGENT_HOME_READERS_CAPABILITY]),
-      ]);
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_for_agent', input.payload));
       // Parse the strict control payload before reserving a mailbox sequence.
       // A malformed/oversized AgentRef therefore cannot leave a durable
       // delivery row behind.
@@ -2045,16 +2010,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     },
 
     async enqueuePreparedOffer(tenant, deviceId, input) {
-      await assertAgentCapabilities(tenant, deviceId, [
-        AGENT_HOME_CONTRACT_CAPABILITY,
-        AGENT_INPUT_PREPARATION_CAPABILITY,
-        AGENT_EGRESS_POLICY_CAPABILITY,
-        AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
-        AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
-        ...(input.payload.messageEgress === undefined ? [] : [AGENT_MESSAGE_EGRESS_CAPABILITY]),
-        ...(input.payload.terminalProjection === undefined ? [] : [TERMINAL_PROJECTION_SELECTION_CAPABILITY]),
-        ...(input.payload.homeAccess === undefined ? [] : [AGENT_HOME_READERS_CAPABILITY]),
-      ]);
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_prepared', input.payload));
       // Parsed before a mailbox sequence is reserved, exactly as the strict
       // Agent offer above is: a malformed preparation reference must not leave
       // a durable delivery row behind. `.strict()` also means a caller that
@@ -2068,14 +2024,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     },
 
     async enqueueAgentEgressOffer(tenant, deviceId, input) {
-      await assertAgentCapabilities(tenant, deviceId, [
-        AGENT_HOME_CONTRACT_CAPABILITY,
-        AGENT_EGRESS_POLICY_CAPABILITY,
-        AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
-        ...(input.payload.messageEgress === undefined ? [] : [AGENT_MESSAGE_EGRESS_CAPABILITY]),
-        ...(input.payload.terminalProjection === undefined ? [] : [TERMINAL_PROJECTION_SELECTION_CAPABILITY]),
-        ...(input.payload.homeAccess === undefined ? [] : [AGENT_HOME_READERS_CAPABILITY]),
-      ]);
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_for_agent_with_egress', input.payload));
       const payload = TaskOfferForAgentWithEgressPayloadSchema.parse(input.payload);
       const enqueued = await enqueueTaskEnvelope(
         tenant,
@@ -2098,12 +2047,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     async enqueueAgentContentRead(tenant, deviceId, input) {
       const payload = AgentContentReadPayloadSchema.parse(input.payload);
-      await assertAgentCapabilities(tenant, deviceId, [
-        AGENT_HOME_CONTRACT_CAPABILITY,
-        AGENT_EGRESS_POLICY_CAPABILITY,
-        AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
-        contentReadCapability(payload.surface),
-      ]);
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('agent.content.read', payload));
       const stores = tenantStoresFor(controlPlane(tenant), root);
       const persisted = await stores.receipts.record({
         key: agentReliabilityKey('agent-content-request', deviceId, payload.agentRef, payload.requestId),
@@ -2142,10 +2086,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       // or receipt/mailbox allocation. A malformed control can therefore never
       // leave an immutable desired fact or delivery row behind.
       const payload = AgentHomeProjectionPayloadSchema.parse(input);
-      await assertAgentCapabilities(tenant, deviceId, [
-        AGENT_HOME_CONTRACT_CAPABILITY,
-        AGENT_HOME_PROJECTION_CAPABILITY,
-      ]);
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('agent.home.projection', payload));
       const stores = tenantStoresFor(controlPlane(tenant), root);
       const requestBody = JSON.stringify(payload);
       const persisted = await stores.receipts.record({
@@ -2201,10 +2142,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       // any receipt/mailbox allocation, so a malformed request can never leave
       // an immutable desired fact or a delivery row behind.
       const payload = AgentInputPreparationPayloadSchema.parse(input);
-      await assertAgentCapabilities(tenant, deviceId, [
-        AGENT_HOME_CONTRACT_CAPABILITY,
-        AGENT_INPUT_PREPARATION_CAPABILITY,
-      ]);
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('agent.input.preparation', payload));
       const stores = tenantStoresFor(controlPlane(tenant), root);
       const requestBody = JSON.stringify(payload);
       const persisted = await stores.receipts.record({
@@ -2260,7 +2198,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       // identity) is a validation failure here, before any admission read or
       // mailbox allocation, never a stripped-and-sent notice.
       const payload = ProviderProvisioningAvailablePayloadSchema.parse(input);
-      await assertAgentCapabilities(tenant, deviceId, [PROVIDER_PROVISIONING_CAPABILITY]);
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('provider.provisioning.available', payload));
       const messageId = uuidFromSha256(
         await options.crypto.sha256(
           new TextEncoder().encode(
@@ -2293,7 +2231,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       // revision, content) is a validation failure here, before any admission
       // read or mailbox allocation, never a stripped-and-sent notice.
       const payload = AgentMemoryIntentAvailablePayloadSchema.parse(input);
-      await assertAgentCapabilities(tenant, deviceId, [AGENT_MEMORY_INTENT_CAPABILITY]);
+      await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('agent.memory.intent.available', payload));
       const messageId = uuidFromSha256(
         await options.crypto.sha256(
           new TextEncoder().encode(
