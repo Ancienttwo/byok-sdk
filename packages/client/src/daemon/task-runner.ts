@@ -912,7 +912,7 @@ interface OfferPhaseContext {
 
 /** The front-phase values that `prepareOfferRuntime` reads. */
 interface OfferRuntimeInput {
-  readonly scratch: ExecutionScratch;
+  readonly acquireScratch: () => Promise<ExecutionScratch>;
   readonly payload: AcceptedOfferPayload;
   readonly agentRef: AgentRef | undefined;
   readonly preparation: InputPreparationOfferBinding | undefined;
@@ -2196,15 +2196,17 @@ export class TaskRunner {
       const offerLimits = this.admitOfferLimits(phase, payload);
       if (offerLimits === undefined) return;
       const { requiredToolsets, resolvedMcp } = offerLimits;
-      const scratch = await this.deps.scratchRoot.create();
-      executionScratch = scratch;
       const runtime = await this.prepareOfferRuntime(phase, {
-        scratch,
+        acquireScratch: async () => {
+          const scratch = await this.deps.scratchRoot.create();
+          executionScratch = scratch;
+          return scratch;
+        },
         payload, agentRef, preparation, preparedMemorySelected, messageRequirement, terminalProjection,
         readerAttempt, requiredToolsets, resolvedMcp, blobAbort,
       });
       if (runtime === undefined) return;
-      const { offered, pick, env, mcpEnv, mcpToolsetTools, prepared } = runtime;
+      const { scratch, offered, pick, env, mcpEnv, mcpToolsetTools, prepared } = runtime;
       let taskMcpServers = runtime.taskMcpServers;
 
       if (agentRef !== undefined) {
@@ -3266,11 +3268,16 @@ export class TaskRunner {
       decline('server does not support the selected custom harness identity', false);
       return undefined;
     }
+    // Scratch-free declines do not own an Execution resource or contend on
+    // its store gate. Acquire it at the first consumer; handleOffer retains
+    // ownership across this await and releases it on every pre-start exit.
+    const scratch = await input.acquireScratch();
+    if (admissionWithdrawn()) return undefined;
     // The environment EVERY child process of this task receives: the
     // daemon's own, minus the hard deny (`./environment.ts`). Computed here,
     // before admission, so the admission-time MCP probes below see exactly
     // what the runtime path sees. One computation, both phases.
-    const env = { ...buildRuntimeEnv({ ambient: process.env }), ...input.scratch.env };
+    const env = { ...buildRuntimeEnv({ ambient: process.env }), ...scratch.env };
     const mcpEnv = pick.descriptor.id === 'pi' ? projectPiMcpEnvironment(env) : env;
     if (resolvedMcp?.ok && agentRef !== undefined && this.deps.prepareHostTaskContext) {
       await this.deps.prepareHostTaskContext(taskId, blobAbort.signal);
@@ -3387,7 +3394,7 @@ export class TaskRunner {
       decline(prepared.reason, prepared.retryable);
       return undefined;
     }
-    return { offered, pick, env, mcpEnv, taskMcpServers, mcpToolsetTools, prepared };
+    return { scratch, offered, pick, env, mcpEnv, taskMcpServers, mcpToolsetTools, prepared };
   }
 
   private withAgentMessageMcp(
