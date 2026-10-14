@@ -59,7 +59,7 @@ describe('additive-minor: task.complete.document projection', () => {
 
   it('projects payload.document verbatim into TaskResult.document', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
-    const handle = await instance.dispatch({ instruction: 'produce a structured result' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'produce a structured result' });
     await claimAndStart(instance, daemon, handle);
 
     const document = { kind: 'invoice', lines: [{ sku: 'a', qty: 2 }], total: 42.5, note: null, nested: { deep: [1, 2] } };
@@ -73,7 +73,7 @@ describe('additive-minor: task.complete.document projection', () => {
 
   it('projects payload.finalMessage into TaskResult.finalMessage, apart from the joined summary (#322)', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
-    const handle = await instance.dispatch({ instruction: 'reply with exactly: CONSOLIDATED' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'reply with exactly: CONSOLIDATED' });
     await claimAndStart(instance, daemon, handle);
 
     await daemon.send(createEnvelope('task.complete', {
@@ -94,7 +94,7 @@ describe('additive-minor: task.complete.document projection', () => {
 
   it('projects a non-object JSON root unchanged — the channel is schema-neutral', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
-    const handle = await instance.dispatch({ instruction: 'produce an array' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'produce an array' });
     await claimAndStart(instance, daemon, handle);
 
     await daemon.send(
@@ -107,7 +107,7 @@ describe('additive-minor: task.complete.document projection', () => {
 
   it('leaves TaskResult.document absent when the daemon sends no document (an old daemon, or one with no extractor configured) — byte-identical to the pre-change result', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
-    const handle = await instance.dispatch({ instruction: 'no structured result' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'no structured result' });
     await claimAndStart(instance, daemon, handle);
 
     await daemon.send(createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess_1' }, { taskId: handle.taskId }));
@@ -123,7 +123,7 @@ describe('additive-minor: task.complete.document projection', () => {
 
   it('never attaches a document to a non-Complete terminal result (task.fail is untouched by this change)', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
-    const handle = await instance.dispatch({ instruction: 'will fail' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'will fail' });
     await claimAndStart(instance, daemon, handle);
 
     await daemon.send(createEnvelope('task.fail', { reason: 'boom', retryable: false }, { taskId: handle.taskId }));
@@ -135,7 +135,7 @@ describe('additive-minor: task.complete.document projection', () => {
 
   it('drops an over-cap task.complete at the inbound boundary — the task does not complete with a truncated or partial document', async () => {
     const { byok: instance, baseUrl, daemon } = await startWithDaemon();
-    const handle = await instance.dispatch({ instruction: 'oversized result' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'oversized result' });
     await claimAndStart(instance, daemon, handle);
 
     const framing = JSON.stringify({ a: '' }).length;

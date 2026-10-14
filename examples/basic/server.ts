@@ -108,7 +108,7 @@ app.get('/api/tasks/:taskId', async (c) => {
 });
 
 app.post('/api/tasks', async (c) => {
-  let body: { instruction?: unknown; runtime?: unknown; sessionRef?: unknown };
+  let body: { deviceId?: unknown; instruction?: unknown; runtime?: unknown; sessionRef?: unknown };
   try {
     body = await c.req.json();
   } catch {
@@ -116,6 +116,9 @@ app.post('/api/tasks', async (c) => {
   }
   if (typeof body.instruction !== 'string' || body.instruction.trim().length === 0) {
     return c.json({ error: 'instruction is required' }, 400);
+  }
+  if (typeof body.deviceId !== 'string' || body.deviceId.length === 0) {
+    return c.json({ error: 'deviceId is required' }, 400);
   }
   if (body.runtime !== undefined && !KNOWN_RUNTIMES.has(body.runtime as string)) {
     return c.json({ error: `unknown runtime "${String(body.runtime)}"` }, 400);
@@ -125,6 +128,7 @@ app.post('/api/tasks', async (c) => {
   }
 
   const input: DispatchInput = {
+    deviceId: body.deviceId,
     instruction: body.instruction,
     runtime: body.runtime as DispatchInput['runtime'],
     // Optional follow-up-turn pass-through: a caller that already has a
