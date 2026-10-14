@@ -1364,6 +1364,20 @@ describe('every compared item declines by its own name, with no claim and no pin
       },
     },
     {
+      name: 'a live toolset with no executor definition revision',
+      reason: 'preparation_tool_surface_unfingerprintable',
+      build: async () => {
+        const built = await lane();
+        return { built, offered: reference(built), runnerOverrides: {
+          inputPreparationLane: {
+            store: built.store, authorizeAgentMemory: async () => {},
+            open: () => built.store.open(), runtime: RUNTIME, policyRevision: POLICY_REVISION,
+            toolsetDefinitionRevisions: () => new Map(),
+          },
+        } };
+      },
+    },
+    {
       name: 'a definition revision or argv the record did not bind',
       reason: 'preparation_tool_binding_digest_mismatch',
       build: async () => {
@@ -1390,6 +1404,7 @@ describe('every compared item declines by its own name, with no claim and no pin
     await runner.handleEnvelope(preparedOffer(`task-${reason}`, offered));
 
     expect(declineReason(sent)).toContain(reason);
+    expect(declineReason(sent).split(':', 1)[0]).toBe(reason);
     const declined = sent.find((envelope) => envelope.type === 'task.decline');
     expect(declined?.type === 'task.decline' ? declined.payload.retryable : undefined).toBe(false);
     expect(sent.filter((envelope) => envelope.type === 'task.claim')).toHaveLength(0);

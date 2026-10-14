@@ -607,6 +607,90 @@ describe('B-P2 service: readiness never reaches ready offline', () => {
     expect(receipt.readinessReasons).toContain('counter_interrupted');
   });
 
+  it.each([
+    ['endpoint', { endpoint: 'https://elsewhere.example/v1' }],
+    ['model', { modelId: 'another-model' }],
+  ])('refuses counter evidence for a different %s without retaining a count or retrying', async (_label, mismatch) => {
+    const counter = fixtureCounter(async (counterRequest) => ({
+      method: 'fixture.tokenizer', methodVersion: '0', authority: 'provider', value: 11,
+      coverage: { covered: true },
+      providerEvidence: { ...fixtureEvidence(counterRequest), ...mismatch },
+    }));
+    const service = await makeService({ counter });
+    expect(await codeOf(service.prepare(request()))).toBe('counter_unavailable');
+    const receipt = await service.lookup({ requestId: 'prep-1', scope: request().scope });
+    expect(receipt).toMatchObject({ state: 'counter_interrupted', detail: 'counter_outcome_unknown', ready: false });
+    expect(receipt.counter).toBeUndefined();
+    expect(receipt.readinessReasons).toContain('counter_interrupted');
+    expect(receipt.pin).toBeUndefined();
+    expect(counter.calls).toHaveLength(1);
+    // The already-attempted call remains charged, but replay must not place another.
+    expect(service.store.list()[0]?.counterCalls).toBe(1);
+    await service.prepare(request());
+    expect(counter.calls).toHaveLength(1);
+  });
+
+  it.each(['reserved', 'counting'] as const)('reports not_prepared while the real service is %s', async (state) => {
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const compiler = stubCompiler();
+    const counter = fixtureCounter(async (counterRequest) => {
+      if (state === 'counting') {
+        entered.resolve();
+        await resume.promise;
+      }
+      return {
+        method: 'fixture.tokenizer', methodVersion: '0', authority: 'provider', value: 11,
+        coverage: { covered: true }, providerEvidence: fixtureEvidence(counterRequest),
+      };
+    });
+    const service = await makeService({ counter, compiler: {
+      ...compiler,
+      async compile(input) {
+        if (state === 'reserved') {
+          entered.resolve();
+          await resume.promise;
+        }
+        return compiler.compile(input);
+      },
+    } });
+    const pending = service.prepare(request({
+      accountingPolicyRef: accountingPolicyRef({ ruledRuntime: runtimeIdentityOf(compiler) }),
+    }));
+    try {
+      await entered.promise;
+      const receipt = await service.lookup({ requestId: 'prep-1', scope: request().scope });
+      expect(receipt).toMatchObject({ state, ready: false, readinessReasons: ['not_prepared'] });
+      expect(receipt.counter).toBeUndefined();
+      expect(receipt.pin).toBeUndefined();
+      expect(counter.calls).toHaveLength(state === 'reserved' ? 0 : 1);
+      expect(service.store.list()[0]?.counterCalls).toBe(state === 'reserved' ? 0 : 1);
+    } finally {
+      resume.resolve();
+      await pending;
+    }
+  });
+
+  it('reports artifact_expired exactly at the retention boundary without another count', async () => {
+    let clock = 1_000_000;
+    const compiler = stubCompiler();
+    const service = await makeService({ compiler, counter: 'none', now: () => clock });
+    const prepared = await service.prepare(request({
+      accountingPolicyRef: accountingPolicyRef({ ruledRuntime: runtimeIdentityOf(compiler) }),
+    }));
+    expect(prepared.ready).toBe(true);
+    const record = service.store.list()[0]!;
+    clock = Date.parse(record.artifactExpiresAt) - 1;
+    expect((await service.lookup({ requestId: 'prep-1', scope: request().scope })).readinessReasons).toEqual([]);
+    clock += 1;
+    const expired = await service.lookup({ requestId: 'prep-1', scope: request().scope });
+    expect(expired).toMatchObject({ state: 'prepared', ready: false, readinessReasons: ['artifact_expired'] });
+    expect(expired.pin).toBeUndefined();
+    expect(service.store.get(record.recordId)?.artifactBytes).toBeGreaterThan(0);
+    expect(service.store.scopeUsage(record.binding.scopeId).counterCalls).toBe(0);
+    expect(compiler.calls).toHaveLength(1);
+  });
+
   it('hands the counter only P(D), the target and an explicit call policy', async () => {
     const counter = fixtureCounter();
     const service = await makeService({ counter });
@@ -936,6 +1020,9 @@ describe('B-P2 service: cancellation and deadlines', () => {
 
     expect(cancelled.state).toBe('cancelled');
     expect(cancelled.detail).toBe('cancelled_before_counter');
+    expect(cancelled.ready).toBe(false);
+    expect(cancelled.readinessReasons).toEqual(['cancelled', 'not_prepared']);
+    expect(cancelled.pin).toBeUndefined();
     expect(code).toBe('cancelled');
     // The call was never placed, so it is not charged as an unknown outcome.
     expect(counter.calls).toEqual([]);
@@ -952,6 +1039,10 @@ describe('B-P2 service: compile refusal', () => {
     const receipt = await service.lookup({ requestId: 'prep-1', scope: request().scope });
     expect(receipt.state).toBe('failed');
     expect(receipt.detail).toBe('compile_rejected');
+    expect(receipt.ready).toBe(false);
+    expect(receipt.readinessReasons).toEqual(['failed', 'not_prepared']);
+    expect(receipt.pin).toBeUndefined();
+    expect(service.store.list()[0]?.counterCalls).toBe(0);
     expect(receipt.artifact).toBeUndefined();
   });
 
@@ -1425,6 +1516,11 @@ describe('PR187 review regressions', () => {
     await service.collectExpired(clock, 32);
     expect(await fs.readdir(path.join(storeDir, 'input-preparation', 'artifacts'))).toEqual([]);
     expect(service.store.list()).toHaveLength(1);
+    expect(service.store.list()[0]?.artifactBytes).toBe(0);
+    const expired = await service.lookup({ requestId: 'prep-1', scope: request().scope });
+    expect(expired.ready).toBe(false);
+    expect(expired.readinessReasons).toContain('artifact_expired');
+    expect(expired.pin).toBeUndefined();
     clock += 100;
     await service.collectExpired(clock, 32);
     expect(service.store.list()).toEqual([]);
