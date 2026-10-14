@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { createServiceLifecycle, nodeAgentProgram, type DaemonConfig, type ServiceDefinition, type ServiceLifecycle } from '../../index';
-import { readLastLifecycleEvent } from '../audit-log';
+import { readLastLifecycleRecord } from '../audit-log';
 import { argValue, resolveStoreDir } from '../config';
 import { formatLifecycle, formatLifecycleRemedy } from '../format';
 
@@ -137,7 +137,7 @@ export async function runServiceStatusCommand(config: DaemonConfig, configPath: 
   log(`detail: ${status.detail.trim() || '(none)'}`);
   // Issue #394: a halted service exits 0 and stays stopped; its last
   // lifecycle event says why and what to do.
-  const last = await readLastLifecycleEvent(resolveStoreDir(config));
+  const last = await readLastLifecycleRecord(resolveStoreDir(config));
   log(last ? `lifecycle: last-known ${formatLifecycle(last.lifecycle)} at=${last.ts}` : 'lifecycle: unknown (no lifecycle event yet)');
   const remedy = last ? formatLifecycleRemedy(last.lifecycle) : undefined;
   if (remedy !== undefined) log(`lifecycle-remedy: ${remedy}`);

@@ -24,6 +24,7 @@ import {
 } from '../daemon/control-protocol';
 import { connectControlClient, type ControlClient } from '../bin/control-client';
 import { createAuditAppender, auditLogPath } from '../bin/audit-log';
+import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import { formatDaemonEventLine } from '../bin/format';
 import type { DaemonEvent } from '../daemon/observer';
 import type { RuntimeCapabilities } from '../types';
@@ -578,7 +579,9 @@ describe('task assertion broker: task_assertion.issue', () => {
 
   it('never writes the context token to the observer feed, the stdout line, or the audit log', async () => {
     const built = await pairedAndStarted('acme-task-leak');
-    built.daemon.subscribe(createAuditAppender(built.storeDir));
+    const projector = createDaemonRecordProjector();
+    const audit = createAuditAppender(built.storeDir);
+    built.daemon.subscribe((event) => projector.project(event).forEach((record) => audit.append(record)));
     const events: DaemonEvent[] = [];
     const unsubscribe = built.daemon.subscribe((event) => events.push(event));
     const tokens = await offerAgentTask(built, 'task-leak');

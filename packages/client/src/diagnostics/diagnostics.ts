@@ -19,7 +19,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { DaemonConfig, RuntimeAdapter } from '../index';
-import { readLastLifecycleEvent, readLastEnvironmentRecord, parseEnvironmentRecord } from '../bin/audit-log';
+import { readLastLifecycleRecord, readLastEnvironmentRecord, parseEnvironmentRecord } from '../bin/audit-log';
 import { parseRuntimeObservations, type RuntimeObservation } from '../runtime-detection';
 import { connectControlClient } from '../bin/control-client';
 import { formatLifecycle, formatLifecycleRemedy } from '../bin/format';
@@ -684,7 +684,7 @@ export async function collectDiagnostics(
     inspectWorkspace(config.workspaceRoot),
     inspectQuarantine(resolvedStoreDir),
     connectControl({ storeDir: resolvedStoreDir, productId: config.productId }),
-    readLastLifecycleEvent(resolvedStoreDir).catch(() => undefined),
+    readLastLifecycleRecord(resolvedStoreDir).catch(() => undefined),
     readLastEnvironmentRecord(resolvedStoreDir).catch(() => undefined),
   ]);
 

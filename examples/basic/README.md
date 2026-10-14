@@ -73,12 +73,13 @@ see `server.ts`); a mismatch is rejected by authenticated HTTP admission.
 1. Click **Create pairing code** and copy it into the daemon's `pair` command
    above.
 2. Wait for the daemon to report that the server accepted it: `byok-agent
-   start` prints `lifecycle phase=running connection=open`, and
+   start` prints a JSON Lines record with `kind: "lifecycle"` and
+   `lifecycle: { phase: "running", connection: "open" }`, and
    `byok-agent status` shows the same `phase=running connection=open`. The
-   earlier `daemon started: ...` line only means local startup finished; it is
+   earlier `{"kind":"daemon-started",...}` record only means local startup finished; it is
    printed before the server has answered. Once the daemon is open, the machine
    appears under **Connected machines** (polled every 2s). If the daemon ends
-   with `lifecycle phase=halted reason=...` or `daemon halted: ...`, follow the
+   with a halted `lifecycle` record or `daemon halted: ...`, follow the
    remedy it prints.
 3. Enter an instruction and click **Dispatch**. The runtime list shows the
    runtimes the connected daemon detected and reported (the chips under

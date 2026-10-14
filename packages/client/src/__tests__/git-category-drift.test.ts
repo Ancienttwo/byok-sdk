@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { STABLE_GIT_ERROR_CATEGORIES as AUDIT_LOG_ERROR_CATEGORIES } from '../bin/audit-log';
+import { STABLE_GIT_ERROR_CATEGORIES as RECORD_ERROR_CATEGORIES } from '../daemon/daemon-record';
 import { STABLE_GIT_ERROR_CATEGORIES as FORMAT_ERROR_CATEGORIES } from '../bin/format';
 import {
   STABLE_GIT_ERROR_CATEGORIES as TASKS_VIEW_ERROR_CATEGORIES,
@@ -27,7 +27,7 @@ describe('git category/phase single source of truth (drift guard)', () => {
   it('every CLI stable-output category validator projects exactly GIT_ERROR_CATEGORIES', () => {
     const projection = new Set(GIT_ERROR_CATEGORIES);
     expect(FORMAT_ERROR_CATEGORIES).toEqual(projection);
-    expect(AUDIT_LOG_ERROR_CATEGORIES).toEqual(projection);
+    expect(RECORD_ERROR_CATEGORIES).toEqual(projection);
     expect(TASKS_VIEW_ERROR_CATEGORIES).toEqual(projection);
     expect(WORKSPACES_COMMAND_ERROR_CATEGORIES).toEqual(projection);
   });
