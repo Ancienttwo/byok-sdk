@@ -11201,9 +11201,10 @@ export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
  * (docs/protocol.md "Freeze rule").
  *
  * A v2 change takes exactly one of three paths: a version bump, a gated
- * addition, or a strip-safe addition. The last two are declared here, and
+ * addition, or a strip-safe addition. Envelope and HTTP rows have explicit
+ * kinds. The last two are declared here, and
  * `src/__tests__/compat.test.ts` proves every declaration against the
- * published decoders pinned in package.json.
+ * published envelope and HTTP decoders pinned in package.json.
  *
  * - `gated`: the sender must not emit the surface unless the receiver
  *   durably advertised `capability`. A field entry applies when the payload
@@ -11220,7 +11221,9 @@ export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
  */
 import type { MessageType } from './messages';
 import type { CapabilityFlag } from './version';
+type HttpWireSurface = 'ChallengeRequest' | 'ChallengeResponse' | 'TokenRequest' | 'TokenResponse' | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse';
 export type WireAddition = {
+    readonly kind: 'envelope';
     readonly rule: 'gated';
     readonly surface: MessageType;
     readonly field?: string;
@@ -11228,8 +11231,14 @@ export type WireAddition = {
     readonly capability: CapabilityFlag;
     readonly advertisedBy: 'device' | 'server';
 } | {
+    readonly kind: 'envelope';
     readonly rule: 'strip-safe';
     readonly surface: MessageType;
+    readonly field: string;
+} | {
+    readonly kind: 'http';
+    readonly rule: 'strip-safe';
+    readonly surface: HttpWireSurface;
     readonly field: string;
 };
 export declare const WIRE_ADDITIONS: readonly WireAddition[];
@@ -11239,3 +11248,4 @@ export declare const WIRE_ADDITIONS: readonly WireAddition[];
  * creating the task or appending to the mailbox) when any is missing.
  */
 export declare function requiredReceiverCapabilities(type: MessageType, payload: unknown): CapabilityFlag[];
+export {};

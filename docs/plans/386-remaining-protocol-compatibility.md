@@ -1,6 +1,6 @@
 # #386 remaining protocol compatibility: assessment and next staged slice
 
-Assessment baseline: `origin/main@76e59b217e4fa6caf2c2ab7e7e1d1017c6ad337c` (2026-10-14). This is a docs-only Draft for [#386](https://github.com/Ancienttwo/byok-sdk/issues/386), following merged staged [#447](https://github.com/Ancienttwo/byok-sdk/pull/447). It implements no runtime or test changes and does not close #386.
+Assessment baseline: `origin/main@76e59b217e4fa6caf2c2ab7e7e1d1017c6ad337c` (2026-10-14). This Draft stages HTTP compatibility evidence for [#386](https://github.com/Ancienttwo/byok-sdk/issues/386), following merged staged [#447](https://github.com/Ancienttwo/byok-sdk/pull/447). The assessment below records that baseline; the approved implementation status is recorded separately. It does not close #386.
 
 ## Conclusion
 
@@ -82,10 +82,28 @@ Stage HTTP evidence for existing contracts; keep the current receive policy and 
 
 The real current/floor/previous HTTP schemas pass the owned corpus; declarations are exercised and dropped paths are classified; batch-count mismatches and recorded prefix changes fail; public API and version deltas are intentional. The release-boundary decision is resolved without claiming old HTTP bytes existed. Existing envelope tests, admission tests and receiver-policy tests still pass. Report HTTP coverage separately from full recursive/enum coverage.
 
-Required implementation verification follows #386: protocol compat/freeze/http routes; cloud wire-additions/admission and device surface; server agent-home readers; client unknown-message/stall/reliability suites; build/typecheck, API surface, version authority, release graph and script tests. Use the shared install/build/typecheck lock and isolated TMPDIR; exclude local tests that write real macOS Keychain as required. No whole-suite rerun is needed for this docs-only assessment.
+Required implementation verification follows #386: protocol compat/freeze/http routes; cloud wire-additions/admission and device surface; server agent-home readers; client unknown-message/stall/reliability suites; build/typecheck, API surface, version authority, release graph and script tests. Use the shared install/build/typecheck lock and isolated TMPDIR; exclude local tests that write real macOS Keychain as required. The historical docs-only assessment reused existing evidence; implementation validation is reported separately below and in the PR.
 
 ## Following slices and issue closure
 
 After the HTTP ledger/corpus slice, add recursive property-path and enum completeness over both corpora using the real current schema surface. Then resolve the owner decision for the one-shot client decoder cutover, remove the private parser/casts in that same work-package, and preserve stall/cursor/auth refusal behaviour. Coordinate #398's constants export independently.
 
 Close #386 only when the actual full-scheme rows above have completion evidence or an explicit owner-approved scope change. Successful #447 CI and six delivered acceptance bullets do not make its listed Deferred work complete. This Draft is a staging artifact, not a close comment or implementation acceptance.
+
+## Approved HTTP evidence implementation
+
+Implementation base: `origin/main@c6af648d021da61aefe07f72c58f06bd7a41eb06`, merged into this branch before verification. Draft status remains intentional.
+
+- The production table has a required envelope/HTTP discriminator. Actual published 0.25.0 and 0.26.1 schemas retain events capabilities/afterSeq and strip only the new messages capability advertisement; no guessed HTTP declarations were added. Envelope sender admission still derives the same flags.
+- Fourteen owned literal HTTP bodies cover eight route schemas. Independently authored decoded values and submitted batch lengths run through current/floor/previous schemas. Direct negative assertions reject changed bodies, undeclared HTTP loss and incomplete batch counts.
+- Three typed exclusions describe the unexecuted old client-private parsers, their reasons and reviewed 0.26.1 bound. They do not implement a fallback or change the event-page contract.
+- HTTP release entries are optional only on the three literally pinned legacy entries. Every later entry requires an immutable, monotonic HTTP prefix. The first such entry defines the boundary; there is no parallel `httpCorpus.state`/`firstVersion` authority. No legacy entry or published corpus prefix was changed.
+- The manifest remains 0.26.1. The public metadata type delta is recorded under Unreleased for the next MINOR; stable release preparation owns the bump and both prefix registrations. Current HTTP fixture equality is not described as historical byte proof before that first registration.
+
+The original remaining recursive-path/enum completeness, client decoder cutover and constants-entry rows stay open. This slice is not full #386 closure. Verification and mutation results are recorded in the Draft PR description after code freeze.
+
+### Local verification after implementation freeze
+
+Shared serial lock: frozen install, workspace build/typecheck passed; the final protocol test-only byte guard also passed protocol typecheck. API surface (9 built goldens), version authority, release graph and 80 script tests passed. All 15 workspace package/example test scripts exited 0: 8070 passed, 0 failed, 172 skipped; the two real-Keychain-writing client files were excluded and client workers bounded to 2, with existing deadlines/assertions unchanged. Optional Docker dataplane coverage accounts for 113 skips. Protocol passed 680 tests; the three retained client unknown-type/stall/reliability suites passed 22 tests.
+
+Three restored file-level mutations exercised the actual compat suite: changing an HTTP literal body failed 4 tests, removing its HTTP declaration failed 2, and changing a batch count failed 4. Synthetic ledger negatives additionally reject legacy backfill, a missing first HTTP prefix, shrinking prefixes and changed prefix bytes. No candidate release was written to the actual ledger. These results validate this staged slice only; hosted CI and full issue closure remain separate.
