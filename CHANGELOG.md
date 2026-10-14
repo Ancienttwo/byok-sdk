@@ -26,6 +26,13 @@
   acknowledgement and replay-floor contracts are unchanged. See the dataplane
   README and hosted operations runbook for migration details.
 
+- **Client observer crash boundary (#384)** — a throwing
+  `ConnectionManager.onOperationalOutcome` now uses the existing `notify()` /
+  `onCrashed` path for reconnect, poll and upload observations. Detached poll
+  and upload drain promises do not leak unhandled rejections; unsettled batches
+  retain their exact envelopes. Handshake, settlement, cursor and retry
+  contracts and public signatures are unchanged.
+
 - **Breaking (protocol; #398)** — `@byok-sdk/protocol/constants` replaces the
   preparation-version subpath. Import `INPUT_PREPARATION_WIRE_VERSION` from
   `/constants`. Protocol root exports retain the same values; schema-free
