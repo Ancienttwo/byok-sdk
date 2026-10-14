@@ -300,7 +300,11 @@ describe('hosted Agent-home contract', () => {
         taskId: 'agent-mailbox-failure',
         payload: agentPayload(),
       }),
-    ).rejects.toThrow('mailbox unavailable');
+    ).rejects.toMatchObject({
+      code: 'task_offer_append_refused',
+      taskId: 'agent-mailbox-failure',
+      cause: new Error('mailbox unavailable'),
+    });
     await expect(harness.cloud.readTaskAttempt(TENANT_A, 'agent-mailbox-failure')).resolves.toMatchObject({
       status: 'offered',
       agentRef: AGENT_REF,

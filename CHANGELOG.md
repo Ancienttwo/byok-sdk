@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Breaking (cloud, 0.x; #387)** — a refused offer append now throws
+  `TaskOfferAppendRefusedError` (code `task_offer_append_refused`) from every
+  `enqueue*Offer` path and the server's `dispatch`, instead of the store's raw
+  error. `taskId` names the attempt that cloud opened before the append, including
+  one it allocated because the Host passed no `taskId`; `cause` keeps the store
+  refusal, e.g. core `storage_quota_exceeded`. Hosts that matched
+  `isCoreError(error, 'storage_quota_exceeded')` match `error.cause` instead.
+  Retry with that `taskId` and the same payload to converge on the one offer, or
+  `cancelTask` it; cancellation is exempt from the mailbox limit.
+
 - **Breaking (cloud, 0.x; #410)** — `ByokCloudOptions` and `CloudRootStores`
   require `mailboxWake`. Replace `longPollIntervalMs` (and the removed
   `DEFAULT_LONG_POLL_INTERVAL_MS`) with a wake composition; held polls now
