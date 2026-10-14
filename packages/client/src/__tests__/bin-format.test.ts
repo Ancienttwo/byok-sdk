@@ -15,7 +15,7 @@ import {
   type StatusView,
 } from '../bin/format';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
-import type { ProbedRuntime } from '../bin/runtime-probe';
+import type { RuntimeObservation } from '../runtime-detection';
 
 // eslint-disable-next-line no-control-regex
 const ANSI_ESCAPE_RE = /\x1b\[/;
@@ -63,7 +63,7 @@ describe('bin/format: formatDaemonEventLine', () => {
       { kind: 'lifecycle', ts: 'T', lifecycle: { phase: 'running', connection: 'open' } },
       { kind: 'paired', ts: 'T', deviceId: 'dev-1' },
       { kind: 'unpaired', ts: 'T' },
-      { kind: 'runtimes-detected', ts: 'T', runtimes: [{ id: 'pi' }, { id: 'claude' }] },
+      { kind: 'runtimes-detected', ts: 'T', runtimes: ['pi', 'claude'].map(id => ({ id, present: true, outcome: 'available' as const, steer: true, resume: true })) },
       { kind: 'shutdown-complete', ts: 'T', reason: 'operator' },
       { kind: 'shutdown-complete', ts: 'T', reason: 'operator', undeliveredOutboxCount: 0 },
       { kind: 'shutdown-complete', ts: 'T', reason: 'operator', undeliveredOutboxCount: 2 },
@@ -225,12 +225,12 @@ describe('bin/format: formatRuntimeLines', () => {
   });
 
   it('renders an absent runtime minimally', () => {
-    const runtimes: ProbedRuntime[] = [{ id: 'claude', present: false, outcome: 'not-found', steer: true, resume: true }];
+    const runtimes: RuntimeObservation[] = [{ id: 'claude', present: false, outcome: 'not-found', steer: true, resume: true }];
     expect(formatRuntimeLines(runtimes)).toEqual(['claude: not-found']);
   });
 
   it('renders a present runtime with full detail', () => {
-    const runtimes: ProbedRuntime[] = [
+    const runtimes: RuntimeObservation[] = [
       { id: 'pi', present: true, outcome: 'available', version: '1.2.3', authPresent: true, steer: true, resume: true },
     ];
     expect(formatRuntimeLines(runtimes)).toEqual([
@@ -239,7 +239,7 @@ describe('bin/format: formatRuntimeLines', () => {
   });
 
   it('renders an unqualified-version warning', () => {
-    const runtimes: ProbedRuntime[] = [
+    const runtimes: RuntimeObservation[] = [
       { id: 'codex', present: true, outcome: 'available', version: 'codex-cli 0.161.0', qualifiedVersion: '0.160.0', steer: true, resume: true },
     ];
     expect(formatRuntimeLines(runtimes)).toEqual([
@@ -248,7 +248,7 @@ describe('bin/format: formatRuntimeLines', () => {
   });
 
   it('renders (none) for capabilities when they are empty', () => {
-    const runtimes: ProbedRuntime[] = [{ id: 'codex', present: true, outcome: 'available', steer: false, resume: false }];
+    const runtimes: RuntimeObservation[] = [{ id: 'codex', present: true, outcome: 'available', steer: false, resume: false }];
     expect(formatRuntimeLines(runtimes)).toEqual(['codex: present capabilities=(none)']);
   });
 });
@@ -312,13 +312,14 @@ describe('bin/format: formatStatusLines', () => {
   it('summarizes runtimes as presence and failure outcomes', () => {
     const lines = formatStatusLines(
       baseView({
+        runtimesDetectedAt: 'T',
         runtimes: [
           { id: 'pi', present: true, outcome: 'available', steer: true, resume: true },
           { id: 'claude', present: false, outcome: 'not-found', steer: true, resume: true },
         ],
       }),
     );
-    expect(lines).toContain('runtimes: pi=present claude=not-found');
+    expect(lines).toContain('runtimes: last-known pi=available claude=not-found at=T');
   });
 
   it('renders full task counts', () => {
@@ -360,7 +361,8 @@ describe('bin/format: formatLiveStatusLines', () => {
       paired: true,
       lifecycle: { phase: 'running', connection: 'open' },
       activeTasks: [],
-      runtimeIds: ['pi'],
+      runtimes: [{ id: 'pi', present: true, outcome: 'available', steer: true, resume: true }],
+      environment: { source: 'inherited' },
       queueWatermarks: [],
       approvals: [],
       approvalsPending: 0,
@@ -378,10 +380,10 @@ describe('bin/format: formatLiveStatusLines', () => {
   }
 
   it('renders pid/uptime/lifecycle, paired+deviceId, and runtimes on their own lines', () => {
-    const lines = formatLiveStatusLines(baseLive({ deviceId: 'dev-1', runtimeIds: ['pi', 'claude'] }));
+    const lines = formatLiveStatusLines(baseLive({ deviceId: 'dev-1', runtimes: ['pi', 'claude'].map(id => ({ id, present: true, outcome: 'available' as const, steer: true, resume: true })) }));
     expect(lines).toContain('live: pid=123 uptimeMs=4567 phase=running connection=open');
     expect(lines).toContain('live-paired: yes deviceId=dev-1');
-    expect(lines).toContain('live-runtimes: pi,claude');
+    expect(lines).toContain('live-runtimes: pi=available claude=available');
     expect(lines).toContain('live-local-agent-release: 1.1.0 buildId=live-build');
   });
 

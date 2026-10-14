@@ -4,10 +4,11 @@ import { isTaskOfferType,
   type AgentEvent,
   type BlobRef,
   type Envelope,
-  type RuntimeInfo,
   type TaskState,
 } from '@byok-sdk/protocol';
 import type { DaemonLifecycle } from './daemon-lifecycle';
+import type { RuntimeObservation } from '../runtime-detection';
+import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 
 /**
  * M3-2a: local observability for the daemon — the seam a CLI (M3-2b) drives a
@@ -77,7 +78,8 @@ export type DaemonEvent =
   | { kind: 'lifecycle'; ts: string; lifecycle: DaemonLifecycle }
   | { kind: 'paired'; ts: string; deviceId: string }
   | { kind: 'unpaired'; ts: string }
-  | { kind: 'runtimes-detected'; ts: string; runtimes: RuntimeInfo[] }
+  | { kind: 'runtimes-detected'; ts: string; runtimes: RuntimeObservation[] }
+  | { kind: 'environment-resolved'; ts: string; status: ServiceEnvironmentStatus }
   /** M4 Phase 2: the control socket's `shutdown` RPC was invoked — emitted once, before this daemon starts tearing itself down, so it lands in the audit log via the exact same subscribe->append plumbing every other event already uses (see `bin/commands/start.ts`). Informational only — do NOT gate any teardown decision on this event; see `shutdown-complete`. */
   | { kind: 'shutdown-requested'; ts: string; reason: string }
   /**
@@ -418,8 +420,12 @@ export class DaemonObserver {
     this.emit({ kind: 'unpaired', ts: nowIso() });
   }
 
-  noteRuntimesDetected(runtimes: RuntimeInfo[]): void {
+  noteRuntimesDetected(runtimes: RuntimeObservation[]): void {
     this.emit({ kind: 'runtimes-detected', ts: nowIso(), runtimes });
+  }
+
+  noteEnvironmentResolved(status: ServiceEnvironmentStatus, ts = nowIso()): void {
+    this.emit({ kind: 'environment-resolved', ts, status });
   }
 
   /** M4 Phase 2: see the `shutdown-requested` `DaemonEvent` variant's own doc comment. */

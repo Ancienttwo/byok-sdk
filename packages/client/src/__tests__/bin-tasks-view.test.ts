@@ -195,6 +195,7 @@ describe('bin/tasks-view: deriveTasksFromEvents', () => {
       { kind: 'paired', ts: '2026-01-01T00:00:01.000Z', deviceId: 'dev-1' },
       { kind: 'unpaired', ts: '2026-01-01T00:00:02.000Z' },
       { kind: 'runtimes-detected', ts: '2026-01-01T00:00:03.000Z', runtimes: [] },
+      { kind: 'environment-resolved', ts: '2026-01-01T00:00:03.500Z', status: { source: 'inherited' } },
       { kind: 'artifact', ts: '2026-01-01T00:00:04.000Z', taskId: 'orphan', name: 'x', contentType: 'text/plain' },
     ];
     expect(deriveTasksFromEvents(events)).toEqual([]);

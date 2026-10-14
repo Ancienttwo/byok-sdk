@@ -452,8 +452,8 @@ metadata are rejected. There is no compatibility translation.
 
 `refused` requires exactly `kind` and `reason`. Its only reason is
 `app_server_unavailable`. No other arm accepts `reason`; arbitrary error text
-is never parsed into a reason. Daemon registration, task selection and local
-CLI/doctor call `detect(signal?)` on the actual adapter. Detection never
+is never parsed into a reason. Daemon registration, task selection and explicit local
+`runtimes`/offline doctor call `detect(signal?)` on the actual adapter. Detection never
 chooses the task lane; `resources.kind` retains that authority. The SDK does
 not measure the installed runtime.
 
@@ -482,7 +482,11 @@ malformed `auth.json` or `settings.json` observes `false`. A missing
 credential. The probe inspects only presence and shape; it never returns, logs
 or retains a credential value.
 
-Fresh local `runtimes` and `status` show failure kinds; `doctor` carries the same
+Explicit local `runtimes` shows fresh failure kinds. Online `status`, `doctor`
+and support bundles use the daemon's startup observations without local probes;
+offline `status` shows the last audited observations with a timestamp, or unknown.
+Offline `doctor` and support bundles label their explicit probes `local-shell`.
+`doctor` carries the same
 closed outcome and finite refusal reason in JSON and counts them in text. Its existing
 any-present pass/warn rule remains unchanged. Display `present` is a deterministic
 projection of `kind === 'available'`, never independent adapter authority.
@@ -494,8 +498,17 @@ contract.
 Daemon runtime registration and task selection validate the same shape and use
 only `available` where they previously consumed presence. No failure-kind field
 is added to wire presence or task envelopes, and no decline/retry/permission
-policy is derived from these diagnostic categories. This contract does not add
-caching, periodic probing, minimum versions, repair commands or self-update.
+policy is derived from these diagnostic categories. Startup detection is cached per daemon run; task admission still observes the
+adapter independently. No periodic probing, minimum versions, repair commands
+or self-update are added.
+
+`DaemonStatus` and control `status` carry `runtimes: RuntimeObservation[]`,
+including unavailable outcomes, plus the closed `environment` projection.
+`environment-resolved` is emitted once after ownership is acquired and before
+runtime detection; audit uses the same content-free flat shape as #409.
+For the next minor, a newer CLI reports unknown when an older daemon omits
+these fields. It never translates `runtimeIds` into availability or executes
+a local probe to fill the missing daemon facts.
 
 ### Explicit local device diagnostics and metadata repair
 

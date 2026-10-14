@@ -118,7 +118,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     expect(projection?.deviceId).toBe(receipt.deviceId);
   }, 10000);
 
-  it('status reports live pid/uptime/lifecycle/activeTasks/runtimeIds', async () => {
+  it('status reports live pid/uptime/lifecycle/activeTasks/cached runtimes', async () => {
     const adapter = new StubRuntimeAdapter('pi');
     const built = await pairedAndStarted('acme-ctl-status', adapter);
     daemon = built.daemon;
@@ -134,7 +134,8 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     expect(typeof status.deviceId).toBe('string');
     expect(status.lifecycle).toEqual({ phase: 'running', connection: 'open' });
     expect(status.activeTasks).toEqual([]);
-    expect(status.runtimeIds).toEqual(['pi']);
+    expect(status.runtimes).toEqual([{ id: 'pi', present: true, outcome: 'available', version: '0.0.0', steer: true, resume: true }]);
+    expect(status.environment).toEqual({ source: 'inherited' });
     // M4 Phase 4 (part B.3): queue watermarks, empty with no active tasks.
     expect(status.queueWatermarks).toEqual([]);
     expect(status.approvalsPending).toBe(0);
@@ -449,7 +450,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     await runStatusCommand(built.config, { log: (l) => linesLive.push(l) });
     expect(linesLive.some((l) => l.startsWith('live: pid='))).toBe(true);
     expect(linesLive.some((l) => l === 'live-active-tasks: (none)')).toBe(true);
-    expect(linesLive.some((l) => l === 'live-runtimes: pi')).toBe(true);
+    expect(linesLive.some((l) => l === 'live-runtimes: pi=available')).toBe(true);
 
     await daemon.stop();
 

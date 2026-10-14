@@ -1,7 +1,8 @@
 import { terminalIdentity } from './terminal-identity';
 import { HarnessIdSchema, type HarnessInfo } from '@byok-sdk/protocol';
 import { TerminalCommitQueue } from './terminal-commit-queue';
-import { observeRuntimeDetection } from '../runtime-detection';
+import { observeRuntimeDetection, projectRuntimeObservation, type RuntimeObservation } from '../runtime-detection';
+import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 import {
   DEVICE_ASSERTION_AUDIENCE_MAX_BYTES,
   DEVICE_ASSERTION_DEFAULT_TTL_MS,
@@ -796,6 +797,11 @@ export interface PresenceConfig {
 }
 
 export interface DaemonStatus {
+  /** Environment selected by this daemon's host process at startup. */
+  environment: ServiceEnvironmentStatus;
+  environmentResolvedAt?: string;
+  /** Startup observations for every configured adapter; status never re-probes. */
+  runtimes: RuntimeObservation[];
   /** Process-immutable Local Agent application release captured at construction. */
   localAgentRelease: Readonly<LocalAgentReleaseIdentity>;
   paired: boolean;
@@ -1014,11 +1020,13 @@ function isRuntimeId(id: string): id is RuntimeId {
 }
 
 /** Runtimes actually detected as present on this device, typed per protocol §10 gap #4 (`ConnHelloPayload.runtimes`). Computed once at `start()` — re-probing on every reconnect would mean re-spawning each runtime's `--version` check for no real benefit within one daemon lifetime. */
-async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{ runtimes: RuntimeInfo[]; harnesses: HarnessInfo[] }> {
+async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{ runtimes: RuntimeInfo[]; harnesses: HarnessInfo[]; observations: RuntimeObservation[] }> {
   const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: await observeRuntimeDetection(adapter) })));
   const runtimes: RuntimeInfo[] = [];
   const harnesses: HarnessInfo[] = [];
+  const observations: RuntimeObservation[] = [];
   for (const { adapter, detected } of detections) {
+    observations.push(projectRuntimeObservation(adapter.descriptor, detected));
     if (detected.kind !== 'available') continue;
     if (detected.advisory !== undefined) {
       console.warn(`[byok/client] ${adapter.descriptor.id} ${detected.version ?? '(unknown version)'} is not the qualified ${detected.advisory.qualifiedVersion}; continuing`);
@@ -1040,7 +1048,7 @@ async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{ runtimes: R
     info.capabilities = toRuntimeInfoCapabilities(adapter.descriptor.capabilities);
     runtimes.push(info);
   }
-  return { runtimes, harnesses };
+  return { runtimes, harnesses, observations };
 }
 
 /**
@@ -1761,6 +1769,9 @@ export function buildDaemonWithAdapters(
   // asynchronous to start(); only Agent offers with host toolsets wait for it.
   let presencePublisher: PresencePublisher | undefined;
   let detectedRuntimeFacts: readonly RuntimeInfo[] = [];
+  let runtimeObservations: RuntimeObservation[] = [];
+  let resolvedEnvironment: ServiceEnvironmentStatus = serviceEnvironmentStatus();
+  let environmentResolvedAt: string | undefined;
   let presenceDiscovery: AbortController | undefined;
   // One active read per connection generation; stale completions cannot publish.
   let presenceDiscoveryPass: {
@@ -2183,6 +2194,11 @@ export function buildDaemonWithAdapters(
     // a rejected second process overwrite the live daemon's marker and create
     // a false crash record on the next restart.
     await operationalHealth.startRun();
+    // The owner alone publishes this host-process observation into the event
+    // stream. CLI audit persistence uses that same event, with no second writer.
+    resolvedEnvironment = { ...serviceEnvironmentStatus() };
+    environmentResolvedAt = new Date().toISOString();
+    observer.noteEnvironmentResolved({ ...resolvedEnvironment }, environmentResolvedAt);
 
     if (gitWorkspaceManager) {
       await gitWorkspaceManager.preflight();
@@ -2191,14 +2207,14 @@ export function buildDaemonWithAdapters(
     }
 
     blobLifecycleAbort = new AbortController();
-    const [{ runtimes, harnesses }, blobClient] = await Promise.all([
+    const [{ runtimes, harnesses, observations }, blobClient] = await Promise.all([
       detectRuntimes(adapters),
       Promise.resolve(new BlobClient(config.serverUrl, auth, { signal: blobLifecycleAbort.signal })),
     ]);
-    // M3-2a: local runtime-detection result — computed once per `start()`,
-    // same as the `conn.hello.runtimes` it also feeds (see `detectRuntimes`'s
-    // own doc comment on why this isn't re-probed on every reconnect).
-    observer.noteRuntimesDetected(runtimes);
+    // Startup owns detection: local status keeps every outcome, while
+    // conn.hello advertises only available runtimes. Neither re-probes.
+    runtimeObservations = observations.map(observation => Object.freeze({ ...observation }));
+    observer.noteRuntimesDetected(runtimeObservations.map(observation => ({ ...observation })));
     detectedRuntimeFacts = runtimes;
     const agentMemoryIntentBackend = await provenAgentMemoryIntentBackend();
     const capabilities = computeCapabilities(
@@ -3458,7 +3474,9 @@ export function buildDaemonWithAdapters(
       deviceId: auth.deviceId,
       lifecycle,
       activeTasks,
-      runtimeIds: adapters.map((adapter) => adapter.descriptor.id),
+      environment: { ...resolvedEnvironment },
+      ...(environmentResolvedAt === undefined ? {} : { environmentResolvedAt }),
+      runtimes: runtimeObservations.map(observation => ({ ...observation })),
       // M4 Phase 4 (part B.3): queue watermarks come from TaskRunner's own
       // active-task map (distinct from `observer.tasks()` above, which is
       // derived from the envelope feed) — see `TaskRunner.getQueueWatermarks`'s
@@ -4209,6 +4227,9 @@ export function buildDaemonWithAdapters(
 
   function status(): DaemonStatus {
     return {
+      environment: { ...resolvedEnvironment },
+      ...(environmentResolvedAt === undefined ? {} : { environmentResolvedAt }),
+      runtimes: runtimeObservations.map(observation => ({ ...observation })),
       localAgentRelease,
       paired: auth.deviceId !== undefined,
       lifecycle,

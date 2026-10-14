@@ -1,14 +1,15 @@
 import { AgentDO } from '../src/agent-do';
 import { cloudErrorResponse } from '../src/errors';
+import { readFirstTextDelta } from './credentials-first-event';
 
 /** Test-only audit RPC: all tables and every row, including native pi state. */
 export class AuditAgentDO extends AgentDO {
   async cancelLocal(input: unknown): Promise<Response> {
     const response = await this.submit(input);
     const reader = response.body!.getReader();
-    const first = await reader.read();
+    const first = await readFirstTextDelta(reader);
     await reader.cancel();
-    return Response.json({ first: new TextDecoder().decode(first.value), cancelled: true });
+    return Response.json({ first, cancelled: true });
   }
 
   async dump() {
@@ -42,9 +43,9 @@ export default {
       if (body.operation === 'cancel-inside') {
         const response = await agent.submit(body.input);
         const reader = response.body!.getReader();
-        const first = await reader.read();
+        const first = await readFirstTextDelta(reader);
         await reader.cancel();
-        return Response.json({ first: new TextDecoder().decode(first.value), cancelled: true });
+        return Response.json({ first, cancelled: true });
       }
       if (body.operation === 'append') {
         await agent.appendExecution(2, body.input as string);

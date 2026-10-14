@@ -7,7 +7,7 @@ import {
   type OperationalHealthFixResult,
 } from '../../diagnostics/diagnostics';
 import { resolveStoreDir } from '../config';
-import { readLastEnvironmentRecord, type EnvironmentRecord } from '../audit-log';
+import type { ServiceEnvironmentRecord } from '../../lifecycle/service-environment';
 import { formatServiceEnvironment } from '../format';
 import { repairDeviceEnrollmentMetadata, DeviceMetadataRepairError } from '../../diagnostics/device-doctor';
 
@@ -35,7 +35,7 @@ export class DoctorDaemonRunningError extends Error {
   }
 }
 
-function formatDoctorLines(snapshot: DiagnosticsSnapshot, environment: EnvironmentRecord | undefined, fixResult?: OperationalHealthFixResult): string[] {
+function formatDoctorLines(snapshot: DiagnosticsSnapshot, environment: ServiceEnvironmentRecord | undefined, fixResult?: OperationalHealthFixResult): string[] {
   const lines = [
     `doctor: productHash=${snapshot.product.nameHash} generatedAt=${snapshot.generatedAt}`,
     `system: node=${snapshot.system.node} platform=${snapshot.system.platform} arch=${snapshot.system.arch} sqlite=${snapshot.system.sqliteAvailable ? 'available' : 'unavailable'}`,
@@ -93,7 +93,7 @@ export async function runDoctorCommand(config: DaemonConfig, options: DoctorOpti
     snapshot = await collectDiagnostics(config, storeDir, options);
   }
   const log = options.log ?? ((line: string) => console.log(line));
-  const environment = await readLastEnvironmentRecord(storeDir).catch(() => undefined);
+  const environment = snapshot.environment.status === 'unknown' ? undefined : snapshot.environment;
   if (options.json) {
     log(JSON.stringify({ diagnostics: snapshot, environment: environment ?? { status: 'unknown' }, ...(fixResult ? { fix: fixResult } : {}) }, null, 2));
     return;
