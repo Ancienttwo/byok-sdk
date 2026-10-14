@@ -50,7 +50,7 @@ describe('server presence lease', () => {
 
   afterEach(async () => {
     vi.useRealTimers();
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;

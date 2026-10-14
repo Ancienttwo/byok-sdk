@@ -32,7 +32,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
@@ -295,7 +295,7 @@ describe('redelivery from a stale cursor (§9)', () => {
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
@@ -366,7 +366,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
@@ -489,7 +489,7 @@ describe('unknown AgentEvent forwarding (pre-freeze tolerance, @byok-sdk/protoco
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;

@@ -340,6 +340,19 @@ lookup, revoke and same-machine replacement share the durable device directory.
 Device IDs are globally tenant-unique. Presence, nonces and unredeemed pairing
 codes remain process-local; no runtime or TaskHandle is reconstructed.
 
+File-backed SQLite has one owner: the actual database handle sets
+`PRAGMA locking_mode=EXCLUSIVE` before WAL initialization. A second open waits
+for the existing 5-second busy grace, then reports `SqliteOwnershipError`
+(`SQLITE_DATABASE_OWNED`). The lock lasts until `await server.close()` or process
+exit, including SIGKILL; no sibling ownership file or WAL shared-memory file is
+needed. External readers and writers must wait for the owner to close. Symlinks
+use SQLite's file identity; database files with multiple hard links are refused
+before open because their WAL paths cannot share recovery authority.
+`close()` is the only server shutdown API; the synchronous `stop()` is removed.
+The upgrade must stop all older owners and external SQLite connections before
+starting this owner, with no parallel sibling-lock path. Schema and wire formats
+are unchanged; see the server README for the breaking API migration.
+
 Schema v4 fences older writers and stores nullable claimed harness identity in
 the ownership CAS. Stop every writer and take a consistent backup before explicit
 adoption. `v1-to-v4` / `v2-to-v4` reject any task, message, agent-admission or

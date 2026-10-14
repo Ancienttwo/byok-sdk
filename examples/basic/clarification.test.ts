@@ -64,7 +64,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
     store = new SqliteClarificationStore(db,'tenant-a'); host = new ClarificationHost(byok,store,() => now);
   });
   afterEach(async () => {
-    await daemon?.stop(); byok?.stop(); await closeHttp?.(); store?.close(); extraStores?.forEach(s => s.close());
+    await daemon?.stop(); await byok?.close(); await closeHttp?.(); store?.close(); extraStores?.forEach(s => s.close());
     if (root) await rm(root,{ recursive: true,force: true });
   });
 

@@ -117,7 +117,7 @@ describe("S0 (GAP-002): task.steer is gated by the claimed runtime's capability 
   let harness: Harness | undefined;
 
   afterEach(async () => {
-    harness?.byok.stop();
+    await harness?.byok.close();
     if (harness) await stopServer(harness.server);
     harness = undefined;
   });
@@ -291,7 +291,7 @@ describe('S0/D-4: connection-advertised capabilities cannot feed the steer gate'
   let harness: Harness | undefined;
 
   afterEach(async () => {
-    harness?.byok.stop();
+    await harness?.byok.close();
     if (harness) await stopServer(harness.server);
     harness = undefined;
   });
@@ -349,7 +349,7 @@ describe('S0 (GAP-002): claim-time capability snapshot on the task record', () =
   let harness: Harness | undefined;
 
   afterEach(async () => {
-    harness?.byok.stop();
+    await harness?.byok.close();
     if (harness) await stopServer(harness.server);
     harness = undefined;
   });

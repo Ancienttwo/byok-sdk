@@ -45,7 +45,7 @@ describe('Auth v2: challenge/token renewal + revocation (§6)', () => {
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;

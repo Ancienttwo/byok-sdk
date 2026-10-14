@@ -57,7 +57,7 @@ describe('M4 (additive-minor): explicit task.approval_resolved handling', () => 
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;

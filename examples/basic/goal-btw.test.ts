@@ -67,7 +67,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
     host = new GoalBtwHost(byok, store, () => now, (_goal, verdict) => accepted(verdict));
   });
   afterEach(async () => {
-    await daemon?.stop(); byok?.stop(); await closeHttp?.(); store?.close(); extraStores?.forEach(s => s.close());
+    await daemon?.stop(); await byok?.close(); await closeHttp?.(); store?.close(); extraStores?.forEach(s => s.close());
     if (root) await rm(root, { recursive: true, force: true });
   });
 

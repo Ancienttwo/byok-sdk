@@ -14,7 +14,7 @@ describe('M4 Phase 4: ByokServer.stats() (part B.1)', () => {
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
@@ -92,7 +92,7 @@ describe('M4 Phase 4: GET /healthz (part B.2)', () => {
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;

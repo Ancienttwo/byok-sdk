@@ -75,29 +75,36 @@ describe('SQLite receipt recovery', () => {
         terminalProjection: { mode: 'none' },
       }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn' } });
       const persistedInput = JSON.stringify(execution);
+      await runtime.stores.close();
       const appendFault = new DatabaseSync(path);
       appendFault.exec("CREATE TRIGGER fail_recurring_append BEFORE INSERT ON mailbox_message BEGIN SELECT RAISE(ABORT, 'injected recurring append'); END;");
       appendFault.close();
+      runtime = open();
       await expect(runtime.cloud.submitRecurringExecution(tenant, JSON.parse(persistedInput))).rejects.toThrow('injected recurring append');
       expect(await runtime.cloud.readTaskOffer(tenant, taskId)).toMatchObject({ delivered: false });
-      await runtime.stores.close(); runtime = open();
+      await runtime.stores.close();
       const removeAppendFault = new DatabaseSync(path); removeAppendFault.exec('DROP TRIGGER fail_recurring_append'); removeAppendFault.close();
+      runtime = open();
       await expect(runtime.cloud.submitRecurringExecution(tenant, { ...execution,
         agentMessageContext: { destinationBinding: 'different' } })).rejects.toThrow();
       await runtime.cloud.submitRecurringExecution(tenant, JSON.parse(persistedInput));
       expect(await runtime.cloud.readTaskOffer(tenant, taskId)).toMatchObject({ delivered: true, payload: execution.payload });
       expect((await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages).toHaveLength(1);
 
+      await runtime.stores.close();
       const fault = new DatabaseSync(path);
       fault.exec("CREATE TRIGGER fail_message_finalize BEFORE UPDATE OF terminal_body ON agent_message_admission BEGIN SELECT RAISE(ABORT, 'injected finalize fault'); END;");
       fault.close();
+      runtime = open();
       await expect(handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume)).rejects.toThrow('injected finalize fault');
       expect(calls).toBe(1);
       expect(await read()).toBeUndefined();
       await runtime.stores.close(); runtime = open();
       expect(await read()).toBeUndefined();
       expect(await discover()).toEqual({ payload: message.payload, context: execution.agentMessageContext });
+      await runtime.stores.close();
       const repair = new DatabaseSync(path); repair.exec('DROP TRIGGER fail_message_finalize'); repair.close();
+      runtime = open();
       expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume)).toBe('accepted');
       expect(calls).toBe(2);
       const receipt = await read();
@@ -118,7 +125,8 @@ describe('SQLite receipt recovery', () => {
     } finally { await runtime.stores.close(); }
   });
 
-  it('keeps one immutable winner across concurrent writers, restart and tenants', async () => {
+  // Refusal now waits for SQLite's existing 5-second busy grace (#414).
+  it('keeps one immutable winner across concurrent writers, restart and tenants', { timeout: 20_000 }, async () => {
     // #388: one SQLite file has one owning composition, so a second independent
     // connection is refused at open; concurrent writers share the owner.
     const { open } = fixture(); const a = open();
@@ -220,8 +228,10 @@ describe('SQLite receipt recovery', () => {
 
   it('preserves immutable offer before failed append and resumes only the original payload', async () => {
     const { open, path } = fixture(); let runtime = open();
+    await runtime.stores.close();
     const db = new DatabaseSync(path);
     db.exec("CREATE TRIGGER fail_append BEFORE INSERT ON mailbox_message BEGIN SELECT RAISE(ABORT, 'injected append failure'); END;"); db.close();
+    runtime = open();
     const input = { taskId: 'pre-append', payload };
     try {
       await expect(runtime.cloud.enqueueOffer(tenant, deviceId, input)).rejects.toThrow('injected append failure');
@@ -237,8 +247,10 @@ describe('SQLite receipt recovery', () => {
 
   it('resumes the same mailbox row after append but before delivered receipt commit', async () => {
     const { open, path } = fixture(); let runtime = open();
+    await runtime.stores.close();
     const db = new DatabaseSync(path);
     db.exec("CREATE TRIGGER fail_delivered BEFORE INSERT ON request_receipt WHEN NEW.key LIKE 'task-offer-delivered:%' BEGIN SELECT RAISE(ABORT, 'injected delivered failure'); END;"); db.close();
+    runtime = open();
     const input = { taskId: 'post-append', payload };
     try {
       await expect(runtime.cloud.enqueueOffer(tenant, deviceId, input)).rejects.toThrow('injected delivered failure');
@@ -282,7 +294,7 @@ describe('SQLite receipt recovery', () => {
 
 
   it('reads only validated immutable offer authority and rejects corrupt receipts', async () => {
-    const { open, path } = fixture(); const runtime = open();
+    const { open, path } = fixture(); let runtime = open();
     const taskId = 'offer-readback';
     try {
       await runtime.stores.cloud.tasks.open(tenant, { taskId: 'unsubmitted', deviceId });
@@ -292,20 +304,31 @@ describe('SQLite receipt recovery', () => {
       expect(original).toMatchObject({ taskId, deviceId, messageId: enqueued.envelope.id, delivered: true,
         type: 'task.offer', payload });
       expect(await runtime.cloud.readTaskOffer(other, taskId)).toBeUndefined();
-      const db = new DatabaseSync(path);
+      await runtime.stores.close();
+      const db = new DatabaseSync(path, { readOnly: true });
       const key = `task-offer:${enqueued.envelope.id}`;
-      const body = db.prepare('SELECT body FROM request_receipt WHERE tenant_id = ? AND key = ?').get(tenant, key)?.body as string;
+      let body: string;
       try {
-        for (const corrupted of ['{', 'null', JSON.stringify({ ...JSON.parse(body), deviceId: 'foreign' }),
-          JSON.stringify({ ...JSON.parse(body), type: 'task.complete' }),
-          JSON.stringify({ ...JSON.parse(body), payload: { ...payload, instruction: 17 } })]) {
-          db.prepare('UPDATE request_receipt SET body = ? WHERE tenant_id = ? AND key = ?').run(corrupted, tenant, key);
-          await expect(runtime.cloud.readTaskOffer(tenant, taskId)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
-        }
-        db.prepare('UPDATE request_receipt SET body = ? WHERE tenant_id = ? AND key = ?').run(body, tenant, key);
-        db.prepare('UPDATE request_receipt SET body = ? WHERE tenant_id = ? AND key = ?').run('wrong-id', tenant, `task-offer-delivered:${enqueued.envelope.id}`);
-        await expect(runtime.cloud.readTaskOffer(tenant, taskId)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        body = db.prepare('SELECT body FROM request_receipt WHERE tenant_id = ? AND key = ?').get(tenant, key)?.body as string;
       } finally { db.close(); }
+      for (const corrupted of ['{', 'null', JSON.stringify({ ...JSON.parse(body), deviceId: 'foreign' }),
+        JSON.stringify({ ...JSON.parse(body), type: 'task.complete' }),
+        JSON.stringify({ ...JSON.parse(body), payload: { ...payload, instruction: 17 } })]) {
+        const corrupt = new DatabaseSync(path);
+        try {
+          corrupt.prepare('UPDATE request_receipt SET body = ? WHERE tenant_id = ? AND key = ?').run(corrupted, tenant, key);
+        } finally { corrupt.close(); }
+        runtime = open();
+        await expect(runtime.cloud.readTaskOffer(tenant, taskId)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        await runtime.stores.close();
+      }
+      const reset = new DatabaseSync(path);
+      try {
+        reset.prepare('UPDATE request_receipt SET body = ? WHERE tenant_id = ? AND key = ?').run(body, tenant, key);
+        reset.prepare('UPDATE request_receipt SET body = ? WHERE tenant_id = ? AND key = ?').run('wrong-id', tenant, `task-offer-delivered:${enqueued.envelope.id}`);
+      } finally { reset.close(); }
+      runtime = open();
+      await expect(runtime.cloud.readTaskOffer(tenant, taskId)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
     } finally { await runtime.stores.close(); }
   });
 
