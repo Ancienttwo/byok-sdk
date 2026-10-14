@@ -1,6 +1,6 @@
 # #412 retention architecture and decision evidence
 
-Status: local candidate verified with targeted checks; PR publication pending network recovery. Based on `5ef13002`, merged `origin/main@a10c67a0` normally, preserving #440 stats, #414 SQLite ownership and #413 TTL presence. The old worker WIP and #437 fixtures are untouched.
+Status: PR #456 is open; rebase verification is recorded below. Originally based on `5ef13002`, merged `origin/main@a10c67a0` normally, preserving #440 stats, #414 SQLite ownership and #413 TTL presence. The old worker WIP and #437 fixtures are untouched.
 
 ## P1: map
 
@@ -60,3 +60,27 @@ edits; this is a known downstream typecheck/CI integration gap for the #437
 owner, not resolved by optional port methods or compatibility code.
 GitHub fetch and gh currently fail DNS, so latest remote freshness, push, PR
 number and CI results are not yet established.
+
+## Rebase integration with embedded wakes
+
+Rebased the candidate onto `origin/main@76e59b21` after the embedded wake queue
+landed. The server conflicts retain main's wake constructor hook, schema
+adoption and scheduler alongside the retention ledger/byte owner. Both
+schedulers start closing synchronously and settle before storage closes; the
+maintenance close test additionally rejects a wake call while its pass is still
+blocked. No existing assertion was removed or weakened.
+
+Prior-head CI confirms the known client fixture integration errors. Its real
+Postgres run passed 387 tests and failed one new retention concurrency case:
+`markDeleted` waited behind physical deletion, then correctly rejected the
+illegal `deleted -> deleted` transition. The test awaits success. The existing
+state contract and the failing test are unchanged in this rebase; this outcome
+is reported separately from conflict resolution and local verification.
+
+Local rebase checks (Node 24.18.0 / Bun 1.4.3): six related builds, five
+package typechecks, four API surfaces, version authority and SQL order passed.
+SQLite conformance selection passed 51 tests. The seven-file server selection
+passed 78 tests and failed eight cases: four wake timer-count cases across two
+drivers observe the newly mandatory maintenance timer. Their assertions remain
+unchanged pending explicit owner approval of the prepared contract-migration
+patch. No client fixture was edited.

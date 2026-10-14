@@ -45,6 +45,8 @@ describe('maintenance scheduler', () => {
       const failure = expect(pass).rejects.toThrow('injected pass failure');
       await Promise.resolve();
       const closing = server.close();
+      // Wake calls close immediately even while maintenance still owns storage.
+      await expect(server.wakes.pending()).rejects.toThrow('closed');
       reject(new Error('injected pass failure'));
       await failure;
       await expect(closing).resolves.toBeUndefined();

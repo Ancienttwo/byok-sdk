@@ -670,7 +670,9 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   }, maintenanceIntervalMs, (error) => relay.emitServerEvent({ kind: 'maintenance.failed', errorCode: error instanceof ByokCloudError ? error.code : 'maintenance_step_failed' }));
   let closePromise: Promise<void> | undefined;
   function close(): Promise<void> {
-    return closePromise ??= scheduler.close().finally(async () => { relay.stop(); await wakes.close(); await composition.close(); });
+    return closePromise ??= Promise.all([scheduler.close(), wakes.close()])
+      .finally(async () => { relay.stop(); await composition.close(); })
+      .then(() => undefined);
   }
 
   return {
