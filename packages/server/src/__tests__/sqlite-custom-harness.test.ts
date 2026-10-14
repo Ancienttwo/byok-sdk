@@ -127,7 +127,7 @@ describe('SQLite custom-harness claim authority', () => {
   function downgradeToV3(path: string): void {
     const legacy = new DatabaseSync(path);
     try {
-      legacy.exec("ALTER TABLE task_attempt DROP COLUMN claimed_harness_id; UPDATE byok_sqlite_meta SET value = '3' WHERE key = 'schema_version'");
+      legacy.exec("DROP TABLE wake; ALTER TABLE task_attempt DROP COLUMN claimed_harness_id; UPDATE byok_sqlite_meta SET value = '3' WHERE key = 'schema_version'");
     } finally { legacy.close(); }
   }
 
@@ -155,14 +155,14 @@ describe('SQLite custom-harness claim authority', () => {
     const offer = await runtime.cloud.readTaskOffer(tenant, taskId);
     await runtime.stores.close();
     downgradeToV3(path);
-    expect(() => open()).toThrow('v3-to-v4');
+    expect(() => open()).toThrow('v3-to-v5');
     expectUnchangedV3(path);
     // Old selectors must fail explicitly rather than silently upgrading past v3.
-    for (const migration of ['v1-to-v3', 'v2-to-v3']) {
-      expect(() => open(migration as SqliteEmbeddedStoreOptions['migration'])).toThrow('Target-v3 migration selectors are no longer supported');
+    for (const migration of ['v1-to-v4', 'v2-to-v4', 'v3-to-v4']) {
+      expect(() => open(migration as SqliteEmbeddedStoreOptions['migration'])).toThrow('Target-v4 migration selectors are no longer supported');
       expectUnchangedV3(path);
     }
-    runtime = open('v3-to-v4');
+    runtime = open('v3-to-v5');
     try {
       expect(await runtime.cloud.readTaskOffer(tenant, taskId)).toEqual(offer);
       expect((await runtime.bound.tasks.get(taskId))?.claimedHarnessId).toBeUndefined();
@@ -178,7 +178,7 @@ describe('SQLite custom-harness claim authority', () => {
       await runtime.stores.close();
       const db = new DatabaseSync(path, { readOnly: true });
       try {
-        expect(db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('4');
+        expect(db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('5');
       } finally { db.close(); }
     } finally { await runtime.stores.close(); }
   });
@@ -191,7 +191,7 @@ describe('SQLite custom-harness claim authority', () => {
     if (status === 'complete') await runtime.stores.cloud.tasks.recordStatus(tenant, { taskId: 'ambiguous', status });
     await runtime.stores.close();
     downgradeToV3(path);
-    expect(() => open('v3-to-v4')).toThrow('historical harness identities are unavailable');
+    expect(() => open('v3-to-v5')).toThrow('historical harness identities are unavailable');
     expectUnchangedV3(path);
     const db = new DatabaseSync(path, { readOnly: true });
     try {
@@ -207,16 +207,16 @@ describe('SQLite custom-harness claim authority', () => {
     const db = new DatabaseSync(path);
     db.exec("CREATE TRIGGER fail_version BEFORE UPDATE ON byok_sqlite_meta BEGIN SELECT RAISE(ABORT, 'injected version failure'); END");
     db.close();
-    expect(() => open('v3-to-v4')).toThrow('injected version failure');
+    expect(() => open('v3-to-v5')).toThrow('injected version failure');
     expectUnchangedV3(path);
     const repair = new DatabaseSync(path);
     repair.exec('DROP TRIGGER fail_version');
     repair.close();
-    await open('v3-to-v4').stores.close();
+    await open('v3-to-v5').stores.close();
     await open().stores.close();
   });
 
-  it('refuses a v4 file missing its claim authority without recreating the column', async () => {
+  it('refuses a v5 file missing its claim authority without recreating the column', async () => {
     const { open, path } = fixture();
     await open().stores.close();
     const db = new DatabaseSync(path);
