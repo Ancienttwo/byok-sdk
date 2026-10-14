@@ -17,6 +17,8 @@ import {
 } from '@byok-sdk/cloud';
 import { RateLimiter, createCountingInboundRateLimiter, type RateLimiterOptions } from './rate-limiter';
 import { createSqliteEmbeddedStores } from './stores/sqlite';
+import { MemoryWakeStore, type WakeStore } from './wakes/store';
+import type { WakeConsumer } from './wakes/types';
 import type { ByokServerStorage } from './types';
 
 /**
@@ -82,6 +84,7 @@ export interface FacadeStoreComposition {
   readonly clock: Clock;
   readonly crypto: CloudCrypto;
   readonly counters: FacadeCounters;
+  readonly wakes: WakeStore;
   close(): Promise<void>;
 }
 
@@ -92,6 +95,7 @@ export interface FacadeStoreOptions {
   readonly rateLimit?: RateLimiterOptions;
   /** One TTL for heartbeat and authenticated transport observations. */
   readonly presenceTtlMs: number;
+  readonly wake?: WakeConsumer;
   /** Fired once per rate-limit EPISODE, not per refused envelope. */
   readonly onRateLimited: (deviceId: string, at: string) => void;
 }
@@ -107,7 +111,7 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
             ...(options.storage.migration === undefined ? {} : { migration: options.storage.migration }),
             ...(options.storage.urlTtlMs === undefined ? {} : { urlTtlMs: options.storage.urlTtlMs }),
           },
-          { clock, crypto },
+          { clock, crypto, ...(options.wake === undefined ? {} : { wake: options.wake }) },
         )
       : undefined;
   const inMemoryCore = sqlite === undefined ? createInMemoryCoreStores({ clock }).stores : undefined;
@@ -161,6 +165,7 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
     clock,
     crypto,
     counters,
+    wakes: sqlite?.wakes(options.tenant) ?? new MemoryWakeStore(),
     close: () => sqlite?.close() ?? Promise.resolve(),
   };
 }

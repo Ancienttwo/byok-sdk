@@ -351,25 +351,84 @@ before open because their WAL paths cannot share recovery authority.
 `close()` is the only server shutdown API; the synchronous `stop()` is removed.
 The upgrade must stop all older owners and external SQLite connections before
 starting this owner, with no parallel sibling-lock path. Schema and wire formats
-are unchanged; see the server README for the breaking API migration.
+were unchanged by the owner-lock refactor; see the schema adoption below and the server README for migration.
 
-Schema v4 fences older writers and stores nullable claimed harness identity in
-the ownership CAS. Stop every writer and take a consistent backup before explicit
-adoption. `v1-to-v4` / `v2-to-v4` reject any task, message, agent-admission or
-advanced cursor history: old in-memory receipt facts cannot be fabricated.
-Eligible v1 adds an empty device directory; v2 retains devices. `v3-to-v4`
-preserves existing receipts, unclaimed offers and identified built-in claims,
+Schema v5 retains nullable claimed harness identity in the ownership CAS and
+adds the server-local wake table. Stop every writer and take a consistent backup
+before explicit adoption. `v1-to-v5` / `v2-to-v5` reject any task, message,
+agent-admission or advanced cursor history: old in-memory receipt facts cannot be
+fabricated. Eligible v1 adds an empty device directory; v2 retains devices.
+`v3-to-v5` preserves receipts, unclaimed offers and identified built-in claims,
 but rejects every owned row without a claimed runtime, including terminal rows:
 lost custom-harness identity cannot be distinguished from legacy identity-free
 built-in claims. No actual adapter identity is inferred from an offer or mutable
-inventory. Existing rows get a null harness identity. Tables and version advance
-atomically; failure preserves the old database. Never delete history to pass these
-checks. The public target-v3 selectors are replaced by target-v4 selectors without
-compatibility aliases; callers must update one-shot migration configuration.
+inventory. Those older rows get a null harness identity. `v4-to-v5` only adds
+wake authority and its indexes; existing device, receipt, mailbox and task rows
+are untouched. A pre-v5 file already containing wake authority is rejected.
+Tables and version advance atomically; failure preserves the old database.
+Never delete history to pass these checks. Target-v4 selectors are deleted and
+replaced with target-v5 selectors, without compatibility aliases. Callers must
+update one-shot migration configuration. Old builds refuse schema 5; rollback
+requires restoring the backup taken before adoption.
 Receipts use tenant/key first-write-wins and have no TTL/deletion path; mailbox
 retention cannot remove the delivered/immutable/terminal facts. Receipt columns
 and composite primary key are validated on open. Capacity exhaustion is an
 error; deleting identity fences is not a quota strategy.
+
+### Embedded wake queue
+
+Only `@byok-sdk/server` provides `wake: { consume(wake, signal) }` and
+`server.wakes.schedule/cancel/pending` (routine K2, ADR-038 decisions 5/6).
+Hosted cloud ports have no routine timer. Host-owned cron/periodic rules choose
+the next epoch-millisecond `availableAt`; SDK wakes are one-shot. Memory queues
+are process-local and lose all wakes at exit; routines requiring restart
+recovery must use SQLite. Wake rows share its EXCLUSIVE owner and coordinator.
+
+`schedule({ dedupKey, availableAt, payload? })` returns `{ wakeId, accepted }`.
+The key contains 1–256 Unicode characters, `availableAt` is a nonnegative safe
+integer no more than 366 days in the future, and payload is an opaque string of
+at most 4 KiB UTF-8. Past times are immediately due. Invalid input throws
+`WakeInputError` with a closed code. An exact key/time/payload replay returns the
+original ID and `accepted: false`, including completed keys retained for seven
+days. Changed content throws `WakeConflictError`. No hook means schedule throws
+`WakeHookMissingError` without writing; reopening SQLite with queued wakes and
+no hook also fails inside the open transaction and releases ownership.
+
+One unref'd timer waits at most 60 seconds, then compares wall clock, so a
+forward clock jump or simulated sleep does not strand the earliest wake. An
+empty queue has no timer. Due wakes are delivered serially in `(next due time,
+wakeId)` order. The committed delivery count increments before calling the
+hook outside every storage/serialization tail; a hook can await schedule/cancel.
+`DueWake` preserves original availableAt and carries deliveredAt, delivery,
+wakeId, dedupKey and payload. pending returns queued/delivering records ordered
+by `(availableAt, wakeId)`, with delivery count and optional retryAt/lastError.
+
+A resolved hook marks done. Rejection records at most 1 KiB of UTF-8 error text,
+keeps availableAt unchanged, and retries after 60 seconds without an attempt
+limit. A delivery has a 60-second deadline: invalidate its token **before**
+aborting its signal, record the deadline rejection and continue the due batch.
+Later settlement of that token cannot change state. An uncooperative hook can
+overlap the same wake's redelivery; at-least-once and overlapping delivery require
+Host durable occurrence dedup. The Host hook records its decision, schedules the
+next wake and submits execution, then resolves; it must not wait for execution
+to finish. No late wake expires or is silently discarded; Host decides whether
+to skip work and resolves after recording that decision.
+
+cancel deletes only queued wakes. An in-flight wake returns false and is not
+interrupted; if that delivery rejects or times out, it still retries. Host must
+cancel again once queued, or record abandonment in the hook and resolve.
+`close()` synchronously rejects new wake calls with `WakeClosedError`, clears
+the timer and invalidates then aborts the current token. It drains accepted
+storage operations, never waits for the hook, then closes the composition.
+An unfinished row remains queued with its committed delivery number; restart
+redelivers with the next number, including after SIGKILL. delivering is an
+in-memory projection, not a second persisted state.
+
+The internal WakeStore collector removes only done rows strictly older than
+seven days, up to its positive limit per call. Server invokes it at startup,
+on schedule and after each delivery, bounded to 100 rows per call. No periodic
+idle collector or independent retention policy is added; #412 maintenance can
+call the same port. Real OS-sleep timing is not measured by the fake-clock test.
 
 Hosts can pre-persist one execution identity and pass caller taskId with an
 explicit device to ordinary/fresh-Agent dispatch. Concurrent same-id calls are
@@ -2161,7 +2220,7 @@ An explicitly selected harness must match the immutable offer receipt. Old peers
 without the capability are refused; no identity is inferred from display names
 or provider/model fields. Business scheduling and device choice stay with the
 host. Deploy migration `0021_custom_harness_identity.sql` for PostgreSQL before
-this server code; embedded SQLite requires schema v4 and its explicit adoption
+this server code; embedded SQLite requires schema v5 and its explicit adoption
 rules above.
 
 ### Terminal boundary acceptance follow-up (#163 / #167)
@@ -2265,6 +2324,9 @@ status, is not evidence of mailbox delivery or physical Agent-home release.
 A strict fresh Agent task may select `terminalProjection: { mode: 'result-document', contract }` without user `messageEgress`. That frozen task selection makes the extracted document a separate internal result. The daemon must not deliver document-less success. Existing extractor validation and server capability gates remain applicable. This is an execution/result primitive: Host owns SummaryJob, coverage/version CAS, budgets and scheduling; schema support alone is not native-runtime or tool-isolation acceptance. On the prepared lane the same primitive runs with zero tools (a tool-less record, an offer that omits `requiredToolsets`, no `messageEgress`); the extractor and the server `result-document` capability remain required.
 
 ### Recurring Host composition requirements
+
+Device-local Hosts can use the embedded wake queue for the one-shot clock;
+periodic rules, occurrence dedup and execution settlement remain Host-owned.
 
 The [Conversation-turn Fresh MVP PRD](researches/2026-09-09_conversation-turn-fresh-mvp-prd.md)
 defines the approved Host composition below this SDK product authority. Recurring

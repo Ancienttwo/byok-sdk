@@ -133,7 +133,7 @@ and only then start the new owner. An idle old NORMAL-mode connection can still
 block the new EXCLUSIVE owner. Do not run old and new writers together: the old
 sibling lock is no longer an ownership authority. After all old owners have
 stopped, operators may remove their leftover `<path>-lock` files; the SDK neither
-opens nor automatically deletes them. Schema v4, persisted data and wire contracts
+opens nor automatically deletes them. The owner-lock refactor itself leaves persisted data and wire contracts
 are unchanged. Use the server facade for live reads, or close the owner before
 external inspection or backup.
 
@@ -161,27 +161,83 @@ Unredeemed pairing codes, presence and other unmodified ports remain ephemeral.
 Keep daemon OS credentials, server URL and token signer stable across restart.
 This does not restore TaskHandle promises, subscriptions or provider processes.
 
+### Device-side one-shot wakes (routine K2)
+
+Only the embedded server has this queue; hosted `@byok-sdk/cloud` has no routine
+timer. Cron/periodic rules and execution/occurrence ledgers remain Host-owned.
+Memory storage loses wakes on exit; use SQLite for restart-safe routines.
+
+```ts
+const server = createByokServer({
+  productId,
+  storage: { kind: 'sqlite', path },
+  wake: {
+    async consume(wake, signal) {
+      // Host durably deduplicates occurrence identity, schedules its next wake,
+      // and submits execution before resolving. Do not await execution completion.
+      await host.consumeWake(wake, signal);
+    },
+  },
+});
+await server.wakes.schedule({
+  dedupKey: 'routine:r1:v3:slot', availableAt: Date.now() + 60_000, payload: 'r1',
+});
+const unfinished = await server.wakes.pending();
+await server.close();
+```
+
+schedule deduplicates exact key/time/payload, returning the original wakeId with
+accepted:false. Changed content throws `WakeConflictError`. Keys are 1–256
+Unicode characters; availableAt is a nonnegative safe integer at most 366 days
+in the future; payload is at most 4 KiB UTF-8. Bad input throws `WakeInputError`.
+A missing hook throws `WakeHookMissingError` without writing; opening a queued
+SQLite wake database without that hook is also refused and releases ownership.
+
+Wakes are delivered serially by next due time and wakeId. One unref'd timer caps
+waits at 60 seconds and compares wall clock, including after a forward jump;
+idle queues have no timer. Rejections retry in 60 seconds with unchanged
+availableAt and updated deliveries/retryAt/lastError (at most 1 KiB UTF-8).
+Deadline is also 60 seconds: token invalidates before signal abort; old settlement
+is ignored and the next due wake proceeds. A timed-out, uncooperative hook may
+overlap a later delivery of the SAME wake. Host persistent dedup is required for
+this at-least-once contract. SDK imposes no attempt cap and discards no late wake.
+
+cancel deletes only queued wakes. False for an in-flight wake means it was **not
+cancelled**; rejection/deadline still retries it. Cancel again once queued, or
+record abandonment in the hook and resolve. pending sorts by availableAt and
+wakeId and reports queued/delivering, delivery count and optional lastError/retryAt.
+Completed keys remain for seven days; bounded collection removes only old done
+rows (up to 100 per automatic call). close aborts after token invalidation,
+rejects new calls and drains storage, without waiting for an uncooperative hook.
+An unfinished committed delivery remains queued and replays after close/crash
+with its next delivery number. There is no persisted delivering state, hosted
+timer, cron parser or parallel legacy path. Real sleep timing is not proven by
+fake timers.
+
 ### Schema adoption
 
-The current schema is v4, which stores the write-once `claimedHarnessId`
-stored atomically with task ownership. Stop **all** writers and take a consistent
+The current schema is v5, retaining write-once `claimedHarnessId`
+stored atomically with task ownership and adding the embedded wake table. Stop **all** writers and take a consistent
 SQLite backup (including WAL state or using SQLite's backup facility) before
 explicit adoption. An already-open old writer is not stopped by the version fence.
 
-- `v1-to-v4` and `v2-to-v4` require no task, mailbox-message, agent-admission or
+- `v1-to-v5` and `v2-to-v5` require no task, mailbox-message, agent-admission or
   advanced cursor history: old in-memory receipts cannot be recovered from task
   status or fabricated from a retry payload. A pristine poll cursor is allowed.
-- `v3-to-v4` preserves receipts, unclaimed offers and claims with an identified
+- `v3-to-v5` preserves receipts, unclaimed offers and claims with an identified
   built-in runtime. It rejects any owned task with no `claimed_runtime`, including
   terminal tasks: a lost custom-harness identity cannot be distinguished from an
   identity-free legacy built-in claim. Neither the requested offer nor current
   device inventory proves the actual claiming adapter. Existing rows receive a
   null harness identity; migration never invents one.
 
+- `v4-to-v5` only creates the wake table and indexes; all existing rows stay
+  unchanged. Pre-v5 files already containing a wake table are refused.
+
 Preserve rejected databases for separate reconciliation; do not delete history,
 reset cursors or edit version markers to make adoption pass.
 
-Every refusal at open is a `SqliteSchemaError` with `foundVersion` and
+Schema refusals at open are a `SqliteSchemaError` with `foundVersion` and
 `requiredVersion`, so a host can check the file at startup and branch on `code`:
 
 - `SQLITE_SCHEMA_UNSUPPORTED`: the file needs an explicit `migration` selector
@@ -195,12 +251,13 @@ Every refusal at open is a `SqliteSchemaError` with `foundVersion` and
 const server = createByokServer({
   productId,
   tokenSigner,
-  storage: { kind: 'sqlite', path, migration: 'v3-to-v4' },
+  storage: { kind: 'sqlite', path, migration: 'v4-to-v5' },
 });
 await server.close();
 ```
 
-Remove `migration` from normal startup. Adoption adds the nullable harness column,
+Remove `migration` from normal startup. Every source gains an empty wake table;
+v1–v3 adoption also adds the nullable harness column,
 adds receipts for v1/v2 and an empty device directory for v1, and updates the marker
 atomically; any failure rolls back. Existing v2/v3 devices and artifacts remain.
 V1 enrollment was in-memory and needs explicit pairing. Unknown versions, missing
