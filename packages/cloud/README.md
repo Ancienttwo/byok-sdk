@@ -81,3 +81,5 @@ A delivered=false read is not evidence that append never happened. Host-only
 message context is a separate authority, not part of this offer projection.
 The API's persistence is that of the injected receipts store: in-memory restart
 and Postgres generic receipt retention are not upgraded by this read method.
+
+Runtime dependencies and size budgets: [entry dependency contract](../../README.md#entry-dependencies).

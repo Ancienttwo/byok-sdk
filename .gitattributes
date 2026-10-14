@@ -5,3 +5,8 @@ packages/client/vendor/** -text
 packages/client/src/adapters/pi/pi-export-asset-layout.json -text
 packages/client/src/adapters/pi/pi-export-assets.source.json -text
 packages/client/src/adapters/pi/todo-locale-layout.json -text
+
+# Entry contracts compare canonical authored bytes on every checkout platform.
+api-surface/*.d.ts text eol=lf
+/README.md text eol=lf
+packages/*/package.json text eol=lf

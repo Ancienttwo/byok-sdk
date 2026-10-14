@@ -15,6 +15,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { checkEntryClosure } from './entry-closure.mjs';
 
 const PACKAGES = [
   'client',
@@ -352,6 +353,16 @@ export function run(argv, out = console) {
         `${pkg}: public type surface drifted from api-surface/${pkg}.d.ts\n${unifiedDiff(golden, surface, `api-surface/${pkg}.d.ts`)}`,
       );
     }
+  }
+
+  // --package is the existing declaration-only view. The full gate also owns
+  // cross-package runtime inventory, policies and the generated Host table.
+  if (options.package === null) {
+    try {
+      const result = checkEntryClosure(options.root, { update: options.update && failures.length === 0 });
+      failures.push(...result.failures);
+      for (const measurement of result.measured) out.log(`entry-closure: ${measurement.id}: ${measurement.bytes}/${measurement.budgetBytes} bytes`);
+    } catch (error) { failures.push(`entry-closure: ${error.message}`); }
   }
 
   if (options.update && failures.length === 0) {

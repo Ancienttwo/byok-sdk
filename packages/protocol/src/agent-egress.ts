@@ -1,16 +1,5 @@
 import { z } from 'zod';
 
-/** Additive daemon capability names. Server/cloud admission consumes these exactly. */
-export const AGENT_EGRESS_POLICY_CAPABILITY = 'agent-egress-policy' as const;
-export const AGENT_EGRESS_RELIABLE_ACK_CAPABILITY = 'agent-egress-reliable-ack' as const;
-/** Admits the distinct offer whose runtime mints its session only after start. */
-export const AGENT_EGRESS_FRESH_SESSION_CAPABILITY = 'agent-egress-fresh-session' as const;
-/** Admits the distinct Agent-authored message lane; activity policy remains independent. */
-export const AGENT_MESSAGE_EGRESS_CAPABILITY = 'agent-message-egress' as const;
-export const AGENT_CONTENT_WORKSPACE_READ_CAPABILITY = 'agent-content-workspace-read' as const;
-export const AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY = 'agent-content-transcript-read' as const;
-export const AGENT_CONTENT_ARTIFACT_READ_CAPABILITY = 'agent-content-artifact-read' as const;
-
 /**
  * Agent-local/cloud egress is an explicit, versioned contract.  This module
  * owns the public policy and fact vocabulary; transport messages compose it

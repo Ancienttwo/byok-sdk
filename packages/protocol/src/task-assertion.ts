@@ -26,6 +26,3 @@
  * carries this exact literal, so a name legal in only one of the two channels
  * would leave them naming different things.
  */
-
-/** Contract §8.1's capability gate for `byok-task-assertion-v1` tool authority. */
-export const HOST_MCP_TASK_CONTEXT_CAPABILITY = 'host-mcp-task-context' as const;
