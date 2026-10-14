@@ -1,10 +1,51 @@
 # @byok-sdk/server
 
-The self-hosted SaaS-side reference coordinator: pairing, authenticated device
-transport over HTTP long-poll (`POST /byok/messages`, `GET /byok/events`; there
-is no WebSocket transport), task leasing, approvals, and device presence over
-protocol v2. State is in memory by default; `storage: { kind: 'sqlite', path }`
-persists enrollment, receipts and the coordination interfaces (see below).
+The embedded reference coordinator: a façade over the `@byok-sdk/cloud` kernel
+that serves one product and one tenant inside your own process. It handles
+pairing, device authentication, dispatch, approvals, cancellation and device
+presence over protocol v2.
+
+Devices talk to it over HTTP: they send envelopes with `POST /byok/messages`
+and receive them by long-polling `GET /byok/events`. An empty poll is held open
+for `longPollHoldMs` (default 50 seconds) before it returns. There is no
+WebSocket transport and no task lease. For a multi-instance hosted deployment,
+use `@byok-sdk/cloud` with `@byok-sdk/cloud-dataplane` instead.
+
+MIT licensed. Node.js 24.15.0 or newer.
+
+## Storage
+
+State is in memory by default. `storage: { kind: 'sqlite', path }` persists:
+
+- the device directory (enrollment and authenticated capabilities);
+- request receipts;
+- the mailbox;
+- task attempts and their Agent message admission records;
+- cancellations;
+- objects and blobs.
+
+Everything else stays in the process and is lost on restart, in SQLite mode as
+well: device presence, `TaskHandle` promises and the task-event relay, the
+approval timeline, inbound dedup, nonces, Agent egress receipt readback
+(`egress.get`), activity, unredeemed pairing codes, storage quota accounting,
+and the token signing key when you do not pass `tokenSigner`.
+
+## Restart
+
+With SQLite storage and no stable `tokenSigner`, a restart makes every
+outstanding access token invalid. Each daemon gets one `401`, renews its token
+through `POST /byok/challenge` and `POST /byok/token` against the persisted
+device directory, and continues; no re-pairing is needed. A device reads as
+connected again at its next poll.
+
+What a restart does not keep:
+
+- pending approvals, because the approval timeline is in memory;
+- `TaskHandle` promises, event subscriptions and provider processes. After a
+  restart, read tasks with `tasks.offer(taskId)` and `tasks.get(taskId)` (see
+  [Persistent host request identity](#persistent-host-request-identity));
+- with memory storage, everything, including enrollment: devices must pair
+  again.
 
 ## Device presence
 
@@ -20,8 +61,26 @@ reads offline about 15 seconds after its last hold would have ended.
 poll does not renew presence. `lastSeen` is reported alongside. Revoking a device
 removes its presence immediately.
 
-Use `@byok-sdk/cloud` plus `@byok-sdk/cloud-dataplane` for the durable hosted
-composition.
+## Mailbox retention
+
+The server runs no retention timer. `mailbox.collectRetired({ ackedBefore,
+expireUnackedBefore })` is a pass-through to the kernel: acked rows appended
+before `ackedBefore` are deleted, and unacked rows appended before
+`expireUnackedBefore` are marked `expired` and stay visible, which moves
+`recoverableFrom` so a device polling from a lost cursor gets
+`409 cursor_too_old`. You choose both cutoffs and when to call it. Without a
+call, an embedded server retires nothing. Retention never deletes receipts (see
+below).
+
+## Stats and liveness
+
+`stats()` returns a plain snapshot: connected device count, task counts by
+state, inbound envelope, dedup and rate-limit counters, and uptime. It is
+in-process only; this package never serves it over HTTP. `healthzRoute: true`
+mounts an unauthenticated `GET /healthz` that returns only `{ ok: true,
+uptimeMs }`; it is off by default.
+
+## Toolset-aware dispatch
 
 Toolset-aware dispatch names logical device-local MCP toolsets; it never sends
 their commands or credentials:
@@ -40,32 +99,31 @@ live device advertises `toolset-selection` and its `configuredToolsets`
 inventory contains every required ID. `machines.list()` projects that same
 logical-ID-only inventory; MCP commands and credentials remain device-local.
 
-MIT licensed. Node.js 24.15.0 or newer.
+## SQLite receipts, ownership and schema adoption
 
-## SQLite enrollment, receipts and schema adoption
-
-`storage: { kind: 'sqlite', path }` persists device enrollment, authenticated
-capabilities, request receipts and the six coordination interfaces. Pairing and
-authentication share the device directory. Receipt keys are tenant scoped and
-first-write-wins across connections and restart. Mailbox retention never deletes
+Pairing and authentication share the persisted device directory. Receipt keys
+are tenant scoped and first-write-wins. Mailbox retention never deletes
 receipts: immutable offer, delivered and canonical terminal facts remain for the
 lifetime of the database. There is no receipt TTL or automatic pruning. Monitor
 disk usage; exhaustion is an error, not permission to delete identity fences.
 
-One SQLite file serves exactly one server process. Opening takes an OS lock on
+### One process per SQLite file
+
+One SQLite file serves exactly one running server. Opening takes an OS lock on
 the canonical database path's `<path>-lock` sibling for the lifetime of the server;
 symlink aliases resolve to that same lock. A second open of the
 same file, from another process or another instance in this one, throws
 `SqliteOwnershipError` (`code: 'SQLITE_DATABASE_OWNED'`) before touching the
 database. The lock is released by `close()` and by the operating system when the
 owning process exits for any reason, including SIGKILL, so a crashed owner never
-blocks the next start. Token signing keys (unless you pass `tokenSigner`),
-presence, the task-event relay and live-task accounting are process-local, which
-is why the file is not shareable. Running several server instances behind a load
-balancer needs external stores (`@byok-sdk/cloud` with `@byok-sdk/cloud-dataplane`)
-and one shared `tokenSigner`.
-Hard-linked database paths are refused before open, since they have no unique
-sibling lock or WAL path.
+blocks the next start. To reopen the same file in one process, `await
+server.close()` first. Hard-linked database paths are refused before open, since
+they have no unique sibling lock or WAL path. The process-local state listed in
+[Storage](#storage) is why the file is not shareable: several server instances
+behind a load balancer need external stores (`@byok-sdk/cloud` with
+`@byok-sdk/cloud-dataplane`) and one shared `tokenSigner`.
+
+### Task snapshots after restart
 
 `stats()` re-reads only live attempts and their approval timelines; absorbing
 terminal states are counted once. SQLite history is scanned once at startup,
@@ -77,11 +135,9 @@ Attempts opened before an offer receipt was committed retain the existing
 attempt-only snapshot (`createdAt: updatedAt`, no requested session). Malformed
 receipts are rejected by the kernel's readback contract.
 
-Unredeemed pairing codes, presence and other unmodified ports remain ephemeral.
-Keep daemon OS credentials, server URL and token signer stable across restart.
-This does not restore TaskHandle promises, subscriptions or provider processes.
+### Schema adoption
 
-This candidate writes schema v4, including the write-once `claimedHarnessId`
+The current schema is v4, which stores the write-once `claimedHarnessId`
 stored atomically with task ownership. Stop **all** writers and take a consistent
 SQLite backup (including WAL state or using SQLite's backup facility) before
 explicit adoption. An already-open old writer is not stopped by the version fence.
@@ -130,9 +186,7 @@ validation of legacy table constraints is a separate tracked concern.
 selectors, with no alias or silent reinterpretation: callers must update their
 one-shot migration configuration after checking eligibility and backing up.
 Restore of a backup requires a separate recovery procedure because it can lose
-new state or restore old grants. This belongs to the next MINOR release; these
-local changes are not a published upgrade.
-
+new state or restore old grants. Schema v4 shipped in 0.24.0.
 
 ## Persistent host request identity
 
