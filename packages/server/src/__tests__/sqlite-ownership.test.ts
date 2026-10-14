@@ -195,7 +195,7 @@ describeSqlite('SQLite single-process ownership', { timeout: 20_000 }, () => {
     expect(() => open(path)).toThrow(SqliteSchemaError);
   });
 
-  it('releases ownership when the initial task-history read fails', async () => {
+  it('opens without materializing task history and still rejects corrupt data on read', async () => {
     const path = databasePath();
     const first = open(path);
     await first.close();
@@ -205,9 +205,28 @@ describeSqlite('SQLite single-process ownership', { timeout: 20_000 }, () => {
       VALUES (?, ?, ?, ?, ?, ?)`)
       .run('product:sqlite-owner', 'bad-task', 'device', 'offered', 'invalid-json', '2026-10-13T00:00:00.000Z');
     corrupt.close();
-    expect(() => open(path)).toThrow(SyntaxError);
-    // A repeated open must report the original bad data, never a leaked owner.
-    expect(() => open(path)).toThrow(SyntaxError);
+    const reopened = open(path);
+    try { await expect(reopened.tasks.get('bad-task')).rejects.toThrow(SyntaxError); }
+    finally { await reopened.close(); }
+  });
+
+  it('adds the active-task covering index to existing v4 files without a schema bump', async () => {
+    const path = databasePath();
+    const first = open(path);
+    await first.close();
+    const old = new DatabaseSync(path);
+    old.exec('DROP INDEX task_attempt_status_idx');
+    old.close();
+    const reopened = open(path);
+    try { expect((await reopened.stats()).taskCountsByState.Offered).toBe(0); }
+    finally { await reopened.close(); }
+    // External reads require the EXCLUSIVE owner to release its handle first.
+    const inspect = new DatabaseSync(path, { readOnly: true });
+    try {
+      expect(inspect.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'task_attempt_status_idx'").get())
+        .toEqual({ name: 'task_attempt_status_idx' });
+      expect(inspect.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual({ value: '4' });
+    } finally { inspect.close(); }
   });
 
   it('uses the actual exclusive WAL handle with the default grace and no lock sibling or SHM', () => {

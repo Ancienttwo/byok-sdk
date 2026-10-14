@@ -4,9 +4,13 @@ import {
   createByokCloud,
   createHmacTokenSigner,
   fullCapabilityDeclaration,
+  INBOUND_REFUSAL_REASONS,
+  TASK_ATTEMPT_ACTIVE_STATUSES,
+  TASK_ATTEMPT_STATUSES,
   pendingApproval,
   type ByokCloud,
   type EnqueuedOffer,
+  type InboundRefusalReason,
   type PairingCodeInfo,
   type PendingApproval,
   type TaskAttempt,
@@ -35,9 +39,8 @@ import {
 import type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
 import { DeviceConnections } from './connections';
 import { pickFirstConnectedDevice, type DeviceCandidate } from './device-selection';
-import { emptyTaskCounts, LiveTaskIndex } from './live-tasks';
 import { TaskEventRelay } from './relay';
-import { toMachineInfo, toTaskResult, toTaskSnapshot, toTaskState } from './snapshot';
+import { toMachineInfo, toTaskResult, toTaskSnapshot, taskStateOf } from './snapshot';
 import { composeFacadeStores, serverTenantId, DEFAULT_MAX_BLOB_SIZE_BYTES } from './stores';
 import { createTaskHandle } from './task-handle';
 import type {
@@ -74,7 +77,7 @@ export type {
   TaskResult,
   TaskSnapshot,
 } from './types';
-export type { TaskOfferReadback } from '@byok-sdk/cloud';
+export type { InboundRefusalReason, TaskOfferReadback } from '@byok-sdk/cloud';
 /**
  * M5 (approval targeting, docs/protocol.md §5.3): `TaskHandle.approve`/`reject`'s
  * `opts.approvalId` targeting throws this when the id names an approval the
@@ -282,11 +285,9 @@ export interface ByokServer {
    * A plain, serializable snapshot of this server's current state. See
    * {@link HubStats} for the field-by-field contract.
    *
-   * Async because the non-terminal part of `taskCountsByState` is re-read from
-   * the durable task store on every call. Terminal states are absorbing, so a
-   * task is read until it settles and then only tallied: the cost of a call
-   * follows the tasks still in flight, not history (`live-tasks.ts`). A SQLite
-   * server accounts the file's existing tasks once, at open.
+   * One store aggregate, an active-attempt page walk, then one approval read
+   * per active attempt. No process-local task counts or startup history scan.
+   * This is a multi-read observation, not a transaction snapshot; see HubStats.
    *
    * Deliberately in-process only: never exposed over HTTP by this SDK itself (see
    * `CreateByokServerOptions.healthzRoute`); an embedder that wants any of it
@@ -326,11 +327,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   }
 
   const connections = new DeviceConnections({ presenceTtlMs });
-  /**
-   * Non-terminal task IDs plus absorbing terminal counts. Dispatch input is
-   * read from the kernel's immutable offer receipt, never retained here.
-   */
-  const tasks = new LiveTaskIndex();
+  const inboundRefusals = Object.fromEntries(INBOUND_REFUSAL_REASONS.map((reason) => [reason, 0])) as Record<InboundRefusalReason, number>;
   const relay = new TaskEventRelay({
     connections,
     ...(opts.taskEventBufferLimit === undefined ? {} : { taskEventBufferLimit: opts.taskEventBufferLimit }),
@@ -343,7 +340,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     ...(opts.storage === undefined ? {} : { storage: opts.storage }),
     ...(opts.rateLimit === undefined ? {} : { rateLimit: opts.rateLimit }),
     connections,
-    tasks,
     onRateLimited: (deviceId, at) => relay.emitServerEvent({ kind: 'device.rate_limited', deviceId, at }),
   });
 
@@ -365,7 +361,10 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     // S1: the product this instance serves is part of every bearer-authed
     // route's decision, not just of the pairing claims.
     instanceProductId: opts.productId,
-    observer: relay,
+    observer: {
+      onInboundCommitted: (input) => relay.onInboundCommitted(input),
+      onInboundRefused: ({ reason }) => { inboundRefusals[reason] += 1; },
+    },
     ...(opts.agentMessage === undefined ? {} : { agentMessage: opts.agentMessage }),
     maxBlobSizeBytes,
     longPollHoldMs,
@@ -874,20 +873,31 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     },
 
     async stats(): Promise<HubStats> {
-      // Only the live set is re-read: one batched attempt read plus one
-      // approval-timeline read per live task. A task that turns out terminal
-      // leaves the live set and joins its count here, exactly once.
-      const attempts = await composition.cloud.tasks.getMany(tenant, tasks.liveTaskIds());
-      for (const attempt of attempts) tasks.observe(attempt);
-      const live = attempts.filter((attempt) => tasks.isLive(attempt.taskId));
-      const pending = await Promise.all(live.map((attempt) => readPending(attempt.taskId)));
-      // Synchronous from here: a task settled by a transition that committed
-      // while the timelines were read sits in its terminal count, not in both.
-      const taskCountsByState = emptyTaskCounts();
-      live.forEach((attempt, index) => {
-        if (tasks.isLive(attempt.taskId)) taskCountsByState[toStateForCount(attempt, pending[index])] += 1;
+      // Aggregate settled rows FIRST. A kernel-settled row cannot subsequently
+      // appear in the active walk; reversing these reads can count it twice.
+      const aggregate = await cloud.countTaskAttempts(tenant);
+      const active: TaskAttempt[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await cloud.listTaskAttempts(tenant, {
+          limit: 100,
+          active: true,
+          ...(cursor === undefined ? {} : { cursor }),
+        });
+        active.push(...page.attempts);
+        cursor = page.nextCursor;
+      } while (cursor !== undefined);
+      const pending = await Promise.all(active.map((attempt) => readPending(attempt.taskId)));
+      const taskCountsByState = Object.fromEntries(TASK_STATES.map((state) => [state, 0])) as Record<TaskState, number>;
+      for (const status of TASK_ATTEMPT_STATUSES) {
+        if (!TASK_ATTEMPT_ACTIVE_STATUSES.some((activeStatus) => activeStatus === status)) {
+          taskCountsByState[taskStateOf(status, false, false)] += aggregate.byStatus[status];
+        }
+      }
+      taskCountsByState[taskStateOf('cancel_requested', true, false)] += aggregate.cancellationRequested;
+      active.forEach((attempt, index) => {
+        taskCountsByState[taskStateOf(attempt.status, attempt.cancellation !== undefined, pending[index] !== undefined)] += 1;
       });
-      for (const state of TASK_STATES) taskCountsByState[state] += tasks.terminalCount(state);
 
       return {
         connectedDeviceCount: connections.connectedCount(),
@@ -895,15 +905,11 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
         envelopesIn: composition.counters.envelopesIn,
         dedupDrops: composition.counters.dedupDrops,
         rateLimitEvents: composition.counters.rateLimitEvents,
+        inboundRefusals: { ...inboundRefusals },
         uptimeMs: Date.now() - startedAtMs,
       };
     },
   };
-}
-
-/** Same projection `tasks.get` uses; named so the count and the snapshot can never disagree. */
-function toStateForCount(attempt: TaskAttempt, pending: PendingApproval | undefined): TaskState {
-  return toTaskState(attempt, pending);
 }
 
 /**
