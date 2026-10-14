@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Breaking (cloud-dataplane, 0.x; #387)** — new migration
+  `deploy/sql/0025_drop_storage_usage_mailbox_bytes.sql` drops the retired
+  `storage_usage.mailbox_bytes` column; the retained outbox rows (#411) are the
+  only mailbox byte record. Owner decision: it ships in the same release as
+  #411 instead of one release later, so an application rollback to 0.26.1 or
+  earlier first needs the pre-upgrade backup, or the column re-added with
+  every writer stopped (`deploy/runbooks/cloud-cleanup.md`, "Rollback and
+  usage rebuild").
+
 - **Breaking (cloud, 0.x; #387)** — a refused offer append now throws
   `TaskOfferAppendRefusedError` (code `task_offer_append_refused`) from every
   `enqueue*Offer` path and the server's `dispatch`, instead of the store's raw
@@ -331,8 +340,7 @@
     until the receipt classification (#412) lands, so `ttl_rows_deleted` no
     longer counts receipts.
   - New migration `deploy/sql/0023_mailbox_usage_index.sql` (covering index,
-    blocks outbox writes while it builds). `storage_usage.mailbox_bytes` stays
-    for one release, unread and unwritten. Run the pre-upgrade audit in
+    blocks outbox writes while it builds). Run the pre-upgrade audit in
     `deploy/runbooks/cloud-cleanup.md` first.
 
 ## 0.26.1 / @byok-sdk/keys 0.11.1 (published, 2026-10-12)

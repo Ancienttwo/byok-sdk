@@ -790,10 +790,14 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       });
       // The dead letter still counts until an operator discards it.
       expect((await mailbox.readUsage(TENANT)).bytes).toBe(second.byteSize);
-      // The retired counter column is neither written nor read any more.
-      await expect(
-        scope.pool.query('SELECT mailbox_bytes FROM storage_usage WHERE tenant_id = $1', [TENANT]),
-      ).resolves.toMatchObject({ rows: [{ mailbox_bytes: 0n }] });
+      // The outbox rows are the only mailbox byte record: 0025 dropped the
+      // retired storage_usage counter (#387).
+      const usageColumns = await scope.pool.query<{ column_name: string }>(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'storage_usage' ORDER BY column_name",
+      );
+      expect(usageColumns.rows.map((row) => row.column_name)).toEqual([
+        'committed_inline_bytes', 'committed_object_bytes', 'object_count', 'tenant_id', 'updated_at',
+      ]);
 
       await cleanup.discardDeadLetter(TENANT, { deviceId: 'device-production', seq: second.seq });
       expect((await mailbox.readUsage(TENANT)).bytes).toBe(0n);
