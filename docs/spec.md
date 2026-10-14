@@ -401,6 +401,16 @@ the optional unexpired presence facts (release, protocol versions, runtime and
 auth observations). Hosts therefore consume one projection rather than
 joining device and presence lists.
 
+The reference server uses this same presence store as its sole observation
+rule. Its TTL is `longPollHoldMs + 15_000` by default (65 seconds), and must
+outlast one held poll. Authenticated hello, accepted envelopes, poll starts
+and heartbeat publications renew the same lease. `machines.list()` projects
+`connected` and live discovery facts plus durable identity and harness discovery. All dispatches
+require an explicit `deviceId`; registered offline targets receive queued work,
+while unknown/revoked legacy targets fail with `device_not_found`. Presence
+and advertised toolset inventories never gate dispatch; durable capabilities
+and the daemon's local acceptance remain the authorities.
+
 This is an SDK-owned observation projection, not a readiness claim or an
 execution, authorization, capability, scheduler, load, or admission gate.
 Hosts consume the aggregate; they must not re-join `listDevices()` and

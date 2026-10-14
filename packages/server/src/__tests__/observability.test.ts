@@ -75,7 +75,7 @@ describe('M4 Phase 4: ByokServer.stats() (part B.1)', () => {
 
     expect((await instance.stats()).connectedDeviceCount).toBe(1);
 
-    const handle = await instance.dispatch({ instruction: 'x' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'x' });
     expect((await instance.stats()).taskCountsByState.Offered).toBe(1);
 
     const claimEnvelope = createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId });

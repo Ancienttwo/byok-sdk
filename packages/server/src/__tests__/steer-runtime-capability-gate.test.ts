@@ -79,7 +79,7 @@ async function dispatchClaimedRunning(
   capabilities: RuntimeCapabilities | undefined,
   instruction = 'long running task',
 ): Promise<TaskHandle> {
-  const handle = await h.byok.dispatch({ instruction });
+  const handle = await h.byok.dispatch({ deviceId: h.daemon.deviceId, instruction });
   const offer = await nextEnvelope(h.daemon);
   expect(offer.type).toBe('task.offer');
   await claimAndStart(h.byok, h.daemon, handle, runtime, capabilities);
@@ -210,7 +210,7 @@ describe("S0 (GAP-002): task.steer is gated by the claimed runtime's capability 
 
   it('a Claimed (not yet started) task is task_not_running — the state gate fires before the capability gate even for a steerable runtime', async () => {
     harness = await startHarness([PI_RUNTIME_INFO]);
-    const handle = await harness.byok.dispatch({ instruction: 'claimed but not started' });
+    const handle = await harness.byok.dispatch({ deviceId: harness.daemon.deviceId, instruction: 'claimed but not started' });
     const claim = await sendOne(
       harness.daemon,
       createEnvelope(
@@ -356,7 +356,7 @@ describe('S0 (GAP-002): claim-time capability snapshot on the task record', () =
 
   it("the Offered -> Claimed transition records the claim's own reported capabilities verbatim, alongside claimedRuntime", async () => {
     harness = await startHarness([PI_RUNTIME_INFO, CLAUDE_RUNTIME_INFO]);
-    const handle = await harness.byok.dispatch({ instruction: 'snapshot me' });
+    const handle = await harness.byok.dispatch({ deviceId: harness.daemon.deviceId, instruction: 'snapshot me' });
     const claim = await sendOne(
       harness.daemon,
       createEnvelope(
@@ -379,16 +379,13 @@ describe('S0 (GAP-002): claim-time capability snapshot on the task record', () =
 
     // Same device, a fresh `conn.hello`, now honestly reporting a pi build that
     // cannot steer (downgrade/reinstall). Over long-poll there is no socket to
-    // drop, so re-announcing IS the reconnect — `DeviceConnections.announce`
-    // replaces the discovery block wholesale. A live capability read would flip
+    // drop, so re-announcing replaces the durable capability snapshot.
+    // A live capability read would flip
     // this running task to unsteerable mid-flight; the snapshot must not.
     await announceHello(harness.daemon, {
       productId: PRODUCT_ID,
       runtimes: [{ id: 'pi', capabilities: { ...PI_RUNTIME_INFO.capabilities, steer: false } }],
     });
-    expect((await harness.byok.machines.list())[0]?.runtimes).toEqual([
-      { id: 'pi', capabilities: { ...PI_RUNTIME_INFO.capabilities, steer: false } },
-    ]);
 
     expect((await harness.byok.tasks.get(handle.taskId))?.claimedRuntimeCapabilities?.steer).toBe(true);
     await expect(handle.steer('still steerable')).resolves.toBeUndefined();

@@ -408,7 +408,10 @@ transport-specific state machine remains beside the kernel.
   host-owned dispatch input outside the cloud snapshot rather than rebuilding a
   second execution read model.
 - `machines.list()` joins durable device rows with unexpired presence hints.
-  Its `connected` projection means an unexpired hint, never a live socket.
+  Its `connected` projection is true exactly while the core hint is unexpired. The reference TTL remains
+  `longPollHoldMs + 15_000`; hello, accepted envelopes, polling and heartbeats
+  renew that one lease. Dispatch requires an explicit registered target and
+  never consults presence.
 - `events.subscribe()` is an in-process live stream fed after cloud commits. It
   is intentionally not a cross-process replay or audit stream; durable mailbox
   and task readbacks remain the recovery authorities. Dispatch provisions the
