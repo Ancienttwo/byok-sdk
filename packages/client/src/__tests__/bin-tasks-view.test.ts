@@ -1,24 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import type { DaemonEvent } from '../index';
-import { deriveTasksFromEvents, lastLifecycle, tallyTaskStates } from '../bin/tasks-view';
+import type { DaemonRecord } from '../index';
+import { deriveTasksFromRecords, lastLifecycle, tallyTaskStates } from '../bin/tasks-view';
 
-describe('bin/tasks-view: deriveTasksFromEvents', () => {
-  it('replays offered -> claimed -> started -> progress -> completed into a single Complete task', () => {
-    const events: DaemonEvent[] = [
+describe('bin/tasks-view: deriveTasksFromRecords', () => {
+  it('replays offered -> claimed -> started -> turn -> completed into a single Complete task', () => {
+    const records: DaemonRecord[] = [
       { kind: 'offered', ts: '2026-01-01T00:00:00.000Z', taskId: 't1', runtime: 'pi' },
       { kind: 'claimed', ts: '2026-01-01T00:00:01.000Z', taskId: 't1' },
       { kind: 'started', ts: '2026-01-01T00:00:02.000Z', taskId: 't1' },
-      { kind: 'progress', ts: '2026-01-01T00:00:03.000Z', taskId: 't1', event: { type: 'progress', text: 'working' } },
-      { kind: 'completed', ts: '2026-01-01T00:00:04.000Z', taskId: 't1', summary: 'done', sessionRef: 'sess-1' },
+      { kind: 'turn', ts: '2026-01-01T00:00:03.000Z', taskId: 't1', turn: 1, closedBy: 'terminal', progressEvents: 1, textBytes: 7, toolUses: 0, toolResults: 0, artifacts: 0, approvals: 0, errors: 0 },
+      { kind: 'completed', ts: '2026-01-01T00:00:04.000Z', taskId: 't1', summaryBytes: 4, sessionRef: 'sess-1' },
     ];
 
-    const tasks = deriveTasksFromEvents(events);
+    const tasks = deriveTasksFromRecords(records);
     expect(tasks).toEqual([
       {
         taskId: 't1',
         state: 'Complete',
         runtime: 'pi',
-        summary: 'done',
+        summaryBytes: 4,
         sessionRef: 'sess-1',
         updatedAt: '2026-01-01T00:00:04.000Z',
       },
@@ -26,12 +26,12 @@ describe('bin/tasks-view: deriveTasksFromEvents', () => {
   });
 
   it('preserves the requested runtime and replays the actual claimed runtime separately', () => {
-    const events: DaemonEvent[] = [
+    const records: DaemonRecord[] = [
       { kind: 'offered', ts: '2026-01-01T00:00:00.000Z', taskId: 't-runtime', runtime: 'claude' },
       { kind: 'claimed', ts: '2026-01-01T00:00:01.000Z', taskId: 't-runtime', claimedRuntime: 'pi' },
     ];
 
-    expect(deriveTasksFromEvents(events)).toEqual([
+    expect(deriveTasksFromRecords(records)).toEqual([
       {
         taskId: 't-runtime',
         state: 'Claimed',
@@ -43,7 +43,7 @@ describe('bin/tasks-view: deriveTasksFromEvents', () => {
   });
 
   it('keeps a legacy claimed event without runtime free of claimedRuntime', () => {
-    const [task] = deriveTasksFromEvents([
+    const [task] = deriveTasksFromRecords([
       { kind: 'claimed', ts: '2026-01-01T00:00:01.000Z', taskId: 't-legacy' },
     ]);
 
@@ -51,38 +51,38 @@ describe('bin/tasks-view: deriveTasksFromEvents', () => {
   });
 
   it('a pre-claim failed event with preClaim:true marks the task Failed + declined:true', () => {
-    const events: DaemonEvent[] = [
+    const records: DaemonRecord[] = [
       { kind: 'offered', ts: '2026-01-01T00:00:00.000Z', taskId: 't2', runtime: 'claude' },
-      { kind: 'failed', ts: '2026-01-01T00:00:01.000Z', taskId: 't2', reason: 'policy not allowed', retryable: false, preClaim: true },
+      { kind: 'failed', ts: '2026-01-01T00:00:01.000Z', taskId: 't2', reasonBytes: 18, retryable: false, preClaim: true },
     ];
-    const [task] = deriveTasksFromEvents(events);
-    expect(task).toMatchObject({ taskId: 't2', state: 'Failed', summary: 'policy not allowed', declined: true });
+    const [task] = deriveTasksFromRecords(records);
+    expect(task).toMatchObject({ taskId: 't2', state: 'Failed', summaryBytes: 18, declined: true });
   });
 
   it('a post-claim failed event (no preClaim) marks Failed without declined', () => {
-    const events: DaemonEvent[] = [
+    const records: DaemonRecord[] = [
       { kind: 'offered', ts: '2026-01-01T00:00:00.000Z', taskId: 't3' },
       { kind: 'claimed', ts: '2026-01-01T00:00:01.000Z', taskId: 't3' },
       { kind: 'started', ts: '2026-01-01T00:00:02.000Z', taskId: 't3' },
-      { kind: 'failed', ts: '2026-01-01T00:00:03.000Z', taskId: 't3', reason: 'crashed', retryable: true },
+      { kind: 'failed', ts: '2026-01-01T00:00:03.000Z', taskId: 't3', reasonBytes: 7, retryable: true },
     ];
-    const [task] = deriveTasksFromEvents(events);
+    const [task] = deriveTasksFromRecords(records);
     expect(task?.declined).toBeUndefined();
-    expect(task).toMatchObject({ state: 'Failed', summary: 'crashed' });
+    expect(task).toMatchObject({ state: 'Failed', summaryBytes: 7 });
   });
 
-  it('cancelled marks the task Cancelled with the reason as summary', () => {
-    const events: DaemonEvent[] = [
+  it('cancelled marks the task Cancelled with the reason size as summaryBytes', () => {
+    const records: DaemonRecord[] = [
       { kind: 'offered', ts: '2026-01-01T00:00:00.000Z', taskId: 't4' },
       { kind: 'claimed', ts: '2026-01-01T00:00:01.000Z', taskId: 't4' },
-      { kind: 'cancelled', ts: '2026-01-01T00:00:02.000Z', taskId: 't4', reason: 'user cancelled' },
+      { kind: 'cancelled', ts: '2026-01-01T00:00:02.000Z', taskId: 't4', reasonBytes: 14 },
     ];
-    const [task] = deriveTasksFromEvents(events);
-    expect(task).toMatchObject({ state: 'Cancelled', summary: 'user cancelled' });
+    const [task] = deriveTasksFromRecords(records);
+    expect(task).toMatchObject({ state: 'Cancelled', summaryBytes: 14 });
   });
 
   it('adds the latest coarse Git status only to an existing lifecycle task row', () => {
-    const events: DaemonEvent[] = [
+    const records: DaemonRecord[] = [
       {
         kind: 'git-workspace',
         ts: '2026-01-01T00:00:00.000Z',
@@ -117,7 +117,7 @@ describe('bin/tasks-view: deriveTasksFromEvents', () => {
       },
     ];
 
-    expect(deriveTasksFromEvents(events)).toEqual([
+    expect(deriveTasksFromRecords(records)).toEqual([
       {
         taskId: 't-git',
         state: 'Offered',
@@ -135,7 +135,7 @@ describe('bin/tasks-view: deriveTasksFromEvents', () => {
   });
 
   it('keeps Git status coarse and excludes paths, IDs, filenames, messages, and raw diagnostics', () => {
-    const events: DaemonEvent[] = [
+    const records: DaemonRecord[] = [
       { kind: 'offered', ts: 'T', taskId: 't-private' },
       {
         kind: 'git-workspace',
@@ -149,7 +149,7 @@ describe('bin/tasks-view: deriveTasksFromEvents', () => {
         errorCategory: 'git-timeout',
       },
     ];
-    const task = deriveTasksFromEvents(events)[0];
+    const task = deriveTasksFromRecords(records)[0];
     expect(task).toEqual({
       taskId: 't-private',
       state: 'Offered',
@@ -166,59 +166,59 @@ describe('bin/tasks-view: deriveTasksFromEvents', () => {
     expect(JSON.stringify(task)).not.toMatch(/SENTINEL|\/tmp|commit-message|filename|stderr/i);
   });
 
-  it('an awaiting-approval task stays AwaitApproval with the approval summary', () => {
-    const events: DaemonEvent[] = [
+  it('an awaiting-approval task stays AwaitApproval with the approval summary size', () => {
+    const records: DaemonRecord[] = [
       { kind: 'offered', ts: '2026-01-01T00:00:00.000Z', taskId: 't5' },
       { kind: 'claimed', ts: '2026-01-01T00:00:01.000Z', taskId: 't5' },
       { kind: 'started', ts: '2026-01-01T00:00:02.000Z', taskId: 't5' },
-      { kind: 'awaiting-approval', ts: '2026-01-01T00:00:03.000Z', taskId: 't5', summary: 'needs a human' },
+      { kind: 'awaiting-approval', ts: '2026-01-01T00:00:03.000Z', taskId: 't5', summaryBytes: 13 },
     ];
-    const [task] = deriveTasksFromEvents(events);
-    expect(task).toMatchObject({ state: 'AwaitApproval', summary: 'needs a human' });
+    const [task] = deriveTasksFromRecords(records);
+    expect(task).toMatchObject({ state: 'AwaitApproval', summaryBytes: 13 });
   });
 
   it('tracks multiple concurrent tasks independently, in first-seen order', () => {
-    const events: DaemonEvent[] = [
+    const records: DaemonRecord[] = [
       { kind: 'offered', ts: '2026-01-01T00:00:00.000Z', taskId: 'a' },
       { kind: 'offered', ts: '2026-01-01T00:00:01.000Z', taskId: 'b' },
       { kind: 'claimed', ts: '2026-01-01T00:00:02.000Z', taskId: 'a' },
     ];
-    const tasks = deriveTasksFromEvents(events);
+    const tasks = deriveTasksFromRecords(records);
     expect(tasks.map((t) => t.taskId)).toEqual(['a', 'b']);
     expect(tasks.find((t) => t.taskId === 'a')?.state).toBe('Claimed');
     expect(tasks.find((t) => t.taskId === 'b')?.state).toBe('Offered');
   });
 
-  it('daemon-level events (lifecycle/paired/unpaired/runtimes-detected/artifact) never create a phantom task', () => {
-    const events: DaemonEvent[] = [
+  it('daemon-level records (lifecycle/paired/unpaired/runtimes-detected/artifact) never create a phantom task', () => {
+    const records: DaemonRecord[] = [
       { kind: 'lifecycle', ts: '2026-01-01T00:00:00.000Z', lifecycle: { phase: 'running', connection: 'open' } },
       { kind: 'paired', ts: '2026-01-01T00:00:01.000Z', deviceId: 'dev-1' },
       { kind: 'unpaired', ts: '2026-01-01T00:00:02.000Z' },
       { kind: 'runtimes-detected', ts: '2026-01-01T00:00:03.000Z', runtimes: [] },
-      { kind: 'environment-resolved', ts: '2026-01-01T00:00:03.500Z', status: { source: 'inherited' } },
-      { kind: 'artifact', ts: '2026-01-01T00:00:04.000Z', taskId: 'orphan', name: 'x', contentType: 'text/plain' },
+      { kind: 'environment-resolved', ts: '2026-01-01T00:00:03.500Z', source: 'inherited' },
+      { kind: 'artifact', ts: '2026-01-01T00:00:04.000Z', taskId: 'orphan', nameBytes: 1, contentType: 'text/plain' },
     ];
-    expect(deriveTasksFromEvents(events)).toEqual([]);
+    expect(deriveTasksFromRecords(records)).toEqual([]);
   });
 
-  it('returns [] for an empty event list', () => {
-    expect(deriveTasksFromEvents([])).toEqual([]);
+  it('returns [] for an empty record list', () => {
+    expect(deriveTasksFromRecords([])).toEqual([]);
   });
 });
 
 describe('bin/tasks-view: lastLifecycle', () => {
-  it('returns undefined when there are no lifecycle events', () => {
+  it('returns undefined when there are no lifecycle records', () => {
     expect(lastLifecycle([{ kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' }])).toBeUndefined();
   });
 
-  it('returns the MOST RECENT lifecycle event, not the first', () => {
+  it('returns the MOST RECENT lifecycle record, not the first', () => {
     const halted = { phase: 'halted', reason: 'device_revoked', at: '2026-01-01T00:00:02.000Z' } as const;
-    const events: DaemonEvent[] = [
+    const records: DaemonRecord[] = [
       { kind: 'lifecycle', ts: '2026-01-01T00:00:00.000Z', lifecycle: { phase: 'running', connection: 'connecting' } },
       { kind: 'lifecycle', ts: '2026-01-01T00:00:01.000Z', lifecycle: { phase: 'running', connection: 'open' } },
       { kind: 'lifecycle', ts: '2026-01-01T00:00:02.000Z', lifecycle: halted },
     ];
-    expect(lastLifecycle(events)).toEqual({ lifecycle: halted, ts: '2026-01-01T00:00:02.000Z' });
+    expect(lastLifecycle(records)).toEqual({ lifecycle: halted, ts: '2026-01-01T00:00:02.000Z' });
   });
 });
 
@@ -239,10 +239,10 @@ describe('bin/tasks-view: tallyTaskStates', () => {
 
   it('tallies a mix of states correctly', () => {
     const counts = tallyTaskStates([
-      { taskId: 'a', state: 'Running', updatedAt: 't' },
-      { taskId: 'b', state: 'Running', updatedAt: 't' },
-      { taskId: 'c', state: 'Complete', updatedAt: 't' },
-      { taskId: 'd', state: 'Failed', updatedAt: 't' },
+      { state: 'Running' },
+      { state: 'Running' },
+      { state: 'Complete' },
+      { state: 'Failed' },
     ]);
     expect(counts.total).toBe(4);
     expect(counts.Running).toBe(2);

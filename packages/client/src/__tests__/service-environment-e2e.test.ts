@@ -145,8 +145,11 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
       encoding: 'utf8',
       timeout: 30_000,
     });
-    expect(run.stdout.split('\n')[0]).toMatch(new RegExp(`^environment: login-shell shell=${path.basename(passwdShell!)} durationMs=\\d+$`, 'u'));
+    // The start did not succeed, so no record carries the environment: stderr shows it (#395).
+    expect(run.stderr).toMatch(new RegExp(`^environment: login-shell shell=${path.basename(passwdShell!)} durationMs=\\d+$`, 'mu'));
     expect(run.stdout).not.toContain(home);
+    expect(run.stderr).not.toContain(home);
+    for (const line of run.stdout.split('\n').filter(Boolean)) expect(() => JSON.parse(line) as unknown).not.toThrow();
     // #394: an unpaired device is a halt, and a halt under --service exits 0
     // so the supervisor leaves it stopped.
     expect(run.stderr).toContain('daemon halted: reason=unpaired');
