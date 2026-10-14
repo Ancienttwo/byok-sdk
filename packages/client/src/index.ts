@@ -517,6 +517,11 @@ export type { BlobClientOptions, BlobRequestAbortReason, BlobRequestOptions, Blo
 // daemon. See `daemon/observer.ts`.
 export { DaemonObserver } from './daemon/observer';
 export type { DaemonEvent, DaemonEventKind, DaemonEventListener, DaemonTaskInfo, Unsubscribe } from './daemon/observer';
+// Issue #395: the content-free projection every durable sink writes (`start`
+// stdout and `audit.jsonl`). `DaemonEvent` carries content and is only for
+// authenticated live views. See `daemon/daemon-record.ts`.
+export { createDaemonRecordProjector, DAEMON_RECORD_KINDS, isDaemonRecordKind } from './daemon/daemon-record';
+export type { DaemonRecord, DaemonRecordKind, DaemonRecordProjector, DaemonTurnRecord } from './daemon/daemon-record';
 
 // M3-4: OS service lifecycle (launchd/systemd/WinSW) — see `lifecycle/create-service-lifecycle.ts`.
 export { createServiceLifecycle, UnsupportedServicePlatformError } from './lifecycle/create-service-lifecycle';

@@ -335,8 +335,7 @@ export const MAX_LINE_BYTES = 64 * 1024;
 
 /**
  * Buffers raw socket bytes and yields complete lines. Splits on the raw byte
- * `0x0a` BEFORE any UTF-8 decoding (mirrors `bin/audit-log.ts`'s
- * `followAuditLog`) — `0x0A` can only ever appear as an actual newline in
+ * `0x0a` BEFORE any UTF-8 decoding — `0x0A` can only ever appear as an actual newline in
  * valid UTF-8, so this never risks decoding a multi-byte character that
  * happened to straddle a chunk boundary.
  */

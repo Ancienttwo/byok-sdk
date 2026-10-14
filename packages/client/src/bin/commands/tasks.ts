@@ -1,9 +1,9 @@
 import { type DaemonConfig, type DaemonEvent } from '../../index';
-import { auditLogPath, followAuditLog, readAuditEvents } from '../audit-log';
+import { readAuditRecords } from '../audit-log';
 import { connectControlClient } from '../control-client';
 import { resolveStoreDir } from '../config';
 import { formatDaemonEventLine, formatTaskListLines } from '../format';
-import { deriveTasksFromEvents } from '../tasks-view';
+import { deriveTasksFromRecords } from '../tasks-view';
 
 export interface TasksListDeps {
   log?: (line: string) => void;
@@ -13,8 +13,7 @@ export interface TasksListDeps {
 export async function runTasksListCommand(config: DaemonConfig, deps: TasksListDeps = {}): Promise<void> {
   const log = deps.log ?? ((line: string) => console.log(line));
   const storeDir = resolveStoreDir(config);
-  const events = await readAuditEvents(storeDir);
-  const tasks = deriveTasksFromEvents(events);
+  const tasks = deriveTasksFromRecords(await readAuditRecords(storeDir));
   for (const line of formatTaskListLines(tasks)) log(line);
 }
 
@@ -22,21 +21,17 @@ export interface TasksFollowDeps {
   log?: (line: string) => void;
   /** Required — see `commands/start.ts`'s identical `StartDeps.signal` doc comment for why there's no sane default. */
   signal: AbortSignal;
-  pollIntervalMs?: number;
   /** DI for tests: substitute the real control-socket connection attempt. */
   connectControl?: typeof connectControlClient;
 }
 
 /**
- * `byok-agent tasks --follow`: M4 Phase 2 — prefers a LIVE stream over the
- * control socket's `tasks.subscribe` method (see `control-client.ts`),
- * which taps the exact same `DaemonObserver` events `start`'s own stdout
- * already shows, full fidelity, as they happen. Falls back to tailing the
- * SAME `audit.jsonl` a running `start` appends to (like `tail -f`, not a
- * full replay — run plain `byok-agent tasks` first for history) whenever
- * the control socket isn't reachable (daemon not running, or an older
- * daemon build with no control socket at all) — see `byok-agent.ts`'s
- * header comment for the historical rationale this fallback preserves.
+ * `byok-agent tasks --follow`: the LIVE `DaemonEvent` stream over the
+ * control socket's `tasks.subscribe` method (see `control-client.ts`), full
+ * fidelity, as it happens. The control socket is the only authenticated
+ * channel that carries task content (issue #395), so there is no offline
+ * fallback: when no daemon is reachable this throws, and plain `byok-agent
+ * tasks` shows what the audit log recorded.
  */
 export async function runTasksFollowCommand(config: DaemonConfig, deps: TasksFollowDeps): Promise<void> {
   const log = deps.log ?? ((line: string) => console.log(line));
@@ -60,10 +55,5 @@ export async function runTasksFollowCommand(config: DaemonConfig, deps: TasksFol
     return;
   }
 
-  const path = auditLogPath(storeDir);
-  await followAuditLog(path, (event: DaemonEvent) => log(formatDaemonEventLine(event)), {
-    signal: deps.signal,
-    pollIntervalMs: deps.pollIntervalMs,
-    fromEnd: true,
-  });
+  throw new Error(`tasks --follow needs a running daemon: control socket not reachable (${conn.reason}); run \`byok-agent tasks\` for the recorded task list`);
 }

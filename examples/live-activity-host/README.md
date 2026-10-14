@@ -21,7 +21,7 @@ const activity = createLiveActivityHost({
   readActivity: (tenantId, taskId) => cloud.readActivity(tenantId, taskId),
   readApprovals: (tenantId, taskId) => cloud.readApprovalTimeline(tenantId, taskId),
   redact: (event, context) => redactTimelineEvent(context.user, event),
-  redactApproval: (observation, context) => redactApprovalSummary(context.user, observation),
+  redactApproval: (observation, context) => redactApprovalForViewer(context.user, observation),
   present: ({ activity, approvals }) => ({ activity, approvals }),
 });
 

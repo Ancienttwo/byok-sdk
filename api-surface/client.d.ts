@@ -3379,8 +3379,7 @@ export declare class ControlError extends Error {
 export declare const MAX_LINE_BYTES: number;
 /**
  * Buffers raw socket bytes and yields complete lines. Splits on the raw byte
- * `0x0a` BEFORE any UTF-8 decoding (mirrors `bin/audit-log.ts`'s
- * `followAuditLog`) — `0x0A` can only ever appear as an actual newline in
+ * `0x0a` BEFORE any UTF-8 decoding — `0x0A` can only ever appear as an actual newline in
  * valid UTF-8, so this never risks decoding a multi-byte character that
  * happened to straddle a chunk boundary.
  */
@@ -4708,6 +4707,217 @@ export declare class DaemonHaltError extends Error {
  * guessed.
  */
 export declare function parseDaemonLifecycle(value: unknown): DaemonLifecycle | undefined;
+// ==== @byok-sdk/client dist/daemon/daemon-record.d.ts ====
+import type { DaemonLifecycle } from './daemon-lifecycle';
+import { type AssertionLane, type DaemonEvent } from './observer';
+import { type ServiceEnvironmentStatus, type ServiceEnvironmentRecord } from '../lifecycle/service-environment';
+import type { RuntimeObservation } from '../runtime-detection';
+/**
+ * The content-free projection of what a daemon observed — the ONE shape every
+ * sink that outlives the process writes (issue #395): `byok-agent start`'s
+ * stdout (a service log under launchd/systemd/WinSW) and `audit.jsonl` hold the
+ * same JSON line per record.
+ *
+ * A record carries lifecycle facts, ids, closed codes, configured identifiers
+ * (runtime/tool/toolset ids, the assertion audience allowlist), sizes, counts
+ * and timestamps — never content. Every free-form field of a `DaemonEvent`
+ * (model text, tool input/output, artifact names and bytes, approval summaries,
+ * completed summaries, failure/cancel/shutdown/disposal reasons) becomes its
+ * UTF-8 byte count (`*Bytes`). `DaemonEvent` itself, with full content, is only
+ * for authenticated live views (the control socket's `tasks.subscribe`).
+ *
+ * Progress is aggregated per turn: a task's `progress` events produce one
+ * `turn` record when the runtime reports `turn_end`, or when the turn is still
+ * open as the task ends, the daemon stops, or the task is evicted.
+ */
+export type DaemonRecord = {
+    kind: 'offered';
+    ts: string;
+    taskId: string;
+    runtime?: string;
+} | {
+    kind: 'claimed';
+    ts: string;
+    taskId: string;
+    claimedRuntime?: string;
+} | {
+    kind: 'started';
+    ts: string;
+    taskId: string;
+} | DaemonTurnRecord | {
+    kind: 'artifact';
+    ts: string;
+    taskId: string;
+    nameBytes: number;
+    contentType: string;
+    inlineBytes?: number;
+    blobRef?: {
+        blobId: string;
+        contentHash: string;
+        size: number;
+    };
+} | {
+    kind: 'awaiting-approval';
+    ts: string;
+    taskId: string;
+    approvalId?: string;
+    summaryBytes: number;
+} | {
+    kind: 'completed';
+    ts: string;
+    taskId: string;
+    sessionRef: string;
+    summaryBytes: number;
+} | {
+    kind: 'failed';
+    ts: string;
+    taskId: string;
+    retryable: boolean;
+    preClaim?: boolean;
+    reasonBytes: number;
+} | {
+    kind: 'cancelled';
+    ts: string;
+    taskId: string;
+    reasonBytes?: number;
+} | {
+    kind: 'lifecycle';
+    ts: string;
+    lifecycle: DaemonLifecycle;
+} | {
+    kind: 'paired';
+    ts: string;
+    deviceId: string;
+} | {
+    kind: 'unpaired';
+    ts: string;
+} | {
+    kind: 'runtimes-detected';
+    ts: string;
+    runtimes: Array<Omit<RuntimeObservation, 'version'>>;
+} | {
+    kind: 'shutdown-requested';
+    ts: string;
+    reasonBytes: number;
+} | {
+    kind: 'shutdown-complete';
+    ts: string;
+    reasonBytes: number;
+    undeliveredOutboxCount?: number;
+} | {
+    kind: 'stale-approval-decision';
+    ts: string;
+    taskId: string;
+    decision: 'approve' | 'reject';
+    reasonBytes?: number;
+} | {
+    kind: 'git-workspace';
+    ts: string;
+    taskId: string;
+    workspaceId: string;
+    phase: string;
+    headChanged?: boolean;
+    commitsSinceBaseline?: number;
+    dirty?: {
+        staged: number;
+        unstaged: number;
+        untracked: number;
+        conflicted: number;
+    };
+    errorCategory?: string;
+} | {
+    kind: 'runtime-disposal-failed';
+    ts: string;
+    taskId: string;
+    runtimeId: string;
+    stage: 'signal' | 'quiescence' | 'cleanup';
+    reasonBytes: number;
+} | {
+    kind: 'agent-memory-intent-integrity';
+    ts: string;
+    intentId: string;
+    disposition: 'conflict' | 'host_terminal';
+} | {
+    kind: 'device-assertion';
+    ts: string;
+    result: 'issued';
+    lane: AssertionLane;
+    taskId?: string;
+    audience: string;
+    jti: string;
+    expiresAt: string;
+} | {
+    kind: 'device-assertion';
+    ts: string;
+    result: 'denied';
+    lane: AssertionLane;
+    taskId?: string;
+    reason: string;
+    audienceBytes?: number;
+}
+/** Written by the process hosting the daemon (`byok-agent start`): where its environment came from (issue #392). */
+ | ({
+    kind: 'environment-resolved';
+    ts: string;
+} & ServiceEnvironmentStatus)
+/** Written by the process hosting the daemon once `start()` resolved. */
+ | {
+    kind: 'daemon-started';
+    ts: string;
+    productId: string;
+}
+/** Written by the process hosting the daemon once `stop()` resolved. */
+ | {
+    kind: 'daemon-stopped';
+    ts: string;
+};
+/** One turn of a task's progress, as sizes and counts. */
+export interface DaemonTurnRecord {
+    kind: 'turn';
+    ts: string;
+    taskId: string;
+    /** 1-based turn number within the task, as this projector counted it. */
+    turn: number;
+    /** What closed the record: the runtime's `turn_end`, or a still-open turn at the task's terminal, the daemon's stop, or eviction. */
+    closedBy: 'turn_end' | 'terminal' | 'stop' | 'evicted';
+    /** Every `AgentEvent` of the turn, `turn_end` and `usage` included. */
+    progressEvents: number;
+    textBytes: number;
+    toolUses: number;
+    toolResults: number;
+    artifacts: number;
+    approvals: number;
+    errors: number;
+    /** The turn's last `usage` report, when it had one. */
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+}
+export type DaemonRecordKind = DaemonRecord['kind'];
+/** Every {@link DaemonRecord} kind — the one list readers (the support bundle, the audit reader) accept. */
+export declare const DAEMON_RECORD_KINDS: readonly DaemonRecordKind[];
+export declare function isDaemonRecordKind(value: unknown): value is DaemonRecordKind;
+export interface DaemonRecordProjector {
+    /** The records `event` produces, in order: none (a progress event inside an open turn), one, or two (an open turn closed by a terminal). */
+    project(event: DaemonEvent): DaemonRecord[];
+    /** Closes every open turn (`closedBy: 'stop'`) — call once the daemon has stopped. */
+    flush(ts: string): DaemonRecord[];
+}
+/**
+ * Git failures are recorded only from this closed set, projected from
+ * `GIT_ERROR_CATEGORIES` (`git-workspace.ts`), never as raw Git errors.
+ *
+ * @internal Exported for the drift-guard test only (never re-exported from
+ * `index.ts`).
+ */
+export declare const STABLE_GIT_ERROR_CATEGORIES: Set<string>;
+/** The one closed environment shape, shared by projection and persistent/live readers. */
+export declare function parseEnvironmentRecord(value: unknown): ServiceEnvironmentRecord | undefined;
+/**
+ * A stateful `DaemonEvent` → {@link DaemonRecord} projector. One per event
+ * stream: it holds each task's open turn until the turn closes.
+ */
+export declare function createDaemonRecordProjector(): DaemonRecordProjector;
 // ==== @byok-sdk/client dist/daemon/deterministic-jitter.d.ts ====
 export type JitterDomain = 'reconnect' | 'upload' | 'maintenance';
 export interface DeterministicJitterInput {
@@ -10073,6 +10283,8 @@ export { BlobClient, BlobRequestAbortedError } from './daemon/blob-client';
 export type { BlobClientOptions, BlobRequestAbortReason, BlobRequestOptions, BlobResolver } from './daemon/blob-client';
 export { DaemonObserver } from './daemon/observer';
 export type { DaemonEvent, DaemonEventKind, DaemonEventListener, DaemonTaskInfo, Unsubscribe } from './daemon/observer';
+export { createDaemonRecordProjector, DAEMON_RECORD_KINDS, isDaemonRecordKind } from './daemon/daemon-record';
+export type { DaemonRecord, DaemonRecordKind, DaemonRecordProjector, DaemonTurnRecord } from './daemon/daemon-record';
 export { createServiceLifecycle, UnsupportedServicePlatformError } from './lifecycle/create-service-lifecycle';
 export type { CreateServiceLifecycleOptions } from './lifecycle/create-service-lifecycle';
 export { nodeAgentProgram, sanitizeServiceName } from './lifecycle/service-types';
