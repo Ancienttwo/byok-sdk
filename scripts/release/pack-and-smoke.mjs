@@ -1,6 +1,6 @@
 import { readRegistryExpectations, runtimeDependencyMetadata } from './registry-contract.mjs';
 import { cloudDoConsumerSmoke } from './cloud-do-consumer-smoke.mjs';
-import { manifestEntries } from '../api-surface/entry-closure.mjs';
+import { runtimeSmokeImports } from '../api-surface/entry-closure.mjs';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -337,6 +337,7 @@ try {
   run(nodeBin, ['scripts/release/check-package-graph.mjs']);
   run(bunBin, ['run', 'build']);
   run(nodeBin, ['scripts/api-surface/check-api-surface.mjs']);
+  const smokeImports = runtimeSmokeImports(repoRoot);
 
   const tarballs = [];
   let migrationFiles;
@@ -388,7 +389,7 @@ try {
         `import { tmpdir } from 'node:os';\n` +
         `import path from 'node:path';\n` +
         `const require = createRequire(import.meta.url);\n` +
-        `for (const name of ${JSON.stringify([...new Set(manifestEntries(repoRoot).filter(entry => entry.kind === 'exports' && /\.(?:js|mjs|cjs)$/.test(entry.target)).map(entry => entry.pkg.manifest.name + (entry.specifier === '.' ? '' : entry.specifier.slice(1))))])}) await import(name);\n` +
+        `for (const name of ${JSON.stringify(smokeImports.node)}) await import(name);\n` +
         `const { buildRuntimeEnv } = await import('@byok-sdk/client/adapters');\n` +
         `assert.deepEqual(buildRuntimeEnv({ ambient: { CLAUDECODE: '1', BYOK_TEST: 'secret', NODE_OPTIONS: '--trace-warnings' } }), { NODE_OPTIONS: '--trace-warnings' });\n` +
         `const { AgentHomeBusyError, AgentHomeManager } = await import('@byok-sdk/client');\n` +
@@ -484,7 +485,7 @@ try {
         `console.log('[release-pack] isolated imports OK');\n`,
     );
     run(nodeBin, ['smoke.mjs'], smokeDir);
-    await cloudDoConsumerSmoke(smokeDir);
+    await cloudDoConsumerSmoke(smokeDir, smokeImports.worker);
     copyFileSync(path.join(repoRoot, 'scripts/release/recurring-smoke.mjs'), path.join(smokeDir, 'recurring-smoke.mjs'));
     run(nodeBin, ['recurring-smoke.mjs'], smokeDir);
     // Preserve the verifier's relative module graph in the isolated fixture.

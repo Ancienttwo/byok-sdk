@@ -58,6 +58,22 @@ export function manifestEntries(root) {
   return entries.sort((a, b) => a.id.localeCompare(b.id));
 }
 
+// Project validated facts into the two existing release-smoke consumers.
+// Platform requirements determine the lane; package names never exempt entries.
+export function runtimeSmokeImports(root) {
+  const contract = readJson(path.join(root, 'api-surface', 'entries.json'));
+  const imports = { node: new Set(), worker: new Set() };
+  for (const entry of manifestEntries(root)) {
+    if (entry.kind !== 'exports' || !/\.(?:js|mjs|cjs)$/.test(entry.target)) continue;
+    const facts = contract[entry.id]?.facts;
+    if (facts?.target !== posix(path.relative(root, entry.target)) || !Array.isArray(facts.bareImports)
+      || facts.bareImports.some(specifier => typeof specifier !== 'string')) throw new Error(`${entry.id}: validated entry facts are required for runtime smoke`);
+    const lane = facts.bareImports.some(specifier => specifier.startsWith('cloudflare:')) ? 'worker' : 'node';
+    imports[lane].add(entry.pkg.manifest.name + (entry.specifier === '.' ? '' : entry.specifier.slice(1)));
+  }
+  return { node: sorted(imports.node), worker: sorted(imports.worker) };
+}
+
 function selectTarget(value, conditions) {
   if (value === null) throw new Error('blocked export target');
   if (typeof value === 'string') return value;
@@ -113,7 +129,7 @@ export function createWalker(root) {
       .find(file => existsSync(file) && statSync(file).isFile());
     if (!file) throw new Error(`missing module ${posix(path.relative(root, base))}`);
     const real = realpathSync(file);
-    const boundary = pkg.workspace && !file.endsWith('/package.json') ? path.join(pkg.directory, 'dist') : pkg.directory;
+    const boundary = pkg.workspace && real !== realpathSync(path.join(pkg.directory, 'package.json')) ? path.join(pkg.directory, 'dist') : pkg.directory;
     if (!inside(realpathSync(boundary), real)) throw new Error(`${posix(path.relative(root, file))}: module leaves ${pkg.workspace ? 'dist' : 'package'}`);
     return real;
   }
