@@ -1,3 +1,4 @@
+import type { CollectExpiredInput, CollectExpiredResult } from './retention';
 /**
  * Tenant storage entitlement, usage, reservation and retention (§12.7.6-12.7.7).
  *
@@ -180,6 +181,7 @@ export const STORAGE_ERROR_HTTP_STATUS = {
  * `storage_reservation_not_found`, and the five wire-stable codes above.
  */
 export interface QuotaStore {
+  collectExpired(tenant: TenantId, input: QuotaCollectExpiredInput): Promise<CollectExpiredResult>;
   readEntitlement(tenant: TenantId): Promise<TenantStorageEntitlement | undefined>;
   /**
    * Version CAS: a write at or below the stored version is rejected with the
@@ -210,6 +212,7 @@ export interface QuotaStore {
   ): Promise<StorageFinalizeResult>;
   /** Idempotent release. Already-settled reservations return their settled row. */
   abortReservation(tenant: TenantId, reservationId: string): Promise<StorageReservation>;
-  /** Cleanup hook: expires reservations past their TTL and releases their bytes. */
-  expireReservations(tenant: TenantId): Promise<readonly StorageReservation[]>;
+
 }
+
+export interface QuotaCollectExpiredInput extends CollectExpiredInput { readonly settledBefore: string; }

@@ -1,3 +1,4 @@
+import { createObjectStorageScope } from './support/dataplane';
 /**
  * Revocation deletes — asserted against the tables, because the whole point is
  * what is NOT there afterwards.
@@ -68,7 +69,7 @@ interface Fixture {
 async function fixture(pool: Pool): Promise<Fixture> {
   const clock = createMutableClock();
   const crypto = createWebCrypto();
-  const core = createPostgresCoreStores({ pool, clock });
+  const core = createPostgresCoreStores({ pool, clock, objectStorage: (await createObjectStorageScope()).config });
   const devices = new PostgresDeviceDirectory(pool, clock);
   const nonces = new PostgresNonceStore(pool, clock, crypto);
   const dedup = new PostgresInboundDedupStore(pool);

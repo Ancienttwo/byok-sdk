@@ -124,7 +124,10 @@ describe('public API surface', () => {
     './ports-contract',
     './sealed-provider-secret',
     './agent-memory-intent',
+    './retention',
     './in-memory/index',
+    './in-memory/storage-ledger',
+    './in-memory/blob',
   ];
 
   it('re-exports only contract, schema, error, and in-memory reference modules', () => {
@@ -156,6 +159,7 @@ describe('public API surface', () => {
       'CORE_PORT_METHODS',
       'CORE_STORE_NAMES',
       'CapabilityDeclarationSchema',
+      'CollectExpiredFailure',
       'CoreConflictError',
       'DEVICE_ASSERTION_ALGORITHMS',
       'DEVICE_ASSERTION_AUDIENCE_MAX_BYTES',
@@ -181,6 +185,7 @@ describe('public API surface', () => {
       'InMemoryPresenceStore',
       'InMemoryQuotaStore',
       'InMemorySkillPackStore',
+      'InMemoryStorageLedger',
       'InMemoryTruthStore',
       'MAILBOX_MESSAGE_STATES',
       'NONCE_SIGNING_DOMAIN',
@@ -243,6 +248,7 @@ describe('public API surface', () => {
       'agentMemoryIntentOperationDigest',
       'assertCanonicalTimestamp',
       'assertCapability',
+      'assertCollectExpiredInput',
       'assertProviderProvisioningConfigDigest',
       'authenticateDeviceAssertion',
       'authenticateTaskAssertion',

@@ -36,7 +36,8 @@ async function fixture() {
   const scope = await createDataplaneScope();
   resources.push(() => scope.dispose());
   await migrate(scope.pool, DEPLOY_SQL);
-  const core = createPostgresCoreStores({ pool: scope.pool, clock });
+  const objectStorage = await createObjectStorageScope();
+  const core = createPostgresCoreStores({ pool: scope.pool, clock, objectStorage: objectStorage.config });
   await core.quota.writeEntitlement(TENANT, {
     version: 1n, hardLimitBytes: 1_000_000n, maxObjectBytes: 1_000_000n, maxInlineBytes: 1_000_000n,
     mailboxLimitBytes: 1_000_000n, retentionPolicyId: 'wake',

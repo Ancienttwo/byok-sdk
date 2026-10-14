@@ -17,6 +17,7 @@ import { CLOUD_CAPABILITIES, fullCapabilityDeclaration, type CloudCapability } f
 import { createByokCloud } from '../cloud';
 import { createWebCrypto } from '../crypto/web-crypto';
 import { CloudRouteRegistry, ROUTE_CLASSES, routeKey, type RouteClass } from '../router/registry';
+import { createInMemoryBlobBytes } from '../stores/in-memory/blobs';
 import { createInMemoryCloudStores } from '../stores/in-memory/index';
 import { CLOUD_ORIGIN, createHarness, offerPayload, TENANT_A, TENANT_B, type CloudHarness, type PairedDevice } from './support/harness';
 
@@ -277,12 +278,14 @@ function declaration(...capabilities: CloudCapability[]): CapabilityDeclaration 
 function cloudWith(options: { readonly capabilities: CapabilityDeclaration; readonly withProxy: boolean }) {
   const clock = createMutableClock();
   const crypto = createWebCrypto();
-  const core = createInMemoryCoreStores({ clock }).stores;
+  const objectBytes = createInMemoryBlobBytes(clock, crypto);
+  const core = createInMemoryCoreStores({ clock, objectBytes }).stores;
   const composition = createInMemoryCloudStores(
     clock,
     crypto,
     core.objects,
     core.mailbox,
+    objectBytes,
   );
   return createByokCloud({
         mailboxWake: createInProcessMailboxWake(),

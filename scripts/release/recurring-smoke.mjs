@@ -262,8 +262,8 @@ async function composeReopened(handoff, consume, finalizeProbePath) {
   }
   const full = fullCapabilityDeclaration();
   const cloud = createByokCloud({
-      mailboxWake: createInProcessMailboxWake(),
-    core: createPostgresCoreStores({ pool, clock }),
+    core: createPostgresCoreStores({ pool, clock, objectStorage: handoff.objectStorage }),
+    mailboxWake: createInProcessMailboxWake(),
     cloud: cloudStores,
     crypto,
     tokenSigner: createHmacTokenSigner(tokenSecret, clock),
@@ -709,7 +709,7 @@ if (substrateConfigured) {
     // installing from npm has no source checkout, and neither does this smoke.
     await migrate(pool, migrationsDir());
 
-    const coreA = createPostgresCoreStores({ pool, clock });
+    const coreA = createPostgresCoreStores({ pool, clock, objectStorage });
     const storesA = createPostgresCloudStores({ pool, clock, crypto, objectStorage });
     const consumer = createProductConsumer({});
     const cloudA = composeDurable(coreA, storesA, createHmacTokenSigner(tokenSecret, clock), consumer);

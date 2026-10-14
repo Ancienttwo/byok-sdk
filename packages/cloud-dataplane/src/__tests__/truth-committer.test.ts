@@ -1,3 +1,5 @@
+import { createObjectStorageScope } from './support/dataplane';
+import { R2ObjectMaintenanceStore } from '../stores/r2-blobs';
 import { fileURLToPath } from 'node:url';
 import {
   TruthCommitError,
@@ -397,7 +399,7 @@ async function createHarness(poolSize = 8) {
   return {
     scope,
     quota,
-    objects: new PostgresObjectStore(scope.pool, clock),
+    objects: new PostgresObjectStore(scope.pool, clock, new R2ObjectMaintenanceStore((await createObjectStorageScope()).config)),
     committer: new PostgresTruthCommitter({ pool: scope.pool, clock, crypto: createWebCrypto() }),
   };
 }

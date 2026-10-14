@@ -10,7 +10,7 @@ import type { Clock, ObjectStore } from '@byok-sdk/core';
 import type { CloudCrypto } from '../../crypto/port';
 import type { BlobContentProxy, CloudStores } from '../ports';
 import { AllowAllRateLimiter } from './rate-limiter';
-import { createInMemoryBlobs } from './blobs';
+import { createInMemoryBlobs, type InMemoryBlobBytes } from './blobs';
 import { InMemoryDeviceDirectory } from './device-directory';
 import { InMemoryInboundDedupStore } from './dedup';
 import { InMemoryNonceStore } from './nonces';
@@ -29,6 +29,8 @@ export {
   InMemoryBlobContentProxy,
   InMemoryCloudBlobStore,
   createInMemoryBlobs,
+  createInMemoryBlobBytes,
+  InMemoryBlobBytes,
 } from './blobs';
 export type { InMemoryBlobs, InMemoryBlobStoreOptions } from './blobs';
 export { DEDUP_RING_CAPACITY, InMemoryInboundDedupStore } from './dedup';
@@ -62,8 +64,9 @@ export function createInMemoryCloudStores(
   crypto: CloudCrypto,
   objects: ObjectStore,
   mailbox: import('@byok-sdk/core').MailboxStore,
+  objectBytes: InMemoryBlobBytes,
 ): InMemoryCloudComposition {
-  const blobs = createInMemoryBlobs(clock, crypto, objects);
+  const blobs = createInMemoryBlobs(objects, objectBytes);
   const taskState = new InMemoryTaskAttemptState(clock);
   const tasks = new InMemoryTaskAttemptStore(clock, taskState);
   const devices = new InMemoryDeviceDirectory();
@@ -75,7 +78,7 @@ export function createInMemoryCloudStores(
       devices,
       // One code/device authority, projected into issuance and consumption
       // ports so neither side exposes the other's methods.
-      pairingCodes: { issue: pairing.issue.bind(pairing) },
+      pairingCodes: { issue: pairing.issue.bind(pairing), collectExpired: pairing.collectExpired.bind(pairing) },
       pairing: { redeemAndRegister: pairing.redeemAndRegister.bind(pairing) },
       nonces: new InMemoryNonceStore(clock, crypto),
       dedup: new InMemoryInboundDedupStore(),

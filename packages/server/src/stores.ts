@@ -9,6 +9,7 @@ import {
 } from '@byok-sdk/core';
 import {
   createInMemoryCloudStores,
+  createInMemoryBlobBytes,
   createInProcessMailboxWake,
   type MailboxWake,
   createWebCrypto,
@@ -117,10 +118,11 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
           { clock, crypto, ...(options.wake === undefined ? {} : { wake: options.wake }) },
         )
       : undefined;
-  const inMemoryCore = sqlite === undefined ? createInMemoryCoreStores({ clock }).stores : undefined;
+  const objectBytes = sqlite === undefined ? createInMemoryBlobBytes(clock, crypto) : undefined;
+  const inMemoryCore = objectBytes === undefined ? undefined : createInMemoryCoreStores({ clock, objectBytes }).stores;
   const core = sqlite?.core ?? inMemoryCore!;
   const inMemoryCloud =
-    sqlite === undefined ? createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox) : undefined;
+    sqlite === undefined ? createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox, objectBytes!) : undefined;
   const stores = sqlite?.cloud ?? inMemoryCloud!.stores;
   const blobContentProxy = sqlite?.blobContentProxy ?? inMemoryCloud!.blobContentProxy;
 
@@ -223,7 +225,7 @@ function observingMailbox(inner: MailboxStore, presence: LeasedPresence): Mailbo
       await presence.renew(tenant, deviceId);
       return cursor;
     },
-    collectRetired: (tenant, input) => inner.collectRetired(tenant, input),
+    collectExpired: (tenant, input) => inner.collectExpired(tenant, input),
   };
 }
 
@@ -256,6 +258,7 @@ function serialPresence(inner: PresenceStore, ttlMs: number): LeasedPresence {
   return {
     read: (tenant, deviceId) => inner.read(tenant, deviceId),
     list: tenant => inner.list(tenant),
+    collectExpired: (tenant, input) => inner.collectExpired(tenant, input),
     publish: (tenant, input) => write(tenant, input.deviceId, () => inner.publish(tenant, input)),
     renew: (tenant, deviceId) => write(tenant, deviceId, async () => {
       const current = await inner.read(tenant, deviceId);

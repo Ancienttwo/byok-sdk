@@ -79,7 +79,7 @@ const SELECT_COLUMNS =
  *   device_id STRING, with no foreign key. What a device did stays true after
  *   the grant that let it is gone.
  * - `outbox` and `device_stream` — core's mailbox, whose rows carry message
- *   bodies and are retired through `collectRetired`/tenant erasure. A device
+ *   bodies and are retired through `collectExpired`/tenant erasure. A device
  *   directory that deleted them would be a second authority over core state,
  *   and an unbounded body delete on the pairing path is an availability risk.
  * - `agent_memory_projection_head` / `…_metering_receipt` — keyed by

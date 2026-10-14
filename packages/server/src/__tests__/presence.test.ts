@@ -105,6 +105,32 @@ describe('single TTL presence lease', () => {
 
 
 describe('concurrent lease observations', () => {
+  it('keeps a lease renewed before a queued maintenance sweep reaches the store', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T0);
+    const tenant = serverTenantId(PRODUCT_ID);
+    const composition = composeFacadeStores({ tenant, maxBlobSizeBytes: 1_000, presenceTtlMs: 1_000, onRateLimited: () => {} });
+    let release!: () => void;
+    let enter!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const collect = InMemoryPresenceStore.prototype.collectExpired;
+    const spy = vi.spyOn(InMemoryPresenceStore.prototype, 'collectExpired').mockImplementationOnce(async function (this: InMemoryPresenceStore, tenant, input) {
+      enter(); await gate;
+      return collect.call(this, tenant, input);
+    });
+    try {
+      await composition.core.presence.publish(tenant, { deviceId: 'renewed-device', level: 'online', ttlMs: 1_000, minimumIntervalMs: 0 });
+      vi.setSystemTime(T0 + 1_001);
+      const sweep = composition.core.presence.collectExpired(tenant, { now: new Date().toISOString(), limit: 1 });
+      await entered;
+      await composition.core.presence.publish(tenant, { deviceId: 'renewed-device', level: 'working', ttlMs: 1_000, minimumIntervalMs: 0 });
+      release();
+      expect(await sweep).toEqual({ removed: 0, expired: 0, releasedBytes: 0n, more: false });
+      expect(await composition.core.presence.read(tenant, 'renewed-device')).toMatchObject({ level: 'working' });
+    } finally { release(); spy.mockRestore(); vi.useRealTimers(); await composition.close(); }
+  });
+
   it('does not overwrite newer heartbeat facts with a concurrent transport renewal', async () => {
     const tenant = serverTenantId(PRODUCT_ID);
     const composition = composeFacadeStores({ tenant, maxBlobSizeBytes: 1_000, presenceTtlMs: 1_000,

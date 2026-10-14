@@ -1,4 +1,6 @@
 import { DEFAULT_ACTIVITY_INGRESS } from '@byok-sdk/protocol';
+import { runMaintenanceSteps, type MaintenanceInput, type MaintenanceReport } from './maintenance';
+import type { DeviceAssertionReplayAuthority } from '@byok-sdk/core';
 import { readTaskAgentMessage, type TaskAgentMessage } from './task-agent-message';
 import { RecurringExecutionInputSchema, type RecurringExecutionInput } from './recurring';
 import { uuidFromSha256, taskOfferMessageId } from './offer-identity';
@@ -253,6 +255,7 @@ function sameOfferEnvelope(expected: Envelope, actual: Envelope): boolean {
 }
 
 export interface ByokCloudOptions {
+  readonly deviceAssertionReplay?: DeviceAssertionReplayAuthority;
   readonly mailboxWake: MailboxWake;
   readonly core: CoreStores;
   readonly cloud: CloudStores;
@@ -517,6 +520,7 @@ export interface EnqueuedOffer {
 }
 
 export interface ByokCloud {
+  runMaintenance(input: MaintenanceInput): Promise<MaintenanceReport>;
   /** WHATWG fetch handler — mount on `@hono/node-server`, a Worker, or Deno. */
   readonly fetch: (request: Request, ...rest: unknown[]) => Response | Promise<Response>;
   /** The I1 route inventory: every mounted route and the credential class it requires. */
@@ -1974,6 +1978,11 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   }
 
   return {
+    async runMaintenance(input) {
+      const report = await runMaintenanceSteps({ core: options.core, cloud: options.cloud, clock: options.clock, ...(options.deviceAssertionReplay === undefined ? {} : { deviceAssertionReplay: options.deviceAssertionReplay }) }, input);
+      try { options.observer?.onMaintenance?.(report); } catch { /* Observers cannot change committed maintenance. */ }
+      return report;
+    },
     fetch: registry.fetch,
     routes: registry.routes,
     mountedRoutes: registry.mounted,

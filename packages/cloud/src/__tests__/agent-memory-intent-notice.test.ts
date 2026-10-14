@@ -209,12 +209,11 @@ describe('enqueueAgentMemoryIntentNotice', () => {
     });
     await harness.core.mailbox.recordDelivery(TENANT_A, { deviceId: device.deviceId, deliveredSeq: first.seq });
     await harness.core.mailbox.advanceCursor(TENANT_A, { deviceId: device.deviceId, ackedSeq: first.seq });
-    const swept = await harness.core.mailbox.collectRetired(TENANT_A, {
-      deviceId: device.deviceId,
+    const swept = await harness.core.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
       ackedBefore: '2999-01-01T00:00:00.000Z',
       expireUnackedBefore: '2999-01-01T00:00:00.000Z',
     });
-    expect(swept.deletedCount).toBe(1);
+    expect(swept.removed).toBe(1);
     expect(await rows(harness, TENANT_A, device.deviceId)).toEqual([]);
 
     // The original row is gone, so the derived message id no longer pins an

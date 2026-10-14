@@ -24,7 +24,7 @@ import type { CloudCrypto } from '@byok-sdk/cloud';
 import type { Clock } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 import { PostgresObjectStore } from './core/objects';
-import { R2CloudBlobStore, type R2BlobStoreOptions } from './r2-blobs';
+import { R2CloudBlobStore, R2ObjectMaintenanceStore, type R2BlobStoreOptions } from './r2-blobs';
 import { PostgresDeviceDirectory } from './devices';
 import { PostgresInboundDedupStore } from './dedup';
 import { PostgresNonceStore } from './nonces';
@@ -110,7 +110,7 @@ export function createPostgresCloudStores(
     devices,
     // One durable code authority, projected into issuance and enrollment ports
     // so consumers cannot reopen the old redeem-then-register sequence.
-    pairingCodes: { issue: pairing.issue.bind(pairing) },
+    pairingCodes: { issue: pairing.issue.bind(pairing), collectExpired: pairing.collectExpired.bind(pairing) },
     pairing: { redeemAndRegister: pairing.redeemAndRegister.bind(pairing) },
     nonces: new PostgresNonceStore(pool, clock, crypto),
     dedup: new PostgresInboundDedupStore(pool),
@@ -125,7 +125,7 @@ export function createPostgresCloudStores(
     // composition first would be an ordering dependency bought for nothing.
     blobs: new R2CloudBlobStore({
       ...options.objectStorage,
-      objects: new PostgresObjectStore(pool, clock),
+      objects: new PostgresObjectStore(pool, clock, new R2ObjectMaintenanceStore(options.objectStorage)),
     }),
     rateLimiter: new AllowAllRateLimiter(),
   };

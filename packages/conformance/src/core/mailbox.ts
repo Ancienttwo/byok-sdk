@@ -328,15 +328,14 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
         });
         await stores.mailbox.advanceCursor(TENANT_A, { deviceId: DEVICE, ackedSeq: 1 });
 
-        const result = await stores.mailbox.collectRetired(TENANT_A, {
-          deviceId: DEVICE,
+        const result = await stores.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
           ackedBefore: '2999-01-01T00:00:00.000Z',
           expireUnackedBefore: '2999-01-01T00:00:00.000Z',
         });
 
-        expect(result.deletedCount).toBe(1);
-        expect(result.expiredCount).toBe(1);
-        expect(result.releasedBytes).toBeGreaterThan(0n);
+        expect(result.removed).toBe(1);
+        expect(result.expired).toBe(1);
+        expect(result.releasedBytes).toBe(0n);
 
         // Retention reports the dead-lettered row separately from the deleted
         // one, so an operator can tell "consumed" from "never consumed".
@@ -367,12 +366,11 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
         ).toBe(1);
 
         // Dead-letters 1 and 2 (appended before the cutoff), leaves 3 and 4.
-        const swept = await stores.mailbox.collectRetired(TENANT_A, {
-          deviceId: DEVICE,
+        const swept = await stores.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
           ackedBefore: cutoff,
           expireUnackedBefore: cutoff,
         });
-        expect(swept).toMatchObject({ deletedCount: 0, expiredCount: 2 });
+        expect(swept).toMatchObject({ removed: 0, expired: 2 });
 
         const page = await stores.mailbox.readAfter(TENANT_A, { deviceId: DEVICE, afterSeq: 0 });
         expect(page.messages.map((message) => message.seq)).toEqual([3, 4]);
@@ -397,12 +395,11 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
         await stores.mailbox.recordDelivery(TENANT_A, { deviceId: DEVICE, deliveredSeq: 2 });
         await stores.mailbox.advanceCursor(TENANT_A, { deviceId: DEVICE, ackedSeq: 2 });
 
-        const swept = await stores.mailbox.collectRetired(TENANT_A, {
-          deviceId: DEVICE,
+        const swept = await stores.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
           ackedBefore: '2999-01-01T00:00:00.000Z',
           expireUnackedBefore: '2999-01-01T00:00:00.000Z',
         });
-        expect(swept).toMatchObject({ deletedCount: 2, expiredCount: 0 });
+        expect(swept).toMatchObject({ removed: 2, expired: 0 });
 
         // Consumed is not lost. The device acked these rows before they were
         // deleted, so nothing about that sweep may turn a re-poll from an old
@@ -432,12 +429,11 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
           first.byteSize + second.byteSize + other.byteSize,
         );
 
-        const swept = await stores.mailbox.collectRetired(TENANT_A, {
-          deviceId: DEVICE,
+        const swept = await stores.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
           ackedBefore: '2999-01-01T00:00:00.000Z',
           expireUnackedBefore: '2999-01-01T00:00:00.000Z',
         });
-        expect(swept).toMatchObject({ deletedCount: 1, expiredCount: 1, releasedBytes: first.byteSize });
+        expect(swept).toMatchObject({ removed: 1, expired: 2, releasedBytes: 0n });
         // The deleted row leaves usage; the dead letter stays counted.
         expect((await stores.mailbox.readUsage(TENANT_A)).bytes).toBe(
           second.byteSize + other.byteSize,

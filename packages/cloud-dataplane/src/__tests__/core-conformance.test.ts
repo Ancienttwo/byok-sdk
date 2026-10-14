@@ -1,3 +1,4 @@
+import { createObjectStorageScope } from './support/dataplane';
 /**
  * The Postgres composition running the complete core conformance suite.
  *
@@ -35,7 +36,7 @@ const postgresFactory: CoreCompositionFactory = {
     await migrate(scope.pool, DEPLOY_SQL);
 
     const clock = createMutableClock();
-    const stores = createPostgresCoreStores({ pool: scope.pool, clock });
+    const stores = createPostgresCoreStores({ pool: scope.pool, clock, objectStorage: (await createObjectStorageScope()).config });
 
     return {
       stores,

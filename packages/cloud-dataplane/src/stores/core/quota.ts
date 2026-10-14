@@ -1,3 +1,4 @@
+import { assertCollectExpiredInput, type QuotaCollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 /**
  * Postgres {@link QuotaStore} — entitlement, usage, reservation (§12.7.6-12.7.7).
  *
@@ -556,20 +557,31 @@ export class PostgresQuotaStore implements QuotaStore {
     return raced.reservation;
   }
 
-  async expireReservations(tenant: TenantId): Promise<readonly StorageReservation[]> {
-    // The cutoff is the injected clock's instant, passed as a parameter. A SQL
-    // `now()` here would make reservation expiry unassertable without sleeping,
-    // and the suite advances a test clock instead.
-    const expired = await this.#pool.query<ReservationRow>(
-      `UPDATE storage_reservation
-          SET state = 'expired', settled_at = $2
-        WHERE tenant_id = $1 AND state = 'reserved' AND expires_at <= $2
-       RETURNING ${RESERVATION_COLUMNS}`,
-      [tenant, this.#now()],
+  async collectExpired(tenant: TenantId, input: QuotaCollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    assertCanonicalTimestamp(input.settledBefore, 'settledBefore');
+    const result = await this.#pool.query<{removed: string; expired: string; released_bytes: string; more: boolean}>(
+      `WITH reserved AS MATERIALIZED (
+         SELECT ctid FROM storage_reservation WHERE tenant_id = $1 AND state = 'reserved' AND expires_at <= $2
+         ORDER BY expires_at, reservation_id LIMIT $4 + 1 FOR UPDATE SKIP LOCKED
+       ), expired AS (
+         UPDATE storage_reservation SET state = 'expired', settled_at = $2
+         WHERE ctid IN (SELECT ctid FROM reserved LIMIT $4) RETURNING expected_bytes
+       ), settled AS MATERIALIZED (
+         SELECT ctid FROM storage_reservation WHERE tenant_id = $1 AND state IN ('expired', 'aborted') AND settled_at < $3
+         ORDER BY settled_at, reservation_id LIMIT $4 - (SELECT count(*) FROM expired) + 1 FOR UPDATE SKIP LOCKED
+       ), deleted AS (
+         DELETE FROM storage_reservation WHERE ctid IN
+           (SELECT ctid FROM settled LIMIT $4 - (SELECT count(*) FROM expired)) RETURNING 1
+       ) SELECT (SELECT count(*) FROM deleted)::text AS removed,
+                (SELECT count(*) FROM expired)::text AS expired,
+                (SELECT COALESCE(sum(expected_bytes), 0) FROM expired)::text AS released_bytes,
+                EXISTS(SELECT 1 FROM reserved OFFSET $4) OR
+                (SELECT count(*) FROM settled) > $4 - (SELECT count(*) FROM expired) AS more`,
+      [tenant, input.now, input.settledBefore, input.limit],
     );
-    return expired.rows
-      .map(toReservation)
-      .sort((left, right) => left.reservationId.localeCompare(right.reservationId));
+    const row = result.rows[0]!;
+    return { removed: Number(row.removed), expired: Number(row.expired), releasedBytes: BigInt(row.released_bytes), more: row.more };
   }
 
   async #lockEntitlement(

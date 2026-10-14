@@ -1,3 +1,5 @@
+import { createObjectStorageScope } from './support/dataplane';
+import { R2ObjectMaintenanceStore } from '../stores/r2-blobs';
 /**
  * The no-orphaned-tombstone property under REAL connection concurrency.
  *
@@ -85,7 +87,7 @@ describe.skipIf(SKIP_DATAPLANE)('object reference writes under real concurrency'
     const scope = await createDataplaneScope(8);
     try {
       await migrate(scope.pool, DEPLOY_SQL);
-      const objects = new PostgresObjectStore(scope.pool, createMutableClock());
+      const objects = new PostgresObjectStore(scope.pool, createMutableClock(), new R2ObjectMaintenanceStore((await createObjectStorageScope()).config));
 
       for (let round = 0; round < ROUNDS; round += 1) {
         const hash = hashForRound(round);

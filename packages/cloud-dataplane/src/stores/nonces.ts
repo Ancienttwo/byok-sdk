@@ -1,3 +1,4 @@
+import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 /**
  * Postgres {@link NonceStore}: single-use challenge nonces bound to the
  * (tenant, device) they were issued for, expiring after `NONCE_TTL_MS`
@@ -33,15 +34,23 @@ export class PostgresNonceStore implements NonceStore {
     this.#ttlMs = ttlMs;
   }
 
+  async collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    const result = await this.#pool.query<{removed: string; more: boolean}>(
+      `WITH candidates AS MATERIALIZED (
+         SELECT ctid FROM auth_nonce WHERE tenant_id = $1 AND (used OR expires_at < $2)
+         ORDER BY expires_at LIMIT $3 + 1 FOR UPDATE SKIP LOCKED
+       ), deleted AS (
+         DELETE FROM auth_nonce WHERE ctid IN (SELECT ctid FROM candidates LIMIT $3) RETURNING 1
+       ) SELECT (SELECT count(*) FROM deleted)::text AS removed,
+                EXISTS(SELECT 1 FROM candidates OFFSET $3) AS more`,
+      [tenant, input.now, input.limit],
+    );
+    return { removed: Number(result.rows[0]!.removed), expired: 0, releasedBytes: 0n, more: result.rows[0]!.more };
+  }
+
   async issue(tenant: TenantId, deviceId: string): Promise<string> {
     const nowMs = this.#clock.now().getTime();
-    const now = new Date(nowMs).toISOString();
-
-    await this.#pool.query(
-      'DELETE FROM auth_nonce WHERE tenant_id = $1 AND device_id = $2 AND (used OR expires_at < $3)',
-      [tenant, deviceId, now],
-    );
-
     const nonce = this.#crypto.randomToken(NONCE_BYTES);
     await this.#pool.query(
       `INSERT INTO auth_nonce (tenant_id, device_id, nonce, expires_at, used)

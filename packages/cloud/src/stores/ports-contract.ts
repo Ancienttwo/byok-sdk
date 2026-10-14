@@ -17,12 +17,12 @@
 import type { CloudStoreName } from './ports';
 
 export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string[]>> = {
-  activity: ['append', 'read'],
-  approvals: ['append', 'read', 'resolvePending'],
+  activity: ['append', 'read', 'collectExpired'],
+  approvals: ['append', 'read', 'resolvePending', 'collectExpired'],
   devices: ['register', 'get', 'revoke', 'list', 'readiness', 'recordCapabilities', 'resolveByDeviceId'],
-  pairingCodes: ['issue'],
+  pairingCodes: ['issue', 'collectExpired'],
   pairing: ['redeemAndRegister'],
-  nonces: ['issue', 'consumeIfValid'],
+  nonces: ['issue', 'consumeIfValid', 'collectExpired'],
   dedup: ['checkAndRecord', 'checkAndRecordAgent'],
   tasks: [
     'open',
@@ -39,7 +39,7 @@ export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string
     'recordStatus',
   ],
   cancellations: ['request'],
-  receipts: ['record', 'get'],
+  receipts: ['record', 'get', 'collectExpired'],
   egress: ['record', 'get'],
   proofReceipts: ['record', 'get'],
   // Three methods, not six: the byte-proxy trio moved to `BlobContentProxy`,

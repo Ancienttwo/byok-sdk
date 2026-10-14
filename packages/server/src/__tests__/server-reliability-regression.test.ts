@@ -3,7 +3,7 @@ import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   createHmacTokenSigner,
-  createInMemoryCloudStores,
+  createInMemoryCloudStores, createInMemoryBlobBytes,
   createByokCloud,
   createWebCrypto,
   fullCapabilityDeclaration,
@@ -34,7 +34,8 @@ function fixedClock(): Clock {
 async function cloudWithFirstMailboxAppendFailure() {
   const clock = fixedClock();
   const crypto = createWebCrypto();
-  const base = createInMemoryCoreStores({ clock }).stores;
+  const objectBytes = createInMemoryBlobBytes(clock, crypto);
+  const base = createInMemoryCoreStores({ clock, objectBytes }).stores;
   // A limited append is admitted against the tenant entitlement (#411).
   void base.quota.writeEntitlement(TENANT, {
     version: 1n,
@@ -44,7 +45,7 @@ async function cloudWithFirstMailboxAppendFailure() {
     mailboxLimitBytes: 100_000_000n,
     retentionPolicyId: 'test',
   });
-  const composition = createInMemoryCloudStores(clock, crypto, base.objects, base.mailbox);
+  const composition = createInMemoryCloudStores(clock, crypto, base.objects, base.mailbox, objectBytes);
   await composition.stores.devices.register(TENANT, {
     productId: PRODUCT_ID, deviceId: 'device-a', deviceName: 'mailbox-retry-fixture',
     devicePublicKey: 'fixture-key', proofKeyId: 'fixture-proof', proofKeyEpoch: 1,
@@ -63,7 +64,7 @@ async function cloudWithFirstMailboxAppendFailure() {
     recordDelivery: (tenant, input) => base.mailbox.recordDelivery(tenant, input),
     advanceCursor: (tenant, input) => base.mailbox.advanceCursor(tenant, input),
     readCursor: (tenant, deviceId) => base.mailbox.readCursor(tenant, deviceId),
-    collectRetired: (tenant, input) => base.mailbox.collectRetired(tenant, input),
+    collectExpired: (tenant, input) => base.mailbox.collectExpired(tenant, input),
   };
   return {
     cloud: createByokCloud({

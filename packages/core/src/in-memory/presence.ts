@@ -1,3 +1,4 @@
+import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpiredResult } from '../retention';
 /**
  * In-memory {@link PresenceStore} reference (§12.3).
  *
@@ -113,6 +114,17 @@ export class InMemoryPresenceStore implements PresenceStore {
     }
     live.sort((left, right) => left.deviceId.localeCompare(right.deviceId));
     return live;
+  }
+
+  async collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    let removed = 0, more = false;
+    for (const [key, hint] of this.#hints) {
+      if (hint.tenantId !== tenant || hint.expiresAt > input.now) continue;
+      if (removed === input.limit) { more = true; break; }
+      this.#hints.delete(key); removed++;
+    }
+    return { removed, expired: 0, releasedBytes: 0n, more };
   }
 
   #isExpired(expiresAt: string): boolean {
