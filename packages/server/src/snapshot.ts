@@ -1,4 +1,4 @@
-import type { DeviceRecord, PendingApproval, TaskAttempt, TaskOfferReadback, TerminalResult } from '@byok-sdk/cloud';
+import type { DeviceRecord, PendingApproval, TaskAttempt, TaskAttemptStatus, TaskOfferReadback, TerminalResult } from '@byok-sdk/cloud';
 import type { TaskState } from '@byok-sdk/protocol';
 import type { DeviceConnection } from './connections';
 import type { MachineInfo, TaskResult, TaskSnapshot } from './types';
@@ -27,9 +27,9 @@ import type { MachineInfo, TaskResult, TaskSnapshot } from './types';
  *    which is the same single authority `approveTask`'s staleness gate reads;
  * 4. otherwise the attempt's own coarse status.
  */
-export function toTaskState(attempt: TaskAttempt, pending: PendingApproval | undefined): TaskState {
-  if (attempt.cancellation !== undefined) return 'Cancelled';
-  switch (attempt.status) {
+export function taskStateOf(status: TaskAttemptStatus, cancelled: boolean, awaitingApproval: boolean): TaskState {
+  if (cancelled) return 'Cancelled';
+  switch (status) {
     case 'complete':
       return 'Complete';
     case 'failed':
@@ -38,11 +38,11 @@ export function toTaskState(attempt: TaskAttempt, pending: PendingApproval | und
     case 'cancel_requested':
       return 'Cancelled';
     case 'offered':
-      return pending === undefined ? 'Offered' : 'AwaitApproval';
+      return !awaitingApproval ? 'Offered' : 'AwaitApproval';
     case 'claimed':
-      return pending === undefined ? 'Claimed' : 'AwaitApproval';
+      return !awaitingApproval ? 'Claimed' : 'AwaitApproval';
     case 'running':
-      return pending === undefined ? 'Running' : 'AwaitApproval';
+      return !awaitingApproval ? 'Running' : 'AwaitApproval';
   }
 }
 
@@ -91,7 +91,7 @@ export function toTaskSnapshot(
   const sessionRef = result?.sessionRef ?? (offer !== undefined && 'sessionRef' in offer.payload ? offer.payload.sessionRef : undefined);
   return {
     taskId: attempt.taskId,
-    state: toTaskState(attempt, pending),
+    state: taskStateOf(attempt.status, attempt.cancellation !== undefined, pending !== undefined),
     deviceId: attempt.deviceId,
     sessionRef,
     ...(attempt.agentRef === undefined ? {} : { agentRef: attempt.agentRef }),

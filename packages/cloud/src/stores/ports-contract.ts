@@ -34,6 +34,7 @@ export const CLOUD_PORT_METHODS: Readonly<Record<CloudStoreName, readonly string
     'get',
     'getMany',
     'list',
+    'countByStatus',
     'claim',
     'recordStatus',
   ],

@@ -22,7 +22,7 @@ import type {
   TerminalProjectionSelection,
   AgentHomeAccess,
 } from '@byok-sdk/protocol';
-import type { TenantId, TokenSigner } from '@byok-sdk/cloud';
+import type { InboundRefusalReason, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { RateLimiterOptions } from './rate-limiter';
 
 /** Mutually-exclusive storage authority for the embedded reference server. */
@@ -544,14 +544,21 @@ export type ByokServerEvent =
 export interface HubStats {
   /** Devices whose presence lease is live right now — see {@link MachineInfo.connected}. */
   connectedDeviceCount: number;
-  /** Every {@link TaskState} mapped to how many known tasks currently sit in it. */
+  /**
+   * Store-aggregated settled counts plus active task/approval projections.
+   * Exact at quiescence; a task settling between reads can be temporarily absent.
+   * This is not a transaction snapshot. SQLite persists attempts/cancellation;
+   * its in-memory approval timeline resets at reopen, so AwaitApproval resets.
+   */
   taskCountsByState: Record<TaskState, number>;
-  /** Total inbound daemon->server envelopes the cloud kernel's inbound gate has been handed (every outcome, including rejected/rate-limited), counted at the gate's own step 0. */
+  /** Total inbound daemon->server envelopes since this server instance was created (every outcome, including rejected/rate-limited), counted at the gate's own step 0. Resets on SQLite reopen. */
   envelopesIn: number;
-  /** Inbound envelopes recognized as an already-seen `(deviceId, id)` pair (N3) — a no-op wire-level success, counted here for observability. */
+  /** Inbound dedup hits since this server instance was created; a no-op wire-level success. Resets on SQLite reopen. */
   dedupDrops: number;
-  /** Inbound envelopes rejected for exceeding a device's rate limit — see `device.rate_limited` on {@link ByokServerEvent}. */
+  /** Rate-limited envelopes since this server instance was created — see `device.rate_limited` on {@link ByokServerEvent}. Resets on SQLite reopen. */
   rateLimitEvents: number;
+  /** Every closed refusal reason, zero-filled; counted since this server instance was created. Rate limiting is separate. */
+  inboundRefusals: Record<InboundRefusalReason, number>;
   /** Milliseconds since `createByokServer` returned this instance. */
   uptimeMs: number;
 }

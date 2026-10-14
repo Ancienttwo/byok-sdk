@@ -13,13 +13,9 @@ import {
   type CloudCrypto,
   type CloudStores,
   type InboundDedupStore,
-  type TaskAttempt,
-  type TaskAttemptStore,
-  type TaskCancellationStore,
 } from '@byok-sdk/cloud';
 import { RateLimiter, createCountingInboundRateLimiter, type RateLimiterOptions } from './rate-limiter';
 import type { DeviceConnections } from './connections';
-import type { LiveTaskIndex } from './live-tasks';
 import { createSqliteEmbeddedStores } from './stores/sqlite';
 import type { ByokServerStorage } from './types';
 
@@ -36,9 +32,6 @@ import type { ByokServerStorage } from './types';
  * - `dedup` counts the already-seen answers that back `dedupDrops`;
  * - `mailbox` reports each device-scoped read, which is how a device that only
  *   ever long-polls still counts as present;
- * - `tasks` and `cancellations` report every attempt they create or move, which
- *   keeps the live-task index (`live-tasks.ts`) that bounds `stats()` and the
- *   dispatch facts by the tasks still in flight rather than by history.
  *
  * Decorators rather than kernel changes, deliberately: each counter is a fact
  * about a call this composition already makes, so it is observable from the
@@ -99,8 +92,6 @@ export interface FacadeStoreOptions {
   readonly rateLimit?: RateLimiterOptions;
   /** Where a device's own liveness observations are recorded. */
   readonly connections: DeviceConnections;
-  /** Where every attempt creation and transition is accounted. */
-  readonly tasks: LiveTaskIndex;
   /** Fired once per rate-limit EPISODE, not per refused envelope. */
   readonly onRateLimited: (deviceId: string, at: string) => void;
 }
@@ -119,10 +110,6 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
           { clock, crypto },
         )
       : undefined;
-  // A SQLite file may hold history from earlier processes. Account it once,
-  // synchronously, before any operation can create or move an attempt; an
-  // in-memory composition is born empty and needs no seed.
-  sqlite?.scanTaskAttemptsAtOpen(options.tenant, (attempt) => options.tasks.seed(attempt));
   const inMemoryCore = sqlite === undefined ? createInMemoryCoreStores({ clock }).stores : undefined;
   const core = sqlite?.core ?? inMemoryCore!;
   const inMemoryCloud =
@@ -168,8 +155,6 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
       ...stores,
       rateLimiter: rateLimiter.limiter,
       dedup,
-      tasks: observingTaskAttempts(stores.tasks, options.tasks),
-      cancellations: observingCancellations(stores.cancellations, options.tasks),
     },
     blobContentProxy,
     clock,
@@ -226,51 +211,5 @@ function observingMailbox(inner: MailboxStore, connections: DeviceConnections): 
       return inner.readCursor(tenant, deviceId);
     },
     collectRetired: (tenant, input) => inner.collectRetired(tenant, input),
-  };
-}
-
-/**
- * Report every attempt the task store creates or moves to the live-task index.
- *
- * Creation is only ever `open` or `reserveAgentOffer`, so those two are what
- * adds a task; `claim` and `recordStatus` are the transitions that can make one
- * terminal. Reads pass straight through: `stats()` observes its own re-reads.
- */
-function observingTaskAttempts(inner: TaskAttemptStore, tasks: LiveTaskIndex): TaskAttemptStore {
-  const observe = (attempt: TaskAttempt | undefined): TaskAttempt | undefined => {
-    if (attempt !== undefined) tasks.observe(attempt);
-    return attempt;
-  };
-  return {
-    open: async (tenant, input) => {
-      const attempt = await inner.open(tenant, input);
-      tasks.opened(attempt);
-      return attempt;
-    },
-    reserveAgentOffer: async (tenant, input) => {
-      const reservation = await inner.reserveAgentOffer(tenant, input);
-      tasks.opened(reservation.attempt);
-      return reservation;
-    },
-    reserveAgentMessage: (tenant, input) => inner.reserveAgentMessage(tenant, input),
-    readTaskAgentMessage: (tenant, input) => inner.readTaskAgentMessage(tenant, input),
-    readAgentMessage: (tenant, input) => inner.readAgentMessage(tenant, input),
-    finalizeAgentMessage: (tenant, input) => inner.finalizeAgentMessage(tenant, input),
-    get: (tenant, taskId) => inner.get(tenant, taskId),
-    getMany: (tenant, taskIds) => inner.getMany(tenant, taskIds),
-    list: (tenant, query) => inner.list(tenant, query),
-    claim: async (tenant, input) => observe(await inner.claim(tenant, input)),
-    recordStatus: async (tenant, input) => observe(await inner.recordStatus(tenant, input)),
-  };
-}
-
-/** A host cancellation is a transition too: it makes the attempt `Cancelled` the moment it commits. */
-function observingCancellations(inner: TaskCancellationStore, tasks: LiveTaskIndex): TaskCancellationStore {
-  return {
-    request: async (tenant, input) => {
-      const mutation = await inner.request(tenant, input);
-      if (mutation !== undefined) tasks.observe(mutation.attempt);
-      return mutation;
-    },
   };
 }

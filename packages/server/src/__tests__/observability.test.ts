@@ -1,8 +1,9 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
+import { INBOUND_REFUSAL_REASONS } from '@byok-sdk/cloud';
 import { createByokServer, type ByokServer } from '../index';
-import { connectFakeDaemonLongPoll, startServer, stopServer, waitForTaskEvent } from './test-support';
+import { connectFakeDaemonLongPoll, sendOne, startServer, stopServer, waitForTaskEvent } from './test-support';
 
 const PRODUCT_ID = 'acme';
 /** Short injected hold so a long-poll in these tests never waits out the real ~50s default. */
@@ -38,7 +39,31 @@ describe('M4 Phase 4: ByokServer.stats() (part B.1)', () => {
     expect(stats.envelopesIn).toBe(0);
     expect(stats.dedupDrops).toBe(0);
     expect(stats.rateLimitEvents).toBe(0);
+    expect(stats.inboundRefusals).toEqual(Object.fromEntries(INBOUND_REFUSAL_REASONS.map((reason) => [reason, 0])));
     expect(stats.uptimeMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('counts closed refusal reasons and still delivers accepted envelopes to the relay', async () => {
+    const instance = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
+    byok = instance;
+    const started = await startServer(instance);
+    server = started.server;
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, instance, { productId: PRODUCT_ID });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'count refusals' });
+    const claim = createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId });
+    expect(await sendOne(daemon, claim)).toEqual({ status: 200, body: { accepted: 1 } });
+    await waitForTaskEvent(handle, (event) => event.kind === 'state' && event.state === 'Claimed');
+    const blob = 'x'.repeat(40 * 1024);
+    const oversized = createEnvelope('task.progress', {
+      seq: 1, events: [{ type: 'x-bulk', blob }, { type: 'x-bulk', blob }],
+    }, { taskId: handle.taskId });
+    expect(await sendOne(daemon, oversized)).toEqual({ status: 200, body: { accepted: 0, rejected: 1 } });
+    const stats = await instance.stats();
+    expect(stats.inboundRefusals).toEqual(Object.fromEntries(INBOUND_REFUSAL_REASONS.map((reason) => [reason, reason === 'activity_batch_too_large' ? 1 : 0])));
+    expect(stats.taskCountsByState.Claimed).toBe(1);
+    // A returned snapshot cannot change the live counters.
+    stats.inboundRefusals.activity_batch_too_large = 99;
+    expect((await instance.stats()).inboundRefusals.activity_batch_too_large).toBe(1);
   });
 
   it('reflects connected devices, task counts by state, inbound envelope totals, and dedup drops as real traffic happens', async () => {

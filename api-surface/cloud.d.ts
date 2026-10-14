@@ -1377,11 +1377,14 @@ export interface ByokCloud {
      * keyset-paged by `taskId` — see {@link TaskAttemptListQuery} for why the key
      * is the task id and not a timestamp, and why the walk terminates on an
      * absent `nextCursor` rather than on an empty page.
+     * `active: true` selects in-flight statuses without cancellation markers.
      *
      * A non-positive or non-integer `limit` is rejected
      * (`coordination_input_invalid`), never defaulted: the host names the bound.
      */
     listTaskAttempts(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
+    /** Store-aggregated task counts, with host cancellation separated from coarse status. */
+    countTaskAttempts(tenant: TenantId): Promise<import('./stores/ports').TaskAttemptCounts>;
     /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
     readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
     /** Actual device terminal only; cancellation intent never creates this observation. */
@@ -1615,7 +1618,7 @@ export declare function assertBoardLabels(channel: string, title: string, limits
  * behind a plausible page. Enforced in the STORE rather than only at the
  * façade, because the port is reachable directly by a host composition.
  */
-export declare function assertTaskAttemptListLimit(limit: number): void;
+export declare function assertTaskAttemptListLimit(limit: number, active?: true): void;
 export declare function validateActivityEvents(events: readonly AgentEventOrUnknown[], dropped: number, bounds: ActivityBounds): void;
 export declare function validateActivityBatch(input: Omit<ActivityAppendInput, 'ttlMs' | 'capacity'>, bounds: ActivityBounds): void;
 export declare function appendActivityEvents(activity: TenantBoundActivity, input: {
@@ -1990,7 +1993,8 @@ export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limit
  * refined without a protocol revision. `rate_limited` is a separate outcome,
  * not a refusal reason.
  */
-export type InboundRefusalReason = 'protocol_version_unsupported' | 'type_not_allowed' | 'task_id_missing' | 'device_not_eligible' | 'hello_device_mismatch' | 'hello_harnesses_without_capability' | 'hello_protocol_version_unsupported' | 'hello_product_mismatch' | 'hello_capabilities_not_recorded' | 'agent_message_attempt_mismatch' | 'agent_message_offer_binding_missing' | 'agent_message_binding_corrupt' | 'agent_message_binding_mismatch' | 'agent_message_too_large' | 'agent_message_already_deduplicated' | 'agent_message_reservation_conflict' | 'agent_message_admission_unconfirmed' | 'egress_conflict' | 'content_receipt_event_request_mismatch' | 'content_receipt_request_unknown' | 'content_receipt_request_mismatch' | 'content_receipt_conflict' | 'task_not_found_for_device' | 'task_owned_by_other_device' | 'agent_identity_mismatch' | 'terminal_harness_mismatch' | 'claim_device_mismatch' | 'claim_harness_and_runtime_conflict' | 'claim_harness_mismatch' | 'claim_harness_unavailable' | 'claim_offer_mismatch' | 'claim_not_won' | 'recovery_report_invalid' | 'recovery_offer_mismatch' | 'activity_batch_too_large' | 'activity_batch_invalid' | 'approval_event_invalid';
+export declare const INBOUND_REFUSAL_REASONS: readonly ['protocol_version_unsupported', 'type_not_allowed', 'task_id_missing', 'device_not_eligible', 'hello_device_mismatch', 'hello_harnesses_without_capability', 'hello_protocol_version_unsupported', 'hello_product_mismatch', 'hello_capabilities_not_recorded', 'agent_message_attempt_mismatch', 'agent_message_offer_binding_missing', 'agent_message_binding_corrupt', 'agent_message_binding_mismatch', 'agent_message_too_large', 'agent_message_already_deduplicated', 'agent_message_reservation_conflict', 'agent_message_admission_unconfirmed', 'egress_conflict', 'content_receipt_event_request_mismatch', 'content_receipt_request_unknown', 'content_receipt_request_mismatch', 'content_receipt_conflict', 'task_not_found_for_device', 'task_owned_by_other_device', 'agent_identity_mismatch', 'terminal_harness_mismatch', 'claim_device_mismatch', 'claim_harness_and_runtime_conflict', 'claim_harness_mismatch', 'claim_harness_unavailable', 'claim_offer_mismatch', 'claim_not_won', 'recovery_report_invalid', 'recovery_offer_mismatch', 'activity_batch_too_large', 'activity_batch_invalid', 'approval_event_invalid'];
+export type InboundRefusalReason = (typeof INBOUND_REFUSAL_REASONS)[number];
 /** The only way to build a rejection: the reason is required and closed. */
 interface Refused {
     readonly outcome: 'rejected';
@@ -2114,7 +2118,7 @@ export { DEVICE_IDENTITY_PROOF_KEY_EPOCH, DEVICE_IDENTITY_PROOF_KEY_ID, PAIRING_
 export type { AuthPlane, AuthPlaneDeps, MintedAccessToken, PairInput } from './auth/plane';
 export { createWebCrypto } from './crypto/web-crypto';
 export type { CloudCrypto } from './crypto/port';
-export { handleInboundEnvelope, terminalReceiptKey } from './inbound';
+export { INBOUND_REFUSAL_REASONS, handleInboundEnvelope, terminalReceiptKey } from './inbound';
 export type { ByokCloudObserver, InboundCommitted, InboundOutcome, InboundRefusalReason, InboundRefused, } from './inbound';
 export { projectTerminalResult } from './terminal-result';
 export type { TerminalResult } from './terminal-result';
@@ -2137,9 +2141,9 @@ export { DEFAULT_MAX_TRUTH_REQUEST_BYTES, DEVICE_PROOF_HEADER, MAX_DEVICE_PROOF_
 export type { PreparedTruthWrite, TruthBodyInput, TruthCommitInput, TruthCommitResponse, TruthCommitResult, TruthCommitter, TruthObjectDownloads, TruthRecordMetadata, TruthWriteRequest, } from './truth/contract';
 export { TruthCommitError, isTruthCommitError } from './truth/errors';
 export type { TruthCommitErrorCode } from './truth/errors';
-export { BLOB_READ_ERROR_CODES, CLOUD_STORE_NAMES, TASK_ATTEMPT_STATUSES, } from './stores/ports';
+export { BLOB_READ_ERROR_CODES, CLOUD_STORE_NAMES, TASK_ATTEMPT_STATUSES, TASK_ATTEMPT_ACTIVE_STATUSES, } from './stores/ports';
 export { CLOUD_PORT_INTERFACES, CLOUD_PORT_METHODS } from './stores/ports-contract';
-export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RequestReceipt, RequestReceiptStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports';
+export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, InboundDedupStore, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RequestReceipt, RequestReceiptStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports';
 export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryBlobs, createInMemoryCloudStores, } from './stores/in-memory/index';
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index';
 export type { DeviceTerminal } from './terminal-result';
@@ -2805,7 +2809,7 @@ export declare class InMemoryRequestReceiptStore implements RequestReceiptStore 
  */
 import { type Clock, type TenantId } from '@byok-sdk/core';
 import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
-import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '../ports';
+import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptCounts, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '../ports';
 interface StoredAgentMessageAdmission extends AgentMessageAdmission {
     readonly deviceId: string;
 }
@@ -2851,6 +2855,7 @@ export declare class InMemoryTaskAttemptStore implements TaskAttemptStore {
     get(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
     getMany(tenant: TenantId, taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
     list(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
+    countByStatus(tenant: TenantId): Promise<TaskAttemptCounts>;
     claim(tenant: TenantId, input: {
         taskId: string;
         deviceId: string;
@@ -3111,6 +3116,15 @@ export interface InboundDedupStore {
 }
 export declare const TASK_ATTEMPT_STATUSES: readonly ['offered', 'claimed', 'running', 'cancel_requested', 'complete', 'failed', 'cancelled'];
 export type TaskAttemptStatus = (typeof TASK_ATTEMPT_STATUSES)[number];
+/** Attempts that can still be in flight, provided no host cancellation is recorded. */
+export declare const TASK_ATTEMPT_ACTIVE_STATUSES: readonly ["offered", "claimed", "running"];
+/** One store aggregate; host cancellation is counted separately because it outranks status. */
+export interface TaskAttemptCounts {
+    /** Every status is present. Rows carrying a cancellation marker are excluded. */
+    readonly byStatus: Readonly<Record<TaskAttemptStatus, number>>;
+    /** Rows carrying a host cancellation marker, regardless of their status. */
+    readonly cancellationRequested: number;
+}
 /** The durable first-message reservation and, once present, its terminal disposition. */
 export interface AgentMessageAdmission {
     readonly messageId: string;
@@ -3197,6 +3211,8 @@ export interface TaskAttemptListQuery {
      * not a lookup.
      */
     readonly cursor?: string;
+    /** Only TASK_ATTEMPT_ACTIVE_STATUSES without a cancellation marker; the same keyset order applies. */
+    readonly active?: true;
 }
 export interface TaskAttemptPage {
     readonly attempts: readonly TaskAttempt[];
@@ -3271,6 +3287,8 @@ export interface TaskAttemptStore {
      * taskId LIMIT limit + 1`), never the whole tenant filtered in memory.
      */
     list(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
+    /** One aggregate over this tenant's stored rows, never an application-side page walk. */
+    countByStatus(tenant: TenantId): Promise<TaskAttemptCounts>;
     /**
      * First claim wins the ownership; a later claim by the same device is
      * idempotent. No-op (returns `undefined`) for a task this tenant never
@@ -3638,6 +3656,7 @@ export interface TenantBoundTaskAttempts {
     }): Promise<import('./stores/ports').AgentMessageAdmission | undefined>;
     get(taskId: string): Promise<TaskAttempt | undefined>;
     getMany(taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
+    countByStatus(): Promise<import('./stores/ports').TaskAttemptCounts>;
     list(query: import('./stores/ports').TaskAttemptListQuery): Promise<import('./stores/ports').TaskAttemptPage>;
     claim(input: {
         readonly taskId: string;

@@ -41,6 +41,20 @@
   flattened observation shape. Check `outcome` when selecting available
   runtimes. Reinstall services created before `--service` was generated.
 
+- **Breaking (custom cloud stores, 0.x)** — `TaskAttemptStore.countByStatus`
+  and `TaskAttemptListQuery.active` are required (#415). Counts partition rows
+  without cancellation by status and count cancellation markers separately.
+  New exports: `TaskAttemptCounts`, `TASK_ATTEMPT_ACTIVE_STATUSES`,
+  `ByokCloud.countTaskAttempts`, and `INBOUND_REFUSAL_REASONS` (the source of
+  `InboundRefusalReason`). Server `HubStats.inboundRefusals` is zero-filled and
+  counts rejected envelopes per reason since server creation; rate limiting
+  stays separate. `stats()` uses a store aggregate and active projections,
+  replacing `LiveTaskIndex`, its decorators and SQLite's startup history scan.
+  Counts are exact at quiescence; a task settling between reads can be absent
+  from that observation. SQLite attempt/cancellation counts persist; approval
+  and traffic counters reset at reopen. Custom store implementers must add the
+  aggregate method and enforce the active filter; there is no legacy fallback.
+
 - **Breaking (client, 0.x)** — daemon readiness and halts are one lifecycle
   model (#391, #394). `daemon.start()` now resolves once local startup is done
   and never waits for the network; the server accepting this session's lone
