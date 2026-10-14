@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -14,6 +14,7 @@ async function tempDir(): Promise<string> {
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
@@ -126,5 +127,36 @@ describe.runIf(posix)('lifecycle/service-environment (issue #392)', () => {
     const env: NodeJS.ProcessEnv = { HOME: home, ZDOTDIR: home, PATH: '/usr/bin:/bin' };
     expect(await captureAndApply({ env })).toMatchObject({ source: 'login-shell', shell: path.basename(passwd!) });
     expect(env.PATH?.split(':')).toContain('/rc-login/bin');
+  });
+});
+
+// Use a real fish binary and isolated rc files; the passwd seam selects it,
+// so this also exercises the production supported-shell gate.
+const fish = (process.env.PATH ?? '').split(path.delimiter)
+  .map(dir => path.join(dir, 'fish')).find(file => existsSync(file));
+describe.runIf(posix && fish !== undefined)('fish login-shell capture', () => {
+  async function fishHome(rc: string): Promise<{ home: string; env: NodeJS.ProcessEnv }> {
+    const home = await tempDir();
+    const config = path.join(home, '.config');
+    await fs.mkdir(path.join(config, 'fish'), { recursive: true });
+    await fs.writeFile(path.join(config, 'fish/config.fish'), rc);
+    vi.spyOn(os, 'userInfo').mockReturnValue({ ...os.userInfo(), shell: fish! });
+    return { home, env: { HOME: home, XDG_CONFIG_HOME: config, PATH: '/usr/bin:/bin', BYOK_OWNER_VALUE: 'original' } };
+  }
+
+  it('captures fish PATH and multiline exports despite rc noise, isolating BYOK values', async () => {
+    const { home, env } = await fishHome('echo welcome\necho warning >&2\nset -gx PATH "$HOME/fish-bin" $PATH\nset -gx RC_MULTI "line one\nline two"\nset -gx BYOK_OWNER_VALUE overwritten\nset -gx BYOK_RC_ONLY secret\n');
+    expect(await captureAndApply({ env })).toMatchObject({ source: 'login-shell', shell: 'fish' });
+    expect(env.PATH?.split(':')).toContain(path.join(home, 'fish-bin'));
+    expect(env.RC_MULTI).toBe('line one\nline two');
+    expect(env.BYOK_OWNER_VALUE).toBe('original');
+    expect(env.BYOK_RC_ONLY).toBeUndefined();
+  });
+
+  it('bounds slow fish rc and leaves the inherited environment untouched on failure', async () => {
+    const { env } = await fishHome('sleep 30\nset -gx RC_SET unexpected\n');
+    const before = { ...env };
+    expect(await captureAndApply({ env, timeoutMs: 100 })).toEqual({ source: 'unavailable', code: 'timeout' });
+    expect(env).toEqual(before);
   });
 });

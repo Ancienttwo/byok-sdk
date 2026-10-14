@@ -4,9 +4,13 @@ import {
   createByokCloud,
   createHmacTokenSigner,
   fullCapabilityDeclaration,
+  INBOUND_REFUSAL_REASONS,
+  TASK_ATTEMPT_ACTIVE_STATUSES,
+  TASK_ATTEMPT_STATUSES,
   pendingApproval,
   type ByokCloud,
   type EnqueuedOffer,
+  type InboundRefusalReason,
   type PairingCodeInfo,
   type PendingApproval,
   type TaskAttempt,
@@ -33,11 +37,8 @@ import {
   type TaskState,
 } from '@byok-sdk/protocol';
 import type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
-import { DeviceConnections } from './connections';
-import { pickFirstConnectedDevice, type DeviceCandidate } from './device-selection';
-import { emptyTaskCounts, LiveTaskIndex } from './live-tasks';
 import { TaskEventRelay } from './relay';
-import { toMachineInfo, toTaskResult, toTaskSnapshot, toTaskState } from './snapshot';
+import { toMachineInfo, toTaskResult, toTaskSnapshot, taskStateOf } from './snapshot';
 import { composeFacadeStores, serverTenantId, DEFAULT_MAX_BLOB_SIZE_BYTES } from './stores';
 import { createTaskHandle } from './task-handle';
 import type {
@@ -74,7 +75,7 @@ export type {
   TaskResult,
   TaskSnapshot,
 } from './types';
-export type { TaskOfferReadback } from '@byok-sdk/cloud';
+export type { InboundRefusalReason, TaskOfferReadback } from '@byok-sdk/cloud';
 /**
  * M5 (approval targeting, docs/protocol.md §5.3): `TaskHandle.approve`/`reject`'s
  * `opts.approvalId` targeting throws this when the id names an approval the
@@ -274,21 +275,17 @@ export interface ByokServer {
    * Release what this instance holds: the relay's per-task feeds and their
    * reclamation timers, and the connection observations. Call it on shutdown so
    * nothing keeps the process alive or leaks a handle in tests; safe to call
-   * more than once. SQLite embedders that need to await handle release should
-   * call {@link ByokServer.close} instead.
+   * more than once. Drain pending store calls before releasing the selected
+   * storage authority; await this before opening the SQLite file again.
    */
-  stop(): void;
-  /** Drain pending store calls and release the selected storage authority. */
   close(): Promise<void>;
   /**
    * A plain, serializable snapshot of this server's current state. See
    * {@link HubStats} for the field-by-field contract.
    *
-   * Async because the non-terminal part of `taskCountsByState` is re-read from
-   * the durable task store on every call. Terminal states are absorbing, so a
-   * task is read until it settles and then only tallied: the cost of a call
-   * follows the tasks still in flight, not history (`live-tasks.ts`). A SQLite
-   * server accounts the file's existing tasks once, at open.
+   * One store aggregate, an active-attempt page walk, then one approval read
+   * per active attempt. No process-local task counts or startup history scan.
+   * This is a multi-read observation, not a transaction snapshot; see HubStats.
    *
    * Deliberately in-process only: never exposed over HTTP by this SDK itself (see
    * `CreateByokServerOptions.healthzRoute`); an embedder that wants any of it
@@ -327,14 +324,8 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     );
   }
 
-  const connections = new DeviceConnections({ presenceTtlMs });
-  /**
-   * Non-terminal task IDs plus absorbing terminal counts. Dispatch input is
-   * read from the kernel's immutable offer receipt, never retained here.
-   */
-  const tasks = new LiveTaskIndex();
+  const inboundRefusals = Object.fromEntries(INBOUND_REFUSAL_REASONS.map((reason) => [reason, 0])) as Record<InboundRefusalReason, number>;
   const relay = new TaskEventRelay({
-    connections,
     ...(opts.taskEventBufferLimit === undefined ? {} : { taskEventBufferLimit: opts.taskEventBufferLimit }),
     ...(opts.taskEventRetentionMs === undefined ? {} : { taskEventRetentionMs: opts.taskEventRetentionMs }),
   });
@@ -344,8 +335,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     maxBlobSizeBytes,
     ...(opts.storage === undefined ? {} : { storage: opts.storage }),
     ...(opts.rateLimit === undefined ? {} : { rateLimit: opts.rateLimit }),
-    connections,
-    tasks,
+    presenceTtlMs,
     onRateLimited: (deviceId, at) => relay.emitServerEvent({ kind: 'device.rate_limited', deviceId, at }),
   });
 
@@ -367,10 +357,16 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     // S1: the product this instance serves is part of every bearer-authed
     // route's decision, not just of the pairing claims.
     instanceProductId: opts.productId,
-    observer: relay,
+    observer: {
+      onInboundCommitted: (input) => relay.onInboundCommitted(input),
+      onInboundRefused: ({ reason }) => { inboundRefusals[reason] += 1; },
+    },
     ...(opts.agentMessage === undefined ? {} : { agentMessage: opts.agentMessage }),
     maxBlobSizeBytes,
     longPollHoldMs,
+    presenceTtlMs,
+    // Transport observations and heartbeat publications renew the same lease.
+    presenceMinimumIntervalMs: 0,
     longPollIntervalMs: longPollInterval(longPollHoldMs),
   });
 
@@ -482,27 +478,8 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     })().catch(() => undefined);
   };
 
-  async function candidatesInObservationOrder(): Promise<DeviceCandidate[]> {
-    const candidates: DeviceCandidate[] = [];
-    for (const deviceId of connections.ids()) {
-      if (!connections.isConnected(deviceId)) continue;
-      const device = await composition.cloud.devices.get(tenant, deviceId);
-      if (device === undefined || device.revoked) continue;
-      candidates.push({
-        deviceId,
-        capabilities: device.capabilities,
-        configuredToolsets: connections.get(deviceId)?.configuredToolsets,
-      });
-    }
-    return candidates;
-  }
-
   async function deviceCapabilities(deviceId: string): Promise<readonly string[] | undefined> {
     return (await composition.cloud.devices.get(tenant, deviceId))?.capabilities;
-  }
-
-  async function requireConnected(deviceId: string): Promise<void> {
-    if (!connections.isConnected(deviceId)) throw new Error(`device ${deviceId} is not connected`);
   }
 
   // An in-flight exclusion only; persisted task and receipt stores own identity.
@@ -512,7 +489,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     const taskId = submission.taskId;
     if (taskId === undefined) return dispatchInternal(submission, fresh);
     if (typeof taskId !== 'string' || taskId.length === 0) throw new Error('taskId must be a non-empty string');
-    if (input.deviceId === undefined) throw new Error('caller taskId requires an explicit deviceId');
     if (dispatching.has(taskId)) throw new Error('dispatch for this taskId is already in progress; retain the original binding');
     dispatching.add(taskId);
     try { return await dispatchInternal(submission, fresh); }
@@ -547,9 +523,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     const requiredToolsets =
       input.requiredToolsets === undefined ? undefined : RequiredToolsetsSchema.parse(input.requiredToolsets);
 
-    if (agentRef !== undefined && input.deviceId === undefined) {
-      throw new Error('Agent-bound dispatch requires an explicit deviceId for capability admission');
-    }
     if (egressPolicy !== undefined && agentRef === undefined) {
       throw new Error('Agent egress policy requires an explicit AgentRef; legacy task dispatch cannot consume it');
     }
@@ -557,18 +530,10 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       throw new Error('Agent message egress requires the typed Agent egress offer path');
     }
 
-    const deviceId =
-      input.deviceId ??
-      pickFirstConnectedDevice(await candidatesInObservationOrder(), {
-        ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
-        allowStrictAgentOnly: agentRef !== undefined,
-      });
-    // No queue-until-connect: reject clearly instead of silently enqueuing a
-    // task nothing will ever claim.
-    if (deviceId === undefined) {
-      throw new Error('no connected device to dispatch to (M0 does not queue tasks until a device connects)');
+    const deviceId = input.deviceId;
+    if (typeof deviceId !== 'string' || deviceId.length === 0) {
+      throw new Error('dispatch requires an explicit deviceId (non-empty string)');
     }
-    await requireConnected(deviceId);
 
     // The gates the kernel does not run, in the pre-fold order. Everything
     // below the kernel DOES run (strict-agent-only, agent-home-contract, the
@@ -585,17 +550,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
         throw new Error(
           `device ${deviceId} did not advertise toolset-selection capability; refusing a task whose semantics require local MCP tools`,
         );
-      }
-      const configuredToolsets = connections.get(deviceId)?.configuredToolsets;
-      if (configuredToolsets === undefined) {
-        throw new Error(
-          `device ${deviceId} did not advertise its configured toolset inventory; refusing to guess from runtime capability`,
-        );
-      }
-      const configured = new Set(configuredToolsets);
-      const missing = requiredToolsets.filter((toolsetId) => !configured.has(toolsetId));
-      if (missing.length > 0) {
-        throw new Error(`device ${deviceId} is missing required MCP toolset(s): ${missing.join(', ')}`);
       }
     }
     if (
@@ -752,7 +706,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
     async requestAgentContentRead(input: AgentContentReadRequest): Promise<void> {
       const payload = AgentContentReadPayloadSchema.parse(input.payload);
-      await requireConnected(input.deviceId);
       await cloud.enqueueAgentContentRead(tenant, input.deviceId, { payload });
     },
 
@@ -760,7 +713,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       input: AgentHomeProjectionRequest,
     ): Promise<AgentHomeProjectionStatusReadback> {
       const payload = AgentHomeProjectionPayloadSchema.parse(input.payload);
-      await requireConnected(input.deviceId);
       return (await cloud.enqueueAgentHomeProjection(tenant, input.deviceId, payload)).status;
     },
 
@@ -843,10 +795,11 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
     machines: {
       async list(): Promise<MachineInfo[]> {
-        const devices = await cloud.listDevices(tenant);
-        return devices.map((device) =>
-          toMachineInfo(device, connections.get(device.deviceId), connections.isConnected(device.deviceId)),
-        );
+        const [devices, readiness] = await Promise.all([cloud.listDevices(tenant), cloud.readTenantReadiness(tenant)]);
+        const harnesses = new Map(devices.map((device) => [device.deviceId, device.harnesses]));
+        return readiness.devices.map((device) => toMachineInfo({
+          deviceId: device.deviceId, deviceName: device.deviceName, harnesses: harnesses.get(device.deviceId),
+        }, device.presence));
       },
     },
 
@@ -860,7 +813,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
         // tenant and supplies it here, so a device id belonging to nobody
         // addresses nothing and touches nothing.
         await cloud.revokeDevice(tenant, deviceId);
-        connections.forget(deviceId);
       },
     },
 
@@ -870,47 +822,49 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       },
     },
 
-    stop(): void {
-      relay.stop();
-      void composition.close();
-    },
-
     async close(): Promise<void> {
       relay.stop();
       await composition.close();
     },
 
     async stats(): Promise<HubStats> {
-      // Only the live set is re-read: one batched attempt read plus one
-      // approval-timeline read per live task. A task that turns out terminal
-      // leaves the live set and joins its count here, exactly once.
-      const attempts = await composition.cloud.tasks.getMany(tenant, tasks.liveTaskIds());
-      for (const attempt of attempts) tasks.observe(attempt);
-      const live = attempts.filter((attempt) => tasks.isLive(attempt.taskId));
-      const pending = await Promise.all(live.map((attempt) => readPending(attempt.taskId)));
-      // Synchronous from here: a task settled by a transition that committed
-      // while the timelines were read sits in its terminal count, not in both.
-      const taskCountsByState = emptyTaskCounts();
-      live.forEach((attempt, index) => {
-        if (tasks.isLive(attempt.taskId)) taskCountsByState[toStateForCount(attempt, pending[index])] += 1;
+      // Aggregate settled rows FIRST. A kernel-settled row cannot subsequently
+      // appear in the active walk; reversing these reads can count it twice.
+      const aggregate = await cloud.countTaskAttempts(tenant);
+      const active: TaskAttempt[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await cloud.listTaskAttempts(tenant, {
+          limit: 100,
+          active: true,
+          ...(cursor === undefined ? {} : { cursor }),
+        });
+        active.push(...page.attempts);
+        cursor = page.nextCursor;
+      } while (cursor !== undefined);
+      const pending = await Promise.all(active.map((attempt) => readPending(attempt.taskId)));
+      const taskCountsByState = Object.fromEntries(TASK_STATES.map((state) => [state, 0])) as Record<TaskState, number>;
+      for (const status of TASK_ATTEMPT_STATUSES) {
+        if (!TASK_ATTEMPT_ACTIVE_STATUSES.some((activeStatus) => activeStatus === status)) {
+          taskCountsByState[taskStateOf(status, false, false)] += aggregate.byStatus[status];
+        }
+      }
+      taskCountsByState[taskStateOf('cancel_requested', true, false)] += aggregate.cancellationRequested;
+      active.forEach((attempt, index) => {
+        taskCountsByState[taskStateOf(attempt.status, attempt.cancellation !== undefined, pending[index] !== undefined)] += 1;
       });
-      for (const state of TASK_STATES) taskCountsByState[state] += tasks.terminalCount(state);
 
       return {
-        connectedDeviceCount: connections.connectedCount(),
+        connectedDeviceCount: (await cloud.readTenantReadiness(tenant)).observedPresenceCount,
         taskCountsByState,
         envelopesIn: composition.counters.envelopesIn,
         dedupDrops: composition.counters.dedupDrops,
         rateLimitEvents: composition.counters.rateLimitEvents,
+        inboundRefusals: { ...inboundRefusals },
         uptimeMs: Date.now() - startedAtMs,
       };
     },
   };
-}
-
-/** Same projection `tasks.get` uses; named so the count and the snapshot can never disagree. */
-function toStateForCount(attempt: TaskAttempt, pending: PendingApproval | undefined): TaskState {
-  return toTaskState(attempt, pending);
 }
 
 /**

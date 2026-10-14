@@ -150,7 +150,7 @@ export { createWebCrypto } from './crypto/web-crypto';
 export type { CloudCrypto } from './crypto/port';
 
 // Inbound gate
-export { handleInboundEnvelope, terminalReceiptKey } from './inbound';
+export { INBOUND_REFUSAL_REASONS, handleInboundEnvelope, terminalReceiptKey } from './inbound';
 export type {
   ByokCloudObserver,
   InboundCommitted,
@@ -294,6 +294,7 @@ export {
   BLOB_READ_ERROR_CODES,
   CLOUD_STORE_NAMES,
   TASK_ATTEMPT_STATUSES,
+  TASK_ATTEMPT_ACTIVE_STATUSES,
 } from './stores/ports';
 // The port method inventory. Contract data, shipped so `@byok-sdk/conformance` and
 // durable adapters read the same table; `ports.ts` itself is untouched.
@@ -328,6 +329,7 @@ export type {
   RequestReceiptStore,
   TaskAttempt,
   TaskAttemptListQuery,
+  TaskAttemptCounts,
   TaskAttemptPage,
   TaskAttemptStatus,
   TaskAttemptStore,

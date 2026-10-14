@@ -41,14 +41,17 @@ it('recovers recurring admission and independent observations through a recreate
       agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn' },
     });
     writeFileSync(inputPath, JSON.stringify(input));
+    await stopServer(http.server); await instance.close();
     const fault = new DatabaseSync(path);
     fault.exec("CREATE TRIGGER fail_append BEFORE INSERT ON mailbox_message BEGIN SELECT RAISE(ABORT, 'restart append fault'); END;");
     fault.close();
+    instance = createByokServer(options); http = await startServer(instance);
     await expect(instance.recurring.submit(input)).rejects.toThrow('restart append fault');
     expect(await instance.tasks.attempt(input.taskId)).toBeDefined();
     expect(await instance.tasks.offer(input.taskId)).toMatchObject({ delivered: false });
-    await restart();
+    await stopServer(http.server); await instance.close();
     const repair = new DatabaseSync(path); repair.exec('DROP TRIGGER fail_append'); repair.close();
+    instance = createByokServer(options); http = await startServer(instance);
     const restored = RecurringExecutionInputSchema.parse(JSON.parse(readFileSync(inputPath, 'utf8')));
     await instance.recurring.submit(restored);
     expect(await instance.tasks.offer(restored.taskId)).toMatchObject({ delivered: true, payload: restored.payload });

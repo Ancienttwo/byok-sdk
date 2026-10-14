@@ -33,7 +33,7 @@ import path from 'node:path';
  * put back: rc files never set SDK control variables either.
  *
  * `byok-agent start --service` calls it first ({@link SERVICE_FLAG}; the
- * launchd plist and systemd unit pass that flag). An embedding Host started
+ * launchd plist, systemd unit and WinSW XML pass that flag). An embedding Host started
  * outside a terminal (an Electron app launched from the Dock has launchd's
  * PATH too) calls the same function at its own startup.
  *
@@ -42,17 +42,17 @@ import path from 'node:path';
  * the shell's basename and a duration. Never a variable name, value or path.
  */
 
-/** The `byok-agent start` flag the launchd plist and the systemd unit pass. */
+/** The `byok-agent start` flag generated service definitions pass. */
 export const SERVICE_FLAG = '--service';
 
 export const LOGIN_SHELL_ENV_TIMEOUT_MS = 10_000;
 export const LOGIN_SHELL_ENV_MAX_BYTES = 1024 * 1024;
 
 /**
- * Shells known to accept `-i -l -c` with POSIX `printf`. Anything else (fish,
- * nu, a missing passwd entry) is `unsupported-shell` rather than a guess.
+ * Shells known to accept `-i -l -c` and this nonce-framed printf/env command.
+ * fish supports the same command; nu and a missing passwd entry are refused.
  */
-const SUPPORTED_SHELLS = new Set(['sh', 'bash', 'zsh', 'ksh', 'dash']);
+const SUPPORTED_SHELLS = new Set(['sh', 'bash', 'zsh', 'ksh', 'dash', 'fish']);
 
 export const SERVICE_ENVIRONMENT_UNAVAILABLE_CODES = [
   'unsupported-shell',
@@ -69,6 +69,12 @@ export type ServiceEnvironmentStatus =
   | { source: 'login-shell'; shell: string; durationMs: number }
   | { source: 'inherited' }
   | { source: 'unavailable'; code: ServiceEnvironmentUnavailableCode };
+
+/** Timestamped closed environment observation shared by diagnostics and audit. */
+export interface ServiceEnvironmentRecord {
+  status: ServiceEnvironmentStatus;
+  ts: string;
+}
 
 /**
  * Test seams for {@link captureAndApply}. Not part of the public API:

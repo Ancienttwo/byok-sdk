@@ -17,6 +17,7 @@ import { createEnvelope, PROTOCOL_VERSION, type Envelope } from '@byok-sdk/proto
 import { describe, expect, it } from 'vitest';
 import {
   handleInboundEnvelope,
+  INBOUND_REFUSAL_REASONS,
   type ByokCloudObserver,
   type InboundRefusalReason,
   type InboundRefused,
@@ -58,6 +59,9 @@ function oversizedProgress(taskId: string): Envelope {
 }
 
 describe('observer.onInboundRefused', () => {
+  it('publishes a unique runtime vocabulary for its closed reason type', () => {
+    expect(new Set(INBOUND_REFUSAL_REASONS).size).toBe(INBOUND_REFUSAL_REASONS.length);
+  });
   it('reports activity_batch_too_large for a task.progress with two ~40 KiB events', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
@@ -119,6 +123,7 @@ describe('observer.onInboundRefused', () => {
     ];
 
     for (const [reason, envelope] of cases) {
+      expect(INBOUND_REFUSAL_REASONS).toContain(reason);
       const { refused, observer } = refusalRecorder();
       expect(
         await handleInboundEnvelope(stores, deviceId, envelope, undefined, undefined, observer).then((result) => result.outcome),

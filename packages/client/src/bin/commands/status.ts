@@ -1,17 +1,15 @@
-import { type DaemonConfig, type RuntimeAdapter } from '../../index';
+import { type DaemonConfig } from '../../index';
 import { DeviceStore } from '../../daemon/store';
 import type { ControlStatusResult } from '../../daemon/control-protocol';
-import { auditLogPath, readAuditEvents, readLastEnvironmentRecord } from '../audit-log';
+import { auditLogPath, readAuditEvents, readLastEnvironmentRecord, parseEnvironmentRecord } from '../audit-log';
+import { parseRuntimeObservations } from '../../runtime-detection';
 import { connectControlClient } from '../control-client';
 import { resolveStoreDir } from '../config';
 import { formatLiveStatusLines, formatStatusLines, type StatusView } from '../format';
-import { defaultRuntimeAdapters, probeRuntimes } from '../runtime-probe';
 import { deriveTasksFromEvents, lastLifecycle, tallyTaskStates } from '../tasks-view';
 
 export interface StatusDeps {
   log?: (line: string) => void;
-  /** DI for tests: probe these adapters instead of constructing the real bundled pi/claude/codex set. */
-  adapters?: RuntimeAdapter[];
   /** DI for tests: substitute the real control-socket connection attempt. */
   connectControl?: typeof connectControlClient;
 }
@@ -34,16 +32,15 @@ export interface StatusDeps {
 export async function runStatusCommand(config: DaemonConfig, deps: StatusDeps = {}): Promise<void> {
   const log = deps.log ?? ((line: string) => console.log(line));
   const storeDir = resolveStoreDir(config);
-  const adapters = deps.adapters ?? defaultRuntimeAdapters(config.runtimeAllowlist);
   const connectControl = deps.connectControl ?? connectControlClient;
 
-  const [record, events, runtimes, environment] = await Promise.all([
+  const [record, events, environment] = await Promise.all([
     new DeviceStore(storeDir).load(),
     readAuditEvents(storeDir),
-    probeRuntimes(adapters),
     readLastEnvironmentRecord(storeDir),
   ]);
   const tasks = deriveTasksFromEvents(events);
+  const lastRuntimes = events.findLast(event => event.kind === 'runtimes-detected');
 
   const view: StatusView = {
     localAgentRelease: config.localAgentRelease,
@@ -53,7 +50,8 @@ export async function runStatusCommand(config: DaemonConfig, deps: StatusDeps = 
     paired: record !== undefined,
     deviceId: record?.deviceId,
     lifecycle: lastLifecycle(events),
-    runtimes,
+    runtimes: lastRuntimes?.kind === 'runtimes-detected' ? lastRuntimes.runtimes : [],
+    ...(lastRuntimes === undefined ? {} : { runtimesDetectedAt: lastRuntimes.ts }),
     taskCounts: tallyTaskStates(tasks),
     auditLogPath: auditLogPath(storeDir),
     auditLogLineCount: events.length,
@@ -68,7 +66,8 @@ export async function runStatusCommand(config: DaemonConfig, deps: StatusDeps = 
   }
   try {
     const live = await conn.client.request<ControlStatusResult>('status');
-    for (const line of formatLiveStatusLines(live)) log(line);
+    const environment = parseEnvironmentRecord({ kind: 'environment-resolved', ts: live.environmentResolvedAt, ...live.environment });
+    for (const line of formatLiveStatusLines({ ...live, runtimes: parseRuntimeObservations(live.runtimes), environment: environment?.status })) log(line);
   } catch (err) {
     log(`live status unavailable: ${err instanceof Error ? err.message : String(err)}`);
   } finally {

@@ -106,7 +106,7 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
 
   afterEach(async () => {
     if (server) await stopServer(server);
-    byok?.stop();
+    await byok?.close();
     server = undefined;
     byok = undefined;
   });

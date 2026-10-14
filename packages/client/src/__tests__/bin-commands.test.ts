@@ -86,7 +86,7 @@ describe('bin/commands/status: runStatusCommand', () => {
     const { log, lines } = collectLog();
     const config = baseConfig(storeDir, { branding: { displayName: 'Acme Coder' } });
 
-    await runStatusCommand(config, { log, adapters: [new StubRuntimeAdapter('pi', { kind: 'available', version: '1.0' })] });
+    await runStatusCommand(config, { log });
 
     expect(lines[0]).toBe('product: Acme Coder (acme-product)');
     expect(lines.some((l) => l === 'paired: no')).toBe(true);
@@ -94,7 +94,7 @@ describe('bin/commands/status: runStatusCommand', () => {
     expect(lines.some((l) => l === 'tasks: total=0 offered=0 claimed=0 running=0 awaitApproval=0 complete=0 failed=0 cancelled=0')).toBe(
       true,
     );
-    expect(lines.some((l) => l === 'runtimes: pi=present')).toBe(true);
+    expect(lines.some((l) => l === 'runtimes: unknown (no runtimes-detected record yet)')).toBe(true);
   });
 
   it('reports paired:yes + deviceId once a device.json exists on disk — even though this Daemon was never start()ed', async () => {
@@ -107,7 +107,7 @@ describe('bin/commands/status: runStatusCommand', () => {
     await new DeviceStore(storeDir).save(record);
 
     const { log, lines } = collectLog();
-    await runStatusCommand(baseConfig(storeDir), { log, adapters: [] });
+    await runStatusCommand(baseConfig(storeDir), { log });
 
     expect(lines.some((l) => l === 'paired: yes deviceId=dev-123')).toBe(true);
   });
@@ -119,7 +119,7 @@ describe('bin/commands/status: runStatusCommand', () => {
     await appendAuditEvent(storeDir, { kind: 'claimed', ts: '2026-01-01T00:00:02.000Z', taskId: 't1' });
 
     const { log, lines } = collectLog();
-    await runStatusCommand(baseConfig(storeDir), { log, adapters: [] });
+    await runStatusCommand(baseConfig(storeDir), { log });
 
     expect(lines.some((l) => l === 'lifecycle: last-known phase=running connection=open at=2026-01-01T00:00:00.000Z')).toBe(true);
     expect(lines.some((l) => l === 'tasks: total=1 offered=0 claimed=1 running=0 awaitApproval=0 complete=0 failed=0 cancelled=0')).toBe(
@@ -763,7 +763,7 @@ describe('bin/audit-log path used consistently by commands', () => {
     expect(auditLogPath(storeDir)).toBe(path.join(storeDir, 'audit.jsonl'));
     await appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' });
     const { log, lines } = collectLog();
-    await runStatusCommand(config, { log, adapters: [] });
+    await runStatusCommand(config, { log });
     expect(lines.some((l) => l.includes('(1 event)'))).toBe(true);
   });
 });

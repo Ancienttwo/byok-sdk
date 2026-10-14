@@ -84,7 +84,7 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
 
     // Work dispatched after open is delivered promptly by the held poll.
     const dispatchedAt = Date.now();
-    const handle = await real.byok.dispatch({ instruction: 'delivered by the held poll' });
+    const handle = await real.byok.dispatch({ deviceId: record.deviceId, instruction: 'delivered by the held poll' });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
     expect(Date.now() - dispatchedAt).toBeLessThan(1_500);
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
@@ -238,7 +238,7 @@ describe('a full task lifecycle over long-poll (finding F6, real @byok-sdk/serve
       expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
 
-    const handle = await real.byok.dispatch({ instruction: 'do it over long-poll' });
+    const handle = await real.byok.dispatch({ deviceId: record.deviceId, instruction: 'do it over long-poll' });
 
     // Claim/started: proves the offer was received over GET /byok/events and
     // the daemon's outbound reply reached the server over POST /byok/messages

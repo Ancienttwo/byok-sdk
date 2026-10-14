@@ -71,7 +71,7 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
@@ -97,7 +97,7 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
     const started = await start({ messagesPerSecond: 1000, burst: 10 });
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const handle = await started.byok.dispatch({ instruction: 'sustained rate' });
+    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'sustained rate' });
     await claimAndStart(daemon, handle.taskId);
 
     for (let i = 0; i < 25; i++) {
@@ -121,7 +121,7 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
     const started = await start({ messagesPerSecond: 5, burst: 3 });
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const handle = await started.byok.dispatch({ instruction: 'burst' });
+    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'burst' });
 
     const statuses: number[] = [];
     for (let i = 0; i < 8; i++) {
@@ -142,7 +142,7 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
     const started = await start({ messagesPerSecond: 20, burst: 3 });
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const handle = await started.byok.dispatch({ instruction: 'recovers after refill' });
+    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'recovers after refill' });
     for (let i = 0; i < 6; i++) {
       await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }));
     }
@@ -236,7 +236,7 @@ describe('M4 Phase 4: per-device inbound rate limiting (part A)', () => {
       announce: false,
     });
     // A second, announced device exists only to carry the ordering barrier —
-    // `dispatch()` needs a connected target, and its own bucket is separate.
+    // `dispatch()` names a registered target; its own bucket is separate.
     const barrierDevice = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
       productId: PRODUCT_ID,
       deviceName: 'device-coalesce-barrier',

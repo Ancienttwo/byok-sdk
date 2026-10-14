@@ -2,11 +2,12 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createMutableClock } from '@byok-sdk/core';
 import { createWebCrypto } from '@byok-sdk/cloud';
 import { createSqliteEmbeddedStores } from '..';
-import { isSqliteAvailable, openSqliteDatabase, SqliteSchemaError } from '../../../sqlite-support';
+import { isSqliteAvailable, SqliteSchemaError } from '../../../sqlite-support';
 
 const directories: string[] = [];
 afterEach(() => { for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -20,7 +21,7 @@ async function seed(body: string, state: string): Promise<string> {
   directories.push(dir);
   const path = join(dir, 'store.sqlite');
   await open(path).close();
-  const db = openSqliteDatabase(path);
+  const db = new DatabaseSync(path);
   db.prepare('INSERT INTO mailbox_message VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
     .run('tenant', 'device', 1, '00000000-0000-4000-8000-000000000001', body,
       'sha256:' + createHash('sha256').update(body).digest('hex'), String(Buffer.byteLength(body)), state, '2026-10-08T00:00:00.000Z');
@@ -33,7 +34,7 @@ async function seed(body: string, state: string): Promise<string> {
     const path = await seed(body, 'pending');
     expect(() => open(path)).toThrow(SqliteSchemaError);
     expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED' }));
-    const db = openSqliteDatabase(path, { readOnly: true });
+    const db = new DatabaseSync(path, { readOnly: true });
     expect(db.prepare('SELECT body, state FROM mailbox_message').get()).toEqual({ body, state: 'pending' });
     db.close();
   });

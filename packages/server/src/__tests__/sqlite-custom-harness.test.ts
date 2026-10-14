@@ -105,6 +105,8 @@ describe('SQLite custom-harness claim authority', () => {
     const { open } = fixture();
     let runtime = open();
     try {
+      await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
       const { taskId } = await runtime.cloud.enqueueOffer(tenant, deviceId, { payload });
       expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', {
         deviceId, ...(runtimeId === undefined ? {} : { runtime: runtimeId }),
@@ -171,6 +173,7 @@ describe('SQLite custom-harness claim authority', () => {
         createEnvelope('task.claim', { deviceId, harnessId }, { taskId })).then((result) => result.outcome)).toBe('accepted');
       await runtime.stores.close(); runtime = open();
       expect(await runtime.bound.tasks.get(taskId)).toMatchObject({ claimedHarnessId: harnessId });
+      await runtime.stores.close();
       const db = new DatabaseSync(path, { readOnly: true });
       try {
         expect(db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('4');

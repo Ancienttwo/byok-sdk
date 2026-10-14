@@ -1,10 +1,14 @@
-// BYOK SDK example: a hono server embedding `@byok-sdk/server`'s M0 reference
-// implementation, plus a plain HTML/JS demo UI (no frontend build
-// step — the page is served as a static file with inline <script>).
+// BYOK SDK example: a hono server embedding `@byok-sdk/server`, plus a plain
+// HTML/JS demo UI (no frontend build step: the page is served as a static file
+// with an inline <script>).
 //
-// This is the "examples/ (不发布)" app from the plan's 服务端参考实现 section:
-// pair -> list machines -> dispatch a task -> stream progress -> show the
-// result -> approve/cancel. See README.md for how to run the whole loop.
+// Copy this file as is. It passes no `longPollHoldMs` or other transport
+// override, so it runs with the SDK defaults, and `quickstart-smoke.test.ts`
+// starts it unmodified to prove the README loop works with those defaults.
+// Do not shorten the hold to hide a readiness problem.
+//
+// The loop: pair -> list machines -> dispatch a task -> stream progress ->
+// show the result -> approve/cancel. See README.md for how to run it.
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,10 +30,12 @@ const PRODUCT_ID = process.env.BYOK_EXAMPLE_PRODUCT_ID ?? 'byok-example-basic';
 // `productId` at construction, so `createPairingCode` takes only the product.
 // `BYOK_EXAMPLE_TENANT_ID` is therefore no longer read.
 
-// `RuntimeId` from @byok-sdk/protocol is 'pi' | 'claude' | 'codex'; the daemon
-// ships an adapter for each, and the page's runtime select offers all three. Mirrors
-// the same literal allowlist `packages/server/src/hub.ts` keeps locally
-// rather than pulling in @byok-sdk/protocol just for this one array.
+// `KNOWN_RUNTIMES` is the allowlist for the `runtime` a caller may request: the
+// `RuntimeId` set from @byok-sdk/protocol ('pi' | 'claude' | 'codex'), kept as
+// a local literal so this example does not import @byok-sdk/protocol for one
+// array. It only validates the request. Which runtimes a given machine can run
+// is whatever that machine reports in `GET /api/machines`, and the page builds
+// its runtime list from that report.
 const KNOWN_RUNTIMES = new Set(['pi', 'claude', 'codex']);
 
 const storageMode = process.env.BYOK_STORE ?? 'memory';
@@ -102,7 +108,7 @@ app.get('/api/tasks/:taskId', async (c) => {
 });
 
 app.post('/api/tasks', async (c) => {
-  let body: { instruction?: unknown; runtime?: unknown; sessionRef?: unknown };
+  let body: { deviceId?: unknown; instruction?: unknown; runtime?: unknown; sessionRef?: unknown };
   try {
     body = await c.req.json();
   } catch {
@@ -110,6 +116,9 @@ app.post('/api/tasks', async (c) => {
   }
   if (typeof body.instruction !== 'string' || body.instruction.trim().length === 0) {
     return c.json({ error: 'instruction is required' }, 400);
+  }
+  if (typeof body.deviceId !== 'string' || body.deviceId.length === 0) {
+    return c.json({ error: 'deviceId is required' }, 400);
   }
   if (body.runtime !== undefined && !KNOWN_RUNTIMES.has(body.runtime as string)) {
     return c.json({ error: `unknown runtime "${String(body.runtime)}"` }, 400);
@@ -119,6 +128,7 @@ app.post('/api/tasks', async (c) => {
   }
 
   const input: DispatchInput = {
+    deviceId: body.deviceId,
     instruction: body.instruction,
     runtime: body.runtime as DispatchInput['runtime'],
     // Optional follow-up-turn pass-through: a caller that already has a

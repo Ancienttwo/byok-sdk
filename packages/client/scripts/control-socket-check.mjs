@@ -86,11 +86,11 @@ const configPath = path.join(workDir, 'config.json');
 const productId = `${name}-${randomUUID()}`;
 await fs.mkdir(workspaceRoot, { recursive: true });
 
-// Short long-poll hold: this façade serves the wire over HTTP only (WP3B
+// Default long-poll hold: this façade serves the wire over HTTP only (WP3B
 // Step 2 removed the WS attachment), so the service-launched daemon runs the
-// protocol §8 long-poll transport, and an in-flight `GET /byok/events` at the
-// ~50s production default would outlive this script's own teardown.
-const byok = createByokServer({ productId, longPollHoldMs: 500 });
+// protocol §8 long-poll transport. Stopping the daemon aborts its in-flight
+// `GET /byok/events`, so teardown does not wait for the ~50s hold.
+const byok = createByokServer({ productId });
 let httpServer;
 let lifecycle;
 let failed = false;

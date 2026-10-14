@@ -1,16 +1,17 @@
 import { TASK_STATES, type TaskState, OUTBOUND_REFUSAL_REASONS, type OutboundRefusalReason } from '@byok-sdk/protocol';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { AgentEvent, BlobRef, RuntimeInfo } from '@byok-sdk/protocol';
+import type { AgentEvent, BlobRef } from '@byok-sdk/protocol';
 import { type DaemonEvent } from '../index';
 import { parseDaemonLifecycle, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { GIT_ERROR_CATEGORIES } from '../daemon/git-workspace';
 import {
   SERVICE_ENVIRONMENT_UNAVAILABLE_CODES,
-  type ServiceEnvironmentStatus,
+  type ServiceEnvironmentRecord,
   type ServiceEnvironmentUnavailableCode,
 } from '../lifecycle/service-environment';
 import { atomicWriteFile } from '../util/atomic-write';
+import { parseRuntimeObservations } from '../runtime-detection';
 
 /**
  * The audit log is the ONLY channel a separate, short-lived CLI invocation
@@ -303,6 +304,11 @@ function redactForAudit(event: DaemonEvent): Record<string, unknown> {
       return { ...base, deviceId: event.deviceId };
     case 'unpaired':
       return { ...base };
+    case 'environment-resolved': {
+      const record = parseEnvironmentRecord({ ...base, ...event.status });
+      if (record === undefined) throw new TypeError('invalid environment-resolved event');
+      return { ...base, ...record.status };
+    }
     case 'runtimes-detected':
       return { ...base, runtimes: event.runtimes };
     case 'shutdown-requested':
@@ -518,8 +524,14 @@ function reconstructDaemonEvent(raw: Record<string, unknown>): DaemonEvent | und
       return { kind: 'paired', ts, deviceId: str(raw.deviceId) };
     case 'unpaired':
       return { kind: 'unpaired', ts };
-    case 'runtimes-detected':
-      return { kind: 'runtimes-detected', ts, runtimes: Array.isArray(raw.runtimes) ? (raw.runtimes as RuntimeInfo[]) : [] };
+    case 'runtimes-detected': {
+      const runtimes = parseRuntimeObservations(raw.runtimes);
+      return runtimes === undefined ? undefined : { kind: 'runtimes-detected', ts, runtimes };
+    }
+    case 'environment-resolved': {
+      const record = parseEnvironmentRecord(raw);
+      return record === undefined ? undefined : { kind: 'environment-resolved', ts: record.ts, status: record.status };
+    }
     case 'shutdown-requested':
       return { kind: 'shutdown-requested', ts, reason: str(raw.reason) };
     case 'shutdown-complete':
@@ -758,9 +770,12 @@ function compactPreservingLiveTasks(lines: readonly string[], targetLines: numbe
   // Issues #391/#394: so does the latest lifecycle event — offline `status`,
   // `doctor` and `service-status` read it.
   let lastLifecycleIndex: number | undefined;
+  let lastRuntimesIndex: number | undefined;
   for (let i = 0; i < lines.length; i++) {
     if (parseEnvironmentLine(lines[i]) !== undefined) lastEnvironmentIndex = i;
-    if (lines[i] !== undefined && parseAuditLine(lines[i]!)?.kind === 'lifecycle') lastLifecycleIndex = i;
+    const event = lines[i] === undefined ? undefined : parseAuditLine(lines[i]!);
+    if (event?.kind === 'lifecycle') lastLifecycleIndex = i;
+    if (event?.kind === 'runtimes-detected') lastRuntimesIndex = i;
   }
   for (const [taskId, lastIndex] of lastIndexForTask) {
     if (hasTerminalEvent.has(taskId)) continue; // reconstructable from its own terminal event, wherever that falls
@@ -777,7 +792,7 @@ function compactPreservingLiveTasks(lines: readonly string[], targetLines: numbe
     );
   }
 
-  for (const index of [lastEnvironmentIndex, lastLifecycleIndex]) {
+  for (const index of [lastEnvironmentIndex, lastLifecycleIndex, lastRuntimesIndex]) {
     if (index !== undefined && index < cutIndex) anchorIndices = [...anchorIndices, index].sort((a, b) => a - b);
   }
   return [...anchorIndices.map((i) => lines[i]), ...lines.slice(cutIndex)].filter((l): l is string => l !== undefined);
@@ -805,26 +820,16 @@ async function rotateIfNeeded(filePath: string): Promise<void> {
 
 /**
  * Issue #392: `byok-agent start` appends one `environment-resolved` record
- * per process, before the daemon starts: where `process.env` came from
- * (`lifecycle/service-environment.ts`). It is not a `DaemonEvent` — the
- * library daemon never sees how its host process built its environment — so
- * `readAuditEvents` skips it like any unknown kind. Closed values and a
+ * from the daemon's real `environment-resolved` event: where `process.env`
+ * came from (`lifecycle/service-environment.ts`). Its on-disk shape remains
+ * the closed-value projection introduced in #409. Closed values and a
  * shell basename only; {@link parseEnvironmentLine} rejects anything else.
  */
 export const ENVIRONMENT_RECORD_KIND = 'environment-resolved';
 
-export interface EnvironmentRecord {
-  status: ServiceEnvironmentStatus;
-  ts: string;
-}
-
-export async function appendEnvironmentRecord(storeDir: string, record: EnvironmentRecord): Promise<void> {
-  await appendAuditRecord(storeDir, { kind: ENVIRONMENT_RECORD_KIND, ts: record.ts, ...record.status });
-}
-
 const UNAVAILABLE_CODES = new Set<string>(SERVICE_ENVIRONMENT_UNAVAILABLE_CODES);
 
-function parseEnvironmentLine(line: string | undefined): EnvironmentRecord | undefined {
+function parseEnvironmentLine(line: string | undefined): ServiceEnvironmentRecord | undefined {
   if (line === undefined || !line.includes(ENVIRONMENT_RECORD_KIND)) return undefined;
   let raw: unknown;
   try {
@@ -832,6 +837,11 @@ function parseEnvironmentLine(line: string | undefined): EnvironmentRecord | und
   } catch {
     return undefined;
   }
+  return parseEnvironmentRecord(raw);
+}
+
+/** Validate the closed environment projection from audit or live control. */
+export function parseEnvironmentRecord(raw: unknown): ServiceEnvironmentRecord | undefined {
   const record = asRecord(raw);
   if (record.kind !== ENVIRONMENT_RECORD_KIND || typeof record.ts !== 'string' || !Number.isFinite(Date.parse(record.ts))) return undefined;
   const keys = Object.keys(record);
@@ -860,7 +870,7 @@ function parseEnvironmentLine(line: string | undefined): EnvironmentRecord | und
  * non-blocking and without following a symlink: doctor and the support
  * bundle call this too, and must not hang on a FIFO planted at the path.
  */
-export async function readLastEnvironmentRecord(storeDir: string): Promise<EnvironmentRecord | undefined> {
+export async function readLastEnvironmentRecord(storeDir: string): Promise<ServiceEnvironmentRecord | undefined> {
   let handle: Awaited<ReturnType<typeof fs.open>>;
   try {
     handle = await fs.open(auditLogPath(storeDir), fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0) | (fsConstants.O_NOFOLLOW ?? 0));
@@ -923,9 +933,7 @@ export async function readLastLifecycleEvent(storeDir: string): Promise<{ lifecy
  * land in emission order, and a failed write (reported via `onError`) never
  * breaks the chain for subsequent events.
  *
- * Issue #392: {@link AuditAppender.appendEnvironment} writes the
- * `environment-resolved` record through the same chain, so it can never
- * interleave with an event append's rotation and lose a line.
+ * `environment-resolved` uses this same event chain and rotation boundary.
  */
 export function createAuditAppender(storeDir: string, onError: (err: unknown) => void = () => {}): AuditAppender {
   let chain: Promise<void> = Promise.resolve();
@@ -938,7 +946,6 @@ export function createAuditAppender(storeDir: string, onError: (err: unknown) =>
       void enqueue(() => appendAuditEvent(storeDir, event));
     },
     {
-      appendEnvironment: (record: EnvironmentRecord) => enqueue(() => appendEnvironmentRecord(storeDir, record)),
       flush: () => chain,
     },
   );
@@ -947,8 +954,6 @@ export function createAuditAppender(storeDir: string, onError: (err: unknown) =>
 /** A `DaemonEventListener` that appends to `audit.jsonl` in call order; see {@link createAuditAppender}. */
 export interface AuditAppender {
   (event: DaemonEvent): void;
-  /** Queues the `environment-resolved` record behind every event already queued. Resolves once written; a failed write goes to `onError`. */
-  appendEnvironment(record: EnvironmentRecord): Promise<void>;
   /** Resolves once every append queued so far has been written (or reported to `onError`). */
   flush(): Promise<void>;
 }

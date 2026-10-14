@@ -34,7 +34,7 @@ describe('M5 (claimed runtime): task.claim.runtime -> TaskSnapshot.claimedRuntim
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
@@ -52,7 +52,7 @@ describe('M5 (claimed runtime): task.claim.runtime -> TaskSnapshot.claimedRuntim
   it('an offer dispatched with NO requested runtime (auto-select): task.claim.runtime sets claimedRuntime', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle = await instance.dispatch({ instruction: 'auto-select this' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'auto-select this' });
 
     const claim = await sendOne(
       daemon,
@@ -68,7 +68,7 @@ describe('M5 (claimed runtime): task.claim.runtime -> TaskSnapshot.claimedRuntim
   it('an offer dispatched WITH a requested runtime: task.claim.runtime is recorded independently as claimedRuntime', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle = await instance.dispatch({ instruction: 'explicit runtime', runtime: 'claude' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'explicit runtime', runtime: 'claude' });
 
     const claim = await sendOne(
       daemon,
@@ -82,7 +82,7 @@ describe('M5 (claimed runtime): task.claim.runtime -> TaskSnapshot.claimedRuntim
   it("compat: a legacy daemon's task.claim with NO runtime field leaves claimedRuntime absent and the claim still succeeds normally", async () => {
     const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle = await instance.dispatch({ instruction: 'legacy daemon claim' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'legacy daemon claim' });
 
     // A pre-M5-batch-2 daemon's task.claim payload never had a `runtime` key.
     const claim = await sendOne(
@@ -99,7 +99,7 @@ describe('M5 (claimed runtime): task.claim.runtime -> TaskSnapshot.claimedRuntim
   it('the task.state ByokServerEvent fired on Offered -> Claimed carries claimedRuntime, mirroring the snapshot', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle = await instance.dispatch({ instruction: 'observe the server event' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'observe the server event' });
     await sendOne(
       daemon,
       createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime: 'codex' }, { taskId: handle.taskId }),

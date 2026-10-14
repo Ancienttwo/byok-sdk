@@ -1,4 +1,60 @@
-import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeAdapter, type RuntimeDetectionAdvisory, type RuntimeDetectResult, type RuntimeDetectionRefusalReason } from './types';
+import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectionAdvisory, type RuntimeDetectResult, type RuntimeDetectionRefusalReason } from './types';
+
+/** Content-free observation of one configured adapter, including unavailable outcomes. */
+export interface RuntimeObservation {
+  id: string;
+  present: boolean;
+  outcome: RuntimeDetectResult['kind'];
+  reason?: RuntimeDetectionRefusalReason;
+  version?: string;
+  qualifiedVersion?: string;
+  authPresent?: boolean;
+  steer: boolean;
+  resume: boolean;
+}
+
+/** The daemon and explicit local probes project the same detection authority. */
+export function projectRuntimeObservation(descriptor: RuntimeAdapterDescriptor, detected: RuntimeDetectResult): RuntimeObservation {
+  const bounded = (value: string, max: number): string => value.replace(/[\r\n\t]/g, ' ').slice(0, max);
+  return {
+    id: bounded(descriptor.id, 128),
+    present: detected.kind === 'available',
+    outcome: detected.kind,
+    ...(detected.kind === 'refused' ? { reason: detected.reason } : {}),
+    ...(detected.kind === 'available' && detected.version !== undefined ? { version: bounded(detected.version, 256) } : {}),
+    ...(detected.kind === 'available' && detected.advisory !== undefined ? { qualifiedVersion: bounded(detected.advisory.qualifiedVersion, 256) } : {}),
+    ...(detected.kind === 'available' && detected.authPresent !== undefined ? { authPresent: detected.authPresent } : {}),
+    steer: descriptor.capabilities.steer === true,
+    resume: descriptor.capabilities.resume === true,
+  };
+}
+
+/** Reject unreadable observations; never infer availability from an older discovery shape. */
+export function parseRuntimeObservations(value: unknown): RuntimeObservation[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const observations: RuntimeObservation[] = [];
+  for (const raw of value) {
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+    const r = raw as Record<string, unknown>;
+    if (Object.keys(r).some(key => !['id', 'present', 'outcome', 'reason', 'version', 'qualifiedVersion', 'authPresent', 'steer', 'resume'].includes(key))
+      || typeof r.id !== 'string' || r.id.length === 0 || r.id.length > 128 || /[\r\n\t]/.test(r.id)
+      || typeof r.steer !== 'boolean' || typeof r.resume !== 'boolean'
+      || r.present !== (r.outcome === 'available')
+      || (r.version !== undefined && (typeof r.version !== 'string' || r.version.length > 256 || /[\r\n\t]/.test(r.version)))
+      || (r.qualifiedVersion !== undefined && (typeof r.qualifiedVersion !== 'string' || r.qualifiedVersion.length > 256 || /[\r\n\t]/.test(r.qualifiedVersion)))) return undefined;
+    try {
+      validateRuntimeDetectResult({
+        kind: r.outcome,
+        ...(r.reason === undefined ? {} : { reason: r.reason }),
+        ...(r.version === undefined ? {} : { version: r.version }),
+        ...(r.authPresent === undefined ? {} : { authPresent: r.authPresent }),
+        ...(r.qualifiedVersion === undefined ? {} : { advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: r.qualifiedVersion } }),
+      });
+    } catch { return undefined; }
+    observations.push({ ...r } as unknown as RuntimeObservation);
+  }
+  return observations;
+}
 
 const REFUSAL_REASONS: readonly RuntimeDetectionRefusalReason[] = Object.freeze(['app_server_unavailable']);
 const MAX_VERSION_CHARS = 256;

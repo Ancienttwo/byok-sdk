@@ -331,6 +331,20 @@ export async function connectFakeDaemonLongPoll(
     }
   }
 
+  if (opts.announce !== false) {
+    const published = await fetch(`${baseUrl}/byok/presence`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({
+        level: 'online',
+        clientVersion: opts.clientVersion,
+        configuredToolsets: opts.configuredToolsets,
+        runtimes: opts.runtimes?.map(({ id, version, authPresent }) => ({ id, version, authPresent })),
+      }),
+    });
+    expect(published.status).toBe(200);
+  }
+
   return {
     deviceId,
     tenantId,
@@ -356,8 +370,8 @@ export async function connectFakeDaemonLongPoll(
  *
  * The long-poll equivalent of "the same device reconnects and announces a
  * different runtime set": there is no socket to drop, so a fresh announcement
- * IS the reconnect. `DeviceConnections.announce` replaces the discovery block
- * wholesale (`connections.ts`), which is exactly what a restarted daemon does.
+ * replaces the durable capability snapshot. Runtime discovery is published
+ * separately through the TTL presence endpoint.
  */
 export async function announceHello(
   daemon: FakeLongPollDaemon,

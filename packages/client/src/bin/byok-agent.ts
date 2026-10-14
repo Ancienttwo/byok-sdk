@@ -65,15 +65,12 @@ import { runVersionCommand } from './version';
  *   clearly-marked `live-*` section (pid/uptime/transport/active tasks) is
  *   appended; if not, one line says so and the persisted view above stands
  *   on its own, never faked as "live".
- * - `runtimes` (and the compact runtime summary inside `status`) is a FRESH
- *   STANDALONE PROBE instead: it constructs the same bundled pi/claude/codex
- *   adapter set `createDaemon` would (see `bin/runtime-probe.ts`) and calls
- *   `detect()` and descriptor capabilities directly, independent of whether any daemon
- *   is running. "What's on this machine right now" is more useful live than
- *   stale, and detection is cheap/side-effect-free, so there's no reason to
- *   read a historical snapshot here instead. The control socket deliberately
- *   never duplicates this probe (see `control-protocol.ts`'s `status`
- *   method doc comment) — this CLI keeps owning it.
+ * - `runtimes` is an explicit fresh local probe. `status` reads the daemon's
+ *   cached startup observations over control when online and timestamped audit
+ *   observations when offline. It never executes a local runtime probe.
+ *   Online doctor/support bundles also use daemon observations; offline
+ *   diagnostics label their explicit probes `local-shell`. Older daemons with
+ *   missing observation fields are reported as unknown.
  * - `tasks --follow` prefers subscribing to the control socket's
  *   `tasks.subscribe` (a genuinely live feed, full fidelity, the same
  *   events `start`'s own stdout shows); falls back to tailing

@@ -23,6 +23,17 @@ install` is run again. Signing, notarization, and distribution of any
 bundled binary (e.g. `WinSW.exe`) are the product's responsibility, not the
 SDK's.
 
+## Environment and runtime observations
+
+The generated `start --service` argument is shared by launchd, systemd and
+WinSW. macOS/Linux capture the passwd login shell (sh/bash/zsh/ksh/dash/fish)
+once before daemon startup; Windows keeps the inherited service-account
+environment. The authenticated daemon status and the `environment-resolved`
+event expose only closed source/failure values, shell basename and duration.
+Online `status`/`doctor`/support bundles use daemon startup runtime observations;
+`runtimes` remains an explicit local probe. Offline `status` uses timestamped
+audit observations, while offline diagnostics label probes `local-shell`.
+
 ## Running multiple agents on one machine
 
 The frozen wire reserves `task.claim.agentId` (optional) for a future

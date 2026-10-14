@@ -101,7 +101,7 @@ is 1–16, bounding per-run ticket history. SQLite transactions and persistent
 execution-ID uniqueness protect two local connections. Keep the cap identical
 across workers. This is a single-machine SQLite reference, not distributed
 storage; busy contention returns errors for Host reread/backoff. Archive/deletion
-and permanent task-ID ledger retention are product policy, not implemented here.
+and permanent task-ID ledger retention are product policy and are left out here.
 
 `complete` is a model verdict, not independently proven business completion.
 The embedding Host must verify objective evidence and permission policy; this

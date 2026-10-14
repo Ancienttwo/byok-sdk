@@ -6394,6 +6394,8 @@ export declare function byokBlobContentPath(blobId: string): string;
 export { MAILBOX_READ_AHEAD_MAX_SEQS, MAILBOX_READ_AHEAD_CAPABILITY } from './version';
 export { PROTOCOL_VERSION, CAPABILITY_FLAGS, STRICT_AGENT_ONLY_CAPABILITY, AGENT_HOME_READERS_CAPABILITY } from './version';
 export type { CapabilityFlag } from './version';
+export { WIRE_ADDITIONS, requiredReceiverCapabilities } from './wire-additions';
+export type { WireAddition } from './wire-additions';
 export { BlobRefSchema, CONTENT_HASH_RE } from './blob';
 export type { BlobRef } from './blob';
 export { PROVIDER_PROFILE_BINDING_CAPABILITY, PROVIDER_MODEL_CAPABILITIES, ProviderProfileRefSchema, ProviderProfileRevisionSchema, ProviderProfileHashSchema, ProviderModelCapabilitySchema, ProviderProfileBindingSchema, } from './provider-profile-binding';
@@ -11122,15 +11124,11 @@ export type TerminalProjectionSelection = z.infer<typeof TerminalProjectionSelec
 export declare const MAILBOX_READ_AHEAD_MAX_SEQS = 4096;
 export declare const MAILBOX_READ_AHEAD_CAPABILITY = "mailbox-read-ahead";
 /**
- * Wire protocol version. Bump on breaking (non-additive) changes to the envelope
- * or message shapes. Additive changes (new optional fields, new message types)
- * do not require a bump — servers negotiate the highest common version and
- * daemons/servers must ignore unknown fields and unknown message types.
- *
- * FROZEN (see docs/protocol.md "Freeze rule"): `PROTOCOL_VERSION` does not
- * bump for additive changes (new optional fields, new message types, new
- * `AgentEvent` variants, new capability flags) — only for a breaking one
- * (changing, removing, or retyping anything that already exists).
+ * Wire protocol version. Every v2 change is a version bump, a gated addition
+ * or a strip-safe addition: see docs/protocol.md "Freeze rule", which is the
+ * one statement of the rule, and `src/wire-additions.ts`, which declares the
+ * additions. `src/__tests__/compat.test.ts` proves them against published
+ * releases.
  *
  * v2 removed the task offer's `policy` (`PermissionPolicy`), the runtime
  * capability `permissionModes` and the input-preparation `permissionMode`.
@@ -11143,16 +11141,6 @@ export declare const MAILBOX_READ_AHEAD_CAPABILITY = "mailbox-read-ahead";
  * and the readiness reason `executor_identity_unproven`. The SDK does not
  * attest tool executables. The artifact names its counted tools in
  * `toolNames`.
- *
- * IMPORTANT: changing this constant, or changing/removing/retyping any
- * already-frozen schema in this package, requires a DELIBERATE update to the
- * committed golden fixtures in `src/__tests__/golden/` (`v<N>.frozen.json`,
- * `v<N>.envelopes.ndjson`) — see `src/__tests__/freeze-guard.test.ts`, which
- * fails loudly on exactly that kind of drift. A passing freeze-guard run
- * after such a change means either (a) the change was genuinely additive and
- * the golden was regenerated with justification, or (b) this constant was
- * bumped alongside a new golden generation for the new version — never a
- * silent edit to either file to make the test pass.
  */
 export declare const PROTOCOL_VERSION = 2;
 /** Host declares that this device accepts only Agent-bound offer variants. */
@@ -11246,3 +11234,47 @@ export declare const AGENT_HOME_READERS_CAPABILITY: 'agent-home-readers';
 export declare const CUSTOM_HARNESS_CAPABILITY: 'custom-harness';
 export declare const CAPABILITY_FLAGS: readonly ['steer', 'blob-upload', 'interactive-approval', 'approval_resolved', 'approval-targeting', 'result-document', 'dispatch-selection', "provider-profile-binding", 'toolset-selection', 'agent-home-contract', "agent-home-readers", "strict-agent-only", "agent-egress-policy", "agent-egress-reliable-ack", "agent-message-egress", "agent-egress-fresh-session", "agent-content-workspace-read", "agent-content-transcript-read", "agent-content-artifact-read", "agent-home-projection", "agent-input-preparation-v9", "terminal-projection-selection", "host-mcp-task-context", "custom-harness", "mailbox-read-ahead", "provider-provisioning.v1", "agent-memory-intent.v1"];
 export type CapabilityFlag = (typeof CAPABILITY_FLAGS)[number];
+// ==== @byok-sdk/protocol dist/wire-additions.d.ts ====
+/**
+ * The one table of v2 wire additions that an older receiver may not decode
+ * (docs/protocol.md "Freeze rule").
+ *
+ * A v2 change takes exactly one of three paths: a version bump, a gated
+ * addition, or a strip-safe addition. The last two are declared here, and
+ * `src/__tests__/compat.test.ts` proves every declaration against the
+ * published decoders pinned in package.json.
+ *
+ * - `gated`: the sender must not emit the surface unless the receiver
+ *   durably advertised `capability`. A field entry applies when the payload
+ *   carries the field (and, with `value`, when the field equals it); a type
+ *   entry applies to every message of that type. Server-to-daemon surfaces
+ *   are gated by a device flag, daemon-to-server surfaces by a server flag.
+ * - `strip-safe`: an optional field an older receiver drops without changing
+ *   what it executes or acknowledges.
+ *
+ * Senders derive their admission flags from {@link requiredReceiverCapabilities}
+ * and nowhere else, so a gate cannot exist in one place and be missing in
+ * another. This module imports no runtime code (types only) so it stays free
+ * of zod.
+ */
+import type { MessageType } from './messages';
+import type { CapabilityFlag } from './version';
+export type WireAddition = {
+    readonly rule: 'gated';
+    readonly surface: MessageType;
+    readonly field?: string;
+    readonly value?: string;
+    readonly capability: CapabilityFlag;
+    readonly advertisedBy: 'device' | 'server';
+} | {
+    readonly rule: 'strip-safe';
+    readonly surface: MessageType;
+    readonly field: string;
+};
+export declare const WIRE_ADDITIONS: readonly WireAddition[];
+/**
+ * Every capability the receiver must have durably advertised before a sender
+ * may emit this message. Deduplicated, in table order. A sender refuses (before
+ * creating the task or appending to the mailbox) when any is missing.
+ */
+export declare function requiredReceiverCapabilities(type: MessageType, payload: unknown): CapabilityFlag[];

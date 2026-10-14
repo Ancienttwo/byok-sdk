@@ -428,7 +428,7 @@ try {
   assert.equal(await server.tasks.attempt('absent'), undefined);
   assert.equal(await server.tasks.deviceTerminal('absent'), undefined);
   await assert.rejects(server.recurring.submit(input), /registered Agent message consumer/);
-} finally { server.stop(); }
+} finally { await server.close(); }
 console.log('[release-pack] recurring public imports, strict submission and independent device observation passed');
 
 // --- issue #196: real message resolution through the authenticated inbound path.
@@ -631,7 +631,7 @@ console.log('[release-pack] recurring public imports, strict submission and inde
     assert.equal(embeddedConsumer.calls.length, 2); // accepted + held, each resolved once on the embedded surface
     console.log('[release-pack] recurring embedded façade round-trip: pairing, conn.hello capabilities, accepted/held resolved and read back matching the cloud projection passed');
   } finally {
-    embedded.stop();
+    await embedded.close();
   }
 }
 

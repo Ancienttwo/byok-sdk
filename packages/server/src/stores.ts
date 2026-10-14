@@ -4,6 +4,7 @@ import {
   type Clock,
   type CoreStores,
   type MailboxStore,
+  type PresenceStore,
   type TenantId,
 } from '@byok-sdk/core';
 import {
@@ -13,13 +14,8 @@ import {
   type CloudCrypto,
   type CloudStores,
   type InboundDedupStore,
-  type TaskAttempt,
-  type TaskAttemptStore,
-  type TaskCancellationStore,
 } from '@byok-sdk/cloud';
 import { RateLimiter, createCountingInboundRateLimiter, type RateLimiterOptions } from './rate-limiter';
-import type { DeviceConnections } from './connections';
-import type { LiveTaskIndex } from './live-tasks';
 import { createSqliteEmbeddedStores } from './stores/sqlite';
 import type { ByokServerStorage } from './types';
 
@@ -36,9 +32,6 @@ import type { ByokServerStorage } from './types';
  * - `dedup` counts the already-seen answers that back `dedupDrops`;
  * - `mailbox` reports each device-scoped read, which is how a device that only
  *   ever long-polls still counts as present;
- * - `tasks` and `cancellations` report every attempt they create or move, which
- *   keeps the live-task index (`live-tasks.ts`) that bounds `stats()` and the
- *   dispatch facts by the tasks still in flight rather than by history.
  *
  * Decorators rather than kernel changes, deliberately: each counter is a fact
  * about a call this composition already makes, so it is observable from the
@@ -97,10 +90,8 @@ export interface FacadeStoreOptions {
   readonly maxBlobSizeBytes: number;
   readonly storage?: ByokServerStorage;
   readonly rateLimit?: RateLimiterOptions;
-  /** Where a device's own liveness observations are recorded. */
-  readonly connections: DeviceConnections;
-  /** Where every attempt creation and transition is accounted. */
-  readonly tasks: LiveTaskIndex;
+  /** One TTL for heartbeat and authenticated transport observations. */
+  readonly presenceTtlMs: number;
   /** Fired once per rate-limit EPISODE, not per refused envelope. */
   readonly onRateLimited: (deviceId: string, at: string) => void;
 }
@@ -119,10 +110,6 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
           { clock, crypto },
         )
       : undefined;
-  // A SQLite file may hold history from earlier processes. Account it once,
-  // synchronously, before any operation can create or move an attempt; an
-  // in-memory composition is born empty and needs no seed.
-  sqlite?.scanTaskAttemptsAtOpen(options.tenant, (attempt) => options.tasks.seed(attempt));
   const inMemoryCore = sqlite === undefined ? createInMemoryCoreStores({ clock }).stores : undefined;
   const core = sqlite?.core ?? inMemoryCore!;
   const inMemoryCloud =
@@ -134,7 +121,8 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
     new RateLimiter(options.rateLimit),
     options.onRateLimited,
   );
-  const dedup = countingDedup(stores.dedup);
+  const presence = serialPresence(core.presence, options.presenceTtlMs);
+  const dedup = countingDedup(stores.dedup, presence);
 
   const counters: FacadeCounters = {
     get envelopesIn(): number {
@@ -163,13 +151,11 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
   });
 
   return {
-    core: { ...core, mailbox: observingMailbox(core.mailbox, options.connections) },
+    core: { ...core, presence, mailbox: observingMailbox(core.mailbox, presence) },
     cloud: {
       ...stores,
       rateLimiter: rateLimiter.limiter,
       dedup,
-      tasks: observingTaskAttempts(stores.tasks, options.tasks),
-      cancellations: observingCancellations(stores.cancellations, options.tasks),
     },
     blobContentProxy,
     clock,
@@ -188,17 +174,19 @@ interface CountingDedupStore extends InboundDedupStore {
  * (§8.2) that re-ran nothing, so it is invisible in the response and this
  * counter is the only place an embedder can see it happening at all.
  */
-function countingDedup(inner: InboundDedupStore): CountingDedupStore {
+function countingDedup(inner: InboundDedupStore, presence: LeasedPresence): CountingDedupStore {
   let drops = 0;
   return {
     async checkAndRecord(tenant, deviceId, envelopeId): Promise<boolean> {
       const seen = await inner.checkAndRecord(tenant, deviceId, envelopeId);
       if (seen) drops += 1;
+      if (!seen) await presence.renew(tenant, deviceId);
       return seen;
     },
     async checkAndRecordAgent(tenant, deviceId, agentRef, envelopeId): Promise<boolean> {
       const seen = await inner.checkAndRecordAgent(tenant, deviceId, agentRef, envelopeId);
       if (seen) drops += 1;
+      if (!seen) await presence.renew(tenant, deviceId);
       return seen;
     },
     drops: () => drops,
@@ -214,63 +202,57 @@ function countingDedup(inner: InboundDedupStore): CountingDedupStore {
  * the one call every poll makes exactly once, before any hold, which makes it
  * the honest place to observe it.
  */
-function observingMailbox(inner: MailboxStore, connections: DeviceConnections): MailboxStore {
+function observingMailbox(inner: MailboxStore, presence: LeasedPresence): MailboxStore {
   return {
     append: (tenant, input) => inner.append(tenant, input),
     readUsage: (tenant) => inner.readUsage(tenant),
     readAfter: (tenant, query) => inner.readAfter(tenant, query),
     recordDelivery: (tenant, input) => inner.recordDelivery(tenant, input),
     advanceCursor: (tenant, input) => inner.advanceCursor(tenant, input),
-    readCursor: (tenant, deviceId) => {
-      connections.touch(deviceId, new Date().toISOString());
-      return inner.readCursor(tenant, deviceId);
+    readCursor: async (tenant, deviceId) => {
+      const cursor = await inner.readCursor(tenant, deviceId);
+      await presence.renew(tenant, deviceId);
+      return cursor;
     },
     collectRetired: (tenant, input) => inner.collectRetired(tenant, input),
   };
 }
 
-/**
- * Report every attempt the task store creates or moves to the live-task index.
- *
- * Creation is only ever `open` or `reserveAgentOffer`, so those two are what
- * adds a task; `claim` and `recordStatus` are the transitions that can make one
- * terminal. Reads pass straight through: `stats()` observes its own re-reads.
- */
-function observingTaskAttempts(inner: TaskAttemptStore, tasks: LiveTaskIndex): TaskAttemptStore {
-  const observe = (attempt: TaskAttempt | undefined): TaskAttempt | undefined => {
-    if (attempt !== undefined) tasks.observe(attempt);
-    return attempt;
-  };
-  return {
-    open: async (tenant, input) => {
-      const attempt = await inner.open(tenant, input);
-      tasks.opened(attempt);
-      return attempt;
-    },
-    reserveAgentOffer: async (tenant, input) => {
-      const reservation = await inner.reserveAgentOffer(tenant, input);
-      tasks.opened(reservation.attempt);
-      return reservation;
-    },
-    reserveAgentMessage: (tenant, input) => inner.reserveAgentMessage(tenant, input),
-    readTaskAgentMessage: (tenant, input) => inner.readTaskAgentMessage(tenant, input),
-    readAgentMessage: (tenant, input) => inner.readAgentMessage(tenant, input),
-    finalizeAgentMessage: (tenant, input) => inner.finalizeAgentMessage(tenant, input),
-    get: (tenant, taskId) => inner.get(tenant, taskId),
-    getMany: (tenant, taskIds) => inner.getMany(tenant, taskIds),
-    list: (tenant, query) => inner.list(tenant, query),
-    claim: async (tenant, input) => observe(await inner.claim(tenant, input)),
-    recordStatus: async (tenant, input) => observe(await inner.recordStatus(tenant, input)),
-  };
+interface LeasedPresence extends PresenceStore {
+  renew(tenant: TenantId, deviceId: string): Promise<void>;
 }
 
-/** A host cancellation is a transition too: it makes the attempt `Cancelled` the moment it commits. */
-function observingCancellations(inner: TaskCancellationStore, tasks: LiveTaskIndex): TaskCancellationStore {
+/**
+ * One store, with per-device write exclusion shared by heartbeat and transport.
+ * A renewal reads and republishes live discovery facts, so that pair must not
+ * overwrite a heartbeat that committed between them. Only in-flight barriers
+ * live here; the inner core store owns every presence fact and expiry decision.
+ */
+function serialPresence(inner: PresenceStore, ttlMs: number): LeasedPresence {
+  const pending = new Map<string, Promise<void>>();
+  async function write<T>(tenant: TenantId, deviceId: string, operation: () => Promise<T>): Promise<T> {
+    const key = JSON.stringify([tenant, deviceId]);
+    const previous = pending.get(key);
+    let release!: () => void;
+    const done = new Promise<void>(resolve => { release = resolve; });
+    pending.set(key, done);
+    if (previous !== undefined) await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (pending.get(key) === done) pending.delete(key);
+    }
+  }
   return {
-    request: async (tenant, input) => {
-      const mutation = await inner.request(tenant, input);
-      if (mutation !== undefined) tasks.observe(mutation.attempt);
-      return mutation;
-    },
+    read: (tenant, deviceId) => inner.read(tenant, deviceId),
+    list: tenant => inner.list(tenant),
+    publish: (tenant, input) => write(tenant, input.deviceId, () => inner.publish(tenant, input)),
+    renew: (tenant, deviceId) => write(tenant, deviceId, async () => {
+      const current = await inner.read(tenant, deviceId);
+      await inner.publish(tenant, {
+        ...current, deviceId, level: current?.level ?? 'online', ttlMs, minimumIntervalMs: 0,
+      });
+    }),
   };
 }

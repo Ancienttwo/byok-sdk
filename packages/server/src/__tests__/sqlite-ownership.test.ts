@@ -1,17 +1,17 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { linkSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdtempSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createByokServer, SqliteOwnershipError, SqliteSchemaError } from '../index';
-import { isSqliteAvailable } from '../sqlite-support';
+import { isSqliteAvailable, openSqliteDatabase } from '../sqlite-support';
 
 /**
- * Issue #388 item 2: one SQLite file, one owning server process. The owner is
- * an OS lock the kernel releases on any exit, so the stale-owner cases are
+ * Issues #388 and #414: one SQLite file, one owning server process. The owner is
+ * SQLite's EXCLUSIVE lock on the actual database handle, so the stale-owner cases are
  * exercised with a real second process that dies by `exit` and by SIGKILL.
  */
 
@@ -20,16 +20,19 @@ const SQLITE_SUPPORT = fileURLToPath(new URL('../sqlite-support.ts', import.meta
 
 /**
  * A separate Node process that takes ownership of `path` through the same
- * `acquireSqliteOwnership` the SQLite composition takes it with, reports it on
+ * `openSqliteDatabase` the SQLite composition uses, reports it on
  * stdout, then waits. Node strips the module's types natively.
  */
-async function ownInChild(path: string, then: 'hold' | 'exit-without-release'): Promise<ChildProcess> {
+async function ownInChild(path: string, then: 'hold' | 'exit-without-release' | 'exit-during-grace'): Promise<ChildProcess> {
+  const initial = createByokServer({ productId: 'sqlite-owner', storage: { kind: 'sqlite', path } });
+  await initial.close();
   const script = `
-    const { acquireSqliteOwnership } = await import(${JSON.stringify(SQLITE_SUPPORT)});
+    const { openSqliteDatabase } = await import(${JSON.stringify(SQLITE_SUPPORT)});
     // Held in a global: an unreachable lock handle may be finalized and closed by GC.
-    globalThis.ownership = acquireSqliteOwnership(${JSON.stringify(path)});
+    globalThis.database = openSqliteDatabase(${JSON.stringify(path)});
+    globalThis.database.exec('CREATE TABLE durable_marker (value INTEGER); INSERT INTO durable_marker VALUES (42); BEGIN; INSERT INTO durable_marker VALUES (99);');
     process.stdout.write('owned\\n');
-    ${then === 'hold' ? 'setInterval(() => {}, 1_000);' : "process.stdin.once('data', () => process.exit(0));"}
+    ${then === 'hold' ? 'setInterval(() => {}, 1_000);' : then === 'exit-during-grace' ? 'setTimeout(() => process.exit(0), 600);' : "process.stdin.once('data', () => process.exit(0));"}
   `;
   const child = spawn(process.execPath, ['--no-warnings', '--input-type=module', '-e', script], {
     stdio: ['pipe', 'pipe', 'inherit'],
@@ -44,12 +47,19 @@ async function ownInChild(path: string, then: 'hold' | 'exit-without-release'): 
   return child;
 }
 
-describeSqlite('SQLite single-process ownership', () => {
+// A refused open retains the product's 5-second busy grace; allow the real
+// cross-process operation to finish rather than timing out the test at 5s.
+describeSqlite('SQLite single-process ownership', { timeout: 20_000 }, () => {
   const roots: string[] = [];
   const children: ChildProcess[] = [];
 
-  afterEach(() => {
-    for (const child of children.splice(0)) if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+  afterEach(async () => {
+    for (const child of children.splice(0)) {
+      if (child.exitCode !== null || child.signalCode !== null) continue;
+      const exited = once(child, 'exit');
+      child.kill('SIGKILL');
+      await exited;
+    }
     for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   });
 
@@ -75,13 +85,19 @@ describeSqlite('SQLite single-process ownership', () => {
     expect(refused).toBeInstanceOf(SqliteOwnershipError);
     expect(refused).toMatchObject({ code: 'SQLITE_DATABASE_OWNED', path });
 
-    // The owner keeps working, and read-only inspection of the file is never blocked.
+    // The owner keeps working; external read-only inspection is excluded too.
     expect(await first.stats()).toMatchObject({ connectedDeviceCount: 0 });
     const inspect = new DatabaseSync(path, { readOnly: true });
-    expect(inspect.prepare('SELECT COUNT(*) AS n FROM task_attempt').get()).toEqual({ n: 0 });
-    inspect.close();
-
-    await first.close();
+    try {
+      expect(() => inspect.prepare('SELECT COUNT(*) AS n FROM task_attempt').get()).toThrow(/locked/);
+    } finally {
+      inspect.close();
+      await first.close();
+    }
+    const released = new DatabaseSync(path, { readOnly: true });
+    try {
+      expect(released.prepare('SELECT COUNT(*) AS n FROM task_attempt').get()).toEqual({ n: 0 });
+    } finally { released.close(); }
     const second = open(path);
     await second.close();
   });
@@ -91,6 +107,19 @@ describeSqlite('SQLite single-process ownership', () => {
     const owner = await ownInChild(path, 'hold');
     children.push(owner);
     expect(() => open(path)).toThrow(SqliteOwnershipError);
+  });
+
+  it('takes ownership if the prior process exits during the default busy grace', async () => {
+    const path = databasePath();
+    const owner = await ownInChild(path, 'exit-during-grace');
+    children.push(owner);
+    const exited = once(owner, 'exit');
+    const database = openSqliteDatabase(path);
+    try {
+      expect(database.prepare('SELECT value FROM durable_marker').all()).toEqual([{ value: 42 }]);
+      expect(database.prepare('PRAGMA locking_mode').get()).toEqual({ locking_mode: 'exclusive' });
+    } finally { database.close(); }
+    expect((await exited)[0]).toBe(0);
   });
 
   it('uses one ownership lock through a symlink to the database', async () => {
@@ -107,7 +136,7 @@ describeSqlite('SQLite single-process ownership', () => {
     await next.close();
   });
 
-  it('refuses hard-linked database paths whose sibling locks would split ownership', async () => {
+  it('refuses hard-linked database paths whose WAL names would split recovery', async () => {
     const path = databasePath();
     const first = open(path);
     const alias = join(path, '..', 'hardlink.sqlite');
@@ -129,8 +158,13 @@ describeSqlite('SQLite single-process ownership', () => {
     const [, signal] = await once(owner, 'exit');
     expect(signal).toBe('SIGKILL');
 
-    const next = open(path);
-    await next.close();
+    const next = openSqliteDatabase(path);
+    try {
+      expect(next.prepare('SELECT value FROM durable_marker').all()).toEqual([{ value: 42 }]);
+      expect(next.prepare('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' });
+    } finally { next.close(); }
+    const server = open(path);
+    await server.close();
   });
 
   it('lets the next process open after the owner exits without releasing', async () => {
@@ -143,8 +177,12 @@ describeSqlite('SQLite single-process ownership', () => {
     const [code] = await once(owner, 'exit');
     expect(code).toBe(0);
 
-    const next = open(path);
-    await next.close();
+    const next = openSqliteDatabase(path);
+    try {
+      expect(next.prepare('SELECT value FROM durable_marker').all()).toEqual([{ value: 42 }]);
+    } finally { next.close(); }
+    const server = open(path);
+    await server.close();
   });
 
   it('releases ownership when the open itself fails', () => {
@@ -157,7 +195,7 @@ describeSqlite('SQLite single-process ownership', () => {
     expect(() => open(path)).toThrow(SqliteSchemaError);
   });
 
-  it('releases ownership when the initial task-history read fails', async () => {
+  it('opens without materializing task history and still rejects corrupt data on read', async () => {
     const path = databasePath();
     const first = open(path);
     await first.close();
@@ -167,19 +205,57 @@ describeSqlite('SQLite single-process ownership', () => {
       VALUES (?, ?, ?, ?, ?, ?)`)
       .run('product:sqlite-owner', 'bad-task', 'device', 'offered', 'invalid-json', '2026-10-13T00:00:00.000Z');
     corrupt.close();
-    expect(() => open(path)).toThrow(SyntaxError);
-    // A repeated open must report the original bad data, never a leaked owner.
-    expect(() => open(path)).toThrow(SyntaxError);
+    const reopened = open(path);
+    try { await expect(reopened.tasks.get('bad-task')).rejects.toThrow(SyntaxError); }
+    finally { await reopened.close(); }
   });
 
-  it('leaves the lock sibling at owner-only permissions', async () => {
+  it('adds the active-task covering index to existing v4 files without a schema bump', async () => {
     const path = databasePath();
-    writeFileSync(`${path}-lock`, '', { mode: 0o644 });
-    const server = open(path);
+    const first = open(path);
+    await first.close();
+    const old = new DatabaseSync(path);
+    old.exec('DROP INDEX task_attempt_status_idx');
+    old.close();
+    const reopened = open(path);
+    try { expect((await reopened.stats()).taskCountsByState.Offered).toBe(0); }
+    finally { await reopened.close(); }
+    // External reads require the EXCLUSIVE owner to release its handle first.
+    const inspect = new DatabaseSync(path, { readOnly: true });
     try {
-      expect(statSync(`${path}-lock`).mode & 0o777).toBe(0o600);
-    } finally {
-      await server.close();
-    }
+      expect(inspect.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'task_attempt_status_idx'").get())
+        .toEqual({ name: 'task_attempt_status_idx' });
+      expect(inspect.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual({ value: '4' });
+    } finally { inspect.close(); }
+  });
+
+  it('uses the actual exclusive WAL handle with the default grace and no lock sibling or SHM', () => {
+    const path = databasePath();
+    const database = openSqliteDatabase(path);
+    try {
+      database.exec('CREATE TABLE marker (id INTEGER)');
+      expect(database.prepare('PRAGMA locking_mode').get()).toEqual({ locking_mode: 'exclusive' });
+      expect(database.prepare('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' });
+      expect(database.prepare('PRAGMA busy_timeout').get()).toEqual({ timeout: 5_000 });
+      expect(existsSync(`${path}-lock`)).toBe(false);
+      expect(existsSync(`${path}-shm`)).toBe(false);
+      expect(existsSync(`${path}-wal`)).toBe(true);
+    } finally { database.close(); }
+  });
+
+  it('secures the database and its canonical WAL when opened through a symlink', async () => {
+    const path = databasePath();
+    const initial = open(path);
+    await initial.close();
+    const alias = join(path, '..', 'alias.sqlite');
+    symlinkSync(path, alias);
+    const server = open(alias);
+    try {
+      expect(statSync(path).mode & 0o777).toBe(0o600);
+      expect(statSync(`${path}-wal`).mode & 0o777).toBe(0o600);
+      expect(existsSync(`${alias}-lock`)).toBe(false);
+      expect(existsSync(`${path}-lock`)).toBe(false);
+      expect(existsSync(`${path}-shm`)).toBe(false);
+    } finally { await server.close(); }
   });
 });

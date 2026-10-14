@@ -19,7 +19,8 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { DaemonConfig, RuntimeAdapter } from '../index';
-import { readLastLifecycleEvent } from '../bin/audit-log';
+import { readLastLifecycleEvent, readLastEnvironmentRecord, parseEnvironmentRecord } from '../bin/audit-log';
+import { parseRuntimeObservations, type RuntimeObservation } from '../runtime-detection';
 import { connectControlClient } from '../bin/control-client';
 import { formatLifecycle, formatLifecycleRemedy } from '../bin/format';
 import { parseDaemonLifecycle } from '../daemon/daemon-lifecycle';
@@ -604,13 +605,18 @@ function checksFor(snapshot: Omit<DiagnosticsSnapshot, 'checks'>): DiagnosticChe
     {
       id: 'runtimes',
       status: snapshot.runtimes.some((runtime) => runtime.present) ? 'pass' : 'warn',
-      summary: `${snapshot.runtimes.filter((runtime) => runtime.present).length}/${snapshot.runtimes.length} present; `
+      summary: `${snapshot.runtimeSource}: ${snapshot.runtimes.filter((runtime) => runtime.present).length}/${snapshot.runtimes.length} present; `
         + RUNTIME_DETECTION_FAILURE_KINDS
            .filter(kind => kind !== 'refused' || snapshot.runtimes.some(runtime => runtime.outcome === 'refused'))
           .map((kind) => `${kind}=${snapshot.runtimes.filter((runtime) => runtime.outcome === kind).length}`).concat(
             [...new Set(snapshot.runtimes.flatMap(runtime => runtime.outcome === 'refused' && runtime.reason !== undefined ? [runtime.reason] : []))].sort()
               .map(reason => `refused:${reason}=${snapshot.runtimes.filter(runtime => runtime.outcome === 'refused' && runtime.reason === reason).length}`),
           ).join(' '),
+    },
+    {
+      id: 'environment',
+      status: snapshot.environment.status === 'unknown' || snapshot.environment.status.source === 'unavailable' ? 'warn' : 'pass',
+      summary: snapshot.environment.status === 'unknown' ? 'unknown' : snapshot.environment.status.source,
     },
     {
       id: 'control',
@@ -671,36 +677,36 @@ export async function collectDiagnostics(
   options: CollectDiagnosticsOptions = {},
 ): Promise<DiagnosticsSnapshot> {
   const resolvedStoreDir = path.resolve(storeDir);
-  const adapters = options.adapters ?? defaultRuntimeAdapters(config.runtimeAllowlist);
   const connectControl = options.connectControl ?? connectControlClient;
-  const [device, probedRuntimes, health, journal, workspace, quarantine, controlConnection, lastAudited] = await Promise.all([
+  const [device, health, journal, workspace, quarantine, controlConnection, lastAudited, lastEnvironment] = await Promise.all([
     inspectDevice(resolvedStoreDir),
-    probeRuntimes(adapters, { timeoutMs: options.runtimeProbeTimeoutMs }),
     inspectOperationalHealthFile(resolvedStoreDir),
     inspectJournal(resolvedStoreDir),
     inspectWorkspace(config.workspaceRoot),
     inspectQuarantine(resolvedStoreDir),
     connectControl({ storeDir: resolvedStoreDir, productId: config.productId }),
     readLastLifecycleEvent(resolvedStoreDir).catch(() => undefined),
+    readLastEnvironmentRecord(resolvedStoreDir).catch(() => undefined),
   ]);
-  const runtimes: DiagnosticsSnapshot['runtimes'] = probedRuntimes.map((runtime) => ({
-    idHash: stableIdentifierHash(runtime.id),
-    present: runtime.present,
-    outcome: runtime.outcome,
-    ...(runtime.outcome === 'refused' ? { reason: runtime.reason } : {}),
-    versionPresent: runtime.version !== undefined,
-    ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
-    steer: runtime.steer,
-    resume: runtime.resume,
-  }));
 
   let control: DiagnosticsSnapshot['control'];
+  let runtimeSource: DiagnosticsSnapshot['runtimeSource'] = 'unknown';
+  let observations: RuntimeObservation[] = [];
+  let environment: DiagnosticsSnapshot['environment'] = { status: 'unknown' };
   let liveLifecycle: ReturnType<typeof parseDaemonLifecycle>;
   if (!controlConnection.ok) {
     control = { status: 'offline', reason: 'daemon control socket unavailable' };
   } else {
     try {
       const live = await controlConnection.client.request<ControlStatusResult>('status');
+      const observed = parseRuntimeObservations(live.runtimes);
+      if (observed !== undefined) {
+        observations = observed;
+        runtimeSource = 'daemon';
+      }
+      if (live.environment !== undefined && live.environmentResolvedAt !== undefined) {
+        environment = parseEnvironmentRecord({ kind: 'environment-resolved', ts: live.environmentResolvedAt, ...live.environment }) ?? { status: 'unknown' };
+      }
       liveLifecycle = parseDaemonLifecycle(live.lifecycle);
       control = {
         status: 'online',
@@ -718,6 +724,22 @@ export async function collectDiagnostics(
       controlConnection.client.close();
     }
   }
+
+  if (control.status === 'offline') {
+    observations = await probeRuntimes(options.adapters ?? defaultRuntimeAdapters(config.runtimeAllowlist), { timeoutMs: options.runtimeProbeTimeoutMs });
+    runtimeSource = 'local-shell';
+    environment = lastEnvironment ?? { status: 'unknown' };
+  }
+  const runtimes: DiagnosticsSnapshot['runtimes'] = observations.map(runtime => ({
+    idHash: stableIdentifierHash(runtime.id),
+    present: runtime.present,
+    outcome: runtime.outcome,
+    ...(runtime.outcome === 'refused' ? { reason: runtime.reason } : {}),
+    versionPresent: runtime.version !== undefined,
+    ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
+    steer: runtime.steer,
+    resume: runtime.resume,
+  }));
 
   const lifecycle: DiagnosticsSnapshot['lifecycle'] = liveLifecycle !== undefined
     ? { status: 'known', source: 'live', lifecycle: liveLifecycle }
@@ -738,6 +760,8 @@ export async function collectDiagnostics(
     },
     device,
     runtimes,
+    runtimeSource,
+    environment,
     control,
     lifecycle,
     health,

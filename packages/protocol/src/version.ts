@@ -3,15 +3,11 @@ export const MAILBOX_READ_AHEAD_MAX_SEQS = 4096;
 export const MAILBOX_READ_AHEAD_CAPABILITY = 'mailbox-read-ahead';
 
 /**
- * Wire protocol version. Bump on breaking (non-additive) changes to the envelope
- * or message shapes. Additive changes (new optional fields, new message types)
- * do not require a bump — servers negotiate the highest common version and
- * daemons/servers must ignore unknown fields and unknown message types.
- *
- * FROZEN (see docs/protocol.md "Freeze rule"): `PROTOCOL_VERSION` does not
- * bump for additive changes (new optional fields, new message types, new
- * `AgentEvent` variants, new capability flags) — only for a breaking one
- * (changing, removing, or retyping anything that already exists).
+ * Wire protocol version. Every v2 change is a version bump, a gated addition
+ * or a strip-safe addition: see docs/protocol.md "Freeze rule", which is the
+ * one statement of the rule, and `src/wire-additions.ts`, which declares the
+ * additions. `src/__tests__/compat.test.ts` proves them against published
+ * releases.
  *
  * v2 removed the task offer's `policy` (`PermissionPolicy`), the runtime
  * capability `permissionModes` and the input-preparation `permissionMode`.
@@ -24,16 +20,6 @@ export const MAILBOX_READ_AHEAD_CAPABILITY = 'mailbox-read-ahead';
  * and the readiness reason `executor_identity_unproven`. The SDK does not
  * attest tool executables. The artifact names its counted tools in
  * `toolNames`.
- *
- * IMPORTANT: changing this constant, or changing/removing/retyping any
- * already-frozen schema in this package, requires a DELIBERATE update to the
- * committed golden fixtures in `src/__tests__/golden/` (`v<N>.frozen.json`,
- * `v<N>.envelopes.ndjson`) — see `src/__tests__/freeze-guard.test.ts`, which
- * fails loudly on exactly that kind of drift. A passing freeze-guard run
- * after such a change means either (a) the change was genuinely additive and
- * the golden was regenerated with justification, or (b) this constant was
- * bumped alongside a new golden generation for the new version — never a
- * silent edit to either file to make the test pass.
  */
 export const PROTOCOL_VERSION = 2;
 

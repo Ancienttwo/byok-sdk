@@ -5,7 +5,7 @@ import { GIT_ERROR_CATEGORIES } from '../daemon/git-workspace';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
 import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 import type { McpToolsetReloadReceipt, McpToolsetStatus } from '../types';
-import type { ProbedRuntime } from './runtime-probe';
+import type { RuntimeObservation } from '../runtime-detection';
 import type { TaskCounts, DerivedTaskInfo } from './tasks-view';
 
 /**
@@ -196,6 +196,8 @@ export function formatDaemonEventLine(event: DaemonEvent, options: FormatDaemonE
       return `${prefix} paired deviceId=${event.deviceId}`;
     case 'unpaired':
       return `${prefix} unpaired`;
+    case 'environment-resolved':
+      return `${prefix} environment-resolved ${formatServiceEnvironment(event.status)}`;
     case 'runtimes-detected':
       return `${prefix} runtimes-detected ids=${event.runtimes.map((r) => r.id).join(',') || '(none)'}`;
     case 'shutdown-requested':
@@ -413,7 +415,7 @@ export function formatTaskListLines(tasks: readonly (DaemonTaskInfo | DerivedTas
   return tasks.map(formatTaskLine);
 }
 
-export function formatRuntimeLines(runtimes: readonly ProbedRuntime[]): string[] {
+export function formatRuntimeLines(runtimes: readonly RuntimeObservation[]): string[] {
   if (runtimes.length === 0) return ['(no runtimes configured — check runtimeAllowlist)'];
   return runtimes.map((r) => {
     if (!r.present) return `${r.id}: ${r.outcome}${r.outcome === 'refused' ? `:${r.reason}` : ''}`;
@@ -440,12 +442,13 @@ export interface StatusView {
   deviceId?: string;
   /** Issues #391/#394: the last `lifecycle` event the audit log holds. */
   lifecycle?: { lifecycle: DaemonLifecycle; ts: string };
-  runtimes: readonly ProbedRuntime[];
+  runtimes: readonly RuntimeObservation[];
   taskCounts: TaskCounts;
   auditLogPath: string;
   auditLogLineCount: number;
   /** Issue #392: the environment the last `start` resolved, from its `environment-resolved` audit record. */
   environment?: { status: ServiceEnvironmentStatus; ts: string };
+  runtimesDetectedAt?: string;
 }
 
 /** Issue #392: `login-shell shell=zsh durationMs=530`, `inherited`, or `unavailable code=timeout` — closed values and a shell basename only. */
@@ -481,14 +484,20 @@ export function formatStatusLines(view: StatusView): string[] {
       ? `environment: ${formatServiceEnvironment(view.environment.status)} at=${view.environment.ts}`
       : 'environment: unknown (no environment-resolved record yet)',
   );
-  const runtimeSummary = view.runtimes.map((r) => `${r.id}=${r.present ? 'present' : r.outcome === 'refused' ? `refused:${r.reason}` : r.outcome}`).join(' ');
-  lines.push(`runtimes: ${runtimeSummary || '(none configured)'}`);
+  const runtimeSummary = formatRuntimeObservations(view.runtimes);
+  lines.push(view.runtimesDetectedAt
+    ? `runtimes: last-known ${runtimeSummary} at=${view.runtimesDetectedAt}`
+    : 'runtimes: unknown (no runtimes-detected record yet)');
   const c = view.taskCounts;
   lines.push(
     `tasks: total=${c.total} offered=${c.Offered} claimed=${c.Claimed} running=${c.Running} awaitApproval=${c.AwaitApproval} complete=${c.Complete} failed=${c.Failed} cancelled=${c.Cancelled}`,
   );
   lines.push(`audit-log: ${view.auditLogPath} (${view.auditLogLineCount} event${view.auditLogLineCount === 1 ? '' : 's'})`);
   return lines;
+}
+
+function formatRuntimeObservations(runtimes: readonly RuntimeObservation[]): string {
+  return runtimes.map(runtime => `${runtime.id}=${runtime.outcome === 'refused' ? `refused:${runtime.reason}` : runtime.outcome}`).join(' ') || '(none)';
 }
 
 /**
@@ -517,7 +526,8 @@ export function formatLiveStatusLines(live: ControlStatusResult): string[] {
       ? `live-local-agent-release: ${liveRelease.version}${liveRelease.buildId ? ` buildId=${liveRelease.buildId}` : ''}`
       : 'live-local-agent-release: unknown',
     `live-paired: ${live.paired ? 'yes' : 'no'}${live.deviceId ? ` deviceId=${live.deviceId}` : ''}`,
-    `live-runtimes: ${live.runtimeIds.length ? live.runtimeIds.join(',') : '(none)'}`,
+    `live-environment: ${live.environment === undefined ? 'unknown' : formatServiceEnvironment(live.environment)}`,
+    `live-runtimes: ${live.runtimes === undefined ? 'unknown' : formatRuntimeObservations(live.runtimes)}`,
     `live-toolsets: revision=${live.toolsets.revision} count=${live.toolsets.toolsets.length}`,
   ];
   for (const toolset of live.toolsets.toolsets) lines.push(formatToolsetStatusLine('live-toolset', toolset));

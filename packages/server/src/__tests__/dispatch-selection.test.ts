@@ -18,7 +18,7 @@ describe('dispatchSelection authority', () => {
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
@@ -49,7 +49,7 @@ describe('dispatchSelection authority', () => {
       providerId: 'openai',
       modelId: 'gpt-5.2',
     };
-    const handle = await started.byok.dispatch({ instruction: 'use exact target', dispatchSelection });
+    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'use exact target', dispatchSelection });
     const offer = await nextEnvelope(daemon);
 
     expect(offer.type).toBe('task.offer');
@@ -61,10 +61,10 @@ describe('dispatchSelection authority', () => {
 
   it('rejects a contradictory legacy runtime before creating or offering a task', async () => {
     const started = await start();
-    await connect(started, ['dispatch-selection']);
+    const daemon = await connect(started, ['dispatch-selection']);
 
     await expect(
-      started.byok.dispatch({
+      started.byok.dispatch({ deviceId: daemon.deviceId,
         instruction: 'contradictory target',
         runtime: 'claude',
         dispatchSelection: {
@@ -79,10 +79,10 @@ describe('dispatchSelection authority', () => {
 
   it('runtime-validates a JavaScript caller selection before any task is created', async () => {
     const started = await start();
-    await connect(started, ['dispatch-selection']);
+    const daemon = await connect(started, ['dispatch-selection']);
 
     await expect(
-      started.byok.dispatch({
+      started.byok.dispatch({ deviceId: daemon.deviceId,
         instruction: 'malformed target',
         dispatchSelection: {
           lane: 'subscription',
@@ -96,10 +96,10 @@ describe('dispatchSelection authority', () => {
 
   it('refuses to send a selection to an older v1 daemon that would strip the additive field', async () => {
     const started = await start();
-    await connect(started, []);
+    const daemon = await connect(started, []);
 
     await expect(
-      started.byok.dispatch({
+      started.byok.dispatch({ deviceId: daemon.deviceId,
         instruction: 'must not degrade to runtime-only dispatch',
         dispatchSelection: {
           lane: 'subscription',

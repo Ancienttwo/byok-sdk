@@ -89,52 +89,54 @@ export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limit
  * and may be refined without a protocol revision. `rate_limited` is a separate outcome,
  * not a refusal reason.
  */
-export type InboundRefusalReason =
+export const INBOUND_REFUSAL_REASONS = [
   // envelope-level
-  | 'protocol_version_unsupported'
-  | 'type_not_allowed'
-  | 'task_id_missing'
-  | 'device_not_eligible'
+  'protocol_version_unsupported',
+  'type_not_allowed',
+  'task_id_missing',
+  'device_not_eligible',
   // conn.hello capability snapshot
-  | 'hello_device_mismatch'
-  | 'hello_harnesses_without_capability'
-  | 'hello_protocol_version_unsupported'
-  | 'hello_product_mismatch'
-  | 'hello_capabilities_not_recorded'
+  'hello_device_mismatch',
+  'hello_harnesses_without_capability',
+  'hello_protocol_version_unsupported',
+  'hello_product_mismatch',
+  'hello_capabilities_not_recorded',
   // agent.message.publish
-  | 'agent_message_attempt_mismatch'
-  | 'agent_message_offer_binding_missing'
-  | 'agent_message_binding_corrupt'
-  | 'agent_message_binding_mismatch'
-  | 'agent_message_too_large'
-  | 'agent_message_already_deduplicated'
-  | 'agent_message_reservation_conflict'
-  | 'agent_message_admission_unconfirmed'
+  'agent_message_attempt_mismatch',
+  'agent_message_offer_binding_missing',
+  'agent_message_binding_corrupt',
+  'agent_message_binding_mismatch',
+  'agent_message_too_large',
+  'agent_message_already_deduplicated',
+  'agent_message_reservation_conflict',
+  'agent_message_admission_unconfirmed',
   // agent.egress.reliable / agent.content.receipt
-  | 'egress_conflict'
-  | 'content_receipt_event_request_mismatch'
-  | 'content_receipt_request_unknown'
-  | 'content_receipt_request_mismatch'
-  | 'content_receipt_conflict'
+  'egress_conflict',
+  'content_receipt_event_request_mismatch',
+  'content_receipt_request_unknown',
+  'content_receipt_request_mismatch',
+  'content_receipt_conflict',
   // task ownership
-  | 'task_not_found_for_device'
-  | 'task_owned_by_other_device'
-  | 'agent_identity_mismatch'
-  | 'terminal_harness_mismatch'
+  'task_not_found_for_device',
+  'task_owned_by_other_device',
+  'agent_identity_mismatch',
+  'terminal_harness_mismatch',
   // task.claim
-  | 'claim_device_mismatch'
-  | 'claim_harness_and_runtime_conflict'
-  | 'claim_harness_mismatch'
-  | 'claim_harness_unavailable'
-  | 'claim_offer_mismatch'
-  | 'claim_not_won'
+  'claim_device_mismatch',
+  'claim_harness_and_runtime_conflict',
+  'claim_harness_mismatch',
+  'claim_harness_unavailable',
+  'claim_offer_mismatch',
+  'claim_not_won',
   // task.fail recovery
-  | 'recovery_report_invalid'
-  | 'recovery_offer_mismatch'
+  'recovery_report_invalid',
+  'recovery_offer_mismatch',
   // bounded payloads
-  | 'activity_batch_too_large'
-  | 'activity_batch_invalid'
-  | 'approval_event_invalid';
+  'activity_batch_too_large',
+  'activity_batch_invalid',
+  'approval_event_invalid',
+] as const;
+export type InboundRefusalReason = (typeof INBOUND_REFUSAL_REASONS)[number];
 
 /** The only way to build a rejection: the reason is required and closed. */
 interface Refused {

@@ -28,7 +28,7 @@ describe('public task handle event retention', () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
-    byok?.stop();
+    await byok?.close();
     vi.useRealTimers();
     if (server !== undefined) await stopServer(server);
     byok = undefined;
@@ -43,8 +43,8 @@ describe('public task handle event retention', () => {
     });
     const started = await startServer(byok);
     server = started.server;
-    await connectFakeDaemonLongPoll(started.baseUrl, byok, { productId: 'event-retention' });
-    const handle = await byok.dispatch({ instruction: 'retention fixture' });
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, byok, { productId: 'event-retention' });
+    const handle = await byok.dispatch({ deviceId: daemon.deviceId, instruction: 'retention fixture' });
     // Pairing/dispatch use real local HTTP. Only the subsequent host-side
     // cancellation and relay reclamation run under controlled timers.
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
@@ -92,7 +92,7 @@ describe('public task handle event retention', () => {
   it('closes an active reader on stop and keeps subsequent event reads empty and allocation-free', async () => {
     const handle = await dispatch();
     const live = collect(handle.events());
-    byok!.stop();
+    await byok!.close();
     expect(await promptly(live)).toEqual([expect.objectContaining({ kind: 'state', state: 'Offered' })]);
     const writes = vi.spyOn(Map.prototype, 'set');
     for (let i = 0; i < 20; i += 1) {
@@ -100,7 +100,7 @@ describe('public task handle event retention', () => {
     }
     expect(writes.mock.calls.filter(([key]) => key === handle.taskId)).toEqual([]);
     writes.mockRestore();
-    byok!.stop();
+    await byok!.close();
     expect(vi.getTimerCount()).toBe(0);
   });
 });

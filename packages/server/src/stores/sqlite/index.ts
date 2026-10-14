@@ -31,6 +31,8 @@ import {
 } from '@byok-sdk/core';
 import {
   InMemoryPairingCodeStore,
+  TASK_ATTEMPT_ACTIVE_STATUSES,
+  TASK_ATTEMPT_STATUSES,
   assertTaskAttemptListLimit,
   createInMemoryCloudStores,
   type AgentMessageAdmission,
@@ -45,6 +47,7 @@ import {
   type RequestReceipt,
   type RequestReceiptStore,
   type TaskAttempt,
+  type TaskAttemptCounts,
   type TaskAttemptListQuery,
   type TaskAttemptPage,
   type TaskAttemptStatus,
@@ -56,12 +59,10 @@ import {
 import { PROTOCOL_VERSION, byokBlobContentPath, type RuntimeCapabilities, type RuntimeId } from '@byok-sdk/protocol';
 import type { DatabaseSync } from 'node:sqlite';
 import {
-  acquireSqliteOwnership,
   closeSqliteDatabaseAfterInitializationFailure,
   openSqliteDatabase,
   secureSqliteFilePermissions,
   SqliteSchemaError,
-  type SqliteOwnership,
   type SqliteSchemaErrorCode,
 } from '../../sqlite-support';
 
@@ -178,30 +179,20 @@ export interface SqliteEmbeddedStores {
   readonly core: CoreStores;
   readonly cloud: CloudStores;
   readonly blobContentProxy: BlobContentProxy;
-  /**
-   * Visit every task attempt of `tenant` already in the file, synchronously.
-   * Only valid at composition time, before any store operation is queued, so
-   * the visit sees exactly the history no later observation will report.
-   */
-  scanTaskAttemptsAtOpen(tenant: TenantId, visit: (attempt: TaskAttempt) => void): void;
   close(): Promise<void>;
 }
 
 /** One serialized owner for the synchronous SQLite handle and every transaction on it. */
 class SqliteCoordinator {
   readonly db: DatabaseSync;
-  readonly #ownership: SqliteOwnership | undefined;
   #tail: Promise<void> = Promise.resolve();
-  #queued = false;
   #closing = false;
   #closePromise: Promise<void> | undefined;
 
   constructor(
     path: string,
     migration: 'v1-to-v4' | 'v2-to-v4' | 'v3-to-v4' | undefined,
-    ownership: SqliteOwnership | undefined,
   ) {
-    this.#ownership = ownership;
     this.db = openSqliteDatabase(path);
     let foundVersion: string | undefined;
     const schemaError = (code: SqliteSchemaErrorCode, message: string, options?: ErrorOptions) =>
@@ -215,8 +206,8 @@ class SqliteCoordinator {
       }
     };
     try {
-      // The host must stop every old writer before this open. A version fence
-      // prevents later downgrade opens, not writes through an already-open handle.
+      // openSqliteDatabase holds EXCLUSIVE ownership before this schema
+      // transaction. Adoption still requires stopping writers and a backup.
       this.db.exec('BEGIN IMMEDIATE');
       try {
         const hasMetadata = this.db
@@ -281,6 +272,7 @@ class SqliteCoordinator {
           this.db.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('schema_version', ?)").run(SQLITE_SCHEMA_VERSION);
         }
         assertProjection('claimed_harness_id FROM task_attempt');
+        this.db.exec('CREATE INDEX IF NOT EXISTS task_attempt_status_idx ON task_attempt (tenant_id, status, cancellation_requested_at, task_id)');
         assertProjection('tenant_id, device_id, product_id, machine_id, device_name, device_public_key, proof_key_id, proof_key_epoch, capabilities_json, harnesses_json FROM device_directory');
         const receiptColumns = this.db.prepare('PRAGMA table_info(request_receipt)').all() as unknown as
           { name: string; type: string; notnull: number; pk: number }[];
@@ -315,24 +307,8 @@ class SqliteCoordinator {
     }
   }
 
-  /** Synchronous read before the first queued operation; see `scanTaskAttemptsAtOpen`. */
-  readAtOpen(operation: (db: DatabaseSync) => void): void {
-    if (this.#queued || this.#closing) throw new Error('SQLite open-time read after store operations began');
-    try {
-      operation(this.db);
-    } catch (error) {
-      this.#closing = true;
-      closeSqliteDatabaseAfterInitializationFailure(
-        this.db, error,
-        'SQLite history initialization failed and its ownership could not be released',
-        () => this.#closeHandle(),
-      );
-    }
-  }
-
   run<T>(operation: (db: DatabaseSync) => T | Promise<T>): Promise<T> {
     if (this.#closing) return Promise.reject(new Error('SQLite embedded composition is closed'));
-    this.#queued = true;
     const result = this.#tail.then(() => operation(this.db));
     this.#tail = result.then(() => undefined, () => undefined);
     return result;
@@ -366,11 +342,7 @@ class SqliteCoordinator {
   }
 
   #closeHandle(): void {
-    try {
-      this.db.close();
-    } finally {
-      this.#ownership?.release();
-    }
+    this.db.close();
   }
 }
 
@@ -589,16 +561,35 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
   }
 
   async list(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage> {
-    assertTaskAttemptListLimit(query.limit);
+    assertTaskAttemptListLimit(query.limit, query.active);
     return this.coordinator.run((db) => {
       const rows = db.prepare(
-        `SELECT * FROM task_attempt WHERE tenant_id = ? AND task_id > ?
+        `SELECT * FROM task_attempt ${query.active === true ? 'INDEXED BY task_attempt_status_idx' : ''}
+         WHERE tenant_id = ? ${query.active === true ? `AND status IN (${TASK_ATTEMPT_ACTIVE_STATUSES.map(() => '?').join(', ')}) AND cancellation_requested_at IS NULL` : ''} AND task_id > ?
          ORDER BY task_id COLLATE BINARY LIMIT ?`,
-      ).all(tenant, query.cursor ?? '', query.limit + 1) as unknown as TaskRow[];
+      ).all(tenant, ...(query.active === true ? TASK_ATTEMPT_ACTIVE_STATUSES : []), query.cursor ?? '', query.limit + 1) as unknown as TaskRow[];
       const hasMore = rows.length > query.limit;
       const attempts = rows.slice(0, query.limit).map(taskRow);
       const last = attempts.at(-1);
       return { attempts, ...(hasMore && last !== undefined ? { nextCursor: last.taskId } : {}) };
+    });
+  }
+
+  countByStatus(tenant: TenantId): Promise<TaskAttemptCounts> {
+    return this.coordinator.run((db) => {
+      const rows = db.prepare(
+        `SELECT status, cancellation_requested_at IS NOT NULL AS cancelled, COUNT(*) AS n
+         FROM task_attempt WHERE tenant_id = ? GROUP BY status, cancelled`,
+      ).all(tenant) as unknown as { status: string; cancelled: number; n: number }[];
+      const byStatus = Object.fromEntries(TASK_ATTEMPT_STATUSES.map((status) => [status, 0])) as Record<TaskAttemptStatus, number>;
+      let cancellationRequested = 0;
+      for (const row of rows) {
+        if (!TASK_ATTEMPT_STATUSES.some((status) => status === row.status)) throw new Error('Unknown stored task attempt status');
+        if (!Number.isSafeInteger(row.n) || row.n < 0) throw new Error('Invalid task attempt aggregate count');
+        if (row.cancelled === 1) cancellationRequested += row.n;
+        else byStatus[row.status as TaskAttemptStatus] += row.n;
+      }
+      return { byStatus, cancellationRequested };
     });
   }
 
@@ -1273,20 +1264,7 @@ export function createSqliteEmbeddedStores(
   options: SqliteEmbeddedStoreOptions,
   dependencies: { readonly clock: Clock; readonly crypto: CloudCrypto },
 ): SqliteEmbeddedStores {
-  // One file, one owning server process: taken before the file is touched, so
-  // a refused open never migrates, validates or writes anything.
-  const ownership = options.path === ':memory:' ? undefined : acquireSqliteOwnership(options.path);
-  let coordinator: SqliteCoordinator;
-  try {
-    coordinator = new SqliteCoordinator(options.path, options.migration, ownership);
-  } catch (error) {
-    try {
-      ownership?.release();
-    } catch (releaseError) {
-      throw new AggregateError([error, releaseError], 'SQLite open failed and its ownership could not be released');
-    }
-    throw error;
-  }
+  const coordinator = new SqliteCoordinator(options.path, options.migration);
   const objects = new SqliteObjectStore(coordinator, dependencies.clock);
   const quota = new InMemoryQuotaStore(dependencies.clock, objects);
   const mailbox = new SqliteMailboxStore(coordinator, dependencies.clock, quota);
@@ -1330,12 +1308,6 @@ export function createSqliteEmbeddedStores(
     core,
     cloud,
     blobContentProxy,
-    scanTaskAttemptsAtOpen: (tenant, visit) =>
-      coordinator.readAtOpen((db) => {
-        for (const row of db.prepare('SELECT * FROM task_attempt WHERE tenant_id = ?').iterate(tenant)) {
-          visit(taskRow(row as TaskRow));
-        }
-      }),
     close: () => coordinator.close(),
   };
 }

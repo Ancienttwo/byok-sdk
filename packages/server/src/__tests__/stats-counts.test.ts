@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { createEnvelope, TASK_STATES, type TaskState } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createByokServer, type ByokServer } from '../index';
-import { LiveTaskIndex } from '../live-tasks';
+import { serverTenantId } from '../stores';
 import { isSqliteAvailable } from '../sqlite-support';
 import {
   claimAndStart,
@@ -19,29 +19,50 @@ import {
 } from './test-support';
 
 /**
- * Issue #388 item 3: `stats()` re-reads only tasks still in flight, its counts
- * match the full-history projection `tasks.list()` reports, and the per-task
- * live-task bookkeeping is reclaimed at terminal while dispatch facts remain
- * readable from immutable offer receipts.
+ * Issue #415: `stats()` re-reads only tasks still in flight, its counts
+ * match the full-history projection `tasks.list()` reports at quiescence.
+ * Task counts come directly from stores while dispatch facts remain readable
+ * from immutable offer receipts.
  *
  * Store reads are counted at the kernel surface the façade calls, by wrapping
  * the one `createByokCloud` it constructs.
  */
-const kernelCalls = vi.hoisted(() => ({ listTaskAttempts: 0, readApprovalTimeline: 0 }));
+const kernelCalls = vi.hoisted(() => ({
+  countTaskAttempts: 0, listTaskAttempts: 0, readApprovalTimeline: 0,
+  rawTasks: undefined as import('@byok-sdk/cloud').TaskAttemptStore | undefined,
+  afterCount: undefined as (() => Promise<void>) | undefined,
+  beforeApproval: undefined as (() => Promise<void>) | undefined,
+}));
 vi.mock('@byok-sdk/cloud', async (importOriginal) => {
   const original = await importOriginal<typeof import('@byok-sdk/cloud')>();
   return {
     ...original,
+    createInMemoryCloudStores: (...args: Parameters<typeof original.createInMemoryCloudStores>) => {
+      const composition = original.createInMemoryCloudStores(...args);
+      kernelCalls.rawTasks = composition.stores.tasks;
+      return composition;
+    },
     createByokCloud: (...args: Parameters<typeof original.createByokCloud>) => {
       const cloud = original.createByokCloud(...args);
       return {
         ...cloud,
+        countTaskAttempts: async (...call: Parameters<typeof cloud.countTaskAttempts>) => {
+          kernelCalls.countTaskAttempts += 1;
+          const counts = await cloud.countTaskAttempts(...call);
+          const hook = kernelCalls.afterCount;
+          kernelCalls.afterCount = undefined;
+          await hook?.();
+          return counts;
+        },
         listTaskAttempts: (...call: Parameters<typeof cloud.listTaskAttempts>) => {
           kernelCalls.listTaskAttempts += 1;
           return cloud.listTaskAttempts(...call);
         },
-        readApprovalTimeline: (...call: Parameters<typeof cloud.readApprovalTimeline>) => {
+        readApprovalTimeline: async (...call: Parameters<typeof cloud.readApprovalTimeline>) => {
           kernelCalls.readApprovalTimeline += 1;
+          const hook = kernelCalls.beforeApproval;
+          kernelCalls.beforeApproval = undefined;
+          await hook?.();
           return cloud.readApprovalTimeline(...call);
         },
       };
@@ -49,7 +70,7 @@ vi.mock('@byok-sdk/cloud', async (importOriginal) => {
   };
 });
 
-const PRODUCT_ID = 'stats-live-tasks';
+const PRODUCT_ID = 'stats-counts';
 const SHORT_HOLD_MS = 200;
 
 /** Today's definition of the counts: every task `tasks.list()` projects, counted by state. */
@@ -70,6 +91,7 @@ async function statsReads(byok: ByokServer) {
   const stats = await byok.stats();
   return {
     stats,
+    countTaskAttempts: kernelCalls.countTaskAttempts - before.countTaskAttempts,
     listTaskAttempts: kernelCalls.listTaskAttempts - before.listTaskAttempts,
     readApprovalTimeline: kernelCalls.readApprovalTimeline - before.readApprovalTimeline,
   };
@@ -109,7 +131,7 @@ async function leaveLiveTasks(byok: ByokServer, daemon: FakeLongPollDaemon): Pro
   await nextEnvelope(daemon);
 }
 
-describe('stats() over live tasks only', () => {
+describe('store-aggregated stats()', () => {
   let server: HttpServer | undefined;
   let byok: ByokServer | undefined;
   const roots: string[] = [];
@@ -117,6 +139,8 @@ describe('stats() over live tasks only', () => {
   afterEach(async () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    kernelCalls.afterCount = undefined;
+    kernelCalls.beforeApproval = undefined;
     if (server) await stopServer(server);
     server = undefined;
     await byok?.close();
@@ -128,6 +152,8 @@ describe('stats() over live tasks only', () => {
     const instance = createByokServer({
       productId: PRODUCT_ID,
       longPollHoldMs: SHORT_HOLD_MS,
+      // The 200-task history test exercises stats cost, with >600 messages.
+      rateLimit: { messagesPerSecond: 2_000, burst: 2_000 },
       ...(storage === undefined ? {} : { storage }),
     });
     const started = await startServer(instance);
@@ -140,46 +166,113 @@ describe('stats() over live tasks only', () => {
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
     await leaveLiveTasks(started.byok, daemon);
-    for (const outcome of ['complete', 'fail', 'cancel'] as const) await runToTerminal(started.byok, daemon, outcome);
-
     const small = await statsReads(started.byok);
     expect(small.stats.taskCountsByState).toEqual(await fullScanCounts(started.byok));
-    expect(small.stats.taskCountsByState).toMatchObject({ Offered: 1, Running: 1, AwaitApproval: 1, Complete: 1, Failed: 1, Cancelled: 1 });
+    expect(small.stats.taskCountsByState).toMatchObject({ Offered: 1, Running: 1, AwaitApproval: 1, Complete: 0, Failed: 0, Cancelled: 0 });
 
-    for (let index = 0; index < 9; index += 1) {
+    for (let index = 0; index < 200; index += 1) {
       await runToTerminal(started.byok, daemon, (['complete', 'fail', 'cancel'] as const)[index % 3]!);
     }
 
     const large = await statsReads(started.byok);
     expect(large.stats.taskCountsByState).toEqual(await fullScanCounts(started.byok));
-    expect(large.stats.taskCountsByState).toMatchObject({ Complete: 4, Failed: 4, Cancelled: 4 });
-    // No history walk at all, and one approval-timeline read per LIVE task, at 3 and at 12 terminal tasks alike.
-    expect(small.listTaskAttempts).toBe(0);
-    expect(large.listTaskAttempts).toBe(0);
+    expect(large.stats.taskCountsByState).toMatchObject({ Complete: 67, Failed: 67, Cancelled: 66 });
+    // One aggregate + one active page, at zero and 200 terminal tasks alike.
+    expect(small.countTaskAttempts).toBe(1);
+    expect(small.listTaskAttempts).toBe(1);
+    expect(large.countTaskAttempts).toBe(1);
+    expect(large.listTaskAttempts).toBe(1);
     expect(small.readApprovalTimeline).toBe(3);
     expect(large.readApprovalTimeline).toBe(3);
-  });
+  }, 20_000);
 
-  it('drops live task IDs when a task turns terminal, so bookkeeping does not grow with completed tasks', async () => {
-    const opened = vi.spyOn(LiveTaskIndex.prototype, 'opened');
+  it('projects every state and host cancellation from the same authority as tasks.list', async () => {
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
-
-    const live = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'still live', sessionRef: 'sess-live' });
+    await leaveLiveTasks(started.byok, daemon);
+    const claimed = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'claimed only' });
     await nextEnvelope(daemon);
-    // The server's own index, captured as the receiver of its first opened call.
-    const tracked = opened.mock.contexts[0] as LiveTaskIndex;
-    expect(tracked.size).toBe(1);
-    expect((await started.byok.tasks.get(live.taskId))?.sessionRef).toBe('sess-live');
-
-    for (let completed = 1; completed <= 8; completed += 1) {
-      await runToTerminal(started.byok, daemon, 'complete');
-      expect(tracked.size).toBe(1);
-    }
-    expect((await started.byok.stats()).taskCountsByState.Complete).toBe(8);
+    expect(await sendOne(daemon, createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: claimed.taskId })))
+      .toEqual({ status: 200, body: { accepted: 1 } });
+    const complete = await runToTerminal(started.byok, daemon, 'complete');
+    await started.byok.tasks.cancel(complete, 'too late');
+    expect(await started.byok.tasks.get(complete)).toMatchObject({ state: 'Complete' });
+    await runToTerminal(started.byok, daemon, 'fail');
+    const ownedCancel = await runToTerminal(started.byok, daemon, 'cancel');
+    expect(await sendOne(daemon, createEnvelope('task.complete', { summary: 'late', sessionRef: 'late' }, { taskId: ownedCancel })))
+      .toEqual({ status: 200, body: { accepted: 1 } });
+    const unowned = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'cancel before claim' });
+    await nextEnvelope(daemon);
+    await unowned.cancel('stop');
+    await nextEnvelope(daemon);
+    const counts = (await started.byok.stats()).taskCountsByState;
+    expect(counts).toEqual({ Offered: 1, Claimed: 1, Running: 1, AwaitApproval: 1, Complete: 1, Failed: 1, Cancelled: 2 });
+    expect(counts).toEqual(await fullScanCounts(started.byok));
   });
 
-  it('accounts a SQLite file\'s history once at open and matches the full scan after restart', async (context) => {
+  it('sees authoritative writes that never passed through facade decorators', async () => {
+    const started = await start();
+    const tasks = kernelCalls.rawTasks!;
+    const tenant = serverTenantId(PRODUCT_ID);
+    await tasks.open(tenant, { taskId: 'external', deviceId: 'device' });
+    expect((await started.byok.stats()).taskCountsByState.Offered).toBe(1);
+    await tasks.recordStatus(tenant, { taskId: 'external', status: 'complete' });
+    expect((await started.byok.stats()).taskCountsByState).toMatchObject({ Offered: 0, Complete: 1 });
+  });
+
+  it('walks every active page when more than 100 attempts remain in flight', async () => {
+    const started = await start();
+    for (let index = 0; index < 205; index += 1) {
+      await kernelCalls.rawTasks!.open(serverTenantId(PRODUCT_ID), { taskId: `external-${index}`, deviceId: 'device' });
+    }
+    const reads = await statsReads(started.byok);
+    expect(reads.stats.taskCountsByState.Offered).toBe(205);
+    expect(reads.countTaskAttempts).toBe(1);
+    expect(reads.listTaskAttempts).toBe(3);
+    expect(reads.readApprovalTimeline).toBe(205);
+    expect(reads.stats.taskCountsByState).toEqual(await fullScanCounts(started.byok));
+  });
+
+  it('can omit a task settling between reads, without subtracting or counting it twice', async () => {
+    const started = await start();
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
+    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'race' });
+    await nextEnvelope(daemon);
+    await claimAndStart(started.byok, daemon, handle);
+    kernelCalls.afterCount = async () => {
+      expect(await sendOne(daemon, createEnvelope('task.complete', { summary: 'done', sessionRef: 'race-session' }, { taskId: handle.taskId }))).toEqual({ status: 200, body: { accepted: 1 } });
+    };
+    const counts = (await started.byok.stats()).taskCountsByState;
+    expect(Object.values(counts)).toEqual(Array(TASK_STATES.length).fill(0));
+    expect((await started.byok.stats()).taskCountsByState).toEqual(await fullScanCounts(started.byok));
+  });
+
+  it('counts a new active task created after the aggregate exactly once', async () => {
+    const started = await start();
+    kernelCalls.afterCount = async () => {
+      await kernelCalls.rawTasks!.open(serverTenantId(PRODUCT_ID), { taskId: 'new', deviceId: 'device' });
+    };
+    const counts = (await started.byok.stats()).taskCountsByState;
+    expect(counts.Offered).toBe(1);
+    expect(Object.values(counts).reduce((sum, count) => sum + count, 0)).toBe(1);
+  });
+
+  it('counts a walked task once when it settles during approval reads', async () => {
+    const started = await start();
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
+    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'race' });
+    await nextEnvelope(daemon);
+    await claimAndStart(started.byok, daemon, handle);
+    kernelCalls.beforeApproval = async () => {
+      expect(await sendOne(daemon, createEnvelope('task.complete', { summary: 'done', sessionRef: 'race-session' }, { taskId: handle.taskId }))).toEqual({ status: 200, body: { accepted: 1 } });
+    };
+    const counts = (await started.byok.stats()).taskCountsByState;
+    expect(counts).toMatchObject({ Running: 1, Complete: 0 });
+    expect(Object.values(counts).reduce((sum, count) => sum + count, 0)).toBe(1);
+    expect((await started.byok.stats()).taskCountsByState).toEqual(await fullScanCounts(started.byok));
+  });
+
+  it('reads SQLite aggregate counts after restart without a startup history scan', async (context) => {
     if (!isSqliteAvailable()) context.skip();
     const root = mkdtempSync(join(tmpdir(), 'byok-stats-'));
     roots.push(root);
@@ -201,7 +294,8 @@ describe('stats() over live tasks only', () => {
     expect(reads.stats.taskCountsByState).toEqual(await fullScanCounts(second.byok));
     expect(reads.stats.taskCountsByState).toMatchObject({ Offered: 1, Complete: 2, Failed: 1, Cancelled: 1 });
     expect(Object.values(reads.stats.taskCountsByState).reduce((sum, count) => sum + count, 0)).toBe(7);
-    expect(reads.listTaskAttempts).toBe(0);
+    expect(reads.countTaskAttempts).toBe(1);
+    expect(reads.listTaskAttempts).toBe(1);
     expect(reads.readApprovalTimeline).toBe(3);
   });
 
@@ -230,36 +324,5 @@ describe('stats() over live tasks only', () => {
     byok = undefined;
     const second = await start(storage);
     expect(await second.byok.tasks.get(handle.taskId)).toMatchObject({ state: 'Failed', createdAt: openedAt, sessionRef: 'requested-session' });
-  });
-});
-
-describe('LiveTaskIndex', () => {
-  const attempt = (taskId: string, status: 'offered' | 'running' | 'complete' | 'failed', cancelled = false) =>
-    ({
-      tenantId: 'tenant',
-      taskId,
-      deviceId: 'device',
-      status,
-      ...(cancelled ? { cancellation: { requestedAt: '2026-10-13T00:00:00.000Z' } } : {}),
-      updatedAt: '2026-10-13T00:00:00.000Z',
-    }) as never;
-
-  it('counts each task once when it leaves the live set, whatever reports it', () => {
-    const index = new LiveTaskIndex();
-    index.seed(attempt('old-done', 'complete'));
-    index.seed(attempt('old-live', 'running'));
-    index.opened(attempt('new', 'offered'));
-    expect(index.liveTaskIds().sort()).toEqual(['new', 'old-live']);
-
-    index.observe(attempt('new', 'running', true));
-    index.observe(attempt('new', 'complete', true)); // a second report of the same terminal
-    index.opened(attempt('new', 'complete', true)); // a replayed create of a terminal task
-    index.observe(attempt('old-live', 'failed'));
-    index.observe(attempt('old-done', 'complete')); // already counted by seed
-
-    expect(index.size).toBe(0);
-    expect(index.terminalCount('Cancelled')).toBe(1);
-    expect(index.terminalCount('Failed')).toBe(1);
-    expect(index.terminalCount('Complete')).toBe(1);
   });
 });

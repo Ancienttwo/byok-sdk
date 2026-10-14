@@ -1,92 +1,3 @@
-// ==== @byok-sdk/server dist/connections.d.ts ====
-import type { RuntimeInfo, ToolsetId } from '@byok-sdk/protocol';
-/**
- * What this process has OBSERVED about a device's live connection.
- *
- * This is not a second authority over anything durable. The device row
- * (`DeviceRecord`, `@byok-sdk/cloud`) owns identity and the capability list
- * every admission gate reads; the mailbox owns delivery. What lives here is the
- * part of `conn.hello` the kernel deliberately does not persist — the runtime
- * DISCOVERY block and the client's self-reported version/toolset inventory —
- * plus "when did we last hear from this device at all".
- *
- * Why the kernel does not persist it: `conn.hello.runtimes` describes what a
- * device build could run, changes on every daemon restart, and authorizes
- * nothing (the steer gate reads the CLAIM snapshot, never this). Storing it
- * durably would create a stale second description of a device that outlives the
- * process that saw it. Keeping it as an in-process observation is honest about
- * its lifetime: restart the server and it is gone, exactly like the connection
- * it describes.
- *
- * Presence is an expiring LEASE over `lastSeen`, not a stored flag and not "a
- * socket is open" — there are no sockets any more. Two observations renew it:
- * the device's own `conn.hello` over `POST /byok/messages`, and a
- * `GET /byok/events` poll (a device that is polling is present even if it never
- * announced). It lapses on its own once nothing has renewed it for
- * `presenceTtlMs` (see {@link DeviceConnections.isConnected}), and revocation
- * deletes the observation outright together with everything else scoped to the
- * device.
- */
-export interface DeviceConnection {
-    /** ISO-8601 instant of the most recent observation. */
-    lastSeen: string;
-    clientVersion?: string;
-    runtimes?: RuntimeInfo[];
-    configuredToolsets?: ToolsetId[];
-}
-/** `conn.hello`'s discovery half, as observed on one accepted announcement. */
-export interface DeviceAnnouncement {
-    readonly clientVersion?: string;
-    readonly runtimes?: readonly RuntimeInfo[];
-    readonly configuredToolsets?: readonly ToolsetId[];
-}
-export interface DeviceConnectionsOptions {
-    /**
-     * How long one observation keeps a device present, ms. Must outlast a full
-     * long-poll hold plus the gap before the next poll: a poll renews the lease
-     * once, when it starts, and nothing renews it while the poll is held.
-     */
-    readonly presenceTtlMs: number;
-    /** Epoch-ms clock the lease is judged against. Defaults to `Date.now`. */
-    readonly now?: () => number;
-}
-/**
- * In-process device observations, in first-observation order.
- *
- * Insertion order is load-bearing for ambient dispatch selection
- * (`device-selection.ts`): "the first connected device" must be stable and
- * explainable, and a `Map` gives that for free without a second index.
- */
-export declare class DeviceConnections {
-    #private;
-    constructor(options: DeviceConnectionsOptions);
-    /**
-     * Record an accepted `conn.hello`. Discovery fields are REPLACED wholesale,
-     * never merged: a daemon that restarted with a runtime removed must not keep
-     * advertising it because an older hello mentioned it.
-     */
-    announce(deviceId: string, announcement: DeviceAnnouncement, at: string): void;
-    /**
-     * Record any other sign of life (an inbound envelope, a long-poll read).
-     * Deliberately additive: it renews the lease by refreshing `lastSeen`
-     * without touching the discovery block, because none of those signals carry
-     * one and clearing it would lose what the last hello said.
-     */
-    touch(deviceId: string, at: string): void;
-    get(deviceId: string): DeviceConnection | undefined;
-    /**
-     * The one presence rule: observed within the last `presenceTtlMs`. Every
-     * reader — `MachineInfo.connected`, ambient selection, the dispatch gate and
-     * `stats().connectedDeviceCount` — asks this, so none can disagree.
-     */
-    isConnected(deviceId: string): boolean;
-    connectedCount(): number;
-    /** Device ids in first-observation order — the order ambient selection walks. */
-    ids(): readonly string[];
-    /** Drop everything scoped to a device. Called when its registration is deleted (§6.3). */
-    forget(deviceId: string): void;
-    clear(): void;
-}
 // ==== @byok-sdk/server dist/index.d.ts ====
 import { Hono } from 'hono';
 import { type EnqueuedOffer, type PairingCodeInfo, type TaskAttempt } from '@byok-sdk/cloud';
@@ -94,7 +5,7 @@ import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispos
 import type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
 import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, TaskHandle, TaskSnapshot } from './types';
 export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskHandle, TaskResult, TaskSnapshot, } from './types';
-export type { TaskOfferReadback } from '@byok-sdk/cloud';
+export type { InboundRefusalReason, TaskOfferReadback } from '@byok-sdk/cloud';
 /**
  * M5 (approval targeting, docs/protocol.md §5.3): `TaskHandle.approve`/`reject`'s
  * `opts.approvalId` targeting throws this when the id names an approval the
@@ -269,21 +180,17 @@ export interface ByokServer {
      * Release what this instance holds: the relay's per-task feeds and their
      * reclamation timers, and the connection observations. Call it on shutdown so
      * nothing keeps the process alive or leaks a handle in tests; safe to call
-     * more than once. SQLite embedders that need to await handle release should
-     * call {@link ByokServer.close} instead.
+     * more than once. Drain pending store calls before releasing the selected
+     * storage authority; await this before opening the SQLite file again.
      */
-    stop(): void;
-    /** Drain pending store calls and release the selected storage authority. */
     close(): Promise<void>;
     /**
      * A plain, serializable snapshot of this server's current state. See
      * {@link HubStats} for the field-by-field contract.
      *
-     * Async because the non-terminal part of `taskCountsByState` is re-read from
-     * the durable task store on every call. Terminal states are absorbing, so a
-     * task is read until it settles and then only tallied: the cost of a call
-     * follows the tasks still in flight, not history (`live-tasks.ts`). A SQLite
-     * server accounts the file's existing tasks once, at open.
+     * One store aggregate, an active-attempt page walk, then one approval read
+     * per active attempt. No process-local task counts or startup history scan.
+     * This is a multi-read observation, not a transaction snapshot; see HubStats.
      *
      * Deliberately in-process only: never exposed over HTTP by this SDK itself (see
      * `CreateByokServerOptions.healthzRoute`); an embedder that wants any of it
@@ -465,14 +372,12 @@ export declare function createCountingInboundRateLimiter(limiter: RateLimiter, o
 // ==== @byok-sdk/server dist/relay.d.ts ====
 import type { InboundCommitted, ByokCloudObserver } from '@byok-sdk/cloud';
 import type { TaskState } from '@byok-sdk/protocol';
-import type { DeviceConnections } from './connections';
 import type { ByokServerEvent, ServerTaskEvent } from './types';
 /** Per-task {@link ServerTaskEvent} retention before drop-oldest engages. */
 export declare const DEFAULT_TASK_EVENT_BUFFER_LIMIT = 1000;
 /** How long a terminal task's relay state is retained before reclamation, ms. */
 export declare const DEFAULT_TASK_EVENT_RETENTION_MS: number;
 export interface TaskEventRelayOptions {
-    readonly connections: DeviceConnections;
     readonly taskEventBufferLimit?: number;
     readonly taskEventRetentionMs?: number;
 }
@@ -610,8 +515,8 @@ export declare class SqliteSchemaError extends Error {
  * would split them. Run several instances only over external stores with a
  * shared `tokenSigner`.
  *
- * Ownership is an OS advisory lock on the `<path>-lock` sibling, held for the
- * lifetime of the open server. The kernel releases it when the owner closes or
+ * Ownership is SQLite's EXCLUSIVE locking mode on the database itself, held
+ * for the lifetime of its handle. The kernel releases it when the owner closes or
  * its process exits for any reason, including SIGKILL, so a stale owner never
  * blocks the next open and no pid is ever compared (pid reuse cannot matter).
  */
@@ -656,11 +561,11 @@ export declare function isSqliteCapableNodeVersion(nodeVersion: string): boolean
 export declare function isSqliteAvailable(): boolean;
 /**
  * Open (or create) a `node:sqlite` `DatabaseSync` at `path`, applying the
- * pragmas both reference SQLite stores share: WAL journaling for a
- * file-backed database (allows a reader and a writer to proceed without
- * blocking each other, and is what makes "close instance A, open instance B
- * on the same file" — the restart-safety story — reliable) and a busy
- * timeout (see {@link DEFAULT_BUSY_TIMEOUT_MS}). WAL is skipped for
+ * pragmas both reference SQLite stores share: EXCLUSIVE locking mode before
+ * the first WAL access, with a busy timeout (see {@link DEFAULT_BUSY_TIMEOUT_MS}).
+ * The file has one owner until this handle closes; external readers and writers
+ * cannot inspect a running owner's database. No sibling ownership file is used.
+ * WAL is skipped for
  * `:memory:`, where it's meaningless. For a file-backed path whose parent
  * directory doesn't exist yet, creates it (recursively) at
  * {@link SECURE_DIR_MODE} — mirroring the client-side device store's
@@ -671,23 +576,6 @@ export declare function isSqliteAvailable(): boolean;
  * this is the single choke point.
  */
 export declare function openSqliteDatabase(path: string, options?: DatabaseSyncOptions, faults?: SqliteOpenFaultSeam): DatabaseSync;
-/** Exclusive ownership of one database file; {@link SqliteOwnership.release} is idempotent. */
-export interface SqliteOwnership {
-    release(): void;
-}
-/**
- * Take exclusive ownership of the database at `path`, or throw
- * {@link SqliteOwnershipError} immediately (no busy wait) if it is held.
- *
- * The lock is SQLite's own: an EXCLUSIVE transaction held open on a dedicated
- * `<path>-lock` file. SQLite maps it to an OS advisory lock, which conflicts
- * across processes and — through SQLite's per-inode lock table — across
- * connections in one process, and which the kernel drops when the holder's
- * process dies. It is a sibling file rather than the database itself so the
- * owner's own connection, and read-only inspection of the database, are never
- * blocked by it. Nothing is ever written to it.
- */
-export declare function acquireSqliteOwnership(path: string): SqliteOwnership;
 /**
  * Restrict `dbPath` and its WAL/SHM sibling files (`<path>-wal`,
  * `<path>-shm` — created by SQLite itself once WAL mode is active and a
@@ -769,8 +657,9 @@ export interface TaskHandleDeps {
 export declare function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHandle;
 // ==== @byok-sdk/server dist/types.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
-import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, RuntimeInfo, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess } from '@byok-sdk/protocol';
-import type { TenantId, TokenSigner } from '@byok-sdk/cloud';
+import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess } from '@byok-sdk/protocol';
+import type { InboundRefusalReason, TenantId, TokenSigner } from '@byok-sdk/cloud';
+import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { RateLimiterOptions } from './rate-limiter';
 /** Mutually-exclusive storage authority for the embedded reference server. */
 export type ByokServerStorage = {
@@ -806,8 +695,7 @@ export interface CreateByokServerOptions {
      * (`conn.hello`, any accepted envelope, or the start of a `GET /byok/events`
      * poll) is at most this old. Default `longPollHoldMs + 15_000`. Must exceed
      * `longPollHoldMs`, because a held poll does not renew the lease; construction
-     * throws otherwise. Governs `MachineInfo.connected`, ambient device selection,
-     * the "not connected" dispatch gate and `HubStats.connectedDeviceCount`.
+     * throws otherwise. Presence is discovery only; dispatch never reads it.
      */
     presenceTtlMs?: number;
     /** Per-product blob size ceiling in bytes (§7). Default 100MB. */
@@ -903,7 +791,8 @@ export interface DispatchInput {
     dispatchSelection?: DispatchSelection;
     runtime?: RuntimeId;
     harnessId?: string;
-    deviceId?: string;
+    /** Explicit target; registered offline devices may receive queued work. */
+    deviceId: string;
     sessionRef?: string;
     /** Logical device-local MCP toolsets required for this task; never executable definitions. */
     requiredToolsets?: ToolsetId[];
@@ -1063,25 +952,18 @@ export interface TaskHandle {
     steer(text: string): Promise<void>;
     result(): Promise<TaskResult>;
 }
-/** A device known to this server, joined from pairing identity + live connection state. */
+/** Durable device identity plus its optional, unexpired presence lease. */
 export interface MachineInfo {
     deviceId: string;
     deviceName: string;
-    /**
-     * Presence lease: `lastSeen` is at most `CreateByokServerOptions.presenceTtlMs`
-     * old (default `longPollHoldMs + 15s`). A device that stops polling reads
-     * `false` once the lease lapses; it is never cleared any other way except by
-     * revocation.
-     */
+    /** True exactly while the single TTL observation is unexpired; never an admission gate. */
     connected: boolean;
+    /** Most recent live observation. Omitted when the lease is absent or expired. */
     lastSeen?: string;
-    /** Process-immutable Local Agent release from the current/last `conn.hello`; omission means legacy/unknown. */
     clientVersion?: string;
-    /** Runtimes detected on this device, as reported in its last `conn.hello` (M1: typed, replaces the old untyped `agents`). */
-    runtimes?: RuntimeInfo[];
+    runtimes?: readonly PresenceRuntimeFact[];
     harnesses?: readonly HarnessInfo[];
-    /** Logical toolset IDs reported by the current daemon; omission means legacy/unknown. */
-    configuredToolsets?: ToolsetId[];
+    configuredToolsets?: readonly string[];
 }
 /**
  * Projection of one task, read back from the cloud kernel's durable authority
@@ -1302,14 +1184,21 @@ export type ByokServerEvent = {
 export interface HubStats {
     /** Devices whose presence lease is live right now — see {@link MachineInfo.connected}. */
     connectedDeviceCount: number;
-    /** Every {@link TaskState} mapped to how many known tasks currently sit in it. */
+    /**
+     * Store-aggregated settled counts plus active task/approval projections.
+     * Exact at quiescence; a task settling between reads can be temporarily absent.
+     * This is not a transaction snapshot. SQLite persists attempts/cancellation;
+     * its in-memory approval timeline resets at reopen, so AwaitApproval resets.
+     */
     taskCountsByState: Record<TaskState, number>;
-    /** Total inbound daemon->server envelopes the cloud kernel's inbound gate has been handed (every outcome, including rejected/rate-limited), counted at the gate's own step 0. */
+    /** Total inbound daemon->server envelopes since this server instance was created (every outcome, including rejected/rate-limited), counted at the gate's own step 0. Resets on SQLite reopen. */
     envelopesIn: number;
-    /** Inbound envelopes recognized as an already-seen `(deviceId, id)` pair (N3) — a no-op wire-level success, counted here for observability. */
+    /** Inbound dedup hits since this server instance was created; a no-op wire-level success. Resets on SQLite reopen. */
     dedupDrops: number;
-    /** Inbound envelopes rejected for exceeding a device's rate limit — see `device.rate_limited` on {@link ByokServerEvent}. */
+    /** Rate-limited envelopes since this server instance was created — see `device.rate_limited` on {@link ByokServerEvent}. Resets on SQLite reopen. */
     rateLimitEvents: number;
+    /** Every closed refusal reason, zero-filled; counted since this server instance was created. Rate limiting is separate. */
+    inboundRefusals: Record<InboundRefusalReason, number>;
     /** Milliseconds since `createByokServer` returned this instance. */
     uptimeMs: number;
 }

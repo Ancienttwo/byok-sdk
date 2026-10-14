@@ -66,7 +66,7 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
 
   // Issue #392: where this process's environment came from. Printed first
   // (the service log shows it even when start fails), and recorded for
-  // `status` only once start() succeeded — i.e. by the process that owns the
+  // `status` once the daemon has acquired ownership — i.e. by the process that owns the
   // store — so a rejected second `start` never overwrites what the running
   // daemon sees.
   const environment = deps.environment ?? serviceEnvironmentStatus();
@@ -162,7 +162,6 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
       unsubscribe();
       return await halted(err.reason);
     }
-    await appendToAudit.appendEnvironment({ status: environment, ts: new Date().toISOString() });
     // Exact "daemon started: ..." prefix preserved from the pre-M3-2b bin —
     // examples/basic/README.md tells a human operator to watch stdout for
     // this literal text.

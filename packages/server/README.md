@@ -49,17 +49,17 @@ What a restart does not keep:
 
 ## Device presence
 
-`machines.list()[].connected`, ambient device selection for a `dispatch()`
-without `deviceId`, the `device ... is not connected` dispatch gate, and
-`stats().connectedDeviceCount` all apply one rule: a device is connected while
-its last observation (`conn.hello`, any accepted envelope, or the start of a
-`GET /byok/events` poll) is at most `presenceTtlMs` old. The default is
-`longPollHoldMs + 15_000` (65 seconds with the default 50 second hold), so a
-device sitting in a normal held poll stays connected and one that stops polling
-reads offline about 15 seconds after its last hold would have ended.
-`presenceTtlMs` is configurable and must exceed `longPollHoldMs`, because a held
-poll does not renew presence. `lastSeen` is reported alongside. Revoking a device
-removes its presence immediately.
+`machines.list()[].connected` projects the core store's unexpired TTL
+observation, joined to the durable device directory. Authenticated hello, accepted envelopes,
+long-poll starts and heartbeat publications renew this same lease. Its default
+TTL remains `longPollHoldMs + 15_000` (65 seconds with the default 50 second
+hold); `presenceTtlMs` must exceed `longPollHoldMs`. Expiry sets `connected` to false and removes live discovery facts
+from the read model, and revocation removes the device entirely.
+
+Every dispatch requires an explicit `deviceId`. Presence never gates dispatch:
+registered offline targets receive queued offers; unknown or revoked legacy
+targets fail with `device_not_found` before task/mailbox creation. Durable
+capabilities remain admission authority; the daemon validates local toolsets.
 
 ## Mailbox retention
 
@@ -94,10 +94,9 @@ const task = await server.dispatch({
 });
 ```
 
-The self-hosted coordinator rejects this call before task creation unless the
-live device advertises `toolset-selection` and its `configuredToolsets`
-inventory contains every required ID. `machines.list()` projects that same
-logical-ID-only inventory; MCP commands and credentials remain device-local.
+The coordinator requires the durable `toolset-selection` capability before
+creating the task. The daemon validates its actual configured inventory when
+it accepts the offer; presence discovery does not gate admission.
 
 ## SQLite receipts, ownership and schema adoption
 
@@ -109,31 +108,58 @@ disk usage; exhaustion is an error, not permission to delete identity fences.
 
 ### One process per SQLite file
 
-One SQLite file serves exactly one running server. Opening takes an OS lock on
-the canonical database path's `<path>-lock` sibling for the lifetime of the server;
-symlink aliases resolve to that same lock. A second open of the
-same file, from another process or another instance in this one, throws
-`SqliteOwnershipError` (`code: 'SQLITE_DATABASE_OWNED'`) before touching the
-database. The lock is released by `close()` and by the operating system when the
-owning process exits for any reason, including SIGKILL, so a crashed owner never
-blocks the next start. To reopen the same file in one process, `await
-server.close()` first. Hard-linked database paths are refused before open, since
-they have no unique sibling lock or WAL path. The process-local state listed in
-[Storage](#storage) is why the file is not shareable: several server instances
-behind a load balancer need external stores (`@byok-sdk/cloud` with
-`@byok-sdk/cloud-dataplane`) and one shared `tokenSigner`.
+One SQLite file serves exactly one server process. The actual database connection
+sets `PRAGMA locking_mode=EXCLUSIVE` before entering WAL mode and retains its
+SQLite lock until `await server.close()` or process exit, including SIGKILL.
+A second open, in this process or another, waits for the existing 5-second busy
+grace and then throws `SqliteOwnershipError` (`code: 'SQLITE_DATABASE_OWNED'`).
+External SQLite readers and writers are excluded while the server is open;
+inspection, backup and raw test mutations require the owner to close first.
+EXCLUSIVE WAL needs no shared-memory file. No sibling ownership file is created.
+Symlink aliases use SQLite's canonical database identity. Hard-linked paths are
+refused before open because distinct WAL names cannot safely recover one file.
+Token signing keys (unless you pass `tokenSigner`), presence, the task-event relay
+remain process-local. Multiple instances need external
+stores (`@byok-sdk/cloud` with `@byok-sdk/cloud-dataplane`) and one shared
+`tokenSigner`.
+
+### Migration from sibling-lock ownership (#403)
+
+This is a breaking 0.x API change: replace `server.stop()` with
+`await server.close()`. `close()` is the sole server shutdown path; await it before
+reopening storage. `SqliteOwnershipError` and its error code remain unchanged.
+Stop every old server and external SQLite connection, take a consistent backup,
+and only then start the new owner. An idle old NORMAL-mode connection can still
+block the new EXCLUSIVE owner. Do not run old and new writers together: the old
+sibling lock is no longer an ownership authority. After all old owners have
+stopped, operators may remove their leftover `<path>-lock` files; the SDK neither
+opens nor automatically deletes them. Schema v4, persisted data and wire contracts
+are unchanged. Use the server facade for live reads, or close the owner before
+external inspection or backup.
 
 ### Task snapshots after restart
 
-`stats()` re-reads only live attempts and their approval timelines; absorbing
-terminal states are counted once. SQLite history is scanned once at startup,
-so repeated stats calls cost O(live tasks), independent of terminal history.
+`stats()` reads one store aggregate, active attempt pages and their approval
+timelines. It keeps no task-count mirror and does not scan history at startup.
+The aggregate scans stored rows; page/approval call counts depend only on active
+tasks. This multi-read observation is exact at quiescence; a task settling
+between reads can be temporarily absent. SQLite preserves attempt/cancellation
+counts, while its approval timeline resets at reopen. Traffic counters and the
+zero-filled `inboundRefusals` map start at server creation and reset on reopen.
 Snapshots read creation time (`recordedAt`) and requested session from the
 immutable offer receipt; the canonical terminal's session takes precedence.
 These facts survive completion and SQLite restart without a dispatch Map.
 Attempts opened before an offer receipt was committed retain the existing
 attempt-only snapshot (`createdAt: updatedAt`, no requested session). Malformed
 receipts are rejected by the kernel's readback contract.
+
+Custom cloud stores must implement `TaskAttemptStore.countByStatus` and the
+`TaskAttemptListQuery.active` filter. `ByokCloud.countTaskAttempts` exposes the
+aggregate; `INBOUND_REFUSAL_REASONS` owns the closed refusal vocabulary.
+
+Unredeemed pairing codes, presence and other unmodified ports remain ephemeral.
+Keep daemon OS credentials, server URL and token signer stable across restart.
+This does not restore TaskHandle promises, subscriptions or provider processes.
 
 ### Schema adoption
 
@@ -194,8 +220,8 @@ Before enqueue, durably bind the authenticated scope and external execution key
 (including cycle/pass where applicable) to one taskId, explicit deviceId and
 immutable dispatch input. Pass that taskId to `dispatch` or
 `dispatchFreshAgentEgress`. Omitting taskId retains fresh-task semantics.
-A caller taskId requires an explicit device; the façade never reselects an
-ambient device for that identity. Initial dispatch still requires a connected
+A caller taskId requires an explicit device; the façade never reselects a
+missing device for that identity. Initial dispatch requires a registered
 device. Concurrent calls for one caller identity in one façade are rejected
 while the first is in flight.
 

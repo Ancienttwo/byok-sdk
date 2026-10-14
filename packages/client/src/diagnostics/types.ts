@@ -2,11 +2,12 @@ import type { RuntimeDetectResult, RuntimeDetectionRefusalReason } from '../type
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import type { OperationalHealthFileInspection } from '../daemon/operational-health';
 import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
+import type { ServiceEnvironmentRecord } from '../lifecycle/service-environment';
 
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 
 export interface DiagnosticCheck {
-  id: 'config' | 'device' | 'runtimes' | 'control' | 'lifecycle' | 'health' | 'journal' | 'workspace' | 'quarantine';
+  id: 'config' | 'device' | 'runtimes' | 'environment' | 'control' | 'lifecycle' | 'health' | 'journal' | 'workspace' | 'quarantine';
   status: DiagnosticStatus;
   summary: string;
 }
@@ -33,6 +34,8 @@ export interface DiagnosticsSnapshot {
     steer: boolean;
     resume: boolean;
   }>;
+  runtimeSource: 'daemon' | 'local-shell' | 'unknown';
+  environment: ServiceEnvironmentRecord | { status: 'unknown' };
   control:
     | { status: 'offline'; reason: string }
     | {
