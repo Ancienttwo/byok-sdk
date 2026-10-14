@@ -22,6 +22,7 @@ interface ProviderScenario {
   prefix?: boolean;
   repeatedSkill?: boolean;
   finalAt?: number;
+  initialResponseDelayMs?: number;
 }
 let mf: Miniflare;
 let script: string;
@@ -50,6 +51,9 @@ function runtime() {
     const body = JSON.parse(text) as ProviderBody;
     const index = calls.length;
     calls.push({ url: String(request.headers['mf-original-url']), body });
+    if (index === 0 && scenario.initialResponseDelayMs !== undefined) {
+      await new Promise(resolve => setTimeout(resolve, scenario.initialResponseDelayMs));
+    }
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     if (scenario.wire !== undefined && index === 0) { response.end(scenario.wire); return; }
     const selected = scenario.calls?.[index] ?? (scenario.repeatedSkill && index !== scenario.finalAt ? [{ name: SKILL, args: {} }] : index === 0 && !scenario.calls ? [{ name: SKILL, args: {} }] : undefined);
@@ -110,7 +114,7 @@ function assertNoSecrets(...values: unknown[]) {
     for (const form of [secret, btoa(secret), encodeURIComponent(secret)]) expect(text).not.toContain(form);
   }
 }
-async function waitDispatched(name: string, count: number) { await vi.waitFor(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(count)); }
+async function waitDispatched(name: string, count: number, options?: { timeout: number }) { await vi.waitFor(async () => expect((await dump(name)).fixture_dispatches).toHaveLength(count), options); }
 async function restart() { await mf.dispose(); mf = runtime(); await mf.ready; }
 
 describe('cloud session native model → tool → model in workerd', () => {
@@ -251,6 +255,8 @@ describe('cloud session native model → tool → model in workerd', () => {
 
 describe('native session limits and late results', () => {
   it('accepts eight model steps and blocks the ninth at the transport gate', async () => {
+    // Two real turns perform sixteen provider round trips and native SQLite work.
+    // This is a step-admission assertion, not a five-second performance contract.
     const name = await setup(); scenario = { repeatedSkill: true, finalAt: 7 };
     expect(events(await run(name)).at(-1)).toMatchObject({ type: 'done' });
     expect(calls).toHaveLength(8);
@@ -258,7 +264,7 @@ describe('native session limits and late results', () => {
     expect(events(await run(second)).at(-1)).toEqual(errorEvent('CLOUD_STEP_LIMIT'));
     expect(calls).toHaveLength(8);
     expect((await dump(second)).cloud_executions).toMatchObject([{ steps: 8, fatalCode: 'CLOUD_STEP_LIMIT' }]);
-  });
+  }, 15_000);
 
   it('accepts twelve native tool calls and blocks the thirteenth before dispatch', async () => {
     const group = () => Array.from({ length: 4 }, () => ({ name: SKILL, args: {} }));
@@ -300,12 +306,16 @@ describe('native session limits and late results', () => {
   });
 
   for (const { limits, code } of [
-    { limits: { callTimeoutMs: 80, turnTimeoutMs: 2_000 }, code: 'CLOUD_TOOL_TIMEOUT' },
-    { limits: { callTimeoutMs: 2_000, turnTimeoutMs: 150 }, code: 'CLOUD_EXECUTION_TIMEOUT' },
+    { limits: { callTimeoutMs: 80, turnTimeoutMs: 10_000 }, code: 'CLOUD_TOOL_TIMEOUT' },
+    { limits: { callTimeoutMs: 10_000, turnTimeoutMs: 5_000 }, code: 'CLOUD_EXECUTION_TIMEOUT' },
   ]) it(`discards the genuine resolver result that arrives after ${code}`, async () => {
+    // reserve() starts the whole-turn clock before conversation/provider work.
+    // Delay the genuine HTTP response and allow dispatch before the tested deadline.
+    scenario = { initialResponseDelayMs: 250 };
     const name = await setup({ limits }, { pause: true });
     const processing = run(name);
-    await waitDispatched(name, 1);
+    await waitDispatched(name, 1, { timeout: 4_000 });
+    expect((await dump(name)).fixture_dispatches).toMatchObject([{ completed: 0 }]);
     const text = await processing;
     expect(events(text).at(-1)).toEqual(errorEvent(code));
     await json(name, 'release');
@@ -314,7 +324,7 @@ describe('native session limits and late results', () => {
     expect(rows.cloud_invocations).toMatchObject([{ state: 'timed_out', resultJson: null, errorCode: code }]);
     expect(JSON.stringify(nativeRows(rows))).not.toContain('"instructions":');
     expect(calls).toHaveLength(1);
-  });
+  }, 15_000);
 
   it('stops the native next generation after a timed-out call even when its sibling already succeeded', async () => {
     const name = await setup({ limits: { callTimeoutMs: 180, turnTimeoutMs: 2_000 } }, { pauseName: 'query_f10_dataset' });
