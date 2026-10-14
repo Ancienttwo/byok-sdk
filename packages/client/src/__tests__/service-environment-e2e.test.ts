@@ -72,6 +72,7 @@ interface ChildReport {
   ready: true;
   environment: { source: string; shell?: string };
   detected: string[];
+  runtimes: Array<{ id: string; outcome: string }>;
   byokNames: string[];
   pathHasFakeBin: boolean;
 }
@@ -111,6 +112,7 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
     expect(report.environment).toMatchObject({ source: 'login-shell', shell: path.basename(passwdShell!) });
     expect(report.pathHasFakeBin).toBe(true);
     expect(report.detected).toEqual(['claude']);
+    expect(report.runtimes).toMatchObject([{ id: 'claude', outcome: 'available' }]);
     expect(report.byokNames).toEqual(['BYOK_TEST_DEVICE_CREDENTIAL_STORE']);
     const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello', 10_000);
     expect((hello.payload as { runtimes: Array<{ id: string }> }).runtimes.map((runtime) => runtime.id)).toEqual(['claude']);
@@ -126,6 +128,7 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
     expect(report.environment).toEqual({ source: 'inherited' });
     expect(report.pathHasFakeBin).toBe(false);
     expect(report.detected).toEqual([]);
+    expect(report.runtimes).toMatchObject([{ id: 'claude', outcome: 'not-found' }]);
     const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello', 10_000);
     expect((hello.payload as { runtimes: unknown[] }).runtimes).toEqual([]);
     expect(await stop(child)).toBe(0);

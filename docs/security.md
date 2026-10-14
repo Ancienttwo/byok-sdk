@@ -561,11 +561,11 @@ generated service definition.
 | Same-user local process | Install/uninstall/start/stop the service — equivalent to running the CLI directly; by design | — |
 | Other local user | — | Install into this user's launchd per-user domain or `systemd --user` namespace (both inherently per-uid) |
 
-**Login-shell environment (#392).** On macOS and Linux, `byok-agent install`
-writes a launchd plist or systemd unit that runs `byok-agent start
+**Login-shell environment (#392).** On macOS, Linux and Windows, `byok-agent install`
+writes a launchd plist, systemd unit or WinSW XML that runs `byok-agent start
 --service` (a Host program passed to `createServiceLifecycle` is written
 unchanged). `--service` runs the user's passwd login shell once per daemon
-start (`-i -l -c`, 10 s and 1 MiB caps) and replaces the daemon's
+start on POSIX (`-i -l -c`, including fish, 10 s and 1 MiB caps) and replaces the daemon's
 `process.env` with the captured environment; the capture ends when the shell
 has exited and the end-of-dump nonce has been read, and the shell's process
 group is then SIGKILLed, including anything the rc left running. This
@@ -576,7 +576,10 @@ rc files cannot set SDK control variables; task children still receive no
 `BYOK_*` at all. Only the source, a closed failure code and the shell's
 basename are recorded (`environment-resolved` in `audit.jsonl`, shown by
 `status`, `doctor` and the support bundle) — never variable names, values or
-paths. WinSW does not pass `--service`.
+paths. Windows uses the inherited service-account environment without spawning a login shell.
+The daemon emits this closed projection as `environment-resolved`; the ordinary
+audit subscriber records it. Live status and diagnostics read the daemon's
+cached environment and runtime observations without executing CLI-side probes.
 
 One place the "same-user" framing itself shifts: a WinSW-installed Windows
 Service commonly runs under a distinct service account (e.g. `SYSTEM`), not

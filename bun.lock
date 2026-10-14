@@ -24,6 +24,7 @@
       },
       "devDependencies": {
         "@types/node": "^24",
+        "linkedom": "0.16.11",
         "tsx": "^4.19.2",
         "typescript": "^7.0.2",
         "vitest": "^4.1.10",

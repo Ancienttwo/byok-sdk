@@ -1,7 +1,8 @@
 // Test-only stub implements the exported client contract. No internal SDK imports.
 import { randomUUID } from 'node:crypto';
-import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter, type RuntimeAdapterPrepareInput,
+import { freezeRuntimeAdapterDescriptor, type Daemon, type RuntimeAdapter, type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult, type RuntimeOperationStartInput, type RuntimeDetectResult, type Session } from '@byok-sdk/client';
+import { expect, vi } from 'vitest';
 type Event = Session['events'] extends AsyncIterable<infer E> ? E : never;
 export class BotStubSession implements Session {
   readonly sessionRef = randomUUID();
@@ -45,4 +46,16 @@ export class BotStubAdapter implements RuntimeAdapter {
       this.sessions.set(input.manifest.taskId, session); return session;
     } } };
   }
+}
+
+/**
+ * Wait for the client's own ready fact: the server accepted this run's
+ * `conn.hello` (`lifecycle` `{ phase: 'running', connection: 'open' }`). The
+ * server-side `MachineInfo.connected` is not readiness: it reads true while a
+ * daemon that failed to settle is still polling.
+ */
+export async function waitForReady(daemon: Pick<Daemon, 'status'>, timeoutMs = 5_000): Promise<void> {
+  await vi.waitFor(() => {
+    expect(daemon.status().lifecycle).toEqual({ phase: 'running', connection: 'open' });
+  }, { timeout: timeoutMs, interval: 25 });
 }

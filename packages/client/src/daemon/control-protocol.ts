@@ -7,6 +7,8 @@ import type { StorageCategory } from './journal/journal';
 import type { StoragePressureState } from './journal/storage-policy';
 import type { OperationalHealthSnapshot } from './operational-health';
 import type { DaemonLifecycle } from './daemon-lifecycle';
+import type { RuntimeObservation } from '../runtime-detection';
+import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
 import type { AgentHomeExecutionStatus } from '../agent-home';
@@ -448,7 +450,12 @@ export interface ControlStatusResult {
   /** Issues #391/#394: the same value as `Daemon.status().lifecycle`. */
   lifecycle: DaemonLifecycle;
   activeTasks: ControlActiveTask[];
-  runtimeIds: string[];
+  /** Absent for a pre-#392 control peer: report unknown, never probe locally. */
+  runtimes?: RuntimeObservation[];
+  /** Absent for a pre-#392 control peer. */
+  environment?: ServiceEnvironmentStatus;
+  /** Timestamp of the same environment-resolved event; absent before startup resolves it. */
+  environmentResolvedAt?: string;
   /** M4 Phase 4 (part B.3): per-active-task queue watermarks — see {@link TaskQueueWatermark}. */
   queueWatermarks: TaskQueueWatermark[];
   /**

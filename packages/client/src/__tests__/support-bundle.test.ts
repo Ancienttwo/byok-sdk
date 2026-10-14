@@ -8,6 +8,7 @@ import type { ConnectControlResult } from '../bin/control-client';
 import { runSupportBundleCommand } from '../bin/commands/support-bundle';
 import { runDoctorCommand } from '../bin/commands/doctor';
 import { appendAuditRecord, auditLogPath } from '../bin/audit-log';
+import { DAEMON_RECORD_KINDS } from '../daemon/daemon-record';
 import { DeviceStore } from '../daemon/store';
 import {
   createSupportBundle,
@@ -45,6 +46,18 @@ function config(storeDir: string): DaemonConfig {
 }
 
 describe('support bundle privacy and bounds', () => {
+  it('uses DaemonRecord kinds for all recent facts and excludes removed progress and unknown kinds', async () => {
+    const dir = await tempDir();
+    const kinds = [...DAEMON_RECORD_KINDS, 'progress', 'future-record'];
+    await fs.writeFile(auditLogPath(dir), kinds.map(kind => JSON.stringify({ kind, ts: '2026-10-14T00:00:00.000Z' })).join('\n') + '\n');
+    const bundle = await createSupportBundle(config(dir), dir, { adapters: [], connectControl: unreachable });
+    expect(bundle.recentEvents.facts.map(fact => fact.kind)).toEqual([...DAEMON_RECORD_KINDS]);
+    for (const fact of bundle.recentEvents.facts) expect(DAEMON_RECORD_KINDS).toContain(fact.kind);
+    for (const kind of ['device-assertion', 'runtime-disposal-failed', 'agent-memory-intent-integrity', 'environment-resolved']) {
+      expect(bundle.recentEvents.facts.map(fact => fact.kind)).toContain(kind);
+    }
+  });
+
   it('allowlists facts and excludes config, device, audit, control and path sentinels byte-for-byte', async () => {
     const dir = await tempDir();
     const record = {

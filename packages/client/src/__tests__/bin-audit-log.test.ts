@@ -27,6 +27,21 @@ function lifecycleRecord(connection: 'open' | 'connecting', ts: string): DaemonR
 }
 
 describe('bin/audit-log: appendAuditRecord / readAuditRecords', () => {
+  it('captures queued lines before nested records mutate, and returns the exact stdout bytes', async () => {
+    const storeDir = await tmpDir('byok-audit-capture-');
+    const appender = createAuditAppender(storeDir);
+    const lifecycle = { phase: 'running' as const, connection: 'connecting' as 'connecting' | 'open' };
+    const record: DaemonRecord = { kind: 'lifecycle', ts: '2026-10-14T00:00:00.000Z', lifecycle };
+    const first = appender.append(record);
+    lifecycle.connection = 'open';
+    const second = appender.append(record);
+    expect(first).not.toBe(second);
+    expect(JSON.parse(first).lifecycle.connection).toBe('connecting');
+    expect(JSON.parse(second).lifecycle.connection).toBe('open');
+    await appender.flush();
+    expect(await fs.readFile(auditLogPath(storeDir), 'utf8')).toBe(`${first}\n${second}\n`);
+  });
+
   it('writes exactly formatDaemonRecordLine(record) plus a newline — the bytes start prints to stdout', async () => {
     const storeDir = await tmpDir('byok-audit-line-');
     const record: DaemonRecord = { kind: 'completed', ts: '2026-01-01T00:00:00.000Z', taskId: 't1', sessionRef: 's', summaryBytes: 3 };

@@ -13,6 +13,8 @@ import { createSupportBundle } from '../diagnostics/support-bundle';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { connectControlClient } from '../bin/control-client';
+import type { ControlStatusResult } from '../daemon/control-protocol';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -155,7 +157,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
 
   it('#395 sentinel: no task content reaches stdout, stderr, audit.jsonl or the support bundle', async () => {
     const SENTINEL = 'SENTINEL-395';
-    const adapter = new StubRuntimeAdapter('pi');
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available', version: SENTINEL });
     const workspaceRoot = await tmpDir('byok-start-workspace-sentinel-');
     const storeDir = await tmpDir('byok-start-store-sentinel-');
     const config = {
@@ -181,6 +183,14 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
         daemon, log: (l) => stdout.push(l), error: (l) => stderr.push(l), signal: controller.signal, onReady: () => { ready = true; },
       });
       await vi.waitFor(() => expect(ready).toBe(true));
+      const connection = await connectControlClient({ storeDir, productId: config.productId });
+      if (!connection.ok) throw new Error('expected the authenticated live control socket');
+      try {
+        const live = await connection.client.request<ControlStatusResult>('status');
+        expect(live.runtimes?.find(runtime => runtime.id === 'pi')?.version).toBe(SENTINEL);
+      } finally {
+        connection.client.close();
+      }
       const offer = (taskId: string) => server.send(createEnvelope('task.offer', { instruction: `do ${SENTINEL}` }, { taskId, seq: server.nextSeq() }));
 
       // Content in every AgentEvent field, an artifact that exists (name and

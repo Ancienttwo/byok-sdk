@@ -113,7 +113,7 @@ Run `bun run --filter @byok-sdk/example-basic test` after the root build. Tests
 allocate and clean all databases/homes/stores under owned temporary directories.
 
 This reference assumes one Host scheduling worker. SQLite revision CAS is tested
-across connections, but multi-worker send leases/scheduling are not implemented.
+across connections, but multi-worker send leases and scheduling are not provided.
 At startup, the Host enumerates its own known goal/side IDs: for outstanding
 reservations, call recoverGoalStep/recoverBtw before reconcileGoal/reconcileBtw.
 It must also schedule ticks while a native step is stuck; helper calls alone

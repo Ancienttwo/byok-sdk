@@ -11,6 +11,7 @@ import {
   runServiceStopCommand,
   runUninstallCommand,
 } from '../bin/commands/service';
+import { generateWinswXml } from '../lifecycle/winsw';
 import { appendAuditRecord } from '../bin/audit-log';
 import { formatHaltRemedy } from '../bin/format';
 
@@ -51,6 +52,14 @@ describe('bin/commands/service: buildServiceDefinition', () => {
       '--config',
       path.resolve('/c.json'),
       '--service',
+    ]);
+  });
+
+  it('#392: generated WinSW XML installs start --service as the final argument', () => {
+    const def = buildServiceDefinition(baseConfig(), '/config/acme.json', ['--winsw-bin', 'C:\\bundled\\WinSW.exe']);
+    const xml = generateWinswXml({ id: def.name, displayName: def.displayName!, program: def.program, logDir: def.logDir });
+    expect([...xml.matchAll(/<argument>(.*?)<\/argument>/g)].map(match => match[1])).toEqual([
+      process.argv[1], 'start', '--config', path.resolve('/config/acme.json'), '--service',
     ]);
   });
 

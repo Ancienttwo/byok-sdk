@@ -2,7 +2,8 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import { GIT_ERROR_CATEGORIES } from './git-workspace';
 import { MAX_TRACKED_TASKS, type AssertionLane, type DaemonEvent } from './observer';
-import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
+import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentStatus, type ServiceEnvironmentRecord, type ServiceEnvironmentUnavailableCode } from '../lifecycle/service-environment';
+import type { RuntimeObservation } from '../runtime-detection';
 
 /**
  * The content-free projection of what a daemon observed — the ONE shape every
@@ -43,7 +44,7 @@ export type DaemonRecord =
   | { kind: 'lifecycle'; ts: string; lifecycle: DaemonLifecycle }
   | { kind: 'paired'; ts: string; deviceId: string }
   | { kind: 'unpaired'; ts: string }
-  | { kind: 'runtimes-detected'; ts: string; runtimeIds: string[] }
+  | { kind: 'runtimes-detected'; ts: string; runtimes: Array<Omit<RuntimeObservation, 'version'>> }
   | { kind: 'shutdown-requested'; ts: string; reasonBytes: number }
   | { kind: 'shutdown-complete'; ts: string; reasonBytes: number; undeliveredOutboxCount?: number }
   | { kind: 'stale-approval-decision'; ts: string; taskId: string; decision: 'approve' | 'reject'; reasonBytes?: number }
@@ -145,6 +146,27 @@ export const STABLE_GIT_ERROR_CATEGORIES = new Set<string>(GIT_ERROR_CATEGORIES)
 
 function bytes(text: string): number {
   return Buffer.byteLength(text, 'utf8');
+}
+
+const UNAVAILABLE_CODES = new Set<string>(SERVICE_ENVIRONMENT_UNAVAILABLE_CODES);
+
+/** The one closed environment shape, shared by projection and persistent/live readers. */
+export function parseEnvironmentRecord(value: unknown): ServiceEnvironmentRecord | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.kind !== 'environment-resolved' || typeof record.ts !== 'string' || !Number.isFinite(Date.parse(record.ts))) return undefined;
+  const keys = Object.keys(record);
+  const only = (...allowed: string[]): boolean => keys.every((key) => ['kind', 'ts', 'source', ...allowed].includes(key));
+  if (record.source === 'inherited' && only()) return { ts: record.ts, status: { source: 'inherited' } };
+  if (record.source === 'unavailable' && only('code') && typeof record.code === 'string' && UNAVAILABLE_CODES.has(record.code)) {
+    return { ts: record.ts, status: { source: 'unavailable', code: record.code as ServiceEnvironmentUnavailableCode } };
+  }
+  if (record.source === 'login-shell' && only('shell', 'durationMs') && typeof record.shell === 'string'
+    && /^[A-Za-z0-9._-]{1,64}$/u.test(record.shell) && typeof record.durationMs === 'number'
+    && Number.isSafeInteger(record.durationMs) && record.durationMs >= 0) {
+    return { ts: record.ts, status: { source: 'login-shell', shell: record.shell, durationMs: record.durationMs } };
+  }
+  return undefined;
 }
 
 interface TurnTally {
@@ -265,7 +287,14 @@ function recordOf(event: Exclude<DaemonEvent, { kind: 'progress' }>): DaemonReco
     case 'unpaired':
       return { kind: 'unpaired', ts };
     case 'runtimes-detected':
-      return { kind: 'runtimes-detected', ts, runtimeIds: event.runtimes.map((runtime) => runtime.id) };
+      // Actual runtime output is untrusted text; the advisory's qualified
+      // version is adapter configuration and preserves its warning offline.
+      return { kind: 'runtimes-detected', ts, runtimes: event.runtimes.map(({ version: _version, ...observation }) => observation) };
+    case 'environment-resolved': {
+      const record = parseEnvironmentRecord({ kind: 'environment-resolved', ts, ...event.status });
+      if (record === undefined) throw new TypeError('invalid environment-resolved event');
+      return { kind: 'environment-resolved', ts: record.ts, ...record.status };
+    }
     case 'shutdown-requested':
       return { kind: 'shutdown-requested', ts, reasonBytes: bytes(event.reason) };
     case 'shutdown-complete':

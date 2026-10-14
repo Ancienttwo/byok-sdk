@@ -66,53 +66,17 @@ import { runVersionCommand } from './version';
  *   clearly-marked `live-*` section (pid/uptime/transport/active tasks) is
  *   appended; if not, one line says so and the persisted view above stands
  *   on its own, never faked as "live".
- * - `runtimes` (and the compact runtime summary inside `status`) is a FRESH
- *   STANDALONE PROBE instead: it constructs the same bundled pi/claude/codex
- *   adapter set `createDaemon` would (see `bin/runtime-probe.ts`) and calls
- *   `detect()` and descriptor capabilities directly, independent of whether any daemon
- *   is running. "What's on this machine right now" is more useful live than
- *   stale, and detection is cheap/side-effect-free, so there's no reason to
- *   read a historical snapshot here instead. The control socket deliberately
- *   never duplicates this probe (see `control-protocol.ts`'s `status`
- *   method doc comment) — this CLI keeps owning it.
- * - `tasks --follow` subscribes to the control socket's `tasks.subscribe`
- *   (a live feed, full fidelity). The control socket is the only channel
- *   that carries task content (issue #395), so `--follow` needs a running
- *   daemon and fails otherwise; plain `tasks` shows the recorded history.
- * - `unpair` tries the control socket first: if reachable, that's a
- *   DEFINITIVE "yes, a daemon is running against this store" (foreground or
- *   service, no distinction needed anymore) — it sends `shutdown
- *   {reason:'unpair'}` and waits for the daemon to actually exit. Finding F6:
- *   `device.json` is only cleared once that exit is CONFIRMED (or `--force`
- *   is passed, logged as an explicit WARNING) — an unconfirmed exit (the RPC
- *   failing, teardown hanging, or the exit-poll timing out) refuses instead,
- *   since the daemon may still be running and could silently re-write the
- *   credential (see `commands/unpair.ts`'s `UnpairExitUnconfirmedError`).
- *   Only when the socket isn't reachable does it fall back to
- *   the heuristic, OS-service-state-based flow this command has had since
- *   finding P1 #2: refusing outright when an installed background service
- *   is confirmed running, or when it cannot even confirm one ISN'T running
- *   (bypassable with `--force`) — see `commands/unpair.ts`'s own doc
- *   comment for the full history and residual gap that heuristic flow
- *   still has (a foreground process is invisible to it, which is exactly
- *   what the control-socket path above now fixes).
- * - `approve`/`reject` call the control socket's `approvals.resolve`
- *   directly — there's no persisted-state fallback for these (approving a
- *   task only ever means anything against a LIVE daemon); daemon
- *   unreachable is reported as a clear, specific error. Still honest about
- *   what these can resolve today: no bundled runtime adapter raises an
- *   approval yet, so a real daemon always answers `not_found` — see
- *   `commands/approve-reject.ts`'s own doc comment.
- * - `approvals` (finding F4: operators otherwise had no way to ever learn
- *   an `approvalId` to pass to `approve`/`reject`) calls the control
- *   socket's `approvals.list` and renders one line per pending approval
- *   (approvalId/taskId/age/summary excerpt) — same no-fallback rule as
- *   `approve`/`reject` above. See `commands/approvals.ts`'s own doc
- *   comment.
- * - `toolsets reload` reads the host-owned config file in the CLI process,
- *   then sends the complete candidate plus the live registry's expected
- *   revision over the authenticated socket. It has no offline fallback: no
- *   running daemon means there is no runtime registry to mutate.
+ * - `runtimes` is an explicit fresh local probe. `status` reads the daemon's
+ *   cached startup observations over control when online and timestamped audit
+ *   observations when offline. It never executes a local runtime probe.
+ *   Online doctor/support bundles also use daemon observations; offline
+ *   diagnostics label their explicit probes `local-shell`. Older daemons with
+ *   missing observation fields are reported as unknown.
+ * - `tasks --follow` requires the authenticated control socket's
+ *   `tasks.subscribe` feed, preserving full content in the live view.
+ *   Offline task snapshots reduce content-free DaemonRecords; there is no
+ *   audit-to-event reconstruction or audit follow fallback. Run
+ *   `byok-agent start` (or the service) for a live subscription.
  *
  * `pair`/`start` are the only commands that construct or run a daemon in THIS
  * process. `toolsets reload` mutates only an already-running daemon over the

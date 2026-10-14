@@ -2,7 +2,7 @@ import { createDaemon, type Daemon, type DaemonConfig } from '../../index';
 import { DaemonHaltError, type DaemonHaltReason } from '../../daemon/daemon-lifecycle';
 import { createDaemonRecordProjector, type DaemonRecord } from '../../daemon/daemon-record';
 import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../../lifecycle/service-environment';
-import { createAuditAppender, formatDaemonRecordLine } from '../audit-log';
+import { createAuditAppender } from '../audit-log';
 import { resolveStoreDir } from '../config';
 import { formatHaltRemedy, formatServiceEnvironment } from '../format';
 
@@ -71,14 +71,11 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
     error(`audit log append failed: ${err instanceof Error ? err.message : String(err)}`),
   );
   const persist = (record: DaemonRecord): void => {
-    log(formatDaemonRecordLine(record));
-    audit.append(record);
+    log(audit.append(record));
   };
 
-  // Issue #392: where this process's environment came from. Recorded only
-  // once start() succeeded — i.e. by the process that owns the store — so a
-  // rejected second `start` never overwrites what the running daemon sees;
-  // a start that fails prints it to stderr instead.
+  // The daemon emits environment-resolved after acquiring ownership (#439).
+  // Only startup failure diagnostics use this host-side snapshot.
   const environment = deps.environment ?? serviceEnvironmentStatus();
 
   // M4 Phase 2: the daemon's control socket (`shutdown` RPC — see
@@ -139,7 +136,6 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
       unsubscribe();
       return await halted(err.reason);
     }
-    persist({ kind: 'environment-resolved', ts: new Date().toISOString(), ...environment });
     persist({ kind: 'daemon-started', ts: new Date().toISOString(), productId: config.productId });
     deps.onReady?.();
 

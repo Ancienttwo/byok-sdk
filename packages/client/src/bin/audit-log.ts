@@ -2,12 +2,11 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { parseDaemonLifecycle, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { isDaemonRecordKind, type DaemonRecord } from '../daemon/daemon-record';
-import {
-  SERVICE_ENVIRONMENT_UNAVAILABLE_CODES,
-  type ServiceEnvironmentStatus,
-  type ServiceEnvironmentUnavailableCode,
-} from '../lifecycle/service-environment';
+import type { ServiceEnvironmentStatus, ServiceEnvironmentRecord } from '../lifecycle/service-environment';
+import { parseEnvironmentRecord } from '../daemon/daemon-record';
+export { parseEnvironmentRecord } from '../daemon/daemon-record';
 import { atomicWriteFile } from '../util/atomic-write';
+import { parseRuntimeObservations } from '../runtime-detection';
 
 /**
  * `audit.jsonl`: the durable record of what a running `byok-agent start`
@@ -35,7 +34,7 @@ import { atomicWriteFile } from '../util/atomic-write';
  * Bounded: past `MAX_AUDIT_LOG_BYTES` the file is atomically rewritten to its
  * most recent `AUDIT_LOG_TRIM_TARGET_LINES` lines, keeping one lifecycle
  * anchor per still-open task (capped at `MAX_LIVE_TASK_ANCHORS`) and the
- * latest `lifecycle` and `environment-resolved` records — see
+ * latest `lifecycle`, `runtimes-detected` and `environment-resolved` records — see
  * {@link compactPreservingLiveTasks}.
  *
  * Readers drop any line that is not a well-formed record of a kind in
@@ -91,6 +90,9 @@ export const MAX_LIVE_TASK_ANCHORS = 500;
  * identical.
  */
 export function formatDaemonRecordLine(record: DaemonRecord): string {
+  if (record.kind === 'environment-resolved' && parseEnvironmentRecord(record) === undefined) {
+    throw new TypeError('invalid environment-resolved record');
+  }
   return JSON.stringify(record);
 }
 
@@ -101,6 +103,12 @@ export function formatDaemonRecordLine(record: DaemonRecord): string {
  * `atomicWriteFile`.
  */
 export async function appendAuditRecord(storeDir: string, record: DaemonRecord): Promise<void> {
+  const line = formatDaemonRecordLine(record);
+  await appendAuditLine(storeDir, line);
+}
+
+/** The already-serialized line is immutable while filesystem work is queued. */
+async function appendAuditLine(storeDir: string, line: string): Promise<void> {
   await fs.mkdir(storeDir, { recursive: true, mode: AUDIT_STORE_DIR_MODE });
   // `mkdir`'s own `mode` only applies at CREATION time. Re-assert on every
   // append, best-effort: a failure here (e.g. a storeDir owned by a
@@ -114,7 +122,7 @@ export async function appendAuditRecord(storeDir: string, record: DaemonRecord):
     // pre-existing permissive file is tightened before the new line lands in
     // it, even when the append below then fails.
     await handle.chmod(AUDIT_LOG_MODE);
-    await handle.appendFile(`${formatDaemonRecordLine(record)}\n`, 'utf8');
+    await handle.appendFile(`${line}\n`, 'utf8');
   } finally {
     await handle.close();
   }
@@ -150,11 +158,11 @@ function lifecycleRecordTaskId(record: DaemonRecord): string | undefined {
  *   lifecycle record falls in the dropped prefix, that one line (an anchor),
  *   capped at {@link MAX_LIVE_TASK_ANCHORS} — the most recently touched are
  *   kept and one warning is logged per rotation for the overflow;
- * - the latest `environment-resolved` and `lifecycle` records, which describe
+ * - the latest `environment-resolved`, `runtimes-detected` and `lifecycle` records, which describe
  *   the daemon for as long as it runs (issues #392, #391/#394).
  *
  * Anchors are spliced in before the kept tail, so the file stays oldest
- * first. `kept.length` is bounded by `targetLines + MAX_LIVE_TASK_ANCHORS + 2`.
+ * first. `kept.length` is bounded by `targetLines + MAX_LIVE_TASK_ANCHORS + 3`.
  */
 function compactPreservingLiveTasks(lines: readonly string[], targetLines: number): string[] {
   if (lines.length <= targetLines) return [...lines];
@@ -164,12 +172,14 @@ function compactPreservingLiveTasks(lines: readonly string[], targetLines: numbe
   const lastIndexForTask = new Map<string, number>();
   let lastEnvironmentIndex: number | undefined;
   let lastLifecycleIndex: number | undefined;
+  let lastRuntimesIndex: number | undefined;
 
   for (let i = 0; i < lines.length; i++) {
     const record = parseRecordLine(lines[i]);
     if (!record) continue;
     if (record.kind === 'environment-resolved') lastEnvironmentIndex = i;
     if (record.kind === 'lifecycle') lastLifecycleIndex = i;
+    if (record.kind === 'runtimes-detected') lastRuntimesIndex = i;
     const taskId = lifecycleRecordTaskId(record);
     if (taskId === undefined) continue;
     lastIndexForTask.set(taskId, i);
@@ -192,7 +202,7 @@ function compactPreservingLiveTasks(lines: readonly string[], targetLines: numbe
     );
   }
 
-  for (const index of [lastEnvironmentIndex, lastLifecycleIndex]) {
+  for (const index of [lastEnvironmentIndex, lastLifecycleIndex, lastRuntimesIndex]) {
     if (index !== undefined && index < cutIndex) anchorIndices = [...anchorIndices, index].sort((a, b) => a - b);
   }
   return [...anchorIndices.map((i) => lines[i]), ...lines.slice(cutIndex)].filter((l): l is string => l !== undefined);
@@ -226,7 +236,9 @@ export function createAuditAppender(storeDir: string, onError: (err: unknown) =>
   let chain: Promise<void> = Promise.resolve();
   return {
     append(record) {
-      chain = chain.then(() => appendAuditRecord(storeDir, record)).catch(onError);
+      const line = formatDaemonRecordLine(record);
+      chain = chain.then(() => appendAuditLine(storeDir, line)).catch(onError);
+      return line;
     },
     flush: () => chain,
   };
@@ -234,43 +246,17 @@ export function createAuditAppender(storeDir: string, onError: (err: unknown) =>
 
 /** Appends records to `audit.jsonl` in call order; see {@link createAuditAppender}. */
 export interface AuditAppender {
-  append(record: DaemonRecord): void;
+  /** Validates, captures and queues the one line synchronously; returns it without a newline for stdout. */
+  append(record: DaemonRecord): string;
   /** Resolves once every append queued so far has been written (or reported to `onError`). */
   flush(): Promise<void>;
 }
 
 /** The `environment-resolved` record (issue #392), as `status`, `doctor` and the support bundle report it. */
-export interface EnvironmentRecord {
-  status: ServiceEnvironmentStatus;
-  ts: string;
-}
-
-const UNAVAILABLE_CODES = new Set<string>(SERVICE_ENVIRONMENT_UNAVAILABLE_CODES);
+export type EnvironmentRecord = ServiceEnvironmentRecord;
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {};
-}
-
-/** Closed values and a shell basename only: anything else is not an `environment-resolved` record. */
-function parseEnvironmentStatus(record: Record<string, unknown>): ServiceEnvironmentStatus | undefined {
-  const keys = Object.keys(record);
-  const only = (...allowed: string[]): boolean => keys.every((key) => ['kind', 'ts', 'source', ...allowed].includes(key));
-  if (record.source === 'inherited' && only()) return { source: 'inherited' };
-  if (record.source === 'unavailable' && only('code') && typeof record.code === 'string' && UNAVAILABLE_CODES.has(record.code)) {
-    return { source: 'unavailable', code: record.code as ServiceEnvironmentUnavailableCode };
-  }
-  if (
-    record.source === 'login-shell' &&
-    only('shell', 'durationMs') &&
-    typeof record.shell === 'string' &&
-    /^[A-Za-z0-9._-]{1,64}$/u.test(record.shell) &&
-    typeof record.durationMs === 'number' &&
-    Number.isSafeInteger(record.durationMs) &&
-    record.durationMs >= 0
-  ) {
-    return { source: 'login-shell', shell: record.shell, durationMs: record.durationMs };
-  }
-  return undefined;
 }
 
 /**
@@ -297,9 +283,13 @@ function parseRecordLine(line: string | undefined): DaemonRecord | undefined {
       return lifecycle === undefined ? undefined : { kind: 'lifecycle', ts: raw.ts, lifecycle };
     }
     case 'environment-resolved': {
-      if (!Number.isFinite(Date.parse(raw.ts))) return undefined;
-      const status = parseEnvironmentStatus(raw);
-      return status === undefined ? undefined : { kind: 'environment-resolved', ts: raw.ts, ...status };
+      const environment = parseEnvironmentRecord(raw);
+      return environment === undefined ? undefined : { kind: 'environment-resolved', ts: environment.ts, ...environment.status };
+    }
+    case 'runtimes-detected': {
+      const runtimes = parseRuntimeObservations(raw.runtimes);
+      if (runtimes?.some(runtime => runtime.version !== undefined)) return undefined;
+      return runtimes === undefined ? undefined : { kind: 'runtimes-detected', ts: raw.ts, runtimes };
     }
     case 'offered':
     case 'claimed':

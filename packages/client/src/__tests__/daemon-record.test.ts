@@ -2,6 +2,7 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { createDaemonRecordProjector, DAEMON_RECORD_KINDS, isDaemonRecordKind, type DaemonEvent, type DaemonRecord } from '../index';
 import { MAX_TRACKED_TASKS } from '../daemon/observer';
+import { parseRuntimeObservations, validateRuntimeDetectResult } from '../runtime-detection';
 
 const SENTINEL = 'SENTINEL-395';
 
@@ -40,7 +41,7 @@ const EVERY_KIND: DaemonEvent[] = [
   { kind: 'lifecycle', ts: 'T', lifecycle: { phase: 'running', connection: 'open' } },
   { kind: 'paired', ts: 'T', deviceId: 'dev-1' },
   { kind: 'unpaired', ts: 'T' },
-  { kind: 'runtimes-detected', ts: 'T', runtimes: [{ id: 'pi', version: SENTINEL }] },
+  { kind: 'runtimes-detected', ts: 'T', runtimes: [{ id: 'pi', present: true, outcome: 'available', version: SENTINEL, steer: true, resume: true }] },
   { kind: 'shutdown-requested', ts: 'T', reason: SENTINEL },
   { kind: 'shutdown-complete', ts: 'T', reason: SENTINEL, undeliveredOutboxCount: 0 },
   { kind: 'agent-memory-intent-integrity', ts: 'T', intentId: 'i1', disposition: 'conflict' },
@@ -49,6 +50,17 @@ const EVERY_KIND: DaemonEvent[] = [
 ];
 
 describe('daemon-record: createDaemonRecordProjector', () => {
+  it('keeps the configured unqualified-version advisory without persisting actual runtime version text', () => {
+    const [record] = createDaemonRecordProjector().project({
+      kind: 'runtimes-detected', ts: 'T',
+      runtimes: [{ id: 'codex', present: true, outcome: 'available', version: SENTINEL, qualifiedVersion: '0.101.0', steer: true, resume: true }],
+    });
+    if (record?.kind !== 'runtimes-detected') throw new Error('expected a runtime record');
+    expect(record.runtimes).toEqual([{ id: 'codex', present: true, outcome: 'available', qualifiedVersion: '0.101.0', steer: true, resume: true }]);
+    expect(parseRuntimeObservations(record.runtimes)).toEqual(record.runtimes);
+    expect(validateRuntimeDetectResult({ kind: 'available', advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '0.101.0' } }))
+      .toEqual({ kind: 'available', advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '0.101.0' } });
+  });
   it('a turn of 30 deltas and 3 tool calls is ONE turn record with correct counts', () => {
     const projector = createDaemonRecordProjector();
     const records: DaemonRecord[] = [];
@@ -122,7 +134,7 @@ describe('daemon-record: createDaemonRecordProjector', () => {
       contentType: 'text/plain',
       inlineBytes: Buffer.byteLength(Buffer.from(SENTINEL).toString('base64')),
     });
-    expect(records).toContainEqual({ kind: 'runtimes-detected', ts: 'T', runtimeIds: ['pi'] });
+    expect(records).toContainEqual({ kind: 'runtimes-detected', ts: 'T', runtimes: [{ id: 'pi', present: true, outcome: 'available', steer: true, resume: true }] });
     expect(records).toContainEqual({ kind: 'git-workspace', ts: 'T', taskId: 't1', workspaceId: 'w1', phase: 'failed' });
     expect(records).toContainEqual({ kind: 'device-assertion', ts: 'T', result: 'denied', lane: 'task', taskId: 't1', reason: 'audience_denied', audienceBytes: 9 });
   });

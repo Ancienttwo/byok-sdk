@@ -194,7 +194,8 @@ describe('bin/tasks-view: deriveTasksFromRecords', () => {
       { kind: 'lifecycle', ts: '2026-01-01T00:00:00.000Z', lifecycle: { phase: 'running', connection: 'open' } },
       { kind: 'paired', ts: '2026-01-01T00:00:01.000Z', deviceId: 'dev-1' },
       { kind: 'unpaired', ts: '2026-01-01T00:00:02.000Z' },
-      { kind: 'runtimes-detected', ts: '2026-01-01T00:00:03.000Z', runtimeIds: [] },
+      { kind: 'runtimes-detected', ts: '2026-01-01T00:00:03.000Z', runtimes: [] },
+      { kind: 'environment-resolved', ts: '2026-01-01T00:00:03.500Z', source: 'inherited' },
       { kind: 'artifact', ts: '2026-01-01T00:00:04.000Z', taskId: 'orphan', nameBytes: 1, contentType: 'text/plain' },
     ];
     expect(deriveTasksFromRecords(records)).toEqual([]);

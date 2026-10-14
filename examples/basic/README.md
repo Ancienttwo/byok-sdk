@@ -1,12 +1,17 @@
 # @byok-sdk/example-basic
 
-End-to-end walking-skeleton demo for the BYOK SDK (see `docs`/plan: 里程碑 M0).
+End-to-end demo for the BYOK SDK.
 A hono server embeds `@byok-sdk/server`'s self-hosted façade over the shared
 `@byok-sdk/cloud` domain kernel and serves a single plain-HTML/JS page (no
 frontend build step). A separate `byok-agent` daemon process (from
 `@byok-sdk/client`) runs on "the user's machine", uses authenticated
-long-poll HTTP for both directions, and drives the local `pi` coding-agent
-runtime.
+long-poll HTTP for both directions, and drives the local coding-agent
+runtimes it detects (`pi`, `claude`, `codex`).
+
+`server.ts` runs with the SDK defaults and is meant to be copied as is: do not
+shorten `longPollHoldMs` to work around a readiness problem.
+`quickstart-smoke.test.ts` starts the unmodified file and runs this loop with a
+stub runtime on every CI run.
 
 Not published — this package is `private` and lives under `examples/`.
 
@@ -55,10 +60,9 @@ node packages/client/dist/bin/byok-agent.js pair <code> --server http://localhos
 node packages/client/dist/bin/byok-agent.js start --config /tmp/byok-example-config.json
 ```
 
-(Once `@byok-sdk/client` publishes its `byok-agent` bin, this is just `byok-agent
-pair`/`byok-agent start` on PATH — see that package's own docs. Invoking
-`dist/bin/byok-agent.js` directly here just avoids requiring a global/linked
-install for the demo.)
+(`@byok-sdk/client` ships the `byok-agent` bin; an installed copy takes the same
+`pair` and `start` arguments. Invoking `dist/bin/byok-agent.js` directly here
+avoids requiring a global or linked install for the demo.)
 
 `productId` in the daemon config **must** match the server's
 `BYOK_EXAMPLE_PRODUCT_ID` (defaults to `byok-example-basic` on both sides —
@@ -68,12 +72,20 @@ see `server.ts`); a mismatch is rejected by authenticated HTTP admission.
 
 1. Click **Create pairing code** and copy it into the daemon's `pair` command
    above.
-2. Once `byok-agent start` prints its `{"kind":"daemon-started",...}` line
-   (stdout is JSON Lines, one content-free record per line), the machine
-   appears under **Connected machines** (polled every 2s).
-3. Enter an instruction, pick a runtime (`pi` by default; `claude` and
-   `codex` are available when that CLI is installed on the daemon's machine)
-   and click **Dispatch**. The progress feed streams live via
+2. Wait for the daemon to report that the server accepted it: `byok-agent
+   start` prints a JSON Lines record with `kind: "lifecycle"` and
+   `lifecycle: { phase: "running", connection: "open" }`, and
+   `byok-agent status` shows the same `phase=running connection=open`. The
+   earlier `{"kind":"daemon-started",...}` record only means local startup finished; it is
+   printed before the server has answered. Once the daemon is open, the machine
+   appears under **Connected machines** (polled every 2s). If the daemon ends
+   with a halted `lifecycle` record or `daemon halted: ...`, follow the
+   remedy it prints.
+3. Enter an instruction and click **Dispatch**. The runtime list shows the
+   runtimes the connected daemon detected and reported (the chips under
+   **Connected machines** are the same report). A runtime whose credentials
+   were not found is marked "(no credentials detected)", and **Dispatch** is
+   disabled while no machine is connected. The progress feed streams live via
    SSE; approve/cancel buttons call the task's `TaskHandle` directly.
 
 ## Optional local Git checkpoint workspaces
@@ -147,15 +159,14 @@ export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY, GEMINI_API_KEY, etc.
 
 Without one, pi's `prompt` call fails immediately with "No API key found..."
 and the task reports `task.fail`. This is normal, expected fail-closed
-behavior — not a bug — and is exactly what the M0 acceptance run's fake-pi
-fixture path also exercises (see the SDK repo's M0 report), just without
-needing a real key.
+behavior, not a bug.
 
 ## Testing with z.ai GLM
 
 `pi` (`@earendil-works/pi-coding-agent`) already ships a **built-in**
 `zai` provider — no extension, no `models.json`, no code change anywhere in
-this SDK is needed. The installed 0.84.1 registry defines it as:
+this SDK is needed. The pinned pi release (1.2.0, `piRuntimePin` in
+`@byok-sdk/client`) defines it as:
 
 ```
 provider: "zai", api: "openai-completions", baseUrl: "https://api.z.ai/api/coding/paas/v4"
@@ -164,13 +175,16 @@ provider: "zai", api: "openai-completions", baseUrl: "https://api.z.ai/api/codin
 The separate `zai-coding-cn` provider uses `ZAI_CODING_CN_API_KEY` for the
 mainland-China endpoint.
 
-### Exact model IDs (from the installed 0.84.1 bundled registry)
+### Exact model IDs (from the pinned pi 1.2.0 bundled registry)
 
 ```
 zai/glm-4.7            (204.8K context, 131K max output)
 zai/glm-5-turbo        (200K context,   131K max output)
 zai/glm-5.2            (1M context,     131K max output)
 zai/glm-5.2-highspeed  (1M context,     131K max output)
+zai/glm-5.3            (1M context,     131K max output)
+zai/glm-5.3-flash      (1M context,     131K max output)
+zai/glm-5.3-highspeed  (1M context,     131K max output)
 ```
 
 (`glm-4.7` remains a conservative default; newer accounts may prefer
@@ -210,7 +224,9 @@ once, rather than something byok selects per task:
    and put `.pi/agent/settings.json` under that scratch `HOME` instead.)
 
 3. **Do not set `BYOK_PI_BIN`** for this — leave it unset so
-   `resolvePiBin()` selects the real user-installed `pi` executable on PATH.
+   `resolvePiBin()` selects the `pi` executable of the pinned
+   `@earendil-works/pi-coding-agent` package installed with `@byok-sdk/client`.
+   There is deliberately no lookup of a globally installed `pi`.
 
 4. Run the daemon exactly as in "Run it" above (`pair` then `start`) with
    `ZAI_API_KEY` exported and the settings file in place, then dispatch:
@@ -236,8 +252,9 @@ all absent):
 
 - `pi --list-models` (offline, with a dummy `ZAI_API_KEY` and the
   `defaultProvider`/`defaultModel` settings above) correctly lists exactly
-  the 5 `zai` models above — confirms the config is recognized.
-- `pi -p "say hi"` (same setup, no `--provider`/`--model` flags, dummy key)
+  the 7 `zai` models above (rechecked on pi 1.2.0) — confirms the config is
+  recognized.
+- `pi -p "say hi"` (an earlier check on an older pi release; same setup, no `--provider`/`--model` flags, dummy key)
   produced `401 token expired or incorrect` — a genuine response from the
   real `api.z.ai` endpoint, confirming the request really is routed to z.ai
   by default, authenticated with the configured key, with no further config
