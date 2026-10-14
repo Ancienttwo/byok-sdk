@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import path from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
@@ -111,7 +112,7 @@ describe('Agent memory helper P1 regressions', () => {
   it('rejects a Linux helper configuration before native admission can forward it to the macOS-only helper', async () => {
     await withPlatform('linux', () => {
       expect(isAgentMemorySecureFilesystemAvailable(true)).toBe(true);
-      expect(() => createDaemonWithAdapters({
+      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' },
         productName: 'Agent memory Linux helper regression guard',
         productId: 'agent-memory-linux-helper-regression-guard',

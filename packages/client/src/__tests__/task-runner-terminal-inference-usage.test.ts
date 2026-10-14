@@ -1,3 +1,4 @@
+import { testScratchOwner, testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -31,7 +32,7 @@ async function makeRunner(
   withRelease = true,
 ): Promise<TaskRunner> {
   const release = Object.freeze({ version: '0.6.0' });
-  const deps: TaskRunnerDeps = {
+  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-terminal-usage-workspace-'),
     deviceId: 'device-terminal-usage',
@@ -166,7 +167,7 @@ describe('TaskRunner terminal inference usage projection', () => {
     try {
       const adapter = new StubRuntimeAdapter('codex');
       daemon = createDaemonWithAdapters(
-        {
+        { storage: { scratchRoot: testScratchRoot() },
           localAgentRelease: { version: '0.6.0' },
           productName: 'Terminal usage composition test',
           productId: 'terminal-usage-composition-test',

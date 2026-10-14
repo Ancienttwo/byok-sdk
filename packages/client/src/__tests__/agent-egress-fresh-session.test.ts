@@ -1,3 +1,4 @@
+import { testScratchRoot, testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -47,7 +48,7 @@ describe('fresh Agent egress session authority', () => {
     const hostStorageRoot = await tmpDir('byok-fresh-egress-home-');
     const adapter = new StubRuntimeAdapter('pi');
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-fresh-egress-test' },
         productName: 'Fresh egress test',
         productId: 'fresh-egress-test',
@@ -203,7 +204,7 @@ describe('fresh Agent egress session authority', () => {
     const handoffs = new AgentSessionHandoffStore();
     vi.spyOn(handoffs, 'record').mockRejectedValueOnce(new Error('fsync unavailable'));
     const sent: Envelope[] = [];
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot: await tmpDir('byok-fresh-fsync-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }),

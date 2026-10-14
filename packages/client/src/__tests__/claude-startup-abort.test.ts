@@ -1,3 +1,4 @@
+import { inertScratch } from './fixtures/inert-scratch';
 import { EventEmitter, getEventListeners } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import { promises as fs } from 'node:fs';
@@ -42,12 +43,14 @@ function fixture(holdWrite = false, onSpawn?: () => void) {
   return { child, spawnFn, write, finishWrite: () => finishWrite(), init: () => child.stdout.write('{"type":"system","subtype":"init","session_id":"ready"}\n') };
 }
 async function operation(spawnFn: SpawnFn, signal?: AbortSignal, withMcp = false) {
+const __executionScratch = withMcp ? inertScratch('/inert-config') : inertScratch();
+
   const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: 'inert-fixture', source: 'path' }), spawnFn });
   const offer = { instruction: 'hello' };
   const mcp = withMcp ? { mcpServers: { byokagentmessage: { command: '/inert-mcp' } } } : {};
   const prepared = await adapter.prepare({ offer, descriptor: adapter.descriptor, requiredToolsetIds: [], ...mcp });
   if (prepared.kind !== 'prepared') throw new Error('unexpected fixture admission rejection');
-  const input: RuntimeOperationStartInput = {
+  const input: RuntimeOperationStartInput = { scratch: __executionScratch,
     kind: 'instruction', instruction: 'hello', env: {}, ...(signal ? { signal } : {}), ...mcp,
     manifest: sealRuntimeOperationManifest({ taskId: 'abort-fixture', runtimeId: 'claude', descriptor: adapter.descriptor,
       requiredToolsetIds: [], workspace: { workspaceDir: '/inert-workspace' }, forwardedEnvironmentNames: [] }),
@@ -82,20 +85,20 @@ describe('Claude startup cancellation ownership', () => {
     expect(fake.spawnFn).not.toHaveBeenCalled();
   });
 
-  it('owns a late MCP directory allocation after cancellation without spawning', async () => {
-    let completeAllocation!: (dir: string) => void;
-    vi.spyOn(fs, 'mkdtemp').mockReturnValue(new Promise<string>(resolve => { completeAllocation = resolve; }));
+  it('owns a late MCP config write after cancellation without spawning', async () => {
+    let completeAllocation!: () => void;
+    vi.spyOn(fs, 'writeFile').mockReturnValue(new Promise<void>(resolve => { completeAllocation = resolve; }));
     const chmod = vi.spyOn(fs, 'chmod').mockResolvedValue(undefined);
     const cleanup = vi.spyOn(fs, 'rm').mockResolvedValue(undefined);
     const controller = new AbortController(); const fake = fixture();
     const op = await operation(fake.spawnFn, controller.signal, true);
     const result = observe(op.start()); await flush(); controller.abort(); await flush();
     expect(result.status).toBe('pending');
-    completeAllocation('/inert-late-config'); await flush();
+    completeAllocation(); await flush();
     expect(result.error).toBeInstanceOf(RuntimeStartupDisposalFailure);
     await (result.error as RuntimeStartupDisposalFailure).retryDisposal();
-    expect(cleanup).toHaveBeenCalledWith('/inert-late-config', { recursive: true, force: true });
-    expect(chmod).not.toHaveBeenCalled();
+    expect(cleanup).toHaveBeenCalledWith('/inert-config', { recursive: true, force: true });
+    expect(chmod).toHaveBeenCalled();
     expect(fake.spawnFn).not.toHaveBeenCalled();
     expect(tree.dispose).not.toHaveBeenCalled();
   });

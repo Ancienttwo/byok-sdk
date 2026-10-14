@@ -1,3 +1,4 @@
+import { testExecutionScratch } from './fixtures/execution-scratch';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,7 +17,7 @@ async function fixture() {
   return {
     root,
     options: {
-      kind:'pi-rpc' as const, sessionCwd, projectionRoot:path.join(root,'private-projections'),
+      kind:'pi-rpc' as const, sessionCwd, scratch: await testExecutionScratch(),
       keysSessionDir:path.join(root,'native-sessions'),
       resolveInvocation: vi.fn(() => ({ command:process.execPath, entry:path.join(root,'sdk entry.js') })),
       env:{PATH:process.env.PATH!, HOME:sessionCwd, PI_PACKAGE_DIR:'/ambient-assets', BYOK_PI_PERMISSION_MODE:'invalid', OPENAI_API_KEY:'ambient-secret'},
@@ -33,7 +34,7 @@ describe('client runtime launch resources', () => {
     expect(prepared.kind).toBe('prepared');
     expect(resolveBin).not.toHaveBeenCalled();
     if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
-    const resources = await prepared.operation.resolveRuntimeLaunch!({kind,cwd:f.options.sessionCwd,env:{},projectionRoot:f.options.projectionRoot});
+    const resources = await prepared.operation.resolveRuntimeLaunch!({kind,cwd:f.options.sessionCwd,env:{},scratch:f.options.scratch});
     try {
       expect(resolveBin).toHaveBeenCalledOnce();
       expect(resources.kind).toBe(kind === 'prepared' ? 'pi-prepared' : 'pi-rpc');
@@ -60,12 +61,12 @@ describe('client runtime launch resources', () => {
         expect(stat.uid).toBe(process.getuid!());
       }
       expect(await fs.readdir(projection)).toEqual([]);
-      expect(path.dirname(projection)).toBe(f.options.projectionRoot);
+      expect(path.dirname(projection)).toBe(f.options.scratch.sdkDir);
       // The keys launcher sets the Pi directories of its own child.
       expect(resources.env.PI_CODING_AGENT_DIR).toBeUndefined();
       await resources.release(); await resources.release();
       await expect(fs.lstat(projection)).rejects.toMatchObject({code:'ENOENT'});
-      expect(await fs.readdir(f.options.projectionRoot)).toEqual([]);
+      await expect(fs.lstat(f.options.scratch.sdkDir)).rejects.toMatchObject({code:'ENOENT'});
     } finally {await resources.release();}
   });
 
@@ -76,7 +77,7 @@ describe('client runtime launch resources', () => {
     try {
       expect(resources.credentialSource).toBe('pi-auth-store');
       expect(resources.projectionDir).toBeUndefined();
-      expect(resources.env).toEqual(f.options.env);
+      expect(resources.env).toEqual({ ...f.options.env, ...f.options.scratch.env });
     } finally { await resources.release(); }
   });
 
@@ -84,14 +85,15 @@ describe('client runtime launch resources', () => {
     const f = await fixture();
     f.options.resolveInvocation.mockImplementation(() => { throw new Error('no Pi'); });
     await expect(resolvePiRuntimeLaunch(f.options)).rejects.toThrow('no Pi');
-    expect(await fs.readdir(f.options.projectionRoot)).toEqual([]);
+    await expect(fs.lstat(f.options.scratch.sdkDir)).rejects.toMatchObject({code:'ENOENT'});
   });
 
-  it('rejects projection roots inside the session, including a symlinked ancestor', async () => {
+  it('rejects SDK projection inside the session and symlinked scratch ancestors', async () => {
     const f = await fixture();
-    await expect(resolvePiRuntimeLaunch({...f.options,projectionRoot:path.join(f.options.sessionCwd,'projection')})).rejects.toThrow(/inside session cwd/);
-    const alias = path.join(f.root,'alias'); await fs.symlink(f.options.sessionCwd,alias);
-    await expect(resolvePiRuntimeLaunch({...f.options,projectionRoot:path.join(alias,'projection')})).rejects.toThrow(/resolves inside session cwd/);
+    const nested = { ...f.options.scratch, sdkDir: path.join(f.options.sessionCwd, 'projection') };
+    await expect(resolvePiRuntimeLaunch({ ...f.options, scratch: nested })).rejects.toThrow(/inside session cwd/);
+    const alias = path.join(f.root, 'alias'); await fs.symlink(f.options.sessionCwd, alias);
+    await expect(resolvePiRuntimeLaunch({ ...f.options, scratch: { ...nested, sdkDir: path.join(alias, 'projection') } })).rejects.toThrow(/resolves inside session cwd/);
   });
 
   it('builds the direct and the keys launcher spawn commands', async () => {
@@ -110,7 +112,7 @@ describe('client runtime launch resources', () => {
       });
     } finally { await resources.release(); }
     const { keysSessionDir: _unused, ...direct } = f.options;
-    const auth = await resolvePiRuntimeLaunch(direct);
+    const auth = await resolvePiRuntimeLaunch({ ...direct, scratch: await testExecutionScratch() });
     try {
       expect(() => piLaunchCommand(auth, 'pi-rpc', 'a'.repeat(64), [], {command:'/launcher', args:[], profileArgs:[]}))
         .toThrow(/projection directory/);
@@ -126,7 +128,7 @@ describe('single-file re-entry (sdkHelperHost)', () => {
     const prepared = await adapter.prepare({offer:{instruction:'Never sent'},descriptor:adapter.descriptor,requiredToolsetIds:[]});
     if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
     const assets = fileURLToPath(new URL('../../dist/assets/', import.meta.url));
-    const resources = await prepared.operation.resolveRuntimeLaunch!({kind,cwd:f.options.sessionCwd,env:{PI_PACKAGE_DIR:assets},projectionRoot:f.options.projectionRoot});
+    const resources = await prepared.operation.resolveRuntimeLaunch!({kind,cwd:f.options.sessionCwd,env:{PI_PACKAGE_DIR:assets},scratch:f.options.scratch});
     try {
       expect(resolveBin).not.toHaveBeenCalled();
       expect(resources).toMatchObject({ kind: entry, command: process.execPath, fixedArgs: ['__byok_sdk_helper', entry] });

@@ -1,3 +1,4 @@
+import { createDaemonScratch } from '../daemon/retention/scratch';
 import type { DiagnosticCheck, DiagnosticsSnapshot } from './types';
 import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeDetectResult } from '../types';
 import { createHash, randomUUID } from 'node:crypto';
@@ -16,7 +17,6 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import type { DaemonConfig, RuntimeAdapter } from '../index';
 import { readLastLifecycleRecord, readLastEnvironmentRecord, parseEnvironmentRecord } from '../bin/audit-log';
@@ -276,7 +276,7 @@ async function inspectJournal(storeDir: string): Promise<DiagnosticsSnapshot['jo
           reason: 'journal exceeds the bounded diagnostics copy limit',
         };
       }
-      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-journal-inspect-'));
+      const tempDir = await createDaemonScratch(storeDir, 'diag');
       const { DatabaseSync } = loadSqliteModule();
       let db: InstanceType<typeof DatabaseSync> | undefined;
       try {
@@ -707,6 +707,7 @@ export async function collectDiagnostics(
       if (live.environment !== undefined && live.environmentResolvedAt !== undefined) {
         environment = parseEnvironmentRecord({ kind: 'environment-resolved', ts: live.environmentResolvedAt, ...live.environment }) ?? { status: 'unknown' };
       }
+      if (live.storage === undefined || !Array.isArray(live.storage.classes) || !Object.hasOwn(live.storage, 'lastSweep')) throw new Error('daemon status omitted required retention storage');
       liveLifecycle = parseDaemonLifecycle(live.lifecycle);
       control = {
         status: 'online',
@@ -716,7 +717,7 @@ export async function collectDiagnostics(
         pendingApprovalCount: live.approvalsPending,
         operationalHealth: live.operationalHealth,
         ...(live.outbound === undefined ? {} : { outbound: live.outbound }),
-        ...(live.storage ? { storage: live.storage } : {}),
+        storage: live.storage,
       };
     } catch {
       control = { status: 'offline', reason: 'daemon status request failed' };

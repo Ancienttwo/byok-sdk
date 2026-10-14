@@ -14,7 +14,7 @@ import { SqliteProviderProfileStore, parseModelProviderProfile, exactProviderPro
 import { parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER } from './pi-runtime-identity.mjs';
 
 import { PiAdapter } from '@byok-sdk/client/adapters';
-import { sealRuntimeOperationManifest } from '@byok-sdk/client';
+import { createExecutionScratch, ensureSecureDir, sealRuntimeOperationManifest } from '@byok-sdk/client';
 
 const require = createRequire(import.meta.url);
 const keysRoot = path.dirname(require.resolve('@byok-sdk/keys/package.json'));
@@ -33,7 +33,7 @@ const piRuntime = parsePiRuntimeIdentity(clientManifest, '@byok-sdk/client packa
 assert.equal(piManifest.name, piRuntime.packageName);
 assert.equal(piManifest.version, piRuntime.version);
 const dir = await realpath(await mkdtemp(path.join(tmpdir(), 'packed-pi-launcher-')));
-const projectionRoot = await realpath(await mkdtemp(path.join(tmpdir(), 'packed-pi-projections-')));
+const scratchRoot = await realpath(await mkdtemp(path.join(process.platform === 'win32' ? tmpdir() : '/tmp', 'byok-pks-')));
 const sdkPiEntry = path.join(clientRoot, 'dist/bin/byok-pi-rpc.js');
 let requests = 0;
 const server = createServer((_req, res) => { requests++; res.writeHead(500); res.end('No inference allowed'); });
@@ -294,11 +294,12 @@ await runtime.dispose();
   assert.equal(prepared.kind,'prepared');
   assert.equal(typeof prepared.operation.resolveRuntimeLaunch,'function');
   let directRuntime;
+  const directScratch = await createExecutionScratch({ root: scratchRoot });
   const captureDirect = async () => {
-    directRuntime=await prepared.operation.resolveRuntimeLaunch({kind:'instruction',cwd:dir,env:directEnv,projectionRoot:path.join(dir,'direct-projections')});
+    directRuntime=await prepared.operation.resolveRuntimeLaunch({kind:'instruction',cwd:dir,env:directEnv,scratch:directScratch});
     const manifest=sealRuntimeOperationManifest({taskId:'packed-direct-capture',runtimeId:'pi',descriptor:adapter.descriptor,
       requiredToolsetIds:[],workspace:{workspaceDir:dir},forwardedEnvironmentNames:Object.keys(directRuntime.env).sort()});
-    await prepared.operation.start({kind:'instruction',mcpEnv:mcpTaskConfig.mcpEnv,manifest,instruction:'Never sent',env:directRuntime.env,runtimeLaunch:directRuntime,
+    await prepared.operation.start({kind:'instruction',mcpEnv:mcpTaskConfig.mcpEnv,manifest,instruction:'Never sent',env:directRuntime.env,runtimeLaunch:directRuntime,scratch:directScratch,
       mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation});
   };
   try {
@@ -334,7 +335,7 @@ await runtime.dispose();
       } finally {await rm(path.dirname(configPath),{recursive:true,force:true});}
       console.log(`[release-pack] installed Pi${piManifest.version} explicit resolve/start capture and SDK host RPC passed; session cwd and real reserved MCP handshake observed; prompts=0`);
     }
-  } finally {await directRuntime?.release();}
+  } finally {await directScratch.release();}
 
   // Admission against the REAL installed launcher bin. `--runtime-entry` is
   // required at its parser, so every invocation here states its child grammar
@@ -419,11 +420,12 @@ await runtime.dispose();
     const keysPrepared=await keysAdapter.prepare({offer:{instruction:'Never sent',dispatchSelection:selection},
       descriptor:keysAdapter.descriptor,requiredToolsetIds:[],mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation});
     assert.equal(keysPrepared.kind,'prepared');
-    const keysRuntime=await keysPrepared.operation.resolveRuntimeLaunch({kind:'instruction',cwd:dir,env,projectionRoot});
+    const keysScratch=await createExecutionScratch({root:scratchRoot});
+    const keysRuntime=await keysPrepared.operation.resolveRuntimeLaunch({kind:'instruction',cwd:dir,env,scratch:keysScratch});
     try {
       const manifest=sealRuntimeOperationManifest({taskId:'packed-keys-capture',runtimeId:'pi',descriptor:keysAdapter.descriptor,
         dispatchSelection:selection,requiredToolsetIds:[],workspace:{workspaceDir:dir},forwardedEnvironmentNames:Object.keys(keysRuntime.env).sort()});
-      await assert.rejects(keysPrepared.operation.start({kind:'instruction',mcpEnv:mcpTaskConfig.mcpEnv,manifest,instruction:'Never sent',env:keysRuntime.env,runtimeLaunch:keysRuntime,
+      await assert.rejects(keysPrepared.operation.start({kind:'instruction',mcpEnv:mcpTaskConfig.mcpEnv,manifest,instruction:'Never sent',env:keysRuntime.env,runtimeLaunch:keysRuntime,scratch:keysScratch,
         mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation}),/pi runtime process could not be spawned/);
       const option=(name)=>keysInvocation.args[keysInvocation.args.indexOf(name)+1];
       assert.equal(option('--pi-cwd'),dir);
@@ -432,7 +434,13 @@ await runtime.dispose();
       assert.equal(keysInvocation.options.cwd,dir);
       assert.equal(keysInvocation.options.env.ZAI_API_KEY,undefined);
       const configPath=option('--config');
-      await mkdir(path.dirname(configPath),{recursive:true}); await writeFile(configPath,keysConfigBytes);
+      // The intercepted spawn failed, so the adapter already disposed SDK
+      // resources. Verify that receipt, then reconstruct only the captured
+      // hermetic fixture files for the independent launcher leg below.
+      await assert.rejects(readFile(configPath),{code:'ENOENT'});
+      await ensureSecureDir(path.dirname(configPath));
+      await ensureSecureDir(keysRuntime.projectionDir);
+      await writeFile(configPath,keysConfigBytes);
       await rm(reservedServerCwdMarker,{force:true});
       try {
         // Windows lowpriv CI rounds 8-9 (35206575959, 35208560163): this
@@ -457,7 +465,7 @@ await runtime.dispose();
         const reservedCwd=(await readFile(reservedServerCwdMarker,'utf8')).trim();
         assert.equal(await realpath(reservedCwd),dir);
       } finally {await rm(path.dirname(configPath),{recursive:true,force:true});}
-    } finally {await keysRuntime.release();}
+    } finally {await keysScratch.release();}
 
     // Preserve the original active MCP registry checks as explicitly separate
     // native-session evidence; no custom extension is injected into the SDK host.
@@ -476,5 +484,5 @@ await runtime.dispose();
   if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
   await new Promise(resolve => server.close(resolve));
   await rm(dir, { recursive: true, force: true });
-  await rm(projectionRoot, { recursive: true, force: true });
+  await rm(scratchRoot, { recursive: true, force: true });
 }

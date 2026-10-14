@@ -867,14 +867,21 @@ export class InputPreparationStore {
    * sending) must still be on disk, whatever the retention horizon says. The
    * horizon resumes the moment `unpin` lands.
    */
-  gc(nowMs = this.now(), preserveInFlight = false): Promise<{ artifactsRemoved: number; recordsRemoved: number }> {
+  gc(nowMs = this.now(), preserveInFlight = false, limit = Number.MAX_SAFE_INTEGER, onRemoval?: (bytes: number) => void): Promise<{ artifactsRemoved: number; recordsRemoved: number }> {
     return this.enqueue(async () => {
       this.assertOpen();
       let artifactsRemoved = 0;
+      const removeArtifact = async (recordId: string) => {
+        const file = this.artifactPath(recordId);
+        const stat = await fs.lstat(file).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
+        await fs.rm(file, { force: true });
+        onRemoval?.(stat?.size ?? 0);
+      };
       const survivors: InputPreparationRecord[] = [];
       const removedIds: string[] = [];
+      if (!Number.isSafeInteger(limit) || limit < 1) throw new TypeError('invalid preparation retention limit');
       for (const record of this.records.values()) {
-        if (record.pin !== undefined || (preserveInFlight && !isTerminalInputPreparationState(record.state))) {
+        if (artifactsRemoved + removedIds.length >= limit || record.pin !== undefined || (preserveInFlight && !isTerminalInputPreparationState(record.state))) {
           survivors.push(record);
           continue;
         }
@@ -883,7 +890,7 @@ export class InputPreparationStore {
           continue;
         }
         if (record.artifactBytes > 0 && nowMs >= Date.parse(record.artifactExpiresAt)) {
-          await fs.rm(this.artifactPath(record.recordId), { force: true });
+          await removeArtifact(record.recordId);
           artifactsRemoved += 1;
           survivors.push({ ...record, artifactBytes: 0, updatedAt: new Date(nowMs).toISOString() });
           continue;
@@ -891,7 +898,7 @@ export class InputPreparationStore {
         survivors.push(record);
       }
       for (const recordId of removedIds) {
-        await fs.rm(this.artifactPath(recordId), { force: true });
+        await removeArtifact(recordId);
       }
       if (artifactsRemoved === 0 && removedIds.length === 0) return { artifactsRemoved: 0, recordsRemoved: 0 };
       try {

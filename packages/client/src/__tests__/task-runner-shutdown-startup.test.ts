@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,7 +15,7 @@ describe('TaskRunner shutdown admission/start ownership barrier', () => {
     const sent: Envelope[] = [];
     const adapter = new StubRuntimeAdapter();
     const release = adapter.blockStart();
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter], deviceId: 'shutdown-device', workspaceRoot: path.join(dir, 'workspace'),
       send: event => { sent.push(event); },
       blobClient: {

@@ -40,3 +40,6 @@ export type {
 } from '../native-interactions';
 
 export { buildRuntimeEnv } from '../daemon/environment';
+
+export { createExecutionScratch, ScratchRootPathError } from '../daemon/retention/scratch';
+export type { ExecutionScratch } from '../daemon/retention/scratch';

@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import net from 'node:net';
@@ -8,7 +9,7 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { acquireDaemonOwner, DaemonOwnerActiveError, storeMutexEndpoint } from '../daemon/daemon-owner';
 import { controlSocketPath, controlTokenPath } from '../daemon/control-protocol';
-import { LocalStoragePressureEngine } from '../daemon/journal/storage-policy';
+import { RetentionSweeper } from '../daemon/retention/sweeper';
 import { isSqliteAvailable } from '../daemon/journal/sqlite-support';
 import { OperationalHealthTracker } from '../daemon/operational-health';
 import { connectControlClient, isControlDaemonGone } from '../bin/control-client';
@@ -121,7 +122,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     const workspaceRoot = await tmpDir(`byok-stop-parity-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-stop-parity-${productId}-store-`);
     const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId, serverUrl: server.url, workspaceRoot, storeDir };
-    const built = createDaemonWithAdapters(config, [adapter]);
+    const built = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 } }, ...(config) }, [adapter]);
     await built.pair('pairing-code');
     await built.start();
     return { daemon: built, config, storeDir };
@@ -269,14 +270,13 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
       storeDir,
       hostedJournal: {
         mode: 'sqlite',
-        storagePolicy: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 },
       },
     };
-    daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter('pi')]);
+    daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 } }, ...(config) }, [new StubRuntimeAdapter('pi')]);
     await daemon.pair('pairing-code');
     await daemon.start();
 
-    const stopSpy = vi.spyOn(LocalStoragePressureEngine.prototype, 'stop').mockRejectedValueOnce(new Error('maintenance stop failed'));
+    const stopSpy = vi.spyOn(RetentionSweeper.prototype, 'stop').mockRejectedValueOnce(new Error('maintenance stop failed'));
     await expect(daemon.stop()).rejects.toThrow('maintenance stop failed');
     await expect(acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(DaemonOwnerActiveError);
     // Plan `shutdown-lease-order`: a retained lease must keep the exit gate
@@ -298,7 +298,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     const workspaceRoot = await tmpDir('byok-stop-concurrent-ws-');
     const storeDir = await tmpDir('byok-stop-concurrent-store-');
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 16 * 1024 * 1024 } },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
         productId: 'acme-stop-concurrent',
         serverUrl: server.url,
@@ -339,6 +339,9 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
 
     releaseClose();
     await waitFor(() => expect(adapter.sessions[0]!.closeCalled).toBe(true));
+    // Session.close is only the process receipt. The retained late writer also
+    // owns asynchronous SDK scratch removal and journal finalization.
+    await waitFor(() => expect(daemon!.status().activeTaskCount).toBe(0));
     await expect(daemon.stop()).resolves.toBeUndefined();
     const doctorLease = await acquireDaemonOwner(storeDir, 'doctor');
     await doctorLease.release();

@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -61,7 +62,7 @@ async function makeRunner(
   blobClient: BlobResolver,
   overrides: Partial<Pick<TaskRunnerDeps, 'maxInlineEventBytes' | 'maxTaskOutputBytes'>> = {},
 ): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = {
+  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-taskrunner-spill-workspace-'),
     deviceId: 'device-1',

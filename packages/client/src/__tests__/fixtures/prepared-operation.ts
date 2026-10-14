@@ -1,6 +1,6 @@
+import { isRuntimeStartupDisposalFailure } from '../../runtime-failure';
 import { projectPiMcpEnvironment } from '../../adapters/pi/mcp-environment';
-import os from 'node:os';
-import path from 'node:path';
+import { testExecutionScratch } from './execution-scratch';
 import type { TaskOfferPayload } from '@byok-sdk/protocol';
 import {
   sealRuntimeOperationManifest,
@@ -14,6 +14,7 @@ import {
 /** Test-only resources passed to a prepared operation after admission. */
 export interface PreparedOperationResources {
   workspaceDir: string;
+  scratch?: import('../../daemon/retention/scratch').ExecutionScratch;
   env: NodeJS.ProcessEnv;
   mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
   /** Stands in for the daemon's `tools/list` observation; required whenever `mcpServers` carries a non-reserved server. */
@@ -67,12 +68,13 @@ export async function startPreparedOperation(
     },
     forwardedEnvironmentNames: Object.keys(resources.env).sort(),
   });
+  const scratch = resources.scratch ?? await testExecutionScratch();
   const runtimeLaunch = await prepared.operation.resolveRuntimeLaunch?.({
     kind: 'instruction', cwd: resources.workspaceDir, env: resources.env,
-    projectionRoot: path.join(os.tmpdir(), 'byok-adapter-test-runtime-projections'),
+    scratch,
   });
   try {
-    return await prepared.operation.start({
+    return await prepared.operation.start({ scratch,
       ...(runtimeLaunch === undefined ? {} : { runtimeLaunch }),
       kind: 'instruction',
       mcpEnv: projectPiMcpEnvironment(resources.env),
@@ -86,7 +88,7 @@ export async function startPreparedOperation(
       ...(resources.approvalChannel === undefined ? {} : { approvalChannel: resources.approvalChannel }),
     });
   } catch (error) {
-    await runtimeLaunch?.release();
+    if (!isRuntimeStartupDisposalFailure(error)) await scratch.release();
     throw error;
   }
 }

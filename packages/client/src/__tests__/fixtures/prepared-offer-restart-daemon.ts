@@ -1,3 +1,4 @@
+import { ScratchRoot } from '../../daemon/retention/scratch';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../../daemon/agent-egress-policy';
 import { promises as fs } from 'node:fs';
 import { createInterface } from 'node:readline';
@@ -65,6 +66,7 @@ import { observationOf } from './mcp-observation';
  */
 
 interface Config {
+  scratchRoot: string;
   /** The preparation store directory. Shared by every lifetime, and the only thing that crosses a restart. */
   readonly storeDir: string;
   /** The task runner's own store directory. Shared too, so a redelivered task resolves the same workspace. */
@@ -180,7 +182,7 @@ await fs.mkdir(config.runnerStoreDir, { recursive: true });
 await fs.mkdir(config.workspaceRoot, { recursive: true });
 await fs.mkdir(config.agentHomeDir, { recursive: true });
 
-const runner = new TaskRunner({
+const runner = new TaskRunner({ scratchRoot: new ScratchRoot(config.scratchRoot),
   adapters: [adapter],
   workspaceRoot: config.workspaceRoot,
   deviceId: DEVICE_ID,

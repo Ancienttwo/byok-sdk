@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -168,7 +169,7 @@ describe('Agent memory MCP local authority', () => {
       approvalInteractive: true,
       mcpToolsets: false,
     });
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot,
       agentHome: new AgentHomeManager({ hostStorageRoot }),
@@ -221,7 +222,7 @@ describe('Agent memory MCP local authority', () => {
       approvalInteractive: true,
       mcpToolsets: true,
     });
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [unsupported, supported],
       getServerCapabilities: () => ['custom-harness'],
       workspaceRoot,

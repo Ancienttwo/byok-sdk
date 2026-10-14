@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -125,7 +126,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
     const workspaceRoot = await tmpDir(`byok-confirm-e2e-${productId}-ws-`);
     const storeDir = await tmpDir(`byok-confirm-e2e-${productId}-store-`);
     const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId, serverUrl: server.url, workspaceRoot, storeDir };
-    const built = createDaemonWithAdapters(config, [adapter], overrides);
+    const built = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter], overrides);
     await built.pair('pairing-code');
     await built.start();
     return { daemon: built, config, storeDir };

@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { afterEach, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -42,7 +43,7 @@ it.skipIf(process.platform === 'win32')('TaskRunner waits for the real durable j
     }
   }
   const adapter = new Adapter('pi'); server = await TestServer.start();
-  daemon = createDaemonWithAdapters({ localAgentRelease:{version:'0.0.0-test'},productName:'Test',productId:'durable-wiring',serverUrl:server.url,
+  daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  localAgentRelease:{version:'0.0.0-test'},productName:'Test',productId:'durable-wiring',serverUrl:server.url,
     storeDir, workspaceRoot:path.join(root,'workspace'),agentHome:{hostStorageRoot:path.join(root,'home')},hostedJournal:{mode:'sqlite'},durablePi:true,
     piByokLauncher:{command:'unused-custody',profileDbPath:path.join(root,'profiles'),sessionDir:path.join(root,'sessions')},
   },[adapter],{hostedJournal:{journal}});

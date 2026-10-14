@@ -49,40 +49,49 @@
 // CI output rather than silently swallowed.
 
 import { createDaemon, PiAdapter } from '@byok-sdk/client';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
 const PROBE_MARKER = 'BYOK_PACKAGING_PROBE';
 
 async function main(): Promise<void> {
-  const daemon = createDaemon({
-    localAgentRelease: { version: '0.0.0-packaging-probe' },
-    productId: 'byok-packaging-smoke',
-    productName: 'BYOK Packaging Smoke',
-    // Deliberately unroutable (port 0) -- start()/pair() are never called,
-    // so this is never dialed. Present only because DaemonConfig requires it.
-    serverUrl: 'http://127.0.0.1:0',
-    workspaceRoot: process.cwd(),
-    // Hermetic: never touch a real ~/.byok on whatever machine/CI runner
-    // this compiled binary happens to execute on.
-    storeDir: path.join(os.tmpdir(), 'byok-packaging-smoke', String(process.pid)),
-  });
+  const scratchRoot = await realpath(await mkdtemp(path.join(
+    process.platform === 'win32' ? os.tmpdir() : '/tmp', 'byok-pkg-',
+  )));
+  try {
+    const daemon = createDaemon({
+      localAgentRelease: { version: '0.0.0-packaging-probe' },
+      productId: 'byok-packaging-smoke',
+      productName: 'BYOK Packaging Smoke',
+      // Deliberately unroutable (port 0) -- start()/pair() are never called,
+      // so this is never dialed. Present only because DaemonConfig requires it.
+      serverUrl: 'http://127.0.0.1:0',
+      workspaceRoot: process.cwd(),
+      // Hermetic: never touch a real ~/.byok on whatever machine/CI runner
+      // this compiled binary happens to execute on.
+      storeDir: path.join(os.tmpdir(), 'byok-packaging-smoke', String(process.pid)),
+      storage: { scratchRoot },
+    });
 
-  // Dry: no pairing on disk yet, so this is `paired: false, connected:
-  // false` by construction -- the point is that it constructs and returns
-  // at all inside a bundled/compiled binary, not what it reports.
-  const daemonStatus = daemon.status();
+    // Dry: no pairing on disk yet, so this is `paired: false, connected:
+    // false` by construction -- the point is that it constructs and returns
+    // at all inside a bundled/compiled binary, not what it reports.
+    const daemonStatus = daemon.status();
 
-  // The actual hazard probe -- see file header.
-  const piDetect = await new PiAdapter().detect();
+    // The actual hazard probe -- see file header.
+    const piDetect = await new PiAdapter().detect();
 
-  const result = {
-    ok: true as const,
-    daemonStatus,
-    piDetect,
-    byokPiBinSet: process.env.BYOK_PI_BIN !== undefined,
-  };
-  console.log(`${PROBE_MARKER} ${JSON.stringify(result)}`);
+    const result = {
+      ok: true as const,
+      daemonStatus,
+      piDetect,
+      byokPiBinSet: process.env.BYOK_PI_BIN !== undefined,
+    };
+    console.log(`${PROBE_MARKER} ${JSON.stringify(result)}`);
+  } finally {
+    await rm(scratchRoot, { recursive: true, force: true });
+  }
 }
 
 main().catch((err: unknown) => {

@@ -1,3 +1,4 @@
+import { inertScratch } from './fixtures/inert-scratch';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { PiRpcMessage } from '../adapters/pi/rpc-client';
@@ -67,9 +68,9 @@ vi.mock('../mcp/client', async () => ({
 }));
 vi.mock('../adapters/pi/todo-locale-assets', () => ({ locateBundledPiAssets: () => sandbox.deny('Pi assets') }));
 vi.mock('../adapters/pi/runtime-launch', () => ({
-  resolvePiRuntimeLaunch: async (input: { kind: string; sessionCwd: string; cwd: string; env: NodeJS.ProcessEnv }) => {
+  resolvePiRuntimeLaunch: async (input: { kind: string; sessionCwd: string; cwd: string; env: NodeJS.ProcessEnv; scratch: import('../daemon/retention/scratch').ExecutionScratch }) => {
     if (input.kind !== 'pi-rpc') return sandbox.deny('non-RPC runtime');
-    return { kind: input.kind, sessionCwd: input.sessionCwd, cwd: input.cwd, env: input.env, release: async () => {} };
+    return { scratch: input.scratch, kind: input.kind, sessionCwd: input.sessionCwd, cwd: input.cwd, env: input.env, release: async () => {} };
   },
   piLaunchCommand: (_runtime: unknown, kind: string) => {
     if (kind !== 'pi-rpc') return sandbox.deny('non-RPC command');
@@ -116,18 +117,20 @@ afterEach(async () => {
 });
 
 async function events(aborted: boolean): Promise<AsyncIterator<AgentEvent>> {
+const __executionScratch = inertScratch();
+
   sandbox.frames.push({ type: 'agent_settled', aborted });
   const adapter = new PiAdapter({ resolveBin: () => sandbox.deny('resolve bin') });
   const offer = { instruction: 'synthetic settlement only' };
   const admitted = await adapter.prepare({ offer, descriptor: adapter.descriptor, requiredToolsetIds: [] });
   if (admitted.kind !== 'prepared') throw new Error('synthetic ordinary operation refused');
   const cwd = `${process.env.TMPDIR}/virtual-workspace`;
-  const runtimeLaunch = await admitted.operation.resolveRuntimeLaunch!({ kind: 'instruction', cwd, env: {}, projectionRoot: `${process.env.TMPDIR}/virtual-projections` });
+  const runtimeLaunch = await admitted.operation.resolveRuntimeLaunch!({ scratch: __executionScratch,  kind: 'instruction', cwd, env: {},  });
   const manifest = sealRuntimeOperationManifest({
     taskId: 'p2-synthetic', runtimeId: adapter.descriptor.id, descriptor: adapter.descriptor,
     requiredToolsetIds: [], workspace: { workspaceDir: cwd }, forwardedEnvironmentNames: [],
   });
-  session = await admitted.operation.start({ kind: 'instruction', runtimeLaunch, manifest, instruction: offer.instruction, env: {}, mcpEnv: {} });
+  session = await admitted.operation.start({ scratch: (runtimeLaunch).scratch,  kind: 'instruction', runtimeLaunch, manifest, instruction: offer.instruction, env: {}, mcpEnv: {} });
   return session.events[Symbol.asyncIterator]();
 }
 const abort = { phase: 'run', category: 'semantic', retry: 'non-retryable', message: 'pi run aborted before completion' };

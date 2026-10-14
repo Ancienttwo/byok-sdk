@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -47,7 +48,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     const workspaceRoot = await tmpDir('byok-start-workspace-');
     const storeDir = await tmpDir('byok-start-store-');
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
         productId: 'acme-start-product',
         serverUrl: server.url,
@@ -123,7 +124,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     await fs.writeFile(storeDir, 'x');
 
     daemon = createDaemonWithAdapters(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-badlog', serverUrl: server.url, workspaceRoot, storeDir: parent },
+      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-badlog', serverUrl: server.url, workspaceRoot, storeDir: parent },
       [adapter],
     );
     // Daemon itself uses `parent` (a real dir) for its OWN device store, but
@@ -313,7 +314,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     const workspaceRoot = await tmpDir('byok-start-workspace-');
     const storeDir = await tmpDir('byok-start-store-revoked-');
     daemon = createDaemonWithAdapters(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-revoked', serverUrl: server.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-revoked', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter('pi')],
     );
     const record = await daemon.pair('pairing-code');

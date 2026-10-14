@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -50,7 +51,7 @@ async function makeDeps(options: {
   if (store) await store.initialize();
   const manager = options.enabled ? (options.manager ?? new GitWorkspaceManager(root, { ownerId: `test-${Math.random()}` })) : undefined;
   if (manager) await manager.preflight();
-  const deps: TaskRunnerDeps = {
+  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
     adapters: [options.adapter ?? new StubRuntimeAdapter()],
     workspaceRoot: root,
     deviceId: 'device',
@@ -95,8 +96,8 @@ class LaunchingAdapter extends StubRuntimeAdapter {
       ...base,
       operation: {
         ...base.operation,
-        resolveRuntimeLaunch: async ({ cwd }) => ({
-          kind: 'pi-rpc', command: 'unused', fixedArgs: [], cwd, env: {}, sessionCwd: cwd,
+        resolveRuntimeLaunch: async ({ cwd, scratch }) => ({
+          scratch, kind: 'pi-rpc', command: 'unused', fixedArgs: [], cwd, env: {}, sessionCwd: cwd,
           credentialSource: 'pi-auth-store', release: () => this.launchRelease(),
         }),
       },
@@ -329,10 +330,10 @@ describe('TaskRunner local Git workspace lifecycle', () => {
           ...base,
           operation: {
             ...base.operation,
-            resolveRuntimeLaunch: async ({ cwd }) => {
+            resolveRuntimeLaunch: async ({ cwd, scratch }) => {
               await runner.handleEnvelope(envelope('task.cancel', 'launch-withdrawn', { reason: 'stop' }));
               return {
-                kind: 'pi-rpc', command: 'unused', fixedArgs: [], cwd, env: {}, sessionCwd: cwd,
+                scratch, kind: 'pi-rpc', command: 'unused', fixedArgs: [], cwd, env: {}, sessionCwd: cwd,
                 credentialSource: 'pi-auth-store', release: async () => {},
               };
             },
@@ -379,11 +380,13 @@ describe('TaskRunner local Git workspace lifecycle', () => {
   it('clears the in-flight offer when an offer cleanup step throws, so a redelivery is admitted', async () => {
     const sent: Envelope[] = [];
     const adapter = new LaunchingAdapter();
-    let launchReleaseFails = true;
-    adapter.launchRelease = async () => {
-      if (launchReleaseFails) { launchReleaseFails = false; throw new Error('fixture projection cleanup failure'); }
-    };
     const { deps } = await makeDeps({ adapter, sent });
+    const createScratch = deps.scratchRoot.create.bind(deps.scratchRoot);
+    let failCleanup = true;
+    vi.spyOn(deps.scratchRoot, 'create').mockImplementation(async () => {
+      const scratch = await createScratch();
+      return { ...scratch, release: async () => { if (failCleanup) { failCleanup=false; throw new Error('fixture projection cleanup failure'); } await scratch.release(); } };
+    });
     let claimFails = true;
     deps.beforeClaim = async () => {
       if (claimFails) { claimFails = false; throw new Error('fixture commitment failure'); }
@@ -401,15 +404,16 @@ describe('TaskRunner local Git workspace lifecycle', () => {
     await waitForAssertion(() => expect(terminal(sent, 'cleanup-throws').map((e) => e.type)).toEqual(['task.complete']));
   });
 
-  it('keeps the runtime launch projection cleanup at offer exit while a startup owner is retained', async () => {
+  it('retains scratch while a startup owner still owns the child and releases it after disposal', async () => {
     // The projection holds env or IPC references, not the key itself.
     // Removing it does not revoke a credential, so its timing stays as is.
     const sent: Envelope[] = [];
     const adapter = new LaunchingAdapter();
-    let launchReleases = 0;
-    adapter.launchRelease = async () => { launchReleases += 1; };
+    const scratchReleases = vi.fn();
     const releaseStart = adapter.blockStart();
     const { deps } = await makeDeps({ adapter, sent });
+    const createScratch = deps.scratchRoot.create.bind(deps.scratchRoot);
+    vi.spyOn(deps.scratchRoot, 'create').mockImplementation(async () => { const scratch=await createScratch(); return { ...scratch, release: async () => { scratchReleases(); await scratch.release(); } }; });
     const runner = new TaskRunner(deps);
     const offer = runner.handleEnvelope(envelope('retained', 'retained-projection', payload()));
     await waitForAssertion(() => expect(adapter.startCalls).toHaveLength(1));
@@ -417,7 +421,7 @@ describe('TaskRunner local Git workspace lifecycle', () => {
     await offer;
 
     expect(terminal(sent, 'retained-projection').map((e) => e.type)).toEqual(['task.cancelled']);
-    expect(launchReleases).toBe(1);
+    expect(scratchReleases).not.toHaveBeenCalled();
 
     runner.stopAcceptingOffers();
     releaseStart();
@@ -425,7 +429,7 @@ describe('TaskRunner local Git workspace lifecycle', () => {
     expect(adapter.sessions[0]?.closeCalled).toBe(true);
     // StubSession never releases the launch, so this only shows that the
     // startup disposal does not release it a second time.
-    expect(launchReleases).toBe(1);
+    expect(scratchReleases).toHaveBeenCalled();
   });
 
   it('retains the Git workspace lease until a failed disposal is retried successfully', async () => {

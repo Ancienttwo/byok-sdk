@@ -75,7 +75,7 @@ const { createServiceLifecycle, nodeAgentProgram } = await import(pathToFileURL(
 const { createByokServer } = await import(pathToFileURL(serverDistIndex).href);
 const { serve } = await import('@hono/node-server');
 
-const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-ctlsocket-check-'));
+const workDir = await fs.realpath(await fs.mkdtemp(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'byok-ctlsocket-check-')));
 const storeDir = path.join(workDir, 'store');
 const workspaceRoot = path.join(workDir, 'workspace');
 const logDir = path.join(workDir, 'logs');

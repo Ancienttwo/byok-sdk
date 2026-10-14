@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -38,20 +39,20 @@ afterEach(() => { constructed.splice(0); });
 
 describe('DaemonConfig.codexSandbox', () => {
   it('leaves the adapter default (danger-full-access) when unset', () => {
-    createDaemon(config());
+    createDaemon({ storage: { scratchRoot: testScratchRoot() }, ...(config()) });
     expect(constructed).toHaveLength(1);
     expect(constructed[0]).not.toHaveProperty('sandbox');
   });
 
   it.each(['read-only', 'workspace-write', 'danger-full-access', 'inherit'] as const)('passes %s to the bundled Codex adapter', (codexSandbox) => {
-    createDaemon(config({ codexSandbox }));
+    createDaemon({ storage: { scratchRoot: testScratchRoot() }, ...(config({ codexSandbox })) });
     expect(constructed).toHaveLength(1);
     expect(constructed[0]?.sandbox).toBe(codexSandbox);
   });
 
   it.each(['yolo', '', 'READ-ONLY', 1])('throws a TypeError for %j before any adapter is built', (codexSandbox) => {
-    expect(() => createDaemon(config({ codexSandbox: codexSandbox as never }))).toThrow(TypeError);
-    expect(() => createDaemon(config({ codexSandbox: codexSandbox as never }))).toThrow(/DaemonConfig\.codexSandbox must be one of/);
+    expect(() => createDaemon({ storage: { scratchRoot: testScratchRoot() }, ...(config({ codexSandbox: codexSandbox as never })) })).toThrow(TypeError);
+    expect(() => createDaemon({ storage: { scratchRoot: testScratchRoot() }, ...(config({ codexSandbox: codexSandbox as never })) })).toThrow(/DaemonConfig\.codexSandbox must be one of/);
     expect(constructed).toHaveLength(0);
   });
 });
@@ -59,12 +60,12 @@ describe('DaemonConfig.codexSandbox', () => {
 
 describe('injected adapter sandbox configuration', () => {
   it.each(['inherit', 'read-only', 'invalid', null, undefined])('rejects an explicit codexSandbox (%j)', (codexSandbox) => {
-    expect(() => createDaemonWithAdapters(config({ codexSandbox: codexSandbox as never }), []))
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config({ codexSandbox: codexSandbox as never })) }, []))
       .toThrow(/codexSandbox.*createDaemon.*adapter/i);
     expect(constructed).toHaveLength(0);
   });
 
   it('accepts injected adapters when no default-adapter option is present', () => {
-    expect(() => createDaemonWithAdapters(config(), [])).not.toThrow();
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config()) }, [])).not.toThrow();
   });
 });

@@ -1,3 +1,4 @@
+import { inertScratch } from './fixtures/inert-scratch';
 import { EventEmitter } from 'node:events';
 import { promises as fs } from 'node:fs';
 import { PassThrough } from 'node:stream';
@@ -41,7 +42,7 @@ function childFixture() {
 }
 function resources(): PreparedOperationResources {
   return {
-    workspaceDir: '/inert-workspace', env: {},
+    scratch: inertScratch(configDir), workspaceDir: '/inert-workspace', env: {},
     mcpServers: { byokagentmessage: { command: '/inert-mcp' } },
   };
 }

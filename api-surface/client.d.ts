@@ -410,24 +410,18 @@ export type { CodexAdapterOptions, CodexSandboxSetting } from './codex/codex-ada
 export { NativeInteractionController, NativeInteractionError } from '../native-interactions';
 export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from '../native-interactions';
 export { buildRuntimeEnv } from '../daemon/environment';
+export { createExecutionScratch, ScratchRootPathError } from '../daemon/retention/scratch';
+export type { ExecutionScratch } from '../daemon/retention/scratch';
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types';
 import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host';
 import { type ResolvedBin } from './resolve-bin';
 import { type SpawnFn } from './rpc-client';
-/**
- * `detect()`'s `authPresent` is pi's non-secret login-state observation
- * (`./auth-presence.ts`): a known provider credential env var *name*, or a
- * usable login record in pi's agent-dir `auth.json` for the configured
- * default provider. It never returns or logs a credential value — see the
- * credential-isolation rule on `RuntimeAdapter`.
- */
+/** Pi launch options; execution scratch and replica authority come from start input. */
 export interface PiAdapterOptions {
     /** Opt-in ordinary, lease-bound durable worker. */
-    durablePi?: {
-        readonly replicaRoot: string;
-    };
+    durablePi?: boolean;
     /** Override bin resolution — tests substitute the fake-pi fixture script. */
     resolveBin?: () => ResolvedBin;
     /** Override process spawning — tests substitute a fake spawn. */
@@ -717,9 +711,11 @@ export interface CopyPiRuntimeAssetsOptions {
  */
 export declare function copyPiRuntimeAssets(options: CopyPiRuntimeAssetsOptions): Promise<readonly string[]>;
 // ==== @byok-sdk/client dist/adapters/pi/runtime-launch.d.ts ====
+import type { ExecutionScratch } from '../../daemon/retention/scratch';
 /** The SDK-owned Pi entry a launch starts. */
 export type PiRuntimeLaunchKind = 'pi-rpc' | 'pi-prepared' | 'pi-durable';
 export interface PiRuntimeLaunchResources {
+    readonly scratch: ExecutionScratch;
     readonly kind: PiRuntimeLaunchKind;
     /** The interpreter, or the executable itself. */
     readonly command: string;
@@ -747,7 +743,7 @@ export declare function resolvePiRuntimeLaunch(options: {
     kind: PiRuntimeLaunchKind;
     sessionCwd: string;
     env: Readonly<Record<string, string | undefined>>;
-    projectionRoot: string;
+    scratch: ExecutionScratch;
     keysSessionDir?: string;
     /** The SDK Pi entry for this kind. */
     resolveInvocation: () => {
@@ -808,6 +804,11 @@ export declare function pruneReaderRuns(input: {
     readonly nowMs: number;
     readonly maxRetained?: number;
     readonly maxAgeMs?: number;
+    readonly maxDeletions?: number;
+    readonly entries?: AsyncIterable<import('node:fs').Dirent>;
+    readonly canRemove?: () => boolean;
+    readonly beforeRemove?: (directory: string) => Promise<void>;
+    readonly afterRemove?: (directory: string) => void;
 }): Promise<readonly string[]>;
 /** Relative path (with `/` separators) -> content fingerprint of one memory file. */
 export type AgentHomeMemoryDigest = ReadonlyMap<string, string>;
@@ -952,6 +953,8 @@ export declare class AgentHomeLayout {
     private readonly agentIdByCanonicalHome;
     private canonicalRoot?;
     constructor(hostStorageRoot: string);
+    /** Configured root, for read-only maintenance discovery; does not materialize a home. */
+    hostRootInput(): string;
     resolve(agentRefInput: AgentRef): Promise<AgentHomeResolution>;
     /**
      * Pure canonical-home derivation for read-only callers, such as the
@@ -999,6 +1002,10 @@ export declare class AgentHomeLeaseManager {
         ownerId?: string;
     });
     acquire(resolution: AgentHomeResolution): Promise<AgentHomeLease>;
+    /** No AgentRef is minted: this lease owns filesystem mutation, not a product profile. */
+    acquireMaintenance(agentsRoot: string, canonicalHome: string): Promise<{
+        release(): Promise<void>;
+    }>;
     private openLeaseMarker;
 }
 /**
@@ -1105,6 +1112,8 @@ export declare class AgentHomeManager {
     preflight(): Promise<void>;
     /** Synchronous construction-time preflight for strict Agent-only admission. */
     preflightSync(): void;
+    /** Maintenance uses the base writer registry and holds its root gate until work settles. */
+    withIdleHomeLease(agentId: string, work: (home: string) => Promise<void>): Promise<boolean>;
     /** Resolve and lease without applying downstream projection side effects. */
     acquire(agentRef: AgentRef): Promise<AgentHomeBinding>;
     /**
@@ -1128,19 +1137,12 @@ export declare class AgentHomeManager {
      * directory. A resumed reader requires its recorded directory to exist and
      * throws {@link AgentHomeReaderRunMissingError} when it does not.
      *
-     * Retention never removes the directory of an active reader.
-     * `referencedRuns` maps run directories to the last update time of the
-     * reader session handoff that points to them; `undefined` skips retention
-     * for this start. A retention failure does not block the Attempt: it is
-     * returned as `retentionError`.
+     * Reader directories remain after the terminal. The unified sweeper prunes
+     * only under an idle home base lease and preserves recent handoff references.
      */
     prepareReaderRun(binding: AgentHomeExecutionBinding, input: {
         readonly fresh: boolean;
-        readonly referencedRuns?: ReadonlyMap<string, number>;
-        readonly nowMs: number;
-    }): Promise<{
-        readonly retentionError?: unknown;
-    }>;
+    }): Promise<void>;
     /** A fresh reader may reuse only a real, empty run directory that no other active reader holds. */
     private assertReusableReaderRun;
     /** Initialize only after any requested session exact-match has succeeded. */
@@ -2466,6 +2468,7 @@ export declare class AgentSessionHandoffStore {
      * ledger throws, and the caller then skips retention.
      */
     readerRunReferences(home: string): Promise<ReadonlyMap<string, number>>;
+    readerRunReferences(home: string, canContinue: () => boolean): Promise<ReadonlyMap<string, number> | undefined>;
     /** Append-only, fsynced write. The caller awaits this before task.started. */
     record(input: Omit<AgentSessionHandoff, 'updatedAt' | 'terminalCause' | 'terminalReason'> & {
         readonly home?: string;
@@ -3209,8 +3212,8 @@ export declare class ConnectionManager {
 // ==== @byok-sdk/client dist/daemon/control-protocol.d.ts ====
 import type { TaskState } from '@byok-sdk/protocol';
 import type { ApprovalDecision, PendingApproval } from './approvals';
-import type { StorageCategory } from './journal/journal';
-import type { StoragePressureState } from './journal/storage-policy';
+import type { StoragePressureState } from './retention/pressure';
+import type { RetentionSnapshot } from './retention/sweeper';
 import type { OperationalHealthSnapshot } from './operational-health';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import type { RuntimeObservation } from '../runtime-detection';
@@ -3424,38 +3427,14 @@ export interface TaskQueueWatermark {
  * Two unrelated concepts sharing a name on one status result is how an
  * operator reads the wrong number during an incident.
  *
- * Present only when a daemon actually runs a storage policy
- * (`DaemonConfig.hostedJournal.storagePolicy`). Absent means "not measured",
- * which is a different statement from "measured, and fine" — so it is an
- * absent field rather than a zeroed one.
+ * Always present. Registry measurements and their timestamp are explicit;
+ * unconfigured scopes remain unmeasured, and budget is optional.
  */
-export interface ControlStorageStatus {
-    /** §12.7.2.1's four states. `hard-pressure` declines new offers; `emergency` refuses to ack at all. */
-    pressureState: StoragePressureState;
-    /** `maxStoreBytes` — the budget `usedBytes` is measured against. */
-    budgetBytes: number;
-    /** Total across every category below, as of `measuredAt`. */
-    usedBytes: number;
-    /** Bytes available to this daemon on the store's filesystem — the free-space axis of the watermark, independent of the budget. */
-    freeBytes: number;
-    measuredAt: string;
-    /** The five §12.7.2.1 categories, always reported separately — a single total cannot drive a category-scoped cleanup order or a category-scoped never-delete list. */
-    categories: ControlStorageCategoryUsage[];
-    /** The most recent bounded WAL checkpoint + incremental vacuum, if one has run in this daemon's lifetime. */
-    lastCompaction?: ControlStorageCompaction;
-}
-export interface ControlStorageCategoryUsage {
-    category: StorageCategory;
-    bytes: number;
-    /** `true` when this is a host-reported or sampled figure rather than one measured off the filesystem. */
-    approximate: boolean;
-}
-export interface ControlStorageCompaction {
-    checkpointed: boolean;
-    walFramesRemaining: number;
-    pagesVacuumed: number;
-    durationMs: number;
-    at: string;
+export interface ControlStorageStatus extends RetentionSnapshot {
+    readonly budget?: {
+        readonly budgetBytes: number;
+        readonly pressureState: StoragePressureState;
+    };
 }
 /** Result shape for the `status` method — see `create-daemon.ts`'s control-method wiring for how each field is sourced, and `bin/format.ts`'s `formatLiveStatusLines` for how the CLI renders it. */
 export interface ControlStatusResult {
@@ -3489,7 +3468,7 @@ export interface ControlStatusResult {
     /** M4 Phase 4 (part B.3): total approvals currently DISPATCHED (registered) across the whole daemon — the same count `approvals.list` returns, surfaced here too for a one-call status view. */
     approvalsPending: number;
     /** S3b (L-003): local storage usage + pressure — see {@link ControlStorageStatus}. Absent unless a storage policy is configured. */
-    storage?: ControlStorageStatus;
+    storage: ControlStorageStatus;
     /** Local retry budget. This is not the lifecycle above. */
     operationalHealth: OperationalHealthSnapshot;
     outbound: import('./outbound-settlement').OutboundStatus;
@@ -3829,6 +3808,7 @@ import type { AgentRef } from '../agent-home';
 import { type LocalAgentReleaseIdentity } from '../release-identity';
 import { type CodexSandboxSetting } from '../adapters/codex/codex-adapter';
 import { type DaemonLifecycle } from './daemon-lifecycle';
+import { type ControlStorageStatus } from './control-protocol';
 import { type InputPreparationAuthorityResolver, type InputPreparationCounterAdapter, type InputPreparationLimitsPolicyV1 } from '../input-preparation';
 import { type OperationalHealthSnapshot } from './operational-health';
 import { type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer';
@@ -3837,7 +3817,8 @@ import { GitWorkspaceStore } from './git-workspace-store';
 import { type DeviceEnrollment } from './store';
 import { type LocalTaskJournal } from './journal/journal';
 import { type JournalOpenFaultSeam } from './journal/sqlite-support';
-import { LocalStoragePressureEngine, type LocalStoragePolicyInput } from './journal/storage-policy';
+import { type StorageConfig } from './retention/config';
+import { type RetentionTimers } from './retention/sweeper';
 import { type ResultDocumentExtractor } from './task-runner';
 import { type ProgressBatcherOptions } from './progress-batcher';
 import { type AgentEgressReliableAppendResult } from './agent-egress-controller';
@@ -3895,23 +3876,9 @@ export interface HostedJournalConfig {
     busyTimeoutMs?: number;
     /** Per-record byte bound. Defaults to the journal's own bound; oversized records are refused, never truncated. */
     maxRecordBytes?: number;
-    /**
-     * S3b (L-003): opt-in local storage policy — §12.7.2.1's watermarks,
-     * classified GC, and bounded WAL compaction. See `LocalStoragePolicyInput`
-     * (`journal/storage-policy.ts`); `maxStoreBytes` and `minFreeBytes` are the
-     * only two a host must supply.
-     *
-     * Optional WITHIN hosted journal mode, and off by default there too: a
-     * journal without a policy is a daemon that records durably and never
-     * declines, which is exactly the right behaviour on a host that manages its
-     * own disk. Setting it is what turns local storage into an admission-control
-     * input — hard pressure declines new offers (retryably) while terminal
-     * flush, delete, export and recovery keep running, and `emergency` refuses
-     * to ack at all rather than acking a row it cannot durably record.
-     */
-    storagePolicy?: LocalStoragePolicyInput;
 }
 export interface DaemonConfig {
+    storage?: StorageConfig;
     /** Distribution-owned application release; observability only, never a protocol/capability gate. */
     localAgentRelease: LocalAgentReleaseIdentity;
     productName: string;
@@ -4404,6 +4371,7 @@ export interface DaemonStatus {
     environmentResolvedAt?: string;
     /** Startup observations for every configured adapter; status never re-probes. */
     runtimes: RuntimeObservation[];
+    storage: ControlStorageStatus;
     /** Process-immutable Local Agent application release captured at construction. */
     localAgentRelease: Readonly<LocalAgentReleaseIdentity>;
     paired: boolean;
@@ -4489,6 +4457,11 @@ export interface Daemon {
 /** Custom adapter composition. Available custom descriptors are published through
  * the capability-gated harness inventory; built-in RuntimeId remains closed. */
 export interface DaemonOverrides {
+    retention?: {
+        clock?: () => Date;
+        timers?: RetentionTimers;
+        freeBytesProvider?: () => Promise<number>;
+    };
     /** Test-only synchronous kill points; never supplied by production configuration. */
     executionRecoveryFault?: (step: 'terminal:before-send' | 'terminal:queued' | 'outbound:before-post' | 'outbound:after-ack') => void;
     /** M4 Phase 3: overrides `TaskRunner`'s default out-of-band approval wait (`DEFAULT_APPROVAL_TIMEOUT_MS`, 10 minutes) before an unanswered `requestApproval` force-resolves as a fail-closed rejection. */
@@ -4531,18 +4504,6 @@ export interface DaemonOverrides {
         journal?: LocalTaskJournal;
         /** Test-only post-open SQLite initialization fault seam. */
         openFaults?: JournalOpenFaultSeam;
-        /**
-         * S3b (L-003): injection seam for the storage pressure engine, same rule
-         * as `journal` above — used only when `config.hostedJournal` is set, and
-         * NOT started or stopped by this daemon. Whoever injects one owns its
-         * cadence, which is what lets the disk-pressure matrix drive `tick()` by
-         * hand with fake usage/free providers and no timer at all.
-         *
-         * An injected engine still answers both questions the daemon asks it
-         * (admission under hard pressure, ack-critical refusal under emergency)
-         * and still backs the `storage` section of the control-socket status.
-         */
-        pressureEngine?: LocalStoragePressureEngine;
     };
 }
 /**
@@ -4732,6 +4693,8 @@ import type { RuntimeObservation } from '../runtime-detection';
  */
 export type DaemonRecord = Extract<DaemonEvent, {
     kind: 'outbound-rejected';
+}> | Extract<DaemonEvent, {
+    kind: 'retention-sweep' | 'retention-failure';
 }> | {
     kind: 'offered';
     ts: string;
@@ -4986,6 +4949,7 @@ export declare class DeviceCredentialStoreError extends Error {
     constructor(message: string);
 }
 export interface DeviceCredentialStoreOptions {
+    readonly storeDir: string;
     readonly productId: string;
     readonly platform?: NodeJS.Platform;
     readonly commandRunner?: DeviceCommandRunner;
@@ -5993,7 +5957,7 @@ export declare class InputPreparationStore {
      * sending) must still be on disk, whatever the retention horizon says. The
      * horizon resumes the moment `unpin` lands.
      */
-    gc(nowMs?: number, preserveInFlight?: boolean): Promise<{
+    gc(nowMs?: number, preserveInFlight?: boolean, limit?: number, onRemoval?: (bytes: number) => void): Promise<{
         artifactsRemoved: number;
         recordsRemoved: number;
     }>;
@@ -6168,57 +6132,13 @@ export interface RecoveryOutcome {
     readonly reason?: string;
     readonly occurredAt?: string;
 }
-/**
- * The five storage categories §12.7.2.1 requires to be measured SEPARATELY —
- * the cleanup order and the never-delete list are both category-scoped, so a
- * single "bytes used" number cannot drive either.
- */
-export type StorageCategory = 'journal' | 'cache' | 'log' | 'workspace' | 'quarantine';
-export interface CategoryUsage {
-    readonly bytes: number;
-    /** `true` when this is a host-reported or sampled figure rather than a measured one. */
-    readonly approximate: boolean;
-}
 export interface LocalStorageUsage {
     readonly measuredAt: string;
-    readonly totalBytes: number;
-    readonly categories: Readonly<Record<StorageCategory, CategoryUsage>>;
-}
-/**
- * The categories automatic cleanup may act on, in §12.7.2.1's order. This
- * union is the never-auto-delete list's enforcement: `quarantine`,
- * unacked envelopes, live tasks, unconfirmed terminals, recovery-marked rows,
- * and user-designated workspaces have NO name here, so no cleanup call can
- * name one. Adding a member is therefore a deliberate, reviewable act rather
- * than a filter that silently stops matching.
- */
-export type CleanableCategory = 
-/** Expired upload/download temp files and rebuildable caches. */
-'expired-temp'
-/** Rotated logs past their retention. */
- | 'rotated-log'
-/** Journal rows for tasks whose terminal the cloud has confirmed and that carry no recovery marker. */
- | 'confirmed-journal'
-/** Generated workspaces the HOST explicitly marked ephemeral, for tasks already terminal. */
- | 'ephemeral-workspace'
-/** Local artifacts with no remaining reference, after a reference scan plus grace period. */
- | 'orphan-artifact';
-export interface CleanupCandidate {
-    readonly candidateId: string;
-    readonly category: CleanableCategory;
-    /** What to act on — a filesystem path, or a journal key. Interpreted by the cleanup worker, never by the journal. */
-    readonly ref: string;
-    readonly eligibleAt: string;
-    readonly reason: string;
-    readonly attempts: number;
-    readonly lastError?: string;
-}
-export interface CleanupResult {
-    readonly candidateId: string;
-    readonly outcome: 'deleted' | 'skipped' | 'failed';
-    readonly bytesReclaimed?: number;
-    readonly error?: string;
-    readonly at: string;
+    readonly journalBytes: number;
+    readonly quarantineBytes: number;
+    readonly journalEntries: number;
+    readonly confirmedEntries: number;
+    readonly oldestConfirmedAt?: string;
 }
 export interface CompactOptions {
     /**
@@ -6279,12 +6199,12 @@ export interface LocalTaskJournal {
     listRecoverable(): Promise<RecoverableTask[]>;
     /** Close out one recoverable task by writing its recovery marker. Never deletes; a marked row is on §12.7.2.1's never-auto-delete list. */
     markRecovered(taskId: string, outcome: RecoveryOutcome): Promise<void>;
-    /** Per-category storage usage (§12.7.2.1) — the input to the watermark state machine. */
+    /** Physical journal/quarantine footprint and logical receipt counts; retention registry owns aggregate usage. */
     measureUsage(): Promise<LocalStorageUsage>;
-    /** Cleanup candidates eligible at `now`, oldest first, at most `limit`. Only {@link CleanableCategory} members can ever appear. */
-    listCleanupCandidates(now: Date, limit: number): Promise<CleanupCandidate[]>;
-    /** Record what the cleanup worker actually did with a candidate. */
-    markCleanupResult(result: CleanupResult): Promise<void>;
+    /** Confirmed terminals older than cutoff, without recovery markers, oldest first. */
+    listPrunableConfirmedTasks(cutoff: Date, limit: number): Promise<string[]>;
+    /** Transactionally rechecks confirmation and recovery protection before pruning. */
+    pruneConfirmedJournalTask(taskId: string): Promise<boolean>;
     /** Bounded WAL checkpoint + incremental vacuum. Maintenance only; never on the envelope path. */
     compact(options: CompactOptions): Promise<CompactResult>;
     /**
@@ -6354,7 +6274,7 @@ export declare class JournalClosedError extends Error {
     constructor(operation: string);
 }
 // ==== @byok-sdk/client dist/daemon/journal/sqlite-journal.d.ts ====
-import { type JournalIdentity, type AdmissionRecord, type CategoryUsage, type CleanableCategory, type CleanupCandidate, type CleanupResult, type CompactOptions, type CompactResult, type JournalReceipt, type LocalStorageUsage, type LocalTaskJournal, type LocalTerminalRecord, type LocalTransitionRecord, type RecoverableTask, type RecoveryOutcome, type ReceivedEnvelopeRecord, type StorageCategory } from './journal';
+import { type JournalIdentity, type AdmissionRecord, type CompactOptions, type CompactResult, type JournalReceipt, type LocalStorageUsage, type LocalTaskJournal, type LocalTerminalRecord, type LocalTransitionRecord, type RecoverableTask, type RecoveryOutcome, type ReceivedEnvelopeRecord } from './journal';
 import { JournalHandleCleanupError, type JournalOpenFaultSeam } from './sqlite-support';
 export { JournalHandleCleanupError };
 /** The single database file, per §12.7.2's "建议单库 `<storeDir>/daemon.db`". */
@@ -6399,8 +6319,6 @@ export interface SqliteLocalTaskJournalOptions {
     /** Injected clock, so receipt/quarantine timestamps are deterministic under test. Defaults to the real one. */
     readonly clock?: () => Date;
 }
-/** The categories `measureUsage` reports. Host-reported ones default to zero-approximate rather than being guessed at. */
-declare const HOST_REPORTED_CATEGORIES: readonly StorageCategory[];
 export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
     #private;
     constructor(options: SqliteLocalTaskJournalOptions);
@@ -6458,70 +6376,9 @@ export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
      * records on the never-auto-delete list, and this is what puts them there.
      */
     markRecovered(taskId: string, outcome: RecoveryOutcome): Promise<void>;
-    /**
-     * Per-category bytes (§12.7.2.1). `journal` and `quarantine` are MEASURED
-     * off the filesystem — they are this object's own footprint, so guessing
-     * would be inexcusable. `cache`/`log`/`workspace` are owned by other
-     * subsystems, so they come from whatever they last reported into
-     * `local_storage_usage`; with nothing reported the answer is an explicit
-     * zero-marked-approximate, never a fabricated estimate.
-     */
+    /** Physical journal/quarantine footprint and confirmed-row inventory. */
     measureUsage(): Promise<LocalStorageUsage>;
-    /**
-     * Record what another subsystem measured for a category it owns. Beyond
-     * S3.3's minimum API and deliberately restricted to the three categories
-     * this journal does NOT measure itself — reporting a number for `journal`
-     * or `quarantine` would let a stale figure override a measured one.
-     */
-    reportCategoryUsage(category: (typeof HOST_REPORTED_CATEGORIES)[number], usage: CategoryUsage): Promise<void>;
-    /**
-     * Register something the cleanup worker may act on. Beyond S3.3's minimum
-     * API (which has no producer for the candidate table), and the only way a
-     * row gets in: `category` is typed {@link CleanableCategory}, so protected
-     * data has no spelling that would let it be enqueued in the first place.
-     */
-    enqueueCleanupCandidate(candidate: {
-        readonly candidateId: string;
-        readonly category: CleanableCategory;
-        readonly ref: string;
-        readonly eligibleAt: string;
-        readonly reason: string;
-    }): Promise<void>;
-    listCleanupCandidates(now: Date, limit: number): Promise<CleanupCandidate[]>;
-    /**
-     * `deleted`/`skipped` resolve the candidate; `failed` does NOT — it bumps
-     * the attempt count and records the error, leaving the row eligible again.
-     * That asymmetry is what makes a cleanup worker crash safe in either order:
-     * crash after deleting the file but before marking, and the candidate is
-     * retried against a file that is already gone (a no-op the worker reports as
-     * `deleted`); crash after marking but before deleting, and the metadata says
-     * resolved for something still on disk, which the next reference scan
-     * re-enqueues. Neither order can lose protected data, because protected data
-     * cannot be a candidate at all.
-     */
-    markCleanupResult(result: CleanupResult): Promise<void>;
-    /**
-     * §12.7.2.1's cleanup step 3: drop one task's journal rows, but ONLY when
-     * the cloud has confirmed its terminal and it carries no recovery marker.
-     *
-     * Beyond S3.3's minimum API, and the ONLY deletion path this journal has.
-     * The eligibility test is the first statement INSIDE the transaction that
-     * would delete, so "is this row protected?" and "delete it" cannot be
-     * separated by another writer marking it recovered in between — a check
-     * performed outside the write lock is a check that can go stale, and the row
-     * it goes stale on is recovery evidence.
-     *
-     * The idempotency receipt goes with the rows. That is deliberate and it is
-     * what `retentionMs['confirmed-journal']` exists to protect: once the receipt
-     * is gone, a redelivery of that envelope would be appended as new, so the
-     * candidate's retention MUST outlast the mailbox redelivery window
-     * (`storage-policy.ts`'s `DEFAULT_RETENTION_MS` carries the longest default
-     * of the five for exactly this reason). Keeping the receipt forever would
-     * trade that risk for an unbounded table, which is the growth this step is
-     * here to stop.
-     *
-     * Returns `false` — having deleted nothing — when the guard refuses.
-     */
+    listPrunableConfirmedTasks(cutoff: Date, limit: number): Promise<string[]>;
     pruneConfirmedJournalTask(taskId: string): Promise<boolean>;
     /**
      * WAL checkpoint plus a BOUNDED incremental vacuum. Maintenance only — it
@@ -6629,375 +6486,6 @@ export declare function openJournalDatabase(path: string, busyTimeoutMs: number,
  * sibling that does not exist yet is skipped rather than treated as an error.
  */
 export declare function secureJournalFilePermissions(dbPath: string): void;
-// ==== @byok-sdk/client dist/daemon/journal/storage-policy.d.ts ====
-/**
- * `LocalStoragePolicy`, the watermark state machine, and the classified GC
- * engine (architecture §12.7.2.1).
- *
- * §12.7.2 gives the daemon a database it must not lose. This file is the other
- * half of that promise: a machine that runs out of disk cannot commit an
- * ack-critical transaction, and a daemon that keeps acking mailbox rows it
- * cannot durably record is losing tasks. So local storage stops being an
- * operational afterthought and becomes an admission-control input.
- *
- * Three shapes here are load-bearing:
- *
- * - **The state machine is §12.7.2.1's table, not a threshold check.** Four
- *   states with distinct *behaviours*: `normal` runs unhurried maintenance;
- *   `pressure` alerts and cleans only what can be rebuilt; `hard-pressure`
- *   stops taking NEW work while everything that finishes existing work keeps
- *   running; `emergency` refuses to ack at all. The difference between
- *   `hard-pressure` and `emergency` is the whole design: one declines offers
- *   (a task the dispatcher can place elsewhere), the other freezes the cursor
- *   (a task the mailbox will redeliver). Neither deletes anything to make room.
- * - **Cleanup is ordered and bounded, and it cannot name protected data.**
- *   The order is §12.7.2.1's 1-5, verbatim. The categories are
- *   {@link CleanableCategory}, which has no member for an unacked envelope, a
- *   `Running` task, an unconfirmed terminal, a recovery-marked row, a user
- *   workspace, or quarantine evidence — so no amount of pressure can express
- *   deleting one. Under pressure the order is TRUNCATED to its rebuildable
- *   prefix rather than extended: being short of disk is the worst moment to
- *   start deleting durable records, and the two cheap categories are the ones
- *   that give space back immediately.
- * - **Everything measurable is injected.** Usage comes from the journal, free
- *   space from a provider (`fs.statfs` in production), time from a clock, and
- *   the cadence from a caller-driven `tick()`. There is no wall-clock race
- *   anywhere in this file's behaviour, which is what lets the S3.4 disk-pressure
- *   matrix assert state transitions instead of waiting for them.
- */
-import type { CategoryUsage, CleanableCategory, CleanupCandidate, CleanupResult, CompactResult, LocalStorageUsage, LocalTaskJournal, StorageCategory } from './journal';
-/** §12.7.2.1's recommended soft watermark: "达到约 80% budget". */
-export declare const DEFAULT_SOFT_BUDGET_RATIO = 0.8;
-/** §12.7.2.1's recommended hard watermark: "达到约 90% budget". */
-export declare const DEFAULT_HARD_BUDGET_RATIO = 0.9;
-/**
- * Free bytes below which one ack-critical transaction can no longer be
- * guaranteed, i.e. §12.7.2.1's `emergency` trigger. Sized for a WAL frame
- * batch plus the checkpoint headroom a `synchronous=FULL` commit needs, not
- * for a single row — a commit that cannot grow the WAL fails as surely as one
- * that cannot grow the database.
- */
-export declare const DEFAULT_ACK_CRITICAL_RESERVE_BYTES: number;
-/** Upper bound on how many candidates one cleanup pass may act on. Bounded so a pass cannot monopolise the journal's single writer. */
-export declare const DEFAULT_CLEANUP_BATCH_LIMIT = 64;
-/** Upper bound on freelist pages one compaction pass returns to the filesystem. */
-export declare const DEFAULT_INCREMENTAL_VACUUM_PAGES = 64;
-/** Unhurried maintenance cadence while `normal` — §12.7.2.1's "常规低频 GC/compaction". */
-export declare const DEFAULT_NORMAL_COMPACTION_INTERVAL_MS: number;
-/** The accelerated cadence §12.7.2.1 asks for at `pressure` and above ("加快 journal compaction"). */
-export declare const DEFAULT_PRESSURE_COMPACTION_INTERVAL_MS: number;
-/**
- * Per-category retention, as milliseconds between something becoming garbage
- * and becoming ELIGIBLE for automatic cleanup (§12.7.5).
- *
- * `confirmed-journal` is deliberately the longest: pruning a journal row also
- * drops its idempotency receipt, so its retention MUST outlast the mailbox
- * redelivery window, or a very late redelivery would re-append an envelope
- * this device already finished. `orphan-artifact` carries §12.7.5's 24-hour
- * grace period, which is the reference scan's safety margin, not a guess.
- */
-export declare const DEFAULT_RETENTION_MS: Readonly<Record<CleanableCategory, number>>;
-/**
- * Log rotation parameters (§12.7.2.1 lists them among a `LocalStoragePolicy`'s
- * minimum contents).
- *
- * This SDK does not own the daemon's log writer — the host does. These are
- * therefore the CONTRACT a host's rotator reads, and the reason they live here
- * rather than in host config is that the rotated files they produce become
- * `rotated-log` cleanup candidates governed by the same retention above. Two
- * separate numbers for "when to rotate" and "when to delete" is exactly how a
- * disk fills up with files nobody owns.
- */
-export interface LogRotationPolicy {
-    /** Rotate the active log once it exceeds this size. */
-    readonly maxFileBytes: number;
-    /** How many rotated generations to keep before the oldest becomes a `rotated-log` cleanup candidate. */
-    readonly keepFiles: number;
-}
-export declare const DEFAULT_LOG_ROTATION: LogRotationPolicy;
-/** Bounded compaction scheduling — see {@link LocalStoragePressureEngine.tick}. */
-export interface CompactionPolicy {
-    readonly incrementalVacuumPages: number;
-    readonly normalIntervalMs: number;
-    readonly pressureIntervalMs: number;
-}
-/**
- * The host-injected policy, resolved and validated (§12.7.2.1: "由 host/daemon
- * config 注入，至少包含 `maxStoreBytes`、`minFreeBytes`、soft/hard watermark、
- * 各数据类别的 retention、workspace policy 与 log rotation").
- */
-export interface LocalStoragePolicy {
-    /** Total bytes this daemon's store directory may occupy. The budget the soft/hard ratios apply to. */
-    readonly maxStoreBytes: number;
-    /** Free bytes on the store's filesystem below which this device is at HARD pressure regardless of its own budget. */
-    readonly minFreeBytes: number;
-    /** Free bytes below which this device is at SOFT pressure. Defaults to twice {@link minFreeBytes}, so pressure engages one doubling before the floor. */
-    readonly softMinFreeBytes: number;
-    readonly softBudgetRatio: number;
-    readonly hardBudgetRatio: number;
-    readonly ackCriticalReserveBytes: number;
-    readonly retentionMs: Readonly<Record<CleanableCategory, number>>;
-    readonly logRotation: LogRotationPolicy;
-    readonly cleanupBatchLimit: number;
-    readonly compaction: CompactionPolicy;
-}
-/** What a host actually writes. Everything but the two budget numbers has a §12.7.2.1 default. */
-export interface LocalStoragePolicyInput {
-    maxStoreBytes: number;
-    minFreeBytes: number;
-    softMinFreeBytes?: number;
-    softBudgetRatio?: number;
-    hardBudgetRatio?: number;
-    ackCriticalReserveBytes?: number;
-    retentionMs?: Partial<Record<CleanableCategory, number>>;
-    logRotation?: Partial<LogRotationPolicy>;
-    cleanupBatchLimit?: number;
-    compaction?: Partial<CompactionPolicy>;
-}
-/**
- * Thrown when a storage policy is internally inconsistent or out of range.
- *
- * Rejected at CONSTRUCTION, before a daemon exists, for the same reason
- * `JournalUnavailableError` is: a policy whose hard watermark sits below its
- * soft one, or whose budget is zero, produces a daemon that behaves plausibly
- * until the day it matters. There is no clamping and no "closest sensible
- * value" here — a misconfigured durability policy is a configuration bug to
- * fix, not a number to guess at.
- */
-export declare class LocalStoragePolicyError extends Error {
-    constructor(field: string, reason: string);
-}
-/**
- * Thrown by {@link LocalStoragePressureEngine.assertAckCriticalAllowed} while
- * the device is in `emergency`.
- *
- * Thrown from the daemon's envelope handler, BEFORE the journal append, which
- * is what makes it §12.7.2.1's "fail-closed，不 ack 新 mailbox row": the
- * handler rejects, so `ConnectionManager` records a stall instead of advancing
- * the cursor, so the mailbox keeps the row and redelivers it. The task is not
- * lost — it is left where it is still safe, which is the cloud.
- */
-export declare class LocalStorageEmergencyError extends Error {
-    constructor(reason: string);
-}
-/**
- * Validate and fill in a host's policy. The ONE place a `LocalStoragePolicy`
- * comes into existence, so every consumer downstream can treat its fields as
- * already checked.
- */
-export declare function resolveLocalStoragePolicy(input: LocalStoragePolicyInput): LocalStoragePolicy;
-/**
- * When something that became garbage at `since` becomes eligible for automatic
- * cleanup. The ONE place retention turns into a timestamp, so a producer
- * calling `enqueueCleanupCandidate` and this engine consuming it agree by
- * construction rather than by two matching constants.
- */
-export declare function cleanupEligibleAt(policy: LocalStoragePolicy, category: CleanableCategory, since: Date): string;
-/**
- * §12.7.2.1's four states, verbatim:
- *
- * | state | trigger | behaviour |
- * | --- | --- | --- |
- * | `normal` | below soft | unhurried GC/compaction |
- * | `pressure` | ≥ soft budget, or free below the soft minimum | alert; clean only rebuildable/expired categories; accelerate compaction |
- * | `hard-pressure` | ≥ hard budget, or free below the hard minimum | stop admitting new ordinary tasks; terminal/truth flush, delete, export and recovery all continue |
- * | `emergency` | one ack-critical transaction can no longer be guaranteed | fail closed: do not ack new mailbox rows; preserve existing recovery evidence |
- */
-export type StoragePressureState = 'normal' | 'pressure' | 'hard-pressure' | 'emergency';
-export interface StorageMeasurement {
-    readonly usage: LocalStorageUsage;
-    readonly freeBytes: number;
-}
-/**
- * The state machine itself — a pure function of policy, measurement, and
- * whether an ack-critical write has already been observed to fail.
- *
- * Evaluated worst-first: `emergency` is not "very bad pressure", it is a
- * different claim (the next commit may not land), so it is decided before any
- * budget arithmetic. `latchedFailure` exists because the cheapest evidence
- * that a transaction cannot complete is one that already did not: a disk-full
- * error from an ack-critical write is a fact, where free-space arithmetic is
- * an estimate.
- */
-export declare function computePressureState(policy: LocalStoragePolicy, measurement: StorageMeasurement, latchedFailure?: string): StoragePressureState;
-/**
- * §12.7.2.1's cleanup order, 1-5:
- *
- * 1. expired upload/download temp files and rebuildable caches;
- * 2. rotated logs past their retention;
- * 3. journal rows for tasks whose terminal the cloud confirmed and that carry
- *    no recovery marker — **compact first, then batch delete**;
- * 4. host-marked ephemeral workspaces for tasks already terminal;
- * 5. orphan artifacts, after a reference scan plus grace period.
- *
- * Under pressure the order is TRUNCATED to steps 1-2, not extended. Steps 3-5
- * touch durable records, need a compaction or a reference scan first, and give
- * their space back slowly; steps 1-2 are pure rebuildable garbage and give it
- * back immediately. Deleting durable evidence is exactly the wrong reflex when
- * the disk is nearly full, so it stays on the unhurried `normal` cadence where
- * a mistake is recoverable.
- */
-export declare function cleanupOrderFor(state: StoragePressureState): readonly CleanableCategory[];
-/** What a {@link CleanupExecutor} did with one candidate. Mirrors {@link CleanupResult} minus the bookkeeping the engine fills in. */
-export interface CleanupExecution {
-    readonly outcome: 'deleted' | 'skipped' | 'failed';
-    readonly bytesReclaimed?: number;
-    readonly error?: string;
-}
-/**
- * Performs one candidate's actual deletion.
- *
- * A seam rather than a method because the journal owns metadata and the
- * filesystem owns bytes, and the crash window BETWEEN them (delete the file,
- * die before marking; mark, die before deleting) is S3.4 point 12. Keeping
- * them separate is what lets that window be tested at all.
- *
- * It receives a {@link CleanupCandidate}, whose `category` is a
- * {@link CleanableCategory} — so an executor cannot be handed protected data
- * even by a caller trying to.
- */
-export type CleanupExecutor = (candidate: CleanupCandidate) => Promise<CleanupExecution>;
-/** `confirmed-journal` candidates address a journal task, not a path. This prefix is that distinction, spelled out. */
-export declare const JOURNAL_TASK_REF_PREFIX = "task:";
-/**
- * The default cleanup worker: filesystem removal for the four path-addressed
- * categories, and a delegated journal prune for `confirmed-journal`.
- *
- * Two deliberate behaviours:
- *
- * - **A missing path is `deleted`, not `failed`.** That is S3.4 point 12's
- *   first order (file gone, metadata not yet marked) converging on retry: the
- *   retry finds nothing to do and says so, rather than looping forever on a
- *   candidate whose work is already done.
- * - **A relative `ref` is refused.** Cleanup resolves paths against nothing —
- *   a relative ref would delete whatever the daemon's cwd happens to make it,
- *   which is not a bug worth having once.
- */
-export declare function createFilesystemCleanupExecutor(options?: {
-    readonly pruneJournalTask?: (taskId: string) => Promise<boolean>;
-}): CleanupExecutor;
-/** What the status surface renders, and what a `tick()` hands back. */
-export interface StorageStatusSnapshot {
-    readonly state: StoragePressureState;
-    readonly measuredAt: string;
-    readonly budgetBytes: number;
-    readonly usedBytes: number;
-    readonly freeBytes: number;
-    readonly categories: Readonly<Record<StorageCategory, CategoryUsage>>;
-    readonly lastCompaction?: CompactResult & {
-        readonly at: string;
-    };
-}
-export type StoragePressureEvent = 
-/** §12.7.2.1's "发出告警" — emitted on every transition, including back down to `normal`. */
-{
-    readonly kind: 'state-changed';
-    readonly from: StoragePressureState;
-    readonly to: StoragePressureState;
-    readonly snapshot: StorageStatusSnapshot;
-} | {
-    readonly kind: 'cleanup';
-    readonly result: CleanupResult;
-    readonly category: CleanableCategory;
-} | {
-    readonly kind: 'compaction';
-    readonly result: CompactResult;
-};
-export interface StorageTickResult {
-    readonly state: StoragePressureState;
-    readonly snapshot: StorageStatusSnapshot;
-    readonly cleaned: readonly CleanupResult[];
-    readonly compaction?: CompactResult;
-}
-export interface TimerLike {
-    setInterval(handler: () => void, ms: number): unknown;
-    clearInterval(handle: unknown): void;
-}
-export interface LocalStoragePressureEngineOptions {
-    readonly policy: LocalStoragePolicy | LocalStoragePolicyInput;
-    readonly journal: LocalTaskJournal;
-    /** Free bytes on the store's filesystem. `fs.statfs` in production (see {@link createStatfsFreeBytesProvider}); a fixed number under test. */
-    readonly freeBytesProvider: () => number | Promise<number>;
-    /** Performs deletions. Defaults to {@link createFilesystemCleanupExecutor}. */
-    readonly executor?: CleanupExecutor;
-    readonly clock?: () => Date;
-    readonly onEvent?: (event: StoragePressureEvent) => void;
-    /** Reports only the scheduler's own maintenance pass outcome; never includes task-domain failures. */
-    readonly onMaintenanceOutcome?: (outcome: 'success' | 'failure') => void;
-    /** Injected so `start()`'s periodic driver is substitutable; the matrix never uses it and drives {@link LocalStoragePressureEngine.tick} directly. */
-    readonly timers?: TimerLike;
-}
-/**
- * Drives §12.7.2.1: measure, decide the state, clean in order, compact within
- * bounds — and answer the two questions the rest of the daemon asks
- * ({@link admissionGuard}, {@link assertAckCriticalAllowed}).
- *
- * The cadence is a caller-driven {@link tick}. `start()` merely arranges for
- * something to call it periodically, so a host with its own scheduler can skip
- * it entirely, and the disk-pressure matrix can advance state deterministically
- * with no timer at all. Nothing here runs on the envelope or task hot path:
- * the only two things the hot path calls are the two synchronous questions,
- * both of which read a field.
- */
-export declare class LocalStoragePressureEngine {
-    #private;
-    readonly policy: LocalStoragePolicy;
-    constructor(options: LocalStoragePressureEngineOptions);
-    get state(): StoragePressureState;
-    /** The last measured snapshot, or `undefined` before the first {@link tick}. */
-    snapshot(): StorageStatusSnapshot | undefined;
-    /**
-     * §12.7.2.1's hard-pressure row, as a `TaskRunnerDeps.admissionGuard`:
-     * "停止接收新的普通 task；仍允许 terminal/truth flush、删除、导出、doctor 与
-     * 恢复操作".
-     *
-     * The decline is RETRYABLE because pressure is a property of this device at
-     * this moment — a dispatcher re-routing the task to another device genuinely
-     * helps, and the same device may take it in a minute. Nothing in this method
-     * touches the disk; it reads the state the last tick computed, so an offer
-     * arriving between ticks is answered instantly.
-     */
-    admissionGuard(): {
-        readonly admit: true;
-    } | {
-        readonly admit: false;
-        readonly reason: string;
-        readonly retryable: boolean;
-    };
-    /** Throws {@link LocalStorageEmergencyError} while in `emergency`. Called immediately before every ack-critical journal append. */
-    assertAckCriticalAllowed(): void;
-    /**
-     * Latch `emergency` from an ack-critical write that ACTUALLY failed.
-     *
-     * A commit that returned `SQLITE_FULL` is stronger evidence than any free-space
-     * estimate, and it must not be forgotten on the next tick just because the
-     * arithmetic happens to look survivable. The latch clears only when a tick
-     * measures a genuinely `normal` device — not `pressure`, not `hard-pressure`:
-     * coming back from "the disk refused a write" requires actual headroom, not a
-     * borderline reading.
-     */
-    noteAckCriticalFailure(reason: string): void;
-    /**
-     * One maintenance pass: measure, transition, clean in order, compact if due.
-     *
-     * Ordered this way on purpose — the cleanup pass acts on the state THIS
-     * measurement produced, so a device that just crossed into pressure cleans on
-     * the same tick it alerts, rather than one cadence later.
-     */
-    tick(): Promise<StorageTickResult>;
-    /** Begin periodic ticking. A host with its own scheduler need never call this. */
-    start(): void;
-    stop(): Promise<void>;
-}
-/**
- * Production free-space provider: bytes available to an unprivileged process
- * on the filesystem holding `dir`.
- *
- * `bavail`, not `bfree` — the reserved blocks `bfree` includes are not space
- * this daemon can write into, and treating them as headroom is how a device
- * discovers it is out of disk at commit time instead of at measurement time.
- */
-export declare function createStatfsFreeBytesProvider(dir: string): () => Promise<number>;
 // ==== @byok-sdk/client dist/daemon/mcp-tools-probe.d.ts ====
 import type { McpStdioServerConfig } from '../types';
 import { McpAuthorityError } from '../mcp/client';
@@ -7088,6 +6576,7 @@ export declare const AGENT_MEMORY_READER_GUIDANCE: string;
 export declare function prependAgentMemoryGuidance(instruction: string): string;
 export declare function prependAgentMemoryReaderGuidance(instruction: string): string;
 // ==== @byok-sdk/client dist/daemon/observer.d.ts ====
+import type { RetentionClassId, RetentionTrigger, SweepReport } from './retention/registry';
 import { type AgentEvent, type BlobRef, type Envelope, type TaskState } from '@byok-sdk/protocol';
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import type { RuntimeObservation } from '../runtime-detection';
@@ -7132,7 +6621,17 @@ export type DaemonEvent = ({
     taskState: TaskState;
 } | {
     terminal: false;
-})) | {
+})) | ({
+    kind: 'retention-sweep';
+    ts: string;
+} & SweepReport) | {
+    kind: 'retention-failure';
+    ts: string;
+    trigger: RetentionTrigger;
+    classId: RetentionClassId;
+    count: number;
+    code: string;
+} | {
     kind: 'offered';
     ts: string;
     taskId: string;
@@ -7577,6 +7076,8 @@ export declare class DaemonObserver {
      * must never make a subscriber's own async work a precondition for
      * cursor advancement or the next envelope being processed.
      */
+    noteRetentionSweep(report: SweepReport): void;
+    noteRetentionFailure(trigger: RetentionTrigger, classId: RetentionClassId, code: string): void;
     private emit;
 }
 // ==== @byok-sdk/client dist/daemon/operational-health.d.ts ====
@@ -7832,6 +7333,232 @@ export interface ResolvedAgentMessageMcpBin {
 }
 /** Resolve the SDK-owned stdio MCP helper shipped beside the client bundle. */
 export declare function resolveAgentMessageMcpBin(host?: SdkHelperHostConfig): ResolvedAgentMessageMcpBin;
+// ==== @byok-sdk/client dist/daemon/retention/config.d.ts ====
+import { type ExpiringClassId } from './registry';
+export declare class LocalStorageConfigError extends Error {
+    constructor(field: string, reason?: string);
+}
+export interface StorageBudgetInput {
+    maxStoreBytes: number;
+    minFreeBytes: number;
+    softMinFreeBytes?: number;
+    softBudgetRatio?: number;
+    hardBudgetRatio?: number;
+    ackCriticalReserveBytes?: number;
+}
+export interface StorageConfig {
+    scratchRoot?: string;
+    budget?: StorageBudgetInput;
+    /** Exact SDK skill-pack dataDir roots used by installSkillPacks. */
+    skillPackDataDirs?: readonly string[];
+    retention?: {
+        sweepIntervalMs?: number;
+        pressureSweepIntervalMs?: number;
+        maxDeletionsPerPass?: number;
+        maxPassDurationMs?: number;
+        ttlMs?: Partial<Record<ExpiringClassId, number>>;
+    };
+}
+export interface StorageBudget {
+    readonly maxStoreBytes: number;
+    readonly minFreeBytes: number;
+    readonly softMinFreeBytes: number;
+    readonly softBudgetRatio: number;
+    readonly hardBudgetRatio: number;
+    readonly ackCriticalReserveBytes: number;
+}
+export declare const DEFAULT_RETENTION_TTL_MS: Readonly<Record<ExpiringClassId, number>>;
+export declare function resolveStorageBudget(input: StorageBudgetInput): StorageBudget;
+export declare function resolveStorageConfig(storeDir: string, input?: StorageConfig): Readonly<{
+    scratchRoot: string;
+    budget: StorageBudget | undefined;
+    skillPackDataDirs: readonly any[];
+    sweepIntervalMs: number;
+    pressureSweepIntervalMs: number;
+    maxDeletionsPerPass: number;
+    maxPassDurationMs: number;
+    ttlMs: Readonly<{
+        "confirmed-journal": number;
+        "daemon-temp": number;
+        "durable-replica": number;
+        "exec-runtime": number;
+        "exec-sdk": number;
+        "home-temp": number;
+        "input-preparation": number;
+        "reader-run": number;
+        "skill-pack-old": number;
+    }>;
+}>;
+export type ResolvedStorageConfig = ReturnType<typeof resolveStorageConfig>;
+// ==== @byok-sdk/client dist/daemon/retention/pressure.d.ts ====
+import type { StorageBudget } from './config';
+export type StoragePressureState = 'normal' | 'pressure' | 'hard-pressure' | 'emergency';
+export declare class LocalStorageEmergencyError extends Error {
+    constructor(reason: string);
+}
+export declare function computePressureState(budget: StorageBudget, usedBytes: number, freeBytes: number, latchedFailure?: string): StoragePressureState;
+export declare class StoragePressure {
+    readonly budget?: StorageBudget | undefined;
+    state: StoragePressureState;
+    private failure?;
+    constructor(budget?: StorageBudget | undefined);
+    update(usedBytes: number, freeBytes: number): void;
+    noteAckCriticalFailure(reason: string): void;
+    admissionGuard(): {
+        admit: true;
+        reason?: undefined;
+        retryable?: undefined;
+    } | {
+        admit: false;
+        reason: string;
+        retryable: boolean;
+    };
+    assertAckCriticalAllowed(): void;
+}
+// ==== @byok-sdk/client dist/daemon/retention/registry.d.ts ====
+export declare const EXPIRING_CLASS_IDS: readonly ['exec-sdk', 'daemon-temp', 'exec-runtime', 'durable-replica', 'input-preparation', 'confirmed-journal', 'reader-run', 'home-temp', 'skill-pack-old'];
+export declare const PROTECTED_CLASS_IDS: readonly ['journal', 'quarantine', 'owned-processes', 'durable-replica-live', 'terminal-evidence', 'agent-content', 'byok-authority', 'agent-home-lease', 'workspace', 'retired-namespace', 'pi-session-dir', 'skill-pack-current', 'store-authority'];
+export type ExpiringClassId = typeof EXPIRING_CLASS_IDS[number];
+export type ProtectedClassId = typeof PROTECTED_CLASS_IDS[number];
+export type RetentionClassId = ExpiringClassId | ProtectedClassId;
+export type RetentionTrigger = 'startup' | 'periodic' | 'pressure' | 'home-lease';
+export interface ClassUsage {
+    readonly classId: RetentionClassId;
+    readonly protected: boolean;
+    readonly measured: boolean;
+    readonly bytes: number;
+    readonly entries: number;
+    readonly oldestAgeMs: number | null;
+}
+export interface SweepReport {
+    readonly trigger: RetentionTrigger;
+    readonly at: string;
+    readonly deleted: number;
+    readonly bytesReclaimed: number;
+    readonly failures: number;
+    readonly truncated: boolean;
+    readonly durationMs: number;
+}
+export interface SweepBudget {
+    readonly now: Date;
+    readonly trigger: RetentionTrigger;
+    available(): boolean;
+    remaining(): number;
+    removed(bytes: number): void;
+    truncate(): void;
+}
+export interface ClassAuthority {
+    readonly roots: readonly string[];
+    readonly owner: 'sdk' | 'host';
+    readonly scope: 'store' | 'agent-home' | 'replica' | 'host';
+    readonly ttlMs?: number;
+    readonly maxEntries?: number;
+}
+export type RetentionClass = {
+    readonly authority: ClassAuthority;
+} & ({
+    readonly id: ExpiringClassId;
+    measure(): Promise<ClassUsage>;
+    sweep(budget: SweepBudget): Promise<void>;
+} | {
+    readonly id: ProtectedClassId;
+    measure(): Promise<ClassUsage>;
+    readonly sweep?: never;
+});
+/** One closed registry serves maintenance, pressure measurement and status. */
+export declare class RetentionRegistry {
+    private readonly dispose;
+    private readonly beforeMeasure;
+    private readonly prepareMaintenance;
+    readonly classes: readonly RetentionClass[];
+    constructor(classes: readonly RetentionClass[], dispose?: () => Promise<void>, beforeMeasure?: () => void, prepareMaintenance?: (budget: SweepBudget, underPressure: boolean) => Promise<void>);
+    prepare(budget: SweepBudget, underPressure: boolean): Promise<void>;
+    close(): Promise<void>;
+    sweep(id: ExpiringClassId, budget: SweepBudget): Promise<void>;
+    measure(): Promise<ClassUsage[]>;
+}
+// ==== @byok-sdk/client dist/daemon/retention/scratch.d.ts ====
+export declare class ScratchRootPathError extends Error {
+    constructor(reason: string);
+}
+/** Resources owned by one execution. release() is part of its disposal receipt. */
+export interface ExecutionScratch {
+    readonly token: string;
+    readonly sdkDir: string;
+    readonly runtimeDir: string;
+    readonly env: Readonly<{
+        TMPDIR: string;
+        TEMP: string;
+        TMP: string;
+    }>;
+    release(): Promise<void>;
+}
+export declare function validateScratchRoot(root: string): string;
+/** Reject aliases before changing permissions or deleting anything. */
+export declare function privateDirectory(directory: string): Promise<void>;
+export declare class ScratchRoot {
+    readonly root: string;
+    private readonly live;
+    private store?;
+    readonly clock: () => Date;
+    constructor(root: string, clock?: () => Date);
+    isLive(token: string): boolean;
+    open(storeDir: string): Promise<void>;
+    private claim;
+    abandon(token: string): void;
+    create(): Promise<ExecutionScratch>;
+}
+/** Standalone adapter Hosts own this root exclusively and await release(). */
+export declare function createExecutionScratch(options: {
+    root: string;
+    clock?: () => Date;
+}): Promise<ExecutionScratch>;
+export declare function createDaemonScratch(storeDir: string, kind: 'diag' | 'credential' | 'prepare'): Promise<string>;
+// ==== @byok-sdk/client dist/daemon/retention/sweeper.d.ts ====
+import type { ResolvedStorageConfig } from './config';
+import { type ClassUsage, type RetentionClassId, type RetentionTrigger, type SweepReport, RetentionRegistry } from './registry';
+import { StoragePressure } from './pressure';
+export interface RetentionTimers {
+    setTimeout(handler: () => void, ms: number): unknown;
+    clearTimeout(handle: unknown): void;
+}
+export interface RetentionSnapshot {
+    readonly measuredAt: string | null;
+    readonly usedBytes: number;
+    readonly freeBytes: number | null;
+    readonly classes: readonly ClassUsage[];
+    readonly lastSweep: SweepReport | null;
+}
+export declare function unmeasuredRetentionSnapshot(): RetentionSnapshot;
+export interface RetentionSweeperOptions {
+    readonly config: ResolvedStorageConfig;
+    readonly registry: RetentionRegistry;
+    readonly pressure: StoragePressure;
+    readonly freeBytes: () => Promise<number>;
+    readonly clock?: () => Date;
+    readonly timers?: RetentionTimers;
+    readonly jitter: (sequence: number, baseMs: number) => number;
+    readonly onSweep?: (report: SweepReport) => void;
+    readonly onFailure?: (trigger: RetentionTrigger, classId: RetentionClassId, code: string) => void;
+}
+/** All maintenance has this one lifecycle owner, including daemons without a journal. */
+export declare class RetentionSweeper {
+    private readonly options;
+    private timer;
+    private running?;
+    private stopped;
+    private sequence;
+    private readonly clock;
+    private readonly timers;
+    private status;
+    constructor(options: RetentionSweeperOptions);
+    snapshot(): RetentionSnapshot;
+    runPass(trigger: RetentionTrigger): Promise<SweepReport>;
+    private pass;
+    start(): void;
+    private arm;
+    stop(): Promise<void>;
+}
 // ==== @byok-sdk/client dist/daemon/session-workspace-store.d.ts ====
 /** What's recoverable for a given `sessionRef` — see the class doc comment. */
 export interface SessionWorkspaceRecord {
@@ -8000,6 +7727,7 @@ export declare function skillPacksRoot(dataDir: string): string;
  * is issued when the declaration does not name `skills.pack`.
  */
 export declare function installSkillPacks(options: InstallSkillPacksOptions): Promise<SkillPackInstallResult>;
+export declare function readInstalledSkillPack(dataDir: string, name: string): Promise<InstalledSkillPack | undefined>;
 /**
  * Every pack this device has a valid lock for, sorted by name.
  *
@@ -8189,6 +7917,7 @@ export declare function readDeviceEnrollmentStatus(options: DeviceEnrollmentStat
 export declare function readDeviceEnrollmentIdentity(options: DeviceEnrollmentStatusOptions): Promise<DeviceEnrollmentIdentityStatus>;
 // ==== @byok-sdk/client dist/daemon/task-runner.d.ts ====
 import { type ActivityIngress } from '@byok-sdk/protocol';
+import type { ScratchRoot } from './retention/scratch';
 import { type AgentMessageContentType, type AgentEgressPolicy, type Envelope, type RuntimeId, type TerminalProjectionSelection, type TaskOfferPayload, type TaskOfferForAgentPayload, type TaskOfferForAgentWithEgressPayload, type TaskOfferForAgentWithEgressFreshPayload, type TaskOfferPreparedPayload, type TaskOfferWithToolsetsPayload } from '@byok-sdk/protocol';
 import { type McpStdioServerConfig, type McpToolsetConfig, type RuntimeAdapter } from '../types';
 import type { InputPreparationStore } from './input-preparation-store';
@@ -8534,6 +8263,7 @@ export interface TaskRunnerDeps {
      */
     approvalRegistry: ApprovalRegistry;
     storeDir: string;
+    scratchRoot: ScratchRoot;
     productId: string;
     /** Authenticated enrollment tenant projection; required by Agent message durability/recovery. */
     tenantId?: string;
@@ -10115,7 +9845,7 @@ export interface DiagnosticsSnapshot {
         pendingApprovalCount: number;
         operationalHealth: ControlStatusResult['operationalHealth'];
         outbound?: ControlStatusResult['outbound'];
-        storage?: ControlStatusResult['storage'];
+        storage: ControlStatusResult['storage'];
     };
     /**
      * Issue #394: the running daemon's lifecycle (`live`), else the last
@@ -10249,11 +9979,14 @@ export type { InputPreparationArtifactSummaryV1, InputPreparationAuthorityGrantV
 export { INPUT_PREPARATION_CANCEL_METHOD, INPUT_PREPARATION_IDENTIFIER_MAX_BYTES, INPUT_PREPARATION_LOOKUP_METHOD, INPUT_PREPARATION_PREPARE_METHOD, parseInputPreparationCancelParams, parseInputPreparationLookupParams, parseInputPreparationRequestParams, } from './daemon/control-protocol';
 export type { InputPreparationResult } from './daemon/control-protocol';
 export { journalHash, JournalUnavailableError, JournalCorruptError, JournalRecordTooLargeError, JournalUnknownTaskError, JournalClosedError, } from './daemon/journal/journal';
-export type { LocalTaskJournal, JournalIdentity, JournalReceipt, ReceivedEnvelopeRecord, AdmissionRecord, LocalTransitionRecord, LocalTerminalRecord, TerminalTruthState, RecoverableTask, RecoveryOutcome, RecoveryDisposition, LocalStorageUsage, StorageCategory, CategoryUsage, CleanableCategory, CleanupCandidate, CleanupResult, CompactOptions, CompactResult, } from './daemon/journal/journal';
+export type { LocalTaskJournal, JournalIdentity, JournalReceipt, ReceivedEnvelopeRecord, AdmissionRecord, LocalTransitionRecord, LocalTerminalRecord, TerminalTruthState, RecoverableTask, RecoveryOutcome, RecoveryDisposition, LocalStorageUsage, CompactOptions, CompactResult, } from './daemon/journal/journal';
 export { SqliteLocalTaskJournal, JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from './daemon/journal/sqlite-journal';
 export type { SqliteLocalTaskJournalOptions } from './daemon/journal/sqlite-journal';
-export { LocalStoragePressureEngine, LocalStoragePolicyError, LocalStorageEmergencyError, resolveLocalStoragePolicy, computePressureState, cleanupOrderFor, cleanupEligibleAt, createFilesystemCleanupExecutor, createStatfsFreeBytesProvider, JOURNAL_TASK_REF_PREFIX, DEFAULT_SOFT_BUDGET_RATIO, DEFAULT_HARD_BUDGET_RATIO, DEFAULT_ACK_CRITICAL_RESERVE_BYTES, DEFAULT_CLEANUP_BATCH_LIMIT, DEFAULT_INCREMENTAL_VACUUM_PAGES, DEFAULT_NORMAL_COMPACTION_INTERVAL_MS, DEFAULT_PRESSURE_COMPACTION_INTERVAL_MS, DEFAULT_RETENTION_MS, DEFAULT_LOG_ROTATION, } from './daemon/journal/storage-policy';
-export type { LocalStoragePolicy, LocalStoragePolicyInput, LocalStoragePressureEngineOptions, LogRotationPolicy, CompactionPolicy, StoragePressureState, StoragePressureEvent, StorageMeasurement, StorageStatusSnapshot, StorageTickResult, CleanupExecutor, CleanupExecution, TimerLike, } from './daemon/journal/storage-policy';
+export { LocalStorageConfigError, resolveStorageConfig, DEFAULT_RETENTION_TTL_MS } from './daemon/retention/config';
+export type { StorageConfig, StorageBudgetInput } from './daemon/retention/config';
+export { LocalStorageEmergencyError } from './daemon/retention/pressure';
+export type { StoragePressureState } from './daemon/retention/pressure';
+export type { ExpiringClassId, ProtectedClassId, RetentionClassId, ClassUsage, SweepReport } from './daemon/retention/registry';
 export { readDeviceEnrollmentStatus, readDeviceEnrollmentIdentity } from './daemon/store';
 export type { DeviceEnrollment, DeviceEnrollmentIdentity, DeviceEnrollmentIdentityStatus, DeviceEnrollmentStatus, DeviceEnrollmentStatusOptions, } from './daemon/store';
 /**
@@ -10314,6 +10047,8 @@ export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, Expor
 export { NativeInteractionController, NativeInteractionError } from './native-interactions';
 export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from './native-interactions';
 export type { OutboundStatus, OutboundRejection } from './daemon/outbound-settlement';
+export { createExecutionScratch, ScratchRootPathError } from './daemon/retention/scratch';
+export type { ExecutionScratch } from './daemon/retention/scratch';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
@@ -12711,6 +12446,7 @@ export declare function resolveSdkReservedHelperBin(kind: SdkReservedHelperKind,
  */
 export declare function runSdkReservedHelperCommand(argv?: readonly string[]): Promise<boolean>;
 // ==== @byok-sdk/client dist/types.d.ts ====
+import type { ExecutionScratch } from './daemon/retention/scratch';
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './daemon/prepared-agent-memory';
@@ -13080,10 +12816,12 @@ export interface DurableLifecycle {
 }
 /** Runtime resources shared by every start variant. */
 interface RuntimeOperationStartBase {
+    readonly scratch: ExecutionScratch;
     /** Trusted parent-only recovery authority; never serialized into the worker. */
     readonly durableContext?: {
         readonly tenantId: string;
         readonly lifecycle: DurableLifecycle;
+        readonly replicaRoot: string;
     };
     readonly runtimeLaunch?: PiRuntimeLaunchResources;
     /** Exact daemon MCP admission environment; Pi requires it and never inherits runtime credentials. */
@@ -13133,7 +12871,7 @@ export interface PreparedRuntimeOperation {
         kind: 'instruction' | 'prepared';
         cwd: string;
         env: Readonly<Record<string, string | undefined>>;
-        projectionRoot: string;
+        scratch: ExecutionScratch;
     }): Promise<PiRuntimeLaunchResources>;
     start(input: RuntimeOperationStartInput): Promise<Session>;
 }

@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -18,7 +19,7 @@ const { createDaemon } = await import('../daemon/create-daemon');
 describe('createDaemon: DaemonConfig.sdkHelperHost reaches the Pi adapter', () => {
   it.each([undefined, { mode: 'self-executable' as const }])('passes %j to PiAdapter', (sdkHelperHost) => {
     seen.length = 0;
-    createDaemon({
+    createDaemon({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'pi-sdk-helper-host-test',
       serverUrl: 'http://127.0.0.1:1',
       workspaceRoot: path.join(os.tmpdir(), 'byok-pi-helper-host-workspaces'),

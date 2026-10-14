@@ -1,3 +1,4 @@
+import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -363,6 +364,8 @@ async function startPrepared(
   prepared: Prepared,
   overrides: StartOverrides = {},
 ): Promise<Session> {
+const __executionScratch = await testExecutionScratch();
+
   const byok = overrides.byok;
   const adapter = new PiAdapter({
     ...(byok?.launcher === undefined ? {} : { byokLauncher: byok.launcher }),
@@ -392,13 +395,13 @@ async function startPrepared(
     workspace: { workspaceDir: prepared.workspaceDir },
     forwardedEnvironmentNames: Object.keys(prepared.childEnv).sort(),
   });
-  const runtimeLaunch = await result.operation.resolveRuntimeLaunch!({
+  const runtimeLaunch = await result.operation.resolveRuntimeLaunch!({ scratch: __executionScratch,
     kind: 'prepared', cwd: prepared.workspaceDir, env: prepared.childEnv,
-    projectionRoot: byok?.projectionRoot ?? path.join(prepared.workspaceDir, '.unused-projections'),
+
   });
   overrides.captureLaunch?.(runtimeLaunch);
   try {
-    const session = await result.operation.start({
+    const session = await result.operation.start({ scratch: (runtimeLaunch).scratch,
       runtimeLaunch,
       kind: 'prepared',
       mcpEnv: projectPiMcpEnvironment(prepared.childEnv),
