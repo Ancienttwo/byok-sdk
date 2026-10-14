@@ -23,6 +23,7 @@ import type {
 } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
+import type { WakeConsumer } from './wakes/types';
 import type { RateLimiterOptions } from './rate-limiter';
 
 /** Mutually-exclusive storage authority for the embedded reference server. */
@@ -34,8 +35,8 @@ export type ByokServerStorage =
       readonly path: string;
       /** Lifetime of signed blob upload/download URLs. Default 15 minutes. */
       readonly urlTtlMs?: number;
-      /** One-shot schema adoption: v1/v2 require no task history; v3 requires no ambiguous claimed identity. Stop all writers and back up first; old builds cannot reopen v4. */
-      readonly migration?: 'v1-to-v4' | 'v2-to-v4' | 'v3-to-v4';
+      /** One-shot schema adoption: v1/v2 require no task history; v3 requires no ambiguous claimed identity. Stop all writers and back up first; old builds cannot reopen v5. v4 adoption only adds the wake queue. */
+      readonly migration?: 'v1-to-v5' | 'v2-to-v5' | 'v3-to-v5' | 'v4-to-v5';
     };
 
 /** Options for {@link createByokServer}. */
@@ -53,6 +54,8 @@ export interface CreateByokServerOptions {
    * falls back to memory.
    */
   storage?: ByokServerStorage;
+  /** Device-side one-shot wakes, at least once. Host must durably deduplicate even overlapping retries. */
+  wake?: WakeConsumer;
   /** How long `GET /byok/events` holds an empty poll open before returning, ms (§8). Default ~50s; override for tests. */
   longPollHoldMs?: number;
   /**
