@@ -2198,6 +2198,9 @@ export function buildDaemonWithAdapters(
     // stream. CLI audit persistence uses that same event, with no second writer.
     resolvedEnvironment = { ...serviceEnvironmentStatus() };
     environmentResolvedAt = new Date().toISOString();
+    // A later start() (re-pair) detects again: until it does, report nothing
+    // rather than the previous start's outcomes.
+    runtimeObservations = [];
     observer.noteEnvironmentResolved({ ...resolvedEnvironment }, environmentResolvedAt);
 
     if (gitWorkspaceManager) {
