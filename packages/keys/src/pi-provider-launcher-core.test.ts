@@ -478,6 +478,7 @@ describe('committed Pi spawn boundary', () => {
  *   condition; an `exit` takes only a literal, a variable or a parenthesis;
  * - an assignment's right-hand side starts with a variable, type expression,
  *   parenthesis, string, number or '@';
+ * - a foreach header's input after 'in' starts with the same value tokens;
  * - after every '(' (so also '$(' and '@('), and after every ',' (call
  *   arguments, outside type brackets), the next token is a variable, type
  *   expression, parenthesis, string, number or '@' (after '(' also ')'), never
@@ -499,6 +500,9 @@ function powershellCommandFindings(script: string): string[] {
   }
   for (const [, next] of code.matchAll(/\((?=\s*(\S?))/gu)) {
     if (!/^[$[('"@)\d]$/u.test(next ?? '')) findings.push(`( followed by ${JSON.stringify(next)}`);
+  }
+  for (const [, next] of code.matchAll(/\bforeach\s*\(\s*\$\w+\s+in\b\s*(\S?)/giu)) {
+    if (!valueStart.test(next ?? '')) findings.push(`foreach in followed by ${JSON.stringify(next)}`);
   }
   // Generic type arguments ([Dictionary[string, object]]) are not call arguments.
   let untyped = code;
@@ -563,7 +567,16 @@ describe('Windows projection ACL verification', () => {
       '[void](iex $text)', '$x = (& $cmd)', '$x = (. $script)', 'exit (gi $p)',
       'if ((gi $p)) { exit 0 }', '$x = "$(gi $p)"', '$x.Add((gci $p))',
       'exit gi $p', '$x.Add($a, gi $p)', '$x = ( gi $p)',
+      // A foreach input is a pipeline even without a wrapping parenthesis.
+      'foreach ($i in gi $p) {', 'foreach ($i in gci $p) { $i }',
+      'foreach($i in gi){$i}', 'FOREACH ($i IN gi $p) {',
     ]) expect(powershellCommandFindings(script), script).not.toEqual([]);
+  });
+  it('accepts foreach headers whose inputs start with value tokens', () => {
+    for (const input of ['$items', '[int]1', '($items)', "'literal'", '"literal"', '@($items)', '1']) {
+      const script = `foreach ($i in ${input}) { $i }`;
+      expect(powershellCommandFindings(script), script).toEqual([]);
+    }
   });
   it('loads the serializer assembly in its own try, outside the path_not_found mapping', async () => {
     const run = vi.fn(async () => ({exitCode:0,stdout:JSON.stringify(good),stderr:''}));
