@@ -756,11 +756,14 @@ export interface ByokCloud {
    * keyset-paged by `taskId` — see {@link TaskAttemptListQuery} for why the key
    * is the task id and not a timestamp, and why the walk terminates on an
    * absent `nextCursor` rather than on an empty page.
+   * `active: true` selects in-flight statuses without cancellation markers.
    *
    * A non-positive or non-integer `limit` is rejected
    * (`coordination_input_invalid`), never defaulted: the host names the bound.
    */
   listTaskAttempts(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
+  /** Store-aggregated task counts, with host cancellation separated from coarse status. */
+  countTaskAttempts(tenant: TenantId): Promise<import('./stores/ports').TaskAttemptCounts>;
   /** The recorded terminal for a task — the first one, re-encoded canonically under the frozen v1 codec (see `recordTerminal`, `inbound.ts`: the stored body is `encodeEnvelope` of the zod-parsed envelope, not the device's original byte sequence). */
   readTerminalReceipt(tenant: TenantId, taskId: string): Promise<RequestReceipt | undefined>;
   /** Actual device terminal only; cancellation intent never creates this observation. */
@@ -2334,6 +2337,10 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     listTaskAttempts(tenant, query) {
       return tenantStoresFor(controlPlane(tenant), root).tasks.list(query);
+    },
+
+    countTaskAttempts(tenant) {
+      return tenantStoresFor(controlPlane(tenant), root).tasks.countByStatus();
     },
 
     readTerminalReceipt(tenant, taskId) {

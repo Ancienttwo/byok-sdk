@@ -6,6 +6,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { build } from 'esbuild';
 import { Miniflare, Log, LogLevel } from 'miniflare';
 import type { CloudDoErrorCode } from '../src/errors';
+import { readThroughFirstEvent } from './sse-reader';
 
 const KEY = 'Primary~0123456789ABCDEFGHIJKLMNOP';
 const SECONDARY = 'Secondary~0123456789QRSTUVWXYZabcd';
@@ -95,7 +96,10 @@ async function setup(extra: Record<string, unknown> = {}, controls: Record<strin
   return name;
 }
 async function dump(name: string) { return json<Record<string, Record<string, unknown>[]>>(name, 'dump'); }
-function events(text: string): Record<string, unknown>[] { return text.split('\n').filter(line => line.startsWith('data: ')).map(line => JSON.parse(line.slice(6))); }
+function events(text: string): Record<string, unknown>[] {
+  return text.split('\n\n').slice(0, -1).flatMap(frame => frame.split('\n').filter(line => line.startsWith('data: ')))
+    .map(line => JSON.parse(line.slice(6)) as Record<string, unknown>);
+}
 const errorEvent = (code: string) => ({ type: 'error', code, retryable: false });
 async function run(name: string) { return (await rpc(name, 'submit', { input: { instruction: 'Read the trusted financial analysis skill and its current tool catalog.' } })).text(); }
 function nativeRows(rows: Record<string, Record<string, unknown>[]>) { return Object.fromEntries(Object.entries(rows).filter(([table]) => table.startsWith('pi_'))); }
@@ -330,8 +334,8 @@ describe('native session limits and late results', () => {
     const response = await mf.dispatchFetch('http://test/', { method: 'POST', body: JSON.stringify({ name, operation: 'submit', input: { instruction: 'Read the skill.' } }) });
     const reader = response.body!.getReader();
     try {
-      const first = await reader.read();
-      expect(new TextDecoder().decode(first.value)).toContain('text_delta');
+      const first = await readThroughFirstEvent(reader);
+      expect(events(first)[0]).toMatchObject({ type: 'text_delta' });
       await waitDispatched(name, 1);
       await reader.cancel();
       await vi.waitFor(async () => expect((await dump(name)).cloud_invocations).toContainEqual(expect.objectContaining({ state: 'aborted', resultJson: null })));

@@ -140,15 +140,27 @@ external inspection or backup.
 
 ### Task snapshots after restart
 
-`stats()` re-reads only live attempts and their approval timelines; absorbing
-terminal states are counted once. SQLite history is scanned once at startup,
-so repeated stats calls cost O(live tasks), independent of terminal history.
+`stats()` reads one store aggregate, active attempt pages and their approval
+timelines. It keeps no task-count mirror and does not scan history at startup.
+The aggregate scans stored rows; page/approval call counts depend only on active
+tasks. This multi-read observation is exact at quiescence; a task settling
+between reads can be temporarily absent. SQLite preserves attempt/cancellation
+counts, while its approval timeline resets at reopen. Traffic counters and the
+zero-filled `inboundRefusals` map start at server creation and reset on reopen.
 Snapshots read creation time (`recordedAt`) and requested session from the
 immutable offer receipt; the canonical terminal's session takes precedence.
 These facts survive completion and SQLite restart without a dispatch Map.
 Attempts opened before an offer receipt was committed retain the existing
 attempt-only snapshot (`createdAt: updatedAt`, no requested session). Malformed
 receipts are rejected by the kernel's readback contract.
+
+Custom cloud stores must implement `TaskAttemptStore.countByStatus` and the
+`TaskAttemptListQuery.active` filter. `ByokCloud.countTaskAttempts` exposes the
+aggregate; `INBOUND_REFUSAL_REASONS` owns the closed refusal vocabulary.
+
+Unredeemed pairing codes, presence and other unmodified ports remain ephemeral.
+Keep daemon OS credentials, server URL and token signer stable across restart.
+This does not restore TaskHandle promises, subscriptions or provider processes.
 
 ### Schema adoption
 

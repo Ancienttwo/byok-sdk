@@ -14,11 +14,74 @@
  * in the tenant it guessed into.
  */
 import { describe, expect, it } from 'vitest';
+import { contentHash } from '@byok-sdk/core';
+import { TASK_ATTEMPT_STATUSES } from '@byok-sdk/cloud';
 import { TENANT_A, TENANT_B } from './fixtures';
 import { withCloudComposition, type CloudCompositionFactory } from './harness';
 
 export function runTaskAttemptConformance(factory: CloudCompositionFactory): void {
   describe('task attempts', () => {
+    it('aggregates every status, separates cancellation markers, and isolates tenants', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        const zeros = Object.fromEntries(TASK_ATTEMPT_STATUSES.map((status) => [status, 0]));
+        expect(await stores.tasks.countByStatus(TENANT_A)).toEqual({ byStatus: zeros, cancellationRequested: 0 });
+        for (const status of TASK_ATTEMPT_STATUSES) {
+          await stores.tasks.open(TENANT_A, { taskId: `status-${status}`, deviceId: 'device-1' });
+          await stores.tasks.recordStatus(TENANT_A, { taskId: `status-${status}`, status });
+        }
+        for (const owned of [false, true]) {
+          const taskId = owned ? 'cancel-owned' : 'cancel-unowned';
+          await stores.tasks.open(TENANT_A, { taskId, deviceId: 'device-1' });
+          if (owned) await stores.tasks.claim(TENANT_A, { taskId, deviceId: 'device-1' });
+          await stores.cancellations.request(TENANT_A, {
+            taskId, proposedMessageId: `message-${taskId}`,
+            materialize: async () => ({ body: 'cancel', bodyHash: contentHash(`sha256:${'a'.repeat(64)}`), byteSize: 6n }),
+          });
+          const late = await stores.tasks.recordStatus(TENANT_A, { taskId, status: 'complete' });
+          expect(late?.status).toBe(owned ? 'cancel_requested' : 'cancelled');
+        }
+        await stores.tasks.open(TENANT_B, { taskId: 'status-complete', deviceId: 'other' });
+        expect(await stores.tasks.countByStatus(TENANT_A)).toEqual({
+          byStatus: Object.fromEntries(TASK_ATTEMPT_STATUSES.map((status) => [status, 1])), cancellationRequested: 2,
+        });
+        expect(await stores.tasks.countByStatus(TENANT_B)).toEqual({ byStatus: { ...zeros, offered: 1 }, cancellationRequested: 0 });
+      });
+    });
+
+    it('walks only active unmarked attempts across exclusive keyset pages', async () => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        const statuses = ['offered', 'complete', 'claimed', 'failed', 'running', 'cancelled', 'cancel_requested'] as const;
+        for (const [index, status] of statuses.entries()) {
+          const taskId = `task-${index}`;
+          await stores.tasks.open(TENANT_A, { taskId, deviceId: 'device-1' });
+          await stores.tasks.recordStatus(TENANT_A, { taskId, status });
+        }
+        await stores.tasks.open(TENANT_B, { taskId: 'task-1', deviceId: 'other' });
+        await stores.tasks.open(TENANT_A, { taskId: 'task-7', deviceId: 'device-1' });
+        await stores.cancellations.request(TENANT_A, {
+          taskId: 'task-7', proposedMessageId: 'cancel',
+          materialize: async () => ({ body: 'cancel', bodyHash: contentHash(`sha256:${'a'.repeat(64)}`), byteSize: 6n }),
+        });
+        const walked: string[] = [];
+        let cursor: string | undefined;
+        do {
+          const page = await stores.tasks.list(TENANT_A, { limit: 1, active: true, ...(cursor === undefined ? {} : { cursor }) });
+          expect(page.attempts.length).toBeLessThanOrEqual(1);
+          walked.push(...page.attempts.map((attempt) => attempt.taskId));
+          cursor = page.nextCursor;
+          expect(walked.length).toBeLessThanOrEqual(3);
+        } while (cursor !== undefined);
+        expect(walked).toEqual(['task-0', 'task-2', 'task-4']);
+        expect((await stores.tasks.list(TENANT_A, { limit: 10, active: true, cursor: 'task-1' })).attempts.map((a) => a.taskId))
+          .toEqual(['task-2', 'task-4']);
+        expect((await stores.tasks.list(TENANT_B, { limit: 10, active: true })).attempts.map((a) => a.taskId)).toEqual(['task-1']);
+        for (const limit of [0, -1, 2.5, Number.NaN]) {
+          await expect(stores.tasks.list(TENANT_A, { limit, active: true })).rejects.toThrow();
+        }
+        await expect(stores.tasks.list(TENANT_A, { limit: 1, active: false as never })).rejects.toThrow();
+      });
+    });
+
     it('opens an unowned attempt and reads it back', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         const attempt = await stores.tasks.open(TENANT_A, {

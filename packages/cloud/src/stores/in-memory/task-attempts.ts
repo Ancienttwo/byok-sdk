@@ -19,9 +19,12 @@ import { tenantKey, type Clock, type TenantId } from '@byok-sdk/core';
 import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import { assertTaskAttemptListLimit } from '../../coordination';
 import {
+  TASK_ATTEMPT_ACTIVE_STATUSES,
+  TASK_ATTEMPT_STATUSES,
   type AgentMessageAdmission,
   type AgentRef,
   type TaskAttempt,
+  type TaskAttemptCounts,
   type TaskAttemptListQuery,
   type TaskAttemptPage,
   type TaskAttemptStatus,
@@ -172,13 +175,15 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
   }
 
   async list(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage> {
-    assertTaskAttemptListLimit(query.limit);
+    assertTaskAttemptListLimit(query.limit, query.active);
     const cursor = query.cursor;
     // Filtered on the row's OWN tenant rather than on a key prefix: the
     // attempt carries its tenant, so this cannot be widened by a tenant id that
     // happens to prefix another.
     const matches = [...this.#state.attempts.values()]
       .filter((attempt) => attempt.tenantId === tenant)
+      .filter((attempt) => query.active === undefined ||
+        (attempt.cancellation === undefined && TASK_ATTEMPT_ACTIVE_STATUSES.some((status) => status === attempt.status)))
       .filter((attempt) => cursor === undefined || attempt.taskId > cursor)
       .sort((left, right) => (left.taskId < right.taskId ? -1 : left.taskId > right.taskId ? 1 : 0));
     // One over the limit is what tells "this page is full" apart from "there is
@@ -190,6 +195,18 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
       attempts,
       ...(hasMore && last !== undefined ? { nextCursor: last.taskId } : {}),
     };
+  }
+
+  async countByStatus(tenant: TenantId): Promise<TaskAttemptCounts> {
+    const byStatus = Object.fromEntries(TASK_ATTEMPT_STATUSES.map((status) => [status, 0])) as Record<TaskAttemptStatus, number>;
+    let cancellationRequested = 0;
+    for (const attempt of this.#state.attempts.values()) {
+      if (attempt.tenantId !== tenant) continue;
+      if (!TASK_ATTEMPT_STATUSES.includes(attempt.status)) throw new Error('Unknown stored task attempt status');
+      if (attempt.cancellation !== undefined) cancellationRequested += 1;
+      else byStatus[attempt.status] += 1;
+    }
+    return { byStatus, cancellationRequested };
   }
 
   async claim(
