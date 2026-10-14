@@ -1,17 +1,50 @@
 # @byok-sdk/server
 
-The embedded reference coordinator: a façade over the `@byok-sdk/cloud` kernel
-that serves one product and one tenant inside your own process. It handles
-pairing, device authentication, dispatch, approvals, cancellation and device
-presence over protocol v2.
+Embed the `@byok-sdk/cloud` coordination kernel in a Node.js process serving
+one product and one tenant. The server handles pairing, device authentication,
+dispatch, approvals, cancellation and device discovery over protocol v2.
+Use `@byok-sdk/cloud` with `@byok-sdk/cloud-dataplane` for a multi-instance
+hosted deployment.
 
-Devices talk to it over HTTP: they send envelopes with `POST /byok/messages`
-and receive them by long-polling `GET /byok/events`. An empty poll is held open
-for `longPollHoldMs` (default 50 seconds) before it returns. There is no
-WebSocket transport and no task lease. For a multi-instance hosted deployment,
-use `@byok-sdk/cloud` with `@byok-sdk/cloud-dataplane` instead.
+Requires Node.js 24.15.0 or newer. MIT licensed.
 
-MIT licensed. Node.js 24.15.0 or newer.
+## Embed the server
+
+```ts
+import { createByokServer } from '@byok-sdk/server';
+
+const server = createByokServer({
+  productId: 'my-product',
+  storage: { kind: 'sqlite', path: './byok.sqlite' },
+});
+
+// Mount server.hono at the root of your HTTP application, or serve its .fetch.
+// The Host owns its HTTP listener and authentication for Host-facing routes.
+
+// On shutdown, stop accepting HTTP requests and release the SDK's resources.
+await server.close();
+```
+
+Omit `storage` for process-local memory. Explicit SQLite storage fails closed
+if the file cannot be opened; it does not fall back to memory. The Host closes
+its HTTP listener separately.
+
+## HTTP long-poll delivery
+
+Devices send envelopes to `POST /byok/messages` and receive them through
+`GET /byok/events`. There is no WebSocket transport or task lease.
+
+A held poll subscribes to a `MailboxWake` before reading the durable mailbox.
+A committed append wakes the poll so it can read and return available
+envelopes. With nothing to deliver, it waits up to `longPollHoldMs` (default
+50 seconds). The server composes the in-process wake automatically for both
+memory and SQLite; `createByokServer` needs no mailbox-wake option.
+
+Hints do not carry message authority. Lost hints trigger another read after the
+wake port's default five-second fallback, bounded by the remaining hold time.
+Duplicate hints do not acknowledge messages or advance a cursor. Every read
+checks the replay floor: lost retained history produces `409 cursor_too_old`,
+including when collection happens during a hold.
 
 ## Storage
 
@@ -32,12 +65,6 @@ and the token signing key when you do not pass `tokenSigner`.
 
 A SQLite file has one owner at a time; see
 [One process per SQLite file](#one-process-per-sqlite-file).
-
-Receipt keys are tenant scoped and first-write-wins. Mailbox retention never
-deletes receipts: immutable offer, delivered and canonical terminal facts remain
-for the lifetime of the database. Only prefixes classified as `request` expire
-under policy; the SDK request class is currently empty. Unknown keys are identity
-fences too. Monitor disk usage; exhaustion does not authorize identity deletion.
 
 ## One process per SQLite file
 
@@ -66,36 +93,24 @@ the owning process, so a second process on the same file would split them. To
 run several instances, use external stores (`@byok-sdk/cloud` with
 `@byok-sdk/cloud-dataplane`) and one shared `tokenSigner`.
 
-### Shutdown and restart
+### Shutdown
 
-`ByokServer.stop()` was removed; `await server.close()` is the only shutdown
-path. It releases the relay's per-task feeds and timers and the connection
-observations, lets store calls that were already queued finish, then closes the
-database and releases ownership. It is safe to call more than once. Await it
-before opening the same file again, in this process or another.
+`await server.close()` is the shutdown API. It closes the maintenance and
+one-shot wake schedulers, waits for an in-flight maintenance pass and accepted
+storage work, then releases task-event feeds and closes the database. It is safe
+to call more than once. Await it before reopening the file, inspecting it or
+taking a consistent backup.
+Use a local filesystem; NFS is unsupported.
 
-Restart contract: after `close()`, a crash or SIGKILL, the next
-`createByokServer` on the file becomes the owner and reads back what
-[Storage](#storage) lists as persisted. Everything else starts empty; see
-[Restart](#restart) for what devices and Hosts see.
-
-### Migrating from `stop()`
-
-Replace `server.stop()` with `await server.close()`. Before you upgrade, stop
-every old server and every external SQLite connection to the file and take a
-consistent backup: an idle connection from an older build can still block the
-new EXCLUSIVE owner. The owner-lock refactor itself leaves persisted data
-and wire contracts unchanged.
-
-Only databases opened by unreleased builds from `main` between #403 and #442
-have a sibling `<path>-lock` file; released 0.26.x never created it. It is not
-an ownership authority any more: delete it once all old owners have stopped,
-because the SDK neither opens nor deletes it.
+Before upgrading, stop all old owners and external SQLite connections and take
+a consistent backup. Databases opened by unreleased builds between #403 and
+#442 can have an obsolete `<path>-lock` sibling: remove it only after all old
+owners have stopped. The current SDK neither opens nor deletes that file.
 
 ## Restart
 
 A restart is `await server.close()`, or a crash, followed by `createByokServer`
-on the same file (see [Shutdown and restart](#shutdown-and-restart)).
+on the same file (see [Shutdown](#shutdown)).
 
 With SQLite storage and no stable `tokenSigner`, a restart makes every
 outstanding access token invalid. Each daemon gets one `401`, renews its token
@@ -106,8 +121,9 @@ connected again at its next poll.
 What a restart does not keep:
 
 - pending approvals, because the approval timeline is in memory;
-- `TaskHandle` promises, event subscriptions and provider processes. After a
-  restart, read tasks with `tasks.offer(taskId)` and `tasks.get(taskId)` (see
+- `TaskHandle` promises and event subscriptions. Provider processes run on
+  devices; recover server coordination after restart with `tasks.offer(taskId)`
+  and `tasks.get(taskId)` (see
   [Persistent host request identity](#persistent-host-request-identity));
 - with memory storage, everything, including enrollment: devices must pair
   again.
@@ -115,14 +131,15 @@ What a restart does not keep:
 ## Device presence
 
 `machines.list()[].connected` projects the core store's unexpired TTL
-observation, joined to the durable device directory. Authenticated hello, accepted envelopes,
-long-poll starts and heartbeat publications renew this same lease. Its default
-TTL remains `longPollHoldMs + 15_000` (65 seconds with the default 50 second
-hold); `presenceTtlMs` must exceed `longPollHoldMs`. Expiry sets `connected` to false and removes live discovery facts
-from the read model, and revocation removes the device entirely.
+observation, joined to the durable device directory. Authenticated hello,
+accepted envelopes, long-poll starts and heartbeat publications renew this same
+lease. Its default TTL is `longPollHoldMs + 15_000` (65 seconds with the default
+50 second hold); `presenceTtlMs` must exceed `longPollHoldMs`. Expiry sets `connected` to
+false and removes live discovery facts from the read model. Revocation removes
+the device entirely.
 
 Every dispatch requires an explicit `deviceId`. Presence never gates dispatch:
-registered offline targets receive queued offers; unknown or revoked legacy
+registered offline targets receive queued offers; unknown or revoked
 targets fail with `device_not_found` before task/mailbox creation. Durable
 capabilities remain admission authority; the daemon validates local toolsets.
 
@@ -134,6 +151,7 @@ policy overrides are positive bigint milliseconds. Defaults are acked mailbox
 24h, unacked mailbox 7d, request receipts 24h, orphan objects 24h, and 500 rows
 per step. There is no disable option.
 
+Each pass calls the kernel's `ByokCloud.runMaintenance` for this server's tenant.
 `await server.maintenance.runNow()` joins an in-flight pass. `await server.close()`
 clears the timer, waits for that pass to settle, then closes storage. A pass
 returns ten ordered step results and emits `maintenance.completed`, or
@@ -146,6 +164,15 @@ Mailbox collection never changes accounting counters. Orphan collection deletes
 real bytes before settling their charge. Identity receipts and redeemed pairing
 codes stay protected. See the [migration](../../docs/migrations/412-retention-maintenance.md)
 and [runbook](../../deploy/runbooks/cloud-cleanup.md) for the port contract.
+
+### Receipt retention
+
+Receipt keys are tenant scoped and first-write-wins. All SDK receipt families
+and unknown prefixes are identity fences: immutable offer, delivered and
+canonical terminal facts remain for the lifetime of the database. The kernel's
+derived `request` class is currently empty, so its configured 24-hour policy
+does not expire SDK identity receipts. Monitor disk usage; exhaustion does not
+authorize deleting those fences.
 
 ## Stats and liveness
 
@@ -204,7 +231,10 @@ The coordinator requires the durable `toolset-selection` capability before
 creating the task. The daemon validates its actual configured inventory when
 it accepts the offer; presence discovery does not gate admission.
 
-## Device-side one-shot wakes (routine K2)
+## Device-side one-shot wakes
+
+`server.wakes` schedules Host work; it is separate from the mailbox wake that
+releases held HTTP polls.
 
 Only the embedded server has this queue; hosted `@byok-sdk/cloud` has no routine
 timer. Cron/periodic rules and execution/occurrence ledgers remain Host-owned.
@@ -257,20 +287,13 @@ with its next delivery number. There is no persisted delivering state, hosted
 timer, cron parser or parallel legacy path. Real sleep timing is not proven by
 fake timers.
 
-## SQLite receipts and schema adoption
+## SQLite schema adoption
 
-Pairing and authentication share the persisted device directory. Receipt keys
-are tenant scoped and first-write-wins. Mailbox retention never deletes
-receipts: immutable offer, delivered and canonical terminal facts remain for the
-lifetime of the database. There is no receipt TTL or automatic pruning. Monitor
-disk usage; exhaustion is an error, not permission to delete identity fences.
-
-### Schema adoption
-
-The current schema is v5, retaining write-once `claimedHarnessId`
-stored atomically with task ownership and adding the embedded wake table. Stop **all** writers and take a consistent
-SQLite backup (including WAL state or using SQLite's backup facility) before
-explicit adoption. An already-open old writer is not stopped by the version fence.
+The current schema is v5. It retains write-once `claimedHarnessId`, stored
+atomically with task ownership, and includes the embedded wake table. Stop
+**all** writers and take a consistent SQLite backup (including WAL state or
+using SQLite's backup facility) before explicit adoption. An already-open old
+writer is not stopped by the version fence.
 
 - `v1-to-v5` and `v2-to-v5` require no task, mailbox-message, agent-admission or
   advanced cursor history: old in-memory receipts cannot be recovered from task
@@ -297,6 +320,8 @@ Schema refusals at open are a `SqliteSchemaError` with `foundVersion` and
   preserve the file.
 - `SQLITE_SCHEMA_INVALID`: the file contradicts its declared schema or is not a
   BYOK database.
+- `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: pending mailbox rows use an unsupported
+  wire major. Drain them with the previous compatible SDK before upgrading.
 
 ```ts
 const server = createByokServer({
@@ -315,12 +340,10 @@ V1 enrollment was in-memory and needs explicit pairing. Unknown versions, missin
 authorities and malformed receipt columns/primary key fail closed. Broader
 validation of legacy table constraints is a separate tracked concern.
 
-**Breaking storage boundary:** schema-v1/v2/v3 writers refuse v4. The public
-`v1-to-v3` / `v2-to-v3` selectors are replaced by the corresponding target-v4
-selectors, with no alias or silent reinterpretation: callers must update their
-one-shot migration configuration after checking eligibility and backing up.
-Restore of a backup requires a separate recovery procedure because it can lose
-new state or restore old grants. Schema v4 shipped in 0.24.0.
+Older builds cannot reopen v5. Restore of a backup requires a separate recovery
+procedure because it can lose newer state or restore old grants. The migration
+selectors above are operator-invoked adoption steps, not alternate runtime
+storage paths.
 
 ## Persistent host request identity
 
@@ -348,8 +371,8 @@ and relay notification as a live handle; it does not require a connected device.
 Missing tasks reject. A host must separately persist cancellation intent if it
 can crash before this call, and prevent dispatch of a cancelled prepared request.
 
-The runnable public-package fixture is
-`docs/researches/2026-09-09-g1c-facade/public-consumer-probe.mjs`. It demonstrates
-pre-enqueue binding and recovery, not product authentication or consumer ACK.
+The [protocol contract](../../docs/protocol.md) and
+[coordination specification](../../docs/spec.md) define the durable facts behind
+these reads. They do not replace Host authentication or consumer acknowledgement.
 
 Runtime dependencies and size budgets: [entry dependency contract](../../README.md#entry-dependencies).
