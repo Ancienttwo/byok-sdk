@@ -663,14 +663,19 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
 
     const reconstructed = await startCloud();
     await waitForAttempt(reconstructed, offer.taskId, 'complete');
+    await waitForFile(path.join(current!.daemonBase.controlDir, `${offer.taskId}.closed`));
+    await waitForJournalTruth('confirmed');
+    const terminalBody = await reconstructed.rpc('readTerminalBody', { taskId: offer.taskId });
+    // Inspect the durable receipt only after the exclusive owner has released
+    // its handle; keep the daemon/journal recovery barriers before that close.
+    await reconstructed.rpc('close');
+    expect(await reconstructed.exited()).toEqual({ code: 0, signal: null });
     const [receipt] = (() => {
       const db = new DatabaseSync(current!.cloudDb, { readOnly: true });
       try { return db.prepare('SELECT body FROM fixture_receipt WHERE receipt_key = ?').all(`task:${offer.taskId}:terminal`) as Record<string, unknown>[]; }
       finally { db.close(); }
     })();
-    expect(receipt?.body).toBe(await reconstructed.rpc('readTerminalBody', { taskId: offer.taskId }));
-    await waitForFile(path.join(current!.daemonBase.controlDir, `${offer.taskId}.closed`));
-    await waitForJournalTruth('confirmed');
+    expect(receipt?.body).toBe(terminalBody);
     expect(journalRows('SELECT truth_state FROM journal_terminal')).toEqual([{ truth_state: 'confirmed' }]);
     expect(starts()).toHaveLength(1);
   }, 30_000);

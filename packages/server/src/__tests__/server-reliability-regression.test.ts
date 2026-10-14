@@ -80,7 +80,7 @@ describe('issues #141-#144 server reliability regressions', () => {
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server !== undefined) await stopServer(server);
     server = undefined;
