@@ -1,8 +1,5 @@
 import { z } from 'zod';
 
-/** Capability required before an offer may select terminal projection behavior. */
-export const TERMINAL_PROJECTION_SELECTION_CAPABILITY = 'terminal-projection-selection' as const;
-
 export const TerminalProjectionContractSchema = z
   .string()
   .min(1)

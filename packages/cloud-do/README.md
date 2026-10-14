@@ -127,11 +127,13 @@ under the SDK's pre-1.0 policy.
 ## Package checks
 
 The library build emits dist/index.js and a local declaration closure.
-The dist check rejects Node builtins, missing or escaped declaration paths,
-and undeclared external type imports. A separate Wrangler dry run writes
+The dist check rejects missing or escaped declaration paths and undeclared
+external type imports. The entry dependency contract enforces runtime builtin policy. A separate Wrangler dry run writes
 dist-worker. That Worker output is not in the npm package.
 
 Release verification installs a real tarball in a temporary consumer.
 It typechecks the subclass, bundles it with Wrangler, and runs its hook,
 Durable Object RPC, identity helper, and SQLite adapter in real workerd.
 The same smoke runs in the Linux, macOS, and Windows release-pack jobs.
+
+Runtime dependencies and size budgets: [entry dependency contract](../../README.md#entry-dependencies).

@@ -118,3 +118,20 @@ describe('byok route paths: client builders reproduce their prior template-strin
     expect(byokBlobContentPath(id)).toBe('/byok/blobs/blob-1/content');
   });
 });
+
+
+describe('outbound settlement v2 additions #397', () => {
+  it('preserves a counts-only response and normalizes unknown observation', async () => {
+    const { MessagesSendResponseSchema } = await import('../http-api');
+    expect(MessagesSendResponseSchema.parse({ accepted: 1 })).toEqual({ accepted: 1 });
+    const id = crypto.randomUUID();
+    expect(MessagesSendResponseSchema.parse({ accepted: 0, rejected: 1, outcomes: [{ id, outcome: 'rejected', reason: 'future_reason' }] }).outcomes).toEqual([{ id, outcome: 'rejected', reason: 'unknown' }]);
+    expect(() => MessagesSendResponseSchema.parse({ accepted: 0, outcomes: [{ id, outcome: 'future' }] })).toThrow();
+    expect(() => MessagesSendResponseSchema.parse({ accepted: 0, outcomes: [{ id, outcome: 'rejected', reason: 'x'.repeat(65) }] })).toThrow();
+  });
+
+  it('accepts advertised limits without requiring them from old responders', () => {
+    expect(EventsPollResponseSchema.parse({ events: [], cursor: 0 })).toEqual({ events: [], cursor: 0 });
+    expect(EventsPollResponseSchema.parse({ events: [], cursor: 0, ingress: { activityMaxEvents: 50, activityMaxBytes: 65536 } }).ingress).toEqual({ activityMaxEvents: 50, activityMaxBytes: 65536 });
+  });
+});

@@ -302,7 +302,7 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
         productId: OTHER_PRODUCT_ID,
       }),
     );
-    expect(refused).toEqual({ status: 200, body: { accepted: 0, rejected: 1 } });
+    expect(refused).toMatchObject({ status: 200, body: { accepted: 0, rejected: 1 } });
   });
 
   // -----------------------------------------------------------------------

@@ -165,6 +165,7 @@ describe('hosted journal integration (L-002)', () => {
     await daemon?.stop();
     daemon = undefined;
     await server.close();
+    vi.restoreAllMocks();
   });
 
   async function startDaemon(
@@ -190,6 +191,41 @@ describe('hosted journal integration (L-002)', () => {
     await daemon.start();
     return { adapter, storeDir, deviceId: record.deviceId };
   }
+
+  it('durably rejects a terminal with its wire reason before publishing status and event', async () => {
+    const { LongPollClient } = await import('../daemon/long-poll-transport');
+    const original = LongPollClient.prototype.postBatch;
+    const journal = new RecordingJournal();
+    vi.spyOn(LongPollClient.prototype, 'postBatch').mockImplementation(async function(this: import('../daemon/long-poll-transport').LongPollClient, batch, signal) {
+      if (!batch.some((envelope) => envelope.type === 'task.complete')) return original.call(this, batch, signal);
+      return { accepted: batch.filter((envelope) => envelope.type !== 'task.complete').length, rejected: 1,
+        outcomes: batch.map((envelope) => envelope.type === 'task.complete'
+          ? { id: envelope.id, outcome: 'rejected' as const, reason: 'state_conflict' }
+          : { id: envelope.id, outcome: 'accepted' as const }) };
+    });
+    const { adapter, storeDir } = await startDaemon({ hostedJournal: { mode: 'sqlite' } }, journal);
+    const rejected: import('../daemon/observer').DaemonEvent[] = [];
+    daemon!.subscribe((event) => {
+      if (event.kind === 'outbound-rejected') {
+        expect(journal.terminals[0]?.truthState).toBe('failed');
+        rejected.push(event);
+      }
+    });
+    server.send(createEnvelope('task.offer', { instruction: 'PAYLOAD_SENTINEL' }, { taskId: 'terminal-rejected', seq: server.nextSeq() }));
+    await server.waitFor((envelope) => envelope.type === 'task.started');
+    adapter.sessions[0]!.emit({ type: 'progress', text: 'PAYLOAD_SENTINEL' });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(rejected).toHaveLength(1));
+    expect(journal.terminals[0]).toMatchObject({ truthState: 'failed', lastError: 'state_conflict' });
+    expect(daemon!.status().outbound).toMatchObject({ rejected: 1, rejectedByReason: { state_conflict: 1 }, rejectedTerminals: 1 });
+    expect(daemon!.status().operationalHealth).toMatchObject({ availability: 'available', state: 'healthy' });
+    expect(daemon!.tasks().find((task) => task.taskId === 'terminal-rejected')).toMatchObject({ state: 'Complete', delivery: 'rejected', summary: 'PAYLOAD_SENTINEL' });
+    expect(JSON.stringify(rejected)).not.toContain('PAYLOAD_SENTINEL');
+    const { connectControlClient } = await import('../bin/control-client');
+    const connected = await connectControlClient({ storeDir, productId: 'test-product-journal' });
+    if (!connected.ok) throw new Error('control unavailable');
+    try { expect((await connected.client.request<import('../daemon/control-protocol').ControlStatusResult>('status')).activeTasks).toEqual([]); } finally { connected.client.close(); }
+  });
 
   it('keeps exact successful terminal bytes and active ownership through a journal write outage', async () => {
     const journal = new RecordingJournal();

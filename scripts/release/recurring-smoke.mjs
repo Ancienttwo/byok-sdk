@@ -192,6 +192,13 @@ async function publishAgentMessage(cloud, authorization, envelope) {
 
 const publishEnvelope = (taskId, payload) => createEnvelope('agent.message.publish', payload, { taskId });
 
+async function assertMessageSettlement(response, envelope, outcome) {
+  assert.deepEqual(await response.json(), {
+    accepted: 1,
+    outcomes: [{ id: envelope.id, outcome }],
+  });
+}
+
 function assertExactDisposition(receipt, payload, outcome, reasonCode) {
   assert.equal(receipt.outcome, outcome);
   if (reasonCode === undefined) assert.equal(receipt.reasonCode, undefined);
@@ -292,7 +299,7 @@ if (reopenHandoffPath !== undefined) {
     // model Execution (it counts callbacks, not executions the product runs).
     const replay = await publishAgentMessage(reopened, { authorization: `Bearer ${handoff.accessToken}` }, handoff.envelope);
     assert.equal(replay.status, 200);
-    assert.deepEqual(await replay.json(), { accepted: 1 });
+    await assertMessageSettlement(replay, handoff.envelope, 'duplicate');
     assert.equal(consumer.calls.length, 0);
     assert.deepEqual(await reopened.readTaskAttempt(reopenTenant, handoff.taskId), attemptBefore);
     assert.deepEqual(
@@ -363,7 +370,7 @@ if (crashReplayHandoffPath !== undefined) {
     );
     const replay = await publishAgentMessage(reopened, { authorization: `Bearer ${handoff.accessToken}` }, handoff.envelope);
     assert.equal(replay.status, 200);
-    assert.deepEqual(await replay.json(), { accepted: 1 });
+    await assertMessageSettlement(replay, handoff.envelope, 'accepted');
     assert.equal(replays.length, 1); // at-least-once delivery reconciled the pending admission
     const receipt = await reopened.readAgentMessageDisposition(replayTenant, handoff.deviceId, handoff.taskId, handoff.payload);
     assertExactDisposition(receipt, handoff.payload, 'accepted');
@@ -447,7 +454,7 @@ console.log('[release-pack] recurring public imports, strict submission and inde
   assert.deepEqual(await readMessage(msgTenant, acceptedTask, agentRef), undefined);
   const acceptedResponse = await publishAgentMessage(composition.cloud, device.authorization, acceptedEnvelope);
   assert.equal(acceptedResponse.status, 200);
-  assert.deepEqual(await acceptedResponse.json(), { accepted: 1 });
+  await assertMessageSettlement(acceptedResponse, acceptedEnvelope, 'accepted');
   const receipt = await readDisposition(msgTenant, acceptedTask, acceptedPayload);
   assertExactDisposition(receipt, acceptedPayload, 'accepted');
   const acceptedMessage = await readMessage(msgTenant, acceptedTask, agentRef);
@@ -461,9 +468,10 @@ console.log('[release-pack] recurring public imports, strict submission and inde
   const heldTask = 'packed-held-task';
   await submit(heldTask);
   const heldPayload = messagePayload(agentRef);
-  const heldResponse = await publishAgentMessage(composition.cloud, device.authorization, publishEnvelope(heldTask, heldPayload));
+  const heldEnvelope = publishEnvelope(heldTask, heldPayload);
+  const heldResponse = await publishAgentMessage(composition.cloud, device.authorization, heldEnvelope);
   assert.equal(heldResponse.status, 200);
-  assert.deepEqual(await heldResponse.json(), { accepted: 1 }); // transport accepted; business decision held
+  await assertMessageSettlement(heldResponse, heldEnvelope, 'accepted'); // transport accepted; business decision held
   const heldReceipt = await readDisposition(msgTenant, heldTask, heldPayload);
   assert.notEqual(heldReceipt, undefined);
   assertExactDisposition(heldReceipt, heldPayload, 'held', 'product_queue_full');
@@ -498,7 +506,7 @@ console.log('[release-pack] recurring public imports, strict submission and inde
   assert.deepEqual(await readMessage(msgTenant, recoveryTask, agentRef), { payload: recoveryPayload, context: MESSAGE_CONTEXT });
   const recoveryResponse = await publishAgentMessage(composition.cloud, device.authorization, recoveryEnvelope);
   assert.equal(recoveryResponse.status, 200);
-  assert.deepEqual(await recoveryResponse.json(), { accepted: 1 });
+  await assertMessageSettlement(recoveryResponse, recoveryEnvelope, 'accepted');
   assert.equal(consumer.calls.length, 4); // at-least-once: the consumer reconciled the pending admission
   assert.equal(consumer.calls.filter((call) => call.messageId === recoveryPayload.messageId).length, 2);
   assert.equal(consumer.committed.get(recoveryPayload.messageId).outcome, 'accepted'); // one logical effect
@@ -508,7 +516,7 @@ console.log('[release-pack] recurring public imports, strict submission and inde
   composition.stores.tasks.finalizeAgentMessage = realFinalize;
   // A third exact replay is a pure duplicate: no third consumer invocation.
   const duplicateResponse = await publishAgentMessage(composition.cloud, device.authorization, recoveryEnvelope);
-  assert.deepEqual(await duplicateResponse.json(), { accepted: 1 });
+  await assertMessageSettlement(duplicateResponse, recoveryEnvelope, 'duplicate');
   assert.equal(consumer.calls.length, 4);
   assert.deepEqual(await readDisposition(msgTenant, recoveryTask, recoveryPayload), recoveryReceipt);
 
@@ -575,8 +583,10 @@ console.log('[release-pack] recurring public imports, strict submission and inde
     assert.equal(helloResponse.status, 200);
     // An accepted hello's answer carries the poll's capability advertisement (#391 Phase 2).
     const helloAnswer = await helloResponse.json();
-    assert.deepEqual(Object.keys(helloAnswer).sort(), ['accepted', 'capabilities']);
+    assert.deepEqual(Object.keys(helloAnswer).sort(), ['accepted', 'capabilities', 'ingress', 'outcomes']);
     assert.equal(helloAnswer.accepted, 1);
+    assert.deepEqual(helloAnswer.outcomes, [{ id: helloEnvelope.id, outcome: 'accepted' }]);
+    assert.deepEqual(helloAnswer.ingress, { activityMaxEvents: 50, activityMaxBytes: 65_536 });
     assert.ok(helloAnswer.capabilities.includes('agent-message-egress'), 'the handshake answer advertises agent-message-egress');
     const embeddedSubmit = (taskId) => embedded.recurring.submit(recurringInput(taskId, embeddedPaired.deviceId, `resolve embedded ${taskId}`, agentRef));
 
@@ -586,9 +596,10 @@ console.log('[release-pack] recurring public imports, strict submission and inde
     const embeddedAcceptedPayload = messagePayload(agentRef);
     assert.equal(await embedded.tasks.messageDisposition(embeddedAcceptedTask, embeddedPaired.deviceId, embeddedAcceptedPayload), undefined);
     assert.equal(await embedded.tasks.agentMessage(embeddedAcceptedTask, embeddedPaired.deviceId, agentRef), undefined);
-    const embeddedAcceptedResponse = await publishAgentMessage(embedded.hono, embeddedAuthorization, publishEnvelope(embeddedAcceptedTask, embeddedAcceptedPayload));
+    const embeddedAcceptedEnvelope = publishEnvelope(embeddedAcceptedTask, embeddedAcceptedPayload);
+    const embeddedAcceptedResponse = await publishAgentMessage(embedded.hono, embeddedAuthorization, embeddedAcceptedEnvelope);
     assert.equal(embeddedAcceptedResponse.status, 200);
-    assert.deepEqual(await embeddedAcceptedResponse.json(), { accepted: 1 });
+    await assertMessageSettlement(embeddedAcceptedResponse, embeddedAcceptedEnvelope, 'accepted');
     const embeddedAcceptedReceipt = await embedded.tasks.messageDisposition(embeddedAcceptedTask, embeddedPaired.deviceId, embeddedAcceptedPayload);
     assert.notEqual(embeddedAcceptedReceipt, undefined);
     assertExactDisposition(embeddedAcceptedReceipt, embeddedAcceptedPayload, 'accepted');
@@ -604,9 +615,10 @@ console.log('[release-pack] recurring public imports, strict submission and inde
     const embeddedHeldTask = 'packed-embedded-held';
     await embeddedSubmit(embeddedHeldTask);
     const embeddedHeldPayload = messagePayload(agentRef);
-    const embeddedHeldResponse = await publishAgentMessage(embedded.hono, embeddedAuthorization, publishEnvelope(embeddedHeldTask, embeddedHeldPayload));
+    const embeddedHeldEnvelope = publishEnvelope(embeddedHeldTask, embeddedHeldPayload);
+    const embeddedHeldResponse = await publishAgentMessage(embedded.hono, embeddedAuthorization, embeddedHeldEnvelope);
     assert.equal(embeddedHeldResponse.status, 200);
-    assert.deepEqual(await embeddedHeldResponse.json(), { accepted: 1 }); // transport accepted; business decision held
+    await assertMessageSettlement(embeddedHeldResponse, embeddedHeldEnvelope, 'accepted'); // transport accepted; business decision held
     const embeddedHeldReceipt = await embedded.tasks.messageDisposition(embeddedHeldTask, embeddedPaired.deviceId, embeddedHeldPayload);
     assert.notEqual(embeddedHeldReceipt, undefined);
     assertExactDisposition(embeddedHeldReceipt, embeddedHeldPayload, 'held', 'product_queue_full');
@@ -708,7 +720,7 @@ if (substrateConfigured) {
     assert.equal(await cloudA.readAgentMessageDisposition(durableTenant, device.deviceId, durableTask, durablePayload), undefined);
     const publishResponse = await publishAgentMessage(cloudA, device.authorization, durableEnvelope);
     assert.equal(publishResponse.status, 200);
-    assert.deepEqual(await publishResponse.json(), { accepted: 1 });
+    await assertMessageSettlement(publishResponse, durableEnvelope, 'accepted');
     const durableReceipt = await cloudA.readAgentMessageDisposition(durableTenant, device.deviceId, durableTask, durablePayload);
     assertExactDisposition(durableReceipt, durablePayload, 'accepted');
     assert.equal(consumer.calls.length, 1);

@@ -16,3 +16,5 @@ hosted production composition must inject durable atomic storage. The assertion
 authorizes one exchange only and is not a connector session or refresh token.
 
 MIT licensed. Node.js 24.15.0 or newer.
+
+Runtime dependencies and size budgets: [entry dependency contract](../../README.md#entry-dependencies).

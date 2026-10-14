@@ -1,3 +1,4 @@
+export * from './constants';
 export { MAILBOX_READ_AHEAD_MAX_SEQS, MAILBOX_READ_AHEAD_CAPABILITY } from './version';
 export { PROTOCOL_VERSION, CAPABILITY_FLAGS, STRICT_AGENT_ONLY_CAPABILITY, AGENT_HOME_READERS_CAPABILITY } from './version';
 export type { CapabilityFlag } from './version';
@@ -9,7 +10,6 @@ export type { BlobRef } from './blob';
 
 
 export {
-  PROVIDER_PROFILE_BINDING_CAPABILITY,
   PROVIDER_MODEL_CAPABILITIES,
   ProviderProfileRefSchema,
   ProviderProfileRevisionSchema,
@@ -26,7 +26,6 @@ export type {
 } from './provider-profile-binding';
 
 export {
-  PROVIDER_PROVISIONING_CAPABILITY,
   PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION,
   PROVIDER_PROVISIONING_OPERATIONS,
   PROVIDER_PROVISIONING_OPERATION_GENERATION_MAXIMUM,
@@ -61,7 +60,6 @@ export type {
 } from './provider-provisioning';
 
 export {
-  AGENT_MEMORY_INTENT_CAPABILITY,
   AGENT_MEMORY_INTENT_CONTENT_MAX_BYTES,
   AGENT_MEMORY_INTENT_PATH_MAX_BYTES,
   AGENT_MEMORY_INTENT_APPROVAL_REF_MAX_BYTES,
@@ -145,13 +143,6 @@ export {
   AgentMessageServerContextSchema,
   AgentMessageEgressRequirementSchema,
   AGENT_MESSAGE_MAX_BYTES,
-  AGENT_MESSAGE_EGRESS_CAPABILITY,
-  AGENT_EGRESS_POLICY_CAPABILITY,
-  AGENT_EGRESS_RELIABLE_ACK_CAPABILITY,
-  AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
-  AGENT_CONTENT_WORKSPACE_READ_CAPABILITY,
-  AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY,
-  AGENT_CONTENT_ARTIFACT_READ_CAPABILITY,
 } from './agent-egress';
 export type {
   AgentEgressPolicy,
@@ -172,7 +163,6 @@ export type {
 } from './agent-egress';
 
 export {
-  AGENT_HOME_PROJECTION_CAPABILITY,
   AGENT_HOME_PROJECTION_MAX_BYTES,
   AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM,
   AgentHomeProjectionProfileRevisionSchema,
@@ -188,8 +178,6 @@ export type {
 } from './agent-home-projection';
 
 export {
-  AGENT_INPUT_PREPARATION_CAPABILITY,
-  INPUT_PREPARATION_WIRE_VERSION,
   InputPreparationContentHashSchema,
   InputPreparationPolicyRevisionSchema,
   InputPreparationProfileIdSchema,
@@ -238,7 +226,6 @@ export type {
 } from './input-preparation';
 
 export {
-  AGENT_MEMORY_PROJECTION_CAPABILITY,
   AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES,
   AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE,
   AgentMemoryProjectionGrantRefSchema,
@@ -264,10 +251,8 @@ export type {
   AgentMemoryProjectionEraseResult,
 } from './agent-memory-projection';
 
-export { HOST_MCP_TASK_CONTEXT_CAPABILITY } from './task-assertion';
 
 export {
-  TERMINAL_PROJECTION_SELECTION_CAPABILITY,
   TerminalProjectionContractSchema,
   TerminalProjectionSelectionSchema,
 } from './terminal-projection';
@@ -420,6 +405,10 @@ export {
   CreateBlobResponseSchema,
   BlobDownloadUrlResponseSchema,
   EventsPollQuerySchema,
+  DEFAULT_ACTIVITY_INGRESS,
+  ActivityIngressSchema,
+  MessageSendOutcomeSchema,
+  OUTBOUND_REFUSAL_REASONS,
   EventsPollResponseSchema,
   MessagesSendRequestSchema,
   MessagesSendResponseSchema,
@@ -481,6 +470,9 @@ export type {
   CreateBlobResponse,
   BlobDownloadUrlResponse,
   EventsPollQuery,
+  ActivityIngress,
+  MessageSendOutcome,
+  OutboundRefusalReason,
   EventsPollResponse,
   MessagesSendRequest,
   MessagesSendResponse,

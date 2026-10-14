@@ -113,7 +113,7 @@ async function runToTerminal(
       outcome === 'complete'
         ? createEnvelope('task.complete', { summary: 'done', sessionRef: 'sess' }, { taskId: handle.taskId })
         : createEnvelope('task.fail', { reason: 'broke', retryable: false }, { taskId: handle.taskId });
-    expect(await sendOne(daemon, terminal)).toEqual({ status: 200, body: { accepted: 1 } });
+    expect(await sendOne(daemon, terminal)).toMatchObject({ status: 200, body: { accepted: 1 } });
   }
   return handle.taskId;
 }
@@ -192,15 +192,17 @@ describe('store-aggregated stats()', () => {
     await leaveLiveTasks(started.byok, daemon);
     const claimed = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'claimed only' });
     await nextEnvelope(daemon);
-    expect(await sendOne(daemon, createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: claimed.taskId })))
-      .toEqual({ status: 200, body: { accepted: 1 } });
+    const claim = createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: claimed.taskId });
+    expect(await sendOne(daemon, claim))
+      .toEqual({ status: 200, body: { accepted: 1, outcomes: [{ id: claim.id, outcome: 'accepted' }] } });
     const complete = await runToTerminal(started.byok, daemon, 'complete');
     await started.byok.tasks.cancel(complete, 'too late');
     expect(await started.byok.tasks.get(complete)).toMatchObject({ state: 'Complete' });
     await runToTerminal(started.byok, daemon, 'fail');
     const ownedCancel = await runToTerminal(started.byok, daemon, 'cancel');
-    expect(await sendOne(daemon, createEnvelope('task.complete', { summary: 'late', sessionRef: 'late' }, { taskId: ownedCancel })))
-      .toEqual({ status: 200, body: { accepted: 1 } });
+    const lateComplete = createEnvelope('task.complete', { summary: 'late', sessionRef: 'late' }, { taskId: ownedCancel });
+    expect(await sendOne(daemon, lateComplete))
+      .toEqual({ status: 200, body: { accepted: 1, outcomes: [{ id: lateComplete.id, outcome: 'accepted' }] } });
     const unowned = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'cancel before claim' });
     await nextEnvelope(daemon);
     await unowned.cancel('stop');
@@ -240,7 +242,8 @@ describe('store-aggregated stats()', () => {
     await nextEnvelope(daemon);
     await claimAndStart(started.byok, daemon, handle);
     kernelCalls.afterCount = async () => {
-      expect(await sendOne(daemon, createEnvelope('task.complete', { summary: 'done', sessionRef: 'race-session' }, { taskId: handle.taskId }))).toEqual({ status: 200, body: { accepted: 1 } });
+      const complete = createEnvelope('task.complete', { summary: 'done', sessionRef: 'race-session' }, { taskId: handle.taskId });
+      expect(await sendOne(daemon, complete)).toEqual({ status: 200, body: { accepted: 1, outcomes: [{ id: complete.id, outcome: 'accepted' }] } });
     };
     const counts = (await started.byok.stats()).taskCountsByState;
     expect(Object.values(counts)).toEqual(Array(TASK_STATES.length).fill(0));
@@ -264,7 +267,8 @@ describe('store-aggregated stats()', () => {
     await nextEnvelope(daemon);
     await claimAndStart(started.byok, daemon, handle);
     kernelCalls.beforeApproval = async () => {
-      expect(await sendOne(daemon, createEnvelope('task.complete', { summary: 'done', sessionRef: 'race-session' }, { taskId: handle.taskId }))).toEqual({ status: 200, body: { accepted: 1 } });
+      const complete = createEnvelope('task.complete', { summary: 'done', sessionRef: 'race-session' }, { taskId: handle.taskId });
+      expect(await sendOne(daemon, complete)).toEqual({ status: 200, body: { accepted: 1, outcomes: [{ id: complete.id, outcome: 'accepted' }] } });
     };
     const counts = (await started.byok.stats()).taskCountsByState;
     expect(counts).toMatchObject({ Running: 1, Complete: 0 });
@@ -315,7 +319,7 @@ describe('store-aggregated stats()', () => {
     vi.setSystemTime(new Date('2026-10-13T00:00:02.000Z'));
     await claimAndStart(first.byok, daemon, handle);
     expect(await sendOne(daemon, createEnvelope('task.fail', { reason: 'failed', retryable: false }, { taskId: handle.taskId })))
-      .toEqual({ status: 200, body: { accepted: 1 } });
+      .toMatchObject({ status: 200, body: { accepted: 1 } });
     expect(await first.byok.tasks.get(handle.taskId)).toMatchObject({ state: 'Failed', createdAt: openedAt, sessionRef: 'requested-session' });
 
     await stopServer(server!);

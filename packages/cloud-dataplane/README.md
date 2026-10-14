@@ -353,3 +353,5 @@ test rather than a step someone remembers. What runs:
 ## License
 
 MIT. Node.js 24.15.0 or newer.
+
+Runtime dependencies and size budgets: [entry dependency contract](../../README.md#entry-dependencies).

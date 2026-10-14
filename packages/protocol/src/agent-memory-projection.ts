@@ -2,9 +2,6 @@ import { z } from 'zod';
 import { AgentEgressContentHashSchema, AgentEgressPolicyRevisionSchema } from './agent-egress';
 import { AgentRefSchema, RuntimeIdSchema } from './messages';
 
-/** Capability required before the optional hosted Agent-memory projection can be used. */
-export const AGENT_MEMORY_PROJECTION_CAPABILITY = 'agent.memory.projection' as const;
-
 /** One hosted projection is bounded before it enters the redaction or storage seam. */
 export const AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES = 512 * 1024;
 

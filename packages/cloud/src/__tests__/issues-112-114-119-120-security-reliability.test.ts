@@ -139,7 +139,7 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
 
     const response = await postMessage(harness, device.authorization, message(taskId));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ accepted: 1 });
+    expect(await response.json()).toMatchObject({ accepted: 1 });
     expect(rate).toHaveBeenCalledTimes(1);
     expect(dedup).toHaveBeenCalledTimes(1);
     expect(consumed).toHaveLength(1);
@@ -155,13 +155,13 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
     const second = message(secondTaskId, '10000000-0000-4000-8000-000000001131', OTHER_AGENT_REF);
 
     expect(first.payload.messageId).toBe(second.payload.messageId);
-    expect(await (await postMessage(harness, device.authorization, first)).json()).toEqual({ accepted: 1 });
-    expect(await (await postMessage(harness, device.authorization, second)).json()).toEqual({ accepted: 1 });
+    expect(await (await postMessage(harness, device.authorization, first)).json()).toMatchObject({ accepted: 1 });
+    expect(await (await postMessage(harness, device.authorization, second)).json()).toMatchObject({ accepted: 1 });
     expect(await (await postMessage(
       harness,
       device.authorization,
       message(firstTaskId, '10000000-0000-4000-8000-000000001132', AGENT_REF),
-    )).json()).toEqual({ accepted: 1 });
+    )).json()).toMatchObject({ accepted: 1 });
     expect(consumed).toHaveLength(2);
     expect(consumed).toEqual(expect.arrayContaining([
       expect.objectContaining({ taskId: firstTaskId, payload: expect.objectContaining({ agentRef: AGENT_REF }) }),
@@ -185,7 +185,7 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
 
     const replay = await postMessage(harness, device.authorization, message(taskId, '10000000-0000-4000-8000-000000001121'));
     expect(replay.status).toBe(200);
-    expect(await replay.json()).toEqual({ accepted: 1 });
+    expect(await replay.json()).toMatchObject({ accepted: 1 });
 
     const terminalBody = 'new terminal side effect';
     const newMessage = createEnvelope('agent.message.publish', {
@@ -196,7 +196,7 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
       contentHash: `sha256:${createHash('sha256').update(terminalBody).digest('hex')}`,
     }, { taskId });
     const terminal = await postMessage(harness, device.authorization, newMessage);
-    expect(await terminal.json()).toEqual({ accepted: 0, rejected: 1 });
+    expect(await terminal.json()).toMatchObject({ accepted: 0, rejected: 1 });
     expect(consumed).toHaveLength(1);
 
     const receipts = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 });
@@ -215,7 +215,7 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
     });
 
     const cancelled = await postMessage(harness, device.authorization, message(taskId));
-    expect(await cancelled.json()).toEqual({ accepted: 0, rejected: 1 });
+    expect(await cancelled.json()).toMatchObject({ accepted: 0, rejected: 1 });
     expect(consumed).toBe(0);
   });
 
@@ -245,14 +245,14 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
     const first = postMessage(harness, device.authorization, message(taskId, '10000000-0000-4000-8000-000000001123'));
     await vi.waitFor(() => expect(invocations).toBe(1));
     const second = postMessage(harness, device.authorization, message(taskId, '10000000-0000-4000-8000-000000001124'));
-    expect(await (await second).json()).toEqual({ accepted: 1 });
+    expect(await (await second).json()).toMatchObject({ accepted: 1 });
     expect(invocations).toBe(2);
     expect(effects).toBe(1);
     release!();
     expect((await first).status).toBe(200);
     expect(effects).toBe(1);
     const replay = await postMessage(harness, device.authorization, message(taskId, '10000000-0000-4000-8000-000000001126'));
-    expect(await replay.json()).toEqual({ accepted: 1 });
+    expect(await replay.json()).toMatchObject({ accepted: 1 });
     expect(invocations).toBe(2);
     expect(effects).toBe(1);
   });
@@ -311,11 +311,11 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
     activeConsumer = createConsumer();
     const retry = await postMessage(harness, device.authorization, envelope);
     expect(retry.status).toBe(200);
-    expect(await retry.json()).toEqual({ accepted: 1 });
+    expect(await retry.json()).toMatchObject({ accepted: 1 });
     expect(invocations).toBe(2);
     expect(effects).toBe(1);
     const replay = await postMessage(harness, device.authorization, envelope);
-    expect(await replay.json()).toEqual({ accepted: 1 });
+    expect(await replay.json()).toMatchObject({ accepted: 1 });
     expect(effects).toBe(1);
     const rows = (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages;
     const dispositions = rows.map((row) => decodeEnvelope(row.body)).filter((row) => row.type === 'agent.message.disposition');
@@ -355,14 +355,14 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
         await harness.cloud.cancelTask(TENANT_A, taskId, 'cancel after consume');
       }
 
-      expect(await (await postMessage(harness, device.authorization, original)).json()).toEqual({ accepted: 1 });
+      expect(await (await postMessage(harness, device.authorization, original)).json()).toMatchObject({ accepted: 1 });
       expect(effects).toBe(1);
 
       const newMessage = createEnvelope('agent.message.publish', {
         ...original.payload,
         messageId: '10000000-0000-4000-8000-000000001127',
       }, { taskId });
-      expect(await (await postMessage(harness, device.authorization, newMessage)).json()).toEqual({ accepted: 0, rejected: 1 });
+      expect(await (await postMessage(harness, device.authorization, newMessage)).json()).toMatchObject({ accepted: 0, rejected: 1 });
 
       const conflictingBody = 'changed after reservation';
       const conflicting = createEnvelope('agent.message.publish', {
@@ -371,7 +371,7 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
         byteCount: new TextEncoder().encode(conflictingBody).length,
         contentHash: `sha256:${createHash('sha256').update(conflictingBody).digest('hex')}`,
       }, { taskId });
-      expect(await (await postMessage(harness, device.authorization, conflicting)).json()).toEqual({ accepted: 0, rejected: 1 });
+      expect(await (await postMessage(harness, device.authorization, conflicting)).json()).toMatchObject({ accepted: 0, rejected: 1 });
       expect(effects).toBe(1);
     },
   );
@@ -401,10 +401,10 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
     expect(invocations).toBe(1);
     expect(effects).toBe(1);
     const consumerReplay = await postMessage(harness, device.authorization, message(taskId, '10000000-0000-4000-8000-000000001125'));
-    expect(await consumerReplay.json()).toEqual({ accepted: 1 });
+    expect(await consumerReplay.json()).toMatchObject({ accepted: 1 });
     expect(invocations).toBe(2);
     expect(effects).toBe(1);
-    expect(await (await postMessage(harness, device.authorization, first)).json()).toEqual({ accepted: 1 });
+    expect(await (await postMessage(harness, device.authorization, first)).json()).toMatchObject({ accepted: 1 });
     expect(invocations).toBe(2);
     const mailbox = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 });
     const dispositions = mailbox.messages
