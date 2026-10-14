@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,7 +28,7 @@ describe('TaskRunner typed runtime failure projection', () => {
 
   async function start(adapter: StubRuntimeAdapter): Promise<void> {
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Runtime failure test',
         productId: 'runtime-failure-test',
         serverUrl: server.url,

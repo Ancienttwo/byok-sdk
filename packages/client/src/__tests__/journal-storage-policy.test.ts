@@ -1,203 +1,69 @@
-/**
- * L-003a: the policy itself, the watermark table, and the cleanup order.
- *
- * The disk-pressure matrix (`journal-pressure-matrix.test.ts`) proves what a
- * daemon DOES at each state. This file pins the two things that decide which
- * state it is in — a validated policy and a pure state function — plus the one
- * property no amount of runtime testing can establish: that a misconfigured
- * policy is refused at construction rather than clamped into something
- * plausible.
- */
-import { promises as fs } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
-import type { LocalStorageUsage } from '../daemon/journal/journal';
-import {
-  cleanupEligibleAt,
-  cleanupOrderFor,
-  computePressureState,
-  createFilesystemCleanupExecutor,
-  DEFAULT_HARD_BUDGET_RATIO,
-  DEFAULT_RETENTION_MS,
-  DEFAULT_SOFT_BUDGET_RATIO,
-  LocalStoragePolicyError,
-  resolveLocalStoragePolicy,
-} from '../daemon/journal/storage-policy';
-
-const dirs: string[] = [];
-
-async function tmpDir(prefix: string): Promise<string> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
-  dirs.push(dir);
-  return dir;
-}
-
-afterEach(async () => {
-  for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
-});
-
-function usage(totalBytes: number): LocalStorageUsage {
-  return {
-    measuredAt: '2026-08-07T00:00:00.000Z',
-    totalBytes,
-    categories: {
-      journal: { bytes: totalBytes, approximate: false },
-      cache: { bytes: 0, approximate: true },
-      log: { bytes: 0, approximate: true },
-      workspace: { bytes: 0, approximate: true },
-      quarantine: { bytes: 0, approximate: false },
-    },
-  };
-}
+import { createDaemonWithAdapters } from '../daemon/create-daemon';
+import { StubRuntimeAdapter } from './fixtures/stub-adapter';
+import { describe, expect, it } from 'vitest';
+import { LocalStorageConfigError, resolveStorageConfig, resolveStorageBudget, DEFAULT_RETENTION_TTL_MS } from '../daemon/retention/config';
+import { computePressureState, StoragePressure, LocalStorageEmergencyError } from '../daemon/retention/pressure';
+import { RetentionRegistry, type ProtectedClassId, type ExpiringClassId } from '../daemon/retention/registry';
+import { ScratchRootPathError } from '../daemon/retention/scratch';
+import { testScratchRoot } from './fixtures/execution-scratch';
 
 const BASE = { maxStoreBytes: 1_000_000, minFreeBytes: 100_000, ackCriticalReserveBytes: 10_000 };
-
-describe('LocalStoragePolicy (L-003a)', () => {
-  it('fills in the §12.7.2.1 defaults and is idempotent under a second resolve', () => {
-    const resolved = resolveLocalStoragePolicy(BASE);
-    expect(resolved.softBudgetRatio).toBe(DEFAULT_SOFT_BUDGET_RATIO);
-    expect(resolved.hardBudgetRatio).toBe(DEFAULT_HARD_BUDGET_RATIO);
-    // The soft free-space floor defaults to one doubling above the hard one.
-    expect(resolved.softMinFreeBytes).toBe(200_000);
-    expect(resolved.retentionMs).toEqual(DEFAULT_RETENTION_MS);
-    // A resolved policy is a valid input, so an engine can accept either shape
-    // without sniffing which one it got.
-    expect(resolveLocalStoragePolicy(resolved)).toEqual(resolved);
+describe('storage configuration and protected authority', () => {
+  it('defaults to 15-minute maintenance, 24-hour runtime residue and 30-day journal receipts', () => {
+    const resolved = resolveStorageConfig(testScratchRoot(), { scratchRoot: testScratchRoot() });
+    expect(resolved.sweepIntervalMs).toBe(900_000);
+    expect(resolved.ttlMs).toEqual(DEFAULT_RETENTION_TTL_MS);
+    expect(resolved.ttlMs['confirmed-journal']).toBe(30 * 86_400_000);
+    expect(resolved.ttlMs['exec-runtime']).toBe(86_400_000);
+    expect(resolveStorageBudget(BASE)).toMatchObject({ softBudgetRatio: 0.8, hardBudgetRatio: 0.9, softMinFreeBytes: 200_000 });
   });
-
-  it('refuses a policy that is internally inconsistent, rather than clamping it', () => {
-    expect(() => resolveLocalStoragePolicy({ ...BASE, maxStoreBytes: 0 })).toThrow(LocalStoragePolicyError);
-    expect(() => resolveLocalStoragePolicy({ ...BASE, maxStoreBytes: 1.5 })).toThrow(/positive integer/);
-    expect(() => resolveLocalStoragePolicy({ ...BASE, softBudgetRatio: 0.95 })).toThrow(/strictly below hardBudgetRatio/);
-    expect(() => resolveLocalStoragePolicy({ ...BASE, softBudgetRatio: 1.5 })).toThrow(/ratio in \(0, 1\]/);
-    expect(() => resolveLocalStoragePolicy({ ...BASE, softMinFreeBytes: 50_000 })).toThrow(/at least minFreeBytes/);
-    // An emergency floor above the hard floor would skip the admission decline
-    // that is supposed to prevent emergency in the first place.
-    expect(() => resolveLocalStoragePolicy({ ...BASE, ackCriticalReserveBytes: 200_000 })).toThrow(/must not exceed minFreeBytes/);
-    // Compaction must accelerate under pressure, never decelerate.
-    expect(() =>
-      resolveLocalStoragePolicy({ ...BASE, compaction: { normalIntervalMs: 1000, pressureIntervalMs: 5000 } }),
-    ).toThrow(/must not be longer than/);
+  it('rejects invalid watermarks and budgets without clamping', () => {
+    for (const input of [{ ...BASE, maxStoreBytes: 0 }, { ...BASE, maxStoreBytes: 1.5 },
+      { ...BASE, softBudgetRatio: 0.95 }, { ...BASE, hardBudgetRatio: 1.5 },
+      { ...BASE, softMinFreeBytes: 50_000 }, { ...BASE, ackCriticalReserveBytes: 200_000 }])
+      expect(() => resolveStorageBudget(input)).toThrow(LocalStorageConfigError);
   });
-
-  it('has no retention setting for protected data, because protected data is never auto-deleted', () => {
-    expect(() =>
-      resolveLocalStoragePolicy({ ...BASE, retentionMs: { quarantine: 1000 } as never }),
-    ).toThrow(/is not a cleanable category/);
+  it('rejects protected TTLs, unsafe home TTLs and journal windows shorter than redelivery', () => {
+    const root = testScratchRoot();
+    for (const ttlMs of [{ quarantine: 1 }, { 'home-temp': 1000 }, { 'confirmed-journal': 7 * 86_400_000 }])
+      expect(() => resolveStorageConfig(root, { retention: { ttlMs: ttlMs as never } })).toThrow(LocalStorageConfigError);
+    expect(() => resolveStorageConfig(root, { retention: { maxDeletionsPerPass: 0 } })).toThrow(LocalStorageConfigError);
+    expect(() => resolveStorageConfig(root, { scratchRoot: '/'+ 'x'.repeat(200) })).toThrow(ScratchRootPathError);
   });
-
-  it('turns retention into an eligibility timestamp in exactly one place', () => {
-    const policy = resolveLocalStoragePolicy(BASE);
-    expect(cleanupEligibleAt(policy, 'orphan-artifact', new Date('2026-08-07T00:00:00.000Z'))).toBe('2026-08-08T00:00:00.000Z');
-    // The longest default belongs to `confirmed-journal`: pruning a journal row
-    // drops its idempotency receipt, so its retention has to outlast the
-    // mailbox redelivery window.
-    expect(Math.max(...Object.values(DEFAULT_RETENTION_MS))).toBe(DEFAULT_RETENTION_MS['confirmed-journal']);
+  it('rejects removed configuration and old journal ports instead of silently disabling retention', () => {
+    const config = { localAgentRelease: { version: '0.0.0-test' }, productName:'Retention',productId:'retention-policy',serverUrl:'http://127.0.0.1:1',workspaceRoot:testScratchRoot(),storeDir:testScratchRoot(),storage:{scratchRoot:testScratchRoot()} };
+    expect(() => createDaemonWithAdapters({ ...config, hostedJournal: { mode:'sqlite',storagePolicy:BASE } as never },[new StubRuntimeAdapter()])).toThrow(LocalStorageConfigError);
+    expect(() => createDaemonWithAdapters(config,[new StubRuntimeAdapter()],{hostedJournal:{pressureEngine:{}}} as never)).toThrow(LocalStorageConfigError);
+    expect(() => createDaemonWithAdapters({ ...config, hostedJournal:{mode:'sqlite'} },[new StubRuntimeAdapter()],{hostedJournal:{journal:{} as never}})).toThrow(/confirmed-retention ports/);
   });
-});
-
-describe('the watermark state machine (§12.7.2.1 table)', () => {
-  const policy = resolveLocalStoragePolicy(BASE);
-  const roomyFree = 500_000;
-
-  it('reads the budget axis at 80% and 90%', () => {
-    expect(computePressureState(policy, { usage: usage(799_999), freeBytes: roomyFree })).toBe('normal');
-    expect(computePressureState(policy, { usage: usage(800_000), freeBytes: roomyFree })).toBe('pressure');
-    expect(computePressureState(policy, { usage: usage(899_999), freeBytes: roomyFree })).toBe('pressure');
-    expect(computePressureState(policy, { usage: usage(900_000), freeBytes: roomyFree })).toBe('hard-pressure');
-  });
-
-  it('reads the free-space axis independently of the budget', () => {
-    // Nothing stored at all, and still at hard pressure: the disk is shared,
-    // and a budget this daemon is nowhere near says nothing about the space
-    // its next commit needs.
-    expect(computePressureState(policy, { usage: usage(0), freeBytes: 199_999 })).toBe('pressure');
-    expect(computePressureState(policy, { usage: usage(0), freeBytes: 99_999 })).toBe('hard-pressure');
-    expect(computePressureState(policy, { usage: usage(0), freeBytes: 9_999 })).toBe('emergency');
-  });
-
-  it('treats an observed ack-critical failure as stronger evidence than any arithmetic', () => {
-    // Every number here says the device is fine. A commit that already failed
-    // says it is not, and that is the one that wins.
-    expect(computePressureState(policy, { usage: usage(0), freeBytes: roomyFree }, 'SQLITE_FULL')).toBe('emergency');
-  });
-
-  it('truncates the cleanup order under pressure instead of extending it', () => {
-    expect(cleanupOrderFor('normal')).toEqual([
-      'expired-temp',
-      'rotated-log',
-      'confirmed-journal',
-      'ephemeral-workspace',
-      'orphan-artifact',
-    ]);
-    for (const state of ['pressure', 'hard-pressure', 'emergency'] as const) {
-      expect(cleanupOrderFor(state)).toEqual(['expired-temp', 'rotated-log']);
-    }
-  });
-});
-
-describe('the default cleanup executor', () => {
-  const candidate = {
-    candidateId: 'c1',
-    category: 'expired-temp' as const,
-    eligibleAt: '2026-08-01T00:00:00.000Z',
-    reason: 'expired',
-    attempts: 0,
-  };
-
-  it('refuses a relative ref rather than resolving it against whatever cwd happens to be', async () => {
-    const executor = createFilesystemCleanupExecutor();
-    expect(await executor({ ...candidate, ref: 'tmp/relative.bin' })).toMatchObject({
-      outcome: 'failed',
-      error: expect.stringContaining('absolute path'),
-    });
-  });
-
-  it('will not remove journal rows without an explicit prune hook', async () => {
-    const executor = createFilesystemCleanupExecutor();
-    expect(await executor({ ...candidate, category: 'confirmed-journal', ref: 'task:t1' })).toMatchObject({ outcome: 'skipped' });
-    expect(await executor({ ...candidate, category: 'confirmed-journal', ref: '/tmp/not-a-task-ref' })).toMatchObject({
-      outcome: 'failed',
-    });
-  });
-});
-
-describe('createDaemon storage policy validation', () => {
-  it('rejects a bad policy at construction, before any daemon exists', async () => {
-    const base: DaemonConfig = {
-      localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
-      productId: 'test-product-storage',
-      serverUrl: 'http://127.0.0.1:1',
-      workspaceRoot: await tmpDir('byok-policy-workspace-'),
-      storeDir: await tmpDir('byok-policy-store-'),
+  it('has no type-level deletion spelling for protected classes', () => {
+    const protectedId: ProtectedClassId = 'quarantine';
+    // @ts-expect-error protected data never enters the expiring union
+    const expiring: ExpiringClassId = protectedId;
+    expect(expiring).toBe('quarantine');
+    const check = (registry: RetentionRegistry) => {
+      // @ts-expect-error protected registry entries cannot be swept
+      registry.sweep(protectedId, {});
     };
-
-    expect(() =>
-      createDaemonWithAdapters(
-        {
-          ...base,
-          hostedJournal: { mode: 'sqlite', storagePolicy: { maxStoreBytes: -1, minFreeBytes: 1000 } },
-        },
-        [],
-      ),
-    ).toThrow(LocalStoragePolicyError);
+    expect(check).toBeTypeOf('function');
   });
-
-  it('constructs no engine — and needs no policy — on the default path', async () => {
-    const daemon = createDaemonWithAdapters(
-      {
-        localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
-        productId: 'test-product-storage',
-        serverUrl: 'http://127.0.0.1:1',
-        workspaceRoot: await tmpDir('byok-policy-workspace-'),
-        storeDir: await tmpDir('byok-policy-store-'),
-      },
-      [],
-    );
-    // The status surface omits `storage` entirely rather than reporting zeros:
-    // "not measured" and "measured, and fine" are different facts.
-    expect(daemon.status()).toBeDefined();
+});
+describe('§12.7.2.1 pressure admission and durability', () => {
+  const budget = resolveStorageBudget(BASE);
+  it.each([[799_999,500_000,'normal'],[800_000,500_000,'pressure'],[900_000,500_000,'hard-pressure'],
+    [0,199_999,'pressure'],[0,99_999,'hard-pressure'],[0,9_999,'emergency']] as const)('used=%i free=%i yields %s', (used, free, state) => {
+    expect(computePressureState(budget, used, free)).toBe(state);
+  });
+  it('hard pressure declines new work while preserving ack-critical writes; emergency refuses both', () => {
+    const pressure = new StoragePressure(budget);
+    pressure.update(900_000, 500_000);
+    expect(pressure.admissionGuard()).toMatchObject({ admit: false, retryable: true });
+    expect(() => pressure.assertAckCriticalAllowed()).not.toThrow();
+    pressure.noteAckCriticalFailure('SQLITE_FULL');
+    expect(() => pressure.assertAckCriticalAllowed()).toThrow(LocalStorageEmergencyError);
+    pressure.update(800_000, 500_000);
+    expect(pressure.state).toBe('emergency');
+    pressure.update(0, 500_000);
+    expect(pressure.state).toBe('normal');
   });
 });

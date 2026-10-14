@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -40,7 +41,7 @@ describe('terminal evidence of the applied Agent-home projection (#318)', () => 
   async function start(hostStorageRoot: string): Promise<StubRuntimeAdapter> {
     const storeDir = await temp('byok-projection-terminal-store-');
     const adapter = new StubRuntimeAdapter('pi');
-    daemon = createDaemonWithAdapters({
+    daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Projection terminal test',
       productId: `projection-terminal-${path.basename(storeDir)}`,

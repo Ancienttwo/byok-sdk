@@ -1,3 +1,4 @@
+import { testScratchOwner, testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -48,7 +49,7 @@ async function makeRunner(
   sent: Envelope[],
   overrides: Partial<Pick<TaskRunnerDeps, 'resultDocument' | 'getServerCapabilities'>> = {},
 ): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = {
+  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-result-document-workspace-'),
     deviceId: 'device-1',
@@ -417,7 +418,7 @@ describe('DaemonConfig.resultDocument end to end (real daemon + in-process serve
     configOverrides: Partial<Parameters<typeof createDaemonWithAdapters>[0]> = {},
   ): Promise<Daemon> {
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product',
         serverUrl: server.url,

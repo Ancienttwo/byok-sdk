@@ -1,3 +1,4 @@
+import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { spawn, type SpawnOptions } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
@@ -134,6 +135,8 @@ describe('prepared Agent memory runtime configuration', () => {
   });
 
   it('keeps the memory helper in private execution config, outside the empty Host MCP map', async () => {
+const __executionScratch = await testExecutionScratch();
+
     const workspace = await tempDir('byok-prepared-memory-runtime-workspace-');
     const recordDir = await tempDir('byok-prepared-memory-runtime-record-');
     const artifactPath = path.join(recordDir, 'artifact.json');
@@ -199,11 +202,11 @@ describe('prepared Agent memory runtime configuration', () => {
       HOME: process.env.HOME ?? '',
       TMPDIR: process.env.TMPDIR ?? '',
     };
-    const runtimeLaunch = await prepared.operation.resolveRuntimeLaunch!({
+    const runtimeLaunch = await prepared.operation.resolveRuntimeLaunch!({ scratch: __executionScratch,
       kind: 'prepared',
       cwd: workspace,
       env,
-      projectionRoot: path.join(recordDir, 'projections'),
+
     });
     const memoryServer = {
       command: '/agent-memory-helper',
@@ -215,7 +218,7 @@ describe('prepared Agent memory runtime configuration', () => {
         BYOK_PREPARED_AGENT_MEMORY_MODE: 'read',
       },
     };
-    const session = await prepared.operation.start({
+    const session = await prepared.operation.start({ scratch: (runtimeLaunch).scratch,
       runtimeLaunch,
       kind: 'prepared',
       preparation,

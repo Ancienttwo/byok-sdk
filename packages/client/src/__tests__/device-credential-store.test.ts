@@ -1,3 +1,4 @@
+import { testScratchRoot } from './fixtures/execution-scratch';
 import { existsSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
@@ -55,7 +56,7 @@ describe('DeviceCredentialStore', () => {
       calls.push({ executable, args, stdin });
       return { exitCode: 0, stdout: '', stderr: '' };
     };
-    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform, commandRunner: run });
+    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform, commandRunner: run });
     await store.replace(credentials);
     expect(calls).toHaveLength(platform === 'win32' ? 2 : 1);
     expect(calls.flatMap((call) => call.args).join(' ')).not.toMatch(/device\.json|tmp|cache/i);
@@ -65,7 +66,7 @@ describe('DeviceCredentialStore', () => {
 
   it('fails closed with a typed error when the OS provider is unavailable', async () => {
     const run = vi.fn<DeviceCommandRunner>().mockResolvedValue({ exitCode: 127, stdout: '', stderr: 'not found' });
-    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'linux', commandRunner: run });
+    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'linux', commandRunner: run });
     await expect(store.read()).rejects.toBeInstanceOf(DeviceCredentialStoreUnavailableError);
     await expect(store.replace(credentials)).rejects.toBeInstanceOf(DeviceCredentialStoreUnavailableError);
   });
@@ -86,7 +87,7 @@ describe('DeviceCredentialStore', () => {
       }
       return { exitCode: 0, stdout: '', stderr: '' };
     };
-    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
+    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'win32', commandRunner: run });
     await store.replace(credentials);
     await expect(store.read()).resolves.toEqual(credentials);
   });
@@ -105,7 +106,7 @@ describe('DeviceCredentialStore', () => {
       invokedExecutable = executable;
       return { exitCode: 44, stdout: '', stderr: '' };
     };
-    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
+    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'win32', commandRunner: run });
 
     await expect(store.read()).resolves.toBeUndefined();
     expect(script).toContain('-OutputType ConsoleApplication');
@@ -129,7 +130,7 @@ describe('DeviceCredentialStore', () => {
       }
       return { exitCode: 44, stdout: '', stderr: '' };
     };
-    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
+    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'win32', commandRunner: run });
 
     await expect(store.read()).resolves.toBeUndefined();
     expect(script).toContain(
@@ -138,7 +139,7 @@ describe('DeviceCredentialStore', () => {
     expect(script).not.toContain('[Console]::In');
   });
 
-  it('scavenges only stale real Windows bridge directories without following symlinks', async () => {
+  it('leaves legacy OS temp cleanup to the explicit doctor migration', async () => {
     const staleDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-device-credential-'));
     const symlinkTarget = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-device-credential-symlink-target-'));
     const symlinkPath = path.join(os.tmpdir(), `byok-device-credential-symlink-${process.pid}-${Date.now()}`);
@@ -147,13 +148,13 @@ describe('DeviceCredentialStore', () => {
     await fs.symlink(symlinkTarget, symlinkPath, 'dir');
 
     try {
-      const store = new DeviceCredentialStore({
+      const store = new DeviceCredentialStore({ storeDir: testScratchRoot(),
         productId: 'credential-store-test',
         platform: 'win32',
         commandRunner: windowsRunner({ exitCode: 44, stdout: '', stderr: '' }),
       });
       await expect(store.read()).resolves.toBeUndefined();
-      expect(existsSync(staleDirectory)).toBe(false);
+      expect(existsSync(staleDirectory)).toBe(true);
       expect(existsSync(symlinkPath)).toBe(true);
       expect(existsSync(symlinkTarget)).toBe(true);
     } finally {
@@ -169,7 +170,7 @@ describe('DeviceCredentialStore', () => {
       stdout: '',
       stderr: 'secret service is unavailable',
     });
-    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'linux', commandRunner: run });
+    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'linux', commandRunner: run });
     await expect(store.read()).rejects.toBeInstanceOf(DeviceCredentialStoreError);
   });
 
@@ -179,7 +180,7 @@ describe('DeviceCredentialStore', () => {
       stdout: '',
       stderr: 'credential operation failed (win32=1312)',
     }));
-    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
+    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'win32', commandRunner: run });
     await expect(store.read()).rejects.toThrow(
       'operating-system credential provider could not read device credentials (win32=1312)',
     );
@@ -191,7 +192,7 @@ describe('DeviceCredentialStore', () => {
       stdout: '',
       stderr: 'PowerShell prefix that must not escape\ncredential operation failed (hresult=-2146233087)\nunowned suffix',
     }));
-    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
+    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'win32', commandRunner: run });
     await expect(store.read()).rejects.toThrow(
       'operating-system credential provider could not read device credentials (hresult=-2146233087)',
     );
@@ -204,7 +205,7 @@ describe('DeviceCredentialStore', () => {
       stdout: '',
       stderr: 'unowned prefix\ncredential operation failed (stage=4,kind=2,hresult=-2146233087)\nunowned suffix',
     }));
-    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
+    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'win32', commandRunner: run });
     await expect(store.read()).rejects.toThrow(
       'operating-system credential provider could not read device credentials (stage=4,kind=2,hresult=-2146233087)',
     );
@@ -217,7 +218,7 @@ describe('DeviceCredentialStore', () => {
       stdout: '',
       stderr: 'credential operation failed: secret-bearing unexpected output',
     }));
-    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
+    const store = new DeviceCredentialStore({ storeDir: testScratchRoot(), productId: 'credential-store-test', platform: 'win32', commandRunner: run });
     await expect(store.read()).rejects.toThrow(
       'operating-system credential provider could not read device credentials',
     );

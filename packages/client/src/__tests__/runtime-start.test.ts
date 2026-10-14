@@ -1,12 +1,15 @@
+import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { expect, it, vi } from 'vitest';
 import { startOwnedRuntime } from '../daemon/runtime-start';
 import { RuntimeStartupDisposalFailure } from '../runtime-failure';
 import type { RuntimeOperationStartInput, Session } from '../types';
 
 it('a startup deadline retains a late session until its close receipt', async () => {
+const __executionScratch = await testExecutionScratch();
+
   let resolve!: (session: Session) => void;
   const pending = new Promise<Session>(r => { resolve = r; });
-  const error = await startOwnedRuntime(() => pending, {} as RuntimeOperationStartInput, new AbortController().signal, 10).catch(e => e);
+  const error = await startOwnedRuntime(() => pending, { scratch: __executionScratch, } as RuntimeOperationStartInput, new AbortController().signal, 10).catch(e => e);
   expect(error).toBeInstanceOf(RuntimeStartupDisposalFailure);
   await expect(error.retryDisposal()).rejects.toThrow('receipt');
   const close = vi.fn().mockRejectedValueOnce(new Error('not quiescent')).mockResolvedValue(undefined);

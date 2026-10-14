@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -48,7 +49,7 @@ describe('shutdown-complete fires even when TaskRunner.shutdownActiveTasks throw
     const workspaceRoot = await tmpDir('byok-shutdown-hardening-ws-');
     const storeDir = await tmpDir('byok-shutdown-hardening-store-');
     const built = createDaemonWithAdapters(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-shutdown-hardening', serverUrl: server.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-shutdown-hardening', serverUrl: server.url, workspaceRoot, storeDir },
       [adapter],
     );
     daemon = built;

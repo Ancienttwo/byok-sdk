@@ -9,6 +9,7 @@ import { runSupportBundleCommand } from '../bin/commands/support-bundle';
 import { runDoctorCommand } from '../bin/commands/doctor';
 import { appendAuditRecord, auditLogPath } from '../bin/audit-log';
 import { DAEMON_RECORD_KINDS } from '../daemon/daemon-record';
+import { unmeasuredRetentionSnapshot } from '../daemon/retention/sweeper';
 import { DeviceStore } from '../daemon/store';
 import {
   createSupportBundle,
@@ -299,6 +300,7 @@ it('includes live outbound counters while excluding last-rejection identity and 
     return { pid: 1, uptimeMs: 2, activeTasks: [], approvalsPending: 0,
       lifecycle: { phase: 'running', connection: 'open' },
       operationalHealth: { availability: 'available', state: 'healthy', failureCount: 0, windowMs: 1000, failureThreshold: 3, crashCount: 0 },
+      storage: unmeasuredRetentionSnapshot(),
       outbound: { ...counters, lastRejection: { envelopeId: 'PRIVATE_ID_SENTINEL', type: 'task.complete', reason: 'limit_exceeded', terminal: true, payload: 'SECRET_PAYLOAD_SENTINEL' } } };
   } } }) as unknown as ConnectControlResult;
   const bundle = await createSupportBundle(config(dir), dir, { adapters: [], connectControl });

@@ -25,6 +25,7 @@ import type { RuntimeObservation } from '../runtime-detection';
  */
 export type DaemonRecord =
   | Extract<DaemonEvent, { kind: 'outbound-rejected' }>
+  | Extract<DaemonEvent, { kind: 'retention-sweep' | 'retention-failure' }>
   | { kind: 'offered'; ts: string; taskId: string; runtime?: string }
   | { kind: 'claimed'; ts: string; taskId: string; claimedRuntime?: string }
   | { kind: 'started'; ts: string; taskId: string }
@@ -98,6 +99,8 @@ export type DaemonRecordKind = DaemonRecord['kind'];
 
 const KIND_SET: Record<DaemonRecordKind, true> = {
   'outbound-rejected': true,
+  'retention-sweep': true,
+  'retention-failure': true,
   offered: true,
   claimed: true,
   started: true,
@@ -254,6 +257,11 @@ function recordOf(event: Exclude<DaemonEvent, { kind: 'progress' }>): DaemonReco
         ? { ...record, terminal: true, taskState: event.taskState }
         : { ...record, terminal: false };
     }
+    case 'retention-sweep':
+      return { kind: event.kind, ts, trigger: event.trigger, at: event.at, deleted: event.deleted,
+        bytesReclaimed: event.bytesReclaimed, failures: event.failures, truncated: event.truncated, durationMs: event.durationMs };
+    case 'retention-failure':
+      return { kind: event.kind, ts, trigger: event.trigger, classId: event.classId, count: event.count, code: event.code };
     case 'offered':
       return { kind: 'offered', ts, taskId: event.taskId, ...(event.runtime === undefined ? {} : { runtime: event.runtime }) };
     case 'claimed':

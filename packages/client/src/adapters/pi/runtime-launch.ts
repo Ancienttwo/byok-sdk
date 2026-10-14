@@ -1,3 +1,4 @@
+import type { ExecutionScratch } from '../../daemon/retention/scratch';
 import { buildAllowlistedEnv } from '../../daemon/environment';
 import { PI_PROVIDER_ENV_KEY_NAMES } from './pi-provider-env.generated';
 import { promises as fs } from 'node:fs';
@@ -10,6 +11,7 @@ import { CONTROLLED_PI_DIRECTORY_ENV_NAMES } from './mcp-environment';
 export type PiRuntimeLaunchKind = 'pi-rpc' | 'pi-prepared' | 'pi-durable';
 
 export interface PiRuntimeLaunchResources {
+  readonly scratch: ExecutionScratch;
   readonly kind: PiRuntimeLaunchKind;
   /** The interpreter, or the executable itself. */
   readonly command: string;
@@ -77,13 +79,13 @@ export async function resolvePiRuntimeLaunch(options: {
   kind: PiRuntimeLaunchKind;
   sessionCwd: string;
   env: Readonly<Record<string, string | undefined>>;
-  projectionRoot: string;
+  scratch: ExecutionScratch;
   keysSessionDir?: string;
   /** The SDK Pi entry for this kind. */
   resolveInvocation: () => { command: string; entry?: string; fixedArgs?: readonly string[] };
 }): Promise<PiRuntimeLaunchResources> {
   const source = options.keysSessionDir === undefined ? 'pi-auth-store' : 'keys-profile';
-  const original = Object.fromEntries(Object.entries(options.env).filter((entry): entry is [string, string] => entry[1] !== undefined));
+  const original = Object.fromEntries(Object.entries({ ...options.env, ...options.scratch.env }).filter((entry): entry is [string, string] => entry[1] !== undefined));
   // The prepared host must send the counted request as is, so it gets only
   // the platform baseline, the Pi directories and the provider names. In the
   // keys lane the launcher also narrows the environment of its own Pi child.
@@ -94,13 +96,14 @@ export async function resolvePiRuntimeLaunch(options: {
   let released = false;
   const release = async (): Promise<void> => {
     if (released) return;
-    if (projectionDir !== undefined) await fs.rm(projectionDir, { recursive: true, force: true });
+    await options.scratch.release();
     released = true;
   };
   try {
-    if (options.keysSessionDir !== undefined) projectionDir = await createProjectionDir(options.projectionRoot, options.sessionCwd);
+    if (options.keysSessionDir !== undefined) projectionDir = await createProjectionDir(options.scratch.sdkDir, options.sessionCwd);
     const invocation = options.resolveInvocation();
     return Object.freeze({
+      scratch: options.scratch,
       kind: options.kind,
       command: invocation.command,
       ...(invocation.entry === undefined ? {} : { entry: invocation.entry }),

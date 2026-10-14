@@ -4,7 +4,7 @@ import { createConnection, createServer, type Server, type Socket } from 'node:n
 import path from 'node:path';
 import { ensureSecureDir } from '../util/secure-dir';
 
-export type PathMutationGateScope = 'store' | 'agent-home-root';
+export type PathMutationGateScope = 'store' | 'agent-home-root' | 'skill-pack-store';
 
 export interface PathMutationGateInput {
   readonly scope: PathMutationGateScope;

@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -95,7 +96,7 @@ describe('Agent egress goes to the Host as is', () => {
       serverUrl: 'http://localhost:3000', workspaceRoot: '/tmp/byok-test-workspace',
       agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY, sanitizer: (value: unknown) => value },
     } as DaemonConfig;
-    expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter('claude', { kind: 'available' })]))
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('claude', { kind: 'available' })]))
       .toThrow('DaemonConfig.agentEgress.sanitizer was removed: Agent egress goes to the Host as is');
   });
 });

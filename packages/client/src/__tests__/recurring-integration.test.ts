@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,7 +18,7 @@ it('runs two recurring executions through real HTTP and TaskRunner with distinct
     agentMessage: { consume: async ({ taskId, payload }) => { accepted.push({ taskId, payload }); return { outcome: 'accepted' }; } } });
   const http = await startServer(sdk);
   const adapter = new StubRuntimeAdapter('pi');
-  const daemon = createDaemonWithAdapters({
+  const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-recurring-test' }, productName: 'recurring test', productId: 'recurring-integration',
     serverUrl: http.baseUrl, workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'store'),
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
@@ -86,7 +87,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
   // Synthetic model output, not a production Summary schema/quality assessment.
   const document = { schemaVersion: 'test.internal-summary.v1', text: 'User constraint: 中文 🐝, no external tools.' };
   const extracts: Array<{ taskId: string; sessionRef: string; terminalProjection?: unknown; finalMessage?: string }> = [];
-  const daemon = createDaemonWithAdapters({
+  const daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
     localAgentRelease: { version: '0.0.0-summary-test' }, productName: 'summary test', productId: options.productId,
     serverUrl: http.baseUrl, workspaceRoot: path.join(root, 'workspace'), storeDir: path.join(root, 'store'),
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },

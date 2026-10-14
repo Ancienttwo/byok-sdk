@@ -1,3 +1,4 @@
+import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { spawn, type ChildProcess } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -14,6 +15,8 @@ function exists(pid: number): boolean {
 }
 
 it.skipIf(process.platform === 'win32')('cancels a silent inert runtime and retains its TERM-resistant process tree until disposal', async () => {
+const __executionScratch = await testExecutionScratch();
+
   const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-aborted-tree-'));
   const receiptFile = path.join(workspaceDir, 'tree.json');
   const fixtureUrl = new URL('./fixtures/process-tree-receipt.mjs', import.meta.url).href;
@@ -36,7 +39,7 @@ it.skipIf(process.platform === 'win32')('cancels a silent inert runtime and reta
   const controller = new AbortController();
   let failure: unknown;
   try {
-    const startup = prepared.operation.start({
+    const startup = prepared.operation.start({ scratch: __executionScratch,
       kind: 'instruction', instruction: 'hello', env: process.env, signal: controller.signal,
       manifest: sealRuntimeOperationManifest({ taskId: 'silent-fixture', runtimeId: 'claude', descriptor: adapter.descriptor,
         requiredToolsetIds: [], workspace: { workspaceDir }, forwardedEnvironmentNames: Object.keys(process.env) }),
