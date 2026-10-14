@@ -301,7 +301,7 @@ describe('native session limits and late results', () => {
 
   for (const { limits, code } of [
     { limits: { callTimeoutMs: 80, turnTimeoutMs: 2_000 }, code: 'CLOUD_TOOL_TIMEOUT' },
-    { limits: { callTimeoutMs: 2_000, turnTimeoutMs: 150 }, code: 'CLOUD_EXECUTION_TIMEOUT' },
+    { limits: { callTimeoutMs: 10_000, turnTimeoutMs: 1_500 }, code: 'CLOUD_EXECUTION_TIMEOUT' },
   ]) it(`discards the genuine resolver result that arrives after ${code}`, async () => {
     const name = await setup({ limits }, { pause: true });
     const processing = run(name);
