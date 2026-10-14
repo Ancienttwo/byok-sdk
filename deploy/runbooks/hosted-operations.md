@@ -46,3 +46,22 @@ The SDK ships no policy for these routes. The data-plane composition uses `Allow
 ## Evidence to collect
 
 Record deployment revision, migration checksum set, capability document, failing tenant/device/resource hashes, aggregate counters and timestamps. Do not collect bearer tokens, provider credentials, prompt/tool bodies or raw object contents.
+
+## Mailbox wake rollout
+
+Run `migrate` with the installed package's migration directory, including
+`0024_mailbox_wake.sql`. Node Hosts create one root-entry
+`createPostgresMailboxWake({ connectionString: sessionDsn, onError })` per
+process and inject it into the cloud and any directly constructed
+`CloudRootStores`. Require a session-mode DSN; reserve one extra connection per
+process beyond the request pool and route errors to the Host's operations sink.
+The self-NOTIFY probe reports unavailable notification delivery; reconnect
+broadcasts force subscribers to re-read durable state. Await `wake.close()`
+at shutdown. Close ends subscriptions, probes, reconnect timers and the client.
+
+Workers Hosts use `@byok-sdk/cloud-dataplane/runtime` and inject a new
+`createInProcessMailboxWake({ fallbackMs: 1_000 })` per invocation. Hyperdrive
+has no LISTEN/NOTIFY support, so accept up to that fallback interval of delivery
+latency. The handler has one wake-driven hold contract across both Hosts.
+Trigger-first and code-first rollout are both correct: lost hints only delay
+mailbox reads to the configured fallback interval.

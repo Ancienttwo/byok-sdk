@@ -1,3 +1,4 @@
+import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 /**
  * Test support for the cloud handler suites.
  *
@@ -62,7 +63,7 @@ export interface CloudHarness extends InMemoryByokCloud {
 }
 
 export function createHarness(options: InMemoryByokCloudOptions = {}): CloudHarness {
-  const composition = createInMemoryByokCloud({ longPollHoldMs: 20, longPollIntervalMs: 5, ...options });
+  const composition = createInMemoryByokCloud({ longPollHoldMs: 20, mailboxWake: createInProcessMailboxWake({ fallbackMs: 5 }), ...options });
 
   const request = (path: string, init: RequestInit = {}): Promise<Response> =>
     Promise.resolve(composition.cloud.fetch(new Request(`${CLOUD_ORIGIN}${path}`, init)));

@@ -1,3 +1,4 @@
+import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 /**
  * `ByokCloudOptions.publicRouteLimiter` — an admission hook in front of the
  * three unauthenticated auth routes. These tests pin that a refusal happens
@@ -44,6 +45,7 @@ function composeCloud(publicRouteLimiter: PublicRouteLimiter | undefined, calls:
   const core = createInMemoryCoreStores({ clock }).stores;
   const composition = createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox);
   return createByokCloud({
+        mailboxWake: createInProcessMailboxWake(),
     core,
     cloud: countingStores(composition.stores, calls),
     blobContentProxy: composition.blobContentProxy,

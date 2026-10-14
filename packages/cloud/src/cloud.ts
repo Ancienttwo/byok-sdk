@@ -209,6 +209,7 @@ import type {
   TaskAttemptStatus,
 } from './stores/ports';
 import { projectTerminalResult, readDeviceTerminalReceipt, type DeviceTerminal, type TerminalResult } from './terminal-result';
+import type { MailboxWake } from './mailbox-wake';
 import { tenantStoresFor, type CloudRootStores, type TenantStores } from './tenant-stores';
 import type { TruthCommitter, TruthObjectDownloads } from './truth/contract';
 
@@ -216,8 +217,6 @@ import type { TruthCommitter, TruthObjectDownloads } from './truth/contract';
 export const DEFAULT_MAX_BLOB_SIZE_BYTES = 100 * 1024 * 1024;
 /** Matches the reference server's hold (§8). */
 export const DEFAULT_LONG_POLL_HOLD_MS = 50_000;
-/** How often a held poll re-reads the mailbox. */
-export const DEFAULT_LONG_POLL_INTERVAL_MS = 250;
 /** Rows per `GET /byok/events` response. */
 export const DEFAULT_EVENTS_PAGE_LIMIT = 50;
 /** Device capability required by the strict Agent offer path. */
@@ -254,6 +253,7 @@ function sameOfferEnvelope(expected: Envelope, actual: Envelope): boolean {
 }
 
 export interface ByokCloudOptions {
+  readonly mailboxWake: MailboxWake;
   readonly core: CoreStores;
   readonly cloud: CloudStores;
   /**
@@ -338,7 +338,6 @@ export interface ByokCloudOptions {
   readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
   readonly maxBlobSizeBytes?: number;
   readonly longPollHoldMs?: number;
-  readonly longPollIntervalMs?: number;
   readonly eventsPageLimit?: number;
   readonly accessTokenTtlSeconds?: number;
   readonly boardPageLimit?: number;
@@ -815,6 +814,7 @@ export interface ByokCloud {
 }
 
 export function createByokCloud(options: ByokCloudOptions): ByokCloud {
+  if (options.mailboxWake === undefined) throw new TypeError('mailboxWake is required');
   const declaration = parseDeclaration(options.capabilities);
   assertNoOverDeclaration(
     declaration,
@@ -825,7 +825,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     options.agentMemoryProjectionAuthorizer,
     options.agentMemoryProjectionStore,
   );
-  const root: CloudRootStores = { core: options.core, cloud: options.cloud };
+  const root: CloudRootStores = { core: options.core, cloud: options.cloud, mailboxWake: options.mailboxWake };
   const auth: AuthPlane = createAuthPlane({
     stores: options.cloud,
     crypto: options.crypto,
@@ -905,7 +905,6 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
         ...deviceRouteDeps,
         activityBounds,
         longPollHoldMs: options.longPollHoldMs ?? DEFAULT_LONG_POLL_HOLD_MS,
-        longPollIntervalMs: options.longPollIntervalMs ?? DEFAULT_LONG_POLL_INTERVAL_MS,
         pageLimit: options.eventsPageLimit ?? DEFAULT_EVENTS_PAGE_LIMIT,
       }),
     );

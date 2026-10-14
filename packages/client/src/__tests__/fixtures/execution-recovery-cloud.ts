@@ -1,3 +1,4 @@
+import { createInProcessMailboxWake } from '../../../../cloud/src/index';
 import { existsSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../../daemon/agent-egress-policy';
 import { createInterface } from 'node:readline';
@@ -316,7 +317,7 @@ const cloud = createByokCloud({
     return { outcome: 'accepted' };
   } },
   longPollHoldMs: 100,
-  longPollIntervalMs: 10,
+  mailboxWake: createInProcessMailboxWake({ fallbackMs: 10 }),
 });
 await embedded.core.quota.writeEntitlement(tenant, {
   version: 1n,

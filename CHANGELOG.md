@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Breaking (cloud, 0.x; #410)** — `ByokCloudOptions` and `CloudRootStores`
+  require `mailboxWake`. Replace `longPollIntervalMs` (and the removed
+  `DEFAULT_LONG_POLL_INTERVAL_MS`) with a wake composition; held polls now
+  subscribe before reading and wait for hints or a 5-second default fallback.
+  `createInMemoryByokCloud` and the reference server compose the in-process
+  wake automatically. Node/Postgres Hosts run migration `0024_mailbox_wake.sql`,
+  create one `createPostgresMailboxWake` per process using a session-mode DSN,
+  inject it into the cloud, and await its `close()` at shutdown. Budget one
+  additional Postgres connection per process. Workers/Hyperdrive Hosts inject
+  a new `createInProcessMailboxWake({ fallbackMs: 1_000 })` per invocation and
+  accept delivery latency up to that interval. There is one hold mode; wire,
+  acknowledgement and replay-floor contracts are unchanged. See the dataplane
+  README and hosted operations runbook for migration details.
+
 - **Breaking (protocol; #398)** — `@byok-sdk/protocol/constants` replaces the
   preparation-version subpath. Import `INPUT_PREPARATION_WIRE_VERSION` from
   `/constants`. Protocol root exports retain the same values; schema-free
