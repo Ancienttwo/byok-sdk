@@ -1,4 +1,7 @@
 // ==== @byok-sdk/server dist/index.d.ts ====
+import type { WakeRecord, WakeScheduleInput, WakeScheduleResult } from './wakes/types';
+export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedError } from './wakes/types';
+export type { DueWake, WakeRecord, WakeScheduleInput, WakeScheduleResult, WakeConsumer, WakeInputErrorCode } from './wakes/types';
 import { Hono } from 'hono';
 import { type EnqueuedOffer, type PairingCodeInfo, type TaskAttempt } from '@byok-sdk/cloud';
 import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
@@ -78,6 +81,13 @@ export interface TaskListQuery {
 }
 /** The object `createByokServer` returns — the SaaS-embedder-facing surface. */
 export interface ByokServer {
+    readonly wakes: {
+        schedule(input: WakeScheduleInput): Promise<WakeScheduleResult>;
+        /** Deletes only queued wakes. False for an in-flight wake means it was not cancelled; a rejection/deadline still retries it. */
+        cancel(dedupKey: string): Promise<boolean>;
+        /** Unfinished wakes, ordered by availableAt then wakeId. */
+        pending(): Promise<readonly WakeRecord[]>;
+    };
     /** Hono app exposing every device route, plus the opt-in `/healthz`. Mount it, or use its `.fetch` with `@hono/node-server`. */
     hono: Hono;
     pairing: {
@@ -660,6 +670,7 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
 import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
+import type { WakeConsumer } from './wakes/types';
 import type { RateLimiterOptions } from './rate-limiter';
 /** Mutually-exclusive storage authority for the embedded reference server. */
 export type ByokServerStorage = {
@@ -670,8 +681,8 @@ export type ByokServerStorage = {
     readonly path: string;
     /** Lifetime of signed blob upload/download URLs. Default 15 minutes. */
     readonly urlTtlMs?: number;
-    /** One-shot schema adoption: v1/v2 require no task history; v3 requires no ambiguous claimed identity. Stop all writers and back up first; old builds cannot reopen v4. */
-    readonly migration?: 'v1-to-v4' | 'v2-to-v4' | 'v3-to-v4';
+    /** One-shot schema adoption: v1/v2 require no task history; v3 requires no ambiguous claimed identity. Stop all writers and back up first; old builds cannot reopen v5. v4 adoption only adds the wake queue. */
+    readonly migration?: 'v1-to-v5' | 'v2-to-v5' | 'v3-to-v5' | 'v4-to-v5';
 };
 /** Options for {@link createByokServer}. */
 export interface CreateByokServerOptions {
@@ -688,6 +699,8 @@ export interface CreateByokServerOptions {
      * falls back to memory.
      */
     storage?: ByokServerStorage;
+    /** Device-side one-shot wakes, at least once. Host must durably deduplicate even overlapping retries. */
+    wake?: WakeConsumer;
     /** How long `GET /byok/events` holds an empty poll open before returning, ms (§8). Default ~50s; override for tests. */
     longPollHoldMs?: number;
     /**
@@ -1202,3 +1215,53 @@ export interface HubStats {
     /** Milliseconds since `createByokServer` returned this instance. */
     uptimeMs: number;
 }
+// ==== @byok-sdk/server dist/wakes/types.d.ts ====
+/** One Host-owned, one-shot wall-clock wake. Periodic rules remain in the Host. */
+export interface WakeScheduleInput {
+    dedupKey: string;
+    availableAt: number;
+    payload?: string;
+}
+export interface WakeScheduleResult {
+    wakeId: string;
+    accepted: boolean;
+}
+export interface DueWake {
+    wakeId: string;
+    dedupKey: string;
+    availableAt: number;
+    deliveredAt: number;
+    delivery: number;
+    payload?: string;
+}
+export interface WakeRecord {
+    wakeId: string;
+    dedupKey: string;
+    availableAt: number;
+    state: 'queued' | 'delivering';
+    deliveries: number;
+    lastError?: string;
+    retryAt?: number;
+    payload?: string;
+}
+export interface WakeConsumer {
+    consume(wake: DueWake, signal: AbortSignal): Promise<void>;
+}
+export declare class WakeHookMissingError extends Error {
+    constructor();
+}
+export declare class WakeConflictError extends Error {
+    constructor();
+}
+export type WakeInputErrorCode = 'WAKE_DEDUP_KEY_INVALID' | 'WAKE_AVAILABLE_AT_INVALID' | 'WAKE_PAYLOAD_TOO_LARGE';
+export declare class WakeInputError extends Error {
+    readonly code: WakeInputErrorCode;
+    constructor(code: WakeInputErrorCode);
+}
+export declare class WakeClosedError extends Error {
+    constructor();
+}
+export declare const WAKE_WAIT_MS = 60000;
+export declare const WAKE_RETENTION_MS: number;
+export declare function validateWakeKey(key: unknown): asserts key is string;
+export declare function validateWakeInput(input: WakeScheduleInput, now: number): WakeScheduleInput;
