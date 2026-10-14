@@ -1,6 +1,6 @@
 # #412 Cloud retention / maintenance
 
-Status: Implemented and targeted-verified locally; publication blocked by GitHub DNS.
+Status: PR #456 is open and non-draft; rebased onto main 76e59b21. Approved test migrations pass targeted checks; excluded #437 fixture remains a CI integration gap.
 Branch: `fix/412-maintenance-ports`.
 Initial base: `5ef13002`; integrate latest cached main normally before final checks.
 
@@ -35,7 +35,10 @@ There is one writer in this worktree; the old worker's WIP is untouched.
 - [x] Migrate in-scope API consumers with business assertions intact.
 - [x] Update docs, migration notes and four affected API goldens.
 - [x] Merge cached main a10c67a0 normally and complete final targeted checks.
-- [ ] Push own branch and open non-draft PR referencing #412; do not merge.
+- [x] Push own branch and open non-draft PR #456 referencing #412; do not merge.
+- [x] Rebase onto main 76e59b21, preserve wake close integration and apply owner-approved test migrations.
+- [x] Verify 86 server tests and seven physical-object tests against real Postgres/S3 with one worker.
+- [ ] Publish approved migration commit and record its hosted CI status.
 
 ## Verification boundary
 
@@ -45,10 +48,10 @@ are built only to supply dist exports. Run single-worker focused retention,
 scheduler, receipts, replay and Worker packaging tests. Check only the four
 changed API surfaces, version authority and installed SQL order.
 
-Real Postgres/S3 validation requires reachable local substrate ports. After
-Herdr restart Docker reports containers healthy but publishes no host listener;
-shared Colima repair is outside scope. GitHub fetch/gh also currently fail DNS.
-Report these evidence gaps if they persist; never call skipped PG tests green.
+Host-shell Postgres/S3 ports and GitHub CLI are now reachable through Herdr.
+The seven physical-object retention tests pass without skips. Direct restricted
+execution still has network limitations; shared Colima repair is outside scope.
 
 No full-root verification, client fixtures, installed migration edits, flags,
-compatibility aliases, history rewrite or worker merge are authorized.
+compatibility aliases or worker merge are authorized. The later owner request
+explicitly authorized rebasing the feature branch; main history remains untouched.

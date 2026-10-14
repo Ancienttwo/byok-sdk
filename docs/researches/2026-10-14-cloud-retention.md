@@ -38,7 +38,7 @@ Committed reservations of both kinds remain protected accounting identity: PG us
 - Latest owner scope limits verification to targeted tests with one worker. No full-repo suite or client fixture edits are authorized for this slice.
 
 
-## Verification (2026-10-14)
+## Initial feature verification (2026-10-14, before rebase)
 
 Node 24.21.0 / Bun 1.4.2; all tests used one worker. Final targeted runs:
 core 97, cloud 114, server 60, memory conformance 52, SQLite conformance 51,
@@ -48,7 +48,7 @@ ran. Related core/cloud/server/dataplane builds and all five affected package
 typechecks (including conformance) passed. Four changed API surfaces, version
 authority and installed SQL order passed.
 
-Real PG/S3 tests are unverified: the attempted remainder regression failed at
+At initial verification, real PG/S3 tests were unverified: the attempted remainder regression failed at
 connection setup with ECONNREFUSED, before product execution. No production
 claim is derived from that result. The analogous SQLite fault was first red
 on lost committed counts and is now green. Installed SQL and SQLite ownership
@@ -58,8 +58,8 @@ The client execution-recovery fixture still implements receipts and pairing
 ports without collectExpired. Latest owner explicitly excludes these fixture
 edits; this is a known downstream typecheck/CI integration gap for the #437
 owner, not resolved by optional port methods or compatibility code.
-GitHub fetch and gh currently fail DNS, so latest remote freshness, push, PR
-number and CI results are not yet established.
+GitHub access initially failed in the restricted execution environment. The host
+shell through Herdr later published PR #456; current CI status belongs to GitHub.
 
 ## Rebase integration with embedded wakes
 
@@ -70,17 +70,22 @@ schedulers start closing synchronously and settle before storage closes; the
 maintenance close test additionally rejects a wake call while its pass is still
 blocked. No existing assertion was removed or weakened.
 
-Prior-head CI confirms the known client fixture integration errors. Its real
-Postgres run passed 387 tests and failed one new retention concurrency case:
-`markDeleted` waited behind physical deletion, then correctly rejected the
-illegal `deleted -> deleted` transition. The test awaits success. The existing
-state contract and the failing test are unchanged in this rebase; this outcome
-is reported separately from conflict resolution and local verification.
+Prior-head CI confirmed the known client fixture integration errors and one
+retention concurrency assertion that awaited an illegal duplicate `markDeleted`.
+The owner explicitly approved two test-contract migrations: five wake timer
+expectations include the mandatory maintenance timer, while close still proves
+zero timers; the queued `markDeleted` now asserts the existing exact
+`object_state_invalid` rejection immediately, avoiding an unhandled rejection.
+All delivery, close, lock, byte, usage and same-hash recreation checks remain.
+No client fixture or product state transition was changed.
 
 Local rebase checks (Node 24.18.0 / Bun 1.4.3): six related builds, five
 package typechecks, four API surfaces, version authority and SQL order passed.
-SQLite conformance selection passed 51 tests. The seven-file server selection
-passed 78 tests and failed eight cases: four wake timer-count cases across two
-drivers observe the newly mandatory maintenance timer. Their assertions remain
-unchanged pending explicit owner approval of the prepared contract-migration
-patch. No client fixture was edited.
+SQLite conformance selection passed 51 tests. After the approved migrations,
+the seven-file server selection passed all 86 tests; server and dataplane
+typechecks passed again. The restored host Postgres/S3 substrate ran all seven
+physical-object retention tests successfully with `BYOK_REQUIRE_DATAPLANE=1`
+and one worker, including row-lock concurrency, same-hash recreation, physical
+DELETE response loss, exact accounting and committed-count preservation.
+These focused results do not establish full-repository CI green; the excluded
+#437 fixture still needs its required receipt/pairing port implementations.

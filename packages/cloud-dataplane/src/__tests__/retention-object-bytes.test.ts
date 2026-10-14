@@ -150,6 +150,9 @@ describe.skipIf(SKIP_DATAPLANE)('PG and independent S3 physical object retention
     try {
       await entry;
       exiting = composition.core.objects.markDeleted(tenant, composition.hash);
+      const exitingCheck = expect(exiting).rejects.toMatchObject({
+        code: 'object_state_invalid', message: 'deleted to deleted is not a legal object manifest transition.',
+      });
       await until(async () => (await composition.scope.pool.query(`SELECT 1 FROM pg_stat_activity WHERE usename = current_user AND wait_event_type = 'Lock' AND query LIKE '%UPDATE object_manifest%'`)).rowCount !== 0);
       const admitted = await composition.core.quota.reserve(tenant, { reservationId: 'unrelated', kind: 'object', expectedBytes: 1n, contentHash: contentHash('sha256:' + 'f'.repeat(64)), contentType: 'text/plain', ttlMs: 60_000 });
       expect(admitted.state).toBe('reserved');
@@ -157,7 +160,7 @@ describe.skipIf(SKIP_DATAPLANE)('PG and independent S3 physical object retention
       expect(deletes).toBe(1);
       release();
       expect(await collecting).toEqual({ removed: 1, expired: 0, releasedBytes: composition.size, more: false });
-      await exiting;
+      await exitingCheck;
       await composition.core.quota.abortReservation(tenant, 'unrelated');
       await composition.upload('recreated');
       expect(await composition.storage.inspectObject(tenant, composition.hash)).toBeDefined();
