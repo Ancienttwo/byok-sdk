@@ -56,7 +56,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { tenantId } from '@byok-sdk/core';
 import {
-  CLOUD_CAPABILITIES, createByokCloud, createHmacTokenSigner, createWebCrypto,
+  CLOUD_CAPABILITIES, createInProcessMailboxWake, createByokCloud, createHmacTokenSigner, createWebCrypto,
   fullCapabilityDeclaration, createInMemoryByokCloud, RecurringExecutionInputSchema,
 } from '@byok-sdk/cloud';
 import { createEnvelope, PROTOCOL_VERSION } from '@byok-sdk/protocol';
@@ -255,6 +255,7 @@ async function composeReopened(handoff, consume, finalizeProbePath) {
   }
   const full = fullCapabilityDeclaration();
   const cloud = createByokCloud({
+      mailboxWake: createInProcessMailboxWake(),
     core: createPostgresCoreStores({ pool, clock }),
     cloud: cloudStores,
     crypto,
@@ -673,6 +674,7 @@ if (substrateConfigured) {
   function composeDurable(core, cloudStores, signer, consumer) {
     const full = fullCapabilityDeclaration();
     return createByokCloud({
+      mailboxWake: createInProcessMailboxWake(),
       core,
       cloud: cloudStores,
       crypto,

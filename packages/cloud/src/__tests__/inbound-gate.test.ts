@@ -42,7 +42,7 @@ describe('the inbound gate', () => {
     harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     deviceId = device.deviceId;
-    stores = tenantStoresFor(devicePrincipal(TENANT_A, deviceId), { core: harness.core, cloud: harness.stores });
+    stores = tenantStoresFor(devicePrincipal(TENANT_A, deviceId), { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake });
   });
 
   it('step 0: a rate-limited envelope never reaches the type check', async () => {
@@ -57,7 +57,7 @@ describe('the inbound gate', () => {
     const device = await limited.pairDevice(TENANT_A);
     const limitedStores = tenantStoresFor(devicePrincipal(TENANT_A, device.deviceId), {
       core: limited.core,
-      cloud: { ...limited.stores, rateLimiter: limiter },
+      mailboxWake: limited.mailboxWake, cloud: { ...limited.stores, rateLimiter: limiter },
     });
 
     // A type the allow-list would reject anyway: it must still cost a token,
@@ -130,6 +130,7 @@ describe('the inbound gate', () => {
     const intruderStores = tenantStoresFor(devicePrincipal(TENANT_A, other.deviceId), {
       core: harness.core,
       cloud: harness.stores,
+      mailboxWake: harness.mailboxWake,
     });
     expect(await handleInboundEnvelope(intruderStores, other.deviceId, claim(taskId, other.deviceId))).toBe('rejected');
     expect(await handleInboundEnvelope(intruderStores, other.deviceId, complete(taskId, 'stolen'))).toBe('rejected');
@@ -167,6 +168,7 @@ describe('the inbound gate', () => {
     const intruderStores = tenantStoresFor(devicePrincipal(TENANT_A, other.deviceId), {
       core: harness.core,
       cloud: harness.stores,
+      mailboxWake: harness.mailboxWake,
     });
     expect(await handleInboundEnvelope(intruderStores, other.deviceId, complete(taskId, 'stolen'))).toBe('rejected');
 
@@ -278,6 +280,7 @@ describe('the inbound gate', () => {
     const otherStores = tenantStoresFor(devicePrincipal(TENANT_A, other.deviceId), {
       core: harness.core,
       cloud: harness.stores,
+      mailboxWake: harness.mailboxWake,
     });
     await harness.stores.tasks.open(TENANT_A, { taskId: 'task-first-device', deviceId });
     await harness.stores.tasks.open(TENANT_A, { taskId: 'task-other-device', deviceId: other.deviceId });
@@ -299,6 +302,7 @@ describe('the inbound gate', () => {
     const foreign = tenantStoresFor(devicePrincipal(TENANT_B, deviceId), {
       core: harness.core,
       cloud: harness.stores,
+      mailboxWake: harness.mailboxWake,
     });
     await harness.stores.tasks.open(TENANT_A, { taskId: 'task-shared', deviceId });
     await harness.stores.tasks.open(TENANT_B, { taskId: 'task-shared', deviceId });
@@ -342,6 +346,7 @@ describe('the inbound gate', () => {
     const foreign = tenantStoresFor(devicePrincipal(TENANT_B, deviceId), {
       core: harness.core,
       cloud: harness.stores,
+      mailboxWake: harness.mailboxWake,
     });
 
     expect(await handleInboundEnvelope(foreign, deviceId, claim(taskId, deviceId))).toBe('rejected');

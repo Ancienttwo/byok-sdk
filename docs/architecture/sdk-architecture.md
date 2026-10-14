@@ -395,6 +395,19 @@ cursor, while `POST /byok/messages` carries the first `conn.hello` snapshot and
 all daemon-to-server envelopes through the single inbound gate. No embedded
 transport-specific state machine remains beside the kernel.
 
+Held event polls use a required `MailboxWake` port. The tenant facade emits
+post-commit hints for append and cancellation and binds `watch` to the
+principal's tenant. The handler subscribes before reading, then waits for hints
+or the port's fallback interval (5 seconds by default), closing on every exit.
+Mailbox reads, delivery watermarks and client acknowledgement remain the only
+authorities; handlers carry no cross-request subscription state. Memory/SQLite
+compositions use an in-process wake. Resident Postgres Hosts use one dedicated
+session-mode LISTEN connection and migration 0024's outbox trigger; the listener
+and its Node imports stay out of the Worker runtime entry. Workers compose a
+per-invocation wake and choose the fallback latency. At 10x device load the
+remaining pressure point is fallback reads and notification fan-out, rather
+than a 250 ms read loop per idle hold.
+
 ### 3.3 Current boundaries
 
 - Pairing and token operations are out-of-band HTTP calls. A device's only

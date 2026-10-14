@@ -117,19 +117,21 @@ describe('statelessness', () => {
     for (const file of SHIPPED) {
       const text = code(file.text);
       expect(text, file.path).not.toMatch(/\bRunning\b/);
-      expect(text, file.path).not.toMatch(/\b(sessions|connections|activeTasks|waiters)\b/);
+      const forbidden = file.path === 'stores/in-memory/mailbox-wake.ts'
+        ? /\b(sessions|connections|activeTasks)\b/
+        : /\b(sessions|connections|activeTasks|waiters)\b/;
+      expect(text, file.path).not.toMatch(forbidden);
     }
   });
 
-  it('holds no long-poll waiter registry: the hold is a bounded re-read', () => {
+  it('holds through an injected wake port without handler subscription state', () => {
     const events = shipped('handlers/events.ts');
-    // No collection to park a pending request in, and exactly one `new
-    // Promise` — the sleep between re-reads. A waiter registry needs both a
-    // place to store the resolver and a second promise to hand back.
+    // Request subscriptions live behind the lossy port; handlers only read.
     expect(events).not.toMatch(/new\s+(Map|Set)\s*[<(]/);
-    expect(events.match(/new Promise/g)).toHaveLength(1);
+    expect(events).not.toContain('new Promise');
     expect(events).toContain('readAfter');
-    expect(events).toContain('setTimeout');
+    expect(events).not.toContain('setTimeout');
+    expect(events).toContain('watch(');
   });
 
   it('resolves the tenant from the request on every device route, never from a cache', () => {

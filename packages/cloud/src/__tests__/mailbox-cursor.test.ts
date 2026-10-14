@@ -1,3 +1,4 @@
+import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 /**
  * Mailbox cursor semantics as the device surface exposes them.
  *
@@ -197,7 +198,7 @@ describe('GET /byok/events cursor semantics', () => {
   });
 
   it('holds an empty poll open instead of answering immediately', async () => {
-    const harness = createHarness({ longPollHoldMs: 120, longPollIntervalMs: 20 });
+    const harness = createHarness({ longPollHoldMs: 120, mailboxWake: createInProcessMailboxWake({ fallbackMs: 20 }) });
     const device = await harness.pairDevice(TENANT_A);
 
     const startedAt = Date.now();
@@ -210,7 +211,7 @@ describe('GET /byok/events cursor semantics', () => {
 
   it('ends a held poll as soon as the caller disconnects, without re-reading its mailbox until the hold expires', async () => {
     // A 30s hold the test would notice if it were waited out.
-    const harness = createHarness({ longPollHoldMs: 30_000, longPollIntervalMs: 20 });
+    const harness = createHarness({ longPollHoldMs: 30_000, mailboxWake: createInProcessMailboxWake({ fallbackMs: 20 }) });
     const device = await harness.pairDevice(TENANT_A);
     const controller = new AbortController();
     const reads: number[] = [];
@@ -313,6 +314,7 @@ describe('enqueueOffer', () => {
     const skewed = createByokCloud({
       core: skewedCore,
       cloud: base.stores,
+      mailboxWake: base.mailboxWake,
       // `fullCapabilityDeclaration()` names `blobs.contentproxy`, and a
       // declaration is not allowed to out-run the parts, so the proxy comes
       // along with it.
@@ -355,7 +357,7 @@ describe('enqueueOffer', () => {
 
 describe('bounded read-ahead navigation', () => {
   it('reads later pages without ACK and replays from the durable cursor after reconnect', async () => {
-    const harness = createHarness({ eventsPageLimit: 2, longPollHoldMs: 1, longPollIntervalMs: 1 });
+    const harness = createHarness({ eventsPageLimit: 2, longPollHoldMs: 1, mailboxWake: createInProcessMailboxWake({ fallbackMs: 1 }) });
     const device = await harness.pairDevice(TENANT_A);
     for (let i = 0; i < 4; i++) await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload(String(i)) });
     const first = await poll(harness, device.authorization, 0);

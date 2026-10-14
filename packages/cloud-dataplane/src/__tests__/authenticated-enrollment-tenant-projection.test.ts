@@ -1,3 +1,4 @@
+import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 import { fileURLToPath } from 'node:url';
 import {
   CLOUD_CAPABILITIES,
@@ -46,6 +47,7 @@ if (SKIP_DATAPLANE) {
         });
         const capabilities = fullCapabilityDeclaration();
         const cloud = createByokCloud({
+        mailboxWake: createInProcessMailboxWake(),
           core: createPostgresCoreStores({ pool: scope.pool, clock }),
           cloud: stores,
           crypto,

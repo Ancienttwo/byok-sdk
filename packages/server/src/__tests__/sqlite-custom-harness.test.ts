@@ -1,3 +1,4 @@
+import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,7 +28,8 @@ describe('SQLite custom-harness claim authority', () => {
     const clock = createMutableClock();
     const crypto = createWebCrypto();
     const open = (migration?: SqliteEmbeddedStoreOptions['migration']) => {
-      const stores = createSqliteEmbeddedStores({ path, ...(migration === undefined ? {} : { migration }) }, { clock, crypto });
+      const embedded = createSqliteEmbeddedStores({ path, ...(migration === undefined ? {} : { migration }) }, { clock, crypto });
+      const stores = { ...embedded, mailboxWake: createInProcessMailboxWake() };
       // Quota is process memory here; issue the entitlement on every open, as the
       // embedded server does, so limited mailbox appends are admitted (#411).
       void stores.core.quota.writeEntitlement(tenant, {

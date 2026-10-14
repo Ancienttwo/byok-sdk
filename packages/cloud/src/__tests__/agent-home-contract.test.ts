@@ -14,7 +14,7 @@ const OTHER_AGENT_REF = { agentId: 'agent-2', profileRevision: 'profile-r9' } as
 function deviceStores(harness: CloudHarness, deviceId: string) {
   return tenantStoresFor(
     { kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId },
-    { core: harness.core, cloud: harness.stores },
+    { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
   );
 }
 

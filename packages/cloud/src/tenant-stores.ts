@@ -50,6 +50,7 @@ import {
   type TenantId,
 } from '@byok-sdk/core';
 import type { AgentRef, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
 import type { ActivityAppendInput, ActivityTail } from './activity';
 import type {
   ApprovalTimelineAppendInput,
@@ -68,6 +69,8 @@ import type {
 } from './stores/ports';
 
 export interface TenantBoundMailbox {
+  /** Subscribe before reading; hints never replace durable mailbox reads. */
+  watch(deviceId: string, signal: AbortSignal): MailboxWakeSubscription;
   append(input: MailboxAppendInput): Promise<MailboxMessage>;
   /** Pure read. Never advances the cursor — the daemon's next poll is the only ack. */
   readAfter(query: MailboxReadQuery): Promise<MailboxPage>;
@@ -229,17 +232,23 @@ export interface TenantStores {
 export interface CloudRootStores {
   readonly core: CoreStores;
   readonly cloud: CloudStores;
+  readonly mailboxWake: MailboxWake;
 }
 
 export function tenantStoresFor(principal: Principal, root: CloudRootStores): TenantStores {
   const tenant = principalTenant(principal);
-  const { core, cloud } = root;
+  const { core, cloud, mailboxWake } = root;
 
   return {
     tenant,
     principal,
     mailbox: {
-      append: (input) => core.mailbox.append(tenant, input),
+      watch: (deviceId, signal) => mailboxWake.subscribe(tenant, deviceId, signal),
+      append: async (input) => {
+        const message = await core.mailbox.append(tenant, input);
+        mailboxWake.appended(tenant, message.deviceId);
+        return message;
+      },
       readAfter: (query) => core.mailbox.readAfter(tenant, query),
       recordDelivery: (input) => core.mailbox.recordDelivery(tenant, input),
       advanceCursor: (input) => core.mailbox.advanceCursor(tenant, input),
@@ -295,7 +304,11 @@ export function tenantStoresFor(principal: Principal, root: CloudRootStores): Te
       recordStatus: (input) => cloud.tasks.recordStatus(tenant, input),
     },
     cancellations: {
-      request: (input) => cloud.cancellations.request(tenant, input),
+      request: async (input) => {
+        const mutation = await cloud.cancellations.request(tenant, input);
+        if (mutation?.message !== undefined) mailboxWake.appended(tenant, mutation.message.deviceId);
+        return mutation;
+      },
     },
     dedup: {
       checkAndRecord: (deviceId, envelopeId) => cloud.dedup.checkAndRecord(tenant, deviceId, envelopeId),

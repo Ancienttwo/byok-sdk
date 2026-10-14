@@ -83,7 +83,7 @@ function contentReadPayload(agentRef: AgentRef = AGENT_REF) {
 function deviceStores(harness: CloudHarness, deviceId: string) {
   return tenantStoresFor(
     { kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId },
-    { core: harness.core, cloud: harness.stores },
+    { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
   );
 }
 

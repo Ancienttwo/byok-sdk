@@ -67,7 +67,6 @@ export {
   AGENT_HOME_CONTRACT_CAPABILITY,
   DEFAULT_EVENTS_PAGE_LIMIT,
   DEFAULT_LONG_POLL_HOLD_MS,
-  DEFAULT_LONG_POLL_INTERVAL_MS,
   DEFAULT_MAX_BLOB_SIZE_BYTES,
 } from './cloud';
 export {
@@ -373,3 +372,7 @@ export type {
 export type { DeviceTerminal } from './terminal-result';
 
 export { RecurringExecutionInputSchema, type RecurringExecutionInput } from './recurring';
+
+export type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
+export { createInProcessMailboxWake, DEFAULT_MAILBOX_WAKE_FALLBACK_MS } from './stores/in-memory/mailbox-wake';
+export type { InProcessMailboxWakeOptions } from './stores/in-memory/mailbox-wake';

@@ -11,7 +11,7 @@ const inventory = [{ id: 'acme-harness', version: '1.2.3', capabilities }];
 async function setup() {
   const h = createHarness();
   const device = await h.pairDevice(TENANT_A);
-  const stores = tenantStoresFor({ kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId: device.deviceId }, { core: h.core, cloud: h.stores });
+  const stores = tenantStoresFor({ kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId: device.deviceId }, { core: h.core, cloud: h.stores, mailboxWake: h.mailboxWake });
   return { h, stores, deviceId: device.deviceId };
 }
 
@@ -95,7 +95,7 @@ describe('custom harness protocol authority', () => {
   it('keeps two device inventories and actual claims isolated, including implicit selection', async () => {
     const { h, stores, deviceId } = await setup();
     const other = await h.pairDevice(TENANT_A);
-    const otherStores = tenantStoresFor({ kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId: other.deviceId }, { core: h.core, cloud: h.stores });
+    const otherStores = tenantStoresFor({ kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId: other.deviceId }, { core: h.core, cloud: h.stores, mailboxWake: h.mailboxWake });
     await stores.devices.recordCapabilities({ capabilities: ['custom-harness'], harnesses: inventory });
     await otherStores.devices.recordCapabilities({ capabilities: ['custom-harness'], harnesses: [{ ...inventory[0]!, id: 'other' }] });
     await expect(h.cloud.enqueueOffer(TENANT_A, other.deviceId, { payload: { ...offerPayload(), harnessId: 'acme-harness' } })).rejects.toThrow();

@@ -2470,3 +2470,32 @@ separation between steering and typed native requests, not copied code. OAR's
 Apache-2.0 attribution and maintained source inventory remain explicit. Fixture
 qualification does not establish live-provider, desktop or Host-reconnect
 acceptance.
+
+## Hosted mailbox hold (#410)
+
+`ByokCloudOptions` and `CloudRootStores` require `MailboxWake`. Held
+`GET /byok/events` requests have one mode: subscribe through the tenant-bound
+mailbox facade before the first read, scan durable rows, and wait for a hint or
+the port's fallback interval before reading again. Every live empty response
+follows a final read and replay-floor check. Reading is not acknowledgement;
+the incoming cursor remains the only acknowledgement and a lost cursor fails
+closed with 409. Abort stops further reads and every exit closes the subscription.
+`longPollIntervalMs` and `DEFAULT_LONG_POLL_INTERVAL_MS` are removed.
+
+Wake signals contain no delivery authority. Duplicate hints coalesce, lost
+hints delay delivery by at most the configured fallback interval (5 seconds by
+default), and a hint between an empty read and the wait is retained. The facade
+signals only after committed append or a cancellation result containing a
+mailbox message. Handlers retain no cross-request subscription state.
+
+Memory and reference-server memory/SQLite compositions use an in-process wake.
+Resident Node/Postgres Hosts use one dedicated session-mode LISTEN connection
+per process and migration 0024's pending-outbox insert trigger, which covers
+append, cancellation and dead-letter replay at commit. The listener reconnects
+with backoff, broadcasts a re-read hint on each successful LISTEN, and probes
+self-NOTIFY delivery; failure is observable through `onError` or the default
+console error. Host shutdown closes the listener and outstanding subscriptions.
+This Node-only factory is excluded from the dataplane runtime entry. Workers
+Hosts compose one in-process wake per invocation and choose their fallback
+latency because Hyperdrive does not carry LISTEN/NOTIFY. The client and frozen
+wire contracts do not change.

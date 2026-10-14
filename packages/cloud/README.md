@@ -81,3 +81,19 @@ A delivered=false read is not evidence that append never happened. Host-only
 message context is a separate authority, not part of this offer projection.
 The API's persistence is that of the injected receipts store: in-memory restart
 and Postgres generic receipt retention are not upgraded by this read method.
+
+## Mailbox wake composition
+
+`createByokCloud` and `tenantStoresFor` require a `mailboxWake` port. It is a
+lossy hint: mailbox reads remain the only event/cursor authority. A held poll
+subscribes before its first read, re-reads after a hint or the fallback interval,
+and closes its subscription on response, error or request abort. Every live
+empty response follows a final read, including the replay-floor check.
+
+`createInMemoryByokCloud` defaults to `createInProcessMailboxWake()` and exposes
+that same instance as `mailboxWake` for hosts building tenant facades directly.
+Direct compositions inject `createInProcessMailboxWake({ fallbackMs: 5_000 })`,
+or the Node/Postgres listener from `@byok-sdk/cloud-dataplane`. The default
+fallback is `DEFAULT_MAILBOX_WAKE_FALLBACK_MS` (5 seconds). There is no interval
+option or alternate polling hold. Append and cancellation hints are emitted
+only after their store commits; direct writes to naked stores rely on fallback.

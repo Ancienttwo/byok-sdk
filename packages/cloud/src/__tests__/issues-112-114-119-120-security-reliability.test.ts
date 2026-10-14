@@ -290,7 +290,7 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
     expect(effects).toBe(1);
     const recomposedStores = tenantStoresFor(
       { kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId: device.deviceId },
-      { core: harness.core, cloud: harness.stores },
+      { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
     );
     await expect(handleAgentMessagePublish(
       recomposedStores,

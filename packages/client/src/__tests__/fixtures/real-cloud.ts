@@ -1,3 +1,4 @@
+import { createInProcessMailboxWake } from '../../../../cloud/src/index';
 import type { Server as HttpServer } from 'node:http';
 import { serve } from '@hono/node-server';
 // This import reaches across the workspace by RELATIVE PATH on purpose.
@@ -74,7 +75,7 @@ export interface StartRealCloudOptions {
   readonly productId: string;
   /** Keep this short in tests: the production default holds each empty poll ~50s. */
   readonly longPollHoldMs?: number;
-  readonly longPollIntervalMs?: number;
+  readonly mailboxFallbackMs?: number;
   /**
    * Capability names to strip from this deployment's declaration (ADR-010).
    * A cloud that does not declare a capability does not mount its routes at
@@ -106,7 +107,7 @@ export async function startRealCloud(opts: StartRealCloudOptions): Promise<RealC
   const { cloud, core } = createInMemoryByokCloud({
     ...(opts.eventsPageLimit === undefined ? {} : { eventsPageLimit: opts.eventsPageLimit }),
     longPollHoldMs: opts.longPollHoldMs ?? 200,
-    longPollIntervalMs: opts.longPollIntervalMs ?? 20,
+    mailboxWake: createInProcessMailboxWake({ fallbackMs: opts.mailboxFallbackMs ?? 20 }),
     ...(opts.omitCapabilities === undefined
       ? {}
       : {

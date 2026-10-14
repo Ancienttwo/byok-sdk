@@ -16,10 +16,9 @@ import { isTaskOfferType, MAILBOX_READ_AHEAD_CAPABILITY, MAILBOX_READ_AHEAD_MAX_
  *   bounds: it rejects regression and refuses any cursor beyond the highest
  *   one this route recorded immediately before returning it.
  * - **The hold.** An empty poll is held open instead of answered immediately,
- *   so an idle daemon is not a busy-loop. The hold is a bounded re-read, not a
- *   registered waiter: a waiter map is exactly the cross-request state a
- *   stateless handler may not keep (S3.5 boxes 14-15), and a second cloud
- *   instance would not see it anyway.
+ *   so an idle daemon is not a busy-loop. An injected wake port hints when to
+ *   re-read; it owns subscriptions, and losing its hints only delays delivery
+ *   to its fallback interval. The mailbox stays the authority across instances.
  * - **A lost cursor fails closed.** A cursor below the mailbox's retained
  *   window is answered `409 { error: 'cursor_too_old', recoverableFrom }`, the
  *   same body the reference server returns (`packages/server/src/http.ts:386`)
@@ -90,27 +89,8 @@ export const CLOUD_PROTOCOL_CAPABILITIES = [
 export interface EventsRouteDeps extends DeviceRouteDeps {
   /** How long an empty poll is held open, ms. */
   readonly longPollHoldMs: number;
-  /** How often the mailbox is re-read while holding, ms. */
-  readonly longPollIntervalMs: number;
   /** Max rows per response. */
   readonly pageLimit: number;
-}
-
-/** Resolves after `ms`, or as soon as `signal` aborts; the timer never outlives the caller. */
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal.aborted) {
-      resolve();
-      return;
-    }
-    const finish = (): void => {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', finish);
-      resolve();
-    };
-    const timer = setTimeout(finish, ms);
-    signal.addEventListener('abort', finish, { once: true });
-  });
 }
 
 export function eventsHandler(deps: EventsRouteDeps) {
@@ -147,68 +127,72 @@ export function eventsHandler(deps: EventsRouteDeps) {
       }
     }
 
-    const attempts = Math.max(1, Math.ceil(deps.longPollHoldMs / deps.longPollIntervalMs));
-    // A caller that disconnected has nobody to read the answer: end the hold
-    // instead of re-reading its mailbox until the hold expires, which would
-    // also keep the embedding process alive that long after a shutdown.
+    const deadline = performance.now() + deps.longPollHoldMs;
     const requestSignal = c.req.raw.signal;
-    for (let attempt = 0; attempt < attempts && !requestSignal.aborted; attempt += 1) {
-      let scanCursor = afterSeq;
-      while (true) {
-        const page = await stores.mailbox.readAfter({
-          deviceId: device.deviceId,
-          afterSeq: scanCursor,
-          limit: deps.pageLimit,
-        });
-        // The replay floor, against the cursor the CALLER brought — never
-        // `scanCursor`, which this request moves on its own. Same rule as the
-        // reference server's `assertReplayAvailable`
-        // (`packages/server/src/hub.ts:2519`): a caller at `recoverableFrom - 1`
-        // can still be handed the first retained row, anything lower has lost
-        // rows and must resync rather than silently resume from a partial tail.
-        // Evaluated on every read, so a sweep that lands mid-hold ends the hold
-        // with the 409 the caller now deserves instead of an empty 200.
-        if (cursor < page.recoverableFrom - 1) {
-          return c.json({ error: 'cursor_too_old', recoverableFrom: page.recoverableFrom }, 409);
+    const subscription = stores.mailbox.watch(device.deviceId, requestSignal);
+    try {
+      while (!requestSignal.aborted) {
+        let scanCursor = afterSeq;
+        while (!requestSignal.aborted) {
+          const page = await stores.mailbox.readAfter({
+            deviceId: device.deviceId,
+            afterSeq: scanCursor,
+            limit: deps.pageLimit,
+          });
+          // The replay floor, against the cursor the CALLER brought — never
+          // `scanCursor`, which this request moves on its own. Same rule as the
+          // reference server's `assertReplayAvailable`
+          // (`packages/server/src/hub.ts:2519`): a caller at `recoverableFrom - 1`
+          // can still be handed the first retained row, anything lower has lost
+          // rows and must resync rather than silently resume from a partial tail.
+          // Evaluated on every read, so a sweep that lands mid-hold ends the hold
+          // with the 409 the caller now deserves instead of an empty 200.
+          if (cursor < page.recoverableFrom - 1) {
+            return c.json({ error: 'cursor_too_old', recoverableFrom: page.recoverableFrom }, 409);
+          }
+          if (page.messages.length === 0) break;
+          const decoded: Envelope[] = page.messages.map((message) => decodeEnvelope(message.body));
+          // The protocol's own classifier, not a list restated here: a
+          // hand-maintained copy silently stops filtering the day a new
+          // task-opening type is registered, and the symptom is a CANCELLED offer
+          // still being delivered.
+          const offeredTaskIds = decoded.flatMap((event) =>
+            isTaskOfferType(event.type) && event.task_id !== undefined ? [event.task_id] : [],
+          );
+          const attemptsByTaskId = Object.fromEntries(
+            (await stores.tasks.getMany(offeredTaskIds)).map((attempt) => [attempt.taskId, attempt]),
+          );
+          const events = decoded.filter((event) => {
+            if (!isTaskOfferType(event.type)) return true;
+            return event.task_id === undefined || attemptsByTaskId[event.task_id]?.cancellation === undefined;
+          });
+          if (events.length === 0 && page.hasMore) {
+            // A cancelled offer can occupy an entire small mailbox page. The
+            // daemon advances from delivered envelope seqs, not response.cursor,
+            // so returning that empty filtered page would replay it forever and
+            // strand the following durable task.cancel. Scan to the next page in
+            // this same request without acknowledging anything server-side.
+            scanCursor = page.nextSeq;
+            continue;
+          }
+          if (events.length === 0) break;
+          const response: EventsPollResponse = {
+            events,
+            cursor: page.nextSeq,
+            capabilities: CLOUD_PROTOCOL_CAPABILITIES,
+          };
+          await stores.mailbox.recordDelivery({
+            deviceId: device.deviceId,
+            deliveredSeq: response.cursor,
+          });
+          return c.json(response, 200);
         }
-        if (page.messages.length === 0) break;
-        const decoded: Envelope[] = page.messages.map((message) => decodeEnvelope(message.body));
-        // The protocol's own classifier, not a list restated here: a
-        // hand-maintained copy silently stops filtering the day a new
-        // task-opening type is registered, and the symptom is a CANCELLED offer
-        // still being delivered.
-        const offeredTaskIds = decoded.flatMap((event) =>
-          isTaskOfferType(event.type) && event.task_id !== undefined ? [event.task_id] : [],
-        );
-        const attemptsByTaskId = Object.fromEntries(
-          (await stores.tasks.getMany(offeredTaskIds)).map((attempt) => [attempt.taskId, attempt]),
-        );
-        const events = decoded.filter((event) => {
-          if (!isTaskOfferType(event.type)) return true;
-          return event.task_id === undefined || attemptsByTaskId[event.task_id]?.cancellation === undefined;
-        });
-        if (events.length === 0 && page.hasMore) {
-          // A cancelled offer can occupy an entire small mailbox page. The
-          // daemon advances from delivered envelope seqs, not response.cursor,
-          // so returning that empty filtered page would replay it forever and
-          // strand the following durable task.cancel. Scan to the next page in
-          // this same request without acknowledging anything server-side.
-          scanCursor = page.nextSeq;
-          continue;
-        }
-        if (events.length === 0) break;
-        const response: EventsPollResponse = {
-          events,
-          cursor: page.nextSeq,
-          capabilities: CLOUD_PROTOCOL_CAPABILITIES,
-        };
-        await stores.mailbox.recordDelivery({
-          deviceId: device.deviceId,
-          deliveredSeq: response.cursor,
-        });
-        return c.json(response, 200);
+        const remaining = deadline - performance.now();
+        if (remaining <= 0 || requestSignal.aborted) break;
+        await subscription.next(remaining);
       }
-      if (attempt < attempts - 1) await sleep(deps.longPollIntervalMs, requestSignal);
+    } finally {
+      subscription.close();
     }
 
     const response: EventsPollResponse = {

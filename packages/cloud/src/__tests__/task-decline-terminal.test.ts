@@ -36,6 +36,7 @@ describe('task.decline terminal', () => {
     stores = tenantStoresFor(devicePrincipal(TENANT_A, deviceId), {
       core: harness.core,
       cloud: harness.stores,
+      mailboxWake: harness.mailboxWake,
     });
   });
 
