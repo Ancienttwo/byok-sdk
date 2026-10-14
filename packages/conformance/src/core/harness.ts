@@ -1,3 +1,4 @@
+import { runCoreRetentionConformance } from './retention';
 /**
  * The composition-parameterized conformance harness.
  *
@@ -82,5 +83,6 @@ export function runCoreConformance(name: string, factory: CoreCompositionFactory
     runSkillPackConformance(factory);
     runTimestampConformance(factory);
     runTenantIsolationConformance(factory);
+    runCoreRetentionConformance(name, factory);
   });
 }

@@ -19,9 +19,9 @@ import { fullCapabilityDeclaration } from '../capabilities';
 import { createWebCrypto } from '../crypto/web-crypto';
 import type { CloudCrypto } from '../crypto/port';
 import { createByokCloud, type ByokCloud, type ByokCloudOptions } from '../cloud';
+import { createInMemoryCloudStores, createInMemoryBlobBytes } from '../stores/in-memory/index';
 import type { MailboxWake } from '../mailbox-wake';
 import { createInProcessMailboxWake } from '../stores/in-memory/mailbox-wake';
-import { createInMemoryCloudStores } from '../stores/in-memory/index';
 import type { BlobContentProxy, CloudStores } from '../stores/ports';
 import type { TruthCommitter, TruthObjectDownloads } from '../truth/contract';
 import type {
@@ -106,12 +106,14 @@ export interface InMemoryByokCloud {
 export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}): InMemoryByokCloud {
   const clock = options.clock ?? systemClock();
   const crypto = options.crypto ?? createWebCrypto();
-  const core = createInMemoryCoreStores({ clock }).stores;
+  const objectBytes = createInMemoryBlobBytes(clock, crypto);
+  const core = createInMemoryCoreStores({ clock, objectBytes }).stores;
   const { stores, blobContentProxy } = createInMemoryCloudStores(
     clock,
     crypto,
     core.objects,
     core.mailbox,
+    objectBytes,
   );
   const tokenSigner =
     options.tokenSigner ??

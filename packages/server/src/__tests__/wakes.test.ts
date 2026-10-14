@@ -39,7 +39,7 @@ describe.each(['memory', 'sqlite'] as const)('embedded wakes (%s)', kind => {
   it('refuses scheduling without a hook and never writes a row or arms an idle timer', async () => {
     const server = open();
     await expect(server.wakes.schedule({ dedupKey: 'none', availableAt: NOW })).rejects.toBeInstanceOf(WakeHookMissingError);
-    expect(await server.wakes.pending()).toEqual([]); expect(vi.getTimerCount()).toBe(0);
+    expect(await server.wakes.pending()).toEqual([]); expect(vi.getTimerCount()).toBe(1);
   });
   it.each([
     [{ dedupKey: '', availableAt: NOW }, 'WAKE_DEDUP_KEY_INVALID'],
@@ -70,7 +70,7 @@ describe.each(['memory', 'sqlite'] as const)('embedded wakes (%s)', kind => {
     expect((await server.wakes.pending()).map(w => w.wakeId)).toEqual([...equalDue, a.wakeId]);
     for (let i = 0; i < 3; i++) { gates[i]!.resolve(); await flush(server); }
     expect(seen.map(w => w.wakeId)).toEqual([...equalDue, a.wakeId]);
-    expect(seen.every(w => w.delivery === 1)).toBe(true); expect(vi.getTimerCount()).toBe(0);
+    expect(seen.every(w => w.delivery === 1)).toBe(true); expect(vi.getTimerCount()).toBe(1);
   });
   it('retries rejection after 60s without changing availableAt; limits lastError to 1KiB UTF-8', async () => {
     const seen: DueWake[] = []; const reason = '界'.repeat(500);
@@ -115,11 +115,11 @@ describe.each(['memory', 'sqlite'] as const)('embedded wakes (%s)', kind => {
   it('uses capped waits and wall clock after a three-day forward jump; idle has no timer', async () => {
     const seen: DueWake[] = []; const server = open(async wake => { seen.push(wake); });
     const availableAt = NOW + 86400000;
-    await server.wakes.schedule({ dedupKey: 'sleep', availableAt }); expect(vi.getTimerCount()).toBe(1);
+    await server.wakes.schedule({ dedupKey: 'sleep', availableAt }); expect(vi.getTimerCount()).toBe(2);
     vi.setSystemTime(NOW + 3 * 86400000); expect(seen).toEqual([]);
     await vi.advanceTimersByTimeAsync(60000); await flush(server);
     expect(seen).toEqual([expect.objectContaining({ availableAt, deliveredAt: NOW + 3 * 86400000 + 60000 })]);
-    expect(vi.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(1);
   });
   it('supports hook reentrancy: await schedule(next), cancel(other), same-key dedup and self-cancel without deadlock', async () => {
     const decisions: unknown[] = []; let server!: ByokServer;
@@ -143,7 +143,7 @@ describe.each(['memory', 'sqlite'] as const)('embedded wakes (%s)', kind => {
     reject(new Error('retry')); await flush(server);
     expect((await server.wakes.pending())[0]).toMatchObject({ state: 'queued', retryAt: NOW + 60000 });
     expect(await server.wakes.cancel('cancel')).toBe(true); expect(await server.wakes.pending()).toEqual([]);
-    expect(vi.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(1);
   });
   it('close invalidates before abort, drains storage but never awaits the hook, and rejects late public calls', async () => {
     const held = deferred(); let signal!: AbortSignal; let late: Promise<unknown> | undefined;

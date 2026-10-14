@@ -1,3 +1,5 @@
+import { createObjectStorageScope } from './support/dataplane';
+import { R2ObjectMaintenanceStore } from '../stores/r2-blobs';
 /**
  * The no-oversell property under REAL connection concurrency.
  *
@@ -116,7 +118,7 @@ describe.skipIf(SKIP_DATAPLANE)('quota reservation under real concurrency', () =
       await migrate(scope.pool, DEPLOY_SQL);
       const clock = createMutableClock();
       const quota = new PostgresQuotaStore(scope.pool, clock);
-      const objects = new PostgresObjectStore(scope.pool, clock);
+      const objects = new PostgresObjectStore(scope.pool, clock, new R2ObjectMaintenanceStore((await createObjectStorageScope()).config));
       const hash = contentHash(`sha256:${'a'.repeat(64)}`);
       await quota.writeEntitlement(TENANT, {
         version: 1n,

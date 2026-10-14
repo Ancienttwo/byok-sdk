@@ -1,3 +1,4 @@
+import { runCloudRetentionConformance } from './retention';
 /**
  * The composition-parameterized cloud-local conformance harness.
  *
@@ -156,5 +157,6 @@ export function runCloudConformance(name: string, factory: CloudCompositionFacto
     runProofReceiptConformance(factory);
     runBlobConformance(factory);
     runCloudTenantIsolationConformance(factory);
+    runCloudRetentionConformance(name, factory);
   });
 }

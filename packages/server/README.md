@@ -33,6 +33,12 @@ and the token signing key when you do not pass `tokenSigner`.
 A SQLite file has one owner at a time; see
 [One process per SQLite file](#one-process-per-sqlite-file).
 
+Receipt keys are tenant scoped and first-write-wins. Mailbox retention never
+deletes receipts: immutable offer, delivered and canonical terminal facts remain
+for the lifetime of the database. Only prefixes classified as `request` expire
+under policy; the SDK request class is currently empty. Unknown keys are identity
+fences too. Monitor disk usage; exhaustion does not authorize identity deletion.
+
 ## One process per SQLite file
 
 One SQLite file serves exactly one running server. The server's own connection
@@ -120,16 +126,26 @@ registered offline targets receive queued offers; unknown or revoked legacy
 targets fail with `device_not_found` before task/mailbox creation. Durable
 capabilities remain admission authority; the daemon validates local toolsets.
 
-## Mailbox retention
+## Maintenance and retention
 
-The server runs no retention timer. `mailbox.collectRetired({ ackedBefore,
-expireUnackedBefore })` is a pass-through to the kernel: acked rows appended
-before `ackedBefore` are deleted, and unacked rows appended before
-`expireUnackedBefore` are marked `expired` and stay visible, which moves
-`recoverableFrom` so a device polling from a lost cursor gets
-`409 cursor_too_old`. You choose both cutoffs and when to call it. Without a
-call, an embedded server retires nothing. Retention never deletes receipts (see
-below).
+The server always schedules one maintenance pass every 5 minutes with ±20%
+jitter. Configure `maintenance: { intervalMs, policy, limit }` at construction;
+policy overrides are positive bigint milliseconds. Defaults are acked mailbox
+24h, unacked mailbox 7d, request receipts 24h, orphan objects 24h, and 500 rows
+per step. There is no disable option.
+
+`await server.maintenance.runNow()` joins an in-flight pass. `await server.close()`
+clears the timer, waits for that pass to settle, then closes storage. A pass
+returns ten ordered step results and emits `maintenance.completed`, or
+`maintenance.failed` when a step failed. A failed event with `report` carries
+step results; one with `errorCode` means the pass itself could not return a report.
+
+Acked rows past policy are deleted; old unacked rows become retained `expired`
+rows, moving `recoverableFrom` so lost cursors receive `409 cursor_too_old`.
+Mailbox collection never changes accounting counters. Orphan collection deletes
+real bytes before settling their charge. Identity receipts and redeemed pairing
+codes stay protected. See the [migration](../../docs/migrations/412-retention-maintenance.md)
+and [runbook](../../deploy/runbooks/cloud-cleanup.md) for the port contract.
 
 ## Stats and liveness
 

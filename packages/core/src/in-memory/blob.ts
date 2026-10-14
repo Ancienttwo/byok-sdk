@@ -1,3 +1,6 @@
+import { InMemoryStorageLedger } from './storage-ledger';
+import { assertCollectExpiredInput, CollectExpiredFailure, type CollectExpiredResult } from '../retention';
+import type { ObjectCollectExpiredInput } from '../blob';
 /**
  * In-memory {@link ObjectStore} reference (§12.7.4, §12.7.8).
  *
@@ -29,9 +32,14 @@ export class InMemoryObjectStore implements ObjectStore {
   readonly #manifest = new Map<string, ObjectManifestEntry>();
   readonly #references = new Map<string, ObjectReference>();
   readonly #clock: Clock;
+  readonly #deleteCursor = new Map<TenantId, string>();
 
-  constructor(clock: Clock) {
+  constructor(clock: Clock, private readonly maintenance: { readonly ledger: InMemoryStorageLedger; readonly bytes: InMemoryObjectBytes }) {
     this.#clock = clock;
+    if (maintenance === undefined || maintenance.ledger === undefined ||
+      typeof maintenance.bytes?.deleteObject !== 'function') {
+      throw new ByokCoreError('retention_input_invalid', 'ObjectStore requires its shared ledger and an explicit byte authority.');
+    }
   }
 
   async putManifest(
@@ -153,6 +161,46 @@ export class InMemoryObjectStore implements ObjectStore {
     return this.#transition(tenant, entry, 'deleted');
   }
 
+  async collectExpired(tenant: TenantId, input: ObjectCollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    assertCanonicalTimestamp(input.orphanBefore, 'orphanBefore');
+    const eligible = (entry: ObjectManifestEntry): boolean => entry.tenantId === tenant && entry.refCount === 0
+      && !this.maintenance.ledger.hasReservedObject(tenant, entry.hash)
+      && (entry.state === 'delete_pending' || ((entry.state === 'pending' || entry.state === 'committed') && entry.updatedAt < input.orphanBefore));
+    let removed = 0, releasedBytes = 0n, more = false, visited = 0, failures = 0;
+    let firstFailure: unknown;
+    const cursor = this.#deleteCursor.get(tenant) ?? '';
+    // Retry tombstones first. Each distinct object consumes one shared slot.
+    const entries = [...this.#manifest.values()].filter(eligible);
+    const pending = entries.filter(entry => entry.state === 'delete_pending').sort((a, b) => a.hash.localeCompare(b.hash));
+    const first = pending.filter(entry => entry.hash > cursor).slice(0, input.limit);
+    const fresh = entries.filter(entry => entry.state !== 'delete_pending').sort((a, b) => a.updatedAt.localeCompare(b.updatedAt) || a.hash.localeCompare(b.hash)).slice(0, input.limit - first.length);
+    const wrapped = pending.filter(entry => entry.hash <= cursor).slice(0, input.limit - first.length - fresh.length);
+    const candidates = [...first, ...fresh, ...wrapped];
+    more = entries.length > candidates.length;
+    for (const candidate of candidates) {
+      if (visited++ === input.limit) { more = true; break; }
+      const entry = this.#manifest.get(tenantKey(tenant, candidate.hash))!;
+      if (!eligible(entry)) continue;
+      const pending = entry.state === 'delete_pending' ? entry : { ...entry, state: 'delete_pending' as const, deletePendingAt: input.now, updatedAt: input.now };
+      this.#manifest.set(tenantKey(tenant, entry.hash), pending);
+      try {
+        // No await may split protection, byte deletion and accounting.
+        const release = this.maintenance.ledger.prepareCollectedObjectRelease(tenant, entry.hash, entry.byteSize, input.now);
+        this.maintenance.bytes.deleteObject(tenant, entry.hash);
+        release.commit();
+        const released = release.releasedBytes;
+        this.#manifest.set(tenantKey(tenant, entry.hash), { ...pending, state: 'deleted', updatedAt: input.now });
+        removed++; releasedBytes += released;
+      } catch (cause) {
+        failures++; firstFailure ??= cause;
+      }
+    }
+    this.#deleteCursor.set(tenant, wrapped.at(-1)?.hash ?? first.at(-1)?.hash ?? '');
+    if (failures > 0) throw new CollectExpiredFailure({ removed, expired: 0, releasedBytes }, failures, true, { cause: firstFailure });
+    return { removed, expired: 0, releasedBytes, more };
+  }
+
   #transition(
     tenant: TenantId,
     entry: ObjectManifestEntry,
@@ -200,4 +248,8 @@ export class InMemoryObjectStore implements ObjectStore {
   #now(): string {
     return this.#clock.now().toISOString();
   }
+}
+
+export interface InMemoryObjectBytes {
+  deleteObject(tenant: TenantId, hash: ContentHash): void;
 }

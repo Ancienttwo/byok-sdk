@@ -3,14 +3,14 @@
  *
  * This entry is the single authority for the online request-path exports:
  * the pool factory, the cloud-local stores (including the R2 blob exports),
- * the core stores, and the truth committer. Everything reachable from here
+ * the core stores, the retention policy store, and the truth committer. Everything reachable from here
  * is the portable half of the package — `pg` over TCP, `aws4fetch` over
  * `fetch`, and nothing else — so the same bundle loads on Cloudflare Workers
  * (`nodejs_compat` + Hyperdrive, with `pg` left external to the host bundler)
  * as well as on Node.
  *
- * The Node-only operations — `migrate`, `migrationsDir`, and the cleanup /
- * maintenance composition — deliberately stay on the package root
+ * The Node-only operations — `migrate`, `migrationsDir`, dead-letter replay
+ * and object reconciliation — deliberately stay on the package root
  * (`./index.ts`) and never appear here. They read migration files off disk
  * and hash with `node:crypto`, none of which exists on a Worker. The host
  * picks the composition explicitly at wiring time: a Worker imports
@@ -94,3 +94,9 @@ export type { PostgresCoreStoreOptions } from './stores/core/index';
 
 export { PostgresTruthCommitter } from './truth-committer';
 export type { PostgresTruthCommitterOptions } from './truth-committer';
+
+// Hosted cron/alarm policy uses the same portable SQL authority as maintenance.
+export { PostgresRetentionPolicyStore } from './stores/retention-policy';
+export type { TenantRetentionPolicy, TenantRetentionPolicyInput } from './stores/retention-policy';
+export { CLOUD_CLEANUP_ERROR_CODES, CloudCleanupError } from './maintenance-errors';
+export type { CloudCleanupErrorCode } from './maintenance-errors';

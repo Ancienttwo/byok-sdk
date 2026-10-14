@@ -181,6 +181,7 @@ export interface InboundCommitted {
  * Synchronous and cheap by contract — it runs inline on the request path.
  */
 export interface ByokCloudObserver {
+  onMaintenance?(report: import('./maintenance').MaintenanceReport): void;
   onInboundCommitted(input: InboundCommitted): void;
   /**
    * One envelope the gate refused, with the reason. Same rules as

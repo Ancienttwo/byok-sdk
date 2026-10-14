@@ -12,7 +12,7 @@
  * The enrollment path serializes each code through registration and flips
  * `used` only after its shared device directory has accepted the row.
  */
-import type { Clock, TenantId } from '@byok-sdk/core';
+import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpiredResult, type Clock, type TenantId } from '@byok-sdk/core';
 import type {
   DeviceDirectory,
   DeviceRecord,
@@ -63,6 +63,20 @@ export class InMemoryPairingCodeStore implements PairingCodeStore, PairingEnroll
   constructor(clock: Clock, devices: DeviceDirectory) {
     this.#clock = clock;
     this.#devices = devices;
+  }
+
+  async collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    let removed = 0;
+    let more = false;
+    for (const [code, record] of this.#codes) {
+      // A redeemed code is the only route to its protected completion fence.
+      if (record.claims.tenantId !== tenant || record.used || record.expiresAtMs >= Date.parse(input.now) || this.#enrollmentTails.has(code)) continue;
+      if (removed === input.limit) { more = true; break; }
+      this.#codes.delete(code);
+      removed++;
+    }
+    return { removed, expired: 0, releasedBytes: 0n, more };
   }
 
   async issue(tenant: TenantId, input: PairingCodeIssueInput): Promise<PairingCodeInfo> {

@@ -1,3 +1,4 @@
+import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 /**
  * In-memory {@link NonceStore}: single-use challenge nonces, ~5min TTL
  * (docs/protocol.md §6.2).
@@ -40,11 +41,6 @@ export class InMemoryNonceStore implements NonceStore {
 
   async issue(tenant: TenantId, deviceId: string): Promise<string> {
     const nowMs = this.#clock.now().getTime();
-    // A long-lived deployment never calls a sweep on a timer, so issue sweeps
-    // inline — same posture as the reference server's `NonceStore`.
-    for (const [nonce, record] of this.#nonces) {
-      if (record.used || record.expiresAtMs <= nowMs) this.#nonces.delete(nonce);
-    }
     const nonce = this.#crypto.randomToken(NONCE_BYTES);
     this.#nonces.set(nonce, {
       owner: tenantKey(tenant, deviceId),
@@ -66,4 +62,16 @@ export class InMemoryNonceStore implements NonceStore {
     record.used = true;
     return true;
   }
+  async collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    const prefix = tenantKey(tenant, '');
+    let removed = 0, more = false;
+    for (const [key, record] of this.#nonces) {
+      if (!record.owner.startsWith(prefix) || (!record.used && record.expiresAtMs >= Date.parse(input.now))) continue;
+      if (removed === input.limit) { more = true; break; }
+      this.#nonces.delete(key); removed++;
+    }
+    return { removed, expired: 0, releasedBytes: 0n, more };
+  }
+
 }

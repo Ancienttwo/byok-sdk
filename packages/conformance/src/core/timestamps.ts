@@ -86,7 +86,7 @@ export function runTimestampConformance(factory: CoreCompositionFactory): void {
         const canonical = '2999-01-01T00:00:00.000Z';
         for (const candidate of NON_CANONICAL) {
           const badAcked = await captureError(
-            stores.mailbox.collectRetired(TENANT_A, {
+            stores.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
               ackedBefore: candidate,
               expireUnackedBefore: canonical,
             }),
@@ -97,7 +97,7 @@ export function runTimestampConformance(factory: CoreCompositionFactory): void {
           ).toBe(true);
 
           const badUnacked = await captureError(
-            stores.mailbox.collectRetired(TENANT_A, {
+            stores.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
               ackedBefore: canonical,
               expireUnackedBefore: candidate,
             }),
@@ -122,7 +122,7 @@ export function runTimestampConformance(factory: CoreCompositionFactory): void {
         });
         expect(written.downgradeGraceUntil).toBe(now);
         await stores.objects.list(TENANT_A, { deletePendingBefore: now });
-        await stores.mailbox.collectRetired(TENANT_A, {
+        await stores.mailbox.collectExpired(TENANT_A, { now: '2999-01-01T00:00:00.000Z', limit: 500,
           ackedBefore: now,
           expireUnackedBefore: now,
         });

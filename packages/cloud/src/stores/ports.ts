@@ -1,3 +1,4 @@
+import type { CollectExpiredInput, CollectExpiredResult } from '@byok-sdk/core';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 /**
  * The cloud-local store ports.
@@ -177,6 +178,7 @@ export interface PairingCodeIssueInput {
 }
 
 export interface PairingCodeStore {
+  collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
   issue(tenant: TenantId, input: PairingCodeIssueInput): Promise<PairingCodeInfo>;
 }
 
@@ -210,6 +212,7 @@ export interface PairingEnrollment {
 // ---------------------------------------------------------------------------
 
 export interface NonceStore {
+  collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
   issue(tenant: TenantId, deviceId: string): Promise<string>;
   /**
    * Atomically consume a nonce only when it belongs to this exact (tenant,
@@ -515,6 +518,7 @@ export interface RequestReceipt {
 }
 
 export interface RequestReceiptStore {
+  collectExpired(tenant: TenantId, input: ReceiptCollectExpiredInput): Promise<CollectExpiredResult>;
   /**
    * Record a receipt under `key`, or return the existing one untouched.
    * `created` is `false` for a replay — the FIRST terminal is the fact
@@ -760,3 +764,5 @@ export const CLOUD_STORE_NAMES = [
 ] as const;
 
 export type CloudStoreName = (typeof CLOUD_STORE_NAMES)[number];
+
+export interface ReceiptCollectExpiredInput extends CollectExpiredInput { readonly requestBefore: string; }

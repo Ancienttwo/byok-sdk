@@ -1,3 +1,6 @@
+import { assertCollectExpiredInput, assertCanonicalTimestamp, type CollectExpiredResult } from '@byok-sdk/core';
+import { REQUEST_RECEIPT_PREFIXES } from '../../receipt-retention';
+import type { ReceiptCollectExpiredInput } from '../ports';
 /**
  * In-memory {@link RequestReceiptStore}: first write wins.
  *
@@ -36,4 +39,17 @@ export class InMemoryRequestReceiptStore implements RequestReceiptStore {
   async get(tenant: TenantId, key: string): Promise<RequestReceipt | undefined> {
     return this.#receipts.get(tenantKey(tenant, key));
   }
+  async collectExpired(tenant: TenantId, input: ReceiptCollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    assertCanonicalTimestamp(input.requestBefore, 'requestBefore');
+    let removed = 0, more = false;
+    for (const [key, receipt] of this.#receipts) {
+      if (receipt.tenantId !== tenant || receipt.recordedAt >= input.requestBefore
+        || !REQUEST_RECEIPT_PREFIXES.some(prefix => receipt.key.startsWith(prefix))) continue;
+      if (removed === input.limit) { more = true; break; }
+      this.#receipts.delete(key); removed++;
+    }
+    return { removed, expired: 0, releasedBytes: 0n, more };
+  }
+
 }

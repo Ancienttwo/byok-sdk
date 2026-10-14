@@ -115,9 +115,9 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres device assertion replay authority', ()
       await replay.consume(replayInput('BBBBBBBBBBBBBBBBBBBBBB'));
       await replay.consume(replayInput('CCCCCCCCCCCCCCCCCCCCCC', '2026-08-12T05:00:00.000Z'));
 
-      await expect(replay.deleteExpired(new Date('2026-08-12T04:47:00.000Z'), 1)).resolves.toBe(1);
-      await expect(replay.deleteExpired(new Date('2026-08-12T04:47:00.000Z'), 1)).resolves.toBe(1);
-      await expect(replay.deleteExpired(new Date('2026-08-12T04:47:00.000Z'), 1)).resolves.toBe(0);
+      await expect(replay.collectExpired(replayInput('AAAAAAAAAAAAAAAAAAAAAA').tenantId, { now: new Date('2026-08-12T04:47:00.000Z').toISOString(), limit: 1 })).resolves.toMatchObject({ removed: 1 });
+      await expect(replay.collectExpired(replayInput('AAAAAAAAAAAAAAAAAAAAAA').tenantId, { now: new Date('2026-08-12T04:47:00.000Z').toISOString(), limit: 1 })).resolves.toMatchObject({ removed: 1 });
+      await expect(replay.collectExpired(replayInput('AAAAAAAAAAAAAAAAAAAAAA').tenantId, { now: new Date('2026-08-12T04:47:00.000Z').toISOString(), limit: 1 })).resolves.toMatchObject({ removed: 0 });
       await expect(replay.consume(replayInput('CCCCCCCCCCCCCCCCCCCCCC', '2026-08-12T05:00:00.000Z'))).resolves.toBe(false);
     } finally {
       await scope.dispose();

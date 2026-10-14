@@ -1,3 +1,4 @@
+import type { CollectExpiredInput, CollectExpiredResult } from '@byok-sdk/core';
 import { tenantKey, type TenantId } from '@byok-sdk/core';
 import { z } from 'zod';
 import { ByokCloudError } from './errors';
@@ -112,6 +113,7 @@ export type ApprovalTimelineResolvePendingResult =
   | { readonly status: 'conflict' | 'superseded' | 'absent'; readonly tail?: ApprovalTimelineTail };
 
 export interface ApprovalTimelineStore {
+  collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
   append(tenant: TenantId, input: ApprovalTimelineAppendInput): Promise<ApprovalTimelineTail>;
   /** Atomically append one host resolution only if its request remains current. */
   resolvePending(

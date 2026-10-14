@@ -1,3 +1,4 @@
+import { R2ObjectMaintenanceStore, type R2ObjectMaintenanceOptions } from '../r2-blobs';
 /**
  * The Postgres composition of the seven `@byok-sdk/core` ports.
  *
@@ -35,6 +36,7 @@ export { PostgresQuotaStore } from './quota';
 export { PostgresSkillPackStore } from './skill-pack';
 
 export interface PostgresCoreStoreOptions {
+  readonly objectStorage: R2ObjectMaintenanceOptions;
   readonly pool: Pool;
   /**
    * The clock every TTL and timestamp in this composition reads. Injected, not
@@ -51,7 +53,7 @@ export function createPostgresCoreStores(options: PostgresCoreStoreOptions): Cor
     board: new PostgresBoardStore(pool, clock),
     truth: new PostgresTruthStore(pool, clock),
     presence: new PostgresPresenceStore(pool, clock),
-    objects: new PostgresObjectStore(pool, clock),
+    objects: new PostgresObjectStore(pool, clock, new R2ObjectMaintenanceStore(options.objectStorage)),
     quota: new PostgresQuotaStore(pool, clock),
     // No clock: a skill-pack manifest carries no timestamp, so this store reads
     // none — the same shape as the cloud-local `devices` directory.

@@ -149,6 +149,21 @@
   and traffic counters reset at reopen. Custom store implementers must add the
   aggregate method and enforce the active filter; there is no legacy fallback.
 
+- **Breaking (core, cloud, server, cloud-dataplane, 0.x)** — unify retention
+  through bounded, tenant-scoped `collectExpired` ports and
+  `ByokCloud.runMaintenance` (#412). The reference server always schedules a
+  pass every five minutes by default and exposes `maintenance.runNow()`;
+  `close()` waits for the active pass. Identity receipts, redeemed pairing codes
+  and committed storage reservations remain protected. Mailbox collection
+  releases no accounted bytes; object GC deletes physical bytes before settling
+  their charge. **Host migration:** replace `collectRetired`,
+  `expireReservations`, replay `deleteExpired`, `ByokServer.mailbox` and hosted
+  `runTenant` calls with the unified contract. Supply positive bigint policy
+  durations and bind object-byte deletion when constructing core stores.
+  `reconcileObjectStorage` remains an explicit hosted operator action; the
+  historical `cleanup_job` table is retained without a new writer. Hosted policy
+  reads/writes move to Worker-loadable `PostgresRetentionPolicyStore`. See
+  [migration notes](docs/migrations/412-retention-maintenance.md).
 - **Breaking (client, 0.x)** — daemon readiness and halts are one lifecycle
   model (#391, #394). `daemon.start()` now resolves once local startup is done
   and never waits for the network; the server accepting this session's lone
