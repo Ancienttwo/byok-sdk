@@ -241,7 +241,8 @@ describe('SQLite receipt recovery', () => {
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
-      await expect(runtime.cloud.enqueueOffer(tenant, deviceId, input)).rejects.toThrow('injected append failure');
+      await expect(runtime.cloud.enqueueOffer(tenant, deviceId, input)).rejects.toMatchObject({
+        code: 'task_offer_append_refused', taskId: input.taskId, cause: expect.objectContaining({ message: expect.stringContaining('injected append failure') }) });
       expect(await runtime.cloud.readTaskOffer(tenant, input.taskId)).toMatchObject({ delivered: false, payload });
       await runtime.stores.close();
       const reset = new DatabaseSync(path); reset.exec('DROP TRIGGER fail_append'); reset.close();
