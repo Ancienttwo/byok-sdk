@@ -1,6 +1,6 @@
 # #412 Cloud retention / maintenance
 
-Status: Implemented locally; targeted verification and publication in progress.
+Status: Implemented and targeted-verified locally; publication blocked by GitHub DNS.
 Branch: `fix/412-maintenance-ports`.
 Initial base: `5ef13002`; integrate latest cached main normally before final checks.
 
@@ -34,7 +34,7 @@ There is one writer in this worktree; the old worker's WIP is untouched.
 - [x] Schedule server passes without overlap; close waits settled work before storage release.
 - [x] Migrate in-scope API consumers with business assertions intact.
 - [x] Update docs, migration notes and four affected API goldens.
-- [ ] Merge latest main normally and complete final targeted checks.
+- [x] Merge cached main a10c67a0 normally and complete final targeted checks.
 - [ ] Push own branch and open non-draft PR referencing #412; do not merge.
 
 ## Verification boundary

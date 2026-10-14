@@ -596,12 +596,12 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       clock.set('2026-01-01T00:00:02.000Z');
 
       const collector = new PostgresObjectStore(scope.pool, clock, storage);
-      await expect(collector.collectExpired(TENANT, objectBounds(clock, 1))).rejects.toMatchObject({ failures: 1, partial: { removed: 0, more: true } });
+      await expect(collector.collectExpired(TENANT, objectBounds(clock, 1))).rejects.toMatchObject({ failedRows: 1, committed: { removed: 0, expired: 0, releasedBytes: 0n }, more: true });
       expect(await objects.get(TENANT, HASH_A)).toMatchObject({ state: 'delete_pending' });
 
-      const retry = await collector.collectExpired(TENANT, objectBounds(clock, 1)).catch(error => error.partial);
+      const retry = await collector.collectExpired(TENANT, objectBounds(clock, 1)).catch(error => error);
       // The first pass selected a fresh row, so one failed retry precedes the fresh-only pass.
-      expect(retry).toMatchObject({ removed: 0, more: true });
+      expect(retry).toMatchObject({ failedRows: 1, committed: { removed: 0, expired: 0, releasedBytes: 0n }, more: true });
       expect(await collector.collectExpired(TENANT, objectBounds(clock, 1))).toMatchObject({ removed: 1, releasedBytes: 5n, more: true });
       expect(await objects.get(TENANT, HASH_A)).toMatchObject({ state: 'delete_pending' });
       expect(await objects.get(TENANT, HASH_B)).toMatchObject({ state: 'deleted' });
@@ -704,7 +704,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       storage.deleteThenFail = true;
       storage.inspectionFailure = true;
       const collector = new PostgresObjectStore(scope.pool, clock, storage);
-      await expect(collector.collectExpired(TENANT, objectBounds(clock))).rejects.toMatchObject({ failures: 1, partial: { removed: 0 } });
+      await expect(collector.collectExpired(TENANT, objectBounds(clock))).rejects.toMatchObject({ failedRows: 1, committed: { removed: 0, expired: 0, releasedBytes: 0n }, more: true, cause: { message: 'injected response loss after DELETE' } });
       expect(await objects.get(TENANT, HASH_A)).toMatchObject({ state: 'delete_pending' });
       expect((await quota.readUsage(TENANT)).committedObjectBytes).toBe(7n);
 

@@ -46,6 +46,53 @@ async function until(predicate: () => Promise<boolean>): Promise<void> {
   }
 }
 describe.skipIf(SKIP_DATAPLANE)('PG and independent S3 physical object retention', () => {
+  it('reports a failed per-object connection without losing the tombstone or charge', async () => {
+    const composition = await setup();
+    const query = composition.scope.pool.query;
+    const connect = composition.scope.pool.connect;
+    let selected = false;
+    const selection = vi.spyOn(composition.scope.pool, 'query').mockImplementation((...args: unknown[]) => {
+      const result = Reflect.apply(query, composition.scope.pool, args);
+      if (typeof args[0] === 'string' && args[0].startsWith('INSERT INTO gc_cursor')) {
+        return Promise.resolve(result).then(value => { selected = true; return value; });
+      }
+      return result;
+    });
+    const connection = vi.spyOn(composition.scope.pool, 'connect').mockImplementation((...args: unknown[]) => {
+      if (selected) { selected = false; return Promise.reject(new Error('injected object connection failure')); }
+      return Reflect.apply(connect, composition.scope.pool, args);
+    });
+    try {
+      await expect(composition.collector.collectExpired(tenant, composition.bounds)).rejects.toMatchObject({
+        failedRows: 1, committed: { removed: 0, expired: 0, releasedBytes: 0n }, more: true,
+      });
+      selection.mockRestore(); connection.mockRestore();
+      expect(await composition.core.objects.get(tenant, composition.hash)).toMatchObject({ state: 'delete_pending' });
+      expect(await composition.storage.inspectObject(tenant, composition.hash)).toBeDefined();
+      expect(await composition.core.quota.readUsage(tenant)).toMatchObject({ committedObjectBytes: composition.size });
+      expect(await composition.collector.collectExpired(tenant, composition.bounds)).toEqual({ removed: 1, expired: 0, releasedBytes: composition.size, more: false });
+    } finally { selection.mockRestore(); connection.mockRestore(); await composition.scope.dispose(); }
+  });
+
+  it('fails before deleting bytes when persisting the selected cursor fails', async () => {
+    const composition = await setup();
+    const query = composition.scope.pool.query;
+    const hook = vi.spyOn(composition.scope.pool, 'query').mockImplementation((...args: unknown[]) => {
+      if (typeof args[0] === 'string' && args[0].startsWith('INSERT INTO gc_cursor')) {
+        return Promise.reject(new Error('injected cursor write failure'));
+      }
+      return Reflect.apply(query, composition.scope.pool, args);
+    });
+    try {
+      await expect(composition.collector.collectExpired(tenant, composition.bounds)).rejects.toThrow('injected cursor write failure');
+      hook.mockRestore();
+      expect(await composition.storage.inspectObject(tenant, composition.hash)).toBeDefined();
+      expect(await composition.core.objects.get(tenant, composition.hash)).toMatchObject({ state: 'delete_pending' });
+      expect(await composition.core.quota.readUsage(tenant)).toMatchObject({ committedObjectBytes: composition.size });
+      expect(await composition.collector.collectExpired(tenant, composition.bounds)).toEqual({ removed: 1, expired: 0, releasedBytes: composition.size, more: false });
+    } finally { hook.mockRestore(); await composition.scope.dispose(); }
+  });
+
   it('preserves committed deletion counts when the final remainder query fails', async () => {
     const composition = await setup();
     const query = composition.scope.pool.query;

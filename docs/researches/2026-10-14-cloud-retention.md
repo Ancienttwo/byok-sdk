@@ -1,6 +1,6 @@
 # #412 retention architecture and decision evidence
 
-Status: implementation candidate; targeted verification in progress, PR publication pending network recovery. Integrated on `origin/main@5ef13002`, preserving #440 stats, #414 SQLite ownership and #413 TTL presence. The old worker WIP and #437 fixtures are untouched.
+Status: local candidate verified with targeted checks; PR publication pending network recovery. Based on `5ef13002`, merged `origin/main@a10c67a0` normally, preserving #440 stats, #414 SQLite ownership and #413 TTL presence. The old worker WIP and #437 fixtures are untouched.
 
 ## P1: map
 
@@ -36,3 +36,27 @@ Committed reservations of both kinds remain protected accounting identity: PG us
 - The scheduler is constructed last. Close awaits a settled pass, then releases stores, while the pass consumer retains its original error. No shutdown error shim is introduced.
 - No installed migration bytes were changed. `cleanup_job` remains installed without writers.
 - Latest owner scope limits verification to targeted tests with one worker. No full-repo suite or client fixture edits are authorized for this slice.
+
+
+## Verification (2026-10-14)
+
+Node 24.21.0 / Bun 1.4.2; all tests used one worker. Final targeted runs:
+core 97, cloud 114, server 60, memory conformance 52, SQLite conformance 51,
+Worker policy/runtime/packaging 18: 392 passed. Two existing server skips and
+229 test-name-filter exclusions are not counted as passes. No full-repo suite
+ran. Related core/cloud/server/dataplane builds and all five affected package
+typechecks (including conformance) passed. Four changed API surfaces, version
+authority and installed SQL order passed.
+
+Real PG/S3 tests are unverified: the attempted remainder regression failed at
+connection setup with ECONNREFUSED, before product execution. No production
+claim is derived from that result. The analogous SQLite fault was first red
+on lost committed counts and is now green. Installed SQL and SQLite ownership
+support files have no diff from main.
+
+The client execution-recovery fixture still implements receipts and pairing
+ports without collectExpired. Latest owner explicitly excludes these fixture
+edits; this is a known downstream typecheck/CI integration gap for the #437
+owner, not resolved by optional port methods or compatibility code.
+GitHub fetch and gh currently fail DNS, so latest remote freshness, push, PR
+number and CI results are not yet established.
