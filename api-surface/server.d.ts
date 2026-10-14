@@ -269,11 +269,9 @@ export interface ByokServer {
      * Release what this instance holds: the relay's per-task feeds and their
      * reclamation timers, and the connection observations. Call it on shutdown so
      * nothing keeps the process alive or leaks a handle in tests; safe to call
-     * more than once. SQLite embedders that need to await handle release should
-     * call {@link ByokServer.close} instead.
+     * more than once. Drain pending store calls before releasing the selected
+     * storage authority; await this before opening the SQLite file again.
      */
-    stop(): void;
-    /** Drain pending store calls and release the selected storage authority. */
     close(): Promise<void>;
     /**
      * A plain, serializable snapshot of this server's current state. See
@@ -610,8 +608,8 @@ export declare class SqliteSchemaError extends Error {
  * would split them. Run several instances only over external stores with a
  * shared `tokenSigner`.
  *
- * Ownership is an OS advisory lock on the `<path>-lock` sibling, held for the
- * lifetime of the open server. The kernel releases it when the owner closes or
+ * Ownership is SQLite's EXCLUSIVE locking mode on the database itself, held
+ * for the lifetime of its handle. The kernel releases it when the owner closes or
  * its process exits for any reason, including SIGKILL, so a stale owner never
  * blocks the next open and no pid is ever compared (pid reuse cannot matter).
  */
@@ -656,11 +654,11 @@ export declare function isSqliteCapableNodeVersion(nodeVersion: string): boolean
 export declare function isSqliteAvailable(): boolean;
 /**
  * Open (or create) a `node:sqlite` `DatabaseSync` at `path`, applying the
- * pragmas both reference SQLite stores share: WAL journaling for a
- * file-backed database (allows a reader and a writer to proceed without
- * blocking each other, and is what makes "close instance A, open instance B
- * on the same file" — the restart-safety story — reliable) and a busy
- * timeout (see {@link DEFAULT_BUSY_TIMEOUT_MS}). WAL is skipped for
+ * pragmas both reference SQLite stores share: EXCLUSIVE locking mode before
+ * the first WAL access, with a busy timeout (see {@link DEFAULT_BUSY_TIMEOUT_MS}).
+ * The file has one owner until this handle closes; external readers and writers
+ * cannot inspect a running owner's database. No sibling ownership file is used.
+ * WAL is skipped for
  * `:memory:`, where it's meaningless. For a file-backed path whose parent
  * directory doesn't exist yet, creates it (recursively) at
  * {@link SECURE_DIR_MODE} — mirroring the client-side device store's
@@ -671,23 +669,6 @@ export declare function isSqliteAvailable(): boolean;
  * this is the single choke point.
  */
 export declare function openSqliteDatabase(path: string, options?: DatabaseSyncOptions, faults?: SqliteOpenFaultSeam): DatabaseSync;
-/** Exclusive ownership of one database file; {@link SqliteOwnership.release} is idempotent. */
-export interface SqliteOwnership {
-    release(): void;
-}
-/**
- * Take exclusive ownership of the database at `path`, or throw
- * {@link SqliteOwnershipError} immediately (no busy wait) if it is held.
- *
- * The lock is SQLite's own: an EXCLUSIVE transaction held open on a dedicated
- * `<path>-lock` file. SQLite maps it to an OS advisory lock, which conflicts
- * across processes and — through SQLite's per-inode lock table — across
- * connections in one process, and which the kernel drops when the holder's
- * process dies. It is a sibling file rather than the database itself so the
- * owner's own connection, and read-only inspection of the database, are never
- * blocked by it. Nothing is ever written to it.
- */
-export declare function acquireSqliteOwnership(path: string): SqliteOwnership;
 /**
  * Restrict `dbPath` and its WAL/SHM sibling files (`<path>-wal`,
  * `<path>-shm` — created by SQLite itself once WAL mode is active and a

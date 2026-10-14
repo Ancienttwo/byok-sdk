@@ -73,7 +73,7 @@ describe('S1: a bearer token is only good on the instance serving its product', 
     // mid-request, which is what surfaced the unread-body connection pin
     // `stopServer` now handles for every server suite — see its doc comment.
     if (server) await stopServer(server);
-    byok?.stop();
+    await byok?.close();
     server = undefined;
     byok = undefined;
   });

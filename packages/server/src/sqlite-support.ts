@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { basename, dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
 
 export type SqliteOpenStep = 'after-open' | 'after-wal';
@@ -102,8 +102,8 @@ export class SqliteSchemaError extends Error {
  * would split them. Run several instances only over external stores with a
  * shared `tokenSigner`.
  *
- * Ownership is an OS advisory lock on the `<path>-lock` sibling, held for the
- * lifetime of the open server. The kernel releases it when the owner closes or
+ * Ownership is SQLite's EXCLUSIVE locking mode on the database itself, held
+ * for the lifetime of its handle. The kernel releases it when the owner closes or
  * its process exits for any reason, including SIGKILL, so a stale owner never
  * blocks the next open and no pid is ever compared (pid reuse cannot matter).
  */
@@ -209,8 +209,18 @@ export function isSqliteAvailable(): boolean {
   }
 }
 
-/** Busy-timeout (ms) shared by both SQLite stores: long enough that two same-process `DatabaseSync` connections opened against the same file back-to-back (e.g. a test proving restart-safety by opening a "second instance" against the same path) don't spuriously throw `SQLITE_BUSY` under momentary write-lock contention. */
+/** Grace period for a previous owner to close before an exclusive open is refused. */
 const DEFAULT_BUSY_TIMEOUT_MS = 5_000;
+
+/** SQLite's primary BUSY result code, including BUSY extended results. */
+const SQLITE_BUSY = 5;
+
+function sqliteOpenError(path: string, error: unknown): unknown {
+  const code = (error as { errcode?: unknown } | null)?.errcode;
+  return path !== ':memory:' && typeof code === 'number' && (code & 0xff) === SQLITE_BUSY
+    ? new SqliteOwnershipError(path, { cause: error })
+    : error;
+}
 
 /** POSIX mode both SQLite reference-store db files (and their WAL/SHM siblings) are secured to — owner read/write only, no group/other access. Matches the convention the client-side device credential store already uses (`packages/client/src/daemon/store.ts`). */
 const SECURE_FILE_MODE = 0o600;
@@ -219,11 +229,11 @@ const SECURE_DIR_MODE = 0o700;
 
 /**
  * Open (or create) a `node:sqlite` `DatabaseSync` at `path`, applying the
- * pragmas both reference SQLite stores share: WAL journaling for a
- * file-backed database (allows a reader and a writer to proceed without
- * blocking each other, and is what makes "close instance A, open instance B
- * on the same file" — the restart-safety story — reliable) and a busy
- * timeout (see {@link DEFAULT_BUSY_TIMEOUT_MS}). WAL is skipped for
+ * pragmas both reference SQLite stores share: EXCLUSIVE locking mode before
+ * the first WAL access, with a busy timeout (see {@link DEFAULT_BUSY_TIMEOUT_MS}).
+ * The file has one owner until this handle closes; external readers and writers
+ * cannot inspect a running owner's database. No sibling ownership file is used.
+ * WAL is skipped for
  * `:memory:`, where it's meaningless. For a file-backed path whose parent
  * directory doesn't exist yet, creates it (recursively) at
  * {@link SECURE_DIR_MODE} — mirroring the client-side device store's
@@ -241,11 +251,22 @@ export function openSqliteDatabase(
   const { DatabaseSync } = loadSqliteModule();
   if (path !== ':memory:') {
     mkdirSync(dirname(path), { recursive: true, mode: SECURE_DIR_MODE });
+    // WAL names are path-bound: a second hard-link name cannot recover the
+    // original path's WAL after a crash. stat follows a symlink's target.
+    if (existsSync(path) && statSync(path).nlink !== 1) {
+      throw new Error('SQLite ownership requires a database file with exactly one hard link');
+    }
   }
-  const db = new DatabaseSync(path, { timeout: DEFAULT_BUSY_TIMEOUT_MS, ...options });
+  let db: DatabaseSync;
+  try {
+    db = new DatabaseSync(path, { timeout: DEFAULT_BUSY_TIMEOUT_MS, ...options });
+  } catch (error) {
+    throw sqliteOpenError(path, error);
+  }
   try {
     faults?.onStep?.('after-open');
     if (path !== ':memory:') {
+      db.exec('PRAGMA locking_mode = EXCLUSIVE;');
       db.exec('PRAGMA journal_mode = WAL;');
       faults?.onStep?.('after-wal');
     }
@@ -253,71 +274,11 @@ export function openSqliteDatabase(
   } catch (error) {
     closeSqliteDatabaseAfterInitializationFailure(
       db,
-      error,
+      sqliteOpenError(path, error),
       'SQLite open initialization failed and its native handle could not be closed',
       faults?.close,
     );
   }
-}
-
-/** SQLite's primary result code for a lock held elsewhere. */
-const SQLITE_BUSY = 5;
-
-/** Exclusive ownership of one database file; {@link SqliteOwnership.release} is idempotent. */
-export interface SqliteOwnership {
-  release(): void;
-}
-
-/**
- * Take exclusive ownership of the database at `path`, or throw
- * {@link SqliteOwnershipError} immediately (no busy wait) if it is held.
- *
- * The lock is SQLite's own: an EXCLUSIVE transaction held open on a dedicated
- * `<path>-lock` file. SQLite maps it to an OS advisory lock, which conflicts
- * across processes and — through SQLite's per-inode lock table — across
- * connections in one process, and which the kernel drops when the holder's
- * process dies. It is a sibling file rather than the database itself so the
- * owner's own connection, and read-only inspection of the database, are never
- * blocked by it. Nothing is ever written to it.
- */
-export function acquireSqliteOwnership(path: string): SqliteOwnership {
-  const { DatabaseSync } = loadSqliteModule();
-  mkdirSync(dirname(path), { recursive: true, mode: SECURE_DIR_MODE });
-  // SQLite opens a symlink's target. Ownership must use that same identity,
-  // including when only the parent exists on the first open of a new file.
-  const databasePath = existsSync(path)
-    ? realpathSync(path)
-    : join(realpathSync(dirname(path)), basename(path));
-  // A hard link has no unique canonical name for the sibling lock or WAL.
-  // Reject it before either SQLite handle opens instead of splitting writers.
-  if (existsSync(databasePath) && statSync(databasePath).nlink !== 1) {
-    throw new Error('SQLite ownership requires a database file with exactly one hard link');
-  }
-  const lockPath = `${databasePath}-lock`;
-  const lock = new DatabaseSync(lockPath, { timeout: 0 });
-  try {
-    chmodSync(lockPath, SECURE_FILE_MODE);
-    lock.exec('BEGIN EXCLUSIVE');
-  } catch (error) {
-    const busy = (error as { errcode?: unknown }).errcode === SQLITE_BUSY;
-    closeSqliteDatabaseAfterInitializationFailure(
-      lock,
-      busy ? new SqliteOwnershipError(path, { cause: error }) : error,
-      'SQLite ownership acquisition failed and its lock handle could not be closed',
-    );
-  }
-  let released = false;
-  return {
-    release() {
-      if (released) return;
-      released = true;
-      try {
-        lock.exec('ROLLBACK');
-      } finally {
-        lock.close();
-      }
-    },
-  };
 }
 
 /**
@@ -338,7 +299,8 @@ export function acquireSqliteOwnership(path: string): SqliteOwnership {
  */
 export function secureSqliteFilePermissions(dbPath: string): void {
   if (dbPath === ':memory:') return;
-  for (const candidate of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+  const databasePath = realpathSync(dbPath);
+  for (const candidate of [databasePath, `${databasePath}-wal`, `${databasePath}-shm`]) {
     if (existsSync(candidate)) {
       chmodSync(candidate, SECURE_FILE_MODE);
     }

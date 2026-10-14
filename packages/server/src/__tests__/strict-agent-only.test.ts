@@ -12,7 +12,7 @@ describe('strict-agent-only producer scheduling defence', () => {
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;

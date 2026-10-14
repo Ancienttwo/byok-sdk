@@ -82,7 +82,7 @@ export async function startRealServer(opts: CreateByokServerOptions): Promise<Re
         close: async () => {
           // Releases the relay's per-task feeds and their reclamation timers
           // before the socket goes away, so nothing outlives the test file.
-          byok.stop();
+          await byok.close();
           await closeServer(httpServer as HttpServer);
         },
       });

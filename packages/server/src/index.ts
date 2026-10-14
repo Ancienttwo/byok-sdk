@@ -274,11 +274,9 @@ export interface ByokServer {
    * Release what this instance holds: the relay's per-task feeds and their
    * reclamation timers, and the connection observations. Call it on shutdown so
    * nothing keeps the process alive or leaks a handle in tests; safe to call
-   * more than once. SQLite embedders that need to await handle release should
-   * call {@link ByokServer.close} instead.
+   * more than once. Drain pending store calls before releasing the selected
+   * storage authority; await this before opening the SQLite file again.
    */
-  stop(): void;
-  /** Drain pending store calls and release the selected storage authority. */
   close(): Promise<void>;
   /**
    * A plain, serializable snapshot of this server's current state. See
@@ -868,11 +866,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       collectRetired(input: MailboxRetentionInput): Promise<MailboxRetentionResult> {
         return composition.core.mailbox.collectRetired(tenant, input);
       },
-    },
-
-    stop(): void {
-      relay.stop();
-      void composition.close();
     },
 
     async close(): Promise<void> {

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Breaking (server, 0.x)** — SQLite ownership uses `PRAGMA locking_mode=EXCLUSIVE`
+  on the database connection; the #403 sibling lock is removed (#414).
+  `ByokServer.stop()` is deleted: replace it with `await server.close()`.
+  A second connection waits for the existing 5-second busy grace, then throws
+  `SqliteOwnershipError` (`SQLITE_DATABASE_OWNED`). External inspection and
+  backup require closing the owner first. Stop all old servers and external
+  SQLite connections before upgrading; schema v4 and wire contracts are
+  unchanged. See `packages/server/README.md` for migration and old lock-file
+  cleanup instructions.
+
 - **Changed (client)** — an unexpected error after `daemon.start()` resolved
   (a `ConnectionManager` observer callback such as the `open` hook, or the
   reconnect loop itself) is now a crash through one defined path instead of
