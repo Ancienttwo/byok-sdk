@@ -92,14 +92,24 @@ export declare class PostgresCloudCleanup {
     /** Run one bounded tenant maintenance cycle. Completed job ids are replay-safe. */
     runTenant(tenant: TenantId, jobId: string): Promise<CloudCleanupResult>;
     listDeadLetters(tenant: TenantId, query?: DeadLetterQuery): Promise<DeadLetterPage>;
-    /** Clone an expired row to a new monotonic seq. The original remains evidence. */
+    /**
+     * Clone an expired row to a new monotonic seq. The original remains evidence.
+     *
+     * The clone is a `limited` mailbox append: it goes through the one outbox
+     * writer, so it is admitted against `mailboxLimitBytes` like any other new
+     * row and is ordered with live offers by the same locks.
+     */
     replayDeadLetter(tenant: TenantId, input: DeadLetterReplayInput): Promise<MailboxMessage>;
-    /** Explicit operator discard. Automatic retention never deletes dead letters. */
+    /**
+     * Explicit operator discard. Automatic retention never deletes dead letters.
+     * Mailbox usage is the sum over retained rows, so deleting one is the whole
+     * operation.
+     */
     discardDeadLetter(tenant: TenantId, ref: DeadLetterRef): Promise<MailboxMessage>;
     /**
      * Explicit recovery operation: rebuild object accounting from committed
      * Postgres manifests. Reconciliation must run first; R2 LIST is never used as
-     * billing authority and inline/mailbox usage is left untouched.
+     * billing authority and inline usage is left untouched.
      */
     rebuildObjectUsage(tenant: TenantId): Promise<ObjectUsageRebuildResult>;
 }
@@ -493,12 +503,16 @@ export declare function createPostgresCoreStores(options: PostgresCoreStoreOptio
  * work" indistinguishable from "there was no work", and dead-lettering those
  * rows is S4B's job (O-009), not this one's.
  *
+ * Rows are written only by `outbox-writer.ts`, which also admits them against
+ * `mailboxLimitBytes`. Mailbox usage is the sum over the retained rows, so
+ * neither retention here nor anything else that deletes a row does accounting.
+ *
  * Every row lives under `(tenant_id, device_id, seq)`, so a cross-tenant read
  * is not denied — it addresses a different key space and finds nothing. That is
  * the SQL expression of §12.6.2 layer 3: there is no bare device index to
  * accidentally query.
  */
-import { type Clock, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type MailboxRetentionInput, type MailboxRetentionResult, type MailboxStore, type TenantId } from '@byok-sdk/core';
+import { type Clock, type MailboxAdvanceCursorInput, type MailboxAppendInput, type MailboxCursorState, type MailboxMessage, type MailboxPage, type MailboxReadQuery, type MailboxRecordDeliveryInput, type MailboxRetentionInput, type MailboxRetentionResult, type MailboxStore, type MailboxUsage, type TenantId } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 export declare const OUTBOX_COLUMNS = "tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at";
 export interface OutboxRow {
@@ -517,6 +531,7 @@ export declare class PostgresMailboxStore implements MailboxStore {
     #private;
     constructor(pool: Pool, clock: Clock);
     append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage>;
+    readUsage(tenant: TenantId): Promise<MailboxUsage>;
     readAfter(tenant: TenantId, query: MailboxReadQuery): Promise<MailboxPage>;
     advanceCursor(tenant: TenantId, input: MailboxAdvanceCursorInput): Promise<MailboxCursorState>;
     recordDelivery(tenant: TenantId, input: MailboxRecordDeliveryInput): Promise<MailboxCursorState>;
@@ -643,7 +658,7 @@ export declare class PostgresPresenceStore implements PresenceStore {
  * so reservation expiry is assertable under a test clock — and
  * `__tests__/constraints.test.ts` scans this directory to keep it that way.
  */
-import { type Clock, type MailboxUsageDeltaInput, type QuotaStore, type StorageFinalizeInput, type StorageFinalizeResult, type StorageReservation, type StorageReservationInput, type StorageStatus, type TenantId, type TenantStorageEntitlement, type TenantStorageEntitlementInput, type TenantStorageUsage } from '@byok-sdk/core';
+import { type Clock, type QuotaStore, type StorageFinalizeInput, type StorageFinalizeResult, type StorageReservation, type StorageReservationInput, type StorageStatus, type TenantId, type TenantStorageEntitlement, type TenantStorageEntitlementInput, type TenantStorageUsage } from '@byok-sdk/core';
 import type { Pool } from 'pg';
 export declare class PostgresQuotaStore implements QuotaStore {
     #private;
@@ -657,7 +672,6 @@ export declare class PostgresQuotaStore implements QuotaStore {
     finalizeReservation(tenant: TenantId, input: StorageFinalizeInput): Promise<StorageFinalizeResult>;
     abortReservation(tenant: TenantId, reservationId: string): Promise<StorageReservation>;
     expireReservations(tenant: TenantId): Promise<readonly StorageReservation[]>;
-    applyMailboxDelta(tenant: TenantId, input: MailboxUsageDeltaInput): Promise<TenantStorageUsage>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/core/skill-pack.d.ts ====
 /**
@@ -1259,7 +1273,7 @@ export declare class PostgresRequestReceiptStore implements RequestReceiptStore 
  * `claim` and `recordStatus` on a task this tenant never offered write nothing
  * and return `undefined`.
  */
-import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '@byok-sdk/cloud';
+import { type AgentMessageAdmission, type AgentRef, type TaskAttempt, type TaskAttemptCounts, type TaskAttemptListQuery, type TaskAttemptPage, type TaskAttemptStatus, type TaskAttemptStore } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
 import type { Pool } from 'pg';
@@ -1324,6 +1338,7 @@ export declare class PostgresTaskAttemptStore implements TaskAttemptStore {
     get(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
     getMany(tenant: TenantId, taskIds: readonly string[]): Promise<readonly TaskAttempt[]>;
     list(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage>;
+    countByStatus(tenant: TenantId): Promise<TaskAttemptCounts>;
     claim(tenant: TenantId, input: {
         readonly taskId: string;
         readonly deviceId: string;

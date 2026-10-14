@@ -359,3 +359,18 @@ describe('tenant plumbing', () => {
     }
   });
 });
+
+describe('mailbox byte authority (#411)', () => {
+  // The retained outbox rows are the only record of mailbox bytes. A second
+  // writer would be a second place the admission check could be skipped, and
+  // a reader of the retired counter would be a second authority again.
+  it('writes outbox rows only through the one outbox writer', () => {
+    const writers = SHIPPED.filter((file) => /INSERT\s+INTO\s+outbox\b/i.test(code(file.text)));
+    expect(writers.map((file) => file.path)).toEqual(['stores/core/outbox-writer.ts']);
+  });
+
+  it('never reads or writes the retired storage_usage.mailbox_bytes counter', () => {
+    const offenders = SHIPPED.filter((file) => /\bmailbox_bytes\b/.test(code(file.text)));
+    expect(offenders.map((file) => file.path)).toEqual([]);
+  });
+});

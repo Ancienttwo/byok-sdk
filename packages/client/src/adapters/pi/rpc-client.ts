@@ -35,8 +35,8 @@ export interface PiRpcClientOptions {
    * must never silently reroute the taskkill sweep on a real host.
    */
   platform?: NodeJS.Platform;
-  /** DI seam for the win32 job-object backstop; see `../win32-job-object.ts`. */
-  jobObject?: { assign(pid: number): Promise<void> };
+  /** DI seam for the win32 job-object backstop; see `../win32-job-object.ts`. `release()` is called by this client's disposal once the tree is proved gone. */
+  jobObject?: { assign(pid: number): Promise<{ release(): void }> };
 }
 
 /** Bound on retained stderr lines (see `onStderr`/`buildExitError`) — enough to show a real crash reason without an unbounded footprint for a long-lived process that's merely chatty on stderr. */

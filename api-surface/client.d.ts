@@ -174,9 +174,11 @@ export interface ClaudeProcessClientOptions {
      * must never silently reroute the taskkill sweep on a real host.
      */
     platform?: NodeJS.Platform;
-    /** DI seam for the win32 job-object backstop; see `../win32-job-object.ts`. */
+    /** DI seam for the win32 job-object backstop; see `../win32-job-object.ts`. `release()` is called by this client's disposal once the tree is proved gone. */
     jobObject?: {
-        assign(pid: number): Promise<void>;
+        assign(pid: number): Promise<{
+            release(): void;
+        }>;
     };
 }
 /**
@@ -564,9 +566,11 @@ export interface PiRpcClientOptions {
      * must never silently reroute the taskkill sweep on a real host.
      */
     platform?: NodeJS.Platform;
-    /** DI seam for the win32 job-object backstop; see `../win32-job-object.ts`. */
+    /** DI seam for the win32 job-object backstop; see `../win32-job-object.ts`. `release()` is called by this client's disposal once the tree is proved gone. */
     jobObject?: {
-        assign(pid: number): Promise<void>;
+        assign(pid: number): Promise<{
+            release(): void;
+        }>;
     };
 }
 /**
@@ -2904,6 +2908,12 @@ export interface ConnectionManagerOptions {
     onOperationalOutcome?: (outcome: 'success' | 'failure', source: 'reconnect' | 'upload') => void;
     /** The session ended for good; nothing reconnects after this. Called once. */
     onHalted?: (reason: ConnectionHaltReason) => void;
+    /**
+     * An observer callback ({@link onStateChange}, {@link onCapabilitiesAdvertised})
+     * or the reconnect loop itself threw. The session ends for good, as for a
+     * halt: nothing reconnects. Called once, never for a halt or a stop.
+     */
+    onCrashed?: (error: unknown) => void;
 }
 export interface RejectedOutboundEnvelope {
     readonly envelope: Envelope;
@@ -2984,6 +2994,7 @@ export declare class ConnectionManager {
     private draining;
     private stopped;
     private haltReason;
+    private crashed;
     private pendingCursorSave;
     /** Admission dedup while an individual handler is running. */
     private readonly inFlightSeqs;
@@ -3028,6 +3039,12 @@ export declare class ConnectionManager {
     private breakSession;
     private applyServerCapabilities;
     private setState;
+    /**
+     * Observer callbacks run inside the reconnect loop, the poll loop and the
+     * drain. A throw there is a crash of this connection, never a route
+     * failure to retry or an unhandled rejection.
+     */
+    private notify;
     private isEnded;
     /**
      * Design B (finding N4): push onto the single shared outbox and try to
@@ -3188,6 +3205,8 @@ export declare class ConnectionManager {
      * `outboxLength()` stays an honest count of what never left.
      */
     private halt;
+    /** The defined end for an unexpected error: stop like a halt, then report it once. */
+    private crash;
 }
 // ==== @byok-sdk/client dist/daemon/control-protocol.d.ts ====
 import type { TaskState } from '@byok-sdk/protocol';
@@ -3196,6 +3215,8 @@ import type { StorageCategory } from './journal/journal';
 import type { StoragePressureState } from './journal/storage-policy';
 import type { OperationalHealthSnapshot } from './operational-health';
 import type { DaemonLifecycle } from './daemon-lifecycle';
+import type { RuntimeObservation } from '../runtime-detection';
+import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 import type { LocalAgentReleaseIdentity } from '../release-identity';
 import type { McpToolsetConfig, McpToolsetRegistryStatus } from '../types';
 import type { AgentHomeExecutionStatus } from '../agent-home';
@@ -3360,8 +3381,7 @@ export declare class ControlError extends Error {
 export declare const MAX_LINE_BYTES: number;
 /**
  * Buffers raw socket bytes and yields complete lines. Splits on the raw byte
- * `0x0a` BEFORE any UTF-8 decoding (mirrors `bin/audit-log.ts`'s
- * `followAuditLog`) — `0x0A` can only ever appear as an actual newline in
+ * `0x0a` BEFORE any UTF-8 decoding — `0x0A` can only ever appear as an actual newline in
  * valid UTF-8, so this never risks decoding a multi-byte character that
  * happened to straddle a chunk boundary.
  */
@@ -3450,7 +3470,12 @@ export interface ControlStatusResult {
     /** Issues #391/#394: the same value as `Daemon.status().lifecycle`. */
     lifecycle: DaemonLifecycle;
     activeTasks: ControlActiveTask[];
-    runtimeIds: string[];
+    /** Absent for a pre-#392 control peer: report unknown, never probe locally. */
+    runtimes?: RuntimeObservation[];
+    /** Absent for a pre-#392 control peer. */
+    environment?: ServiceEnvironmentStatus;
+    /** Timestamp of the same environment-resolved event; absent before startup resolves it. */
+    environmentResolvedAt?: string;
     /** M4 Phase 4 (part B.3): per-active-task queue watermarks — see {@link TaskQueueWatermark}. */
     queueWatermarks: TaskQueueWatermark[];
     /**
@@ -3795,6 +3820,8 @@ export declare function parseInputPreparationLookupParams(value: unknown): Input
 /** Strict shape gate for `input_preparation.cancel`. Same two fields as lookup, and no third. */
 export declare function parseInputPreparationCancelParams(value: unknown): InputPreparationCancelParamsV1 | undefined;
 // ==== @byok-sdk/client dist/daemon/create-daemon.d.ts ====
+import { type RuntimeObservation } from '../runtime-detection';
+import { type ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 import type { AgentEgressPolicy, RuntimeId } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, GitWorkspaceConfig, McpToolsetConfig, McpToolsetObservation, McpToolsetRegistryStatus, McpToolsetReloadReceipt } from '../types';
 import { type AgentHomeExecutionStatus, type AgentHomeProjection } from '../agent-home';
@@ -4376,6 +4403,11 @@ export interface PresenceConfig {
     minimumIntervalMs?: number;
 }
 export interface DaemonStatus {
+    /** Environment selected by this daemon's host process at startup. */
+    environment: ServiceEnvironmentStatus;
+    environmentResolvedAt?: string;
+    /** Startup observations for every configured adapter; status never re-probes. */
+    runtimes: RuntimeObservation[];
     /** Process-immutable Local Agent application release captured at construction. */
     localAgentRelease: Readonly<LocalAgentReleaseIdentity>;
     paired: boolean;
@@ -4636,6 +4668,12 @@ export declare function isDaemonHaltReason(value: unknown): value is DaemonHaltR
  *   accepted this run's `conn.hello` and `connecting` otherwise.
  * - `halted`: the run ended on a {@link DaemonHaltReason}. It stays halted
  *   (also after `stop()`) until the next `start()`.
+ * - `crashed`: the run ended on an unexpected error after `start()` resolved
+ *   (an observer callback or the reconnect loop threw). The connection
+ *   stops and a `lifecycle` operational-health failure is recorded; unlike a
+ *   halt, a restart may fix it, so `byok-agent start` exits 1 and the OS
+ *   supervisor restarts it. It stays crashed (also after `stop()`) until the
+ *   next `start()`.
  */
 export type DaemonLifecycle = {
     phase: 'stopped';
@@ -4647,6 +4685,9 @@ export type DaemonLifecycle = {
 } | {
     phase: 'halted';
     reason: DaemonHaltReason;
+    at: string;
+} | {
+    phase: 'crashed';
     at: string;
 };
 /**
@@ -4669,6 +4710,217 @@ export declare class DaemonHaltError extends Error {
  * guessed.
  */
 export declare function parseDaemonLifecycle(value: unknown): DaemonLifecycle | undefined;
+// ==== @byok-sdk/client dist/daemon/daemon-record.d.ts ====
+import type { DaemonLifecycle } from './daemon-lifecycle';
+import { type AssertionLane, type DaemonEvent } from './observer';
+import { type ServiceEnvironmentStatus, type ServiceEnvironmentRecord } from '../lifecycle/service-environment';
+import type { RuntimeObservation } from '../runtime-detection';
+/**
+ * The content-free projection of what a daemon observed — the ONE shape every
+ * sink that outlives the process writes (issue #395): `byok-agent start`'s
+ * stdout (a service log under launchd/systemd/WinSW) and `audit.jsonl` hold the
+ * same JSON line per record.
+ *
+ * A record carries lifecycle facts, ids, closed codes, configured identifiers
+ * (runtime/tool/toolset ids, the assertion audience allowlist), sizes, counts
+ * and timestamps — never content. Every free-form field of a `DaemonEvent`
+ * (model text, tool input/output, artifact names and bytes, approval summaries,
+ * completed summaries, failure/cancel/shutdown/disposal reasons) becomes its
+ * UTF-8 byte count (`*Bytes`). `DaemonEvent` itself, with full content, is only
+ * for authenticated live views (the control socket's `tasks.subscribe`).
+ *
+ * Progress is aggregated per turn: a task's `progress` events produce one
+ * `turn` record when the runtime reports `turn_end`, or when the turn is still
+ * open as the task ends, the daemon stops, or the task is evicted.
+ */
+export type DaemonRecord = {
+    kind: 'offered';
+    ts: string;
+    taskId: string;
+    runtime?: string;
+} | {
+    kind: 'claimed';
+    ts: string;
+    taskId: string;
+    claimedRuntime?: string;
+} | {
+    kind: 'started';
+    ts: string;
+    taskId: string;
+} | DaemonTurnRecord | {
+    kind: 'artifact';
+    ts: string;
+    taskId: string;
+    nameBytes: number;
+    contentType: string;
+    inlineBytes?: number;
+    blobRef?: {
+        blobId: string;
+        contentHash: string;
+        size: number;
+    };
+} | {
+    kind: 'awaiting-approval';
+    ts: string;
+    taskId: string;
+    approvalId?: string;
+    summaryBytes: number;
+} | {
+    kind: 'completed';
+    ts: string;
+    taskId: string;
+    sessionRef: string;
+    summaryBytes: number;
+} | {
+    kind: 'failed';
+    ts: string;
+    taskId: string;
+    retryable: boolean;
+    preClaim?: boolean;
+    reasonBytes: number;
+} | {
+    kind: 'cancelled';
+    ts: string;
+    taskId: string;
+    reasonBytes?: number;
+} | {
+    kind: 'lifecycle';
+    ts: string;
+    lifecycle: DaemonLifecycle;
+} | {
+    kind: 'paired';
+    ts: string;
+    deviceId: string;
+} | {
+    kind: 'unpaired';
+    ts: string;
+} | {
+    kind: 'runtimes-detected';
+    ts: string;
+    runtimes: Array<Omit<RuntimeObservation, 'version'>>;
+} | {
+    kind: 'shutdown-requested';
+    ts: string;
+    reasonBytes: number;
+} | {
+    kind: 'shutdown-complete';
+    ts: string;
+    reasonBytes: number;
+    undeliveredOutboxCount?: number;
+} | {
+    kind: 'stale-approval-decision';
+    ts: string;
+    taskId: string;
+    decision: 'approve' | 'reject';
+    reasonBytes?: number;
+} | {
+    kind: 'git-workspace';
+    ts: string;
+    taskId: string;
+    workspaceId: string;
+    phase: string;
+    headChanged?: boolean;
+    commitsSinceBaseline?: number;
+    dirty?: {
+        staged: number;
+        unstaged: number;
+        untracked: number;
+        conflicted: number;
+    };
+    errorCategory?: string;
+} | {
+    kind: 'runtime-disposal-failed';
+    ts: string;
+    taskId: string;
+    runtimeId: string;
+    stage: 'signal' | 'quiescence' | 'cleanup';
+    reasonBytes: number;
+} | {
+    kind: 'agent-memory-intent-integrity';
+    ts: string;
+    intentId: string;
+    disposition: 'conflict' | 'host_terminal';
+} | {
+    kind: 'device-assertion';
+    ts: string;
+    result: 'issued';
+    lane: AssertionLane;
+    taskId?: string;
+    audience: string;
+    jti: string;
+    expiresAt: string;
+} | {
+    kind: 'device-assertion';
+    ts: string;
+    result: 'denied';
+    lane: AssertionLane;
+    taskId?: string;
+    reason: string;
+    audienceBytes?: number;
+}
+/** Written by the process hosting the daemon (`byok-agent start`): where its environment came from (issue #392). */
+ | ({
+    kind: 'environment-resolved';
+    ts: string;
+} & ServiceEnvironmentStatus)
+/** Written by the process hosting the daemon once `start()` resolved. */
+ | {
+    kind: 'daemon-started';
+    ts: string;
+    productId: string;
+}
+/** Written by the process hosting the daemon once `stop()` resolved. */
+ | {
+    kind: 'daemon-stopped';
+    ts: string;
+};
+/** One turn of a task's progress, as sizes and counts. */
+export interface DaemonTurnRecord {
+    kind: 'turn';
+    ts: string;
+    taskId: string;
+    /** 1-based turn number within the task, as this projector counted it. */
+    turn: number;
+    /** What closed the record: the runtime's `turn_end`, or a still-open turn at the task's terminal, the daemon's stop, or eviction. */
+    closedBy: 'turn_end' | 'terminal' | 'stop' | 'evicted';
+    /** Every `AgentEvent` of the turn, `turn_end` and `usage` included. */
+    progressEvents: number;
+    textBytes: number;
+    toolUses: number;
+    toolResults: number;
+    artifacts: number;
+    approvals: number;
+    errors: number;
+    /** The turn's last `usage` report, when it had one. */
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+}
+export type DaemonRecordKind = DaemonRecord['kind'];
+/** Every {@link DaemonRecord} kind — the one list readers (the support bundle, the audit reader) accept. */
+export declare const DAEMON_RECORD_KINDS: readonly DaemonRecordKind[];
+export declare function isDaemonRecordKind(value: unknown): value is DaemonRecordKind;
+export interface DaemonRecordProjector {
+    /** The records `event` produces, in order: none (a progress event inside an open turn), one, or two (an open turn closed by a terminal). */
+    project(event: DaemonEvent): DaemonRecord[];
+    /** Closes every open turn (`closedBy: 'stop'`) — call once the daemon has stopped. */
+    flush(ts: string): DaemonRecord[];
+}
+/**
+ * Git failures are recorded only from this closed set, projected from
+ * `GIT_ERROR_CATEGORIES` (`git-workspace.ts`), never as raw Git errors.
+ *
+ * @internal Exported for the drift-guard test only (never re-exported from
+ * `index.ts`).
+ */
+export declare const STABLE_GIT_ERROR_CATEGORIES: Set<string>;
+/** The one closed environment shape, shared by projection and persistent/live readers. */
+export declare function parseEnvironmentRecord(value: unknown): ServiceEnvironmentRecord | undefined;
+/**
+ * A stateful `DaemonEvent` → {@link DaemonRecord} projector. One per event
+ * stream: it holds each task's open turn until the turn closes.
+ */
+export declare function createDaemonRecordProjector(): DaemonRecordProjector;
 // ==== @byok-sdk/client dist/daemon/deterministic-jitter.d.ts ====
 export type JitterDomain = 'reconnect' | 'upload' | 'maintenance';
 export interface DeterministicJitterInput {
@@ -6837,8 +7089,10 @@ export declare const AGENT_MEMORY_READER_GUIDANCE: string;
 export declare function prependAgentMemoryGuidance(instruction: string): string;
 export declare function prependAgentMemoryReaderGuidance(instruction: string): string;
 // ==== @byok-sdk/client dist/daemon/observer.d.ts ====
-import { type AgentEvent, type BlobRef, type Envelope, type RuntimeInfo, type TaskState } from '@byok-sdk/protocol';
+import { type AgentEvent, type BlobRef, type Envelope, type TaskState } from '@byok-sdk/protocol';
 import type { DaemonLifecycle } from './daemon-lifecycle';
+import type { RuntimeObservation } from '../runtime-detection';
+import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 /**
  * M3-2a: local observability for the daemon — the seam a CLI (M3-2b) drives a
  * live task feed, a task list, and approve/reject/unpair from, all LOCALLY
@@ -6961,7 +7215,11 @@ export type DaemonEvent = {
 } | {
     kind: 'runtimes-detected';
     ts: string;
-    runtimes: RuntimeInfo[];
+    runtimes: RuntimeObservation[];
+} | {
+    kind: 'environment-resolved';
+    ts: string;
+    status: ServiceEnvironmentStatus;
 }
 /** M4 Phase 2: the control socket's `shutdown` RPC was invoked — emitted once, before this daemon starts tearing itself down, so it lands in the audit log via the exact same subscribe->append plumbing every other event already uses (see `bin/commands/start.ts`). Informational only — do NOT gate any teardown decision on this event; see `shutdown-complete`. */
  | {
@@ -7188,7 +7446,8 @@ export declare class DaemonObserver {
     noteLifecycle(lifecycle: DaemonLifecycle): void;
     notePaired(deviceId: string): void;
     noteUnpaired(): void;
-    noteRuntimesDetected(runtimes: RuntimeInfo[]): void;
+    noteRuntimesDetected(runtimes: RuntimeObservation[]): void;
+    noteEnvironmentResolved(status: ServiceEnvironmentStatus, ts?: string): void;
     /** M4 Phase 2: see the `shutdown-requested` `DaemonEvent` variant's own doc comment. */
     noteShutdownRequested(reason: string): void;
     /** M4 Phase 2: see the `shutdown-complete` `DaemonEvent` variant's own doc comment (finding F5(b): `undeliveredOutboxCount`). */
@@ -9773,9 +10032,10 @@ import type { RuntimeDetectResult, RuntimeDetectionRefusalReason } from '../type
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import type { OperationalHealthFileInspection } from '../daemon/operational-health';
 import type { DaemonLifecycle } from '../daemon/daemon-lifecycle';
+import type { ServiceEnvironmentRecord } from '../lifecycle/service-environment';
 export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
 export interface DiagnosticCheck {
-    id: 'config' | 'device' | 'runtimes' | 'control' | 'lifecycle' | 'health' | 'journal' | 'workspace' | 'quarantine';
+    id: 'config' | 'device' | 'runtimes' | 'environment' | 'control' | 'lifecycle' | 'health' | 'journal' | 'workspace' | 'quarantine';
     status: DiagnosticStatus;
     summary: string;
 }
@@ -9812,6 +10072,10 @@ export interface DiagnosticsSnapshot {
         steer: boolean;
         resume: boolean;
     }>;
+    runtimeSource: 'daemon' | 'local-shell' | 'unknown';
+    environment: ServiceEnvironmentRecord | {
+        status: 'unknown';
+    };
     control: {
         status: 'offline';
         reason: string;
@@ -9991,6 +10255,8 @@ export { BlobClient, BlobRequestAbortedError } from './daemon/blob-client';
 export type { BlobClientOptions, BlobRequestAbortReason, BlobRequestOptions, BlobResolver } from './daemon/blob-client';
 export { DaemonObserver } from './daemon/observer';
 export type { DaemonEvent, DaemonEventKind, DaemonEventListener, DaemonTaskInfo, Unsubscribe } from './daemon/observer';
+export { createDaemonRecordProjector, DAEMON_RECORD_KINDS, isDaemonRecordKind } from './daemon/daemon-record';
+export type { DaemonRecord, DaemonRecordKind, DaemonRecordProjector, DaemonTurnRecord } from './daemon/daemon-record';
 export { createServiceLifecycle, UnsupportedServicePlatformError } from './lifecycle/create-service-lifecycle';
 export type { CreateServiceLifecycleOptions } from './lifecycle/create-service-lifecycle';
 export { nodeAgentProgram, sanitizeServiceName } from './lifecycle/service-types';
@@ -9999,7 +10265,8 @@ export { generateLaunchdPlist } from './lifecycle/launchd';
 export { generateSystemdUnit } from './lifecycle/systemd';
 export { generateWinswXml } from './lifecycle/winsw';
 export { applyLoginShellEnvironment, serviceEnvironmentStatus } from './lifecycle/service-environment';
-export type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './lifecycle/service-environment';
+export type { RuntimeObservation } from './runtime-detection';
+export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './lifecycle/service-environment';
 export { ensureSecureDir, buildIcaclsArgs, SecureDirHardeningError } from './util/secure-dir';
 export type { EnsureSecureDirOptions } from './util/secure-dir';
 export { PiAdapter } from './adapters/pi/pi-adapter';
@@ -11285,7 +11552,7 @@ export declare function createLaunchdLifecycle(def: ServiceDefinition, deps?: La
  * put back: rc files never set SDK control variables either.
  *
  * `byok-agent start --service` calls it first ({@link SERVICE_FLAG}; the
- * launchd plist and systemd unit pass that flag). An embedding Host started
+ * launchd plist, systemd unit and WinSW XML pass that flag). An embedding Host started
  * outside a terminal (an Electron app launched from the Dock has launchd's
  * PATH too) calls the same function at its own startup.
  *
@@ -11293,7 +11560,7 @@ export declare function createLaunchdLifecycle(def: ServiceDefinition, deps?: La
  * carries only {@link ServiceEnvironmentStatus}: a source, a closed code,
  * the shell's basename and a duration. Never a variable name, value or path.
  */
-/** The `byok-agent start` flag the launchd plist and the systemd unit pass. */
+/** The `byok-agent start` flag generated service definitions pass. */
 export declare const SERVICE_FLAG = "--service";
 export declare const LOGIN_SHELL_ENV_TIMEOUT_MS = 10000;
 export declare const LOGIN_SHELL_ENV_MAX_BYTES: number;
@@ -11309,6 +11576,11 @@ export type ServiceEnvironmentStatus = {
     source: 'unavailable';
     code: ServiceEnvironmentUnavailableCode;
 };
+/** Timestamped closed environment observation shared by diagnostics and audit. */
+export interface ServiceEnvironmentRecord {
+    status: ServiceEnvironmentStatus;
+    ts: string;
+}
 /**
  * Test seams for {@link captureAndApply}. Not part of the public API:
  * {@link applyLoginShellEnvironment} takes no options.
@@ -12286,6 +12558,28 @@ export declare const LOCAL_AGENT_RELEASE_BUILD_ID_MAX_LENGTH = 128;
  * being rewritten into another authority.
  */
 export declare function resolveLocalAgentReleaseIdentity(input: LocalAgentReleaseIdentity | undefined): Readonly<LocalAgentReleaseIdentity>;
+// ==== @byok-sdk/client dist/runtime-detection.d.ts ====
+import { type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectResult, type RuntimeDetectionRefusalReason } from './types';
+/** Content-free observation of one configured adapter, including unavailable outcomes. */
+export interface RuntimeObservation {
+    id: string;
+    present: boolean;
+    outcome: RuntimeDetectResult['kind'];
+    reason?: RuntimeDetectionRefusalReason;
+    version?: string;
+    qualifiedVersion?: string;
+    authPresent?: boolean;
+    steer: boolean;
+    resume: boolean;
+}
+/** The daemon and explicit local probes project the same detection authority. */
+export declare function projectRuntimeObservation(descriptor: RuntimeAdapterDescriptor, detected: RuntimeDetectResult): RuntimeObservation;
+/** Reject unreadable observations; never infer availability from an older discovery shape. */
+export declare function parseRuntimeObservations(value: unknown): RuntimeObservation[] | undefined;
+/** Reject legacy/mixed authoring shapes; copy only validated, known facts. */
+export declare function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult;
+/** Single routing author for daemon, selection and local diagnostics. */
+export declare function observeRuntimeDetection(adapter: RuntimeAdapter, signal?: AbortSignal): Promise<RuntimeDetectResult>;
 // ==== @byok-sdk/client dist/runtime-failure.d.ts ====
 /** Closed lifecycle phases for failures after an offer has been admitted. */
 export type RuntimeFailurePhase = 'start' | 'run';

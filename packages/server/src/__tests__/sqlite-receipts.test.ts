@@ -1,3 +1,4 @@
+import { WAKE_SCHEMA } from '../stores/sqlite/wakes';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,8 +25,18 @@ describe('SQLite receipt recovery', () => {
     const clock = createMutableClock();
     const crypto = createWebCrypto();
     const path = join(root, 'server.sqlite');
-    function open(migration?: 'v1-to-v4' | 'v2-to-v4') {
+    function open(migration?: 'v1-to-v5' | 'v2-to-v5') {
       const stores = createSqliteEmbeddedStores({ path, ...(migration === undefined ? {} : { migration }) }, { clock, crypto });
+      // Quota is process memory here; issue the entitlement on every open, as the
+      // embedded server does, so limited mailbox appends are admitted (#411).
+      void stores.core.quota.writeEntitlement(tenant, {
+        version: 1n,
+        hardLimitBytes: 1_000_000_000n,
+        maxObjectBytes: 100_000_000n,
+        maxInlineBytes: 1_000_000n,
+        mailboxLimitBytes: 100_000_000n,
+        retentionPolicyId: 'test',
+      });
       const cloud = createByokCloud({ ...stores, clock, crypto,
         tokenSigner: createHmacTokenSigner(new Uint8Array(32), clock), capabilities: fullCapabilityDeclaration(),
         agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
@@ -65,29 +76,36 @@ describe('SQLite receipt recovery', () => {
         terminalProjection: { mode: 'none' },
       }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn' } });
       const persistedInput = JSON.stringify(execution);
+      await runtime.stores.close();
       const appendFault = new DatabaseSync(path);
       appendFault.exec("CREATE TRIGGER fail_recurring_append BEFORE INSERT ON mailbox_message BEGIN SELECT RAISE(ABORT, 'injected recurring append'); END;");
       appendFault.close();
+      runtime = open();
       await expect(runtime.cloud.submitRecurringExecution(tenant, JSON.parse(persistedInput))).rejects.toThrow('injected recurring append');
       expect(await runtime.cloud.readTaskOffer(tenant, taskId)).toMatchObject({ delivered: false });
-      await runtime.stores.close(); runtime = open();
+      await runtime.stores.close();
       const removeAppendFault = new DatabaseSync(path); removeAppendFault.exec('DROP TRIGGER fail_recurring_append'); removeAppendFault.close();
+      runtime = open();
       await expect(runtime.cloud.submitRecurringExecution(tenant, { ...execution,
         agentMessageContext: { destinationBinding: 'different' } })).rejects.toThrow();
       await runtime.cloud.submitRecurringExecution(tenant, JSON.parse(persistedInput));
       expect(await runtime.cloud.readTaskOffer(tenant, taskId)).toMatchObject({ delivered: true, payload: execution.payload });
       expect((await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages).toHaveLength(1);
 
+      await runtime.stores.close();
       const fault = new DatabaseSync(path);
       fault.exec("CREATE TRIGGER fail_message_finalize BEFORE UPDATE OF terminal_body ON agent_message_admission BEGIN SELECT RAISE(ABORT, 'injected finalize fault'); END;");
       fault.close();
+      runtime = open();
       await expect(handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume)).rejects.toThrow('injected finalize fault');
       expect(calls).toBe(1);
       expect(await read()).toBeUndefined();
       await runtime.stores.close(); runtime = open();
       expect(await read()).toBeUndefined();
       expect(await discover()).toEqual({ payload: message.payload, context: execution.agentMessageContext });
+      await runtime.stores.close();
       const repair = new DatabaseSync(path); repair.exec('DROP TRIGGER fail_message_finalize'); repair.close();
+      runtime = open();
       expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume)).toBe('accepted');
       expect(calls).toBe(2);
       const receipt = await read();
@@ -108,7 +126,8 @@ describe('SQLite receipt recovery', () => {
     } finally { await runtime.stores.close(); }
   });
 
-  it('keeps one immutable winner across concurrent writers, restart and tenants', async () => {
+  // Refusal now waits for SQLite's existing 5-second busy grace (#414).
+  it('keeps one immutable winner across concurrent writers, restart and tenants', { timeout: 20_000 }, async () => {
     // #388: one SQLite file has one owning composition, so a second independent
     // connection is refused at open; concurrent writers share the owner.
     const { open } = fixture(); const a = open();
@@ -130,6 +149,8 @@ describe('SQLite receipt recovery', () => {
     const { open } = fixture(); let runtime = open();
     const taskId = 'completed-task'; const input = { taskId, payload };
     try {
+      await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
       const first = await runtime.cloud.enqueueOffer(tenant, deviceId, input);
       expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', { deviceId }, { taskId }))).toBe('accepted');
       expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { summary: 'first', sessionRef: 'session-first' }, { taskId }))).toBe('accepted');
@@ -160,14 +181,14 @@ describe('SQLite receipt recovery', () => {
     await runtime.stores.cloud.tasks.open(tenant, { taskId: 'historical', deviceId });
     await runtime.stores.close();
     const db = new DatabaseSync(path);
-    db.exec('DROP TABLE request_receipt; ALTER TABLE task_attempt DROP COLUMN claimed_harness_id');
+    db.exec('DROP TABLE wake; DROP TABLE request_receipt; ALTER TABLE task_attempt DROP COLUMN claimed_harness_id');
     if (version === '1') db.exec('DROP TABLE device_directory');
     db.prepare("UPDATE byok_sqlite_meta SET value = ? WHERE key = 'schema_version'").run(version);
     db.close();
-    const migration = version === '1' ? 'v1-to-v4' : 'v2-to-v4';
+    const migration = version === '1' ? 'v1-to-v5' : 'v2-to-v5';
     expect(() => open()).toThrow('Unsupported BYOK SQLite schema version');
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: version, requiredVersion: '4' }));
-    expect(() => open(`v${version}-to-v3` as typeof migration)).toThrow('Target-v3 migration selectors are no longer supported');
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: version, requiredVersion: '5' }));
+    expect(() => open(`v${version}-to-v4` as typeof migration)).toThrow('Target-v4 migration selectors are no longer supported');
     expect(() => open(migration)).toThrow('historical receipts are unavailable');
     expect(() => open(migration)).toThrow(expect.objectContaining({ code: 'SQLITE_MIGRATION_REFUSED', foundVersion: version }));
     const check = new DatabaseSync(path);
@@ -182,7 +203,7 @@ describe('SQLite receipt recovery', () => {
       expect((await runtime.stores.cloud.devices.list(tenant)).length).toBe(version === '1' ? 0 : 1);
     } finally { await runtime.stores.close(); }
     const current = new DatabaseSync(path, { readOnly: true });
-    expect(current.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('4');
+    expect(current.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('5');
     current.close();
   });
 
@@ -190,7 +211,7 @@ describe('SQLite receipt recovery', () => {
     const { open, path } = fixture(); await open().stores.close();
     const db = new DatabaseSync(path); db.exec('DROP TABLE request_receipt'); db.close();
     expect(() => open()).toThrow();
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '4' }));
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '5' }));
     const check = new DatabaseSync(path, { readOnly: true });
     expect(check.prepare("SELECT name FROM sqlite_master WHERE name = 'request_receipt'").get()).toBeUndefined();
     check.close();
@@ -200,7 +221,7 @@ describe('SQLite receipt recovery', () => {
     const { open, path } = fixture(); await open().stores.close();
     const db = new DatabaseSync(path); db.exec('DROP TABLE mailbox_message'); db.close();
     expect(() => open()).toThrow(expect.objectContaining({
-      name: 'SqliteSchemaError', code: 'SQLITE_SCHEMA_INVALID', foundVersion: '4', requiredVersion: '4',
+      name: 'SqliteSchemaError', code: 'SQLITE_SCHEMA_INVALID', foundVersion: '5', requiredVersion: '5',
       message: expect.stringContaining('FROM mailbox_message'),
     }));
     const check = new DatabaseSync(path, { readOnly: true });
@@ -210,10 +231,14 @@ describe('SQLite receipt recovery', () => {
 
   it('preserves immutable offer before failed append and resumes only the original payload', async () => {
     const { open, path } = fixture(); let runtime = open();
+    await runtime.stores.close();
     const db = new DatabaseSync(path);
     db.exec("CREATE TRIGGER fail_append BEFORE INSERT ON mailbox_message BEGIN SELECT RAISE(ABORT, 'injected append failure'); END;"); db.close();
+    runtime = open();
     const input = { taskId: 'pre-append', payload };
     try {
+      await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
       await expect(runtime.cloud.enqueueOffer(tenant, deviceId, input)).rejects.toThrow('injected append failure');
       expect(await runtime.cloud.readTaskOffer(tenant, input.taskId)).toMatchObject({ delivered: false, payload });
       await runtime.stores.close();
@@ -227,10 +252,14 @@ describe('SQLite receipt recovery', () => {
 
   it('resumes the same mailbox row after append but before delivered receipt commit', async () => {
     const { open, path } = fixture(); let runtime = open();
+    await runtime.stores.close();
     const db = new DatabaseSync(path);
     db.exec("CREATE TRIGGER fail_delivered BEFORE INSERT ON request_receipt WHEN NEW.key LIKE 'task-offer-delivered:%' BEGIN SELECT RAISE(ABORT, 'injected delivered failure'); END;"); db.close();
+    runtime = open();
     const input = { taskId: 'post-append', payload };
     try {
+      await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
       await expect(runtime.cloud.enqueueOffer(tenant, deviceId, input)).rejects.toThrow('injected delivered failure');
       const before = (await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages;
       expect(before).toHaveLength(1);
@@ -243,24 +272,27 @@ describe('SQLite receipt recovery', () => {
   });
 
 
-  it('rejects cleaned legacy delivery history and a v4 table missing its composite primary key', async () => {
+  it('rejects cleaned legacy delivery history and a v5 table missing its composite primary key', async () => {
     const { open, path } = fixture(); await open().stores.close();
     const db = new DatabaseSync(path);
-    db.exec("DROP TABLE request_receipt; ALTER TABLE task_attempt DROP COLUMN claimed_harness_id; UPDATE byok_sqlite_meta SET value = '2' WHERE key = 'schema_version'; INSERT INTO mailbox_cursor VALUES ('receipts', 'device-receipts', 2, 1, 1, '2026-01-01T00:00:00.000Z')");
+    db.exec("DROP TABLE wake; DROP TABLE request_receipt; ALTER TABLE task_attempt DROP COLUMN claimed_harness_id; UPDATE byok_sqlite_meta SET value = '2' WHERE key = 'schema_version'; INSERT INTO mailbox_cursor VALUES ('receipts', 'device-receipts', 2, 1, 1, '2026-01-01T00:00:00.000Z')");
     db.close();
-    expect(() => open('v2-to-v4')).toThrow('delivery history');
-    expect(() => open('v2-to-v4')).toThrow(expect.objectContaining({ code: 'SQLITE_MIGRATION_REFUSED', foundVersion: '2' }));
+    expect(() => open('v2-to-v5')).toThrow('delivery history');
+    expect(() => open('v2-to-v5')).toThrow(expect.objectContaining({ code: 'SQLITE_MIGRATION_REFUSED', foundVersion: '2' }));
     const corrupt = new DatabaseSync(path);
     expect(corrupt.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('2');
-    corrupt.exec("ALTER TABLE task_attempt ADD COLUMN claimed_harness_id TEXT; UPDATE byok_sqlite_meta SET value = '4' WHERE key = 'schema_version'; CREATE TABLE request_receipt (tenant_id TEXT NOT NULL, key TEXT NOT NULL, body TEXT NOT NULL, recorded_at TEXT NOT NULL)");
+    corrupt.exec(WAKE_SCHEMA);
+    corrupt.exec("ALTER TABLE task_attempt ADD COLUMN claimed_harness_id TEXT; UPDATE byok_sqlite_meta SET value = '5' WHERE key = 'schema_version'; CREATE TABLE request_receipt (tenant_id TEXT NOT NULL, key TEXT NOT NULL, body TEXT NOT NULL, recorded_at TEXT NOT NULL)");
     corrupt.close();
     expect(() => open()).toThrow('Invalid BYOK SQLite request receipt schema');
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '4' }));
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '5' }));
   });
 
   it('keeps cancellation result authority after reopen', async () => {
     const { open } = fixture(); let runtime = open();
     try {
+      await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
       await runtime.cloud.enqueueOffer(tenant, deviceId, { taskId: 'cancelled-task', payload });
       await runtime.cloud.cancelTask(tenant, 'cancelled-task', 'host-cancel');
       const result = await runtime.cloud.readTaskResult(tenant, 'cancelled-task');
@@ -272,9 +304,11 @@ describe('SQLite receipt recovery', () => {
 
 
   it('reads only validated immutable offer authority and rejects corrupt receipts', async () => {
-    const { open, path } = fixture(); const runtime = open();
+    const { open, path } = fixture(); let runtime = open();
     const taskId = 'offer-readback';
     try {
+      await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
       await runtime.stores.cloud.tasks.open(tenant, { taskId: 'unsubmitted', deviceId });
       expect(await runtime.cloud.readTaskOffer(tenant, 'unsubmitted')).toBeUndefined();
       const enqueued = await runtime.cloud.enqueueOffer(tenant, deviceId, { taskId, payload });
@@ -282,20 +316,31 @@ describe('SQLite receipt recovery', () => {
       expect(original).toMatchObject({ taskId, deviceId, messageId: enqueued.envelope.id, delivered: true,
         type: 'task.offer', payload });
       expect(await runtime.cloud.readTaskOffer(other, taskId)).toBeUndefined();
-      const db = new DatabaseSync(path);
+      await runtime.stores.close();
+      const db = new DatabaseSync(path, { readOnly: true });
       const key = `task-offer:${enqueued.envelope.id}`;
-      const body = db.prepare('SELECT body FROM request_receipt WHERE tenant_id = ? AND key = ?').get(tenant, key)?.body as string;
+      let body: string;
       try {
-        for (const corrupted of ['{', 'null', JSON.stringify({ ...JSON.parse(body), deviceId: 'foreign' }),
-          JSON.stringify({ ...JSON.parse(body), type: 'task.complete' }),
-          JSON.stringify({ ...JSON.parse(body), payload: { ...payload, instruction: 17 } })]) {
-          db.prepare('UPDATE request_receipt SET body = ? WHERE tenant_id = ? AND key = ?').run(corrupted, tenant, key);
-          await expect(runtime.cloud.readTaskOffer(tenant, taskId)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
-        }
-        db.prepare('UPDATE request_receipt SET body = ? WHERE tenant_id = ? AND key = ?').run(body, tenant, key);
-        db.prepare('UPDATE request_receipt SET body = ? WHERE tenant_id = ? AND key = ?').run('wrong-id', tenant, `task-offer-delivered:${enqueued.envelope.id}`);
-        await expect(runtime.cloud.readTaskOffer(tenant, taskId)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        body = db.prepare('SELECT body FROM request_receipt WHERE tenant_id = ? AND key = ?').get(tenant, key)?.body as string;
       } finally { db.close(); }
+      for (const corrupted of ['{', 'null', JSON.stringify({ ...JSON.parse(body), deviceId: 'foreign' }),
+        JSON.stringify({ ...JSON.parse(body), type: 'task.complete' }),
+        JSON.stringify({ ...JSON.parse(body), payload: { ...payload, instruction: 17 } })]) {
+        const corrupt = new DatabaseSync(path);
+        try {
+          corrupt.prepare('UPDATE request_receipt SET body = ? WHERE tenant_id = ? AND key = ?').run(corrupted, tenant, key);
+        } finally { corrupt.close(); }
+        runtime = open();
+        await expect(runtime.cloud.readTaskOffer(tenant, taskId)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+        await runtime.stores.close();
+      }
+      const reset = new DatabaseSync(path);
+      try {
+        reset.prepare('UPDATE request_receipt SET body = ? WHERE tenant_id = ? AND key = ?').run(body, tenant, key);
+        reset.prepare('UPDATE request_receipt SET body = ? WHERE tenant_id = ? AND key = ?').run('wrong-id', tenant, `task-offer-delivered:${enqueued.envelope.id}`);
+      } finally { reset.close(); }
+      runtime = open();
+      await expect(runtime.cloud.readTaskOffer(tenant, taskId)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
     } finally { await runtime.stores.close(); }
   });
 

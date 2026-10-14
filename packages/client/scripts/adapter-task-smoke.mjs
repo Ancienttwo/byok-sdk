@@ -197,13 +197,12 @@ try {
   const productId = `byok-adapter-task-smoke-${process.pid}`;
   // The server is a self-hosted façade over the `@byok-sdk/cloud` kernel and
   // serves the wire over HTTP only (WP3B Step 2 removed the WS attachment), so
-  // the daemon below runs the protocol §8 long-poll transport. A short hold
-  // keeps each empty poll cheap and keeps an in-flight poll from outliving
-  // this script's own teardown.
+  // the daemon below runs the protocol §8 long-poll transport with the default
+  // hold; stopping the daemon aborts the in-flight poll.
   // The default task-event retention is intentional here: `handle.events()`
   // must end at the terminal event itself, independently of when the relay
   // later reclaims its retained buffer.
-  byok = createByokServer({ productId, longPollHoldMs: 200 });
+  byok = createByokServer({ productId });
   const listening = await new Promise((resolve) => {
     httpServer = serve({ fetch: byok.hono.fetch, port: 0 }, (info) => resolve(info));
   });
@@ -412,7 +411,7 @@ try {
       console.error(`daemon cleanup warning: ${error instanceof Error ? error.message : String(error)}`);
     });
   }
-  byok?.stop();
+  await byok?.close();
   await withTimeout(closeHttpServer(httpServer), 'HTTP server cleanup', 10_000).catch((error) => {
     console.error(`HTTP server cleanup warning: ${error instanceof Error ? error.message : String(error)}`);
   });

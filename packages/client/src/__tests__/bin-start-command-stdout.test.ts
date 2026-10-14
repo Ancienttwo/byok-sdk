@@ -6,14 +6,14 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import type { DaemonConfig } from '../index';
 import type { Daemon } from '../daemon/create-daemon';
 import type { DaemonEvent, DaemonEventListener } from '../daemon/observer';
+import type { DaemonRecord } from '../daemon/daemon-record';
 import {
   AUDIT_LOG_TRIM_TARGET_LINES,
-  appendEnvironmentRecord,
+  appendAuditRecord,
   auditLogPath,
   MAX_AUDIT_LOG_BYTES,
-  appendAuditEvent,
   createAuditAppender,
-  readAuditEvents,
+  readAuditRecords,
   readLastEnvironmentRecord,
 } from '../bin/audit-log';
 import { runStartCommand } from '../bin/commands/start';
@@ -53,7 +53,7 @@ function fakeDaemon(): { daemon: Daemon; emit: (event: DaemonEvent) => void } {
   const listeners = new Set<DaemonEventListener>();
   const daemon: Daemon = {
     pair: vi.fn(),
-    start: vi.fn().mockResolvedValue(undefined),
+    start: vi.fn().mockImplementation(async () => { for (const listener of listeners) listener({ kind: 'environment-resolved', ts: new Date().toISOString(), status: { source: 'inherited' } }); }),
     stop: vi.fn().mockResolvedValue(undefined),
     status: vi.fn().mockReturnValue({ paired: true, lifecycle: { phase: 'running', connection: 'open' }, activeTaskCount: 0 }),
     reloadMcpToolsets: vi.fn(),
@@ -70,8 +70,8 @@ function fakeDaemon(): { daemon: Daemon; emit: (event: DaemonEvent) => void } {
   return { daemon, emit: (event) => { for (const listener of listeners) listener(event); } };
 }
 
-describe('bin/commands/start: stdout carries no model text (issue #395, minimal)', () => {
-  it('SENTINEL text never reaches stdout or audit.jsonl; a 30-delta, 3-tool turn is one line', async () => {
+describe('bin/commands/start: stdout is the audit log (issue #395)', () => {
+  it('every stdout line is a JSON record equal to its audit.jsonl line; no SENTINEL; a 30-delta, 3-tool turn is one record', async () => {
     const storeDir = await tmpDir('byok-stdout-');
     const { daemon, emit } = fakeDaemon();
     const lines: string[] = [];
@@ -102,72 +102,83 @@ describe('bin/commands/start: stdout carries no model text (issue #395, minimal)
     emit(progress('t2', { type: 'progress', text: 'SENTINEL-PARTIAL' }));
     emit({ kind: 'failed', ts: 'T', taskId: 't2', reason: 'SENTINEL-FAIL-REASON', retryable: false });
     emit({ kind: 'cancelled', ts: 'T', taskId: 't3', reason: 'SENTINEL-CANCEL-REASON' });
+    emit({ kind: 'shutdown-requested', ts: 'T', reason: 'SENTINEL-SHUTDOWN' });
     emit(progress('t4', { type: 'progress', text: 'SENTINEL-OPEN-AT-STOP' }));
 
     controller.abort();
     await run;
 
-    expect(lines.join('\n')).not.toContain('SENTINEL');
-    await vi.waitFor(async () => {
-      const audit = await fs.readFile(auditLogPath(storeDir), 'utf8');
-      expect(audit).toContain('"kind":"cancelled"');
-      expect(audit).not.toContain('SENTINEL');
-    });
-    expect(lines.filter((l) => l.includes('progress taskId=t1'))).toEqual([
-      `[T] progress taskId=t1 turn=end events=40 text=30 textBytes=${textBytes} tool_use=3 tool_result=3 artifact=0 needs_approval=1 error=1 usage=in:10,out:5,total:15`,
+    const audit = await fs.readFile(auditLogPath(storeDir), 'utf8');
+    expect(lines).toEqual(audit.trimEnd().split('\n'));
+    expect(audit).not.toContain('SENTINEL');
+    const records = lines.map((line) => JSON.parse(line) as DaemonRecord);
+    expect(records.map((record) => record.kind)).toEqual([
+      'environment-resolved', 'daemon-started', 'turn', 'awaiting-approval', 'completed', 'turn', 'failed', 'cancelled',
+      'shutdown-requested', 'turn', 'daemon-stopped',
     ]);
-    const t2 = lines.findIndex((l) => l.includes('progress taskId=t2 turn=open'));
-    expect(lines[t2 + 1]).toBe(`[T] failed taskId=t2 retryable=false reason="[redacted: ${Buffer.byteLength('SENTINEL-FAIL-REASON')} bytes]"`);
-    expect(lines.filter((l) => l.includes('progress taskId=t4 turn=open'))).toHaveLength(1);
-    expect(lines.filter((l) => l.includes(' progress taskId='))).toHaveLength(3);
+    expect(records.filter((record) => record.kind === 'turn')).toEqual([
+      {
+        kind: 'turn', ts: 'T', taskId: 't1', turn: 1, closedBy: 'turn_end', progressEvents: 40, textBytes,
+        toolUses: 3, toolResults: 3, artifacts: 0, approvals: 1, errors: 1, inputTokens: 10, outputTokens: 5, totalTokens: 15,
+      },
+      expect.objectContaining({ taskId: 't2', closedBy: 'terminal', textBytes: Buffer.byteLength('SENTINEL-PARTIAL') }),
+      expect.objectContaining({ taskId: 't4', closedBy: 'stop' }),
+    ]);
+    expect(records).toContainEqual({ kind: 'failed', ts: 'T', taskId: 't2', retryable: false, reasonBytes: Buffer.byteLength('SENTINEL-FAIL-REASON') });
+    expect(records[1]).toMatchObject({ kind: 'daemon-started', productId: 'acme-stdout' });
   });
 });
 
 describe('bin/audit-log: environment-resolved record (issue #392)', () => {
-  it('start records inherited by default; status/doctor/bundle read it back without paths', async () => {
+  it('start persists the daemon environment event; status/doctor/bundle read it back without paths', async () => {
     const storeDir = await tmpDir('byok-envrec-');
-    const { daemon } = fakeDaemon();
+    const { daemon, emit } = fakeDaemon();
     const lines: string[] = [];
     const controller = new AbortController();
-    const run = runStartCommand(config(storeDir), { daemon, log: (l) => lines.push(l), signal: controller.signal, onReady: () => controller.abort() });
+    const run = runStartCommand(config(storeDir), { daemon, log: (l) => lines.push(l), signal: controller.signal, onReady: () => { controller.abort(); } });
     await run;
-    expect(lines[0]).toBe('environment: inherited');
+    expect(lines.map(line => JSON.parse(line)).filter(record => record.kind === 'environment-resolved')).toEqual([expect.objectContaining({ source: 'inherited' })]);
     expect(await readLastEnvironmentRecord(storeDir)).toMatchObject({ status: { source: 'inherited' } });
     const status: string[] = [];
-    await runStatusCommand(config(storeDir), { adapters: [], connectControl: offline, log: (l) => status.push(l) });
+    await runStatusCommand(config(storeDir), { connectControl: offline, log: (l) => status.push(l) });
     expect(status.some((l) => /^environment: inherited at=\d{4}-/u.test(l))).toBe(true);
 
-    await appendEnvironmentRecord(storeDir, { ts: '2026-10-13T00:00:00.000Z', status: { source: 'login-shell', shell: 'zsh', durationMs: 530 } });
+    await appendAuditRecord(storeDir, { kind: 'environment-resolved', ts: '2026-10-13T00:00:00.000Z', source: 'login-shell', shell: 'zsh', durationMs: 530 });
     const doctor: string[] = [];
-    await runDoctorCommand(config(storeDir), { adapters: [], connectControl: offline, log: (l) => doctor.push(l) });
+    await runDoctorCommand(config(storeDir), { connectControl: offline, log: (l) => doctor.push(l) });
     expect(doctor).toContain('environment: login-shell shell=zsh durationMs=530 at=2026-10-13T00:00:00.000Z');
     const bundle = await createSupportBundle(config(storeDir), storeDir, { adapters: [], connectControl: offline });
     expect(bundle.environment).toEqual({ ts: '2026-10-13T00:00:00.000Z', status: { source: 'login-shell', shell: 'zsh', durationMs: 530 } });
     expect(JSON.stringify(bundle)).not.toContain(storeDir);
   });
 
-  it('is not a DaemonEvent, rejects open-ended values, and survives audit rotation', async () => {
+  it('rejects open-ended values, and survives audit rotation', async () => {
     const storeDir = await tmpDir('byok-envrec-rot-');
-    await appendEnvironmentRecord(storeDir, { ts: '2026-10-13T00:00:00.000Z', status: { source: 'unavailable', code: 'timeout' } });
-    expect(await readAuditEvents(storeDir)).toEqual([]);
+    await appendAuditRecord(storeDir, { kind: 'environment-resolved', ts: '2026-10-13T00:00:00.000Z', source: 'unavailable', code: 'timeout' });
+    expect(await readAuditRecords(storeDir)).toEqual([{ kind: 'environment-resolved', ts: '2026-10-13T00:00:00.000Z', source: 'unavailable', code: 'timeout' }]);
+    await expect(appendAuditRecord(storeDir, { kind: 'environment-resolved', ts: '2026-10-13T00:00:01.000Z', source: 'inherited', PATH: '/private/sentinel' } as unknown as import('../daemon/daemon-record').DaemonRecord)).rejects.toThrow('invalid environment-resolved record');
+    expect(await fs.readFile(auditLogPath(storeDir), 'utf8')).not.toContain('/private/sentinel');
     // A forged record with a path or an unknown code is ignored, not echoed.
     await fs.appendFile(auditLogPath(storeDir), `${JSON.stringify({ kind: 'environment-resolved', ts: '2026-10-13T00:00:01.000Z', source: 'unavailable', code: '/Users/me/.zshrc' })}\n`);
     await fs.appendFile(auditLogPath(storeDir), `${JSON.stringify({ kind: 'environment-resolved', ts: '2026-10-13T00:00:02.000Z', source: 'login-shell', shell: 'zsh', durationMs: 1, PATH: '/x' })}\n`);
     expect(await readLastEnvironmentRecord(storeDir)).toEqual({ ts: '2026-10-13T00:00:00.000Z', status: { source: 'unavailable', code: 'timeout' } });
 
-    // Push the log past the rotation cap with ordinary events; the environment record is kept.
+    const runtimes: DaemonEvent = { kind: 'runtimes-detected', ts: '2026-10-13T00:00:03.000Z', runtimes: [{ id: 'claude', outcome: 'not-found', present: false, steer: true, resume: true }] };
+    await appendAuditRecord(storeDir, runtimes);
+    // Push the log past the cap; both startup observations must remain available offline.
     const padding = 'x'.repeat(Math.ceil(MAX_AUDIT_LOG_BYTES / (AUDIT_LOG_TRIM_TARGET_LINES * 2)));
     const filler = Array.from({ length: AUDIT_LOG_TRIM_TARGET_LINES * 3 }, (_, i) =>
       JSON.stringify({ kind: 'lifecycle', ts: `2026-10-13T00:01:00.${String(i % 1000).padStart(3, '0')}Z`, lifecycle: { phase: 'running', connection: 'open' }, pad: padding }),
     );
     await fs.appendFile(auditLogPath(storeDir), `${filler.join('\n')}\n`);
-    await appendAuditEvent(storeDir, { kind: 'lifecycle', ts: '2026-10-13T00:02:00.000Z', lifecycle: { phase: 'running', connection: 'open' } });
+    await appendAuditRecord(storeDir, { kind: 'lifecycle', ts: '2026-10-13T00:02:00.000Z', lifecycle: { phase: 'running', connection: 'open' } });
     const size = (await fs.stat(auditLogPath(storeDir))).size;
     expect(size).toBeLessThan(MAX_AUDIT_LOG_BYTES);
+    expect((await readAuditRecords(storeDir)).find(event => event.kind === 'runtimes-detected')).toEqual(runtimes);
     expect(await readLastEnvironmentRecord(storeDir)).toEqual({ ts: '2026-10-13T00:00:00.000Z', status: { source: 'unavailable', code: 'timeout' } });
   });
 
-  it('start writes it through the event appender\'s chain: queued behind pending appends and a rotation, never lost', async () => {
+  it('goes through the same appender chain as every record: queued behind pending appends and a rotation, never lost', async () => {
     const storeDir = await tmpDir('byok-envrec-chain-');
     // Over the cap, so the next event append rotates the log.
     const padding = 'x'.repeat(Math.ceil(MAX_AUDIT_LOG_BYTES / (AUDIT_LOG_TRIM_TARGET_LINES * 2)));
@@ -177,8 +188,9 @@ describe('bin/audit-log: environment-resolved record (issue #392)', () => {
     await fs.writeFile(auditLogPath(storeDir), `${filler.join('\n')}\n`);
     const errors: unknown[] = [];
     const appender = createAuditAppender(storeDir, (err) => errors.push(err));
-    for (let i = 0; i < 20; i++) appender({ kind: 'lifecycle', ts: `2026-10-13T00:02:00.${String(i).padStart(3, '0')}Z`, lifecycle: { phase: 'running', connection: 'open' } });
-    await appender.appendEnvironment({ ts: '2026-10-13T00:03:00.000Z', status: { source: 'inherited' } });
+    for (let i = 0; i < 20; i++) appender.append({ kind: 'lifecycle', ts: `2026-10-13T00:02:00.${String(i).padStart(3, '0')}Z`, lifecycle: { phase: 'running', connection: 'open' } });
+    appender.append({ kind: 'environment-resolved', ts: '2026-10-13T00:03:00.000Z', source: 'inherited' });
+    await appender.flush();
 
     expect(errors).toEqual([]);
     const lines = (await fs.readFile(auditLogPath(storeDir), 'utf8')).trimEnd().split('\n');

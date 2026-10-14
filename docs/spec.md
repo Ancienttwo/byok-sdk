@@ -340,23 +340,95 @@ lookup, revoke and same-machine replacement share the durable device directory.
 Device IDs are globally tenant-unique. Presence, nonces and unredeemed pairing
 codes remain process-local; no runtime or TaskHandle is reconstructed.
 
-Schema v4 fences older writers and stores nullable claimed harness identity in
-the ownership CAS. Stop every writer and take a consistent backup before explicit
-adoption. `v1-to-v4` / `v2-to-v4` reject any task, message, agent-admission or
-advanced cursor history: old in-memory receipt facts cannot be fabricated.
-Eligible v1 adds an empty device directory; v2 retains devices. `v3-to-v4`
-preserves existing receipts, unclaimed offers and identified built-in claims,
+File-backed SQLite has one owner: the actual database handle sets
+`PRAGMA locking_mode=EXCLUSIVE` before WAL initialization. A second open waits
+for the existing 5-second busy grace, then reports `SqliteOwnershipError`
+(`SQLITE_DATABASE_OWNED`). The lock lasts until `await server.close()` or process
+exit, including SIGKILL; no sibling ownership file or WAL shared-memory file is
+needed. External readers and writers must wait for the owner to close. Symlinks
+use SQLite's file identity; database files with multiple hard links are refused
+before open because their WAL paths cannot share recovery authority.
+`close()` is the only server shutdown API; the synchronous `stop()` is removed.
+The upgrade must stop all older owners and external SQLite connections before
+starting this owner, with no parallel sibling-lock path. Schema and wire formats
+were unchanged by the owner-lock refactor; see the schema adoption below and the server README for migration.
+
+Schema v5 retains nullable claimed harness identity in the ownership CAS and
+adds the server-local wake table. Stop every writer and take a consistent backup
+before explicit adoption. `v1-to-v5` / `v2-to-v5` reject any task, message,
+agent-admission or advanced cursor history: old in-memory receipt facts cannot be
+fabricated. Eligible v1 adds an empty device directory; v2 retains devices.
+`v3-to-v5` preserves receipts, unclaimed offers and identified built-in claims,
 but rejects every owned row without a claimed runtime, including terminal rows:
 lost custom-harness identity cannot be distinguished from legacy identity-free
 built-in claims. No actual adapter identity is inferred from an offer or mutable
-inventory. Existing rows get a null harness identity. Tables and version advance
-atomically; failure preserves the old database. Never delete history to pass these
-checks. The public target-v3 selectors are replaced by target-v4 selectors without
-compatibility aliases; callers must update one-shot migration configuration.
+inventory. Those older rows get a null harness identity. `v4-to-v5` only adds
+wake authority and its indexes; existing device, receipt, mailbox and task rows
+are untouched. A pre-v5 file already containing wake authority is rejected.
+Tables and version advance atomically; failure preserves the old database.
+Never delete history to pass these checks. Target-v4 selectors are deleted and
+replaced with target-v5 selectors, without compatibility aliases. Callers must
+update one-shot migration configuration. Old builds refuse schema 5; rollback
+requires restoring the backup taken before adoption.
 Receipts use tenant/key first-write-wins and have no TTL/deletion path; mailbox
 retention cannot remove the delivered/immutable/terminal facts. Receipt columns
 and composite primary key are validated on open. Capacity exhaustion is an
 error; deleting identity fences is not a quota strategy.
+
+### Embedded wake queue
+
+Only `@byok-sdk/server` provides `wake: { consume(wake, signal) }` and
+`server.wakes.schedule/cancel/pending` (routine K2, ADR-038 decisions 5/6).
+Hosted cloud ports have no routine timer. Host-owned cron/periodic rules choose
+the next epoch-millisecond `availableAt`; SDK wakes are one-shot. Memory queues
+are process-local and lose all wakes at exit; routines requiring restart
+recovery must use SQLite. Wake rows share its EXCLUSIVE owner and coordinator.
+
+`schedule({ dedupKey, availableAt, payload? })` returns `{ wakeId, accepted }`.
+The key contains 1–256 Unicode characters, `availableAt` is a nonnegative safe
+integer no more than 366 days in the future, and payload is an opaque string of
+at most 4 KiB UTF-8. Past times are immediately due. Invalid input throws
+`WakeInputError` with a closed code. An exact key/time/payload replay returns the
+original ID and `accepted: false`, including completed keys retained for seven
+days. Changed content throws `WakeConflictError`. No hook means schedule throws
+`WakeHookMissingError` without writing; reopening SQLite with queued wakes and
+no hook also fails inside the open transaction and releases ownership.
+
+One unref'd timer waits at most 60 seconds, then compares wall clock, so a
+forward clock jump or simulated sleep does not strand the earliest wake. An
+empty queue has no timer. Due wakes are delivered serially in `(next due time,
+wakeId)` order. The committed delivery count increments before calling the
+hook outside every storage/serialization tail; a hook can await schedule/cancel.
+`DueWake` preserves original availableAt and carries deliveredAt, delivery,
+wakeId, dedupKey and payload. pending returns queued/delivering records ordered
+by `(availableAt, wakeId)`, with delivery count and optional retryAt/lastError.
+
+A resolved hook marks done. Rejection records at most 1 KiB of UTF-8 error text,
+keeps availableAt unchanged, and retries after 60 seconds without an attempt
+limit. A delivery has a 60-second deadline: invalidate its token **before**
+aborting its signal, record the deadline rejection and continue the due batch.
+Later settlement of that token cannot change state. An uncooperative hook can
+overlap the same wake's redelivery; at-least-once and overlapping delivery require
+Host durable occurrence dedup. The Host hook records its decision, schedules the
+next wake and submits execution, then resolves; it must not wait for execution
+to finish. No late wake expires or is silently discarded; Host decides whether
+to skip work and resolves after recording that decision.
+
+cancel deletes only queued wakes. An in-flight wake returns false and is not
+interrupted; if that delivery rejects or times out, it still retries. Host must
+cancel again once queued, or record abandonment in the hook and resolve.
+`close()` synchronously rejects new wake calls with `WakeClosedError`, clears
+the timer and invalidates then aborts the current token. It drains accepted
+storage operations, never waits for the hook, then closes the composition.
+An unfinished row remains queued with its committed delivery number; restart
+redelivers with the next number, including after SIGKILL. delivering is an
+in-memory projection, not a second persisted state.
+
+The internal WakeStore collector removes only done rows strictly older than
+seven days, up to its positive limit per call. Server invokes it at startup,
+on schedule and after each delivery, bounded to 100 rows per call. No periodic
+idle collector or independent retention policy is added; #412 maintenance can
+call the same port. Real OS-sleep timing is not measured by the fake-clock test.
 
 Hosts can pre-persist one execution identity and pass caller taskId with an
 explicit device to ordinary/fresh-Agent dispatch. Concurrent same-id calls are
@@ -388,6 +460,16 @@ the optional unexpired presence facts (release, protocol versions, runtime and
 auth observations). Hosts therefore consume one projection rather than
 joining device and presence lists.
 
+The reference server uses this same presence store as its sole observation
+rule. Its TTL is `longPollHoldMs + 15_000` by default (65 seconds), and must
+outlast one held poll. Authenticated hello, accepted envelopes, poll starts
+and heartbeat publications renew the same lease. `machines.list()` projects
+`connected` and live discovery facts plus durable identity and harness discovery. All dispatches
+require an explicit `deviceId`; registered offline targets receive queued work,
+while unknown/revoked legacy targets fail with `device_not_found`. Presence
+and advertised toolset inventories never gate dispatch; durable capabilities
+and the daemon's local acceptance remain the authorities.
+
 This is an SDK-owned observation projection, not a readiness claim or an
 execution, authorization, capability, scheduler, load, or admission gate.
 Hosts consume the aggregate; they must not re-join `listDevices()` and
@@ -411,16 +493,21 @@ the run as `halted`, whenever it is found; `start()` throws `DaemonHaltError`
 for one it finds locally. `store_owned` and `config_invalid` are found before
 the process owns the store and are thrown only, never reported through
 `lifecycle`. Every other start failure is a crash: it is thrown as is and
-recorded as a `lifecycle` operational-health failure.
+recorded as a `lifecycle` operational-health failure. An unexpected error
+after `start()` resolved (an observer callback or the reconnect loop throwing)
+is a crash too: the connection stops, the same health failure is recorded,
+and `lifecycle` becomes `crashed` (it stays so, also after `stop()`, until the
+next `start()`); it is never an unhandled rejection.
 
 `byok-agent start` maps the run's end to its exit code: 0 for a normal stop,
-78 for a halt, 1 for a crash. Under `--service` a halt exits 0, the one status
+78 for a halt, 1 for a crash (a `crashed` lifecycle included). Under `--service` a halt exits 0, the one status
 launchd, systemd and WinSW all leave stopped; a crash still exits 1 and is
 restarted by the OS supervisor, which is the only crash retry. `byok-agent
 install` writes `--service` into the launchd plist, systemd unit and WinSW
 XML. The last `lifecycle` event is kept in `audit.jsonl` (also across
 rotation); offline `status`, `service-status` and the `doctor` `lifecycle`
-check read it, and a halted daemon fails that check with its remedy.
+check read it, and a halted or crashed daemon fails that check with its
+remedy.
 
 ## Runtime operation authority
 
@@ -434,8 +521,8 @@ metadata are rejected. There is no compatibility translation.
 
 `refused` requires exactly `kind` and `reason`. Its only reason is
 `app_server_unavailable`. No other arm accepts `reason`; arbitrary error text
-is never parsed into a reason. Daemon registration, task selection and local
-CLI/doctor call `detect(signal?)` on the actual adapter. Detection never
+is never parsed into a reason. Daemon registration, task selection and explicit local
+`runtimes`/offline doctor call `detect(signal?)` on the actual adapter. Detection never
 chooses the task lane; `resources.kind` retains that authority. The SDK does
 not measure the installed runtime.
 
@@ -464,7 +551,11 @@ malformed `auth.json` or `settings.json` observes `false`. A missing
 credential. The probe inspects only presence and shape; it never returns, logs
 or retains a credential value.
 
-Fresh local `runtimes` and `status` show failure kinds; `doctor` carries the same
+Explicit local `runtimes` shows fresh failure kinds. Online `status`, `doctor`
+and support bundles use the daemon's startup observations without local probes;
+offline `status` shows the last audited observations with a timestamp, or unknown.
+Offline `doctor` and support bundles label their explicit probes `local-shell`.
+`doctor` carries the same
 closed outcome and finite refusal reason in JSON and counts them in text. Its existing
 any-present pass/warn rule remains unchanged. Display `present` is a deterministic
 projection of `kind === 'available'`, never independent adapter authority.
@@ -476,8 +567,39 @@ contract.
 Daemon runtime registration and task selection validate the same shape and use
 only `available` where they previously consumed presence. No failure-kind field
 is added to wire presence or task envelopes, and no decline/retry/permission
-policy is derived from these diagnostic categories. This contract does not add
-caching, periodic probing, minimum versions, repair commands or self-update.
+policy is derived from these diagnostic categories. Startup detection is cached per daemon run; task admission still observes the
+adapter independently. No periodic probing, minimum versions, repair commands
+or self-update are added.
+
+`DaemonStatus` and control `status` carry `runtimes: RuntimeObservation[]`,
+including unavailable outcomes, plus the closed `environment` projection.
+`environment-resolved` is emitted once after ownership is acquired and before
+runtime detection; audit uses the same content-free flat shape as #409.
+For the next minor, a newer CLI reports unknown when an older daemon omits
+these fields. It never translates `runtimeIds` into availability or executes
+a local probe to fill the missing daemon facts.
+
+### Durable daemon records
+
+`byok-agent start` projects observed events once into `DaemonRecord` and
+serializes each record once. The returned JSON line feeds both stdout and
+`audit.jsonl`; each corresponding line is byte-identical. Records contain
+lifecycle facts, IDs, closed codes, configured identifiers, byte sizes, counts
+and timestamps. Progress is aggregated per turn, with an unfinished turn flushed
+before its terminal record or on shutdown. Artifact names, runtime version text,
+approval/completion summaries and free-form reasons never enter these sinks.
+Configured runtime advisory identifiers remain, and offline observations show
+their timestamp. Full events remain on the authenticated control socket;
+`tasks --follow` requires that socket. Support-bundle kinds come from
+`DAEMON_RECORD_KINDS`.
+
+Start's durable stderr diagnostics contain closed categories and reason byte
+counts, never raw adapter/library errors or stacks. SDK-authored actionable
+configuration templates retain their configured path and repair guidance;
+parser errors cannot inject config excerpts into those templates. The library
+still rejects with the original error object, and the CLI retains crash exit 1,
+halt exit 78 (0 under `--service`) and the halt remedy. Existing service log
+files are not rewritten or removed by this change.
 
 ### Explicit local device diagnostics and metadata repair
 
@@ -2098,7 +2220,7 @@ An explicitly selected harness must match the immutable offer receipt. Old peers
 without the capability are refused; no identity is inferred from display names
 or provider/model fields. Business scheduling and device choice stay with the
 host. Deploy migration `0021_custom_harness_identity.sql` for PostgreSQL before
-this server code; embedded SQLite requires schema v4 and its explicit adoption
+this server code; embedded SQLite requires schema v5 and its explicit adoption
 rules above.
 
 ### Terminal boundary acceptance follow-up (#163 / #167)
@@ -2203,6 +2325,9 @@ A strict fresh Agent task may select `terminalProjection: { mode: 'result-docume
 
 ### Recurring Host composition requirements
 
+Device-local Hosts can use the embedded wake queue for the one-shot clock;
+periodic rules, occurrence dedup and execution settlement remain Host-owned.
+
 The [Conversation-turn Fresh MVP PRD](researches/2026-09-09_conversation-turn-fresh-mvp-prd.md)
 defines the approved Host composition below this SDK product authority. Recurring
 fresh and explicit session continuity remain selectable parallel contracts;
@@ -2245,7 +2370,7 @@ Prepared child environment is rebuilt through an explicit EnvironmentBuilder all
 
 A1'' compile uses only a placeholder key and injected capture-and-throw fetch against the actual baseUrl. The official OpenAI client reads exactly OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET, OPENAI_LOG and OPENAI_CUSTOM_HEADERS. The approved purity contract is D independence plus this exact read set, not zero reads; an upgrade changing the set requires a fresh ruling. Poisoning these variables must leave D unchanged. OPENAI_LOG may cause a local request log during compile: the device owner deliberately enabled this debug setting; the accepted side effect remains local, does not change D and is not sent externally. No global env or transport monkey-patch is permitted.
 
-Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.2.0 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.59.1 source at `packages/client/vendor/oar/bb98cbc/`, from upstream commit `bb98cbc1e383ea7192da0c87ce777d799669a7a9`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
+Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.2.0 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.62.1 source at `packages/client/vendor/oar/bf55fd6/`, from upstream commit `bf55fd68f19749cab8ed2d5a234238af7adbd4b0`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
 
 pi-durable 1.0.1 ruling (2026-10-04, approved by Aimpact): admitted at exactly 1.0.1. Its shipped code is byte-identical to 1.0.0 (version-only change), and the closure was freshly attested at closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`.
 

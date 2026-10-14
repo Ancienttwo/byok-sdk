@@ -1,5 +1,4 @@
-import type { RuntimeDetectResult, RuntimeDetectionRefusalReason } from '../types';
-import { observeRuntimeDetection } from '../runtime-detection';
+import { observeRuntimeDetection, projectRuntimeObservation, type RuntimeObservation } from '../runtime-detection';
 import { PiAdapter, ClaudeAdapter, CodexAdapter, type RuntimeAdapter } from '../index';
 
 /**
@@ -14,7 +13,6 @@ import { PiAdapter, ClaudeAdapter, CodexAdapter, type RuntimeAdapter } from '../
 const ALL_RUNTIME_IDS = ['pi', 'claude', 'codex'] as const;
 export const RUNTIME_PROBE_TIMEOUT_MS = 5_000;
 const MAX_RUNTIME_ID_CHARS = 128;
-const MAX_RUNTIME_VERSION_CHARS = 256;
 
 function boundedSingleLine(value: string, maxChars: number): string {
   return value.replace(/[\r\n\t]/g, ' ').slice(0, maxChars);
@@ -37,7 +35,7 @@ async function detectWithTimeout(adapter: RuntimeAdapter, timeoutMs: number): Re
   }
 }
 
-/** The bundled adapter set `byok-agent status`/`byok-agent runtimes` probe by default — same unset-vs-set allowlist contract as `createDaemon` itself. */
+/** The bundled adapter set explicit runtimes and offline diagnostics probe by default — same unset-vs-set allowlist contract as `createDaemon` itself. */
 export function defaultRuntimeAdapters(runtimeAllowlist: string[] | undefined): RuntimeAdapter[] {
   const ids = runtimeAllowlist ? ALL_RUNTIME_IDS.filter((id) => runtimeAllowlist.includes(id)) : ALL_RUNTIME_IDS;
   return ids.map((id) => {
@@ -53,29 +51,6 @@ export function defaultRuntimeAdapters(runtimeAllowlist: string[] | undefined): 
 }
 
 /**
- * What `byok-agent status`/`byok-agent runtimes` show per runtime — a
- * flattened, display-ready merge of `RuntimeDetectResult` and
- * `RuntimeCapabilities` (see `../types.ts`). Always probed fresh (this
- * module never reads from the daemon or the audit log) — see
- * `byok-agent.ts`'s header comment for why a live, standalone probe is the
- * honest choice for "what's on this machine right now" instead of a
- * historical snapshot.
- */
-export interface ProbedRuntime {
-  id: string;
-  /** Deterministic projection of outcome, never adapter-authored. */
-  present: boolean;
-  outcome: RuntimeDetectResult['kind'];
-  reason?: RuntimeDetectionRefusalReason;
-  version?: string;
-  /** Set when the runtime is not the version the SDK was qualified against; a warning only. */
-  qualifiedVersion?: string;
-  authPresent?: boolean;
-  steer: boolean;
-  resume: boolean;
-}
-
-/**
  * Fresh, parallel local observations. A custom adapter timeout is an observation
  * deadline only: detect() has no cancellation contract. Never expose arbitrary
  * adapter errors or interpret an old/malformed result as available.
@@ -83,11 +58,11 @@ export interface ProbedRuntime {
 export async function probeRuntimes(
   adapters: readonly RuntimeAdapter[],
   options: { timeoutMs?: number } = {},
-): Promise<ProbedRuntime[]> {
+): Promise<RuntimeObservation[]> {
   const timeoutMs = options.timeoutMs ?? RUNTIME_PROBE_TIMEOUT_MS;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new Error('runtime probe timeout must be a positive integer');
   return Promise.all(
-    adapters.map(async (adapter): Promise<ProbedRuntime> => {
+    adapters.map(async (adapter): Promise<RuntimeObservation> => {
       let id = 'unavailable';
       let steer = false;
       let resume = false;
@@ -97,21 +72,7 @@ export async function probeRuntimes(
         steer = caps.steer === true;
         resume = caps.resume === true;
         const detected = await detectWithTimeout(adapter, timeoutMs);
-        return {
-          id,
-          present: detected.kind === 'available',
-          outcome: detected.kind,
-          ...(detected.kind === 'refused' ? { reason: detected.reason } : {}),
-          ...(detected.kind !== 'available' || detected.version === undefined
-            ? {}
-            : { version: boundedSingleLine(detected.version, MAX_RUNTIME_VERSION_CHARS) }),
-          ...(detected.kind === 'available' && detected.advisory !== undefined
-            ? { qualifiedVersion: boundedSingleLine(detected.advisory.qualifiedVersion, MAX_RUNTIME_VERSION_CHARS) }
-            : {}),
-          ...(detected.kind === 'available' && typeof detected.authPresent === 'boolean' ? { authPresent: detected.authPresent } : {}),
-          steer,
-          resume,
-        };
+        return projectRuntimeObservation(adapter.descriptor, detected);
       } catch (error) {
         return { id, present: false, outcome: error instanceof RuntimeProbeTimeout ? 'timeout' : 'probe-failed', steer, resume };
       }

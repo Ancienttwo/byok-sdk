@@ -133,6 +133,25 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres offer delivery composition', () => {
         },
       });
 
+      // Offers require durable registration, independently of presence (#413).
+      await stores.devices.register(OFFER_TENANT, {
+        deviceId: 'device-offer-sequence',
+        productId: 'offer-sequence',
+        deviceName: 'offer sequence fixture',
+        devicePublicKey: 'fixture-public-key',
+        proofKeyId: 'fixture-proof',
+        proofKeyEpoch: 1,
+      });
+
+      // A limited append is admitted against the tenant entitlement (#411).
+      await core.quota.writeEntitlement(OFFER_TENANT, {
+        version: 1n,
+        hardLimitBytes: 1_000_000_000n,
+        maxObjectBytes: 100_000_000n,
+        maxInlineBytes: 1_000_000n,
+        mailboxLimitBytes: 100_000_000n,
+        retentionPolicyId: 'test',
+      });
       const first = await cloud.enqueueOffer(OFFER_TENANT, 'device-offer-sequence', {
         payload: { instruction: 'prove the sequence boundary' },
       });

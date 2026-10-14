@@ -7,7 +7,7 @@ import { createDaemonWithAdapters, type Daemon, type AgentEgressPolicy } from '@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GoalBtwHost, GOAL_RESULT_CONTRACT, BTW_RESULT_CONTRACT, extractBotResult, type BotTarget } from './goal-btw';
 import { SqliteGoalBtwStore, HostRevisionConflict } from './goal-btw-store';
-import { BotStubAdapter } from './goal-btw.test-support';
+import { BotStubAdapter, waitForReady } from './goal-btw.test-support';
 
 const policy: AgentEgressPolicy = {
   policyRevision: 'example-bot-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
@@ -47,7 +47,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
   }
   beforeEach(async () => {
     root = await mkdtemp(path.join(tmpdir(), 'gb-')); now = 1_000_000; extraStores = [];
-    byok = createByokServer({ productId: 'goal-btw-test', longPollHoldMs: 100 });
+    byok = createByokServer({ productId: 'goal-btw-test' });
     const listening = await new Promise<{ url: string; close: () => Promise<void> }>(resolve => {
       const http = serve({ fetch: byok.hono.fetch, port: 0, hostname: '127.0.0.1' }, info => resolve({
         url: `http://127.0.0.1:${info.port}`, close: () => new Promise<void>(done => { http.close(() => done()); if ('closeAllConnections' in http) http.closeAllConnections(); }),
@@ -61,13 +61,12 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
     }, [adapter], { longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
     const pair = await byok.pairing.createPairingCode({ productId: 'goal-btw-test' });
     deviceId = (await daemon.pair(pair.code)).deviceId;
-    await daemon.start();
-    await vi.waitFor(async () => expect((await byok.machines.list()).find(m => m.deviceId === deviceId)?.connected).toBe(true), { timeout: 5000 });
+    await daemon.start(); await waitForReady(daemon);
     dbPath = path.join(root, 'host.sqlite'); store = new SqliteGoalBtwStore(dbPath, 'goal-btw-test');
     host = new GoalBtwHost(byok, store, () => now, (_goal, verdict) => accepted(verdict));
   });
   afterEach(async () => {
-    await daemon?.stop(); byok?.stop(); await closeHttp?.(); store?.close(); extraStores?.forEach(s => s.close());
+    await daemon?.stop(); await byok?.close(); await closeHttp?.(); store?.close(); extraStores?.forEach(s => s.close());
     if (root) await rm(root, { recursive: true, force: true });
   });
 

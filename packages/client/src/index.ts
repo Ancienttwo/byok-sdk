@@ -517,6 +517,11 @@ export type { BlobClientOptions, BlobRequestAbortReason, BlobRequestOptions, Blo
 // daemon. See `daemon/observer.ts`.
 export { DaemonObserver } from './daemon/observer';
 export type { DaemonEvent, DaemonEventKind, DaemonEventListener, DaemonTaskInfo, Unsubscribe } from './daemon/observer';
+// Issue #395: the content-free projection every durable sink writes (`start`
+// stdout and `audit.jsonl`). `DaemonEvent` carries content and is only for
+// authenticated live views. See `daemon/daemon-record.ts`.
+export { createDaemonRecordProjector, DAEMON_RECORD_KINDS, isDaemonRecordKind } from './daemon/daemon-record';
+export type { DaemonRecord, DaemonRecordKind, DaemonRecordProjector, DaemonTurnRecord } from './daemon/daemon-record';
 
 // M3-4: OS service lifecycle (launchd/systemd/WinSW) — see `lifecycle/create-service-lifecycle.ts`.
 export { createServiceLifecycle, UnsupportedServicePlatformError } from './lifecycle/create-service-lifecycle';
@@ -535,7 +540,8 @@ export { generateSystemdUnit } from './lifecycle/systemd';
 export { generateWinswXml } from './lifecycle/winsw';
 // Issue #392: one-time login-shell environment capture for service-launched (or Dock-launched) hosts.
 export { applyLoginShellEnvironment, serviceEnvironmentStatus } from './lifecycle/service-environment';
-export type { ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './lifecycle/service-environment';
+export type { RuntimeObservation } from './runtime-detection';
+export type { ServiceEnvironmentRecord, ServiceEnvironmentStatus, ServiceEnvironmentUnavailableCode } from './lifecycle/service-environment';
 
 // Finding F7: the storeDir-hardening chokepoint (`DeviceStore.save()`/
 // `control-server.ts`'s `startControlServer` both funnel through this) —

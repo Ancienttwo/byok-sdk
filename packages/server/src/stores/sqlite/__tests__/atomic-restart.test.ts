@@ -1,16 +1,19 @@
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import {
   contentHash,
   createMutableClock,
+  isCoreError,
   tenantId,
   type StorageReservation,
+  type TenantStorageEntitlementInput,
 } from '@byok-sdk/core';
 import { createWebCrypto } from '@byok-sdk/cloud';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createSqliteEmbeddedStores } from '..';
-import { isSqliteAvailable, openSqliteDatabase, SqliteSchemaError } from '../../../sqlite-support';
+import { isSqliteAvailable, SqliteSchemaError } from '../../../sqlite-support';
 
 const describeSqlite = isSqliteAvailable() ? describe : describe.skip;
 const TENANT = tenantId('tenant-restart');
@@ -33,10 +36,12 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
   it('rolls back both cancellation sides when the task update fails', async () => {
     const path = databasePath();
     const clock = createMutableClock();
-    const composition = createSqliteEmbeddedStores({ path }, { clock, crypto: createWebCrypto() });
+    const crypto = createWebCrypto();
+    let composition = createSqliteEmbeddedStores({ path }, { clock, crypto });
     await composition.cloud.tasks.open(TENANT, { taskId: 'task-rollback', deviceId: 'device-1' });
 
-    const fault = openSqliteDatabase(path);
+    await composition.close();
+    const fault = new DatabaseSync(path);
     fault.exec(`
       CREATE TRIGGER fail_cancel_update
       BEFORE UPDATE OF cancellation_requested_at ON task_attempt
@@ -45,6 +50,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
       END;
     `);
     fault.close();
+    composition = createSqliteEmbeddedStores({ path }, { clock, crypto });
 
     await expect(
       composition.cloud.cancellations.request(TENANT, {
@@ -70,7 +76,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
 
   it('fails closed on an unsupported schema version', () => {
     const path = databasePath();
-    const db = openSqliteDatabase(path);
+    const db = new DatabaseSync(path);
     db.exec('CREATE TABLE byok_sqlite_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
     db.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('schema_version', '999')").run();
     db.close();
@@ -82,7 +88,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
     expect(open).toThrow('Unsupported BYOK SQLite schema version');
     expect(open).toThrow(SqliteSchemaError);
     expect(open).toThrow(expect.objectContaining({
-      code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '999', requiredVersion: '4',
+      code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '999', requiredVersion: '5',
     }));
   });
 
@@ -171,6 +177,52 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
     const content = await reopened.blobContentProxy.readContent(grant.blobId);
     expect(content?.ok).toBe(true);
     if (content?.ok) expect(content.content.data).toEqual(bytes);
+    await reopened.close();
+  });
+
+  it('keeps enforcing the mailbox limit after reopen, from the durable rows (#411)', async () => {
+    const path = databasePath();
+    const clock = createMutableClock();
+    const crypto = createWebCrypto();
+    // Quota is process memory in this composition; the host re-issues its
+    // entitlement on every start, exactly as the embedded server does.
+    const entitlement: TenantStorageEntitlementInput = {
+      version: 1n,
+      hardLimitBytes: 1_000n,
+      maxObjectBytes: 1_000n,
+      maxInlineBytes: 1_000n,
+      mailboxLimitBytes: 60n,
+      retentionPolicyId: 'restart',
+    };
+    const row = (messageId: string, byteSize: number) => ({
+      deviceId: 'device-1',
+      messageId,
+      admission: 'limited' as const,
+      // A pending row must be a protocol envelope to survive reopen; pad it to
+      // an exact byte size (`{"v":2,"p":""}` is 14 bytes).
+      materialize: () => ({
+        body: JSON.stringify({ v: 2, p: 'x'.repeat(byteSize - 14) }),
+        bodyHash: contentHash(`sha256:${'c'.repeat(64)}`),
+        byteSize: BigInt(byteSize),
+      }),
+    });
+
+    const first = createSqliteEmbeddedStores({ path }, { clock, crypto });
+    await first.core.quota.writeEntitlement(TENANT, entitlement);
+    await first.core.mailbox.append(TENANT, row('before-restart', 40));
+    await first.close();
+
+    const reopened = createSqliteEmbeddedStores({ path }, { clock, crypto });
+    await reopened.core.quota.writeEntitlement(TENANT, entitlement);
+    await expect(reopened.core.mailbox.readUsage(TENANT)).resolves.toEqual({ bytes: 40n });
+    const refused = await reopened.core.mailbox
+      .append(TENANT, row('after-restart-over', 21))
+      .then(() => undefined, (caught: unknown) => caught);
+    expect(isCoreError(refused, 'storage_quota_exceeded')).toBe(true);
+    await expect(
+      reopened.core.mailbox.append(TENANT, row('after-restart-fits', 20)),
+    ).resolves.toMatchObject({ seq: 2 });
+    await expect(reopened.core.mailbox.readUsage(TENANT)).resolves.toEqual({ bytes: 60n });
     await reopened.close();
   });
 });

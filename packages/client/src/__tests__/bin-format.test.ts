@@ -10,12 +10,10 @@ import {
   formatTaskLine,
   formatTaskListLines,
   formatToolsetsReloadReceiptLines,
-  formatTurnProgressLine,
-  StartStdoutProjector,
   type StatusView,
 } from '../bin/format';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
-import type { ProbedRuntime } from '../bin/runtime-probe';
+import type { RuntimeObservation } from '../runtime-detection';
 
 // eslint-disable-next-line no-control-regex
 const ANSI_ESCAPE_RE = /\x1b\[/;
@@ -63,7 +61,7 @@ describe('bin/format: formatDaemonEventLine', () => {
       { kind: 'lifecycle', ts: 'T', lifecycle: { phase: 'running', connection: 'open' } },
       { kind: 'paired', ts: 'T', deviceId: 'dev-1' },
       { kind: 'unpaired', ts: 'T' },
-      { kind: 'runtimes-detected', ts: 'T', runtimes: [{ id: 'pi' }, { id: 'claude' }] },
+      { kind: 'runtimes-detected', ts: 'T', runtimes: ['pi', 'claude'].map(id => ({ id, present: true, outcome: 'available' as const, steer: true, resume: true })) },
       { kind: 'shutdown-complete', ts: 'T', reason: 'operator' },
       { kind: 'shutdown-complete', ts: 'T', reason: 'operator', undeliveredOutboxCount: 0 },
       { kind: 'shutdown-complete', ts: 'T', reason: 'operator', undeliveredOutboxCount: 2 },
@@ -103,36 +101,6 @@ describe('bin/format: formatDaemonEventLine', () => {
       '[T] shutdown-complete reason="operator" undeliveredOutboxCount=2',
       '[T] git-workspace taskId=t1 workspaceId=opaque-w1 phase=active headChanged=true commits=2 dirty=1/0/3/0 errorCategory=git-command-failed',
     ]);
-  });
-
-  describe('finding F8: redactApprovalSummary option', () => {
-    it('redacts an awaiting-approval summary to a byte-count placeholder when set, leaving taskId/approvalId intact', () => {
-      const event: DaemonEvent = { kind: 'awaiting-approval', ts: 'T', taskId: 't1', approvalId: 'appr-1', summary: 'Bash: rm -rf /tmp/secret' };
-      const line = formatDaemonEventLine(event, { redactApprovalSummary: true });
-      expect(line).toBe(`[T] awaiting-approval taskId=t1 approvalId=appr-1 summary="[redacted: ${Buffer.byteLength('Bash: rm -rf /tmp/secret', 'utf8')} bytes]"`);
-      expect(line).not.toContain('rm -rf');
-    });
-
-    it('defaults to full fidelity (option omitted) — unchanged from before this finding', () => {
-      const event: DaemonEvent = { kind: 'awaiting-approval', ts: 'T', taskId: 't1', summary: 'needs a human' };
-      expect(formatDaemonEventLine(event)).toBe('[T] awaiting-approval taskId=t1 summary="needs a human"');
-    });
-
-    it('explicit redactApprovalSummary:false also keeps full fidelity', () => {
-      const event: DaemonEvent = { kind: 'awaiting-approval', ts: 'T', taskId: 't1', summary: 'needs a human' };
-      expect(formatDaemonEventLine(event, { redactApprovalSummary: false })).toBe('[T] awaiting-approval taskId=t1 summary="needs a human"');
-    });
-
-    it('the option only ever affects awaiting-approval — every other kind renders identically with or without it', () => {
-      const events: DaemonEvent[] = [
-        { kind: 'completed', ts: 'T', taskId: 't1', summary: 'done', sessionRef: 'sess-1' },
-        { kind: 'failed', ts: 'T', taskId: 't1', reason: 'boom', retryable: false },
-        { kind: 'cancelled', ts: 'T', taskId: 't1', reason: 'user cancelled' },
-      ];
-      for (const event of events) {
-        expect(formatDaemonEventLine(event, { redactApprovalSummary: true })).toBe(formatDaemonEventLine(event));
-      }
-    });
   });
 
   it('formats Git workspace progress without exposing sensitive metadata or free-form errors', () => {
@@ -205,6 +173,12 @@ describe('bin/format: formatTaskLine / formatTaskListLines', () => {
       git: { workspaceId: 'opaque-w1', phase: 'failed' },
     })).toBe('t-git Failed git=failed updatedAt=T');
   });
+  it('renders a recorded task (from the audit log) with its summary size, never text', () => {
+    expect(formatTaskLine({ taskId: 't1', state: 'Complete', updatedAt: 'T', sessionRef: 's', summaryBytes: 42 })).toBe(
+      't1 Complete updatedAt=T sessionRef=s summaryBytes=42',
+    );
+  });
+
   it('formatTaskListLines shows a placeholder line for an empty list', () => {
     expect(formatTaskListLines([])).toEqual(['(no tasks observed yet)']);
   });
@@ -225,12 +199,12 @@ describe('bin/format: formatRuntimeLines', () => {
   });
 
   it('renders an absent runtime minimally', () => {
-    const runtimes: ProbedRuntime[] = [{ id: 'claude', present: false, outcome: 'not-found', steer: true, resume: true }];
+    const runtimes: RuntimeObservation[] = [{ id: 'claude', present: false, outcome: 'not-found', steer: true, resume: true }];
     expect(formatRuntimeLines(runtimes)).toEqual(['claude: not-found']);
   });
 
   it('renders a present runtime with full detail', () => {
-    const runtimes: ProbedRuntime[] = [
+    const runtimes: RuntimeObservation[] = [
       { id: 'pi', present: true, outcome: 'available', version: '1.2.3', authPresent: true, steer: true, resume: true },
     ];
     expect(formatRuntimeLines(runtimes)).toEqual([
@@ -239,7 +213,7 @@ describe('bin/format: formatRuntimeLines', () => {
   });
 
   it('renders an unqualified-version warning', () => {
-    const runtimes: ProbedRuntime[] = [
+    const runtimes: RuntimeObservation[] = [
       { id: 'codex', present: true, outcome: 'available', version: 'codex-cli 0.161.0', qualifiedVersion: '0.160.0', steer: true, resume: true },
     ];
     expect(formatRuntimeLines(runtimes)).toEqual([
@@ -248,7 +222,7 @@ describe('bin/format: formatRuntimeLines', () => {
   });
 
   it('renders (none) for capabilities when they are empty', () => {
-    const runtimes: ProbedRuntime[] = [{ id: 'codex', present: true, outcome: 'available', steer: false, resume: false }];
+    const runtimes: RuntimeObservation[] = [{ id: 'codex', present: true, outcome: 'available', steer: false, resume: false }];
     expect(formatRuntimeLines(runtimes)).toEqual(['codex: present capabilities=(none)']);
   });
 });
@@ -263,7 +237,7 @@ describe('bin/format: formatStatusLines', () => {
       runtimes: [],
       taskCounts: { total: 0, Offered: 0, Claimed: 0, Running: 0, AwaitApproval: 0, Complete: 0, Failed: 0, Cancelled: 0 },
       auditLogPath: '/store/audit.jsonl',
-      auditLogLineCount: 0,
+      auditLogRecordCount: 0,
       ...overrides,
     };
   }
@@ -312,13 +286,14 @@ describe('bin/format: formatStatusLines', () => {
   it('summarizes runtimes as presence and failure outcomes', () => {
     const lines = formatStatusLines(
       baseView({
+        runtimesDetectedAt: 'T',
         runtimes: [
           { id: 'pi', present: true, outcome: 'available', steer: true, resume: true },
           { id: 'claude', present: false, outcome: 'not-found', steer: true, resume: true },
         ],
       }),
     );
-    expect(lines).toContain('runtimes: pi=present claude=not-found');
+    expect(lines).toContain('runtimes: last-known pi=available claude=not-found at=T');
   });
 
   it('renders full task counts', () => {
@@ -332,9 +307,9 @@ describe('bin/format: formatStatusLines', () => {
     );
   });
 
-  it('renders the audit log path + event count, singular vs plural', () => {
-    expect(formatStatusLines(baseView({ auditLogLineCount: 1 }))).toContain('audit-log: /store/audit.jsonl (1 event)');
-    expect(formatStatusLines(baseView({ auditLogLineCount: 2 }))).toContain('audit-log: /store/audit.jsonl (2 events)');
+  it('renders the audit log path + record count, singular vs plural', () => {
+    expect(formatStatusLines(baseView({ auditLogRecordCount: 1 }))).toContain('audit-log: /store/audit.jsonl (1 record)');
+    expect(formatStatusLines(baseView({ auditLogRecordCount: 2 }))).toContain('audit-log: /store/audit.jsonl (2 records)');
   });
 
   it('never emits ANSI escape sequences', () => {
@@ -360,7 +335,8 @@ describe('bin/format: formatLiveStatusLines', () => {
       paired: true,
       lifecycle: { phase: 'running', connection: 'open' },
       activeTasks: [],
-      runtimeIds: ['pi'],
+      runtimes: [{ id: 'pi', present: true, outcome: 'available', steer: true, resume: true }],
+      environment: { source: 'inherited' },
       queueWatermarks: [],
       approvals: [],
       approvalsPending: 0,
@@ -378,11 +354,23 @@ describe('bin/format: formatLiveStatusLines', () => {
   }
 
   it('renders pid/uptime/lifecycle, paired+deviceId, and runtimes on their own lines', () => {
-    const lines = formatLiveStatusLines(baseLive({ deviceId: 'dev-1', runtimeIds: ['pi', 'claude'] }));
+    const lines = formatLiveStatusLines(baseLive({ deviceId: 'dev-1', runtimes: ['pi', 'claude'].map(id => ({ id, present: true, outcome: 'available' as const, steer: true, resume: true })) }));
     expect(lines).toContain('live: pid=123 uptimeMs=4567 phase=running connection=open');
     expect(lines).toContain('live-paired: yes deviceId=dev-1');
-    expect(lines).toContain('live-runtimes: pi,claude');
+    expect(lines).toContain('live-runtimes: pi=available claude=available');
     expect(lines).toContain('live-local-agent-release: 1.1.0 buildId=live-build');
+  });
+
+  it('renders a live daemon that predates lifecycle (it reports transport) as lifecycle unknown instead of failing', () => {
+    const { lifecycle: _omitted, ...older } = baseLive();
+    const lines = formatLiveStatusLines({ ...older, transport: 'open' } as unknown as ControlStatusResult);
+    expect(lines).toContain('live: pid=123 uptimeMs=4567 lifecycle unknown (daemon predates lifecycle)');
+    expect(lines).toContain('live-paired: yes');
+  });
+
+  it('renders a crashed live daemon', () => {
+    const lines = formatLiveStatusLines(baseLive({ lifecycle: { phase: 'crashed', at: '2026-10-14T00:00:00.000Z' } }));
+    expect(lines).toContain('live: pid=123 uptimeMs=4567 phase=crashed');
   });
 
   it('renders explicit toolset observations and marks absent evidence unobserved without executable bytes', () => {
@@ -472,7 +460,7 @@ describe('bin/format: formatLiveStatusLines', () => {
     expect(lines).not.toContain('live-approvals: (none)');
   });
 
-  it('truncates a long approval summary in the live section (display-width concern, not redaction — F8 keeps stdout redaction separate)', () => {
+  it('truncates a long approval summary in the live section (display-width concern, not redaction)', () => {
     const longSummary = 'x'.repeat(100);
     const lines = formatLiveStatusLines(
       baseLive({
@@ -589,72 +577,8 @@ describe('bin/format: formatApprovalsListLines (finding F4)', () => {
   });
 });
 
-describe('bin/format: start stdout projection (issue #384 item 5)', () => {
-  it('redactTaskText replaces completed/failed/cancelled/stale-approval text with the audit-log byte-count placeholder', () => {
-    const events: DaemonEvent[] = [
-      { kind: 'completed', ts: 'T', taskId: 't1', summary: 'model says hi', sessionRef: 'sess-1' },
-      { kind: 'failed', ts: 'T', taskId: 't1', reason: 'boom', retryable: true, preClaim: true },
-      { kind: 'cancelled', ts: 'T', taskId: 't1', reason: 'user cancelled' },
-      { kind: 'cancelled', ts: 'T', taskId: 't1' },
-      { kind: 'stale-approval-decision', ts: 'T', taskId: 't1', decision: 'reject', reason: 'not now' },
-    ];
-    expect(events.map((event) => formatDaemonEventLine(event, { redactTaskText: true }))).toEqual([
-      '[T] completed taskId=t1 sessionRef=sess-1 summary="[redacted: 13 bytes]"',
-      '[T] failed taskId=t1 retryable=true preClaim=true reason="[redacted: 4 bytes]"',
-      '[T] cancelled taskId=t1 reason="[redacted: 14 bytes]"',
-      '[T] cancelled taskId=t1',
-      '[T] stale-approval-decision taskId=t1 decision=reject reason="[redacted: 7 bytes]"',
-    ]);
-  });
-
-  it('formats one turn summary line with sizes and counts only', () => {
-    const summary = { events: 4, text: 2, textBytes: 11, toolUses: 1, toolResults: 0, artifacts: 0, approvals: 0, errors: 1 };
-    expect(formatTurnProgressLine('T', 't1', summary, 'end')).toBe(
-      '[T] progress taskId=t1 turn=end events=4 text=2 textBytes=11 tool_use=1 tool_result=0 artifact=0 needs_approval=0 error=1',
-    );
-    expect(formatTurnProgressLine('T', 't1', { ...summary, usage: { outputTokens: 7 } }, 'open')).toBe(
-      '[T] progress taskId=t1 turn=open events=4 text=2 textBytes=11 tool_use=1 tool_result=0 artifact=0 needs_approval=0 error=1 usage=out:7',
-    );
-  });
-
-  it('StartStdoutProjector: at most one progress line per turn, per task, and never the model text', () => {
-    const projector = new StartStdoutProjector();
-    const progress = (taskId: string, event: Parameters<typeof formatAgentEvent>[0]): DaemonEvent => ({ kind: 'progress', ts: 'T', taskId, event });
-    const out: string[] = [];
-    for (const event of [
-      progress('a', { type: 'progress', text: 'héllo' }),
-      progress('b', { type: 'progress', text: 'other task' }),
-      progress('a', { type: 'needs_approval', summary: 'rm -rf /' }),
-      progress('a', { type: 'error', message: 'model error text' }),
-      progress('a', { type: 'artifact', name: 'out.txt', contentType: 'text/plain' }),
-      progress('a', { type: 'turn_end' }),
-      progress('a', { type: 'progress', text: 'second turn' }),
-      progress('a', { type: 'turn_end' }),
-      { kind: 'awaiting-approval', ts: 'T', taskId: 'b', approvalId: 'ap-1', summary: 'secret tool input' },
-    ] satisfies DaemonEvent[]) {
-      out.push(...projector.accept(event));
-    }
-    expect(out).toEqual([
-      `[T] progress taskId=a turn=end events=5 text=1 textBytes=${Buffer.byteLength('héllo')} tool_use=0 tool_result=0 artifact=1 needs_approval=1 error=1`,
-      '[T] progress taskId=a turn=end events=2 text=1 textBytes=11 tool_use=0 tool_result=0 artifact=0 needs_approval=0 error=0',
-      '[T] awaiting-approval taskId=b approvalId=ap-1 summary="[redacted: 17 bytes]"',
-    ]);
-    // Task b's turn is still open: a terminal event prints its summary first, then the redacted terminal line.
-    expect(projector.accept({ kind: 'cancelled', ts: 'T2', taskId: 'b', reason: 'stop' })).toEqual([
-      '[T2] progress taskId=b turn=open events=1 text=1 textBytes=10 tool_use=0 tool_result=0 artifact=0 needs_approval=0 error=0',
-      '[T2] cancelled taskId=b reason="[redacted: 4 bytes]"',
-    ]);
-    expect(projector.flush('T3')).toEqual([]);
-    projector.accept(progress('c', { type: 'progress', text: 'x' }));
-    expect(projector.flush('T3')).toEqual([
-      '[T3] progress taskId=c turn=open events=1 text=1 textBytes=1 tool_use=0 tool_result=0 artifact=0 needs_approval=0 error=0',
-    ]);
-    for (const line of out) {
-      expect(line).not.toMatch(/héllo|other task|rm -rf|model error text|second turn|secret tool input/u);
-    }
-  });
-
-  it('tasks --follow formatting is unchanged: formatDaemonEventLine without options still renders full fidelity', () => {
+describe('bin/format: live view and environment', () => {
+  it('tasks --follow (the authenticated live view) renders full fidelity', () => {
     expect(formatDaemonEventLine({ kind: 'progress', ts: 'T', taskId: 't1', event: { type: 'progress', text: 'doing the thing' } })).toBe(
       '[T] progress taskId=t1 progress: "doing the thing"',
     );
@@ -673,7 +597,7 @@ describe('bin/format: start stdout projection (issue #384 item 5)', () => {
       runtimes: [],
       taskCounts: { total: 0, Offered: 0, Claimed: 0, Running: 0, AwaitApproval: 0, Complete: 0, Failed: 0, Cancelled: 0 },
       auditLogPath: '/x/audit.jsonl',
-      auditLogLineCount: 0,
+      auditLogRecordCount: 0,
     };
     expect(formatStatusLines(view)).toContain('environment: unknown (no environment-resolved record yet)');
     const at = '2026-10-13T00:00:00.000Z';

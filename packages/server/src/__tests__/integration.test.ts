@@ -32,7 +32,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
@@ -64,7 +64,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
       }),
     ]);
 
-    const handle = await started.byok.dispatch({ instruction: 'say hello' });
+    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'say hello' });
     expect(handle.taskId).toBeTruthy();
     expect((await started.byok.tasks.get(handle.taskId))?.state).toBe('Offered');
 
@@ -151,7 +151,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     byok = instance;
     const daemon = await connectFakeDaemonLongPoll(startedServer.baseUrl, instance, { productId: PRODUCT_ID });
 
-    const handle = await instance.dispatch({ instruction: 'end at the terminal' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'end at the terminal' });
     await nextEnvelope(daemon); // task.offer
 
     // A consumer already iterating when the terminal lands.
@@ -185,7 +185,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const handle = await started.byok.dispatch({ instruction: 'say hello' });
+    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'say hello' });
     await nextEnvelope(daemon); // task.offer
 
     const claimEnvelope = createEnvelope(
@@ -228,7 +228,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const handle = await started.byok.dispatch({ instruction: 'a long task' });
+    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'a long task' });
     const offer = await nextEnvelope(daemon);
     expect(offer.type).toBe('task.offer');
 
@@ -251,7 +251,7 @@ describe('server integration (in-process http, fake long-poll daemon client)', (
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
-    const handle = await started.byok.dispatch({ instruction: 'do something risky' });
+    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'do something risky' });
     await nextEnvelope(daemon); // task.offer
     await claimAndStart(started.byok, daemon, handle);
 
@@ -295,7 +295,7 @@ describe('redelivery from a stale cursor (§9)', () => {
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
@@ -328,7 +328,7 @@ describe('redelivery from a stale cursor (§9)', () => {
 
     // task1 stays Running — steer() below produces an envelope the daemon
     // never reads before it "drops".
-    const handle1 = await started.byok.dispatch({ instruction: 'long running task' });
+    const handle1 = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'long running task' });
     const offer1 = (await pageAt(daemon, 0))[0];
     if (offer1?.type !== 'task.offer') throw new Error('unreachable');
     const cursor = offer1.seq; // "I've fully processed everything through this seq"
@@ -341,7 +341,7 @@ describe('redelivery from a stale cursor (§9)', () => {
     // must not be redelivered; its task.cancel IS exempt (N1/F4) precisely
     // because a cancellation is recorded BEFORE the notification is queued, so
     // without the exemption a dropped cancel could never be redelivered.
-    const handle2 = await started.byok.dispatch({ instruction: 'short task' });
+    const handle2 = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'short task' });
     await handle2.cancel('not needed after all');
     await handle2.result();
     expect((await started.byok.tasks.get(handle2.taskId))?.state).toBe('Cancelled');
@@ -366,7 +366,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
@@ -384,7 +384,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
   it('task.decline moves Offered -> Failed (pre-claim fail-closed rejection, §3.2)', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle = await instance.dispatch({ instruction: 'unsupported instruction shape' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'unsupported instruction shape' });
     await nextEnvelope(daemon); // offer
 
     await sendOne(
@@ -421,7 +421,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
   it('task.cancelled is the authoritative trigger when the daemon observes a cancellation the server did not initiate', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle = await instance.dispatch({ instruction: 'x' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'x' });
     await nextEnvelope(daemon);
     await claimAndStart(instance, daemon, handle);
 
@@ -439,7 +439,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
   it('task.cancelled after a server-initiated cancel is a silent idempotent ack, not a warning (M0 gatekeeper finding)', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle = await instance.dispatch({ instruction: 'task one' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'task one' });
     await nextEnvelope(daemon);
     await claimAndStart(instance, daemon, handle);
     await handle.cancel('server decided');
@@ -461,7 +461,7 @@ describe('task lifecycle: task.started / task.decline / task.cancelled + idempot
   it('task.fail after a server-initiated cancel is also a silent stale drop, not a warning (§9)', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle = await instance.dispatch({ instruction: 'task one' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'task one' });
     await nextEnvelope(daemon);
     await claimAndStart(instance, daemon, handle);
     await handle.cancel('server decided');
@@ -489,7 +489,7 @@ describe('unknown AgentEvent forwarding (pre-freeze tolerance, @byok-sdk/protoco
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
@@ -502,7 +502,7 @@ describe('unknown AgentEvent forwarding (pre-freeze tolerance, @byok-sdk/protoco
     byok = instance;
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, instance, { productId: PRODUCT_ID });
 
-    const handle = await instance.dispatch({ instruction: 'x' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'x' });
     await nextEnvelope(daemon); // offer
     await claimAndStart(instance, daemon, handle);
 

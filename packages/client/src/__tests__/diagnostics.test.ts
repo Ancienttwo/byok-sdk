@@ -8,7 +8,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DaemonConfig } from '../index';
 import type { ConnectControlResult, ControlClient } from '../bin/control-client';
-import { appendAuditEvent } from '../bin/audit-log';
+import { appendAuditRecord } from '../bin/audit-log';
 import { formatHaltRemedy } from '../bin/format';
 import {
   DoctorConfirmationRequiredError,
@@ -58,7 +58,7 @@ function unreachable(): Promise<ConnectControlResult> {
   return Promise.resolve({ ok: false, reason: 'offline' });
 }
 
-function connected(): Promise<ConnectControlResult> {
+function connected(overrides: Record<string, unknown> = {}): Promise<ConnectControlResult> {
   const client: ControlClient = {
     request: vi.fn().mockResolvedValue({
       pid: 1,
@@ -66,11 +66,14 @@ function connected(): Promise<ConnectControlResult> {
       paired: false,
       lifecycle: { phase: 'running', connection: 'open' },
       activeTasks: [],
-      runtimeIds: [],
+      runtimes: [],
+      environment: { source: 'inherited' },
+      environmentResolvedAt: '2026-10-14T00:00:00.000Z',
       queueWatermarks: [],
       approvals: [],
       approvalsPending: 0,
       operationalHealth: { availability: 'available', state: 'healthy', failureCount: 0, windowMs: 60_000, failureThreshold: 3, crashCount: 0 },
+      ...overrides,
     }),
     subscribe: () => ({ close: vi.fn() }),
     close: vi.fn(),
@@ -97,6 +100,23 @@ async function unusedLoopbackPort(): Promise<number> {
 }
 
 describe('diagnostics collector', () => {
+  it('#392: old or malformed online observations remain unknown and never trigger local probes', async () => {
+    const dir = await tempDir();
+    const adapter = { descriptor: freezeRuntimeAdapterDescriptor({ id: 'private', supportsDispatchSelection: false, capabilities: { steer: false, resume: false, approvalInteractive: false } }), detect: vi.fn(), prepare: vi.fn() };
+    for (const overrides of [
+      { runtimes: undefined, environment: undefined },
+      { runtimes: [{ id: 'pi' }], environment: { source: 'login-shell', shell: '/private/secret', durationMs: 1 } },
+    ]) {
+      const snapshot = await collectDiagnostics(config(dir), dir, { adapters: [adapter], connectControl: () => connected(overrides) });
+      expect(snapshot.control.status).toBe('online');
+      expect(snapshot.runtimeSource).toBe('unknown');
+      expect(snapshot.runtimes).toEqual([]);
+      expect(snapshot.environment).toEqual({ status: 'unknown' });
+      expect(JSON.stringify(snapshot)).not.toContain('/private/secret');
+    }
+    expect(adapter.detect).not.toHaveBeenCalled();
+  });
+
   it('#394: the lifecycle check warns when unknown, fails a halted daemon with its remedy, and prefers the live answer', async () => {
     const dir = await tempDir();
     const unknown = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
@@ -104,7 +124,7 @@ describe('diagnostics collector', () => {
     expect(unknown.checks.find((check) => check.id === 'lifecycle')?.status).toBe('warn');
 
     const at = '2026-10-13T00:00:00.000Z';
-    await appendAuditEvent(dir, { kind: 'lifecycle', ts: at, lifecycle: { phase: 'halted', reason: 'device_revoked', at } });
+    await appendAuditRecord(dir, { kind: 'lifecycle', ts: at, lifecycle: { phase: 'halted', reason: 'device_revoked', at } });
     const halted = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
     expect(halted.lifecycle).toEqual({ status: 'known', source: 'audit', lifecycle: { phase: 'halted', reason: 'device_revoked', at } });
     expect(halted.checks.find((check) => check.id === 'lifecycle')).toEqual({
@@ -113,7 +133,7 @@ describe('diagnostics collector', () => {
       summary: `audit phase=halted reason=device_revoked; ${formatHaltRemedy('device_revoked')}`,
     });
 
-    const live = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: connected });
+    const live = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: () => connected() });
     expect(live.lifecycle).toEqual({ status: 'known', source: 'live', lifecycle: { phase: 'running', connection: 'open' } });
     expect(live.checks.find((check) => check.id === 'lifecycle')?.status).toBe('pass');
   });
@@ -337,7 +357,7 @@ describe('doctor explicit fix', () => {
       DoctorConfirmationRequiredError,
     );
     await expect(
-      runDoctorCommand(config(dir), { fix: true, confirmed: true, adapters: [], connectControl: connected }),
+      runDoctorCommand(config(dir), { fix: true, confirmed: true, adapters: [], connectControl: () => connected() }),
     ).rejects.toBeInstanceOf(DoctorDaemonRunningError);
     expect(await fs.readFile(path.join(dir, OPERATIONAL_HEALTH_FILENAME), 'utf8')).toBe('{bad');
   });

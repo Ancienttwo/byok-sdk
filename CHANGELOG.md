@@ -2,6 +2,102 @@
 
 ## Unreleased
 
+- **Breaking (server, 0.x; #420)** — embedded device-side one-shot wake queue:
+  `wake: { consume }` plus `wakes.schedule/cancel/pending`, shared memory/SQLite
+  semantics, exact dedup, serial at-least-once delivery, 60-second capped waits,
+  deadline/retry and bounded seven-day completion retention. Host owns periodic
+  rules, occurrence dedup and execution submission. Timed-out hooks may overlap
+  retries; in-flight cancellation returns false and does not stop the delivery.
+  `close()` invalidates then aborts and drains storage without awaiting hooks.
+  SQLite schema 5 adds wake authority. Stop all writers and back up before
+  explicit `v4-to-v5` adoption; v1/v2/v3 use the replacement target-v5 selectors
+  with their existing safety gates. Target-v4 selectors are deleted, not aliased;
+  old builds refuse schema 5 and rollback requires the pre-adoption backup.
+
+- **Breaking (server, 0.x)** — SQLite ownership uses `PRAGMA locking_mode=EXCLUSIVE`
+  on the database connection; the #403 sibling lock is removed (#414).
+  `ByokServer.stop()` is deleted: replace it with `await server.close()`.
+  A second connection waits for the existing 5-second busy grace, then throws
+  `SqliteOwnershipError` (`SQLITE_DATABASE_OWNED`). External inspection and
+  backup require closing the owner first. Stop all old servers and external
+  SQLite connections before upgrading; schema v4 and wire contracts are
+  unchanged. See `packages/server/README.md` for migration and old lock-file
+  cleanup instructions.
+
+- **Changed (client)** — an unexpected error after `daemon.start()` resolved
+  (a `ConnectionManager` observer callback such as the `open` hook, or the
+  reconnect loop itself) is now a crash through one defined path instead of
+  an unhandled rejection: the connection stops, a `lifecycle`
+  operational-health failure is recorded, and `status().lifecycle` becomes
+  the new `{phase:'crashed', at}` (`ConnectionManagerOptions.onCrashed`).
+  `byok-agent start` stops the daemon and exits 1 on it, so the supervisor
+  restarts it; `status`, `service-status` and `doctor` show it with a remedy.
+  `byok-agent start` now sets `process.exitCode` instead of calling
+  `process.exit()`, so piped output (the halt remedy line) drains. A live
+  `status` against a daemon that predates `lifecycle` prints
+  `lifecycle unknown (daemon predates lifecycle)` instead of failing.
+
+- **Breaking (client, 0.x)** — every sink that outlives the process holds
+  only content-free records (#395, parent #384). `byok-agent start` now
+  writes one JSON Lines `DaemonRecord` per line to stdout, byte-identical to
+  the line it appends to `<storeDir>/audit.jsonl` (one serializer). A record
+  carries lifecycle facts, ids, closed codes, configured identifiers, sizes,
+  counts and timestamps — never progress or tool text, approval summaries,
+  completion summaries, failure/cancel/shutdown/disposal reasons, artifact
+  names or contents (each is a `*Bytes` size). Agent progress is aggregated
+  into one `turn` record per turn (`closedBy`: `turn_end` | `terminal` |
+  `stop` | `evicted`) with event, text-byte, tool, artifact, approval, error
+  and token counts. stdout also carries `environment-resolved`,
+  `daemon-started` and `daemon-stopped` records; the old
+  `daemon started:`/`daemon stopped` text lines are gone, and a start that
+  fails prints `environment: …` to stderr. Full content stays on the
+  authenticated control socket: `tasks --follow` now requires a running
+  daemon and no longer falls back to tailing the audit log. Library stderr
+  follows the same rule (artifact names, raw adapter errors and disposal
+  reasons are reported as sizes). Start's cleanup, audit-append and fatal
+  diagnostics use the same rule and never print stacks; SDK-authored config
+  templates keep their configured path and repair guidance without parser
+  excerpts. Other interactive commands keep their diagnostics. New exports: `createDaemonRecordProjector`,
+  `DAEMON_RECORD_KINDS`, `isDaemonRecordKind` and the `DaemonRecord`,
+  `DaemonRecordKind`, `DaemonRecordProjector`, `DaemonTurnRecord` types.
+  **Migration:** parse service stdout as JSON Lines and wait for
+  `lifecycle` with `phase: "running", connection: "open"` for readiness;
+  `daemon-started` means local startup only. Offline status keeps the
+  timestamped runtime outcomes and configured advisory, omitting the raw
+  runtime version text (live control status remains full fidelity). Audit lines in
+  the old shape are dropped on read. Service log files written before this
+  release are not rewritten or removed; delete them by hand if they may hold
+  task content.
+- **Breaking (client, 0.x; #392)** — live status, doctor and support bundles use daemon
+  startup runtime observations (including unavailable outcomes) and the closed
+  environment projection without CLI-side probes. `DaemonStatus.runtimes`
+  and control `runtimes` expose `RuntimeObservation[]`; control `runtimeIds`
+  is removed. `environment-resolved` is a real `DaemonEvent`, recorded by the
+  ordinary audit subscriber with the existing content-free disk shape.
+  Offline status uses timestamped audit observations; explicit `runtimes`
+  and offline diagnostics still probe locally. A newer CLI reports unknown
+  for an older daemon's missing fields for the next minor. Login-shell
+  capture now accepts fish. Generated WinSW install XML uses `--service`
+  (already wired by #427); Windows retains its inherited environment.
+  **Host migration:** read `runtimes` observations instead of `runtimeIds`;
+  `runtimes-detected` now includes unavailable outcomes and uses the shared
+  flattened observation shape. Check `outcome` when selecting available
+  runtimes. Reinstall services created before `--service` was generated.
+
+- **Breaking (custom cloud stores, 0.x)** — `TaskAttemptStore.countByStatus`
+  and `TaskAttemptListQuery.active` are required (#415). Counts partition rows
+  without cancellation by status and count cancellation markers separately.
+  New exports: `TaskAttemptCounts`, `TASK_ATTEMPT_ACTIVE_STATUSES`,
+  `ByokCloud.countTaskAttempts`, and `INBOUND_REFUSAL_REASONS` (the source of
+  `InboundRefusalReason`). Server `HubStats.inboundRefusals` is zero-filled and
+  counts rejected envelopes per reason since server creation; rate limiting
+  stays separate. `stats()` uses a store aggregate and active projections,
+  replacing `LiveTaskIndex`, its decorators and SQLite's startup history scan.
+  Counts are exact at quiescence; a task settling between reads can be absent
+  from that observation. SQLite attempt/cancellation counts persist; approval
+  and traffic counters reset at reopen. Custom store implementers must add the
+  aggregate method and enforce the active filter; there is no legacy fallback.
+
 - **Breaking (client, 0.x)** — daemon readiness and halts are one lifecycle
   model (#391, #394). `daemon.start()` now resolves once local startup is done
   and never waits for the network; the server accepting this session's lone
@@ -53,7 +149,19 @@
   unreleased `noHold` events-poll flag (`EVENTS_POLL_NO_HOLD_PARAM`, added
   after 0.26.1) is removed: readiness no longer waits on a poll, so nothing
   sends it. Freeze golden regenerated; `PROTOCOL_VERSION` is unchanged.
-
+- **Fixed (client, Windows)** — every owned runtime tree now gets its own
+  kill-on-close Job Object, held until disposal proves the tree gone, instead
+  of one job per daemon. An empty job nests under the job its first process is
+  in, and a Node or Bun root puts itself into a private job of its own at its
+  first spawn; when the first assignment landed after that (the cold `koffi`
+  load took 44.6 ms on windows-latest), the shared job sat under that root's
+  private job, and after that root exited every later runtime start failed with
+  `Win32JobObjectFailure { step: 'AssignProcessToJobObject', win32Code: 87 }`.
+  A failed assignment of a live root is still refused, and a daemon death still
+  closes every job and kills every live owned tree. **Public type change:** the
+  `jobObject` seam on `ClaudeProcessClientOptions` and `PiRpcClientOptions` now
+  returns the tree's job, `assign(pid): Promise<{ release(): void }>` (was
+  `Promise<void>`).
 - **Changed (client, cloud-do)** — update the official Pi closure from 1.1.0 to
   1.2.0 (all nine `@earendil-works` packages, upstream commit
   `06a466935536f8c9bcacb2d5efc0fc021be1bdff`, provenance re-attested).
@@ -64,6 +172,11 @@
   the interrupted run settles as `interrupted / CLOUD_EXECUTION_INTERRUPTED` and
   later submits run instead of returning 409 until isolate restart. The failed
   model turn is not resent.
+- **Changed (client)** — update the private OAR source from 0.59.1 to 0.62.1
+  (`bf55fd6`). No selected source file changed upstream, so the five
+  maintained BYOK deltas and the import closure stay the same. Only the vendor
+  directory, the manifest base and the change notices move. No behavior or
+  public API change. See `docs/notes/2026-10-13-oar-0.62-upgrade.md`.
 - **Changed (client)** — update the private OAR source from 0.57.0 to 0.59.1
   (`bb98cbc`). The maintained BYOK deltas shrink from 6 files to 5:
   session-options, credential-redactor and the `Promise.withResolvers` hunk are
@@ -120,6 +233,41 @@
   marker `byok:rpc-ipc` for a keyed profile instead of `$PI_PROVIDER_API_KEY`,
   so a caller that relied on the default must state the entry it projects for
   (`'pi-prepared'` keeps the environment reference).
+- **Fixed / Breaking (core, cloud, cloud-dataplane, server)** — mailbox bytes
+  now have one authority, the retained mailbox rows (#411). Production appends
+  never maintained `storage_usage.mailbox_bytes`, so hosted
+  `PostgresCloudCleanup.runTenant` failed with `cleanup_accounting_drift` on any
+  tenant with an acked row past retention (rolling back the whole retention
+  transaction), and `mailboxLimitBytes` was never enforced. Usage is now
+  `MailboxStore.readUsage(tenant)` (`SUM(byteSize)` over every retained row),
+  and every `limited` append is admitted against `mailboxLimitBytes` in the
+  same serialized unit that inserts the row, in all three drivers. Migration
+  for embedders:
+  - `MailboxAppendInput.admission: 'limited' | 'cancellation'` is required.
+    Only a task's cancellation row is `cancellation` (exempt, still counted).
+  - A `limited` append is refused with `storage_quota_exceeded`, or with
+    `storage_entitlement_missing` when the tenant has no entitlement (fail
+    closed): issue an entitlement before the first offer. A refused append
+    consumes no seq; an existing `messageId` still returns its row.
+  - `enqueue*`, `submitRecurringExecution`, `approveTask`, `rejectTask` and
+    `steerTask` throw `ByokCoreError('storage_quota_exceeded')` on a full
+    mailbox; retrying the same `taskId` converges. `cancelTask` is never
+    blocked. `POST /byok/messages` answers 507 `{ error:
+    'storage_quota_exceeded' }` when a reply cannot be appended
+    (`docs/protocol.md` §8.2).
+  - Removed `QuotaStore.applyMailboxDelta`, `MailboxUsageDeltaInput` and
+    `TenantStorageUsage.mailboxBytes`; added `MailboxStore.readUsage` and
+    `MailboxUsage`. `InMemoryMailboxStore` now takes `(clock, quota)`.
+  - `PostgresCloudCleanup`: `runTenant` and `discardDeadLetter` no longer
+    raise `cleanup_accounting_drift` for the mailbox; `replayDeadLetter`
+    without an entitlement raises `storage_entitlement_missing` (was
+    `cleanup_policy_missing`). `runTenant` no longer deletes request receipts
+    until the receipt classification (#412) lands, so `ttl_rows_deleted` no
+    longer counts receipts.
+  - New migration `deploy/sql/0023_mailbox_usage_index.sql` (covering index,
+    blocks outbox writes while it builds). `storage_usage.mailbox_bytes` stays
+    for one release, unread and unwritten. Run the pre-upgrade audit in
+    `deploy/runbooks/cloud-cleanup.md` first.
 
 ## 0.26.1 / @byok-sdk/keys 0.11.1 (published, 2026-10-12)
 

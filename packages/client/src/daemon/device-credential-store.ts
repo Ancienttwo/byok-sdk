@@ -440,9 +440,12 @@ export async function runDeviceCommand(executable: string, args: readonly string
 }
 
 // PowerShell only compiles this static, non-secret console executable. The
-// executable itself owns Credential Manager result bytes and process exit.
+// executable itself owns Credential Manager result bytes and process exit. The
+// output path arrives on stdin and is decoded as UTF-8 explicitly, independent
+// of the console code page, so a non-ASCII temp directory reaches Add-Type
+// unchanged.
 const WINDOWS_CREDENTIAL_COMPILER_SCRIPT = Buffer.from(String.raw`
-$assembly=[Console]::In.ReadToEnd()
+$assembly=[System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false, $true)).ReadToEnd()
 try {
 Add-Type -OutputAssembly $assembly -OutputType ConsoleApplication -ErrorAction Stop -TypeDefinition @"
 using System; using System.Runtime.InteropServices; using System.Text;

@@ -54,7 +54,7 @@ describe('M4 Phase 3: implicit approval resume (daemon traffic while the read mo
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
@@ -72,7 +72,7 @@ describe('M4 Phase 3: implicit approval resume (daemon traffic while the read mo
   it('(a) task.progress arriving while AwaitApproval implicitly resumes to Running, applies the progress, and emits task.approval_resolved_implicit — NOT force-failed', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
     await claimAndStart(daemon, handle);
     await moveToAwaitApproval(daemon, handle, 'appr-implicit-a');
 
@@ -100,7 +100,7 @@ describe('M4 Phase 3: implicit approval resume (daemon traffic while the read mo
   it('(b) task.complete arriving directly while AwaitApproval completes normally — NOT force-failed', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ instruction: 'needs a human ok' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs a human ok' });
     await claimAndStart(daemon, handle);
     await moveToAwaitApproval(daemon, handle, 'appr-implicit-b');
 
@@ -119,7 +119,7 @@ describe('M4 Phase 3: implicit approval resume (daemon traffic while the read mo
   it('(c) a second task.await_approval after an implicit resume transitions cleanly back to AwaitApproval', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ instruction: 'needs two human oks' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'needs two human oks' });
     await claimAndStart(daemon, handle);
     await moveToAwaitApproval(daemon, handle, 'appr-implicit-c1', 'first approval needed');
 
@@ -153,7 +153,7 @@ describe('M4 Phase 3: implicit approval resume (daemon traffic while the read mo
   it('(d) existing behavior preserved: task.progress on an already-terminal task is still dropped, not force-failed and not implicitly resumed', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle1 = await instance.dispatch({ instruction: 'task one' });
+    const handle1 = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'task one' });
     await claimAndStart(daemon, handle1);
     await handle1.cancel('server decided');
     expect((await instance.tasks.get(handle1.taskId))?.state).toBe('Cancelled');
@@ -169,7 +169,7 @@ describe('M4 Phase 3: implicit approval resume (daemon traffic while the read mo
   it('(a-legacy) task.progress arriving while AwaitApproval with NO reported approvalId still implicitly resumes to Running', async () => {
     const { byok: instance, daemon } = await start();
 
-    const handle = await instance.dispatch({ instruction: 'legacy daemon, no approvalId' });
+    const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'legacy daemon, no approvalId' });
     await claimAndStart(daemon, handle);
     await daemon.send(createEnvelope('task.await_approval', { summary: 'needs a human ok' }, { taskId: handle.taskId }));
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'AwaitApproval');

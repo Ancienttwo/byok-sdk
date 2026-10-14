@@ -45,15 +45,18 @@
     <textarea id="instruction" rows="3" required
       placeholder="Create a file named hello.txt containing 'hello from pi' in the workspace"></textarea>
     <p>
+      <label>Device
+        <select id="device" required></select>
+      </label>
       <label>Runtime
-        <select id="runtime">
-          <option value="pi" selected>pi</option>
-          <option value="claude">claude</option>
-          <option value="codex">codex</option>
+        <!-- Options are filled by renderRuntimeOptions() from the runtimes the
+             connected machines report in /api/machines; nothing is hard-coded. -->
+        <select id="runtime" disabled>
+          <option value="">no connected machine</option>
         </select>
       </label>
     </p>
-    <button type="submit">Dispatch</button>
+    <button id="dispatch-btn" type="submit" disabled>Dispatch</button>
   </form>
 </section>
 
@@ -117,7 +120,7 @@
   // server's read-only machine view) has no `revoked` field of its own —
   // revocation (protocol §6.3) is server-side-only with no wire message, so
   // the only observable proof is the daemon's *next* challenge/token/WS
-  // attempt getting a 401 (visible as `connected` staying/going false, and
+  // attempt getting a 401 (visible as presence disappearing, and
   // in the daemon's own `byok-agent start` status log as `"revoked": true`).
   // This tag just marks "we asked the server to revoke this one."
   const revokedDevices = new Set();
@@ -134,8 +137,64 @@
       .join(' ');
   }
 
+  // The runtime <select> is the union of the runtime ids that connected
+  // machines report, the same data the chips above are drawn from. A runtime
+  // is flagged when no connected machine reports it with credentials present.
+  function runtimeOptionsFor(machines) {
+    const byId = new Map();
+    for (const m of machines) {
+      if (!m.connected) continue;
+      for (const r of m.runtimes ?? []) {
+        const entry = byId.get(r.id) ?? { id: r.id, authPresent: false };
+        if (r.authPresent !== false) entry.authPresent = true;
+        byId.set(r.id, entry);
+      }
+    }
+    return [...byId.values()];
+  }
+
+  function renderRuntimeOptions(machines) {
+    const select = $('runtime');
+    const previous = select.value;
+    const anyConnected = machines.some((m) => m.connected);
+    const options = runtimeOptionsFor(machines);
+    select.innerHTML = '';
+    if (options.length === 0) {
+      const none = document.createElement('option');
+      none.value = '';
+      none.textContent = anyConnected ? 'no runtime reported' : 'no connected machine';
+      select.appendChild(none);
+    }
+    for (const o of options) {
+      const option = document.createElement('option');
+      option.value = o.id;
+      option.textContent = o.authPresent ? o.id : `${o.id} (no credentials detected)`;
+      option.selected = o.id === previous;
+      select.appendChild(option);
+    }
+    if (!options.some((o) => o.id === previous)) select.options[0].selected = true;
+    select.disabled = options.length === 0;
+    $('dispatch-btn').disabled = !anyConnected;
+  }
+
   async function refreshMachines() {
     const machines = await (await fetch('/api/machines')).json();
+    renderRuntimeOptions(machines);
+    const deviceSelect = $('device');
+    const selectedDeviceId = deviceSelect.value;
+    deviceSelect.innerHTML = '';
+    const chooseDevice = document.createElement('option');
+    chooseDevice.value = '';
+    chooseDevice.textContent = 'Choose a device';
+    chooseDevice.selected = !machines.some(machine => machine.deviceId === selectedDeviceId);
+    deviceSelect.appendChild(chooseDevice);
+    for (const machine of machines) {
+      const option = document.createElement('option');
+      option.value = machine.deviceId;
+      option.textContent = machine.deviceName;
+      option.selected = machine.deviceId === selectedDeviceId;
+      deviceSelect.appendChild(option);
+    }
     const list = $('machine-list');
     list.innerHTML = '';
     if (machines.length === 0) {
@@ -162,11 +221,7 @@
     try {
       await fetch(`/api/machines/${encodeURIComponent(deviceId)}/revoke`, { method: 'POST' });
       revokedDevices.add(deviceId);
-      // The daemon's live WS connection isn't force-dropped (protocol §6.3 —
-      // revocation only bites on the *next* auth-requiring call), so
-      // "connected" may still read true here; the revoked tag stays visible
-      // regardless, and connected will flip once that daemon reconnects or
-      // renews and gets its 401.
+      // Revoked devices disappear from the durable directory immediately.
       await refreshMachines();
     } finally {
       button.disabled = false;
@@ -256,7 +311,8 @@
     ev.preventDefault();
     const instruction = $('instruction').value.trim();
     const runtime = $('runtime').value;
-    if (!instruction) return;
+    const deviceId = $('device').value;
+    if (!instruction || !deviceId || $('dispatch-btn').disabled) return;
 
     $('feed').textContent = '';
     $('artifacts').innerHTML = '';
@@ -265,7 +321,7 @@
     const res = await fetch('/api/tasks', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ instruction, runtime }),
+      body: JSON.stringify(runtime ? { instruction, runtime, deviceId } : { instruction, deviceId }),
     });
     const body = await res.json();
     if (!res.ok) {

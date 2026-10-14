@@ -1,108 +1,52 @@
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { AgentEvent, BlobRef, RuntimeInfo } from '@byok-sdk/protocol';
-import { type DaemonEvent } from '../index';
 import { parseDaemonLifecycle, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
-import { GIT_ERROR_CATEGORIES } from '../daemon/git-workspace';
-import {
-  SERVICE_ENVIRONMENT_UNAVAILABLE_CODES,
-  type ServiceEnvironmentStatus,
-  type ServiceEnvironmentUnavailableCode,
-} from '../lifecycle/service-environment';
+import { isDaemonRecordKind, type DaemonRecord } from '../daemon/daemon-record';
+import type { ServiceEnvironmentStatus, ServiceEnvironmentRecord } from '../lifecycle/service-environment';
+import { parseEnvironmentRecord } from '../daemon/daemon-record';
+export { parseEnvironmentRecord } from '../daemon/daemon-record';
 import { atomicWriteFile } from '../util/atomic-write';
+import { parseRuntimeObservations } from '../runtime-detection';
 
 /**
- * The audit log is the ONLY channel a separate, short-lived CLI invocation
- * (`status`/`tasks`/`tasks --follow`) has into what an already-running
- * `byok-agent start` process has observed — see `byok-agent.ts`'s header
- * comment for the full read-model rationale. One JSON line per
- * `DaemonEvent`, oldest first, append-only.
+ * `audit.jsonl`: the durable record of what a running `byok-agent start`
+ * process observed, and the ONLY channel a separate, short-lived CLI
+ * invocation (`status`/`tasks`/`doctor`/`service-status`/the support bundle)
+ * has into it — see `byok-agent.ts`'s header comment. One JSON line per
+ * {@link DaemonRecord} (`daemon/daemon-record.ts`), oldest first,
+ * append-only.
  *
- * Finding P1 #3 (SECURITY): a `DaemonEvent` can carry a task's raw
- * instruction-derived output — `tool_use.input`/`tool_result.output` are
- * `z.unknown()` in `@byok-sdk/protocol` (a shell command, a whole file's
- * contents echoed back, anything), `progress`/`needs_approval`/`completed`/
- * `failed`/`cancelled` all carry free-form agent/operator text, and
- * `artifact.inline` is literally base64 file bytes. Persisting all of that
- * VERBATIM into a durable, append-only, potentially long-retained file —
- * previously created at the default `0666 & umask` mode (NOT 0600), with
- * `storeDir` only chmod'd 0700 at the moment it's first created (a
- * pre-existing custom `storeDir` kept whatever mode it already had) — is
- * exactly the kind of thing that turns "helpful audit trail" into "durable
- * secret/credential/source leak" the moment anything else on the machine can
- * read it. Fixed on two independent axes:
+ * Issue #395: every sink that outlives the process writes the same
+ * content-free projection. `start` prints each record to stdout as the very
+ * line it appends here, so a service log (launchd/systemd do not rotate it)
+ * and this file hold identical bytes. Task content — model text, tool
+ * input/output, artifact names and bytes, approval summaries, completed
+ * summaries, failure reasons — never reaches either: a record carries only
+ * ids, closed codes, configured identifiers, sizes and counts. Full content
+ * travels only over the authenticated control socket (`tasks --follow`).
  *
- * 1. **Redaction** (`redactForAudit`/`redactAgentEvent`): only event type,
- *    taskId, timestamps, tool/runtime NAMES, sizes/counts, and closed-enum
- *    state fields are ever written to disk — every free-form text/bytes
- *    field is replaced with its byte SIZE. `readAuditEvents`/`followAuditLog`
- *    reconstruct a `DaemonEvent`-shaped value from that redacted projection
- *    for their callers (`tasks-view.ts`/`format.ts` stay unchanged and none
- *    the wiser) by substituting an unambiguous `[redacted: N bytes]`
- *    placeholder wherever real content used to be — so a replayed
- *    `tasks`/`status`/`tasks --follow` view degrades to showing sizes
- *    instead of content, which is the correct, honest trade-off for a
- *    broadly-readable-by-default durable file. `start`'s stdout is a
- *    durable file too once installed as a service (launchd/systemd do not
- *    rotate it), so it is redacted by the same rule in `bin/format.ts`'s
- *    `StartStdoutProjector` (issue #395); only the authenticated control
- *    socket (`tasks --follow`) carries full content.
- * 2. **Permissions**: the file is tightened to 0600 BEFORE any new content
- *    is written, on every single append (mirrors `util/atomic-write.ts`'s
- *    own defensive re-chmod, for the identical reason: `open()`'s own
- *    `mode` argument only governs permissions at CREATION time, so a
- *    pre-existing file — predating this fix, or loosened by something else
- *    — keeps whatever mode it already had until explicitly chmod'd).
- *    `storeDir` gets the same defensive re-`chmod` to 0700 on every append.
+ * Permissions: the file is tightened to 0600 BEFORE any new content is
+ * written, on every append (`open()`'s `mode` only governs creation, so a
+ * pre-existing permissive file is chmod'd first; the tightening also takes
+ * effect when the append that follows it fails). `storeDir` gets the same
+ * defensive re-`chmod` to 0700 on every append.
  *
- *    Finding P1 #3b (STILL-OPEN, now fixed): the chmod used to run AFTER
- *    `appendFile` rather than before — for a pre-existing permissive file
- *    that meant the newly-appended line briefly landed in a file that was
- *    still world-readable, and if `appendFile` itself failed, the chmod
- *    (being sequenced after it) never ran at all, leaving the file exactly
- *    as permissive as it started. Fixed by reordering so the chmod always
- *    happens FIRST: there is no window where a new append lands in a
- *    still-permissive file, and the tightening takes effect even when the
- *    append that follows it fails. This closes the gap going forward; it
- *    does NOT retroactively scrub plaintext a pre-fix build of this code
- *    may have already written into an inherited permissive file — only
- *    that the file stops being world-readable from the first append
- *    onward.
+ * Bounded: past `MAX_AUDIT_LOG_BYTES` the file is atomically rewritten to its
+ * most recent `AUDIT_LOG_TRIM_TARGET_LINES` lines, keeping one lifecycle
+ * anchor per still-open task (capped at `MAX_LIVE_TASK_ANCHORS`) and the
+ * latest `lifecycle`, `runtimes-detected` and `environment-resolved` records — see
+ * {@link compactPreservingLiveTasks}.
  *
- * Finding P2/#11 (audit half): also bounded/rotated now — `appendAuditEvent`
- * checks the file's size (cheap `fs.stat`) on every append and, once it
- * exceeds `MAX_AUDIT_LOG_BYTES`, atomically rewrites it down to the most
- * recent `AUDIT_LOG_TRIM_TARGET_LINES` lines (reusing `atomicWriteFile`, so
- * a concurrent `tasks`/`tasks --follow` read never observes a torn file
- * mid-rotation) — so a long-lived daemon's audit.jsonl no longer grows
- * forever. `followAuditLog` no longer re-reads the entire file every poll
- * either; see its own doc comment.
- *
- * Finding P2 (new, round 1, now fixed): that trim used to be purely
- * positional (the most recent N lines, full stop) — which could evict
- * EVERY event a still-running task ever had if it went quiet for long
- * enough, permanently erasing it from `tasks`/`status` even though it was
- * never actually done. `compactPreservingLiveTasks` now preserves one
- * lifecycle-anchor line for any still-open (non-terminal) task that would
- * otherwise be fully evicted — see its own doc comment.
- *
- * Finding P2 (new, round 2, now fixed): round 1's anchor preservation had no
- * cap of its own — a daemon that crashes leaving many non-terminal tasks
- * behind (or one that keeps creating non-terminal tasks that never reach a
- * terminal kind) accumulates one anchor per distinct non-terminal taskId
- * FOREVER, defeating `MAX_AUDIT_LOG_BYTES`'s own size cap (the whole point
- * of rotation) and making every append past the cap an ever-larger O(n)
- * read + atomic-rewrite. `compactPreservingLiveTasks` now also bounds the
- * anchors themselves to `MAX_LIVE_TASK_ANCHORS`, keeping the most
- * recently-touched ones and dropping the oldest overflow with a single
- * logged warning — see that constant's own doc comment.
+ * Readers drop any line that is not a well-formed record of a kind in
+ * `DAEMON_RECORD_KINDS`, including lines an older build wrote in another
+ * shape, so one bad line never breaks a read.
  */
 
 export function auditLogPath(storeDir: string): string {
   return path.join(storeDir, 'audit.jsonl');
 }
 
-/** 0600: this file can carry tool names, task ids, and sizes/counts derived from potentially sensitive task data — never group/world-readable, same bar as `device.json` (`daemon/store.ts`). */
+/** 0600: this file carries task ids, runtime and audience identifiers, and sizes/counts derived from potentially sensitive task data — never group/world-readable, same bar as `device.json` (`daemon/store.ts`). */
 const AUDIT_LOG_MODE = 0o600;
 const AUDIT_STORE_DIR_MODE = 0o700;
 
@@ -111,8 +55,8 @@ const AUDIT_STORE_DIR_MODE = 0o700;
  * trimming to the most recent `AUDIT_LOG_TRIM_TARGET_LINES` lines. Checked
  * via a cheap `fs.stat` (O(1), not a full read) on every single append; the
  * expensive read-all-lines + atomic-rewrite only actually runs once the cap
- * is crossed, and trimming well under the cap (redacted lines are small —
- * mostly ids/sizes/counts) means it won't immediately re-trigger on the next
+ * is crossed, and trimming well under the cap (records are small —
+ * ids/sizes/counts) means it won't immediately re-trigger on the next
  * append either. Deliberately simple size/line based bounding, not a
  * time-based retention policy — "keep it simple" per this finding's own
  * scope note.
@@ -140,507 +84,45 @@ export const AUDIT_LOG_TRIM_TARGET_LINES = 5000;
  */
 export const MAX_LIVE_TASK_ANCHORS = 500;
 
-function byteSize(text: string | undefined): number | undefined {
-  return text === undefined ? undefined : Buffer.byteLength(text, 'utf8');
+/**
+ * The line a record occupies in `audit.jsonl` and on `start`'s stdout, without
+ * the trailing newline. One serializer for both sinks, so their bytes are
+ * identical.
+ */
+export function formatDaemonRecordLine(record: DaemonRecord): string {
+  if (record.kind === 'environment-resolved' && parseEnvironmentRecord(record) === undefined) {
+    throw new TypeError('invalid environment-resolved record');
+  }
+  return JSON.stringify(record);
 }
 
 /**
- * Rough serialized-size estimate for an arbitrary (`unknown`) value —
- * `tool_use.input`/`tool_result.output` are typed `z.unknown()` in
- * `@byok-sdk/protocol` precisely because a tool's input/output can be anything
- * (a command string, a JSON object, a whole file's contents). `JSON.stringify`
- * can itself throw (a circular structure, a lone BigInt) — caught
- * defensively since this is only ever a size ESTIMATE for the audit trail,
- * never allowed to break the append it's part of.
+ * Appends one record at 0600, then rotates the file if it has grown past
+ * the size cap. Plain `fs.open('a')` + `appendFile` — an append has no
+ * torn-read risk; rotation, the one whole-file replace, uses
+ * `atomicWriteFile`.
  */
-function valueByteSize(value: unknown): number | undefined {
-  if (value === undefined) return undefined;
-  try {
-    const json = JSON.stringify(value);
-    return json === undefined ? undefined : Buffer.byteLength(json, 'utf8');
-  } catch {
-    return undefined;
-  }
+export async function appendAuditRecord(storeDir: string, record: DaemonRecord): Promise<void> {
+  const line = formatDaemonRecordLine(record);
+  await appendAuditLine(storeDir, line);
 }
 
-/** Unambiguous, never-confusable-with-real-content marker substituted for a redacted text/bytes field on READ (see `reconstructDaemonEvent`/`reconstructAgentEvent`) — never written to disk itself (only the size is). `spilled` marks a size that came from a spill descriptor's pre-spill `totalBytes` rather than from the inline value. */
-function placeholderFor(size: number | undefined, spilled?: boolean): string {
-  const suffix = spilled ? ', spilled' : '';
-  return size === undefined ? `[redacted${suffix}]` : `[redacted: ${size} bytes${suffix}]`;
-}
-
-/**
- * Git failures are serialized only as this closed, stable category set —
- * never raw Git errors or command output. Projected from
- * `daemon/git-workspace.ts`'s `GIT_ERROR_CATEGORIES` (the single source of
- * truth for the `GitErrorCategory` union) rather than carrying a literal
- * copy that could drift from it; the runtime half of that guarantee is
- * `__tests__/git-category-drift.test.ts`.
- *
- * @internal Exported for the drift-guard test only (never re-exported from
- * `index.ts`).
- */
-export const STABLE_GIT_ERROR_CATEGORIES = new Set<string>(GIT_ERROR_CATEGORIES);
-
-function stableGitErrorCategory(value: unknown): string | undefined {
-  return typeof value === 'string' && STABLE_GIT_ERROR_CATEGORIES.has(value) ? value : undefined;
-}
-
-function gitCount(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
-}
-
-function gitDirty(value: unknown): { staged: number; unstaged: number; untracked: number; conflicted: number } | undefined {
-  const dirty = asRecord(value);
-  const staged = gitCount(dirty.staged);
-  const unstaged = gitCount(dirty.unstaged);
-  const untracked = gitCount(dirty.untracked);
-  const conflicted = gitCount(dirty.conflicted);
-  return staged !== undefined && unstaged !== undefined && untracked !== undefined && conflicted !== undefined
-    ? { staged, unstaged, untracked, conflicted }
-    : undefined;
-}
-
-/**
- * Finding P1 #3: the redacted projection of a `task.progress`-derived
- * `AgentEvent` that's actually written to disk — every free-form field
- * (`text`/`input`/`output`/`summary`/`message`) becomes a `*Size` byte count;
- * `tool`/`name`/`contentType` (identifiers, not content) and `usage`'s token
- * COUNTS survive verbatim. A spilled `tool_use`/`tool_result` records the
- * pre-spill content size (`spill.totalBytes`) plus a boolean
- * `inputSpilled`/`outputSpilled`, never the spill locator (`blob`/`blobId`/
- * `contentHash`) or its `unstoredReason` text.
- */
-function redactAgentEvent(event: AgentEvent): Record<string, unknown> {
-  switch (event.type) {
-    case 'progress':
-      return { type: 'progress', textSize: byteSize(event.text) };
-    case 'tool_use':
-      return event.spill !== undefined
-        ? { type: 'tool_use', tool: event.tool, inputSize: event.spill.totalBytes, inputSpilled: true }
-        : { type: 'tool_use', tool: event.tool, inputSize: valueByteSize(event.input) };
-    case 'tool_result':
-      return event.spill !== undefined
-        ? { type: 'tool_result', tool: event.tool, outputSize: event.spill.totalBytes, outputSpilled: true }
-        : { type: 'tool_result', tool: event.tool, outputSize: valueByteSize(event.output) };
-    case 'artifact':
-      return { type: 'artifact', name: event.name, contentType: event.contentType };
-    case 'needs_approval':
-      return { type: 'needs_approval', summarySize: byteSize(event.summary) };
-    case 'turn_end':
-      return { type: 'turn_end' };
-    case 'error':
-      return { type: 'error', messageSize: byteSize(event.message) };
-    case 'usage':
-      return {
-        type: 'usage',
-        inputTokens: event.inputTokens,
-        cachedInputTokens: event.cachedInputTokens,
-        outputTokens: event.outputTokens,
-        reasoningTokens: event.reasoningTokens,
-        totalTokens: event.totalTokens,
-      };
-  }
-}
-
-/**
- * Finding P1 #3: the redacted projection of a `DaemonEvent` that's actually
- * written to disk. See this file's module doc comment for the full
- * rationale; `reconstructDaemonEvent` is this function's read-side inverse.
- */
-function redactForAudit(event: DaemonEvent): Record<string, unknown> {
-  const base = { kind: event.kind, ts: event.ts };
-  switch (event.kind) {
-    case 'offered':
-      return { ...base, taskId: event.taskId, runtime: event.runtime };
-    case 'claimed':
-      return { ...base, taskId: event.taskId, claimedRuntime: event.claimedRuntime };
-    case 'started':
-      return { ...base, taskId: event.taskId };
-    case 'progress':
-      return { ...base, taskId: event.taskId, event: redactAgentEvent(event.event) };
-    case 'artifact':
-      return {
-        ...base,
-        taskId: event.taskId,
-        name: event.name,
-        contentType: event.contentType,
-        // `inline` is base64 file bytes (up to the 64KB inline cap) — never
-        // persisted. `blobRef.url` is a presigned URL — itself effectively a
-        // time-limited bearer credential for the actual bytes, so it's
-        // dropped too; only the safe pointer/size metadata survives.
-        inlineSize: byteSize(event.inline),
-        blobRef: event.blobRef
-          ? {
-              blobId: event.blobRef.blobId,
-              contentHash: event.blobRef.contentHash,
-              size: event.blobRef.size,
-              contentType: event.blobRef.contentType,
-            }
-          : undefined,
-      };
-    case 'awaiting-approval':
-      return { ...base, taskId: event.taskId, summarySize: byteSize(event.summary) };
-    case 'completed':
-      return { ...base, taskId: event.taskId, summarySize: byteSize(event.summary), sessionRef: event.sessionRef };
-    case 'failed':
-      return {
-        ...base,
-        taskId: event.taskId,
-        reasonSize: byteSize(event.reason),
-        retryable: event.retryable,
-        preClaim: event.preClaim,
-      };
-    case 'cancelled':
-      return { ...base, taskId: event.taskId, reasonSize: byteSize(event.reason) };
-    case 'lifecycle':
-      // Closed enums and a timestamp only.
-      return { ...base, lifecycle: event.lifecycle };
-    case 'paired':
-      return { ...base, deviceId: event.deviceId };
-    case 'unpaired':
-      return { ...base };
-    case 'runtimes-detected':
-      return { ...base, runtimes: event.runtimes };
-    case 'shutdown-requested':
-      // Not sensitive/free-form the way task instruction/output text is —
-      // this is an internally-constructed operational message (see
-      // `create-daemon.ts`'s control-socket shutdown wiring), so it's kept
-      // verbatim rather than redacted to a size.
-      return { ...base, reason: event.reason };
-    case 'shutdown-complete':
-      // Finding R3 (cross-model re-review): `undeliveredOutboxCount`
-      // (finding F5(b)) is a plain NUMBER, not free-form text — no
-      // redaction concern at all — but this branch used to share the
-      // `shutdown-requested` case above verbatim, which only ever copied
-      // `reason` across, silently dropping this field on every persisted
-      // write. A replayed `tasks --follow`/audit read therefore always saw
-      // `undeliveredOutboxCount: undefined`, indistinguishable from "0
-      // undelivered" — exactly the false "everything was delivered"
-      // impression F5(b) exists to prevent. See `reconstructDaemonEvent`'s
-      // own `shutdown-complete` case for the read-side symmetry this needs.
-      return { ...base, reason: event.reason, undeliveredOutboxCount: event.undeliveredOutboxCount };
-    case 'stale-approval-decision':
-      // `reason` here is an operator-supplied free-text reject reason (same
-      // redaction rule as `failed`/`cancelled` above) — `decision` is just
-      // the fixed 'approve'|'reject' identifier, kept verbatim.
-      return { ...base, taskId: event.taskId, decision: event.decision, reasonSize: byteSize(event.reason) };
-    case 'runtime-disposal-failed':
-      return { ...base, taskId: event.taskId, runtimeId: event.runtimeId, stage: event.stage, reason: event.reason };
-    case 'agent-memory-intent-integrity':
-      // WP2I-S2: metadata only by construction (the event has no other field).
-      return { ...base, intentId: event.intentId, disposition: event.disposition };
-    case 'device-assertion':
-      // Plan `device-assertion-broker`. There is no signature or envelope to
-      // drop here — the event type cannot carry either (see `observer.ts`'s
-      // own doc comment on this variant), so this projection is a projection
-      // of metadata only, by construction rather than by vigilance.
-      //
-      // codex round-2 F4: the DENIED variant already carries `audienceSize`
-      // (a number) and NO raw audience — the observer converted it at event
-      // construction, so there is no raw string here to strip, on the feed OR
-      // on disk. This redactor merely copies the size across. The ISSUED
-      // `audience` came from the allowlist and is kept verbatim, as are the
-      // daemon's own `jti`/`expiresAt` (the `jti` ties a suspect assertion back
-      // to the call that minted it).
-      //
-      // Contract §8.2(1): `lane` (and, on the task lane, `taskId`) is what
-      // keeps the two credential kinds distinguishable in this durable ledger.
-      // The `BYOK_HOST_TOOLSET_CONTEXT` nonce is not a field of the event, so
-      // it cannot reach this file — the same structural guarantee the signature
-      // already has.
-      return event.result === 'issued'
-        ? {
-            ...base,
-            result: 'issued',
-            lane: event.lane,
-            ...(event.taskId === undefined ? {} : { taskId: event.taskId }),
-            audience: event.audience,
-            jti: event.jti,
-            expiresAt: event.expiresAt,
-          }
-        : {
-            ...base,
-            result: 'denied',
-            lane: event.lane,
-            ...(event.taskId === undefined ? {} : { taskId: event.taskId }),
-            reason: event.reason,
-            audienceSize: event.audienceSize,
-          };
-    case 'git-workspace':
-      // Git observations are deliberately coarse: paths, commit ids,
-      // filenames, messages, raw Git output, and free-form errors never cross
-      // this boundary. The opaque workspaceId is safe to retain for correlation.
-      return {
-        ...base,
-        taskId: event.taskId,
-        workspaceId: event.workspaceId,
-        phase: event.phase,
-        headChanged: event.headChanged,
-        commitsSinceBaseline: event.commitsSinceBaseline,
-        dirty: event.dirty,
-        errorCategory: stableGitErrorCategory(event.errorCategory),
-      };
-  }
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {};
-}
-function str(value: unknown, fallback = ''): string {
-  return typeof value === 'string' ? value : fallback;
-}
-function num(value: unknown): number | undefined {
-  return typeof value === 'number' ? value : undefined;
-}
-function bool(value: unknown, fallback: boolean): boolean {
-  return typeof value === 'boolean' ? value : fallback;
-}
-
-/** Read-side inverse of {@link redactAgentEvent}: reconstructs an `AgentEvent`-SHAPED value with a `[redacted: N bytes]` placeholder wherever real content used to be. An unrecognized/corrupt inner `type` degrades to a harmless opaque `error` event rather than throwing — mirrors this whole module's "never let one bad line break the read" contract. */
-function reconstructAgentEvent(raw: unknown): AgentEvent {
-  const r = asRecord(raw);
-  const type = str(r.type);
-  switch (type) {
-    case 'progress':
-      return { type: 'progress', text: placeholderFor(num(r.textSize)) };
-    case 'tool_use':
-      return { type: 'tool_use', tool: str(r.tool), input: placeholderFor(num(r.inputSize), bool(r.inputSpilled, false)) };
-    case 'tool_result':
-      return { type: 'tool_result', tool: str(r.tool), output: placeholderFor(num(r.outputSize), bool(r.outputSpilled, false)) };
-    case 'artifact':
-      return { type: 'artifact', name: str(r.name), contentType: str(r.contentType) };
-    case 'needs_approval':
-      return { type: 'needs_approval', summary: placeholderFor(num(r.summarySize)) };
-    case 'turn_end':
-      return { type: 'turn_end' };
-    case 'error':
-      return { type: 'error', message: placeholderFor(num(r.messageSize)) };
-    case 'usage':
-      return {
-        type: 'usage',
-        inputTokens: num(r.inputTokens),
-        cachedInputTokens: num(r.cachedInputTokens),
-        outputTokens: num(r.outputTokens),
-        reasoningTokens: num(r.reasoningTokens),
-        totalTokens: num(r.totalTokens),
-      };
-    default:
-      return { type: 'error', message: `[unrecognized audit event type: ${type || '(missing)'}]` };
-  }
-}
-
-/** Read-side inverse of {@link redactForAudit} — see this file's module doc comment. `raw` has already passed {@link isAuditRecordShaped} (has string `kind`/`ts`) by the time this is called; an unrecognized `kind` (corrupt line, or a future version's new kind) returns `undefined` and is dropped by the caller like any other bad line. */
-function reconstructDaemonEvent(raw: Record<string, unknown>): DaemonEvent | undefined {
-  const kind = str(raw.kind);
-  const ts = str(raw.ts);
-  switch (kind) {
-    case 'offered':
-      return { kind: 'offered', ts, taskId: str(raw.taskId), runtime: typeof raw.runtime === 'string' ? raw.runtime : undefined };
-    case 'claimed': {
-      const claimedRuntime = typeof raw.claimedRuntime === 'string' ? raw.claimedRuntime : undefined;
-      return claimedRuntime === undefined
-        ? { kind: 'claimed', ts, taskId: str(raw.taskId) }
-        : { kind: 'claimed', ts, taskId: str(raw.taskId), claimedRuntime };
-    }
-    case 'started':
-      return { kind: 'started', ts, taskId: str(raw.taskId) };
-    case 'progress':
-      return { kind: 'progress', ts, taskId: str(raw.taskId), event: reconstructAgentEvent(raw.event) };
-    case 'artifact': {
-      const blobRefPresent = raw.blobRef !== undefined && raw.blobRef !== null;
-      const blobRefRaw = asRecord(raw.blobRef);
-      const blobRef: BlobRef | undefined = blobRefPresent
-        ? {
-            blobId: str(blobRefRaw.blobId),
-            contentHash: str(blobRefRaw.contentHash),
-            size: num(blobRefRaw.size) ?? 0,
-            contentType: str(blobRefRaw.contentType),
-          }
-        : undefined;
-      const inlineSize = num(raw.inlineSize);
-      return {
-        kind: 'artifact',
-        ts,
-        taskId: str(raw.taskId),
-        name: str(raw.name),
-        contentType: str(raw.contentType),
-        inline: inlineSize === undefined ? undefined : placeholderFor(inlineSize),
-        blobRef,
-      };
-    }
-    case 'awaiting-approval':
-      return { kind: 'awaiting-approval', ts, taskId: str(raw.taskId), summary: placeholderFor(num(raw.summarySize)) };
-    case 'completed':
-      return {
-        kind: 'completed',
-        ts,
-        taskId: str(raw.taskId),
-        summary: placeholderFor(num(raw.summarySize)),
-        sessionRef: str(raw.sessionRef),
-      };
-    case 'failed':
-      return {
-        kind: 'failed',
-        ts,
-        taskId: str(raw.taskId),
-        reason: placeholderFor(num(raw.reasonSize)),
-        retryable: bool(raw.retryable, false),
-        preClaim: typeof raw.preClaim === 'boolean' ? raw.preClaim : undefined,
-      };
-    case 'cancelled': {
-      const reasonSize = num(raw.reasonSize);
-      return {
-        kind: 'cancelled',
-        ts,
-        taskId: str(raw.taskId),
-        reason: reasonSize === undefined ? undefined : placeholderFor(reasonSize),
-      };
-    }
-    case 'lifecycle': {
-      const lifecycle = parseDaemonLifecycle(raw.lifecycle);
-      return lifecycle === undefined ? undefined : { kind: 'lifecycle', ts, lifecycle };
-    }
-    case 'paired':
-      return { kind: 'paired', ts, deviceId: str(raw.deviceId) };
-    case 'unpaired':
-      return { kind: 'unpaired', ts };
-    case 'runtimes-detected':
-      return { kind: 'runtimes-detected', ts, runtimes: Array.isArray(raw.runtimes) ? (raw.runtimes as RuntimeInfo[]) : [] };
-    case 'shutdown-requested':
-      return { kind: 'shutdown-requested', ts, reason: str(raw.reason) };
-    case 'shutdown-complete':
-      // Finding R3: read-side symmetry with `redactForAudit`'s own
-      // `shutdown-complete` case — `undeliveredOutboxCount` is a plain
-      // number, reconstructed verbatim (never a placeholder — there was
-      // never anything to redact here), `undefined` only for an
-      // audit-log line written before this fix existed (or a
-      // corrupt/non-numeric value).
-      return { kind: 'shutdown-complete', ts, reason: str(raw.reason), undeliveredOutboxCount: num(raw.undeliveredOutboxCount) };
-    case 'stale-approval-decision': {
-      const reasonSize = num(raw.reasonSize);
-      return {
-        kind: 'stale-approval-decision',
-        ts,
-        taskId: str(raw.taskId),
-        decision: str(raw.decision) as 'approve' | 'reject',
-        reason: reasonSize === undefined ? undefined : placeholderFor(reasonSize),
-      };
-    }
-    case 'agent-memory-intent-integrity':
-      return {
-        kind: 'agent-memory-intent-integrity',
-        ts,
-        intentId: str(raw.intentId),
-        disposition: str(raw.disposition) as 'conflict' | 'host_terminal',
-      };
-    case 'runtime-disposal-failed':
-      return {
-        kind: 'runtime-disposal-failed',
-        ts,
-        taskId: str(raw.taskId),
-        runtimeId: str(raw.runtimeId),
-        stage: str(raw.stage) as 'signal' | 'quiescence' | 'cleanup',
-        reason: str(raw.reason),
-      };
-    case 'device-assertion': {
-      // Read-side inverse of `redactForAudit`'s own `device-assertion` case.
-      // Anything that is not exactly `'issued'` reconstructs as `denied` — a
-      // corrupt or unrecognized result must never replay as a successful
-      // issuance. codex round-2 F4: the denied line only ever held a byte
-      // size (there was never a raw audience on disk), so it reads back as a
-      // number; the issued line's allowlist audience reads back verbatim.
-      //
-      // Contract §8.2(1): anything that is not exactly `'task'` reads back as
-      // the device lane, for the same reason the result does — a corrupt line
-      // must not replay as the more privileged, task-scoped credential.
-      const lane = raw.lane === 'task' ? 'task' : 'device';
-      const taskId = typeof raw.taskId === 'string' ? raw.taskId : undefined;
-      if (raw.result === 'issued') {
-        return {
-          kind: 'device-assertion',
-          ts,
-          result: 'issued',
-          lane,
-          ...(taskId === undefined ? {} : { taskId }),
-          audience: typeof raw.audience === 'string' ? raw.audience : '',
-          jti: typeof raw.jti === 'string' ? raw.jti : '',
-          expiresAt: typeof raw.expiresAt === 'string' ? raw.expiresAt : '',
-        };
-      }
-      const audienceSize = num(raw.audienceSize);
-      return {
-        kind: 'device-assertion',
-        ts,
-        result: 'denied',
-        lane,
-        ...(taskId === undefined ? {} : { taskId }),
-        reason: typeof raw.reason === 'string' ? raw.reason : '',
-        ...(audienceSize === undefined ? {} : { audienceSize }),
-      };
-    }
-    case 'git-workspace': {
-      const commitsSinceBaseline = gitCount(raw.commitsSinceBaseline);
-      const dirty = gitDirty(raw.dirty);
-      return {
-        kind: 'git-workspace',
-        ts,
-        taskId: str(raw.taskId),
-        workspaceId: str(raw.workspaceId),
-        phase: str(raw.phase),
-        headChanged: typeof raw.headChanged === 'boolean' ? raw.headChanged : undefined,
-        commitsSinceBaseline,
-        dirty,
-        errorCategory: stableGitErrorCategory(raw.errorCategory),
-      };
-    }
-    default:
-      return undefined;
-  }
-}
-
-/**
- * Appends one `DaemonEvent` as a single redacted JSON line (finding P1 #3 —
- * see this file's module doc comment) at 0600, and rotates the file if it's
- * grown past the size cap (finding P2/#11). Plain `fs.open('a')` +
- * `appendFile` — sufficient for an append-only log (no torn-read risk the
- * way a whole-file replace has; see `util/atomic-write.ts`'s own doc comment
- * for why THAT helper exists for whole-file writes instead of just being
- * used here too — rotation below is the one path in this file that DOES
- * replace the whole file, and does use it).
- */
-export async function appendAuditEvent(storeDir: string, event: DaemonEvent): Promise<void> {
-  await appendAuditRecord(storeDir, redactForAudit(event));
-}
-
-async function appendAuditRecord(storeDir: string, record: Record<string, unknown>): Promise<void> {
+/** The already-serialized line is immutable while filesystem work is queued. */
+async function appendAuditLine(storeDir: string, line: string): Promise<void> {
   await fs.mkdir(storeDir, { recursive: true, mode: AUDIT_STORE_DIR_MODE });
-  // `mkdir`'s own `mode` only applies at CREATION time — a pre-existing
-  // storeDir (predating this fix, or created by something else with a more
-  // permissive mode) keeps whatever it already had. Re-assert explicitly on
-  // every append, best-effort: this directory also holds device.json/cursor
-  // state, so locking it down helps those as a side effect, but a failure
-  // here (e.g. a storeDir owned by a different user) must never block the
-  // append itself.
+  // `mkdir`'s own `mode` only applies at CREATION time. Re-assert on every
+  // append, best-effort: a failure here (e.g. a storeDir owned by a
+  // different user) must never block the append itself.
   await fs.chmod(storeDir, AUDIT_STORE_DIR_MODE).catch(() => {});
 
   const filePath = auditLogPath(storeDir);
-  const line = `${JSON.stringify(record)}\n`;
   const handle = await fs.open(filePath, 'a', AUDIT_LOG_MODE);
   try {
-    // Finding P1 #3b: chmod BEFORE appending, not after. `open()`'s own
-    // `mode` argument only governs permissions at file-CREATION time, so a
-    // PRE-EXISTING file (predating this fix, or loosened by something else)
-    // keeps whatever mode it already had until explicitly chmod'd here —
-    // doing that FIRST means there is never a window where the line we're
-    // about to write lands in a still-permissive file, and the tightening
-    // still takes effect even if the `appendFile` below then fails (it's no
-    // longer gated behind a write that might throw before ever reaching
-    // it). Mirrors `util/atomic-write.ts`'s own defensive re-chmod, for the
-    // identical reason (don't trust "governed at creation only" for a file
-    // that can carry sensitive metadata).
+    // chmod BEFORE appending: `open()`'s `mode` only governs creation, so a
+    // pre-existing permissive file is tightened before the new line lands in
+    // it, even when the append below then fails.
     await handle.chmod(AUDIT_LOG_MODE);
-    await handle.appendFile(line, 'utf8');
+    await handle.appendFile(`${line}\n`, 'utf8');
   } finally {
     await handle.close();
   }
@@ -648,109 +130,65 @@ async function appendAuditRecord(storeDir: string, record: Record<string, unknow
   await rotateIfNeeded(filePath);
 }
 
-/**
- * `DaemonEvent.kind`s that end a task's lifecycle — once one of these
- * appears anywhere for a taskId, `deriveTasksFromEvents` (`tasks-view.ts`)
- * can reconstruct that task's final state from that ONE event alone
- * (`upsert` seeds a fresh record from whatever patch a terminal event
- * carries), so no earlier event of its needs to survive a rotation. A small
- * local set rather than importing from `@byok-sdk/protocol`/`tasks-view.ts`:
- * those describe reducer OUTPUT states, not `DaemonEvent.kind`s, and only
- * these three kinds ever end a task (mirrors `tasks-view.ts`'s own
- * `deriveTasksFromEvents` switch).
- */
-const TERMINAL_EVENT_KINDS = new Set(['completed', 'failed', 'cancelled']);
+/** Record kinds that end a task: a task with one of these anywhere in the file is fully described by it, so none of its earlier lines need to survive a rotation. */
+const TERMINAL_RECORD_KINDS = new Set<DaemonRecord['kind']>(['completed', 'failed', 'cancelled']);
 
-function lifecycleEventTaskId(event: DaemonEvent): string | undefined {
-  // Only kinds that create a task row in deriveTasksFromEvents can anchor
-  // replay state. Artifacts, Git observations and disposal diagnostics must
-  // neither replace a lifecycle anchor nor count as one in the retained tail.
-  switch (event.kind) {
+/** The task a record anchors, for the kinds that create or move a task row in `deriveTasksFromRecords`. Artifacts, Git observations and disposal diagnostics never anchor one. */
+function lifecycleRecordTaskId(record: DaemonRecord): string | undefined {
+  switch (record.kind) {
     case 'offered':
     case 'claimed':
     case 'started':
-    case 'progress':
+    case 'turn':
     case 'awaiting-approval':
     case 'completed':
     case 'failed':
     case 'cancelled':
-      return event.taskId;
+      return record.taskId;
     default:
       return undefined;
   }
 }
 
 /**
- * Finding P2 (new, round 1): a pure positional "keep the last N lines" trim
- * can evict EVERY event a still-running (non-terminal) task ever had — if a
- * task's `offered`/`started`/`progress` events are all old enough to fall
- * in the dropped prefix, and it hasn't reached a terminal kind
- * (`completed`/`failed`/`cancelled`) anywhere in the file, there is
- * nothing left for `deriveTasksFromEvents` to reconstruct it from —
- * `tasks`/`status` silently forget a task that is still actually running.
+ * Trims `lines` to the most recent `targetLines`, preserving what the
+ * dropped prefix would otherwise erase from `tasks`/`status`:
  *
- * Deliberately simple (a full retention policy is more than this finding's
- * own scope calls for): scan every line once, tracking per taskId whether
- * a terminal kind occurs anywhere in the file and the index of its LAST
- * state-bearing lifecycle occurrence. Any taskId with no terminal kind whose
- * last lifecycle occurrence falls in the portion about to be dropped gets
- * exactly that one line preserved — spliced in immediately before the kept
- * tail (so the file stays
- * oldest-first overall, matching every other invariant this module
- * documents) as a lifecycle anchor. That's just enough for the reducer to
- * know the task exists and its last-known state; it does NOT preserve that
- * task's entire historical event stream (which could itself be unbounded
- * for a long-running task with many `progress` events — preserving all of
- * it would defeat the point of rotation). A task that already reached a
- * terminal kind needs no anchor at all: it's fully reconstructable from
- * that one terminal event, wherever it happens to fall.
+ * - for every task with no terminal record anywhere in the file whose last
+ *   lifecycle record falls in the dropped prefix, that one line (an anchor),
+ *   capped at {@link MAX_LIVE_TASK_ANCHORS} — the most recently touched are
+ *   kept and one warning is logged per rotation for the overflow;
+ * - the latest `environment-resolved`, `runtimes-detected` and `lifecycle` records, which describe
+ *   the daemon for as long as it runs (issues #392, #391/#394).
  *
- * Finding P2 (new, round 2): round 1's anchor count had no cap of its own —
- * bounded by "the number of DISTINCT non-terminal tasks old enough to be
- * affected", which in realistic operation is small, but is NOT actually
- * bounded when a daemon crashes leaving many non-terminal tasks behind, or
- * a bug keeps creating tasks that never reach a terminal kind. Anchors are
- * now additionally capped at {@link MAX_LIVE_TASK_ANCHORS}: once the number
- * of candidate anchors exceeds it, only the most RECENTLY-touched ones (by
- * last-seen line index) are kept, the oldest overflow is dropped, and a
- * single warning is logged for the whole rotation (not once per dropped
- * anchor). This keeps `kept.length` bounded by `targetLines +
- * MAX_LIVE_TASK_ANCHORS` in the worst case — still slightly over
- * `targetLines`, by design (see round 1's own trade-off), but no longer
- * unboundedly so. Self-correcting either way: once an anchored task reaches
- * a terminal kind, a later rotation stops preserving it at all.
+ * Anchors are spliced in before the kept tail, so the file stays oldest
+ * first. `kept.length` is bounded by `targetLines + MAX_LIVE_TASK_ANCHORS + 3`.
  */
 function compactPreservingLiveTasks(lines: readonly string[], targetLines: number): string[] {
   if (lines.length <= targetLines) return [...lines];
 
   const cutIndex = lines.length - targetLines; // lines[0, cutIndex) would normally be dropped entirely
-  const hasTerminalEvent = new Set<string>();
+  const hasTerminalRecord = new Set<string>();
   const lastIndexForTask = new Map<string, number>();
+  let lastEnvironmentIndex: number | undefined;
+  let lastLifecycleIndex: number | undefined;
+  let lastRuntimesIndex: number | undefined;
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line === undefined) continue;
-    const event = parseAuditLine(line);
-    if (!event) continue;
-    const taskId = lifecycleEventTaskId(event);
+    const record = parseRecordLine(lines[i]);
+    if (!record) continue;
+    if (record.kind === 'environment-resolved') lastEnvironmentIndex = i;
+    if (record.kind === 'lifecycle') lastLifecycleIndex = i;
+    if (record.kind === 'runtimes-detected') lastRuntimesIndex = i;
+    const taskId = lifecycleRecordTaskId(record);
     if (taskId === undefined) continue;
     lastIndexForTask.set(taskId, i);
-    if (TERMINAL_EVENT_KINDS.has(event.kind)) hasTerminalEvent.add(taskId);
+    if (TERMINAL_RECORD_KINDS.has(record.kind)) hasTerminalRecord.add(taskId);
   }
 
   let anchorIndices: number[] = [];
-  // Issue #392: the latest environment-resolved record describes the running
-  // daemon for as long as it runs; it survives rotation like a live task.
-  let lastEnvironmentIndex: number | undefined;
-  // Issues #391/#394: so does the latest lifecycle event — offline `status`,
-  // `doctor` and `service-status` read it.
-  let lastLifecycleIndex: number | undefined;
-  for (let i = 0; i < lines.length; i++) {
-    if (parseEnvironmentLine(lines[i]) !== undefined) lastEnvironmentIndex = i;
-    if (lines[i] !== undefined && parseAuditLine(lines[i]!)?.kind === 'lifecycle') lastLifecycleIndex = i;
-  }
   for (const [taskId, lastIndex] of lastIndexForTask) {
-    if (hasTerminalEvent.has(taskId)) continue; // reconstructable from its own terminal event, wherever that falls
+    if (hasTerminalRecord.has(taskId)) continue; // reconstructable from its own terminal record, wherever that falls
     if (lastIndex < cutIndex) anchorIndices.push(lastIndex); // otherwise about to be fully evicted
   }
   anchorIndices.sort((a, b) => a - b); // ascending: oldest-touched first, most-recently-touched last
@@ -760,17 +198,17 @@ function compactPreservingLiveTasks(lines: readonly string[], targetLines: numbe
     const droppedCount = totalCandidates - MAX_LIVE_TASK_ANCHORS;
     anchorIndices = anchorIndices.slice(-MAX_LIVE_TASK_ANCHORS); // keep the most RECENTLY-touched, drop the oldest overflow
     console.warn(
-      `[byok/client] audit log rotation: ${totalCandidates} non-terminal task lifecycle anchors exceeded MAX_LIVE_TASK_ANCHORS (${MAX_LIVE_TASK_ANCHORS}) — dropped the oldest ${droppedCount}, kept the most recently-touched ${MAX_LIVE_TASK_ANCHORS}; dropped tasks will stop appearing in tasks/status once their own events age out of the retained tail`,
+      `[byok/client] audit log rotation: ${totalCandidates} non-terminal task lifecycle anchors exceeded MAX_LIVE_TASK_ANCHORS (${MAX_LIVE_TASK_ANCHORS}) — dropped the oldest ${droppedCount}, kept the most recently-touched ${MAX_LIVE_TASK_ANCHORS}; dropped tasks will stop appearing in tasks/status once their own records age out of the retained tail`,
     );
   }
 
-  for (const index of [lastEnvironmentIndex, lastLifecycleIndex]) {
+  for (const index of [lastEnvironmentIndex, lastLifecycleIndex, lastRuntimesIndex]) {
     if (index !== undefined && index < cutIndex) anchorIndices = [...anchorIndices, index].sort((a, b) => a - b);
   }
   return [...anchorIndices.map((i) => lines[i]), ...lines.slice(cutIndex)].filter((l): l is string => l !== undefined);
 }
 
-/** Finding P2/#11 (audit half): see `MAX_AUDIT_LOG_BYTES`'s own doc comment. Finding P2 (new): see {@link compactPreservingLiveTasks}. */
+/** See `MAX_AUDIT_LOG_BYTES` and {@link compactPreservingLiveTasks}. */
 async function rotateIfNeeded(filePath: string): Promise<void> {
   let size: number;
   try {
@@ -783,193 +221,98 @@ async function rotateIfNeeded(filePath: string): Promise<void> {
   const lines = await readCompleteLines(filePath);
   const kept = compactPreservingLiveTasks(lines, AUDIT_LOG_TRIM_TARGET_LINES);
   const content = kept.length > 0 ? `${kept.join('\n')}\n` : '';
-  // Atomic (temp file + rename) so a concurrent `readAuditEvents`/
-  // `followAuditLog` reader never observes a torn/partial file mid-rotation
-  // — same helper `daemon/store.ts`/`daemon/cursor-store.ts` use for their
-  // own whole-file replaces.
+  // Atomic (temp file + rename), so a concurrent reader never observes a
+  // torn file mid-rotation.
   await atomicWriteFile(filePath, content, { mode: AUDIT_LOG_MODE });
 }
 
 /**
- * Issue #392: `byok-agent start` appends one `environment-resolved` record
- * per process, before the daemon starts: where `process.env` came from
- * (`lifecycle/service-environment.ts`). It is not a `DaemonEvent` — the
- * library daemon never sees how its host process built its environment — so
- * `readAuditEvents` skips it like any unknown kind. Closed values and a
- * shell basename only; {@link parseEnvironmentLine} rejects anything else.
- */
-export const ENVIRONMENT_RECORD_KIND = 'environment-resolved';
-
-export interface EnvironmentRecord {
-  status: ServiceEnvironmentStatus;
-  ts: string;
-}
-
-export async function appendEnvironmentRecord(storeDir: string, record: EnvironmentRecord): Promise<void> {
-  await appendAuditRecord(storeDir, { kind: ENVIRONMENT_RECORD_KIND, ts: record.ts, ...record.status });
-}
-
-const UNAVAILABLE_CODES = new Set<string>(SERVICE_ENVIRONMENT_UNAVAILABLE_CODES);
-
-function parseEnvironmentLine(line: string | undefined): EnvironmentRecord | undefined {
-  if (line === undefined || !line.includes(ENVIRONMENT_RECORD_KIND)) return undefined;
-  let raw: unknown;
-  try {
-    raw = JSON.parse(line);
-  } catch {
-    return undefined;
-  }
-  const record = asRecord(raw);
-  if (record.kind !== ENVIRONMENT_RECORD_KIND || typeof record.ts !== 'string' || !Number.isFinite(Date.parse(record.ts))) return undefined;
-  const keys = Object.keys(record);
-  const only = (...allowed: string[]): boolean => keys.every((key) => ['kind', 'ts', 'source', ...allowed].includes(key));
-  if (record.source === 'inherited' && only()) return { ts: record.ts, status: { source: 'inherited' } };
-  if (record.source === 'unavailable' && only('code') && typeof record.code === 'string' && UNAVAILABLE_CODES.has(record.code)) {
-    return { ts: record.ts, status: { source: 'unavailable', code: record.code as ServiceEnvironmentUnavailableCode } };
-  }
-  if (
-    record.source === 'login-shell' &&
-    only('shell', 'durationMs') &&
-    typeof record.shell === 'string' &&
-    /^[A-Za-z0-9._-]{1,64}$/u.test(record.shell) &&
-    typeof record.durationMs === 'number' &&
-    Number.isSafeInteger(record.durationMs) &&
-    record.durationMs >= 0
-  ) {
-    return { ts: record.ts, status: { source: 'login-shell', shell: record.shell, durationMs: record.durationMs } };
-  }
-  return undefined;
-}
-
-/**
- * The most recent valid `environment-resolved` record, or `undefined` when
- * there is none, no log, or the log is not a regular file. Opened
- * non-blocking and without following a symlink: doctor and the support
- * bundle call this too, and must not hang on a FIFO planted at the path.
- */
-export async function readLastEnvironmentRecord(storeDir: string): Promise<EnvironmentRecord | undefined> {
-  let handle: Awaited<ReturnType<typeof fs.open>>;
-  try {
-    handle = await fs.open(auditLogPath(storeDir), fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0) | (fsConstants.O_NOFOLLOW ?? 0));
-  } catch {
-    return undefined;
-  }
-  let raw: string;
-  try {
-    if (!(await handle.stat()).isFile()) return undefined;
-    raw = await handle.readFile('utf8');
-  } finally {
-    await handle.close();
-  }
-  const lines = completeLines(raw);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const record = parseEnvironmentLine(lines[i]);
-    if (record) return record;
-  }
-  return undefined;
-}
-
-/**
- * The last `lifecycle` event (issue #394), for the offline readers
- * (`doctor`, `service-status`). Opened like
- * {@link readLastEnvironmentRecord}: non-blocking, no symlink, regular file
- * only, so a FIFO or a missing log is `undefined` ("unknown"), never a hang.
- */
-export async function readLastLifecycleEvent(storeDir: string): Promise<{ lifecycle: DaemonLifecycle; ts: string } | undefined> {
-  let handle: Awaited<ReturnType<typeof fs.open>>;
-  try {
-    handle = await fs.open(auditLogPath(storeDir), fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0) | (fsConstants.O_NOFOLLOW ?? 0));
-  } catch {
-    return undefined;
-  }
-  let raw: string;
-  try {
-    if (!(await handle.stat()).isFile()) return undefined;
-    raw = await handle.readFile('utf8');
-  } finally {
-    await handle.close();
-  }
-  const lines = completeLines(raw);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const event = parseAuditLine(lines[i]!);
-    if (event?.kind === 'lifecycle') return { lifecycle: event.lifecycle, ts: event.ts };
-  }
-  return undefined;
-}
-
-/**
- * Adapts {@link appendAuditEvent} into a `DaemonEventListener` for
- * `daemon.subscribe()` (used by the `start` command). `DaemonEventListener`
- * is synchronous — `observer.ts`'s `emit()` never awaits a listener (see its
- * own doc comment on why, including the finding #6 async-safety fix) — so a
- * naive fire-and-forget `appendAuditEvent(...).catch(...)` per call would
- * have a real problem: the underlying `fs.open`/`appendFile` calls could
- * complete OUT OF ORDER under load, silently corrupting the log's own event
- * ordering. This chains each append onto the previous one (still
- * async/non-blocking from the listener's point of view) so writes always
- * land in emission order, and a failed write (reported via `onError`) never
- * breaks the chain for subsequent events.
- *
- * Issue #392: {@link AuditAppender.appendEnvironment} writes the
- * `environment-resolved` record through the same chain, so it can never
- * interleave with an event append's rotation and lose a line.
+ * Serializes appends from a synchronous listener. Each `append` is chained
+ * onto the previous one, so lines land in call order even though every
+ * `fs.open`/`appendFile` is async, and a failed write (reported to
+ * `onError`) never breaks the chain for the records after it.
  */
 export function createAuditAppender(storeDir: string, onError: (err: unknown) => void = () => {}): AuditAppender {
   let chain: Promise<void> = Promise.resolve();
-  const enqueue = (write: () => Promise<void>): Promise<void> => {
-    chain = chain.then(write).catch(onError);
-    return chain;
+  return {
+    append(record) {
+      const line = formatDaemonRecordLine(record);
+      chain = chain.then(() => appendAuditLine(storeDir, line)).catch(onError);
+      return line;
+    },
+    flush: () => chain,
   };
-  return Object.assign(
-    (event: DaemonEvent): void => {
-      void enqueue(() => appendAuditEvent(storeDir, event));
-    },
-    {
-      appendEnvironment: (record: EnvironmentRecord) => enqueue(() => appendEnvironmentRecord(storeDir, record)),
-      flush: () => chain,
-    },
-  );
 }
 
-/** A `DaemonEventListener` that appends to `audit.jsonl` in call order; see {@link createAuditAppender}. */
+/** Appends records to `audit.jsonl` in call order; see {@link createAuditAppender}. */
 export interface AuditAppender {
-  (event: DaemonEvent): void;
-  /** Queues the `environment-resolved` record behind every event already queued. Resolves once written; a failed write goes to `onError`. */
-  appendEnvironment(record: EnvironmentRecord): Promise<void>;
+  /** Validates, captures and queues the one line synchronously; returns it without a newline for stdout. */
+  append(record: DaemonRecord): string;
   /** Resolves once every append queued so far has been written (or reported to `onError`). */
   flush(): Promise<void>;
 }
 
-function isAuditRecordShaped(value: unknown): value is Record<string, unknown> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as { kind?: unknown }).kind === 'string' &&
-    typeof (value as { ts?: unknown }).ts === 'string'
-  );
+/** The `environment-resolved` record (issue #392), as `status`, `doctor` and the support bundle report it. */
+export type EnvironmentRecord = ServiceEnvironmentRecord;
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {};
 }
 
-/** Parses one line; returns `undefined` (never throws) for a blank, corrupt, or unrecognized-kind line so one bad line can't take down a whole `status`/`tasks` read. Reconstructs a `DaemonEvent`-shaped value from the redacted on-disk projection — see the module doc comment. */
-function parseAuditLine(line: string): DaemonEvent | undefined {
-  const trimmed = line.trim();
+/**
+ * Parses one line into a record, or `undefined` (never throws) for a blank,
+ * corrupt or foreign line. A record needs a known kind and a string `ts`; a
+ * task record also needs a string `taskId`; `lifecycle` and
+ * `environment-resolved` are validated in full, because the offline readers
+ * render them.
+ */
+function parseRecordLine(line: string | undefined): DaemonRecord | undefined {
+  const trimmed = line?.trim();
   if (!trimmed) return undefined;
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(trimmed);
-    if (!isAuditRecordShaped(parsed)) return undefined;
-    return reconstructDaemonEvent(parsed);
+    parsed = JSON.parse(trimmed);
   } catch {
     return undefined;
+  }
+  const raw = asRecord(parsed);
+  if (!isDaemonRecordKind(raw.kind) || typeof raw.ts !== 'string') return undefined;
+  switch (raw.kind) {
+    case 'lifecycle': {
+      const lifecycle = parseDaemonLifecycle(raw.lifecycle);
+      return lifecycle === undefined ? undefined : { kind: 'lifecycle', ts: raw.ts, lifecycle };
+    }
+    case 'environment-resolved': {
+      const environment = parseEnvironmentRecord(raw);
+      return environment === undefined ? undefined : { kind: 'environment-resolved', ts: environment.ts, ...environment.status };
+    }
+    case 'runtimes-detected': {
+      const runtimes = parseRuntimeObservations(raw.runtimes);
+      if (runtimes?.some(runtime => runtime.version !== undefined)) return undefined;
+      return runtimes === undefined ? undefined : { kind: 'runtimes-detected', ts: raw.ts, runtimes };
+    }
+    case 'offered':
+    case 'claimed':
+    case 'started':
+    case 'turn':
+    case 'artifact':
+    case 'awaiting-approval':
+    case 'completed':
+    case 'failed':
+    case 'cancelled':
+    case 'stale-approval-decision':
+    case 'git-workspace':
+    case 'runtime-disposal-failed':
+      return typeof raw.taskId === 'string' ? (raw as unknown as DaemonRecord) : undefined;
+    default:
+      return raw as unknown as DaemonRecord;
   }
 }
 
 /**
- * Every line that's definitely COMPLETE — i.e. every line except the last
- * element `raw.split('\n')` produces, which is either `''` (when `raw` ends
- * with `\n`, the normal fully-flushed case) or a genuinely not-yet-terminated
- * partial line (when `raw` was read mid-write). Dropping that last element
- * either way means a `--follow` reader can never observe — and thus never
- * permanently skip — a torn line from a write it caught mid-flush; it just
- * gets picked up whole on a later poll once the writer finishes it.
+ * Every line that is definitely COMPLETE — every element `raw.split('\n')`
+ * produces except the last, which is either `''` (a fully flushed file) or a
+ * line a writer has not finished, picked up whole by a later read.
  */
 function completeLines(raw: string): string[] {
   const parts = raw.split('\n');
@@ -988,184 +331,55 @@ async function readCompleteLines(filePath: string): Promise<string[]> {
   return completeLines(raw);
 }
 
-/** Full historical read (oldest first) — `[]` if the log doesn't exist yet (e.g. `start` has never run). Used by `status`/`tasks` (no `--follow`). */
-export async function readAuditEvents(storeDir: string): Promise<DaemonEvent[]> {
-  const lines = await readCompleteLines(auditLogPath(storeDir));
-  const events: DaemonEvent[] = [];
-  for (const line of lines) {
-    const event = parseAuditLine(line);
-    if (event) events.push(event);
+/** Every record, oldest first — `[]` when the log does not exist yet (`start` has never run). Used by `status` and `tasks`. */
+export async function readAuditRecords(storeDir: string): Promise<DaemonRecord[]> {
+  const records: DaemonRecord[] = [];
+  for (const line of await readCompleteLines(auditLogPath(storeDir))) {
+    const record = parseRecordLine(line);
+    if (record) records.push(record);
   }
-  return events;
-}
-
-export interface FollowOptions {
-  signal: AbortSignal;
-  /** How often to check the file for new bytes. Default 200ms — plenty responsive for a human tailing output, without busy-looping. */
-  pollIntervalMs?: number;
-  /**
-   * `true` (default): start at the file's CURRENT length — a `tail -f`,
-   * streaming only events appended from the moment `followAuditLog` was
-   * called. `false`: replay the full existing log first, then keep
-   * streaming — mainly useful for tests that want both in one pass.
-   */
-  fromEnd?: boolean;
-}
-
-/** Cancellable delay: resolves early the instant `signal` aborts, so a follow loop stops promptly instead of waiting out a full poll interval. */
-function delay(ms: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
-  return new Promise((resolve) => {
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(() => {
-      signal.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    signal.addEventListener('abort', onAbort, { once: true });
-  });
+  return records;
 }
 
 /**
- * Tails `filePath` (the audit log) for newly-appended `DaemonEvent` lines
- * until `options.signal` aborts. No native filesystem-event watching (no
- * `fs.watch` — inconsistent across platforms, especially the rename-based
- * atomic writes this package uses elsewhere for OTHER files).
- *
- * Finding P2/#11 (audit half): the previous implementation re-read the
- * ENTIRE file from byte 0 on every single poll, re-parsing every
- * already-emitted line just to find the handful of new ones at the end —
- * O(file size) work every `pollIntervalMs`, forever, for as long as
- * `tasks --follow` stays attached. This tracks a byte OFFSET across polls
- * instead: each poll opens the file and reads only the bytes appended since
- * the last read (`FileHandle.read` at a specific position), advancing
- * `offset` by exactly that many bytes — only genuinely new bytes are ever
- * read or decoded.
- *
- * UTF-8 safety: the new bytes are split on the RAW BYTE `0x0a` ('\n')
- * BEFORE any UTF-8 decoding happens, not on an already-decoded string —
- * `0x0A` can only ever appear as an actual newline in valid UTF-8
- * (continuation bytes are always `0x80`-`0xBF`), so this never risks
- * decoding a torn multi-byte character that happened to straddle a chunk
- * boundary. Bytes after the last `\n` in a chunk are held in `pending`
- * (as a `Buffer`, still undecoded) until a future poll's bytes complete
- * that line — mirrors `completeLines`'s existing "never guess at a torn
- * trailing line" contract for `readAuditEvents`, just incremental.
- *
- * Rotation tolerance: if `appendAuditEvent`'s own size-cap rotation (or
- * anything else) replaces the file out from under an in-progress follow,
- * `offset` resets to 0 and `pending` is cleared — the follow session
- * survives (rather than throwing or garbling) at the cost of re-emitting
- * the post-rotation file's retained lines as if they were new.
- *
- * Finding P2 (new): that replacement is detected by file IDENTITY
- * (`dev:ino`), not by comparing sizes. The previous implementation only
- * reset `offset` when the new file was SMALLER than it (`st.size <
- * offset`) — sufficient for the common case (a big pre-rotation file
- * trimmed down to a small one), but `rotateIfNeeded`'s replace is an atomic
- * temp-file + `fs.rename` (see `atomicWriteFile`), which swaps the
- * underlying INODE regardless of whether the new file happens to be
- * smaller OR LARGER than the reader's current offset. A `--follow` session
- * that attached while the log was still tiny (a small `offset`) can have a
- * rotation land a compacted-but-still-much-bigger-than-that-tiny-offset
- * file in its place — the old size-only check missed exactly that case
- * (`st.size < offset` was false), so it kept reading from the stale
- * `offset` INTO THE NEW FILE's bytes: skipping that file's own prefix
- * entirely and very likely starting mid-JSON-line. Tracking `dev:ino`
- * across polls catches ANY replacement — smaller, larger, anything — and
- * resets `offset` to 0 so the new file is always re-read from its own
- * start. The size-based check is kept as a secondary fallback (a
- * same-identity in-place truncate, or a platform where `ino` isn't a
- * reliable identity signal).
+ * The most recent record `pick` accepts, or `undefined` when there is none,
+ * no log, or the log is not a regular file. Opened non-blocking and without
+ * following a symlink: `doctor`, `service-status` and the support bundle
+ * call this, and must not hang on a FIFO planted at the path.
  */
-export async function followAuditLog(
-  filePath: string,
-  onEvent: (event: DaemonEvent) => void,
-  options: FollowOptions,
-): Promise<void> {
-  const { signal, pollIntervalMs = 200, fromEnd = true } = options;
-
-  let offset = 0;
-  // Explicit `Buffer` (not the narrower type `Buffer.alloc(0)` alone would
-  // infer): this gets reassigned from `Buffer.concat`/`.subarray`, whose
-  // return types don't always narrow identically across @types/node
-  // versions — the plain `Buffer` alias covers all of them.
-  let pending: Buffer = Buffer.alloc(0);
-  // Finding P2 (new): `dev:ino` of the file `offset` was last measured
-  // against — `undefined` until the first successful stat of an existing
-  // file. See this function's own doc comment ("Rotation tolerance").
-  let lastFileIdentity: string | undefined;
-
-  if (fromEnd) {
-    try {
-      const st = await fs.stat(filePath);
-      offset = st.size;
-      lastFileIdentity = `${st.dev}:${st.ino}`;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-      offset = 0;
-    }
+async function readLastRecord<T>(storeDir: string, pick: (record: DaemonRecord) => T | undefined): Promise<T | undefined> {
+  let handle: Awaited<ReturnType<typeof fs.open>>;
+  try {
+    handle = await fs.open(auditLogPath(storeDir), fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0) | (fsConstants.O_NOFOLLOW ?? 0));
+  } catch {
+    return undefined;
   }
-
-  async function readNewBytes(): Promise<Buffer> {
-    let handle;
-    try {
-      handle = await fs.open(filePath, 'r');
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return Buffer.alloc(0);
-      throw err;
-    }
-    try {
-      const st = await handle.stat();
-      const identity = `${st.dev}:${st.ino}`;
-      if (lastFileIdentity !== undefined && identity !== lastFileIdentity) {
-        // The file at this path was replaced (e.g. an atomic rotation)
-        // since our last read — a different inode means our byte offset no
-        // longer means anything for THIS file's bytes, regardless of
-        // whether the new file is smaller OR LARGER than the old offset
-        // (a purely size-based check misses the latter — finding P2 (new)).
-        offset = 0;
-        pending = Buffer.alloc(0);
-      } else if (st.size < offset) {
-        // Same identity but shrunk (e.g. truncated in place rather than
-        // replaced) — keep the original size-based fallback for that case,
-        // and as a safety net on a platform where `ino` isn't reliable.
-        offset = 0;
-        pending = Buffer.alloc(0);
-      }
-      lastFileIdentity = identity;
-      if (st.size <= offset) return Buffer.alloc(0);
-      const length = st.size - offset;
-      const buffer = Buffer.alloc(length);
-      const { bytesRead } = await handle.read(buffer, 0, length, offset);
-      offset += bytesRead;
-      return buffer.subarray(0, bytesRead);
-    } finally {
-      await handle.close();
-    }
+  let raw: string;
+  try {
+    if (!(await handle.stat()).isFile()) return undefined;
+    raw = await handle.readFile('utf8');
+  } finally {
+    await handle.close();
   }
-
-  while (!signal.aborted) {
-    const chunk = await readNewBytes();
-    if (chunk.length > 0) {
-      const combined = pending.length > 0 ? Buffer.concat([pending, chunk]) : chunk;
-      const lastNewline = combined.lastIndexOf(0x0a);
-      if (lastNewline === -1) {
-        pending = combined;
-      } else {
-        const completeText = combined.subarray(0, lastNewline + 1).toString('utf8');
-        pending = Buffer.from(combined.subarray(lastNewline + 1));
-        for (const line of completeText.split('\n')) {
-          if (!line) continue;
-          const event = parseAuditLine(line);
-          if (event) onEvent(event);
-        }
-      }
-    }
-
-    if (signal.aborted) break;
-    await delay(pollIntervalMs, signal);
+  const lines = completeLines(raw);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const record = parseRecordLine(lines[i]);
+    const picked = record === undefined ? undefined : pick(record);
+    if (picked !== undefined) return picked;
   }
+  return undefined;
+}
+
+/** The last `environment-resolved` record (issue #392). */
+export function readLastEnvironmentRecord(storeDir: string): Promise<EnvironmentRecord | undefined> {
+  return readLastRecord(storeDir, (record) => {
+    if (record.kind !== 'environment-resolved') return undefined;
+    const { kind: _kind, ts, ...status } = record;
+    return { ts, status: status as ServiceEnvironmentStatus };
+  });
+}
+
+/** The last `lifecycle` record (issue #394), for the offline readers (`doctor`, `service-status`). */
+export function readLastLifecycleRecord(storeDir: string): Promise<{ lifecycle: DaemonLifecycle; ts: string } | undefined> {
+  return readLastRecord(storeDir, (record) => (record.kind === 'lifecycle' ? { lifecycle: record.lifecycle, ts: record.ts } : undefined));
 }

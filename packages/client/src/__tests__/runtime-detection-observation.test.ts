@@ -13,7 +13,9 @@ import { runRuntimesCommand } from '../bin/commands/runtimes';
 import { runStatusCommand } from '../bin/commands/status';
 import { runDoctorCommand } from '../bin/commands/doctor';
 import { collectDiagnostics } from '../diagnostics/diagnostics';
-import { validateRuntimeDetectResult } from '../runtime-detection';
+import { createDaemonRecordProjector } from '../daemon/daemon-record';
+import { appendAuditRecord } from '../bin/audit-log';
+import { projectRuntimeObservation, validateRuntimeDetectResult } from '../runtime-detection';
 import type { RuntimeDetectResult } from '../types';
 import type { DaemonConfig } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -234,7 +236,8 @@ it('carries failure outcomes through runtimes/status and doctor JSON/text withou
   const lines: string[] = [];
   const log = (line: string) => { lines.push(line); };
   await runRuntimesCommand(config, { adapters, log });
-  await runStatusCommand(config, { adapters, log, connectControl });
+  await appendAuditRecord(dir, createDaemonRecordProjector().project({ kind: 'runtimes-detected', ts: '2026-10-14T00:00:00.000Z', runtimes: await Promise.all(adapters.map(async adapter => projectRuntimeObservation(adapter.descriptor, await adapter.detect()))) })[0]!);
+  await runStatusCommand(config, { log, connectControl });
   for (const kind of kinds.filter((kind) => kind !== 'available')) {
     expect(lines).toContain(`${kind}: ${kind}`);
     expect(lines.find((line) => line.startsWith('runtimes:'))).toContain(`${kind}=${kind}`);
@@ -244,7 +247,7 @@ it('carries failure outcomes through runtimes/status and doctor JSON/text withou
   expect(snapshot.runtimes.map(({ present }) => present)).toEqual([true, false, false, false, false]);
   const check = snapshot.checks.find(({ id }) => id === 'runtimes');
   expect(check?.status).toBe('pass');
-  expect(check?.summary).toBe('1/5 present; not-found=1 not-executable=1 timeout=1 probe-failed=1');
+  expect(check?.summary).toBe('local-shell: 1/5 present; not-found=1 not-executable=1 timeout=1 probe-failed=1');
   await runDoctorCommand(config, { adapters, connectControl, log });
   expect(lines.some((line) => line.includes(check!.summary))).toBe(true);
   const json: string[] = [];

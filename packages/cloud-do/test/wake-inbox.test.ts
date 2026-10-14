@@ -843,7 +843,25 @@ describe('4e-2 real native renewal, dispatch intent and billing facts', () => {
     expect(rows.cloud_executions).toMatchObject([{ steps: 0, sentRequests: 0 }]);
     expect(receipts(rows)).toMatchObject([{ compensated: 1 }]);
     await json(name, 'release'); await json(name, 'controls', { controls: { audit: true } });
-    await direct(name); await waitAck(name, 2); expect(calls).toHaveLength(1);
+    // The deadline session keeps its immutable 150 ms limit. Recovery under a
+    // normal turn budget is checked separately below, rather than racing it.
+    if (stop === 'cancel') {
+      await direct(name); await waitAck(name, 2); expect(calls).toHaveLength(1);
+    }
+  });
+
+  it('admits a later paid request after a model renewal deadline releases the run', async () => {
+    const name = await setup({ audit: true, pauseRenew: 'model' }, { turnTimeoutMs: HELD_CALL_TIMEOUT_MS });
+    await enqueue(name, { dedupKey: 'renew-deadline-recovery', text: 'renew never cooperates' });
+    await eventually(async () => expect((await dump(name)).fixture_renewals).toHaveLength(1));
+    const first = await waitAck(name);
+    expect(calls).toHaveLength(0);
+    expect(first.cloud_executions).toMatchObject([{ steps: 0, sentRequests: 0 }]);
+    expect(receipts(first)).toMatchObject([{ compensated: 1 }]);
+    await json(name, 'release'); await json(name, 'controls', { controls: { audit: true } });
+    await direct(name); const rows = await waitAck(name, 2);
+    expect(calls).toHaveLength(1);
+    expect(rows.cloud_executions!.at(-1)).toMatchObject({ state: 'completed', sentRequests: 1 });
   });
 
   it('times out tool renewal before taking the sole inline slot, so the next run can dispatch', async () => {

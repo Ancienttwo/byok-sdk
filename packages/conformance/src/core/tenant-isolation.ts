@@ -18,9 +18,11 @@ export function runTenantIsolationConformance(factory: CoreCompositionFactory): 
   describe('tenant isolation', () => {
     it('does not leak mailbox rows or cursors', async () => {
       await withComposition(factory, async ({ stores }) => {
+        await stores.quota.writeEntitlement(TENANT_A, ENTITLEMENT);
         await stores.mailbox.append(TENANT_A, {
           deviceId: 'device-1',
           messageId: 'msg-1',
+          admission: 'limited',
           materialize: () => ({ body: '{}', bodyHash: hashOf(1), byteSize: 2n }),
         });
         await stores.mailbox.recordDelivery(TENANT_A, { deviceId: 'device-1', deliveredSeq: 1 });

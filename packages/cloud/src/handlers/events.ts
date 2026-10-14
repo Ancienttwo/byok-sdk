@@ -96,8 +96,21 @@ export interface EventsRouteDeps extends DeviceRouteDeps {
   readonly pageLimit: number;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/** Resolves after `ms`, or as soon as `signal` aborts; the timer never outlives the caller. */
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const finish = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    signal.addEventListener('abort', finish, { once: true });
+  });
 }
 
 export function eventsHandler(deps: EventsRouteDeps) {
@@ -135,7 +148,11 @@ export function eventsHandler(deps: EventsRouteDeps) {
     }
 
     const attempts = Math.max(1, Math.ceil(deps.longPollHoldMs / deps.longPollIntervalMs));
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
+    // A caller that disconnected has nobody to read the answer: end the hold
+    // instead of re-reading its mailbox until the hold expires, which would
+    // also keep the embedding process alive that long after a shutdown.
+    const requestSignal = c.req.raw.signal;
+    for (let attempt = 0; attempt < attempts && !requestSignal.aborted; attempt += 1) {
       let scanCursor = afterSeq;
       while (true) {
         const page = await stores.mailbox.readAfter({
@@ -191,7 +208,7 @@ export function eventsHandler(deps: EventsRouteDeps) {
         });
         return c.json(response, 200);
       }
-      if (attempt < attempts - 1) await sleep(deps.longPollIntervalMs);
+      if (attempt < attempts - 1) await sleep(deps.longPollIntervalMs, requestSignal);
     }
 
     const response: EventsPollResponse = {

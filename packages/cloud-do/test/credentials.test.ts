@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { readFirstTextDelta } from './credentials-first-event';
 import { build } from 'esbuild';
 import { Log, LogLevel, Miniflare, type MiniflareOptions, type WorkerdStructuredLog } from 'miniflare';
 
@@ -22,7 +24,7 @@ interface ProviderCall { url: string; headers: Record<string, string>; body: str
 const calls: ProviderCall[] = [];
 let mf: Miniflare;
 let serial = 0;
-let scenario: { chunks?: string[]; ending?: string; status?: number; responseBody?: string; location?: string; hold?: boolean; trailingHold?: boolean } = {};
+let scenario: { chunks?: string[]; ending?: string; status?: number; responseBody?: string; location?: string; hold?: boolean; trailingHold?: boolean; bodyDelayMs?: number } = {};
 let finishProvider: (() => void) | undefined;
 let cancelled = false;
 let providerClosed = false;
@@ -51,22 +53,27 @@ beforeAll(async () => {
       },
     },
       dev: { outboundService: { type: 'node-handler', handler: async (request: IncomingMessage, response: ServerResponse) => {
+        const currentScenario = scenario;
         let body = '';
         for await (const chunk of request) body += chunk.toString();
         const headers = Object.fromEntries(Object.entries(request.headers).map(([key, value]) => [key, Array.isArray(value) ? value.join(',') : value ?? '']));
         calls.push({ url: headers['mf-original-url'] ?? new URL(request.url!, `https://${headers.host}`).href, headers, body });
-        if (scenario.status) {
-          response.writeHead(scenario.status, { location: scenario.location ?? 'https://evil.invalid/next' });
-          response.end(scenario.responseBody); return;
+        if (currentScenario.status) {
+          response.writeHead(currentScenario.status, { location: currentScenario.location ?? 'https://evil.invalid/next' });
+          response.end(currentScenario.responseBody); return;
         }
-        const chunks = scenario.chunks ?? [sse(LONG_SAFE)];
+        const chunks = currentScenario.chunks ?? [sse(LONG_SAFE)];
         response.on('close', () => { if (!response.writableEnded) cancelled = true; });
         response.writeHead(200, { 'content-type': 'text/event-stream', 'x-provider-credential': KEY });
         response.flushHeaders();
+        if (currentScenario.bodyDelayMs !== undefined) {
+          await delay(currentScenario.bodyDelayMs);
+          if (response.destroyed) return;
+        }
         for (const chunk of chunks) response.write(chunk);
-        const terminal = scenario.ending ?? ending;
+        const terminal = currentScenario.ending ?? ending;
         finishProvider = () => { response.end(terminal); providerClosed = true; };
-        if (!scenario.hold && !scenario.trailingHold) finishProvider();
+        if (!currentScenario.hold && !currentScenario.trailingHold) finishProvider();
       } } },
     };
   });
@@ -93,7 +100,8 @@ async function dump(name: string, kind = 'normal') {
   return await response.json() as Record<string, unknown[]>;
 }
 function events(text: string): Record<string, unknown>[] {
-  return text.split('\n').filter(line => line.startsWith('data: ')).map(line => JSON.parse(line.slice(6)) as Record<string, unknown>);
+  return text.split('\n\n').slice(0, -1).flatMap(frame => frame.split('\n').filter(line => line.startsWith('data: ')))
+    .map(line => JSON.parse(line.slice(6)) as Record<string, unknown>);
 }
 function assistantUsage(persisted: Record<string, unknown[]>): Record<string, unknown> {
   const assistants = (persisted.pi_entries as { record: string }[]).flatMap(row => {
@@ -169,50 +177,59 @@ describe('platform credentials through real native Harness in workerd', () => {
   });
 
   it('releases safe text before provider EOF and finishes the tail in order', async () => {
-    scenario = { hold: true, chunks: [sse(LONG_SAFE)] };
+    scenario = { hold: true, chunks: [sse(LONG_SAFE)], bodyDelayMs: 500 };
     const response = await rpc(`incremental-${++serial}`, 'submit', { instruction: 'Write a paragraph.' });
     const reader = response.body!.getReader();
     try {
-      const first = await reader.read();
-      expect(first.done).toBe(false);
-      expect(new TextDecoder().decode(first.value)).toContain('text_delta');
+      const decoder = new TextDecoder();
+      const first = await readFirstTextDelta(reader, decoder);
+      expect(first).toContain(': keepalive');
+      expect(first).toContain('text_delta');
+      expect(events(first)[0]).toMatchObject({ type: 'text_delta' });
       expect(providerClosed).toBe(false);
       finishProvider!();
-      let text = new TextDecoder().decode(first.value);
-      for (;;) { const chunk = await reader.read(); if (chunk.done) break; text += new TextDecoder().decode(chunk.value); }
+      let text = first;
+      for (;;) { const chunk = await reader.read(); if (chunk.done) break; text += decoder.decode(chunk.value, { stream: true }); }
+      text += decoder.decode();
       expect(events(text).filter(event => event.type === 'text_delta').map(event => event.delta).join('')).toBe(LONG_SAFE);
       safeArtifacts(text, logs);
     } finally { if (!providerClosed && !cancelled) finishProvider?.(); await reader.cancel(); }
   });
 
   it('cancels the live upstream HTTP response when the client cancels its SSE reader', async () => {
-    scenario = { hold: true, chunks: [sse(LONG_SAFE)] };
+    scenario = { hold: true, chunks: [sse(LONG_SAFE)], bodyDelayMs: 500 };
     const name = `client-cancel-${++serial}`;
     // Exercise an HTTP client stream, including disconnect propagation, rather
     // than Miniflare's magic getWorker() proxy stream bridge.
     const response = await mf.dispatchFetch('http://test/', { method: 'POST', body: JSON.stringify({ name, operation: 'submit', input: { instruction: 'Write a paragraph.' } }) });
     const reader = response.body!.getReader();
     try {
-      const first = await reader.read();
-      expect(first.done).toBe(false);
-      expect(new TextDecoder().decode(first.value)).toContain('text_delta');
+      const decoder = new TextDecoder();
+      const first = await readFirstTextDelta(reader, decoder);
+      expect(first).toContain(': keepalive');
+      expect(first).toContain('text_delta');
+      expect(events(first)[0]).toMatchObject({ type: 'text_delta' });
       expect(providerClosed).toBe(false);
       await reader.cancel();
       await vi.waitFor(() => expect(cancelled).toBe(true));
       expect(providerClosed).toBe(false);
       expect(calls).toHaveLength(1);
-      safeArtifacts(new TextDecoder().decode(first.value), logs, await dump(name));
+      safeArtifacts(first, logs, await dump(name));
     } finally { if (!providerClosed && !cancelled) finishProvider?.(); }
   });
 
-  for (const operation of ['cancel-inside', 'cancel-local'] as const) it(`propagates ${operation} workerd reader cancellation to the upstream HTTP response`, async () => {
-    scenario = { hold: true, chunks: [sse(LONG_SAFE)] };
+  // Exercise immediate output and bytes held beyond AgentDO's 250 ms heartbeat;
+  // cancellation must follow model data rather than the first transport chunk.
+  for (const operation of ['cancel-inside', 'cancel-local'] as const) for (const bodyDelayMs of [undefined, 1_000]) it(`propagates ${operation} workerd reader cancellation to the upstream HTTP response${bodyDelayMs ? ' after keepalive' : ''}`, async () => {
+    scenario = { hold: true, chunks: [sse(LONG_SAFE)], bodyDelayMs };
     const name = `diagnostic-${operation}-${++serial}`;
     try {
       const response = await rpc(name, operation, { instruction: 'Write a paragraph.' });
       expect(response.status).toBe(200);
       const result = await response.json() as { first: string; cancelled: boolean };
+      if (bodyDelayMs) expect(result.first.slice(0, result.first.indexOf('data: '))).toContain(': keepalive');
       expect(result.first).toContain('text_delta');
+      expect(events(result.first)[0]).toMatchObject({ type: 'text_delta' });
       expect(result.cancelled).toBe(true);
       await vi.waitFor(() => expect(cancelled).toBe(true));
       expect(providerClosed).toBe(false);

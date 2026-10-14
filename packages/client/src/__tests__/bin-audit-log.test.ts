@@ -2,45 +2,100 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import type { DaemonEvent } from '../index';
+import type { DaemonRecord } from '../index';
 import {
-  appendAuditEvent,
+  appendAuditRecord,
   AUDIT_LOG_TRIM_TARGET_LINES,
   auditLogPath,
   createAuditAppender,
-  followAuditLog,
+  formatDaemonRecordLine,
   MAX_AUDIT_LOG_BYTES,
   MAX_LIVE_TASK_ANCHORS,
-  readAuditEvents,
+  readAuditRecords,
+  readLastEnvironmentRecord,
+  readLastLifecycleRecord,
 } from '../bin/audit-log';
 import { atomicWriteFile } from '../util/atomic-write';
-import { deriveTasksFromEvents } from '../bin/tasks-view';
+import { deriveTasksFromRecords } from '../bin/tasks-view';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
-function lifecycleEvent(connection: 'open' | 'connecting', ts: string): DaemonEvent {
+function lifecycleRecord(connection: 'open' | 'connecting', ts: string): DaemonRecord {
   return { kind: 'lifecycle', ts, lifecycle: { phase: 'running', connection } };
 }
 
-describe('bin/audit-log: appendAuditEvent / readAuditEvents', () => {
+describe('bin/audit-log: appendAuditRecord / readAuditRecords', () => {
+  it('captures queued lines before nested records mutate, and returns the exact stdout bytes', async () => {
+    const storeDir = await tmpDir('byok-audit-capture-');
+    const appender = createAuditAppender(storeDir);
+    const lifecycle = { phase: 'running' as const, connection: 'connecting' as 'connecting' | 'open' };
+    const record: DaemonRecord = { kind: 'lifecycle', ts: '2026-10-14T00:00:00.000Z', lifecycle };
+    const first = appender.append(record);
+    lifecycle.connection = 'open';
+    const second = appender.append(record);
+    expect(first).not.toBe(second);
+    expect(JSON.parse(first).lifecycle.connection).toBe('connecting');
+    expect(JSON.parse(second).lifecycle.connection).toBe('open');
+    await appender.flush();
+    expect(await fs.readFile(auditLogPath(storeDir), 'utf8')).toBe(`${first}\n${second}\n`);
+  });
+
+  it('writes exactly formatDaemonRecordLine(record) plus a newline — the bytes start prints to stdout', async () => {
+    const storeDir = await tmpDir('byok-audit-line-');
+    const record: DaemonRecord = { kind: 'completed', ts: '2026-01-01T00:00:00.000Z', taskId: 't1', sessionRef: 's', summaryBytes: 3 };
+    await appendAuditRecord(storeDir, record);
+    expect(await fs.readFile(auditLogPath(storeDir), 'utf8')).toBe(`${formatDaemonRecordLine(record)}\n`);
+  });
+
+  it('drops lines in another shape: an unknown kind (an older build\'s per-event progress or connection line) or a task record without a taskId', async () => {
+    const storeDir = await tmpDir('byok-audit-foreign-');
+    const good: DaemonRecord = { kind: 'started', ts: '2026-01-01T00:00:02.000Z', taskId: 't1' };
+    const lines = [
+      JSON.stringify({ kind: 'progress', ts: '2026-01-01T00:00:00.000Z', taskId: 't1', event: { type: 'progress', textSize: 3 } }),
+      JSON.stringify({ kind: 'connection', ts: '2026-01-01T00:00:00.500Z', state: 'open' }),
+      JSON.stringify({ kind: 'started', ts: '2026-01-01T00:00:01.000Z' }),
+      JSON.stringify(good),
+    ];
+    await fs.writeFile(auditLogPath(storeDir), `${lines.join('\n')}\n`, { mode: 0o600 });
+    expect(await readAuditRecords(storeDir)).toEqual([good]);
+  });
+
+  it('readLastLifecycleRecord / readLastEnvironmentRecord return the latest valid one', async () => {
+    const storeDir = await tmpDir('byok-audit-last-');
+    await appendAuditRecord(storeDir, lifecycleRecord('connecting', '2026-01-01T00:00:00.000Z'));
+    await appendAuditRecord(storeDir, { kind: 'environment-resolved', ts: '2026-01-01T00:00:01.000Z', source: 'login-shell', shell: 'zsh', durationMs: 5 });
+    await appendAuditRecord(storeDir, lifecycleRecord('open', '2026-01-01T00:00:02.000Z'));
+    await fs.appendFile(auditLogPath(storeDir), `${JSON.stringify({ kind: 'environment-resolved', ts: '2026-01-01T00:00:03.000Z', source: 'login-shell', shell: '/bin/zsh', durationMs: 5 })}\n`);
+    expect(await readLastLifecycleRecord(storeDir)).toEqual({ ts: '2026-01-01T00:00:02.000Z', lifecycle: { phase: 'running', connection: 'open' } });
+    expect(await readLastEnvironmentRecord(storeDir)).toEqual({ ts: '2026-01-01T00:00:01.000Z', status: { source: 'login-shell', shell: 'zsh', durationMs: 5 } });
+  });
+
   it('round-trips audit-safe runtime disposal evidence', async () => {
     const storeDir = await tmpDir('byok-audit-runtime-disposal-');
-    const event: DaemonEvent = {
+    const event: DaemonRecord = {
       kind: 'runtime-disposal-failed',
       ts: '2026-01-01T00:00:00.000Z',
       taskId: 'task-disposal',
       runtimeId: 'codex',
       stage: 'quiescence',
-      reason: 'codex runtime process group remained live after SIGKILL',
+      reasonBytes: 55,
     };
-    await appendAuditEvent(storeDir, event);
-    expect(await readAuditEvents(storeDir)).toEqual([event]);
+    await appendAuditRecord(storeDir, event);
+    expect(await readAuditRecords(storeDir)).toEqual([event]);
   });
+
+  it('round-trips a crashed lifecycle', async () => {
+    const storeDir = await tmpDir('byok-audit-crashed-');
+    const crashed: DaemonRecord = { kind: 'lifecycle', ts: '2026-10-14T00:00:00.000Z', lifecycle: { phase: 'crashed', at: '2026-10-14T00:00:00.000Z' } };
+    await appendAuditRecord(storeDir, crashed);
+    expect(await readAuditRecords(storeDir)).toEqual([crashed]);
+  });
+
   it('#394: round-trips a halted lifecycle, and drops pre-lifecycle connection lines and malformed lifecycles', async () => {
     const storeDir = await tmpDir('byok-audit-lifecycle-');
-    const halted: DaemonEvent = {
+    const halted: DaemonRecord = {
       kind: 'lifecycle',
       ts: '2026-01-01T00:00:02.000Z',
       lifecycle: { phase: 'halted', reason: 'device_revoked', at: '2026-01-01T00:00:02.000Z' },
@@ -51,114 +106,107 @@ describe('bin/audit-log: appendAuditEvent / readAuditEvents', () => {
       JSON.stringify({ kind: 'lifecycle', ts: '2026-01-01T00:00:01.500Z', lifecycle: { phase: 'running', connection: 'closed' } }),
     ];
     await fs.writeFile(auditLogPath(storeDir), `${lines.join('\n')}\n`, { mode: 0o600 });
-    await appendAuditEvent(storeDir, halted);
-    expect(await readAuditEvents(storeDir)).toEqual([halted]);
+    await appendAuditRecord(storeDir, halted);
+    expect(await readAuditRecords(storeDir)).toEqual([halted]);
   });
 
   it('appends events as one JSON line each, oldest first, and reads them back', async () => {
     const storeDir = await tmpDir('byok-audit-');
-    const e1 = lifecycleEvent('open', '2026-01-01T00:00:00.000Z');
-    const e2: DaemonEvent = { kind: 'offered', ts: '2026-01-01T00:00:01.000Z', taskId: 't1', runtime: 'pi' };
+    const e1 = lifecycleRecord('open', '2026-01-01T00:00:00.000Z');
+    const e2: DaemonRecord = { kind: 'offered', ts: '2026-01-01T00:00:01.000Z', taskId: 't1', runtime: 'pi' };
 
-    await appendAuditEvent(storeDir, e1);
-    await appendAuditEvent(storeDir, e2);
+    await appendAuditRecord(storeDir, e1);
+    await appendAuditRecord(storeDir, e2);
 
     const raw = await fs.readFile(auditLogPath(storeDir), 'utf8');
     expect(raw.split('\n').filter(Boolean)).toHaveLength(2);
 
-    const events = await readAuditEvents(storeDir);
+    const events = await readAuditRecords(storeDir);
     expect(events).toEqual([e1, e2]);
   });
 
   it('persists and replays claimedRuntime while leaving legacy claim lines without it unchanged', async () => {
     const storeDir = await tmpDir('byok-audit-claimed-runtime-');
-    const actual: DaemonEvent = {
+    const actual: DaemonRecord = {
       kind: 'claimed',
       ts: '2026-01-01T00:00:00.000Z',
       taskId: 't-actual',
       claimedRuntime: 'pi',
     };
-    const legacy: DaemonEvent = { kind: 'claimed', ts: '2026-01-01T00:00:01.000Z', taskId: 't-legacy' };
+    const legacy: DaemonRecord = { kind: 'claimed', ts: '2026-01-01T00:00:01.000Z', taskId: 't-legacy' };
 
-    await appendAuditEvent(storeDir, actual);
-    await appendAuditEvent(storeDir, legacy);
+    await appendAuditRecord(storeDir, actual);
+    await appendAuditRecord(storeDir, legacy);
 
     const raw = await fs.readFile(auditLogPath(storeDir), 'utf8');
     const lines = raw.split('\n').filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(lines[0]?.claimedRuntime).toBe('pi');
     expect(lines[1] && 'claimedRuntime' in lines[1]).toBe(false);
-    expect(await readAuditEvents(storeDir)).toEqual([actual, legacy]);
+    expect(await readAuditRecords(storeDir)).toEqual([actual, legacy]);
   });
 
   it('returns [] when the log does not exist yet', async () => {
     const storeDir = await tmpDir('byok-audit-missing-');
-    expect(await readAuditEvents(storeDir)).toEqual([]);
+    expect(await readAuditRecords(storeDir)).toEqual([]);
   });
 
   it('skips a corrupt/blank line instead of throwing', async () => {
     const storeDir = await tmpDir('byok-audit-corrupt-');
-    const good: DaemonEvent = { kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' };
+    const good: DaemonRecord = { kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' };
     await fs.mkdir(storeDir, { recursive: true });
     await fs.writeFile(auditLogPath(storeDir), `${JSON.stringify(good)}\n\nnot json at all\n{"missing":"kind and ts"}\n`);
 
-    const events = await readAuditEvents(storeDir);
+    const events = await readAuditRecords(storeDir);
     expect(events).toEqual([good]);
   });
 
   it('drops a torn trailing line with no terminating newline (a write caught mid-flush) rather than misreading it', async () => {
     const storeDir = await tmpDir('byok-audit-torn-');
-    const good: DaemonEvent = { kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' };
+    const good: DaemonRecord = { kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' };
     await fs.mkdir(storeDir, { recursive: true });
     await fs.writeFile(auditLogPath(storeDir), `${JSON.stringify(good)}\n{"kind":"paired","ts":"2026-01-01T00:00:0`);
 
-    const events = await readAuditEvents(storeDir);
+    const events = await readAuditRecords(storeDir);
     expect(events).toEqual([good]);
   });
 
-  // Finding R3 (cross-model re-review): `shutdown-complete`'s
-  // `undeliveredOutboxCount` (finding F5(b)) is a plain NUMBER — no
-  // redaction concern — but the redaction/reconstruction branch used to
-  // share `shutdown-requested`'s case verbatim, which only ever copied
-  // `reason` across; the field was silently dropped on every persisted
-  // write, so a replayed view always saw `undefined`, indistinguishable
-  // from "0 undelivered" (the exact false "everything delivered"
-  // impression F5(b) exists to prevent).
+  // Finding R3: `shutdown-complete`'s `undeliveredOutboxCount` (finding
+  // F5(b)) must survive persistence: `undefined` would be indistinguishable
+  // from "0 undelivered".
   it('finding R3: shutdown-complete.undeliveredOutboxCount survives a real append + read round trip', async () => {
     const storeDir = await tmpDir('byok-audit-shutdown-complete-');
-    const withCount: DaemonEvent = {
+    const withCount: DaemonRecord = {
       kind: 'shutdown-complete',
       ts: '2026-01-01T00:00:00.000Z',
-      reason: 'operator',
+      reasonBytes: 8,
       undeliveredOutboxCount: 3,
     };
-    const zeroCount: DaemonEvent = {
+    const zeroCount: DaemonRecord = {
       kind: 'shutdown-complete',
       ts: '2026-01-01T00:00:01.000Z',
-      reason: 'unpair',
+      reasonBytes: 6,
       undeliveredOutboxCount: 0,
     };
 
-    await appendAuditEvent(storeDir, withCount);
-    await appendAuditEvent(storeDir, zeroCount);
+    await appendAuditRecord(storeDir, withCount);
+    await appendAuditRecord(storeDir, zeroCount);
 
-    const events = await readAuditEvents(storeDir);
+    const events = await readAuditRecords(storeDir);
     expect(events).toEqual([withCount, zeroCount]);
 
-    // Explicit, not incidental: the persisted line itself actually carries
-    // the field (proves it survived redaction on the WRITE side, not just
-    // that reconstruction happens to default it back to the right number).
+    // Explicit, not incidental: the persisted line itself carries the field.
     const raw = await fs.readFile(auditLogPath(storeDir), 'utf8');
     const lines = raw.split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
     expect(lines[0]?.undeliveredOutboxCount).toBe(3);
     expect(lines[1]?.undeliveredOutboxCount).toBe(0);
   });
 
-  it('finding R3: an older audit line predating this fix (no undeliveredOutboxCount key at all) reconstructs as undefined, never a false 0', async () => {
+  it('finding R3: a shutdown-complete record without undeliveredOutboxCount reads back as undefined, never a false 0', async () => {
     const storeDir = await tmpDir('byok-audit-shutdown-complete-legacy-');
     await fs.mkdir(storeDir, { recursive: true });
-    await fs.writeFile(auditLogPath(storeDir), `${JSON.stringify({ kind: 'shutdown-complete', ts: '2026-01-01T00:00:00.000Z', reason: 'operator' })}\n`);
+    await fs.writeFile(auditLogPath(storeDir), `${JSON.stringify({ kind: 'shutdown-complete', ts: '2026-01-01T00:00:00.000Z', reasonBytes: 8 })}\n`);
 
-    const events = await readAuditEvents(storeDir);
+    const events = await readAuditRecords(storeDir);
     expect(events).toHaveLength(1);
     const [event] = events;
     if (event?.kind !== 'shutdown-complete') throw new Error('unreachable');
@@ -166,218 +214,7 @@ describe('bin/audit-log: appendAuditEvent / readAuditEvents', () => {
   });
 });
 
-describe('bin/audit-log: finding P1 #3 (SECURITY) — redaction, 0600 file, 0700 storeDir', () => {
-  it('a secret-like tool_use input / tool_result output / inline artifact bytes are NOT present verbatim in audit.jsonl, and the file is 0600', async () => {
-    const storeDir = await tmpDir('byok-audit-redact-');
-    const secretApiKey = 'sk-live-SUPER-SECRET-1234567890abcdef';
-    const secretToolOutput = 'password=hunter2\nAPI_KEY=sk-another-secret-value';
-    const secretInlineBase64 = Buffer.from('# secret file contents\nTOKEN=abcdef123456').toString('base64');
-
-    await appendAuditEvent(storeDir, {
-      kind: 'progress',
-      ts: '2026-01-01T00:00:00.000Z',
-      taskId: 't1',
-      event: {
-        type: 'tool_use',
-        tool: 'bash',
-        input: { command: `curl -H "Authorization: Bearer ${secretApiKey}" https://example.invalid` },
-      },
-    });
-    await appendAuditEvent(storeDir, {
-      kind: 'progress',
-      ts: '2026-01-01T00:00:01.000Z',
-      taskId: 't1',
-      event: { type: 'tool_result', tool: 'bash', output: secretToolOutput },
-    });
-    await appendAuditEvent(storeDir, {
-      kind: 'artifact',
-      ts: '2026-01-01T00:00:02.000Z',
-      taskId: 't1',
-      name: 'secrets.txt',
-      contentType: 'text/plain',
-      inline: secretInlineBase64,
-    });
-
-    const raw = await fs.readFile(auditLogPath(storeDir), 'utf8');
-    expect(raw).not.toContain(secretApiKey);
-    expect(raw).not.toContain(secretToolOutput);
-    expect(raw).not.toContain(secretInlineBase64);
-    expect(raw).not.toContain('hunter2');
-
-    // Still useful for triage: tool NAMES, taskId, and sizes/counts survive.
-    expect(raw).toContain('"tool":"bash"');
-    expect(raw).toContain('inputSize');
-    expect(raw).toContain('outputSize');
-    expect(raw).toContain('inlineSize');
-
-    const stat = await fs.stat(auditLogPath(storeDir));
-    expect(stat.mode & 0o777).toBe(0o600);
-
-    // Reading it back degrades honestly to size placeholders — never the raw secret.
-    const events = await readAuditEvents(storeDir);
-    const serializedReadBack = JSON.stringify(events);
-    expect(serializedReadBack).not.toContain(secretApiKey);
-    expect(serializedReadBack).not.toContain(secretToolOutput);
-    expect(serializedReadBack).not.toContain(secretInlineBase64);
-  });
-
-  it('records a spilled tool_result as the pre-spill totalBytes plus a boolean, never the blob locator or the preview', async () => {
-    const storeDir = await tmpDir('byok-audit-spill-result-');
-    await appendAuditEvent(storeDir, {
-      kind: 'progress',
-      ts: '2026-01-01T00:00:00.000Z',
-      taskId: 'task-big-output',
-      event: {
-        type: 'tool_result',
-        tool: 'bash',
-        output: { preview: { head: 'HEAD-BYTES', tail: 'TAIL' } },
-        spill: {
-          field: 'output',
-          totalBytes: 3_145_728,
-          omittedBytes: 3_145_000,
-          contentType: 'application/json',
-          blob: {
-            blobId: 'blob_SECRET_LOCATOR',
-            contentHash: `sha256:${'a'.repeat(64)}`,
-            size: 3_145_728,
-            contentType: 'application/json',
-          },
-        },
-      },
-    });
-
-    const raw = await fs.readFile(auditLogPath(storeDir), 'utf8');
-    expect(raw).toContain('"outputSize":3145728');
-    expect(raw).toContain('"outputSpilled":true');
-    expect(raw).not.toContain('blob_SECRET_LOCATOR');
-    expect(raw).not.toContain('contentHash');
-    expect(raw).not.toContain('spill');
-    expect(raw).not.toContain('HEAD-BYTES');
-
-    const events = await readAuditEvents(storeDir);
-    expect(events).toHaveLength(1);
-    const [event] = events;
-    if (event?.kind !== 'progress' || event.event.type !== 'tool_result') throw new Error('unreachable');
-    expect(event.event.output).toBe('[redacted: 3145728 bytes, spilled]');
-  });
-
-  it('records the unstoredReason form of a spilled tool_use as totalBytes plus a boolean, never the reason text', async () => {
-    const storeDir = await tmpDir('byok-audit-spill-use-');
-    await appendAuditEvent(storeDir, {
-      kind: 'progress',
-      ts: '2026-01-01T00:00:00.000Z',
-      taskId: 'task-unstored',
-      event: {
-        type: 'tool_use',
-        tool: 'bash',
-        input: { preview: { head: 'HEAD-BYTES', tail: 'TAIL' } },
-        spill: {
-          field: 'input',
-          totalBytes: 2_097_152,
-          omittedBytes: 2_096_000,
-          contentType: 'application/json',
-          unstoredReason: 'REASON-TEXT-MUST-NOT-LEAK',
-        },
-      },
-    });
-
-    const raw = await fs.readFile(auditLogPath(storeDir), 'utf8');
-    expect(raw).toContain('"inputSize":2097152');
-    expect(raw).toContain('"inputSpilled":true');
-    expect(raw).not.toContain('REASON-TEXT-MUST-NOT-LEAK');
-    expect(raw).not.toContain('unstoredReason');
-
-    const events = await readAuditEvents(storeDir);
-    const [event] = events;
-    if (event?.kind !== 'progress' || event.event.type !== 'tool_use') throw new Error('unreachable');
-    expect(event.event.input).toBe('[redacted: 2097152 bytes, spilled]');
-  });
-
-  it('leaves an unspilled tool_result unchanged: no outputSpilled key, outputSize is the inline value size', async () => {
-    const storeDir = await tmpDir('byok-audit-unspilled-');
-    const output = { stdout: 'ok' };
-    const size = Buffer.byteLength(JSON.stringify(output), 'utf8');
-    await appendAuditEvent(storeDir, {
-      kind: 'progress',
-      ts: '2026-01-01T00:00:00.000Z',
-      taskId: 't-unspilled',
-      event: { type: 'tool_result', tool: 'bash', output },
-    });
-
-    const raw = await fs.readFile(auditLogPath(storeDir), 'utf8');
-    expect(raw).not.toContain('outputSpilled');
-    expect(raw).toContain(`"outputSize":${size}`);
-
-    const events = await readAuditEvents(storeDir);
-    const [event] = events;
-    if (event?.kind !== 'progress' || event.event.type !== 'tool_result') throw new Error('unreachable');
-    expect(event.event.output).toBe(`[redacted: ${size} bytes]`);
-  });
-
-  it('persists only coarse Git workspace metadata, rejects sensitive sentinels, and does not anchor task lifecycle rotation', async () => {
-    const storeDir = await tmpDir('byok-audit-git-workspace-');
-    const sentinels = {
-      workspacePath: '/private/repo/SENTINEL-WORKSPACE-PATH',
-      commitId: 'SENTINEL-COMMIT-ID',
-      filename: 'SENTINEL-FILENAME.txt',
-      message: 'SENTINEL-COMMIT-MESSAGE',
-      rawOutput: 'SENTINEL-GIT-STDOUT-STDERR',
-      freeformError: 'SENTINEL-FREEFORM-ERROR',
-    };
-    const event: DaemonEvent = {
-      kind: 'git-workspace',
-      ts: '2026-01-01T00:00:00.000Z',
-      taskId: 'task-git',
-      workspaceId: 'opaque-workspace-1',
-      phase: 'active',
-      headChanged: true,
-      commitsSinceBaseline: 2,
-      dirty: { staged: 1, unstaged: 2, untracked: 3, conflicted: 4 },
-      errorCategory: 'git-command-failed',
-    };
-
-    await appendAuditEvent(storeDir, event);
-
-    const raw = await fs.readFile(auditLogPath(storeDir), 'utf8');
-    expect(raw).toContain('"workspaceId":"opaque-workspace-1"');
-    expect(raw).toContain('"commitsSinceBaseline":2');
-    expect(raw).toContain('"dirty":{"staged":1,"unstaged":2,"untracked":3,"conflicted":4}');
-    for (const sentinel of Object.values(sentinels)) expect(raw).not.toContain(sentinel);
-    expect(await readAuditEvents(storeDir)).toEqual([event]);
-
-    // A Git event must not become a lifecycle anchor during compaction.
-    const filePath = auditLogPath(storeDir);
-    const fillerCount = AUDIT_LOG_TRIM_TARGET_LINES * 5;
-    const lines = [
-      JSON.stringify(event),
-      ...Array.from({ length: fillerCount }, (_, i) => JSON.stringify({
-        kind: 'completed', ts: '2026-01-01T00:00:01.000Z', taskId: `filler-${i}`, summarySize: 0, sessionRef: 'sess', padding: 'x'.repeat(500),
-      })),
-    ];
-    await fs.writeFile(filePath, `${lines.join('\n')}\n`, { mode: 0o600 });
-    await appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:02.000Z' });
-    const rotated = await readAuditEvents(storeDir);
-    expect(rotated.some((entry) => entry.kind === 'git-workspace' && entry.taskId === 'task-git')).toBe(false);
-  });
-
-  it('drops unknown Git error categories instead of persisting free-form values', async () => {
-    const storeDir = await tmpDir('byok-audit-git-error-category-');
-    await appendAuditEvent(storeDir, {
-      kind: 'git-workspace',
-      ts: '2026-01-01T00:00:00.000Z',
-      taskId: 't1',
-      workspaceId: 'w1',
-      phase: 'failed',
-      errorCategory: 'SENTINEL-FREEFORM-ERROR',
-    });
-    const raw = await fs.readFile(auditLogPath(storeDir), 'utf8');
-    expect(raw).not.toContain('SENTINEL-FREEFORM-ERROR');
-    expect(await readAuditEvents(storeDir)).toEqual([{
-      kind: 'git-workspace', ts: '2026-01-01T00:00:00.000Z', taskId: 't1', workspaceId: 'w1', phase: 'failed',
-      headChanged: undefined, commitsSinceBaseline: undefined, dirty: undefined, errorCategory: undefined,
-    }]);
-  });
-
+describe('bin/audit-log: 0600 file, 0700 storeDir', () => {
   it('a pre-existing storeDir with a permissive mode gets locked down to 0700 on append', async () => {
     const parent = await tmpDir('byok-audit-storedir-mode-parent-');
     const storeDir = path.join(parent, 'permissive-store');
@@ -385,7 +222,7 @@ describe('bin/audit-log: finding P1 #3 (SECURITY) — redaction, 0600 file, 0700
     const before = await fs.stat(storeDir);
     expect(before.mode & 0o777).toBe(0o755);
 
-    await appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' });
+    await appendAuditRecord(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' });
 
     const after = await fs.stat(storeDir);
     expect(after.mode & 0o777).toBe(0o700);
@@ -393,10 +230,10 @@ describe('bin/audit-log: finding P1 #3 (SECURITY) — redaction, 0600 file, 0700
 
   it('the file stays 0600 across repeated appends, even if something else loosened it in between', async () => {
     const storeDir = await tmpDir('byok-audit-mode-persist-');
-    await appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' });
+    await appendAuditRecord(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' });
     await fs.chmod(auditLogPath(storeDir), 0o644); // simulate something else loosening it
 
-    await appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:01.000Z' });
+    await appendAuditRecord(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:01.000Z' });
 
     const stat = await fs.stat(auditLogPath(storeDir));
     expect(stat.mode & 0o777).toBe(0o600);
@@ -437,7 +274,7 @@ describe('bin/audit-log: finding P1 #3b (STILL-OPEN, now fixed) — chmod happen
     });
 
     try {
-      await appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:01.000Z' });
+      await appendAuditRecord(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:01.000Z' });
     } finally {
       openSpy.mockRestore();
     }
@@ -465,7 +302,7 @@ describe('bin/audit-log: finding P1 #3b (STILL-OPEN, now fixed) — chmod happen
     });
 
     try {
-      await expect(appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:01.000Z' })).rejects.toThrow(
+      await expect(appendAuditRecord(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:01.000Z' })).rejects.toThrow(
         'simulated disk-full failure',
       );
     } finally {
@@ -488,8 +325,8 @@ describe('bin/audit-log: finding P2/#11 (audit half) — size-cap rotation', () 
     const filePath = auditLogPath(storeDir);
 
     // Pre-seed a file already OVER the cap directly (bypassing individual
-    // appendAuditEvent calls, which would be slow/wasteful at this scale).
-    // Each line is a valid (already-redacted-shaped) 'completed' (TERMINAL —
+    // appendAuditRecord calls, which would be slow/wasteful at this scale).
+    // Each line is a valid (record-shaped) 'completed' (TERMINAL —
     // see finding P2 (new)'s `compactPreservingLiveTasks`) record with a
     // distinguishable taskId so the trim boundary is directly observable.
     // Deliberately terminal, not e.g. 'claimed': a non-terminal kind would
@@ -501,7 +338,7 @@ describe('bin/audit-log: finding P2/#11 (audit half) — size-cap rotation', () 
     // padding are both deliberately chosen so that this many lines exceeds
     // MAX_AUDIT_LOG_BYTES, but AUDIT_LOG_TRIM_TARGET_LINES of them (what a
     // rotation keeps) does NOT — i.e. proportioned like real (small)
-    // redacted lines, not a pathological single-huge-line case.
+    // record lines, not a pathological single-huge-line case.
     const lineCount = AUDIT_LOG_TRIM_TARGET_LINES * 5;
     const bigLines: string[] = [];
     for (let i = 0; i < lineCount; i++) {
@@ -510,7 +347,7 @@ describe('bin/audit-log: finding P2/#11 (audit half) — size-cap rotation', () 
           kind: 'completed',
           ts: '2026-01-01T00:00:00.000Z',
           taskId: `pre-seed-${i}`,
-          summarySize: 4,
+          summaryBytes: 4,
           sessionRef: 'sess',
           padding: 'x'.repeat(500),
         }),
@@ -521,13 +358,13 @@ describe('bin/audit-log: finding P2/#11 (audit half) — size-cap rotation', () 
     expect(beforeSize).toBeGreaterThan(MAX_AUDIT_LOG_BYTES);
 
     // One more real append triggers the rotation check.
-    await appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:01.000Z' });
+    await appendAuditRecord(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:01.000Z' });
 
     const afterSize = (await fs.stat(filePath)).size;
     expect(afterSize).toBeLessThan(beforeSize);
     expect(afterSize).toBeLessThanOrEqual(MAX_AUDIT_LOG_BYTES);
 
-    const events = await readAuditEvents(storeDir);
+    const events = await readAuditRecords(storeDir);
     expect(events.length).toBeLessThanOrEqual(AUDIT_LOG_TRIM_TARGET_LINES + 1);
     // Oldest pre-seed lines are gone; the most recent ones (plus the just-appended one) survive.
     expect(events.some((e) => 'taskId' in e && e.taskId === 'pre-seed-0')).toBe(false);
@@ -542,13 +379,13 @@ describe('bin/audit-log: finding P2/#11 (audit half) — size-cap rotation', () 
   it('does not rotate while under the size cap', async () => {
     const storeDir = await tmpDir('byok-audit-no-rotate-');
     for (let i = 0; i < 20; i++) {
-      await appendAuditEvent(storeDir, { kind: 'claimed', ts: '2026-01-01T00:00:00.000Z', taskId: `t${i}` });
+      await appendAuditRecord(storeDir, { kind: 'claimed', ts: '2026-01-01T00:00:00.000Z', taskId: `t${i}` });
     }
-    const events = await readAuditEvents(storeDir);
+    const events = await readAuditRecords(storeDir);
     expect(events).toHaveLength(20); // nothing trimmed
   });
 
-  it('finding P2 (new): rotation preserves a still-running (non-terminal) task\'s lifecycle anchor, even though its own events fall entirely in the dropped range — deriveTasksFromEvents still lists it', async () => {
+  it('finding P2 (new): rotation preserves a still-running (non-terminal) task\'s lifecycle anchor, even though its own events fall entirely in the dropped range — deriveTasksFromRecords still lists it', async () => {
     const storeDir = await tmpDir('byok-audit-rotate-live-task-');
     await fs.mkdir(storeDir, { recursive: true });
     const filePath = auditLogPath(storeDir);
@@ -571,7 +408,7 @@ describe('bin/audit-log: finding P2/#11 (audit half) — size-cap rotation', () 
           kind: 'completed',
           ts: '2026-01-01T00:00:02.000Z',
           taskId: `filler-${i}`,
-          summarySize: 4,
+          summaryBytes: 4,
           sessionRef: 'sess',
           padding: 'x'.repeat(500),
         }),
@@ -582,17 +419,17 @@ describe('bin/audit-log: finding P2/#11 (audit half) — size-cap rotation', () 
 
     // One more real append triggers the rotation check (same trigger as
     // the test above).
-    await appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:03.000Z' });
+    await appendAuditRecord(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:03.000Z' });
 
-    const events = await readAuditEvents(storeDir);
+    const events = await readAuditRecords(storeDir);
 
     // The still-running task's anchor survived rotation even though it's
     // far older than the trim target...
     expect(events.some((e) => 'taskId' in e && e.taskId === 'still-running')).toBe(true);
 
-    // ...and `deriveTasksFromEvents` — the actual `tasks`/`status` reducer
+    // ...and `deriveTasksFromRecords` — the actual `tasks`/`status` reducer
     // — still lists it as Running, rather than forgetting it entirely.
-    const tasks = deriveTasksFromEvents(events);
+    const tasks = deriveTasksFromRecords(events);
     const stillRunning = tasks.find((t) => t.taskId === 'still-running');
     expect(stillRunning).toBeDefined();
     expect(stillRunning?.state).toBe('Running');
@@ -632,7 +469,7 @@ describe('bin/audit-log: finding P2/#11 (audit half) — size-cap rotation', () 
           kind: 'completed',
           ts: '2026-01-01T00:00:02.000Z',
           taskId: `filler-${i}`,
-          summarySize: 4,
+          summaryBytes: 4,
           sessionRef: 'sess',
           padding: 'x'.repeat(500),
         }),
@@ -644,9 +481,9 @@ describe('bin/audit-log: finding P2/#11 (audit half) — size-cap rotation', () 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     // One more real append triggers the rotation check.
-    await appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:03.000Z' });
+    await appendAuditRecord(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:03.000Z' });
 
-    const events = await readAuditEvents(storeDir);
+    const events = await readAuditRecords(storeDir);
 
     // The file stays BOUNDED: at most the trim target plus the anchor cap —
     // never one anchor per leaked task (which would be ~leakedCount lines,
@@ -669,160 +506,26 @@ describe('bin/audit-log: finding P2/#11 (audit half) — size-cap rotation', () 
   });
 });
 
-describe('bin/audit-log: finding P2/#11 (audit half) — followAuditLog byte-offset tracking', () => {
-  it('sees every event across many sequential appends, in order, exactly once (not a full re-read/re-parse each poll)', async () => {
-    const storeDir = await tmpDir('byok-audit-follow-many-');
-    const filePath = auditLogPath(storeDir);
-
-    const seen: DaemonEvent[] = [];
-    const controller = new AbortController();
-    const followPromise = followAuditLog(filePath, (e) => seen.push(e), {
-      signal: controller.signal,
-      pollIntervalMs: 10,
-      fromEnd: true,
-    });
-
-    const N = 50;
-    for (let i = 0; i < N; i++) {
-      await appendAuditEvent(storeDir, {
-        kind: 'claimed',
-        ts: `2026-01-01T00:00:${String(i).padStart(2, '0')}.000Z`,
-        taskId: `t${i}`,
-      });
-    }
-
-    await vi.waitFor(() => expect(seen).toHaveLength(N));
-    expect(seen.map((e) => ('taskId' in e ? e.taskId : undefined))).toEqual(Array.from({ length: N }, (_, i) => `t${i}`));
-
-    controller.abort();
-    await followPromise;
-  });
-
-  it('decodes multi-byte UTF-8 characters correctly (byte-safe split on raw 0x0a, never a partially-decoded chunk)', async () => {
-    const storeDir = await tmpDir('byok-audit-follow-utf8-');
-    const filePath = auditLogPath(storeDir);
-
-    const seen: DaemonEvent[] = [];
-    const controller = new AbortController();
-    const followPromise = followAuditLog(filePath, (e) => seen.push(e), {
-      signal: controller.signal,
-      pollIntervalMs: 5,
-      fromEnd: true,
-    });
-
-    const taskId = 'task-emoji-\u{1F680}-日本語'; // rocket emoji + Japanese, multi-byte in UTF-8
-    await appendAuditEvent(storeDir, { kind: 'claimed', ts: '2026-01-01T00:00:00.000Z', taskId });
-
-    await vi.waitFor(() => expect(seen).toHaveLength(1));
-    expect(seen[0]).toMatchObject({ kind: 'claimed', taskId });
-
-    controller.abort();
-    await followPromise;
-  });
-
-  it('recovers (rather than throwing) if the log is rotated/replaced with a smaller file while a follow session is attached', async () => {
-    const storeDir = await tmpDir('byok-audit-follow-rotate-');
-    const filePath = auditLogPath(storeDir);
-    // Build up several lines first so the pre-rotation file is
-    // unambiguously LARGER than the single line it gets replaced with below
-    // — matches the real shape `rotateIfNeeded` produces (trims a
-    // much-larger, over-cap file down to a small bounded target), unlike a
-    // same-size swap the offset-reset heuristic isn't meant to cover.
-    for (let i = 0; i < 10; i++) {
-      await appendAuditEvent(storeDir, {
-        kind: 'claimed',
-        ts: `2026-01-01T00:00:${String(i).padStart(2, '0')}.000Z`,
-        taskId: `pre-rotation-${i}`,
-      });
-    }
-
-    const seen: DaemonEvent[] = [];
-    const controller = new AbortController();
-    const followPromise = followAuditLog(filePath, (e) => seen.push(e), {
-      signal: controller.signal,
-      pollIntervalMs: 10,
-      fromEnd: true,
-    });
-
-    // Simulate a rotation: replace the file with a single, much smaller
-    // line (mirrors what appendAuditEvent's own size-cap rotation does).
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    await fs.writeFile(filePath, `${JSON.stringify({ kind: 'paired', ts: '2026-01-01T00:00:20.000Z', deviceId: 'dev-1' })}\n`, {
-      mode: 0o600,
-    });
-
-    await vi.waitFor(() => expect(seen.some((e) => e.kind === 'paired')).toBe(true));
-
-    controller.abort();
-    await followPromise;
-  });
-
-  it('finding P2 (new): re-syncs from the start of a REPLACED (renamed) file even when the replacement is LARGER than the old offset, rather than skipping its prefix / garbling mid-line', async () => {
-    const storeDir = await tmpDir('byok-audit-follow-rotate-larger-');
-    await fs.mkdir(storeDir, { recursive: true });
-    const filePath = auditLogPath(storeDir);
-
-    // Start the file out TINY (one event) so the follow's initial
-    // `fromEnd` offset is tiny too.
-    await appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' });
-
-    const seen: DaemonEvent[] = [];
-    const controller = new AbortController();
-    const followPromise = followAuditLog(filePath, (e) => seen.push(e), {
-      signal: controller.signal,
-      pollIntervalMs: 10,
-      fromEnd: true,
-    });
-    await new Promise((resolve) => setTimeout(resolve, 30)); // let it settle at the tiny offset
-
-    // Replace the file via the SAME atomic (temp-file + fs.rename)
-    // mechanism `rotateIfNeeded` actually uses, with content much LARGER
-    // (in bytes) than the tiny pre-replace offset — the old size-only
-    // check (`st.size < offset`) only reset on a SMALLER replacement, so it
-    // would have kept reading from the stale tiny offset straight into the
-    // middle of this new file's bytes instead of re-syncing from its start.
-    const replacementEvents: DaemonEvent[] = Array.from({ length: 30 }, (_, i) => ({
-      kind: 'claimed',
-      ts: `2026-01-01T00:01:${String(i).padStart(2, '0')}.000Z`,
-      taskId: `post-rotation-${i}`,
-    }));
-    const content = `${replacementEvents.map((e) => JSON.stringify(e)).join('\n')}\n`;
-    await atomicWriteFile(filePath, content, { mode: 0o600 });
-
-    await vi.waitFor(() => expect(seen.length).toBeGreaterThanOrEqual(replacementEvents.length));
-
-    // Every replacement event survived, in full and in order — a stale
-    // byte offset carried into the new (larger) file would instead have
-    // skipped its own prefix and likely garbled/dropped its first line(s).
-    expect(seen.map((e) => ('taskId' in e ? e.taskId : undefined))).toEqual(
-      replacementEvents.map((e) => ('taskId' in e ? e.taskId : undefined)),
-    );
-
-    controller.abort();
-    await followPromise;
-  });
-});
-
 describe('bin/audit-log: createAuditAppender', () => {
   it('serializes concurrent appends so they land in call order even though each write is async', async () => {
     const storeDir = await tmpDir('byok-audit-appender-');
     const appender = createAuditAppender(storeDir);
 
-    const events: DaemonEvent[] = Array.from({ length: 20 }, (_, i) => ({
+    const events: DaemonRecord[] = Array.from({ length: 20 }, (_, i) => ({
       kind: 'claimed',
       ts: `2026-01-01T00:00:${String(i).padStart(2, '0')}.000Z`,
       taskId: `t${i}`,
     }));
-    for (const event of events) appender(event); // fire-and-forget from the caller's point of view
+    for (const event of events) appender.append(event); // fire-and-forget from the caller's point of view
 
     // Poll rather than a fixed sleep: each append now does several fs calls
     // (mkdir/chmod/open/appendFile/chmod/close/stat — see finding P1 #3's
     // 0600 re-assertion and P2/#11's size-cap check, both in
-    // `appendAuditEvent`), so a hardcoded short wait is exactly the kind of
+    // `appendAuditRecord`), so a hardcoded short wait is exactly the kind of
     // timing assumption real disk I/O variance can make flaky.
-    let read: Awaited<ReturnType<typeof readAuditEvents>> = [];
+    let read: Awaited<ReturnType<typeof readAuditRecords>> = [];
     await vi.waitFor(async () => {
-      read = await readAuditEvents(storeDir);
+      read = await readAuditRecords(storeDir);
       expect(read).toHaveLength(events.length);
     });
 
@@ -839,7 +542,7 @@ describe('bin/audit-log: createAuditAppender', () => {
 
     const errors: unknown[] = [];
     const appender = createAuditAppender(brokenStoreDir, (err) => errors.push(err));
-    appender({ kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' });
+    appender.append({ kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' });
     await vi.waitFor(() => expect(errors.length).toBeGreaterThanOrEqual(1));
 
     // A subsequent append against a WORKING storeDir on the same appender
@@ -847,94 +550,7 @@ describe('bin/audit-log: createAuditAppender', () => {
     // owns its own chain) — what matters here is the failed append didn't
     // leave the returned function itself unusable for a fixed storeDir.
     await fs.rm(brokenStoreDir, { force: true });
-    appender({ kind: 'unpaired', ts: '2026-01-01T00:00:01.000Z' });
-    await vi.waitFor(async () => expect((await readAuditEvents(brokenStoreDir)).length).toBeGreaterThanOrEqual(1));
-  });
-});
-
-describe('bin/audit-log: followAuditLog', () => {
-  it('fromEnd: false replays existing lines, then streams newly appended ones, and stops promptly on abort', async () => {
-    const storeDir = await tmpDir('byok-audit-follow-');
-    const filePath = auditLogPath(storeDir);
-    await appendAuditEvent(storeDir, lifecycleEvent('open', '2026-01-01T00:00:00.000Z'));
-
-    const seen: DaemonEvent[] = [];
-    const controller = new AbortController();
-    const followPromise = followAuditLog(filePath, (e) => seen.push(e), {
-      signal: controller.signal,
-      pollIntervalMs: 10,
-      fromEnd: false,
-    });
-
-    await vi.waitFor(() => expect(seen.length).toBeGreaterThanOrEqual(1));
-    expect(seen[0]).toMatchObject({ kind: 'lifecycle', lifecycle: { phase: 'running', connection: 'open' } });
-
-    await appendAuditEvent(storeDir, { kind: 'offered', ts: '2026-01-01T00:00:01.000Z', taskId: 't1' });
-    await vi.waitFor(() => expect(seen.length).toBeGreaterThanOrEqual(2));
-    expect(seen[1]).toMatchObject({ kind: 'offered', taskId: 't1' });
-
-    controller.abort();
-    await followPromise;
-
-    // Appending after abort must never be observed — the loop already exited.
-    await appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:02.000Z' });
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(seen).toHaveLength(2);
-  });
-
-  it('fromEnd: true (the default `tasks --follow` uses) ignores pre-existing lines and only streams new ones', async () => {
-    const storeDir = await tmpDir('byok-audit-follow-fromend-');
-    const filePath = auditLogPath(storeDir);
-    await appendAuditEvent(storeDir, lifecycleEvent('open', '2026-01-01T00:00:00.000Z'));
-
-    const seen: DaemonEvent[] = [];
-    const controller = new AbortController();
-    const followPromise = followAuditLog(filePath, (e) => seen.push(e), {
-      signal: controller.signal,
-      pollIntervalMs: 10,
-      fromEnd: true,
-    });
-
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(seen).toHaveLength(0); // the pre-existing line was skipped
-
-    await appendAuditEvent(storeDir, { kind: 'offered', ts: '2026-01-01T00:00:01.000Z', taskId: 't1' });
-    await vi.waitFor(() => expect(seen.length).toBeGreaterThanOrEqual(1));
-    expect(seen[0]).toMatchObject({ kind: 'offered', taskId: 't1' });
-
-    controller.abort();
-    await followPromise;
-  });
-
-  it('tolerates the log not existing yet at all, then picks up events once it is created', async () => {
-    const storeDir = await tmpDir('byok-audit-follow-nofile-');
-    const filePath = auditLogPath(storeDir);
-
-    const seen: DaemonEvent[] = [];
-    const controller = new AbortController();
-    const followPromise = followAuditLog(filePath, (e) => seen.push(e), {
-      signal: controller.signal,
-      pollIntervalMs: 10,
-      fromEnd: true,
-    });
-
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    await appendAuditEvent(storeDir, { kind: 'unpaired', ts: '2026-01-01T00:00:00.000Z' });
-    await vi.waitFor(() => expect(seen.length).toBeGreaterThanOrEqual(1));
-
-    controller.abort();
-    await followPromise;
-  });
-
-  it('resolves promptly on abort even mid-poll-interval, rather than waiting out the full interval', async () => {
-    const storeDir = await tmpDir('byok-audit-follow-abort-speed-');
-    const filePath = auditLogPath(storeDir);
-    const controller = new AbortController();
-    const followPromise = followAuditLog(filePath, () => {}, { signal: controller.signal, pollIntervalMs: 5000 });
-
-    const start = Date.now();
-    controller.abort();
-    await followPromise;
-    expect(Date.now() - start).toBeLessThan(1000); // well under the 5s poll interval
+    appender.append({ kind: 'unpaired', ts: '2026-01-01T00:00:01.000Z' });
+    await vi.waitFor(async () => expect((await readAuditRecords(brokenStoreDir)).length).toBeGreaterThanOrEqual(1));
   });
 });

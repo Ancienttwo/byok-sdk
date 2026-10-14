@@ -12,7 +12,7 @@ describe('strict-agent-only producer scheduling defence', () => {
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;
@@ -39,22 +39,12 @@ describe('strict-agent-only producer scheduling defence', () => {
     expect((await started.byok.tasks.list()).tasks).toEqual([]);
   });
 
-  it('skips strict devices in implicit legacy selection but admits Agent offers to them', async () => {
+  it('admits explicitly targeted Agent offers to strict devices', async () => {
     const started = await start();
     const strict = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
       productId: PRODUCT_ID,
       capabilities: ['strict-agent-only', 'agent-home-contract'],
     });
-    const regular = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
-      productId: PRODUCT_ID,
-      deviceName: 'regular-laptop',
-      capabilities: [],
-    });
-
-    const legacy = await started.byok.dispatch({ instruction: 'implicit legacy' });
-    expect((await started.byok.tasks.get(legacy.taskId))?.deviceId).toBe(regular.deviceId);
-    await expect(nextEnvelope(regular)).resolves.toMatchObject({ type: 'task.offer' });
-
     const agent = await started.byok.dispatch({
       deviceId: strict.deviceId,
       instruction: 'Agent work',

@@ -5,10 +5,10 @@ import path from 'node:path';
 import {
   startAppServerClient, RpcTimeoutError,
   type LineProcess, type SpawnLineProcess, type AppServerLimits,
-} from '../../vendor/oar/bb98cbc/runtimes/codex/app-server-client.js';
-import { rpcControl } from '../../vendor/oar/bb98cbc/runtimes/codex/rpc-control.js';
-import { createSessionKernel } from '../../vendor/oar/bb98cbc/shared/session-kernel.js';
-import { sessionCredentialRedactor } from '../../vendor/oar/bb98cbc/shared/credential-redactor.js';
+} from '../../vendor/oar/bf55fd6/runtimes/codex/app-server-client.js';
+import { rpcControl } from '../../vendor/oar/bf55fd6/runtimes/codex/rpc-control.js';
+import { createSessionKernel } from '../../vendor/oar/bf55fd6/shared/session-kernel.js';
+import { sessionCredentialRedactor } from '../../vendor/oar/bf55fd6/shared/credential-redactor.js';
 
 function fakeProcess() {
   const lines: Array<(line: string) => void> = [];
@@ -307,7 +307,7 @@ describe('OAR session kernel record redaction', () => {
 });
 
 it('accounts for every vendored file and the five maintained source deltas', () => {
-  const root = path.resolve(import.meta.dirname, '../../vendor/oar/bb98cbc');
+  const root = path.resolve(import.meta.dirname, '../../vendor/oar/bf55fd6');
   const manifest = JSON.parse(readFileSync(path.join(root, 'source-manifest.json'), 'utf8')) as {
     files: Array<{ path: string; sourcePath: string; upstreamSha256: string; vendoredSha256: string; delta?: string }>;
   };

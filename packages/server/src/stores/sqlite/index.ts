@@ -18,17 +18,21 @@ import {
   type MailboxRetentionInput,
   type MailboxRetentionResult,
   type MailboxStore,
+  type MailboxUsage,
   type ObjectCommitInput,
   type ObjectListQuery,
   type ObjectManifestEntry,
   type ObjectManifestInput,
   type ObjectReferenceInput,
   type ObjectStore,
+  type QuotaStore,
   type StorageReservation,
   type TenantId,
 } from '@byok-sdk/core';
 import {
   InMemoryPairingCodeStore,
+  TASK_ATTEMPT_ACTIVE_STATUSES,
+  TASK_ATTEMPT_STATUSES,
   assertTaskAttemptListLimit,
   createInMemoryCloudStores,
   type AgentMessageAdmission,
@@ -43,6 +47,7 @@ import {
   type RequestReceipt,
   type RequestReceiptStore,
   type TaskAttempt,
+  type TaskAttemptCounts,
   type TaskAttemptListQuery,
   type TaskAttemptPage,
   type TaskAttemptStatus,
@@ -54,12 +59,10 @@ import {
 import { PROTOCOL_VERSION, byokBlobContentPath, type RuntimeCapabilities, type RuntimeId } from '@byok-sdk/protocol';
 import type { DatabaseSync } from 'node:sqlite';
 import {
-  acquireSqliteOwnership,
   closeSqliteDatabaseAfterInitializationFailure,
   openSqliteDatabase,
   secureSqliteFilePermissions,
   SqliteSchemaError,
-  type SqliteOwnership,
   type SqliteSchemaErrorCode,
 } from '../../sqlite-support';
 
@@ -67,7 +70,11 @@ const DEFAULT_MAILBOX_READ_LIMIT = 50;
 const DEFAULT_OBJECT_LIST_LIMIT = 100;
 const DEFAULT_BLOB_URL_TTL_MS = 15 * 60_000;
 const SIGNING_SECRET_BYTES = 32;
-const SQLITE_SCHEMA_VERSION = '4';
+const SQLITE_SCHEMA_VERSION = '5';
+
+import { SqliteWakeStore, WAKE_SCHEMA } from './wakes';
+import type { WakeStore } from '../../wakes/store';
+import { WakeHookMissingError, type WakeConsumer } from '../../wakes/types';
 
 import { SqliteDeviceDirectory, DEVICE_SCHEMA } from './device-directory';
 
@@ -169,37 +176,32 @@ CREATE TABLE IF NOT EXISTS blob (
 export interface SqliteEmbeddedStoreOptions {
   readonly path: string;
   readonly urlTtlMs?: number;
-  readonly migration?: 'v1-to-v4' | 'v2-to-v4' | 'v3-to-v4';
+  readonly migration?: 'v1-to-v5' | 'v2-to-v5' | 'v3-to-v5' | 'v4-to-v5';
 }
 
 export interface SqliteEmbeddedStores {
   readonly core: CoreStores;
   readonly cloud: CloudStores;
   readonly blobContentProxy: BlobContentProxy;
-  /**
-   * Visit every task attempt of `tenant` already in the file, synchronously.
-   * Only valid at composition time, before any store operation is queued, so
-   * the visit sees exactly the history no later observation will report.
-   */
-  scanTaskAttemptsAtOpen(tenant: TenantId, visit: (attempt: TaskAttempt) => void): void;
+  wakes(tenant: TenantId): WakeStore;
   close(): Promise<void>;
 }
 
 /** One serialized owner for the synchronous SQLite handle and every transaction on it. */
 class SqliteCoordinator {
   readonly db: DatabaseSync;
-  readonly #ownership: SqliteOwnership | undefined;
   #tail: Promise<void> = Promise.resolve();
-  #queued = false;
   #closing = false;
   #closePromise: Promise<void> | undefined;
 
   constructor(
     path: string,
-    migration: 'v1-to-v4' | 'v2-to-v4' | 'v3-to-v4' | undefined,
-    ownership: SqliteOwnership | undefined,
+    migration: SqliteEmbeddedStoreOptions['migration'],
+    wake?: WakeConsumer,
   ) {
-    this.#ownership = ownership;
+    if (migration !== undefined && !['v1-to-v5', 'v2-to-v5', 'v3-to-v5', 'v4-to-v5'].includes(migration)) {
+      throw new SqliteSchemaError('SQLITE_SCHEMA_UNSUPPORTED', 'Unsupported migration selector. Target-v4 migration selectors are no longer supported.', undefined, SQLITE_SCHEMA_VERSION);
+    }
     this.db = openSqliteDatabase(path);
     let foundVersion: string | undefined;
     const schemaError = (code: SqliteSchemaErrorCode, message: string, options?: ErrorOptions) =>
@@ -213,8 +215,8 @@ class SqliteCoordinator {
       }
     };
     try {
-      // The host must stop every old writer before this open. A version fence
-      // prevents later downgrade opens, not writes through an already-open handle.
+      // openSqliteDatabase holds EXCLUSIVE ownership before this schema
+      // transaction. Adoption still requires stopping writers and a backup.
       this.db.exec('BEGIN IMMEDIATE');
       try {
         const hasMetadata = this.db
@@ -224,9 +226,9 @@ class SqliteCoordinator {
           const version = this.db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'")
             .get() as { value: string } | undefined;
           foundVersion = version?.value;
-          if (version?.value !== SQLITE_SCHEMA_VERSION && !((version?.value === '1' && migration === 'v1-to-v4') || (version?.value === '2' && migration === 'v2-to-v4') || (version?.value === '3' && migration === 'v3-to-v4'))) {
+          if (version?.value !== SQLITE_SCHEMA_VERSION && !((version?.value === '1' && migration === 'v1-to-v5') || (version?.value === '2' && migration === 'v2-to-v5') || (version?.value === '3' && migration === 'v3-to-v5') || (version?.value === '4' && migration === 'v4-to-v5'))) {
             throw schemaError('SQLITE_SCHEMA_UNSUPPORTED', `Unsupported BYOK SQLite schema version ${JSON.stringify(version?.value)}; ` +
-              `this build requires ${SQLITE_SCHEMA_VERSION}. Stop all writers, back up the database and explicitly select migration: 'v1-to-v4' or 'v2-to-v4' for a receipt-free legacy database without task history, or 'v3-to-v4' for a database without ambiguous claimed identity. Target-v3 migration selectors are no longer supported.`);
+              `this build requires ${SQLITE_SCHEMA_VERSION}. Stop all writers, back up the database and explicitly select migration: 'v1-to-v5' or 'v2-to-v5' for a receipt-free legacy database without task history, 'v3-to-v5' for a database without ambiguous claimed identity, or 'v4-to-v5' to add the wake queue. Target-v4 migration selectors are no longer supported.`);
           }
           for (const projection of [
             'tenant_id, device_id, next_seq, delivered_seq, acked_seq, updated_at FROM mailbox_cursor',
@@ -260,7 +262,7 @@ class SqliteCoordinator {
             if (unexpected !== undefined) throw schemaError('SQLITE_SCHEMA_INVALID', 'Unexpected device directory in BYOK SQLite schema v1');
             this.db.exec(DEVICE_SCHEMA);
           }
-          if (version?.value !== SQLITE_SCHEMA_VERSION) {
+          if (version?.value === '1' || version?.value === '2' || version?.value === '3') {
             // A v3 claim without a runtime may be a legacy built-in claim or a
             // custom claim whose identity was discarded. Neither mutable device
             // inventory nor the requested offer proves the actual adapter.
@@ -268,6 +270,12 @@ class SqliteCoordinator {
               throw schemaError('SQLITE_MIGRATION_REFUSED', 'Cannot migrate BYOK SQLite database with ambiguous claimed identity: historical harness identities are unavailable; preserve this database for reconciliation');
             }
             this.db.exec('ALTER TABLE task_attempt ADD COLUMN claimed_harness_id TEXT');
+          }
+          if (version?.value !== SQLITE_SCHEMA_VERSION) {
+            if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'wake'").get() !== undefined) {
+              throw schemaError('SQLITE_SCHEMA_INVALID', 'Unexpected wake authority in pre-v5 BYOK SQLite schema');
+            }
+            this.db.exec(WAKE_SCHEMA);
             this.db.prepare("UPDATE byok_sqlite_meta SET value = ? WHERE key = 'schema_version'").run(SQLITE_SCHEMA_VERSION);
           }
         } else {
@@ -276,9 +284,15 @@ class SqliteCoordinator {
           this.db.exec(SCHEMA);
           this.db.exec(RECEIPT_SCHEMA);
           this.db.exec(DEVICE_SCHEMA);
+          this.db.exec(WAKE_SCHEMA);
           this.db.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('schema_version', ?)").run(SQLITE_SCHEMA_VERSION);
         }
         assertProjection('claimed_harness_id FROM task_attempt');
+        assertProjection('tenant_id, wake_id, dedup_key, available_at, payload, state, due_at, retry_at, deliveries, last_error, done_at FROM wake');
+        if (wake === undefined && this.db.prepare("SELECT 1 FROM wake WHERE state = 'queued' LIMIT 1").get() !== undefined) {
+          throw new WakeHookMissingError();
+        }
+        this.db.exec('CREATE INDEX IF NOT EXISTS task_attempt_status_idx ON task_attempt (tenant_id, status, cancellation_requested_at, task_id)');
         assertProjection('tenant_id, device_id, product_id, machine_id, device_name, device_public_key, proof_key_id, proof_key_epoch, capabilities_json, harnesses_json FROM device_directory');
         const receiptColumns = this.db.prepare('PRAGMA table_info(request_receipt)').all() as unknown as
           { name: string; type: string; notnull: number; pk: number }[];
@@ -288,7 +302,7 @@ class SqliteCoordinator {
           column.pk !== (index < 2 ? index + 1 : 0))) {
           throw schemaError('SQLITE_SCHEMA_INVALID', 'Invalid BYOK SQLite request receipt schema');
         }
-        // Schema v4 spans the wire-major cut. A pending old envelope must be
+        // Schema v5 retains the wire-major fence. A pending old envelope must be
         // refused before routes can repeatedly fail to decode the same row.
         for (const row of this.db.prepare("SELECT body FROM mailbox_message WHERE state = 'pending'").iterate()) {
           let envelope: unknown;
@@ -313,24 +327,8 @@ class SqliteCoordinator {
     }
   }
 
-  /** Synchronous read before the first queued operation; see `scanTaskAttemptsAtOpen`. */
-  readAtOpen(operation: (db: DatabaseSync) => void): void {
-    if (this.#queued || this.#closing) throw new Error('SQLite open-time read after store operations began');
-    try {
-      operation(this.db);
-    } catch (error) {
-      this.#closing = true;
-      closeSqliteDatabaseAfterInitializationFailure(
-        this.db, error,
-        'SQLite history initialization failed and its ownership could not be released',
-        () => this.#closeHandle(),
-      );
-    }
-  }
-
   run<T>(operation: (db: DatabaseSync) => T | Promise<T>): Promise<T> {
     if (this.#closing) return Promise.reject(new Error('SQLite embedded composition is closed'));
-    this.#queued = true;
     const result = this.#tail.then(() => operation(this.db));
     this.#tail = result.then(() => undefined, () => undefined);
     return result;
@@ -364,11 +362,7 @@ class SqliteCoordinator {
   }
 
   #closeHandle(): void {
-    try {
-      this.db.close();
-    } finally {
-      this.#ownership?.release();
-    }
+    this.db.close();
   }
 }
 
@@ -587,16 +581,35 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
   }
 
   async list(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage> {
-    assertTaskAttemptListLimit(query.limit);
+    assertTaskAttemptListLimit(query.limit, query.active);
     return this.coordinator.run((db) => {
       const rows = db.prepare(
-        `SELECT * FROM task_attempt WHERE tenant_id = ? AND task_id > ?
+        `SELECT * FROM task_attempt ${query.active === true ? 'INDEXED BY task_attempt_status_idx' : ''}
+         WHERE tenant_id = ? ${query.active === true ? `AND status IN (${TASK_ATTEMPT_ACTIVE_STATUSES.map(() => '?').join(', ')}) AND cancellation_requested_at IS NULL` : ''} AND task_id > ?
          ORDER BY task_id COLLATE BINARY LIMIT ?`,
-      ).all(tenant, query.cursor ?? '', query.limit + 1) as unknown as TaskRow[];
+      ).all(tenant, ...(query.active === true ? TASK_ATTEMPT_ACTIVE_STATUSES : []), query.cursor ?? '', query.limit + 1) as unknown as TaskRow[];
       const hasMore = rows.length > query.limit;
       const attempts = rows.slice(0, query.limit).map(taskRow);
       const last = attempts.at(-1);
       return { attempts, ...(hasMore && last !== undefined ? { nextCursor: last.taskId } : {}) };
+    });
+  }
+
+  countByStatus(tenant: TenantId): Promise<TaskAttemptCounts> {
+    return this.coordinator.run((db) => {
+      const rows = db.prepare(
+        `SELECT status, cancellation_requested_at IS NOT NULL AS cancelled, COUNT(*) AS n
+         FROM task_attempt WHERE tenant_id = ? GROUP BY status, cancelled`,
+      ).all(tenant) as unknown as { status: string; cancelled: number; n: number }[];
+      const byStatus = Object.fromEntries(TASK_ATTEMPT_STATUSES.map((status) => [status, 0])) as Record<TaskAttemptStatus, number>;
+      let cancellationRequested = 0;
+      for (const row of rows) {
+        if (!TASK_ATTEMPT_STATUSES.some((status) => status === row.status)) throw new Error('Unknown stored task attempt status');
+        if (!Number.isSafeInteger(row.n) || row.n < 0) throw new Error('Invalid task attempt aggregate count');
+        if (row.cancelled === 1) cancellationRequested += row.n;
+        else byStatus[row.status as TaskAttemptStatus] += row.n;
+      }
+      return { byStatus, cancellationRequested };
     });
   }
 
@@ -700,9 +713,31 @@ function readCursor(db: DatabaseSync, clock: Clock, tenant: TenantId, deviceId: 
       };
 }
 
+/** The mailbox reads its limit from quota; quota never reads the mailbox. */
+type MailboxQuota = Pick<QuotaStore, 'readEntitlement'>;
+
+/**
+ * Mailbox bytes are the retained rows, so usage is recomputed from the durable
+ * table on every read and stays correct across a restart. `byte_size` is TEXT;
+ * the sum is rendered back to TEXT so it never passes through a JS number.
+ */
+function mailboxUsedBytes(db: DatabaseSync, tenant: TenantId): bigint {
+  const row = db.prepare(
+    `SELECT CAST(COALESCE(SUM(CAST(byte_size AS INTEGER)), 0) AS TEXT) AS bytes
+       FROM mailbox_message WHERE tenant_id = ?`,
+  ).get(tenant) as { bytes: string };
+  return BigInt(row.bytes);
+}
+
+/**
+ * The one SQLite mailbox row writer. It runs inside the coordinator's
+ * transaction, which serializes every writer globally, so reading the
+ * entitlement, summing and inserting cannot be interleaved by another append.
+ */
 async function appendMailbox(
   db: DatabaseSync,
   clock: Clock,
+  quota: MailboxQuota,
   tenant: TenantId,
   input: MailboxAppendInput,
 ): Promise<MailboxMessage> {
@@ -711,11 +746,33 @@ async function appendMailbox(
     `SELECT * FROM mailbox_message WHERE tenant_id = ? AND device_id = ? AND message_id = ?`,
   ).get(tenant, input.deviceId, input.messageId) as MailboxRow | undefined;
   if (existing !== undefined) return mailboxMessage(existing);
+  // Anything but the one exempt class is limited: an unknown admission fails
+  // closed instead of skipping the check.
+  let limit: bigint | undefined;
+  if (input.admission !== 'cancellation') {
+    const entitlement = await quota.readEntitlement(tenant);
+    if (entitlement === undefined) {
+      throw new ByokCoreError(
+        'storage_entitlement_missing',
+        'No storage entitlement has been issued for this tenant.',
+      );
+    }
+    limit = entitlement.mailboxLimitBytes;
+  }
   const cursor = db.prepare(
     `SELECT next_seq FROM mailbox_cursor WHERE tenant_id = ? AND device_id = ?`,
   ).get(tenant, input.deviceId) as { next_seq: number };
   const seq = Number(cursor.next_seq);
   const materialized = await input.materialize(seq);
+  if (limit !== undefined) {
+    const used = mailboxUsedBytes(db, tenant);
+    if (used + materialized.byteSize > limit) {
+      throw new ByokCoreError(
+        'storage_quota_exceeded',
+        `Mailbox would reach ${String(used + materialized.byteSize)} bytes, over the limit of ${String(limit)} bytes.`,
+      );
+    }
+  }
   db.prepare(
     `INSERT INTO mailbox_message
      (tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at)
@@ -739,10 +796,18 @@ async function appendMailbox(
 }
 
 export class SqliteMailboxStore implements MailboxStore {
-  constructor(private readonly coordinator: SqliteCoordinator, private readonly clock: Clock) {}
+  constructor(
+    private readonly coordinator: SqliteCoordinator,
+    private readonly clock: Clock,
+    private readonly quota: MailboxQuota,
+  ) {}
 
   append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage> {
-    return this.coordinator.transaction((db) => appendMailbox(db, this.clock, tenant, input));
+    return this.coordinator.transaction((db) => appendMailbox(db, this.clock, this.quota, tenant, input));
+  }
+
+  readUsage(tenant: TenantId): Promise<MailboxUsage> {
+    return this.coordinator.run((db) => ({ bytes: mailboxUsedBytes(db, tenant) }));
   }
 
   readAfter(tenant: TenantId, query: MailboxReadQuery): Promise<MailboxPage> {
@@ -843,7 +908,11 @@ export class SqliteMailboxStore implements MailboxStore {
 }
 
 export class SqliteTaskCancellationStore implements TaskCancellationStore {
-  constructor(private readonly coordinator: SqliteCoordinator, private readonly clock: Clock) {}
+  constructor(
+    private readonly coordinator: SqliteCoordinator,
+    private readonly clock: Clock,
+    private readonly quota: MailboxQuota,
+  ) {}
 
   request(tenant: TenantId, input: TaskCancellationRequest): Promise<TaskCancellationMutation | undefined> {
     return this.coordinator.transaction(async (db) => {
@@ -868,10 +937,11 @@ export class SqliteTaskCancellationStore implements TaskCancellationStore {
         return { attempt: existing, message: mailboxMessage(row) };
       }
 
-      const message = await appendMailbox(db, this.clock, tenant, {
+      const message = await appendMailbox(db, this.clock, this.quota, tenant, {
         deviceId: existing.deviceId,
         messageId: input.proposedMessageId,
         materialize: (seq) => input.materialize(seq, input.proposedMessageId),
+        admission: 'cancellation',
       });
       const requestedAt = this.clock.now().toISOString();
       db.prepare(
@@ -1212,26 +1282,14 @@ export class SqliteBlobContentProxy implements BlobContentProxy {
 /** Mixed embedded composition: eight durable interfaces, every other port unchanged in-memory. */
 export function createSqliteEmbeddedStores(
   options: SqliteEmbeddedStoreOptions,
-  dependencies: { readonly clock: Clock; readonly crypto: CloudCrypto },
+  dependencies: { readonly clock: Clock; readonly crypto: CloudCrypto; readonly wake?: WakeConsumer },
 ): SqliteEmbeddedStores {
-  // One file, one owning server process: taken before the file is touched, so
-  // a refused open never migrates, validates or writes anything.
-  const ownership = options.path === ':memory:' ? undefined : acquireSqliteOwnership(options.path);
-  let coordinator: SqliteCoordinator;
-  try {
-    coordinator = new SqliteCoordinator(options.path, options.migration, ownership);
-  } catch (error) {
-    try {
-      ownership?.release();
-    } catch (releaseError) {
-      throw new AggregateError([error, releaseError], 'SQLite open failed and its ownership could not be released');
-    }
-    throw error;
-  }
+  const coordinator = new SqliteCoordinator(options.path, options.migration, dependencies.wake);
   const objects = new SqliteObjectStore(coordinator, dependencies.clock);
-  const mailbox = new SqliteMailboxStore(coordinator, dependencies.clock);
+  const quota = new InMemoryQuotaStore(dependencies.clock, objects);
+  const mailbox = new SqliteMailboxStore(coordinator, dependencies.clock, quota);
   const tasks = new SqliteTaskAttemptStore(coordinator, dependencies.clock);
-  const cancellations = new SqliteTaskCancellationStore(coordinator, dependencies.clock);
+  const cancellations = new SqliteTaskCancellationStore(coordinator, dependencies.clock, quota);
   const registry = new SqliteBlobRegistry(
     coordinator,
     dependencies.clock,
@@ -1246,7 +1304,7 @@ export function createSqliteEmbeddedStores(
     ...inMemoryCore,
     mailbox,
     objects,
-    quota: new InMemoryQuotaStore(dependencies.clock, objects),
+    quota,
   };
   const inMemoryCloud = createInMemoryCloudStores(
     dependencies.clock,
@@ -1270,12 +1328,7 @@ export function createSqliteEmbeddedStores(
     core,
     cloud,
     blobContentProxy,
-    scanTaskAttemptsAtOpen: (tenant, visit) =>
-      coordinator.readAtOpen((db) => {
-        for (const row of db.prepare('SELECT * FROM task_attempt WHERE tenant_id = ?').iterate(tenant)) {
-          visit(taskRow(row as TaskRow));
-        }
-      }),
+    wakes: tenant => new SqliteWakeStore(coordinator, tenant),
     close: () => coordinator.close(),
   };
 }

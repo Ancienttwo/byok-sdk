@@ -201,6 +201,38 @@ describe('SDK prepared compile on official Pi 1.0.4', () => {
     expect((error as InputPreparationCompileError).detail).toBe('tool_constrained_sampling_unsupported');
   });
 
+  test.each([
+    ['blank provider', { model: { ...MODEL, provider: '   ' } }, 'model_provider_invalid'],
+    ['malformed endpoint', { model: { ...MODEL, baseUrl: 'not-a-url' } }, 'model_endpoint_invalid'],
+    ['endpoint credentials', { model: { ...MODEL, baseUrl: 'https://user:password@example.invalid/v1' } }, 'model_endpoint_invalid'],
+    ['endpoint query', { model: { ...MODEL, baseUrl: 'https://example.invalid/v1?key=value' } }, 'model_endpoint_invalid'],
+    ['endpoint fragment', { model: { ...MODEL, baseUrl: 'https://example.invalid/v1#fragment' } }, 'model_endpoint_invalid'],
+    ['endpoint protocol', { model: { ...MODEL, baseUrl: 'file:///tmp/provider' } }, 'model_endpoint_invalid'],
+    ['missing executor', { toolExecutors: {} }, 'tool_manifest_mismatch'],
+    ['foreign executor', { toolExecutors: { foreign: TOOL_IDENTITY } }, 'tool_manifest_mismatch'],
+    ['blank executor', { toolExecutors: { [TOOL_NAME]: ' ' } }, 'tool_manifest_mismatch'],
+  ] as const)('refuses %s with the exact compile detail and no provider send', async (_label, overrides, detail) => {
+    await expect(compile(compileRequest(overrides))).rejects.toMatchObject({
+      name: 'InputPreparationCompileError', detail,
+    });
+    expect(globalFetch.calls).toEqual([]);
+  });
+
+  test.each([
+    ['unexpected envelope field', (envelope: PreparedPiInputV1) => ({ ...envelope, unexpected: true })],
+    ['missing envelope field', (envelope: PreparedPiInputV1) => {
+      const { transcript: _removed, ...rest } = envelope;
+      return rest;
+    }],
+    ['malformed digest', (envelope: PreparedPiInputV1) => ({ ...envelope, digest: 'not-a-digest' })],
+    ['unsupported version', (envelope: PreparedPiInputV1) => ({ ...envelope, version: 0 })],
+  ] as const)('consume-side verifier reports prepared_input_invalid for %s before any send', async (_label, mutate) => {
+    const { envelope } = await compile();
+    await expect(verifyPreparedPiInput(mutate(envelope), expectedFor(envelope)))
+      .rejects.toMatchObject({ name: 'PreparedSessionError', code: 'prepared_input_invalid' });
+    expect(globalFetch.calls).toEqual([]);
+  });
+
   test('consume-side verification refuses a tampered transcript, a re-digested drift and a foreign expectation', async () => {
     const { envelope } = await compile();
     const tampered = structuredClone(envelope) as { transcript: { systemPrompt: string } };

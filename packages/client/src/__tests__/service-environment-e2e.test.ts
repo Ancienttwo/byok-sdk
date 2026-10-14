@@ -72,6 +72,7 @@ interface ChildReport {
   ready: true;
   environment: { source: string; shell?: string };
   detected: string[];
+  runtimes: Array<{ id: string; outcome: string }>;
   byokNames: string[];
   pathHasFakeBin: boolean;
 }
@@ -111,6 +112,7 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
     expect(report.environment).toMatchObject({ source: 'login-shell', shell: path.basename(passwdShell!) });
     expect(report.pathHasFakeBin).toBe(true);
     expect(report.detected).toEqual(['claude']);
+    expect(report.runtimes).toMatchObject([{ id: 'claude', outcome: 'available' }]);
     expect(report.byokNames).toEqual(['BYOK_TEST_DEVICE_CREDENTIAL_STORE']);
     const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello', 10_000);
     expect((hello.payload as { runtimes: Array<{ id: string }> }).runtimes.map((runtime) => runtime.id)).toEqual(['claude']);
@@ -126,6 +128,7 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
     expect(report.environment).toEqual({ source: 'inherited' });
     expect(report.pathHasFakeBin).toBe(false);
     expect(report.detected).toEqual([]);
+    expect(report.runtimes).toMatchObject([{ id: 'claude', outcome: 'not-found' }]);
     const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello', 10_000);
     expect((hello.payload as { runtimes: unknown[] }).runtimes).toEqual([]);
     expect(await stop(child)).toBe(0);
@@ -142,8 +145,11 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
       encoding: 'utf8',
       timeout: 30_000,
     });
-    expect(run.stdout.split('\n')[0]).toMatch(new RegExp(`^environment: login-shell shell=${path.basename(passwdShell!)} durationMs=\\d+$`, 'u'));
+    // The start did not succeed, so no record carries the environment: stderr shows it (#395).
+    expect(run.stderr).toMatch(new RegExp(`^environment: login-shell shell=${path.basename(passwdShell!)} durationMs=\\d+$`, 'mu'));
     expect(run.stdout).not.toContain(home);
+    expect(run.stderr).not.toContain(home);
+    for (const line of run.stdout.split('\n').filter(Boolean)) expect(() => JSON.parse(line) as unknown).not.toThrow();
     // #394: an unpaired device is a halt, and a halt under --service exits 0
     // so the supervisor leaves it stopped.
     expect(run.stderr).toContain('daemon halted: reason=unpaired');

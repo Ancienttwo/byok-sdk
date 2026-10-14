@@ -14,6 +14,10 @@
  * work" indistinguishable from "there was no work", and dead-lettering those
  * rows is S4B's job (O-009), not this one's.
  *
+ * Rows are written only by `outbox-writer.ts`, which also admits them against
+ * `mailboxLimitBytes`. Mailbox usage is the sum over the retained rows, so
+ * neither retention here nor anything else that deletes a row does accounting.
+ *
  * Every row lives under `(tenant_id, device_id, seq)`, so a cross-tenant read
  * is not denied — it addresses a different key space and finds nothing. That is
  * the SQL expression of §12.6.2 layer 3: there is no bare device index to
@@ -36,10 +40,11 @@ import {
   type MailboxRetentionInput,
   type MailboxRetentionResult,
   type MailboxStore,
+  type MailboxUsage,
   type TenantId,
 } from '@byok-sdk/core';
 import type { Pool } from 'pg';
-import { allocateMailboxSequence } from './mailbox-sequence';
+import { BEGIN_OUTBOX_WRITE, insertOutboxRow, readMailboxBytes } from './outbox-writer';
 
 const DEFAULT_READ_LIMIT = 50;
 
@@ -100,8 +105,10 @@ export class PostgresMailboxStore implements MailboxStore {
     this.#requireDeviceId(input.deviceId);
     const client = await this.#pool.connect();
     try {
-      await client.query('BEGIN');
+      await client.query(BEGIN_OUTBOX_WRITE);
 
+      // An existing `messageId` answers before any lock or admission check, so
+      // a retry against a full mailbox is never refused.
       const existing = await client.query<OutboxRow>(
         `SELECT ${OUTBOX_COLUMNS} FROM outbox
           WHERE tenant_id = $1 AND device_id = $2 AND message_id = $3`,
@@ -113,68 +120,25 @@ export class PostgresMailboxStore implements MailboxStore {
         return toMailboxMessage(replayed);
       }
 
-      // The device_stream row lock serializes the whole allocate -> materialize
-      // -> insert unit. Releasing it before insertion would let seq N+1 become
-      // visible before N; a daemon could then ack N+1 and permanently skip the
-      // late N row.
-      const seq = await allocateMailboxSequence(client, tenant, input.deviceId, this.#now());
-      const serializedExisting = await client.query<OutboxRow>(
-        `SELECT ${OUTBOX_COLUMNS} FROM outbox
-          WHERE tenant_id = $1 AND device_id = $2 AND message_id = $3`,
-        [tenant, input.deviceId, input.messageId],
-      );
-      const winnerAfterLock = serializedExisting.rows[0];
-      if (winnerAfterLock !== undefined) {
-        await client.query('ROLLBACK');
-        return toMailboxMessage(winnerAfterLock);
-      }
-      const materialized = await input.materialize(seq);
-      const now = this.#now();
-      const inserted = await client.query<OutboxRow>(
-        `INSERT INTO outbox (${OUTBOX_COLUMNS})
-         VALUES ($1, $2, $3::bigint, $4, $5, $6, $7::bigint, 'pending', $8)
-         ON CONFLICT (tenant_id, device_id, message_id) DO NOTHING
-         RETURNING ${OUTBOX_COLUMNS}`,
-        [
-          tenant,
-          input.deviceId,
-          seq,
-          input.messageId,
-          materialized.body,
-          materialized.bodyHash,
-          materialized.byteSize,
-          now,
-        ],
-      );
-      const row = inserted.rows[0];
-      if (row !== undefined) {
-        await client.query('COMMIT');
-        return toMailboxMessage(row);
-      }
-
-      // A concurrent append with the same idempotency key won while this
-      // transaction waited on the per-device allocator. Roll back our sequence
-      // bump so an idempotent retry consumes neither a row nor a number.
-      const winner = await client.query<OutboxRow>(
-        `SELECT ${OUTBOX_COLUMNS} FROM outbox
-          WHERE tenant_id = $1 AND device_id = $2 AND message_id = $3`,
-        [tenant, input.deviceId, input.messageId],
-      );
-      await client.query('ROLLBACK');
-      const won = winner.rows[0];
-      if (won === undefined) {
-        throw new ByokCoreError(
-          'mailbox_message_not_found',
-          `Message ${input.messageId} vanished during an idempotent append.`,
-        );
-      }
-      return toMailboxMessage(won);
+      const written = await insertOutboxRow(client, tenant, {
+        deviceId: input.deviceId,
+        messageId: input.messageId,
+        admission: input.admission,
+        now: this.#now(),
+        materialize: input.materialize,
+      });
+      await client.query('COMMIT');
+      return toMailboxMessage(written.row);
     } catch (cause) {
       await client.query('ROLLBACK').catch(() => {});
       throw cause;
     } finally {
       client.release();
     }
+  }
+
+  async readUsage(tenant: TenantId): Promise<MailboxUsage> {
+    return { bytes: await readMailboxBytes(this.#pool, tenant) };
   }
 
   async readAfter(tenant: TenantId, query: MailboxReadQuery): Promise<MailboxPage> {

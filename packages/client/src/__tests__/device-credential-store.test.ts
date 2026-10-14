@@ -120,6 +120,24 @@ describe('DeviceCredentialStore', () => {
     expect(existsSync(path.dirname(invokedExecutable))).toBe(false);
   });
 
+  it('reads the Windows compiler request from stdin as UTF-8, not the console code page', async () => {
+    let script = '';
+    const run: DeviceCommandRunner = async (executable, args) => {
+      if (path.win32.basename(executable).toLowerCase() === 'powershell.exe') {
+        script = Buffer.from(args.at(-1) ?? '', 'base64').toString('utf16le');
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+      return { exitCode: 44, stdout: '', stderr: '' };
+    };
+    const store = new DeviceCredentialStore({ productId: 'credential-store-test', platform: 'win32', commandRunner: run });
+
+    await expect(store.read()).resolves.toBeUndefined();
+    expect(script).toContain(
+      '$assembly=[System.IO.StreamReader]::new([Console]::OpenStandardInput(), [System.Text.UTF8Encoding]::new($false, $true)).ReadToEnd()',
+    );
+    expect(script).not.toContain('[Console]::In');
+  });
+
   it('scavenges only stale real Windows bridge directories without following symlinks', async () => {
     const staleDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-device-credential-'));
     const symlinkTarget = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-device-credential-symlink-target-'));

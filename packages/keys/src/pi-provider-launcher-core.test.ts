@@ -468,6 +468,55 @@ describe('committed Pi spawn boundary', () => {
   });
 });
 
+/**
+ * Positions in a PowerShell script where a command could be invoked, so could
+ * resolve through PSModulePath. The ACL script is .NET-only, and this guard
+ * enforces that structurally, without a denylist that the next alias would
+ * slip past:
+ * - every statement (split on newline, ';', '{', '}' and '|') starts with a
+ *   variable, a type expression, a try/catch/exit keyword or an if/while/foreach
+ *   condition; an `exit` takes only a literal, a variable or a parenthesis;
+ * - an assignment's right-hand side starts with a variable, type expression,
+ *   parenthesis, string, number or '@';
+ * - a foreach header's input after 'in' starts with the same value tokens;
+ * - after every '(' (so also '$(' and '@('), and after every ',' (call
+ *   arguments, outside type brackets), the next token is a variable, type
+ *   expression, parenthesis, string, number or '@' (after '(' also ')'), never
+ *   a bare word, '&' or '.'.
+ * Single-quoted strings are inert, so their contents are blanked first;
+ * double-quoted strings stay in view because '$(...)' runs inside them.
+ * Rejects Verb-Noun cmdlets in any case and aliases (gi, gci, %, ?, iex,
+ * select, where, ...).
+ */
+function powershellCommandFindings(script: string): string[] {
+  const code = script.replaceAll(/'[^']*'/gu, "''");
+  const statementStart = /^(?:\$|\[|(?:try|catch)\b|exit\b\s*(?:$|[\d$(]\S*)|(?:if|while|foreach)\s*\()/iu;
+  const valueStart = /^(?:\$|\[|\(|'|"|\d|@)/u;
+  const findings: string[] = [];
+  for (const statement of code.split(/[\n;{}|]/u).map((part) => part.trim()).filter((part) => part !== '')) {
+    if (!statementStart.test(statement)) findings.push(statement);
+    const rhs = /^\$\w+(?:\['[^']*'\])?\s*=\s*(.*)$/u.exec(statement)?.[1];
+    if (rhs !== undefined && !valueStart.test(rhs)) findings.push(statement);
+  }
+  for (const [, next] of code.matchAll(/\((?=\s*(\S?))/gu)) {
+    if (!/^[$[('"@)\d]$/u.test(next ?? '')) findings.push(`( followed by ${JSON.stringify(next)}`);
+  }
+  for (const [, next] of code.matchAll(/\bforeach\s*\(\s*\$\w+\s+in\b\s*(\S?)/giu)) {
+    if (!valueStart.test(next ?? '')) findings.push(`foreach in followed by ${JSON.stringify(next)}`);
+  }
+  // Generic type arguments ([Dictionary[string, object]]) are not call arguments.
+  let untyped = code;
+  for (let previous = ''; previous !== untyped;) {
+    previous = untyped;
+    untyped = untyped.replaceAll(/\[[A-Za-z][^[\]]*\]/gu, '[T]');
+  }
+  for (const [, next] of untyped.matchAll(/,(?=\s*(\S?))/gu)) {
+    if (!/^[$[('"@\d]$/u.test(next ?? '')) findings.push(`, followed by ${JSON.stringify(next)}`);
+  }
+  if (/\b[a-z]+-[a-z]+\b/iu.test(code.replaceAll(/\s-[a-z]+\b/giu, ' '))) findings.push('Verb-Noun');
+  return findings;
+}
+
 describe('Windows projection ACL verification', () => {
   const owner = 'S-1-5-21-1000';
   const good = { owner, currentUser:owner, protected:true, reparsePoint:false, rules:[
@@ -503,13 +552,44 @@ describe('Windows projection ACL verification', () => {
     const [,args] = run.mock.calls[0] as unknown as [string,string[]];
     const script = Buffer.from(args[3]!, 'base64').toString('utf16le');
     expect(script).toContain('GetAccessControl');
-    // A Verb-Noun command resolves through PSModulePath; an inherited
-    // PowerShell 7 module path then shadows Microsoft.PowerShell.Security.
-    expect(script).not.toMatch(/\b[A-Z][A-Za-z]+-[A-Z][A-Za-z]+\b/u);
+    // A Verb-Noun command (or an alias for one) resolves through PSModulePath;
+    // an inherited PowerShell 7 module path then shadows
+    // Microsoft.PowerShell.Security.
+    expect(powershellCommandFindings(script)).toEqual([]);
+  });
+  it('rejects every command form the cmdlet guard exists to keep out', () => {
+    for (const script of [
+      '$acl = Get-Acl $path', '$acl = get-acl $path', '$acl = GET-ACL $path',
+      'gi $path', 'gci $path', '$x | select Name', '$x | where Name', '$x | % { $_ }',
+      '$x | ? { $_ }', 'iex $text', '$x | foreach Name', '$acl = gi $path',
+      // Commands reached through a parenthesis, subexpression or argument.
+      '$acl = (gi $path).GetAccessControl()', '$acl = $(gi $path)', '$acl = @(gci $path)',
+      '[void](iex $text)', '$x = (& $cmd)', '$x = (. $script)', 'exit (gi $p)',
+      'if ((gi $p)) { exit 0 }', '$x = "$(gi $p)"', '$x.Add((gci $p))',
+      'exit gi $p', '$x.Add($a, gi $p)', '$x = ( gi $p)',
+      // A foreach input is a pipeline even without a wrapping parenthesis.
+      'foreach ($i in gi $p) {', 'foreach ($i in gci $p) { $i }',
+      'foreach($i in gi){$i}', 'FOREACH ($i IN gi $p) {',
+    ]) expect(powershellCommandFindings(script), script).not.toEqual([]);
+  });
+  it('accepts foreach headers whose inputs start with value tokens', () => {
+    for (const input of ['$items', '[int]1', '($items)', "'literal'", '"literal"', '@($items)', '1']) {
+      const script = `foreach ($i in ${input}) { $i }`;
+      expect(powershellCommandFindings(script), script).toEqual([]);
+    }
+  });
+  it('loads the serializer assembly in its own try, outside the path_not_found mapping', async () => {
+    const run = vi.fn(async () => ({exitCode:0,stdout:JSON.stringify(good),stderr:''}));
+    await assertWindowsPiProjectionAcl('C:\\projection',{systemRoot:'C:\\Windows',run});
+    const [,args] = run.mock.calls[0] as unknown as [string,string[]];
+    const script = Buffer.from(args[3]!, 'base64').toString('utf16le');
+    // A missing System.Web.Extensions throws FileNotFoundException; inside the
+    // main try it would be mapped to exit 3 (path_not_found).
+    expect(script).toMatch(/^try \{ \[void\]\[System\.Reflection\.Assembly\]::Load\('System\.Web\.Extensions,[^']*'\) \} catch \{ exit 5 \}$/mu);
   });
   it.each([
     [2, 'invalid_request'], [3, 'path_not_found'], [4, 'access_denied'],
-    [127, 'powershell_unavailable'], [1, 'unexpected'], [-196608, 'unexpected'],
+    [127, 'powershell_unavailable'], [1, 'unexpected'], [5, 'unexpected'], [-196608, 'unexpected'],
   ])('fails closed on query exit %i with the closed cause %s and no host detail', async (exitCode, cause) => {
     const stderr = 'C:\\Users\\someone\\secret-dir: System.UnauthorizedAccessException';
     const run = vi.fn(async () => ({exitCode,stdout:JSON.stringify(good),stderr}));

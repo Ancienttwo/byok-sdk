@@ -1,11 +1,11 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { DaemonBranding, DaemonEvent, DaemonTaskInfo, LocalAgentReleaseIdentity } from '../index';
-import type { DaemonHaltReason, DaemonLifecycle } from '../daemon/daemon-lifecycle';
+import { parseDaemonLifecycle, type DaemonHaltReason, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { GIT_ERROR_CATEGORIES } from '../daemon/git-workspace';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol';
 import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
 import type { McpToolsetReloadReceipt, McpToolsetStatus } from '../types';
-import type { ProbedRuntime } from './runtime-probe';
+import type { RuntimeObservation } from '../runtime-detection';
 import type { TaskCounts, DerivedTaskInfo } from './tasks-view';
 
 /**
@@ -21,20 +21,6 @@ import type { TaskCounts, DerivedTaskInfo } from './tasks-view';
 
 function quote(text: string): string {
   return JSON.stringify(text);
-}
-
-/**
- * Finding F8 (cross-model adversarial review): mirrors `bin/audit-log.ts`'s
- * own `[redacted: N bytes]` placeholder style EXACTLY (byte count, not a
- * hash — same convention, same wording), so a redacted stdout line and a
- * redacted (replayed-from-audit-log) line read identically. Deliberately
- * NOT imported from `audit-log.ts` itself — that module does real
- * filesystem I/O and this one is pure by design (see the module doc
- * comment above); duplicating this one small, stable string format is
- * cheaper than crossing that boundary.
- */
-function redactedByteCountPlaceholder(text: string): string {
-  return `[redacted: ${Buffer.byteLength(text, 'utf8')} bytes]`;
 }
 
 /**
@@ -82,43 +68,6 @@ export function formatAgentEvent(event: AgentEvent): string {
   }
 }
 
-export interface FormatDaemonEventLineOptions {
-  /**
-   * Finding F8 (cross-model adversarial review): redact an
-   * `awaiting-approval` event's `summary` to a `[redacted: N bytes]`
-   * placeholder instead of the raw text. `summary` can carry the exact
-   * tool-call text (a shell command, a file's contents) a `confirm`-mode
-   * policy is gating — `start.ts`'s stdout is captured verbatim by
-   * launchd/systemd/WinSW service logs, which have no business holding
-   * that. Default `false` (full fidelity) — every OTHER caller
-   * (`tasks --follow`'s control-socket path, which is authenticated;
-   * and its audit-log-tailing fallback, whose events are ALREADY redacted
-   * at the source by `audit-log.ts` regardless of this flag) keeps showing
-   * whatever it already legitimately can. Only `bin/commands/start.ts`
-   * sets this to `true`.
-   */
-  redactApprovalSummary?: boolean;
-  /**
-   * Issue #384 item 5: redact the remaining free-form task text — a
-   * `completed` summary (the model's own final text), a `failed`/`cancelled`
-   * reason, a `stale-approval-decision` reason — to the same
-   * `[redacted: N bytes]` placeholder, matching what `bin/audit-log.ts`
-   * persists for those fields. Only `bin/commands/start.ts` sets it: its
-   * stdout is a service log. Independent of `redactApprovalSummary`.
-   */
-  redactTaskText?: boolean;
-}
-
-function taskText(text: string, options: FormatDaemonEventLineOptions): string {
-  return options.redactTaskText ? redactedByteCountPlaceholder(text) : text;
-}
-
-/**
- * One line per `DaemonEvent`. Shared by `start` (printed to stdout live
- * while it runs) and `tasks --follow` (tailing the identical shape back out
- * of the audit log) so the two ways of watching the same feed read
- * identically.
- */
 /** `phase=running connection=open`, `phase=halted reason=device_revoked` — closed values only; the caller prints the time. */
 export function formatLifecycle(lifecycle: DaemonLifecycle): string {
   switch (lifecycle.phase) {
@@ -129,6 +78,13 @@ export function formatLifecycle(lifecycle: DaemonLifecycle): string {
     default:
       return `phase=${lifecycle.phase}`;
   }
+}
+
+/** What an operator does about a run that ended (`halted` or `crashed`); `undefined` otherwise. */
+export function formatLifecycleRemedy(lifecycle: DaemonLifecycle): string | undefined {
+  if (lifecycle.phase === 'halted') return formatHaltRemedy(lifecycle.reason);
+  if (lifecycle.phase === 'crashed') return 'the run crashed on an unexpected error: see the daemon log (a supervised service is restarted)';
+  return undefined;
 }
 
 /** Issue #394: what an operator does about each halt. A restart alone fixes none of them. */
@@ -151,7 +107,12 @@ export function formatHaltRemedy(reason: DaemonHaltReason): string {
   }
 }
 
-export function formatDaemonEventLine(event: DaemonEvent, options: FormatDaemonEventLineOptions = {}): string {
+/**
+ * One line per `DaemonEvent`, full content included — only for the
+ * authenticated live view (`tasks --follow` over the control socket). A
+ * durable sink writes `DaemonRecord`s instead (`daemon/daemon-record.ts`).
+ */
+export function formatDaemonEventLine(event: DaemonEvent): string {
   const prefix = `[${event.ts}]`;
   switch (event.kind) {
     case 'offered':
@@ -170,23 +131,22 @@ export function formatDaemonEventLine(event: DaemonEvent, options: FormatDaemonE
       // omitted (rather than shown as e.g. "approvalId=undefined") for the
       // rare event with none, so the plain-text shape never implies a
       // literal "undefined" id exists.
-      // Finding F8: see `FormatDaemonEventLineOptions.redactApprovalSummary`'s
-      // own doc comment.
-      const summary = options.redactApprovalSummary ? redactedByteCountPlaceholder(event.summary) : event.summary;
-      return `${prefix} awaiting-approval taskId=${event.taskId}${event.approvalId ? ` approvalId=${event.approvalId}` : ''} summary=${quote(summary)}`;
+      return `${prefix} awaiting-approval taskId=${event.taskId}${event.approvalId ? ` approvalId=${event.approvalId}` : ''} summary=${quote(event.summary)}`;
     }
     case 'completed':
-      return `${prefix} completed taskId=${event.taskId} sessionRef=${event.sessionRef} summary=${quote(taskText(event.summary, options))}`;
+      return `${prefix} completed taskId=${event.taskId} sessionRef=${event.sessionRef} summary=${quote(event.summary)}`;
     case 'failed':
-      return `${prefix} failed taskId=${event.taskId} retryable=${event.retryable}${event.preClaim ? ' preClaim=true' : ''} reason=${quote(taskText(event.reason, options))}`;
+      return `${prefix} failed taskId=${event.taskId} retryable=${event.retryable}${event.preClaim ? ' preClaim=true' : ''} reason=${quote(event.reason)}`;
     case 'cancelled':
-      return `${prefix} cancelled taskId=${event.taskId}${event.reason ? ` reason=${quote(taskText(event.reason, options))}` : ''}`;
+      return `${prefix} cancelled taskId=${event.taskId}${event.reason ? ` reason=${quote(event.reason)}` : ''}`;
     case 'lifecycle':
       return `${prefix} lifecycle ${formatLifecycle(event.lifecycle)}`;
     case 'paired':
       return `${prefix} paired deviceId=${event.deviceId}`;
     case 'unpaired':
       return `${prefix} unpaired`;
+    case 'environment-resolved':
+      return `${prefix} environment-resolved ${formatServiceEnvironment(event.status)}`;
     case 'runtimes-detected':
       return `${prefix} runtimes-detected ids=${event.runtimes.map((r) => r.id).join(',') || '(none)'}`;
     case 'shutdown-requested':
@@ -199,7 +159,7 @@ export function formatDaemonEventLine(event: DaemonEvent, options: FormatDaemonE
       // predates this fix and simply has no such field at all.
       return `${prefix} shutdown-complete reason=${quote(event.reason)}${event.undeliveredOutboxCount !== undefined ? ` undeliveredOutboxCount=${event.undeliveredOutboxCount}` : ''}`;
     case 'stale-approval-decision':
-      return `${prefix} stale-approval-decision taskId=${event.taskId} decision=${event.decision}${event.reason ? ` reason=${quote(taskText(event.reason, options))}` : ''}`;
+      return `${prefix} stale-approval-decision taskId=${event.taskId} decision=${event.decision}${event.reason ? ` reason=${quote(event.reason)}` : ''}`;
     case 'agent-memory-intent-integrity':
       return `${prefix} agent-memory-intent-integrity intentId=${event.intentId} disposition=${event.disposition}`;
     case 'runtime-disposal-failed':
@@ -221,9 +181,7 @@ export function formatDaemonEventLine(event: DaemonEvent, options: FormatDaemonE
       // the event type cannot carry either. codex round-2 F4: the DENIED
       // variant has no raw audience field at all (only `audienceSize`), so a
       // caller-supplied secret shaped as an audience can never reach this
-      // stdout line — the daemon prints these live to the
-      // foreground/systemd/launchd/WinSW log. The ISSUED audience came from
-      // the allowlist and is safe to print.
+      // line. The ISSUED audience came from the allowlist.
       //
       // Contract §8.2(1): `lane` tells the two credential kinds apart on one
       // stream, and `taskId` names the task the nonce registry resolved. The
@@ -251,130 +209,6 @@ export function formatDaemonEventLine(event: DaemonEvent, options: FormatDaemonE
   }
 }
 
-/** Per-turn progress tally `start` prints instead of one line per `AgentEvent`. Sizes and counts only. */
-export interface TurnProgressSummary {
-  events: number;
-  /** `progress` (model text) events, and their UTF-8 byte total — the audit log's `textSize`, summed. */
-  text: number;
-  textBytes: number;
-  toolUses: number;
-  toolResults: number;
-  artifacts: number;
-  approvals: number;
-  errors: number;
-  /** The last `usage` event's token counts, when the turn reported one. */
-  usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number };
-}
-
-function emptyTurnProgress(): TurnProgressSummary {
-  return { events: 0, text: 0, textBytes: 0, toolUses: 0, toolResults: 0, artifacts: 0, approvals: 0, errors: 0 };
-}
-
-function tallyAgentEvent(summary: TurnProgressSummary, event: AgentEvent): void {
-  summary.events += 1;
-  switch (event.type) {
-    case 'progress':
-      summary.text += 1;
-      summary.textBytes += Buffer.byteLength(event.text, 'utf8');
-      return;
-    case 'tool_use':
-      summary.toolUses += 1;
-      return;
-    case 'tool_result':
-      summary.toolResults += 1;
-      return;
-    case 'artifact':
-      summary.artifacts += 1;
-      return;
-    case 'needs_approval':
-      summary.approvals += 1;
-      return;
-    case 'error':
-      summary.errors += 1;
-      return;
-    case 'usage':
-      summary.usage = { inputTokens: event.inputTokens, outputTokens: event.outputTokens, totalTokens: event.totalTokens };
-      return;
-    case 'turn_end':
-      return;
-  }
-}
-
-/**
- * Issue #384 item 5: the single stdout line one turn's progress produces.
- * `turn=end` when the runtime reported `turn_end`; `turn=open` when the
- * task reached a terminal state (or `start` stopped) first.
- */
-export function formatTurnProgressLine(ts: string, taskId: string, summary: TurnProgressSummary, turn: 'end' | 'open'): string {
-  const usage = summary.usage;
-  const usageParts = usage
-    ? [
-        usage.inputTokens !== undefined ? `in:${usage.inputTokens}` : undefined,
-        usage.outputTokens !== undefined ? `out:${usage.outputTokens}` : undefined,
-        usage.totalTokens !== undefined ? `total:${usage.totalTokens}` : undefined,
-      ].filter((part): part is string => part !== undefined)
-    : [];
-  return [
-    `[${ts}] progress taskId=${taskId} turn=${turn}`,
-    `events=${summary.events}`,
-    `text=${summary.text}`,
-    `textBytes=${summary.textBytes}`,
-    `tool_use=${summary.toolUses}`,
-    `tool_result=${summary.toolResults}`,
-    `artifact=${summary.artifacts}`,
-    `needs_approval=${summary.approvals}`,
-    `error=${summary.errors}`,
-    usage ? `usage=${usageParts.length ? usageParts.join(',') : 'none'}` : undefined,
-  ].filter((part): part is string => part !== undefined).join(' ');
-}
-
-/**
- * Issue #384 item 5: `byok-agent start`'s stdout projection. `start` stdout
- * is a service log (launchd/systemd/WinSW keep it verbatim), so it never
- * carries model text: every `progress` event of a turn is tallied, and the
- * turn produces at most ONE line — at its `turn_end`, or, when the task ends
- * or `start` stops first, just before that. Every other event is one line
- * with free-form text redacted (`redactApprovalSummary` + `redactTaskText`).
- *
- * `tasks --follow` does not use this: it stays one line per event over the
- * authenticated control socket (full fidelity) or the already-redacted audit
- * log.
- */
-export class StartStdoutProjector {
-  readonly #turns = new Map<string, TurnProgressSummary>();
-
-  /** Lines to print for `event`, in order (zero, one or two). */
-  accept(event: DaemonEvent): string[] {
-    if (event.kind === 'progress') {
-      const summary = this.#turns.get(event.taskId) ?? emptyTurnProgress();
-      tallyAgentEvent(summary, event.event);
-      if (event.event.type !== 'turn_end') {
-        this.#turns.set(event.taskId, summary);
-        return [];
-      }
-      this.#turns.delete(event.taskId);
-      return [formatTurnProgressLine(event.ts, event.taskId, summary, 'end')];
-    }
-    const lines: string[] = [];
-    if (event.kind === 'completed' || event.kind === 'failed' || event.kind === 'cancelled') {
-      const open = this.#turns.get(event.taskId);
-      if (open) {
-        this.#turns.delete(event.taskId);
-        lines.push(formatTurnProgressLine(event.ts, event.taskId, open, 'open'));
-      }
-    }
-    lines.push(formatDaemonEventLine(event, { redactApprovalSummary: true, redactTaskText: true }));
-    return lines;
-  }
-
-  /** Lines for every turn still open — `start` prints them when it stops. */
-  flush(ts: string): string[] {
-    const lines = [...this.#turns].map(([taskId, summary]) => formatTurnProgressLine(ts, taskId, summary, 'open'));
-    this.#turns.clear();
-    return lines;
-  }
-}
-
 export function formatTaskLine(task: DaemonTaskInfo | DerivedTaskInfo): string {
   const git = 'git' in task ? task.git : undefined;
   const gitStatus = git
@@ -393,7 +227,8 @@ export function formatTaskLine(task: DaemonTaskInfo | DerivedTaskInfo): string {
     `updatedAt=${task.updatedAt}`,
     task.sessionRef ? `sessionRef=${task.sessionRef}` : undefined,
     task.declined ? 'declined=true' : undefined,
-    task.summary ? `summary=${quote(task.summary)}` : undefined,
+    'summary' in task && task.summary ? `summary=${quote(task.summary)}` : undefined,
+    'summaryBytes' in task && task.summaryBytes !== undefined ? `summaryBytes=${task.summaryBytes}` : undefined,
   ].filter((part): part is string => Boolean(part));
   return parts.join(' ');
 }
@@ -403,7 +238,7 @@ export function formatTaskListLines(tasks: readonly (DaemonTaskInfo | DerivedTas
   return tasks.map(formatTaskLine);
 }
 
-export function formatRuntimeLines(runtimes: readonly ProbedRuntime[]): string[] {
+export function formatRuntimeLines(runtimes: readonly RuntimeObservation[]): string[] {
   if (runtimes.length === 0) return ['(no runtimes configured — check runtimeAllowlist)'];
   return runtimes.map((r) => {
     if (!r.present) return `${r.id}: ${r.outcome}${r.outcome === 'refused' ? `:${r.reason}` : ''}`;
@@ -428,14 +263,16 @@ export interface StatusView {
   branding?: DaemonBranding;
   paired: boolean;
   deviceId?: string;
-  /** Issues #391/#394: the last `lifecycle` event the audit log holds. */
+  /** Issues #391/#394: the last `lifecycle` record the audit log holds. */
   lifecycle?: { lifecycle: DaemonLifecycle; ts: string };
-  runtimes: readonly ProbedRuntime[];
+  runtimes: readonly RuntimeObservation[];
   taskCounts: TaskCounts;
   auditLogPath: string;
-  auditLogLineCount: number;
+  /** Records the audit log holds (lines in another shape are not counted). */
+  auditLogRecordCount: number;
   /** Issue #392: the environment the last `start` resolved, from its `environment-resolved` audit record. */
   environment?: { status: ServiceEnvironmentStatus; ts: string };
+  runtimesDetectedAt?: string;
 }
 
 /** Issue #392: `login-shell shell=zsh durationMs=530`, `inherited`, or `unavailable code=timeout` — closed values and a shell basename only. */
@@ -464,20 +301,27 @@ export function formatStatusLines(view: StatusView): string[] {
       ? `lifecycle: last-known ${formatLifecycle(view.lifecycle.lifecycle)} at=${view.lifecycle.ts}`
       : 'lifecycle: unknown (no lifecycle event yet — run `byok-agent start` at least once to begin observing)',
   );
-  if (view.lifecycle?.lifecycle.phase === 'halted') lines.push(`lifecycle-remedy: ${formatHaltRemedy(view.lifecycle.lifecycle.reason)}`);
+  const remedy = view.lifecycle ? formatLifecycleRemedy(view.lifecycle.lifecycle) : undefined;
+  if (remedy !== undefined) lines.push(`lifecycle-remedy: ${remedy}`);
   lines.push(
     view.environment
       ? `environment: ${formatServiceEnvironment(view.environment.status)} at=${view.environment.ts}`
       : 'environment: unknown (no environment-resolved record yet)',
   );
-  const runtimeSummary = view.runtimes.map((r) => `${r.id}=${r.present ? 'present' : r.outcome === 'refused' ? `refused:${r.reason}` : r.outcome}`).join(' ');
-  lines.push(`runtimes: ${runtimeSummary || '(none configured)'}`);
+  const runtimeSummary = formatRuntimeObservations(view.runtimes);
+  lines.push(view.runtimesDetectedAt
+    ? `runtimes: last-known ${runtimeSummary} at=${view.runtimesDetectedAt}`
+    : 'runtimes: unknown (no runtimes-detected record yet)');
   const c = view.taskCounts;
   lines.push(
     `tasks: total=${c.total} offered=${c.Offered} claimed=${c.Claimed} running=${c.Running} awaitApproval=${c.AwaitApproval} complete=${c.Complete} failed=${c.Failed} cancelled=${c.Cancelled}`,
   );
-  lines.push(`audit-log: ${view.auditLogPath} (${view.auditLogLineCount} event${view.auditLogLineCount === 1 ? '' : 's'})`);
+  lines.push(`audit-log: ${view.auditLogPath} (${view.auditLogRecordCount} record${view.auditLogRecordCount === 1 ? '' : 's'})`);
   return lines;
+}
+
+function formatRuntimeObservations(runtimes: readonly RuntimeObservation[]): string {
+  return runtimes.map(runtime => `${runtime.id}=${runtime.outcome === 'refused' ? `refused:${runtime.reason}` : runtime.outcome}`).join(' ') || '(none)';
 }
 
 /**
@@ -488,15 +332,26 @@ export function formatStatusLines(view: StatusView): string[] {
  * unambiguous which lines are a live snapshot of a running process versus
  * the historical/persisted view above them.
  */
+/**
+ * The control `status` answer comes from another process, possibly an older
+ * daemon that reports `transport` and no `lifecycle`: read it strictly, as
+ * `doctor` does, and say so instead of failing the whole live view.
+ */
+function formatLiveLifecycle(value: unknown): string {
+  const lifecycle = parseDaemonLifecycle(value);
+  return lifecycle ? formatLifecycle(lifecycle) : 'lifecycle unknown (daemon predates lifecycle)';
+}
+
 export function formatLiveStatusLines(live: ControlStatusResult): string[] {
   const liveRelease = live.localAgentRelease;
   const lines: string[] = [
-    `live: pid=${live.pid} uptimeMs=${live.uptimeMs} ${formatLifecycle(live.lifecycle)}`,
+    `live: pid=${live.pid} uptimeMs=${live.uptimeMs} ${formatLiveLifecycle(live.lifecycle)}`,
     liveRelease
       ? `live-local-agent-release: ${liveRelease.version}${liveRelease.buildId ? ` buildId=${liveRelease.buildId}` : ''}`
       : 'live-local-agent-release: unknown',
     `live-paired: ${live.paired ? 'yes' : 'no'}${live.deviceId ? ` deviceId=${live.deviceId}` : ''}`,
-    `live-runtimes: ${live.runtimeIds.length ? live.runtimeIds.join(',') : '(none)'}`,
+    `live-environment: ${live.environment === undefined ? 'unknown' : formatServiceEnvironment(live.environment)}`,
+    `live-runtimes: ${live.runtimes === undefined ? 'unknown' : formatRuntimeObservations(live.runtimes)}`,
     `live-toolsets: revision=${live.toolsets.revision} count=${live.toolsets.toolsets.length}`,
   ];
   for (const toolset of live.toolsets.toolsets) lines.push(formatToolsetStatusLine('live-toolset', toolset));
@@ -586,7 +441,7 @@ export function formatToolsetsReloadReceiptLines(receipt: Readonly<McpToolsetRel
   ];
 }
 
-/** Cap on a rendered approval summary's length before truncating with an ellipsis — these can be arbitrarily long tool-input dumps (see `docs/security.md`'s F8 note on why the FULL summary is only ever shown over the authenticated control socket, never service-log stdout); this is purely a display-width concern for a CLI table, not a redaction. */
+/** Cap on a rendered approval summary's length before truncating with an ellipsis — these can be arbitrarily long tool-input dumps (the full summary is only ever shown over the authenticated control socket, never in a durable sink — `docs/security.md`); this is purely a display-width concern for a CLI table, not a redaction. */
 const SUMMARY_EXCERPT_MAX_LEN = 60;
 
 function summaryExcerpt(summary: string | undefined): string {

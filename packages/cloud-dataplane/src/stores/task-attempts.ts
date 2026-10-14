@@ -15,10 +15,13 @@
  * and return `undefined`.
  */
 import {
+  TASK_ATTEMPT_ACTIVE_STATUSES,
+  TASK_ATTEMPT_STATUSES,
   assertTaskAttemptListLimit,
   type AgentMessageAdmission,
   type AgentRef,
   type TaskAttempt,
+  type TaskAttemptCounts,
   type TaskAttemptListQuery,
   type TaskAttemptPage,
   type TaskAttemptStatus,
@@ -306,19 +309,20 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
   }
 
   async list(tenant: TenantId, query: TaskAttemptListQuery): Promise<TaskAttemptPage> {
-    assertTaskAttemptListLimit(query.limit);
+    assertTaskAttemptListLimit(query.limit, query.active);
     // Keyset, not OFFSET: the bound is carried in the WHERE clause, so page N
-    // costs the same as page 1 and a row inserted behind the cursor cannot
-    // shift the walk. One row over the limit answers "is there more" without a
-    // second query; the tenant-first `(tenant_id, task_id)` primary key already
-    // orders exactly this way, so no extra index is needed.
+    // starts after the previous key and an insertion behind it cannot shift
+    // the walk. One row over the limit answers "is there more" without another
+    // query. The primary key orders the unfiltered walk; an active filter can
+    // still scan settled history on Postgres (no stats-specific index yet).
     const result = await this.#pool.query<TaskRow>(
       `SELECT ${TASK_SELECT_COLUMNS}
          FROM task
         WHERE tenant_id = $1 AND ($2::text IS NULL OR task_id > $2)
+        ${query.active === true ? 'AND status = ANY($4::text[]) AND cancel_requested_at IS NULL' : ''}
         ORDER BY task_id
         LIMIT $3`,
-      [tenant, query.cursor ?? null, query.limit + 1],
+      [tenant, query.cursor ?? null, query.limit + 1, ...(query.active === true ? [[...TASK_ATTEMPT_ACTIVE_STATUSES]] : [])],
     );
     const rows = result.rows.slice(0, query.limit);
     const attempts = rows.map(taskRowToAttempt);
@@ -328,6 +332,24 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
       attempts,
       ...(hasMore && last !== undefined ? { nextCursor: last.taskId } : {}),
     };
+  }
+
+  async countByStatus(tenant: TenantId): Promise<TaskAttemptCounts> {
+    const result = await this.#pool.query<{ status: string; cancelled: boolean; n: string }>(
+      `SELECT status, (cancel_requested_at IS NOT NULL) AS cancelled, count(*)::text AS n
+       FROM task WHERE tenant_id = $1 GROUP BY status, (cancel_requested_at IS NOT NULL)`,
+      [tenant],
+    );
+    const byStatus = Object.fromEntries(TASK_ATTEMPT_STATUSES.map((status) => [status, 0])) as Record<TaskAttemptStatus, number>;
+    let cancellationRequested = 0;
+    for (const row of result.rows) {
+      if (!TASK_ATTEMPT_STATUSES.some((status) => status === row.status)) throw new Error('Unknown stored task attempt status');
+      const count = Number(row.n);
+      if (!Number.isSafeInteger(count) || count < 0) throw new Error('Invalid task attempt aggregate count');
+      if (row.cancelled) cancellationRequested += count;
+      else byStatus[row.status as TaskAttemptStatus] += count;
+    }
+    return { byStatus, cancellationRequested };
   }
 
   async claim(

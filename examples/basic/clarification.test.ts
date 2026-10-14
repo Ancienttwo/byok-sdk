@@ -5,7 +5,7 @@ import { serve } from '@hono/node-server';
 import { createByokServer, type ByokServer } from '@byok-sdk/server';
 import { createDaemonWithAdapters, type Daemon, type AgentEgressPolicy, type DaemonConfig } from '@byok-sdk/client';
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
-import { BotStubAdapter } from './goal-btw.test-support';
+import { BotStubAdapter, waitForReady } from './goal-btw.test-support';
 import { HostRevisionConflict } from './goal-btw-store';
 import type { BotTarget } from './goal-btw';
 import { SqliteClarificationStore } from './clarification-store';
@@ -50,7 +50,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
   }
   beforeEach(async () => {
     root = await mkdtemp(path.join(tmpdir(),'cq-')); db = path.join(root,'host.sqlite'); now = 1_000_000; extraStores = [];
-    byok = createByokServer({ productId: 'clarification-test',longPollHoldMs: 100 });
+    byok = createByokServer({ productId: 'clarification-test' });
     const listening = await new Promise<{ url: string;close: () => Promise<void> }>(resolve => {
       const http = serve({ fetch: byok.hono.fetch,port: 0,hostname: '127.0.0.1' },info => resolve({ url: `http://127.0.0.1:${info.port}`,
         close: () => new Promise<void>(done => { http.close(() => done()); if ('closeAllConnections' in http) http.closeAllConnections(); }) }));
@@ -60,11 +60,11 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
       workspaceRoot: path.join(root,'ws'),storeDir: path.join(root,'sdk'),agentHome: { hostStorageRoot: path.join(root,'homes') },agentEgress: { policy },resultDocument: { extract: extractClarification },
     },[adapter],{ longPoll: { retryDelayMs: 10,idleDelayMs: 10 } });
     const pair = await byok.pairing.createPairingCode({ productId: 'clarification-test' }); deviceId = (await daemon.pair(pair.code)).deviceId;
-    await daemon.start(); await vi.waitFor(async () => expect((await byok.machines.list()).find(m => m.deviceId === deviceId)?.connected).toBe(true),{ timeout: 5000 });
+    await daemon.start(); await waitForReady(daemon);
     store = new SqliteClarificationStore(db,'tenant-a'); host = new ClarificationHost(byok,store,() => now);
   });
   afterEach(async () => {
-    await daemon?.stop(); byok?.stop(); await closeHttp?.(); store?.close(); extraStores?.forEach(s => s.close());
+    await daemon?.stop(); await byok?.close(); await closeHttp?.(); store?.close(); extraStores?.forEach(s => s.close());
     if (root) await rm(root,{ recursive: true,force: true });
   });
 
@@ -252,7 +252,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
     };
     daemon = createDaemonWithAdapters(config,[adapter],{ longPoll: { retryDelayMs: 10,idleDelayMs: 10 } });
     const code = await byok.pairing.createPairingCode({ productId: 'clarification-test' }); deviceId = (await daemon.pair(code.code)).deviceId;
-    await daemon.start(); await vi.waitFor(async () => expect((await byok.machines.list()).find(m => m.deviceId === deviceId)?.connected).toBe(true),{ timeout: 5000 });
+    await daemon.start(); await waitForReady(daemon);
     start();
     if (mode === 'capability') {
       await expect(host.send('run',row().revision)).rejects.toThrow('agent-home-contract');

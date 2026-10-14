@@ -34,59 +34,65 @@ envelope as v2. Package/application SemVer remains unrelated to wire admission.
 
 ## Freeze rule
 
-**Additive-minor-only after freeze.** `PROTOCOL_VERSION` is `2`. Any of the
-following is non-breaking and may be added without a version bump, ever:
+`PROTOCOL_VERSION` is `2`. Every v2 change takes exactly one of three paths.
+Compatibility is decided by `packages/protocol/src/__tests__/compat.test.ts`,
+which runs the published decoders of the oldest supported release and of the
+latest or second-latest release, not by author judgment.
 
-- A new OPTIONAL field on an existing payload or the envelope.
-- A new message type.
-- A new `AgentEvent` variant.
-- A new capability flag (`CAPABILITY_FLAGS`, or a new key inside
-  `RuntimeInfo.capabilities`).
+1. **Version bump.** Bump `PROTOCOL_VERSION`; server and client upgrade
+   together under "Server supports N and N-1" below. This is the only path
+   for a change that narrows anything a release already shipped: removing or
+   retyping a field, a message type, a capability flag, a task state or a
+   transition; making an optional field required; adding a bound, a pattern,
+   an enum restriction or strictness to an existing shape; or renaming a
+   message type.
+2. **Gated addition.** The addition is declared in `WIRE_ADDITIONS`
+   (`packages/protocol/src/wire-additions.ts`) as `gated`, with a capability
+   flag that older releases do not know. The sender refuses a message
+   carrying the addition, before it creates the task or appends to the
+   mailbox, unless the receiver durably advertised the flag (a device flag
+   for server-to-daemon messages, a server flag for daemon-to-server ones).
+   An older receiver therefore never sees it. Required for a new message
+   type, for a field on a strict payload (the offers, control payloads and
+   the `instruction` blob-ref), and for any field whose loss would change what
+   the receiver executes or acknowledges. `homeAccess` on the Agent offers
+   (`agent-home-readers`) is the worked example. Senders take their flags
+   from `requiredReceiverCapabilities(type, payload)`, which reads the same
+   table.
+3. **Strip-safe addition.** A new optional field on a strip-unknown payload,
+   a new `AgentEvent` variant, a new capability flag, or a new key inside
+   `RuntimeInfo.capabilities`. An older receiver drops it. A new payload field
+   on this path is declared in `WIRE_ADDITIONS` as `strip-safe`; the
+   declaration says dropping it does not change what the receiver executes or
+   acknowledges.
+
+`compat.test.ts` enforces the three paths:
+
+- The released surface is never narrowed: message types, their direction,
+  capability flags, task states and transitions, AgentEvent types, batch and
+  hash bounds, and the JSON Schema of every exported schema, compared against
+  each pinned release.
+- `golden/v2.envelopes.ndjson` is append-only. `golden/releases.json` pins,
+  per stable release, the sha256 of the corpus prefix it shipped with. The
+  current decoder must decode every line back to the committed JSON.
+- Each pinned released decoder reads every corpus line. A rejected line must
+  be explained by a gate the release does not know; a silently dropped field
+  must be declared strip-safe or gated.
+- Every `WIRE_ADDITIONS` entry, every message type, and every top-level key a
+  payload gained since the floor release appears in a corpus line.
+
+That the server and hosted cloud actually refuse an undeclared receiver is
+tested at the senders (for example
+`packages/cloud/src/__tests__/wire-additions-admission.test.ts`). Nested
+fields of a strip-safe payload are checked only as far as the corpus carries
+them; the HTTP API bodies are not in the corpus yet.
 
 **History note.** The "Landed additive minor" entries in this document, and
 other sections that say a change landed with "no `PROTOCOL_VERSION` bump" or
 name the `v1.*` golden files, record additive changes made under v1. v2 kept
 every one of those shapes; only the fields listed in the status note above were
-removed. The current goldens are `v2.frozen.json` and `v2.envelopes.ndjson`.
-
-**Exception:** the "new optional field is always non-breaking" bullet above
-does not apply to the `instruction` blob-ref shape (`{ blobRef: BlobRef }`)
-or to the strict offer and control payloads — see the asymmetry below. They
-are built with zod's `.strict()`, not the default strip-unknown-keys behavior
-every other schema in this bullet list gets, so adding a field to one is
-not an unconditional additive change, by design. A strict payload gains a
-field by exactly one of two legal paths:
-
-1. **Version bump.** Bump `PROTOCOL_VERSION`; server and client upgrade
-   together under "Server supports N and N-1" below.
-2. **Capability-gated additive field.** Introduce a new capability flag
-   together with the field. The server and the hosted cloud inbound gate
-   refuse a message carrying the field for a device that has not durably
-   declared the flag, before they create the task or append to the mailbox.
-   A daemon that did not declare the flag therefore never receives the field,
-   so its strict decoder never sees it. `homeAccess` on the Agent offers
-   (`agent-home-readers`) is the worked example.
-
-The second path is checked by an executable test, not by author judgment, for
-the decoder half only: `packages/protocol/src/__tests__/released-compat.test.ts`
-decodes the current envelope corpus with the oldest released decoder, and every
-envelope that decoder rejects must be listed with the capability flag that
-protects it. A structural case also requires every top-level key a strict
-payload gained since that release to appear in at least one live corpus line,
-so a new key cannot hide from the decoding cases by being absent from the
-corpus. Limits: nested strict schemas are not checked, and a new message type
-is not a payload key. The released decoder rejects an unknown type with
-`UnknownMessageTypeError`, so a new message type needs a `{ field: null,
-capability }` gate entry. That the server and hosted cloud actually refuse an
-undeclared device is tested elsewhere (for example
-`packages/cloud/src/__tests__/agent-home-readers.test.ts`), not by this file.
-
-**What IS breaking, and requires a `v` bump instead:** changing an existing
-field's type, removing a field, making an optional field required (or vice
-versa in a way a receiver depends on), renaming a message type, or removing a
-state/transition. There is no in-place "tighten it a little" allowance
-post-freeze the way pre-freeze M0→M1 had (§10) — a change of this shape is a
-new major version, full stop.
+removed. There is no in-place "tighten it a little" allowance post-freeze the
+way pre-freeze M0→M1 had (§10).
 
 **Scoped input-preparation cut:** the Owner-approved
 [prepared memory contract](researches/2026-09-28-prepared-agent-memory-contract.md)
@@ -133,11 +139,9 @@ observability data, but FAIL-CLOSED for control/security data:
   default strip-unknown-keys behavior: an unrecognized field is REJECTED
   outright, not silently discarded. A strict offer that still carries the
   removed `policy` is therefore rejected, not stripped. **Consequence:**
-  adding a new field to one of these schemas post-freeze is a BREAKING change
-  unless it takes one of the two legal paths in the Freeze rule above (a
-  `PROTOCOL_VERSION` bump, or a capability-gated additive field) — the one
-  explicit exception to "a new optional field is always non-breaking" noted
-  above.
+  adding a new field to one of these schemas post-freeze takes the
+  version-bump or gated-addition path in the Freeze rule above, never the
+  strip-safe path.
 
 This asymmetry is enforced by the freeze-guard regression test
 (`packages/protocol/src/__tests__/freeze-guard.test.ts`), not just documented
@@ -1921,6 +1925,30 @@ of the wire contract.
 A daemon sends every D→S envelope this way; there is no alternate socket
 queue or transport selection to reconcile.
 
+**A full mailbox answers 507 `{ "error": "storage_quota_exceeded" }`.** Some
+envelopes make the server append a reply to this device's mailbox (an
+`agent.egress.ack` for reliable egress or a content receipt, an
+`agent.message.disposition` for a published message). That append is admitted
+against the tenant's `mailboxLimitBytes`; when it does not fit, the whole
+request answers HTTP 507 with that body, which is the storage error mapping of
+§12.7.7. Envelopes earlier in the batch, and the envelope whose reply was
+refused, may already have taken effect — the same no-rollback rule as the 429
+above. Resending the same batch is safe: each already-processed envelope is
+counted `accepted` as a duplicate (§9) and its idempotent reply is appended
+once the mailbox has room, so nothing executes twice. The remainder of the
+batch waits until there is room.
+
+**A tenant with no storage entitlement answers 409
+`{ "error": "storage_entitlement_missing" }`.** The same reply append is
+refused closed when the Host never issued the tenant a storage entitlement (the
+status the blob routes use for the same condition, §7). Unlike 507 this does not
+clear with time: it needs operator action, because the Host has to issue the
+tenant a storage entitlement. The daemon keeps the batch unchanged and resends
+it with backoff; resending is safe for the same reason as for 507, and it
+succeeds once the entitlement exists. The distinct status lets operators and
+Hosts tell this case apart from a full mailbox (507) and from a server fault
+(500).
+
 **Chunking an oversized outbound queue is a client-side implementation
 detail, not a new wire rule.** A daemon that has accumulated more than
 `MAX_MESSAGES_PER_BATCH` queued envelopes (e.g. after an extended outage)
@@ -2480,13 +2508,16 @@ being set far larger than any realistic task duration, so this residual can
 only manifest for a device genuinely unreachable for an extended period, not
 a normal slow turn.
 
-## 13. Version-negotiation drill (M4 Phase 4)
+## 13. Compatibility suite
 
-A compat-matrix exercise simulating a future minor server against today's
-daemon, and vice versa — proving the Freeze rule's stated additive-compat
-promise actually holds in real code, not just in this document, and pinning
-down exactly where it doesn't (by design). Four scenarios, each with its
-real evidence:
+Compatibility between releases is decided by
+`packages/protocol/src/__tests__/compat.test.ts`, which runs the published
+decoders of the floor release and the previous release against the
+append-only corpus (see "Freeze rule"). It replaces the hand-built
+future-peer simulation this section used to describe. What remains below is
+the receiver policy that the suite and the behavioural tests rely on: which
+unknowns a current receiver tolerates and which it refuses. Four scenarios,
+each with its real evidence:
 
 1. **Unknown additive fields on observability-class messages are tolerated**
    (parsed, field stripped, no throw) —

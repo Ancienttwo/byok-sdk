@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { DaemonConfig, DaemonEvent } from '../index';
+import type { DaemonConfig } from '../index';
 import type { DaemonHaltReason, DaemonLifecycle } from '../daemon/daemon-lifecycle';
-import { auditLogPath, readLastEnvironmentRecord, type EnvironmentRecord } from '../bin/audit-log';
+import { auditLogPath } from '../bin/audit-log';
+import { isDaemonRecordKind, type DaemonRecordKind } from '../daemon/daemon-record';
 import { atomicWriteFile } from '../util/atomic-write';
 import { ensureSecureDir, ensureSecureFile, type EnsureSecureDirOptions } from '../util/secure-dir';
 import {
@@ -28,6 +29,7 @@ export interface SupportBundle {
   };
   device: { status: DiagnosticsSnapshot['device']['status']; deviceIdHash?: string };
   runtimes: DiagnosticsSnapshot['runtimes'];
+  runtimeSource: DiagnosticsSnapshot['runtimeSource'];
   control:
     | { status: 'offline' }
     | {
@@ -56,7 +58,7 @@ export interface SupportBundle {
     | { status: 'known'; source: 'live' | 'audit'; phase: DaemonLifecycle['phase']; connection?: 'connecting' | 'open'; reason?: DaemonHaltReason };
   health: DiagnosticsSnapshot['health'];
   /** Issue #392: the last `start`'s `environment-resolved` record — closed values and a shell basename only. */
-  environment: EnvironmentRecord | { status: 'unknown' };
+  environment: DiagnosticsSnapshot['environment'];
   journal: DiagnosticsSnapshot['journal'];
   workspace: DiagnosticsSnapshot['workspace'];
   quarantine: {
@@ -72,37 +74,14 @@ export interface SupportBundle {
     included: number;
     sourceBytesRead: number;
     sourceTruncated: boolean;
-    facts: Array<{ kind: DaemonEvent['kind']; ts: string }>;
+    /** Kind and time of each recent record — kinds from `DAEMON_RECORD_KINDS` only. */
+    facts: Array<{ kind: DaemonRecordKind; ts: string }>;
   };
   redaction: {
     policy: 'allowlist-v1';
     omitted: string[];
     transformed: string[];
   };
-}
-
-const AUDIT_KINDS = new Set<DaemonEvent['kind']>([
-  'artifact',
-  'awaiting-approval',
-  'cancelled',
-  'claimed',
-  'completed',
-  'failed',
-  'git-workspace',
-  'lifecycle',
-  'offered',
-  'paired',
-  'progress',
-  'runtimes-detected',
-  'shutdown-complete',
-  'shutdown-requested',
-  'stale-approval-decision',
-  'started',
-  'unpaired',
-]);
-
-function isAuditKind(value: unknown): value is DaemonEvent['kind'] {
-  return typeof value === 'string' && AUDIT_KINDS.has(value as DaemonEvent['kind']);
 }
 
 function sameFileState(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
@@ -171,11 +150,11 @@ async function recentAuditFacts(storeDir: string): Promise<SupportBundle['recent
     let text = buffer.subarray(0, bytesRead).toString('utf8');
     if (start > 0) text = text.slice(Math.max(0, text.indexOf('\n') + 1));
     const lines = text.split('\n').filter(Boolean).slice(-MAX_SUPPORT_AUDIT_FACTS);
-    const facts: Array<{ kind: DaemonEvent['kind']; ts: string }> = [];
+    const facts: Array<{ kind: DaemonRecordKind; ts: string }> = [];
     for (const line of lines) {
       try {
         const value = JSON.parse(line) as Record<string, unknown>;
-        if (isAuditKind(value.kind) && typeof value.ts === 'string' && Number.isFinite(Date.parse(value.ts))) {
+        if (isDaemonRecordKind(value.kind) && typeof value.ts === 'string' && Number.isFinite(Date.parse(value.ts))) {
           facts.push({ kind: value.kind, ts: new Date(Date.parse(value.ts)).toISOString() });
         }
       } catch {
@@ -232,10 +211,9 @@ export async function createSupportBundle(
   storeDir: string,
   options: CollectDiagnosticsOptions = {},
 ): Promise<SupportBundle> {
-  const [snapshot, recentEvents, environment] = await Promise.all([
+  const [snapshot, recentEvents] = await Promise.all([
     collectDiagnostics(config, storeDir, options),
     recentAuditFacts(storeDir),
-    readLastEnvironmentRecord(storeDir).catch(() => undefined),
   ]);
   return {
     version: 1,
@@ -253,10 +231,11 @@ export async function createSupportBundle(
       ...(snapshot.device.deviceIdHash ? { deviceIdHash: snapshot.device.deviceIdHash } : {}),
     },
     runtimes: snapshot.runtimes,
+    runtimeSource: snapshot.runtimeSource,
     control: projectControl(snapshot.control),
     lifecycle: projectLifecycle(snapshot.lifecycle),
     health: snapshot.health,
-    environment: environment ?? { status: 'unknown' },
+    environment: snapshot.environment,
     journal: snapshot.journal,
     workspace: snapshot.workspace,
     quarantine: {

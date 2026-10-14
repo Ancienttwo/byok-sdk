@@ -4,7 +4,7 @@
 // (BYOK_TEST_DEVICE_CREDENTIAL_STORE=1, a BYOK_* value the capture must keep)
 // holds the secret. Prints one JSON line once started; stops on SIGTERM.
 import { readFileSync } from 'node:fs';
-import { applyLoginShellEnvironment, createDaemon, serviceEnvironmentStatus } from '../../../dist/index.js';
+import { applyLoginShellEnvironment, createDaemon } from '../../../dist/index.js';
 
 const [configPath, flag] = process.argv.slice(2);
 if (flag === '--service') await applyLoginShellEnvironment();
@@ -12,13 +12,14 @@ const config = { ...JSON.parse(readFileSync(configPath, 'utf8')), localAgentRele
 const daemon = createDaemon(config);
 let detected = [];
 daemon.subscribe((event) => {
-  if (event.kind === 'runtimes-detected') detected = event.runtimes.map((runtime) => runtime.id);
+  if (event.kind === 'runtimes-detected') detected = event.runtimes.filter((runtime) => runtime.outcome === 'available').map((runtime) => runtime.id);
 });
 await daemon.pair('pairing-code');
 await daemon.start();
 process.stdout.write(`${JSON.stringify({
   ready: true,
-  environment: serviceEnvironmentStatus(),
+  environment: daemon.status().environment,
+  runtimes: daemon.status().runtimes,
   detected,
   byokNames: Object.keys(process.env).filter((name) => name.startsWith('BYOK_')).sort(),
   pathHasFakeBin: (process.env.PATH ?? '').split(':').some((entry) => entry.endsWith('/fakebin')),

@@ -48,6 +48,9 @@ credential never enter WinSW XML, service argv, config, logs, or a file store.
 Without the explicit `serviceEnrollment` opt-in, unpaired `start` keeps its
 original fail-closed behavior.
 
+The generated XML runs `start --config <path> --service`. On Windows the
+environment source is `inherited`; no POSIX login shell is launched.
+
 This copies `WinSW-x64.exe` into
 `~/.byok/<productId>/service-logs/<productId>.exe` (WinSW's own convention:
 the exe and its XML config must share a basename in the same directory — see
@@ -84,6 +87,7 @@ unit-tested template):
   <argument>start</argument>
   <argument>--config</argument>
   <argument>C:\absolute\path\to\config.json</argument>
+  <argument>--service</argument>
   <logpath>C:\Users\you\.byok\your-product-id\service-logs</logpath>
   <log mode="roll"></log>
   <startmode>Automatic</startmode>
@@ -93,6 +97,9 @@ unit-tested template):
 </service>
 ```
 
+- **`--service`** makes a halt (a revoked device, an unpaired store, a
+  rejected handshake, an invalid config) exit 0, so WinSW leaves the service
+  stopped; a crash still exits non-zero and is restarted (#394).
 - **`<onfailure>`** is the crash-restart mechanism, delegated entirely to
   WinSW/the SCM — the SDK never runs its own in-process supervisor. Two
   entries give an escalating backoff (10s, then 30s on repeated failures);
