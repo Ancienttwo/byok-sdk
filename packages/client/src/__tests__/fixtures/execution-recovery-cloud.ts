@@ -410,7 +410,7 @@ lines.on('line', (line) => {
       case 'close':
         await new Promise<void>((resolve) => {
           httpServer.close(() => resolve());
-          httpServer.closeAllConnections();
+          (httpServer as import('node:http').Server).closeAllConnections();
         });
         await embedded.close();
         lines.close();
