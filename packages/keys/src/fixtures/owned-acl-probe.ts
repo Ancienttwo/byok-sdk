@@ -13,12 +13,31 @@ export interface ProbePhase {
 }
 export interface ProbeTarget { readonly executable: string; readonly stdin: string }
 
+const ACL_QUERY_EXECUTABLE_SUFFIX = '\\system32\\windowspowershell\\v1.0\\powershell.exe';
+/** The Pi projection ACL query's argv: fixed Windows PowerShell flags and one encoded script. */
+function isAclQueryArgs(args: readonly string[]): boolean {
+  return args.length === 4 && args[0] === '-NoProfile' && args[1] === '-NonInteractive'
+    && args[2] === '-EncodedCommand' && typeof args[3] === 'string';
+}
+/** Any ACL query, owned or not: the system Windows PowerShell executable with the query argv. */
+function isAclQueryCommand([executable, args]: Parameters<CommandRunner>): boolean {
+  return executable.toLowerCase().endsWith(ACL_QUERY_EXECUTABLE_SUFFIX) && isAclQueryArgs(args);
+}
+
 /** Test-only dispatcher. Outside one matching command invocation it is a no-op. */
 export class AclProbeObserver {
   private readonly context = new AsyncLocalStorage<OwnedAclProbe>();
   private capture?: OwnedAclProbe;
   private active?: OwnedAclProbe;
   private sequence = 0;
+  private started = 0;
+
+  /**
+   * ACL queries this process has handed to the original runner, owned or not.
+   * Observation only: it lets a native case prove it is (or is not) the
+   * process's first Windows PowerShell ACL query instead of relying on order.
+   */
+  get matchingInvocations(): number { return this.started; }
 
   create(target: ProbeTarget, log: (phase: ProbePhase) => void = () => {}): OwnedAclProbe {
     this.assertIdle();
@@ -44,13 +63,17 @@ export class AclProbeObserver {
 
   command(original: CommandRunner, receiver: unknown, args: Parameters<CommandRunner>): ReturnType<CommandRunner> {
     const probe = this.context.getStore();
-    if (!probe || !probe.matches(args)) return Reflect.apply(original, receiver, args);
+    if (!probe || !probe.matches(args)) {
+      if (isAclQueryCommand(args)) this.started += 1;
+      return Reflect.apply(original, receiver, args);
+    }
     // The ALS object survives lstat/realpath awaits. Expiry never permits a late
     // native launch, even after an outer test/hook has stopped waiting.
     const refusal = probe.beforeCommand();
     if (refusal) return Promise.reject(refusal);
     if (this.active !== probe || this.capture) return Promise.reject(probe.failCapture('command scope overlap'));
     this.capture = probe;
+    if (isAclQueryCommand(args)) this.started += 1;
     try {
       // runCommand spawns synchronously, before returning its native promise.
       // Keep that exact promise/result; observe only this synchronous invocation.
@@ -105,9 +128,7 @@ export class OwnedAclProbe {
     } catch { this.captureFailure ??= new Error('ACL diagnostic logger failed'); }
   }
   matches([executable, args, stdin]: Parameters<CommandRunner>): boolean {
-    return executable === this.target.executable && stdin === this.target.stdin
-      && args.length === 4 && args[0] === '-NoProfile' && args[1] === '-NonInteractive'
-      && args[2] === '-EncodedCommand' && typeof args[3] === 'string';
+    return executable === this.target.executable && stdin === this.target.stdin && isAclQueryArgs(args);
   }
   beforeCommand(): Error | undefined {
     if (this.cancellation || this.disposed || this.disposalFailure) {

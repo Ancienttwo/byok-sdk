@@ -570,16 +570,26 @@ describe('B-P2 service: readiness never reaches ready offline', () => {
     expect(receipt.readinessReasons).not.toContain('accounting_policy_inapplicable');
   });
 
+  // Each row differs from an applicable ruling (see the residual-keys test above) in exactly one
+  // field, so every comparison in the applicability check is exercised on its own.
   it.each([
     ['a runtime the ruling was not made for', () => accountingPolicyRef({ ruledRuntime: 'some-other-runtime@1+abc.1' })],
     [
-      'a target the ruling was not made for',
-      () => accountingPolicyRef({ ruledTarget: { endpoint: 'https://elsewhere.example', modelId: 'glm-4.6' } }),
+      'an endpoint the ruling was not made for',
+      (runtime: string) => accountingPolicyRef({
+        ruledRuntime: runtime, ruledTarget: { endpoint: 'https://elsewhere.example', modelId: 'glm-4.6' },
+      }),
+    ],
+    [
+      'a model the ruling was not made for at the same endpoint',
+      (runtime: string) => accountingPolicyRef({
+        ruledRuntime: runtime, ruledTarget: { endpoint: 'https://api.z.ai/api/coding/paas/v4', modelId: 'glm-4.5' },
+      }),
     ],
   ])('carries accounting_policy_inapplicable for %s', async (_label, build) => {
     const compiler = stubCompiler();
     const service = await makeService({ compiler });
-    const receipt = await service.prepare(request({ accountingPolicyRef: build() }));
+    const receipt = await service.prepare(request({ accountingPolicyRef: build(runtimeIdentityOf(compiler)) }));
 
     expect(receipt.readinessReasons).toContain('accounting_policy_inapplicable');
     // Applicability is decided before the key subset: a ruling about another
