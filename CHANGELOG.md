@@ -226,8 +226,8 @@
   `start` records an `environment-resolved` line in `audit.jsonl`; `status`,
   `doctor` and the support bundle show it (source, closed code, shell
   basename only). New exports: `applyLoginShellEnvironment`,
-  `serviceEnvironmentStatus`. WinSW is unchanged. Existing services pick this
-  up on reinstall (#392).
+  `serviceEnvironmentStatus`. WinSW passes `--service` too (#394); on Windows the
+  result is `inherited`. Existing services pick this up on reinstall (#392).
 - **Changed (client CLI)** — `byok-agent start` stdout no longer prints model
   text: each turn's progress becomes at most one line of sizes and counts, and
   completed/failed/cancelled/stale-approval text is redacted to a byte count
