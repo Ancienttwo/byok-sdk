@@ -580,12 +580,11 @@ jobs:
             # cmdlet now, and the keys suite and the custody lane below must pass
             # with it inherited, as a user's PowerShell 7 session would pass it.
             #
-            # Fresh-account prepay: the first powershell.exe this new local account
-            # starts pays a one-time ~3s first-use cost even with no module loaded,
-            # which the positive keys test would otherwise spend out of its 4.8s
-            # evidence budget. One empty spawn in this same identity pays it here.
-            & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -NonInteractive -Command 'exit 0'
-            if ($LASTEXITCODE -ne 0) { Fail 92 'Windows PowerShell first-use prepay failed under the standard-user token' }
+            # No Windows PowerShell prepay runs here. The first powershell.exe this
+            # new local account starts pays a one-time first-use cost; the keys
+            # suite's first (cold) case pays it itself, inside the client's 30s
+            # startup deadline, and checks that it is the first ACL query. Any
+            # powershell.exe spawn before that suite would hide the cost it proves.
 
             # git compares safe.directory against its own forward-slash spelling of
             # this exact checkout. Never '*'.
