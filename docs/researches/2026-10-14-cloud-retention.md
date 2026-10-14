@@ -140,3 +140,25 @@ registry has eleven immutable entries and validation runs once on import.
 No guard allowlist or test assertion changes are needed. Cloud build,
 typecheck, API surface and 28 targeted constraint/classification/request-family
 tests pass after the change.
+
+
+## Rebase onto main a2ec8697 (19:40 HKT)
+
+Replayed the existing ten feature commits onto `a2ec8697f10adecd5c57eed6061b6a86f7a49fe3`.
+The two conflicts were cloud imports and server README structure: preserve main's
+`DEFAULT_ACTIVITY_INGRESS` alongside maintenance imports, and retain main's
+ownership/close/stats sections with the retention/identity receipt policy.
+Both schedulers still start closing synchronously before storage closes; SQLite
+still receives its wake consumer. No assertion or test budget changed in this
+integration. The six core inventory additions already on remote `91f2f845` were
+replayed unchanged; their exact equality tests now pass.
+
+Verified source `59b06ba7437e1366755a781ef016d45454b4f875`: ten package builds,
+six related typechecks, all nine declaration goldens and the complete entry
+closure/policy gate, version authority and SQL order pass. Targeted tests use
+one worker: core 83, cloud 64, server 86, selected SQLite conformance 51, and
+real Postgres/S3 physical retention 7 (291 passed). The 113 conformance cases
+outside the name filter are exclusions, not passes. No full repository suite
+ran locally. These results do not establish hosted CI green. The earlier
+Windows ACL positive-probe timeout is only to be investigated if it recurs
+on the rebased head; its budget and implementation remain unchanged.
