@@ -2,7 +2,7 @@ import { DEFAULT_ACTIVITY_INGRESS } from '@byok-sdk/protocol';
 import { runMaintenanceSteps, type MaintenanceInput, type MaintenanceReport } from './maintenance';
 import type { DeviceAssertionReplayAuthority } from '@byok-sdk/core';
 import { readTaskAgentMessage, type TaskAgentMessage } from './task-agent-message';
-import { RecurringExecutionInputSchema, type RecurringExecutionInput } from './recurring';
+import { AgentExecutionInputSchema, type AgentExecutionInput } from './agent-execution';
 import { uuidFromSha256, taskOfferMessageId } from './offer-identity';
 import { HarnessIdSchema, requiredReceiverCapabilities } from '@byok-sdk/protocol';
 /**
@@ -88,7 +88,6 @@ import {
   AgentMessageServerContextSchema,
   AgentMessagePublishPayloadSchema,
   TaskOfferForAgentWithEgressPayloadSchema,
-  TaskOfferForAgentWithEgressFreshPayloadSchema,
   TaskOfferForAgentPayloadSchema,
   TaskOfferPreparedPayloadSchema,
   type AgentRef,
@@ -115,7 +114,6 @@ import {
   type TaskOfferForAgentPayload,
   type TaskOfferPreparedPayload,
   type TaskOfferForAgentWithEgressPayload,
-  type TaskOfferForAgentWithEgressFreshPayload,
   type TaskOfferWithToolsetsPayload,
 } from '@byok-sdk/protocol';
 import { SteerRejectedError } from './steer-control';
@@ -423,16 +421,6 @@ export interface AgentEgressDispatchInput {
   readonly agentMessageContext?: AgentMessageServerContext;
 }
 
-/** Strict Agent dispatch whose selected runtime mints its session after start. */
-export interface AgentEgressFreshSessionDispatchInput {
-  /** Supply one to make the enqueue addressable by the host's own id; otherwise cloud mints one. */
-  readonly taskId?: string;
-  /** Deliberately session-free strict payload for the fresh-runtime path. */
-  readonly payload: TaskOfferForAgentWithEgressFreshPayload;
-  /** Host-only product destination/freshness authority; never serialized to the daemon. */
-  readonly agentMessageContext?: AgentMessageServerContext;
-}
-
 /** A task-free, independently capability-gated Agent content read. */
 export interface AgentContentReadInput {
   readonly payload: AgentContentReadPayload;
@@ -568,17 +556,10 @@ export interface ByokCloud {
     input: AgentEgressDispatchInput,
   ): Promise<EnqueuedOffer>;
   /**
-   * Host control plane: enqueue the distinct fresh-session egress offer.
-   * The device must durably advertise fresh-session support before task or
-   * mailbox reservation, so older resume-only daemons never receive it.
+   * Submit one fresh Agent execution from the Host's persisted input.
+   * A delivered taskId conflicts; recover through exact offer readback.
    */
-  enqueueFreshAgentEgressOffer(
-    tenant: TenantId,
-    deviceId: string,
-    input: AgentEgressFreshSessionDispatchInput,
-  ): Promise<EnqueuedOffer>;
-  /** Strict recurring execution: caller persists the complete input before submission. */
-  submitRecurringExecution(tenant: TenantId, input: RecurringExecutionInput): Promise<EnqueuedOffer>;
+  submitAgentExecution(tenant: TenantId, input: AgentExecutionInput): Promise<EnqueuedOffer>;
   /** Host control plane: request one policy-bound content read without a task fallback. */
   enqueueAgentContentRead(
     tenant: TenantId,
@@ -1938,18 +1919,23 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     };
   }
 
-  async function enqueueFreshAgentEgressOffer(
-    tenant: TenantId, deviceId: string, input: AgentEgressFreshSessionDispatchInput,
+  async function submitAgentExecution(
+    tenant: TenantId, input: AgentExecutionInput,
   ): Promise<EnqueuedOffer> {
-    await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_for_agent_with_egress_fresh', input.payload));
-    const payload = TaskOfferForAgentWithEgressFreshPayloadSchema.parse(input.payload);
+    const validated = AgentExecutionInputSchema.parse(input);
+    const { deviceId, payload } = validated;
+    if (payload.messageEgress !== undefined && typeof options.agentMessage?.consume !== 'function') {
+      throw new Error('Agent execution with messageEgress requires a registered Agent message consumer.');
+    }
+    const beforeMailbox = agentMessageOfferWriter(deviceId, payload, validated.agentMessageContext);
+    await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_for_agent_with_egress_fresh', payload));
     const enqueued = await enqueueTaskEnvelope(
       tenant,
       deviceId,
-      input.taskId,
+      validated.taskId,
       payload.agentRef,
       (taskId, seq, messageId) => createEnvelope('task.offer_for_agent_with_egress_fresh', payload, { id: messageId, taskId, seq }),
-      agentMessageOfferWriter(deviceId, payload, input.agentMessageContext),
+      beforeMailbox,
     );
     return enqueued;
   }
@@ -2022,13 +2008,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       return enqueued;
     },
 
-    enqueueFreshAgentEgressOffer,
-
-    async submitRecurringExecution(tenant, input) {
-      const validated = RecurringExecutionInputSchema.parse(input);
-      if (typeof options.agentMessage?.consume !== 'function') throw new Error('Recurring execution requires a registered Agent message consumer.');
-      return enqueueFreshAgentEgressOffer(tenant, validated.deviceId, validated);
-    },
+    submitAgentExecution,
 
     async enqueueAgentContentRead(tenant, deviceId, input) {
       const payload = AgentContentReadPayloadSchema.parse(input.payload);

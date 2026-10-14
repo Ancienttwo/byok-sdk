@@ -76,11 +76,11 @@ describe('reference-server Agent egress contract', () => {
       terminalProjection: { mode: 'none' as const },
     }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn' } };
     expect(await instance.tasks.attempt(input.taskId)).toBeUndefined();
-    const offered = await instance.recurring.submit(input);
+    const offered = await instance.executions.submit(input);
     expect(offered.taskId).toBe(input.taskId);
     expect(await awaitEnvelope(daemon, e => e.task_id === input.taskId)).toMatchObject({ type: 'task.offer_for_agent_with_egress_fresh', payload: input.payload });
     expect(await instance.tasks.offer(input.taskId)).toMatchObject({ delivered: true, payload: input.payload });
-    await expect(instance.recurring.submit(input)).rejects.toThrow();
+    await expect(instance.executions.submit(input)).rejects.toThrow();
     expect(await instance.tasks.attempt(input.taskId)).toMatchObject({ taskId: input.taskId, deviceId: daemon.deviceId, status: 'offered' });
     await instance.tasks.cancel(input.taskId, 'stop remaining');
     expect(await instance.tasks.attempt(input.taskId)).toMatchObject({ cancellation: { reason: 'stop remaining', requestedAt: expect.any(String) } });
@@ -218,30 +218,29 @@ describe('reference-server Agent egress contract', () => {
       'agent-egress-reliable-ack',
     ]);
 
-    // `dispatchFreshAgentEgress`'s own argument guards throw SYNCHRONOUSLY
-    // (`index.ts`), before the async body runs, so each call is wrapped to give
-    // `.rejects` a promise to inspect either way.
-    const rejects = (call: () => unknown) => expect(Promise.resolve().then(call));
-
-    await rejects(() => instance.dispatchFreshAgentEgress({
+    await expect(instance.executions.submit({
+      taskId: 'fresh-no-policy',
       deviceId: daemon.deviceId,
-      instruction: 'must not downgrade without policy',
-      agentRef: AGENT_REF,
-      egressPolicy: undefined,
-    } as never)).rejects.toThrow(/requires exact AgentRef and egress policy/);
+      payload: { instruction: 'must not downgrade without policy', runtime: 'codex',
+        agentRef: AGENT_REF, egressPolicy: undefined, terminalProjection: { mode: 'none' } },
+    } as never)).rejects.toMatchObject({ name: 'ZodError', issues: expect.arrayContaining([
+      expect.objectContaining({ path: ['payload', 'egressPolicy'] }),
+    ]) });
 
-    await rejects(() => instance.dispatchFreshAgentEgress({
-      instruction: 'must not pick an ambient device',
-      agentRef: AGENT_REF,
-      egressPolicy: POLICY,
-    } as never)).rejects.toThrow(/requires an explicit deviceId/);
+    await expect(instance.executions.submit({
+      taskId: 'fresh-no-device',
+      payload: { instruction: 'must not pick an ambient device', runtime: 'codex',
+        agentRef: AGENT_REF, egressPolicy: POLICY, terminalProjection: { mode: 'none' } },
+    } as never)).rejects.toMatchObject({ name: 'ZodError', issues: expect.arrayContaining([
+      expect.objectContaining({ path: ['deviceId'] }),
+    ]) });
 
     await expect(
-      instance.dispatchFreshAgentEgress({
+      instance.executions.submit({
+        taskId: 'fresh-missing-capability',
         deviceId: daemon.deviceId,
-        instruction: 'fresh Agent work',
-        agentRef: AGENT_REF,
-        egressPolicy: POLICY,
+        payload: { instruction: 'fresh Agent work', runtime: 'codex', agentRef: AGENT_REF,
+          egressPolicy: POLICY, terminalProjection: { mode: 'none' } },
       }),
     ).rejects.toThrow(/agent-egress-fresh-session/);
     expect((await instance.tasks.list()).tasks).toHaveLength(0);
@@ -253,6 +252,7 @@ describe('reference-server Agent egress contract', () => {
       'agent-egress-policy',
       'agent-egress-reliable-ack',
       AGENT_EGRESS_FRESH_SESSION_CAPABILITY,
+      'terminal-projection-selection',
     ]);
 
     await expect(instance.dispatch({
@@ -260,19 +260,19 @@ describe('reference-server Agent egress contract', () => {
       instruction: 'must not reinterpret resume as fresh',
       agentRef: AGENT_REF,
       egressPolicy: POLICY,
-    })).rejects.toThrow(/dispatchFreshAgentEgress/);
+    })).rejects.toThrow(/executions.submit/);
     expect((await instance.tasks.list()).tasks).toHaveLength(0);
 
-    const handle = await instance.dispatchFreshAgentEgress({
+    const offered = await instance.executions.submit({
+      taskId: 'fresh-agent-work',
       deviceId: daemon.deviceId,
-      instruction: 'fresh Agent work',
-      agentRef: AGENT_REF,
-      egressPolicy: POLICY,
+      payload: { instruction: 'fresh Agent work', runtime: 'codex', agentRef: AGENT_REF,
+        egressPolicy: POLICY, terminalProjection: { mode: 'none' } },
     });
-    const offer = await awaitEnvelope(daemon, (e) => e.task_id === handle.taskId);
+    const offer = await awaitEnvelope(daemon, (e) => e.task_id === offered.taskId);
     expect(offer).toMatchObject({
       type: 'task.offer_for_agent_with_egress_fresh',
-      task_id: handle.taskId,
+      task_id: offered.taskId,
       payload: { agentRef: AGENT_REF, egressPolicy: POLICY },
     });
     expect('sessionRef' in offer.payload).toBe(false);

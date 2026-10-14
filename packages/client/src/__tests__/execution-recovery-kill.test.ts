@@ -453,7 +453,7 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud, { agentHome: true });
     await fs.writeFile(`${current!.cloudDb}.message-outage`, '503');
-    const offer = await cloud.rpc('enqueueMessageOffer', { deviceId }) as { taskId: string };
+    const offer = await cloud.rpc('enqueueMessageOffer', { deviceId, taskId: globalThis.crypto.randomUUID() }) as { taskId: string };
     await waitForFile(`${current!.cloudDb}.message-blocked`);
     const originalPayload = JSON.parse(await fs.readFile(`${current!.cloudDb}.message-blocked`, 'utf8'));
     expect(await cloud.rpc('readMessages')).toEqual([]);
@@ -501,7 +501,7 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud, { agentHome: true });
     await fs.writeFile(`${current!.cloudDb}.message-outage`, '503');
-    const offer = await cloud.rpc('enqueueMessageOffer', { deviceId }) as { taskId: string };
+    const offer = await cloud.rpc('enqueueMessageOffer', { deviceId, taskId: globalThis.crypto.randomUUID() }) as { taskId: string };
     await waitForFile(`${current!.cloudDb}.message-blocked`);
     daemon.kill();
     await daemon.exited();

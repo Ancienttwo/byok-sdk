@@ -40,7 +40,7 @@ it('runs two recurring executions through real HTTP and TaskRunner with distinct
         messageEgress: { mode: 'required' as const, contract: 'conversation-turn/v1', contentType: 'text/markdown' as const, maxBytes: 1024 },
         terminalProjection: { mode: 'none' as const },
       }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: `turn-${index}` } };
-      await sdk.recurring.submit(JSON.parse(JSON.stringify(input)));
+      await sdk.executions.submit(JSON.parse(JSON.stringify(input)));
       await vi.waitFor(async () => {
         const terminal = await sdk.tasks.deviceTerminal(taskId);
         if (terminal) throw new Error(JSON.stringify(terminal.envelope));
@@ -111,7 +111,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
     if (precedingTurns) {
       const instruction = 'Remember the constraint: 中文 🐝, no external tools.';
       frozenInstructions.set('preceding-user-turn', instruction);
-      await sdk.recurring.submit({ taskId: 'preceding-user-turn', deviceId, payload: {
+      await sdk.executions.submit({ taskId: 'preceding-user-turn', deviceId, payload: {
         agentRef, runtime: 'pi', instruction,
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' },
         messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
@@ -136,10 +136,10 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
         history: [{ input: frozenInstructions.get('preceding-user-turn'), reply: precedingMessage!.payload.body }] })
       : 'Summarize only this frozen historical input.';
     frozenInstructions.set(taskId, summaryInstruction);
-    const input = { taskId, deviceId, agentRef, runtime: 'pi' as const,
+    const input = { taskId, deviceId, payload: { agentRef, runtime: 'pi' as const,
       instruction: summaryInstruction,
-      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selector };
-    await sdk.dispatchFreshAgentEgress(input);
+      egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selector } };
+    await sdk.executions.submit(input);
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(precedingTurns + 1), { timeout: 10000 });
     const session = adapter.sessions[precedingTurns]!;
     expect(adapter.startCalls[precedingTurns]?.task.sessionRef).toBeUndefined();
@@ -164,7 +164,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
     if (outcome === 'document') {
       expect(terminal).toMatchObject({ envelope: { payload: { document } } });
       // Deliberate competing probe, not Host scheduling or automatic retry.
-      await sdk.dispatchFreshAgentEgress({ ...input, taskId: 'competing-before-close' });
+      await sdk.executions.submit({ ...input, taskId: 'competing-before-close' });
       await vi.waitFor(async () => expect(await sdk.tasks.deviceTerminal('competing-before-close')).toMatchObject({
         envelope: { type: 'task.decline', payload: { retryable: true } },
       }), { timeout: 10000 });
@@ -183,7 +183,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
       const instruction = JSON.stringify({ summary: recoveredDocument, recentHistory: [], input: 'Current user request' });
       frozenInstructions.set('dependent-user-turn', instruction);
       // New explicit user execution after Summary, not a retry of the decline.
-      await sdk.recurring.submit({ taskId: 'dependent-user-turn', deviceId, payload: {
+      await sdk.executions.submit({ taskId: 'dependent-user-turn', deviceId, payload: {
         agentRef, runtime: 'pi', instruction,
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' },
         messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },

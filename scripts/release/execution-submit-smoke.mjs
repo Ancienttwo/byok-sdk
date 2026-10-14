@@ -57,7 +57,7 @@ import { fileURLToPath } from 'node:url';
 import { tenantId } from '@byok-sdk/core';
 import {
   CLOUD_CAPABILITIES, createInProcessMailboxWake, createByokCloud, createHmacTokenSigner, createWebCrypto,
-  fullCapabilityDeclaration, createInMemoryByokCloud, RecurringExecutionInputSchema,
+  fullCapabilityDeclaration, createInMemoryByokCloud, AgentExecutionInputSchema,
 } from '@byok-sdk/cloud';
 import { createEnvelope, PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import { createByokServer } from '@byok-sdk/server';
@@ -150,7 +150,7 @@ async function pairCapableDevice(composition, tenant, deviceName) {
 }
 
 function recurringInput(taskId, deviceId, instruction, agentRef = { agentId: 'packed-agent', profileRevision: 'profile' }) {
-  return RecurringExecutionInputSchema.parse({
+  return AgentExecutionInputSchema.parse({
     taskId, deviceId,
     payload: { instruction, runtime: 'codex',
       agentRef,
@@ -337,7 +337,7 @@ if (crashCommitHandoffPath !== undefined) {
   };
   const { cloud, pool } = await composeReopened(handoff, consume, handoff.finalizeProbePath);
   try {
-    await cloud.submitRecurringExecution(tenantId(handoff.tenant), recurringInput(handoff.taskId, handoff.deviceId, 'crash window host commit', handoff.agentRef));
+    await cloud.submitAgentExecution(tenantId(handoff.tenant), recurringInput(handoff.taskId, handoff.deviceId, 'crash window host commit', handoff.agentRef));
     const response = await publishAgentMessage(cloud, { authorization: `Bearer ${handoff.accessToken}` }, handoff.envelope);
     // Unreachable on the intended path: consume exits the process first.
     throw new Error(`crash-commit child survived publish (HTTP ${response.status}) — the abrupt exit never happened`);
@@ -407,12 +407,12 @@ await core.quota.writeEntitlement(tenant, {
 await stores.devices.register(tenant, { deviceId, productId: 'packed', deviceName: 'fixture', devicePublicKey: 'fixture-key', proofKeyId: 'fixture-proof', proofKeyEpoch: 1 });
 await stores.devices.recordCapabilities(tenant, { deviceId, capabilities: AGENT_MESSAGE_CAPABILITIES });
 const input = recurringInput('packed-execution', deviceId, 'persisted current input');
-const submitted = await cloud.submitRecurringExecution(tenant, JSON.parse(JSON.stringify(input)));
+const submitted = await cloud.submitAgentExecution(tenant, JSON.parse(JSON.stringify(input)));
 assert.equal(submitted.taskId, input.taskId);
 assert.equal(submitted.envelope.type, 'task.offer_for_agent_with_egress_fresh');
 assert.equal('sessionRef' in submitted.envelope.payload, false);
 assert.deepEqual((await cloud.readTaskOffer(tenant, input.taskId)).payload, input.payload);
-await assert.rejects(cloud.submitRecurringExecution(tenant, input));
+await assert.rejects(cloud.submitAgentExecution(tenant, input));
 assert.equal(await cloud.readDeviceTerminal(tenant, input.taskId), undefined);
 await cloud.cancelTask(tenant, input.taskId, 'packed stop');
 assert.equal((await cloud.readTaskResult(tenant, input.taskId)).state, 'cancelled');
@@ -422,13 +422,13 @@ assert.equal(typeof cloud.readTaskAgentMessage, 'function');
 assert.equal(await cloud.readTaskAgentMessage(tenant, deviceId, input.taskId, input.payload.agentRef), undefined);
 const server = createByokServer({ productId: 'packed-recurring' });
 try {
-  assert.equal(typeof server.recurring.submit, 'function');
+  assert.equal(typeof server.executions.submit, 'function');
   assert.equal(typeof server.tasks.messageDisposition, 'function');
   assert.equal(typeof server.tasks.agentMessage, 'function');
   assert.equal(await server.tasks.agentMessage('absent', deviceId, input.payload.agentRef), undefined);
   assert.equal(await server.tasks.attempt('absent'), undefined);
   assert.equal(await server.tasks.deviceTerminal('absent'), undefined);
-  await assert.rejects(server.recurring.submit(input), /registered Agent message consumer/);
+  await assert.rejects(server.executions.submit(input), /registered Agent message consumer/);
 } finally { await server.close(); }
 console.log('[release-pack] recurring public imports, strict submission and independent device observation passed');
 
@@ -442,7 +442,7 @@ console.log('[release-pack] recurring public imports, strict submission and inde
   });
   const composition = createInMemoryByokCloud({ agentMessage: { consume: consumer.consume } });
   const device = await pairCapableDevice(composition, msgTenant, 'packed-msg-device');
-  const submit = (taskId) => composition.cloud.submitRecurringExecution(msgTenant, recurringInput(taskId, device.deviceId, `resolve ${taskId}`, agentRef));
+  const submit = (taskId) => composition.cloud.submitAgentExecution(msgTenant, recurringInput(taskId, device.deviceId, `resolve ${taskId}`, agentRef));
   const readDisposition = (t, taskId, payload) => composition.cloud.readAgentMessageDisposition(t, device.deviceId, taskId, payload);
   const readMessage = (t, taskId, ref) => composition.cloud.readTaskAgentMessage(t, device.deviceId, taskId, ref);
 
@@ -589,7 +589,7 @@ console.log('[release-pack] recurring public imports, strict submission and inde
     assert.deepEqual(helloAnswer.outcomes, [{ id: helloEnvelope.id, outcome: 'accepted' }]);
     assert.deepEqual(helloAnswer.ingress, { activityMaxEvents: 50, activityMaxBytes: 65_536 });
     assert.ok(helloAnswer.capabilities.includes('agent-message-egress'), 'the handshake answer advertises agent-message-egress');
-    const embeddedSubmit = (taskId) => embedded.recurring.submit(recurringInput(taskId, embeddedPaired.deviceId, `resolve embedded ${taskId}`, agentRef));
+    const embeddedSubmit = (taskId) => embedded.executions.submit(recurringInput(taskId, embeddedPaired.deviceId, `resolve embedded ${taskId}`, agentRef));
 
     // Accepted, end-to-end on the embedded surface.
     const embeddedAcceptedTask = 'packed-embedded-accepted';
@@ -715,7 +715,7 @@ if (substrateConfigured) {
     const cloudA = composeDurable(coreA, storesA, createHmacTokenSigner(tokenSecret, clock), consumer);
     const device = await pairCapableDevice({ core: coreA, cloud: cloudA, stores: storesA }, durableTenant, 'packed-durable-device');
     const durableTask = 'packed-durable-restart';
-    await cloudA.submitRecurringExecution(durableTenant, recurringInput(durableTask, device.deviceId, 'durable round-trip'));
+    await cloudA.submitAgentExecution(durableTenant, recurringInput(durableTask, device.deviceId, 'durable round-trip'));
     const durablePayload = messagePayload(durableRef);
     const durableEnvelope = publishEnvelope(durableTask, durablePayload);
     assert.equal(await cloudA.readTaskAgentMessage(durableTenant, device.deviceId, durableTask, durableRef), undefined);
