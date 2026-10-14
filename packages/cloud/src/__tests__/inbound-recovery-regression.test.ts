@@ -68,11 +68,11 @@ describe('inbound lifecycle recovery', () => {
       },
     };
 
-    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope)).rejects.toThrow(
+    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope).then((result) => result.outcome)).rejects.toThrow(
       'fault before capability snapshot',
     );
-    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope)).resolves.toBe('accepted');
-    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope)).resolves.toBe('duplicate');
+    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope).then((result) => result.outcome)).resolves.toBe('accepted');
+    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope).then((result) => result.outcome)).resolves.toBe('duplicate');
     expect((await stores.devices.get(device.deviceId))?.capabilities).toEqual(['recovered-capability']);
   });
 
@@ -98,21 +98,21 @@ describe('inbound lifecycle recovery', () => {
     const observer = { onInboundCommitted: ({ envelope: committed }: { readonly envelope: Envelope }) => observed.push(committed.id) };
 
     await expect(
-      handleInboundEnvelope(recoveryStores, device.deviceId, envelope, undefined, undefined, observer),
+      handleInboundEnvelope(recoveryStores, device.deviceId, envelope, undefined, undefined, observer).then((result) => result.outcome),
     ).rejects.toThrow('fault after claim');
     expect(observed).toEqual([]);
 
     await expect(
-      handleInboundEnvelope(recoveryStores, device.deviceId, envelope, undefined, undefined, observer),
+      handleInboundEnvelope(recoveryStores, device.deviceId, envelope, undefined, undefined, observer).then((result) => result.outcome),
     ).resolves.toBe('accepted');
     expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.status).toBe('claimed');
     expect(observed).toEqual([envelope.id]);
-    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope)).resolves.toBe('duplicate');
+    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope).then((result) => result.outcome)).resolves.toBe('duplicate');
   });
 
   it('replays a status write, activity batch, and approval observation after their post-write faults', async () => {
     const { harness, device, stores, taskId } = await offeredTask();
-    await handleInboundEnvelope(stores, device.deviceId, claim(taskId, device.deviceId));
+    await handleInboundEnvelope(stores, device.deviceId, claim(taskId, device.deviceId)).then((result) => result.outcome);
     const started = createEnvelope('task.started', {}, { taskId });
     const progress = createEnvelope(
       'task.progress',
@@ -167,9 +167,9 @@ describe('inbound lifecycle recovery', () => {
       [progress, 'fault after activity'],
       [approval, 'fault after approval'],
     ] as const) {
-      await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope)).rejects.toThrow(fault);
-      await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope)).resolves.toBe('accepted');
-      await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope)).resolves.toBe('duplicate');
+      await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope).then((result) => result.outcome)).rejects.toThrow(fault);
+      await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope).then((result) => result.outcome)).resolves.toBe('accepted');
+      await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope).then((result) => result.outcome)).resolves.toBe('duplicate');
     }
     expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.status).toBe('running');
     expect((await harness.cloud.readActivity(TENANT_A, taskId))?.entries).toHaveLength(1);
@@ -239,12 +239,12 @@ describe('inbound lifecycle recovery', () => {
       return { outcome: 'accepted' as const };
     };
 
-    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope, undefined, consume)).rejects.toThrow(
+    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope, undefined, consume).then((result) => result.outcome)).rejects.toThrow(
       'fault after agent message terminal',
     );
-    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope, undefined, consume)).resolves.toBe('accepted');
+    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope, undefined, consume).then((result) => result.outcome)).resolves.toBe('accepted');
     expect(consumed).toBe(1);
-    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope, undefined, consume)).resolves.toBe('duplicate');
+    await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope, undefined, consume).then((result) => result.outcome)).resolves.toBe('duplicate');
   });
 
   it('keeps two exact AgentRefs on one device isolated by their task attempts and terminal receipts', async () => {
@@ -264,7 +264,7 @@ describe('inbound lifecycle recovery', () => {
       { reason: 'wrong Agent must not write this task', agentRef: second.agentRef },
       { taskId: first.taskId, id: '10000000-0000-4000-8000-000000001139' },
     );
-    await expect(handleInboundEnvelope(stores, device.deviceId, crossAgentTerminal)).resolves.toBe('rejected');
+    await expect(handleInboundEnvelope(stores, device.deviceId, crossAgentTerminal).then((result) => result.outcome)).resolves.toBe('rejected');
 
     const terminals = [first, second].map(({ taskId, agentRef }, index) =>
       createEnvelope(
@@ -273,9 +273,9 @@ describe('inbound lifecycle recovery', () => {
         { taskId, id: `10000000-0000-4000-8000-00000000114${index}` },
       ),
     );
-    await expect(handleInboundEnvelope(stores, device.deviceId, terminals[0]!)).resolves.toBe('accepted');
-    await expect(handleInboundEnvelope(stores, device.deviceId, terminals[0]!)).resolves.toBe('duplicate');
-    await expect(handleInboundEnvelope(stores, device.deviceId, terminals[1]!)).resolves.toBe('accepted');
+    await expect(handleInboundEnvelope(stores, device.deviceId, terminals[0]!).then((result) => result.outcome)).resolves.toBe('accepted');
+    await expect(handleInboundEnvelope(stores, device.deviceId, terminals[0]!).then((result) => result.outcome)).resolves.toBe('duplicate');
+    await expect(handleInboundEnvelope(stores, device.deviceId, terminals[1]!).then((result) => result.outcome)).resolves.toBe('accepted');
 
     await expect(harness.cloud.readTaskAttempt(TENANT_A, first.taskId)).resolves.toMatchObject({
       deviceId: device.deviceId,
@@ -305,7 +305,7 @@ describe('inbound lifecycle recovery', () => {
         title: 'Terminal recovery',
         status: 'in_progress',
       });
-      await handleInboundEnvelope(stores, device.deviceId, claim(taskId, device.deviceId));
+      await handleInboundEnvelope(stores, device.deviceId, claim(taskId, device.deviceId)).then((result) => result.outcome);
       let fault = true;
       const recoveryStores: TenantStores = {
         ...stores,
@@ -345,24 +345,24 @@ describe('inbound lifecycle recovery', () => {
       };
       const envelope = complete(taskId);
 
-      await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope)).rejects.toThrow(`fault after terminal ${faultPoint}`);
-      await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope)).resolves.toBe('accepted');
+      await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope).then((result) => result.outcome)).rejects.toThrow(`fault after terminal ${faultPoint}`);
+      await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope).then((result) => result.outcome)).resolves.toBe('accepted');
       expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.status).toBe('complete');
       await expect(harness.cloud.listBoardItems(TENANT_A, {})).resolves.toMatchObject({
         items: [{ itemId: taskId, status: 'in_review' }],
       });
-      await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope)).resolves.toBe('duplicate');
+      await expect(handleInboundEnvelope(recoveryStores, device.deviceId, envelope).then((result) => result.outcome)).resolves.toBe('duplicate');
     },
   );
 
   it('projects the exact first terminal binding and rejects unknown terminals before receipts or dedup', async () => {
     const { harness, device, stores, taskId } = await offeredTask();
-    await handleInboundEnvelope(stores, device.deviceId, claim(taskId, device.deviceId));
+    await handleInboundEnvelope(stores, device.deviceId, claim(taskId, device.deviceId)).then((result) => result.outcome);
     const winning = complete(taskId);
     await stores.receipts.record({ key: terminalReceiptKey(taskId), body: encodeEnvelope(winning) });
     const losing = createEnvelope('task.fail', { reason: 'must not win' }, { taskId });
 
-    await expect(handleInboundEnvelope(stores, device.deviceId, losing)).resolves.toBe('accepted');
+    await expect(handleInboundEnvelope(stores, device.deviceId, losing).then((result) => result.outcome)).resolves.toBe('accepted');
     expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.status).toBe('complete');
     expect((await harness.cloud.readTaskResult(TENANT_A, taskId))?.state).toBe('complete');
 
@@ -392,7 +392,7 @@ describe('inbound lifecycle recovery', () => {
       createEnvelope('task.decline', { reason: 'unknown' }, { taskId: 'task-unknown-decline' }),
     ];
     for (const terminal of unknownTerminals) {
-      await expect(handleInboundEnvelope(guardedStores, device.deviceId, terminal)).resolves.toBe('rejected');
+      await expect(handleInboundEnvelope(guardedStores, device.deviceId, terminal).then((result) => result.outcome)).resolves.toBe('rejected');
     }
     expect(dedupCalls).toBe(0);
     expect(receiptCalls).toBe(0);

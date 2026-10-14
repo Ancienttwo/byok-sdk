@@ -1,5 +1,9 @@
 import type { HarnessInfo } from '@byok-sdk/protocol';
 import {
+  DEFAULT_ACTIVITY_INGRESS,
+  type OutboundRefusalReason,
+  type MessageSendOutcome,
+  type ActivityIngress,
   MAX_MESSAGES_PER_BATCH,
   createEnvelope,
   isServerToDaemonType,
@@ -85,8 +89,7 @@ export interface ConnectionManagerOptions {
    */
   onCapabilitiesAdvertised?: (added: readonly string[]) => void;
   /** Await durable disposition before retiring the exact accepted/rejected bytes. */
-  onOutboundAccepted?: (envelopes: readonly Envelope[]) => Promise<void>;
-  onOutboundRejected?: (envelope: Envelope) => Promise<void>;
+  onOutboundSettled?: (settlements: readonly OutboundSettlement[]) => Promise<void>;
   onOutboundQueued?: (envelope: Envelope) => void;
   beforeOutboundPost?: (envelopes: readonly Envelope[]) => void;
   /** Base delay before each reconnect handshake, and for stalled-cycle and local-disposition backoff. Default 2s. */
@@ -105,12 +108,11 @@ export interface ConnectionManagerOptions {
   onCrashed?: (error: unknown) => void;
 }
 
-export interface RejectedOutboundEnvelope {
+export interface OutboundSettlement {
   readonly envelope: Envelope;
-  readonly reason: 'inbound_rejected';
+  readonly outcome: MessageSendOutcome['outcome'];
+  readonly reason?: OutboundRefusalReason;
 }
-
-const MAX_REJECTED_OUTBOX_ENTRIES = 1_000;
 
 /**
  * Owns the daemon's one authenticated long-poll session with the server.
@@ -174,7 +176,7 @@ export class ConnectionManager {
    */
   private readonly outbox: Envelope[] = [];
   /** Terminally rejected outbound envelopes, retained as a bounded observable quarantine. */
-  private readonly rejectedOutboundEnvelopes: RejectedOutboundEnvelope[] = [];
+  private ingressBudget: ActivityIngress = { activityMaxEvents: DEFAULT_ACTIVITY_INGRESS.maxEvents, activityMaxBytes: DEFAULT_ACTIVITY_INGRESS.maxBytes };
   /**
    * Finding F5(b): how many envelopes `drainOutbox` has
    * currently spliced OUT of `this.outbox` for an in-flight (not yet
@@ -222,6 +224,7 @@ export class ConnectionManager {
       // failure impossible to redeliver.
       getCursor: () => this.cursor,
       onEnvelope: (envelope) => this.deliver(envelope),
+      onIngress: (ingress) => { this.ingressBudget = ingress; },
       onServerCapabilities: (capabilities) => this.applyServerCapabilities(capabilities),
       onLoopFailure: () => this.breakSession(),
       onRevoked: () => this.halt('device_revoked'),
@@ -266,12 +269,23 @@ export class ConnectionManager {
    */
   private async run(): Promise<void> {
     const signal = this.lifetime.signal;
+    let hello: Envelope | undefined;
     while (!this.isEnded()) {
       this.setState('connecting');
       if (this.isEnded()) return;
-      const hello = createConnectionHelloEnvelope(this.opts, () => this.cursor);
+      hello ??= createConnectionHelloEnvelope(this.opts, () => this.cursor);
       const answer = await this.longPoll.postBatch([hello], signal);
       if (this.isEnded()) return;
+      if (answer !== undefined) {
+        try {
+          const outcome = answer.outcomes?.[0];
+          await this.opts.onOutboundSettled?.([{ envelope: hello, outcome: outcome?.outcome ?? ((answer.rejected ?? 0) > 0 ? 'rejected' : 'accepted'), ...((answer.rejected ?? 0) > 0 ? { reason: (outcome?.reason ?? 'unspecified') as OutboundRefusalReason } : {}) }]);
+        } catch {
+          this.opts.onOperationalOutcome?.('failure', 'reconnect');
+          await sleep(this.fleetJitter.delay('reconnect', this.reconnectAttempt++, this.opts.longPollRetryDelayMs ?? 2000), signal);
+          continue;
+        }
+      }
       if (answer !== undefined && (answer.rejected ?? 0) > 0) {
         console.error('[byok/client] the server rejected this device\'s conn.hello; the daemon halts (re-pair, or check product and protocol version)');
         this.halt('handshake_rejected');
@@ -281,6 +295,7 @@ export class ConnectionManager {
         this.opts.onOperationalOutcome?.('failure', 'reconnect');
       } else {
         await this.serveSession(answer);
+        hello = undefined;
         if (this.isEnded()) return;
       }
       const baseMs = this.opts.longPollRetryDelayMs ?? 2000;
@@ -295,6 +310,7 @@ export class ConnectionManager {
     });
     this.sessionGeneration += 1;
     // Capabilities first: work an `open` observer queues sees them already.
+    if (handshake.ingress !== undefined) this.ingressBudget = handshake.ingress;
     if (handshake.capabilities !== undefined) this.applyServerCapabilities(handshake.capabilities);
     this.setState('open');
     // An `open` observer that threw has already ended the session.
@@ -396,9 +412,9 @@ export class ConnectionManager {
   private async drainOutbox(): Promise<void> {
     if (this.state !== 'open' || this.isEnded() || this.draining) return;
     this.draining = true;
-    // Frozen v1 has no rejected ids. A finite FIFO therefore replays an
+    // Counts-only v2 responders have no rejected ids. A finite FIFO therefore replays an
     // immutable rejected segment by halves; accepted replays are server-dedup
-    // success and a rejected singleton reaches bounded quarantine. A missing
+    // success and a rejected singleton reaches the awaited settlement callback. A missing
     // response returns the same current segment plus untouched siblings for
     // the ordinary backoff path below. At most 2n - 1 POSTs occur per batch.
     type Retained = { readonly envelopes: Envelope[]; readonly cause: 'route' | 'local' };
@@ -412,19 +428,33 @@ export class ConnectionManager {
           this.opts.beforeOutboundPost?.(segment);
           const result = await this.longPoll.postBatch(segment);
           if (result === undefined) return { envelopes: [...segment, ...pending.flat()], cause: 'route' };
+          if (result.ingress !== undefined) this.ingressBudget = result.ingress;
           if (result.capabilities !== undefined) this.applyServerCapabilities(result.capabilities);
+          if (result.outcomes !== undefined) {
+            const byId = new Map(result.outcomes.map((outcome) => [outcome.id, outcome]));
+            await this.opts.onOutboundSettled?.(segment.map((envelope) => {
+              const outcome = byId.get(envelope.id)!;
+              return { envelope, outcome: outcome.outcome, ...(outcome.outcome === 'rejected' ? { reason: (outcome.reason ?? 'unspecified') as OutboundRefusalReason } : {}) };
+            }));
+            if (result.outcomes.some((outcome) => outcome.outcome === 'rejected' && segment.some((envelope) => envelope.id === outcome.id && envelope.type === 'conn.hello'))) {
+              this.halt('handshake_rejected');
+              return undefined;
+            }
+            continue;
+          }
+          // v2 counts-only responders: retire only accepted segments or isolated singletons. Remove in v3.
           if ((result.rejected ?? 0) === 0) {
-            await this.opts.onOutboundAccepted?.(segment);
+            await this.opts.onOutboundSettled?.(segment.map((envelope) => ({ envelope, outcome: 'accepted' })));
             continue;
           }
           if (segment.length === 1) {
             if (segment[0]!.type === 'conn.hello') {
               // A refreshed snapshot is a handshake like any other.
+              await this.opts.onOutboundSettled?.([{ envelope: segment[0]!, outcome: 'rejected', reason: 'unspecified' }]);
               this.halt('handshake_rejected');
               return undefined;
             }
-            await this.opts.onOutboundRejected?.(segment[0]!);
-            this.quarantineRejectedOutbound(segment[0]!, 'inbound_rejected');
+            await this.opts.onOutboundSettled?.([{ envelope: segment[0]!, outcome: 'rejected', reason: 'unspecified' }]);
             continue;
           }
         } catch (error) {
@@ -606,9 +636,8 @@ export class ConnectionManager {
     return this.outbox.length + this.inFlightBatchSize;
   }
 
-  /** A bounded terminal quarantine for operator inspection; these entries are never retried. */
-  rejectedOutbox(): readonly RejectedOutboundEnvelope[] {
-    return this.rejectedOutboundEnvelopes;
+  getIngressBudget(): Readonly<ActivityIngress> {
+    return { ...this.ingressBudget };
   }
 
   /**
@@ -780,14 +809,6 @@ export class ConnectionManager {
     this.pendingCursorSave = save;
     await save;
     this.cursor = seq;
-  }
-
-  private quarantineRejectedOutbound(envelope: Envelope, reason: 'inbound_rejected'): void {
-    if (this.rejectedOutboundEnvelopes.length === MAX_REJECTED_OUTBOX_ENTRIES) this.rejectedOutboundEnvelopes.shift();
-    this.rejectedOutboundEnvelopes.push({ envelope, reason });
-    console.error(
-      `[byok/client] outbound envelope ${envelope.id} was permanently rejected (${reason}) and moved to the terminal quarantine.`,
-    );
   }
 
   /**

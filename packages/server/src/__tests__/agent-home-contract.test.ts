@@ -99,7 +99,7 @@ describe('agent-home-contract reference server', () => {
     expect(response.status).toBe(200);
     // The accepted hello's answer carries the poll's capability advertisement (#391 Phase 2).
     const answer = (await response.json()) as { accepted: number; capabilities?: string[] };
-    expect(answer).toEqual({ accepted: 1, capabilities: expect.arrayContaining(['agent-home-contract']) });
+    expect(answer).toMatchObject({ accepted: 1, capabilities: expect.arrayContaining(['agent-home-contract']) });
     await expect(
       started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'agent over long-poll', agentRef }),
     ).resolves.toMatchObject({ taskId: expect.any(String) });
@@ -121,7 +121,7 @@ describe('agent-home-contract reference server', () => {
         { taskId: claimMismatch.taskId },
       ),
     );
-    expect(await claimRes.json()).toEqual({ accepted: 0, rejected: 1 });
+    expect(await claimRes.json()).toMatchObject({ accepted: 0, rejected: 1 });
     expect((await started.byok.tasks.get(claimMismatch.taskId))?.state).toBe('Offered'); // never claimed
 
     const terminalMismatch = await started.byok.dispatch({
@@ -140,7 +140,7 @@ describe('agent-home-contract reference server', () => {
         { taskId: terminalMismatch.taskId },
       ),
     );
-    expect(await terminalRes.json()).toEqual({ accepted: 0, rejected: 1 });
+    expect(await terminalRes.json()).toMatchObject({ accepted: 0, rejected: 1 });
     expect((await started.byok.tasks.get(terminalMismatch.taskId))?.state).toBe('Running'); // no terminal was written
     expect((await started.byok.tasks.get(terminalMismatch.taskId))?.result).toBeUndefined();
   });
@@ -198,7 +198,7 @@ describe('agent-home-contract reference server', () => {
       createEnvelope('task.claim', { deviceId: attacker.deviceId, agentRef }, { taskId: claimTarget.taskId }),
     );
     expect(claimResponse.status).toBe(200);
-    expect(await claimResponse.json()).toEqual({ accepted: 0, rejected: 1 });
+    expect(await claimResponse.json()).toMatchObject({ accepted: 0, rejected: 1 });
     expect((await started.byok.tasks.get(claimTarget.taskId))?.state).toBe('Offered');
 
     const declineTarget = await started.byok.dispatch({
@@ -219,7 +219,7 @@ describe('agent-home-contract reference server', () => {
       ),
     );
     expect(declineResponse.status).toBe(200);
-    expect(await declineResponse.json()).toEqual({ accepted: 0, rejected: 1 });
+    expect(await declineResponse.json()).toMatchObject({ accepted: 0, rejected: 1 });
     expect((await started.byok.tasks.get(declineTarget.taskId))?.state).toBe('Offered');
   });
 });

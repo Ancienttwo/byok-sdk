@@ -89,75 +89,42 @@ describe('ProgressBatcher', () => {
     expect(emitted).toHaveLength(0);
   });
 
-  describe('maxBatchBytes', () => {
-    it('accepts a batch exactly at the configured UTF-8 byte limit', () => {
-      const event: AgentEvent = { type: 'progress', text: 'exact' };
-      const emitted: Array<{ seq: number; events: AgentEvent[] }> = [];
-      const batcher = new ProgressBatcher((seq, events) => emitted.push({ seq, events }), {
-        maxBatchBytes: eventsBytes([event]),
-      });
-
-      batcher.push(event);
-      batcher.flush();
-
-      expect(emitted).toEqual([{ seq: 1, events: [event] }]);
+  describe('server activity ingress', () => {
+    it('batches two 40 KiB results separately under the default budget', () => {
+      const emitted: AgentEvent[][] = [];
+      const batcher = new ProgressBatcher((_seq, events) => emitted.push(events));
+      const event: AgentEvent = { type: 'tool_result', tool: 'read', output: 'x'.repeat(40 * 1024) };
+      batcher.push(event); batcher.push(event); batcher.flush();
+      expect(emitted).toEqual([[event], [event]]);
+      expect(emitted.every((batch) => eventsBytes(batch) <= 65536)).toBe(true);
     });
 
-    it('flushes a valid prefix before buffering an event that would cross the byte limit', () => {
-      const first: AgentEvent = { type: 'progress', text: 'first' };
-      const second: AgentEvent = { type: 'progress', text: 'second' };
-      const emitted: Array<{ seq: number; events: AgentEvent[] }> = [];
-      const batcher = new ProgressBatcher((seq, events) => emitted.push({ seq, events }), {
-        maxBatchBytes: Math.max(eventsBytes([first]), eventsBytes([second])),
-        maxBatchSize: 10,
-        flushIntervalMs: 1000,
-      });
-
-      batcher.push(first);
-      batcher.push(second);
-
-      expect(emitted).toEqual([{ seq: 1, events: [first] }]);
-      expect(batcher.pendingCount).toBe(1);
-
-      batcher.flush();
-      expect(emitted).toEqual([
-        { seq: 1, events: [first] },
-        { seq: 2, events: [second] },
-      ]);
+    it.each(['x'.repeat(100 * 1024), '😀中文'.repeat(10000), '\"\\\n\u0000'.repeat(10000), '\ud800'.repeat(10000)])('splits oversize text losslessly (%#)', (text) => {
+      const emitted: AgentEvent[][] = [];
+      const batcher = new ProgressBatcher((_seq, events) => emitted.push(events), {}, () => ({ activityMaxEvents: 2, activityMaxBytes: 1024 }));
+      batcher.push({ type: 'progress', text }); batcher.flush();
+      expect(emitted.length).toBeGreaterThan(1);
+      expect(emitted.every((batch) => batch.length <= 2 && eventsBytes(batch) <= 1024)).toBe(true);
+      expect(emitted.flat().map((event) => event.type === 'progress' ? event.text : '').join('')).toBe(text);
     });
 
-    it('rejects one oversized event without emitting it or consuming a sequence number', () => {
-      const valid: AgentEvent = { type: 'turn_end' };
-      const oversized: AgentEvent = { type: 'progress', text: 'x'.repeat(100) };
-      const emitted: Array<{ seq: number; events: AgentEvent[] }> = [];
-      const batcher = new ProgressBatcher((seq, events) => emitted.push({ seq, events }), {
-        maxBatchBytes: eventsBytes([valid]),
-      });
-
-      expect(() => batcher.push(oversized)).toThrow(ProgressEventTooLargeError);
-      expect(emitted).toEqual([]);
-      expect(batcher.pendingCount).toBe(0);
-
-      batcher.push(valid);
-      batcher.flush();
-      expect(emitted).toEqual([{ seq: 1, events: [valid] }]);
+    it('reads changes in the advertised event count and byte ceiling', () => {
+      let budget = { activityMaxEvents: 2, activityMaxBytes: 100 };
+      const emitted: AgentEvent[][] = [];
+      const batcher = new ProgressBatcher((_seq, events) => emitted.push(events), { maxBatchSize: 10 }, () => budget);
+      batcher.push({ type: 'progress', text: 'a' }); batcher.push({ type: 'progress', text: 'b' });
+      expect(emitted).toHaveLength(1);
+      budget = { activityMaxEvents: 1, activityMaxBytes: 50 };
+      batcher.push({ type: 'progress', text: 'c' });
+      expect(emitted).toHaveLength(2);
+      expect(eventsBytes(emitted[1]!)).toBeLessThanOrEqual(50);
     });
 
-    it('measures UTF-8 bytes rather than JavaScript string length', () => {
-      const event: AgentEvent = { type: 'progress', text: '😀' };
-      const codeUnitLength = JSON.stringify([event]).length;
-      expect(eventsBytes([event])).toBeGreaterThan(codeUnitLength);
-
-      const batcher = new ProgressBatcher(() => {}, { maxBatchBytes: codeUnitLength });
-      expect(() => batcher.push(event)).toThrow(ProgressEventTooLargeError);
+    it('rejects an unsplittable event and rejects the removed Host option', () => {
+      const batcher = new ProgressBatcher(() => {}, {}, () => ({ activityMaxEvents: 1, activityMaxBytes: 50 }));
+      expect(() => batcher.push({ type: 'error', message: 'x'.repeat(100) })).toThrow(ProgressEventTooLargeError);
+      expect(() => new ProgressBatcher(() => {}, { maxBatchBytes: 50 } as never)).toThrow(/Unknown progressBatch option/);
     });
-
-    it.each([0, -1, Number.NaN, 1.5])(
-      'rejects invalid maxBatchBytes %s at construction',
-      (maxBatchBytes) => {
-        expect(() => new ProgressBatcher(() => {}, { maxBatchBytes })).toThrow(/maxBatchBytes/);
-      },
-    );
   });
 
   describe('pendingCount (M4 Phase 4, part B.3: observability watermark)', () => {

@@ -1819,7 +1819,7 @@ Presence remains a lossy TTL hint and is not an execution or admission signal.
 ```
 POST /byok/messages
   Request  (MessagesSendRequestSchema):  { messages: Envelope[] }   // capped at 256 per batch
-  Response (MessagesSendResponseSchema): { accepted: number, rejected?: number, capabilities?: string[] }
+  Response (MessagesSendResponseSchema): { accepted: number, rejected?: number, capabilities?: string[], outcomes?: Outcome[], ingress?: ActivityIngress }
 ```
 
 `capabilities` is present only on the answer to a batch whose `conn.hello`
@@ -1901,8 +1901,8 @@ id)` dedup window). It does not mean "freshly processed": a redelivered or
 retried envelope this device already sent once is counted `accepted` again
 on retry, even though no handler reran for it that second time. `rejected`
 is a separate, additive count — every envelope the server refused — present
-in the response only when nonzero, so a batch with nothing rejected keeps the
-`{ accepted }`-only shape. The type-allow check above and the ownership check
+in the response only when nonzero. Existing counts-only v2 responders retain
+the `{ accepted }` shape; newer responders add optional metadata. The type-allow check above and the ownership check
 (§9) are only two of the causes. An envelope is also rejected, among other
 reasons, for an unsupported protocol version; for a device that is revoked or lacks the
 capability the type requires; for a missing or mismatched Agent or harness
@@ -1916,11 +1916,30 @@ mismatch, `byteCount` over `maxBytes`, a reservation conflict, or admission
 that cannot be confirmed); for a `task.fail` whose recovery report is
 refused; and for a `conn.hello` with a product mismatch or whose
 capabilities the server fails to record. These are examples, not an
-exhaustive list. The response carries only the count, not which
-check refused: a daemon cannot tell a size overrun from an identity mismatch
-from this response. A hosted deployment can observe the reason server-side
-through `ByokCloudObserver.onInboundRefused`; those reason names are not part
-of the wire contract.
+exhaustive list. `outcomes`, when present, contains exactly one result per
+request envelope: `{ id: uuid, outcome: 'accepted' | 'duplicate' | 'rejected', reason?: string }`.
+Its id set and counts must match the request and the aggregate counts (duplicates
+count as accepted). An unreadable or inconsistent answer retains the original
+bytes for retry. `outcome` is closed control data; an unknown refusal reason is
+observational and becomes `unknown`. Reason strings are bounded to 64 characters.
+The coarse wire reasons are `payload_invalid`, `not_permitted`, `limit_exceeded`,
+`state_conflict`, and `unsupported`. Unknown tasks, wrong owners, harness and
+Agent identity mismatches all use `not_permitted`; internal reason names remain
+server-local in `ByokCloudObserver.onInboundRefused`.
+
+A successful hello answer and every events response advertise optional `ingress`:
+`{ activityMaxEvents, activityMaxBytes }`, derived from the same bounds the gate
+enforces. Bytes mean UTF-8 `JSON.stringify(events)`, including array brackets.
+Before any advertisement the v2 client uses `DEFAULT_ACTIVITY_INGRESS` (50 events,
+65536 bytes). The latest advertisement applies to new progress pushes; oversized
+progress text splits at code point boundaries, preserving the concatenated text.
+Non-splittable oversized events fail explicitly. The public Host byte-budget
+option is removed; timing and a smaller event count remain Host choices.
+
+These response-only optional additions are strip-safe in protocol v2 and need no
+capability gate. Counts-only v2 servers still use client bisection with reason
+`unspecified`, and cannot distinguish duplicate from accepted. At protocol v3,
+make `outcomes` and `ingress` required and delete bisection and default ingress.
 
 A daemon sends every D→S envelope this way; there is no alternate socket
 queue or transport selection to reconcile.

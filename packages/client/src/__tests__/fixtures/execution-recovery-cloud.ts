@@ -408,7 +408,10 @@ lines.on('line', (line) => {
       case 'readCursor':
         return embedded.core.mailbox.readCursor(tenant, String(params.deviceId));
       case 'close':
-        await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+        await new Promise<void>((resolve) => {
+          httpServer.close(() => resolve());
+          (httpServer as import('node:http').Server).closeAllConnections();
+        });
         await embedded.close();
         lines.close();
         return 'closed';

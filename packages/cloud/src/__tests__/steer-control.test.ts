@@ -101,7 +101,7 @@ async function claim(
         },
         { taskId },
       ),
-    ),
+    ).then((result) => result.outcome),
   ).toBe('accepted');
 }
 
@@ -111,7 +111,7 @@ async function started(harness: CloudHarness, device: PairedDevice, taskId: stri
       deviceStores(harness, device),
       device.deviceId,
       createEnvelope('task.started', {}, { taskId }),
-    ),
+    ).then((result) => result.outcome),
   ).toBe('accepted');
 }
 
@@ -144,7 +144,7 @@ async function helloAdvertisingSteer(harness: CloudHarness, device: PairedDevice
         productId: PRODUCT_ID,
         runtimes: [{ id: 'pi', capabilities: { steer: true } }],
       }),
-    ),
+    ).then((result) => result.outcome),
   ).toBe('accepted');
 }
 
@@ -274,7 +274,7 @@ describe('steerTask (GAP-2)', () => {
           { summary: 'done', sessionRef: 'session-1' },
           { taskId: task.taskId },
         ),
-      ),
+      ).then((result) => result.outcome),
     ).toBe('accepted');
 
     const error = await steerRejection(harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'go left' }));

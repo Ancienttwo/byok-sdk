@@ -1,3 +1,4 @@
+import type { OutboundStatus } from './outbound-settlement';
 import { terminalIdentity } from './terminal-identity';
 import { HarnessIdSchema, type HarnessInfo } from '@byok-sdk/protocol';
 import { TerminalCommitQueue } from './terminal-commit-queue';
@@ -11,6 +12,7 @@ import {
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
+  DEFAULT_ACTIVITY_INGRESS,
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
@@ -523,7 +525,7 @@ export interface DaemonConfig {
    *
    * This is a per-event bound, orthogonal to `maxTaskOutputBytes` (a
    * whole-task total, counted AFTER spilling) and to
-   * `progressBatch.maxBatchBytes` (a per-batch wire budget).
+   * the server-advertised activity ingress budget.
    *
    * **Consumer contract:** `spill`'s presence is the only signal that the
    * inline field is a preview. A consumer that renders `tool_result.output`
@@ -540,11 +542,7 @@ export interface DaemonConfig {
    */
   maxInlineEventBytes?: number;
   /**
-   * Host-owned batching policy for normalized `task.progress` events.
-   * `maxBatchBytes`, when set, measures exactly the UTF-8 bytes of
-   * `JSON.stringify(events)` and must match the deployment's activity-ingress
-   * budget. It is deliberately unset by default because that ingress ceiling
-   * is deployment policy, not a frozen protocol constant.
+   * Timing and event-count batching policy. The server owns the byte ceiling.
    */
   progressBatch?: ProgressBatcherOptions;
   /**
@@ -824,6 +822,7 @@ export interface DaemonStatus {
   toolsets: McpToolsetRegistryStatus;
   /** Content-free egress lane watermarks and typed last-drop facts. */
   egress: AgentEgressStatus;
+  outbound: OutboundStatus;
   /** WP0: per-canonical-Agent-home execution serialization — see {@link AgentHomeExecutionStatus}. */
   agentHomeExecution: AgentHomeExecutionStatus;
 }
@@ -1736,6 +1735,7 @@ export function buildDaemonWithAdapters(
   // per `start()`) so `subscribe()`/`tasks()` work immediately after
   // `createDaemonWithAdapters()` returns and keep accumulating across an
   // internal stop()/start() cycle within the same instance. See `observer.ts`.
+  const outbound: OutboundStatus = { accepted: 0, duplicate: 0, rejected: 0, rejectedByReason: {}, rejectedTerminals: 0 };
   const observer = new DaemonObserver();
   // M4 Phase 2: registry backing the control socket's `approvals.list`/
   // `approvals.resolve` methods — see `approvals.ts`'s module doc comment.
@@ -2314,7 +2314,7 @@ export function buildDaemonWithAdapters(
     const sendEnvelope: TaskRunnerDeps['send'] = (envelope) => {
       const terminalKind = terminalKindOf(envelope.type);
       if (!activeJournal || !journalIdentity || terminalKind === undefined || envelope.task_id === undefined) {
-        observer.handleOutboundEnvelope(envelope);
+        observer.captureOutboundApproval(envelope);
         connection?.send(envelope);
         return;
       }
@@ -2329,7 +2329,7 @@ export function buildDaemonWithAdapters(
           if (!terminal || terminal.truthState !== 'pending') return;
           const durable = decodeEnvelope(terminal.bytes);
           overrides.executionRecoveryFault?.('terminal:before-send');
-          observer.handleOutboundEnvelope(durable);
+          observer.captureOutboundApproval(durable);
           connection?.send(durable);
         } catch (error: unknown) {
           if (!(error instanceof JournalRecordTooLargeError)) throw error;
@@ -2353,7 +2353,7 @@ export function buildDaemonWithAdapters(
           const durableFailure = (await activeJournal.listPendingTerminals(journalIdentity)).find((row) => row.taskId === taskId);
           if (!durableFailure || durableFailure.truthState !== 'pending') return;
           const decoded = decodeEnvelope(durableFailure.bytes);
-          observer.handleOutboundEnvelope(decoded);
+          observer.captureOutboundApproval(decoded);
           connection?.send(decoded);
           // Never recurse through arbitrary fallback terminals. A storage or
           // canonicalization failure remains visible and requires operator
@@ -2400,14 +2400,8 @@ export function buildDaemonWithAdapters(
             ),
           },
         }),
-      // M3-2a: `send` is already this file's OWN closure (not something
-      // `TaskRunner` builds) — every `task.claim`/`task.started`/
-      // `task.progress`/`task.artifact`/`task.await_approval`/
-      // `task.complete`/`task.fail`/`task.decline`/`task.cancelled`
-      // `TaskRunner` ever emits passes through here. Feeding the observer
-      // first (never throws — see `observer.ts`) and then sending exactly as
-      // before is the entire integration; `task-runner.ts` itself is
-      // untouched. See `observer.ts`'s module doc comment.
+      // Queue the exact bytes; observer delivery projections run only after
+      // the awaited outbound settlement, including terminal journal fsync.
       send: sendEnvelope,
       ...(config.durablePi !== true ? {} : { durablePi: true, recordDurableTransition: async (taskId: string, leaseId: string, kind: string, ordinal: number) => {
         if (!activeJournal) throw new Error('durable journal unavailable');
@@ -2497,6 +2491,7 @@ export function buildDaemonWithAdapters(
       // capability is only known once the handshake completes, strictly
       // after this `deps` object is constructed.
       getServerCapabilities: () => connection?.getServerCapabilities() ?? [],
+      getIngressBudget: () => connection?.getIngressBudget() ?? { activityMaxEvents: DEFAULT_ACTIVITY_INGRESS.maxEvents, activityMaxBytes: DEFAULT_ACTIVITY_INGRESS.maxBytes },
       // Contract §8.1: the nonce injection asks the SAME gate the RPC and the
       // hello advertisement ask, read fresh at offer time for the same reason
       // `getServerCapabilities` is — the declaration lands after this `deps`
@@ -2528,7 +2523,7 @@ export function buildDaemonWithAdapters(
           throw new Error('durable terminal execution binding mismatch');
         }
         overrides.executionRecoveryFault?.('terminal:before-send');
-        observer.handleOutboundEnvelope(envelope);
+        observer.captureOutboundApproval(envelope);
         connection?.send(envelope);
       }
     };
@@ -2811,17 +2806,31 @@ export function buildDaemonWithAdapters(
       beforeOutboundPost: (envelopes) => {
         if (envelopes.some((envelope) => terminalKindOf(envelope.type) !== undefined)) overrides.executionRecoveryFault?.('outbound:before-post');
       },
-      onOutboundAccepted: async (envelopes) => {
-        if (!activeJournal) return;
-        for (const envelope of envelopes) {
-          if (terminalKindOf(envelope.type) === undefined || envelope.task_id === undefined) continue;
-          overrides.executionRecoveryFault?.('outbound:after-ack');
-          await activeJournal.confirmTerminal(envelope.task_id, journalHash(encodeEnvelope(envelope)));
+      onOutboundSettled: async (settlements) => {
+        // All terminal fsyncs must succeed before publishing any observation.
+        // A retry after a partial local write can repeat the idempotent journal
+        // operation, without double-counting an earlier part of this batch.
+        for (const { envelope, outcome, reason } of settlements) {
+          if (!activeJournal || terminalKindOf(envelope.type) === undefined || envelope.task_id === undefined) continue;
+          const hash = journalHash(encodeEnvelope(envelope));
+          if (outcome === 'rejected') await activeJournal.rejectTerminal(envelope.task_id, hash, reason ?? 'unknown');
+          else {
+            overrides.executionRecoveryFault?.('outbound:after-ack');
+            await activeJournal.confirmTerminal(envelope.task_id, hash);
+          }
         }
-      },
-      onOutboundRejected: async (envelope) => {
-        if (activeJournal && terminalKindOf(envelope.type) !== undefined && envelope.task_id !== undefined) {
-          await activeJournal.rejectTerminal(envelope.task_id, journalHash(encodeEnvelope(envelope)), 'inbound_rejected');
+        for (const { envelope, outcome, reason } of settlements) {
+          outbound[outcome] += 1;
+          if (outcome !== 'rejected') { observer.handleOutboundEnvelope(envelope); continue; }
+          const rejection = {
+            envelopeId: envelope.id, type: envelope.type,
+            ...(envelope.task_id === undefined ? {} : { taskId: envelope.task_id }),
+            reason: reason ?? 'unknown', terminal: terminalKindOf(envelope.type) !== undefined,
+          };
+          outbound.rejectedByReason[rejection.reason] = (outbound.rejectedByReason[rejection.reason] ?? 0) + 1;
+          if (rejection.terminal) outbound.rejectedTerminals += 1;
+          outbound.lastRejection = rejection;
+          observer.noteOutboundRejected(envelope, rejection);
         }
       },
       onStateChange: (state) => {
@@ -3494,6 +3503,7 @@ export function buildDaemonWithAdapters(
       // fine.
       ...(storageStatus === undefined ? {} : { storage: storageStatus }),
       operationalHealth: operationalHealth.snapshot(),
+      outbound: outboundStatus(),
       toolsets: toolsetRegistry.status(),
       // WP0: same counts `Daemon.status()` reports, from the same reader.
       agentHomeExecution: agentHomeExecutionStatus(),
@@ -4225,6 +4235,10 @@ export function buildDaemonWithAdapters(
     };
   }
 
+  function outboundStatus(): OutboundStatus {
+    return { ...outbound, rejectedByReason: { ...outbound.rejectedByReason }, ...(outbound.lastRejection === undefined ? {} : { lastRejection: { ...outbound.lastRejection } }) };
+  }
+
   function status(): DaemonStatus {
     return {
       environment: { ...resolvedEnvironment },
@@ -4238,6 +4252,7 @@ export function buildDaemonWithAdapters(
       pendingTerminalCommits: terminalCommits.pendingCount,
       branding: config.branding,
       operationalHealth: operationalHealth.snapshot(),
+      outbound: outboundStatus(),
       toolsets: toolsetRegistry.status(),
       egress: agentEgress.status(),
       agentHomeExecution: agentHomeExecutionStatus(),

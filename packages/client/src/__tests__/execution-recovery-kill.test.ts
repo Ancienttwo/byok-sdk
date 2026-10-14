@@ -24,6 +24,7 @@ interface ChildConfig {
 }
 
 interface JsonLine {
+  readonly event?: { readonly kind: string };
   readonly id?: number;
   readonly ready?: boolean;
   readonly deviceId?: string;
@@ -505,11 +506,7 @@ describe.skipIf(process.platform !== 'darwin')('compiled daemon SIGKILL executio
     await cloud.rpc('cancelTask', { taskId: offer.taskId, reason: 'cancel before message admission' });
     await fs.unlink(`${current!.cloudDb}.message-outage`);
     const restarted = await startDaemon({ agentHome: true });
-    const deadline = Date.now() + 5000;
-    while (!restarted.stderr.includes('inbound_rejected')) {
-      if (Date.now() >= deadline) throw new Error(`no message rejection: ${restarted.stderr}`);
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
+    await restarted.waitFor((event) => event.event?.kind === 'outbound-rejected', 5000);
     expect(await cloud.rpc('readMessages')).toEqual([]);
     expect(await cloud.rpc('readTaskAttempt', { taskId: offer.taskId })).toMatchObject({ cancellation: { reason: 'cancel before message admission' } });
     expect(journalRows('SELECT truth_state FROM journal_terminal')).toEqual([{ truth_state: 'pending' }]);
