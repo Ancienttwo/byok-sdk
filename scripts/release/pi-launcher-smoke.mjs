@@ -14,7 +14,7 @@ import { SqliteProviderProfileStore, parseModelProviderProfile, exactProviderPro
 import { parsePiRuntimeIdentity, PI_DEPENDENCY_SPECIFIER } from './pi-runtime-identity.mjs';
 
 import { PiAdapter } from '@byok-sdk/client/adapters';
-import { createExecutionScratch, sealRuntimeOperationManifest } from '@byok-sdk/client';
+import { createExecutionScratch, ensureSecureDir, sealRuntimeOperationManifest } from '@byok-sdk/client';
 
 const require = createRequire(import.meta.url);
 const keysRoot = path.dirname(require.resolve('@byok-sdk/keys/package.json'));
@@ -438,8 +438,8 @@ await runtime.dispose();
       // resources. Verify that receipt, then reconstruct only the captured
       // hermetic fixture files for the independent launcher leg below.
       await assert.rejects(readFile(configPath),{code:'ENOENT'});
-      await mkdir(path.dirname(configPath),{recursive:true,mode:0o700});
-      await mkdir(keysRuntime.projectionDir,{recursive:true,mode:0o700});
+      await ensureSecureDir(path.dirname(configPath));
+      await ensureSecureDir(keysRuntime.projectionDir);
       await writeFile(configPath,keysConfigBytes);
       await rm(reservedServerCwdMarker,{force:true});
       try {
