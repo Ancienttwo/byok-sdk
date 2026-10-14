@@ -13,6 +13,7 @@ use `@byok-sdk/cloud` with `@byok-sdk/cloud-dataplane` instead.
 
 MIT licensed. Node.js 24.15.0 or newer.
 
+
 ## Storage
 
 State is in memory by default. `storage: { kind: 'sqlite', path }` persists:
@@ -30,7 +31,67 @@ approval timeline, inbound dedup, nonces, Agent egress receipt readback
 (`egress.get`), activity, unredeemed pairing codes, storage quota accounting,
 and the token signing key when you do not pass `tokenSigner`.
 
+
+A SQLite file has one owner at a time; see
+[One process per SQLite file](#one-process-per-sqlite-file).
+
+## One process per SQLite file
+
+One SQLite file serves exactly one running server. The server's own connection
+sets `PRAGMA locking_mode=EXCLUSIVE` before it enters WAL mode and keeps
+SQLite's lock for as long as that connection is open. The lock is released when
+the owner closes or its process exits for any reason, SIGKILL included. No pid
+or lock file is involved, so a dead owner never blocks the next open.
+
+A second owner gets an error instead of a shared file:
+
+- A second `createByokServer` on the same file, in this process or in another,
+  waits for the 5-second busy grace and then throws `SqliteOwnershipError`
+  (`code: 'SQLITE_DATABASE_OWNED'`, with the `path`) from `createByokServer`
+  itself. If the first owner closes or exits inside the grace, the second open
+  succeeds.
+- A symlink to the file is the same database and is refused the same way. A
+  file with more than one hard link is refused at open with an error, because
+  the other name could not recover the WAL.
+- Every other SQLite connection, read-only ones included, is locked out while
+  the server is open. Close the owner before you inspect or back up the file.
+
+Token signing keys (unless you pass `tokenSigner`), presence, the task-event
+relay and the other in-process state listed under [Storage](#storage) live in
+the owning process, so a second process on the same file would split them. To
+run several instances, use external stores (`@byok-sdk/cloud` with
+`@byok-sdk/cloud-dataplane`) and one shared `tokenSigner`.
+
+### Shutdown and restart
+
+`ByokServer.stop()` was removed; `await server.close()` is the only shutdown
+path. It releases the relay's per-task feeds and timers and the connection
+observations, lets store calls that were already queued finish, then closes the
+database and releases ownership. It is safe to call more than once. Await it
+before opening the same file again, in this process or another.
+
+Restart contract: after `close()`, a crash or SIGKILL, the next
+`createByokServer` on the file becomes the owner and reads back what
+[Storage](#storage) lists as persisted. Everything else starts empty; see
+[Restart](#restart) for what devices and Hosts see.
+
+### Migrating from `stop()`
+
+Replace `server.stop()` with `await server.close()`. Before you upgrade, stop
+every old server and every external SQLite connection to the file and take a
+consistent backup: an idle connection from an older build can still block the
+new EXCLUSIVE owner. Schema v4, persisted data and wire contracts are
+unchanged.
+
+Only databases opened by unreleased builds from `main` between #403 and #442
+have a sibling `<path>-lock` file; released 0.26.x never created it. It is not
+an ownership authority any more: delete it once all old owners have stopped,
+because the SDK neither opens nor deletes it.
+
 ## Restart
+
+A restart is `await server.close()`, or a crash, followed by `createByokServer`
+on the same file (see [Shutdown and restart](#shutdown-and-restart)).
 
 With SQLite storage and no stable `tokenSigner`, a restart makes every
 outstanding access token invalid. Each daemon gets one `401`, renews its token
@@ -46,6 +107,7 @@ What a restart does not keep:
   [Persistent host request identity](#persistent-host-request-identity));
 - with memory storage, everything, including enrollment: devices must pair
   again.
+
 
 ## Device presence
 
@@ -74,11 +136,42 @@ below).
 
 ## Stats and liveness
 
-`stats()` returns a plain snapshot: connected device count, task counts by
-state, inbound envelope, dedup and rate-limit counters, and uptime. It is
-in-process only; this package never serves it over HTTP. `healthzRoute: true`
-mounts an unauthenticated `GET /healthz` that returns only `{ ok: true,
-uptimeMs }`; it is off by default.
+`await server.stats()` returns a plain `HubStats` snapshot. It is in-process
+only: this package never serves it over HTTP, so an embedder that wants it
+remotely wraps it in its own authenticated route. `healthzRoute: true` mounts
+an unauthenticated `GET /healthz` that returns only `{ ok: true, uptimeMs }`; it
+is off by default.
+
+- `connectedDeviceCount`: devices with a live presence lease (see
+  [Device presence](#device-presence)). Process-local.
+- `taskCountsByState`: read from the task stores, not from a count kept in the
+  process. One aggregate over stored attempts and cancellation markers, then a
+  walk of the active attempts and their approval timelines. SQLite keeps
+  attempts and cancellations across a reopen; the approval timeline resets, so a
+  task that was awaiting approval no longer counts as such afterwards. Nothing
+  is scanned at startup.
+- `envelopesIn`, `dedupDrops`, `rateLimitEvents`: counted since this server
+  instance was created. They reset on every reopen, SQLite mode included.
+- `inboundRefusals`: one counter per reason in `INBOUND_REFUSAL_REASONS`
+  (exported by `@byok-sdk/cloud`), all present and zero-filled. Each inbound
+  envelope the gate refuses increments its reason. Counted since creation and
+  reset on reopen. Rate limiting is counted by `rateLimitEvents`, not here.
+- `uptimeMs`: since `createByokServer` returned.
+
+The task read is several store calls, not a transaction. It is exact when the
+server is quiet; a task that settles between the aggregate and the active walk
+can be briefly absent from one snapshot. The aggregate scans stored rows, and
+the page and approval reads scale with the number of active tasks.
+
+A task snapshot reads its creation time and requested session from the
+immutable offer receipt, and the canonical terminal's session takes precedence.
+This survives completion and a SQLite restart. An attempt opened before its
+offer receipt was committed keeps the attempt-only snapshot (`createdAt` equal
+to `updatedAt`, no requested session).
+
+Custom cloud stores must implement `TaskAttemptStore.countByStatus` and the
+`TaskAttemptListQuery.active` filter; `ByokCloud.countTaskAttempts` exposes the
+aggregate.
 
 ## Toolset-aware dispatch
 
@@ -99,68 +192,15 @@ live device advertises `toolset-selection` and its `configuredToolsets`
 inventory contains every required ID. `machines.list()` projects that same
 logical-ID-only inventory; MCP commands and credentials remain device-local.
 
-## SQLite receipts, ownership and schema adoption
+
+## SQLite receipts and schema adoption
+
 
 Pairing and authentication share the persisted device directory. Receipt keys
 are tenant scoped and first-write-wins. Mailbox retention never deletes
 receipts: immutable offer, delivered and canonical terminal facts remain for the
 lifetime of the database. There is no receipt TTL or automatic pruning. Monitor
 disk usage; exhaustion is an error, not permission to delete identity fences.
-
-### One process per SQLite file
-
-One SQLite file serves exactly one server process. The actual database connection
-sets `PRAGMA locking_mode=EXCLUSIVE` before entering WAL mode and retains its
-SQLite lock until `await server.close()` or process exit, including SIGKILL.
-A second open, in this process or another, waits for the existing 5-second busy
-grace and then throws `SqliteOwnershipError` (`code: 'SQLITE_DATABASE_OWNED'`).
-External SQLite readers and writers are excluded while the server is open;
-inspection, backup and raw test mutations require the owner to close first.
-EXCLUSIVE WAL needs no shared-memory file. No sibling ownership file is created.
-Symlink aliases use SQLite's canonical database identity. Hard-linked paths are
-refused before open because distinct WAL names cannot safely recover one file.
-Token signing keys (unless you pass `tokenSigner`), presence, the task-event relay
-remain process-local. Multiple instances need external
-stores (`@byok-sdk/cloud` with `@byok-sdk/cloud-dataplane`) and one shared
-`tokenSigner`.
-
-### Migration from sibling-lock ownership (#403)
-
-This is a breaking 0.x API change: replace `server.stop()` with
-`await server.close()`. `close()` is the sole server shutdown path; await it before
-reopening storage. `SqliteOwnershipError` and its error code remain unchanged.
-Stop every old server and external SQLite connection, take a consistent backup,
-and only then start the new owner. An idle old NORMAL-mode connection can still
-block the new EXCLUSIVE owner. Do not run old and new writers together: the old
-sibling lock is no longer an ownership authority. After all old owners have
-stopped, operators may remove their leftover `<path>-lock` files; the SDK neither
-opens nor automatically deletes them. Schema v4, persisted data and wire contracts
-are unchanged. Use the server facade for live reads, or close the owner before
-external inspection or backup.
-
-### Task snapshots after restart
-
-`stats()` reads one store aggregate, active attempt pages and their approval
-timelines. It keeps no task-count mirror and does not scan history at startup.
-The aggregate scans stored rows; page/approval call counts depend only on active
-tasks. This multi-read observation is exact at quiescence; a task settling
-between reads can be temporarily absent. SQLite preserves attempt/cancellation
-counts, while its approval timeline resets at reopen. Traffic counters and the
-zero-filled `inboundRefusals` map start at server creation and reset on reopen.
-Snapshots read creation time (`recordedAt`) and requested session from the
-immutable offer receipt; the canonical terminal's session takes precedence.
-These facts survive completion and SQLite restart without a dispatch Map.
-Attempts opened before an offer receipt was committed retain the existing
-attempt-only snapshot (`createdAt: updatedAt`, no requested session). Malformed
-receipts are rejected by the kernel's readback contract.
-
-Custom cloud stores must implement `TaskAttemptStore.countByStatus` and the
-`TaskAttemptListQuery.active` filter. `ByokCloud.countTaskAttempts` exposes the
-aggregate; `INBOUND_REFUSAL_REASONS` owns the closed refusal vocabulary.
-
-Unredeemed pairing codes, presence and other unmodified ports remain ephemeral.
-Keep daemon OS credentials, server URL and token signer stable across restart.
-This does not restore TaskHandle promises, subscriptions or provider processes.
 
 ### Schema adoption
 
@@ -214,6 +254,7 @@ selectors, with no alias or silent reinterpretation: callers must update their
 one-shot migration configuration after checking eligibility and backing up.
 Restore of a backup requires a separate recovery procedure because it can lose
 new state or restore old grants. Schema v4 shipped in 0.24.0.
+
 
 ## Persistent host request identity
 
