@@ -1,92 +1,3 @@
-// ==== @byok-sdk/server dist/connections.d.ts ====
-import type { RuntimeInfo, ToolsetId } from '@byok-sdk/protocol';
-/**
- * What this process has OBSERVED about a device's live connection.
- *
- * This is not a second authority over anything durable. The device row
- * (`DeviceRecord`, `@byok-sdk/cloud`) owns identity and the capability list
- * every admission gate reads; the mailbox owns delivery. What lives here is the
- * part of `conn.hello` the kernel deliberately does not persist — the runtime
- * DISCOVERY block and the client's self-reported version/toolset inventory —
- * plus "when did we last hear from this device at all".
- *
- * Why the kernel does not persist it: `conn.hello.runtimes` describes what a
- * device build could run, changes on every daemon restart, and authorizes
- * nothing (the steer gate reads the CLAIM snapshot, never this). Storing it
- * durably would create a stale second description of a device that outlives the
- * process that saw it. Keeping it as an in-process observation is honest about
- * its lifetime: restart the server and it is gone, exactly like the connection
- * it describes.
- *
- * Presence is an expiring LEASE over `lastSeen`, not a stored flag and not "a
- * socket is open" — there are no sockets any more. Two observations renew it:
- * the device's own `conn.hello` over `POST /byok/messages`, and a
- * `GET /byok/events` poll (a device that is polling is present even if it never
- * announced). It lapses on its own once nothing has renewed it for
- * `presenceTtlMs` (see {@link DeviceConnections.isConnected}), and revocation
- * deletes the observation outright together with everything else scoped to the
- * device.
- */
-export interface DeviceConnection {
-    /** ISO-8601 instant of the most recent observation. */
-    lastSeen: string;
-    clientVersion?: string;
-    runtimes?: RuntimeInfo[];
-    configuredToolsets?: ToolsetId[];
-}
-/** `conn.hello`'s discovery half, as observed on one accepted announcement. */
-export interface DeviceAnnouncement {
-    readonly clientVersion?: string;
-    readonly runtimes?: readonly RuntimeInfo[];
-    readonly configuredToolsets?: readonly ToolsetId[];
-}
-export interface DeviceConnectionsOptions {
-    /**
-     * How long one observation keeps a device present, ms. Must outlast a full
-     * long-poll hold plus the gap before the next poll: a poll renews the lease
-     * once, when it starts, and nothing renews it while the poll is held.
-     */
-    readonly presenceTtlMs: number;
-    /** Epoch-ms clock the lease is judged against. Defaults to `Date.now`. */
-    readonly now?: () => number;
-}
-/**
- * In-process device observations, in first-observation order.
- *
- * Insertion order is load-bearing for ambient dispatch selection
- * (`device-selection.ts`): "the first connected device" must be stable and
- * explainable, and a `Map` gives that for free without a second index.
- */
-export declare class DeviceConnections {
-    #private;
-    constructor(options: DeviceConnectionsOptions);
-    /**
-     * Record an accepted `conn.hello`. Discovery fields are REPLACED wholesale,
-     * never merged: a daemon that restarted with a runtime removed must not keep
-     * advertising it because an older hello mentioned it.
-     */
-    announce(deviceId: string, announcement: DeviceAnnouncement, at: string): void;
-    /**
-     * Record any other sign of life (an inbound envelope, a long-poll read).
-     * Deliberately additive: it renews the lease by refreshing `lastSeen`
-     * without touching the discovery block, because none of those signals carry
-     * one and clearing it would lose what the last hello said.
-     */
-    touch(deviceId: string, at: string): void;
-    get(deviceId: string): DeviceConnection | undefined;
-    /**
-     * The one presence rule: observed within the last `presenceTtlMs`. Every
-     * reader — `MachineInfo.connected`, ambient selection, the dispatch gate and
-     * `stats().connectedDeviceCount` — asks this, so none can disagree.
-     */
-    isConnected(deviceId: string): boolean;
-    connectedCount(): number;
-    /** Device ids in first-observation order — the order ambient selection walks. */
-    ids(): readonly string[];
-    /** Drop everything scoped to a device. Called when its registration is deleted (§6.3). */
-    forget(deviceId: string): void;
-    clear(): void;
-}
 // ==== @byok-sdk/server dist/index.d.ts ====
 import { Hono } from 'hono';
 import { type EnqueuedOffer, type PairingCodeInfo, type TaskAttempt } from '@byok-sdk/cloud';
@@ -461,14 +372,12 @@ export declare function createCountingInboundRateLimiter(limiter: RateLimiter, o
 // ==== @byok-sdk/server dist/relay.d.ts ====
 import type { InboundCommitted, ByokCloudObserver } from '@byok-sdk/cloud';
 import type { TaskState } from '@byok-sdk/protocol';
-import type { DeviceConnections } from './connections';
 import type { ByokServerEvent, ServerTaskEvent } from './types';
 /** Per-task {@link ServerTaskEvent} retention before drop-oldest engages. */
 export declare const DEFAULT_TASK_EVENT_BUFFER_LIMIT = 1000;
 /** How long a terminal task's relay state is retained before reclamation, ms. */
 export declare const DEFAULT_TASK_EVENT_RETENTION_MS: number;
 export interface TaskEventRelayOptions {
-    readonly connections: DeviceConnections;
     readonly taskEventBufferLimit?: number;
     readonly taskEventRetentionMs?: number;
 }
@@ -748,8 +657,9 @@ export interface TaskHandleDeps {
 export declare function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHandle;
 // ==== @byok-sdk/server dist/types.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
-import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, RuntimeInfo, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess } from '@byok-sdk/protocol';
+import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, TenantId, TokenSigner } from '@byok-sdk/cloud';
+import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { RateLimiterOptions } from './rate-limiter';
 /** Mutually-exclusive storage authority for the embedded reference server. */
 export type ByokServerStorage = {
@@ -785,8 +695,7 @@ export interface CreateByokServerOptions {
      * (`conn.hello`, any accepted envelope, or the start of a `GET /byok/events`
      * poll) is at most this old. Default `longPollHoldMs + 15_000`. Must exceed
      * `longPollHoldMs`, because a held poll does not renew the lease; construction
-     * throws otherwise. Governs `MachineInfo.connected`, ambient device selection,
-     * the "not connected" dispatch gate and `HubStats.connectedDeviceCount`.
+     * throws otherwise. Presence is discovery only; dispatch never reads it.
      */
     presenceTtlMs?: number;
     /** Per-product blob size ceiling in bytes (§7). Default 100MB. */
@@ -882,7 +791,8 @@ export interface DispatchInput {
     dispatchSelection?: DispatchSelection;
     runtime?: RuntimeId;
     harnessId?: string;
-    deviceId?: string;
+    /** Explicit target; registered offline devices may receive queued work. */
+    deviceId: string;
     sessionRef?: string;
     /** Logical device-local MCP toolsets required for this task; never executable definitions. */
     requiredToolsets?: ToolsetId[];
@@ -1042,25 +952,18 @@ export interface TaskHandle {
     steer(text: string): Promise<void>;
     result(): Promise<TaskResult>;
 }
-/** A device known to this server, joined from pairing identity + live connection state. */
+/** Durable device identity plus its optional, unexpired presence lease. */
 export interface MachineInfo {
     deviceId: string;
     deviceName: string;
-    /**
-     * Presence lease: `lastSeen` is at most `CreateByokServerOptions.presenceTtlMs`
-     * old (default `longPollHoldMs + 15s`). A device that stops polling reads
-     * `false` once the lease lapses; it is never cleared any other way except by
-     * revocation.
-     */
+    /** True exactly while the single TTL observation is unexpired; never an admission gate. */
     connected: boolean;
+    /** Most recent live observation. Omitted when the lease is absent or expired. */
     lastSeen?: string;
-    /** Process-immutable Local Agent release from the current/last `conn.hello`; omission means legacy/unknown. */
     clientVersion?: string;
-    /** Runtimes detected on this device, as reported in its last `conn.hello` (M1: typed, replaces the old untyped `agents`). */
-    runtimes?: RuntimeInfo[];
+    runtimes?: readonly PresenceRuntimeFact[];
     harnesses?: readonly HarnessInfo[];
-    /** Logical toolset IDs reported by the current daemon; omission means legacy/unknown. */
-    configuredToolsets?: ToolsetId[];
+    configuredToolsets?: readonly string[];
 }
 /**
  * Projection of one task, read back from the cloud kernel's durable authority

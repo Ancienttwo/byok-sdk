@@ -37,8 +37,6 @@ import {
   type TaskState,
 } from '@byok-sdk/protocol';
 import type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
-import { DeviceConnections } from './connections';
-import { pickFirstConnectedDevice, type DeviceCandidate } from './device-selection';
 import { TaskEventRelay } from './relay';
 import { toMachineInfo, toTaskResult, toTaskSnapshot, taskStateOf } from './snapshot';
 import { composeFacadeStores, serverTenantId, DEFAULT_MAX_BLOB_SIZE_BYTES } from './stores';
@@ -326,10 +324,8 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     );
   }
 
-  const connections = new DeviceConnections({ presenceTtlMs });
   const inboundRefusals = Object.fromEntries(INBOUND_REFUSAL_REASONS.map((reason) => [reason, 0])) as Record<InboundRefusalReason, number>;
   const relay = new TaskEventRelay({
-    connections,
     ...(opts.taskEventBufferLimit === undefined ? {} : { taskEventBufferLimit: opts.taskEventBufferLimit }),
     ...(opts.taskEventRetentionMs === undefined ? {} : { taskEventRetentionMs: opts.taskEventRetentionMs }),
   });
@@ -339,7 +335,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     maxBlobSizeBytes,
     ...(opts.storage === undefined ? {} : { storage: opts.storage }),
     ...(opts.rateLimit === undefined ? {} : { rateLimit: opts.rateLimit }),
-    connections,
+    presenceTtlMs,
     onRateLimited: (deviceId, at) => relay.emitServerEvent({ kind: 'device.rate_limited', deviceId, at }),
   });
 
@@ -368,6 +364,9 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     ...(opts.agentMessage === undefined ? {} : { agentMessage: opts.agentMessage }),
     maxBlobSizeBytes,
     longPollHoldMs,
+    presenceTtlMs,
+    // Transport observations and heartbeat publications renew the same lease.
+    presenceMinimumIntervalMs: 0,
     longPollIntervalMs: longPollInterval(longPollHoldMs),
   });
 
@@ -479,27 +478,8 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     })().catch(() => undefined);
   };
 
-  async function candidatesInObservationOrder(): Promise<DeviceCandidate[]> {
-    const candidates: DeviceCandidate[] = [];
-    for (const deviceId of connections.ids()) {
-      if (!connections.isConnected(deviceId)) continue;
-      const device = await composition.cloud.devices.get(tenant, deviceId);
-      if (device === undefined || device.revoked) continue;
-      candidates.push({
-        deviceId,
-        capabilities: device.capabilities,
-        configuredToolsets: connections.get(deviceId)?.configuredToolsets,
-      });
-    }
-    return candidates;
-  }
-
   async function deviceCapabilities(deviceId: string): Promise<readonly string[] | undefined> {
     return (await composition.cloud.devices.get(tenant, deviceId))?.capabilities;
-  }
-
-  async function requireConnected(deviceId: string): Promise<void> {
-    if (!connections.isConnected(deviceId)) throw new Error(`device ${deviceId} is not connected`);
   }
 
   // An in-flight exclusion only; persisted task and receipt stores own identity.
@@ -509,7 +489,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     const taskId = submission.taskId;
     if (taskId === undefined) return dispatchInternal(submission, fresh);
     if (typeof taskId !== 'string' || taskId.length === 0) throw new Error('taskId must be a non-empty string');
-    if (input.deviceId === undefined) throw new Error('caller taskId requires an explicit deviceId');
     if (dispatching.has(taskId)) throw new Error('dispatch for this taskId is already in progress; retain the original binding');
     dispatching.add(taskId);
     try { return await dispatchInternal(submission, fresh); }
@@ -544,9 +523,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     const requiredToolsets =
       input.requiredToolsets === undefined ? undefined : RequiredToolsetsSchema.parse(input.requiredToolsets);
 
-    if (agentRef !== undefined && input.deviceId === undefined) {
-      throw new Error('Agent-bound dispatch requires an explicit deviceId for capability admission');
-    }
     if (egressPolicy !== undefined && agentRef === undefined) {
       throw new Error('Agent egress policy requires an explicit AgentRef; legacy task dispatch cannot consume it');
     }
@@ -554,18 +530,10 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       throw new Error('Agent message egress requires the typed Agent egress offer path');
     }
 
-    const deviceId =
-      input.deviceId ??
-      pickFirstConnectedDevice(await candidatesInObservationOrder(), {
-        ...(requiredToolsets === undefined ? {} : { requiredToolsets }),
-        allowStrictAgentOnly: agentRef !== undefined,
-      });
-    // No queue-until-connect: reject clearly instead of silently enqueuing a
-    // task nothing will ever claim.
-    if (deviceId === undefined) {
-      throw new Error('no connected device to dispatch to (M0 does not queue tasks until a device connects)');
+    const deviceId = input.deviceId;
+    if (typeof deviceId !== 'string' || deviceId.length === 0) {
+      throw new Error('dispatch requires an explicit deviceId (non-empty string)');
     }
-    await requireConnected(deviceId);
 
     // The gates the kernel does not run, in the pre-fold order. Everything
     // below the kernel DOES run (strict-agent-only, agent-home-contract, the
@@ -582,17 +550,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
         throw new Error(
           `device ${deviceId} did not advertise toolset-selection capability; refusing a task whose semantics require local MCP tools`,
         );
-      }
-      const configuredToolsets = connections.get(deviceId)?.configuredToolsets;
-      if (configuredToolsets === undefined) {
-        throw new Error(
-          `device ${deviceId} did not advertise its configured toolset inventory; refusing to guess from runtime capability`,
-        );
-      }
-      const configured = new Set(configuredToolsets);
-      const missing = requiredToolsets.filter((toolsetId) => !configured.has(toolsetId));
-      if (missing.length > 0) {
-        throw new Error(`device ${deviceId} is missing required MCP toolset(s): ${missing.join(', ')}`);
       }
     }
     if (
@@ -749,7 +706,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
     async requestAgentContentRead(input: AgentContentReadRequest): Promise<void> {
       const payload = AgentContentReadPayloadSchema.parse(input.payload);
-      await requireConnected(input.deviceId);
       await cloud.enqueueAgentContentRead(tenant, input.deviceId, { payload });
     },
 
@@ -757,7 +713,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       input: AgentHomeProjectionRequest,
     ): Promise<AgentHomeProjectionStatusReadback> {
       const payload = AgentHomeProjectionPayloadSchema.parse(input.payload);
-      await requireConnected(input.deviceId);
       return (await cloud.enqueueAgentHomeProjection(tenant, input.deviceId, payload)).status;
     },
 
@@ -840,10 +795,11 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
     machines: {
       async list(): Promise<MachineInfo[]> {
-        const devices = await cloud.listDevices(tenant);
-        return devices.map((device) =>
-          toMachineInfo(device, connections.get(device.deviceId), connections.isConnected(device.deviceId)),
-        );
+        const [devices, readiness] = await Promise.all([cloud.listDevices(tenant), cloud.readTenantReadiness(tenant)]);
+        const harnesses = new Map(devices.map((device) => [device.deviceId, device.harnesses]));
+        return readiness.devices.map((device) => toMachineInfo({
+          deviceId: device.deviceId, deviceName: device.deviceName, harnesses: harnesses.get(device.deviceId),
+        }, device.presence));
       },
     },
 
@@ -857,7 +813,6 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
         // tenant and supplies it here, so a device id belonging to nobody
         // addresses nothing and touches nothing.
         await cloud.revokeDevice(tenant, deviceId);
-        connections.forget(deviceId);
       },
     },
 
@@ -900,7 +855,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       });
 
       return {
-        connectedDeviceCount: connections.connectedCount(),
+        connectedDeviceCount: (await cloud.readTenantReadiness(tenant)).observedPresenceCount,
         taskCountsByState,
         envelopesIn: composition.counters.envelopesIn,
         dedupDrops: composition.counters.dedupDrops,

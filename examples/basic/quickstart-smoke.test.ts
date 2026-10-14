@@ -116,7 +116,7 @@ describe('examples/basic quickstart with default settings', () => {
     const dispatched = await fetch(`${server.url}/api/tasks`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ instruction: 'quickstart smoke', runtime: 'pi' }),
+      body: JSON.stringify({ deviceId, instruction: 'quickstart smoke', runtime: 'pi' }),
     });
     expect(dispatched.status).toBe(200);
     const { taskId } = (await dispatched.json()) as { taskId: string };

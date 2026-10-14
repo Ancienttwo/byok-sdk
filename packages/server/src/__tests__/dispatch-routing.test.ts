@@ -1,32 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { createByokServer } from '../index';
 
-describe('dispatch() routing (no live connection)', () => {
-  it('rejects with a clear error when no device is connected — M0 does not queue', async () => {
+describe('explicit dispatch routing', () => {
+  it('rejects a missing target rather than selecting an ambient device', async () => {
     const byok = createByokServer({ productId: 'acme' });
-
-    await expect(byok.dispatch({ instruction: 'do the thing' })).rejects.toThrow(
-      /no connected device/i,
-    );
+    try {
+      await expect(byok.dispatch({ instruction: 'do the thing' } as never)).rejects.toThrow(/explicit deviceId/);
+      expect((await byok.tasks.list()).tasks).toEqual([]);
+    } finally { await byok.close(); }
   });
-
-  it('rejects when a specific deviceId is requested but not connected', async () => {
+  it('rejects an unknown target before task creation', async () => {
     const byok = createByokServer({ productId: 'acme' });
-
-    await expect(
-      byok.dispatch({ instruction: 'do the thing', deviceId: 'dev_ghost' }),
-    ).rejects.toThrow(/not connected/i);
-  });
-
-  it('does not create a task record for a rejected dispatch', async () => {
-    const byok = createByokServer({ productId: 'acme' });
-
-    await expect(byok.dispatch({ instruction: 'anything' })).rejects.toThrow();
-    expect((await byok.tasks.list()).tasks).toEqual([]);
-  });
-
-  it('machines.list() is empty when nothing has ever paired', async () => {
-    const byok = createByokServer({ productId: 'acme' });
-    expect(await byok.machines.list()).toEqual([]);
+    try {
+      await expect(byok.dispatch({ instruction: 'do the thing', deviceId: 'dev_ghost' })).rejects.toMatchObject({ code: 'device_not_found' });
+      expect((await byok.tasks.list()).tasks).toEqual([]);
+      expect(await byok.machines.list()).toEqual([]);
+    } finally { await byok.close(); }
   });
 });

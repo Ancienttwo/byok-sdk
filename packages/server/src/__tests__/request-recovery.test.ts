@@ -15,7 +15,7 @@ describe('public facade request recovery', () => {
     try {
       const daemon = await connectFakeDaemonLongPoll(http.baseUrl, byok, { productId: options.productId });
       const input = { taskId: 'host-persisted-a', deviceId: daemon.deviceId, instruction: 'original', runtime: 'claude' as const };
-      await expect(byok.dispatch({ ...input, deviceId: undefined })).rejects.toThrow('explicit deviceId');
+      await expect(byok.dispatch({ ...input, deviceId: undefined } as never)).rejects.toThrow('explicit deviceId');
       await expect(byok.dispatch({ ...input, taskId: '' })).rejects.toThrow('non-empty');
       const mutable = { ...input, taskId: 'captured-before-await' };
       const captured = byok.dispatch(mutable);
