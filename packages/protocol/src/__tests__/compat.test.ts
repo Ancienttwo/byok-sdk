@@ -38,19 +38,21 @@ import {
  * - `byok-protocol-previous`: the latest or second-latest registered stable
  *   release. It knows the most context, so it catches nested regressions.
  *
- * The corpus `golden/v2.envelopes.ndjson` is append-only. Each registered
- * release pins a sha256 of the corpus prefix it shipped with; editing a
- * released line fails here. To register a release, add the entry this file
- * prints (docs/releases/README.md).
+ * The envelope and HTTP corpora are append-only. Registered releases pin
+ * shipped prefixes; HTTP registration begins after the frozen pre-HTTP
+ * releases, never by backfilling them. To register a release, add the entry
+ * this file prints (docs/releases/README.md).
  */
 
 const require = createRequire(import.meta.url);
 const goldenDir = fileURLToPath(new URL('./golden/', import.meta.url));
 const corpusPath = `${goldenDir}v2.envelopes.ndjson`;
+const httpCorpusPath = `${goldenDir}v2.http.ndjson`;
 
 interface ReleaseEntry {
   readonly version: string;
   readonly envelopes: { readonly lines: number; readonly sha256: string };
+  readonly http?: { readonly lines: number; readonly sha256: string };
 }
 interface ReleaseRegistry {
   readonly floor: string;
@@ -60,6 +62,18 @@ interface ReleaseRegistry {
 const registry = JSON.parse(readFileSync(`${goldenDir}releases.json`, 'utf8')) as ReleaseRegistry;
 const corpusText = readFileSync(corpusPath, 'utf8');
 const rawLines = corpusText.split('\n').filter((line) => line.length > 0);
+const httpCorpusText = readFileSync(httpCorpusPath, 'utf8');
+// Retain empty lines: silently filtering them would hide a byte mutation.
+const httpRawLines = httpCorpusText.split('\n');
+if (httpRawLines.at(-1) === '') httpRawLines.pop();
+
+// These releases shipped only the envelope corpus. Freeze the complete
+// historical entries: adding an HTTP member would fabricate shipped bytes.
+const PRE_HTTP_RELEASES: readonly ReleaseEntry[] = [
+  { version: '0.25.0', envelopes: { lines: 32, sha256: '56f21c931838d41dd18a89ea360b4b48ff5712add5e43871f65b3b2fb0356e04' } },
+  { version: '0.26.0', envelopes: { lines: 32, sha256: '56f21c931838d41dd18a89ea360b4b48ff5712add5e43871f65b3b2fb0356e04' } },
+  { version: '0.26.1', envelopes: { lines: 32, sha256: '56f21c931838d41dd18a89ea360b4b48ff5712add5e43871f65b3b2fb0356e04' } },
+];
 
 interface CorpusLine {
   readonly index: number;
@@ -77,9 +91,32 @@ function packageVersion(specifier: string): string {
   return (JSON.parse(readFileSync(require.resolve(`${specifier}/package.json`), 'utf8')) as { version: string }).version;
 }
 
-function prefixEntry(version: string, lines: number): ReleaseEntry {
-  const prefix = rawLines.slice(0, lines).map((line) => `${line}\n`).join('');
-  return { version, envelopes: { lines, sha256: createHash('sha256').update(prefix).digest('hex') } };
+function prefixHash(lines: readonly string[], length: number): { lines: number; sha256: string } {
+  const prefix = lines.slice(0, length).map((line) => `${line}\n`).join('');
+  return { lines: length, sha256: createHash('sha256').update(prefix).digest('hex') };
+}
+
+function prefixEntry(version: string, lines: number, httpLines?: number): ReleaseEntry {
+  return {
+    version, envelopes: prefixHash(rawLines, lines),
+    ...(httpLines === undefined ? {} : { http: prefixHash(httpRawLines, httpLines) }),
+  };
+}
+
+/** The first post-legacy entry is the HTTP boundary; there is no second marker. */
+function assertHttpLedger(entries: readonly ReleaseEntry[], bytes: readonly string[] = httpRawLines): void {
+  expect(entries.slice(0, PRE_HTTP_RELEASES.length), 'pre-HTTP historical entries must not be changed or backfilled').toEqual(PRE_HTTP_RELEASES);
+  let previousLines = 0;
+  for (const entry of entries.slice(PRE_HTTP_RELEASES.length)) {
+    expect(entry.http, `HTTP prefix required for post-legacy release ${entry.version}`).toBeDefined();
+    const http = entry.http!;
+    expect(http.lines).toBeGreaterThan(0);
+    expect(Number.isSafeInteger(http.lines)).toBe(true);
+    expect(http.lines).toBeGreaterThanOrEqual(previousLines);
+    expect(http.lines).toBeLessThanOrEqual(bytes.length);
+    expect(http, `HTTP bytes released with ${entry.version} are append-only`).toEqual(prefixHash(bytes, http.lines));
+    previousLines = http.lines;
+  }
 }
 
 function compareVersions(a: string, b: string): number {
@@ -108,11 +145,35 @@ describe('compat: release registry', () => {
     (_version, entry) => {
       expect(entry.envelopes.lines).toBeLessThanOrEqual(rawLines.length);
       expect(
-        prefixEntry(entry.version, entry.envelopes.lines),
+        prefixEntry(entry.version, entry.envelopes.lines, entry.http?.lines),
         `golden/v2.envelopes.ndjson lines 1-${entry.envelopes.lines} shipped with ${entry.version} and are append-only`,
       ).toEqual(entry);
     },
   );
+
+  it('historical entries have no invented HTTP evidence and every subsequent release pins HTTP bytes', () => {
+    assertHttpLedger(registry.releases);
+  });
+
+  it('rejects backfilled historical HTTP bytes', () => {
+    const entries = structuredClone(PRE_HTTP_RELEASES) as ReleaseEntry[];
+    entries[2] = { ...entries[2]!, http: prefixHash(httpRawLines, httpRawLines.length) };
+    expect(() => assertHttpLedger(entries)).toThrow('pre-HTTP historical entries');
+  });
+
+  it('requires HTTP evidence at the first subsequent release, and pins the literal bytes', () => {
+    const candidate = prefixEntry('0.27.0', rawLines.length, httpRawLines.length);
+    // Synthetic candidate, never appended to the real release ledger here.
+    const entries = [...PRE_HTTP_RELEASES, candidate];
+    expect(() => assertHttpLedger(entries)).not.toThrow();
+    expect(() => assertHttpLedger([...PRE_HTTP_RELEASES, { version: candidate.version, envelopes: candidate.envelopes }]))
+      .toThrow('HTTP prefix required');
+    const changed = [...httpRawLines];
+    changed[0] = `${changed[0]} `;
+    expect(() => assertHttpLedger(entries, changed)).toThrow('HTTP bytes released');
+    const shortened = { ...candidate, version: '0.28.0', http: prefixHash(httpRawLines, 1) };
+    expect(() => assertHttpLedger([...entries, shortened])).toThrow();
+  });
 
   it('the current stable package version is registered', () => {
     const version = (JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }).version;
@@ -120,7 +181,7 @@ describe('compat: release registry', () => {
     const entry = registry.releases.find((candidate) => candidate.version === version);
     expect(
       entry,
-      `@byok-sdk/protocol ${version} is not in golden/releases.json. Append this entry: ${JSON.stringify(prefixEntry(version, rawLines.length))}`,
+      `@byok-sdk/protocol ${version} is not in golden/releases.json. Append this entry: ${JSON.stringify(prefixEntry(version, rawLines.length, httpRawLines.length))}`,
     ).toBeDefined();
   });
 
@@ -146,6 +207,136 @@ const PINNED: readonly (readonly [string, ProtocolModule])[] = [
 ];
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
+
+type HttpSurface = Extract<WireAddition, { kind: 'http' }>['surface'];
+interface HttpCorpusLine {
+  readonly index: number;
+  readonly surface: HttpSurface;
+  /** Literal wire body; the expected value is authored independently. */
+  readonly body: string;
+  readonly value: Record<string, unknown>;
+  readonly batchLength?: number;
+}
+const httpCorpus: readonly HttpCorpusLine[] = httpRawLines.map((raw, index) => ({
+  ...(JSON.parse(raw) as Omit<HttpCorpusLine, 'index'>), index,
+}));
+
+function httpSchema(module: ProtocolModule | typeof currentModule, surface: HttpSurface): {
+  parse(input: unknown): Record<string, unknown>;
+  shape: Record<string, unknown>;
+} {
+  const schema = (module as Record<string, unknown>)[`${surface}Schema`];
+  if (schema === undefined) throw new Error(`missing HTTP schema: ${surface}`);
+  return schema as ReturnType<typeof httpSchema>;
+}
+
+function assertBatchCounts(line: HttpCorpusLine, decoded: Record<string, unknown>): void {
+  if (line.surface !== 'MessagesSendResponse') return;
+  expect((decoded.accepted as number) + (decoded.rejected === undefined ? 0 : decoded.rejected as number),
+    'accepted + rejected must account for the entire submitted batch').toBe(line.batchLength);
+}
+
+function assertCurrentHttp(line: HttpCorpusLine): void {
+  const decoded = httpSchema(currentModule, line.surface).parse(JSON.parse(line.body));
+  expect(decoded, 'the current HTTP decoder dropped or changed the independently committed value').toEqual(line.value);
+  assertBatchCounts(line, decoded);
+}
+
+function assertReleasedHttp(release: ProtocolModule, line: HttpCorpusLine, additions: readonly WireAddition[] = WIRE_ADDITIONS): void {
+  const decoded = httpSchema(release, line.surface).parse(JSON.parse(line.body));
+  const dropped: string[] = [];
+  droppedPaths(line.value, decoded, '', dropped);
+  const undeclared = dropped.filter((path) => !additions.some((entry) =>
+    entry.kind === 'http' && entry.surface === line.surface && entry.field === path));
+  expect(undeclared, 'released HTTP decoder lost an undeclared field').toEqual([]);
+  const retained = structuredClone(line.value);
+  for (const path of dropped) delete retained[path];
+  expect(decoded, 'released HTTP decoder changed a retained value').toEqual(retained);
+  assertBatchCounts(line, decoded);
+}
+
+// These published *protocol* decoders do not execute the old client-private
+// parsers. A newer alias must trigger review rather than silently extend this
+// explicitly bounded exclusion. This is an evidence boundary, not a fallback.
+const PRIVATE_CLIENT_HTTP_EXCLUSIONS = [
+  {
+    surface: 'EventsPollResponse', through: '0.26.1',
+    reason: 'LongPollTransport validates the outer page privately, then decodes entries individually to preserve unknown-event cursor stalls.',
+  },
+  {
+    surface: 'ChallengeResponse', through: '0.26.1',
+    reason: 'AuthManager reads nonce from a client-private response cast rather than ChallengeResponseSchema.',
+  },
+  {
+    surface: 'TokenResponse', through: '0.26.1',
+    reason: 'AuthManager reads accessToken/expiresAt from a client-private response cast rather than TokenResponseSchema.',
+  },
+] as const satisfies readonly { surface: HttpSurface; through: string; reason: string }[];
+
+describe('compat: HTTP corpus evidence boundary', () => {
+  it('covers all eight scoped HTTP route schemas with owned bodies and independent expected values', () => {
+    const surfaces: readonly HttpSurface[] = ['ChallengeRequest', 'ChallengeResponse', 'TokenRequest', 'TokenResponse',
+      'EventsPollQuery', 'EventsPollResponse', 'MessagesSendRequest', 'MessagesSendResponse'];
+    expect([...new Set(httpCorpus.map((line) => line.surface))].sort()).toEqual([...surfaces].sort());
+    expect(httpCorpusText.endsWith('\n'), 'literal corpus lines must be newline terminated').toBe(true);
+    for (const line of httpCorpus) {
+      expect(typeof line.body).toBe('string');
+      expect(JSON.parse(line.body)).toEqual(line.value);
+      if (line.surface === 'MessagesSendResponse') {
+        expect(Number.isSafeInteger(line.batchLength)).toBe(true);
+        expect(line.batchLength).toBeGreaterThanOrEqual(0);
+      } else expect(line.batchLength).toBeUndefined();
+    }
+  });
+
+  it('keeps the three private-client exclusions typed, explained and bounded to reviewed releases', () => {
+    expect(PRIVATE_CLIENT_HTTP_EXCLUSIONS.map((entry) => entry.surface)).toEqual([
+      'EventsPollResponse', 'ChallengeResponse', 'TokenResponse',
+    ]);
+    for (const entry of PRIVATE_CLIENT_HTTP_EXCLUSIONS) {
+      expect(entry.reason.length).toBeGreaterThan(0);
+      for (const [, release] of PINNED) {
+        expect(httpSchema(release, entry.surface)).toBeDefined();
+      }
+      for (const alias of ['byok-protocol-floor', 'byok-protocol-previous']) {
+        expect(compareVersions(packageVersion(alias), entry.through),
+          'a newer published alias requires removing or explicitly reviewing the private-client exclusion').toBeLessThanOrEqual(0);
+      }
+    }
+  });
+
+  it('detects a changed literal body independently of the expected value', () => {
+    const line = httpCorpus.find((entry) => entry.surface === 'ChallengeResponse')!;
+    expect(() => assertCurrentHttp({ ...line, body: JSON.stringify({ nonce: 'changed-nonce' }) })).toThrow('independently committed');
+  });
+
+  it('rejects unaccounted batch members in current and published decoders', () => {
+    const line = httpCorpus.find((entry) => entry.surface === 'MessagesSendResponse' && entry.batchLength === 2)!;
+    const changed = { ...line, batchLength: 3 };
+    expect(() => assertCurrentHttp(changed)).toThrow('entire submitted batch');
+    for (const [, release] of PINNED) expect(() => assertReleasedHttp(release, changed)).toThrow('entire submitted batch');
+  });
+
+  it('rejects undeclared HTTP loss using the actual published decoders', () => {
+    const line = httpCorpus.find((entry) => entry.surface === 'MessagesSendResponse' && Object.hasOwn(entry.value, 'capabilities'))!;
+    const withoutHttp = WIRE_ADDITIONS.filter((entry) => entry.kind !== 'http');
+    for (const [, release] of PINNED) expect(() => assertReleasedHttp(release, line, withoutHttp)).toThrow('undeclared field');
+  });
+});
+
+describe('compat: current HTTP decoders read committed literal bodies', () => {
+  it.each(httpCorpus.map((line) => [line.index + 1, line.surface, line] as const))(
+    'HTTP line %i (%s) deep-equals its independent expected value and accounts for its batch',
+    (_index, _surface, line) => assertCurrentHttp(line),
+  );
+});
+
+describe.each(PINNED)('compat: published HTTP decoders %s read current bodies', (_label, release) => {
+  it.each(httpCorpus.map((line) => [line.index + 1, line.surface, line] as const))(
+    'HTTP line %i (%s) retains values and loses only declared strip-safe fields',
+    (_index, _surface, line) => assertReleasedHttp(release, line),
+  );
+});
 
 function jsonSchema(schema: unknown): Json {
   return z.toJSONSchema(schema as z.ZodType, { io: 'input', unrepresentable: 'any' }) as Json;
@@ -287,7 +478,7 @@ function droppedPaths(sent: unknown, received: unknown, path: string, out: strin
 }
 
 function fieldEntries(type: MessageType, field: string): WireAddition[] {
-  return WIRE_ADDITIONS.filter((entry) => entry.surface === type && entry.field === field);
+  return WIRE_ADDITIONS.filter((entry) => entry.kind === 'envelope' && entry.surface === type && entry.field === field);
 }
 
 /**
@@ -354,7 +545,7 @@ describe.each(PINNED)('compat: the released decoder %s reads current bytes', (_l
 // ---------------------------------------------------------------------------
 
 function carries(line: CorpusLine, entry: WireAddition): boolean {
-  if (line.type !== entry.surface) return false;
+  if (entry.kind !== 'envelope' || line.type !== entry.surface) return false;
   if (entry.field === undefined) return true;
   const value = line.payload[entry.field];
   if (value === undefined) return false;
@@ -364,6 +555,11 @@ function carries(line: CorpusLine, entry: WireAddition): boolean {
 describe('compat: WIRE_ADDITIONS', () => {
   it('every entry names a current message type and capability, in the right direction', () => {
     for (const entry of WIRE_ADDITIONS) {
+      if (entry.kind === 'http') {
+        expect(Object.keys(httpSchema(currentModule, entry.surface).shape)).toContain(entry.field);
+        if (entry.surface === 'MessagesSendResponse') expect(['accepted', 'rejected']).not.toContain(entry.field);
+        continue;
+      }
       expect(MESSAGE_TYPES).toContain(entry.surface);
       if (entry.rule !== 'gated') continue;
       expect(CAPABILITY_FLAGS).toContain(entry.capability);
@@ -374,7 +570,9 @@ describe('compat: WIRE_ADDITIONS', () => {
   });
 
   it('every entry is exercised by a corpus line', () => {
-    const unused = WIRE_ADDITIONS.filter((entry) => !corpus.some((line) => carries(line, entry))).map(
+    const unused = WIRE_ADDITIONS.filter((entry) => entry.kind === 'envelope'
+      ? !corpus.some((line) => carries(line, entry))
+      : !httpCorpus.some((line) => line.surface === entry.surface && Object.hasOwn(line.value, entry.field))).map(
       (entry) => `${entry.surface}${entry.field === undefined ? '' : `.${entry.field}`}${entry.rule === 'gated' && entry.value !== undefined ? `=${entry.value}` : ''}`,
     );
     expect(unused, 'append a corpus line that carries each of these (golden/v2.envelopes.ndjson is append-only)').toEqual([]);

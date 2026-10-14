@@ -41,6 +41,16 @@
   policies, generated facts and workspace size budgets. Wire v2 and freeze
   goldens are unchanged. See `docs/releases/398-entry-dependency-closure.md`.
 
+- **Protocol public metadata change (next MINOR; #386)** — `WireAddition` is a
+  closed union with required `kind: 'envelope' | 'http'`; `surface`/`field`
+  remain available and `requiredReceiverCapabilities` keeps its signature and
+  envelope admission behaviour. The single `WIRE_ADDITIONS` table now declares
+  `MessagesSendResponse.capabilities` strip-safe against published 0.25.0/0.26.1
+  decoders. Owned HTTP corpus bodies, independent values and submitted batch
+  lengths extend compatibility evidence. The first post-0.26.1 stable release
+  must register both corpus prefixes; old envelope-only history stays frozen.
+  No manifest bump or unpublished release registration in this feature PR.
+
 - **Breaking (server, 0.x; #420)** — embedded device-side one-shot wake queue:
   `wake: { consume }` plus `wakes.schedule/cancel/pending`, shared memory/SQLite
   semantics, exact dedup, serial at-least-once delivery, 60-second capped waits,
