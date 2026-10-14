@@ -24,7 +24,7 @@ it('default daemon/cloud limits deliver two 40 KiB tool results in separate acce
     productId: 'test-product', serverUrl: server.url, workspaceRoot: path.join(dir, 'workspace'), storeDir: path.join(dir, 'store') }, [adapter],
     { longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
   await fs.mkdir(path.join(dir, 'workspace'));
-  await daemon.pair((await server.createPairingCode()).code);
+  const record = await daemon.pair((await server.createPairingCode()).code);
   await daemon.start(); await waitForDaemonOpen(daemon);
   const nativeFetch = globalThis.fetch;
   const accepted: Array<{ events: unknown[]; rejected: number }> = [];
@@ -40,7 +40,7 @@ it('default daemon/cloud limits deliver two 40 KiB tool results in separate acce
     }
     return response;
   });
-  await server.byok.dispatch({ instruction: 'two large results' });
+  await server.byok.dispatch({ deviceId: record.deviceId, instruction: 'two large results' });
   await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
   adapter.sessions[0]!.emit({ type: 'tool_result', tool: 'read', output: 'a'.repeat(40 * 1024) });
   adapter.sessions[0]!.emit({ type: 'tool_result', tool: 'read', output: 'b'.repeat(40 * 1024) });
