@@ -28,33 +28,7 @@ import { AgentEgressContentHashSchema } from './agent-egress';
  *    breaking change.
  */
 
-import { INPUT_PREPARATION_WIRE_VERSION } from './input-preparation-version';
-export { INPUT_PREPARATION_WIRE_VERSION } from './input-preparation-version';
-
-/**
- * Capability required before a task-free remote input preparation — or a
- * prepared Execution — is admitted: `agent-input-preparation-v<N>`, where
- * `<N>` is {@link INPUT_PREPARATION_WIRE_VERSION}.
- *
- * The version is IN the token because the relay wire has none. A device
- * declares exactly the one token of the contract it speaks, and a cloud admits
- * exactly the one token of the contract it speaks, so a device and a cloud on
- * different contract versions never exchange a preparation at all: the cloud
- * refuses at enqueue (`agent_capability_missing`, before any receipt or
- * mailbox row) instead of relaying a payload the other side would refuse with
- * a strict-schema 422 and a device would then redeliver forever. There is no
- * dual token and no accepted older one. The retired unversioned token
- * `agent-input-preparation` (versions up to 4) is admitted nowhere.
- *
- * The token gates NEW admissions only. A row enqueued before a version cut is
- * still in flight afterwards, and its completion is accepted only by a cloud
- * on the same version as the device answering it; across the cut it is a 422
- * and a stalled device cursor. Draining in-flight rows and upgrading cloud and
- * devices as a pair is the operator precondition for the cut (`docs/spec.md`,
- * bounded admission); nothing here parses an older receipt.
- */
-export const AGENT_INPUT_PREPARATION_CAPABILITY =
-  `agent-input-preparation-v${INPUT_PREPARATION_WIRE_VERSION}` as const;
+import { PREPARED_AGENT_MEMORY_MODES } from './capability-constants';
 
 /** The preparation surface uses the package-wide lowercase `sha256:<hex>` transport form. */
 export const InputPreparationContentHashSchema = AgentEgressContentHashSchema;
@@ -97,7 +71,7 @@ export const InputPreparationPolicyRevisionSchema = OPAQUE_ID;
 export const InputPreparationProfileIdSchema = OPAQUE_ID;
 
 /** Explicit prepared SDK memory selection; never defaulted. */
-export const PreparedAgentMemoryModeSchema = z.enum(['none', 'read', 'read-write']);
+export const PreparedAgentMemoryModeSchema = z.enum(PREPARED_AGENT_MEMORY_MODES);
 export type PreparedAgentMemoryMode = z.infer<typeof PreparedAgentMemoryModeSchema>;
 
 

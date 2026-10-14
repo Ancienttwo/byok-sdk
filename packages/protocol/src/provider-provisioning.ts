@@ -30,9 +30,6 @@ import {
  * this package.
  */
 
-/** Device capability required before a Host may enqueue `provider.provisioning.available`. */
-export const PROVIDER_PROVISIONING_CAPABILITY = 'provider-provisioning.v1' as const;
-
 /**
  * Device-proof `operation` for the signed claim that registers the device's
  * provider-secret sealing public key (`{ keyId, epoch, publicJwk }`).

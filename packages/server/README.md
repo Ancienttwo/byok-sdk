@@ -300,3 +300,5 @@ can crash before this call, and prevent dispatch of a cancelled prepared request
 The runnable public-package fixture is
 `docs/researches/2026-09-09-g1c-facade/public-consumer-probe.mjs`. It demonstrates
 pre-enqueue binding and recovery, not product authentication or consumer ACK.
+
+Runtime dependencies and size budgets: [entry dependency contract](../../README.md#entry-dependencies).

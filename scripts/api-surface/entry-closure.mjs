@@ -100,7 +100,11 @@ export function createWalker(root) {
         return packageCache.get(real);
       }
       const parent = path.dirname(directory);
-      if (parent === directory) throw new Error(`cannot resolve installed package ${name} from ${from.manifest.name}`);
+      if (parent === directory) {
+        if (Object.hasOwn(from.manifest.optionalDependencies ?? {}, name) || from.manifest.peerDependenciesMeta?.[name]?.optional === true) return null;
+        if (!from.workspace) return { unavailablePackage: name };
+        throw new Error(`cannot resolve installed package ${name} from ${from.manifest.name}`);
+      }
       directory = parent;
     }
   }
@@ -129,6 +133,10 @@ export function createWalker(root) {
       throw new Error(`${from.manifest.name}: undeclared runtime dependency ${specifier}`);
     }
     const pkg = workspace.get(name) ?? installedPackage(from, name);
+    // Optional absence is an explicit fact, never evidence of safety. Strict
+    // policies below reject closures whose optional source cannot be examined.
+    if (pkg === null) return { unavailableOptional: specifier };
+    if (pkg.unavailablePackage) return { opaqueImport: specifier };
     const subpath = specifier === name ? '.' : '.' + specifier.slice(name.length);
     const target = pkg.manifest.exports !== undefined ? mappedTarget(pkg.manifest.exports, subpath, conditions)
       : subpath === '.' ? (pkg.manifest.main ?? './index.js') : subpath;
@@ -140,7 +148,7 @@ export function createWalker(root) {
   }
   return entry => {
     if (closureCache.has(entry.target)) return closureCache.get(entry.target);
-    const seen = new Set(), bare = [], lazy = [], third = [], builtins = [], codegen = [];
+    const seen = new Set(), bare = [], lazy = [], third = [], unavailableOptional = [], opaqueImports = [], builtins = { workspace: [], thirdParty: [] }, codegen = [];
     let bytes = 0;
     function visit(file, pkg) {
       if (seen.has(file)) return;
@@ -149,26 +157,43 @@ export function createWalker(root) {
       else third.push(pkg.manifest.name);
       if (file.endsWith('.json')) return;
       if (!/\.(?:js|mjs|cjs)$/.test(file)) throw new Error(`unsupported runtime module ${file}`);
-      if (!tokenCache.has(file)) tokenCache.set(file, scanModule(readFileSync(file, 'utf8')));
+      if (!tokenCache.has(file)) {
+        let type = pkg.manifest.type;
+        for (let directory = path.dirname(file); directory !== pkg.directory && inside(pkg.directory, directory); directory = path.dirname(directory)) {
+          const manifest = path.join(directory, 'package.json');
+          if (existsSync(manifest)) { type = readJson(manifest).type; break; }
+        }
+        const sourceType = file.endsWith('.mjs') || type === 'module' ? 'module' : file.endsWith('.cjs') || type === 'commonjs' ? 'script' : 'auto';
+        try { tokenCache.set(file, scanModule(readFileSync(file, 'utf8'), { sourceType })); }
+        catch (error) { throw new Error(`${file}: ${error.message}`); }
+      }
       const scan = tokenCache.get(file);
       const display = pkg.workspace ? posix(path.relative(root, file)) : `${pkg.manifest.name}/${posix(path.relative(pkg.directory, file))}`;
       for (const hit of scan.codegen) codegen.push({ file: display, ...hit });
       for (const edge of scan.lazyImports) {
         if (pkg.workspace) lazy.push(edge.specifier);
-        if (isBuiltin(edge.specifier)) builtins.push(edge.specifier);
+        if (isBuiltin(edge.specifier)) builtins[pkg.workspace ? 'workspace' : 'thirdParty'].push(edge.specifier);
         // Validate literal workspace lazy edges without counting their bytes.
-        if (pkg.workspace && !isBuiltin(edge.specifier)) resolve(file, pkg, edge);
+        if (pkg.workspace && (edge.specifier.startsWith('.') || edge.specifier.startsWith('#') || edge.specifier.startsWith('@byok-sdk/'))) {
+          const target = resolve(file, pkg, edge);
+          if (target?.unavailableOptional) unavailableOptional.push(target.unavailableOptional);
+        }
       }
       for (const edge of scan.imports) {
         if (pkg.workspace && !edge.specifier.startsWith('.')) bare.push(edge.specifier);
-        if (isBuiltin(edge.specifier)) builtins.push(edge.specifier);
+        if (isBuiltin(edge.specifier)) builtins[pkg.workspace ? 'workspace' : 'thirdParty'].push(edge.specifier);
         const resolved = resolve(file, pkg, edge);
-        if (resolved) visit(resolved.file, resolved.pkg);
+        if (resolved?.unavailableOptional) unavailableOptional.push(resolved.unavailableOptional);
+        else if (resolved?.opaqueImport) {
+          opaqueImports.push(`${display}: ${resolved.opaqueImport}`);
+          codegen.push({ file: display, line: 0, rule: `unresolved external dependency ${resolved.opaqueImport}` });
+        }
+        else if (resolved) visit(resolved.file, resolved.pkg);
       }
     }
     visit(fileAt(entry.target, entry.pkg), entry.pkg);
-    const result = { bytes, bareImports: sorted(bare), lazyImports: sorted(lazy), thirdParty: sorted(third),
-      nodeBuiltins: sorted(builtins), codegen: codegen.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.rule.localeCompare(b.rule)) };
+    const result = { bytes, bareImports: sorted(bare), lazyImports: sorted(lazy), thirdParty: sorted(third), unavailableOptional: sorted(unavailableOptional), opaqueImports: sorted(opaqueImports),
+      nodeBuiltins: { workspace: sorted(builtins.workspace), thirdParty: sorted(builtins.thirdParty) }, codegen: codegen.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.rule.localeCompare(b.rule)) };
     closureCache.set(entry.target, result);
     return result;
   };
@@ -193,7 +218,8 @@ export function checkEntryClosure(root, { update = false } = {}) {
       const policy = record.policy;
       if (!policy || typeof policy.purpose !== 'string' || !policy.purpose.trim()
         || !Number.isSafeInteger(policy.budgetBytes) || policy.budgetBytes < 0
-        || ['zod', 'codegen', 'nodeBuiltins'].some(key => typeof policy[key] !== 'boolean')) throw new Error('invalid entry policy');
+        || ['zod', 'codegen'].some(key => typeof policy[key] !== 'boolean')
+        || !policy.nodeBuiltins || ['workspace', 'thirdParty'].some(key => typeof policy.nodeBuiltins[key] !== 'boolean')) throw new Error('invalid entry policy');
       for (const type of entry.types) {
         const target = path.resolve(root, type);
         if (!inside(path.join(entry.pkg.directory, 'dist'), target) || !existsSync(target)) throw new Error(`missing or escaped declaration target ${type}`);
@@ -201,9 +227,10 @@ export function checkEntryClosure(root, { update = false } = {}) {
       const result = walk(entry);
       measured.push({ id: entry.id, bytes: result.bytes, budgetBytes: policy.budgetBytes });
       const via = result.bareImports.join(', ');
-      if (!policy.zod && result.thirdParty.includes('zod')) throw new Error(`zod is forbidden; specifiers: ${via}`);
+      if (!policy.zod && [...result.thirdParty, ...result.unavailableOptional.map(packageName)].includes('zod')) throw new Error(`zod is forbidden; specifiers: ${via}`);
+      if ((result.unavailableOptional.length || result.opaqueImports.length) && (!policy.codegen || !policy.nodeBuiltins.thirdParty)) throw new Error(`strict policy cannot prove optional dependency safety: ${[...result.unavailableOptional, ...result.opaqueImports].join(', ')}`);
       if (!policy.codegen && result.codegen.length) throw new Error(`code generation is forbidden: ${JSON.stringify(result.codegen.slice(0, 3))}; specifiers: ${via}`);
-      if (!policy.nodeBuiltins && result.nodeBuiltins.length) throw new Error(`Node builtins are forbidden: ${result.nodeBuiltins.join(', ')}`);
+      for (const layer of ['workspace', 'thirdParty']) if (!policy.nodeBuiltins[layer] && result.nodeBuiltins[layer].length) throw new Error(`Node builtins are forbidden in ${layer}: ${result.nodeBuiltins[layer].join(', ')}`);
       if (result.bytes > policy.budgetBytes) throw new Error(`closure ${result.bytes} bytes exceeds budget ${policy.budgetBytes}`);
       const { bytes, ...facts } = result;
       const next = { kind: entry.kind, policy, facts: { target: posix(path.relative(root, entry.target)), conditions: entry.conditions, types: entry.types, ...facts } };
