@@ -1,6 +1,6 @@
 # #412 Cloud retention / maintenance
 
-Status: PR #456 is open and non-draft; rebased onto main 76e59b21. Approved test migrations pass targeted checks; excluded #437 fixture remains a CI integration gap.
+Status: PR #456 is open and non-draft; rebased onto main 76e59b21. Approved test migrations pass targeted checks; the later authorized fixture methods pass client build/typecheck. Hosted CI remains the integration gate.
 Branch: `fix/412-maintenance-ports`.
 Initial base: `5ef13002`; integrate latest cached main normally before final checks.
 
@@ -8,7 +8,9 @@ Initial base: `5ef13002`; integrate latest cached main normally before final che
 
 Issue #412 defines ten bounded expired-state ports and one cloud executor.
 Latest owner instruction requires targeted tests only with one worker, no
-full-repo suites, no #437 fixture edits, and a non-draft PR without merge.
+full-repo suites, and a non-draft PR without merge. The later 16:30 owner
+instruction permits only the execution-recovery receipt/pairing collectExpired
+fixture migration; other #437/auth changes remain excluded.
 #436 settlement, #437 client retention, #430 wake and #431 Summary are excluded.
 
 ## P1 / P2 / P3
@@ -40,7 +42,9 @@ There is one writer in this worktree; the old worker's WIP is untouched.
 - [x] Verify 86 server tests and seven physical-object tests against real Postgres/S3 with one worker.
 - [x] Publish approved migration commit; hosted tests pass 388 dataplane / 181 conformance, exposing the untyped release consumer constructor gap.
 - [x] Migrate only its two core factory arguments and pass the recurring smoke against built packages and real Postgres/S3.
-- [ ] Publish constructor migration and record hosted installed-artifact CI status.
+- [x] Publish constructor migration; owner updates branch onto main c6af648d (4b9e3f81).
+- [x] Implement the newly authorized fixture collector methods and pass client build/typecheck.
+- [ ] Publish fixture migration and record hosted installed-artifact CI status.
 
 ## Verification boundary
 
@@ -54,6 +58,6 @@ Host-shell Postgres/S3 ports and GitHub CLI are now reachable through Herdr.
 The seven physical-object retention tests pass without skips. Direct restricted
 execution still has network limitations; shared Colima repair is outside scope.
 
-No full-root verification, client fixtures, installed migration edits, flags,
+No full-root verification, other client fixture/auth changes, installed migration edits, flags,
 compatibility aliases or worker merge are authorized. The later owner request
 explicitly authorized rebasing the feature branch; main history remains untouched.

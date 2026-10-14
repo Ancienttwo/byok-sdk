@@ -1,6 +1,6 @@
 # #412 retention architecture and decision evidence
 
-Status: PR #456 is open; rebase verification is recorded below. Originally based on `5ef13002`, merged `origin/main@a10c67a0` normally, preserving #440 stats, #414 SQLite ownership and #413 TTL presence. The old worker WIP and #437 fixtures are untouched.
+Status: PR #456 is open; rebase verification is recorded below. Originally based on `5ef13002`, merged `origin/main@a10c67a0` normally, preserving #440 stats, #414 SQLite ownership and #413 TTL presence. The old worker WIP is untouched. The owner later authorized only the execution-recovery fixture port migration recorded below.
 
 ## P1: map
 
@@ -35,7 +35,7 @@ Committed reservations of both kinds remain protected accounting identity: PG us
 - `CollectExpiredFailure` preserves confirmed committed counts, counts failed rows separately, and omits unknown remainder. A real SQLite remainder-probe fault reproduced lost counts after byte/manifest/accounting commit; the regression now proves those counts survive. PG uses the same contract, but its live regression remains unverified while the local substrate is unreachable.
 - The scheduler is constructed last. Close awaits a settled pass, then releases stores, while the pass consumer retains its original error. No shutdown error shim is introduced.
 - No installed migration bytes were changed. `cleanup_job` remains installed without writers.
-- Latest owner scope limits verification to targeted tests with one worker. No full-repo suite or client fixture edits are authorized for this slice.
+- Verification is limited to targeted tests with one worker. The later owner instruction authorizes the execution-recovery receipt/pairing collectExpired fixture migration only; other #437/auth changes remain excluded.
 
 
 ## Initial feature verification (2026-10-14, before rebase)
@@ -54,10 +54,10 @@ claim is derived from that result. The analogous SQLite fault was first red
 on lost committed counts and is now green. Installed SQL and SQLite ownership
 support files have no diff from main.
 
-The client execution-recovery fixture still implements receipts and pairing
-ports without collectExpired. Latest owner explicitly excludes these fixture
-edits; this is a known downstream typecheck/CI integration gap for the #437
-owner, not resolved by optional port methods or compatibility code.
+At initial verification the client execution-recovery fixture lacked the new
+receipt/pairing methods and its edits were excluded. The later explicit owner
+authorization and completed migration are recorded below; no optional port
+methods or compatibility code were added.
 GitHub access initially failed in the restricted execution environment. The host
 shell through Herdr later published PR #456; current CI status belongs to GitHub.
 
@@ -87,8 +87,8 @@ typechecks passed again. The restored host Postgres/S3 substrate ran all seven
 physical-object retention tests successfully with `BYOK_REQUIRE_DATAPLANE=1`
 and one worker, including row-lock concurrency, same-hash recreation, physical
 DELETE response loss, exact accounting and committed-count preservation.
-These focused results do not establish full-repository CI green; the excluded
-#437 fixture still needs its required receipt/pairing port implementations.
+These focused results alone do not establish full-repository CI green. The
+subsequently authorized receipt/pairing fixture migration is recorded below.
 
 
 ## JavaScript release consumer migration
@@ -106,3 +106,23 @@ links to this worktree's built packages, passes against real Postgres/S3 on
 Node 24.18.0. It covers the independent reopen and body-commit/crash/replay legs.
 This local check is built-workspace evidence; installed-tarball evidence stays
 with the hosted release smoke. Full-repository verification remains excluded.
+
+
+## Owner-authorized execution-recovery fixture port migration
+
+The owner updated the feature branch onto main c6af648d, yielding 4b9e3f81,
+then explicitly authorized fixing its two missing collectExpired methods.
+SqliteFixtureReceipts owns fixture_receipt, so its collector uses the same
+REQUEST_RECEIPT_PREFIXES authority and input validation as the real store,
+with a tenant-scoped, timestamp-ordered batch and transactional remainder probe.
+Identity/unknown receipts remain protected; the current request-family set is
+empty. The existing ownerWrite guard preserves exclusive SQLite ownership and
+the committed-receipt SIGKILL hook. Pairing binds the existing collector on the
+same InMemoryPairingCodeStore that owns issue/redeem. No assertion or auth path
+changes and no fixture behavior fallback are included.
+
+Client build and both client typecheck passes succeed. The selected committed-
+receipt SIGKILL case fails before its recovery scenario: the OS credential
+provider cannot replace device credentials during first pairing. This local
+prerequisite failure is reported, without altering credentials, auth, test
+assertions, deadlines or skips. Hosted CI remains the integration gate.

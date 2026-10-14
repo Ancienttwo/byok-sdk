@@ -8,17 +8,19 @@ import {
   createHmacTokenSigner,
   createWebCrypto,
   fullCapabilityDeclaration,
+  REQUEST_RECEIPT_PREFIXES,
   tenantId,
   type DeviceDirectory,
   type DeviceRecord,
   type DeviceRegistration,
   type InboundDedupStore,
+  type ReceiptCollectExpiredInput,
   type RequestReceipt,
   type RequestReceiptStore,
 } from '../../../../cloud/src/index';
 import { InMemoryPairingCodeStore } from '../../../../cloud/src/stores/in-memory/pairing-codes';
 import { createSqliteEmbeddedStores } from '../../../../server/src/stores/sqlite/index';
-import { PRESENCE_LEVELS, type PresenceStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
+import { assertCanonicalTimestamp, assertCollectExpiredInput, PRESENCE_LEVELS, type CollectExpiredResult, type PresenceStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { AgentRef } from '@byok-sdk/protocol';
 
 interface Config {
@@ -245,6 +247,29 @@ class SqliteFixtureDevices implements DeviceDirectory {
 }
 
 class SqliteFixtureReceipts implements RequestReceiptStore {
+  async collectExpired(owner: TenantId, input: ReceiptCollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    assertCanonicalTimestamp(input.requestBefore, 'requestBefore');
+    return ownerWrite(() => {
+      if (REQUEST_RECEIPT_PREFIXES.length === 0) return { removed: 0, expired: 0, releasedBytes: 0n, more: false };
+      const predicate = REQUEST_RECEIPT_PREFIXES.map(() => 'substr(receipt_key, 1, length(?)) = ?').join(' OR ');
+      const parameters = REQUEST_RECEIPT_PREFIXES.flatMap(prefix => [prefix, prefix]);
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const removed = Number(db.prepare(`DELETE FROM fixture_receipt WHERE rowid IN
+          (SELECT rowid FROM fixture_receipt WHERE tenant_id = ? AND recorded_at < ? AND (${predicate}) ORDER BY recorded_at, receipt_key LIMIT ?)`)
+          .run(owner, input.requestBefore, ...parameters, input.limit).changes);
+        const more = db.prepare(`SELECT 1 FROM fixture_receipt WHERE tenant_id = ? AND recorded_at < ? AND (${predicate}) LIMIT 1`)
+          .get(owner, input.requestBefore, ...parameters) !== undefined;
+        db.exec('COMMIT');
+        return { removed, expired: 0, releasedBytes: 0n, more };
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+    });
+  }
+
   async record(owner: TenantId, input: { readonly key: string; readonly body: string }): Promise<{ receipt: RequestReceipt; created: boolean }> {
     const recordedAt = clock.now().toISOString();
     const result = await ownerWrite(() => {
@@ -294,7 +319,7 @@ const pairing = new InMemoryPairingCodeStore(clock, devices);
 const stores = {
   ...embedded.cloud,
   devices,
-  pairingCodes: { issue: pairing.issue.bind(pairing) },
+  pairingCodes: { issue: pairing.issue.bind(pairing), collectExpired: pairing.collectExpired.bind(pairing) },
   pairing: { redeemAndRegister: pairing.redeemAndRegister.bind(pairing) },
   receipts: new SqliteFixtureReceipts(),
   dedup: new SqliteFixtureDedup(),
