@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { defineConfig } from 'tsup';
 import { subagentsBuild } from './scripts/subagents-build';
+import { workspaceExternals } from './scripts/workspace-externals';
 
 const manifest = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version?: unknown };
 if (typeof manifest.version !== 'string') throw new Error('packages/client/package.json must declare a string version');
@@ -32,8 +33,9 @@ export default defineConfig({
   clean: true,
   splitting: false,
   treeshake: true,
-  noExternal: ['pi-web-access'],
-  esbuildPlugins: [subagentsBuild(false)],
+  // Let our plugin annotate these external edges before tsup short-circuits them.
+  noExternal: ['pi-web-access', /^@byok-sdk\//],
+  esbuildPlugins: [workspaceExternals(), subagentsBuild(false)],
   // koffi is the win32 job-object backstop's native binding layer and an
   // `optionalDependencies` entry: it must stay a runtime resolution so a
   // non-win32 install (where the addon may be absent) never has it inlined,
