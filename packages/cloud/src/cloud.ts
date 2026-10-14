@@ -22,9 +22,7 @@ import { HarnessIdSchema, requiredReceiverCapabilities } from '@byok-sdk/protoco
  * `src/__tests__/constraints.test.ts`.
  */
 import {
-  STORAGE_ERROR_HTTP_STATUS,
   contentHash,
-  isCoreError,
   parseCapabilityDeclaration,
   type BoardItem,
   type BoardItemInput,
@@ -915,42 +913,17 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   }
 
   if (declares(declaration, CLOUD_CAPABILITIES.messagesBatch)) {
-    // The batch appends server replies (acks, dispositions) to the device's
-    // mailbox. A full mailbox refuses them with `storage_quota_exceeded`, and
-    // the route answers its wire-stable 507 (§8.2) instead of a 500: resending
-    // the same batch is safe, because its duplicates re-append the same
-    // idempotent replies once the mailbox has room.
-    const messages = messagesHandler({
-      ...deviceRouteDeps,
-      activityBounds,
-      appendReliableEgressAck: enqueueReliableEgressAck,
-      appendContentReceiptAck: enqueueContentReceiptAck,
-      agentMessage: options.agentMessage,
-      appendAgentMessageDisposition: enqueueAgentMessageDisposition,
-      observer: options.observer,
-    });
     registry.register(
       { method: 'POST', path: BYOK_MESSAGES_PATH, class: 'device' },
-      async (c) => {
-        try {
-          return await messages(c);
-        } catch (cause) {
-          if (isCoreError(cause, 'storage_quota_exceeded')) {
-            return c.json(
-              { error: cause.code },
-              STORAGE_ERROR_HTTP_STATUS.storage_quota_exceeded,
-            );
-          }
-          // A tenant the Host never issued an entitlement to: the client keeps
-          // the batch and retries with backoff until the Host issues one. The
-          // typed 409 the blob routes use makes the cause visible, instead of
-          // an opaque 500, so operators can tell it from a full mailbox (507).
-          if (isCoreError(cause, 'storage_entitlement_missing')) {
-            return c.json({ error: cause.code }, 409);
-          }
-          throw cause;
-        }
-      },
+      messagesHandler({
+        ...deviceRouteDeps,
+        activityBounds,
+        appendReliableEgressAck: enqueueReliableEgressAck,
+        appendContentReceiptAck: enqueueContentReceiptAck,
+        agentMessage: options.agentMessage,
+        appendAgentMessageDisposition: enqueueAgentMessageDisposition,
+        observer: options.observer,
+      }),
     );
   }
 
