@@ -1451,7 +1451,13 @@ describe('4e-2 review fixes: independent consumer closes and legacy reads', () =
     const availableAt = Date.now() + 200;
     const item = await enqueue(name, { dedupKey: 'wake-during-close-failure', text: 'future wake is independent', availableAt });
     await json(name, 'release-alarm');
-    await vi.waitFor(async () => expect((await dump(name)).cloud_executions!.find(row => row.trigger === 'wake')).toMatchObject({ state: 'completed', settlementAck: 1 }), { timeout: 5_000 });
+    // The wake may run in the held alarm or in its platform retry, depending on whether it is due
+    // when that alarm resumes. Either way the older close fails, so wait for the retry it causes.
+    await vi.waitFor(async () => {
+      const rows = await dump(name);
+      expect(rows.cloud_executions!.find(row => row.trigger === 'wake')).toMatchObject({ state: 'completed', settlementAck: 1 });
+      expect(rows.fixture_alarms).toEqual(expect.arrayContaining([expect.objectContaining({ retryCount: 1 })]));
+    }, { timeout: 5_000 });
     const activeRetry = await dump(name);
     expect(activeRetry.cloud_executions!.find(row => row.conversationId === olderId)).toMatchObject({ state: 'completed', settlementAck: 0, steps: 1, sentRequests: 1, inputTokens: 11, outputTokens: 2 });
     expect(activeRetry.cloud_inbox).toMatchObject([{ seq: item.seq, state: 'done', attempts: 1 }]);
