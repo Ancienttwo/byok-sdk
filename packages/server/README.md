@@ -13,7 +13,6 @@ use `@byok-sdk/cloud` with `@byok-sdk/cloud-dataplane` instead.
 
 MIT licensed. Node.js 24.15.0 or newer.
 
-
 ## Storage
 
 State is in memory by default. `storage: { kind: 'sqlite', path }` persists:
@@ -30,7 +29,6 @@ well: device presence, `TaskHandle` promises and the task-event relay, the
 approval timeline, inbound dedup, nonces, Agent egress receipt readback
 (`egress.get`), activity, unredeemed pairing codes, storage quota accounting,
 and the token signing key when you do not pass `tokenSigner`.
-
 
 A SQLite file has one owner at a time; see
 [One process per SQLite file](#one-process-per-sqlite-file).
@@ -107,7 +105,6 @@ What a restart does not keep:
   [Persistent host request identity](#persistent-host-request-identity));
 - with memory storage, everything, including enrollment: devices must pair
   again.
-
 
 ## Device presence
 
@@ -192,9 +189,7 @@ live device advertises `toolset-selection` and its `configuredToolsets`
 inventory contains every required ID. `machines.list()` projects that same
 logical-ID-only inventory; MCP commands and credentials remain device-local.
 
-
 ## SQLite receipts and schema adoption
-
 
 Pairing and authentication share the persisted device directory. Receipt keys
 are tenant scoped and first-write-wins. Mailbox retention never deletes
@@ -254,7 +249,6 @@ selectors, with no alias or silent reinterpretation: callers must update their
 one-shot migration configuration after checking eligibility and backing up.
 Restore of a backup requires a separate recovery procedure because it can lose
 new state or restore old grants. Schema v4 shipped in 0.24.0.
-
 
 ## Persistent host request identity
 
