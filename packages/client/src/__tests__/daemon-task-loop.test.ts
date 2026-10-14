@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -32,7 +33,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     const workspaceRoot = await tmpDir('byok-client-workspace-');
     const storeDir = await tmpDir('byok-client-store-');
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product',
         serverUrl: server.url,
@@ -91,7 +92,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     expect(complete.payload).toMatchObject({ summary: 'working...', sessionRef: session?.sessionRef });
     expect(session?.closeCalled).toBe(true);
 
-    expect(daemon?.status().activeTaskCount).toBe(0);
+    await vi.waitFor(() => expect(daemon?.status().activeTaskCount).toBe(0));
   });
 
   it('cancel mid-task calls interrupt and reports the explicit task.cancelled message (M1 gap #6)', async () => {

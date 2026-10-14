@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -43,7 +44,7 @@ describe('task.offer admission gates (M5 batch-3)', () => {
     const workspaceRoot = await tmpDir('byok-admission-workspace-');
     const storeDir = await tmpDir('byok-admission-store-');
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-admission',
         serverUrl: server.url,

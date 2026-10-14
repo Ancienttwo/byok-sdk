@@ -1513,12 +1513,9 @@ describe('PR187 review regressions', () => {
     const service = await makeService({ storeDir, limits, now: () => clock });
     await service.prepare(request());
     clock += 401;
-    // The GC timer delay comes from the fake clock; each poll advances the fake
-    // timers until GC publishes the durable record update, after artifact unlink.
-    await vi.waitFor(async () => {
-      expect(service.store.list()[0]?.artifactBytes).toBe(0);
-      expect(await fs.readdir(path.join(storeDir, 'input-preparation', 'artifacts'))).toEqual([]);
-    }, { timeout: 5_000 });
+    await service.collectExpired(clock, 32);
+    expect(service.store.list()[0]?.artifactBytes).toBe(0);
+    expect(await fs.readdir(path.join(storeDir, 'input-preparation', 'artifacts'))).toEqual([]);
     expect(service.store.list()).toHaveLength(1);
     expect(service.store.list()[0]?.artifactBytes).toBe(0);
     const expired = await service.lookup({ requestId: 'prep-1', scope: request().scope });
@@ -1526,9 +1523,8 @@ describe('PR187 review regressions', () => {
     expect(expired.readinessReasons).toContain('artifact_expired');
     expect(expired.pin).toBeUndefined();
     clock += 100;
-    await vi.waitFor(() => {
-      expect(service.store.list()).toEqual([]);
-    }, { timeout: 5_000 });
+    await service.collectExpired(clock, 32);
+    expect(service.store.list()).toEqual([]);
   });
 
   it('collects artifacts on restart after both horizons without another prepare', async () => {
@@ -1543,20 +1539,14 @@ describe('PR187 review regressions', () => {
     expect(await fs.readdir(path.join(storeDir, 'input-preparation', 'artifacts'))).toEqual([]);
   });
 
-  it('latches background GC faults for subsequent access and stop', async () => {
-    useFakeTimeouts();
-    const limits = { ...LIMITS, counterTimeoutMs: 100, preparationDeadlineMs: 200, retentionMs: 400, retryHorizonMs: 100 };
-    const service = await makeService({ limits });
-    await service.prepare(request());
+  it('reports a unified-pass GC failure directly without publishing a private service fault latch', async () => {
+    const service = await makeService(); await service.prepare(request());
     const fault = new Error('GC filesystem offline');
-    const gc = vi.spyOn(service.store, 'gc').mockRejectedValue(fault);
-    await vi.waitFor(() => {
-      expect(gc).toHaveBeenCalled();
-    }, { timeout: 5_000 });
-    await expect(service.lookup({ requestId: 'prep-1', scope: request().scope })).rejects.toBe(fault);
-    await expect(service.stop()).rejects.toBe(fault);
-    gc.mockRestore();
+    const gc = vi.spyOn(service.store, 'gc').mockRejectedValueOnce(fault);
+    await expect(service.collectExpired(Date.now(), 32)).rejects.toBe(fault);
+    gc.mockRestore(); await expect(service.stop()).resolves.toBeUndefined();
   });
+
 });
 
 
@@ -1583,27 +1573,13 @@ describe('PR187 retention lifecycle races', () => {
     expect(service.store.list()[0]?.state).toBe('cancelled');
   });
 
-  it('waits for in-flight GC on stop and leaves no timer running', async () => {
-    useFakeTimeouts();
-    const service = await makeService({ limits: { ...LIMITS, counterTimeoutMs: 100, preparationDeadlineMs: 200, retentionMs: 400, retryHorizonMs: 100 } });
-    await service.prepare(request());
-    let release!: () => void;
-    const gate = new Promise<{ artifactsRemoved: number; recordsRemoved: number }>((resolve) => {
-      release = () => resolve({ artifactsRemoved: 0, recordsRemoved: 0 });
-    });
-    const gc = vi.spyOn(service.store, 'gc').mockReturnValue(gate);
-    while (gc.mock.calls.length === 0) await vi.advanceTimersByTimeAsync(5);
-    let stopped = false;
-    const stop = service.stop().then(() => { stopped = true; });
-    await new Promise((done) => setImmediate(done));
-    expect(stopped).toBe(false);
-    release();
-    await stop;
-    // Past retentionMs + retryHorizonMs, so any timer left armed would fire.
-    await vi.advanceTimersByTimeAsync(1_000);
-    expect(gc).toHaveBeenCalledTimes(1);
-    gc.mockRestore();
+  it('creates no private expiry timer; the unified sweeper owns the stop barrier', async () => {
+    useFakeTimeouts(); const service = await makeService(); await service.prepare(request());
+    const gc = vi.spyOn(service.store, 'gc');
+    await vi.advanceTimersByTimeAsync(1_000_000); expect(gc).not.toHaveBeenCalled();
+    await service.stop(); expect(vi.getTimerCount()).toBe(0);
   });
+
 });
 
 

@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,11 +14,14 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import * as runtimeStart from '../daemon/runtime-start';
 import { RuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../runtime-failure';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
-import { freezeRuntimeAdapterDescriptor } from '../types';
+import { freezeRuntimeAdapterDescriptor, type Session } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 const roots: string[] = [];
-afterEach(async () => Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))));
+afterEach(async () => {
+  vi.restoreAllMocks();
+  await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+});
 
 async function temporary(prefix: string): Promise<string> {
   const value = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -32,7 +36,7 @@ async function cancellationFixture() {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const deps: TaskRunnerDeps = {
+    const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: await temporary('byok-publish-cancel-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }), agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-cancel',
@@ -97,6 +101,19 @@ describe('required Agent message completion gate', () => {
     let workspaceDir = '';
     for (let index = 0; index < 65; index++) {
       const releaseStart = adapter.blockStart();
+      let signalStart!: () => void;
+      const startReached = new Promise<void>(resolve => { signalStart = resolve; });
+      let startReceipt: Promise<Session> | undefined;
+      const prepare = adapter.prepare.bind(adapter);
+      const prepareSpy = vi.spyOn(adapter, 'prepare').mockImplementation(async input => {
+        const result = await prepare(input);
+        if (result.kind !== 'prepared') return result;
+        return { ...result, operation: { ...result.operation, start: startInput => {
+          startReceipt = result.operation.start(startInput);
+          signalStart();
+          return startReceipt;
+        } } };
+      });
       const taskId = `pre-active-${index}`;
       const offer = runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
         instruction: 'reply', runtime: 'pi',
@@ -104,7 +121,12 @@ describe('required Agent message completion gate', () => {
         messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
       }, { taskId, seq: index * 2 + 1 }));
       try {
-        await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(index + 1));
+        // Startup performs real filesystem work. Its actual start barrier,
+        // rather than a one-second poll, defines the pre-active cancel window.
+        await Promise.race([startReached, offer.then(() => {
+          throw new Error('offer settled before the staged runtime started');
+        })]);
+        expect(adapter.startCalls).toHaveLength(index + 1);
         const ctx = adapter.startCalls[index]!.ctx;
         workspaceDir = ctx.workspaceDir;
         expect(await runner.publishAgentMessage({
@@ -121,8 +143,10 @@ describe('required Agent message completion gate', () => {
         const reopened = await AgentMessageOutbox.open(workspaceDir);
         expect(reopened.retryableRecords()).toHaveLength(0);
       } finally {
+        prepareSpy.mockRestore();
         releaseStart();
-        await vi.waitFor(() => expect(adapter.sessions).toHaveLength(index + 1));
+        await startReceipt;
+        expect(adapter.sessions).toHaveLength(index + 1);
         await runner.shutdownActiveTasks('late Session cleanup');
         await offer;
       }
@@ -147,6 +171,19 @@ describe('required Agent message completion gate', () => {
   it.each(['late-session', 'quiescent-start-failure'] as const)('pre-active %s retains ownership when revoke fails and retries settlement once', async (mode) => {
     const { runner, adapter, sent } = await cancellationFixture();
     const releaseStart = adapter.blockStart();
+    let signalStart!: () => void;
+    const reachedStart = new Promise<void>(resolve => { signalStart = resolve; });
+    let startReceipt: Promise<Session> | undefined;
+    const prepare = adapter.prepare.bind(adapter);
+    const prepareSpy = vi.spyOn(adapter, 'prepare').mockImplementation(async input => {
+      const prepared = await prepare(input);
+      if (prepared.kind !== 'prepared') return prepared;
+      return { ...prepared, operation: { ...prepared.operation, start: startInput => {
+        startReceipt = prepared.operation.start(startInput);
+        signalStart();
+        return startReceipt;
+      } } };
+    });
     const startOwnedRuntime = runtimeStart.startOwnedRuntime;
     // Exercise the other catch branch with an explicit quiescent startup
     // failure receipt, after the real aborted start's late Session is closed.
@@ -154,29 +191,37 @@ describe('required Agent message completion gate', () => {
       try { return await startOwnedRuntime(...args); } catch (error) {
         if (mode === 'late-session' || !isRuntimeStartupDisposalFailure(error)) throw error;
         releaseStart();
-        await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+        await startReceipt;
+        expect(adapter.sessions).toHaveLength(1);
+        const ownedStart = runtimeStart.abortedStartOf(error);
+        expect(ownedStart).toBeDefined();
+        await ownedStart!.settled;
         await error.retryDisposal();
         throw new RuntimeExecutionFailure({ phase: 'start', category: 'infrastructure', retry: 'non-retryable', reason: 'cancelled startup is quiescent' });
       }
     });
     const taskId = `revoke-failure-${mode}`;
-    const offer = runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-      instruction: 'reply', runtime: 'pi',
-      agentRef: { agentId: 'revoke-failure-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
-      messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
-    }, { taskId, seq: 1 }));
-    await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
-    const ctx = adapter.startCalls[0]!.ctx;
-    const token = ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!;
-    await runner.publishAgentMessage({ contextToken: token, contentType: 'text/markdown', body: 'retain exact draft' });
-    let releaseRevoke!: () => void;
-    const barrier = new Promise<void>(resolve => { releaseRevoke = resolve; });
-    const revoke = AgentMessageOutbox.prototype.revoke;
-    const revokeSpy = vi.spyOn(AgentMessageOutbox.prototype, 'revoke').mockImplementationOnce(async () => {
-      await barrier;
-      throw new Error('injected revoke write failure');
-    });
+    let offer: Promise<void> | undefined;
+    let releaseRevoke = () => {};
+    let restoreRevoke = () => {};
     try {
+      offer = runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+        instruction: 'reply', runtime: 'pi',
+        agentRef: { agentId: 'revoke-failure-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
+      }, { taskId, seq: 1 }));
+      await Promise.race([reachedStart, offer.then(() => { throw new Error('offer settled before the staged runtime started'); })]);
+      expect(adapter.startCalls).toHaveLength(1);
+      const ctx = adapter.startCalls[0]!.ctx;
+      const token = ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!;
+      await runner.publishAgentMessage({ contextToken: token, contentType: 'text/markdown', body: 'retain exact draft' });
+      const barrier = new Promise<void>(resolve => { releaseRevoke = resolve; });
+      const revoke = AgentMessageOutbox.prototype.revoke;
+      const revokeSpy = vi.spyOn(AgentMessageOutbox.prototype, 'revoke').mockImplementationOnce(async () => {
+        await barrier;
+        throw new Error('injected revoke write failure');
+      });
+      restoreRevoke = () => revokeSpy.mockRestore();
       await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'cancel' }, { taskId, seq: 2 }));
       await vi.waitFor(() => expect(revokeSpy).toHaveBeenCalled());
       expect(sent.filter(e => e.type === 'task.cancelled')).toHaveLength(0);
@@ -188,7 +233,8 @@ describe('required Agent message completion gate', () => {
       expect((await AgentMessageOutbox.open(ctx.workspaceDir)).records()).toHaveLength(1);
       await expect(runner.publishAgentMessage({ contextToken: token, contentType: 'text/markdown', body: 'stale' })).rejects.toThrow();
       releaseStart();
-      await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+      await startReceipt;
+      expect(adapter.sessions).toHaveLength(1);
       revokeSpy.mockImplementation(revoke);
       await runner.shutdownActiveTasks('retry durable settlement');
       await runner.shutdownActiveTasks('idempotent cleanup');
@@ -198,7 +244,7 @@ describe('required Agent message completion gate', () => {
       expect(sent.filter(e => e.type === 'agent.message.publish')).toHaveLength(0);
       expect((await AgentMessageOutbox.open(ctx.workspaceDir)).retryableRecords()).toHaveLength(0);
     } finally {
-      releaseRevoke(); releaseStart(); revokeSpy.mockRestore(); startSpy.mockRestore();
+      releaseRevoke(); releaseStart(); restoreRevoke(); startSpy.mockRestore(); prepareSpy.mockRestore();
       await offer; await runner.shutdownActiveTasks('cleanup'); runner.stopAcceptingOffers();
     }
   });
@@ -206,26 +252,42 @@ describe('required Agent message completion gate', () => {
   it('startup cancellation durably revokes a staged message activated while start was in flight', async () => {
     const { runner, adapter, sent, deps } = await cancellationFixture();
     const releaseStart = adapter.blockStart();
-    const taskId = 'startup-cancel-message';
-    const offer = runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
-      instruction: 'reply', runtime: 'pi',
-      agentRef: { agentId: 'startup-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
-      messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
-    }, { taskId, seq: 1 }));
-    await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
-    const ctx = adapter.startCalls[0]!.ctx;
-    const token = ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!;
-    expect(await runner.publishAgentMessage({ contextToken: token, contentType: 'text/markdown', body: 'staged reply' })).toMatchObject({ state: 'staged' });
-    let release!: () => void;
-    let entered!: () => void;
-    const gate = new Promise<void>(resolve => { release = resolve; });
-    const reached = new Promise<void>(resolve => { entered = resolve; });
-    const activate = AgentMessageOutbox.prototype.activate;
-    const spy = vi.spyOn(AgentMessageOutbox.prototype, 'activate').mockImplementation(async function (this: AgentMessageOutbox, ...args) {
-      const record = await activate.apply(this, args);
-      entered(); await gate; return record;
+    let signalStart!: () => void;
+    const reachedStart = new Promise<void>(resolve => { signalStart = resolve; });
+    const prepare = adapter.prepare.bind(adapter);
+    const prepareSpy = vi.spyOn(adapter, 'prepare').mockImplementation(async input => {
+      const prepared = await prepare(input);
+      if (prepared.kind !== 'prepared') return prepared;
+      return { ...prepared, operation: { ...prepared.operation, start: startInput => {
+        const receipt = prepared.operation.start(startInput);
+        signalStart();
+        return receipt;
+      } } };
     });
+    const taskId = 'startup-cancel-message';
+    let offer: Promise<void> | undefined;
+    let release = () => {};
+    let restoreActivate = () => {};
     try {
+      offer = runner.handleEnvelope(createEnvelope('task.offer_for_agent_with_egress_fresh', {
+        instruction: 'reply', runtime: 'pi',
+        agentRef: { agentId: 'startup-agent', profileRevision: '1' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
+      }, { taskId, seq: 1 }));
+      await Promise.race([reachedStart, offer.then(() => { throw new Error('offer settled before the staged runtime started'); })]);
+      expect(adapter.startCalls).toHaveLength(1);
+      const ctx = adapter.startCalls[0]!.ctx;
+      const token = ctx.mcpServers!.byokagentmessage!.env!.BYOK_AGENT_MESSAGE_CONTEXT!;
+      expect(await runner.publishAgentMessage({ contextToken: token, contentType: 'text/markdown', body: 'staged reply' })).toMatchObject({ state: 'staged' });
+      let entered!: () => void;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      const reached = new Promise<void>(resolve => { entered = resolve; });
+      const activate = AgentMessageOutbox.prototype.activate;
+      const spy = vi.spyOn(AgentMessageOutbox.prototype, 'activate').mockImplementation(async function (this: AgentMessageOutbox, ...args) {
+        const record = await activate.apply(this, args);
+        entered(); await gate; return record;
+      });
+      restoreActivate = () => spy.mockRestore();
       releaseStart();
       await reached;
       await runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'startup cancelled' }, { taskId, seq: 2 }));
@@ -238,7 +300,7 @@ describe('required Agent message completion gate', () => {
       recovery.retryRecoveredAgentMessages();
       expect(sent.filter(e => e.type === 'agent.message.publish')).toHaveLength(0);
       expect(runner.activeTaskCount).toBe(0);
-    } finally { release(); releaseStart(); spy.mockRestore(); await offer; await runner.shutdownActiveTasks('cleanup'); }
+    } finally { release(); releaseStart(); restoreActivate(); prepareSpy.mockRestore(); await offer; await runner.shutdownActiveTasks('cleanup'); }
   });
 
   it('cancellation cannot emit terminal truth until an in-flight activation and its local revoke are durable', async () => {
@@ -311,7 +373,7 @@ describe('required Agent message completion gate', () => {
     const record = await outbox.activate('pending', 'session-one');
     const payload = outbox.publishPayload(record!);
     const sent: Envelope[] = [];
-    const createRunner = () => new TaskRunner({
+    const createRunner = () => new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [], workspaceRoot: root, storeDir: root, productId: 'recovery-test', deviceId: 'device-one', tenantId: 'tenant-one',
       send: (envelope) => sent.push(envelope),
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
@@ -347,7 +409,7 @@ describe('required Agent message completion gate', () => {
       const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
         steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
       });
-      const runner = new TaskRunner({
+      const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
         adapters: [adapter], workspaceRoot: await temporary('byok-refusal-workspace-'),
         agentHome: new AgentHomeManager({ hostStorageRoot }), agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-refusal',
@@ -435,7 +497,7 @@ describe('required Agent message completion gate', () => {
     const adapter = new StubRuntimeAdapter('codex', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: await temporary('byok-message-preflight-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -471,7 +533,7 @@ describe('required Agent message completion gate', () => {
       throw new Error('message-only output is not a research document');
     });
     const helperPreflight = vi.fn<NonNullable<TaskRunnerDeps['agentMessageMcpPreflight']>>(async () => {});
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: await temporary('byok-message-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -568,7 +630,7 @@ describe('required Agent message completion gate', () => {
     expect(sent.some((envelope) => envelope.type === 'task.complete' && envelope.task_id === refusedTaskId)).toBe(false);
 
     const restartSent: Envelope[] = [];
-    const restarted = new TaskRunner({
+    const restarted = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: await temporary('byok-message-restart-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -591,7 +653,7 @@ describe('required Agent message completion gate', () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: await temporary('byok-message-auto-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -634,7 +696,7 @@ describe('required Agent message completion gate', () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: await temporary('byok-message-empty-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -669,7 +731,7 @@ describe('required Agent message completion gate', () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: await temporary('byok-message-cap-workspace-'),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -720,7 +782,7 @@ describe('required Agent message completion gate', () => {
         value: freezeRuntimeAdapterDescriptor({ ...adapter.descriptor, progressEventsAreMessages: true }),
       });
     }
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter], workspaceRoot: await temporary(`byok-${prefix}-workspace-`),
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,

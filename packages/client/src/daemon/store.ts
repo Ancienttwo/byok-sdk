@@ -211,7 +211,7 @@ export class DeviceStore {
       }
       this.credentials = credentials;
     } else {
-      this.credentials = new DeviceCredentialStore({ productId });
+      this.credentials = new DeviceCredentialStore({ productId, storeDir });
     }
   }
 

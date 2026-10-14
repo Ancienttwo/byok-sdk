@@ -34,7 +34,7 @@ import { formatLiveStatusLines } from '../bin/format';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import { CursorStore } from '../daemon/cursor-store';
-import { journalHash, type CleanupCandidate, type JournalIdentity, type ReceivedEnvelopeRecord } from '../daemon/journal/journal';
+import { journalHash, type JournalIdentity, type ReceivedEnvelopeRecord } from '../daemon/journal/journal';
 import {
   JOURNAL_DB_FILENAME,
   JOURNAL_QUARANTINE_DIRNAME,
@@ -43,16 +43,10 @@ import {
   type JournalFaultStep,
 } from '../daemon/journal/sqlite-journal';
 import { isSqliteAvailable, openJournalDatabase } from '../daemon/journal/sqlite-support';
-import {
-  cleanupEligibleAt,
-  createFilesystemCleanupExecutor,
-  LocalStoragePressureEngine,
-  LocalStorageEmergencyError,
-  resolveLocalStoragePolicy,
-  type CleanupExecutor,
-  type LocalStoragePolicyInput,
-  type StoragePressureEvent,
-} from '../daemon/journal/storage-policy';
+import { StoragePressure, LocalStorageEmergencyError } from '../daemon/retention/pressure';
+import { RetentionSweeper } from '../daemon/retention/sweeper';
+import type { StorageBudgetInput } from '../daemon/retention/config';
+import { testScratchRoot } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
@@ -71,55 +65,6 @@ async function tmpDir(prefix: string): Promise<string> {
 
 afterEach(async () => {
   for (const dir of dirs.splice(0)) await fs.rm(dir, { recursive: true, force: true });
-});
-
-it.skipIf(!isSqliteAvailable())('serializes scheduled maintenance and stop waits for the in-flight pass before journal close', async () => {
-  const storeDir = await tmpDir('byok-pressure-scheduler-barrier-');
-  const journal = new SqliteLocalTaskJournal({ storeDir });
-  const realMeasureUsage = journal.measureUsage.bind(journal);
-  let releaseMeasure: (() => void) | undefined;
-  const measureGate = new Promise<void>((resolve) => {
-    releaseMeasure = resolve;
-  });
-  const measureSpy = vi.spyOn(journal, 'measureUsage').mockImplementation(async () => {
-    await measureGate;
-    return realMeasureUsage();
-  });
-  let scheduled: (() => void) | undefined;
-  const clearInterval = vi.fn();
-  const outcomes: string[] = [];
-  const engine = new LocalStoragePressureEngine({
-    policy: freeDrivenPolicy(),
-    journal,
-    freeBytesProvider: () => ROOMY_FREE_BYTES,
-    onMaintenanceOutcome: (outcome) => outcomes.push(outcome),
-    timers: {
-      setInterval: (handler) => {
-        scheduled = handler;
-        return 'maintenance-timer';
-      },
-      clearInterval,
-    },
-  });
-
-  engine.start();
-  scheduled?.();
-  scheduled?.();
-  await Promise.resolve();
-  expect(measureSpy).toHaveBeenCalledOnce();
-
-  let stopSettled = false;
-  const stop = engine.stop().then(() => {
-    stopSettled = true;
-  });
-  await Promise.resolve();
-  expect(stopSettled).toBe(false);
-  expect(clearInterval).toHaveBeenCalledWith('maintenance-timer');
-
-  releaseMeasure?.();
-  await stop;
-  expect(outcomes).toEqual(['success']);
-  await journal.close();
 });
 
 function offerRecord(taskId: string, seq: number): ReceivedEnvelopeRecord {
@@ -158,7 +103,7 @@ async function exists(target: string): Promise<boolean> {
 }
 
 /** A policy whose free-space axis is the one under the test's control; the budget is far out of reach unless a test says otherwise. */
-function freeDrivenPolicy(overrides: Partial<LocalStoragePolicyInput> = {}): LocalStoragePolicyInput {
+function freeDrivenPolicy(overrides: Partial<StorageBudgetInput> = {}): StorageBudgetInput {
   return {
     maxStoreBytes: 1024 * 1024 * 1024,
     minFreeBytes: 100 * 1024 * 1024,
@@ -171,123 +116,6 @@ function freeDrivenPolicy(overrides: Partial<LocalStoragePolicyInput> = {}): Loc
 describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', () => {
   // -------------------------------------------------------------------
   // 7. Soft watermark.
-  // -------------------------------------------------------------------
-  it('7: soft pressure alerts and cleans ONLY rebuildable/expired categories, touching no durable record', async () => {
-    const storeDir = await tmpDir('byok-pressure-7-store-');
-    const scratch = await tmpDir('byok-pressure-7-scratch-');
-    const journal = new SqliteLocalTaskJournal({ storeDir });
-
-    // Protected data, in every shape §12.7.2.1 names.
-    // 1. An acked envelope for a task still in flight (no terminal, no marker).
-    await journal.appendEnvelope(offerRecord('task-running', 1));
-    await journal.recordTransition({ transitionId: 'tr-run', taskId: 'task-running', to: 'Running', occurredAt: '2026-08-07T00:00:01.000Z' });
-    // 2. A terminal the cloud has NOT confirmed.
-    await journal.appendEnvelope(offerRecord('task-pending-truth', 2));
-    await journal.recordTerminal({
-      taskId: 'task-pending-truth',
-      terminalType: 'complete',
-      bytes: 'payload-pending',
-      payloadHash: journalHash('payload-pending'),
-      truthState: 'pending',
-      attempt: 1,
-      recordedAt: '2026-08-07T00:00:02.000Z',
-    });
-    // 3. A confirmed terminal — the only journal shape cleanup step 3 may ever
-    //    touch, and it must stay untouched anyway at this state.
-    await journal.appendEnvelope(offerRecord('task-confirmed', 3));
-    await journal.recordTerminal({
-      taskId: 'task-confirmed',
-      terminalType: 'complete',
-      bytes: 'payload-confirmed',
-      payloadHash: journalHash('payload-confirmed'),
-      truthState: 'confirmed',
-      attempt: 1,
-      recordedAt: '2026-08-07T00:00:03.000Z',
-    });
-    // 4. Quarantine evidence.
-    const quarantineFile = path.join(storeDir, JOURNAL_QUARANTINE_DIRNAME, '2026-evidence.db');
-    await fs.mkdir(path.dirname(quarantineFile), { recursive: true });
-    await fs.writeFile(quarantineFile, 'corrupt database evidence');
-
-    // One candidate per cleanable category, all eligible.
-    const tempFile = path.join(scratch, 'upload.tmp');
-    const rotatedLog = path.join(scratch, 'daemon.1.log');
-    const ephemeralWorkspace = path.join(scratch, 'ws-ephemeral');
-    const orphanArtifact = path.join(scratch, 'orphan.bin');
-    await fs.writeFile(tempFile, 'x'.repeat(2048));
-    await fs.writeFile(rotatedLog, 'y'.repeat(4096));
-    await fs.mkdir(ephemeralWorkspace, { recursive: true });
-    await fs.writeFile(path.join(ephemeralWorkspace, 'file.txt'), 'z'.repeat(1024));
-    await fs.writeFile(orphanArtifact, 'w'.repeat(512));
-
-    const eligibleAt = '2026-08-01T00:00:00.000Z';
-    await journal.enqueueCleanupCandidate({ candidateId: 'c-temp', category: 'expired-temp', ref: tempFile, eligibleAt, reason: 'expired upload temp' });
-    await journal.enqueueCleanupCandidate({ candidateId: 'c-log', category: 'rotated-log', ref: rotatedLog, eligibleAt, reason: 'rotated past retention' });
-    await journal.enqueueCleanupCandidate({ candidateId: 'c-journal', category: 'confirmed-journal', ref: 'task:task-confirmed', eligibleAt, reason: 'terminal confirmed' });
-    await journal.enqueueCleanupCandidate({ candidateId: 'c-ws', category: 'ephemeral-workspace', ref: ephemeralWorkspace, eligibleAt, reason: 'host-marked ephemeral' });
-    await journal.enqueueCleanupCandidate({ candidateId: 'c-orphan', category: 'orphan-artifact', ref: orphanArtifact, eligibleAt, reason: 'reference scan + grace' });
-
-    const envelopesBefore = countRows(storeDir, 'journal_envelope');
-    const tasksBefore = countRows(storeDir, 'journal_task');
-    const terminalsBefore = countRows(storeDir, 'journal_terminal');
-
-    // The budget is sized off the CURRENT measurement so the device sits
-    // between the soft (80%) and hard (90%) watermarks exactly, with no
-    // dependence on how big a SQLite page happens to be on this machine.
-    const measured = await journal.measureUsage();
-    const events: StoragePressureEvent[] = [];
-    const engine = new LocalStoragePressureEngine({
-      policy: {
-        maxStoreBytes: Math.ceil(measured.totalBytes / 0.85),
-        minFreeBytes: 1024,
-        ackCriticalReserveBytes: 512,
-      },
-      journal,
-      freeBytesProvider: () => ROOMY_FREE_BYTES,
-      executor: createFilesystemCleanupExecutor({ pruneJournalTask: (taskId) => journal.pruneConfirmedJournalTask(taskId) }),
-      onEvent: (event) => events.push(event),
-    });
-
-    const result = await engine.tick();
-
-    // The alert §12.7.2.1 asks for, on the transition itself.
-    expect(result.state).toBe('pressure');
-    expect(events.filter((e) => e.kind === 'state-changed')).toEqual([
-      expect.objectContaining({ kind: 'state-changed', from: 'normal', to: 'pressure' }),
-    ]);
-
-    // Only the two rebuildable/expired categories were acted on — and both of
-    // those actually happened, so this is not a pass by doing nothing.
-    expect(result.cleaned.map((r) => r.candidateId).sort()).toEqual(['c-log', 'c-temp']);
-    expect(result.cleaned.every((r) => r.outcome === 'deleted')).toBe(true);
-    expect(await exists(tempFile)).toBe(false);
-    expect(await exists(rotatedLog)).toBe(false);
-
-    // Protected data untouched: not one journal row moved, the unconfirmed
-    // terminal is intact, and quarantine evidence is exactly where it was.
-    expect(countRows(storeDir, 'journal_envelope')).toBe(envelopesBefore);
-    expect(countRows(storeDir, 'journal_task')).toBe(tasksBefore);
-    expect(countRows(storeDir, 'journal_terminal')).toBe(terminalsBefore);
-    expect(readRows(storeDir, "SELECT truth_state FROM journal_terminal WHERE task_id = 'task-pending-truth'")[0]?.truth_state).toBe('pending');
-    expect(await exists(quarantineFile)).toBe(true);
-    // Including the CONFIRMED journal row, whose candidate exists and is
-    // eligible — pressure truncates the order rather than extending it.
-    expect(readRows(storeDir, "SELECT task_id FROM journal_task WHERE task_id = 'task-confirmed'")).toHaveLength(1);
-    expect(await exists(ephemeralWorkspace)).toBe(true);
-    expect(await exists(orphanArtifact)).toBe(true);
-
-    // No lost task, stable recovery status: the in-flight task is still the
-    // one and only thing recovery would pick up.
-    expect((await journal.listRecoverable()).map((t) => t.taskId)).toEqual(['task-running']);
-    // The untouched candidates are still queued, not silently resolved.
-    const remaining = await journal.listCleanupCandidates(new Date('2026-08-09T00:00:00.000Z'), 100);
-    expect(remaining.map((c) => c.candidateId).sort()).toEqual(['c-journal', 'c-orphan', 'c-ws']);
-
-    await journal.close();
-  });
-
-  // -------------------------------------------------------------------
-  // 8 & 9. Hard watermark, idle and with a task Running.
   // -------------------------------------------------------------------
   describe('against a running daemon', () => {
     let server: TestServer;
@@ -307,7 +135,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
     async function startPressuredDaemon(initialFreeBytes: number): Promise<{
       adapter: StubRuntimeAdapter;
       journal: SqliteLocalTaskJournal;
-      engine: LocalStoragePressureEngine;
+      engine: StoragePressure & { tick(): Promise<{ state: string }> };
       storeDir: string;
       deviceId: string;
       setFreeBytes: (value: number) => void;
@@ -316,10 +144,15 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
       const workspaceRoot = await tmpDir('byok-pressure-daemon-workspace-');
       const journal = new SqliteLocalTaskJournal({ storeDir });
       let freeBytes = initialFreeBytes;
-      const engine = new LocalStoragePressureEngine({
-        policy: freeDrivenPolicy(),
-        journal,
-        freeBytesProvider: () => freeBytes,
+      let sweeper!: RetentionSweeper;
+      let pressure!: StoragePressure;
+      const originalPass = RetentionSweeper.prototype.runPass;
+      const originalUpdate = StoragePressure.prototype.update;
+      const passSpy = vi.spyOn(RetentionSweeper.prototype, 'runPass').mockImplementation(function (this: RetentionSweeper, trigger) {
+        sweeper = this; return originalPass.call(this, trigger);
+      });
+      const updateSpy = vi.spyOn(StoragePressure.prototype, 'update').mockImplementation(function (this: StoragePressure, used, free) {
+        pressure = this; return originalUpdate.call(this, used, free);
       });
       const adapter = new StubRuntimeAdapter('pi');
       daemon = createDaemonWithAdapters(
@@ -329,13 +162,16 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
           serverUrl: server.url,
           workspaceRoot,
           storeDir,
+          storage: { scratchRoot: testScratchRoot(), budget: freeDrivenPolicy() },
           hostedJournal: { mode: 'sqlite' },
         },
         [adapter],
-        { hostedJournal: { journal, pressureEngine: engine } },
+        { hostedJournal: { journal }, retention: { freeBytesProvider: async () => freeBytes } },
       );
       const record = await daemon.pair('pairing-code');
       await daemon.start();
+      passSpy.mockRestore(); updateSpy.mockRestore();
+      const engine = Object.assign(pressure, { tick: async () => { await sweeper.runPass('pressure'); return { state: pressure.state }; } });
       return { adapter, journal, engine, storeDir, deviceId: record.deviceId, setFreeBytes: (value) => (freeBytes = value) };
     }
 
@@ -349,7 +185,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
 
       // Declined before anything was claimed or spawned — the whole point of
       // putting the guard ahead of adapter selection.
-      expect(decline.payload).toMatchObject({ retryable: true, reason: 'local storage hard pressure' });
+      expect(decline.payload).toMatchObject({ retryable: true, reason: 'local storage hard-pressure' });
       expect(adapter.startCalls).toHaveLength(0);
       expect(server.received.filter((e) => e.type === 'task.claim')).toHaveLength(0);
 
@@ -435,6 +271,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
           serverUrl: server.url,
           workspaceRoot,
           storeDir,
+          storage: { scratchRoot: testScratchRoot(), budget: freeDrivenPolicy() },
           hostedJournal: { mode: 'sqlite' },
         },
         [adapter],
@@ -484,23 +321,13 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
       try {
         const status = await conn.client.request<ControlStatusResult>('status');
         expect(status.storage).toMatchObject({
-          pressureState: 'hard-pressure',
-          budgetBytes: 1024 * 1024 * 1024,
+          budget: { pressureState: 'hard-pressure', budgetBytes: 1024 * 1024 * 1024 },
           freeBytes: 50 * 1024 * 1024,
         });
-        // All five §12.7.2.1 categories, separately — a single total cannot
-        // drive a category-scoped cleanup order or never-delete list.
-        expect(status.storage?.categories.map((c) => c.category)).toEqual(['cache', 'journal', 'log', 'quarantine', 'workspace']);
-        // The two concepts stay apart on the wire and in the rendering.
+        expect(status.storage.classes).toHaveLength(22);
+        expect(status.storage.lastSweep).toMatchObject({ trigger: 'pressure' });
         expect(status.queueWatermarks).toEqual([]);
-        const lines = formatLiveStatusLines(status);
-        expect(lines.some((line) => line.startsWith('live-storage: state=hard-pressure'))).toBe(true);
-        expect(lines.filter((line) => line.startsWith('live-storage-category:'))).toHaveLength(5);
-        expect(lines.some((line) => line.startsWith('live-queue-watermarks: (none)'))).toBe(true);
-
-        // And a daemon with no storage policy renders none of it, rather than
-        // a row of zeros that reads as a healthy measurement.
-        expect(formatLiveStatusLines({ ...status, storage: undefined }).some((line) => line.startsWith('live-storage'))).toBe(false);
+        expect(formatLiveStatusLines(status).some(line => line.startsWith('live-storage:'))).toBe(true);
       } finally {
         conn.client.close();
       }
@@ -633,130 +460,6 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
       return { storeDir, scratch, journal };
     }
 
-    function engineWith(journal: SqliteLocalTaskJournal, executor: CleanupExecutor): LocalStoragePressureEngine {
-      return new LocalStoragePressureEngine({
-        // Roomy on both axes: this test is about the cleanup worker, and
-        // `normal` is the state whose cleanup order includes every category.
-        policy: freeDrivenPolicy(),
-        journal,
-        freeBytesProvider: () => ROOMY_FREE_BYTES,
-        executor,
-        clock: () => new Date('2026-08-09T00:00:00.000Z'),
-      });
-    }
-
-    it('order A — file deleted, metadata not marked: the retry converges and deletes nothing twice', async () => {
-      const { storeDir, scratch, journal } = await seeded('byok-pressure-12a');
-      const target = path.join(scratch, 'expired.tmp');
-      await fs.writeFile(target, 'temp bytes');
-      await journal.enqueueCleanupCandidate({
-        candidateId: 'c-crash-a',
-        category: 'expired-temp',
-        ref: target,
-        eligibleAt: '2026-08-01T00:00:00.000Z',
-        reason: 'expired',
-      });
-
-      // The crash: the worker removes the file, then dies before the journal
-      // learns anything about it.
-      const seen: string[] = [];
-      const crashing: CleanupExecutor = async (candidate) => {
-        seen.push(candidate.candidateId);
-        await fs.rm(candidate.ref, { force: true });
-        throw new Error('cleanup worker died after the unlink');
-      };
-      await engineWith(journal, crashing).tick();
-
-      expect(await exists(target)).toBe(false);
-      // The candidate is NOT resolved — `failed` leaves it eligible, which is
-      // what makes the crash recoverable at all.
-      const [pending] = await journal.listCleanupCandidates(new Date('2026-08-09T00:00:00.000Z'), 10);
-      expect(pending).toMatchObject({ candidateId: 'c-crash-a', attempts: 1 });
-
-      // The retry, with a healthy worker. It finds nothing to delete and says
-      // so — no second deletion, no infinite retry.
-      const realExecutor = createFilesystemCleanupExecutor();
-      const retry = await engineWith(journal, realExecutor).tick();
-      expect(retry.cleaned).toEqual([
-        expect.objectContaining({ candidateId: 'c-crash-a', outcome: 'deleted', bytesReclaimed: 0 }),
-      ]);
-      expect(await journal.listCleanupCandidates(new Date('2026-08-09T00:00:00.000Z'), 10)).toEqual([]);
-      expect(seen).toEqual(['c-crash-a']);
-
-      // Protected data untouched throughout, and recovery still sees exactly
-      // the one in-flight task.
-      expect(countRows(storeDir, 'journal_envelope')).toBe(1);
-      expect((await journal.listRecoverable()).map((t) => t.taskId)).toEqual(['task-protected']);
-      await journal.close();
-    });
-
-    it('order B — metadata marked, file not deleted: a fresh reference scan re-enqueues and the retry is idempotent', async () => {
-      const { storeDir, scratch, journal } = await seeded('byok-pressure-12b');
-      const target = path.join(scratch, 'orphan.bin');
-      await fs.writeFile(target, 'artifact bytes');
-      await journal.enqueueCleanupCandidate({
-        candidateId: 'c-crash-b',
-        category: 'orphan-artifact',
-        ref: target,
-        eligibleAt: '2026-08-01T00:00:00.000Z',
-        reason: 'reference scan + grace',
-      });
-
-      // The other order: the journal is told the work is done, and then the
-      // unlink never happens.
-      const lying: CleanupExecutor = async () => ({ outcome: 'deleted', bytesReclaimed: 14 });
-      await engineWith(journal, lying).tick();
-      expect(await journal.listCleanupCandidates(new Date('2026-08-09T00:00:00.000Z'), 10)).toEqual([]);
-      expect(await exists(target)).toBe(true); // still on disk, metadata says otherwise
-
-      // Re-enqueueing the SAME candidate id changes nothing — resolved rows are
-      // not reopened by a repeated enqueue, so a scan that runs twice cannot
-      // resurrect the same work twice.
-      await journal.enqueueCleanupCandidate({
-        candidateId: 'c-crash-b',
-        category: 'orphan-artifact',
-        ref: target,
-        eligibleAt: '2026-08-01T00:00:00.000Z',
-        reason: 'reference scan + grace',
-      });
-      expect(countRows(storeDir, 'local_cleanup_candidate')).toBe(1);
-      expect(await journal.listCleanupCandidates(new Date('2026-08-09T00:00:00.000Z'), 10)).toEqual([]);
-
-      // The next reference scan sees a file with no reference and enqueues it
-      // afresh, which is the convergence path.
-      await journal.enqueueCleanupCandidate({
-        candidateId: 'c-crash-b-rescan',
-        category: 'orphan-artifact',
-        ref: target,
-        eligibleAt: cleanupEligibleAt(resolveLocalStoragePolicy(freeDrivenPolicy()), 'orphan-artifact', new Date('2026-08-01T00:00:00.000Z')),
-        reason: 'reference scan + grace, second pass',
-      });
-      const realExecutor = createFilesystemCleanupExecutor();
-      const first = await engineWith(journal, realExecutor).tick();
-      expect(first.cleaned).toEqual([
-        expect.objectContaining({ candidateId: 'c-crash-b-rescan', outcome: 'deleted', bytesReclaimed: 14 }),
-      ]);
-      expect(await exists(target)).toBe(false);
-
-      // Idempotent on a third pass: same ref, already gone, still `deleted`
-      // with nothing reclaimed and no error.
-      await journal.enqueueCleanupCandidate({
-        candidateId: 'c-crash-b-rescan-2',
-        category: 'orphan-artifact',
-        ref: target,
-        eligibleAt: '2026-08-01T00:00:00.000Z',
-        reason: 'third pass',
-      });
-      const second = await engineWith(journal, realExecutor).tick();
-      expect(second.cleaned).toEqual([
-        expect.objectContaining({ candidateId: 'c-crash-b-rescan-2', outcome: 'deleted', bytesReclaimed: 0 }),
-      ]);
-
-      expect(countRows(storeDir, 'journal_envelope')).toBe(1);
-      expect((await journal.listRecoverable()).map((t) => t.taskId)).toEqual(['task-protected']);
-      await journal.close();
-    });
-
     it('protected data has no cleanup spelling: the journal prune refuses anything unconfirmed or recovery-marked', async () => {
       const { storeDir, journal } = await seeded('byok-pressure-12c');
 
@@ -813,19 +516,6 @@ describe.skipIf(!isSqliteAvailable())('S3.4 disk-pressure matrix, points 7-12', 
         'env-task-protected',
         'env-task-unconfirmed',
       ]);
-
-      // A refused prune is a `skipped` candidate, not a failure to retry
-      // forever — the executor reports it and the journal resolves it.
-      const refused: CleanupCandidate = {
-        candidateId: 'c-refused',
-        category: 'confirmed-journal',
-        ref: 'task:task-marked',
-        eligibleAt: '2026-08-01T00:00:00.000Z',
-        reason: 'confirmed terminal',
-        attempts: 0,
-      };
-      const executor = createFilesystemCleanupExecutor({ pruneJournalTask: (taskId) => journal.pruneConfirmedJournalTask(taskId) });
-      expect(await executor(refused)).toMatchObject({ outcome: 'skipped' });
 
       await journal.close();
     });

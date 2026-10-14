@@ -1,3 +1,4 @@
+import { unmeasuredRetentionSnapshot, type RetentionSnapshot } from '../daemon/retention/sweeper';
 import { randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -21,6 +22,7 @@ export interface SupportBundle {
   generatedAt: string;
   product: { nameHash: string; idHash: string };
   system: DiagnosticsSnapshot['system'];
+  storage: RetentionSnapshot;
   config: {
     serverProtocol: 'http' | 'https' | 'ws' | 'wss' | 'invalid' | 'unsupported';
     customStoreDir: boolean;
@@ -191,7 +193,7 @@ function projectControl(control: DiagnosticsSnapshot['control']): SupportBundle[
     activeTaskCount: control.activeTaskCount,
     pendingApprovalCount: control.pendingApprovalCount,
     operationalHealth,
-    storagePresent: control.storage !== undefined,
+    storagePresent: true,
     ...(control.outbound === undefined ? {} : { outbound: { accepted: control.outbound.accepted, duplicate: control.outbound.duplicate, rejected: control.outbound.rejected, rejectedByReason: { ...control.outbound.rejectedByReason }, rejectedTerminals: control.outbound.rejectedTerminals } }),
   };
 }
@@ -220,6 +222,7 @@ export async function createSupportBundle(
   return {
     version: 1,
     generatedAt: snapshot.generatedAt,
+    storage: snapshot.control.status === 'online' ? snapshot.control.storage : unmeasuredRetentionSnapshot(),
     product: snapshot.product,
     system: snapshot.system,
     config: {

@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 /**
  * Sprint S3.4's crash matrix, points 1-6 (P-007).
  *
@@ -283,7 +284,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 crash matrix, points 1-6', () => {
       journal = new SqliteLocalTaskJournal({ storeDir });
 
       daemon = createDaemonWithAdapters(
-        {
+        { storage: { scratchRoot: testScratchRoot() },
           localAgentRelease: { version: '0.0.0-test' }, productName: 'Test',
           productId: 'test-product',
           serverUrl: cloud.url,

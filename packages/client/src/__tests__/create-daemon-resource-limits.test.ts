@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -34,32 +35,32 @@ describe('createDaemonWithAdapters: DaemonConfig.maxTaskOutputBytes validation',
 
   it('rejects 0 synchronously with a clear message', async () => {
     const config = await buildConfig(0);
-    expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()])).toThrow(/maxTaskOutputBytes/);
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter()])).toThrow(/maxTaskOutputBytes/);
   });
 
   it('rejects a negative number synchronously', async () => {
     const config = await buildConfig(-1);
-    expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()])).toThrow(/maxTaskOutputBytes/);
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter()])).toThrow(/maxTaskOutputBytes/);
   });
 
   it('rejects NaN synchronously', async () => {
     const config = await buildConfig(Number.NaN);
-    expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()])).toThrow(/maxTaskOutputBytes/);
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter()])).toThrow(/maxTaskOutputBytes/);
   });
 
   it('accepts Number.POSITIVE_INFINITY as the documented explicit opt-out', async () => {
     const config = await buildConfig(Number.POSITIVE_INFINITY);
-    expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()])).not.toThrow();
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter()])).not.toThrow();
   });
 
   it('accepts an ordinary positive number', async () => {
     const config = await buildConfig(1024);
-    expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()])).not.toThrow();
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter()])).not.toThrow();
   });
 
   it('accepts an unset value (the default applies later, inside TaskRunner)', async () => {
     const config = await buildConfig(undefined);
-    expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()])).not.toThrow();
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter()])).not.toThrow();
   });
 });
 
@@ -79,16 +80,16 @@ describe('createDaemonWithAdapters: DaemonConfig.progressBatch validation', () =
     'rejects invalid maxBatchBytes %s synchronously',
     async (maxBatchBytes) => {
       const config = await buildConfig({ maxBatchBytes } as never);
-      expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()])).toThrow(/maxBatchBytes/);
+      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...config }, [new StubRuntimeAdapter()])).toThrow(/maxBatchBytes/);
     },
   );
 
   it('rejects invalid count and timer bounds through the same config authority', async () => {
     const badCount = await buildConfig({ maxBatchSize: 0 });
-    expect(() => createDaemonWithAdapters(badCount, [new StubRuntimeAdapter()])).toThrow(/maxBatchSize/);
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(badCount) }, [new StubRuntimeAdapter()])).toThrow(/maxBatchSize/);
 
     const badInterval = await buildConfig({ flushIntervalMs: 0 });
-    expect(() => createDaemonWithAdapters(badInterval, [new StubRuntimeAdapter()])).toThrow(/flushIntervalMs/);
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(badInterval) }, [new StubRuntimeAdapter()])).toThrow(/flushIntervalMs/);
   });
 
   it('accepts timing and count policy with server-owned bytes', async () => {
@@ -96,10 +97,10 @@ describe('createDaemonWithAdapters: DaemonConfig.progressBatch validation', () =
       maxBatchSize: 10,
       flushIntervalMs: 250,
     });
-    expect(() => createDaemonWithAdapters(configured, [new StubRuntimeAdapter()])).not.toThrow();
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(configured) }, [new StubRuntimeAdapter()])).not.toThrow();
 
     const unset = await buildConfig(undefined);
-    expect(() => createDaemonWithAdapters(unset, [new StubRuntimeAdapter()])).not.toThrow();
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(unset) }, [new StubRuntimeAdapter()])).not.toThrow();
   });
 });
 
@@ -127,21 +128,21 @@ describe('createDaemonWithAdapters: DaemonConfig.maxInlineEventBytes validation'
     'rejects %s synchronously with a clear message',
     async (maxInlineEventBytes) => {
       const config = await buildConfig(maxInlineEventBytes);
-      expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()])).toThrow(/maxInlineEventBytes/);
+      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter()])).toThrow(/maxInlineEventBytes/);
     },
   );
 
   it('accepts exactly the documented minimum (4096)', async () => {
     const config = await buildConfig(MIN_MAX_INLINE_EVENT_BYTES);
     expect(MIN_MAX_INLINE_EVENT_BYTES).toBe(4096);
-    expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()])).not.toThrow();
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter()])).not.toThrow();
   });
 
   it('accepts the default value and an unset value', async () => {
     expect(DEFAULT_MAX_INLINE_EVENT_BYTES).toBe(64 * 1024);
     const explicit = await buildConfig(DEFAULT_MAX_INLINE_EVENT_BYTES);
-    expect(() => createDaemonWithAdapters(explicit, [new StubRuntimeAdapter()])).not.toThrow();
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(explicit) }, [new StubRuntimeAdapter()])).not.toThrow();
     const unset = await buildConfig(undefined);
-    expect(() => createDaemonWithAdapters(unset, [new StubRuntimeAdapter()])).not.toThrow();
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(unset) }, [new StubRuntimeAdapter()])).not.toThrow();
   });
 });

@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs, readdirSync, readFileSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -195,7 +196,7 @@ async function startDaemon(options: {
         };
   const adapter = new StubRuntimeAdapter();
   const daemon = createDaemonWithAdapters(
-    {
+    { storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Test',
       productId: 'test-product',
@@ -263,7 +264,7 @@ describe('createDaemon providerProvisioning seam', () => {
   it('rejects a non-function providerProvisioning at construction', () => {
     expect(() =>
       createDaemonWithAdapters(
-        {
+        { storage: { scratchRoot: testScratchRoot() },
           localAgentRelease: { version: '0.0.0-test' },
           productName: 'Test',
           productId: 'test-product',

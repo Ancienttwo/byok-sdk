@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -98,7 +99,7 @@ describe('a startup-deadline decline hands the canonical Agent home back to the 
 
       // Held by the test and mutated in place between the two offers; the
       // runner re-reads `startupTimeoutMs` off this exact object per offer.
-      const deps: TaskRunnerDeps = {
+      const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
         adapters: [adapter],
         workspaceRoot,
         agentHome,

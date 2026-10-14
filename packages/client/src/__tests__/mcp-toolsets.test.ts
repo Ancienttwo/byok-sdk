@@ -1,3 +1,4 @@
+import { testScratchOwner, testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -71,7 +72,7 @@ async function makeRunner(
   getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>,
   mcpToolsetToolsProbe: NonNullable<TaskRunnerDeps['mcpToolsetToolsProbe']> = stubToolsProbe,
 ): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = {
+  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
     mcpToolsetToolsProbe,
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-mcp-toolsets-workspace-'),
@@ -486,7 +487,7 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
   it('accepts a bounded stdio definition', () => {
     expect(() =>
       createDaemonWithAdapters(
-        {
+        { storage: { scratchRoot: testScratchRoot() },
           ...baseConfig,
           mcpToolsets: {
             salesko: { mcpServers: { salesko: { command: '/opt/salesko/mcp', args: ['--stdio'] } } },
@@ -500,7 +501,7 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
   it('refuses a server name runtimes cannot express at daemon start', () => {
     expect(() =>
       createDaemonWithAdapters(
-        { ...baseConfig, mcpToolsets: { salesko: { mcpServers: { 'salesko.probe': { command: '/opt/salesko/mcp' } } } } },
+        { storage: { scratchRoot: testScratchRoot() },  ...baseConfig, mcpToolsets: { salesko: { mcpServers: { 'salesko.probe': { command: '/opt/salesko/mcp' } } } } },
         [new StubRuntimeAdapter('codex', { kind: 'available' }, MCP_CAPABLE)],
       ),
     ).toThrow(/"salesko\.probe", which cannot be expressed as a runtime MCP server name/);
@@ -509,7 +510,7 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
   it('refuses the removed permissionDefaults key instead of ignoring it', () => {
     expect(() =>
       createDaemonWithAdapters(
-        { ...baseConfig, permissionDefaults: { mode: 'auto' } } as DaemonConfig,
+        { storage: { scratchRoot: testScratchRoot() }, ...({ ...baseConfig, permissionDefaults: { mode: 'auto' } } as DaemonConfig) },
         [new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE)],
       ),
     ).toThrow("DaemonConfig.permissionDefaults was removed: the local agent's own permission settings apply");
@@ -519,13 +520,13 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
     const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
     expect(() =>
       createDaemonWithAdapters(
-        { ...baseConfig, mcpToolsets: { Salesko: { mcpServers: { salesko: { command: '/bin/true' } } } } },
+        { storage: { scratchRoot: testScratchRoot() },  ...baseConfig, mcpToolsets: { Salesko: { mcpServers: { salesko: { command: '/bin/true' } } } } },
         [adapter],
       ),
     ).toThrow(/invalid toolset id/);
     expect(() =>
       createDaemonWithAdapters(
-        {
+        { storage: { scratchRoot: testScratchRoot() },
           ...baseConfig,
           mcpToolsets: {
             salesko: { mcpServers: { byokagentmessage: { command: '/bin/true' } } },
@@ -536,7 +537,7 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
     ).toThrow(/reserved/);
     expect(() =>
       createDaemonWithAdapters(
-        {
+        { storage: { scratchRoot: testScratchRoot() },
           ...baseConfig,
           mcpToolsets: {
             salesko: {
@@ -565,11 +566,11 @@ describe('DaemonConfig.mcpToolsets local authority validation', () => {
 
     // Writer 1: daemon construction, which is the only place `DaemonConfig`
     // reaches the registry.
-    expect(() => createDaemonWithAdapters({ ...baseConfig, mcpToolsets: bare }, [adapter]))
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  ...baseConfig, mcpToolsets: bare }, [adapter]))
       .toThrow(/mcp_toolset_command_not_absolute/);
-    expect(() => createDaemonWithAdapters({ ...baseConfig, mcpToolsets: relative }, [adapter]))
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  ...baseConfig, mcpToolsets: relative }, [adapter]))
       .toThrow(/mcp_toolset_command_not_absolute/);
-    expect(() => createDaemonWithAdapters({ ...baseConfig, mcpToolsets: optionLike }, [adapter]))
+    expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  ...baseConfig, mcpToolsets: optionLike }, [adapter]))
       .toThrow(/mcp_toolset_command_option_like/);
 
     // Writer 2: the registry's own constructor, reached directly by hosts that
@@ -622,7 +623,7 @@ describe('absolute toolset command, consistently across every runtime', () => {
   it('never probes, claims or starts a toolset whose command the registry refused, on pi, codex or claude', async () => {
     for (const runtime of ['pi', 'codex', 'claude'] as const) {
       const adapter = new StubRuntimeAdapter(runtime, { kind: 'available' }, MCP_CAPABLE);
-      expect(() => createDaemonWithAdapters({ ...baseConfig, mcpToolsets: configured }, [adapter]))
+      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  ...baseConfig, mcpToolsets: configured }, [adapter]))
         .toThrow(/mcp_toolset_command_not_absolute/);
 
       // A daemon that refused the definition holds no snapshot carrying it, so
@@ -685,7 +686,7 @@ describe('TaskRunner host toolset context nonce injection', () => {
     extra: Partial<TaskRunnerDeps> = {},
   ): Promise<TaskRunner> {
     const storeDir = await tmpDir('byok-host-toolset-store-');
-    const deps: TaskRunnerDeps = {
+    const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
       mcpToolsetToolsProbe: stubToolsProbe,
       adapters: [adapter],
       workspaceRoot: await tmpDir('byok-host-toolset-workspace-'),

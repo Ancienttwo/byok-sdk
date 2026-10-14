@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -22,7 +23,7 @@ describe('createDaemonWithAdapters: removed DaemonConfig.toolImplementationAutho
       toolImplementationAuthority: { mode: 'dev' },
     } as DaemonConfig;
     try {
-      expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter('pi', { kind: 'available' })]))
+      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi', { kind: 'available' })]))
         .toThrow('DaemonConfig.toolImplementationAuthority was removed: the SDK does not attest tool or runtime executables');
     } finally {
       await fs.rm(config.workspaceRoot!, { recursive: true, force: true });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import os from 'node:os';
@@ -10,7 +10,7 @@ const load = (pkg, entry = 'index.js') => import(pathToFileURL(path.join(install
 const { createInMemoryByokCloud, tenantId } = await load('cloud');
 const client = await load('client');
 const adapters = await load('client', 'adapters/index.js');
-const root = mkdtempSync(path.join(os.tmpdir(), 'byok-packed-cli-mcp-'));
+const root = realpathSync(mkdtempSync(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'byok-pm-')));
 const fakeCodex = path.join(root, process.platform === 'win32' ? 'codex-probe.exe' : 'codex-probe');
 const fixture = fileURLToPath(new URL('./fixtures/packed-cli-mcp-codex.mjs', import.meta.url));
 const built = spawnSync('bun', ['build', '--compile', fixture, '--outfile', fakeCodex], { encoding: 'utf8' });

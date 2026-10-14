@@ -1,3 +1,4 @@
+import { testScratchRoot } from './fixtures/execution-scratch';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -188,6 +189,7 @@ async function spawnLifetime(name: string): Promise<DaemonProcess> {
   await fs.writeFile(configPath, JSON.stringify({
     storeDir,
     runnerStoreDir,
+    scratchRoot: testScratchRoot(),
     workspaceRoot,
     agentHomeDir,
     serverCommand,

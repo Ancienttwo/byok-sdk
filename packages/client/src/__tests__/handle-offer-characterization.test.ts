@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -79,7 +80,7 @@ async function agentRunner(
   const storeDir = await temporary('byok-offer-char-store-');
   const agentHome = new AgentHomeManager({ hostStorageRoot: await temporary('byok-offer-char-home-') });
   const sent: Envelope[] = [];
-  const runner = new TaskRunner({
+  const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await temporary('byok-offer-char-workspace-'),
     agentHome,
@@ -111,7 +112,7 @@ async function gitRunner(
   await manager.preflight();
   const sessionStore = new SessionWorkspaceStore(storeDir);
   const sent: Envelope[] = [];
-  const runner = new TaskRunner({
+  const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: root,
     deviceId: 'device-offer-char',
@@ -332,7 +333,7 @@ describe('handleOffer exit characterization (before the phase split)', () => {
     const root = await temporary('byok-offer-char-half-git-root-');
     const storeDir = await temporary('byok-offer-char-half-git-store-');
     const sent: Envelope[] = [];
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
       adapters: [adapter],
       workspaceRoot: root,
       deviceId: 'device-offer-char',

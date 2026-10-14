@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,7 +24,7 @@ describe('createDaemonWithAdapters: removed DaemonConfig.mcpLaunchCwd', () => {
       mcpLaunchCwd: { dir: '/' },
     } as DaemonConfig;
     try {
-      expect(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter('pi', { kind: 'available' })]))
+      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi', { kind: 'available' })]))
         .toThrow('DaemonConfig.mcpLaunchCwd was removed: MCP servers start in the session cwd, as the agent runtime does');
     } finally {
       await fs.rm(config.workspaceRoot!, { recursive: true, force: true });

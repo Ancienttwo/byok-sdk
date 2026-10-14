@@ -1,3 +1,4 @@
+import { testScratchRoot } from './fixtures/execution-scratch';
 import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -54,13 +55,14 @@ if (process.argv[2] !== 'capture') {
     const prepared=await adapter.prepare({offer:{instruction:'Never sent'},
       descriptor:adapter.descriptor,requiredToolsetIds:[],mcpServers:input.mcpServers,mcpToolsetTools:input.observation});
     if(prepared.kind!=='prepared') throw new Error(prepared.reason);
+    const scratch=await sdk.createExecutionScratch({root:input.scratchRoot});
     stage='resolve';
     runtime=await prepared.operation.resolveRuntimeLaunch({kind:input.kind,cwd:input.cwd,env:input.env,
-      projectionRoot:input.projectionRoot});
+      scratch});
     stage='start';
     const manifest=sdk.sealRuntimeOperationManifest({...(input.kind==='prepared'?{agentMemory:'none'}:{}),taskId:'s2-'+input.kind,runtimeId:'pi',descriptor:adapter.descriptor,
       requiredToolsetIds:[],workspace:{workspaceDir:input.cwd},forwardedEnvironmentNames:Object.keys(runtime.env).sort()});
-    await prepared.operation.start({kind:input.kind,...(input.kind==='prepared'?{preparation:input.preparation}:{instruction:'Never sent'}),
+    await prepared.operation.start({scratch,kind:input.kind,...(input.kind==='prepared'?{preparation:input.preparation}:{instruction:'Never sent'}),
       manifest,runtimeLaunch:runtime,env:runtime.env,mcpEnv:input.mcpEnv,mcpServers:input.mcpServers,
       mcpToolsetTools:input.observation});
     throw new Error('unexpected prompt-capable start');
@@ -260,7 +262,7 @@ describe('Pi launch path — single-file product re-entry (sdkHelperHost)', () =
           const reportPath = path.join(runDir, `${kind}-report.json`);
           const inputPath = path.join(runDir, `${kind}-input.json`);
           await fs.writeFile(inputPath, JSON.stringify({ ...fixture, release, kind, env, mcpEnv: { PATH: env.PATH },
-            projectionRoot: path.join(runDir, 'projections'), report: reportPath }));
+            scratchRoot: testScratchRoot(), report: reportPath }));
           try { await execFileAsync(interpreter, ['--no-install', bundle, 'capture', inputPath], { cwd: runDir, env: bootstrapEnv, timeout: 20_000 }); }
           catch (error) {
             if (!existsSync(reportPath)) { nativeBlockers.push(`${entryKind} bootstrap failed before adapter evidence: ${String(error)}`); continue; }

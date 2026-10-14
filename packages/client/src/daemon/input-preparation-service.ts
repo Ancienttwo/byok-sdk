@@ -164,6 +164,7 @@ export interface InputPreparationCallOptions {
 export interface InputPreparationService {
   /** Replay, confirm and reconcile the durable log. Must complete before any method answers. */
   open(): Promise<void>;
+  collectExpired(nowMs: number, limit: number): Promise<{ artifactsRemoved: number; recordsRemoved: number; bytesReclaimed: number }>;
   authorizeAgentMemory(binding: InputPreparationBindingV1): Promise<void>;
   prepare(request: InputPreparationRequestV1, options?: InputPreparationCallOptions): Promise<InputPreparationReceiptV1>;
   lookup(params: InputPreparationLookupParamsV1): Promise<InputPreparationReceiptV1>;
@@ -427,61 +428,11 @@ export function createInputPreparationService(options: InputPreparationServiceOp
   const locks = new Map<string, Promise<unknown>>();
   let opened: Promise<void> | undefined;
   let stopped = false;
-  let gcTimer: ReturnType<typeof setTimeout> | undefined;
-  let gcInFlight: Promise<void> | undefined;
-  let gcFailure: { cause: unknown } | undefined;
-
-  // The service owns retention scheduling even when TaskRunner releases a pin
-  // directly through its store. Keep this binding private: a standalone store
-  // has no timer/lifecycle owner and needs no public observer API.
-  class ServiceOwnedPreparationStore extends InputPreparationStore {
-    override async unpin(recordId: string, taskId: string): Promise<InputPreparationRecord> {
-      const record = await super.unpin(recordId, taskId);
-      // Never turn a committed unpin into a failed release because scheduling
-      // failed. Surface that fault through the existing service GC failure
-      // latch instead. Stopped services stay stopped; an in-flight GC's final
-      // scan will schedule from the newly committed state.
-      try { scheduleGc(); } catch (cause) { gcFailure = { cause }; }
-      return record;
-    }
-  }
-  const store = new ServiceOwnedPreparationStore({
-    storeDir: options.storeDir,
-    retentionMs: limits.retentionMs,
-    retryHorizonMs: limits.retryHorizonMs,
-    now,
-  });
+  const store = new InputPreparationStore({ storeDir: options.storeDir,
+    retentionMs: limits.retentionMs, retryHorizonMs: limits.retryHorizonMs, now });
 
   function assertAvailable(): void {
-    if (gcFailure) rethrowDurable(gcFailure.cause);
     if (stopped) throw new InputPreparationRequestError('cancelled', 'the input-preparation service is stopped');
-  }
-
-  // One timer for the earliest retained expiry. Active records are protected
-  // until their owning run settles and rearms this timer; an overdue compile
-  // must not cause a zero-delay GC loop. An empty or wholly pinned store sleeps.
-  function scheduleGc(): void {
-    if (gcTimer !== undefined) clearTimeout(gcTimer);
-    gcTimer = undefined;
-    if (stopped || gcFailure || gcInFlight !== undefined) return;
-    let nextExpiry = Number.POSITIVE_INFINITY;
-    for (const record of store.list()) {
-      if (record.pin !== undefined || !isTerminalInputPreparationState(record.state)) continue;
-      nextExpiry = Math.min(nextExpiry, Date.parse(record.recordExpiresAt));
-      if (record.artifactBytes > 0) nextExpiry = Math.min(nextExpiry, Date.parse(record.artifactExpiresAt));
-    }
-    if (!Number.isFinite(nextExpiry)) return;
-    gcTimer = setTimeout(() => {
-      gcTimer = undefined;
-      gcInFlight = store.gc(now(), true).then(
-        () => undefined,
-        (cause: unknown) => { gcFailure = { cause }; },
-      ).finally(() => {
-        gcInFlight = undefined;
-        scheduleGc();
-      });
-    }, Math.min(Math.max(1, nextExpiry - now()), 2_147_483_647));
-    gcTimer.unref?.();
   }
 
   async function withRecordLock<T>(recordId: string, work: () => Promise<T>, signal: AbortSignal): Promise<T> {
@@ -565,7 +516,6 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       await store.open();
       await reconcile();
       await store.gc(now(), true);
-      scheduleGc();
     })();
     await opened;
     assertAvailable();
@@ -1206,8 +1156,7 @@ export function createInputPreparationService(options: InputPreparationServiceOp
           return toReceipt(result, now());
         } finally {
           active.delete(recordId);
-          scheduleGc();
-        }
+            }
       }, controller.signal);
     } finally {
       clearTimeout(deadline);
@@ -1240,7 +1189,6 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       stopped = false;
       await ensureOpen();
       if (wasOpened) await store.gc(now(), true).catch(rethrowDurable);
-      scheduleGc();
     },
     prepare,
     runtime: options.compiler.runtime,
@@ -1277,19 +1225,21 @@ export function createInputPreparationService(options: InputPreparationServiceOp
       if (grant.scopeId !== binding.scopeId) throw new InputPreparationRequestError('scope_denied', 'scope changed');
       assertMemoryCeiling(binding.agentMemory, grant.agentMemory);
     },
+    async collectExpired(nowMs: number, limit: number) {
+      await ensureOpen();
+      let bytesReclaimed = 0;
+      const result = await store.gc(nowMs, true, limit, bytes => { bytesReclaimed += bytes; });
+      return { ...result, bytesReclaimed };
+    },
     async stop(): Promise<void> {
       stopped = true;
       for (const controller of preparationControllers) controller.abort(new InputPreparationRequestError('cancelled', 'the input-preparation service is stopped'));
-      if (gcTimer !== undefined) clearTimeout(gcTimer);
-      gcTimer = undefined;
       await opened;
       const pending = [...active.values()];
       for (const run of pending) run.controller.abort();
       await Promise.all(pending.map((run) => run.done));
       await Promise.all(locks.values());
-      await gcInFlight;
-      if (gcFailure) rethrowDurable(gcFailure.cause);
-    },
+      },
   };
 }
 

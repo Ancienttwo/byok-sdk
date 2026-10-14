@@ -34,6 +34,7 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { acquirePathMutationGate } from './path-mutation-gate';
 import {
   CONTENT_HASH_PATTERN,
   SKILL_PACK_ENTRY_PATH,
@@ -400,9 +401,11 @@ export async function installSkillPacks(
 
   const installed: InstalledSkillPack[] = [];
   const unchanged: string[] = [];
+  const gate = await acquirePathMutationGate({ scope: 'skill-pack-store', targetPath: skillPacksRoot(options.dataDir) }, { waitMs: 1_000 });
+  try {
   for (const raw of rawPacks) {
     const manifest = parseManifest(raw);
-    const existing = await readLock(options.dataDir, manifest.name);
+    const existing = await readInstalledSkillPack(options.dataDir, manifest.name);
     if (existing?.lock.content_hash === (manifest.contentHash as string)) {
       unchanged.push(manifest.name);
       continue;
@@ -410,6 +413,8 @@ export async function installSkillPacks(
     installed.push(await installOne(options, manifest, source, base));
   }
   return { installed, unchanged };
+  } finally { await gate.release(); }
+
 }
 
 function parseManifest(raw: unknown): SkillPackManifest {
@@ -555,7 +560,7 @@ async function installOne(
  * Shape gate for `lock.json`.
  *
  * `content_hash` is matched against the full `CONTENT_HASH_PATTERN`, not merely
- * its `sha256:` prefix: {@link readLock} slices the prefix off and joins the
+ * its `sha256:` prefix: {@link readInstalledSkillPack} slices the prefix off and joins the
  * remainder onto the pack root to name the revision directory, so anything
  * other than a 64-character hex digest there is a path component chosen by
  * whoever wrote the file. A prefix-only check would let `sha256:../../..`
@@ -575,7 +580,7 @@ function isLockShaped(value: unknown): value is SkillPackLock {
   );
 }
 
-async function readLock(dataDir: string, name: string): Promise<InstalledSkillPack | undefined> {
+export async function readInstalledSkillPack(dataDir: string, name: string): Promise<InstalledSkillPack | undefined> {
   if (!isSkillPackPathSafe(name)) return undefined;
   const packRoot = path.join(skillPacksRoot(dataDir), name);
   let raw: string;
@@ -620,7 +625,7 @@ export async function listInstalledSkillPacks(dataDir: string): Promise<readonly
   const packs: InstalledSkillPack[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    const installed = await readLock(dataDir, entry.name);
+    const installed = await readInstalledSkillPack(dataDir, entry.name);
     if (installed !== undefined) packs.push(installed);
   }
   packs.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
@@ -650,7 +655,13 @@ export async function projectSkillPack(
   name: string,
   targetDir: string,
 ): Promise<ProjectedSkillPack> {
-  const installed = await readLock(dataDir, name);
+  const gate = await acquirePathMutationGate({ scope: 'skill-pack-store', targetPath: skillPacksRoot(dataDir) }, { waitMs: 1_000 });
+  try { return await projectSkillPackUnderGate(dataDir, name, targetDir); }
+  finally { await gate.release(); }
+}
+
+async function projectSkillPackUnderGate(dataDir: string, name: string, targetDir: string): Promise<ProjectedSkillPack> {
+  const installed = await readInstalledSkillPack(dataDir, name);
   if (installed === undefined) {
     throw new SkillPackInstallError('store_unsafe', `no installed skill pack named ${JSON.stringify(name)}.`, {
       packName: name,

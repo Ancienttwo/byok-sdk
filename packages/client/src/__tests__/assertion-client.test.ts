@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { readFileSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -200,7 +201,7 @@ describe('requestDeviceAssertion', () => {
       storeDir,
       ...(deviceAssertion === undefined ? {} : { deviceAssertion }),
     };
-    const built = createDaemonWithAdapters(config, [new StubRuntimeAdapter('pi')]);
+    const built = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')]);
     daemons.push(built);
     await built.pair('pairing-code');
     await built.start();
@@ -328,7 +329,7 @@ describe('requestTaskAssertion', () => {
       deviceAssertion: { audiences: [ALLOWED_AUDIENCE] },
       mcpToolsets: { [TOOLSET]: { mcpServers: { [SERVER_NAME]: { command: '/opt/salesko/read' } } } },
     };
-    const built = createDaemonWithAdapters(config, [adapter]);
+    const built = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter]);
     daemons.push(built);
     await built.pair('pairing-code');
     await built.start();
