@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -154,7 +155,7 @@ describe('task-free Agent-home projection', () => {
       hookCwds.push(cwd);
     });
     const adapterA = new StubRuntimeAdapter();
-    const daemonA = createDaemonWithAdapters({
+    const daemonA = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Test',
       productId: 'agent-home-projection-test',
@@ -231,7 +232,7 @@ describe('task-free Agent-home projection', () => {
     daemons.splice(daemons.indexOf(daemonA), 1);
     vi.unstubAllGlobals();
     const adapterB = new StubRuntimeAdapter();
-    const daemonB = createDaemonWithAdapters({
+    const daemonB = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Test',
       productId: 'agent-home-projection-test',

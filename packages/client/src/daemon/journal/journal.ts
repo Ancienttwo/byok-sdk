@@ -183,62 +183,13 @@ export interface RecoveryOutcome {
   readonly occurredAt?: string;
 }
 
-/**
- * The five storage categories §12.7.2.1 requires to be measured SEPARATELY —
- * the cleanup order and the never-delete list are both category-scoped, so a
- * single "bytes used" number cannot drive either.
- */
-export type StorageCategory = 'journal' | 'cache' | 'log' | 'workspace' | 'quarantine';
-
-export interface CategoryUsage {
-  readonly bytes: number;
-  /** `true` when this is a host-reported or sampled figure rather than a measured one. */
-  readonly approximate: boolean;
-}
-
 export interface LocalStorageUsage {
   readonly measuredAt: string;
-  readonly totalBytes: number;
-  readonly categories: Readonly<Record<StorageCategory, CategoryUsage>>;
-}
-
-/**
- * The categories automatic cleanup may act on, in §12.7.2.1's order. This
- * union is the never-auto-delete list's enforcement: `quarantine`,
- * unacked envelopes, live tasks, unconfirmed terminals, recovery-marked rows,
- * and user-designated workspaces have NO name here, so no cleanup call can
- * name one. Adding a member is therefore a deliberate, reviewable act rather
- * than a filter that silently stops matching.
- */
-export type CleanableCategory =
-  /** Expired upload/download temp files and rebuildable caches. */
-  | 'expired-temp'
-  /** Rotated logs past their retention. */
-  | 'rotated-log'
-  /** Journal rows for tasks whose terminal the cloud has confirmed and that carry no recovery marker. */
-  | 'confirmed-journal'
-  /** Generated workspaces the HOST explicitly marked ephemeral, for tasks already terminal. */
-  | 'ephemeral-workspace'
-  /** Local artifacts with no remaining reference, after a reference scan plus grace period. */
-  | 'orphan-artifact';
-
-export interface CleanupCandidate {
-  readonly candidateId: string;
-  readonly category: CleanableCategory;
-  /** What to act on — a filesystem path, or a journal key. Interpreted by the cleanup worker, never by the journal. */
-  readonly ref: string;
-  readonly eligibleAt: string;
-  readonly reason: string;
-  readonly attempts: number;
-  readonly lastError?: string;
-}
-
-export interface CleanupResult {
-  readonly candidateId: string;
-  readonly outcome: 'deleted' | 'skipped' | 'failed';
-  readonly bytesReclaimed?: number;
-  readonly error?: string;
-  readonly at: string;
+  readonly journalBytes: number;
+  readonly quarantineBytes: number;
+  readonly journalEntries: number;
+  readonly confirmedEntries: number;
+  readonly oldestConfirmedAt?: string;
 }
 
 export interface CompactOptions {
@@ -302,12 +253,12 @@ export interface LocalTaskJournal {
   listRecoverable(): Promise<RecoverableTask[]>;
   /** Close out one recoverable task by writing its recovery marker. Never deletes; a marked row is on §12.7.2.1's never-auto-delete list. */
   markRecovered(taskId: string, outcome: RecoveryOutcome): Promise<void>;
-  /** Per-category storage usage (§12.7.2.1) — the input to the watermark state machine. */
+  /** Physical journal/quarantine footprint and logical receipt counts; retention registry owns aggregate usage. */
   measureUsage(): Promise<LocalStorageUsage>;
-  /** Cleanup candidates eligible at `now`, oldest first, at most `limit`. Only {@link CleanableCategory} members can ever appear. */
-  listCleanupCandidates(now: Date, limit: number): Promise<CleanupCandidate[]>;
-  /** Record what the cleanup worker actually did with a candidate. */
-  markCleanupResult(result: CleanupResult): Promise<void>;
+  /** Confirmed terminals older than cutoff, without recovery markers, oldest first. */
+  listPrunableConfirmedTasks(cutoff: Date, limit: number): Promise<string[]>;
+  /** Transactionally rechecks confirmation and recovery protection before pruning. */
+  pruneConfirmedJournalTask(taskId: string): Promise<boolean>;
   /** Bounded WAL checkpoint + incremental vacuum. Maintenance only; never on the envelope path. */
   compact(options: CompactOptions): Promise<CompactResult>;
   /**

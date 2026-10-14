@@ -65,10 +65,22 @@ describe('S18-2: observation-wide deadline', () => {
   });
 
   it('shares the same deadline across every tools/list page', async () => {
-    const f = await fixture({ initializeMs: 150, listMs: 400, pages: 3 });
-    const started = performance.now();
+    const f = await fixture({ pages: 3 });
+    const wallNow = performance.now.bind(performance);
+    const started = wallNow();
+    let elapsed = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => started + elapsed);
+    const request = Client.prototype.request;
+    vi.spyOn(Client.prototype, 'request').mockImplementation(async function (this: Client, ...args) {
+      const result = await request.apply(this, args);
+      // Pagination consumes one budget: 100ms initialize plus two 500ms pages.
+      // OS startup is tested separately; it cannot decide this pagination trace.
+      if (args[0].method === 'initialize') elapsed += 100;
+      if (args[0].method === 'tools/list') elapsed += 500;
+      return result;
+    });
     await expect(observeMcpServer('fixture', f.server, { env: ENV, timeoutMs: 1_100 })).rejects.toBeInstanceOf(McpTransportError);
-    expect(performance.now() - started).toBeLessThan(1_750);
+    expect(wallNow() - started).toBeLessThan(1_750);
     const events = await expectExited(f);
     expect(events.filter((event) => event.event === 'request' && event.method === 'tools/list').length).toBeGreaterThan(1);
   });

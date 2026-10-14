@@ -141,7 +141,7 @@ import { createPiInputPreparationCompiler, resolvePinnedPiRuntimeIdentity } from
 import { decodeTeamMemberContext, encodeTeamMemberContext, LocalTeamWorkspace } from './team-workspace';
 import { McpToolsetRegistry, McpToolsetRevisionConflictError } from './toolset-registry';
 import { ConnectionManager } from './connection-manager';
-import { createFleetJitter, type FleetJitter } from './deterministic-jitter';
+import { createFleetJitter, deterministicJitterMs, type FleetJitter } from './deterministic-jitter';
 import { OperationalHealthTracker, type OperationalHealthSnapshot } from './operational-health';
 import { acquireDaemonOwner, DaemonOwnerActiveError, type DaemonOwnerLease } from './daemon-owner';
 import { toRuntimeInfoCapabilities } from './runtime-capabilities';
@@ -152,17 +152,16 @@ import { AgentSessionHandoffStore } from './agent-session-handoff-store';
 import { GitWorkspaceManager, stableGitWorkspaceOwnerId } from './git-workspace';
 import { GitWorkspaceStore } from './git-workspace-store';
 import { DeviceRecordRePairRequiredError, DeviceStore, type DeviceEnrollment, type DeviceRecord } from './store';
-import { JournalRecordTooLargeError, JournalUnavailableError, journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord, type StorageCategory } from './journal/journal';
+import { JournalRecordTooLargeError, JournalUnavailableError, journalHash, type JournalIdentity, type LocalTaskJournal, type ReceivedEnvelopeRecord } from './journal/journal';
 import { JournalHandleCleanupError, SqliteLocalTaskJournal } from './journal/sqlite-journal';
 import { isSqliteAvailable, type JournalOpenFaultSeam } from './journal/sqlite-support';
-import {
-  createFilesystemCleanupExecutor,
-  createStatfsFreeBytesProvider,
-  LocalStoragePressureEngine,
-  resolveLocalStoragePolicy,
-  type LocalStoragePolicy,
-  type LocalStoragePolicyInput,
-} from './journal/storage-policy';
+import { promises as fs } from 'node:fs';
+import { LocalStorageConfigError, resolveStorageConfig, type StorageConfig } from './retention/config';
+import { ScratchRoot } from './retention/scratch';
+import { StoragePressure } from './retention/pressure';
+import { RetentionSweeper, type RetentionTimers } from './retention/sweeper';
+import { createRetentionRegistry } from './retention/producers';
+
 import { DEFAULT_MAX_INLINE_EVENT_BYTES, MIN_MAX_INLINE_EVENT_BYTES } from './event-spill';
 import {
   DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME,
@@ -289,24 +288,11 @@ export interface HostedJournalConfig {
   busyTimeoutMs?: number;
   /** Per-record byte bound. Defaults to the journal's own bound; oversized records are refused, never truncated. */
   maxRecordBytes?: number;
-  /**
-   * S3b (L-003): opt-in local storage policy — §12.7.2.1's watermarks,
-   * classified GC, and bounded WAL compaction. See `LocalStoragePolicyInput`
-   * (`journal/storage-policy.ts`); `maxStoreBytes` and `minFreeBytes` are the
-   * only two a host must supply.
-   *
-   * Optional WITHIN hosted journal mode, and off by default there too: a
-   * journal without a policy is a daemon that records durably and never
-   * declines, which is exactly the right behaviour on a host that manages its
-   * own disk. Setting it is what turns local storage into an admission-control
-   * input — hard pressure declines new offers (retryably) while terminal
-   * flush, delete, export and recovery keep running, and `emergency` refuses
-   * to ack at all rather than acking a row it cannot durably record.
-   */
-  storagePolicy?: LocalStoragePolicyInput;
+
 }
 
 export interface DaemonConfig {
+  storage?: StorageConfig;
   /** Distribution-owned application release; observability only, never a protocol/capability gate. */
   localAgentRelease: LocalAgentReleaseIdentity;
   productName: string;
@@ -800,6 +786,7 @@ export interface DaemonStatus {
   environmentResolvedAt?: string;
   /** Startup observations for every configured adapter; status never re-probes. */
   runtimes: RuntimeObservation[];
+  storage: ControlStorageStatus;
   /** Process-immutable Local Agent application release captured at construction. */
   localAgentRelease: Readonly<LocalAgentReleaseIdentity>;
   paired: boolean;
@@ -894,6 +881,7 @@ export interface Daemon {
 /** Custom adapter composition. Available custom descriptors are published through
  * the capability-gated harness inventory; built-in RuntimeId remains closed. */
 export interface DaemonOverrides {
+  retention?: { clock?: () => Date; timers?: RetentionTimers; freeBytesProvider?: () => Promise<number> };
   /** Test-only synchronous kill points; never supplied by production configuration. */
   executionRecoveryFault?: (step: 'terminal:before-send' | 'terminal:queued' | 'outbound:before-post' | 'outbound:after-ack') => void;
   /** M4 Phase 3: overrides `TaskRunner`'s default out-of-band approval wait (`DEFAULT_APPROVAL_TIMEOUT_MS`, 10 minutes) before an unanswered `requestApproval` force-resolves as a fail-closed rejection. */
@@ -936,18 +924,7 @@ export interface DaemonOverrides {
     journal?: LocalTaskJournal;
     /** Test-only post-open SQLite initialization fault seam. */
     openFaults?: JournalOpenFaultSeam;
-    /**
-     * S3b (L-003): injection seam for the storage pressure engine, same rule
-     * as `journal` above — used only when `config.hostedJournal` is set, and
-     * NOT started or stopped by this daemon. Whoever injects one owns its
-     * cadence, which is what lets the disk-pressure matrix drive `tick()` by
-     * hand with fake usage/free providers and no timer at all.
-     *
-     * An injected engine still answers both questions the daemon asks it
-     * (admission under hard pressure, ack-critical refusal under emergency)
-     * and still backs the `storage` section of the control-socket status.
-     */
-    pressureEngine?: LocalStoragePressureEngine;
+
   };
 }
 
@@ -1222,7 +1199,7 @@ const ALL_RUNTIME_IDS: readonly RuntimeId[] = ['pi', 'claude', 'codex'];
 function buildAdapter(id: RuntimeId, config: DaemonConfig): RuntimeAdapter {
   switch (id) {
     case 'pi':
-      return new PiAdapter({ byokLauncher: config.piByokLauncher, ...(config.sdkHelperHost === undefined ? {} : { sdkHelperHost: config.sdkHelperHost }), ...(config.durablePi === true ? { durablePi: { replicaRoot: path.join(DeviceStore.resolveDir(config.productId, config.storeDir), 'durable') } } : {}) });
+      return new PiAdapter({ byokLauncher: config.piByokLauncher, ...(config.sdkHelperHost === undefined ? {} : { sdkHelperHost: config.sdkHelperHost }), ...(config.durablePi === true ? { durablePi: true } : {}) });
     case 'claude':
       return new ClaudeAdapter();
     case 'codex':
@@ -1379,6 +1356,10 @@ export function buildDaemonWithAdapters(
     ? undefined
     : resolveAgentMemoryDescribeBin(externalAgentMemoryFilesystem, config.sdkHelperHost);
   const localAgentRelease = resolveLocalAgentReleaseIdentity(config.localAgentRelease);
+  if (Object.hasOwn(config.hostedJournal ?? {}, 'storagePolicy')) throw new LocalStorageConfigError('config', 'rejects removed hostedJournal.storagePolicy; use storage.budget and storage.retention');
+  if (Object.hasOwn(overrides.hostedJournal ?? {}, 'pressureEngine')) throw new LocalStorageConfigError('config', 'rejects removed hostedJournal.pressureEngine; maintenance belongs to the daemon');
+  const suppliedJournal = overrides.hostedJournal?.journal;
+  if (suppliedJournal !== undefined && (typeof suppliedJournal.listPrunableConfirmedTasks !== 'function' || typeof suppliedJournal.pruneConfirmedJournalTask !== 'function')) throw new LocalStorageConfigError('config', 'requires the journal confirmed-retention ports');
   const toolsetRegistry = new McpToolsetRegistry(config.mcpToolsets);
   validatePiByokLauncherConfig(config.piByokLauncher);
   if (config.durablePi !== undefined && typeof config.durablePi !== 'boolean') throw new Error('durablePi must be boolean');
@@ -1494,6 +1475,11 @@ export function buildDaemonWithAdapters(
   let shuttingDown = false;
 
   const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
+  const storageConfig = resolveStorageConfig(storeDir, config.storage);
+  const retentionClock = overrides.retention?.clock ?? (() => new Date());
+  const scratchRoot = new ScratchRoot(storageConfig.scratchRoot, retentionClock);
+  const storagePressure = new StoragePressure(storageConfig.budget);
+  let retentionIdentity: JournalIdentity | undefined;
 
   /**
    * B-P2 local primitive. Three facts are resolved here, once, at construction:
@@ -1625,22 +1611,12 @@ export function buildDaemonWithAdapters(
   // Fail-closed on a runtime without `node:sqlite` needs no check here: this
   // is the constructor that refuses (`JournalUnavailableError`), before any
   // filesystem work, and it propagates straight out of `createDaemon`.
-  let resolvedStoragePolicy: LocalStoragePolicy | undefined;
   if (config.hostedJournal) {
     // Validated synchronously and up front, the same way `maxTaskOutputBytes`
     // is above — a misconfigured durability section must fail at
     // construction, not at the first envelope that needed it.
     if (config.hostedJournal.mode !== 'sqlite') {
       throw new Error(`DaemonConfig.hostedJournal.mode must be "sqlite" — got ${JSON.stringify(config.hostedJournal.mode)}`);
-    }
-    // Resolved HERE, in the same pure-config block, and deliberately BEFORE
-    // any journal is constructed: rejecting a malformed storage policy must
-    // not depend on this runtime having `node:sqlite`, or the same bad config
-    // would surface as `JournalUnavailableError` on Node 20 and
-    // `LocalStoragePolicyError` on Node 22. Config errors are config errors on
-    // every runtime.
-    if (config.hostedJournal.storagePolicy) {
-      resolvedStoragePolicy = resolveLocalStoragePolicy(config.hostedJournal.storagePolicy);
     }
   }
   // Capability detection is side-effect-free and therefore remains a
@@ -1654,11 +1630,8 @@ export function buildDaemonWithAdapters(
 
   let ownedJournal: SqliteLocalTaskJournal | undefined;
   let journal: LocalTaskJournal | undefined = config.hostedJournal ? overrides.hostedJournal?.journal : undefined;
-  let ownedPressureEngine: LocalStoragePressureEngine | undefined;
   let hostedStorageInitializationBarrierComplete = true;
-  let pressureEngine: LocalStoragePressureEngine | undefined = config.hostedJournal
-    ? overrides.hostedJournal?.pressureEngine
-    : undefined;
+
 
   /** Construct every daemon-owned hosted writer only after ownership exists. */
   function initializeOwnedHostedStorage(): void {
@@ -1677,43 +1650,27 @@ export function buildDaemonWithAdapters(
       }
       journal = ownedJournal;
     }
-    if (resolvedStoragePolicy && !pressureEngine) {
-      const activeJournal = journal;
-      const cleanupJournal = ownedJournal;
-      ownedPressureEngine = new LocalStoragePressureEngine({
-        policy: resolvedStoragePolicy,
-        journal: activeJournal,
-        freeBytesProvider: createStatfsFreeBytesProvider(storeDir),
-        executor: createFilesystemCleanupExecutor(
-          cleanupJournal ? { pruneJournalTask: (taskId) => cleanupJournal.pruneConfirmedJournalTask(taskId) } : {},
-        ),
-        timers: {
-          setInterval: (handler, baseMs) => {
-            if (!fleetJitter) throw new Error('maintenance scheduler started before device identity was loaded');
-            const timer = setInterval(handler, fleetJitter.delay('maintenance', maintenanceSequence++, baseMs));
-            timer.unref?.();
-            return timer;
-          },
-          clearInterval: (handle) => clearInterval(handle as NodeJS.Timeout),
-        },
-        onMaintenanceOutcome: (outcome) => {
-          const write = outcome === 'success'
-            ? operationalHealth.recordSuccess('maintenance')
-            : operationalHealth.recordFailure('maintenance');
-          void write.catch((err: unknown) => {
-            console.warn(`[byok/client] failed to persist operational health: ${err instanceof Error ? err.message : String(err)}`);
-          });
-        },
-        onEvent: (event) => {
-          if (event.kind !== 'state-changed') return;
-          console.warn(
-            `[byok/client] local storage pressure: ${event.from} -> ${event.to} (used ${event.snapshot.usedBytes} of ${event.snapshot.budgetBytes} budget bytes, ${event.snapshot.freeBytes} free)`,
-          );
-        },
-      });
-      pressureEngine = ownedPressureEngine;
-    }
   }
+  const retentionRegistry = createRetentionRegistry({
+    storeDir, scratch: scratchRoot, config: storageConfig, clock: retentionClock,
+    journal: () => journal, identity: () => retentionIdentity, preparation: () => inputPreparationService,
+    ...(agentHomeManager === undefined ? {} : { home: agentHomeManager }),
+    ...(agentSessionHandoffs === undefined ? {} : { handoffs: agentSessionHandoffs }),
+    ...(config.workspaceRoot === undefined ? {} : { workspaceRoot: config.workspaceRoot }),
+    ...(config.piByokLauncher?.sessionDir === undefined ? {} : { piSessionDir: config.piByokLauncher.sessionDir }),
+  });
+  const retentionSweeper = new RetentionSweeper({
+    config: storageConfig, registry: retentionRegistry, pressure: storagePressure, clock: retentionClock,
+    ...(overrides.retention?.timers === undefined ? {} : { timers: overrides.retention.timers }),
+    freeBytes: overrides.retention?.freeBytesProvider ?? (async () => { const stats = await fs.statfs(storeDir); return Number(stats.bavail) * Number(stats.bsize); }),
+    jitter: (sequence, baseMs) => deterministicJitterMs({ seed: `${config.productId}\0${storeDir}`, domain: 'maintenance', sequence, baseMs }),
+    onSweep: report => {
+      observer.noteRetentionSweep(report);
+      void (report.failures === 0 ? operationalHealth.recordSuccess('maintenance') : operationalHealth.recordFailure('maintenance')).catch(() => undefined);
+    },
+    onFailure: (trigger, classId, code) => observer.noteRetentionFailure(trigger, classId, code),
+  });
+
   /**
    * S3b: serializes terminal journal writes against the outbound send that
    * follows each one, and gives `runShutdownSequence` something to await.
@@ -2063,6 +2020,7 @@ export function buildDaemonWithAdapters(
         `[byok/client] previous daemon run left owned runtime process groups: recorded=${reconciliation.recorded} found=${reconciliation.found} terminated=${reconciliation.terminated} survived=${reconciliation.survived} liveWriter=${reconciliation.liveWriter}`,
       );
     }
+    await scratchRoot.open(storeDir);
     detachOwnedProcessGroupLedger?.();
     detachOwnedProcessGroupLedger = attachOwnedProcessGroupLedger(ownedProcessLedger);
     // Initialization is one instance promise, including refusal. Even the
@@ -2097,6 +2055,8 @@ export function buildDaemonWithAdapters(
         startedAt = Date.now();
         serviceEnrollmentWaiting = true;
         serviceEnrollmentTransitioning = false;
+        await retentionSweeper.runPass('startup');
+        retentionSweeper.start();
         await replaceControlServer(true, true);
         setLifecycle({ phase: 'awaiting-enrollment' });
         return;
@@ -2114,8 +2074,8 @@ export function buildDaemonWithAdapters(
       throw new DaemonHaltError('unpaired');
     }
     const activeJournal = journal;
-    const activePressureEngine = pressureEngine;
-    const activeOwnedPressureEngine = ownedPressureEngine;
+    const activePressureEngine = storagePressure;
+    retentionIdentity = { tenantId: record.tenantId, productId: config.productId, deviceId: record.deviceId };
     // Loading an existing record arms proactive token renewal, whose final
     // step writes device.json. Acquire the store mutation lease first so a
     // rejected second daemon can never leave that timer behind as a writer.
@@ -2169,10 +2129,8 @@ export function buildDaemonWithAdapters(
     // policy is an explicit request to gate on local storage, and a daemon that
     // cannot measure it cannot honour that (§12.7.2's fail-closed posture).
     // An INJECTED engine is left alone — its owner drives its cadence.
-    if (activeOwnedPressureEngine) {
-      await activeOwnedPressureEngine.tick();
-      activeOwnedPressureEngine.start();
-    }
+    await retentionSweeper.runPass('startup');
+    retentionSweeper.start();
 
     startedAt = Date.now();
     // M4 Phase 2: a second start() on THIS SAME Daemon instance (e.g. the
@@ -2375,6 +2333,7 @@ export function buildDaemonWithAdapters(
       ...(config.strictAgentOnly === true ? { strictAgentOnly: true } : {}),
       // Already validated up front — see `DaemonConfig.maxConcurrentReaderAttemptsPerAgentHome`.
       maxConcurrentReaderAttemptsPerAgentHome: agentHomeReaderLimit,
+      scratchRoot,
       ...(agentSessionHandoffs === undefined ? {} : { agentSessionHandoffs }),
       deviceId: record.deviceId,
       getMcpToolsets: () => toolsetRegistry.snapshot().toolsets,
@@ -3176,9 +3135,8 @@ export function buildDaemonWithAdapters(
     // `counter_interrupted`, never a silent cancellation and never an automatic
     // second call on restart (§10.3.5).
     await attempt(() => inputPreparationService?.stop(), false);
-    const stoppingOwnedPressureEngine = ownedPressureEngine;
     const stoppingOwnedJournal = ownedJournal;
-    const maintenanceStopped = stoppingOwnedPressureEngine?.stop() ?? Promise.resolve();
+    const maintenanceStopped = retentionSweeper.stop();
     await attempt(() => runner?.stopAcceptingOffers(), true);
     const activeTeardown = runner?.shutdownActiveTasks(reason) ?? Promise.resolve();
     const graceMs = config.shutdownGraceMs ?? SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS;
@@ -3230,8 +3188,6 @@ export function buildDaemonWithAdapters(
       if (journalClosed) {
         if (journal === stoppingOwnedJournal) journal = undefined;
         if (ownedJournal === stoppingOwnedJournal) ownedJournal = undefined;
-        if (pressureEngine === stoppingOwnedPressureEngine) pressureEngine = undefined;
-        if (ownedPressureEngine === stoppingOwnedPressureEngine) ownedPressureEngine = undefined;
       }
     } else if (stoppingOwnedJournal) {
       mutationBarrierComplete = false;
@@ -3439,36 +3395,15 @@ export function buildDaemonWithAdapters(
   // start()/stop() cycles.
   // -------------------------------------------------------------------------
 
+  function buildStorageStatus(): ControlStorageStatus {
+    const snapshot = retentionSweeper.snapshot();
+    return { ...snapshot, ...(storageConfig.budget === undefined ? {} : { budget: {
+      budgetBytes: storageConfig.budget.maxStoreBytes, pressureState: storagePressure.state,
+    } }) };
+  }
+
   function buildControlStatus(): ControlStatusResult {
-    const snapshot = pressureEngine?.snapshot();
-    const storageStatus: ControlStorageStatus | undefined =
-      snapshot === undefined
-        ? undefined
-        : {
-            pressureState: snapshot.state,
-            budgetBytes: snapshot.budgetBytes,
-            usedBytes: snapshot.usedBytes,
-            freeBytes: snapshot.freeBytes,
-            measuredAt: snapshot.measuredAt,
-            categories: (Object.keys(snapshot.categories) as StorageCategory[])
-              .sort()
-              .map((category) => ({
-                category,
-                bytes: snapshot.categories[category].bytes,
-                approximate: snapshot.categories[category].approximate,
-              })),
-            ...(snapshot.lastCompaction
-              ? {
-                  lastCompaction: {
-                    checkpointed: snapshot.lastCompaction.checkpointed,
-                    walFramesRemaining: snapshot.lastCompaction.walFramesRemaining,
-                    pagesVacuumed: snapshot.lastCompaction.pagesVacuumed,
-                    durationMs: snapshot.lastCompaction.durationMs,
-                    at: snapshot.lastCompaction.at,
-                  },
-                }
-              : {}),
-          };
+    const storageStatus = buildStorageStatus();
     const activeTasks: ControlActiveTask[] = observer
       .tasks()
       .filter((task) => TASK_TRANSITIONS[task.state].length > 0) // non-terminal only — see the `status` method's own doc comment (control-protocol.ts)
@@ -3504,7 +3439,7 @@ export function buildDaemonWithAdapters(
       // measured" and "measured, and empty" are different facts, and a status
       // surface that conflates them is how an operator concludes a full disk is
       // fine.
-      ...(storageStatus === undefined ? {} : { storage: storageStatus }),
+      storage: storageStatus,
       operationalHealth: operationalHealth.snapshot(),
       outbound: outboundStatus(),
       toolsets: toolsetRegistry.status(),
@@ -4247,6 +4182,7 @@ export function buildDaemonWithAdapters(
       environment: { ...resolvedEnvironment },
       ...(environmentResolvedAt === undefined ? {} : { environmentResolvedAt }),
       runtimes: runtimeObservations.map(observation => ({ ...observation })),
+      storage: buildStorageStatus(),
       localAgentRelease,
       paired: auth.deviceId !== undefined,
       lifecycle,

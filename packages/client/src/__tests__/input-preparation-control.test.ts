@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import net from 'node:net';
@@ -210,7 +211,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
       mcpToolsets: { ...TOOLSETS },
       ...(options.enabled ? { inputPreparation: { limits: LIMITS, authorityResolver, counter } } : {}),
     };
-    daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter('pi')]);
+    daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')]);
     await daemon.pair('pairing-code');
     await daemon.start();
     const connected = await connectControlClient({ storeDir, productId: options.productId });
@@ -244,7 +245,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     await fs.writeFile(logPath, leftover, { mode: 0o600 });
 
     const adapter = new StubRuntimeAdapter('pi');
-    daemon = createDaemonWithAdapters({
+    daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Acme',
       productId,
@@ -305,7 +306,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
     const storeDir = await tmpDir('byok-prep-badpolicy-store-');
     expect(() =>
       createDaemonWithAdapters(
-        {
+        { storage: { scratchRoot: testScratchRoot() },
           localAgentRelease: { version: '0.0.0-test' },
           productName: 'Acme',
           productId: 'acme-prep-badpolicy',
@@ -391,7 +392,7 @@ describe('B-P2 control surface: end to end over the real control socket', () => 
       ...JSON.parse(line), artifactExpiresAt: new Date(0).toISOString(), recordExpiresAt: new Date(1).toISOString(),
     }));
     await fs.writeFile(logPath, lines.map((line) => JSON.stringify(line)).join('\n') + '\n');
-    daemon = createDaemonWithAdapters(config, [new StubRuntimeAdapter('pi')]);
+    daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter('pi')]);
     await daemon.start();
     expect(await fs.readdir(path.join(storeDir, 'input-preparation', 'artifacts'))).toEqual([]);
     expect(await fs.readFile(logPath, 'utf8')).toBe('');

@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -49,7 +50,7 @@ async function startDaemon(config: Record<string, unknown> = {}): Promise<{ life
   const workspaceRoot = await tmpDir('byok-lifecycle-workspace-');
   const storeDir = await tmpDir('byok-lifecycle-store-');
   daemon = createDaemonWithAdapters(
-    {
+    { storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-lifecycle-test' },
       productName: 'Lifecycle test',
       productId: 'lifecycle-test',
@@ -119,7 +120,7 @@ describe('daemon lifecycle (#391)', () => {
     const workspaceRoot = await tmpDir('byok-lifecycle-workspace-');
     const storeDir = await tmpDir('byok-lifecycle-store-');
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-lifecycle-test' },
         productName: 'Lifecycle test',
         productId: 'lifecycle-test',
@@ -188,7 +189,7 @@ describe('daemon lifecycle (#391)', () => {
     const workspaceRoot = await tmpDir('byok-lifecycle-workspace-');
     const storeDir = await tmpDir('byok-lifecycle-store-');
     daemon = createDaemonWithAdapters(
-      { localAgentRelease: { version: '0.0.0-lifecycle-test' }, productName: 'Lifecycle test', productId: 'lifecycle-test', serverUrl: server.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-lifecycle-test' }, productName: 'Lifecycle test', productId: 'lifecycle-test', serverUrl: server.url, workspaceRoot, storeDir },
       [new StubRuntimeAdapter('pi')],
     );
     const { deviceId } = await daemon.pair('lifecycle-pair-code');

@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -50,7 +51,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     const workspaceRoot = await tmpDir('byok-selection-workspace-');
     const storeDir = await tmpDir('byok-selection-store-');
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product-selection',
         serverUrl: server.url,
@@ -221,7 +222,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       });
       const prepareSpy = vi.spyOn(pi, 'prepare');
       daemon = createDaemonWithAdapters(
-        {
+        { storage: { scratchRoot: testScratchRoot() },
           localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
           productId: 'test-product-pi-falsifier',
           serverUrl: server.url,

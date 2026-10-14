@@ -31,7 +31,7 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
   if (!selection || (selection.lane !== 'byok' && selection.lane !== 'byok-profile')) throw new Error('durable requires BYOK selection');
   const binding = { agentRef: { ...manifest.agentRef, tenantId: context.tenantId }, taskId: manifest.taskId, leaseId: manifest.lease.leaseId, canonicalHome: manifest.lease.canonicalHome };
   const file = await admitReplica(options.replicaRoot, binding);
-  const configDir = await fs.mkdtemp(path.join(path.dirname(file), 'launch-'));
+  const configDir = input.scratch.sdkDir;
   await fs.chmod(configDir, 0o700);
   const configPath = path.join(configDir, 'config.json');
   const profileRef = selection.lane === 'byok-profile' ? selection.providerProfile.profileRef : selection.providerId;
@@ -43,7 +43,7 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
       launchCwd: binding.canonicalHome },
   });
   try { await fs.writeFile(configPath, serialized.bytes, { mode: 0o600 }); }
-  catch (error) { await fs.rm(configDir, { recursive: true, force: true }); throw error; }
+  catch (error) { await input.scratch.release(); throw error; }
   const shellGroups = new Set<number>();
   let workerPid: number | undefined;
   const queue = new AsyncQueue<AgentEvent>();
@@ -77,7 +77,7 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
       try { if (rpc) await rpc.dispose(); } finally { await disposeDurableShellGroups(shellGroups); }
       if (pump) await pump; // owned tree receipt before replica cleanup or lease release
       await resetReplica(file);
-      await fs.rm(configDir, { recursive: true, force: true });
+      await input.scratch.release();
       await runtimeLaunch.release(); queue.end();
     })();
     disposal = attempt.catch(error => { disposal = undefined; throw error; });

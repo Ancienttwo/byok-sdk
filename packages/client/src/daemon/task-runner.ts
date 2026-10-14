@@ -1,4 +1,5 @@
 import { DEFAULT_ACTIVITY_INGRESS, type ActivityIngress } from '@byok-sdk/protocol';
+import type { ScratchRoot, ExecutionScratch } from './retention/scratch';
 import { observePreparedMemory, type PreparedAgentMemoryState } from './prepared-agent-memory';
 import { InputPreparationRequestError } from './input-preparation-service';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
@@ -564,6 +565,7 @@ export interface TaskRunnerDeps {
    */
   approvalRegistry: ApprovalRegistry;
   storeDir: string;
+  scratchRoot: ScratchRoot;
   productId: string;
   /** Authenticated enrollment tenant projection; required by Agent message durability/recovery. */
   tenantId?: string;
@@ -742,6 +744,7 @@ interface ActiveTask {
   egressEnabled: boolean;
   adapter: RuntimeAdapter;
   session: Session;
+  scratch: ExecutionScratch;
   /** One consumer; teardown drains its final usage within the existing interrupt deadline. */
   eventPump?: Promise<void>;
   workspaceDir: string;
@@ -911,6 +914,7 @@ interface OfferPhaseContext {
 
 /** The front-phase values that `prepareOfferRuntime` reads. */
 interface OfferRuntimeInput {
+  readonly acquireScratch: () => Promise<ExecutionScratch>;
   readonly payload: AcceptedOfferPayload;
   readonly agentRef: AgentRef | undefined;
   readonly preparation: InputPreparationOfferBinding | undefined;
@@ -1847,7 +1851,7 @@ export class TaskRunner {
   private closeActiveSession(active: ActiveTask): Promise<void> {
     // Store the receipt before close runs. A synchronous throw is a rejected
     // receipt, just like an adapter's asynchronous disposal failure.
-    const attempt = active.disposalAttempt ??= Promise.resolve().then(() => active.session.close());
+    const attempt = active.disposalAttempt ??= Promise.resolve().then(async () => { await active.session.close(); await active.scratch.release(); });
     // Interrupt can start close before finalization waits for it. Observe the
     // rejection here, but retain the receipt until finalization reports it.
     void attempt.catch(() => undefined);
@@ -2177,6 +2181,7 @@ export class TaskRunner {
     // startup registration or the active handoff it names.
     let owner: 'offer' | 'startup' | 'active' = 'offer';
     let runtimeLaunch: PiRuntimeLaunchResources | undefined;
+    let executionScratch: ExecutionScratch | undefined;
     let reservedHome: string | undefined;
     const releaseReservation = (): void => {
       if (reservedHome === undefined) return;
@@ -2201,11 +2206,16 @@ export class TaskRunner {
       if (offerLimits === undefined) return;
       const { requiredToolsets, resolvedMcp } = offerLimits;
       const runtime = await this.prepareOfferRuntime(phase, {
+        acquireScratch: async () => {
+          const scratch = await this.deps.scratchRoot.create();
+          executionScratch = scratch;
+          return scratch;
+        },
         payload, agentRef, preparation, preparedMemorySelected, messageRequirement, terminalProjection,
         readerAttempt, requiredToolsets, resolvedMcp, blobAbort,
       });
       if (runtime === undefined) return;
-      const { offered, pick, env, mcpEnv, mcpToolsetTools, prepared } = runtime;
+      const { scratch, offered, pick, env, mcpEnv, mcpToolsetTools, prepared } = runtime;
       let taskMcpServers = runtime.taskMcpServers;
 
       if (agentRef !== undefined) {
@@ -2273,21 +2283,7 @@ export class TaskRunner {
         if (readerAttempt) {
           const fresh = sessionRef === undefined;
           try {
-            const referencedRuns = fresh
-              ? await this.deps.agentSessionHandoffs!.readerRunReferences(agentBinding.resolution.canonicalHome)
-                .catch((error: unknown) => {
-                  console.warn(`[byok/client] reader run retention skipped for ${taskId}: session handoffs are unreadable: ${errorMessage(error)}`);
-                  return undefined;
-                })
-              : undefined;
-            const prepared = await this.deps.agentHome!.prepareReaderRun(agentBinding, {
-              fresh,
-              ...(referencedRuns === undefined ? {} : { referencedRuns }),
-              nowMs: Date.now(),
-            });
-            if (prepared.retentionError !== undefined) {
-              console.warn(`[byok/client] reader run retention failed for ${taskId}: ${errorMessage(prepared.retentionError)}`);
-            }
+            await this.deps.agentHome!.prepareReaderRun(agentBinding, { fresh });
           } catch (error) {
             await agentBinding.lease.release().catch(() => {});
             agentBinding = undefined;
@@ -2383,7 +2379,7 @@ export class TaskRunner {
         try {
           runtimeLaunch = await prepared.operation.resolveRuntimeLaunch({
             kind: preparation === undefined ? 'instruction' : 'prepared', cwd: workspaceDir, env,
-            projectionRoot: path.join(this.deps.storeDir, 'runtime-projections'),
+            scratch,
           });
         } catch (error) {
           gitLease?.release();
@@ -2712,8 +2708,9 @@ export class TaskRunner {
       }
       const durableBinding = agentBinding;
       const startInput: RuntimeOperationStartInput = {
+        scratch,
         ...(runtimeLaunch?.kind !== 'pi-durable' ? {} : { durableContext: {
-          tenantId: this.deps.tenantId!, lifecycle: {
+          tenantId: this.deps.tenantId!, replicaRoot: path.join(this.deps.storeDir, 'durable-replicas'), lifecycle: {
             ownsLease: () => durableBinding !== undefined && !blobAbort.signal.aborted && !this.pendingCancelled.has(taskId),
             record: async (kind: 'tool-intent' | 'tool-committed' | 'respawn-intent', ordinal: number) => {
               if (!durableBinding || !this.deps.recordDurableTransition || !this.deps.tenantId) throw new Error('durable parent authority unavailable');
@@ -2786,7 +2783,7 @@ export class TaskRunner {
           this.startupOwnership.register(taskId, {
             runtimeId: pick.descriptor.id,
             ...(abortedStart === undefined ? {} : { abortedStart }),
-            dispose: disposalFailure ? err.retryDisposal : async () => {},
+            dispose: async () => { if (disposalFailure) await err.retryDisposal(); await scratch.release(); },
             ...(cancelled ? { settle: async () => {
               if (cancellationSettled) return;
               // Retain startup ownership on a failed durable barrier, just as
@@ -2841,7 +2838,7 @@ export class TaskRunner {
       const ownedBinding = agentBinding;
       this.startupOwnership.register(taskId, {
         runtimeId: pick.descriptor.id,
-        dispose: () => session.close(),
+        dispose: async () => { await session.close(); await scratch.release(); },
         release: async () => {
           await ownedBinding?.lease.release();
           gitLease?.release();
@@ -2875,6 +2872,7 @@ export class TaskRunner {
         egressEnabled: 'egressPolicy' in payload,
         adapter: pick.adapter,
         session,
+        scratch,
         workspaceDir,
         ...(agentBinding === undefined ? {} : {
           agentBinding,
@@ -3069,7 +3067,14 @@ export class TaskRunner {
         // holds env or IPC references, not the key, so removing it does not
         // revoke a credential. Its cleanup timing for a retained startup
         // stays unchanged here.
-        if (owner !== 'active') await runtimeLaunch?.release();
+        if (owner === 'offer' && executionScratch !== undefined) {
+          try { await executionScratch.release(); }
+          catch (error) {
+            this.deps.scratchRoot?.abandon(executionScratch.token);
+            this.deps.onRuntimeDisposalFailure?.({ taskId, runtimeId: 'scratch', stage: 'cleanup', reason: 'offer scratch disposal did not complete' });
+            throw error;
+          }
+        }
       } finally {
         this.inFlightBlobAborts.delete(taskId);
         this.inFlightOffers.delete(taskId);
@@ -3275,11 +3280,16 @@ export class TaskRunner {
       decline('server does not support the selected custom harness identity', false);
       return undefined;
     }
+    // Scratch-free declines do not own an Execution resource or contend on
+    // its store gate. Acquire it at the first consumer; handleOffer retains
+    // ownership across this await and releases it on every pre-start exit.
+    const scratch = await input.acquireScratch();
+    if (admissionWithdrawn()) return undefined;
     // The environment EVERY child process of this task receives: the
     // daemon's own, minus the hard deny (`./environment.ts`). Computed here,
     // before admission, so the admission-time MCP probes below see exactly
     // what the runtime path sees. One computation, both phases.
-    const env = buildRuntimeEnv({ ambient: process.env });
+    const env = { ...buildRuntimeEnv({ ambient: process.env }), ...scratch.env };
     const mcpEnv = pick.descriptor.id === 'pi' ? projectPiMcpEnvironment(env) : env;
     if (resolvedMcp?.ok && agentRef !== undefined && this.deps.prepareHostTaskContext) {
       await this.deps.prepareHostTaskContext(taskId, blobAbort.signal);
@@ -3396,7 +3406,7 @@ export class TaskRunner {
       decline(prepared.reason, prepared.retryable);
       return undefined;
     }
-    return { offered, pick, env, mcpEnv, taskMcpServers, mcpToolsetTools, prepared };
+    return { scratch, offered, pick, env, mcpEnv, taskMcpServers, mcpToolsetTools, prepared };
   }
 
   private withAgentMessageMcp(

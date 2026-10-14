@@ -1,3 +1,4 @@
+import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { fileURLToPath } from 'node:url';
 import { spawn as realSpawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
@@ -334,6 +335,8 @@ describe('PiAdapter against the fake-pi fixture', () => {
   // L3: an asset root without the SDK manifest is reported early, not as an
   // opaque ENOENT inside the Pi child.
   it('reports a single-file product without its Pi asset manifest as not-found and refuses its launch with the reason', async () => {
+const __executionScratch = await testExecutionScratch();
+
     const bundle = new PiAdapter({ sdkHelperHost: { mode: 'self-executable', executable: process.execPath, entry: '/product/sdk.js' } });
     vi.stubEnv('PI_PACKAGE_DIR', '');
     await expect(bundle.detect()).resolves.toEqual({ kind: 'not-found' });
@@ -347,7 +350,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     } finally { await fs.rm(empty, { recursive: true, force: true }); }
     const prepared = await bundle.prepare({ offer: { instruction: 'Never sent' }, descriptor: bundle.descriptor, requiredToolsetIds: [] });
     if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
-    await expect(prepared.operation.resolveRuntimeLaunch!({ kind: 'instruction', cwd: os.tmpdir(), env: {}, projectionRoot: path.join(os.tmpdir(), 'byok-unused-projections') }))
+    await expect(prepared.operation.resolveRuntimeLaunch!({ scratch: __executionScratch,  kind: 'instruction', cwd: os.tmpdir(), env: {},  }))
       .rejects.toMatchObject({ name: 'RuntimeExecutionFailure', phase: 'start', message: 'pi_bundled_assets_unavailable: an interpreter + bundle product must set PI_PACKAGE_DIR to its Pi asset root' });
   });
 

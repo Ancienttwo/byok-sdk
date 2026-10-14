@@ -1,3 +1,4 @@
+import { inertScratch } from './fixtures/inert-scratch';
 import { EventEmitter, errorMonitor } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -146,7 +147,7 @@ describe('Claude stdin transport failure ownership', () => {
     tree.dispose.mockReturnValue(disposal.promise);
     const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: 'inert-fixture', source: 'path' }), spawnFn: fixture.spawnFn });
     const start = observe(startPreparedOperation(adapter, { instruction: 'hello' }, {
-      workspaceDir: process.cwd(), env: {},
+      scratch: inertScratch(), workspaceDir: process.cwd(), env: {},
     }));
     await flush();
     if (phase === 'init') fixture.child.stdin.destroy(fixture.error);
@@ -168,7 +169,7 @@ describe('Claude stdin transport failure ownership', () => {
     tree.dispose.mockReturnValue(disposal.promise);
     const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: 'inert-fixture', source: 'path' }), spawnFn: fixture.spawnFn });
     const start = observe(startPreparedOperation(adapter, { instruction: 'hello' }, {
-      workspaceDir: process.cwd(), env: {},
+      scratch: inertScratch(), workspaceDir: process.cwd(), env: {},
     }));
     await flush();
     fixture.child.stdout.write('{"type":"system","subtype":"init","session_id":"early"}\n');
@@ -187,7 +188,7 @@ describe('Claude stdin transport failure ownership', () => {
     const fixture = fakeChild(false);
     const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: 'inert-fixture', source: 'path' }), spawnFn: fixture.spawnFn });
     const start = startPreparedOperation(adapter, { instruction: 'hello' }, {
-      workspaceDir: process.cwd(), env: {},
+      scratch: inertScratch(), workspaceDir: process.cwd(), env: {},
     });
     await flush();
     fixture.child.stdout.write('{"type":"system","subtype":"init","session_id":"ready"}\n');
@@ -230,7 +231,7 @@ describe('Claude stdin transport failure ownership', () => {
     tree.dispose.mockRejectedValueOnce(failure);
     const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: 'inert-fixture', source: 'path' }), spawnFn: fixture.spawnFn });
     const start = observe(startPreparedOperation(adapter, { instruction: 'hello' }, {
-      workspaceDir: process.cwd(), env: {},
+      scratch: inertScratch(), workspaceDir: process.cwd(), env: {},
     }));
     await flush(); await flush();
     expect(start.error).toBeInstanceOf(RuntimeStartupDisposalFailure);

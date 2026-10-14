@@ -1,8 +1,7 @@
+import { createDaemonScratch } from './retention/scratch';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import type { Dirent } from 'node:fs';
 import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { isTenantId } from '@byok-sdk/core';
 
@@ -57,8 +56,6 @@ export type DeviceCommandRunner = (
 const ENTRY_ACCOUNT = 'device-enrollment';
 const ENCODED_PREFIX = 'byok-device-credential-v1:';
 const NOT_FOUND = 44;
-const WINDOWS_BRIDGE_DIRECTORY_PREFIX = 'byok-device-credential-';
-const WINDOWS_BRIDGE_STALE_MS = 24 * 60 * 60 * 1_000;
 
 function providerDiagnostic(stderr: string): string {
   const match = /credential operation failed \((win32=\d{1,10}|hresult=-?\d{1,11}|stage=\d{1,2},kind=\d{1,2},hresult=-?\d{1,11})\)/u.exec(stderr);
@@ -67,30 +64,6 @@ function providerDiagnostic(stderr: string): string {
 
 function isNodeError(error: unknown, code: string): boolean {
   return error instanceof Error && 'code' in error && error.code === code;
-}
-
-async function scavengeStaleWindowsBridges(): Promise<void> {
-  const temporaryRoot = os.tmpdir();
-  let entries: Dirent[];
-  try {
-    entries = await fs.readdir(temporaryRoot, { withFileTypes: true });
-  } catch {
-    throw new DeviceCredentialStoreError('temporary Windows credential bridge root is unavailable');
-  }
-
-  const staleBefore = Date.now() - WINDOWS_BRIDGE_STALE_MS;
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !entry.name.startsWith(WINDOWS_BRIDGE_DIRECTORY_PREFIX)) continue;
-    const candidate = path.join(temporaryRoot, entry.name);
-    try {
-      const info = await fs.lstat(candidate);
-      if (!info.isDirectory() || info.isSymbolicLink() || info.mtimeMs >= staleBefore) continue;
-      await fs.rm(candidate, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-    } catch (error) {
-      if (isNodeError(error, 'ENOENT')) continue;
-      throw new DeviceCredentialStoreError('stale Windows credential bridge cleanup failed');
-    }
-  }
 }
 
 function windowsPowerShellExecutable(): string {
@@ -234,6 +207,7 @@ function quoteInteractive(value: string): string {
 }
 
 export interface DeviceCredentialStoreOptions {
+  readonly storeDir: string;
   readonly productId: string;
   readonly platform?: NodeJS.Platform;
   readonly commandRunner?: DeviceCommandRunner;
@@ -246,11 +220,13 @@ export interface DeviceCredentialStoreOptions {
  * inject a double directly.
  */
 export class DeviceCredentialStore {
+  readonly #storeDir: string;
   readonly #service: string;
   readonly #platform: NodeJS.Platform;
   readonly #run: DeviceCommandRunner;
 
   constructor(options: DeviceCredentialStoreOptions) {
+    this.#storeDir = options.storeDir;
     this.#service = serviceFor(options.productId);
     this.#platform = options.platform ?? process.platform;
     this.#run = options.commandRunner ?? runDeviceCommand;
@@ -352,8 +328,7 @@ export class DeviceCredentialStore {
   }
 
   async #windows(operation: 'read' | 'replace' | 'clear', encoded?: string): Promise<DeviceCommandResult> {
-    await scavengeStaleWindowsBridges();
-    const directory = await fs.mkdtemp(path.join(os.tmpdir(), WINDOWS_BRIDGE_DIRECTORY_PREFIX));
+    const directory = await createDaemonScratch(this.#storeDir, 'credential');
     const executable = path.join(directory, 'credential-bridge.exe');
     const request = [
       operation,

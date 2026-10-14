@@ -102,6 +102,7 @@ async function waitFor(predicate, label, ms = timeoutMs) {
 
 let failed = false;
 let workDir;
+let scratchRoot;
 let daemon;
 let byok;
 let httpServer;
@@ -117,6 +118,11 @@ try {
   }
 
   workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-adapter-task-smoke-'));
+  // Audit evidence may live under a long CI workspace path. Runtime sockets
+  // need a separate, short, private root even when TMPDIR points at that path.
+  scratchRoot = await fs.realpath(await fs.mkdtemp(path.join(
+    process.platform === 'win32' ? os.tmpdir() : '/tmp', 'byok-sm-',
+  )));
   const home = path.resolve(suppliedHome ?? path.join(workDir, 'home'));
   const tmpDir = path.join(workDir, 'tmp');
   const storeDir = path.join(workDir, 'store');
@@ -252,6 +258,7 @@ try {
       serverUrl,
       workspaceRoot,
       storeDir,
+      storage: { scratchRoot },
       runtimeAllowlist: runtimes,
       runtimePreference: runtimes,
       shutdownGraceMs: 2_000,
@@ -428,6 +435,11 @@ try {
   if (workDir) {
     await withTimeout(fs.rm(workDir, { recursive: true, force: true }), 'workspace cleanup', 10_000).catch((error) => {
       console.error(`workspace cleanup warning: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
+  if (scratchRoot) {
+    await withTimeout(fs.rm(scratchRoot, { recursive: true, force: true }), 'scratch cleanup', 10_000).catch((error) => {
+      console.error(`scratch cleanup warning: ${error instanceof Error ? error.message : String(error)}`);
     });
   }
   if (originalEnvironment) restoreProcessEnvironment(originalEnvironment);

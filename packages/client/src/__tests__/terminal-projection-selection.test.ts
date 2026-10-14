@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -22,7 +23,7 @@ async function temporary(prefix: string): Promise<string> {
 async function harness(extract: (output: string, task: ResultDocumentTask) => unknown) {
   const sent: Envelope[] = [];
   const adapter = new StubRuntimeAdapter('pi');
-  const runner = new TaskRunner({
+  const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await temporary('byok-terminal-workspace-'),
     agentHome: new AgentHomeManager({ hostStorageRoot: await temporary('byok-terminal-home-') }),
