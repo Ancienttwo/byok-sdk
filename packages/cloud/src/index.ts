@@ -80,7 +80,7 @@ export { createInMemoryByokCloud } from './composition/in-memory';
 export type { InMemoryByokCloud, InMemoryByokCloudOptions } from './composition/in-memory';
 
 // Errors
-export { ByokCloudError, CLOUD_ERROR_CODES, isCloudError } from './errors';
+export { ByokCloudError, CLOUD_ERROR_CODES, TaskOfferAppendRefusedError, isCloudError } from './errors';
 export type { CloudErrorCode } from './errors';
 
 export {

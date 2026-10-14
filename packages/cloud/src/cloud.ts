@@ -134,7 +134,7 @@ import {
   type ActivityBounds,
 } from './coordination';
 import type { CloudCrypto } from './crypto/port';
-import { ByokCloudError } from './errors';
+import { ByokCloudError, TaskOfferAppendRefusedError } from './errors';
 import {
   blobDownloadContentHandler,
   blobDownloadUrlHandler,
@@ -1209,6 +1209,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     }
 
     await beforeMailbox?.(stores, taskId);
+    // The attempt is already open, so a refused append must name it: a Host
+    // that let cloud allocate the id has no other way to retry or cancel it.
     const message = await stores.mailbox.append({
       admission: 'limited',
       deviceId,
@@ -1226,6 +1228,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
           byteSize: BigInt(bytes.length),
         };
       },
+    }).catch((refusal: unknown) => {
+      throw new TaskOfferAppendRefusedError(taskId, refusal);
     });
     const envelope = decodeEnvelope(message.body);
     if (envelope.seq !== message.seq) {

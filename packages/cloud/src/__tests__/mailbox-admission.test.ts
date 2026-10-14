@@ -1,11 +1,12 @@
 /**
- * Mailbox admission at the cloud surface (#411).
+ * Mailbox admission at the cloud surface (#411, #387).
  *
  * The mailbox limit is enforced by the store that inserts the row, so these
- * cases pin what a Host and a device observe when it refuses: a typed
- * `storage_quota_exceeded`, a retry that converges on the same task, a
- * cancellation that is never blocked, and a 507 on the device message route
- * whose resend executes nothing twice.
+ * cases pin what a Host and a device observe when it refuses: a
+ * `TaskOfferAppendRefusedError` naming the opened task with the store's
+ * `storage_quota_exceeded` as its cause, a retry that converges on the same
+ * task, a cancellation that is never blocked, and a 507 on the device message
+ * route whose resend executes nothing twice.
  */
 import { isCoreError, type TenantId } from '@byok-sdk/core';
 import {
@@ -15,6 +16,7 @@ import {
   type EventsPollResponse,
 } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
+import { TaskOfferAppendRefusedError } from '../errors';
 import {
   TENANT_A,
   createHarness,
@@ -75,6 +77,15 @@ async function captureError(promise: Promise<unknown>): Promise<unknown> {
   );
 }
 
+/** Asserts the refusal names the opened task and keeps the store's quota error as its cause. */
+function expectQuotaRefusal(refused: unknown): TaskOfferAppendRefusedError {
+  expect(refused).toBeInstanceOf(TaskOfferAppendRefusedError);
+  const error = refused as TaskOfferAppendRefusedError;
+  expect(error.code).toBe('task_offer_append_refused');
+  expect(isCoreError(error.cause, 'storage_quota_exceeded')).toBe(true);
+  return error;
+}
+
 describe('mailbox admission at the cloud surface', () => {
   it('refuses an offer into a full mailbox and converges when the same taskId is retried', async () => {
     const harness = createHarness();
@@ -87,7 +98,7 @@ describe('mailbox admission at the cloud surface', () => {
         payload: offerPayload('wait for room'),
       }),
     );
-    expect(isCoreError(refused, 'storage_quota_exceeded')).toBe(true);
+    expect(expectQuotaRefusal(refused).taskId).toBe('admission-retry');
     expect((await harness.core.mailbox.readUsage(TENANT_A)).bytes).toBe(0n);
 
     await limitMailbox(harness, TENANT_A, 3n, 100_000_000n);
@@ -116,13 +127,62 @@ describe('mailbox admission at the cloud surface', () => {
     const blocked = await captureError(
       harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload('no room') }),
     );
-    expect(isCoreError(blocked, 'storage_quota_exceeded')).toBe(true);
+    const orphan = expectQuotaRefusal(blocked).taskId;
+    expect(orphan).not.toBe(offer.taskId);
+    await expect(harness.cloud.readTaskAttempt(TENANT_A, orphan)).resolves.toMatchObject({ status: 'offered' });
 
     const cancelled = await harness.cloud.cancelTask(TENANT_A, offer.taskId, 'full mailbox');
     expect(cancelled).toMatchObject({ taskId: offer.taskId, status: 'cancelled' });
     expect((await harness.core.mailbox.readUsage(TENANT_A)).bytes).toBeGreaterThan(before);
     const page = await poll(harness, device);
     expect(page.events.map((event) => event.type)).toEqual(['task.cancel']);
+  });
+
+  it('names a cloud-allocated task on refusal so the Host can retry it into one offer or cancel it', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await limitMailbox(harness, TENANT_A, 2n, 0n);
+
+    // No taskId: the cloud allocates one and opens its attempt before the append.
+    const refusedRetry = expectQuotaRefusal(
+      await captureError(harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload('retry me') })),
+    );
+    const refusedCancel = expectQuotaRefusal(
+      await captureError(harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload('cancel me') })),
+    );
+    expect(refusedRetry.taskId).not.toBe(refusedCancel.taskId);
+    for (const taskId of [refusedRetry.taskId, refusedCancel.taskId]) {
+      await expect(harness.cloud.readTaskAttempt(TENANT_A, taskId)).resolves.toMatchObject({ taskId, status: 'offered' });
+    }
+    expect((await harness.core.mailbox.readUsage(TENANT_A)).bytes).toBe(0n);
+
+    // Cancellation is exempt from the limit, so the Host settles one while the mailbox is still full.
+    const cancelled = await harness.cloud.cancelTask(TENANT_A, refusedCancel.taskId, 'mailbox full');
+    expect(cancelled).toMatchObject({ taskId: refusedCancel.taskId, status: 'cancelled' });
+
+    // The refused offer reserved its body and message identity but was never delivered.
+    const reserved = await harness.cloud.readTaskOffer(TENANT_A, refusedRetry.taskId);
+    expect(reserved).toMatchObject({ taskId: refusedRetry.taskId, delivered: false });
+
+    await limitMailbox(harness, TENANT_A, 3n, 100_000_000n);
+    const retried = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, {
+      taskId: refusedRetry.taskId,
+      payload: offerPayload('retry me'),
+    });
+    expect(retried.taskId).toBe(refusedRetry.taskId);
+    expect(retried.attempt).toMatchObject({ taskId: refusedRetry.taskId, status: 'offered' });
+    // The retry converges on that one offer rather than allocating a second.
+    expect(retried.envelope.id).toBe(reserved?.messageId);
+    await expect(harness.cloud.readTaskOffer(TENANT_A, refusedRetry.taskId)).resolves.toMatchObject({
+      messageId: reserved?.messageId,
+      delivered: true,
+    });
+
+    const page = await poll(harness, device);
+    expect(page.events.map((event) => [event.type, event.task_id])).toEqual([
+      ['task.cancel', refusedCancel.taskId],
+      ['task.offer', refusedRetry.taskId],
+    ]);
   });
 
   it('answers 507 when a reply cannot be appended and a resent batch executes nothing twice', async () => {
