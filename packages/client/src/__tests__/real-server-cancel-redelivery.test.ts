@@ -66,7 +66,7 @@ describe('a task.cancel sent while the daemon is not polling is delivered when p
       expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
 
-    const handle = await real.byok.dispatch({ instruction: 'a long task to cancel' });
+    const handle = await real.byok.dispatch({ deviceId: record.deviceId, instruction: 'a long task to cancel' });
 
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));

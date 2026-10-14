@@ -105,6 +105,8 @@ describe('SQLite custom-harness claim authority', () => {
     const { open } = fixture();
     let runtime = open();
     try {
+      await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
       const { taskId } = await runtime.cloud.enqueueOffer(tenant, deviceId, { payload });
       expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', {
         deviceId, ...(runtimeId === undefined ? {} : { runtime: runtimeId }),

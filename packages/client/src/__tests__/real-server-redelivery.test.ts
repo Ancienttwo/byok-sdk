@@ -68,7 +68,7 @@ describe('redelivery across a real receive outage (finding F2, real @byok-sdk/se
       expect((await real.byok.machines.list()).find((m) => m.deviceId === record.deviceId)?.connected).toBe(true);
     });
 
-    const handle = await real.byok.dispatch({
+    const handle = await real.byok.dispatch({ deviceId: record.deviceId,
       instruction: 'do a thing that needs approval',
     });
 
