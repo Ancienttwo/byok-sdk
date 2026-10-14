@@ -57,7 +57,8 @@ async function errorCode(run: Promise<unknown>): Promise<string | undefined> {
 
 describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
   it('every device-advertised gated surface has a hosted enqueue path under test', () => {
-    const surfaces = new Set(WIRE_ADDITIONS.filter((entry) => entry.rule === 'gated' && entry.advertisedBy === 'device').map((entry) => entry.surface));
+    const surfaces = new Set(WIRE_ADDITIONS.flatMap((entry) =>
+      entry.kind === 'envelope' && entry.rule === 'gated' && entry.advertisedBy === 'device' ? [entry.surface] : []));
     expect([...surfaces].filter((surface) => ENQUEUE[surface] === undefined)).toEqual([]);
     expect(new Set(gatedLines.map((entry) => entry.type))).toEqual(surfaces);
   });
