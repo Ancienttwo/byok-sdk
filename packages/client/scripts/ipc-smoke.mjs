@@ -165,7 +165,7 @@ try {
   startChild.stderr.on('data', (chunk) => {
     startStderr += chunk.toString('utf8');
   });
-  await waitForStartupLine(startChild, 'phase=running connection=open', 10000);
+  await waitForStartupLine(startChild, '"lifecycle":{"phase":"running","connection":"open"}', 10000);
   log('PASS: daemon reported the open connection on stdout');
 
   log('==> byok-agent status (separate short-lived invocation)');

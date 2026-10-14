@@ -60,7 +60,7 @@ try {
         const configFile = path.join(root, 'cli.json'); writeFileSync(configFile, JSON.stringify(config));
         processChild = spawn(process.execPath, [cli, 'start', '--config', configFile], { env, stdio: ['ignore', 'pipe', 'pipe'] });
         processChild.stdout.on('data', chunk => { output += chunk; }); processChild.stderr.on('data', chunk => { output += chunk; });
-        await wait(() => { if (processChild.exitCode !== null) throw new Error(output); return output.includes('daemon started:'); }, 'packed CLI start');
+        await wait(() => { if (processChild.exitCode !== null) throw new Error(output); return output.includes('"kind":"daemon-started"'); }, 'packed CLI start');
         await runCli(['pair', pairing.code, '--server', serverUrl, '--config', configFile], env);
       } else {
         const runtimeConfig = { ...config, localAgentRelease: { version: '0.0.0-test' } };

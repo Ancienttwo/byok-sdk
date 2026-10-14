@@ -1,12 +1,12 @@
 import { type DaemonConfig } from '../../index';
 import { DeviceStore } from '../../daemon/store';
 import type { ControlStatusResult } from '../../daemon/control-protocol';
-import { auditLogPath, readAuditEvents, readLastEnvironmentRecord, parseEnvironmentRecord } from '../audit-log';
+import { auditLogPath, readAuditRecords, readLastEnvironmentRecord, parseEnvironmentRecord } from '../audit-log';
 import { parseRuntimeObservations } from '../../runtime-detection';
 import { connectControlClient } from '../control-client';
 import { resolveStoreDir } from '../config';
 import { formatLiveStatusLines, formatStatusLines, type StatusView } from '../format';
-import { deriveTasksFromEvents, lastLifecycle, tallyTaskStates } from '../tasks-view';
+import { deriveTasksFromRecords, lastLifecycle, tallyTaskStates } from '../tasks-view';
 
 export interface StatusDeps {
   log?: (line: string) => void;
@@ -34,13 +34,13 @@ export async function runStatusCommand(config: DaemonConfig, deps: StatusDeps = 
   const storeDir = resolveStoreDir(config);
   const connectControl = deps.connectControl ?? connectControlClient;
 
-  const [record, events, environment] = await Promise.all([
+  const [record, records, environment] = await Promise.all([
     new DeviceStore(storeDir).load(),
-    readAuditEvents(storeDir),
+    readAuditRecords(storeDir),
     readLastEnvironmentRecord(storeDir),
   ]);
-  const tasks = deriveTasksFromEvents(events);
-  const lastRuntimes = events.findLast(event => event.kind === 'runtimes-detected');
+  const tasks = deriveTasksFromRecords(records);
+  const lastRuntimes = records.findLast(event => event.kind === 'runtimes-detected');
 
   const view: StatusView = {
     localAgentRelease: config.localAgentRelease,
@@ -49,12 +49,12 @@ export async function runStatusCommand(config: DaemonConfig, deps: StatusDeps = 
     branding: config.branding,
     paired: record !== undefined,
     deviceId: record?.deviceId,
-    lifecycle: lastLifecycle(events),
+    lifecycle: lastLifecycle(records),
     runtimes: lastRuntimes?.kind === 'runtimes-detected' ? lastRuntimes.runtimes : [],
     ...(lastRuntimes === undefined ? {} : { runtimesDetectedAt: lastRuntimes.ts }),
     taskCounts: tallyTaskStates(tasks),
     auditLogPath: auditLogPath(storeDir),
-    auditLogLineCount: events.length,
+    auditLogRecordCount: records.length,
     ...(environment ? { environment } : {}),
   };
   for (const line of formatStatusLines(view)) log(line);
