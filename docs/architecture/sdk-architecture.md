@@ -1682,6 +1682,8 @@ interface TenantStorageUsage {
 
 mailbox bytes 不在 `TenantStorageUsage` 里。它只有一个权威：保留的 mailbox 行。用量由 `MailboxStore.readUsage(tenant)` 对租户所有保留行（任何状态）求 `SUM(byteSize)`；`limited` 追加在插入行的同一个串行单元里检查 `mailboxLimitBytes`，超限返回 `storage_quota_exceeded`，没有 entitlement 返回 `storage_entitlement_missing`。只有任务的取消行（`cancellation`）豁免限额，但仍计入用量。删除行不做任何记账（#411）。
 
+Host 侧的 offer 追加被拒时，attempt 已经先于追加打开（`offered`），设备还看不到它。cloud 抛 `TaskOfferAppendRefusedError`（code `task_offer_append_refused`），`taskId` 指向这个 attempt，`cause` 保留存储层原错误（如 `storage_quota_exceeded`）。Host 没传 `taskId` 时也能拿到 cloud 分配的 id：用同一 `taskId` 和同一 payload 重试，会收敛到同一个 offer 和同一个 message id；也可以直接 `cancelTask`，取消不受限额约束（#387）。
+
 计量与展示的边界：
 
 - 用户容量 = tenant-scoped R2 committed object bytes 加 Postgres inline payload bytes；

@@ -1774,6 +1774,14 @@ export declare const CLOUD_ERROR_CODES: {
     readonly agent_ref_mismatch: 'agent_ref_mismatch';
     /** A strict Agent task id already names a durable attempt and cannot be re-enqueued. */
     readonly agent_task_already_exists: 'agent_task_already_exists';
+    /**
+     * A task attempt was opened but the mailbox refused its offer append, so the
+     * device never saw it. Raised as {@link TaskOfferAppendRefusedError}, which
+     * names the task so the Host can retry with that `taskId` (the retry
+     * converges on the one offer) or cancel it; `cause` is the store's refusal,
+     * e.g. a core `storage_quota_exceeded`.
+     */
+    readonly task_offer_append_refused: 'task_offer_append_refused';
     /** A first-write-wins Agent control record was replayed with a different body. */
     readonly agent_content_request_mismatch: 'agent_content_request_mismatch';
     /** A durable mailbox receipt id resolved to an envelope other than its exact acknowledgement. */
@@ -1819,6 +1827,15 @@ export type CloudErrorCode = (typeof CLOUD_ERROR_CODES)[keyof typeof CLOUD_ERROR
 export declare class ByokCloudError extends Error {
     readonly code: CloudErrorCode;
     constructor(code: CloudErrorCode, message: string, options?: ErrorOptions);
+}
+/**
+ * The one cloud error that carries a task identity: a refused offer append
+ * after the attempt opened. Without `taskId` a Host that let cloud allocate the
+ * id could neither retry nor cancel the attempt it now owns.
+ */
+export declare class TaskOfferAppendRefusedError extends ByokCloudError {
+    readonly taskId: string;
+    constructor(taskId: string, cause: unknown);
 }
 export declare function isCloudError(value: unknown, code?: CloudErrorCode): value is ByokCloudError;
 // ==== @byok-sdk/cloud dist/handlers/board.d.ts ====
@@ -2113,7 +2130,7 @@ export { DEFAULT_BOARD_PAGE_LIMIT, DEFAULT_BOARD_STREAM_HEARTBEAT_INTERVAL_MS, D
 export { DEFAULT_SKILL_PACK_PAGE_LIMIT } from './handlers/skill-packs';
 export { createInMemoryByokCloud } from './composition/in-memory';
 export type { InMemoryByokCloud, InMemoryByokCloudOptions } from './composition/in-memory';
-export { ByokCloudError, CLOUD_ERROR_CODES, isCloudError } from './errors';
+export { ByokCloudError, CLOUD_ERROR_CODES, TaskOfferAppendRefusedError, isCloudError } from './errors';
 export type { CloudErrorCode } from './errors';
 export { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore, } from './stores/in-memory/agent-memory-projection';
 export type { AgentMemoryProjectionAuthorization, AgentMemoryProjectionEraseResult, AgentMemoryProjectionAuthorizer, AgentMemoryProjectionAuthorizerInput, AgentMemoryProjectionCommitInput, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionStore, } from './agent-memory-projection';
