@@ -7,10 +7,10 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import type { DaemonEventListener } from '../daemon/observer';
 import type { DaemonRecord } from '../daemon/daemon-record';
 import { auditLogPath, readAuditRecords } from '../bin/audit-log';
-import { DaemonCrashedError, runStartCommand, startExitCode } from '../bin/commands/start';
+import { DaemonCrashedError, formatStartErrorReason, runStartCommand, startExitCode } from '../bin/commands/start';
 import { DaemonHaltError } from '../daemon/daemon-lifecycle';
 import { createSupportBundle } from '../diagnostics/support-bundle';
-import { RuntimeExecutionFailure } from '../runtime-failure';
+import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { connectControlClient } from '../bin/control-client';
@@ -119,7 +119,7 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     const parent = await tmpDir('byok-start-store-badlog-parent-');
     // storeDir itself is a FILE, not a directory — every audit append's own
     // `fs.mkdir(storeDir, {recursive:true})` will reject.
-    const storeDir = path.join(parent, 'not-a-directory');
+    const storeDir = path.join(parent, 'SENTINEL-395-audit-not-a-directory');
     await fs.writeFile(storeDir, 'x');
 
     daemon = createDaemonWithAdapters(
@@ -153,6 +153,9 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
 
     controller.abort();
     await startPromise;
+    const diagnostics = lines.filter((line) => line.startsWith('ERR:'));
+    expect(diagnostics.every((line) => /Error reasonBytes=\d+/.test(line))).toBe(true);
+    expect(diagnostics.join('\n')).not.toContain('SENTINEL-395');
   });
 
   it('#395 sentinel: no task content reaches stdout, stderr, audit.jsonl or the support bundle', async () => {
@@ -239,6 +242,39 @@ describe('bin/commands/start: runStartCommand (real daemon + TestServer)', () =>
     }
     // The task content did flow on the wire to the server — it is only kept out of the durable sinks.
     expect(server.received.some((e) => JSON.stringify(e).includes(SENTINEL))).toBe(true);
+  });
+
+  it('#395: disposal failure stderr contains only its stage and byte count while the original error propagates', async () => {
+    const failure = new RuntimeDisposalFailure({ stage: 'cleanup', reason: 'SENTINEL-395-清理' });
+    const listeners = new Set<DaemonEventListener>();
+    const stop = vi.fn().mockRejectedValue(failure);
+    const fakeDaemon: Daemon = {
+      pair: vi.fn(), start: vi.fn().mockResolvedValue(undefined), stop,
+      status: vi.fn(), reloadMcpToolsets: vi.fn(), reportMcpToolsetObservation: vi.fn(),
+      subscribe: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+      tasks: () => [], unpair: vi.fn(), approve: vi.fn(), reject: vi.fn(),
+    };
+    const storeDir = await tmpDir('byok-start-store-disposal-');
+    const controller = new AbortController();
+    controller.abort();
+    const stderr: string[] = [];
+    await expect(runStartCommand(
+      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme-start-disposal', serverUrl: 'http://example.invalid', workspaceRoot: '/ws', storeDir },
+      { daemon: fakeDaemon, log: () => {}, error: (line) => stderr.push(line), signal: controller.signal },
+    )).rejects.toBe(failure);
+    expect(stderr).toEqual([`cleanup failed during shutdown: RuntimeDisposalFailure stage=cleanup reasonBytes=${Buffer.byteLength(failure.message, 'utf8')}`]);
+    expect(stderr.join('\n')).not.toContain('SENTINEL-395');
+    expect(formatStartErrorReason(failure)).toBe(`RuntimeDisposalFailure stage=cleanup reasonBytes=${Buffer.byteLength(failure.message, 'utf8')}`);
+    expect(stop).toHaveBeenCalledTimes(2);
+    expect(listeners.size).toBe(0);
+  });
+
+  it('#395: an unknown error name or stack cannot bypass the start diagnostic projection', () => {
+    const error = new Error('SENTINEL-395');
+    error.name = 'SENTINEL-395-name';
+    error.stack = 'SENTINEL-395-stack';
+    expect(formatStartErrorReason(error)).toBe('Error reasonBytes=12');
+    expect(formatStartErrorReason('SENTINEL-395')).toBe('UnknownError reasonBytes=12');
   });
 
   it('propagates an error from daemon.start() after unsubscribing and best-effort stopping', async () => {

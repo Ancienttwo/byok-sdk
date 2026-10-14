@@ -3,7 +3,9 @@ import { DaemonHaltError, type DaemonHaltReason } from '../../daemon/daemon-life
 import { createDaemonRecordProjector, type DaemonRecord } from '../../daemon/daemon-record';
 import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../../lifecycle/service-environment';
 import { createAuditAppender } from '../audit-log';
-import { resolveStoreDir } from '../config';
+import { ConfigError, resolveStoreDir } from '../config';
+import { DaemonOwnerActiveError } from '../../daemon/daemon-owner';
+import { isRuntimeDisposalFailure } from '../../runtime-failure';
 import { formatHaltRemedy, formatServiceEnvironment } from '../format';
 
 export interface StartDeps {
@@ -35,6 +37,22 @@ export class DaemonCrashedError extends Error {
   }
 }
 
+/** @internal One content-free diagnostic for start's durable stderr sink. */
+export function formatStartErrorReason(error: unknown): string {
+  // These SDK classes contain only fixed templates and configured identifiers.
+  // Config loading must never interpolate a parser/library error into them.
+  if (error instanceof ConfigError || error instanceof DaemonOwnerActiveError
+    || error instanceof DaemonHaltError || error instanceof DaemonCrashedError) {
+    return `${error.name}: ${error.message}`;
+  }
+  if (isRuntimeDisposalFailure(error)) {
+    return `RuntimeDisposalFailure stage=${error.stage} reasonBytes=${Buffer.byteLength(error.message, 'utf8')}`;
+  }
+  const reason = error instanceof Error ? error.message : String(error);
+  // Unknown names and codes can themselves contain runtime text.
+  return `${error instanceof Error ? 'Error' : 'UnknownError'} reasonBytes=${Buffer.byteLength(reason, 'utf8')}`;
+}
+
 /**
  * Issue #394, the `start` exit-code contract: 0 a normal stop, 78 a halt
  * (EX_CONFIG: a restart cannot fix it), 1 a crash (`main().catch`). Under
@@ -59,7 +77,7 @@ export function startExitCode(outcome: StartOutcome, service: boolean): number {
  * service log under launchd/systemd/WinSW. The process's own
  * `environment-resolved`, `daemon-started` and `daemon-stopped` records go
  * through the same path. Full content is only on the authenticated control
- * socket (`tasks --follow`). Errors go to stderr as plain text.
+ * socket (`tasks --follow`). Errors go to stderr through the same content-free diagnostic formatter.
  */
 export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Promise<StartOutcome> {
   const log = deps.log ?? ((line: string) => console.log(line));
@@ -68,7 +86,7 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
   const daemon = deps.daemon ?? createDaemon(config);
   const projector = createDaemonRecordProjector();
   const audit = createAuditAppender(storeDir, (err) =>
-    error(`audit log append failed: ${err instanceof Error ? err.message : String(err)}`),
+    error(`audit log append failed: ${formatStartErrorReason(err)}`),
   );
   const persist = (record: DaemonRecord): void => {
     log(audit.append(record));
@@ -131,7 +149,7 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
       // start() has already torn its partial startup down; this stop() only
       // settles anything a caller-built daemon may still hold.
       await daemon.stop().catch((cleanupErr: unknown) => {
-        error(`cleanup failed during shutdown: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`);
+        error(`cleanup failed during shutdown: ${formatStartErrorReason(cleanupErr)}`);
       });
       unsubscribe();
       return await halted(err.reason);
@@ -163,7 +181,7 @@ export async function runStartCommand(config: DaemonConfig, deps: StartDeps): Pr
     if (err instanceof DaemonCrashedError) throw err;
     unsubscribe();
     await daemon.stop().catch((cleanupErr: unknown) => {
-      error(`cleanup failed during shutdown: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`);
+      error(`cleanup failed during shutdown: ${formatStartErrorReason(cleanupErr)}`);
     });
     throw err;
   }

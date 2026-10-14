@@ -510,6 +510,28 @@ For the next minor, a newer CLI reports unknown when an older daemon omits
 these fields. It never translates `runtimeIds` into availability or executes
 a local probe to fill the missing daemon facts.
 
+### Durable daemon records
+
+`byok-agent start` projects observed events once into `DaemonRecord` and
+serializes each record once. The returned JSON line feeds both stdout and
+`audit.jsonl`; each corresponding line is byte-identical. Records contain
+lifecycle facts, IDs, closed codes, configured identifiers, byte sizes, counts
+and timestamps. Progress is aggregated per turn, with an unfinished turn flushed
+before its terminal record or on shutdown. Artifact names, runtime version text,
+approval/completion summaries and free-form reasons never enter these sinks.
+Configured runtime advisory identifiers remain, and offline observations show
+their timestamp. Full events remain on the authenticated control socket;
+`tasks --follow` requires that socket. Support-bundle kinds come from
+`DAEMON_RECORD_KINDS`.
+
+Start's durable stderr diagnostics contain closed categories and reason byte
+counts, never raw adapter/library errors or stacks. SDK-authored actionable
+configuration templates retain their configured path and repair guidance;
+parser errors cannot inject config excerpts into those templates. The library
+still rejects with the original error object, and the CLI retains crash exit 1,
+halt exit 78 (0 under `--service`) and the halt remedy. Existing service log
+files are not rewritten or removed by this change.
+
 ### Explicit local device diagnostics and metadata repair
 
 `diagnoseDevice(config, { adapters?, runtimeProbeTimeoutMs? })` is the public,

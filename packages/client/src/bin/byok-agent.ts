@@ -21,7 +21,7 @@ import {
   runServiceStopCommand,
   runUninstallCommand,
 } from './commands/service';
-import { runStartCommand, startExitCode, type StartOutcome } from './commands/start';
+import { formatStartErrorReason, runStartCommand, startExitCode, type StartOutcome } from './commands/start';
 import { runStatusCommand } from './commands/status';
 import { runSupportBundleCommand } from './commands/support-bundle';
 import { runTasksFollowCommand, runTasksListCommand } from './commands/tasks';
@@ -132,7 +132,7 @@ async function startOutcome(rest: string[]): Promise<StartOutcome> {
     config = loadConfig(configPath);
   } catch (err) {
     if (!(err instanceof ConfigError)) throw err;
-    console.error(err.message);
+    console.error(formatStartErrorReason(err));
     console.error(`daemon halted: reason=config_invalid — ${formatHaltRemedy('config_invalid')}`);
     return { kind: 'halted', reason: 'config_invalid' };
   }
@@ -179,10 +179,15 @@ async function main(): Promise<void> {
     // Issue #392: under a service manager, adopt the user's login-shell
     // environment BEFORE anything reads process.env (BYOK_CONFIG, the config
     // file, adapter resolution). This process's own BYOK_* values survive.
-    if (service) await applyLoginShellEnvironment();
-    // exitCode, not exit(): a piped stdout/stderr (a service log) drains the
-    // final lines, the halt remedy included, before the process ends.
-    process.exitCode = startExitCode(await startOutcome(rest), service);
+    try {
+      if (service) await applyLoginShellEnvironment();
+      // exitCode, not exit(): a piped stdout/stderr (a service log) drains the
+      // final lines, the halt remedy included, before the process ends.
+      process.exitCode = startExitCode(await startOutcome(rest), service);
+    } catch (error) {
+      console.error(formatStartErrorReason(error));
+      process.exitCode = 1;
+    }
     return;
   }
 

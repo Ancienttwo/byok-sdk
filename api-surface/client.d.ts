@@ -4713,7 +4713,8 @@ export declare function parseDaemonLifecycle(value: unknown): DaemonLifecycle | 
 // ==== @byok-sdk/client dist/daemon/daemon-record.d.ts ====
 import type { DaemonLifecycle } from './daemon-lifecycle';
 import { type AssertionLane, type DaemonEvent } from './observer';
-import type { ServiceEnvironmentStatus } from '../lifecycle/service-environment';
+import { type ServiceEnvironmentStatus, type ServiceEnvironmentRecord } from '../lifecycle/service-environment';
+import type { RuntimeObservation } from '../runtime-detection';
 /**
  * The content-free projection of what a daemon observed — the ONE shape every
  * sink that outlives the process writes (issue #395): `byok-agent start`'s
@@ -4796,7 +4797,7 @@ export type DaemonRecord = {
 } | {
     kind: 'runtimes-detected';
     ts: string;
-    runtimeIds: string[];
+    runtimes: Array<Omit<RuntimeObservation, 'version'>>;
 } | {
     kind: 'shutdown-requested';
     ts: string;
@@ -4913,6 +4914,8 @@ export interface DaemonRecordProjector {
  * `index.ts`).
  */
 export declare const STABLE_GIT_ERROR_CATEGORIES: Set<string>;
+/** The one closed environment shape, shared by projection and persistent/live readers. */
+export declare function parseEnvironmentRecord(value: unknown): ServiceEnvironmentRecord | undefined;
 /**
  * A stateful `DaemonEvent` → {@link DaemonRecord} projector. One per event
  * stream: it holds each task's open turn until the turn closes.

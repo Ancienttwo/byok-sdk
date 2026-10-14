@@ -42,7 +42,10 @@
   authenticated control socket: `tasks --follow` now requires a running
   daemon and no longer falls back to tailing the audit log. Library stderr
   follows the same rule (artifact names, raw adapter errors and disposal
-  reasons are reported as sizes). New exports: `createDaemonRecordProjector`,
+  reasons are reported as sizes). Start's cleanup, audit-append and fatal
+  diagnostics use the same rule and never print stacks; SDK-authored config
+  templates keep their configured path and repair guidance without parser
+  excerpts. Other interactive commands keep their diagnostics. New exports: `createDaemonRecordProjector`,
   `DAEMON_RECORD_KINDS`, `isDaemonRecordKind` and the `DaemonRecord`,
   `DaemonRecordKind`, `DaemonRecordProjector`, `DaemonTurnRecord` types.
   **Migration:** parse service stdout as JSON Lines and wait for
