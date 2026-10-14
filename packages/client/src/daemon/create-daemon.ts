@@ -3801,7 +3801,7 @@ export function buildDaemonWithAdapters(
         const parsed = parseAssertionIssueParams(params);
         if (!parsed) {
           // The audience is reported only when it was a string at all — and
-          // even then `bin/audit-log.ts` persists just its byte size, since on
+          // even then the event carries just its byte size, since on
           // this path it is unvalidated caller free text.
           const rawAudience =
             typeof params === 'object' && params !== null && typeof (params as { audience?: unknown }).audience === 'string'

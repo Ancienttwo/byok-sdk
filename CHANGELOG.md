@@ -37,6 +37,37 @@
   `status` against a daemon that predates `lifecycle` prints
   `lifecycle unknown (daemon predates lifecycle)` instead of failing.
 
+- **Breaking (client, 0.x)** — every sink that outlives the process holds
+  only content-free records (#395, parent #384). `byok-agent start` now
+  writes one JSON Lines `DaemonRecord` per line to stdout, byte-identical to
+  the line it appends to `<storeDir>/audit.jsonl` (one serializer). A record
+  carries lifecycle facts, ids, closed codes, configured identifiers, sizes,
+  counts and timestamps — never progress or tool text, approval summaries,
+  completion summaries, failure/cancel/shutdown/disposal reasons, artifact
+  names or contents (each is a `*Bytes` size). Agent progress is aggregated
+  into one `turn` record per turn (`closedBy`: `turn_end` | `terminal` |
+  `stop` | `evicted`) with event, text-byte, tool, artifact, approval, error
+  and token counts. stdout also carries `environment-resolved`,
+  `daemon-started` and `daemon-stopped` records; the old
+  `daemon started:`/`daemon stopped` text lines are gone, and a start that
+  fails prints `environment: …` to stderr. Full content stays on the
+  authenticated control socket: `tasks --follow` now requires a running
+  daemon and no longer falls back to tailing the audit log. Library stderr
+  follows the same rule (artifact names, raw adapter errors and disposal
+  reasons are reported as sizes). Start's cleanup, audit-append and fatal
+  diagnostics use the same rule and never print stacks; SDK-authored config
+  templates keep their configured path and repair guidance without parser
+  excerpts. Other interactive commands keep their diagnostics. New exports: `createDaemonRecordProjector`,
+  `DAEMON_RECORD_KINDS`, `isDaemonRecordKind` and the `DaemonRecord`,
+  `DaemonRecordKind`, `DaemonRecordProjector`, `DaemonTurnRecord` types.
+  **Migration:** parse service stdout as JSON Lines and wait for
+  `lifecycle` with `phase: "running", connection: "open"` for readiness;
+  `daemon-started` means local startup only. Offline status keeps the
+  timestamped runtime outcomes and configured advisory, omitting the raw
+  runtime version text (live control status remains full fidelity). Audit lines in
+  the old shape are dropped on read. Service log files written before this
+  release are not rewritten or removed; delete them by hand if they may hold
+  task content.
 - **Breaking (client, 0.x; #392)** — live status, doctor and support bundles use daemon
   startup runtime observations (including unavailable outcomes) and the closed
   environment projection without CLI-side probes. `DaemonStatus.runtimes`

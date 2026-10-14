@@ -6,12 +6,13 @@ import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import type { DaemonEvent } from '../daemon/observer';
 import type { ControlStatusResult } from '../daemon/control-protocol';
 import { connectControlClient } from '../bin/control-client';
-import { createAuditAppender, readAuditEvents, readLastEnvironmentRecord } from '../bin/audit-log';
+import { createAuditAppender, readAuditRecords, readLastEnvironmentRecord } from '../bin/audit-log';
 import { runStatusCommand } from '../bin/commands/status';
 import { collectDiagnostics } from '../diagnostics/diagnostics';
 import { createSupportBundle } from '../diagnostics/support-bundle';
 import * as runtimeProbe from '../bin/runtime-probe';
 import * as serviceEnvironment from '../lifecycle/service-environment';
+import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import { parseRuntimeObservations } from '../runtime-detection';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -29,7 +30,8 @@ describe('#392: daemon startup observations are the live authority', () => {
     const daemon = createDaemonWithAdapters(config, adapters);
     const events: DaemonEvent[] = [];
     const appender = createAuditAppender(dir);
-    const unsubscribe = daemon.subscribe(event => { events.push(event); appender(event); });
+    const projector = createDaemonRecordProjector();
+    const unsubscribe = daemon.subscribe(event => { events.push(event); for (const record of projector.project(event)) appender.append(record); });
     const probe = vi.spyOn(runtimeProbe, 'probeRuntimes').mockRejectedValue(new Error('must not probe locally'));
     try {
       await daemon.pair('pairing-code');
@@ -73,7 +75,7 @@ describe('#392: daemon startup observations are the live authority', () => {
       expect(bundle.environment).toEqual(snapshot.environment);
       expect(probe).not.toHaveBeenCalled();
       for (const detect of detects) expect(detect).toHaveBeenCalledTimes(1);
-      expect((await readAuditEvents(dir)).find(event => event.kind === 'environment-resolved')).toEqual(resolved);
+      expect((await readAuditRecords(dir)).filter(record => record.kind === 'environment-resolved')).toEqual([{ kind: 'environment-resolved', ts: resolved?.ts, ...environment }]);
       expect(await readLastEnvironmentRecord(dir)).toEqual(snapshot.environment);
       await daemon.stop();
       await appender.flush();

@@ -44,13 +44,15 @@ export function loadConfig(configPath: string | undefined, overrides: Partial<Cl
     let raw: string;
     try {
       raw = readFileSync(configPath, 'utf8');
-    } catch (err) {
-      throw new ConfigError(`could not read config at "${configPath}": ${err instanceof Error ? err.message : String(err)}`);
+    } catch {
+      throw new ConfigError(`could not read config at "${configPath}"; check the path and read permissions`);
     }
     try {
       base = JSON.parse(raw) as Partial<CliConfigInput> & { localAgentRelease?: unknown };
-    } catch (err) {
-      throw new ConfigError(`config at "${configPath}" is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
+    } catch {
+      // SyntaxError.message may quote the config contents; the path and fixed
+      // failure category are sufficient for the operator to repair the file.
+      throw new ConfigError(`config at "${configPath}" is not valid JSON`);
     }
   }
   if (
