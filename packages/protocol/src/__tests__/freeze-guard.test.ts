@@ -1,47 +1,13 @@
 import { z } from 'zod';
-import { readFileSync, writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   PROTOCOL_VERSION,
-  CAPABILITY_FLAGS,
-  TASK_STATES,
-  TASK_TRANSITIONS,
   MESSAGE_TYPES,
   MESSAGE_PAYLOAD_SCHEMAS,
-  SERVER_TO_DAEMON_TYPES,
-  DAEMON_TO_SERVER_TYPES,
   EnvelopeSchema,
   AgentEventSchema,
-  AgentEventOrUnknownSchema,
   KNOWN_AGENT_EVENT_TYPES,
-  BlobRefSchema,
-  CONTENT_HASH_RE,
-  PairRequestSchema,
-  PairResponseSchema,
-  ChallengeRequestSchema,
-  ChallengeResponseSchema,
-  TokenRequestSchema,
-  TokenResponseSchema,
-  PresencePublishRequestSchema,
-  CreateBlobRequestSchema,
-  CreateBlobResponseSchema,
-  BlobDownloadUrlResponseSchema,
-  EventsPollQuerySchema,
-  EventsPollResponseSchema,
-  MessagesSendRequestSchema,
-  MessagesSendResponseSchema,
-  AgentHomeProjectionCompletionRequestSchema,
-  AgentHomeProjectionStatusSchema,
-  AgentHomeProjectionReadbackSchema,
-  InputPreparationCompletionRequestSchema,
-  InputPreparationStatusSchema,
-  InputPreparationReadbackSchema,
-  InputPreparationStatusQuerySchema,
-  MAX_MESSAGES_PER_BATCH,
   createEnvelope,
-  encodeEnvelope,
-  decodeEnvelope,
   parseMessage,
   UnknownMessageTypeError,
   EnvelopeValidationError,
@@ -50,50 +16,31 @@ import {
 } from '../index';
 
 /**
- * FREEZE GUARD — the regression net for the frozen wire (docs/protocol.md
- * "Freeze rule"). This file is the one committed place that pins down
- * "everything that must never silently change" and gives every diff a
- * concrete, actionable verdict: an additive/optional change regenerates the
- * golden with a justification in the commit message; anything that changes,
- * removes, or retypes an existing frozen shape needs a `PROTOCOL_VERSION`
- * bump instead, per docs/protocol.md's freeze rule — this test's job is only
- * to make that distinction impossible to miss, not to make either call for
- * you.
+ * FREEZE GUARD — local invariants of the frozen wire (docs/protocol.md
+ * "Freeze rule"). Compatibility with PUBLISHED releases (the released
+ * corpus, the never-narrowed surface, and what old decoders do with new
+ * bytes) lives in `compat.test.ts`. This file keeps the checks that need no
+ * released decoder:
  *
- * Three independent nets live in this one file:
- *
- *   1. A schema fingerprint snapshot (`buildFrozenSnapshot`) compared against
- *      the committed `golden/v2.frozen.json` — catches ANY structural change
- *      to a frozen schema, however small.
- *   2. A golden NDJSON envelope corpus (`golden/v2.envelopes.ndjson`, one
- *      canonical line per message type) that must keep `decodeEnvelope`-
- *      parsing forever — the actual regression net: real historical wire
- *      bytes a v2 peer already sent, re-played against today's code. Beyond
- *      "does it still parse", each decoded envelope is also asserted to
- *      deep-equal the ORIGINAL committed JSON field-for-field — parsing
- *      successfully isn't enough if a schema silently dropped or renamed an
- *      optional field along the way.
- *   3. Explicit behavior assertions for the freeze rule's own asymmetry:
- *      unknown is TOLERATED for observability data, FAIL-CLOSED for
- *      control/security data (see docs/protocol.md) — including that an
- *      unrecognized field on an otherwise well-formed `instruction` blob-ref
- *      is rejected outright (`.strict()`), not silently stripped the way
- *      every other payload's unknown field is.
- *
- * Plus a dual-source cross-check between envelope.ts's `envelopeShape()`
- * calls and codec.ts's `EnvelopeShapeOptions`/`CreateEnvelopeOptions<T>` —
- * two independently hand-maintained descriptions of the exact same
- * `task_id`/`seq` requiredness rule (see codec.ts's own doc comment); a
- * second dual-authority check between agent-event.ts's hand-maintained
- * `KNOWN_AGENT_EVENT_TYPES` and `AgentEventSchema`'s own variant `type`
- * literals; and a standalone `PROTOCOL_VERSION === 2` pin.
+ *   1. The per-type `task_id`/`seq` requiredness table, typed against
+ *      codec.ts's `CreateEnvelopeOptions<T>`.
+ *   2. Behavior assertions for the freeze rule's own asymmetry: unknown is
+ *      TOLERATED for observability data, FAIL-CLOSED for control/security
+ *      data — including that an unrecognized field on an otherwise
+ *      well-formed `instruction` blob-ref is rejected outright (`.strict()`),
+ *      not silently stripped the way every other payload's unknown field is.
+ *   3. A dual-source cross-check between envelope.ts's `envelopeShape()`
+ *      calls and codec.ts's `EnvelopeShapeOptions`/`CreateEnvelopeOptions<T>`
+ *      — two independently hand-maintained descriptions of the exact same
+ *      `task_id`/`seq` requiredness rule (see codec.ts's own doc comment).
+ *   4. A dual-authority check between agent-event.ts's hand-maintained
+ *      `KNOWN_AGENT_EVENT_TYPES` and `AgentEventSchema`'s own variant `type`
+ *      literals.
  */
 
-const goldenDir = fileURLToPath(new URL('./golden/', import.meta.url));
-const frozenGoldenPath = `${goldenDir}v2.frozen.json`;
 
 // ---------------------------------------------------------------------------
-// Part 1 — schema fingerprint snapshot
+// Part 1 — the task_id/seq requiredness table (checked in Part 3)
 // ---------------------------------------------------------------------------
 
 /**
@@ -108,9 +55,6 @@ const frozenGoldenPath = `${goldenDir}v2.frozen.json`;
  *     drift in codec.ts. A change to either source that isn't mirrored in
  *     the other breaks one of these checks with a pointed compile/runtime
  *     error, not a vague downstream symptom.
- *
- * It's also folded into the golden fingerprint snapshot (Part 1) so a
- * diff against `golden/v2.frozen.json` surfaces a requiredness change too.
  */
 function codecRequirednessMatrix(): CodecRequirednessMatrix {
   return {
@@ -255,147 +199,8 @@ type CodecRequirednessMatrix = {
   };
 };
 
-/** Builds the current schema fingerprint fresh from the live schemas — compared against the committed `golden/v2.frozen.json`. */
-function buildFrozenSnapshot() {
-  const payloadSchemas: Record<string, unknown> = {};
-  for (const type of MESSAGE_TYPES) {
-    payloadSchemas[type] = z.toJSONSchema(MESSAGE_PAYLOAD_SCHEMAS[type]);
-  }
-
-  // The AgentEvent variant list, derived from AgentEventSchema's own JSON
-  // Schema output (`oneOf[].properties.type.const`) rather than from
-  // agent-event.ts's hand-written KNOWN_AGENT_EVENT_TYPES constant — this
-  // fingerprint is specifically about the SCHEMA's own shape, independent of
-  // that constant. `KNOWN_AGENT_EVENT_TYPES` is exported and cross-checked
-  // against this same schema-derived variant list separately, in the
-  // "dual-authority cross-check (agent-event.ts)" describe block (Part 6)
-  // below.
-  const agentEventJsonSchema = z.toJSONSchema(AgentEventSchema) as unknown as {
-    oneOf: Array<{ properties: { type: { const: string } } }>;
-  };
-  const agentEventVariants = agentEventJsonSchema.oneOf.map((branch) => branch.properties.type.const);
-
-  return {
-    protocolVersion: PROTOCOL_VERSION,
-    capabilityFlags: [...CAPABILITY_FLAGS],
-    taskStates: [...TASK_STATES],
-    taskTransitions: TASK_TRANSITIONS,
-    messageTypes: [...MESSAGE_TYPES],
-    serverToDaemonTypes: [...SERVER_TO_DAEMON_TYPES],
-    daemonToServerTypes: [...DAEMON_TO_SERVER_TYPES],
-    agentEventVariants,
-    envelopeRequiredness: codecRequirednessMatrix(),
-    maxMessagesPerBatch: MAX_MESSAGES_PER_BATCH,
-    contentHashPattern: CONTENT_HASH_RE.source,
-    payloadSchemas,
-    envelopeSchema: z.toJSONSchema(EnvelopeSchema),
-    agentEventSchema: z.toJSONSchema(AgentEventSchema),
-    agentEventOrUnknownSchema: z.toJSONSchema(AgentEventOrUnknownSchema),
-    blobRefSchema: z.toJSONSchema(BlobRefSchema),
-    httpApiSchemas: {
-      pairRequest: z.toJSONSchema(PairRequestSchema),
-      pairResponse: z.toJSONSchema(PairResponseSchema),
-      challengeRequest: z.toJSONSchema(ChallengeRequestSchema),
-      challengeResponse: z.toJSONSchema(ChallengeResponseSchema),
-      tokenRequest: z.toJSONSchema(TokenRequestSchema),
-      tokenResponse: z.toJSONSchema(TokenResponseSchema),
-      presencePublishRequest: z.toJSONSchema(PresencePublishRequestSchema),
-      createBlobRequest: z.toJSONSchema(CreateBlobRequestSchema),
-      createBlobResponse: z.toJSONSchema(CreateBlobResponseSchema),
-      blobDownloadUrlResponse: z.toJSONSchema(BlobDownloadUrlResponseSchema),
-      eventsPollQuery: z.toJSONSchema(EventsPollQuerySchema),
-      eventsPollResponse: z.toJSONSchema(EventsPollResponseSchema),
-      messagesSendRequest: z.toJSONSchema(MessagesSendRequestSchema),
-      messagesSendResponse: z.toJSONSchema(MessagesSendResponseSchema),
-      agentHomeProjectionCompletionRequest: z.toJSONSchema(AgentHomeProjectionCompletionRequestSchema),
-      agentHomeProjectionStatus: z.toJSONSchema(AgentHomeProjectionStatusSchema),
-      agentHomeProjectionReadback: z.toJSONSchema(AgentHomeProjectionReadbackSchema),
-      inputPreparationCompletionRequest: z.toJSONSchema(InputPreparationCompletionRequestSchema),
-      inputPreparationStatus: z.toJSONSchema(InputPreparationStatusSchema),
-      inputPreparationReadback: z.toJSONSchema(InputPreparationReadbackSchema),
-      inputPreparationStatusQuery: z.toJSONSchema(InputPreparationStatusQuerySchema),
-    },
-  };
-}
-
-/**
- * Regenerate only after reviewing a failing freeze diff and proving it is
- * additive. This mirrors the repository's other deliberate golden-update
- * gates and keeps the writer beside the fingerprint authority:
- * `BYOK_PROTOCOL_UPDATE_GOLDEN=1 bun run --filter @byok-sdk/protocol test -- freeze-guard.test.ts`.
- */
-if (process.env['BYOK_PROTOCOL_UPDATE_GOLDEN'] === '1') {
-  writeFileSync(frozenGoldenPath, `${JSON.stringify(buildFrozenSnapshot(), null, 2)}\n`, 'utf8');
-}
-
-const FREEZE_DIFF_MESSAGE =
-  'v2 frozen schema fingerprint drifted from golden/v2.frozen.json. If this diff is purely additive (a new optional field, a new message type, a new AgentEvent variant, a new capability flag), regenerate the golden and say so — with justification — in the commit message. If it adds a field to a strict payload, regenerating is legal only on the capability-gated path: a new capability flag, with server and hosted cloud refusing undeclared devices before task creation or mailbox append, and the gate recorded in released-compat.test.ts (a new message type needs a `field: null` gate entry there, since the released decoder rejects an unknown type). If it changes, removes, or retypes anything that already existed, or adds a strict field with no capability gate, that is a breaking change and needs a PROTOCOL_VERSION bump instead, per docs/protocol.md "Freeze rule" — do not just regenerate the golden to make this pass.';
-
-describe('freeze guard: v2 schema fingerprint snapshot', () => {
-  it('matches the committed golden/v2.frozen.json exactly', () => {
-    const fresh = buildFrozenSnapshot();
-    const golden = JSON.parse(readFileSync(frozenGoldenPath, 'utf8'));
-    expect(fresh, FREEZE_DIFF_MESSAGE).toEqual(golden);
-  });
-
-  it('PROTOCOL_VERSION is embedded in the fingerprint (a version bump changes this file, forcing a conscious golden bump alongside it)', () => {
-    expect(buildFrozenSnapshot().protocolVersion).toBe(PROTOCOL_VERSION);
-  });
-});
-
 // ---------------------------------------------------------------------------
-// Part 2 — v2 golden envelope corpus: real wire bytes that must keep parsing
-// ---------------------------------------------------------------------------
-
-describe('freeze guard: v2 golden envelope corpus (golden/v2.envelopes.ndjson)', () => {
-  const raw = readFileSync(`${goldenDir}v2.envelopes.ndjson`, 'utf8');
-  const lines = raw.split('\n').filter((line) => line.length > 0);
-
-  it('has exactly one committed line per message type', () => {
-    expect(lines.length).toBe(MESSAGE_TYPES.length);
-  });
-
-  it.each(lines.map((line, index) => [index, line] as const))(
-    'golden line %i decodeEnvelope-parses without throwing',
-    (_index, line) => {
-      expect(() => decodeEnvelope(line)).not.toThrow();
-    },
-  );
-
-  it('covers every message type exactly once, and each line round-trips through encode/decode unchanged', () => {
-    const seenTypes = new Set<string>();
-    for (const line of lines) {
-      const envelope = decodeEnvelope(line);
-      seenTypes.add(envelope.type);
-      const reencoded = encodeEnvelope(envelope);
-      expect(decodeEnvelope(reencoded)).toEqual(envelope);
-    }
-    expect(seenTypes).toEqual(new Set(MESSAGE_TYPES));
-  });
-
-  it('each decoded envelope deep-equals the ORIGINAL committed JSON, field-for-field (catches a dropped/renamed field the round-trip check above can miss)', () => {
-    // The round-trip check above only proves decode -> encode -> decode is a
-    // fixed point; it says nothing about whether that fixed point still has
-    // every field the committed corpus line actually has. If a schema
-    // silently drops (or renames) an optional field, `decodeEnvelope` strips
-    // it on the way in, so decode -> encode -> decode stays internally
-    // consistent and the round-trip check above stays green — even though a
-    // real v2 peer that sent this exact committed line just had a field it
-    // relied on vanish. The committed raw JSON — not the schema's own
-    // output — is the source of truth for "what a v2 peer actually put on
-    // the wire", so comparing the decoded value against it (not just against
-    // itself, re-encoded) is what actually catches that regression.
-    for (const line of lines) {
-      const committed: unknown = JSON.parse(line);
-      const decoded = decodeEnvelope(line);
-      const type = (committed as { type?: string }).type;
-      expect(decoded, `decoded envelope must retain every field present in the committed golden line (type: ${type})`).toEqual(committed);
-    }
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Part 3 — behavior assertions: the freeze rule's tolerate/fail-closed split
+// Part 2 — behavior assertions: the freeze rule's tolerate/fail-closed split
 // ---------------------------------------------------------------------------
 
 describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)', () => {
@@ -517,7 +322,7 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
 });
 
 // ---------------------------------------------------------------------------
-// Part 4 — dual-source cross-check: envelope.ts vs. codec.ts requiredness
+// Part 3 — dual-source cross-check: envelope.ts vs. codec.ts requiredness
 // ---------------------------------------------------------------------------
 
 /** Minimal-but-schema-valid payload per type, used only to probe `EnvelopeSchema`'s own requiredness at runtime — self-contained (not imported from another test file), matching this repo's existing test-file convention. */
@@ -784,17 +589,7 @@ describe('freeze guard: dual-source cross-check (envelope.ts vs. codec.ts)', () 
 });
 
 // ---------------------------------------------------------------------------
-// Part 5 — PROTOCOL_VERSION pin
-// ---------------------------------------------------------------------------
-
-describe('freeze guard: PROTOCOL_VERSION is pinned', () => {
-  it('PROTOCOL_VERSION === 2 — a version bump must be a deliberate, visible edit, made alongside a golden update (see version.ts)', () => {
-    expect(PROTOCOL_VERSION).toBe(2);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Part 6 — dual-authority guard: KNOWN_AGENT_EVENT_TYPES vs. AgentEventSchema
+// Part 4 — dual-authority guard: KNOWN_AGENT_EVENT_TYPES vs. AgentEventSchema
 // ---------------------------------------------------------------------------
 
 describe('freeze guard: dual-authority cross-check (agent-event.ts)', () => {
@@ -803,10 +598,9 @@ describe('freeze guard: dual-authority cross-check (agent-event.ts)', () => {
     // as a known AgentEvent": the hand-written `KNOWN_AGENT_EVENT_TYPES` list
     // (consulted by `isKnownAgentEvent`/`partitionAgentEvents`) and
     // `AgentEventSchema`'s own discriminated-union variants (consulted by
-    // everything that actually parses an event). `buildFrozenSnapshot`'s
-    // `agentEventVariants` (Part 1) only snapshots the schema side against
-    // the golden file — it says nothing about whether the hand-written list
-    // still agrees with it. Adding a new variant to the schema without also
+    // everything that actually parses an event). The compat suite only proves
+    // the schema side against released decoders — it says nothing about
+    // whether the hand-written list still agrees with it. Adding a new variant to the schema without also
     // adding its `type` literal to `KNOWN_AGENT_EVENT_TYPES` would NOT be
     // caught there: the new variant would just fall through
     // `isKnownAgentEvent` as "unknown" — a well-formed known event silently
