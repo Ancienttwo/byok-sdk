@@ -2,9 +2,10 @@ import { unmeasuredRetentionSnapshot, type RetentionSnapshot } from '../daemon/r
 import { randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { DaemonConfig, DaemonEvent } from '../index';
+import type { DaemonConfig } from '../index';
 import type { DaemonHaltReason, DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { auditLogPath } from '../bin/audit-log';
+import { isDaemonRecordKind, type DaemonRecordKind } from '../daemon/daemon-record';
 import { atomicWriteFile } from '../util/atomic-write';
 import { ensureSecureDir, ensureSecureFile, type EnsureSecureDirOptions } from '../util/secure-dir';
 import {
@@ -75,40 +76,14 @@ export interface SupportBundle {
     included: number;
     sourceBytesRead: number;
     sourceTruncated: boolean;
-    facts: Array<{ kind: DaemonEvent['kind']; ts: string }>;
+    /** Kind and time of each recent record — kinds from `DAEMON_RECORD_KINDS` only. */
+    facts: Array<{ kind: DaemonRecordKind; ts: string }>;
   };
   redaction: {
     policy: 'allowlist-v1';
     omitted: string[];
     transformed: string[];
   };
-}
-
-const AUDIT_KINDS = new Set<DaemonEvent['kind']>([
-  'retention-sweep',
-  'retention-failure',
-  'artifact',
-  'awaiting-approval',
-  'cancelled',
-  'claimed',
-  'completed',
-  'failed',
-  'git-workspace',
-  'lifecycle',
-  'offered',
-  'paired',
-  'progress',
-  'runtimes-detected',
-  'environment-resolved',
-  'shutdown-complete',
-  'shutdown-requested',
-  'stale-approval-decision',
-  'started',
-  'unpaired',
-]);
-
-function isAuditKind(value: unknown): value is DaemonEvent['kind'] {
-  return typeof value === 'string' && AUDIT_KINDS.has(value as DaemonEvent['kind']);
 }
 
 function sameFileState(left: import('node:fs').BigIntStats, right: import('node:fs').BigIntStats): boolean {
@@ -177,11 +152,11 @@ async function recentAuditFacts(storeDir: string): Promise<SupportBundle['recent
     let text = buffer.subarray(0, bytesRead).toString('utf8');
     if (start > 0) text = text.slice(Math.max(0, text.indexOf('\n') + 1));
     const lines = text.split('\n').filter(Boolean).slice(-MAX_SUPPORT_AUDIT_FACTS);
-    const facts: Array<{ kind: DaemonEvent['kind']; ts: string }> = [];
+    const facts: Array<{ kind: DaemonRecordKind; ts: string }> = [];
     for (const line of lines) {
       try {
         const value = JSON.parse(line) as Record<string, unknown>;
-        if (isAuditKind(value.kind) && typeof value.ts === 'string' && Number.isFinite(Date.parse(value.ts))) {
+        if (isDaemonRecordKind(value.kind) && typeof value.ts === 'string' && Number.isFinite(Date.parse(value.ts))) {
           facts.push({ kind: value.kind, ts: new Date(Date.parse(value.ts)).toISOString() });
         }
       } catch {

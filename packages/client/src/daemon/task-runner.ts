@@ -1864,7 +1864,10 @@ export class TaskRunner {
             stage: 'quiescence',
             reason: `${active.adapter.descriptor.id} session.close() returned an untyped disposal failure`,
           }, { cause: caught });
-      console.error(`[byok/client] runtime disposal failed for task ${active.taskId}: ${failure.message}`);
+      // stderr is a service log: the stage and the reason's size, never its text (issue #395).
+      console.error(
+        `[byok/client] runtime disposal failed for task ${active.taskId}: runtime=${active.adapter.descriptor.id} stage=${failure.stage} reasonBytes=${Buffer.byteLength(failure.message, 'utf8')}`,
+      );
       this.deps.onRuntimeDisposalFailure?.({
         taskId: active.taskId,
         runtimeId: active.adapter.descriptor.id,
@@ -2809,7 +2812,9 @@ export class TaskRunner {
         }
         const failure = projectRuntimeBoundaryFailure(err, 'start');
         if (failure.contractViolation) {
-          console.error('[byok/client] runtime adapter start() returned an untyped failure', err);
+          // Never the error object itself: stderr is a service log and an
+          // adapter's error can carry runtime output (issue #395).
+          console.error(`[byok/client] runtime adapter ${pick.descriptor.id} start() returned an untyped failure for task ${taskId}`);
         }
         await this.updateGitPhaseBestEffort(gitWorkspaceId, 'failed', 'repository-invalid');
         gitLease?.release();
@@ -4095,7 +4100,10 @@ export class TaskRunner {
       }
       const failure = projectRuntimeBoundaryFailure(err, 'run');
       if (failure.contractViolation) {
-        console.error('[byok/client] runtime adapter events iterable returned an untyped failure', err);
+        // Never the error object itself (issue #395); see the start() case.
+        console.error(
+          `[byok/client] runtime adapter ${active.adapter.descriptor.id} events iterable returned an untyped failure for task ${active.taskId}`,
+        );
       }
       await this.fail(active.taskId, failure.reason, failure.retryable);
     }
@@ -4194,7 +4202,11 @@ export class TaskRunner {
   /** Loud, non-silent artifact failure (finding F7): logged, and folded into this task's own progress stream as an `error` AgentEvent rather than swallowed — the task itself can still complete normally, but the omission is now visible. */
   private reportArtifactError(active: ActiveTask, name: string, reason: string): void {
     if (active.blobAbort.signal.aborted || active.beingTornDown) return;
-    console.error(`[byok/client] artifact "${name}" for task ${active.taskId} dropped: ${reason}`);
+    // The name and reason go to the task's own progress stream; stderr is a
+    // service log and gets sizes only (issue #395).
+    console.error(
+      `[byok/client] artifact for task ${active.taskId} dropped: nameBytes=${Buffer.byteLength(name, 'utf8')} reasonBytes=${Buffer.byteLength(reason, 'utf8')}`,
+    );
     active.batcher.push({ type: 'error', message: reason });
   }
 

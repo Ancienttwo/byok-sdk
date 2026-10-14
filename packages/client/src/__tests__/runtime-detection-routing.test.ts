@@ -9,7 +9,8 @@ import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { runRuntimesCommand } from '../bin/commands/runtimes';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
-import { appendAuditEvent } from '../bin/audit-log';
+import { createDaemonRecordProjector } from '../daemon/daemon-record';
+import { appendAuditRecord } from '../bin/audit-log';
 import { projectRuntimeObservation, validateRuntimeDetectResult } from '../runtime-detection';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -79,7 +80,7 @@ it.each(['explicit', 'automatic'] as const)('real TaskRunner %s selection declin
 it('projects finite refusal through status and public doctor without private information', async () => {
   const cfg = await config(); const adapter = refusingAdapter();
   const lines: string[] = []; const connectControl = async () => ({ ok: false as const, reason: 'offline' });
-  await appendAuditEvent(cfg.storeDir!, { kind: 'runtimes-detected', ts: '2026-10-14T00:00:00.000Z', runtimes: [projectRuntimeObservation(adapter.descriptor, await adapter.detect())] });
+  await appendAuditRecord(cfg.storeDir!, createDaemonRecordProjector().project({ kind: 'runtimes-detected', ts: '2026-10-14T00:00:00.000Z', runtimes: [projectRuntimeObservation(adapter.descriptor, await adapter.detect())] })[0]!);
   await runStatusCommand(cfg, { log: line => lines.push(line), connectControl });
   expect(lines).toContain('runtimes: last-known codex=refused:app_server_unavailable at=2026-10-14T00:00:00.000Z');
   const snapshot = await diagnoseDevice(cfg, { adapters: [adapter] });

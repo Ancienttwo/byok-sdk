@@ -77,7 +77,9 @@ export class StartupOwnership {
         stage: 'quiescence', reason: 'startup runtime disposal has not been confirmed',
       }, { cause: caught });
       this.deps.onDisposalFailure(taskId, owner.runtimeId, failure);
-      console.error(`[byok/client] startup ownership retained for ${taskId}: ${failure.message}`);
+      console.error(
+        `[byok/client] startup ownership retained for ${taskId}: runtime=${owner.runtimeId} stage=${failure.stage} reasonBytes=${Buffer.byteLength(failure.message, 'utf8')}`,
+      );
     }
     if (!disposed) {
       this.armRetry();

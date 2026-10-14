@@ -24,6 +24,7 @@ import { buildDaemonWithAdapters, createDaemonWithAdapters, type Daemon, type Da
 import { ControlError, type AssertionIssueResult } from '../daemon/control-protocol';
 import { connectControlClient, type ControlClient } from '../bin/control-client';
 import { createAuditAppender, auditLogPath } from '../bin/audit-log';
+import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import { formatDaemonEventLine } from '../bin/format';
 import { NONCE_SIGNING_DOMAIN } from '../daemon/device-keys';
 import { DeviceStore } from '../daemon/store';
@@ -530,7 +531,9 @@ describe('device assertion broker: assertion.issue', () => {
   it('writes assertion metadata to the audit log and never the signature or the envelope', async () => {
     const built = await pairedAndStarted('acme-assert-audit');
     daemon = built.daemon;
-    daemon.subscribe(createAuditAppender(built.storeDir));
+    const projector = createDaemonRecordProjector();
+    const audit = createAuditAppender(built.storeDir);
+    daemon.subscribe((event) => projector.project(event).forEach((record) => audit.append(record)));
     const client = await control(built.storeDir, built.config.productId);
 
     const issued = await client.request<AssertionIssueResult>('assertion.issue', { audience: ALLOWED_AUDIENCE });
@@ -554,7 +557,7 @@ describe('device assertion broker: assertion.issue', () => {
     expect(raw).not.toContain('"protected"');
     // A denied audience is caller free text — only its size is persisted.
     expect(raw).not.toContain(deniedAudience);
-    expect(raw).toContain(`"audienceSize":${Buffer.byteLength(deniedAudience, 'utf8')}`);
+    expect(raw).toContain(`"audienceBytes":${Buffer.byteLength(deniedAudience, 'utf8')}`);
     expect(raw).toContain('"reason":"audience_denied"');
 
     // What must be there, so an incident can trace an assertion back to the

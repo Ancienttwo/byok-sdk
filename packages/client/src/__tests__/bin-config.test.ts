@@ -1,3 +1,4 @@
+import { formatStartErrorReason } from '../bin/commands/start';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -97,6 +98,34 @@ describe('bin/config: loadConfig', () => {
     const configPath = path.join(dir, 'config.json');
     await fs.writeFile(configPath, '{ not json');
     expect(() => loadConfig(configPath)).toThrow(ConfigError);
+  });
+
+  it('#395: ConfigError diagnostics retain actionable SDK templates without parser or config content', async () => {
+    const dir = await tmpDir('byok-bin-config-safe-errors-');
+    const configPath = path.join(dir, 'config.json');
+    const sentinel = 'SENTINEL-395';
+    try {
+      await fs.writeFile(configPath, `{"secret":"${sentinel}", invalid}`);
+      const base = { productName: sentinel, productId: sentinel, serverUrl: sentinel, workspaceRoot: sentinel };
+      const cases: Array<[() => unknown, string]> = [
+        [() => loadConfig(configPath), `config at "${configPath}" is not valid JSON`],
+        [() => loadConfig(path.join(dir, 'missing.json')), `could not read config at "${path.join(dir, 'missing.json')}"; check the path and read permissions`],
+        [() => loadConfig(undefined, { productName: sentinel }), 'config is missing required field "productId"'],
+        [() => loadConfig(undefined, { ...base, workspaceRoot: undefined }), 'config is missing required field "workspaceRoot"'],
+        [() => loadConfig(undefined, { ...base, localAgentRelease: { version: sentinel } } as never), 'config field "localAgentRelease" is distribution-owned and must not be supplied'],
+        [() => loadConfig(undefined, { ...base, gitWorkspace: sentinel } as never), 'gitWorkspace must be an object'],
+        [() => loadConfig(undefined, { ...base, gitWorkspace: { mode: sentinel } } as never), 'gitWorkspace.mode must be local-checkpoints'],
+      ];
+      for (const [load, message] of cases) {
+        let caught: unknown;
+        try { load(); } catch (error) { caught = error; }
+        expect(caught).toBeInstanceOf(ConfigError);
+        expect(formatStartErrorReason(caught)).toBe(`ConfigError: ${message}`);
+        expect(formatStartErrorReason(caught)).not.toContain(sentinel);
+      }
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('strictly validates the optional Git workspace config', () => {

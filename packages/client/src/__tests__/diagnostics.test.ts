@@ -9,7 +9,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DaemonConfig } from '../index';
 import type { ConnectControlResult, ControlClient } from '../bin/control-client';
-import { appendAuditEvent } from '../bin/audit-log';
+import { appendAuditRecord } from '../bin/audit-log';
 import { formatHaltRemedy } from '../bin/format';
 import {
   DoctorConfirmationRequiredError,
@@ -126,7 +126,7 @@ describe('diagnostics collector', () => {
     expect(unknown.checks.find((check) => check.id === 'lifecycle')?.status).toBe('warn');
 
     const at = '2026-10-13T00:00:00.000Z';
-    await appendAuditEvent(dir, { kind: 'lifecycle', ts: at, lifecycle: { phase: 'halted', reason: 'device_revoked', at } });
+    await appendAuditRecord(dir, { kind: 'lifecycle', ts: at, lifecycle: { phase: 'halted', reason: 'device_revoked', at } });
     const halted = await collectDiagnostics(config(dir), dir, { adapters: [], connectControl: unreachable });
     expect(halted.lifecycle).toEqual({ status: 'known', source: 'audit', lifecycle: { phase: 'halted', reason: 'device_revoked', at } });
     expect(halted.checks.find((check) => check.id === 'lifecycle')).toEqual({
