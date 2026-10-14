@@ -216,7 +216,8 @@
         "zod": "^4.4.3",
       },
       "devDependencies": {
-        "@byok-sdk/protocol-released": "npm:@byok-sdk/protocol@0.25.0",
+        "byok-protocol-floor": "https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.25.0.tgz",
+        "byok-protocol-previous": "https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.26.1.tgz",
       },
     },
     "packages/server": {
@@ -329,8 +330,6 @@
     "@byok-sdk/keys": ["@byok-sdk/keys@workspace:packages/keys"],
 
     "@byok-sdk/protocol": ["@byok-sdk/protocol@workspace:packages/protocol"],
-
-    "@byok-sdk/protocol-released": ["@byok-sdk/protocol@0.25.0", "", { "dependencies": { "zod": "^4.4.3" } }, "sha512-EZs2QbBFlPLgYMJyQpfCKWBcTnwSwoJ2sC7gYHtKmnYQIXJc3aUvVbY+vMoHDSv/S1YjxmOtzwmsMOr3w2Q1+g=="],
 
     "@byok-sdk/server": ["@byok-sdk/server@workspace:packages/server"],
 
@@ -813,6 +812,10 @@
     "buffer-equal-constant-time": ["buffer-equal-constant-time@1.0.1", "", {}, "sha512-zRpUiDwd/xk6ADqPMATG8vc9VPrkck7T07OIx0gnjmJAnHnTVXNQG3vfvWNuiZIkwu9KrKdA1iJKfsfTVxE6NA=="],
 
     "bundle-require": ["bundle-require@5.1.0", "", { "dependencies": { "load-tsconfig": "0.2.5" }, "peerDependencies": { "esbuild": "0.27.7" } }, "sha512-3WrrOuZiyaaZPWiEt4G3+IffISVC9HYlWueJEBWED4ZH4aIAC2PnkdnuRrR94M+w6yGWn4AglWtJtBI8YqvgoA=="],
+
+    "byok-protocol-floor": ["@byok-sdk/protocol@https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.25.0.tgz", { "dependencies": { "zod": "^4.4.3" } }, "sha512-EZs2QbBFlPLgYMJyQpfCKWBcTnwSwoJ2sC7gYHtKmnYQIXJc3aUvVbY+vMoHDSv/S1YjxmOtzwmsMOr3w2Q1+g=="],
+
+    "byok-protocol-previous": ["@byok-sdk/protocol@https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.26.1.tgz", { "dependencies": { "zod": "^4.4.3" } }, "sha512-eUucLQqUNWtOn43Iv+8ZYiWzpf+yd8+M/wNIGWJdVQKOODyXBknxWDd/7Mmp/TPKfkl5BH0hfZ6Jl1xwx9NMXg=="],
 
     "cac": ["cac@6.7.14", "", {}, "sha512-b6Ilus+c3RrdDk+JhLKUAQfzzgLEPy6wcXqS7f/xe1EETvsDP6GORG7SFuOs6cID5YkqchW/LXZbX5bc8j7ZcQ=="],
 
