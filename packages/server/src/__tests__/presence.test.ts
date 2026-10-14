@@ -2,7 +2,6 @@ import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InMemoryPresenceStore } from '@byok-sdk/core';
 import { composeFacadeStores, serverTenantId } from '../stores';
-import { LiveTaskIndex } from '../live-tasks';
 import { createByokServer, type ByokServer } from '../index';
 import { connectFakeDaemonLongPoll, nextEnvelope, startServer, stopServer, waitFor } from './test-support';
 
@@ -109,7 +108,7 @@ describe('concurrent lease observations', () => {
   it('does not overwrite newer heartbeat facts with a concurrent transport renewal', async () => {
     const tenant = serverTenantId(PRODUCT_ID);
     const composition = composeFacadeStores({ tenant, maxBlobSizeBytes: 1_000, presenceTtlMs: 1_000,
-      tasks: new LiveTaskIndex(), onRateLimited: () => {} });
+      onRateLimited: () => {} });
     let enter!: () => void;
     let release!: () => void;
     const entered = new Promise<void>(resolve => { enter = resolve; });
