@@ -38,7 +38,9 @@ There is one writer in this worktree; the old worker's WIP is untouched.
 - [x] Push own branch and open non-draft PR #456 referencing #412; do not merge.
 - [x] Rebase onto main 76e59b21, preserve wake close integration and apply owner-approved test migrations.
 - [x] Verify 86 server tests and seven physical-object tests against real Postgres/S3 with one worker.
-- [ ] Publish approved migration commit and record its hosted CI status.
+- [x] Publish approved migration commit; hosted tests pass 388 dataplane / 181 conformance, exposing the untyped release consumer constructor gap.
+- [x] Migrate only its two core factory arguments and pass the recurring smoke against built packages and real Postgres/S3.
+- [ ] Publish constructor migration and record hosted installed-artifact CI status.
 
 ## Verification boundary
 

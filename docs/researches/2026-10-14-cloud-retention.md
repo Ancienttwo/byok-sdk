@@ -89,3 +89,20 @@ and one worker, including row-lock concurrency, same-hash recreation, physical
 DELETE response loss, exact accounting and committed-count preservation.
 These focused results do not establish full-repository CI green; the excluded
 #437 fixture still needs its required receipt/pairing port implementations.
+
+
+## JavaScript release consumer migration
+
+The new required physical-byte owner also crosses the untyped packed-smoke
+composition boundary. CI passed 388 dataplane tests and 181 conformance tests,
+then failed constructing the durable smoke's core stores without objectStorage.
+Both initial and reopened child compositions already have the same explicit
+S3 configuration used by their cloud stores; pass that authority to core too.
+This changes two constructor arguments, without changing any smoke assertion,
+consumer behavior, receipt fixture or state transition. No fallback is added.
+
+The unchanged recurring smoke source, copied into an isolated context with
+links to this worktree's built packages, passes against real Postgres/S3 on
+Node 24.18.0. It covers the independent reopen and body-commit/crash/replay legs.
+This local check is built-workspace evidence; installed-tarball evidence stays
+with the hosted release smoke. Full-repository verification remains excluded.
