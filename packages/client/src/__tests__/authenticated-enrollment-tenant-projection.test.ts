@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -56,8 +57,8 @@ class CapturingJournal implements LocalTaskJournal {
   async listRecoverable(): Promise<[]> { return []; }
   async markRecovered(): Promise<void> {}
   async measureUsage(): Promise<never> { throw new Error('not used'); }
-  async listCleanupCandidates(): Promise<[]> { return []; }
-  async markCleanupResult(): Promise<void> {}
+  async listPrunableConfirmedTasks(): Promise<string[]> { return []; }
+  async pruneConfirmedJournalTask(): Promise<boolean> { return false; }
   async compact(): Promise<never> { throw new Error('not used'); }
   async close(): Promise<void> {}
 }
@@ -113,7 +114,7 @@ describe('authenticated enrollment tenant projection', () => {
       devicePublicKey: 'legacy-public-key',
     }));
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' },
         productName: 'Enrollment repair test',
         productId: 'enrollment-repair-test',
@@ -158,7 +159,7 @@ describe('authenticated enrollment tenant projection', () => {
     expect(JSON.parse(await fs.readFile(filePath, 'utf8'))).toEqual(legacy);
 
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' },
         productName: 'Legacy authority refusal test',
         productId,
@@ -276,7 +277,7 @@ describe('authenticated enrollment tenant projection', () => {
     const storeDir = await tmpDir('byok-enrollment-active-store-');
     const hostStorageRoot = await tmpDir('byok-enrollment-active-agent-home-');
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' },
         productName: 'Enrollment active test',
         productId: 'enrollment-active-test',
@@ -326,7 +327,7 @@ describe('authenticated enrollment tenant projection', () => {
     });
     const journal = new CapturingJournal();
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' },
         productName: 'Enrollment test',
         productId: 'enrollment-test',

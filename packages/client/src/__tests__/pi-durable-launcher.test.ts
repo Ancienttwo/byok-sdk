@@ -1,3 +1,4 @@
+import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, realpath, rm, readFile, writeFile } from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
@@ -38,6 +39,8 @@ function tool(res: import('node:http').ServerResponse, command: string, name = '
   ].map(value => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n');
 }
 async function fixture(respond: (res: import('node:http').ServerResponse, ordinal: number, body: string, paths: {home:string;store:string}) => void, lifecycle?: {ownsLease?():boolean; record?(kind:string,n:number):Promise<void>}) {
+const __executionScratch = await testExecutionScratch();
+
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'byok-durable-launch-'))); roots.push(root);
   const home = path.join(root, 'home'), store = path.join(root, 'store'); await mkdir(home); await mkdir(store);
   let calls = 0; const bodies: string[] = [], authorizations: unknown[] = [];
@@ -46,7 +49,7 @@ async function fixture(respond: (res: import('node:http').ServerResponse, ordina
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('no provider port');
   const profile = parseModelProviderProfile({ adapter: 'openai_compatible', auth_mode: 'bearer', base_url: `http://127.0.0.1:${address.port}/v1`, capabilities: [], created_at: '2026-09-10T00:00:00.000Z', updated_at: '2026-09-10T00:00:00.000Z', display_name: 'Synthetic', enabled: true, kind: 'model', model: 'test', profile_ref: 'probe', provider_kind: 'custom', pi_model: { ...PI_MODEL_FIXTURE, contextWindow: 4096, maxTokens: 64, reasoning: false, thinkingLevel: 'off' } });
   const children: ChildProcess[] = [];
-  const adapter = new PiAdapter({ durablePi: { replicaRoot: path.join(store, 'durable') }, byokLauncher: { command: 'synthetic-custody-launcher', profileDbPath: path.join(root,'profiles'), sessionDir: path.join(root,'sessions') },
+  const adapter = new PiAdapter({ durablePi: true, byokLauncher: { command: 'synthetic-custody-launcher', profileDbPath: path.join(root,'profiles'), sessionDir: path.join(root,'sessions') },
     spawnFn: ((_cmd, args, options) => {
       const parsed = parsePiProviderLauncherOptions(args as string[]); expect(parsed.runtimeEntry).toBe('pi-durable');
       const delegated = buildPiPreparedArgs(parsed.piArgs);
@@ -67,10 +70,10 @@ async function fixture(respond: (res: import('node:http').ServerResponse, ordina
   const prepared = await adapter.prepare({ offer } as never);
   if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
   const env = buildRuntimeEnv({ ambient: process.env });
-  const launch = await prepared.operation.resolveRuntimeLaunch!({ kind: 'instruction', cwd: home, env, projectionRoot: path.join(store,'projections') });
+  const launch = await prepared.operation.resolveRuntimeLaunch!({ scratch: __executionScratch,  kind: 'instruction', cwd: home, env,  });
   const manifest = sealRuntimeOperationManifest({ taskId: 'task', runtimeId: 'pi', descriptor: adapter.descriptor, dispatchSelection: selection, requiredToolsetIds: [], cwd: home, workspace: { workspaceDir: home }, agentRef: { agentId: 'agent', profileRevision: 'revision' }, lease: { leaseId: 'lease', canonicalHome: home }, forwardedEnvironmentNames: Object.keys(env) });
   const journal: string[] = [];
-  const session = await prepared.operation.start({ kind: 'instruction', instruction: 'Host authority input\nHost context second line', manifest, env, runtimeLaunch: launch, mcpEnv: projectPiMcpEnvironment(env), durableContext: { tenantId: 'tenant', lifecycle: { ownsLease: () => lifecycle?.ownsLease?.() ?? true, record: async (kind,n) => { journal.push(`${kind}:${n}`); await lifecycle?.record?.(kind,n); } } } }); sessions.push(session);
+  const session = await prepared.operation.start({ scratch: (launch).scratch,  kind: 'instruction', instruction: 'Host authority input\nHost context second line', manifest, env, runtimeLaunch: launch, mcpEnv: projectPiMcpEnvironment(env), durableContext: { replicaRoot: path.join(store, 'durable-replicas'), tenantId: 'tenant', lifecycle: { ownsLease: () => lifecycle?.ownsLease?.() ?? true, record: async (kind,n) => { journal.push(`${kind}:${n}`); await lifecycle?.record?.(kind,n); } } } }); sessions.push(session);
   return { session, children, calls: () => calls, bodies, authorizations, home, journal };
 }
 function liveGroup(pgid:number):number[] {return execFileSync('ps',['-eo','pid=,pgid=,stat='],{encoding:'utf8'}).trim().split('\n').map(line=>line.trim().split(/\s+/u)).filter(([,group,stat])=>Number(group)===pgid&&!stat!.startsWith('Z')).map(([pid])=>Number(pid));}
@@ -116,7 +119,7 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
   // The durable replica store stays private to the SDK.
   it.each(['read','write','edit'])('real %s rejects a path inside the durable replica store before file access', async name => {
     let target = '';
-    const f = await fixture((res,n,_body,paths) => { target = path.join(paths.store,'durable','probe.txt'); if (n === 1) tool(res,target,name); else finish(res,'denied'); });
+    const f = await fixture((res,n,_body,paths) => { target = path.join(paths.store,'durable-replicas','probe.txt'); if (n === 1) tool(res,target,name); else finish(res,'denied'); });
     const events:AgentEvent[] = []; for await (const event of f.session.events) events.push(event);
     const result = events.find(event => event.type === 'tool_result');
     expect(result?.type).toBe('tool_result'); if (result?.type !== 'tool_result') throw new Error('result missing');
@@ -198,7 +201,7 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     let home='';let intents=0;
     const f=await fixture((res,n,_body,paths)=>{home=paths.home;if(n!==1){finish(res,'denied');return;}
       const base={id:'race',object:'chat.completion.chunk',created:0,model:'test'};
-      const calls=[{name:'bash',args:{command:`sleep 0.1; ln -s ${JSON.stringify(path.join(paths.store,"durable"))} race-link; printf ready > race-ready`}},{name:'write',args:{path:'race-link/forbidden.txt',content:'RACE_WRITE'}}];
+      const calls=[{name:'bash',args:{command:`sleep 0.1; ln -s ${JSON.stringify(path.join(paths.store,"durable-replicas"))} race-link; printf ready > race-ready`}},{name:'write',args:{path:'race-link/forbidden.txt',content:'RACE_WRITE'}}];
       res.writeHead(200,{'content-type':'text/event-stream'});res.end([{...base,choices:[{index:0,delta:{role:'assistant',tool_calls:calls.map((call,index)=>({index,id:`race-${index}`,type:'function',function:{name:call.name,arguments:JSON.stringify(call.args)}}))},finish_reason:null}]},{...base,choices:[{index:0,delta:{},finish_reason:'tool_calls'}],usage:{prompt_tokens:3,completion_tokens:2,total_tokens:5}}].map(value=>`data: ${JSON.stringify(value)}\n\n`).join('')+'data: [DONE]\n\n');
     },{record:async kind=>{if(kind==='tool-intent'&&++intents===2)await vi.waitFor(async()=>expect(await readFile(path.join(home,'race-ready'),'utf8')).toBe('ready'),{timeout:4_000,interval:20});}});
     const events:AgentEvent[]=[];for await(const event of f.session.events)events.push(event);

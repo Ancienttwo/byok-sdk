@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -38,7 +39,7 @@ async function makeRunner(
   sent: Envelope[],
   extra: Partial<TaskRunnerDeps> = {},
 ): Promise<TaskRunner> {
-  return new TaskRunner({
+  return new TaskRunner({ scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-final-message-workspace-'),
     deviceId: 'device-final-message',

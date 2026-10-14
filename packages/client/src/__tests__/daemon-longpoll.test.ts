@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -26,7 +27,7 @@ describe('long-poll lifecycle (protocol §8)', () => {
     const slow = new StubRuntimeAdapter('codex');
     const other = new StubRuntimeAdapter('pi');
     const release = slow.blockStart();
-    daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-test' },
+    daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' },
       productName: 'Test', productId: 'test-product', serverUrl: server.url,
       workspaceRoot: await tmpDir('byok-independent-work-'), storeDir: await tmpDir('byok-independent-store-'),
     }, [slow, other], { longPoll: { retryDelayMs: 20 } });
@@ -57,7 +58,7 @@ describe('long-poll lifecycle (protocol §8)', () => {
     const adapter = new StubRuntimeAdapter();
 
     daemon = createDaemonWithAdapters(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [adapter],
       {
         longPoll: { retryDelayMs: 20 },

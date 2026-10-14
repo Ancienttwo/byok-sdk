@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,7 +11,7 @@ import {
 } from '../agent-home';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
-import { LocalStoragePressureEngine } from '../daemon/journal/storage-policy';
+
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { connectControlClient } from '../bin/control-client';
@@ -82,7 +83,7 @@ describe('canonical Agent home single writer (WP0)', () => {
     const productId = fixed.productId ?? `single-writer-${path.basename(storeDir)}`;
     const pi = new LaneAdapter('pi');
     const claude = new LaneAdapter('claude');
-    const started = createDaemonWithAdapters({
+    const started = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Single writer',
       productId,
@@ -299,7 +300,7 @@ describe('canonical Agent home single writer (WP0)', () => {
     const storeDir = await temp('byok-single-writer-removed-store-');
     const hostStorageRoot = await temp('byok-single-writer-removed-home-');
     for (const limit of [1, 2]) {
-      expect(() => createDaemonWithAdapters({
+      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...({
         localAgentRelease: { version: '0.0.0-test' },
         productName: 'Single writer',
         productId: `single-writer-removed-${limit}`,
@@ -308,7 +309,7 @@ describe('canonical Agent home single writer (WP0)', () => {
         storeDir,
         agentHome: { hostStorageRoot },
         maxConcurrentMutableSessionsPerAgentHome: limit,
-      } as DaemonConfig, [new LaneAdapter('pi')])).toThrow(/maxConcurrentMutableSessionsPerAgentHome was removed/);
+      } as DaemonConfig) }, [new LaneAdapter('pi')])).toThrow(/maxConcurrentMutableSessionsPerAgentHome was removed/);
     }
   });
 
@@ -356,19 +357,8 @@ describe('canonical Agent home single writer (WP0)', () => {
     const storeDir = await temp('byok-single-writer-veto-store-');
     const hostStorageRoot = await temp('byok-single-writer-veto-home-');
     const journal = new SqliteLocalTaskJournal({ storeDir });
-    const engine = new LocalStoragePressureEngine({
-      policy: {
-        maxStoreBytes: 1024 * 1024 * 1024,
-        minFreeBytes: 100 * 1024 * 1024,
-        softMinFreeBytes: 200 * 1024 * 1024,
-        ackCriticalReserveBytes: 8 * 1024 * 1024,
-      },
-      journal,
-      // Under the hard watermark, so `admissionGuard()` refuses new offers.
-      freeBytesProvider: () => 50 * 1024 * 1024,
-    });
     const pi = new LaneAdapter('pi');
-    const started = createDaemonWithAdapters({
+    const started = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot(), budget: { maxStoreBytes: 1024 * 1024 * 1024, minFreeBytes: 100 * 1024 * 1024 } },
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Single writer',
       productId: `single-writer-veto-${path.basename(storeDir)}`,
@@ -377,13 +367,13 @@ describe('canonical Agent home single writer (WP0)', () => {
       storeDir,
       agentHome: { hostStorageRoot },
       hostedJournal: { mode: 'sqlite' },
-    }, [pi], { hostedJournal: { journal, pressureEngine: engine } });
+    }, [pi], { hostedJournal: { journal }, retention: { freeBytesProvider: async () => 50 * 1024 * 1024 } });
     daemon = started;
     try {
       await started.pair('pairing-code');
       await started.start();
       await server.waitFor((entry) => entry.type === 'conn.hello');
-      expect((await engine.tick()).state).toBe('hard-pressure');
+      expect(started.status().storage.budget?.pressureState).toBe('hard-pressure');
 
       const agentsRoot = path.join(await fs.realpath(hostStorageRoot), AGENT_HOME_DIRECTORY);
       server.send(offer('veto-task', 'veto-agent', 'pi'));
@@ -487,7 +477,7 @@ describe('canonical Agent home single writer (WP0)', () => {
     const workspaceRoot = await temp('byok-single-writer-invalid-workspace-');
     const storeDir = await temp('byok-single-writer-invalid-store-');
     const hostStorageRoot = await temp('byok-single-writer-invalid-home-');
-    const build = (limit: number): Daemon => createDaemonWithAdapters({
+    const build = (limit: number): Daemon => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() },
       localAgentRelease: { version: '0.0.0-test' },
       productName: 'Single writer',
       productId: `single-writer-invalid-${limit}`,

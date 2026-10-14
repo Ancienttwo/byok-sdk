@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -57,7 +58,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
     const workspaceRoot = await tmpDir('byok-conn-hello-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-store-');
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
         productId: 'test-product',
         serverUrl: server.url,
@@ -170,7 +171,7 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
     const workspaceRoot = await tmpDir('byok-conn-hello-capflags-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-capflags-store-');
     daemon = createDaemonWithAdapters(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [pi],
     );
     await daemon.pair('pairing-code');
@@ -207,7 +208,7 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
     const workspaceRoot = await tmpDir('byok-conn-hello-capflags-custom-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-capflags-custom-store-');
     daemon = createDaemonWithAdapters(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [opaquePi],
     );
     await daemon.pair('pairing-code');
@@ -222,7 +223,7 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
     const workspaceRoot = await tmpDir('byok-conn-hello-capflags-empty-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-capflags-empty-store-');
     daemon = createDaemonWithAdapters(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product', productId: 'test-product', serverUrl: server.url, workspaceRoot, storeDir },
       [],
     );
     await daemon.pair('pairing-code');
@@ -238,7 +239,7 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
     const storeDir = await tmpDir('byok-conn-hello-agent-store-');
     const hostStorageRoot = await tmpDir('byok-conn-hello-agent-root-');
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' },
         productName: 'Test Product',
         productId: 'test-product',
@@ -264,7 +265,7 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
     const hostStorageRoot = path.join(parent, 'not-a-directory');
     await fs.writeFile(hostStorageRoot, 'not a directory');
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' },
         productName: 'Test Product',
         productId: 'test-product',
@@ -287,7 +288,7 @@ describe('conn.hello.capabilities (C2: approval-targeting)', () => {
     const hostStorageRoot = await tmpDir('byok-conn-hello-agent-git-root-');
 
     expect(() => createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' },
         productName: 'Test Product',
         productId: 'test-product',
@@ -333,7 +334,7 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
     const storeDir = await tmpDir('byok-conn-hello-intent-store-');
     const hostStorageRoot = await tmpDir('byok-conn-hello-intent-root-');
     daemon = createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' },
         productName: 'Test Product',
         productId: 'test-product',
@@ -392,7 +393,7 @@ describe('conn.hello.capabilities (WP2I-S2: agent-memory-intent.v1)', () => {
     const workspaceRoot = await tmpDir('byok-conn-hello-intent-bad-workspace-');
     const storeDir = await tmpDir('byok-conn-hello-intent-bad-store-');
     expect(() => createDaemonWithAdapters(
-      {
+      { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' },
         productName: 'Test Product',
         productId: 'test-product',

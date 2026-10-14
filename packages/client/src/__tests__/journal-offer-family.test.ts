@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -87,7 +88,7 @@ async function setup(type: string) {
     } finally { await binding.lease.release(); }
   }
   const adapter = new StubRuntimeAdapter('pi');
-  daemon = createDaemonWithAdapters(config, [adapter]);
+  daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [adapter]);
   const device = await daemon.pair('pair-code');
   await daemon.start();
   const payload = type === 'task.offer_prepared'
@@ -147,7 +148,7 @@ describe('issue #147 protocol offer family through real hosted SQLite journal', 
     // POST can be accepted (and confirmed locally) before start() returns. Hold
     // that acceptance so the read below sees the row strictly before confirmation.
     const releaseConfirmation = server.holdNextMessagesResponse((event) => event.type === 'task.fail' && event.task_id === 'task-147');
-    daemon = createDaemonWithAdapters(config, [restartedAdapter]);
+    daemon = createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [restartedAdapter]);
     await daemon.start();
     const interrupted = await server.waitFor((event) => event.type === 'task.fail' && event.task_id === 'task-147');
     const recovered = rows(storeDir, 'SELECT recovery_marker FROM journal_task');

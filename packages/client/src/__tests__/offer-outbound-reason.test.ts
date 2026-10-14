@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -80,7 +81,7 @@ async function runner(adapter: StubRuntimeAdapter, extra: Partial<TaskRunnerDeps
   const workspaceRoot = await temporary('byok outbound offer workspace-');
   const agentHome = new AgentHomeManager({ hostStorageRoot });
   const sent: Envelope[] = [];
-  const taskRunner = new TaskRunner({
+  const taskRunner = new TaskRunner({ scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot,
     agentHome,

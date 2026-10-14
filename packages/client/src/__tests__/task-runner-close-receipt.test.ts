@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -25,7 +26,7 @@ async function makeRunner(overrides: Partial<Pick<TaskRunnerDeps, 'awaitTerminal
   directories.push(directory);
   const adapter = new StubRuntimeAdapter();
   const sent: Envelope[] = [];
-  const runner = new TaskRunner({
+  const runner = new TaskRunner({ scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: path.join(directory, 'workspace'),
     deviceId: 'close-receipt-device',

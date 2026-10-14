@@ -193,7 +193,7 @@ describe.skipIf(!isSqliteAvailable())('SqliteLocalTaskJournal', () => {
       }
     });
 
-    it('creates all eight §12.7.2 tables', async () => {
+    it('creates journal tables and drops producerless GC tables', async () => {
       const storeDir = await tmpStore();
       build(storeDir);
 
@@ -207,9 +207,6 @@ describe.skipIf(!isSqliteAvailable())('SqliteLocalTaskJournal', () => {
         'journal_task',
         'journal_terminal',
         'journal_transition',
-        'local_artifact_ref',
-        'local_cleanup_candidate',
-        'local_storage_usage',
       ]);
     });
   });
@@ -628,43 +625,15 @@ describe.skipIf(!isSqliteAvailable())('SqliteLocalTaskJournal', () => {
   });
 
   describe('storage accounting and maintenance', () => {
-    it('reports the five categories separately, measuring its own two', async () => {
-      const storeDir = await tmpStore();
-      const journal = build(storeDir);
+    it('measures physical journal footprint and logical rows without Host-reported categories', async () => {
+      const journal = build(await tmpStore());
       await journal.appendEnvelope(envelopeRecord());
-
       const usage = await journal.measureUsage();
-
-      expect(Object.keys(usage.categories).sort()).toEqual(['cache', 'journal', 'log', 'quarantine', 'workspace']);
-      expect(usage.categories.journal.bytes).toBeGreaterThan(0);
-      expect(usage.categories.journal.approximate).toBe(false);
-      // Nothing has reported these, so they say so rather than guessing.
-      expect(usage.categories.cache).toEqual({ bytes: 0, approximate: true });
-      expect(usage.totalBytes).toBe(
-        Object.values(usage.categories).reduce((sum, category) => sum + category.bytes, 0),
-      );
-
-      await journal.reportCategoryUsage('cache', { bytes: 4_096, approximate: true });
-      expect((await journal.measureUsage()).categories.cache).toEqual({ bytes: 4_096, approximate: true });
-    });
-
-    it('hands out only eligible cleanup candidates, and keeps a failed one eligible', async () => {
-      const storeDir = await tmpStore();
-      const journal = build(storeDir);
-
-      await journal.enqueueCleanupCandidate({ candidateId: 'c1', category: 'expired-temp', ref: '/tmp/a', eligibleAt: '2026-08-07T00:00:00.000Z', reason: 'expired' });
-      await journal.enqueueCleanupCandidate({ candidateId: 'c2', category: 'rotated-log', ref: '/tmp/b.log', eligibleAt: '2026-09-01T00:00:00.000Z', reason: 'rotated' });
-
-      const now = new Date('2026-08-08T00:00:00.000Z');
-      expect((await journal.listCleanupCandidates(now, 10)).map((c) => c.candidateId)).toEqual(['c1']);
-
-      await journal.markCleanupResult({ candidateId: 'c1', outcome: 'failed', error: 'EBUSY', at: '2026-08-08T00:00:01.000Z' });
-      const afterFailure = await journal.listCleanupCandidates(now, 10);
-      expect(afterFailure.map((c) => c.candidateId)).toEqual(['c1']);
-      expect(afterFailure[0]).toMatchObject({ attempts: 1, lastError: 'EBUSY' });
-
-      await journal.markCleanupResult({ candidateId: 'c1', outcome: 'deleted', bytesReclaimed: 10, at: '2026-08-08T00:00:02.000Z' });
-      expect(await journal.listCleanupCandidates(now, 10)).toEqual([]);
+      expect(usage.journalBytes).toBeGreaterThan(0);
+      expect(usage.quarantineBytes).toBe(0);
+      expect(usage.journalEntries).toBe(1);
+      expect(usage.confirmedEntries).toBe(0);
+      expect(usage).not.toHaveProperty('categories');
     });
 
     it('checkpoints the WAL and returns a bounded, honest result', async () => {

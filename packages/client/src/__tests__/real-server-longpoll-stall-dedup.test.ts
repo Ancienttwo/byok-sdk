@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -62,7 +63,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
     const retryDelayMs = 100;
 
     daemon = createDaemonWithAdapters(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
         longPoll: { retryDelayMs, idleDelayMs: 20 },
@@ -128,7 +129,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
     }) as typeof fetch);
 
     daemon = createDaemonWithAdapters(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
         longPoll: { retryDelayMs, idleDelayMs: 20 },
@@ -205,7 +206,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
     const retryDelayMs = 30;
 
     daemon = createDaemonWithAdapters(
-      { localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
+      { storage: { scratchRoot: testScratchRoot() },  localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: real.url, workspaceRoot, storeDir },
       [adapter],
       {
         longPoll: { retryDelayMs, idleDelayMs: 20 },

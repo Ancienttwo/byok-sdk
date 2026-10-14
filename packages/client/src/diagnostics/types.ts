@@ -46,7 +46,7 @@ export interface DiagnosticsSnapshot {
         pendingApprovalCount: number;
         operationalHealth: ControlStatusResult['operationalHealth'];
         outbound?: ControlStatusResult['outbound'];
-        storage?: ControlStatusResult['storage'];
+        storage: ControlStatusResult['storage'];
       };
   /**
    * Issue #394: the running daemon's lifecycle (`live`), else the last

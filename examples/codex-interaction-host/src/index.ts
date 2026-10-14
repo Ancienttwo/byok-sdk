@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { sealRuntimeOperationManifest, isRuntimeStartupDisposalFailure, RuntimeStartupDisposalFailure, type Session } from '@byok-sdk/client';
-import { CodexAdapter } from '@byok-sdk/client/adapters';
+import { CodexAdapter, createExecutionScratch, type ExecutionScratch } from '@byok-sdk/client/adapters';
 import { TerminalInteractionHost } from './terminal-host';
 import { fixtureScenarios, type FixtureScenario } from './scenarios';
 
@@ -32,7 +32,9 @@ export async function startFixtureHost(options: FixtureHostOptions): Promise<{
   options.signal?.throwIfAborted();
   const host = new TerminalInteractionHost(randomUUID(), randomUUID(), options.output, options.timeoutMs);
   let workspace: string | undefined;
-  const removeWorkspace = async () => { if (workspace) await rm(workspace, { recursive: true, force: true }); };
+  let scratchRoot: string | undefined;
+  let scratch: ExecutionScratch | undefined;
+  const removeWorkspace = async () => { await scratch?.release(); if (scratchRoot) await rm(scratchRoot, { recursive: true, force: true }); if (workspace) await rm(workspace, { recursive: true, force: true }); };
   const instruction = 'Synthetic native-interaction fixture. Do not execute any command.';
   const env = { PATH: process.env.PATH, FAKE_HOST_SCENARIO: options.scenario,
     ...(options.fixtureReceiptPath ? { FAKE_HOST_RECEIPT: options.fixtureReceiptPath } : {}) };
@@ -43,6 +45,8 @@ export async function startFixtureHost(options: FixtureHostOptions): Promise<{
     const adapter = new CodexAdapter({ resolveBin: () => ({ command, source: 'path' }),
       nativeInteractions: host.nativeInteractions });
     workspace = await mkdtemp(path.join(tmpdir(), 'byok-codex-reference-'));
+    scratchRoot = await mkdtemp(path.join(await realpath(tmpdir()), 's-'));
+    scratch = await createExecutionScratch({ root: scratchRoot });
     const prepared = await adapter.prepare({ offer: { instruction },
       descriptor: adapter.descriptor, requiredToolsetIds: [] });
     if (prepared.kind === 'reject') throw new Error('fixture adapter refused');
@@ -51,7 +55,7 @@ export async function startFixtureHost(options: FixtureHostOptions): Promise<{
     const manifest = sealRuntimeOperationManifest({ taskId: host.taskId, runtimeId: 'codex',
       descriptor: adapter.descriptor, requiredToolsetIds: [],
       workspace: { workspaceDir: workspace }, forwardedEnvironmentNames: Object.keys(env).sort() });
-    started = await prepared.operation.start({ kind: 'instruction', manifest, instruction, env, signal: options.signal });
+    started = await prepared.operation.start({ scratch, kind: 'instruction', manifest, instruction, env, signal: options.signal });
     const session = started;
     let closing: Promise<void> | undefined;
     const close = (): Promise<void> => {

@@ -1,3 +1,4 @@
+import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -47,7 +48,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
     });
 
     it('rejects pairing against an insecure remote URL with the typed error, before any network call', async () => {
-      const daemon = createDaemon({
+      const daemon = createDaemon({ storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
         productId: 'acme-gate-pair-fail',
         serverUrl: 'http://example.com',
@@ -66,7 +67,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
         json: async () => ({ deviceId: 'dev-1', tenantId: 'tenant-url-gate', accessToken: 'tok-1' }),
       });
 
-      const daemon = createDaemon({
+      const daemon = createDaemon({ storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
         productId: 'acme-gate-pair-hatch',
         serverUrl: 'http://example.com',
@@ -91,7 +92,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
         json: async () => ({ deviceId: 'dev-2', tenantId: 'tenant-url-gate', accessToken: 'tok-2' }),
       });
 
-      const daemon = createDaemon({
+      const daemon = createDaemon({ storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
         productId: 'acme-gate-pair-inert-hatch',
         serverUrl: 'http://127.0.0.1:1',
@@ -107,7 +108,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
     });
 
     it('F2: with dangerouslyAllowInsecureRemote: true, an unsupported scheme (ftp:) still throws the typed error unconditionally — the hatch only covers plaintext-to-non-loopback, never a scheme this transport has no meaning for at all', async () => {
-      const daemon = createDaemon({
+      const daemon = createDaemon({ storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
         productId: 'acme-gate-pair-unsupported-scheme',
         serverUrl: 'ftp://x',
@@ -124,7 +125,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
 
   describe('start()', () => {
     it('rejects starting against an insecure remote config URL with the typed error — even for a never-paired device (runs before the "not paired" check)', async () => {
-      const daemon: Daemon = createDaemon({
+      const daemon: Daemon = createDaemon({ storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
         productId: 'acme-gate-start-fail',
         serverUrl: 'http://example.com',
@@ -137,7 +138,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
     });
 
     it('with dangerouslyAllowInsecureRemote: true, proceeds past the gate (fails on "not paired" instead) and logs a warning', async () => {
-      const daemon: Daemon = createDaemon({
+      const daemon: Daemon = createDaemon({ storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
         productId: 'acme-gate-start-hatch',
         serverUrl: 'http://example.com',
@@ -157,7 +158,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
     });
 
     it('a loopback config URL never triggers the gate at all, with or without the escape hatch set', async () => {
-      const daemon: Daemon = createDaemon({
+      const daemon: Daemon = createDaemon({ storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
         productId: 'acme-gate-start-loopback',
         serverUrl: 'http://127.0.0.1:1',
@@ -171,7 +172,7 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
     });
 
     it('F2: with dangerouslyAllowInsecureRemote: true, an unsupported scheme (ftp:) still throws the typed error unconditionally, with no warning emitted', async () => {
-      const daemon: Daemon = createDaemon({
+      const daemon: Daemon = createDaemon({ storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
         productId: 'acme-gate-start-unsupported-scheme',
         serverUrl: 'ftp://x',

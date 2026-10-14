@@ -1,3 +1,4 @@
+import { testScratchOwner } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -36,7 +37,7 @@ async function makeRunner(
   sent: Envelope[],
   overrides: Partial<Pick<TaskRunnerDeps, 'shutdownInterruptTimeoutMs' | 'onRuntimeDisposalFailure'>> = {},
 ): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = {
+  const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
     adapters: [adapter],
     workspaceRoot: await tmpDir('byok-taskrunner-shutdown-workspace-'),
     deviceId: 'device-1',

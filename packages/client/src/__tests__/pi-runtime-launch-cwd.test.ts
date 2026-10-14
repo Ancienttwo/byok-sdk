@@ -1,3 +1,4 @@
+import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { execFile, spawn, type SpawnOptions } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -145,6 +146,8 @@ async function prepareArtifact(home: string, artifactPath: string): Promise<Runt
 
 /** The actual adapter owns cwd/env; the test substitutes only the native runtime. */
 async function launchThroughAdapter(lane: 'ordinary' | 'prepared', home: string): Promise<ChildReport> {
+const __executionScratch = await testExecutionScratch();
+
   const { compiledBin, preparedEntry } = await piRelease();
   const recordDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-adapter-record-'));
   const recordTo = path.join(recordDir, 'record.json');
@@ -175,11 +178,11 @@ async function launchThroughAdapter(lane: 'ordinary' | 'prepared', home: string)
   });
   const preparation = lane === 'prepared'
     ? await prepareArtifact(home, path.join(recordDir, 'artifact.json')) : undefined;
-  const runtimeLaunch = await prepared.operation.resolveRuntimeLaunch!({
+  const runtimeLaunch = await prepared.operation.resolveRuntimeLaunch!({ scratch: __executionScratch,
     kind: preparation === undefined ? 'instruction' : 'prepared', cwd: home, env,
-    projectionRoot: path.join(recordDir, 'projections'),
+
   });
-  const session = await prepared.operation.start({
+  const session = await prepared.operation.start({ scratch: (runtimeLaunch).scratch,
     runtimeLaunch,
     ...(preparation === undefined ? { kind: 'instruction' as const, instruction: offer.instruction }
       : { kind: 'prepared' as const, preparation }),
