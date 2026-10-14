@@ -320,12 +320,7 @@ Platform behavior is inherited from the daemon path, not restated: Linux uses
 the native descriptor-relative backend, macOS requires the external helper, and
 Windows stays fail-closed with or without one.
 
-This entry deliberately reaches no transport, no daemon composition, and no
-control socket — importing the same symbols from the package root pulls all
-three in. `connectControlClient` is not public anywhere in this package and
-must not become reachable here; `src/__tests__/agent-memory-entry-constraints.test.ts`
-pins the source module graph and `scripts/check-agent-memory-entry.mjs` pins the
-built bundle.
+Runtime dependencies, code-generation evidence and size budgets are recorded in the [entry dependency contract](../../README.md#entry-dependencies).
 
 Hosted projection is not on this entry. An embedded host gets the local
 snapshot and no way to send it anywhere from this package.
@@ -366,11 +361,7 @@ their option/result types. `connectControlClient` stays unreachable here for the
 same reason it is unreachable everywhere else in this package: that socket also
 carries `shutdown`, approval resolution, and the raw task-event stream. The root
 entry keeps exporting both functions; this is a narrower door to the same
-authority, not a replacement. `src/__tests__/dist-subpath-closure.test.ts` walks
-the emitted bundle for runtime code generation and for any import specifier that
-is not a node builtin, `@byok-sdk/core`, `@byok-sdk/protocol`, or a relative
-path, and runs the same checker against `dist/index.js` as a control that must
-report hits.
+authority. See the [entry dependency contract](../../README.md#entry-dependencies) for its complete eager dependency report, including core and Zod.
 
 ## Serving an MCP toolset over stdio
 
@@ -419,12 +410,7 @@ always produces a `result`, and only a thrown `McpServerToolError` becomes an
 a successful `{behavior:'deny'}` payload, which is the behaviour that keeps
 claude from abandoning the turn.
 
-The entry adds no dependency. `@modelcontextprotocol/sdk` is not required to run
-an SDK-reserved MCP server; the emitted bundle reaches node builtins only, and
-`src/__tests__/dist-subpath-closure.test.ts` keeps that true.
-
-The sub-path is an unreleased candidate: it is not in a published artifact yet,
-so consume it from the workspace until the release that ships it.
+The subpath is exported by the package manifest. See the [entry dependency contract](../../README.md#entry-dependencies) for its dependencies and budget.
 
 ## Agent egress and explicit content reads
 

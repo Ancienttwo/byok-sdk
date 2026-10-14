@@ -14,7 +14,7 @@
  * So three properties are pinned here, at the source-module level:
  *
  * 1. The exact module graph reachable from the entry.
- * 2. The exact set of non-relative specifiers that graph imports.
+ * Runtime dependency policy is owned by api-surface/entries.json.
  * 3. The exact runtime export list of the entry.
  *
  * Each is an equality, not a subset check, on purpose: growing any of the
@@ -110,21 +110,6 @@ describe('the embedded agent-memory entry module graph', () => {
       'mcp-server/index.ts',
       'util/atomic-write.ts',
       'util/secure-dir.ts',
-    ]);
-  });
-
-  it('imports @byok-sdk/protocol and node builtins, and nothing else', () => {
-    // No `ws`. No `@byok-sdk/core`. No runtime adapter package. A host that
-    // installs `@byok-sdk/client` for memory alone pays for the protocol
-    // schemas and the Node standard library.
-    expect(GRAPH.external).toEqual([
-      '@byok-sdk/protocol',
-      'node:child_process',
-      'node:crypto',
-      'node:fs',
-      'node:net',
-      'node:os',
-      'node:path',
     ]);
   });
 

@@ -33,11 +33,6 @@ for (const [name, file, source, message] of [
   ['keys import', 'index.d.ts', "import type { SecretStore } from '@byok-sdk/keys';", /undeclared external type/],
   ['client dynamic type', 'index.d.ts', "export type X = import('@byok-sdk/client').X;", /undeclared external type/],
   ['unknown external subpath', 'index.d.ts', "export * from '@earendil-works/pi-ai-other';", /undeclared external type/],
-  ['bare builtin', 'index.js', "import { readFile } from 'fs';", /Node builtin/],
-  ['prefixed builtin', 'index.js', "import { readFile } from 'node:fs';", /Node builtin/],
-  ['dynamic builtin', 'index.js', "export const fs = () => import('node:fs');", /Node builtin/],
-  ['builtin re-export', 'index.js', "export { readFile } from 'fs';", /Node builtin/],
-  ['builtin require', 'index.js', "export const fs = require('fs');", /Node builtin/],
 ]) {
   test('rejects ' + name, t => assert.throws(() => checkDist(fixture(t, { [file]: source })), message));
 }

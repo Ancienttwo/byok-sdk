@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Breaking (protocol; #398)** — `@byok-sdk/protocol/constants` replaces the
+  preparation-version subpath. Import `INPUT_PREPARATION_WIRE_VERSION` from
+  `/constants`. Protocol root exports retain the same values; schema-free
+  consumers use the new subpath. Client adapters, Agent memory and MCP helpers
+  avoid Zod at load time. `api-surface/entries.json` centralizes entry dependency
+  policies, generated facts and workspace size budgets. Wire v2 and freeze
+  goldens are unchanged. See `docs/releases/398-entry-dependency-closure.md`.
+
 - **Breaking (server, 0.x; #420)** — embedded device-side one-shot wake queue:
   `wake: { consume }` plus `wakes.schedule/cancel/pending`, shared memory/SQLite
   semantics, exact dedup, serial at-least-once delivery, 60-second capped waits,

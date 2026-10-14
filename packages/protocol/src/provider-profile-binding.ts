@@ -1,8 +1,5 @@
 import { z } from 'zod';
 
-/** Daemon capability required before an exact local provider profile may be offered. */
-export const PROVIDER_PROFILE_BINDING_CAPABILITY = 'provider-profile-binding' as const;
-
 /** Opaque, portable local profile identity. It is one logical id, never a path. */
 export const ProviderProfileRefSchema = z
   .string()

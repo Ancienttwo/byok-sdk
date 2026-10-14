@@ -1,15 +1,5 @@
 // ==== @byok-sdk/protocol dist/agent-egress.d.ts ====
 import { z } from 'zod';
-/** Additive daemon capability names. Server/cloud admission consumes these exactly. */
-export declare const AGENT_EGRESS_POLICY_CAPABILITY: 'agent-egress-policy';
-export declare const AGENT_EGRESS_RELIABLE_ACK_CAPABILITY: 'agent-egress-reliable-ack';
-/** Admits the distinct offer whose runtime mints its session only after start. */
-export declare const AGENT_EGRESS_FRESH_SESSION_CAPABILITY: 'agent-egress-fresh-session';
-/** Admits the distinct Agent-authored message lane; activity policy remains independent. */
-export declare const AGENT_MESSAGE_EGRESS_CAPABILITY: 'agent-message-egress';
-export declare const AGENT_CONTENT_WORKSPACE_READ_CAPABILITY: 'agent-content-workspace-read';
-export declare const AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY: 'agent-content-transcript-read';
-export declare const AGENT_CONTENT_ARTIFACT_READ_CAPABILITY: 'agent-content-artifact-read';
 export declare const AGENT_MESSAGE_MAX_BYTES: number;
 export declare const AgentMessageContractSchema: z.ZodString;
 export declare const AgentMessageContentTypeSchema: z.ZodEnum<{
@@ -462,8 +452,6 @@ export declare function partitionAgentEvents(events: readonly AgentEventOrUnknow
 };
 // ==== @byok-sdk/protocol dist/agent-home-projection.d.ts ====
 import { z } from 'zod';
-/** Capability required before a task-free Agent-home projection is admitted. */
-export declare const AGENT_HOME_PROJECTION_CAPABILITY: 'agent-home-projection';
 /** Maximum UTF-8 encoded JSON bytes carried by one projection payload. */
 export declare const AGENT_HOME_PROJECTION_MAX_BYTES: number;
 /** PostgreSQL BIGINT maximum, kept as decimal text to avoid JavaScript precision loss. */
@@ -533,8 +521,6 @@ import { z } from 'zod';
  * `agentMemoryIntentOperationDigest(...)`, which a device recomputes with its
  * own enrolled tenant and device ids.
  */
-/** Device capability required before a Host may enqueue `agent.memory.intent.available`. */
-export declare const AGENT_MEMORY_INTENT_CAPABILITY: 'agent-memory-intent.v1';
 /** Maximum UTF-8 byte length of a released `replace` body (one memory file): 256 KiB. */
 export declare const AGENT_MEMORY_INTENT_CONTENT_MAX_BYTES = 262144;
 /** Maximum byte length of an intent `path` (ASCII, so bytes = characters). */
@@ -1219,8 +1205,6 @@ export declare function agentMemoryIntentFetchResponseSchemaFor(reservation: Age
 }, z.core.$strict>], "disposition">;
 // ==== @byok-sdk/protocol dist/agent-memory-projection.d.ts ====
 import { z } from 'zod';
-/** Capability required before the optional hosted Agent-memory projection can be used. */
-export declare const AGENT_MEMORY_PROJECTION_CAPABILITY: 'agent.memory.projection';
 /** One hosted projection is bounded before it enters the redaction or storage seam. */
 export declare const AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES: number;
 /** PostgreSQL `integer` ceiling shared by writer epochs and source sequences. */
@@ -1353,6 +1337,48 @@ export declare const BlobRefSchema: z.ZodObject<{
     url: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 export type BlobRef = z.infer<typeof BlobRefSchema>;
+// ==== @byok-sdk/protocol dist/capability-constants.d.ts ====
+/**
+ * The ONE version of the input-preparation contract, shared by this relay wire
+ * (the `agent.input.preparation` payload and the completion receipt summary)
+ * and by the device-local request, receipt and artifact
+ * (`@byok-sdk/client`'s `INPUT_PREPARATION_VERSION`, which is this value).
+ *
+ * The relay wire carries no version field of its own, so a version change is
+ * made visible where admission actually happens: in the capability token
+ * below. See `INPUT_PREPARATION_VERSION` in the client for what each version
+ * changed.
+ */
+export declare const INPUT_PREPARATION_WIRE_VERSION: 9;
+/** Additive daemon capability names. Server/cloud admission consumes these exactly. */
+export declare const AGENT_EGRESS_POLICY_CAPABILITY: 'agent-egress-policy';
+export declare const AGENT_EGRESS_RELIABLE_ACK_CAPABILITY: 'agent-egress-reliable-ack';
+/** Admits the distinct offer whose runtime mints its session only after start. */
+export declare const AGENT_EGRESS_FRESH_SESSION_CAPABILITY: 'agent-egress-fresh-session';
+/** Admits the distinct Agent-authored message lane; activity policy remains independent. */
+export declare const AGENT_MESSAGE_EGRESS_CAPABILITY: 'agent-message-egress';
+export declare const AGENT_CONTENT_WORKSPACE_READ_CAPABILITY: 'agent-content-workspace-read';
+export declare const AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY: 'agent-content-transcript-read';
+export declare const AGENT_CONTENT_ARTIFACT_READ_CAPABILITY: 'agent-content-artifact-read';
+/** Capability required before a task-free Agent-home projection is admitted. */
+export declare const AGENT_HOME_PROJECTION_CAPABILITY: 'agent-home-projection';
+/** Capability required before an offer may select terminal projection behavior. */
+export declare const TERMINAL_PROJECTION_SELECTION_CAPABILITY: 'terminal-projection-selection';
+/** Contract §8.1's capability gate for `byok-task-assertion-v1` tool authority. */
+export declare const HOST_MCP_TASK_CONTEXT_CAPABILITY: 'host-mcp-task-context';
+/** Daemon capability required before an exact local provider profile may be offered. */
+export declare const PROVIDER_PROFILE_BINDING_CAPABILITY: 'provider-profile-binding';
+/** Device capability required before a Host may enqueue `provider.provisioning.available`. */
+export declare const PROVIDER_PROVISIONING_CAPABILITY: 'provider-provisioning.v1';
+/** Device capability required before a Host may enqueue `agent.memory.intent.available`. */
+export declare const AGENT_MEMORY_INTENT_CAPABILITY: 'agent-memory-intent.v1';
+/** Capability required before the optional hosted Agent-memory projection can be used. */
+export declare const AGENT_MEMORY_PROJECTION_CAPABILITY: 'agent.memory.projection';
+/** Exact capability of the single input-preparation wire authority. */
+export declare const AGENT_INPUT_PREPARATION_CAPABILITY: "agent-input-preparation-v9";
+/** Single value authority shared by schema validation and schema-free consumers. */
+export declare const PREPARED_AGENT_MEMORY_MODES: readonly ['none', 'read', 'read-write'];
+export declare function isPreparedAgentMemoryMode(value: unknown): value is (typeof PREPARED_AGENT_MEMORY_MODES)[number];
 // ==== @byok-sdk/protocol dist/codec.d.ts ====
 import type { z } from 'zod';
 import { type Envelope } from './envelope';
@@ -1530,6 +1556,11 @@ export declare function createEnvelope<T extends MessageType>(type: T, payload: 
     type: T;
 }>;
 export {};
+// ==== @byok-sdk/protocol dist/constants.d.ts ====
+/** Schema-free protocol values. Import this entry when runtime schemas are unnecessary. */
+export * from './version';
+export * from './task-state';
+export * from './capability-constants';
 // ==== @byok-sdk/protocol dist/envelope.d.ts ====
 import { z } from 'zod';
 import { type MessageType } from './messages';
@@ -6352,6 +6383,7 @@ export declare function byokBlobUrlPath(blobId: string): string;
  */
 export declare function byokBlobContentPath(blobId: string): string;
 // ==== @byok-sdk/protocol dist/index.d.ts ====
+export * from './constants';
 export { MAILBOX_READ_AHEAD_MAX_SEQS, MAILBOX_READ_AHEAD_CAPABILITY } from './version';
 export { PROTOCOL_VERSION, CAPABILITY_FLAGS, STRICT_AGENT_ONLY_CAPABILITY, AGENT_HOME_READERS_CAPABILITY } from './version';
 export type { CapabilityFlag } from './version';
@@ -6359,24 +6391,23 @@ export { WIRE_ADDITIONS, requiredReceiverCapabilities } from './wire-additions';
 export type { WireAddition } from './wire-additions';
 export { BlobRefSchema, CONTENT_HASH_RE } from './blob';
 export type { BlobRef } from './blob';
-export { PROVIDER_PROFILE_BINDING_CAPABILITY, PROVIDER_MODEL_CAPABILITIES, ProviderProfileRefSchema, ProviderProfileRevisionSchema, ProviderProfileHashSchema, ProviderModelCapabilitySchema, ProviderProfileBindingSchema, } from './provider-profile-binding';
+export { PROVIDER_MODEL_CAPABILITIES, ProviderProfileRefSchema, ProviderProfileRevisionSchema, ProviderProfileHashSchema, ProviderModelCapabilitySchema, ProviderProfileBindingSchema, } from './provider-profile-binding';
 export type { ProviderProfileRef, ProviderProfileRevision, ProviderProfileHash, ProviderModelCapability, ProviderProfileBinding, } from './provider-profile-binding';
-export { PROVIDER_PROVISIONING_CAPABILITY, PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION, PROVIDER_PROVISIONING_OPERATIONS, PROVIDER_PROVISIONING_OPERATION_GENERATION_MAXIMUM, PROVIDER_PROVISIONING_REJECTION_CODES, PROVIDER_PROVISIONING_HOST_TERMINAL_CODES, PROVIDER_PROVISIONING_DISPOSITIONS, PROVIDER_PROVISIONING_KEY_CHECK_RESULTS, ProviderProvisioningAvailablePayloadSchema, ProviderProvisioningKeyCheckResultSchema, ProviderProvisioningKeyCheckSchema, ProviderProvisioningOperationSchema, ProviderProvisioningOperationGenerationSchema, ProviderProvisioningOperationDigestSchema, ProviderProvisioningRejectionCodeSchema, ProviderProvisioningProviderStatusSchema, ProviderProvisioningCompletionSchema, ProviderProvisioningDispositionSchema, ProviderProvisioningReadbackSchema, } from './provider-provisioning';
+export { PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION, PROVIDER_PROVISIONING_OPERATIONS, PROVIDER_PROVISIONING_OPERATION_GENERATION_MAXIMUM, PROVIDER_PROVISIONING_REJECTION_CODES, PROVIDER_PROVISIONING_HOST_TERMINAL_CODES, PROVIDER_PROVISIONING_DISPOSITIONS, PROVIDER_PROVISIONING_KEY_CHECK_RESULTS, ProviderProvisioningAvailablePayloadSchema, ProviderProvisioningKeyCheckResultSchema, ProviderProvisioningKeyCheckSchema, ProviderProvisioningOperationSchema, ProviderProvisioningOperationGenerationSchema, ProviderProvisioningOperationDigestSchema, ProviderProvisioningRejectionCodeSchema, ProviderProvisioningProviderStatusSchema, ProviderProvisioningCompletionSchema, ProviderProvisioningDispositionSchema, ProviderProvisioningReadbackSchema, } from './provider-provisioning';
 export type { ProviderProvisioningAvailablePayload, ProviderProvisioningOperation, ProviderProvisioningOperationGeneration, ProviderProvisioningOperationDigest, ProviderProvisioningRejectionCode, ProviderProvisioningProviderStatus, ProviderProvisioningCompletion, ProviderProvisioningDisposition, ProviderProvisioningReadback, ProviderProvisioningKeyCheckResult, ProviderProvisioningKeyCheck, } from './provider-provisioning';
-export { AGENT_MEMORY_INTENT_CAPABILITY, AGENT_MEMORY_INTENT_CONTENT_MAX_BYTES, AGENT_MEMORY_INTENT_PATH_MAX_BYTES, AGENT_MEMORY_INTENT_APPROVAL_REF_MAX_BYTES, AGENT_MEMORY_INTENT_OPERATIONS, AGENT_MEMORY_INTENT_HOST_TERMINAL_CODES, AGENT_MEMORY_INTENT_REJECTION_CODES, AGENT_MEMORY_INTENT_READBACK_DISPOSITIONS, AGENT_MEMORY_INTENT_RESERVATIONS, AGENT_MEMORY_INTENT_FETCH_DISPOSITIONS, AGENT_MEMORY_INTENT_FETCH_DISPOSITIONS_BY_RESERVATION, AgentMemoryIntentRevisionSchema, AgentMemoryIntentOperationDigestSchema, AgentMemoryIntentPathSchema, AgentMemoryIntentApprovalRefSchema, AgentMemoryIntentContentSchema, AgentMemoryIntentOperationSchema, AgentMemoryIntentV1Schema, AgentMemoryIntentHostTerminalCodeSchema, AgentMemoryIntentRejectionCodeSchema, AgentMemoryIntentFileObservationSchema, AgentMemoryIntentCompletionSchema, AgentMemoryIntentReadbackDispositionSchema, AgentMemoryIntentReadbackSchema, AgentMemoryIntentReservationSchema, AgentMemoryIntentFetchRequestSchema, AgentMemoryIntentFetchResponseSchema, agentMemoryIntentFetchResponseSchemaFor, } from './agent-memory-intent';
+export { AGENT_MEMORY_INTENT_CONTENT_MAX_BYTES, AGENT_MEMORY_INTENT_PATH_MAX_BYTES, AGENT_MEMORY_INTENT_APPROVAL_REF_MAX_BYTES, AGENT_MEMORY_INTENT_OPERATIONS, AGENT_MEMORY_INTENT_HOST_TERMINAL_CODES, AGENT_MEMORY_INTENT_REJECTION_CODES, AGENT_MEMORY_INTENT_READBACK_DISPOSITIONS, AGENT_MEMORY_INTENT_RESERVATIONS, AGENT_MEMORY_INTENT_FETCH_DISPOSITIONS, AGENT_MEMORY_INTENT_FETCH_DISPOSITIONS_BY_RESERVATION, AgentMemoryIntentRevisionSchema, AgentMemoryIntentOperationDigestSchema, AgentMemoryIntentPathSchema, AgentMemoryIntentApprovalRefSchema, AgentMemoryIntentContentSchema, AgentMemoryIntentOperationSchema, AgentMemoryIntentV1Schema, AgentMemoryIntentHostTerminalCodeSchema, AgentMemoryIntentRejectionCodeSchema, AgentMemoryIntentFileObservationSchema, AgentMemoryIntentCompletionSchema, AgentMemoryIntentReadbackDispositionSchema, AgentMemoryIntentReadbackSchema, AgentMemoryIntentReservationSchema, AgentMemoryIntentFetchRequestSchema, AgentMemoryIntentFetchResponseSchema, agentMemoryIntentFetchResponseSchemaFor, } from './agent-memory-intent';
 export type { AgentMemoryIntentRevision, AgentMemoryIntentOperationDigest, AgentMemoryIntentPath, AgentMemoryIntentApprovalRef, AgentMemoryIntentContent, AgentMemoryIntentOperation, AgentMemoryIntentV1, AgentMemoryIntentHostTerminalCode, AgentMemoryIntentRejectionCode, AgentMemoryIntentFileObservation, AgentMemoryIntentCompletion, AgentMemoryIntentReadbackDisposition, AgentMemoryIntentReadback, AgentMemoryIntentReservation, AgentMemoryIntentFetchRequest, AgentMemoryIntentFetchDisposition, AgentMemoryIntentFetchResponse, } from './agent-memory-intent';
 export { AgentEventSchema, AgentEventSpillSchema, AGENT_EVENT_SPILL_UNSTORED_REASON_MAX_LENGTH, UnknownAgentEventSchema, AgentEventOrUnknownSchema, KNOWN_AGENT_EVENT_TYPES, isKnownAgentEvent, partitionAgentEvents, } from './agent-event';
 export type { AgentEvent, AgentEventSpill, UnknownAgentEvent, AgentEventOrUnknown } from './agent-event';
-export { AgentEgressPolicySchema, AgentEgressActivityPolicySchema, AgentReliableQuotaPolicySchema, ContentReadPolicySchema, AgentEgressLaneSchema, AgentEgressDropReasonSchema, AgentContentReadSurfaceSchema, AgentContentActorKindSchema, AgentContentActorSchema, AgentContentDecodeAsSchema, AgentContentMimeTypeSchema, AgentContentReadDecisionSchema, AgentContentReadDenialReasonSchema, AgentEgressContentHashSchema, AgentEgressPolicyRevisionSchema, AgentMessageContractSchema, AgentMessageContentTypeSchema, AgentMessageDestinationBindingSchema, AgentMessageFreshnessCursorSchema, AgentMessageServerContextSchema, AgentMessageEgressRequirementSchema, AGENT_MESSAGE_MAX_BYTES, AGENT_MESSAGE_EGRESS_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_CONTENT_WORKSPACE_READ_CAPABILITY, AGENT_CONTENT_TRANSCRIPT_READ_CAPABILITY, AGENT_CONTENT_ARTIFACT_READ_CAPABILITY, } from './agent-egress';
+export { AgentEgressPolicySchema, AgentEgressActivityPolicySchema, AgentReliableQuotaPolicySchema, ContentReadPolicySchema, AgentEgressLaneSchema, AgentEgressDropReasonSchema, AgentContentReadSurfaceSchema, AgentContentActorKindSchema, AgentContentActorSchema, AgentContentDecodeAsSchema, AgentContentMimeTypeSchema, AgentContentReadDecisionSchema, AgentContentReadDenialReasonSchema, AgentEgressContentHashSchema, AgentEgressPolicyRevisionSchema, AgentMessageContractSchema, AgentMessageContentTypeSchema, AgentMessageDestinationBindingSchema, AgentMessageFreshnessCursorSchema, AgentMessageServerContextSchema, AgentMessageEgressRequirementSchema, AGENT_MESSAGE_MAX_BYTES, } from './agent-egress';
 export type { AgentEgressPolicy, AgentEgressActivityPolicy, AgentReliableQuotaPolicy, ContentReadPolicy, AgentEgressLane, AgentEgressDropReason, AgentMessageContentType, AgentMessageEgressRequirement, AgentMessageServerContext, AgentContentReadSurface, AgentContentActorKind, AgentContentActor, AgentContentDecodeAs, AgentContentReadDecision, AgentContentReadDenialReason, } from './agent-egress';
-export { AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_MAX_BYTES, AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM, AgentHomeProjectionProfileRevisionSchema, AgentHomeProjectionHashSchema, AgentHomeProjectionOutcomeSchema, AgentHomeProjectionValueSchema, } from './agent-home-projection';
+export { AGENT_HOME_PROJECTION_MAX_BYTES, AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM, AgentHomeProjectionProfileRevisionSchema, AgentHomeProjectionHashSchema, AgentHomeProjectionOutcomeSchema, AgentHomeProjectionValueSchema, } from './agent-home-projection';
 export type { AgentHomeProjectionProfileRevision, AgentHomeProjectionHash, AgentHomeProjectionOutcome, AgentHomeProjectionValue, } from './agent-home-projection';
-export { AGENT_INPUT_PREPARATION_CAPABILITY, INPUT_PREPARATION_WIRE_VERSION, InputPreparationContentHashSchema, InputPreparationPolicyRevisionSchema, InputPreparationProfileIdSchema, InputPreparationSourceSchema, InputPreparationModelCostSchema, InputPreparationModelSchema, InputPreparationOptionsSchema, InputPreparationSelectionSchema, InputPreparationPromptSnapshotSchema, InputPreparationUserMessageSchema, InputPreparationHostCanonicalAssistantMessageSchema, InputPreparationMessageSchema, InputPreparationContextDocumentSchema, InputPreparationStateSchema, InputPreparationReadinessReasonSchema, InputPreparationRuntimeIdentitySchema, InputPreparationCounterTargetSchema, InputPreparationAccountingPolicyRefSchema, InputPreparationCounterProviderEvidenceSchema, InputPreparationCounterEvidenceSchema, InputPreparationResidualValueClassSchema, InputPreparationResidualKeySchema, InputPreparationProjectionSchema, InputPreparationArtifactSummarySchema, InputPreparationBindingSchema, InputPreparationReceiptSummarySchema, InputPreparationReferenceSchema, InputPreparationOfferBindingSchema, InputPreparationRejectionReasonSchema, } from './input-preparation';
+export { InputPreparationContentHashSchema, InputPreparationPolicyRevisionSchema, InputPreparationProfileIdSchema, InputPreparationSourceSchema, InputPreparationModelCostSchema, InputPreparationModelSchema, InputPreparationOptionsSchema, InputPreparationSelectionSchema, InputPreparationPromptSnapshotSchema, InputPreparationUserMessageSchema, InputPreparationHostCanonicalAssistantMessageSchema, InputPreparationMessageSchema, InputPreparationContextDocumentSchema, InputPreparationStateSchema, InputPreparationReadinessReasonSchema, InputPreparationRuntimeIdentitySchema, InputPreparationCounterTargetSchema, InputPreparationAccountingPolicyRefSchema, InputPreparationCounterProviderEvidenceSchema, InputPreparationCounterEvidenceSchema, InputPreparationResidualValueClassSchema, InputPreparationResidualKeySchema, InputPreparationProjectionSchema, InputPreparationArtifactSummarySchema, InputPreparationBindingSchema, InputPreparationReceiptSummarySchema, InputPreparationReferenceSchema, InputPreparationOfferBindingSchema, InputPreparationRejectionReasonSchema, } from './input-preparation';
 export type { InputPreparationSource, InputPreparationModel, InputPreparationOptions, InputPreparationSelection, InputPreparationMessage, InputPreparationContextDocument, InputPreparationState, InputPreparationReadinessReason, InputPreparationAccountingPolicyRef, InputPreparationResidualValueClass, InputPreparationRuntimeIdentity, InputPreparationReceiptSummary, InputPreparationOfferBinding, InputPreparationRejectionReason, } from './input-preparation';
-export { AGENT_MEMORY_PROJECTION_CAPABILITY, AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES, AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE, AgentMemoryProjectionGrantRefSchema, AgentMemoryProjectionSessionRefSchema, AgentMemoryProjectionWriterEpochSchema, AgentMemoryProjectionSourceSeqSchema, AgentMemoryProjectionSnapshotSchema, AgentMemoryProjectionMeteringReceiptSchema, AgentMemoryProjectionMutationSchema, AgentMemoryProjectionReceiptSchema, AgentMemoryProjectionEraseResultSchema, agentMemoryProjectionBase64UrlByteLength, } from './agent-memory-projection';
+export { AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES, AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE, AgentMemoryProjectionGrantRefSchema, AgentMemoryProjectionSessionRefSchema, AgentMemoryProjectionWriterEpochSchema, AgentMemoryProjectionSourceSeqSchema, AgentMemoryProjectionSnapshotSchema, AgentMemoryProjectionMeteringReceiptSchema, AgentMemoryProjectionMutationSchema, AgentMemoryProjectionReceiptSchema, AgentMemoryProjectionEraseResultSchema, agentMemoryProjectionBase64UrlByteLength, } from './agent-memory-projection';
 export type { AgentMemoryProjectionGrantRef, AgentMemoryProjectionSessionRef, AgentMemoryProjectionWriterEpoch, AgentMemoryProjectionSourceSeq, AgentMemoryProjectionSnapshot, AgentMemoryProjectionMeteringReceipt, AgentMemoryProjectionMutation, AgentMemoryProjectionReceipt, AgentMemoryProjectionEraseResult, } from './agent-memory-projection';
-export { HOST_MCP_TASK_CONTEXT_CAPABILITY } from './task-assertion';
-export { TERMINAL_PROJECTION_SELECTION_CAPABILITY, TerminalProjectionContractSchema, TerminalProjectionSelectionSchema, } from './terminal-projection';
+export { TerminalProjectionContractSchema, TerminalProjectionSelectionSchema, } from './terminal-projection';
 export type { TerminalProjectionSelection } from './terminal-projection';
 export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state';
 export type { TaskState } from './task-state';
@@ -6393,45 +6424,8 @@ export type { TaskOfferType } from './messages';
 export type { HarnessId, HarnessInfo } from './messages';
 export { CUSTOM_HARNESS_CAPABILITY } from './version';
 export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation';
-// ==== @byok-sdk/protocol dist/input-preparation-version.d.ts ====
-/**
- * The ONE version of the input-preparation contract, shared by this relay wire
- * (the `agent.input.preparation` payload and the completion receipt summary)
- * and by the device-local request, receipt and artifact
- * (`@byok-sdk/client`'s `INPUT_PREPARATION_VERSION`, which is this value).
- *
- * The relay wire carries no version field of its own, so a version change is
- * made visible where admission actually happens: in the capability token
- * below. See `INPUT_PREPARATION_VERSION` in the client for what each version
- * changed.
- */
-export declare const INPUT_PREPARATION_WIRE_VERSION: 9;
 // ==== @byok-sdk/protocol dist/input-preparation.d.ts ====
 import { z } from 'zod';
-export { INPUT_PREPARATION_WIRE_VERSION } from './input-preparation-version';
-/**
- * Capability required before a task-free remote input preparation — or a
- * prepared Execution — is admitted: `agent-input-preparation-v<N>`, where
- * `<N>` is {@link INPUT_PREPARATION_WIRE_VERSION}.
- *
- * The version is IN the token because the relay wire has none. A device
- * declares exactly the one token of the contract it speaks, and a cloud admits
- * exactly the one token of the contract it speaks, so a device and a cloud on
- * different contract versions never exchange a preparation at all: the cloud
- * refuses at enqueue (`agent_capability_missing`, before any receipt or
- * mailbox row) instead of relaying a payload the other side would refuse with
- * a strict-schema 422 and a device would then redeliver forever. There is no
- * dual token and no accepted older one. The retired unversioned token
- * `agent-input-preparation` (versions up to 4) is admitted nowhere.
- *
- * The token gates NEW admissions only. A row enqueued before a version cut is
- * still in flight afterwards, and its completion is accepted only by a cloud
- * on the same version as the device answering it; across the cut it is a 422
- * and a stalled device cursor. Draining in-flight rows and upgrading cloud and
- * devices as a pair is the operator precondition for the cut (`docs/spec.md`,
- * bounded admission); nothing here parses an older receipt.
- */
-export declare const AGENT_INPUT_PREPARATION_CAPABILITY: "agent-input-preparation-v9";
 /** The preparation surface uses the package-wide lowercase `sha256:<hex>` transport form. */
 export declare const InputPreparationContentHashSchema: z.ZodString;
 /**
@@ -10614,8 +10608,6 @@ export declare const DAEMON_TO_SERVER_TYPES: readonly ["task.claim", "task.start
 export {};
 // ==== @byok-sdk/protocol dist/provider-profile-binding.d.ts ====
 import { z } from 'zod';
-/** Daemon capability required before an exact local provider profile may be offered. */
-export declare const PROVIDER_PROFILE_BINDING_CAPABILITY: 'provider-profile-binding';
 /** Opaque, portable local profile identity. It is one logical id, never a path. */
 export declare const ProviderProfileRefSchema: z.ZodString;
 export type ProviderProfileRef = z.infer<typeof ProviderProfileRefSchema>;
@@ -10667,8 +10659,6 @@ import { z } from 'zod';
  * Audiences, route paths and product names are Host vocabulary and stay out of
  * this package.
  */
-/** Device capability required before a Host may enqueue `provider.provisioning.available`. */
-export declare const PROVIDER_PROVISIONING_CAPABILITY: 'provider-provisioning.v1';
 /**
  * Device-proof `operation` for the signed claim that registers the device's
  * provider-secret sealing public key (`{ keyId, epoch, publicJwk }`).
@@ -11014,37 +11004,6 @@ export declare const ProviderProvisioningReadbackSchema: z.ZodObject<{
     completedAt: z.ZodISODateTime;
 }, z.core.$strict>;
 export type ProviderProvisioningReadback = z.infer<typeof ProviderProvisioningReadbackSchema>;
-// ==== @byok-sdk/protocol dist/task-assertion.d.ts ====
-/**
- * The device-level half of the task lane's capability gate (contract §8.1).
- *
- * Contract §8.1 fixes ONE name, `host-mcp-task-context`, carried on two
- * independent channels that must both be in place before a host may route a
- * tool invocation through the task lane:
- *
- * 1. **Deployment level** — the ADR-010 `CapabilityDeclarationSchema` a
- *    deployment serves (`@byok-sdk/cloud`'s `CLOUD_CAPABILITIES`). §8.2(1)
- *    governs it: a deployment declares the capability only once it is
- *    completely implemented.
- * 2. **Device level** — this constant: a `conn.hello` capability string a host
- *    consumes through `declaresCapabilities`. §8.3 governs it: a device whose
- *    build cannot serve the lane simply does not advertise it, and the host
- *    answers `unavailable` rather than reaching for the device assertion the
- *    task lane does not accept.
- *
- * It lives in `@byok-sdk/protocol` for the same reason every other daemon
- * capability flag does: this package is the wire vocabulary both sides compile
- * against, and a name spelled twice is a name that can drift. It is registered
- * in `CAPABILITY_FLAGS` (`./version`), which is what makes it a value a daemon
- * can actually send.
- *
- * The spelling satisfies `@byok-sdk/core`'s `CAPABILITY_NAME_PATTERN`
- * (`/^[a-z0-9]+(?:[._-][a-z0-9]+)*$/`) on purpose: the deployment-level channel
- * carries this exact literal, so a name legal in only one of the two channels
- * would leave them naming different things.
- */
-/** Contract §8.1's capability gate for `byok-task-assertion-v1` tool authority. */
-export declare const HOST_MCP_TASK_CONTEXT_CAPABILITY: 'host-mcp-task-context';
 // ==== @byok-sdk/protocol dist/task-state.d.ts ====
 export declare const TASK_STATES: readonly ['Offered', 'Claimed', 'Running', 'AwaitApproval', 'Complete', 'Failed', 'Cancelled'];
 export type TaskState = (typeof TASK_STATES)[number];
@@ -11069,8 +11028,6 @@ export declare const TASK_TRANSITIONS: Readonly<Record<TaskState, readonly TaskS
 export declare function canTransition(from: TaskState, to: TaskState): boolean;
 // ==== @byok-sdk/protocol dist/terminal-projection.d.ts ====
 import { z } from 'zod';
-/** Capability required before an offer may select terminal projection behavior. */
-export declare const TERMINAL_PROJECTION_SELECTION_CAPABILITY: 'terminal-projection-selection';
 export declare const TerminalProjectionContractSchema: z.ZodString;
 /** Offer-scoped authority: explicit bypass or one required structured result. */
 export declare const TerminalProjectionSelectionSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{

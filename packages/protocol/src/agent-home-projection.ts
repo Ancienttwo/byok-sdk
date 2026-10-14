@@ -1,9 +1,6 @@
 import { z } from 'zod';
 import { AgentEgressContentHashSchema } from './agent-egress';
 
-/** Capability required before a task-free Agent-home projection is admitted. */
-export const AGENT_HOME_PROJECTION_CAPABILITY = 'agent-home-projection' as const;
-
 /** Maximum UTF-8 encoded JSON bytes carried by one projection payload. */
 export const AGENT_HOME_PROJECTION_MAX_BYTES = 64 * 1024;
 
