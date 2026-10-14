@@ -1,7 +1,7 @@
 # #194 + #195 计划：C07 首批请求预算与启用门槛、ContextPack → Summary → fresh 回复的集成验收
 
 > 状态：计划草案，只含设计，不含实现代码。不授权读取或修改 aiphabee，不授权生产迁移、部署、发布或付费模型调用。
-> 依据：byok-sdk `main@bfa7de5c`；issue [#194]、[#195] 及 owner 2026-10-08 的评论；[docs/spec.md](../spec.md)「Prepared operations」「Bounded admission (2026-09-23)」「Explicit internal result projection under Agent egress」「Recurring Host composition requirements」「0.22.0 Host calibration and upgrade boundary」；[Conversation-turn Fresh MVP PRD](../researches/2026-09-09_conversation-turn-fresh-mvp-prd.md) §9；[Bot 平台 PRD](../researches/2026-10-13_bot-platform-prd.md) §8.1（K5）、§8.3（K7）；[ADR-038](../architecture/adr-2026-10-13-bot-platform.md) 决策 10、12。
+> 依据：byok-sdk `main@6c3b31df975425ac1319e6aa91194b727040767a`（已含 #452 embedded device wake queue，SQLite schema 5）；issue [#194]、[#195] 及 owner 2026-10-08 的评论；[docs/spec.md](../spec.md)「Prepared operations」「Bounded admission (2026-09-23)」「Explicit internal result projection under Agent egress」「Recurring Host composition requirements」「0.22.0 Host calibration and upgrade boundary」；[Conversation-turn Fresh MVP PRD](../researches/2026-09-09_conversation-turn-fresh-mvp-prd.md) §9；[Bot 平台 PRD](../researches/2026-10-13_bot-platform-prd.md) §8.1（K5）、§8.3（K7）；[ADR-038](../architecture/adr-2026-10-13-bot-platform.md) 决策 10、12。
 > 为什么合成一份：#195 的真实启用依赖 #194 的预算证据，两者的剩余缺口都落在 Summary 这一个执行上，验收也共用同一条链路。
 
 ## 0. 结论
@@ -23,6 +23,8 @@
 | Summary 的执行原语 | SDK：strict fresh、result-document、prepared lane 上零工具 | 同上；`bb999e7b`（tool-less prepared record） |
 
 不在范围内：新的 Conversation store、第二个 scheduler、另一套 serializer、新的 wire 字段（#194、#195 都明确排除）。
+
+"第二个 scheduler"指不另建 Conversation 自有的调度器。如果 Summary 需要定时触发，必须复用 #452 的 `server.wakes`（`server.wakes.schedule` / `cancel` / `pending`，加上 `wake: { consume }` hook）。周期规则和 occurrence 去重仍归 Host。
 
 ## 2. P2：一条真实路径（prepared lane 上的 Summary）
 
@@ -67,7 +69,7 @@
 ### S1：#194 追溯表（现在可做，不改代码）
 
 - 产出：`docs/notes/` 下一份追溯表。每个拒绝码一行：触发条件、所在源文件、覆盖它的测试文件和用例名、属于 #194 的哪一条验收。
-- 起点（`main@bfa7de5c`）：拒绝码在 `packages/client/src/daemon/input-preparation-service.ts`、`packages/client/src/daemon/prepared-offer-admission.ts`、`packages/client/src/adapters/pi/input-preparation.ts`；每个码至少有一个测试文件引用。
+- 起点（`main@6c3b31df`）：拒绝码在 `packages/client/src/daemon/input-preparation-service.ts`、`packages/client/src/daemon/prepared-offer-admission.ts`、`packages/client/src/adapters/pi/input-preparation.ts`；每个码至少有一个测试文件引用。
 - 判定规则：只引用断言了该码的测试，不把"文件里出现了这个字符串"算作覆盖。缺测试的码列为缺口，另开 issue，不在本计划里补。
 - 验证：表里每个测试用 `bun run --cwd packages/client test -- <file>` 跑一遍并记录结果。
 
@@ -75,6 +77,7 @@
 
 - 位置：扩展现有的 Host 集成入口 `scripts/integration/`（`salesko-recurring.test.ts` 和 `fixtures/salesko-recurring-daemon.ts`），不新建生产 store。
 - 形状：一个最小的合成 Host，用 embedded server（SQLite）+ 真实 daemon + 假 provider。至少四轮用户输入，中间触发一次 Summary 更新。每轮保存实际冻结的 D 字节和 receipt。
+- SQLite schema：#452 之后是 schema 5。迁移 selector 只有 `v1-to-v5`、`v2-to-v5`、`v3-to-v5`、`v4-to-v5`，target-v4 的 selector 已删除。数据库里有排队中的 wake 而没配 `wake.consume` hook 时，初始化即被拒绝。新 fixture 优先用全新的 schema-5 数据库；复用旧 fixture 时走 `v*-to-v5` adoption，并且不能留下没有 hook 消费的排队 wake。
 - 必须断言：
   - Summary 执行用 strict fresh、result-document、没有 `messageEgress`；K7 之后只有 `submit_result` 一个工具。
   - 用户执行的 ContextPack = 新 Summary + 覆盖边界之后的连续历史 + 当前输入，覆盖前缀无洞。
@@ -118,6 +121,7 @@ Host：#250、#252（并行）       ──┘
 - C 是经验标定值，不是普遍的 token 上界（spec「0.22.0 Host calibration」）。#194 原文要求"不填经验比例或未经证明的 margin"，和 bounded admission 的取舍有张力；owner 已按 bounded admission 裁定，本计划不重开这个选择。
 - 当前 pin（Pi 1.2.0）的 runtime 身份与标定时（0.87.1）不同。在 S3 完成之前，任何生产启用都缺少对应身份的 C。
 - K7 的时间不确定。如果 K7 推迟很久，S2 可以先按零工具记录写，K7 PR 负责迁移，代价是 fixture 写两遍。
+- #452 的 wake 投递是 at-least-once：超过 deadline 或被拒后会重试，超时且不配合 abort 的 hook 可能和同一个 wake 的下一次投递重叠。如果 Summary 由 wake 触发，Host SummaryJob 的去重必须覆盖 wake 重投和并发 consume，和已列的 exact replay、重复 terminal 同一标准（#195 第 5 条）。S2 若加 wake 触发，故障注入要包含这一项。
 - Host #252 的 arm64/x64 acceptance checks 仍在失败（owner 2026-10-08 评论），Host 证据是关闭的关键路径。
 
 ## 9. 验证
