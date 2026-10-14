@@ -12,7 +12,7 @@ export const REQUEST_RECEIPT_PREFIXES: readonly string[] = Object.freeze(
   RECEIPT_RETENTION.filter(entry => entry.class === 'request').map(entry => entry.prefix),
 );
 const identities = RECEIPT_RETENTION.filter(entry => entry.class === 'identity');
-if (new Set(RECEIPT_RETENTION.map(entry => entry.prefix)).size !== RECEIPT_RETENTION.length
+if (RECEIPT_RETENTION.some((entry, index) => RECEIPT_RETENTION.findIndex(other => other.prefix === entry.prefix) !== index)
   || REQUEST_RECEIPT_PREFIXES.some(prefix => !prefix.endsWith(':')
     || identities.some(identity => identity.prefix.startsWith(prefix) || prefix.startsWith(identity.prefix)))) {
   throw new ByokCloudError('maintenance_invalid_input', 'Receipt retention families must be distinct and request prefixes cannot overlap identity fences.');

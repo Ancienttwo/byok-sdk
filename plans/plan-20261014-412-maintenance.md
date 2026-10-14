@@ -44,7 +44,9 @@ There is one writer in this worktree; the old worker's WIP is untouched.
 - [x] Migrate only its two core factory arguments and pass the recurring smoke against built packages and real Postgres/S3.
 - [x] Publish constructor migration; owner updates branch onto main c6af648d (4b9e3f81).
 - [x] Implement the newly authorized fixture collector methods and pass client build/typecheck.
-- [ ] Publish fixture migration and record hosted installed-artifact CI status.
+- [x] Publish fixture migration; both hosted real-Postgres jobs, including installed release smoke, pass.
+- [x] Preserve duplicate-prefix validation without a temporary Set; cloud build/typecheck/API and 28 targeted tests pass.
+- [ ] Publish stateless validation fix and record hosted CI results.
 
 ## Verification boundary
 

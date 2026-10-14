@@ -126,3 +126,17 @@ receipt SIGKILL case fails before its recovery scenario: the OS credential
 provider cannot replace device credentials during first pairing. This local
 prerequisite failure is reported, without altering credentials, auth, test
 assertions, deadlines or skips. Hosted CI remains the integration gate.
+
+
+## Stateless receipt validation
+
+CI on the fixture-migration head passed the required typechecks and both real-
+Postgres jobs, including their installed release smoke. Baseline/Node 26 then
+exposed the cloud statelessness guard: the new receipt registry's duplicate-
+prefix validator constructed a temporary Set outside a store class. Replace
+that one expression with an array first-index comparison. Both reject exactly
+the same duplicate prefixes; identity-overlap validation is unchanged. The
+registry has eleven immutable entries and validation runs once on import.
+No guard allowlist or test assertion changes are needed. Cloud build,
+typecheck, API surface and 28 targeted constraint/classification/request-family
+tests pass after the change.
