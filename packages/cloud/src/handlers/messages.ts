@@ -18,8 +18,15 @@
  * effect — there are no rollback semantics here — which is safe because every
  * `task.*` type is idempotent (§9): a client that retries the same batch gets
  * `duplicate` for whatever already landed.
+ *
+ * Server replies (acks, dispositions) are appended to the device's mailbox.
+ * A full mailbox refuses them with `storage_quota_exceeded`, which answers the
+ * wire-stable 507 (§8.2) instead of a 500: resending the same batch is safe,
+ * because its duplicates re-append the same idempotent replies once the
+ * mailbox has room.
  */
 import type { Context } from 'hono';
+import { STORAGE_ERROR_HTTP_STATUS, isCoreError } from '@byok-sdk/core';
 import {
   MessagesSendRequestSchema,
   type AgentContentReceiptPayload,
@@ -116,6 +123,27 @@ export interface MessagesRouteDeps extends DeviceRouteDeps {
 }
 
 export function messagesHandler(deps: MessagesRouteDeps) {
+  const send = batchHandler(deps);
+  return async (c: Context): Promise<Response> => {
+    try {
+      return await send(c);
+    } catch (cause) {
+      if (isCoreError(cause, 'storage_quota_exceeded')) {
+        return c.json({ error: cause.code }, STORAGE_ERROR_HTTP_STATUS.storage_quota_exceeded);
+      }
+      // A tenant the Host never issued an entitlement to: the client keeps
+      // the batch and retries with backoff until the Host issues one. The
+      // typed 409 the blob routes use makes the cause visible, instead of
+      // an opaque 500, so operators can tell it from a full mailbox (507).
+      if (isCoreError(cause, 'storage_entitlement_missing')) {
+        return c.json({ error: cause.code }, 409);
+      }
+      throw cause;
+    }
+  };
+}
+
+function batchHandler(deps: MessagesRouteDeps) {
   return async (c: Context): Promise<Response> => {
     const authenticated = await authenticateDevice(c, deps);
     if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
