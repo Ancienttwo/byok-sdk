@@ -72,14 +72,14 @@ async function claimedTask(harness: CloudHarness, device: PairedDevice): Promise
       stores,
       device.deviceId,
       createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId: offer.taskId }),
-    ),
+    ).then((result) => result.outcome),
   ).toBe('accepted');
   expect(
     await handleInboundEnvelope(
       stores,
       device.deviceId,
       createEnvelope('task.started', {}, { taskId: offer.taskId }),
-    ),
+    ).then((result) => result.outcome),
   ).toBe('accepted');
   return { taskId: offer.taskId, seq: offer.seq };
 }
@@ -101,7 +101,7 @@ async function awaitApproval(
         { summary, ...(approvalId === undefined ? {} : { approvalId }) },
         { taskId },
       ),
-    ),
+    ).then((result) => result.outcome),
   ).toBe('accepted');
 }
 
@@ -121,7 +121,7 @@ async function approvalResolved(
         { approvalId, decision: 'approve', resolvedBy: 'local', at: new Date().toISOString() },
         { taskId },
       ),
-    ),
+    ).then((result) => result.outcome),
   ).toBe('accepted');
 }
 
@@ -275,7 +275,7 @@ describe('the gates that refuse before any mailbox row exists', () => {
           { summary: 'did it anyway', sessionRef: 'resolved-locally' },
           { taskId: task.taskId },
         ),
-      ),
+      ).then((result) => result.outcome),
     ).toBe('accepted');
 
     const caught = await harness.cloud

@@ -1,5 +1,6 @@
 import { readRegistryExpectations, runtimeDependencyMetadata } from './registry-contract.mjs';
 import { cloudDoConsumerSmoke } from './cloud-do-consumer-smoke.mjs';
+import { runtimeSmokeImports } from '../api-surface/entry-closure.mjs';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -335,6 +336,8 @@ try {
   mkdirSync(outDir, { recursive: true });
   run(nodeBin, ['scripts/release/check-package-graph.mjs']);
   run(bunBin, ['run', 'build']);
+  run(nodeBin, ['scripts/api-surface/check-api-surface.mjs']);
+  const smokeImports = runtimeSmokeImports(repoRoot);
 
   const tarballs = [];
   let migrationFiles;
@@ -386,10 +389,9 @@ try {
         `import { tmpdir } from 'node:os';\n` +
         `import path from 'node:path';\n` +
         `const require = createRequire(import.meta.url);\n` +
-        `for (const name of ['@byok-sdk/core','@byok-sdk/protocol','@byok-sdk/protocol/input-preparation-version','@byok-sdk/client','@byok-sdk/client/adapters','@byok-sdk/client/agent-memory','@byok-sdk/client/assertion-client','@byok-sdk/client/mcp-server','@byok-sdk/server','@byok-sdk/cloud','@byok-sdk/cloud-dataplane','@byok-sdk/cloud-dataplane/runtime','@byok-sdk/ui-runtime','@byok-sdk/keys']) await import(name);\n` +
+        `for (const name of ${JSON.stringify(smokeImports.node)}) await import(name);\n` +
         `const { buildRuntimeEnv } = await import('@byok-sdk/client/adapters');\n` +
         `assert.deepEqual(buildRuntimeEnv({ ambient: { CLAUDECODE: '1', BYOK_TEST: 'secret', NODE_OPTIONS: '--trace-warnings' } }), { NODE_OPTIONS: '--trace-warnings' });\n` +
-        `assert.equal((await import('@byok-sdk/protocol/input-preparation-version')).INPUT_PREPARATION_WIRE_VERSION, (await import('@byok-sdk/protocol')).INPUT_PREPARATION_WIRE_VERSION);\n` +
         `const { AgentHomeBusyError, AgentHomeManager } = await import('@byok-sdk/client');\n` +
         `const parallelRoot = mkdtempSync(path.join(tmpdir(), 'byok-packed-agent-session-'));\n` +
         `try {\n` +
@@ -483,7 +485,7 @@ try {
         `console.log('[release-pack] isolated imports OK');\n`,
     );
     run(nodeBin, ['smoke.mjs'], smokeDir);
-    await cloudDoConsumerSmoke(smokeDir);
+    await cloudDoConsumerSmoke(smokeDir, smokeImports.worker);
     copyFileSync(path.join(repoRoot, 'scripts/release/recurring-smoke.mjs'), path.join(smokeDir, 'recurring-smoke.mjs'));
     run(nodeBin, ['recurring-smoke.mjs'], smokeDir);
     // Preserve the verifier's relative module graph in the isolated fixture.
@@ -503,16 +505,6 @@ try {
     console.log(run(nodeBin, ['scripts/release/pi-launcher-smoke.mjs'], smokeDir));
     assertSingleVersionSet(smokeDir, expectedPackageVersions);
     assertNpmCoreClosure(smokeDir);
-    // The worker runtime subpath must stay deployable outside Node: the smoke
-    // import above proves it loads, this proves it never grew node: builtins.
-    const runtimePath = path.join(smokeDir, 'node_modules', '@byok-sdk', 'cloud-dataplane', 'dist', 'runtime.js');
-    if (!existsSync(runtimePath)) {
-      throw new Error(`isolated install is missing @byok-sdk/cloud-dataplane/dist/runtime.js (${runtimePath})`);
-    }
-    const nodeBuiltinSpecifier = /(?:\bimport\b[^'"`\n]*|\brequire\b[^'"`\n]*)['"`]node:/;
-    if (nodeBuiltinSpecifier.test(readFileSync(runtimePath, 'utf8'))) {
-      throw new Error('@byok-sdk/cloud-dataplane/dist/runtime.js must not reference node: builtins (worker runtime)');
-    }
     const clientManifest = JSON.parse(readFileSync(path.join(smokeDir, 'node_modules', '@byok-sdk', 'client', 'package.json'), 'utf8'));
     if (clientManifest.dependencies['@juicesharp/rpiv-todo'] !== undefined) throw new Error('packed client retained a second npm todo authority');
     console.log('[release-pack] client dependencies=' + Object.keys(clientManifest.dependencies).length +

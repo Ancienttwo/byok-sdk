@@ -135,7 +135,7 @@ describe('hosted Agent egress contract', () => {
       method: 'POST', headers: { ...device.authorization, 'content-type': 'application/json' },
       body: JSON.stringify({ messages: [message] }),
     });
-    expect(await first.json()).toEqual({ accepted: 1 });
+    expect(await first.json()).toMatchObject({ accepted: 1 });
     expect(consumed).toHaveLength(1);
     expect(consumed[0]).toMatchObject({ context: { destinationBinding: 'conversation/42/turn/7', freshnessCursor: 'turn-seq:7' } });
     expect(offered.envelope.payload).not.toHaveProperty('agentMessageContext');
@@ -143,7 +143,7 @@ describe('hosted Agent egress contract', () => {
       method: 'POST', headers: { ...device.authorization, 'content-type': 'application/json' },
       body: JSON.stringify({ messages: [message] }),
     });
-    expect(await replay.json()).toEqual({ accepted: 1 });
+    expect(await replay.json()).toMatchObject({ accepted: 1 });
     expect(consumed).toHaveLength(1);
     const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 });
     const dispositions = page.messages.map((row) => decodeEnvelope(row.body)).filter((item) => item.type === 'agent.message.disposition');
@@ -160,7 +160,7 @@ describe('hosted Agent egress contract', () => {
       method: 'POST', headers: { ...device.authorization, 'content-type': 'application/json' },
       body: JSON.stringify({ messages: [second] }),
     });
-    expect(await refusedSecond.json()).toEqual({ accepted: 0, rejected: 1 });
+    expect(await refusedSecond.json()).toMatchObject({ accepted: 0, rejected: 1 });
     expect(consumed).toHaveLength(1);
   });
 
@@ -189,7 +189,7 @@ describe('hosted Agent egress contract', () => {
         method: 'POST', headers: { ...device.authorization, 'content-type': 'application/json' },
         body: JSON.stringify({ messages: [message] }),
       });
-      expect(await response.json()).toEqual({ accepted: 1 });
+      expect(await response.json()).toMatchObject({ accepted: 1 });
     }
     expect(consumed).toHaveLength(1);
     const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 });
@@ -283,7 +283,7 @@ describe('hosted Agent egress contract', () => {
       headers: { ...device.authorization, 'content-type': 'application/json' },
       body: JSON.stringify({ messages: [event] }),
     });
-    expect(await first.json()).toEqual({ accepted: 1 });
+    expect(await first.json()).toMatchObject({ accepted: 1 });
     const stored = await harness.cloud.readAgentEgress(
       TENANT_A,
       device.deviceId,
@@ -298,7 +298,7 @@ describe('hosted Agent egress contract', () => {
       headers: { ...device.authorization, 'content-type': 'application/json' },
       body: JSON.stringify({ messages: [event] }),
     });
-    expect(await replay.json()).toEqual({ accepted: 1 });
+    expect(await replay.json()).toMatchObject({ accepted: 1 });
 
     const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 });
     const acknowledgements = page.messages
@@ -339,9 +339,9 @@ describe('hosted Agent egress contract', () => {
     const second = reliableEnvelope(secondAgent, eventId, envelopeId);
     const stores = deviceStores(harness, device.deviceId);
 
-    await expect(handleInboundEnvelope(stores, device.deviceId, first)).resolves.toBe('accepted');
-    await expect(handleInboundEnvelope(stores, device.deviceId, second)).resolves.toBe('accepted');
-    await expect(handleInboundEnvelope(stores, device.deviceId, first)).resolves.toBe('duplicate');
+    await expect(handleInboundEnvelope(stores, device.deviceId, first).then((result) => result.outcome)).resolves.toBe('accepted');
+    await expect(handleInboundEnvelope(stores, device.deviceId, second).then((result) => result.outcome)).resolves.toBe('accepted');
+    await expect(handleInboundEnvelope(stores, device.deviceId, first).then((result) => result.outcome)).resolves.toBe('duplicate');
 
     const firstRecord = await stores.egress.get(device.deviceId, AGENT_REF, eventId);
     const secondRecord = await stores.egress.get(device.deviceId, secondAgent, eventId);
@@ -437,7 +437,7 @@ describe('hosted Agent egress contract', () => {
       headers: { ...device.authorization, 'content-type': 'application/json' },
       body: JSON.stringify({ messages: [receipt] }),
     });
-    expect(await response.json()).toEqual({ accepted: 1 });
+    expect(await response.json()).toMatchObject({ accepted: 1 });
     const durableReceipt = await deviceStores(harness, device.deviceId).receipts.get(
       agentReliabilityKey('agent-content-receipt', device.deviceId, AGENT_REF, receipt.payload.requestId),
     );
@@ -460,7 +460,7 @@ describe('hosted Agent egress contract', () => {
       headers: { ...device.authorization, 'content-type': 'application/json' },
       body: JSON.stringify({ messages: [createEnvelope('agent.content.receipt', receipt.payload)] }),
     });
-    expect(await duplicate.json()).toEqual({ accepted: 1 });
+    expect(await duplicate.json()).toMatchObject({ accepted: 1 });
     expect(
       (await harness.core.mailbox.readAfter(TENANT_A, { deviceId: device.deviceId, afterSeq: 0 })).messages
         .map((message) => decodeEnvelope(message.body))
@@ -476,7 +476,7 @@ describe('hosted Agent egress contract', () => {
       headers: { ...device.authorization, 'content-type': 'application/json' },
       body: JSON.stringify({ messages: [mismatch] }),
     });
-    expect(await rejected.json()).toEqual({ accepted: 0, rejected: 1 });
+    expect(await rejected.json()).toMatchObject({ accepted: 0, rejected: 1 });
   });
 
   it('isolates same-device content reads with one logical request id by exact AgentRef', async () => {

@@ -97,3 +97,5 @@ or the Node/Postgres listener from `@byok-sdk/cloud-dataplane`. The default
 fallback is `DEFAULT_MAILBOX_WAKE_FALLBACK_MS` (5 seconds). There is no interval
 option or alternate polling hold. Append and cancellation hints are emitted
 only after their store commits; direct writes to naked stores rely on fallback.
+
+Runtime dependencies and size budgets: [entry dependency contract](../../README.md#entry-dependencies).

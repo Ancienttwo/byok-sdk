@@ -51,13 +51,13 @@ describe('M4 Phase 4: ByokServer.stats() (part B.1)', () => {
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, instance, { productId: PRODUCT_ID });
     const handle = await instance.dispatch({ deviceId: daemon.deviceId, instruction: 'count refusals' });
     const claim = createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId });
-    expect(await sendOne(daemon, claim)).toEqual({ status: 200, body: { accepted: 1 } });
+    expect(await sendOne(daemon, claim)).toEqual({ status: 200, body: { accepted: 1, outcomes: [{ id: claim.id, outcome: 'accepted' }] } });
     await waitForTaskEvent(handle, (event) => event.kind === 'state' && event.state === 'Claimed');
     const blob = 'x'.repeat(40 * 1024);
     const oversized = createEnvelope('task.progress', {
       seq: 1, events: [{ type: 'x-bulk', blob }, { type: 'x-bulk', blob }],
     }, { taskId: handle.taskId });
-    expect(await sendOne(daemon, oversized)).toEqual({ status: 200, body: { accepted: 0, rejected: 1 } });
+    expect(await sendOne(daemon, oversized)).toEqual({ status: 200, body: { accepted: 0, rejected: 1, outcomes: [{ id: oversized.id, outcome: 'rejected', reason: 'limit_exceeded' }] } });
     const stats = await instance.stats();
     expect(stats.inboundRefusals).toEqual(Object.fromEntries(INBOUND_REFUSAL_REASONS.map((reason) => [reason, reason === 'activity_batch_too_large' ? 1 : 0])));
     expect(stats.taskCountsByState.Claimed).toBe(1);

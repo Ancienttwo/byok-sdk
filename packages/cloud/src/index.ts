@@ -155,6 +155,7 @@ export type {
   InboundCommitted,
   InboundOutcome,
   InboundRefusalReason,
+  InboundResult,
   InboundRefused,
 } from './inbound';
 
@@ -219,8 +220,6 @@ export {
   assertTaskAttemptListLimit,
   DEFAULT_ACTIVITY_BOUNDS,
   DEFAULT_ACTIVITY_CAPACITY,
-  DEFAULT_ACTIVITY_MAX_BYTES,
-  DEFAULT_ACTIVITY_MAX_EVENTS,
   DEFAULT_ACTIVITY_TTL_MS,
   DEFAULT_BOARD_CHANNEL_MAX_BYTES,
   DEFAULT_BOARD_TITLE_MAX_BYTES,

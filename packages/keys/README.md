@@ -366,3 +366,5 @@ Ported symbol by symbol from `aip-main-open@c6a5385`
 symbols listed in `docs/researches/HANDOFF-byok-keys.md` §4.5 deliberately stayed
 behind; the clients here take generic `messages` / `max_tokens` / `system`
 parameters instead of building domain prompts.
+
+Runtime dependencies and size budgets: [entry dependency contract](../../README.md#entry-dependencies).

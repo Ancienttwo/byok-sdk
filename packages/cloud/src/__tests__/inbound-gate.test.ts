@@ -63,7 +63,7 @@ describe('the inbound gate', () => {
     // A type the allow-list would reject anyway: it must still cost a token,
     // and the answer must be `rate_limited`, not `rejected`.
     const wrongDirection = createEnvelope('task.approve', {}, { taskId: 'task-1', seq: 1 });
-    expect(await handleInboundEnvelope(limitedStores, device.deviceId, wrongDirection)).toBe('rate_limited');
+    expect(await handleInboundEnvelope(limitedStores, device.deviceId, wrongDirection).then((result) => result.outcome)).toBe('rate_limited');
     expect(seen).toEqual([device.deviceId]);
   });
 
@@ -74,7 +74,7 @@ describe('the inbound gate', () => {
       createEnvelope('conn.ack', { protocolVersion: 2, capabilities: [], serverTime: new Date().toISOString() }, { seq: 3 }),
     ];
     for (const envelope of inbound) {
-      expect(await handleInboundEnvelope(stores, deviceId, envelope)).toBe('rejected');
+      expect(await handleInboundEnvelope(stores, deviceId, envelope).then((result) => result.outcome)).toBe('rejected');
     }
   });
 
@@ -114,7 +114,7 @@ describe('the inbound gate', () => {
           }),
         });
       }
-      const outcome = await handleInboundEnvelope(stores, deviceId, envelope);
+      const outcome = await handleInboundEnvelope(stores, deviceId, envelope).then((result) => result.outcome);
       if (outcome === 'accepted') accepted.push(type);
     }
     // `agent.message.publish` has its own exact task/Agent binding and product
@@ -132,8 +132,8 @@ describe('the inbound gate', () => {
       cloud: harness.stores,
       mailboxWake: harness.mailboxWake,
     });
-    expect(await handleInboundEnvelope(intruderStores, other.deviceId, claim(taskId, other.deviceId))).toBe('rejected');
-    expect(await handleInboundEnvelope(intruderStores, other.deviceId, complete(taskId, 'stolen'))).toBe('rejected');
+    expect(await handleInboundEnvelope(intruderStores, other.deviceId, claim(taskId, other.deviceId)).then((result) => result.outcome)).toBe('rejected');
+    expect(await handleInboundEnvelope(intruderStores, other.deviceId, complete(taskId, 'stolen')).then((result) => result.outcome)).toBe('rejected');
     await expect(harness.stores.tasks.claim(TENANT_A, {
       taskId,
       deviceId: other.deviceId,
@@ -152,7 +152,7 @@ describe('the inbound gate', () => {
     const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
     const spoofed = createEnvelope('task.claim', { deviceId: 'device-spoofed' }, { taskId });
 
-    expect(await handleInboundEnvelope(stores, deviceId, spoofed)).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, deviceId, spoofed).then((result) => result.outcome)).toBe('rejected');
     await expect(harness.cloud.readTaskAttempt(TENANT_A, taskId)).resolves.toMatchObject({
       deviceId,
       status: 'offered',
@@ -163,14 +163,14 @@ describe('the inbound gate', () => {
     const other = await harness.pairDevice(TENANT_A);
     const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
 
-    expect(await handleInboundEnvelope(stores, deviceId, claim(taskId, deviceId))).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, deviceId, claim(taskId, deviceId)).then((result) => result.outcome)).toBe('accepted');
 
     const intruderStores = tenantStoresFor(devicePrincipal(TENANT_A, other.deviceId), {
       core: harness.core,
       cloud: harness.stores,
       mailboxWake: harness.mailboxWake,
     });
-    expect(await handleInboundEnvelope(intruderStores, other.deviceId, complete(taskId, 'stolen'))).toBe('rejected');
+    expect(await handleInboundEnvelope(intruderStores, other.deviceId, complete(taskId, 'stolen')).then((result) => result.outcome)).toBe('rejected');
 
     const attempt = await harness.cloud.readTaskAttempt(TENANT_A, taskId);
     expect(attempt?.ownerDeviceId).toBe(deviceId);
@@ -179,7 +179,7 @@ describe('the inbound gate', () => {
   });
 
   it('step 2: rejects an unknown task before task-scoped projections or dedup', async () => {
-    expect(await handleInboundEnvelope(stores, deviceId, progress('task-nobody-offered'))).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, deviceId, progress('task-nobody-offered')).then((result) => result.outcome)).toBe('rejected');
     expect(await harness.cloud.readTaskAttempt(TENANT_A, 'task-nobody-offered')).toBeUndefined();
   });
 
@@ -189,16 +189,16 @@ describe('the inbound gate', () => {
       { seq: -1, events: [{ type: 'turn_end' }] },
       { taskId: 'task-invalid-progress' },
     );
-    expect(await handleInboundEnvelope(stores, deviceId, malformed)).toBe('rejected');
-    expect(await handleInboundEnvelope(stores, deviceId, malformed)).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, deviceId, malformed).then((result) => result.outcome)).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, deviceId, malformed).then((result) => result.outcome)).toBe('rejected');
   });
 
   it('step 3: a repeated envelope id is a duplicate, not a rejection, and re-runs nothing', async () => {
     const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
     const envelope = claim(taskId, deviceId);
 
-    expect(await handleInboundEnvelope(stores, deviceId, envelope)).toBe('accepted');
-    expect(await handleInboundEnvelope(stores, deviceId, envelope)).toBe('duplicate');
+    expect(await handleInboundEnvelope(stores, deviceId, envelope).then((result) => result.outcome)).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, deviceId, envelope).then((result) => result.outcome)).toBe('duplicate');
     expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.ownerDeviceId).toBe(deviceId);
   });
 
@@ -222,9 +222,9 @@ describe('the inbound gate', () => {
       { taskId },
     );
 
-    expect(await handleInboundEnvelope(stores, deviceId, requested)).toBe('accepted');
-    expect(await handleInboundEnvelope(stores, deviceId, requested)).toBe('duplicate');
-    expect(await handleInboundEnvelope(stores, deviceId, resolved)).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, deviceId, requested).then((result) => result.outcome)).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, deviceId, requested).then((result) => result.outcome)).toBe('duplicate');
+    expect(await handleInboundEnvelope(stores, deviceId, resolved).then((result) => result.outcome)).toBe('accepted');
 
     const tail = await harness.cloud.readApprovalTimeline(TENANT_A, taskId);
     expect(tail?.entries.map((entry) => entry.event)).toEqual([
@@ -250,7 +250,7 @@ describe('the inbound gate', () => {
       { summary: 'Legacy request' },
       { taskId },
     );
-    expect(await handleInboundEnvelope(stores, deviceId, requested)).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, deviceId, requested).then((result) => result.outcome)).toBe('accepted');
     expect((await harness.cloud.readApprovalTimeline(TENANT_A, taskId))?.entries[0]?.event).toEqual({
       type: 'approval_requested',
       summary: 'Legacy request',
@@ -268,8 +268,8 @@ describe('the inbound gate', () => {
       },
       { taskId: 'task-invalid-approval' },
     );
-    expect(await handleInboundEnvelope(stores, deviceId, malformed)).toBe('rejected');
-    expect(await handleInboundEnvelope(stores, deviceId, malformed)).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, deviceId, malformed).then((result) => result.outcome)).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, deviceId, malformed).then((result) => result.outcome)).toBe('rejected');
     expect(
       await harness.cloud.readApprovalTimeline(TENANT_A, 'task-invalid-approval'),
     ).toBeUndefined();
@@ -294,8 +294,8 @@ describe('the inbound gate', () => {
       taskId: 'task-other-device',
     });
 
-    expect(await handleInboundEnvelope(stores, deviceId, first)).toBe('accepted');
-    expect(await handleInboundEnvelope(otherStores, other.deviceId, second)).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, deviceId, first).then((result) => result.outcome)).toBe('accepted');
+    expect(await handleInboundEnvelope(otherStores, other.deviceId, second).then((result) => result.outcome)).toBe('accepted');
   });
 
   it('step 3: dedup is per tenant — the same device id in another tenant has its own ring', async () => {
@@ -308,17 +308,17 @@ describe('the inbound gate', () => {
     await harness.stores.tasks.open(TENANT_B, { taskId: 'task-shared', deviceId });
     const envelope = progress('task-shared');
 
-    expect(await handleInboundEnvelope(stores, deviceId, envelope)).toBe('accepted');
-    expect(await handleInboundEnvelope(foreign, deviceId, envelope)).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, deviceId, envelope).then((result) => result.outcome)).toBe('accepted');
+    expect(await handleInboundEnvelope(foreign, deviceId, envelope).then((result) => result.outcome)).toBe('accepted');
   });
 
   it('step 4: the first terminal is the fact; a retried terminal records nothing new', async () => {
     const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
-    await handleInboundEnvelope(stores, deviceId, claim(taskId, deviceId));
+    await handleInboundEnvelope(stores, deviceId, claim(taskId, deviceId)).then((result) => result.outcome);
 
-    expect(await handleInboundEnvelope(stores, deviceId, complete(taskId, 'first'))).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, deviceId, complete(taskId, 'first')).then((result) => result.outcome)).toBe('accepted');
     // A retry with a NEW envelope id: dedup does not catch it, the receipt does.
-    expect(await handleInboundEnvelope(stores, deviceId, complete(taskId, 'second'))).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, deviceId, complete(taskId, 'second')).then((result) => result.outcome)).toBe('accepted');
 
     const receipt = await harness.cloud.readTerminalReceipt(TENANT_A, taskId);
     expect(receipt?.key).toBe(terminalReceiptKey(taskId));
@@ -331,13 +331,13 @@ describe('the inbound gate', () => {
     const { taskId } = await harness.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
     expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.status).toBe('offered');
 
-    await handleInboundEnvelope(stores, deviceId, claim(taskId, deviceId));
+    await handleInboundEnvelope(stores, deviceId, claim(taskId, deviceId)).then((result) => result.outcome);
     expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.status).toBe('claimed');
 
-    await handleInboundEnvelope(stores, deviceId, createEnvelope('task.started', {}, { taskId }));
+    await handleInboundEnvelope(stores, deviceId, createEnvelope('task.started', {}, { taskId })).then((result) => result.outcome);
     expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.status).toBe('running');
 
-    await handleInboundEnvelope(stores, deviceId, complete(taskId, 'done'));
+    await handleInboundEnvelope(stores, deviceId, complete(taskId, 'done')).then((result) => result.outcome);
     expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.status).toBe('complete');
   });
 
@@ -349,7 +349,7 @@ describe('the inbound gate', () => {
       mailboxWake: harness.mailboxWake,
     });
 
-    expect(await handleInboundEnvelope(foreign, deviceId, claim(taskId, deviceId))).toBe('rejected');
+    expect(await handleInboundEnvelope(foreign, deviceId, claim(taskId, deviceId)).then((result) => result.outcome)).toBe('rejected');
 
     // Tenant A's attempt is untouched, and tenant B gained no row for the id
     // it guessed.

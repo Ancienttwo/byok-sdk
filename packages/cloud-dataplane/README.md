@@ -389,3 +389,5 @@ Deployment order is independent of correctness: new code without the trigger
 uses fallback reads; the trigger without listeners only emits unused hints.
 `longPollIntervalMs` and `DEFAULT_LONG_POLL_INTERVAL_MS` are deleted. Do not
 carry the old hold loop alongside the wake port.
+
+Runtime dependencies and size budgets: [entry dependency contract](../../README.md#entry-dependencies).

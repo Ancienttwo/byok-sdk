@@ -91,7 +91,7 @@ describe('GET /byok/events protocol capability advertisement', () => {
     // waiting out a held poll.
     const handshake = await post([hello([2])]);
     expect(handshake.status).toBe(200);
-    expect(handshake.body as MessagesSendResponse).toEqual({ accepted: 1, capabilities: EXPECTED_CAPABILITIES });
+    expect(handshake.body as MessagesSendResponse).toMatchObject({ accepted: 1, capabilities: EXPECTED_CAPABILITIES });
 
     // A batch without a hello carries no update: absence, never an empty list.
     const other = await post([createEnvelope('task.started', {}, { taskId: 'no-such-task' })]);
@@ -101,7 +101,7 @@ describe('GET /byok/events protocol capability advertisement', () => {
     // A rejected hello opens nothing, so it advertises nothing.
     const refused = await post([hello([1])]);
     expect(refused.status).toBe(200);
-    expect(refused.body as MessagesSendResponse).toEqual({ accepted: 0, rejected: 1 });
+    expect(refused.body as MessagesSendResponse).toMatchObject({ accepted: 0, rejected: 1 });
   });
 
   it('advertises approval_resolved, which the kernel inbound accepts', async () => {

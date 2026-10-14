@@ -87,6 +87,9 @@ export function deriveTasksFromRecords(records: readonly DaemonRecord[]): Derive
 
   for (const event of records) {
     switch (event.kind) {
+      case 'outbound-rejected':
+        if (event.terminal && event.taskId !== undefined) upsert(event.taskId, event.ts, { state: event.taskState, delivery: 'rejected' });
+        break;
       case 'offered':
         upsert(event.taskId, event.ts, { state: 'Offered', runtime: event.runtime });
         break;

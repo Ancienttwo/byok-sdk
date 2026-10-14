@@ -584,3 +584,5 @@ export type {
   NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason,
   NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode,
 } from './native-interactions';
+
+export type { OutboundStatus, OutboundRejection } from './daemon/outbound-settlement';
