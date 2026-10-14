@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Breaking (server, 0.x; #420)** — embedded device-side one-shot wake queue:
+  `wake: { consume }` plus `wakes.schedule/cancel/pending`, shared memory/SQLite
+  semantics, exact dedup, serial at-least-once delivery, 60-second capped waits,
+  deadline/retry and bounded seven-day completion retention. Host owns periodic
+  rules, occurrence dedup and execution submission. Timed-out hooks may overlap
+  retries; in-flight cancellation returns false and does not stop the delivery.
+  `close()` invalidates then aborts and drains storage without awaiting hooks.
+  SQLite schema 5 adds wake authority. Stop all writers and back up before
+  explicit `v4-to-v5` adoption; v1/v2/v3 use the replacement target-v5 selectors
+  with their existing safety gates. Target-v4 selectors are deleted, not aliased;
+  old builds refuse schema 5 and rollback requires the pre-adoption backup.
+
 - **Breaking (server, 0.x)** — SQLite ownership uses `PRAGMA locking_mode=EXCLUSIVE`
   on the database connection; the #403 sibling lock is removed (#414).
   `ByokServer.stop()` is deleted: replace it with `await server.close()`.

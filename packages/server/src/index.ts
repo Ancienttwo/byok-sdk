@@ -1,3 +1,7 @@
+import { WakeScheduler } from './wakes/scheduler';
+import type { WakeRecord, WakeScheduleInput, WakeScheduleResult } from './wakes/types';
+export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedError } from './wakes/types';
+export type { DueWake, WakeRecord, WakeScheduleInput, WakeScheduleResult, WakeConsumer, WakeInputErrorCode } from './wakes/types';
 import { Hono } from 'hono';
 import {
   agentHomeProjectionRequestKey,
@@ -169,6 +173,13 @@ export interface TaskListQuery {
 
 /** The object `createByokServer` returns — the SaaS-embedder-facing surface. */
 export interface ByokServer {
+  readonly wakes: {
+    schedule(input: WakeScheduleInput): Promise<WakeScheduleResult>;
+    /** Deletes only queued wakes. False for an in-flight wake means it was not cancelled; a rejection/deadline still retries it. */
+    cancel(dedupKey: string): Promise<boolean>;
+    /** Unfinished wakes, ordered by availableAt then wakeId. */
+    pending(): Promise<readonly WakeRecord[]>;
+  };
   /** Hono app exposing every device route, plus the opt-in `/healthz`. Mount it, or use its `.fetch` with `@hono/node-server`. */
   hono: Hono;
   pairing: {
@@ -336,8 +347,11 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     ...(opts.storage === undefined ? {} : { storage: opts.storage }),
     ...(opts.rateLimit === undefined ? {} : { rateLimit: opts.rateLimit }),
     presenceTtlMs,
+    ...(opts.wake === undefined ? {} : { wake: opts.wake }),
     onRateLimited: (deviceId, at) => relay.emitServerEvent({ kind: 'device.rate_limited', deviceId, at }),
   });
+
+  const wakes = new WakeScheduler(composition.wakes, opts.wake);
 
   const tokenSigner =
     opts.tokenSigner ??
@@ -666,6 +680,11 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   }
 
   return {
+    wakes: {
+      schedule: input => wakes.schedule(input),
+      cancel: key => wakes.cancel(key),
+      pending: () => wakes.pending(),
+    },
     hono,
 
     pairing: {
@@ -824,6 +843,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
 
     async close(): Promise<void> {
       relay.stop();
+      await wakes.close();
       await composition.close();
     },
 
