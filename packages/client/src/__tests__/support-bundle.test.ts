@@ -269,15 +269,25 @@ describe('outbound rejection diagnostics #397', () => {
   });
 
   it('projects rejection audit to tasks without retaining payload fields', async () => {
-    const { readAuditEvents } = await import('../bin/audit-log');
-    const { deriveTasksFromEvents } = await import('../bin/tasks-view');
+    const { appendAuditRecord, readAuditRecords } = await import('../bin/audit-log');
+    const { deriveTasksFromRecords } = await import('../bin/tasks-view');
     const { formatTaskLine } = await import('../bin/format');
     const dir = await tempDir();
-    await appendAuditEvent(dir, { kind: 'offered', ts: new Date().toISOString(), taskId: 'task' });
-    await appendAuditEvent(dir, { kind: 'outbound-rejected', ts: new Date().toISOString(), envelopeId: crypto.randomUUID(), type: 'task.complete', taskId: 'task', reason: 'limit_exceeded', terminal: true, taskState: 'Complete' });
-    const events = await readAuditEvents(dir);
-    expect(events.some((event) => event.kind === 'outbound-rejected' && event.reason === 'limit_exceeded')).toBe(true);
-    expect(formatTaskLine(deriveTasksFromEvents(events)[0]!)).toContain('delivery=rejected');
+    const ts = new Date().toISOString();
+    await appendAuditRecord(dir, { kind: 'offered', ts, taskId: 'task' });
+    await appendAuditRecord(dir, {
+      kind: 'outbound-rejected',
+      ts,
+      envelopeId: crypto.randomUUID(),
+      type: 'task.complete',
+      taskId: 'task',
+      reason: 'limit_exceeded',
+      terminal: true,
+      taskState: 'Complete',
+    });
+    const records = await readAuditRecords(dir);
+    expect(records.some((record) => record.kind === 'outbound-rejected' && record.reason === 'limit_exceeded')).toBe(true);
+    expect(formatTaskLine(deriveTasksFromRecords(records)[0]!)).toContain('delivery=rejected');
   });
 });
 
