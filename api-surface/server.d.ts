@@ -93,7 +93,7 @@ export interface ByokServer {
         /** Mint a single-use pairing code for this server's product and tenant (docs/protocol.md §6.1). */
         createPairingCode(input: CreatePairingCodeInput): Promise<PairingCodeInfo>;
     };
-    /** Durable recurring submission; no TaskHandle is needed to recover after restart. */
+    /** Submit one fresh Agent execution: persist the input first; a delivered taskId conflicts (`agent_task_already_exists`), recover via `tasks.offer`. */
     readonly executions: {
         /** Persist input before submitting; use tasks.offer for exact recovery after a conflict. */
         submit(input: AgentExecutionInput): Promise<EnqueuedOffer>;

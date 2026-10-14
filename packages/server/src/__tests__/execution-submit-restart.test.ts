@@ -55,7 +55,7 @@ it('recovers recurring admission and independent observations through a recreate
     const restored = AgentExecutionInputSchema.parse(JSON.parse(readFileSync(inputPath, 'utf8')));
     await instance.executions.submit(restored);
     expect(await instance.tasks.offer(restored.taskId)).toMatchObject({ delivered: true, payload: restored.payload });
-    await expect(instance.executions.submit(restored)).rejects.toThrow();
+    await expect(instance.executions.submit(restored)).rejects.toMatchObject({ code: 'agent_task_already_exists' });
     const message = createEnvelope('agent.message.publish', {
       agentRef: restored.payload.agentRef, sessionRef: 'native-session', contract: 'conversation-turn/v1',
       messageId: '10000000-0000-4000-8000-000000000099', cursor: 1, contentType: 'text/markdown', body: 'hello', byteCount: 5,

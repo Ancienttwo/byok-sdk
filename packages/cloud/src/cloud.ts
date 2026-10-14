@@ -1928,7 +1928,20 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       throw new Error('Agent execution with messageEgress requires a registered Agent message consumer.');
     }
     const beforeMailbox = agentMessageOfferWriter(deviceId, payload, validated.agentMessageContext);
-    await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer_for_agent_with_egress_fresh', payload));
+    // Selection admission (protocol/version.ts: dispatch-selection, toolset-selection)
+    // is refused here, before any attempt, receipt or mailbox write.
+    if (payload.dispatchSelection !== undefined && payload.runtime !== payload.dispatchSelection.runtimeId) {
+      throw new ByokCloudError(
+        'coordination_input_invalid',
+        `Agent execution runtime ${payload.runtime} does not match dispatchSelection.runtimeId ${payload.dispatchSelection.runtimeId}.`,
+      );
+    }
+    const required = [
+      ...requiredReceiverCapabilities('task.offer_for_agent_with_egress_fresh', payload),
+      ...(payload.dispatchSelection === undefined ? [] : ['dispatch-selection']),
+      ...(payload.requiredToolsets === undefined ? [] : ['toolset-selection']),
+    ].filter((capability, index, all) => all.indexOf(capability) === index);
+    await assertAgentCapabilities(tenant, deviceId, required);
     const enqueued = await enqueueTaskEnvelope(
       tenant,
       deviceId,
