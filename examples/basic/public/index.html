@@ -46,14 +46,14 @@
       placeholder="Create a file named hello.txt containing 'hello from pi' in the workspace"></textarea>
     <p>
       <label>Runtime
-        <select id="runtime">
-          <option value="pi" selected>pi</option>
-          <option value="claude">claude</option>
-          <option value="codex">codex</option>
+        <!-- Options are filled by renderRuntimeOptions() from the runtimes the
+             connected machines report in /api/machines; nothing is hard-coded. -->
+        <select id="runtime" disabled>
+          <option value="">no connected machine</option>
         </select>
       </label>
     </p>
-    <button type="submit">Dispatch</button>
+    <button id="dispatch-btn" type="submit" disabled>Dispatch</button>
   </form>
 </section>
 
@@ -134,8 +134,49 @@
       .join(' ');
   }
 
+  // The runtime <select> is the union of the runtime ids that connected
+  // machines report, the same data the chips above are drawn from. A runtime
+  // is flagged when no connected machine reports it with credentials present.
+  function runtimeOptionsFor(machines) {
+    const byId = new Map();
+    for (const m of machines) {
+      if (!m.connected) continue;
+      for (const r of m.runtimes ?? []) {
+        const entry = byId.get(r.id) ?? { id: r.id, authPresent: false };
+        if (r.authPresent !== false) entry.authPresent = true;
+        byId.set(r.id, entry);
+      }
+    }
+    return [...byId.values()];
+  }
+
+  function renderRuntimeOptions(machines) {
+    const select = $('runtime');
+    const previous = select.value;
+    const anyConnected = machines.some((m) => m.connected);
+    const options = runtimeOptionsFor(machines);
+    select.innerHTML = '';
+    if (options.length === 0) {
+      const none = document.createElement('option');
+      none.value = '';
+      none.textContent = anyConnected ? 'no runtime reported' : 'no connected machine';
+      select.appendChild(none);
+    }
+    for (const o of options) {
+      const option = document.createElement('option');
+      option.value = o.id;
+      option.textContent = o.authPresent ? o.id : `${o.id} (no credentials detected)`;
+      option.selected = o.id === previous;
+      select.appendChild(option);
+    }
+    if (!options.some((o) => o.id === previous)) select.options[0].selected = true;
+    select.disabled = options.length === 0;
+    $('dispatch-btn').disabled = !anyConnected;
+  }
+
   async function refreshMachines() {
     const machines = await (await fetch('/api/machines')).json();
+    renderRuntimeOptions(machines);
     const list = $('machine-list');
     list.innerHTML = '';
     if (machines.length === 0) {
@@ -256,7 +297,7 @@
     ev.preventDefault();
     const instruction = $('instruction').value.trim();
     const runtime = $('runtime').value;
-    if (!instruction) return;
+    if (!instruction || $('dispatch-btn').disabled) return;
 
     $('feed').textContent = '';
     $('artifacts').innerHTML = '';
@@ -265,7 +306,7 @@
     const res = await fetch('/api/tasks', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ instruction, runtime }),
+      body: JSON.stringify(runtime ? { instruction, runtime } : { instruction }),
     });
     const body = await res.json();
     if (!res.ok) {

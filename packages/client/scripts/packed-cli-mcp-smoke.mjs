@@ -16,7 +16,7 @@ const fixture = fileURLToPath(new URL('./fixtures/packed-cli-mcp-codex.mjs', imp
 const built = spawnSync('bun', ['build', '--compile', fixture, '--outfile', fakeCodex], { encoding: 'utf8' });
 assert.equal(built.status, 0, built.stderr);
 const tenant = tenantId('packed-cli-mcp');
-const { cloud, core } = createInMemoryByokCloud({ longPollHoldMs: 100, longPollIntervalMs: 10 });
+const { cloud, core } = createInMemoryByokCloud();
 await core.quota.writeEntitlement(tenant, { version: 1n, hardLimitBytes: 10000000n, maxObjectBytes: 1000000n,
   maxInlineBytes: 1000000n, mailboxLimitBytes: 10000000n, retentionPolicyId: 'test' });
 const server = createServer(async (req, res) => {

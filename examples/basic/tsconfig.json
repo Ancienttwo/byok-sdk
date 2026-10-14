@@ -4,6 +4,7 @@
     "server.ts",
     "goal-btw*.ts",
     "clarification*.ts",
+    "page*.ts",
     "quickstart*.ts"
   ]
 }
