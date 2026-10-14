@@ -136,6 +136,7 @@ describe('canonical Agent home single writer (WP0)', () => {
     const declined = await server.waitFor(declineFor('same-home-second'));
 
     expect(declineReason(declined)).toBe('agent home busy: 1 active attempt(s)');
+    expect(declined.payload).toMatchObject({ code: 'agent_home_writer_busy' });
     expect(declineRetryable(declined)).toBe(true);
     // Counts only: no home path, no agentId, no prompt text on the wire.
     expect(declineReason(declined)).not.toContain(harness.hostStorageRoot);
@@ -219,6 +220,7 @@ describe('canonical Agent home single writer (WP0)', () => {
     server.send(offer('disposal-second', 'disposal-agent', 'claude'));
     const declined = await server.waitFor(declineFor('disposal-second'));
     expect(declineReason(declined)).toBe('agent home busy: 1 active attempt(s)');
+    expect(declined.payload).toMatchObject({ code: 'agent_home_writer_busy' });
     expect(harness.claude.prepareCalls).toBe(0);
 
     // Let the shutdown in `afterEach` reach a quiescent runtime again; the
@@ -380,7 +382,7 @@ describe('canonical Agent home single writer (WP0)', () => {
       const declined = await server.waitFor(declineFor('veto-task'));
 
       // Declined by the host, not by the single-writer gate.
-      expect(declineReason(declined)).not.toContain('agent home busy');
+      expect(declined.payload).not.toHaveProperty('code');
       await expect(fs.stat(path.join(agentsRoot, 'veto-agent'))).rejects.toMatchObject({ code: 'ENOENT' });
       expect(pi.prepareCalls).toBe(0);
       expect(pi.startCalls).toHaveLength(0);
@@ -403,6 +405,7 @@ describe('canonical Agent home single writer (WP0)', () => {
     server.send(offer('busy-fs-second', 'busy-fs-agent', 'claude'));
     const declined = await server.waitFor(declineFor('busy-fs-second'));
     expect(declineReason(declined)).toBe('agent home busy: 1 active attempt(s)');
+    expect(declined.payload).toMatchObject({ code: 'agent_home_writer_busy' });
     expect((await fs.readdir(agentsRoot)).sort()).toEqual(before);
   });
 
@@ -432,7 +435,7 @@ describe('canonical Agent home single writer (WP0)', () => {
     // through the resolution error path rather than reading `one`'s count.
     server.send(offer('symlink-alias', 'two', 'claude'));
     const declined = await server.waitFor(declineFor('symlink-alias'));
-    expect(declineReason(declined)).not.toContain('agent home busy');
+    expect(declined.payload).not.toHaveProperty('code');
     expect(declineReason(declined)).toMatch(/is not a real directory/);
     expect(declineRetryable(declined)).toBe(false);
     expect(harness.claude.prepareCalls).toBe(0);

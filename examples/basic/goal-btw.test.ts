@@ -97,7 +97,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
     await byok.executions.submit({ deviceId, taskId: 'same-home-side', payload: { ...selection, instruction: 'side question',
       terminalProjection: { mode: 'result-document', contract: BTW_RESULT_CONTRACT } } });
     await terminal('same-home-side');
-    expect((await byok.tasks.deviceTerminal('same-home-side'))?.envelope).toMatchObject({ type: 'task.decline', payload: { reason: 'agent home busy: 1 active attempt(s)' } });
+    expect((await byok.tasks.deviceTerminal('same-home-side'))?.envelope).toMatchObject({ type: 'task.decline', payload: { reason: 'agent home busy: 1 active attempt(s)', code: 'agent_home_writer_busy' } });
     expect(adapter.starts).toHaveLength(starts);
     expect(adapter.sessions.has('same-home-side')).toBe(false);
     adapter.sessions.get('side-1')!.finish({ contract: BTW_RESULT_CONTRACT, answer: 'An independent answer' }); await terminal('side-1');

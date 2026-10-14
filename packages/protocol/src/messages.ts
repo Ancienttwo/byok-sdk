@@ -855,7 +855,7 @@ export type TaskStartedPayload = z.infer<typeof TaskStartedPayloadSchema>;
  * writeup): declining does *not* introduce a new `Declined` terminal state.
  * It maps onto the existing `Failed` state via a new `Offered -> Failed`
  * transition. `reason`/`retryable` intentionally mirror `TaskFailPayload`
- * exactly, because a pre-claim decline and a post-claim failure are the same
+ * semantics, because a pre-claim decline and a post-claim failure are the same
  * outcome from the dispatcher's point of view (this attempt produced no
  * result; here's whether retrying — e.g. offering to a different device —
  * makes sense), and keeping the state machine minimal avoids forking every
@@ -865,6 +865,7 @@ export const TaskDeclinePayloadSchema = z.object({
   reason: z.string(),
   retryable: z.boolean().optional(),
   agentRef: AgentRefSchema.optional(),
+  code: z.enum(['agent_home_writer_busy', 'agent_home_reader_busy']).optional(),
 });
 export type TaskDeclinePayload = z.infer<typeof TaskDeclinePayloadSchema>;
 

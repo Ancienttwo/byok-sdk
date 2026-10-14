@@ -49,6 +49,25 @@ describe('agent-home-contract reference server', () => {
     return { byok: instance, baseUrl: started.baseUrl };
   }
 
+  it.each(['agent_home_writer_busy', 'agent_home_reader_busy', undefined] as const)(
+    'returns decline code %s through tasks.deviceTerminal', async (code) => {
+      const started = await start();
+      const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
+        productId: PRODUCT_ID, capabilities: ['agent-home-contract'],
+      });
+      const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'busy readback', agentRef });
+      await awaitEnvelope(daemon, e => e.task_id === handle.taskId);
+      const payload = { reason: 'display only', retryable: true, agentRef, ...(code === undefined ? {} : { code }) };
+      const terminal = createEnvelope('task.decline', payload, { taskId: handle.taskId });
+      const response = await daemon.send(terminal);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ accepted: 1, outcomes: [{ id: terminal.id, outcome: 'accepted' }] });
+      const deviceTerminal = await started.byok.tasks.deviceTerminal(handle.taskId);
+      expect(deviceTerminal).toMatchObject({ envelope: terminal });
+      if (code === undefined) expect(deviceTerminal?.envelope.payload).not.toHaveProperty('code');
+    },
+  );
+
   it('rejects before task creation when an old daemon omits the capability', async () => {
     const started = await start();
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {

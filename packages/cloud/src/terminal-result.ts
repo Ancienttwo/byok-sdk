@@ -8,6 +8,7 @@ import {
   type TerminalAgentHomeProjection,
   type TerminalAgentHomeMemoryChange,
   type TaskFailPayload,
+  type TaskDeclinePayload,
 } from '@byok-sdk/protocol';
 import { ByokCloudError } from './errors';
 import type { RequestReceipt } from './stores/ports';
@@ -87,6 +88,8 @@ export interface TerminalResult {
    */
   readonly preparedObservation?: TerminalPreparedObservation;
   readonly reason?: string;
+  /** Verbatim home-busy decline code; reason is display text only. */
+  readonly code?: TaskDeclinePayload['code'];
   /** Terminal cause projection; currently the protocol's terminal reason. */
   readonly terminalCause?: string;
   readonly retryable?: boolean;
@@ -166,6 +169,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
       return {
         taskId,
         state: 'failed',
+        ...(envelope.payload.code === undefined ? {} : { code: envelope.payload.code }),
         ...(envelope.payload.agentRef === undefined ? {} : { agentRef: envelope.payload.agentRef }),
         reason: envelope.payload.reason,
         terminalCause: envelope.payload.reason,

@@ -54,7 +54,6 @@ const WIDE_STARTUP_TIMEOUT_MS = 5_000;
 /** Exact pre-claim decline reason set by `admissionWithdrawn` (`task-runner.ts:1977`). */
 const DEADLINE_DECLINE_REASON = 'runtime startup deadline exceeded';
 /** Exact prefix of the per-home busy decline (`task-runner.ts:2053`). */
-const AGENT_HOME_BUSY_PREFIX = 'agent home busy';
 
 const AGENT_REF = { agentId: 'deadline-release-agent', profileRevision: 'profile-1' } as const;
 
@@ -158,7 +157,7 @@ describe('a startup-deadline decline hands the canonical Agent home back to the 
       // The exact reason attempt 2 would carry if attempt 1's reservation had
       // leaked, named so a regression reads as itself rather than as a timeout.
       expect(sent.filter((entry) => entry.type === 'task.decline'
-        && entry.payload.reason.startsWith(AGENT_HOME_BUSY_PREFIX))).toEqual([]);
+        && entry.payload.code !== undefined)).toEqual([]);
       // Exactly what ONE admitted attempt implies: one home, one attempt.
       expect(agentHome.executionLeaseManager.activeAttemptSummary()).toEqual({ homes: 1, attempts: 1, readerAttempts: 0 });
 

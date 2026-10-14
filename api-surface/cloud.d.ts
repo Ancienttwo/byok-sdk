@@ -3881,7 +3881,7 @@ export interface CloudRootStores {
 }
 export declare function tenantStoresFor(principal: Principal, root: CloudRootStores): TenantStores;
 // ==== @byok-sdk/cloud dist/terminal-result.d.ts ====
-import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TaskFailPayload } from '@byok-sdk/protocol';
+import { type AgentRef, type BlobRef, type Envelope, type TerminalInferenceUsage, type TerminalPreparedObservation, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TaskFailPayload, type TaskDeclinePayload } from '@byok-sdk/protocol';
 import type { RequestReceipt } from './stores/ports';
 /** Canonical device evidence, independent of the Host cancellation projection. */
 export interface DeviceTerminal {
@@ -3950,6 +3950,8 @@ export interface TerminalResult {
      */
     readonly preparedObservation?: TerminalPreparedObservation;
     readonly reason?: string;
+    /** Verbatim home-busy decline code; reason is display text only. */
+    readonly code?: TaskDeclinePayload['code'];
     /** Terminal cause projection; currently the protocol's terminal reason. */
     readonly terminalCause?: string;
     readonly retryable?: boolean;
