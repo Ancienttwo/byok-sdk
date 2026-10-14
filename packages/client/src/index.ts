@@ -542,5 +542,6 @@ export type {
   NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode,
 } from './native-interactions';
 
+export type { OutboundStatus, OutboundRejection } from './daemon/outbound-settlement';
 export { createExecutionScratch, ScratchRootPathError } from './daemon/retention/scratch';
 export type { ExecutionScratch } from './daemon/retention/scratch';

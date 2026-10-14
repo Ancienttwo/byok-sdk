@@ -1,3 +1,4 @@
+import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 /**
  * The Postgres composition running the complete cloud-local conformance suite.
  *
@@ -60,7 +61,7 @@ const postgresFactory: CloudCompositionFactory = {
       crypto: createWebCrypto(),
       objectStorage: objectStorage.config,
     });
-    const core = createPostgresCoreStores({ pool: scope.pool, clock });
+    const core = createPostgresCoreStores({ pool: scope.pool, clock, objectStorage: objectStorage.config });
 
     return {
       stores,
@@ -111,7 +112,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres offer delivery composition', () => {
       const objectStorage = await createObjectStorageScope();
       const clock = createMutableClock();
       const crypto = createWebCrypto();
-      const core = createPostgresCoreStores({ pool: scope.pool, clock });
+      const core = createPostgresCoreStores({ pool: scope.pool, clock, objectStorage: objectStorage.config });
       const stores = createPostgresCloudStores({
         pool: scope.pool,
         clock,
@@ -120,6 +121,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres offer delivery composition', () => {
       });
       const full = fullCapabilityDeclaration();
       const cloud = createByokCloud({
+        mailboxWake: createInProcessMailboxWake(),
         core,
         cloud: stores,
         crypto,

@@ -2117,6 +2117,43 @@ terminate the owned child. Pending prompt RPC has a 30-second deadline. Already
 admitted work is not recalled by a later dialog. GUI requests/concurrent commands
 are capped at 32. The TaskRunner unattended cancellation policy is unchanged.
 
+## Cloud maintenance contract
+
+`ByokCloud.runMaintenance({ tenant, now, policy, limit })` runs a closed sequence
+of ten tenant-first `collectExpired` ports: mailbox, receipts, nonces, pairing
+codes, presence, activity, approvals, device assertion replay, quota and
+objects. Every step has one batch budget, returns removed/expired counts,
+released bigint bytes and an eligible-remainder flag, and commits independently.
+Failures retain confirmed `committed` counts and `failedRows`; step faults use
+`failedRows: 0`. Unknown counts and `more` are omitted. A remainder-probe fault
+cannot erase prior committed counts. Observers receive the same report.
+
+The reference server always schedules one non-overlapping pass every five
+minutes with ±20% jitter, defaults to 500 rows/objects per step, and exposes
+`maintenance.runNow()` to join an in-flight pass. Shutdown awaits collection
+before releasing SQLite. Hosted schedulers invoke the same kernel with their
+stored policy. Retention durations are positive bigint milliseconds: acked
+mailbox 24h, unacked mailbox 7d, request receipts 24h and orphan grace 24h.
+There is no disable value or missing-policy substitution.
+
+Acked mailbox rows may be deleted; unacked rows only become retained dead
+letters. Mailbox collection reports zero released bytes and never touches a
+usage counter. The sole receipt classification table protects all 11 SDK
+families and unknown keys as identity; the request projection is empty.
+Redeemed pairing code rows remain reachable identity fences. Committed reservation rows remain accounting/replay identity; only expired/aborted settled rows are GC candidates. Durable tasks,
+egress, truth, board, memory, profile and terminal history do not expire.
+Objects need no references or live reservation and must pass orphan grace;
+physical byte deletion and accounted settlement are one protected unit. PG
+holds the manifest row through physical deletion, and SQLite commits its SQL
+and process-local ledger release without an asynchronous gap.
+
+The old mailbox façade, `collectRetired`, replay `deleteExpired`, public
+`expireReservations` and Postgres `runTenant` are removed. Hosted policy lives on `PostgresRetentionPolicyStore` in the
+Worker-loadable dataplane runtime entry. Operator
+dead-letter, reconciliation and usage-rebuild APIs remain. Installed
+`cleanup_job` rows are historical; no current code writes them. Client artifact
+retention and cloud-do alarms retain their own ownership boundaries.
+
 ## Durable execution recovery
 
 For a daemon configured with hostedJournal, the existing tenant-scoped taskId is an immutable execution identity reserved by cloud dispatch. Omitted IDs are minted by cloud; explicit host IDs are idempotency inputs, never permission to reopen or retarget an execution. Delivery retirement survives mailbox retention. Every lifecycle message is bound to the authenticated tenant, exact offered device and, for Agent executions, the exact AgentRef. Retry is an explicit new execution; daemon restart never reruns committed runtime side effects.
@@ -2157,7 +2194,7 @@ Closed DeviceOperatorError codes carry no raw OS errors or secrets. Hosts own
 supervisor stop/restore and independent readiness verification. The SDK does not
 create a remote maintenance channel or automatically replay tasks.
 
-The journal owns one immutable terminal byte record, including pre-claim declines. ConnectionManager uses its existing authenticated POST queue and retries the exact original envelope. Accepted transport disposition is durably recorded as confirmed before local delivery state is retired; an acknowledgement write failure retains the original batch. A rejected singleton is durably failed and remains inspectable. Confirmation records delivery acceptance; the cloud's immutable first terminal and cancellation authority remain product truth.
+The journal owns one immutable terminal byte record, including pre-claim declines. ConnectionManager uses its existing authenticated POST queue and retries the exact original envelope. Accepted transport disposition is durably recorded as confirmed before local delivery state is retired; an acknowledgement write failure retains the original batch. Every rejected envelope emits a payload-free `outbound-rejected` event and increments `status().outbound` (also control status). A rejected terminal is durably failed with its coarse wire reason in `last_error` before retirement; support bundles report `journal.failedTerminalCount` and live outbound counts. `byok-agent tasks` marks refused terminal rows `delivery=rejected`, preserving the local terminal state even after restart; its rejection record carries a closed `taskState` and no payload. A refused progress batch is counted and reported without marking terminal delivery. Progress and terminal observer events follow successful settlement. Rejection is a delivery fact, separate from operational liveness health. Counts-only v2 servers use `unspecified` and singleton isolation until protocol v3. Confirmation records delivery acceptance; the cloud's immutable first terminal and cancellation authority remain product truth.
 
 Unknown or invalid executable messages cannot silently advance the mailbox cursor. The observer consumes the protocol offer classifier. The new journal format requires complete terminal bytes: a valid hash-only predecessor is preserved and rejected with an explicit format error, never silently upgraded, quarantined as corruption, or synthesized into replayable evidence.
 
@@ -2555,6 +2592,34 @@ Apache-2.0 attribution and maintained source inventory remain explicit. Fixture
 qualification does not establish live-provider, desktop or Host-reconnect
 acceptance.
 
+## Hosted mailbox hold (#410)
+
+`ByokCloudOptions` and `CloudRootStores` require `MailboxWake`. Held
+`GET /byok/events` requests have one mode: subscribe through the tenant-bound
+mailbox facade before the first read, scan durable rows, and wait for a hint or
+the port's fallback interval before reading again. Every live empty response
+follows a final read and replay-floor check. Reading is not acknowledgement;
+the incoming cursor remains the only acknowledgement and a lost cursor fails
+closed with 409. Abort stops further reads and every exit closes the subscription.
+`longPollIntervalMs` and `DEFAULT_LONG_POLL_INTERVAL_MS` are removed.
+
+Wake signals contain no delivery authority. Duplicate hints coalesce, lost
+hints delay delivery by at most the configured fallback interval (5 seconds by
+default), and a hint between an empty read and the wait is retained. The facade
+signals only after committed append or a cancellation result containing a
+mailbox message. Handlers retain no cross-request subscription state.
+
+Memory and reference-server memory/SQLite compositions use an in-process wake.
+Resident Node/Postgres Hosts use one dedicated session-mode LISTEN connection
+per process and migration 0024's pending-outbox insert trigger, which covers
+append, cancellation and dead-letter replay at commit. The listener reconnects
+with backoff, broadcasts a re-read hint on each successful LISTEN, and probes
+self-NOTIFY delivery; failure is observable through `onError` or the default
+console error. Host shutdown closes the listener and outstanding subscriptions.
+This Node-only factory is excluded from the dataplane runtime entry. Workers
+Hosts compose one in-process wake per invocation and choose their fallback
+latency because Hyperdrive does not carry LISTEN/NOTIFY. The client and frozen
+wire contracts do not change.
 
 ### Client intermediate retention (#399)
 

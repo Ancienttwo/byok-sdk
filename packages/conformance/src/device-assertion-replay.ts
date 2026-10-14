@@ -21,6 +21,21 @@ export function runDeviceAssertionReplayConformance(
   options: { readonly skip?: boolean } = {},
 ): void {
   describe.skipIf(options.skip === true)(`device assertion replay conformance [${name}]`, () => {
+    it('collects expiry at the exact boundary with one bounded tenant budget', async () => {
+      const handle = await factory.create();
+      try {
+        const tenant = tenantId('replay-retention');
+        const input = { schema: DEVICE_ASSERTION_SCHEMA_ID, tenantId: tenant, issuer: 'https://api.example.com', productId: 'product-a', deviceId: 'device-a', audience: 'connector-binding', expiresAt: '2026-08-12T04:47:00.000Z' } as const;
+        for (const jti of ['AAAAAAAAAAAAAAAAAAAAAA', 'BBBBBBBBBBBBBBBBBBBBBB', 'CCCCCCCCCCCCCCCCCCCCCC']) await handle.replay.consume({ ...input, jti });
+        const other = { ...input, tenantId: tenantId('replay-other'), jti: 'DDDDDDDDDDDDDDDDDDDDDD' };
+        await handle.replay.consume(other);
+        expect(await handle.replay.collectExpired(tenant, { now: '2026-08-12T04:46:59.999Z', limit: 2 })).toEqual({ removed: 0, expired: 0, releasedBytes: 0n, more: false });
+        expect(await handle.replay.collectExpired(tenant, { now: input.expiresAt, limit: 2 })).toEqual({ removed: 2, expired: 0, releasedBytes: 0n, more: true });
+        expect(await handle.replay.collectExpired(tenant, { now: input.expiresAt, limit: 1 })).toEqual({ removed: 1, expired: 0, releasedBytes: 0n, more: false });
+        expect(await handle.replay.consume(other)).toBe(false);
+      } finally { await handle.dispose?.(); }
+    });
+
     it('admits exactly one concurrent consumer for an assertion namespace and JTI', async () => {
       const handle = await factory.create();
       try {

@@ -9,76 +9,48 @@ contract in `packages/core/src/mailbox.ts`, and the Postgres implementation in
 
 ## What the sweep does
 
-`MailboxStore.collectRetired(tenant, { deviceId?, ackedBefore, expireUnackedBefore })`
-is the only retention entry point. It performs two disjoint sweeps in one
-statement:
+`MailboxStore.collectExpired(tenant, { now, limit, ackedBefore, expireUnackedBefore })`
+is the tenant-wide mailbox collector. One call mutates at most `limit` rows:
+acked rows are deleted first, then the remaining slots mark old pending rows
+`expired`. `more` reports a further eligible row; reaching the limit alone does
+not imply a remainder.
 
-| Row state | Cutoff | Action | Reported as |
+| Row state | Cutoff | Action | Report field |
 | --- | --- | --- | --- |
-| `acked` | `ackedBefore` | **deleted** | `deletedCount`, `releasedBytes` (report only) |
-| `pending` | `expireUnackedBefore` | **marked `expired`** | `expiredCount` |
+| `acked` | `ackedBefore` | delete | `removed` |
+| `pending` | `expireUnackedBefore` | mark `expired`, retain the row | `expired` |
 
-Mailbox usage is the sum over the retained rows (`MailboxStore.readUsage`), so
-a deleted row stops counting by itself; `releasedBytes` reports what left, it
-is not an accounting step. An `expired` row is retained and keeps counting.
+Mailbox usage is `SUM(byteSize)` over retained rows in all states. The collector
+never reads or writes an accounting counter, and **`releasedBytes` is always
+`0n`**. Deleted rows cease contributing to the next derived usage read; dead
+letters continue to count until explicit operator discard.
 
-The asymmetry is the contract, not an optimization. A row the device
-acknowledged has been durably journaled on the device, so deleting it loses
-nothing. A row that aged out **before anyone consumed it** is work that was
-dropped, and §12.7.5 requires it to stay visible — deleting it would make "we
-lost work" indistinguishable from "there was no work". No path in the
-implementation deletes an unacked row, and the conformance suite asserts an
-unacked row survives a sweep whose cutoffs are far in the future.
-
-Both cutoffs must be **canonical ISO-8601 UTC** (`YYYY-MM-DDTHH:mm:ss.sssZ`).
-Anything else is rejected with `timestamp_not_canonical` before the sweep runs,
-so a malformed cutoff deletes nothing rather than a wrong prefix of history.
-The instants are compared against the stored `appended_at` as text, which is a
-time comparison only for that canonical form.
-
-Predicates and index, for capacity planning: both sweeps filter
-`(tenant_id, device_id, state, appended_at)`, which is exactly
-`outbox_retention_idx` in `deploy/sql/0002_core_domain.sql`. Omitting
-`deviceId` widens the sweep to the whole tenant and drops `device_id` from the
-prefix, so a tenant-wide sweep scans more of the index — prefer per-device
-sweeps on large tenants.
+`now` and both cutoffs must be canonical ISO-8601 UTC
+(`YYYY-MM-DDTHH:mm:ss.sssZ`). `limit` must be a positive safe integer. Validation
+precedes mutations. There is no device-specific collection argument.
 
 ## Who runs it
 
-**The SDK ships no scheduler.** Nothing in `@byok-sdk/core`, `@byok-sdk/cloud` or
-`@byok-sdk/cloud-dataplane` starts a timer, and nothing calls `collectRetired` on its
-own. The host runs it: a cron job, a queue consumer, a Cloudflare cron trigger,
-a Kubernetes CronJob — whatever the deployment already has. Two consequences
-worth stating plainly:
+`ByokCloud.runMaintenance({ tenant, now, policy, limit })` computes the two
+cutoffs and calls this collector as one of its ten fixed steps. The defaults
+are 24 hours for acked rows, 7 days for unacked rows and 500 rows per step.
+Unacked expiry is evidence of lost work, not permission to delete that work.
 
-- **A deployment that never calls it never expires anything.** The mailbox grows
-  until `mailboxLimitBytes` refuses new appends with `storage_quota_exceeded`.
-  That is a working failure mode (bounded, typed, visible) and it is not the one
-  you want to discover in production.
-- **The cutoffs are the caller's**, computed against the caller's clock. The
-  store reads no clock of its own for retention, which is what makes the sweep
-  assertable under a test clock and what makes a wrong cutoff entirely the
-  host's to own.
+The reference server schedules maintenance every 5 minutes with ±20% jitter.
+`server.maintenance.runNow()` joins an in-flight pass; `server.close()` stops
+the timer and awaits collection before closing SQLite. There is no separate
+`server.mailbox` retention façade and no disable option.
 
-Suggested defaults, from the §12.7.5 table:
+Hosted deployments call the same kernel entry point from their scheduler,
+with their explicitly stored policy and caller-owned clock. Use one scheduler
+per tenant and export its returned report or `observer.onMaintenance` report.
+A missing hosted policy fails closed; embedded defaults do not substitute for
+it. See [cloud-cleanup.md](cloud-cleanup.md) for the other steps and operator
+reconciliation.
 
-| Data | Suggested default | Deletion condition |
-| --- | --- | --- |
-| mailbox | time-bounded window, configured per tenant/device | acked; unacked past expiry moves to `expired` and is not silently dropped |
-| inbound dedup | at least the mailbox's maximum redelivery window | expiry |
-| request receipts | at least proof clock skew plus the client retry horizon | expiry |
-| pairing / auth nonce | order of 10 minutes | used or expired |
-| presence | 60–120 s | TTL |
-| activity tail | 5–15 minutes | TTL |
-
-The dedup window is the coupled one: `inbound_dedup` must remember an envelope
-id for at least as long as the mailbox can still redeliver it. Set the mailbox
-window wider than the dedup window and a redelivered envelope can be processed
-twice.
-
-Presence and activity are not swept by this runbook. Their TTL is enforced as a
-read filter (`expires_at > now`), so an expired hint is invisible the moment it
-expires whether or not anything reclaims the row.
+The SQL collector has bounded tenant/state/cutoff predicates. The existing
+outbox indexes remain installed; assess a large tenant with `EXPLAIN` and its
+actual distribution before choosing an additional index.
 
 ## Capacity-bounded rings are not time-bounded retention
 
@@ -96,7 +68,7 @@ Concretely in this SDK:
   count-bounded: `DEDUP_RING_CAPACITY = 1024` ids per device, oldest evicted
   first. Its window in *time* is whatever 1024 envelopes happens to span — an
   hour for a chatty device, a month for a quiet one.
-- `collectRetired` is age-bounded: a row survives on its `appended_at`, whatever
+- `collectExpired` is age-bounded: a row survives on its `appended_at`, whatever
   the volume.
 
 So "we keep 1024" and "we keep 24 hours" are answers to different questions. A
@@ -145,7 +117,7 @@ execute. The skip path calls `advanceCursor` **without** routing the envelope
 through `onEnvelope`, so nothing is written to the local journal.
 
 In hosted mode the consequence lands here: the cloud sees the advanced cursor,
-`advanceCursor` marks the row `acked`, and the next `collectRetired` sweep
+`advanceCursor` marks the row `acked`, and the next `collectExpired` sweep
 **deletes** it as consumed. The row is gone from the mailbox and was never
 recorded on the device.
 

@@ -35,8 +35,10 @@ satisfies that contract directly.
 ```ts
 const stores = createPostgresCloudStores(options);
 const truthCommitter = new PostgresTruthCommitter({ pool, clock, crypto });
+const mailboxWake = createPostgresMailboxWake({ connectionString: sessionDsn, onError: reportWakeError });
 
 createByokCloud({
+  mailboxWake,
   // core, cloud: stores, crypto, tokenSigner, clock, capabilities, ...
   truthCommitter,
   truthObjectDownloads: stores.blobs,
@@ -156,16 +158,27 @@ observes existence, size and content type; it never verifies SHA-256.
 
 `createPostgresCloudMaintenance` builds the separate host-operations
 composition. It intentionally does not add methods to the conformance-certified
-`CloudBlobStore`: LIST/HEAD/DELETE, retention policy, dead-letter replay and
+`CloudBlobStore`: LIST/HEAD/DELETE, dead-letter replay and
 usage rebuild are host operations, not device blob capabilities.
 
-The host calls `runTenant(tenant, jobId)` from its scheduler. Postgres stores the
-job/cursor readback, eligible objects are tombstoned before R2 DELETE, and
-manifest plus usage settle once after deletion. An R2 key without a manifest is
-first recorded as a pending witness and waits the tenant's orphan grace; it is
-never deleted from a single LIST observation. See
-`deploy/runbooks/cloud-cleanup.md` for metrics, alerts, replay/discard,
-crash recovery and rollback.
+The Host scheduler calls `cloud.runMaintenance({ tenant, now, policy, limit })`.
+Read the existing policy with
+`new PostgresRetentionPolicyStore(pool, clock).readRetentionPolicy(tenant)`
+from `@byok-sdk/cloud-dataplane/runtime` and pass it directly: its four fields
+use the kernel's bigint milliseconds. Policy writes use the same store; a missing
+entitlement-selected policy fails closed.
+`createPostgresCoreStores` requires the real `objectStorage` configuration;
+standalone `PostgresObjectStore` requires a physical deletion authority.
+Each port has one bounded `collectExpired`, and each object consumes one
+shared retry/tombstone/delete budget. PG holds the same-hash manifest row
+across physical deletion and accounting settlement to prevent concurrent
+recreation from losing bytes. `cleanup_job` remains installed without writers.
+
+`reconcileObjectStorage(tenant)` is an explicit operator API. A previously
+untracked R2 key first becomes a pending witness and waits fresh orphan grace.
+See `deploy/runbooks/cloud-cleanup.md` for reports, scheduling, replay/discard,
+crash recovery and accounting repair. Identity receipts and redeemed pairing
+code rows remain protected; the production request receipt class is empty.
 
 `@byok-sdk/cloud` is a stateless handler package — it serves the frozen v1 device
 wire contract over ports and owns no storage. This package is one composition of
@@ -353,3 +366,39 @@ test rather than a step someone remembers. What runs:
 ## License
 
 MIT. Node.js 24.15.0 or newer.
+
+## Wake-driven long-poll migration (#410)
+
+Apply `0024_mailbox_wake.sql` through the package migration runner. Its
+`outbox` AFTER INSERT trigger signals pending rows at commit, covering normal
+append, atomic cancellation and dead-letter replay. Rollback does not notify.
+The fixed-size `md5(tenant_id || '\n' || device_id)` payload contains no ids or
+message contents. Hash collisions cause extra reads, never a lost delivery.
+
+On Node, import `createPostgresMailboxWake` from the package root, create one
+instance per process with a **session-mode DSN**, and inject it into
+`createByokCloud({ mailboxWake, ... })`. It owns one dedicated `pg.Client` and
+never takes a pool slot, even with many simultaneous holds. Add one connection
+per process to the `max_connections` budget. At shutdown await
+`mailboxWake.close()` as well as `pool.end()`.
+
+The listener reconnects with bounded exponential backoff and wakes every local
+subscription after each successful LISTEN. A self-NOTIFY probe checks each new
+connection; missing notifications and connection failures go to `onError`, or
+to the default labelled console error. `probeTimeoutMs` defaults to 5 seconds.
+`onError` must not throw. A transaction-mode PgBouncer DSN cannot keep a LISTEN
+session; the probe reports this configuration failure. Hints may be lost or
+repeated, so `fallbackMs` (default 5 seconds) still bounds delivery latency.
+
+The listener is Node-only and absent from `./runtime`. Hyperdrive cannot carry
+LISTEN/NOTIFY. Workers Hosts import the portable runtime stores and inject a
+new `createInProcessMailboxWake({ fallbackMs: 1_000 })` from `@byok-sdk/cloud`
+per invocation; cross-isolate writes are observed within that interval.
+A low-latency Durable Object wake is outside this package's current scope.
+
+Deployment order is independent of correctness: new code without the trigger
+uses fallback reads; the trigger without listeners only emits unused hints.
+`longPollIntervalMs` and `DEFAULT_LONG_POLL_INTERVAL_MS` are deleted. Do not
+carry the old hold loop alongside the wake port.
+
+Runtime dependencies and size budgets: [entry dependency contract](../../README.md#entry-dependencies).

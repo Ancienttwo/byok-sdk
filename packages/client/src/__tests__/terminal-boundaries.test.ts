@@ -131,7 +131,7 @@ describe('terminal durability and actual harness boundaries', () => {
 });
 
 it('R1/R6: committed decline settles its failed receipt after cancellation filters the offer', async () => {
-  const cloud = await startRealCloud({ productId: 'terminal-boundaries', eventsPageLimit: 2, longPollHoldMs: 20, longPollIntervalMs: 5 });
+  const cloud = await startRealCloud({ productId: 'terminal-boundaries', eventsPageLimit: 2, longPollHoldMs: 20, mailboxFallbackMs: 5 });
   cleanup.push(() => cloud.close());
   const cfg = await config(cloud.url);
   const adapter = new StubRuntimeAdapter();

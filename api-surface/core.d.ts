@@ -186,6 +186,7 @@ export interface DeviceProofVerifier {
     verify(input: DeviceProofVerifyInput): Promise<boolean>;
 }
 // ==== @byok-sdk/core dist/blob.d.ts ====
+import type { CollectExpiredInput, CollectExpiredResult } from './retention';
 import type { TenantId } from './tenant';
 /** `sha256:<64 lowercase hex>`. The only content-address form core accepts. */
 export declare const CONTENT_HASH_PATTERN: RegExp;
@@ -329,6 +330,7 @@ export interface ObjectListQuery {
  * `deletePendingBefore` is not a canonical ISO-8601 UTC instant).
  */
 export interface ObjectStore {
+    collectExpired(tenant: TenantId, input: ObjectCollectExpiredInput): Promise<CollectExpiredResult>;
     /** Creates or returns the `pending` row for `hash`. Idempotent per (tenant, hash). */
     putManifest(tenant: TenantId, input: ObjectManifestInput): Promise<ObjectManifestEntry>;
     /** `pending` → `committed` after verifying observed size/type. */
@@ -342,6 +344,9 @@ export interface ObjectStore {
     markDeletePending(tenant: TenantId, hash: ContentHash): Promise<ObjectManifestEntry>;
     /** Tombstone step 3: the object store delete succeeded. */
     markDeleted(tenant: TenantId, hash: ContentHash): Promise<ObjectManifestEntry>;
+}
+export interface ObjectCollectExpiredInput extends CollectExpiredInput {
+    readonly orphanBefore: string;
 }
 // ==== @byok-sdk/core dist/board.d.ts ====
 /**
@@ -504,6 +509,7 @@ export declare function hasCapability(declaration: CapabilityDeclaration, capabi
  */
 export declare function assertCapability(declaration: CapabilityDeclaration, capability: string): void;
 // ==== @byok-sdk/core dist/device-assertion.d.ts ====
+import type { CollectExpiredInput, CollectExpiredResult } from './retention';
 /**
  * Device assertion envelope, canonical signing bytes, and verifier
  * (plan `device-assertion-broker`, P3 ①-⑤).
@@ -795,6 +801,7 @@ export interface DeviceAssertionReplayConsumeInput {
  * never be translated into authenticated success.
  */
 export interface DeviceAssertionReplayAuthority {
+    collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     consume(input: DeviceAssertionReplayConsumeInput): Promise<boolean>;
 }
 export interface AuthenticateDeviceAssertionDeps {
@@ -1050,6 +1057,8 @@ export {};
  * - the five `storage_*` codes (§12.7.7, see `quota.ts`)
  */
 export declare const CORE_ERROR_CODES: {
+    readonly retention_input_invalid: 'retention_input_invalid';
+    readonly retention_collect_failed: 'retention_collect_failed';
     readonly tenant_id_invalid: 'tenant_id_invalid';
     readonly content_hash_invalid: 'content_hash_invalid';
     readonly timestamp_not_canonical: 'timestamp_not_canonical';
@@ -1116,6 +1125,9 @@ export declare function isCoreError(value: unknown, code?: CoreErrorCode): value
 /** Narrows an unknown thrown value to a conflict error carrying a snapshot. */
 export declare function isCoreConflictError<TCurrent>(value: unknown, code?: CoreErrorCode): value is CoreConflictError<TCurrent>;
 // ==== @byok-sdk/core dist/in-memory/blob.d.ts ====
+import { InMemoryStorageLedger } from './storage-ledger';
+import { type CollectExpiredResult } from '../retention';
+import type { ObjectCollectExpiredInput } from '../blob';
 /**
  * In-memory {@link ObjectStore} reference (§12.7.4, §12.7.8).
  *
@@ -1130,7 +1142,11 @@ import type { Clock } from '../stores';
 import { type TenantId } from '../tenant';
 export declare class InMemoryObjectStore implements ObjectStore {
     #private;
-    constructor(clock: Clock);
+    private readonly maintenance;
+    constructor(clock: Clock, maintenance: {
+        readonly ledger: InMemoryStorageLedger;
+        readonly bytes: InMemoryObjectBytes;
+    });
     putManifest(tenant: TenantId, input: ObjectManifestInput): Promise<ObjectManifestEntry>;
     commit(tenant: TenantId, input: ObjectCommitInput): Promise<ObjectManifestEntry>;
     get(tenant: TenantId, hash: ContentHash): Promise<ObjectManifestEntry | undefined>;
@@ -1139,6 +1155,10 @@ export declare class InMemoryObjectStore implements ObjectStore {
     removeReference(tenant: TenantId, input: ObjectReferenceInput): Promise<ObjectManifestEntry>;
     markDeletePending(tenant: TenantId, hash: ContentHash): Promise<ObjectManifestEntry>;
     markDeleted(tenant: TenantId, hash: ContentHash): Promise<ObjectManifestEntry>;
+    collectExpired(tenant: TenantId, input: ObjectCollectExpiredInput): Promise<CollectExpiredResult>;
+}
+export interface InMemoryObjectBytes {
+    deleteObject(tenant: TenantId, hash: ContentHash): void;
 }
 // ==== @byok-sdk/core dist/in-memory/board.d.ts ====
 /**
@@ -1181,15 +1201,17 @@ import type { MutableClock } from '../stores';
 export declare const IN_MEMORY_CLOCK_EPOCH = "2026-01-01T00:00:00.000Z";
 export declare function createMutableClock(start?: Date): MutableClock;
 // ==== @byok-sdk/core dist/in-memory/device-assertion-replay.d.ts ====
+import { type CollectExpiredInput, type CollectExpiredResult } from '../retention';
+import type { TenantId } from '../tenant';
 import type { DeviceAssertionReplayConsumeInput, DeviceAssertionReplayAuthority } from '../device-assertion';
 /** Process-local reference authority. Production runtimes need durable atomic storage. */
 export declare class InMemoryDeviceAssertionReplayAuthority implements DeviceAssertionReplayAuthority {
     #private;
     consume(input: DeviceAssertionReplayConsumeInput): Promise<boolean>;
-    /** Delete at most `limit` keys whose assertion lifetime ended at or before `before`. */
-    deleteExpired(before: Date, limit: number): Promise<number>;
+    collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/core dist/in-memory/index.d.ts ====
+import type { InMemoryObjectBytes } from './blob';
 import type { Clock, CoreStores, MutableClock } from '../stores';
 export { createMutableClock, IN_MEMORY_CLOCK_EPOCH } from './clock';
 export { InMemoryMailboxStore } from './mailbox';
@@ -1201,6 +1223,7 @@ export { InMemoryQuotaStore } from './quota';
 export { InMemorySkillPackStore } from './skill-pack';
 export { InMemoryDeviceAssertionReplayAuthority } from './device-assertion-replay';
 export interface InMemoryCoreOptions {
+    readonly objectBytes: InMemoryObjectBytes;
     /** Defaults to a fresh {@link createMutableClock}, so TTL behavior is deterministic. */
     readonly clock?: Clock;
 }
@@ -1209,14 +1232,17 @@ export interface InMemoryCoreComposition {
     /** The clock the stores read. Mutable only when the caller did not inject its own. */
     readonly clock: Clock;
 }
-export declare function createInMemoryCoreStores(options?: InMemoryCoreOptions): InMemoryCoreComposition;
+export declare function createInMemoryCoreStores(options: InMemoryCoreOptions): InMemoryCoreComposition;
 /** Convenience for tests that need to move time: returns the composition and its mutable clock. */
-export declare function createInMemoryCoreCompositionWithClock(): {
+export declare function createInMemoryCoreCompositionWithClock(objectBytes: InMemoryObjectBytes): {
     readonly stores: CoreStores;
     readonly clock: MutableClock;
 };
+export { InMemoryStorageLedger } from './storage-ledger';
+export type { InMemoryObjectBytes } from './blob';
 // ==== @byok-sdk/core dist/in-memory/mailbox.d.ts ====
-import type { MailboxAdvanceCursorInput, MailboxAppendInput, MailboxCursorState, MailboxMessage, MailboxPage, MailboxReadQuery, MailboxRecordDeliveryInput, MailboxRetentionInput, MailboxRetentionResult, MailboxStore, MailboxUsage } from '../mailbox';
+import { type CollectExpiredResult } from '../retention';
+import type { MailboxAdvanceCursorInput, MailboxAppendInput, MailboxCursorState, MailboxMessage, MailboxPage, MailboxReadQuery, MailboxRecordDeliveryInput, MailboxCollectExpiredInput, MailboxStore, MailboxUsage } from '../mailbox';
 import type { QuotaStore } from '../quota';
 import type { Clock } from '../stores';
 import { type TenantId } from '../tenant';
@@ -1230,9 +1256,10 @@ export declare class InMemoryMailboxStore implements MailboxStore {
     advanceCursor(tenant: TenantId, input: MailboxAdvanceCursorInput): Promise<MailboxCursorState>;
     recordDelivery(tenant: TenantId, input: MailboxRecordDeliveryInput): Promise<MailboxCursorState>;
     readCursor(tenant: TenantId, deviceId: string): Promise<MailboxCursorState>;
-    collectRetired(tenant: TenantId, input: MailboxRetentionInput): Promise<MailboxRetentionResult>;
+    collectExpired(tenant: TenantId, input: MailboxCollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/core dist/in-memory/presence.d.ts ====
+import { type CollectExpiredInput, type CollectExpiredResult } from '../retention';
 import { type PresenceHint, type PresenceHintInput, type PresenceStore } from '../presence';
 import type { Clock } from '../stores';
 import { type TenantId } from '../tenant';
@@ -1242,15 +1269,20 @@ export declare class InMemoryPresenceStore implements PresenceStore {
     publish(tenant: TenantId, input: PresenceHintInput): Promise<PresenceHint>;
     read(tenant: TenantId, deviceId: string): Promise<PresenceHint | undefined>;
     list(tenant: TenantId): Promise<readonly PresenceHint[]>;
+    collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/core dist/in-memory/quota.d.ts ====
+import { InMemoryStorageLedger } from './storage-ledger';
+import { type CollectExpiredResult } from '../retention';
+import type { QuotaCollectExpiredInput } from '../quota';
 import type { ObjectStore } from '../blob';
 import type { StorageFinalizeInput, StorageFinalizeResult, StorageReservation, StorageReservationInput, StorageStatus, QuotaStore, TenantStorageEntitlement, TenantStorageEntitlementInput, TenantStorageUsage } from '../quota';
 import type { Clock } from '../stores';
 import { type TenantId } from '../tenant';
 export declare class InMemoryQuotaStore implements QuotaStore {
     #private;
-    constructor(clock: Clock, objects: ObjectStore);
+    private readonly ledger;
+    constructor(clock: Clock, objects: ObjectStore, ledger: InMemoryStorageLedger);
     readEntitlement(tenant: TenantId): Promise<TenantStorageEntitlement | undefined>;
     writeEntitlement(tenant: TenantId, input: TenantStorageEntitlementInput): Promise<TenantStorageEntitlement>;
     readUsage(tenant: TenantId): Promise<TenantStorageUsage>;
@@ -1259,7 +1291,7 @@ export declare class InMemoryQuotaStore implements QuotaStore {
     reserve(tenant: TenantId, input: StorageReservationInput): Promise<StorageReservation>;
     finalizeReservation(tenant: TenantId, input: StorageFinalizeInput): Promise<StorageFinalizeResult>;
     abortReservation(tenant: TenantId, reservationId: string): Promise<StorageReservation>;
-    expireReservations(tenant: TenantId): Promise<readonly StorageReservation[]>;
+    collectExpired(tenant: TenantId, input: QuotaCollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/core dist/in-memory/skill-pack.d.ts ====
 /**
@@ -1286,6 +1318,36 @@ export declare class InMemorySkillPackStore implements SkillPackStore {
     get(tenant: TenantId, name: string): Promise<SkillPackManifest | undefined>;
     list(tenant: TenantId, query: SkillPackListQuery): Promise<readonly SkillPackManifest[]>;
     readFile(tenant: TenantId, name: string, path: string): Promise<SkillPackFileContent | undefined>;
+}
+// ==== @byok-sdk/core dist/in-memory/storage-ledger.d.ts ====
+import type { Clock } from '../stores';
+import type { ContentHash } from '../blob';
+import type { StorageReservation, TenantStorageUsage } from '../quota';
+import type { TenantId } from '../tenant';
+export interface ReservationRecord {
+    readonly reservation: StorageReservation;
+    readonly deduplicated: boolean;
+}
+/** Shared authority for reservations, object accounting and quota reads. */
+export declare class InMemoryStorageLedger {
+    #private;
+    private readonly clock;
+    constructor(clock: Clock);
+    readReservation(key: string): ReservationRecord | undefined;
+    writeReservation(key: string, record: ReservationRecord): void;
+    deleteReservation(key: string): void;
+    reservations(): IterableIterator<[string, ReservationRecord]>;
+    readUsage(tenant: TenantId): TenantStorageUsage;
+    writeUsage(tenant: TenantId, usage: TenantStorageUsage): void;
+    isCounted(tenant: TenantId, hash: string): boolean;
+    recordCommitted(tenant: TenantId, reservation: StorageReservation): void;
+    hasReservedObject(tenant: TenantId, hash: ContentHash): boolean;
+    reservedObjectHashes(tenant: TenantId): readonly string[];
+    prepareCollectedObjectRelease(tenant: TenantId, hash: ContentHash, byteSize: bigint, now: string): {
+        readonly releasedBytes: bigint;
+        readonly commit: () => void;
+    };
+    releaseCollectedObject(tenant: TenantId, hash: ContentHash, byteSize: bigint, now: string): bigint;
 }
 // ==== @byok-sdk/core dist/in-memory/truth.d.ts ====
 import type { Clock } from '../stores';
@@ -1322,7 +1384,7 @@ export { ByokCoreError, CoreConflictError, CORE_ERROR_CODES, isCoreError, isCore
 export type { CoreErrorCode } from './errors';
 export { CANONICAL_TIMESTAMP_PATTERN, assertCanonicalTimestamp, isCanonicalTimestamp, } from './time';
 export { MAILBOX_MESSAGE_STATES } from './mailbox';
-export type { MailboxAdmission, MailboxAdvanceCursorInput, MailboxAppendInput, MailboxBody, MailboxCursorState, MailboxMessage, MailboxMessageState, MailboxPage, MailboxReadQuery, MailboxRecordDeliveryInput, MailboxRetentionInput, MailboxRetentionResult, MailboxStore, MailboxUsage, } from './mailbox';
+export type { MailboxAdmission, MailboxAdvanceCursorInput, MailboxAppendInput, MailboxBody, MailboxCursorState, MailboxMessage, MailboxMessageState, MailboxPage, MailboxReadQuery, MailboxRecordDeliveryInput, MailboxCollectExpiredInput, MailboxStore, MailboxUsage, } from './mailbox';
 export { BOARD_STATUSES, BOARD_TRANSITIONS, isLegalBoardTransition } from './board';
 export type { BoardAssignee, BoardClaimInput, BoardItem, BoardItemInput, BoardListQuery, BoardPage, BoardStatus, BoardStatusUpdateInput, BoardStore, BoardUnclaimInput, } from './board';
 export { TRUTH_RECORD_KINDS } from './truth';
@@ -1352,7 +1414,14 @@ export type { AgentMemoryIntentDigestInput } from './agent-memory-intent';
 export { NONCE_SIGNING_DOMAIN, nonceSigningBytes } from './pairing';
 export { IN_MEMORY_CLOCK_EPOCH, InMemoryBoardStore, InMemoryMailboxStore, InMemoryDeviceAssertionReplayAuthority, InMemoryObjectStore, InMemoryPresenceStore, InMemoryQuotaStore, InMemorySkillPackStore, InMemoryTruthStore, createInMemoryCoreStores, createInMemoryCoreCompositionWithClock, createMutableClock, } from './in-memory/index';
 export type { InMemoryCoreComposition, InMemoryCoreOptions } from './in-memory/index';
+export { assertCollectExpiredInput, CollectExpiredFailure } from './retention';
+export type { CollectExpiredInput, CollectExpiredCounts, CollectExpiredResult } from './retention';
+export type { QuotaCollectExpiredInput } from './quota';
+export type { ObjectCollectExpiredInput } from './blob';
+export { InMemoryStorageLedger } from './in-memory/storage-ledger';
+export type { InMemoryObjectBytes } from './in-memory/blob';
 // ==== @byok-sdk/core dist/mailbox.d.ts ====
+import type { CollectExpiredInput, CollectExpiredResult } from './retention';
 /**
  * Hosted mailbox contract (§12.7.3).
  *
@@ -1471,7 +1540,7 @@ export interface MailboxPage {
      * retained, which §12.7.5 requires.
      *
      * This is a READ of the retained window, never a second retention authority:
-     * `collectRetired` decides what is retained, this reports what it cost.
+     * `collectExpired` decides what is retained, this reports what it cost.
      */
     readonly recoverableFrom: number;
 }
@@ -1504,18 +1573,11 @@ export interface MailboxCursorState {
  * `timestamptz` comparison read differently is the worst place to guess — see
  * `time.ts`.
  */
-export interface MailboxRetentionInput {
-    readonly deviceId?: string;
+export interface MailboxCollectExpiredInput extends CollectExpiredInput {
     /** Acked rows appended before this instant are deleted. */
     readonly ackedBefore: string;
     /** Unacked rows appended before this instant move to `expired`, never deleted here. */
     readonly expireUnackedBefore: string;
-}
-export interface MailboxRetentionResult {
-    readonly deletedCount: number;
-    readonly expiredCount: number;
-    /** Report value only: usage is derived from rows, so nothing is released. */
-    readonly releasedBytes: bigint;
 }
 /**
  * Mailbox port. Tenant-first, async.
@@ -1540,7 +1602,7 @@ export interface MailboxStore {
     advanceCursor(tenant: TenantId, input: MailboxAdvanceCursorInput): Promise<MailboxCursorState>;
     readCursor(tenant: TenantId, deviceId: string): Promise<MailboxCursorState>;
     /** Retention hook: delete acked rows, dead-letter unacked ones. */
-    collectRetired(tenant: TenantId, input: MailboxRetentionInput): Promise<MailboxRetentionResult>;
+    collectExpired(tenant: TenantId, input: MailboxCollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/core dist/pairing.d.ts ====
 /**
@@ -1626,6 +1688,7 @@ export declare const CORE_PORT_METHODS: Readonly<Record<CoreStoreName, readonly 
 /** The interface each port name is declared as, for the source-side scan. */
 export declare const CORE_PORT_INTERFACES: Readonly<Record<CoreStoreName, string>>;
 // ==== @byok-sdk/core dist/presence.d.ts ====
+import type { CollectExpiredInput, CollectExpiredResult } from './retention';
 /**
  * Presence hints (§12.3).
  *
@@ -1728,6 +1791,7 @@ export interface PresenceHintInput {
  * expired hint is indistinguishable from one that was never written.
  */
 export interface PresenceStore {
+    collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     publish(tenant: TenantId, input: PresenceHintInput): Promise<PresenceHint>;
     read(tenant: TenantId, deviceId: string): Promise<PresenceHint | undefined>;
     list(tenant: TenantId): Promise<readonly PresenceHint[]>;
@@ -1788,6 +1852,7 @@ export declare function isControlPlanePrincipal(principal: Principal): principal
  */
 export declare function principalTenant(principal: Principal): TenantId;
 // ==== @byok-sdk/core dist/quota.d.ts ====
+import type { CollectExpiredInput, CollectExpiredResult } from './retention';
 /**
  * Tenant storage entitlement, usage, reservation and retention (§12.7.6-12.7.7).
  *
@@ -1943,6 +2008,7 @@ export declare const STORAGE_ERROR_HTTP_STATUS: {
  * `storage_reservation_not_found`, and the five wire-stable codes above.
  */
 export interface QuotaStore {
+    collectExpired(tenant: TenantId, input: QuotaCollectExpiredInput): Promise<CollectExpiredResult>;
     readEntitlement(tenant: TenantId): Promise<TenantStorageEntitlement | undefined>;
     /**
      * Version CAS: a write at or below the stored version is rejected with the
@@ -1967,8 +2033,31 @@ export interface QuotaStore {
     finalizeReservation(tenant: TenantId, input: StorageFinalizeInput): Promise<StorageFinalizeResult>;
     /** Idempotent release. Already-settled reservations return their settled row. */
     abortReservation(tenant: TenantId, reservationId: string): Promise<StorageReservation>;
-    /** Cleanup hook: expires reservations past their TTL and releases their bytes. */
-    expireReservations(tenant: TenantId): Promise<readonly StorageReservation[]>;
+}
+export interface QuotaCollectExpiredInput extends CollectExpiredInput {
+    readonly settledBefore: string;
+}
+// ==== @byok-sdk/core dist/retention.d.ts ====
+import { ByokCoreError } from './errors';
+export interface CollectExpiredInput {
+    readonly now: string;
+    readonly limit: number;
+}
+export interface CollectExpiredCounts {
+    readonly removed: number;
+    readonly expired: number;
+    readonly releasedBytes: bigint;
+}
+export interface CollectExpiredResult extends CollectExpiredCounts {
+    readonly more: boolean;
+}
+export declare function assertCollectExpiredInput(input: CollectExpiredInput): void;
+/** A committed partial result remains visible when external deletion fails. */
+export declare class CollectExpiredFailure extends ByokCoreError {
+    readonly committed: CollectExpiredCounts;
+    readonly failedRows: number;
+    readonly more?: boolean | undefined;
+    constructor(committed: CollectExpiredCounts, failedRows: number, more?: boolean | undefined, options?: ErrorOptions);
 }
 // ==== @byok-sdk/core dist/sealed-provider-secret.d.ts ====
 /**

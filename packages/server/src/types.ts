@@ -21,7 +21,7 @@ import type {
   TerminalProjectionSelection,
   AgentHomeAccess,
 } from '@byok-sdk/protocol';
-import type { InboundRefusalReason, TenantId, TokenSigner } from '@byok-sdk/cloud';
+import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { WakeConsumer } from './wakes/types';
 import type { RateLimiterOptions } from './rate-limiter';
@@ -41,6 +41,7 @@ export type ByokServerStorage =
 
 /** Options for {@link createByokServer}. */
 export interface CreateByokServerOptions {
+  maintenance?: { readonly policy?: Partial<RetentionPolicy>; readonly intervalMs?: number; readonly limit?: number };
   /**
    * Identifies which product this server instance serves. Checked against the
    * `productId` a daemon announces in `conn.hello` — one daemon process is
@@ -443,7 +444,11 @@ export interface TaskSnapshot {
  * publish transitions no device ever made. `machines.list()` reports the
  * observation itself instead.
  */
+/** A failed event has a report for step failures, or errorCode for a pass fault. */
 export type ByokServerEvent =
+  | { readonly kind: 'maintenance.completed'; readonly report: MaintenanceReport }
+  | { readonly kind: 'maintenance.failed'; readonly report: MaintenanceReport }
+  | { readonly kind: 'maintenance.failed'; readonly errorCode: string }
   | { kind: 'task.created'; taskId: string; at: string }
   | {
       kind: 'task.state';

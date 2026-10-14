@@ -2,10 +2,10 @@
 import type { WakeRecord, WakeScheduleInput, WakeScheduleResult } from './wakes/types';
 export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedError } from './wakes/types';
 export type { DueWake, WakeRecord, WakeScheduleInput, WakeScheduleResult, WakeConsumer, WakeInputErrorCode } from './wakes/types';
+import { type MaintenanceReport } from '@byok-sdk/cloud';
 import { Hono } from 'hono';
 import { type EnqueuedOffer, type PairingCodeInfo, type TaskAttempt } from '@byok-sdk/cloud';
 import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
-import type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
 import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, TaskHandle, TaskSnapshot } from './types';
 export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, CreateByokServerOptions, DispatchInput, FreshAgentEgressDispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskHandle, TaskResult, TaskSnapshot, } from './types';
 export type { InboundRefusalReason, TaskOfferReadback } from '@byok-sdk/cloud';
@@ -37,8 +37,6 @@ export type { SteerRejectionCode } from '@byok-sdk/cloud';
  */
 export type { AccessTokenClaims, DeviceRecord, PairingCodeInfo, TenantId, TokenSigner } from '@byok-sdk/cloud';
 export { createHmacTokenSigner } from '@byok-sdk/cloud';
-/** Cutoffs and result of {@link ByokServer.mailbox.collectRetired}, owned by `@byok-sdk/core`. */
-export type { MailboxRetentionInput, MailboxRetentionResult } from '@byok-sdk/core';
 export { SqliteOwnershipError, SqliteSchemaError, SqliteUnavailableError } from './sqlite-support';
 export type { SqliteSchemaErrorCode } from './sqlite-support';
 export type { RateLimiterOptions } from './rate-limiter';
@@ -165,26 +163,8 @@ export interface ByokServer {
     devices: {
         revoke(deviceId: string): Promise<void>;
     };
-    /**
-     * Mailbox retention for this server's tenant — the host control-plane
-     * operation core defines (`MailboxStore.collectRetired`), forwarded verbatim.
-     *
-     * A pass-through, deliberately, and NOT a retention policy: the caller names
-     * both cutoffs, so this package invents no TTL, runs no timer, and holds no
-     * second opinion about when a device's undelivered work is declared lost.
-     * Nothing in `@byok-sdk/core`, `@byok-sdk/cloud` or this façade drives the
-     * sweep on its own, which is exactly why an embedder needs a way to reach it:
-     * without one, an embedded server retires nothing, ever, and the
-     * `cursor_too_old` floor can never move.
-     *
-     * Acked rows appended before `ackedBefore` are DELETED; unacked rows appended
-     * before `expireUnackedBefore` are dead-lettered as `expired` and stay
-     * visible, which is what moves `recoverableFrom` and turns a device polling
-     * from a lost cursor into a `409 cursor_too_old` resync instead of a silently
-     * short page. Both cutoffs must be canonical ISO-8601 UTC.
-     */
-    mailbox: {
-        collectRetired(input: MailboxRetentionInput): Promise<MailboxRetentionResult>;
+    maintenance: {
+        runNow(): Promise<MaintenanceReport>;
     };
     /**
      * Release what this instance holds: the relay's per-task feeds and their
@@ -668,7 +648,7 @@ export declare function createTaskHandle(taskId: string, deps: TaskHandleDeps): 
 // ==== @byok-sdk/server dist/types.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
 import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess } from '@byok-sdk/protocol';
-import type { InboundRefusalReason, TenantId, TokenSigner } from '@byok-sdk/cloud';
+import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { WakeConsumer } from './wakes/types';
 import type { RateLimiterOptions } from './rate-limiter';
@@ -686,6 +666,11 @@ export type ByokServerStorage = {
 };
 /** Options for {@link createByokServer}. */
 export interface CreateByokServerOptions {
+    maintenance?: {
+        readonly policy?: Partial<RetentionPolicy>;
+        readonly intervalMs?: number;
+        readonly limit?: number;
+    };
     /**
      * Identifies which product this server instance serves. Checked against the
      * `productId` a daemon announces in `conn.hello` — one daemon process is
@@ -1091,7 +1076,17 @@ export interface TaskSnapshot {
  * publish transitions no device ever made. `machines.list()` reports the
  * observation itself instead.
  */
+/** A failed event has a report for step failures, or errorCode for a pass fault. */
 export type ByokServerEvent = {
+    readonly kind: 'maintenance.completed';
+    readonly report: MaintenanceReport;
+} | {
+    readonly kind: 'maintenance.failed';
+    readonly report: MaintenanceReport;
+} | {
+    readonly kind: 'maintenance.failed';
+    readonly errorCode: string;
+} | {
     kind: 'task.created';
     taskId: string;
     at: string;

@@ -186,8 +186,8 @@ export function runQuotaConformance(factory: CoreCompositionFactory): void {
 
         await handle.advanceTime(60_000);
 
-        const expired = await stores.quota.expireReservations(TENANT_A);
-        expect(expired.map((entry) => entry.reservationId)).toEqual(['res-1']);
+        const expired = await stores.quota.collectExpired(TENANT_A, { now: handle.now(), limit: 500, settledBefore: '1970-01-01T00:00:00.000Z' });
+        expect(expired).toEqual({ removed: 0, expired: 1, releasedBytes: 300n, more: false });
         expect((await stores.quota.readUsage(TENANT_A)).reservedBytes).toBe(0n);
 
         const late = await captureError(

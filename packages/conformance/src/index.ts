@@ -44,3 +44,7 @@ export type {
   PairingSimulatorComposition,
   PairingSimulatorCompositionFactory,
 } from './simulator/index';
+
+export { runCoreRetentionConformance } from './core/retention';
+
+export { runCloudRetentionConformance } from './cloud/retention';

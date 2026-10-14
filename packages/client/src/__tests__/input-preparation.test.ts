@@ -1514,6 +1514,7 @@ describe('PR187 review regressions', () => {
     await service.prepare(request());
     clock += 401;
     await service.collectExpired(clock, 32);
+    expect(service.store.list()[0]?.artifactBytes).toBe(0);
     expect(await fs.readdir(path.join(storeDir, 'input-preparation', 'artifacts'))).toEqual([]);
     expect(service.store.list()).toHaveLength(1);
     expect(service.store.list()[0]?.artifactBytes).toBe(0);

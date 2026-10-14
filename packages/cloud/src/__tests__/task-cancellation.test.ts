@@ -64,17 +64,18 @@ describe('host task cancellation', () => {
     const stores = tenantStoresFor(devicePrincipal(TENANT_A, device.deviceId), {
       core: harness.core,
       cloud: harness.stores,
+      mailboxWake: harness.mailboxWake,
     });
     await handleInboundEnvelope(
       stores,
       device.deviceId,
       createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId: offer.taskId }),
-    );
+    ).then((result) => result.outcome);
     await handleInboundEnvelope(
       stores,
       device.deviceId,
       createEnvelope('task.started', {}, { taskId: offer.taskId }),
-    );
+    ).then((result) => result.outcome);
 
     const cancellation = await harness.cloud.cancelTask(TENANT_A, offer.taskId, 'stop runtime');
     expect(cancellation.status).toBe('cancel_requested');
@@ -88,7 +89,7 @@ describe('host task cancellation', () => {
       stores,
       device.deviceId,
       createEnvelope('task.cancelled', { reason: 'stop runtime' }, { taskId: offer.taskId }),
-    );
+    ).then((result) => result.outcome);
     await expect(harness.cloud.readTaskAttempt(TENANT_A, offer.taskId)).resolves.toMatchObject({
       status: 'cancelled',
       cancellation: { reason: 'stop runtime' },
@@ -108,6 +109,7 @@ describe('host task cancellation', () => {
     const stores = tenantStoresFor(devicePrincipal(TENANT_A, device.deviceId), {
       core: harness.core,
       cloud: harness.stores,
+      mailboxWake: harness.mailboxWake,
     });
     await harness.cloud.createBoardItem(TENANT_A, {
       itemId: offer.taskId,
@@ -120,12 +122,12 @@ describe('host task cancellation', () => {
       stores,
       device.deviceId,
       createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId: offer.taskId }),
-    );
+    ).then((result) => result.outcome);
     await handleInboundEnvelope(
       stores,
       device.deviceId,
       createEnvelope('task.started', {}, { taskId: offer.taskId }),
-    );
+    ).then((result) => result.outcome);
     await handleInboundEnvelope(
       stores,
       device.deviceId,
@@ -134,7 +136,7 @@ describe('host task cancellation', () => {
         { summary: 'success won', sessionRef: 'successful-session' },
         { taskId: offer.taskId },
       ),
-    );
+    ).then((result) => result.outcome);
 
     const lateCancellation = await harness.cloud.cancelTask(TENANT_A, offer.taskId, 'too late');
 
@@ -165,12 +167,13 @@ describe('host task cancellation', () => {
     const stores = tenantStoresFor(devicePrincipal(TENANT_A, device.deviceId), {
       core: harness.core,
       cloud: harness.stores,
+      mailboxWake: harness.mailboxWake,
     });
     await handleInboundEnvelope(
       stores,
       device.deviceId,
       createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId: offer.taskId }),
-    );
+    ).then((result) => result.outcome);
     const cancellation = await harness.cloud.cancelTask(TENANT_A, offer.taskId, 'cancel wins');
 
     await handleInboundEnvelope(
@@ -181,7 +184,7 @@ describe('host task cancellation', () => {
         { summary: 'late success', sessionRef: 'late-session' },
         { taskId: offer.taskId },
       ),
-    );
+    ).then((result) => result.outcome);
 
     const raw = await harness.cloud.readTerminalReceipt(TENANT_A, offer.taskId);
     expect(raw && decodeEnvelope(raw.body).type).toBe('task.complete');
@@ -202,6 +205,7 @@ describe('host task cancellation', () => {
     const stores = tenantStoresFor(devicePrincipal(TENANT_A, device.deviceId), {
       core: harness.core,
       cloud: harness.stores,
+      mailboxWake: harness.mailboxWake,
     });
     await harness.cloud.createBoardItem(TENANT_A, {
       itemId: offer.taskId,
@@ -213,7 +217,7 @@ describe('host task cancellation', () => {
       stores,
       device.deviceId,
       createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId: offer.taskId }),
-    );
+    ).then((result) => result.outcome);
 
     let releaseStatusMutation!: () => void;
     const statusMutationHeld = new Promise<void>((resolve) => {
@@ -246,7 +250,7 @@ describe('host task cancellation', () => {
         { summary: 'late success', sessionRef: 'late-session' },
         { taskId: offer.taskId },
       ),
-    );
+    ).then((result) => result.outcome);
     await statusMutationStarted;
 
     const cancellation = await harness.cloud.cancelTask(TENANT_A, offer.taskId, 'cancel wins the CAS');

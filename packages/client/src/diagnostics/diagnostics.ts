@@ -314,7 +314,8 @@ async function inspectJournal(storeDir: string): Promise<DiagnosticsSnapshot['jo
         if (result?.quick_check !== 'ok') {
           return { status: 'corrupt', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), reason: 'journal quick_check failed' };
         }
-        return { status: 'present', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), integrity: 'ok' };
+        const failed = db.prepare("SELECT COUNT(*) AS count FROM journal_terminal WHERE truth_state = 'failed'").get() as { count: number };
+        return { status: 'present', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), integrity: 'ok', failedTerminalCount: failed.count };
       } catch {
         return { status: 'unavailable', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), reason: 'journal snapshot could not be checked' };
       } finally {
@@ -715,6 +716,7 @@ export async function collectDiagnostics(
         activeTaskCount: live.activeTasks.length,
         pendingApprovalCount: live.approvalsPending,
         operationalHealth: live.operationalHealth,
+        ...(live.outbound === undefined ? {} : { outbound: live.outbound }),
         storage: live.storage,
       };
     } catch {

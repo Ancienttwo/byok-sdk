@@ -1,3 +1,4 @@
+import { R2ObjectMaintenanceStore } from '../stores/r2-blobs';
 /**
  * The nine S4A.4 object assertions, against a real S3 implementation.
  *
@@ -80,7 +81,7 @@ async function createObjectHarness(options: HarnessOptions = {}): Promise<Object
 
   // The manifest's own clock stays logical, exactly as every other store's
   // does. Only the signature reads wall time.
-  const objects = new PostgresObjectStore(scope.pool, createMutableClock());
+  const objects = new PostgresObjectStore(scope.pool, createMutableClock(), new R2ObjectMaintenanceStore(storage.config));
   const blobs = new R2CloudBlobStore({
     ...storage.config,
     ...options,

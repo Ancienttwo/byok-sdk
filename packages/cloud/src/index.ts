@@ -67,7 +67,6 @@ export {
   AGENT_HOME_CONTRACT_CAPABILITY,
   DEFAULT_EVENTS_PAGE_LIMIT,
   DEFAULT_LONG_POLL_HOLD_MS,
-  DEFAULT_LONG_POLL_INTERVAL_MS,
   DEFAULT_MAX_BLOB_SIZE_BYTES,
 } from './cloud';
 export {
@@ -156,6 +155,7 @@ export type {
   InboundCommitted,
   InboundOutcome,
   InboundRefusalReason,
+  InboundResult,
   InboundRefused,
 } from './inbound';
 
@@ -220,8 +220,6 @@ export {
   assertTaskAttemptListLimit,
   DEFAULT_ACTIVITY_BOUNDS,
   DEFAULT_ACTIVITY_CAPACITY,
-  DEFAULT_ACTIVITY_MAX_BYTES,
-  DEFAULT_ACTIVITY_MAX_EVENTS,
   DEFAULT_ACTIVITY_TTL_MS,
   DEFAULT_BOARD_CHANNEL_MAX_BYTES,
   DEFAULT_BOARD_TITLE_MAX_BYTES,
@@ -363,6 +361,8 @@ export {
   NONCE_TTL_MS,
   createInMemoryBlobs,
   createInMemoryCloudStores,
+  createInMemoryBlobBytes,
+  InMemoryBlobBytes,
 } from './stores/in-memory/index';
 export type {
   InMemoryBlobStoreOptions,
@@ -373,3 +373,12 @@ export type {
 export type { DeviceTerminal } from './terminal-result';
 
 export { RecurringExecutionInputSchema, type RecurringExecutionInput } from './recurring';
+
+export { DEFAULT_RETENTION_POLICY, DEFAULT_MAINTENANCE_LIMIT, MAINTENANCE_STEPS, resolveRetentionPolicy } from './maintenance';
+export type { RetentionPolicy, MaintenanceInput, MaintenanceReport, MaintenanceStep, MaintenanceStepReport } from './maintenance';
+export { RECEIPT_RETENTION, REQUEST_RECEIPT_PREFIXES, receiptRetentionClass } from './receipt-retention';
+export type { ReceiptRetentionClass } from './receipt-retention';
+export type { ReceiptCollectExpiredInput } from './stores/ports';
+export type { MailboxWake, MailboxWakeSubscription } from './mailbox-wake';
+export { createInProcessMailboxWake, DEFAULT_MAILBOX_WAKE_FALLBACK_MS } from './stores/in-memory/mailbox-wake';
+export type { InProcessMailboxWakeOptions } from './stores/in-memory/mailbox-wake';

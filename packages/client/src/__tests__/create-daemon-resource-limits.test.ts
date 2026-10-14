@@ -79,8 +79,8 @@ describe('createDaemonWithAdapters: DaemonConfig.progressBatch validation', () =
   it.each([0, -1, Number.NaN, 1.5, Number.POSITIVE_INFINITY])(
     'rejects invalid maxBatchBytes %s synchronously',
     async (maxBatchBytes) => {
-      const config = await buildConfig({ maxBatchBytes });
-      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(config) }, [new StubRuntimeAdapter()])).toThrow(/maxBatchBytes/);
+      const config = await buildConfig({ maxBatchBytes } as never);
+      expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...config }, [new StubRuntimeAdapter()])).toThrow(/maxBatchBytes/);
     },
   );
 
@@ -92,9 +92,8 @@ describe('createDaemonWithAdapters: DaemonConfig.progressBatch validation', () =
     expect(() => createDaemonWithAdapters({ storage: { scratchRoot: testScratchRoot() }, ...(badInterval) }, [new StubRuntimeAdapter()])).toThrow(/flushIntervalMs/);
   });
 
-  it('accepts an explicit byte budget and an unset policy', async () => {
+  it('accepts timing and count policy with server-owned bytes', async () => {
     const configured = await buildConfig({
-      maxBatchBytes: 64 * 1024,
       maxBatchSize: 10,
       flushIntervalMs: 250,
     });

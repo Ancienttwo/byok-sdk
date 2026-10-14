@@ -1,3 +1,5 @@
+import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpiredResult } from '../retention';
+import type { TenantId } from '../tenant';
 import type {
   DeviceAssertionReplayConsumeInput,
   DeviceAssertionReplayAuthority,
@@ -40,19 +42,15 @@ export class InMemoryDeviceAssertionReplayAuthority implements DeviceAssertionRe
     return true;
   }
 
-  /** Delete at most `limit` keys whose assertion lifetime ended at or before `before`. */
-  async deleteExpired(before: Date, limit: number): Promise<number> {
-    const cutoff = before.getTime();
-    if (!Number.isFinite(cutoff) || !Number.isSafeInteger(limit) || limit <= 0) {
-      throw new Error('device assertion replay cleanup bounds are invalid');
-    }
-    let deleted = 0;
+  async collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    const cutoff = Date.parse(input.now);
+    let removed = 0, more = false;
     for (const [key, expiresAt] of this.#expiresAtByKey) {
-      if (expiresAt > cutoff) continue;
-      this.#expiresAtByKey.delete(key);
-      deleted += 1;
-      if (deleted === limit) break;
+      if (JSON.parse(key)[0] !== tenant || expiresAt > cutoff) continue;
+      if (removed === input.limit) { more = true; break; }
+      this.#expiresAtByKey.delete(key); removed++;
     }
-    return deleted;
+    return { removed, expired: 0, releasedBytes: 0n, more };
   }
 }

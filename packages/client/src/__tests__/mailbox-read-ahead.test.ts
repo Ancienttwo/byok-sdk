@@ -14,7 +14,7 @@ const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => { for (const clean of cleanup.reverse()) await clean(); cleanup.length = 0; });
 
 it('real pageLimit=2 reaches approve/cancel behind an unfinished offer without acknowledging it', async () => {
-  const cloud = await startRealCloud({ productId: 'read-ahead', eventsPageLimit: 2, longPollHoldMs: 20, longPollIntervalMs: 5 });
+  const cloud = await startRealCloud({ productId: 'read-ahead', eventsPageLimit: 2, longPollHoldMs: 20, mailboxFallbackMs: 5 });
   cleanup.push(() => cloud.close());
   const root = await mkdtemp(path.join(os.tmpdir(), 'byok-read-ahead-')); cleanup.push(() => rm(root, { recursive: true, force: true }));
   const auth = new AuthManager({ serverUrl: cloud.url, store: new DeviceStore(root) });
@@ -56,7 +56,7 @@ it('real pageLimit=2 reaches approve/cancel behind an unfinished offer without a
 it('R5/R6: real paginated cancel retires never-returning prepare and permits same-home reuse', async () => {
   const { createDaemonWithAdapters } = await import('../daemon/create-daemon');
   const { StubRuntimeAdapter } = await import('./fixtures/stub-adapter');
-  const cloud = await startRealCloud({ productId: 'read-ahead', eventsPageLimit: 2, longPollHoldMs: 20, longPollIntervalMs: 5 });
+  const cloud = await startRealCloud({ productId: 'read-ahead', eventsPageLimit: 2, longPollHoldMs: 20, mailboxFallbackMs: 5 });
   cleanup.push(() => cloud.close());
   const root = await mkdtemp(path.join(os.tmpdir(), 'byok-read-ahead-')); cleanup.push(() => rm(root, { recursive: true, force: true }));
   const adapter = new StubRuntimeAdapter('acme-harness');

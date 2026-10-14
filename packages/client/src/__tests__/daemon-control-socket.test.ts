@@ -203,6 +203,8 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     adapter.sessions[0]?.emit({ type: 'turn_end' });
     await server.waitFor((e) => e.type === 'task.complete');
 
+    // Server receipt precedes local settlement; control projects the settled observer.
+    await vi.waitFor(() => expect(daemon!.tasks().find((task) => task.taskId === 't1')?.state).toBe('Complete'));
     let statusAfter!: ControlStatusResult;
     await vi.waitFor(async () => { statusAfter = await conn.client.request<ControlStatusResult>('status'); expect(statusAfter.activeTasks).toEqual([]); expect(statusAfter.queueWatermarks).toEqual([]); expect(statusAfter.approvalsPending).toBe(0); });
     expect(statusAfter.queueWatermarks).toEqual([]);

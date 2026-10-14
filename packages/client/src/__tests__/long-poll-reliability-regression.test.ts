@@ -51,6 +51,7 @@ async function seededAuth(): Promise<AuthManager> {
 describe('long-poll reliability regressions (#135, #136, #137)', () => {
   let server: TestServer | undefined;
   let connection: ConnectionManager | undefined;
+  let settlements: import('../daemon/connection-manager').OutboundSettlement[] = [];
 
   afterEach(async () => {
     vi.restoreAllMocks();
@@ -62,6 +63,7 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
   });
 
   async function startConnection(cursorStore: CursorStore): Promise<{ deviceId: string; pollCursors: Array<string | null> }> {
+    settlements = [];
     server = await TestServer.start();
     const storeDir = await tmpDir('byok-long-poll-reliability-connection-');
     const auth = new AuthManager({ serverUrl: server.url, store: new DeviceStore(storeDir) });
@@ -83,6 +85,7 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
       auth,
       cursorStore,
       onEnvelope: () => {},
+      onOutboundSettled: async (batch) => { settlements.push(...batch); },
       longPollRetryDelayMs: 15,
       longPollIdleDelayMs: 15,
     });
@@ -243,12 +246,9 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     releaseHello();
     await starting;
 
-    const rejectionView = connection as unknown as {
-      rejectedOutbox: () => readonly { envelope: Envelope; reason: string }[];
-    };
-    await vi.waitFor(() => expect(rejectionView.rejectedOutbox()).toEqual([
-      { envelope: poisonFirst, reason: 'inbound_rejected' },
-      { envelope: poisonSecond, reason: 'inbound_rejected' },
+    await vi.waitFor(() => expect(settlements.filter((item) => item.outcome === 'rejected')).toEqual([
+      { envelope: poisonFirst, outcome: 'rejected', reason: 'unspecified' },
+      { envelope: poisonSecond, outcome: 'rejected', reason: 'unspecified' },
     ]), { timeout: 600 });
     await vi.waitFor(() => expect(connection!.outboxLength()).toBe(0));
     expect(postBatch.mock.calls.map(([batch]) => batch.map((envelope) => envelope.id))).toEqual([

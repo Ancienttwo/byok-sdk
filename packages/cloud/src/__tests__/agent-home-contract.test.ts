@@ -14,7 +14,7 @@ const OTHER_AGENT_REF = { agentId: 'agent-2', profileRevision: 'profile-r9' } as
 function deviceStores(harness: CloudHarness, deviceId: string) {
   return tenantStoresFor(
     { kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId },
-    { core: harness.core, cloud: harness.stores },
+    { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
   );
 }
 
@@ -153,14 +153,14 @@ describe('hosted Agent-home contract', () => {
           stores,
           device.deviceId,
           createEnvelope('task.claim', { deviceId: device.deviceId, agentRef }, { taskId }),
-        ),
+        ).then((result) => result.outcome),
       ).resolves.toBe('accepted');
       await expect(
         handleInboundEnvelope(
           stores,
           device.deviceId,
           createEnvelope('task.await_approval', { summary: 'needs confirmation', approvalId }, { taskId }),
-        ),
+        ).then((result) => result.outcome),
       ).resolves.toBe('accepted');
     }
 
@@ -199,7 +199,7 @@ describe('hosted Agent-home contract', () => {
       body: JSON.stringify({ messages: [hello] }),
     });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ accepted: 1, capabilities: [...CLOUD_PROTOCOL_CAPABILITIES] });
+    expect(await response.json()).toMatchObject({ accepted: 1, capabilities: [...CLOUD_PROTOCOL_CAPABILITIES] });
     expect((await harness.stores.devices.get(TENANT_A, device.deviceId))?.capabilities).toEqual([
       AGENT_HOME_CONTRACT_CAPABILITY,
     ]);
@@ -225,7 +225,7 @@ describe('hosted Agent-home contract', () => {
       deviceId: device.deviceId,
       productId: 'test-product',
     });
-    expect(await handleInboundEnvelope(stores, device.deviceId, downgradedHello)).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, device.deviceId, downgradedHello).then((result) => result.outcome)).toBe('accepted');
     expect((await harness.stores.devices.get(TENANT_A, device.deviceId))?.capabilities).toEqual([]);
     await expect(
       harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
@@ -250,7 +250,7 @@ describe('hosted Agent-home contract', () => {
       productId: 'test-product',
     });
 
-    expect(await handleInboundEnvelope(stores, device.deviceId, incompatibleHello)).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, device.deviceId, incompatibleHello).then((result) => result.outcome)).toBe('rejected');
     expect((await harness.stores.devices.get(TENANT_A, device.deviceId))?.capabilities).toBeUndefined();
   });
 
@@ -378,7 +378,7 @@ describe('hosted Agent-home contract', () => {
           { deviceId: other.deviceId, agentRef: AGENT_REF },
           { taskId },
         ),
-      ),
+      ).then((result) => result.outcome),
     ).toBe('rejected');
 
     const mismatchedClaim = createEnvelope(
@@ -386,14 +386,14 @@ describe('hosted Agent-home contract', () => {
       { deviceId: device.deviceId, agentRef: { agentId: 'agent-other', profileRevision: 'profile-r1' } },
       { taskId },
     );
-    expect(await handleInboundEnvelope(stores, device.deviceId, mismatchedClaim)).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, device.deviceId, mismatchedClaim).then((result) => result.outcome)).toBe('rejected');
 
     const missingDecline = createEnvelope(
       'task.decline',
       { reason: 'missing AgentRef', retryable: false },
       { taskId },
     );
-    expect(await handleInboundEnvelope(stores, device.deviceId, missingDecline)).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, device.deviceId, missingDecline).then((result) => result.outcome)).toBe('rejected');
     const mismatchedDecline = createEnvelope(
       'task.decline',
       {
@@ -403,15 +403,15 @@ describe('hosted Agent-home contract', () => {
       },
       { taskId },
     );
-    expect(await handleInboundEnvelope(stores, device.deviceId, mismatchedDecline)).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, device.deviceId, mismatchedDecline).then((result) => result.outcome)).toBe('rejected');
 
     const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF }, { taskId });
-    expect(await handleInboundEnvelope(stores, device.deviceId, claim)).toBe('accepted');
-    expect(await handleInboundEnvelope(stores, device.deviceId, createEnvelope('task.started', {}, { taskId }))).toBe(
+    expect(await handleInboundEnvelope(stores, device.deviceId, claim).then((result) => result.outcome)).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, device.deviceId, createEnvelope('task.started', {}, { taskId })).then((result) => result.outcome)).toBe(
       'accepted',
     );
     expect(
-      await handleInboundEnvelope(stores, device.deviceId, createEnvelope('task.progress', { seq: 1, events: [] }, { taskId })),
+      await handleInboundEnvelope(stores, device.deviceId, createEnvelope('task.progress', { seq: 1, events: [] }, { taskId })).then((result) => result.outcome),
     ).toBe('accepted');
 
     const mismatchedTerminal = createEnvelope(
@@ -423,7 +423,7 @@ describe('hosted Agent-home contract', () => {
       },
       { taskId },
     );
-    expect(await handleInboundEnvelope(stores, device.deviceId, mismatchedTerminal)).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, device.deviceId, mismatchedTerminal).then((result) => result.outcome)).toBe('rejected');
     expect(await harness.cloud.readTerminalReceipt(TENANT_A, taskId)).toBeUndefined();
 
     const first = createEnvelope(
@@ -436,8 +436,8 @@ describe('hosted Agent-home contract', () => {
       { reason: 'second', agentRef: AGENT_REF },
       { taskId },
     );
-    expect(await handleInboundEnvelope(stores, device.deviceId, first)).toBe('accepted');
-    expect(await handleInboundEnvelope(stores, device.deviceId, second)).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, device.deviceId, first).then((result) => result.outcome)).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, device.deviceId, second).then((result) => result.outcome)).toBe('accepted');
     expect((await harness.cloud.readTaskResult(TENANT_A, taskId))?.state).toBe('complete');
     expect((await harness.cloud.readTaskResult(TENANT_A, taskId))?.agentRef).toEqual(AGENT_REF);
   });

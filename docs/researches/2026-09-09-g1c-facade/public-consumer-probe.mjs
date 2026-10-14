@@ -61,7 +61,7 @@ async function recoverOrDispatch(byok, binding) {
 
 const root = mkdtempSync(join(tmpdir(), 'byok-public-request-'));
 const productId = 'public-request-probe';
-const serverOptions = { productId, storage: { kind: 'sqlite', path: join(root, 'server.sqlite') },
+const serverOptions = { productId, maintenance: { policy: { mailboxAckedRetentionMs: 1n } }, storage: { kind: 'sqlite', path: join(root, 'server.sqlite') },
   tokenSigner: createHmacTokenSigner(new Uint8Array(32).fill(9), { now: () => new Date() }), longPollHoldMs: 5 };
 const scope = 'fixture-authenticated-account/workspace';
 const hostPath = join(root, 'host.sqlite');
@@ -141,7 +141,9 @@ try {
   await send('task.started', {}, first.taskId);
   await send('task.complete', { summary: 'fixture complete', sessionRef }, first.taskId);
   await poll(); // Sends the cursor that ACKs the original offer.
-  await byok.mailbox.collectRetired({ deviceId, ackedBefore: '2999-01-01T00:00:00.000Z', expireUnackedBefore: '2999-01-01T00:00:00.000Z' });
+  // Let the explicit 1ms test policy age before the shared maintenance pass.
+  await new Promise(resolve => setTimeout(resolve, 10));
+  await byok.maintenance.runNow();
   await restart();
   assert.deepEqual(await recoverOrDispatch(byok, host.bind(requestId, 'cycle-1/support', input)), offer);
   assert.equal((await byok.tasks.get(first.taskId)).result.summary, 'fixture complete');

@@ -1,6 +1,7 @@
 import { EXPIRING_CLASS_IDS, PROTECTED_CLASS_IDS, type RetentionClassId, type RetentionTrigger } from '../daemon/retention/registry';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
+import { TASK_STATES, type TaskState, OUTBOUND_REFUSAL_REASONS, type OutboundRefusalReason } from '@byok-sdk/protocol';
 import { parseDaemonLifecycle, type DaemonLifecycle } from '../daemon/daemon-lifecycle';
 import { isDaemonRecordKind, type DaemonRecord } from '../daemon/daemon-record';
 import type { ServiceEnvironmentStatus, ServiceEnvironmentRecord } from '../lifecycle/service-environment';
@@ -137,6 +138,8 @@ const TERMINAL_RECORD_KINDS = new Set<DaemonRecord['kind']>(['completed', 'faile
 /** The task a record anchors, for the kinds that create or move a task row in `deriveTasksFromRecords`. Artifacts, Git observations and disposal diagnostics never anchor one. */
 function lifecycleRecordTaskId(record: DaemonRecord): string | undefined {
   switch (record.kind) {
+    case 'outbound-rejected':
+      return record.terminal ? record.taskId : undefined;
     case 'offered':
     case 'claimed':
     case 'started':
@@ -184,7 +187,7 @@ function compactPreservingLiveTasks(lines: readonly string[], targetLines: numbe
     const taskId = lifecycleRecordTaskId(record);
     if (taskId === undefined) continue;
     lastIndexForTask.set(taskId, i);
-    if (TERMINAL_RECORD_KINDS.has(record.kind)) hasTerminalRecord.add(taskId);
+    if (TERMINAL_RECORD_KINDS.has(record.kind) || (record.kind === 'outbound-rejected' && record.terminal)) hasTerminalRecord.add(taskId);
   }
 
   let anchorIndices: number[] = [];
@@ -279,6 +282,25 @@ function parseRecordLine(line: string | undefined): DaemonRecord | undefined {
   const raw = asRecord(parsed);
   if (!isDaemonRecordKind(raw.kind) || typeof raw.ts !== 'string') return undefined;
   switch (raw.kind) {
+    case 'outbound-rejected': {
+      const reason = raw.reason;
+      if (typeof reason !== 'string' || !([...OUTBOUND_REFUSAL_REASONS, 'unknown', 'unspecified'] as readonly string[]).includes(reason)
+        || typeof raw.envelopeId !== 'string' || typeof raw.type !== 'string' || typeof raw.terminal !== 'boolean'
+        || (raw.taskId !== undefined && typeof raw.taskId !== 'string')) return undefined;
+      const record = {
+        kind: 'outbound-rejected' as const,
+        ts: raw.ts,
+        envelopeId: raw.envelopeId,
+        type: raw.type,
+        reason: reason as OutboundRefusalReason,
+        ...(typeof raw.taskId === 'string' ? { taskId: raw.taskId } : {}),
+      };
+      if (raw.terminal) {
+        if (typeof raw.taskState !== 'string' || !(TASK_STATES as readonly string[]).includes(raw.taskState)) return undefined;
+        return { ...record, terminal: true, taskState: raw.taskState as TaskState };
+      }
+      return { ...record, terminal: false };
+    }
     case 'retention-sweep': {
       if (typeof raw.trigger !== 'string' || !['startup', 'periodic', 'pressure', 'home-lease'].includes(raw.trigger)
         || !['deleted', 'bytesReclaimed', 'failures', 'durationMs'].every(key => typeof raw[key] === 'number' && Number.isFinite(raw[key]) && (raw[key] as number) >= 0)

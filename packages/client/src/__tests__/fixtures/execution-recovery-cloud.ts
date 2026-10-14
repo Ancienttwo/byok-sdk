@@ -1,6 +1,8 @@
+import { createInProcessMailboxWake } from '../../../../cloud/src/index';
 import { existsSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../../daemon/agent-egress-policy';
 import { createInterface } from 'node:readline';
+import type { Server as HttpServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { serve } from '@hono/node-server';
 import {
@@ -8,17 +10,19 @@ import {
   createHmacTokenSigner,
   createWebCrypto,
   fullCapabilityDeclaration,
+  REQUEST_RECEIPT_PREFIXES,
   tenantId,
   type DeviceDirectory,
   type DeviceRecord,
   type DeviceRegistration,
   type InboundDedupStore,
+  type ReceiptCollectExpiredInput,
   type RequestReceipt,
   type RequestReceiptStore,
 } from '../../../../cloud/src/index';
 import { InMemoryPairingCodeStore } from '../../../../cloud/src/stores/in-memory/pairing-codes';
 import { createSqliteEmbeddedStores } from '../../../../server/src/stores/sqlite/index';
-import { PRESENCE_LEVELS, type PresenceStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
+import { assertCanonicalTimestamp, assertCollectExpiredInput, PRESENCE_LEVELS, type CollectExpiredResult, type PresenceStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
 import type { AgentRef } from '@byok-sdk/protocol';
 
 interface Config {
@@ -245,6 +249,29 @@ class SqliteFixtureDevices implements DeviceDirectory {
 }
 
 class SqliteFixtureReceipts implements RequestReceiptStore {
+  async collectExpired(owner: TenantId, input: ReceiptCollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    assertCanonicalTimestamp(input.requestBefore, 'requestBefore');
+    return ownerWrite(() => {
+      if (REQUEST_RECEIPT_PREFIXES.length === 0) return { removed: 0, expired: 0, releasedBytes: 0n, more: false };
+      const predicate = REQUEST_RECEIPT_PREFIXES.map(() => 'substr(receipt_key, 1, length(?)) = ?').join(' OR ');
+      const parameters = REQUEST_RECEIPT_PREFIXES.flatMap(prefix => [prefix, prefix]);
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const removed = Number(db.prepare(`DELETE FROM fixture_receipt WHERE rowid IN
+          (SELECT rowid FROM fixture_receipt WHERE tenant_id = ? AND recorded_at < ? AND (${predicate}) ORDER BY recorded_at, receipt_key LIMIT ?)`)
+          .run(owner, input.requestBefore, ...parameters, input.limit).changes);
+        const more = db.prepare(`SELECT 1 FROM fixture_receipt WHERE tenant_id = ? AND recorded_at < ? AND (${predicate}) LIMIT 1`)
+          .get(owner, input.requestBefore, ...parameters) !== undefined;
+        db.exec('COMMIT');
+        return { removed, expired: 0, releasedBytes: 0n, more };
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+    });
+  }
+
   async record(owner: TenantId, input: { readonly key: string; readonly body: string }): Promise<{ receipt: RequestReceipt; created: boolean }> {
     const recordedAt = clock.now().toISOString();
     const result = await ownerWrite(() => {
@@ -294,7 +321,7 @@ const pairing = new InMemoryPairingCodeStore(clock, devices);
 const stores = {
   ...embedded.cloud,
   devices,
-  pairingCodes: { issue: pairing.issue.bind(pairing) },
+  pairingCodes: { issue: pairing.issue.bind(pairing), collectExpired: pairing.collectExpired.bind(pairing) },
   pairing: { redeemAndRegister: pairing.redeemAndRegister.bind(pairing) },
   receipts: new SqliteFixtureReceipts(),
   dedup: new SqliteFixtureDedup(),
@@ -315,7 +342,7 @@ const cloud = createByokCloud({
     return { outcome: 'accepted' };
   } },
   longPollHoldMs: 100,
-  longPollIntervalMs: 10,
+  mailboxWake: createInProcessMailboxWake({ fallbackMs: 10 }),
 });
 await embedded.core.quota.writeEntitlement(tenant, {
   version: 1n,
@@ -358,7 +385,7 @@ const httpServer = serve({
     }
     return response;
   },
-});
+}) as HttpServer;
 
 function respond(id: number, result?: unknown, error?: unknown): void {
   process.stdout.write(`${JSON.stringify(error === undefined ? { id, result } : { id, error: String(error) })}\n`);
@@ -408,7 +435,11 @@ lines.on('line', (line) => {
       case 'readCursor':
         return embedded.core.mailbox.readCursor(tenant, String(params.deviceId));
       case 'close':
-        await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+        await new Promise<void>((resolve) => {
+          httpServer.close(() => resolve());
+          // The live daemon can keep a polling connection open after listener shutdown.
+          httpServer.closeAllConnections();
+        });
         await embedded.close();
         lines.close();
         return 'closed';

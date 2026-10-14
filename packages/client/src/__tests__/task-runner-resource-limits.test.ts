@@ -11,7 +11,7 @@ import {
   DEFAULT_MAX_TASK_OUTPUT_BYTES,
   MAX_DURATION_EXCEEDED_REASON_PREFIX,
   MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX,
-  MAX_PROGRESS_BATCH_BYTES_EXCEEDED_REASON_PREFIX,
+  ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX,
   TaskRunner,
   type TaskRunnerDeps,
 } from '../daemon/task-runner';
@@ -53,7 +53,7 @@ const unusedBlobClient: BlobResolver = {
 async function makeRunner(
   adapter: StubRuntimeAdapter,
   sent: Envelope[],
-  overrides: Partial<Pick<TaskRunnerDeps, 'shutdownInterruptTimeoutMs' | 'maxTaskOutputBytes' | 'batcherOptions'>> = {},
+  overrides: Partial<Pick<TaskRunnerDeps, 'shutdownInterruptTimeoutMs' | 'maxTaskOutputBytes' | 'batcherOptions' | 'getIngressBudget'>> = {},
 ): Promise<TaskRunner> {
   const deps: TaskRunnerDeps = { scratchRoot: testScratchOwner(),
     adapters: [adapter],
@@ -70,6 +70,7 @@ async function makeRunner(
     shutdownInterruptTimeoutMs: overrides.shutdownInterruptTimeoutMs,
     maxTaskOutputBytes: overrides.maxTaskOutputBytes,
     batcherOptions: overrides.batcherOptions,
+    getIngressBudget: overrides.getIngressBudget,
   };
   return new TaskRunner(deps);
 }
@@ -258,14 +259,32 @@ describe('TaskRunner: maxTaskOutputBytes enforcement (M5 batch-3, workstream 2)'
   });
 });
 
-describe('TaskRunner: progressBatch.maxBatchBytes enforcement', () => {
+describe('TaskRunner: server activity ingress enforcement', () => {
+  it('splits 100 KiB text and preserves the completed summary', async () => {
+    const adapter = new StubRuntimeAdapter();
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(adapter, sent);
+    await runner.handleEnvelope(createEnvelope('task.offer', { instruction: 'x' }, { taskId: 'text-split', seq: 1 }));
+    const text = 'x'.repeat(100 * 1024);
+    adapter.sessions[0]!.emit({ type: 'progress', text });
+    adapter.sessions[0]!.emit({ type: 'turn_end' });
+    await vi.waitFor(() => expect(sent.some((event) => event.type === 'task.complete')).toBe(true));
+    const progress = sent.filter((event) => event.type === 'task.progress');
+    expect(progress.length).toBeGreaterThan(1);
+    expect(progress.every((event) => event.type === 'task.progress' && Buffer.byteLength(JSON.stringify(event.payload.events)) <= 65536)).toBe(true);
+    expect(progress.flatMap((event) => event.type === 'task.progress' ? event.payload.events : []).flatMap((event) => event.type === 'progress' ? [event.text] : []).join('')).toBe(text);
+    expect(sent.find((event) => event.type === 'task.complete')?.payload).toMatchObject({ summary: text });
+    expect(sent.some((event) => event.type === 'task.fail')).toBe(false);
+  });
+
   it('flushes prior valid activity, rejects the oversized event locally, and tears down once', async () => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];
     const validEvent = { type: 'progress' as const, text: 'valid-prefix' };
     const maxBatchBytes = new TextEncoder().encode(JSON.stringify([validEvent])).length;
     const runner = await makeRunner(adapter, sent, {
-      batcherOptions: { maxBatchBytes, maxBatchSize: 10, flushIntervalMs: 60_000 },
+      batcherOptions: { maxBatchSize: 10, flushIntervalMs: 60_000 },
+      getIngressBudget: () => ({ activityMaxEvents: 10, activityMaxBytes: maxBatchBytes }),
     });
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
@@ -276,7 +295,7 @@ describe('TaskRunner: progressBatch.maxBatchBytes enforcement', () => {
     expect(session).toBeDefined();
 
     session!.emit(validEvent);
-    session!.emit({ type: 'progress', text: 'x'.repeat(maxBatchBytes * 2) });
+    session!.emit({ type: 'error', message: 'x'.repeat(maxBatchBytes * 2) });
 
     await vi.waitFor(() => {
       expect(sent.some((event) => event.type === 'task.fail' && event.task_id === 'task-batch-bytes')).toBe(true);
@@ -296,7 +315,7 @@ describe('TaskRunner: progressBatch.maxBatchBytes enforcement', () => {
     expect(failures[0]?.payload).toMatchObject({ retryable: false });
     expect(
       (failures[0]?.payload as { reason: string }).reason.startsWith(
-        MAX_PROGRESS_BATCH_BYTES_EXCEEDED_REASON_PREFIX,
+        ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX,
       ),
     ).toBe(true);
     expect(session?.interruptCalled).toBe(true);

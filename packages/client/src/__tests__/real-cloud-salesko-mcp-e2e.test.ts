@@ -29,7 +29,7 @@ describe('hosted Salesko MCP toolset over the real cloud transport', () => {
     cloud = await startRealCloud({
       productId: 'salesko',
       longPollHoldMs: 200,
-      longPollIntervalMs: 20,
+      mailboxFallbackMs: 20,
     });
 
     const adapter = new ClaudeAdapter({

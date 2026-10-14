@@ -34,9 +34,6 @@ import { AgentHomeProjectionAgentRefSchema } from './messages';
  * own enrolled tenant and device ids.
  */
 
-/** Device capability required before a Host may enqueue `agent.memory.intent.available`. */
-export const AGENT_MEMORY_INTENT_CAPABILITY = 'agent-memory-intent.v1' as const;
-
 /** Maximum UTF-8 byte length of a released `replace` body (one memory file): 256 KiB. */
 export const AGENT_MEMORY_INTENT_CONTENT_MAX_BYTES = 262_144;
 /** Maximum byte length of an intent `path` (ASCII, so bytes = characters). */

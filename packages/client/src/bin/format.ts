@@ -115,6 +115,8 @@ export function formatHaltRemedy(reason: DaemonHaltReason): string {
 export function formatDaemonEventLine(event: DaemonEvent): string {
   const prefix = `[${event.ts}]`;
   switch (event.kind) {
+    case 'outbound-rejected':
+      return `${prefix} outbound-rejected envelopeId=${event.envelopeId} type=${event.type} reason=${event.reason} terminal=${event.terminal}${event.taskId === undefined ? '' : ` taskId=${event.taskId}`}`;
     case 'retention-sweep': return `${prefix} retention-sweep trigger=${event.trigger} deleted=${event.deleted} bytesReclaimed=${event.bytesReclaimed} failures=${event.failures} truncated=${event.truncated}`;
     case 'retention-failure': return `${prefix} retention-failure trigger=${event.trigger} class=${event.classId} count=${event.count} code=${event.code}`;
     case 'offered':
@@ -229,6 +231,7 @@ export function formatTaskLine(task: DaemonTaskInfo | DerivedTaskInfo): string {
     `updatedAt=${task.updatedAt}`,
     task.sessionRef ? `sessionRef=${task.sessionRef}` : undefined,
     task.declined ? 'declined=true' : undefined,
+    task.delivery === 'rejected' ? 'delivery=rejected' : undefined,
     'summary' in task && task.summary ? `summary=${quote(task.summary)}` : undefined,
     'summaryBytes' in task && task.summaryBytes !== undefined ? `summaryBytes=${task.summaryBytes}` : undefined,
   ].filter((part): part is string => Boolean(part));
@@ -357,6 +360,8 @@ export function formatLiveStatusLines(live: ControlStatusResult): string[] {
     `live-toolsets: revision=${live.toolsets.revision} count=${live.toolsets.toolsets.length}`,
   ];
   for (const toolset of live.toolsets.toolsets) lines.push(formatToolsetStatusLine('live-toolset', toolset));
+  const outbound = live.outbound;
+  lines.push(`live-outbound: accepted=${outbound.accepted} duplicate=${outbound.duplicate} rejected=${outbound.rejected} rejectedTerminals=${outbound.rejectedTerminals}`);
   const health = live.operationalHealth;
   if (health.availability === 'unavailable') {
     lines.push(`live-operational-health: unavailable reason=${quote(health.reason)}`);

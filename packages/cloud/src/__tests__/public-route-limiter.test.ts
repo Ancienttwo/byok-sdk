@@ -1,3 +1,4 @@
+import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 /**
  * `ByokCloudOptions.publicRouteLimiter` — an admission hook in front of the
  * three unauthenticated auth routes. These tests pin that a refusal happens
@@ -10,6 +11,7 @@ import { createHmacTokenSigner } from '../auth/tokens';
 import { fullCapabilityDeclaration } from '../capabilities';
 import { createByokCloud, type LimitedPublicRoute, type PublicRouteLimiter } from '../cloud';
 import { createWebCrypto } from '../crypto/web-crypto';
+import { createInMemoryBlobBytes } from '../stores/in-memory/blobs';
 import { createInMemoryCloudStores } from '../stores/in-memory/index';
 import type { CloudStores } from '../stores/ports';
 import { CLOUD_ORIGIN, TENANT_A, createHarness } from './support/harness';
@@ -41,9 +43,11 @@ function countingStores(stores: CloudStores, calls: string[]): CloudStores {
 function composeCloud(publicRouteLimiter: PublicRouteLimiter | undefined, calls: string[]) {
   const clock = createMutableClock();
   const crypto = createWebCrypto();
-  const core = createInMemoryCoreStores({ clock }).stores;
-  const composition = createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox);
+  const objectBytes = createInMemoryBlobBytes(clock, crypto);
+  const core = createInMemoryCoreStores({ clock, objectBytes }).stores;
+  const composition = createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox, objectBytes);
   return createByokCloud({
+        mailboxWake: createInProcessMailboxWake(),
     core,
     cloud: countingStores(composition.stores, calls),
     blobContentProxy: composition.blobContentProxy,

@@ -18,8 +18,15 @@
  * effect — there are no rollback semantics here — which is safe because every
  * `task.*` type is idempotent (§9): a client that retries the same batch gets
  * `duplicate` for whatever already landed.
+ *
+ * Server replies (acks, dispositions) are appended to the device's mailbox.
+ * A full mailbox refuses them with `storage_quota_exceeded`, which answers the
+ * wire-stable 507 (§8.2) instead of a 500: resending the same batch is safe,
+ * because its duplicates re-append the same idempotent replies once the
+ * mailbox has room.
  */
 import type { Context } from 'hono';
+import { STORAGE_ERROR_HTTP_STATUS, isCoreError } from '@byok-sdk/core';
 import {
   MessagesSendRequestSchema,
   type AgentContentReceiptPayload,
@@ -27,12 +34,54 @@ import {
   type AgentMessagePublishPayload,
   type MessagesSendResponse,
 } from '@byok-sdk/protocol';
-import { handleInboundEnvelope, readAgentMessageDisposition, type ByokCloudObserver } from '../inbound';
+import { handleInboundEnvelope, readAgentMessageDisposition, type ByokCloudObserver, type InboundRefusalReason } from '../inbound';
 import type { ActivityBounds } from '../coordination';
 import type { AgentEgressRecord } from '../stores/ports';
 import type { TenantStores } from '../tenant-stores';
 import { CLOUD_PROTOCOL_CAPABILITIES } from './events';
 import { authenticateDevice, readBoundedJsonBody, type DeviceRouteDeps } from './shared';
+
+
+/** Coarse wire vocabulary deliberately hides task existence and identity bindings. */
+const WIRE_REFUSAL_REASONS = {
+  task_id_missing: 'payload_invalid',
+  hello_harnesses_without_capability: 'payload_invalid',
+  content_receipt_event_request_mismatch: 'payload_invalid',
+  claim_harness_and_runtime_conflict: 'payload_invalid',
+  recovery_report_invalid: 'payload_invalid',
+  activity_batch_invalid: 'payload_invalid',
+  approval_event_invalid: 'payload_invalid',
+  device_not_eligible: 'not_permitted',
+  hello_device_mismatch: 'not_permitted',
+  hello_product_mismatch: 'not_permitted',
+  hello_capabilities_not_recorded: 'not_permitted',
+  agent_message_attempt_mismatch: 'not_permitted',
+  agent_message_offer_binding_missing: 'not_permitted',
+  agent_message_binding_corrupt: 'not_permitted',
+  agent_message_binding_mismatch: 'not_permitted',
+  content_receipt_request_unknown: 'not_permitted',
+  content_receipt_request_mismatch: 'not_permitted',
+  task_not_found_for_device: 'not_permitted',
+  task_owned_by_other_device: 'not_permitted',
+  agent_identity_mismatch: 'not_permitted',
+  terminal_harness_mismatch: 'not_permitted',
+  claim_device_mismatch: 'not_permitted',
+  claim_harness_mismatch: 'not_permitted',
+  claim_harness_unavailable: 'not_permitted',
+  claim_offer_mismatch: 'not_permitted',
+  recovery_offer_mismatch: 'not_permitted',
+  agent_message_too_large: 'limit_exceeded',
+  activity_batch_too_large: 'limit_exceeded',
+  agent_message_already_deduplicated: 'state_conflict',
+  agent_message_reservation_conflict: 'state_conflict',
+  agent_message_admission_unconfirmed: 'state_conflict',
+  egress_conflict: 'state_conflict',
+  content_receipt_conflict: 'state_conflict',
+  claim_not_won: 'state_conflict',
+  protocol_version_unsupported: 'unsupported',
+  type_not_allowed: 'unsupported',
+  hello_protocol_version_unsupported: 'unsupported',
+} satisfies Record<InboundRefusalReason, import('@byok-sdk/protocol').OutboundRefusalReason>;
 
 const MESSAGES_JSON_BODY_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -74,6 +123,27 @@ export interface MessagesRouteDeps extends DeviceRouteDeps {
 }
 
 export function messagesHandler(deps: MessagesRouteDeps) {
+  const send = batchHandler(deps);
+  return async (c: Context): Promise<Response> => {
+    try {
+      return await send(c);
+    } catch (cause) {
+      if (isCoreError(cause, 'storage_quota_exceeded')) {
+        return c.json({ error: cause.code }, STORAGE_ERROR_HTTP_STATUS.storage_quota_exceeded);
+      }
+      // A tenant the Host never issued an entitlement to: the client keeps
+      // the batch and retries with backoff until the Host issues one. The
+      // typed 409 the blob routes use makes the cause visible, instead of
+      // an opaque 500, so operators can tell it from a full mailbox (507).
+      if (isCoreError(cause, 'storage_entitlement_missing')) {
+        return c.json({ error: cause.code }, 409);
+      }
+      throw cause;
+    }
+  };
+}
+
+function batchHandler(deps: MessagesRouteDeps) {
   return async (c: Context): Promise<Response> => {
     const authenticated = await authenticateDevice(c, deps);
     if (authenticated === undefined) return c.json({ error: 'unauthorized' }, 401);
@@ -87,8 +157,9 @@ export function messagesHandler(deps: MessagesRouteDeps) {
     let accepted = 0;
     let rejected = 0;
     let handshake = false;
+    const outcomes: NonNullable<MessagesSendResponse['outcomes']> = [];
     for (const envelope of parsed.data.messages) {
-      const outcome = await handleInboundEnvelope(
+      const result = await handleInboundEnvelope(
         stores,
         device.deviceId,
         envelope,
@@ -96,7 +167,9 @@ export function messagesHandler(deps: MessagesRouteDeps) {
         envelope.type === 'agent.message.publish' ? deps.agentMessage?.consume : undefined,
         deps.observer,
       );
+      const { outcome } = result;
       if (outcome === 'rate_limited') return c.json({ error: 'rate limit exceeded' }, 429);
+      outcomes.push({ id: envelope.id, outcome, ...(result.outcome === 'rejected' ? { reason: WIRE_REFUSAL_REASONS[result.reason] } : {}) });
       if (envelope.type === 'agent.message.publish') {
         const disposition = await readAgentMessageDisposition(stores, device.deviceId, envelope.task_id, envelope.payload);
         if (disposition !== undefined) {
@@ -127,8 +200,9 @@ export function messagesHandler(deps: MessagesRouteDeps) {
     // hello's included, omits it ("no update").
     const response: MessagesSendResponse = {
       accepted,
+      outcomes,
       ...(rejected > 0 ? { rejected } : {}),
-      ...(handshake ? { capabilities: [...CLOUD_PROTOCOL_CAPABILITIES] } : {}),
+      ...(handshake ? { capabilities: [...CLOUD_PROTOCOL_CAPABILITIES], ingress: { activityMaxEvents: deps.activityBounds.maxEvents, activityMaxBytes: deps.activityBounds.maxBytes } } : {}),
     };
     return c.json(response, 200);
   };

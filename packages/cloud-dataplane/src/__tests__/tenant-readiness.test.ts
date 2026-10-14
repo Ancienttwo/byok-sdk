@@ -1,3 +1,4 @@
+import { createObjectStorageScope } from './support/dataplane';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createMutableClock, tenantId } from '@byok-sdk/core';
@@ -36,7 +37,7 @@ if (POSTGRES_URL === undefined) {
       try {
         await migrate(scope.pool, DEPLOY_SQL);
         const clock = createMutableClock();
-        const core = createPostgresCoreStores({ pool: scope.pool, clock });
+        const core = createPostgresCoreStores({ pool: scope.pool, clock, objectStorage: (await createObjectStorageScope()).config });
         const devices = new PostgresDeviceDirectory(scope.pool, clock);
         await register(devices, TENANT_A, 'readiness-active');
         await register(devices, TENANT_A, 'readiness-online');

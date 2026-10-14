@@ -1,3 +1,6 @@
+import { DEFAULT_ACTIVITY_INGRESS } from '@byok-sdk/protocol';
+import { runMaintenanceSteps, type MaintenanceInput, type MaintenanceReport } from './maintenance';
+import type { DeviceAssertionReplayAuthority } from '@byok-sdk/core';
 import { readTaskAgentMessage, type TaskAgentMessage } from './task-agent-message';
 import { RecurringExecutionInputSchema, type RecurringExecutionInput } from './recurring';
 import { uuidFromSha256, taskOfferMessageId } from './offer-identity';
@@ -19,9 +22,7 @@ import { HarnessIdSchema, requiredReceiverCapabilities } from '@byok-sdk/protoco
  * `src/__tests__/constraints.test.ts`.
  */
 import {
-  STORAGE_ERROR_HTTP_STATUS,
   contentHash,
-  isCoreError,
   parseCapabilityDeclaration,
   type BoardItem,
   type BoardItemInput,
@@ -124,8 +125,6 @@ import { CLOUD_CAPABILITIES, declares } from './capabilities';
 import {
   assertBoardLabels,
   DEFAULT_ACTIVITY_CAPACITY,
-  DEFAULT_ACTIVITY_MAX_BYTES,
-  DEFAULT_ACTIVITY_MAX_EVENTS,
   DEFAULT_ACTIVITY_TTL_MS,
   DEFAULT_BOARD_CHANNEL_MAX_BYTES,
   DEFAULT_BOARD_TITLE_MAX_BYTES,
@@ -210,6 +209,7 @@ import type {
   TaskAttemptStatus,
 } from './stores/ports';
 import { projectTerminalResult, readDeviceTerminalReceipt, type DeviceTerminal, type TerminalResult } from './terminal-result';
+import type { MailboxWake } from './mailbox-wake';
 import { tenantStoresFor, type CloudRootStores, type TenantStores } from './tenant-stores';
 import type { TruthCommitter, TruthObjectDownloads } from './truth/contract';
 
@@ -217,8 +217,6 @@ import type { TruthCommitter, TruthObjectDownloads } from './truth/contract';
 export const DEFAULT_MAX_BLOB_SIZE_BYTES = 100 * 1024 * 1024;
 /** Matches the reference server's hold (§8). */
 export const DEFAULT_LONG_POLL_HOLD_MS = 50_000;
-/** How often a held poll re-reads the mailbox. */
-export const DEFAULT_LONG_POLL_INTERVAL_MS = 250;
 /** Rows per `GET /byok/events` response. */
 export const DEFAULT_EVENTS_PAGE_LIMIT = 50;
 /** Device capability required by the strict Agent offer path. */
@@ -255,6 +253,8 @@ function sameOfferEnvelope(expected: Envelope, actual: Envelope): boolean {
 }
 
 export interface ByokCloudOptions {
+  readonly deviceAssertionReplay?: DeviceAssertionReplayAuthority;
+  readonly mailboxWake: MailboxWake;
   readonly core: CoreStores;
   readonly cloud: CloudStores;
   /**
@@ -339,7 +339,6 @@ export interface ByokCloudOptions {
   readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
   readonly maxBlobSizeBytes?: number;
   readonly longPollHoldMs?: number;
-  readonly longPollIntervalMs?: number;
   readonly eventsPageLimit?: number;
   readonly accessTokenTtlSeconds?: number;
   readonly boardPageLimit?: number;
@@ -519,6 +518,7 @@ export interface EnqueuedOffer {
 }
 
 export interface ByokCloud {
+  runMaintenance(input: MaintenanceInput): Promise<MaintenanceReport>;
   /** WHATWG fetch handler — mount on `@hono/node-server`, a Worker, or Deno. */
   readonly fetch: (request: Request, ...rest: unknown[]) => Response | Promise<Response>;
   /** The I1 route inventory: every mounted route and the credential class it requires. */
@@ -816,6 +816,7 @@ export interface ByokCloud {
 }
 
 export function createByokCloud(options: ByokCloudOptions): ByokCloud {
+  if (options.mailboxWake === undefined) throw new TypeError('mailboxWake is required');
   const declaration = parseDeclaration(options.capabilities);
   assertNoOverDeclaration(
     declaration,
@@ -826,7 +827,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     options.agentMemoryProjectionAuthorizer,
     options.agentMemoryProjectionStore,
   );
-  const root: CloudRootStores = { core: options.core, cloud: options.cloud };
+  const root: CloudRootStores = { core: options.core, cloud: options.cloud, mailboxWake: options.mailboxWake };
   const auth: AuthPlane = createAuthPlane({
     stores: options.cloud,
     crypto: options.crypto,
@@ -850,8 +851,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
   const registry = new CloudRouteRegistry();
   const activityBounds: ActivityBounds = {
-    maxEvents: options.activityMaxEvents ?? DEFAULT_ACTIVITY_MAX_EVENTS,
-    maxBytes: options.activityMaxBytes ?? DEFAULT_ACTIVITY_MAX_BYTES,
+    maxEvents: options.activityMaxEvents ?? DEFAULT_ACTIVITY_INGRESS.maxEvents,
+    maxBytes: options.activityMaxBytes ?? DEFAULT_ACTIVITY_INGRESS.maxBytes,
     capacity: options.activityCapacity ?? DEFAULT_ACTIVITY_CAPACITY,
     ttlMs: options.activityTtlMs ?? DEFAULT_ACTIVITY_TTL_MS,
   };
@@ -904,50 +905,25 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
       { method: 'GET', path: BYOK_EVENTS_PATH, class: 'device' },
       eventsHandler({
         ...deviceRouteDeps,
+        activityBounds,
         longPollHoldMs: options.longPollHoldMs ?? DEFAULT_LONG_POLL_HOLD_MS,
-        longPollIntervalMs: options.longPollIntervalMs ?? DEFAULT_LONG_POLL_INTERVAL_MS,
         pageLimit: options.eventsPageLimit ?? DEFAULT_EVENTS_PAGE_LIMIT,
       }),
     );
   }
 
   if (declares(declaration, CLOUD_CAPABILITIES.messagesBatch)) {
-    // The batch appends server replies (acks, dispositions) to the device's
-    // mailbox. A full mailbox refuses them with `storage_quota_exceeded`, and
-    // the route answers its wire-stable 507 (§8.2) instead of a 500: resending
-    // the same batch is safe, because its duplicates re-append the same
-    // idempotent replies once the mailbox has room.
-    const messages = messagesHandler({
-      ...deviceRouteDeps,
-      activityBounds,
-      appendReliableEgressAck: enqueueReliableEgressAck,
-      appendContentReceiptAck: enqueueContentReceiptAck,
-      agentMessage: options.agentMessage,
-      appendAgentMessageDisposition: enqueueAgentMessageDisposition,
-      observer: options.observer,
-    });
     registry.register(
       { method: 'POST', path: BYOK_MESSAGES_PATH, class: 'device' },
-      async (c) => {
-        try {
-          return await messages(c);
-        } catch (cause) {
-          if (isCoreError(cause, 'storage_quota_exceeded')) {
-            return c.json(
-              { error: cause.code },
-              STORAGE_ERROR_HTTP_STATUS.storage_quota_exceeded,
-            );
-          }
-          // A tenant the Host never issued an entitlement to: the client keeps
-          // the batch and retries with backoff until the Host issues one. The
-          // typed 409 the blob routes use makes the cause visible, instead of
-          // an opaque 500, so operators can tell it from a full mailbox (507).
-          if (isCoreError(cause, 'storage_entitlement_missing')) {
-            return c.json({ error: cause.code }, 409);
-          }
-          throw cause;
-        }
-      },
+      messagesHandler({
+        ...deviceRouteDeps,
+        activityBounds,
+        appendReliableEgressAck: enqueueReliableEgressAck,
+        appendContentReceiptAck: enqueueContentReceiptAck,
+        agentMessage: options.agentMessage,
+        appendAgentMessageDisposition: enqueueAgentMessageDisposition,
+        observer: options.observer,
+      }),
     );
   }
 
@@ -1975,6 +1951,11 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
   }
 
   return {
+    async runMaintenance(input) {
+      const report = await runMaintenanceSteps({ core: options.core, cloud: options.cloud, clock: options.clock, ...(options.deviceAssertionReplay === undefined ? {} : { deviceAssertionReplay: options.deviceAssertionReplay }) }, input);
+      try { options.observer?.onMaintenance?.(report); } catch { /* Observers cannot change committed maintenance. */ }
+      return report;
+    },
     fetch: registry.fetch,
     routes: registry.routes,
     mountedRoutes: registry.mounted,

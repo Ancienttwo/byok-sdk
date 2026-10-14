@@ -12,7 +12,7 @@ import {
   type ToolsetId,
 } from '@byok-sdk/protocol';
 import { NONCE_SIGNING_DOMAIN, tenantId as brandTenantId, type TenantId } from '@byok-sdk/cloud';
-import { expect } from 'vitest';
+import { expect, vi } from 'vitest';
 import type {
   ByokServer,
   ByokServerEvent,
@@ -471,11 +471,11 @@ export async function claimAndStart(
     daemon,
     createEnvelope('task.claim', { deviceId: daemon.deviceId, runtime, capabilities }, { taskId: handle.taskId }),
   );
-  expect(claim).toEqual({ status: 200, body: { accepted: 1 } });
+  expect(claim).toMatchObject({ status: 200, body: { accepted: 1 } });
   expect((await byok.tasks.get(handle.taskId))?.state).toBe('Claimed');
 
   const started = await sendOne(daemon, createEnvelope('task.started', {}, { taskId: handle.taskId }));
-  expect(started).toEqual({ status: 200, body: { accepted: 1 } });
+  expect(started).toMatchObject({ status: 200, body: { accepted: 1 } });
   expect((await byok.tasks.get(handle.taskId))?.state).toBe('Running');
 }
 
@@ -497,7 +497,7 @@ export async function moveToAwaitApproval(
       { taskId: handle.taskId },
     ),
   );
-  expect(reported).toEqual({ status: 200, body: { accepted: 1 } });
+  expect(reported).toMatchObject({ status: 200, body: { accepted: 1 } });
   expect((await byok.tasks.get(handle.taskId))?.state).toBe('AwaitApproval');
 }
 
@@ -509,4 +509,11 @@ export async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs
     if (Date.now() - startedAt > timeoutMs) throw new Error('waitFor: condition never became true');
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+}
+
+/** Advance only the maintenance clock; HTTP and scheduler timers remain real. */
+export async function runMaintenanceAt(server: ByokServer, now: string) {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(now));
+  try { return await server.maintenance.runNow(); } finally { vi.useRealTimers(); }
 }

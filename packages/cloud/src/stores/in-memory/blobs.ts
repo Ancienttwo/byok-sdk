@@ -232,17 +232,28 @@ export interface InMemoryBlobs {
   readonly contentProxy: BlobContentProxy;
 }
 
-export function createInMemoryBlobs(
-  clock: Clock,
-  crypto: CloudCrypto,
-  objects: ObjectStore,
-  options: InMemoryBlobStoreOptions = {},
-): InMemoryBlobs {
-  const registry = new InMemoryBlobRegistry(clock, crypto, options);
-  return {
-    blobs: new InMemoryCloudBlobStore(registry, objects),
-    contentProxy: new InMemoryBlobContentProxy(registry),
-  };
+/** Composition-owned bytes, constructed before the core metadata stores. */
+export class InMemoryBlobBytes {
+  readonly #registry: InMemoryBlobRegistry;
+  constructor(clock: Clock, crypto: CloudCrypto, options: InMemoryBlobStoreOptions = {}) {
+    this.#registry = new InMemoryBlobRegistry(clock, crypto, options);
+  }
+  deleteObject(tenant: TenantId, hash: ContentHash): void {
+    for (const [id, record] of this.#registry.blobs) {
+      if (record.tenantId !== tenant || record.contentHash !== hash) continue;
+      this.#registry.blobs.delete(id);
+      this.#registry.reservationBlobs.delete(`${tenant}\u0000${record.reservationId}`);
+    }
+  }
+  bind(objects: ObjectStore): InMemoryBlobs {
+    return { blobs: new InMemoryCloudBlobStore(this.#registry, objects), contentProxy: new InMemoryBlobContentProxy(this.#registry) };
+  }
+}
+export function createInMemoryBlobBytes(clock: Clock, crypto: CloudCrypto, options: InMemoryBlobStoreOptions = {}): InMemoryBlobBytes {
+  return new InMemoryBlobBytes(clock, crypto, options);
+}
+export function createInMemoryBlobs(objects: ObjectStore, bytes: InMemoryBlobBytes): InMemoryBlobs {
+  return bytes.bind(objects);
 }
 
 function assertReservedObject(tenant: TenantId, reservation: StorageReservation): void {

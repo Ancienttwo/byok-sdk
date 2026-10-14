@@ -1,3 +1,4 @@
+import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpiredResult, type TenantId } from '@byok-sdk/core';
 import type {
   DeviceAssertionReplayAuthority,
   DeviceAssertionReplayConsumeInput,
@@ -42,22 +43,19 @@ export class PostgresDeviceAssertionReplayAuthority implements DeviceAssertionRe
     return result.rowCount === 1;
   }
 
-  /** Bounded retention cleanup; callers choose cadence and batch size. */
-  async deleteExpired(before: Date, limit: number): Promise<number> {
-    if (!Number.isFinite(before.getTime()) || !Number.isSafeInteger(limit) || limit <= 0) {
-      throw new Error('device assertion replay cleanup bounds are invalid');
-    }
-    const result = await this.#pool.query(
-      `DELETE FROM device_assertion_replay
-       WHERE ctid IN (
-         SELECT ctid
-         FROM device_assertion_replay
-         WHERE expires_at <= $1
-         ORDER BY expires_at
-         LIMIT $2
-       )`,
-      [before.toISOString(), limit],
+  async collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    const result = await this.#pool.query<{removed: string; more: boolean}>(
+      `WITH candidates AS MATERIALIZED (
+         SELECT ctid FROM device_assertion_replay WHERE tenant_id = $1 AND (expires_at <= $2)
+         ORDER BY expires_at LIMIT $3 + 1 FOR UPDATE SKIP LOCKED
+       ), deleted AS (
+         DELETE FROM device_assertion_replay WHERE ctid IN (SELECT ctid FROM candidates LIMIT $3) RETURNING 1
+       ) SELECT (SELECT count(*) FROM deleted)::text AS removed,
+                EXISTS(SELECT 1 FROM candidates OFFSET $3) AS more`,
+      [tenant, input.now, input.limit],
     );
-    return result.rowCount ?? 0;
+    return { removed: Number(result.rows[0]!.removed), expired: 0, releasedBytes: 0n, more: result.rows[0]!.more };
   }
+
 }

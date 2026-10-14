@@ -48,11 +48,11 @@ export const CORE_PORT_METHODS: Readonly<Record<CoreStoreName, readonly string[]
     'recordDelivery',
     'advanceCursor',
     'readCursor',
-    'collectRetired',
+    'collectExpired',
   ],
   board: ['create', 'get', 'list', 'claim', 'unclaim', 'updateStatus'],
   truth: ['writeTerminal', 'writeSnapshot', 'getRecord', 'listManifest'],
-  presence: ['publish', 'read', 'list'],
+  presence: ['publish', 'read', 'list', 'collectExpired'],
   objects: [
     'putManifest',
     'commit',
@@ -62,6 +62,7 @@ export const CORE_PORT_METHODS: Readonly<Record<CoreStoreName, readonly string[]
     'removeReference',
     'markDeletePending',
     'markDeleted',
+    'collectExpired',
   ],
   quota: [
     'readEntitlement',
@@ -72,7 +73,7 @@ export const CORE_PORT_METHODS: Readonly<Record<CoreStoreName, readonly string[]
     'reserve',
     'finalizeReservation',
     'abortReservation',
-    'expireReservations',
+    'collectExpired',
   ],
   skillPacks: ['publish', 'get', 'list', 'readFile'],
 };

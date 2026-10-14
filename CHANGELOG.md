@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **Breaking (cloud, 0.x; #410)** — `ByokCloudOptions` and `CloudRootStores`
+  require `mailboxWake`. Replace `longPollIntervalMs` (and the removed
+  `DEFAULT_LONG_POLL_INTERVAL_MS`) with a wake composition; held polls now
+  subscribe before reading and wait for hints or a 5-second default fallback.
+  `createInMemoryByokCloud` and the reference server compose the in-process
+  wake automatically. Node/Postgres Hosts run migration `0024_mailbox_wake.sql`,
+  create one `createPostgresMailboxWake` per process using a session-mode DSN,
+  inject it into the cloud, and await its `close()` at shutdown. Budget one
+  additional Postgres connection per process. Workers/Hyperdrive Hosts inject
+  a new `createInProcessMailboxWake({ fallbackMs: 1_000 })` per invocation and
+  accept delivery latency up to that interval. There is one hold mode; wire,
+  acknowledgement and replay-floor contracts are unchanged. See the dataplane
+  README and hosted operations runbook for migration details.
+
+- **Breaking (protocol; #398)** — `@byok-sdk/protocol/constants` replaces the
+  preparation-version subpath. Import `INPUT_PREPARATION_WIRE_VERSION` from
+  `/constants`. Protocol root exports retain the same values; schema-free
+  consumers use the new subpath. Client adapters, Agent memory and MCP helpers
+  avoid Zod at load time. `api-surface/entries.json` centralizes entry dependency
+  policies, generated facts and workspace size budgets. Wire v2 and freeze
+  goldens are unchanged. See `docs/releases/398-entry-dependency-closure.md`.
+
 - **Breaking (server, 0.x; #420)** — embedded device-side one-shot wake queue:
   `wake: { consume }` plus `wakes.schedule/cancel/pending`, shared memory/SQLite
   semantics, exact dedup, serial at-least-once delivery, 60-second capped waits,
@@ -37,6 +59,25 @@
   `status` against a daemon that predates `lifecycle` prints
   `lifecycle unknown (daemon predates lifecycle)` instead of failing.
 
+- **Outbound settlement (#397)** — protocol v2 keeps aggregate counts and adds
+  optional per-envelope `outcomes` plus server-owned `ingress` advertisements.
+  Unknown refusal observations become `unknown`; invalid control outcomes or
+  inconsistent ids/counts retain the original bytes for retry. Counts-only v2
+  bisection uses `unspecified` and is removed with the ingress default at v3.
+- **Breaking (client/cloud, 0.x)** — replace outbound quarantine and accepted/
+  rejected callbacks with awaited `onOutboundSettled`; local activity events now
+  follow successful settlement. Inspect rejection via `outbound-rejected`,
+  daemon/control `outbound`, journal terminal reason, support bundle counts and
+  `tasks delivery=rejected` for refused terminals. Rejected terminal rows preserve
+  local terminal state (including restart replay); partial progress refusal stays
+  an event/counter. The content-free rejection record includes the terminal
+  `taskState` for audit projection. Remove `progressBatch.maxBatchBytes`; the server owns
+  byte limits and large progress text splits losslessly. Replace
+  `MAX_PROGRESS_BATCH_BYTES_EXCEEDED_REASON_PREFIX` with
+  `ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX`. `handleInboundEnvelope` returns
+  discriminated `InboundResult` (read `.outcome` and rejected `.reason`);
+  `DEFAULT_ACTIVITY_MAX_*` cloud exports are removed; use protocol
+  `DEFAULT_ACTIVITY_INGRESS` only before server advertisement.
 - **Breaking (client, 0.x)** — every sink that outlives the process holds
   only content-free records (#395, parent #384). `byok-agent start` now
   writes one JSON Lines `DaemonRecord` per line to stdout, byte-identical to
@@ -98,6 +139,21 @@
   and traffic counters reset at reopen. Custom store implementers must add the
   aggregate method and enforce the active filter; there is no legacy fallback.
 
+- **Breaking (core, cloud, server, cloud-dataplane, 0.x)** — unify retention
+  through bounded, tenant-scoped `collectExpired` ports and
+  `ByokCloud.runMaintenance` (#412). The reference server always schedules a
+  pass every five minutes by default and exposes `maintenance.runNow()`;
+  `close()` waits for the active pass. Identity receipts, redeemed pairing codes
+  and committed storage reservations remain protected. Mailbox collection
+  releases no accounted bytes; object GC deletes physical bytes before settling
+  their charge. **Host migration:** replace `collectRetired`,
+  `expireReservations`, replay `deleteExpired`, `ByokServer.mailbox` and hosted
+  `runTenant` calls with the unified contract. Supply positive bigint policy
+  durations and bind object-byte deletion when constructing core stores.
+  `reconcileObjectStorage` remains an explicit hosted operator action; the
+  historical `cleanup_job` table is retained without a new writer. Hosted policy
+  reads/writes move to Worker-loadable `PostgresRetentionPolicyStore`. See
+  [migration notes](docs/migrations/412-retention-maintenance.md).
 - **Breaking (client, 0.x)** — daemon readiness and halts are one lifecycle
   model (#391, #394). `daemon.start()` now resolves once local startup is done
   and never waits for the network; the server accepting this session's lone
@@ -199,8 +255,8 @@
   `start` records an `environment-resolved` line in `audit.jsonl`; `status`,
   `doctor` and the support bundle show it (source, closed code, shell
   basename only). New exports: `applyLoginShellEnvironment`,
-  `serviceEnvironmentStatus`. WinSW is unchanged. Existing services pick this
-  up on reinstall (#392).
+  `serviceEnvironmentStatus`. WinSW passes `--service` too (#394); on Windows the
+  result is `inherited`. Existing services pick this up on reinstall (#392).
 - **Changed (client CLI)** — `byok-agent start` stdout no longer prints model
   text: each turn's progress becomes at most one line of sizes and counts, and
   completed/failed/cancelled/stale-approval text is redacted to a byte count

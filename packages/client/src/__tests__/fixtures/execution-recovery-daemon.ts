@@ -218,6 +218,10 @@ const daemon = createDaemonWithAdapters(
   overrides,
 );
 
+daemon.subscribe((event) => {
+  if (event.kind === 'outbound-rejected') process.stdout.write(`${JSON.stringify({ event })}\n`);
+});
+
 if (config.action === 'unpair') {
   await daemon.unpair();
   await journal.close();

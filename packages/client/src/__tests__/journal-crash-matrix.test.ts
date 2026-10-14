@@ -275,7 +275,7 @@ describe.skipIf(!isSqliteAvailable())('S3.4 crash matrix, points 1-6', () => {
       cloudHandle: RealCloudHandle;
       journalHandle: SqliteLocalTaskJournal;
     }> {
-      cloud = await startRealCloud({ productId: 'test-product', longPollHoldMs: 200, longPollIntervalMs: 20 });
+      cloud = await startRealCloud({ productId: 'test-product', longPollHoldMs: 200, mailboxFallbackMs: 20 });
       const storeDir = await store('byok-crash-cloud-store-');
       const workspaceRoot = await store('byok-crash-cloud-workspace-');
       const adapter = new StubRuntimeAdapter();

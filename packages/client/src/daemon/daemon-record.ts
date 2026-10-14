@@ -24,6 +24,7 @@ import type { RuntimeObservation } from '../runtime-detection';
  * open as the task ends, the daemon stops, or the task is evicted.
  */
 export type DaemonRecord =
+  | Extract<DaemonEvent, { kind: 'outbound-rejected' }>
   | Extract<DaemonEvent, { kind: 'retention-sweep' | 'retention-failure' }>
   | { kind: 'offered'; ts: string; taskId: string; runtime?: string }
   | { kind: 'claimed'; ts: string; taskId: string; claimedRuntime?: string }
@@ -97,6 +98,7 @@ export interface DaemonTurnRecord {
 export type DaemonRecordKind = DaemonRecord['kind'];
 
 const KIND_SET: Record<DaemonRecordKind, true> = {
+  'outbound-rejected': true,
   'retention-sweep': true,
   'retention-failure': true,
   offered: true,
@@ -242,6 +244,19 @@ function turnRecord(ts: string, taskId: string, turn: number, open: TurnTally, c
 function recordOf(event: Exclude<DaemonEvent, { kind: 'progress' }>): DaemonRecord {
   const { ts } = event;
   switch (event.kind) {
+    case 'outbound-rejected': {
+      const record = {
+        kind: 'outbound-rejected' as const,
+        ts,
+        envelopeId: event.envelopeId,
+        type: event.type,
+        reason: event.reason,
+        ...(event.taskId === undefined ? {} : { taskId: event.taskId }),
+      };
+      return event.terminal
+        ? { ...record, terminal: true, taskState: event.taskState }
+        : { ...record, terminal: false };
+    }
     case 'retention-sweep':
       return { kind: event.kind, ts, trigger: event.trigger, at: event.at, deleted: event.deleted,
         bytesReclaimed: event.bytesReclaimed, failures: event.failures, truncated: event.truncated, durationMs: event.durationMs };
@@ -413,10 +428,13 @@ export function createDaemonRecordProjector(): DaemonRecordProjector {
         tally(state.open, event.event);
         return event.event.type === 'turn_end' ? [...evicted, ...close(event.taskId, state, event.ts, 'turn_end')] : evicted;
       }
-      if (event.kind === 'completed' || event.kind === 'failed' || event.kind === 'cancelled') {
-        const state = tasks.get(event.taskId);
-        tasks.delete(event.taskId);
-        return [...(state === undefined ? [] : close(event.taskId, state, event.ts, 'terminal')), recordOf(event)];
+      const terminalTaskId = event.kind === 'completed' || event.kind === 'failed' || event.kind === 'cancelled'
+        ? event.taskId
+        : event.kind === 'outbound-rejected' && event.terminal ? event.taskId : undefined;
+      if (terminalTaskId !== undefined) {
+        const state = tasks.get(terminalTaskId);
+        tasks.delete(terminalTaskId);
+        return [...(state === undefined ? [] : close(terminalTaskId, state, event.ts, 'terminal')), recordOf(event)];
       }
       return [recordOf(event)];
     },
