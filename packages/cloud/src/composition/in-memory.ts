@@ -19,6 +19,8 @@ import { fullCapabilityDeclaration } from '../capabilities';
 import { createWebCrypto } from '../crypto/web-crypto';
 import type { CloudCrypto } from '../crypto/port';
 import { createByokCloud, type ByokCloud, type ByokCloudOptions } from '../cloud';
+import type { MailboxWake } from '../mailbox-wake';
+import { createInProcessMailboxWake } from '../stores/in-memory/mailbox-wake';
 import { createInMemoryCloudStores } from '../stores/in-memory/index';
 import type { BlobContentProxy, CloudStores } from '../stores/ports';
 import type { TruthCommitter, TruthObjectDownloads } from '../truth/contract';
@@ -52,7 +54,7 @@ export interface InMemoryByokCloudOptions {
   readonly instanceProductId?: string;
   readonly maxBlobSizeBytes?: number;
   readonly longPollHoldMs?: number;
-  readonly longPollIntervalMs?: number;
+  readonly mailboxWake?: MailboxWake;
   readonly eventsPageLimit?: number;
   readonly accessTokenTtlSeconds?: number;
   readonly boardPageLimit?: number;
@@ -90,6 +92,7 @@ export interface InMemoryByokCloudOptions {
 }
 
 export interface InMemoryByokCloud {
+  readonly mailboxWake: MailboxWake;
   readonly cloud: ByokCloud;
   /** The naked stores, for a host that wants to inspect or seed state directly. */
   readonly core: CoreStores;
@@ -114,7 +117,9 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
     options.tokenSigner ??
     createHmacTokenSigner(globalThis.crypto.getRandomValues(new Uint8Array(TOKEN_SECRET_BYTES)), clock);
 
+  const mailboxWake = options.mailboxWake ?? createInProcessMailboxWake();
   const cloud = createByokCloud({
+    mailboxWake,
     core,
     cloud: stores,
     // This composition has nowhere else to put bytes, so it supplies the proxy
@@ -148,7 +153,6 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
       : { agentMemoryProjectionStore: options.agentMemoryProjectionStore }),
     ...(options.maxBlobSizeBytes !== undefined ? { maxBlobSizeBytes: options.maxBlobSizeBytes } : {}),
     ...(options.longPollHoldMs !== undefined ? { longPollHoldMs: options.longPollHoldMs } : {}),
-    ...(options.longPollIntervalMs !== undefined ? { longPollIntervalMs: options.longPollIntervalMs } : {}),
     ...(options.eventsPageLimit !== undefined ? { eventsPageLimit: options.eventsPageLimit } : {}),
     ...(options.accessTokenTtlSeconds !== undefined
       ? { accessTokenTtlSeconds: options.accessTokenTtlSeconds }
@@ -189,5 +193,5 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
       : { skillPackPageLimit: options.skillPackPageLimit }),
   });
 
-  return { cloud, core, stores, blobContentProxy, clock, crypto };
+  return { cloud, core, stores, blobContentProxy, clock, crypto, mailboxWake };
 }

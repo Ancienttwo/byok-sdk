@@ -7,7 +7,7 @@ import { createHarness, offerPayload, TENANT_A } from './support/harness';
 function storesFor(harness: ReturnType<typeof createHarness>, deviceId: string) {
   return tenantStoresFor(
     { kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId },
-    { core: harness.core, cloud: harness.stores },
+    { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
   );
 }
 
@@ -18,10 +18,10 @@ describe('protocol-version admission at cloud lifecycle boundaries', () => {
     const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
     const v1Claim = { ...createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId: offer.taskId }), v: 1 };
 
-    await expect(handleInboundEnvelope(storesFor(harness, device.deviceId), device.deviceId, v1Claim)).resolves.toBe('rejected');
+    await expect(handleInboundEnvelope(storesFor(harness, device.deviceId), device.deviceId, v1Claim).then((result) => result.outcome)).resolves.toBe('rejected');
     expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('offered');
     await expect(
-      handleInboundEnvelope(storesFor(harness, device.deviceId), device.deviceId, { ...v1Claim, v: 2 }),
+      handleInboundEnvelope(storesFor(harness, device.deviceId), device.deviceId, { ...v1Claim, v: 2 }).then((result) => result.outcome),
     ).resolves.toBe('accepted');
     expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('claimed');
   });
@@ -47,7 +47,7 @@ describe('protocol-version admission at cloud lifecycle boundaries', () => {
     const offer = await harness.cloud.enqueueOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
     const v2Claim = createEnvelope('task.claim', { deviceId: device.deviceId }, { taskId: offer.taskId });
 
-    await expect(handleInboundEnvelope(storesFor(harness, device.deviceId), device.deviceId, v2Claim)).resolves.toBe('accepted');
+    await expect(handleInboundEnvelope(storesFor(harness, device.deviceId), device.deviceId, v2Claim).then((result) => result.outcome)).resolves.toBe('accepted');
     expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('claimed');
   });
 });

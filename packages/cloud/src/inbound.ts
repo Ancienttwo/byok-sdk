@@ -84,9 +84,9 @@ export type InboundOutcome = 'accepted' | 'duplicate' | 'rejected' | 'rate_limit
  * new rejection path that does not name one fails typecheck rather than
  * disappearing into an uncounted `rejected`.
  *
- * Observation vocabulary only. It never reaches the wire: `POST /byok/messages`
- * still answers `{ accepted, rejected }`, and these names are free to be
- * refined without a protocol revision. `rate_limited` is a separate outcome,
+ * Internal observation vocabulary. `POST /byok/messages` maps these names
+ * exhaustively to coarse wire codes; the internal names never reach the wire
+ * and may be refined without a protocol revision. `rate_limited` is a separate outcome,
  * not a refusal reason.
  */
 export const INBOUND_REFUSAL_REASONS = [
@@ -149,7 +149,7 @@ function refuse(reason: InboundRefusalReason): Refused {
 }
 
 /** The gate's internal result. `rejected` cannot be expressed without a reason. */
-type GateResult = Refused | { readonly outcome: Exclude<InboundOutcome, 'rejected'> };
+export type InboundResult = Refused | { readonly outcome: Exclude<InboundOutcome, 'rejected'> };
 
 /**
  * One envelope whose write COMMITTED, handed to {@link ByokCloudObserver}.
@@ -455,8 +455,8 @@ export async function handleInboundEnvelope(
   activityBounds: ActivityBounds = DEFAULT_ACTIVITY_BOUNDS,
   agentMessageConsume?: Parameters<typeof handleAgentMessagePublish>[4],
   observer?: ByokCloudObserver,
-): Promise<InboundOutcome> {
-  // Everything that decides the outcome lives in a helper typed Promise<GateResult>,
+): Promise<InboundResult> {
+  // Everything that decides the outcome lives in a helper typed Promise<InboundResult>,
   // so a 'rejected' cannot reach the exit below without a reason for the observer.
   const result = await resolveInboundResult(stores, deviceId, envelope, activityBounds, agentMessageConsume);
   const { outcome } = result;
@@ -486,7 +486,7 @@ export async function handleInboundEnvelope(
       }
     }
   }
-  return outcome;
+  return result;
 }
 
 async function resolveInboundResult(
@@ -495,7 +495,7 @@ async function resolveInboundResult(
   envelope: Envelope,
   activityBounds: ActivityBounds,
   agentMessageConsume: Parameters<typeof handleAgentMessagePublish>[4] | undefined,
-): Promise<GateResult> {
+): Promise<InboundResult> {
   // This exported entrypoint can be called without the HTTP schema boundary.
   // Refuse before reserving an envelope identity or mutating task lifecycle.
   if (envelope.v !== PROTOCOL_VERSION) return refuse('protocol_version_unsupported');
@@ -508,7 +508,7 @@ async function applyInboundGate(
   envelope: Envelope,
   activityBounds: ActivityBounds,
   agentMessageConsume: Parameters<typeof handleAgentMessagePublish>[4] | undefined,
-): Promise<GateResult> {
+): Promise<InboundResult> {
   if (!(await stores.rateLimiter.consume(deviceId))) return { outcome: 'rate_limited' };
 
   // Long-poll has no live WS handshake. A bearer-authenticated conn.hello is
@@ -685,7 +685,7 @@ async function completeInboundEnvelope(
   deviceId: string,
   envelopeId: string,
   agentRef: AgentRef | undefined,
-): Promise<GateResult> {
+): Promise<InboundResult> {
   const duplicate = agentRef === undefined
     ? await stores.dedup.checkAndRecord(deviceId, envelopeId)
     : await stores.dedup.checkAndRecordAgent(deviceId, agentRef, envelopeId);

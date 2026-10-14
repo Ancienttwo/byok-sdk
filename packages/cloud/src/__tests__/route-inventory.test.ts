@@ -1,3 +1,4 @@
+import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 /**
  * I1: the route inventory, closed in both directions, plus tenant B driven
  * against every one of tenant A's resources.
@@ -150,6 +151,7 @@ describe('tenant isolation across every device-class resource', () => {
     const events = await harness.json('/byok/events', { headers: mallory.authorization });
     expect(events.status).toBe(200);
     expect(events.body).toEqual({
+      ingress: { activityMaxEvents: 50, activityMaxBytes: 65536 },
       events: [],
       cursor: 0,
       capabilities: [
@@ -283,6 +285,7 @@ function cloudWith(options: { readonly capabilities: CapabilityDeclaration; read
     core.mailbox,
   );
   return createByokCloud({
+        mailboxWake: createInProcessMailboxWake(),
     core,
     cloud: composition.stores,
     ...(options.withProxy ? { blobContentProxy: composition.blobContentProxy } : {}),

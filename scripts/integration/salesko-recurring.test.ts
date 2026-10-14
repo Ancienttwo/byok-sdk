@@ -701,7 +701,7 @@ for (const cut of ['before_host_commit', 'after_host_commit', 'held', 'refused']
 
 test('Salesko observes first held reply after consumer configuration loss', async () => {
   const { Hono } = await installed('hono');
-  const { createByokCloud, createHmacTokenSigner, fullCapabilityDeclaration } = await installed('@byok-sdk/cloud');
+  const { createByokCloud, createInProcessMailboxWake, createHmacTokenSigner, fullCapabilityDeclaration } = await installed('@byok-sdk/cloud');
   const { createDaemonWithAdapters } = await installed('@byok-sdk/client');
   const { createPrivateAgentChatRouter } = await load('apps/byok-control/src/main.ts');
   const { ByokPrivateAgentChatDispatcher } = await load('apps/api/src/private-agent-chat-dispatch.ts');
@@ -764,7 +764,7 @@ test('Salesko observes first held reply after consumer configuration loss', asyn
     await dispatchAndReconcile(repository, dispatcher, owner.tenantId, 'T1', now());
     const frozen = (await repository.reconcileDispatch({ ...owner, turnId: 'T1', now: now() }))!;
     await until(() => adapter.sessions.length === 1, 'active session before configuration loss');
-    facade = createByokCloud({ core: sdk.core, cloud: sdk.stores, crypto: sdk.crypto, clock: sdk.clock,
+    facade = createByokCloud({ mailboxWake: createInProcessMailboxWake(), core: sdk.core, cloud: sdk.stores, crypto: sdk.crypto, clock: sdk.clock,
       tokenSigner: signer, capabilities: fullCapabilityDeclaration(), blobContentProxy: sdk.blobContentProxy, longPollHoldMs: 50, observer });
     app = router();
     adapter.sessions[0]!.emit({ type: 'progress', text: 'Held reply' }); adapter.sessions[0]!.emit({ type: 'turn_end' });

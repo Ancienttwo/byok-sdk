@@ -1,3 +1,4 @@
+import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 import { WAKE_SCHEMA } from '../stores/sqlite/wakes';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -26,7 +27,8 @@ describe('SQLite receipt recovery', () => {
     const crypto = createWebCrypto();
     const path = join(root, 'server.sqlite');
     function open(migration?: 'v1-to-v5' | 'v2-to-v5') {
-      const stores = createSqliteEmbeddedStores({ path, ...(migration === undefined ? {} : { migration }) }, { clock, crypto });
+      const embedded = createSqliteEmbeddedStores({ path, ...(migration === undefined ? {} : { migration }) }, { clock, crypto });
+      const stores = { ...embedded, mailboxWake: createInProcessMailboxWake() };
       // Quota is process memory here; issue the entitlement on every open, as the
       // embedded server does, so limited mailbox appends are admitted (#411).
       void stores.core.quota.writeEntitlement(tenant, {
@@ -97,7 +99,7 @@ describe('SQLite receipt recovery', () => {
       fault.exec("CREATE TRIGGER fail_message_finalize BEFORE UPDATE OF terminal_body ON agent_message_admission BEGIN SELECT RAISE(ABORT, 'injected finalize fault'); END;");
       fault.close();
       runtime = open();
-      await expect(handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume)).rejects.toThrow('injected finalize fault');
+      await expect(handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume).then((result) => result.outcome)).rejects.toThrow('injected finalize fault');
       expect(calls).toBe(1);
       expect(await read()).toBeUndefined();
       await runtime.stores.close(); runtime = open();
@@ -106,7 +108,7 @@ describe('SQLite receipt recovery', () => {
       await runtime.stores.close();
       const repair = new DatabaseSync(path); repair.exec('DROP TRIGGER fail_message_finalize'); repair.close();
       runtime = open();
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume)).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume).then((result) => result.outcome)).toBe('accepted');
       expect(calls).toBe(2);
       const receipt = await read();
       expect(receipt).toMatchObject({ outcome, messageId: message.payload.messageId, agentRef });
@@ -120,7 +122,7 @@ describe('SQLite receipt recovery', () => {
       expect(await runtime.cloud.readAgentMessageDisposition(other, deviceId, taskId, message.payload)).toBeUndefined();
       expect(await runtime.cloud.readAgentMessageDisposition(tenant, 'other-device', taskId, message.payload)).toBeUndefined();
       // Envelope dedup is process-local; durable message replay must still skip the consumer.
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume)).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, consume).then((result) => result.outcome)).toBe('accepted');
       expect(calls).toBe(2);
       expect(await read()).toEqual(receipt);
     } finally { await runtime.stores.close(); }
@@ -152,8 +154,8 @@ describe('SQLite receipt recovery', () => {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
       const first = await runtime.cloud.enqueueOffer(tenant, deviceId, input);
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', { deviceId }, { taskId }))).toBe('accepted');
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { summary: 'first', sessionRef: 'session-first' }, { taskId }))).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', { deviceId }, { taskId })).then((result) => result.outcome)).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { summary: 'first', sessionRef: 'session-first' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
       const receipt = await runtime.cloud.readTerminalReceipt(tenant, taskId);
       const result = await runtime.cloud.readTaskResult(tenant, taskId);
       const deviceTerminal = await runtime.cloud.readDeviceTerminal(tenant, taskId);
@@ -168,7 +170,7 @@ describe('SQLite receipt recovery', () => {
         await expect(runtime.cloud.enqueueOffer(tenant, deviceId, retry)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
       }
       expect((await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages).toEqual([]);
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { summary: 'conflict', sessionRef: 'session-other' }, { taskId }))).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { summary: 'conflict', sessionRef: 'session-other' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
       expect(await runtime.cloud.readTerminalReceipt(tenant, taskId)).toEqual(receipt);
       expect(await runtime.cloud.readTaskResult(tenant, taskId)).toEqual(result);
     } finally { await runtime.stores.close(); }

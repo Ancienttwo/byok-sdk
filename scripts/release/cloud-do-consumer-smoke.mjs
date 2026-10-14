@@ -4,6 +4,8 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { runtimeSmokeImports } from '../api-surface/entry-closure.mjs';
+import { scanModule } from '../api-surface/module-scan.mjs';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -46,7 +48,7 @@ async function deadline(work, milliseconds, label) {
   }
 }
 
-export async function cloudDoConsumerSmoke(installRoot) {
+export async function cloudDoConsumerSmoke(installRoot, workerImports) {
   const rootRequire = createRequire(path.join(repoRoot, 'package.json'));
   const cloudRequire = createRequire(path.join(repoRoot, 'packages/cloud-do/package.json'));
   const installedRequire = createRequire(path.join(installRoot, 'package.json'));
@@ -76,7 +78,7 @@ export async function cloudDoConsumerSmoke(installRoot) {
     files: [workersTypes],
     include: ['worker.ts'],
   }, null, 2) + '\n');
-  writeFileSync(path.join(consumer, 'worker.ts'), `import { AgentDO, DurableObjectSqliteDatabase, sessionObjectName } from '@byok-sdk/cloud-do';
+  const workerSource = `import { AgentDO, DurableObjectSqliteDatabase, sessionObjectName } from '@byok-sdk/cloud-do';
 
 export class ConsumerDO extends AgentDO {
   protected instructions(): string { return 'Consumer hook reached.'; }
@@ -99,7 +101,11 @@ export default {
     return Response.json(await env.AGENTS.getByName('consumer').probe());
   },
 };
-`);
+`;
+  const consumerImports = scanModule(workerSource, { declaration: true }).imports.map(edge => edge.specifier);
+  assert.deepEqual([...new Set(workerImports)].sort(), [...new Set(consumerImports)].sort(),
+    'every Worker export must be covered by the installed consumer imports');
+  writeFileSync(path.join(consumer, 'worker.ts'), workerSource);
   const flags = ['no_nodejs_compat', 'no_nodejs_compat_v2'];
   writeFileSync(path.join(consumer, 'wrangler.jsonc'), JSON.stringify({
     name: 'cloud-do-installed-consumer',
@@ -146,5 +152,5 @@ export default {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (!process.argv[2]) throw new Error('provide the installed tarball consumer root');
-  await cloudDoConsumerSmoke(path.resolve(process.argv[2]));
+  await cloudDoConsumerSmoke(path.resolve(process.argv[2]), runtimeSmokeImports(repoRoot).worker);
 }

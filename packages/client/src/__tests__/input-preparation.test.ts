@@ -1514,8 +1514,9 @@ describe('PR187 review regressions', () => {
     await service.prepare(request());
     clock += 401;
     // The GC timer delay comes from the fake clock; each poll advances the fake
-    // timers until the background GC has drained the artifact.
+    // timers until GC publishes the durable record update, after artifact unlink.
     await vi.waitFor(async () => {
+      expect(service.store.list()[0]?.artifactBytes).toBe(0);
       expect(await fs.readdir(path.join(storeDir, 'input-preparation', 'artifacts'))).toEqual([]);
     }, { timeout: 5_000 });
     expect(service.store.list()).toHaveLength(1);

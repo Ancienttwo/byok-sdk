@@ -36,6 +36,7 @@ describe('task.decline terminal', () => {
     stores = tenantStoresFor(devicePrincipal(TENANT_A, deviceId), {
       core: harness.core,
       cloud: harness.stores,
+      mailboxWake: harness.mailboxWake,
     });
   });
 
@@ -53,7 +54,7 @@ describe('task.decline terminal', () => {
       stores,
       deviceId,
       createEnvelope('task.decline', { reason: 'no runtime available', retryable: true }, { taskId }),
-    );
+    ).then((result) => result.outcome);
     expect(outcome).toBe('accepted');
 
     const result = await harness.cloud.readTaskResult(TENANT_A, taskId);
@@ -84,7 +85,7 @@ describe('task.decline terminal', () => {
       stores,
       deviceId,
       createEnvelope('task.decline', { reason: 'policy rejected', retryable: false }, { taskId }),
-    );
+    ).then((result) => result.outcome);
 
     const result = await harness.cloud.readTaskResult(TENANT_A, taskId);
     expect(result).toMatchObject({ state: 'failed', reason: 'policy rejected', retryable: false });
@@ -96,7 +97,7 @@ describe('task.decline terminal', () => {
       stores,
       deviceId,
       createEnvelope('task.decline', { reason: 'no runtime' }, { taskId }),
-    );
+    ).then((result) => result.outcome);
 
     const result = await harness.cloud.readTaskResult(TENANT_A, taskId);
     expect(result?.state).toBe('failed');
@@ -109,7 +110,7 @@ describe('task.decline terminal', () => {
       stores,
       deviceId,
       createEnvelope('task.decline', { reason: 'agent home busy', retryable: true }, { taskId }),
-    );
+    ).then((result) => result.outcome);
     const late = await handleInboundEnvelope(
       stores,
       deviceId,
@@ -118,7 +119,7 @@ describe('task.decline terminal', () => {
         { summary: 'late terminal', sessionRef: 'session-late' },
         { taskId },
       ),
-    );
+    ).then((result) => result.outcome);
     expect(late).toBe('accepted');
 
     const result = await harness.cloud.readTaskResult(TENANT_A, taskId);
@@ -129,17 +130,17 @@ describe('task.decline terminal', () => {
 
   it('keeps a completed result when a late decline races it', async () => {
     const taskId = await offeredTask();
-    await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId }, { taskId }));
+    await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId }, { taskId })).then((result) => result.outcome);
     await handleInboundEnvelope(
       stores,
       deviceId,
       createEnvelope('task.complete', { summary: 'did the thing', sessionRef: 'session-1' }, { taskId }),
-    );
+    ).then((result) => result.outcome);
     await handleInboundEnvelope(
       stores,
       deviceId,
       createEnvelope('task.decline', { reason: 'late decline', retryable: true }, { taskId }),
-    );
+    ).then((result) => result.outcome);
 
     const result = await harness.cloud.readTaskResult(TENANT_A, taskId);
     expect(result).toMatchObject({ state: 'complete', summary: 'did the thing' });
@@ -153,12 +154,12 @@ describe('task.decline terminal', () => {
       stores,
       deviceId,
       createEnvelope('task.decline', { reason: 'first decline', retryable: true }, { taskId }),
-    );
+    ).then((result) => result.outcome);
     await handleInboundEnvelope(
       stores,
       deviceId,
       createEnvelope('task.decline', { reason: 'second decline', retryable: false }, { taskId }),
-    );
+    ).then((result) => result.outcome);
 
     const result = await harness.cloud.readTaskResult(TENANT_A, taskId);
     expect(result).toMatchObject({ state: 'failed', reason: 'first decline', retryable: true });

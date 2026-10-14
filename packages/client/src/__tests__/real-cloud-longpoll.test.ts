@@ -40,7 +40,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
   });
 
   it('offer -> claim -> started -> progress -> complete all travel over GET /byok/events + POST /byok/messages', async () => {
-    cloud = await startRealCloud({ productId: 'test-product', longPollHoldMs: 200, longPollIntervalMs: 20 });
+    cloud = await startRealCloud({ productId: 'test-product', longPollHoldMs: 200, mailboxFallbackMs: 20 });
 
     const workspaceRoot = await tmpDir('byok-cloud-e2e-workspace-');
     const storeDir = await tmpDir('byok-cloud-e2e-store-');
@@ -107,7 +107,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
   }, 15000);
 
   it('admits and runs an Agent offer only after long-poll publishes agent-home-contract', async () => {
-    cloud = await startRealCloud({ productId: 'test-product', longPollHoldMs: 200, longPollIntervalMs: 20 });
+    cloud = await startRealCloud({ productId: 'test-product', longPollHoldMs: 200, mailboxFallbackMs: 20 });
     const workspaceRoot = await tmpDir('byok-cloud-agent-workspace-');
     const storeDir = await tmpDir('byok-cloud-agent-store-');
     const hostStorageRoot = await tmpDir('byok-cloud-agent-home-');
@@ -156,7 +156,7 @@ describe('a full task lifecycle over long-poll only, against the real @byok-sdk/
   }, 15000);
 
   it('host cancellation interrupts the running session and the device acknowledges cancellation over long-poll', async () => {
-    cloud = await startRealCloud({ productId: 'test-product', longPollHoldMs: 200, longPollIntervalMs: 20 });
+    cloud = await startRealCloud({ productId: 'test-product', longPollHoldMs: 200, mailboxFallbackMs: 20 });
 
     const workspaceRoot = await tmpDir('byok-cloud-cancel-workspace-');
     const storeDir = await tmpDir('byok-cloud-cancel-store-');

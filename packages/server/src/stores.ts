@@ -9,6 +9,8 @@ import {
 } from '@byok-sdk/core';
 import {
   createInMemoryCloudStores,
+  createInProcessMailboxWake,
+  type MailboxWake,
   createWebCrypto,
   type BlobContentProxy,
   type CloudCrypto,
@@ -78,6 +80,7 @@ export interface FacadeCounters {
 }
 
 export interface FacadeStoreComposition {
+  readonly mailboxWake: MailboxWake;
   readonly core: CoreStores;
   readonly cloud: CloudStores;
   readonly blobContentProxy: BlobContentProxy;
@@ -155,6 +158,7 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
   });
 
   return {
+    mailboxWake: createInProcessMailboxWake(),
     core: { ...core, presence, mailbox: observingMailbox(core.mailbox, presence) },
     cloud: {
       ...stores,

@@ -77,6 +77,7 @@ const ONLINE_EXPORTS = [
 
 /** Operations that belong to the root entry and must never reach the subpath. */
 const NODE_ONLY_EXPORTS = [
+  'createPostgresMailboxWake',
   'migrate',
   'migrationsDir',
   'readMigrationFiles',

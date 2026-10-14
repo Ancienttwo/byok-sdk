@@ -333,39 +333,6 @@ const clientManifest = manifests.get('@byok-sdk/client');
 if (clientManifest?.optionalDependencies?.[PI_DEPENDENCY_SPECIFIER]) {
   errors.push('packages/client/package.json: pi must be required, not optional');
 }
-if (
-  clientManifest?.exports?.['./adapters']?.import !== './dist/adapters/index.js' ||
-  clientManifest?.exports?.['./adapters']?.types !== './dist/adapters/index.d.ts'
-) {
-  errors.push('packages/client/package.json: adapter-only import/types exports are incomplete');
-}
-if (
-  clientManifest?.exports?.['./agent-memory']?.import !== './dist/agent-memory/index.js' ||
-  clientManifest?.exports?.['./agent-memory']?.types !== './dist/agent-memory/index.d.ts'
-) {
-  errors.push('packages/client/package.json: embedded agent-memory import/types exports are incomplete');
-}
-if (
-  clientManifest?.exports?.['./assertion-client']?.import !== './dist/assertion-client/index.js' ||
-  clientManifest?.exports?.['./assertion-client']?.types !== './dist/assertion-client/index.d.ts'
-) {
-  errors.push('packages/client/package.json: daemon-free assertion-client import/types exports are incomplete');
-}
-if (
-  clientManifest?.exports?.['./mcp-server']?.import !== './dist/mcp-server/index.js' ||
-  clientManifest?.exports?.['./mcp-server']?.types !== './dist/mcp-server/index.d.ts'
-) {
-  errors.push('packages/client/package.json: tools-only MCP server core import/types exports are incomplete');
-}
-
-const cloudDataplaneManifest = manifests.get('@byok-sdk/cloud-dataplane');
-if (
-  cloudDataplaneManifest?.exports?.['./runtime']?.import !== './dist/runtime.js' ||
-  cloudDataplaneManifest?.exports?.['./runtime']?.types !== './dist/runtime.d.ts'
-) {
-  errors.push('packages/cloud-dataplane/package.json: worker runtime subpath import/types exports are incomplete');
-}
-
 const clientDirectory = path.join(repoRoot, 'packages/client');
 const clientOptionalDependencies = Object.entries(clientManifest?.optionalDependencies ?? {});
 const clientTsupConfig = readFileSync(path.join(repoRoot, 'packages/client/tsup.config.ts'), 'utf8');

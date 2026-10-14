@@ -1,3 +1,4 @@
+import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,7 +28,8 @@ describe('SQLite custom-harness claim authority', () => {
     const clock = createMutableClock();
     const crypto = createWebCrypto();
     const open = (migration?: SqliteEmbeddedStoreOptions['migration']) => {
-      const stores = createSqliteEmbeddedStores({ path, ...(migration === undefined ? {} : { migration }) }, { clock, crypto });
+      const embedded = createSqliteEmbeddedStores({ path, ...(migration === undefined ? {} : { migration }) }, { clock, crypto });
+      const stores = { ...embedded, mailboxWake: createInProcessMailboxWake() };
       // Quota is process memory here; issue the entitlement on every open, as the
       // embedded server does, so limited mailbox appends are admitted (#411).
       void stores.core.quota.writeEntitlement(tenant, {
@@ -63,7 +65,7 @@ describe('SQLite custom-harness claim authority', () => {
       });
       const taskId = offer.taskId;
       const claim = createEnvelope('task.claim', { deviceId, harnessId, capabilities }, { taskId });
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, claim)).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, claim).then((result) => result.outcome)).toBe('accepted');
       const expected = { ownerDeviceId: deviceId, claimedHarnessId: harnessId,
         claimedRuntimeCapabilities: capabilities, status: 'claimed' };
       expect(await runtime.bound.tasks.get(taskId)).toMatchObject(expected);
@@ -72,10 +74,10 @@ describe('SQLite custom-harness claim authority', () => {
       expect(await runtime.bound.tasks.get(taskId)).toMatchObject(expected);
       expect(await runtime.stores.cloud.tasks.getMany(tenant, [taskId])).toMatchObject([expected]);
       expect((await runtime.stores.cloud.tasks.list(tenant, { limit: 10 })).attempts).toMatchObject([expected]);
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, claim)).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, claim).then((result) => result.outcome)).toBe('accepted');
       for (const changed of [{}, { harnessId: 'other' }, { runtime: 'pi' }] satisfies Omit<TaskClaimPayload, 'deviceId'>[]) {
         expect(await handleInboundEnvelope(runtime.bound, deviceId,
-          createEnvelope('task.claim', { deviceId, ...changed }, { taskId }))).toBe('rejected');
+          createEnvelope('task.claim', { deviceId, ...changed }, { taskId })).then((result) => result.outcome)).toBe('rejected');
       }
       // Mutable inventory is not authority for this already-claimed execution.
       await runtime.bound.devices.recordCapabilities({ capabilities: [], harnesses: [] });
@@ -84,7 +86,7 @@ describe('SQLite custom-harness claim authority', () => {
           createEnvelope('task.complete', { summary: 'wrong', sessionRef: 's', ...identity }, { taskId }),
           createEnvelope('task.fail', { reason: 'wrong', retryable: false, ...identity }, { taskId }),
           createEnvelope('task.cancelled', { ...identity }, { taskId }),
-        ]) expect(await handleInboundEnvelope(runtime.bound, deviceId, terminal)).toBe('rejected');
+        ]) expect(await handleInboundEnvelope(runtime.bound, deviceId, terminal).then((result) => result.outcome)).toBe('rejected');
       }
       expect(await runtime.cloud.readTerminalReceipt(tenant, taskId)).toBeUndefined();
       expect(await runtime.bound.tasks.get(taskId)).toMatchObject(expected);
@@ -93,7 +95,7 @@ describe('SQLite custom-harness claim authority', () => {
         : status === 'failed'
           ? createEnvelope('task.fail', { reason: 'fixture-failure', retryable: false, harnessId }, { taskId })
           : createEnvelope('task.cancelled', { harnessId }, { taskId });
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, terminal)).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, terminal).then((result) => result.outcome)).toBe('accepted');
       await runtime.stores.close();
       runtime = open();
       expect(await runtime.bound.tasks.get(taskId)).toMatchObject({ ...expected, status });
@@ -110,15 +112,15 @@ describe('SQLite custom-harness claim authority', () => {
       const { taskId } = await runtime.cloud.enqueueOffer(tenant, deviceId, { payload });
       expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', {
         deviceId, ...(runtimeId === undefined ? {} : { runtime: runtimeId }),
-      }, { taskId }))).toBe('accepted');
+      }, { taskId })).then((result) => result.outcome)).toBe('accepted');
       await runtime.stores.close(); runtime = open();
       const attempt = await runtime.bound.tasks.get(taskId);
       expect(attempt?.claimedRuntime).toBe(runtimeId);
       expect(attempt?.claimedHarnessId).toBeUndefined();
       expect(await handleInboundEnvelope(runtime.bound, deviceId,
-        createEnvelope('task.complete', { summary: 'wrong', sessionRef: 's', harnessId }, { taskId }))).toBe('rejected');
+        createEnvelope('task.complete', { summary: 'wrong', sessionRef: 's', harnessId }, { taskId })).then((result) => result.outcome)).toBe('rejected');
       expect(await handleInboundEnvelope(runtime.bound, deviceId,
-        createEnvelope('task.complete', { summary: 'done', sessionRef: 's' }, { taskId }))).toBe('accepted');
+        createEnvelope('task.complete', { summary: 'done', sessionRef: 's' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
     } finally { await runtime.stores.close(); }
   });
 
@@ -170,7 +172,7 @@ describe('SQLite custom-harness claim authority', () => {
         expect(attempt?.claimedHarnessId).toBeUndefined();
       }
       expect(await handleInboundEnvelope(runtime.bound, deviceId,
-        createEnvelope('task.claim', { deviceId, harnessId }, { taskId }))).toBe('accepted');
+        createEnvelope('task.claim', { deviceId, harnessId }, { taskId })).then((result) => result.outcome)).toBe('accepted');
       await runtime.stores.close(); runtime = open();
       expect(await runtime.bound.tasks.get(taskId)).toMatchObject({ claimedHarnessId: harnessId });
       await runtime.stores.close();

@@ -11,7 +11,7 @@ const inventory = [{ id: 'acme-harness', version: '1.2.3', capabilities }];
 async function setup() {
   const h = createHarness();
   const device = await h.pairDevice(TENANT_A);
-  const stores = tenantStoresFor({ kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId: device.deviceId }, { core: h.core, cloud: h.stores });
+  const stores = tenantStoresFor({ kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId: device.deviceId }, { core: h.core, cloud: h.stores, mailboxWake: h.mailboxWake });
   return { h, stores, deviceId: device.deviceId };
 }
 
@@ -42,7 +42,7 @@ describe('custom harness protocol authority', () => {
       });
       const complete = vi.spyOn(stores.dedup, 'checkAndRecord');
       const envelopes = [first, second].map((identity) => createEnvelope('task.claim', { deviceId, ...identity }, { taskId }));
-      const results = await Promise.all(envelopes.map((envelope) => handleInboundEnvelope(stores, deviceId, envelope)));
+      const results = await Promise.all(envelopes.map((envelope) => handleInboundEnvelope(stores, deviceId, envelope).then((result) => result.outcome)));
       spy.mockRestore();
       const winner = (await stores.tasks.get(taskId))!;
       const expected = [first, second].map((identity) =>
@@ -51,13 +51,13 @@ describe('custom harness protocol authority', () => {
       expect(complete).toHaveBeenCalledTimes(expected.filter((result) => result === 'accepted').length);
       expect(winner.ownerDeviceId).toBe(deviceId);
       const winnerIndex = expected.indexOf('accepted');
-      expect(await handleInboundEnvelope(stores, deviceId, envelopes[winnerIndex]!)).toBe('duplicate');
+      expect(await handleInboundEnvelope(stores, deviceId, envelopes[winnerIndex]!).then((result) => result.outcome)).toBe('duplicate');
       // New-envelope, same-identity replay is also idempotent and cannot restamp ownership.
       expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', {
         deviceId, ...[first, second][winnerIndex],
-      }, { taskId }))).toBe('accepted');
+      }, { taskId })).then((result) => result.outcome)).toBe('accepted');
       const loserIndex = expected.indexOf('rejected');
-      if (loserIndex !== -1) expect(await handleInboundEnvelope(stores, deviceId, envelopes[loserIndex]!)).toBe('rejected');
+      if (loserIndex !== -1) expect(await handleInboundEnvelope(stores, deviceId, envelopes[loserIndex]!).then((result) => result.outcome)).toBe('rejected');
       expect(await stores.tasks.get(taskId)).toEqual(winner);
     },
   );
@@ -74,7 +74,7 @@ describe('custom harness protocol authority', () => {
     await expect(h.cloud.enqueueOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), harnessId: 'other' } })).rejects.toThrow();
     await expect(h.cloud.enqueueOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), harnessId: 'acme-harness', runtime: 'pi' } })).rejects.toThrow();
     const hello = createEnvelope('conn.hello', { deviceId, productId: 'test-product', protocolVersions: [2], capabilities: [], runtimes: [], harnesses: inventory });
-    expect(await handleInboundEnvelope(stores, deviceId, hello)).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, deviceId, hello).then((result) => result.outcome)).toBe('rejected');
   });
 
   it('seals explicit selection, claim CAS and terminal echo for the actual device', async () => {
@@ -82,37 +82,37 @@ describe('custom harness protocol authority', () => {
     await stores.devices.recordCapabilities({ capabilities: ['custom-harness'], harnesses: [...inventory, { ...inventory[0]!, id: 'other' }] });
     const { taskId } = await h.cloud.enqueueOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), harnessId: 'acme-harness' } });
     for (const payload of [{ deviceId }, { deviceId, harnessId: 'other' }, { deviceId, harnessId: 'acme-harness', runtime: 'pi' as const }]) {
-      expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', payload, { taskId }))).toBe('rejected');
+      expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', payload, { taskId })).then((result) => result.outcome)).toBe('rejected');
     }
-    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, harnessId: 'acme-harness', capabilities }, { taskId }))).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, harnessId: 'acme-harness', capabilities }, { taskId })).then((result) => result.outcome)).toBe('accepted');
     expect((await stores.tasks.get(taskId))?.claimedHarnessId).toBe('acme-harness');
     for (const harnessId of [undefined, 'other']) {
-      expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.complete', { summary: 'done', sessionRef: 's', ...(harnessId ? { harnessId } : {}) }, { taskId }))).toBe('rejected');
+      expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.complete', { summary: 'done', sessionRef: 's', ...(harnessId ? { harnessId } : {}) }, { taskId })).then((result) => result.outcome)).toBe('rejected');
     }
-    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.complete', { summary: 'done', sessionRef: 's', harnessId: 'acme-harness' }, { taskId }))).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.complete', { summary: 'done', sessionRef: 's', harnessId: 'acme-harness' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
   });
 
   it('keeps two device inventories and actual claims isolated, including implicit selection', async () => {
     const { h, stores, deviceId } = await setup();
     const other = await h.pairDevice(TENANT_A);
-    const otherStores = tenantStoresFor({ kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId: other.deviceId }, { core: h.core, cloud: h.stores });
+    const otherStores = tenantStoresFor({ kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId: other.deviceId }, { core: h.core, cloud: h.stores, mailboxWake: h.mailboxWake });
     await stores.devices.recordCapabilities({ capabilities: ['custom-harness'], harnesses: inventory });
     await otherStores.devices.recordCapabilities({ capabilities: ['custom-harness'], harnesses: [{ ...inventory[0]!, id: 'other' }] });
     await expect(h.cloud.enqueueOffer(TENANT_A, other.deviceId, { payload: { ...offerPayload(), harnessId: 'acme-harness' } })).rejects.toThrow();
     const { taskId } = await h.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
-    expect(await handleInboundEnvelope(otherStores, other.deviceId, createEnvelope('task.claim', { deviceId: other.deviceId, harnessId: 'other' }, { taskId }))).toBe('rejected');
-    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, harnessId: 'acme-harness' }, { taskId }))).toBe('accepted');
-    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, runtime: 'pi' }, { taskId }))).toBe('rejected');
+    expect(await handleInboundEnvelope(otherStores, other.deviceId, createEnvelope('task.claim', { deviceId: other.deviceId, harnessId: 'other' }, { taskId })).then((result) => result.outcome)).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, harnessId: 'acme-harness' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, runtime: 'pi' }, { taskId })).then((result) => result.outcome)).toBe('rejected');
     expect((await stores.tasks.get(taskId))?.claimedHarnessId).toBe('acme-harness');
     const builtin = await h.cloud.enqueueOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), runtime: 'pi' } });
-    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, harnessId: 'acme-harness' }, { taskId: builtin.taskId }))).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, harnessId: 'acme-harness' }, { taskId: builtin.taskId })).then((result) => result.outcome)).toBe('rejected');
   });
 
   it('does not permit a custom terminal identity on a built-in claim', async () => {
     const { h, stores, deviceId } = await setup();
     const { taskId } = await h.cloud.enqueueOffer(TENANT_A, deviceId, { payload: offerPayload() });
-    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, runtime: 'pi' }, { taskId }))).toBe('accepted');
-    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.fail', { reason: 'x', retryable: false, harnessId: 'acme-harness' }, { taskId }))).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, runtime: 'pi' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.fail', { reason: 'x', retryable: false, harnessId: 'acme-harness' }, { taskId })).then((result) => result.outcome)).toBe('rejected');
   });
   it('accepts only offer-bound interruption observations without inventing a claim', async () => {
     const { h, stores, deviceId } = await setup();
@@ -129,18 +129,18 @@ describe('custom harness protocol authority', () => {
       { ...valid, retryable: true },
       { ...valid, retryable: undefined },
     ]) {
-      expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.fail', payload, { taskId: offer.taskId }))).toBe('rejected');
+      expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.fail', payload, { taskId: offer.taskId })).then((result) => result.outcome)).toBe('rejected');
     }
     const other = await h.pairDevice(TENANT_A);
-    expect(await handleInboundEnvelope(stores, other.deviceId, createEnvelope('task.fail', valid, { taskId: offer.taskId }))).toBe('rejected');
-    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.fail', valid, { taskId: offer.taskId }))).toBe('accepted');
+    expect(await handleInboundEnvelope(stores, other.deviceId, createEnvelope('task.fail', valid, { taskId: offer.taskId })).then((result) => result.outcome)).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.fail', valid, { taskId: offer.taskId })).then((result) => result.outcome)).toBe('accepted');
     expect(await stores.tasks.get(offer.taskId)).toMatchObject({ status: 'failed' });
     expect((await stores.tasks.get(offer.taskId))?.ownerDeviceId).toBeUndefined();
     expect((await stores.tasks.get(offer.taskId))?.claimedHarnessId).toBeUndefined();
     const receipt = (await h.cloud.readTerminalReceipt(TENANT_A, offer.taskId))!;
     expect(projectTerminalResult(offer.taskId, receipt)).toMatchObject({ recovery: valid.recovery, harnessId: 'acme-harness', state: 'failed' });
     // Recovery never fabricates an execution claim, including on replay.
-    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, harnessId: 'acme-harness' }, { taskId: offer.taskId }))).toBe('rejected');
+    expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, harnessId: 'acme-harness' }, { taskId: offer.taskId })).then((result) => result.outcome)).toBe('rejected');
     expect((await stores.tasks.get(offer.taskId))?.ownerDeviceId).toBeUndefined();
   });
 
@@ -151,8 +151,8 @@ describe('custom harness protocol authority', () => {
       const offer = await h.cloud.enqueueOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), ...(builtin ? { runtime: 'pi' as const } : {}) } });
       const payload = { reason: 'daemon_interrupted', retryable: false, harnessId: 'acme-harness',
         recovery: { kind: 'daemon_interrupted' as const, offerId: offer.envelope.id } };
-      if (!builtin) expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, harnessId: 'other' }, { taskId: offer.taskId }))).toBe('accepted');
-      expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.fail', payload, { taskId: offer.taskId }))).toBe('rejected');
+      if (!builtin) expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, harnessId: 'other' }, { taskId: offer.taskId })).then((result) => result.outcome)).toBe('accepted');
+      expect(await handleInboundEnvelope(stores, deviceId, createEnvelope('task.fail', payload, { taskId: offer.taskId })).then((result) => result.outcome)).toBe('rejected');
       expect(await h.cloud.readTerminalReceipt(TENANT_A, offer.taskId)).toBeUndefined();
     }
   });

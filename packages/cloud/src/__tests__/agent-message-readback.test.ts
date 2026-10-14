@@ -53,7 +53,7 @@ describe('Host exact Agent message disposition readback', () => {
     expect(consumed).toBe(1);
     expect(await read()).toBeUndefined();
     expect(await discover()).toEqual({ payload: message.payload, context: input.agentMessageContext });
-    expect(await (await publish()).json()).toEqual({ accepted: 1 });
+    expect(await (await publish()).json()).toMatchObject({ accepted: 1 });
     expect(consumed).toBe(2);
     finalize.mockRestore();
     const receipt = await harness.cloud.readAgentMessageDisposition(TENANT_A, device.deviceId, taskId, message.payload);
@@ -64,7 +64,7 @@ describe('Host exact Agent message disposition readback', () => {
     expect(await harness.cloud.readTaskAgentMessage(TENANT_A, device.deviceId, 'other-task', agentRef)).toBeUndefined();
     expect(await harness.cloud.readTaskAgentMessage(TENANT_A, device.deviceId, taskId, { ...agentRef, agentId: 'other' })).toBeUndefined();
     expect(await harness.cloud.readTaskAgentMessage(TENANT_A, device.deviceId, taskId, { ...agentRef, profileRevision: 'other' })).toBeUndefined();
-    expect(await (await publish()).json()).toEqual({ accepted: 1 });
+    expect(await (await publish()).json()).toMatchObject({ accepted: 1 });
     expect(consumed).toBe(2);
     expect(await harness.cloud.readAgentMessageDisposition(TENANT_A, device.deviceId, taskId, message.payload)).toEqual(receipt);
     expect(await harness.cloud.readAgentMessageDisposition(TENANT_B, device.deviceId, taskId, message.payload)).toBeUndefined();
