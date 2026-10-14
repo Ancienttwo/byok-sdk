@@ -91,6 +91,43 @@ describe('#392: daemon startup observations are the live authority', () => {
     }
   });
 
+  it('a later start() reports no runtimes until its own detection finishes, never the previous start\'s', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-obs-restart-'));
+    const server = await TestServer.start();
+    const config = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'obs-392-restart', serverUrl: server.url, workspaceRoot: dir, storeDir: dir };
+    const adapter = new StubRuntimeAdapter('pi');
+    const daemon = createDaemonWithAdapters(config, [adapter]);
+    let releaseDetect: (() => void) | undefined;
+    try {
+      await daemon.pair('pairing-code');
+      await daemon.start();
+      await waitForDaemonOpen(daemon);
+      expect(daemon.status().runtimes.map(runtime => runtime.outcome)).toEqual(['available']);
+      await daemon.stop();
+
+      const detectGate = new Promise<void>(resolve => { releaseDetect = resolve; });
+      let detectStarted!: () => void;
+      const detectEntered = new Promise<void>(resolve => { detectStarted = resolve; });
+      vi.spyOn(adapter, 'detect').mockImplementation(async () => {
+        detectStarted();
+        await detectGate;
+        return { kind: 'not-found' };
+      });
+      const restarted = daemon.start();
+      await detectEntered;
+      expect(daemon.status().runtimes).toEqual([]);
+      releaseDetect!();
+      await restarted;
+      expect(daemon.status().runtimes.map(runtime => runtime.outcome)).toEqual(['not-found']);
+    } finally {
+      releaseDetect?.();
+      await daemon.stop();
+      vi.restoreAllMocks();
+      await server.close();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('rejects older/mixed runtime-id records instead of inventing available observations', () => {
     expect(parseRuntimeObservations([{ id: 'pi' }])).toBeUndefined();
     expect(parseRuntimeObservations([{ id: 'pi', present: true, outcome: 'not-found', steer: true, resume: true }])).toBeUndefined();
