@@ -78,6 +78,14 @@ latest or second-latest release, not by author judgment.
 - Each pinned released decoder reads every corpus line. A rejected line must
   be explained by a gate the release does not know; a silently dropped field
   must be declared strip-safe or gated.
+- `golden/v2.http.ndjson` carries literal HTTP bodies and independently authored
+  expected decoded values for challenge/token, events query/page and messages
+  request/response schemas. Current and both published protocol decoders read
+  them. HTTP loss requires a `kind: 'http'` strip-safe row in `WIRE_ADDITIONS`;
+  envelope rows have `kind: 'envelope'`. The optional messages capability
+  advertisement is strip-safe for 0.25.0/0.26.1; acknowledgement counts are not.
+  Each messages response carries its submitted `batchLength`, and all three
+  decoders must retain counts summing to it.
 - Every `WIRE_ADDITIONS` entry, every message type, and every top-level key a
   payload gained since the floor release appears in a corpus line.
 
@@ -85,7 +93,27 @@ That the server and hosted cloud actually refuse an undeclared receiver is
 tested at the senders (for example
 `packages/cloud/src/__tests__/wire-additions-admission.test.ts`). Nested
 fields of a strip-safe payload are checked only as far as the corpus carries
-them; the HTTP API bodies are not in the corpus yet.
+them; complete recursive-path and enum coverage remains a separate slice.
+
+**HTTP release evidence boundary.** The 0.25.0, 0.26.0 and 0.26.1 ledger entries
+are frozen envelope-only history. Do not backfill HTTP hashes into them. Every
+subsequent entry must pin both corpus prefixes; the first such entry defines
+the first HTTP-corpus release, without a separate state/version marker. Until
+that registration, literal body/expected-value equality proves current decoder
+behaviour, not historical HTTP byte immutability. Running those bodies through
+the actually published aliases already proves cross-version protocol decoding.
+Registration belongs to stable release preparation, not a feature-PR version
+bump (see `docs/releases/README.md`).
+
+**Private-client evidence exclusions.** Published protocol decoders do not
+execute old client-private parsers. The suite names three typed exclusions,
+bounded through 0.26.1: `EventsPollResponse` (private outer-page validation and
+per-entry decoding preserve unknown-event cursor stalls), `ChallengeResponse`
+and `TokenResponse` (AuthManager response casts). Advancing either alias past
+that bound requires reviewing/removing the exclusions. Remove them when the
+supported floor excludes those clients or an approved decoder cutover supplies
+the actual replacement proof. This slice neither unifies those parsers nor
+changes `EventsPollResponse.events` from `EnvelopeSchema[]`.
 
 **History note.** The "Landed additive minor" entries in this document, and
 other sections that say a change landed with "no `PROTOCOL_VERSION` bump" or
