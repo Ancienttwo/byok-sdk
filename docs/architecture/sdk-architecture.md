@@ -307,12 +307,8 @@ stateDiagram-v2
 
 ### 2.4 Freeze 与兼容边界
 
-- wire `v2` 已冻结。ADR-037 删除 offer 的 `PermissionPolicy`、runtime capability `permissionModes` 与 input-preparation `permissionMode`，因此 `PROTOCOL_VERSION` 由 1 升到 2，没有 v1 reader。freeze 由两道门禁分别执行，不是一句"golden 不漂移"：
-  - **wire corpus**（`packages/protocol/src/__tests__/golden/v2.envelopes.ndjson`）byte-for-byte 冻结，任何 diff 都是回归。
-  - **schema fingerprint**（`packages/protocol/src/__tests__/golden/v2.frozen.json`）只能经显式批准的 additive amendment 更新；v1 时期发生过一次：`ac92acb` 加入 additive 的 `task.claim.capabilities`。
-- breaking shape change 必须升 major，不允许靠改 fingerprint 就地放行。
-- 普通 optional field、新 message type、新 `AgentEvent`、新 capability flag 可 additive 增加。
-- 例外：instruction blob-ref 与 strict offer payload 是 `.strict()` control shape；增加字段本身就是 breaking。
+- wire `v2` 已冻结。ADR-037 删除 offer 的 `PermissionPolicy`、runtime capability `permissionModes` 与 input-preparation `permissionMode`，因此 `PROTOCOL_VERSION` 由 1 升到 2，没有 v1 reader。
+- 规则只写在 [protocol.md "Freeze rule"](../protocol.md#freeze-rule)：每个 v2 变更走 version bump、gated addition、strip-safe addition 三条路之一。后两条在 `packages/protocol/src/wire-additions.ts` 的 `WIRE_ADDITIONS` 里声明，cloud admission 读同一张表；`compat.test.ts` 用 npm 上已发布的 floor 与 previous decoder 证明这些声明。
 - observability unknown 可忽略；control/security unknown 必须 fail-closed。
 - server 只接受当前 major（v2）。v1 envelope 被拒绝；没有 N-1 reader，所以 server 与 client 必须一起升级。
 
@@ -1975,7 +1971,7 @@ S7-a 落 operational health/crash authority；S7-b 已把它与 runtime/control/
 
 ### 14.4 必须保持的不变量
 
-1. protocol freeze 走双门禁：wire corpus（`v2.envelopes.ndjson`）byte-for-byte 冻结；schema fingerprint（`v2.frozen.json`）只能经显式批准的 additive amendment 更新（v1 时期一次：`ac92acb`，additive `task.claim.capabilities`）。breaking shape 必须升 major（ADR-037 的 v1 → v2 即是一例）。
+1. protocol freeze 按 [protocol.md "Freeze rule"](../protocol.md#freeze-rule) 的三条路执行，由 `compat.test.ts` 对已发布 decoder 机检；`golden/v2.envelopes.ndjson` 只追加，已发布前缀由 `golden/releases.json` 的 sha256 钉住。breaking shape 必须升 major（ADR-037 的 v1 → v2 即是一例）。
 2. `keys` 与 dispatch/platform dependency graph 保持所规定的零边。
 3. unknown observability 可忽略；unknown control/security fail-closed。
 4. device/server/task ownership 每次 crossing 都验证，不靠调用者自律。
@@ -2080,7 +2076,7 @@ hosted cloud 骨架（P1）合入前，下列九条全绿才算隔离真正落�
 | I5 | bearer 交叉验证 | token `claims.tenantId` 与 registry 行不符 → 401；registry 为权威 | `@byok-sdk/server` auth 测试 |
 | I6 | `board_seq` 隔离 | 并发双租户写入下，A 的 SSE/轮询流永不出现 B 的行；per-tenant 序列互不推进 | cloud board 测试（P3 并入矩阵） |
 | I7 | 铸造点受控 | `@byok-sdk/core` 只允许 `tenant.ts` 铸造；`@byok-sdk/cloud-dataplane` 只允许 row→record 的 `stores/` 边界铸造；cloud 的 pre-tenant device lookup 是显式 auth 例外。各包用自己的 source scan/type tests 守住边界 | package-local guards（不是单一 repo-wide scanner） |
-| I8 | golden 零漂 | `git diff --exit-code packages/protocol/src/__tests__/golden/` 加 freeze-guard 全绿——机检证明 pairing 绑定未碰 DTO | 既有机检 |
+| I8 | golden 零漂 | `git diff --exit-code packages/protocol/src/__tests__/golden/` 加 compat 与 freeze-guard 全绿——机检证明 pairing 绑定未碰 DTO | 既有机检 |
 | I9 | `productId` 等值 | `conn.hello.productId` 与 device 行不符 → 拒连 | `@byok-sdk/server` hub 测试 |
 
 ### 16.2 平台线附加验证面（目标设计）

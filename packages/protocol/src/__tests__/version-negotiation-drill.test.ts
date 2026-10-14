@@ -51,12 +51,12 @@ import {
  *      thing that block doesn't: routing the same two cases through the
  *      REAL end-to-end decode entrypoint (`parseMessage`/`decodeEnvelope` on
  *      a full wire-shaped envelope), not just the isolated payload schema.
- *      No golden-sample (`golden/v1.frozen.json`/`v1.envelopes.ndjson`)
+ *      No golden-corpus (`golden/v2.envelopes.ndjson`)
  *      extension was needed for either 1 or 3: both are proven by direct,
  *      inline `safeParse`/`parseMessage` assertions, which is the existing,
  *      already-established convention for exactly this kind of behavior
  *      check in this file's sibling (see `freeze-guard.test.ts`'s own "Part
- *      3" describe block) — the golden files are a different, narrower net
+ *      2" describe block) — the golden files are a different, narrower net
  *      (pinning exact schema shape / exact historical wire bytes), not the
  *      right tool for a tolerate-vs-reject behavior assertion.
  *   4. Handshake version negotiation: daemon advertising [1,1] vs. server

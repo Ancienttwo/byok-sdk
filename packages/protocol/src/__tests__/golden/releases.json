@@ -1,0 +1,8 @@
+{
+  "floor": "0.25.0",
+  "releases": [
+    { "version": "0.25.0", "envelopes": { "lines": 32, "sha256": "56f21c931838d41dd18a89ea360b4b48ff5712add5e43871f65b3b2fb0356e04" } },
+    { "version": "0.26.0", "envelopes": { "lines": 32, "sha256": "56f21c931838d41dd18a89ea360b4b48ff5712add5e43871f65b3b2fb0356e04" } },
+    { "version": "0.26.1", "envelopes": { "lines": 32, "sha256": "56f21c931838d41dd18a89ea360b4b48ff5712add5e43871f65b3b2fb0356e04" } }
+  ]
+}

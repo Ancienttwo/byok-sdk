@@ -1,6 +1,8 @@
 export { MAILBOX_READ_AHEAD_MAX_SEQS, MAILBOX_READ_AHEAD_CAPABILITY } from './version';
 export { PROTOCOL_VERSION, CAPABILITY_FLAGS, STRICT_AGENT_ONLY_CAPABILITY, AGENT_HOME_READERS_CAPABILITY } from './version';
 export type { CapabilityFlag } from './version';
+export { WIRE_ADDITIONS, requiredReceiverCapabilities } from './wire-additions';
+export type { WireAddition } from './wire-additions';
 
 export { BlobRefSchema, CONTENT_HASH_RE } from './blob';
 export type { BlobRef } from './blob';
