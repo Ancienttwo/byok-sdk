@@ -281,6 +281,18 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
     expect(host.apply(job3, documentOf(run3.terminal))).toBe('applied');
     expect(host.apply(job2, documentOf(run2.terminal))).toBe('stale');
     expect(host.summary).toEqual({ version: 2, coveredThroughTurnSeq: 5, text: 'S3: through turn 5.' });
+    // Each CAS half is rejected on its own (hand-built jobs; no execution needed).
+    const current = { ...host.summary };
+    const handBuilt = (jobId: string, baseVersion: number, targetCoveredThrough: number): [SummaryJob, SummaryDocument] => [
+      { jobId, baseVersion, baseCoveredThrough: 0, targetCoveredThrough, taskId: `summary-${jobId}` },
+      { schemaVersion: 'synthetic-host.summary.v1', jobId, coveredThroughTurnSeq: targetCoveredThrough, text: `hand-built ${jobId}` },
+    ];
+    // Stale base only: the target (6) would extend coverage (5), but the job froze against v1 while the Summary is v2.
+    expect(host.apply(...handBuilt('j-stale-base', 1, 6))).toBe('stale');
+    expect(host.summary).toEqual(current);
+    // Mirror: the base is current (v2), but the target (5) does not extend coverage (5).
+    expect(host.apply(...handBuilt('j-no-extend', 2, 5))).toBe('stale');
+    expect(host.summary).toEqual(current);
 
     const pack6 = await runUserTurn('U6: summarize where we are', 'reply');
     expect(pack6.summary).toEqual({ version: 2, coveredThroughTurnSeq: 5, text: 'S3: through turn 5.' });
