@@ -1,3 +1,6 @@
+import { REQUEST_RECEIPT_PREFIXES, type ReceiptCollectExpiredInput } from '@byok-sdk/cloud';
+import { assertCollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
+import { assertCanonicalTimestamp } from '@byok-sdk/core';
 /**
  * Postgres {@link RequestReceiptStore}: the first write is the fact.
  *
@@ -37,6 +40,24 @@ export class PostgresRequestReceiptStore implements RequestReceiptStore {
   constructor(pool: Pool, clock: Clock) {
     this.#pool = pool;
     this.#clock = clock;
+  }
+
+  async collectExpired(tenant: TenantId, input: ReceiptCollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    assertCanonicalTimestamp(input.requestBefore, 'requestBefore');
+    if (REQUEST_RECEIPT_PREFIXES.length === 0) return { removed: 0, expired: 0, releasedBytes: 0n, more: false };
+    const predicates = REQUEST_RECEIPT_PREFIXES.map((_, i) => `left(key, length($${i + 4}::text)) = $${i + 4}`).join(' OR ');
+    const result = await this.#pool.query<{removed: string; more: boolean}>(
+      `WITH candidates AS MATERIALIZED (
+         SELECT ctid FROM device_request_receipts WHERE tenant_id = $1 AND recorded_at < $2 AND (${predicates})
+         ORDER BY recorded_at, key LIMIT $3 + 1 FOR UPDATE SKIP LOCKED
+       ), deleted AS (
+         DELETE FROM device_request_receipts WHERE ctid IN (SELECT ctid FROM candidates LIMIT $3) RETURNING 1
+       ) SELECT (SELECT count(*) FROM deleted)::text AS removed,
+                EXISTS(SELECT 1 FROM candidates OFFSET $3) AS more`,
+      [tenant, input.requestBefore, input.limit, ...REQUEST_RECEIPT_PREFIXES],
+    );
+    return { removed: Number(result.rows[0]!.removed), expired: 0, releasedBytes: 0n, more: result.rows[0]!.more };
   }
 
   async record(

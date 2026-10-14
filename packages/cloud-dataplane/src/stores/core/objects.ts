@@ -1,9 +1,13 @@
+import { settleDeletedObject } from './object-gc';
+import { assertCollectExpiredInput, CollectExpiredFailure, type CollectExpiredResult, type ObjectCollectExpiredInput } from '@byok-sdk/core';
+import type { R2ObjectMaintenance } from '../r2-blobs';
 /**
  * Postgres {@link ObjectStore} — the manifest, and only the manifest
  * (§12.7.4, §12.7.8).
  *
- * Zero bytes cross this file. The manifest is the transaction authority and the
- * object store holds the payload; the R2 adapter that moves bytes is S4A-c.
+ * The manifest is the transaction authority and the object store holds the
+ * payload. Collection calls the bound R2 byte owner while holding the tombstone
+ * row so a concurrent same-hash recreation cannot lose its uploaded bytes.
  * What lives here is the state machine that stands between a failed object-store
  * delete and either a leaked object or a deleted one a truth record still points
  * at.
@@ -84,9 +88,98 @@ export class PostgresObjectStore implements ObjectStore {
   readonly #pool: Pool;
   readonly #clock: Clock;
 
-  constructor(pool: Pool, clock: Clock) {
+  constructor(pool: Pool, clock: Clock, private readonly objectStorage: Pick<R2ObjectMaintenance, 'deleteObject'>) {
     this.#pool = pool;
     this.#clock = clock;
+    if (objectStorage === undefined || typeof objectStorage.deleteObject !== 'function') throw new ByokCoreError('retention_input_invalid', 'ObjectStore requires a physical byte deletion authority.');
+  }
+
+  async collectExpired(tenant: TenantId, input: ObjectCollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    assertCanonicalTimestamp(input.orphanBefore, 'orphanBefore');
+    const cursor = await this.#pool.query<{cursor_value: string | null}>("SELECT cursor_value FROM gc_cursor WHERE tenant_id = $1 AND cursor_kind = 'delete'", [tenant]);
+    const deleteCursor = cursor.rows[0]?.cursor_value ?? '';
+    const retry = await this.#pool.query<{hash: string}>(`SELECT m.hash FROM object_manifest m
+      WHERE m.tenant_id = $1 AND m.state = 'delete_pending' AND m.ref_count = 0
+        AND m.gc_accounted_bytes IS NOT NULL AND m.gc_accounted_object IS NOT NULL AND m.hash > $2
+        AND NOT EXISTS (SELECT 1 FROM storage_reservation s WHERE s.tenant_id = m.tenant_id AND s.content_hash = m.hash AND s.state = 'reserved')
+      ORDER BY m.hash LIMIT $3`, [tenant, deleteCursor, input.limit + 1]);
+    const work = retry.rows.slice(0, input.limit).map(row => row.hash);
+    const firstRetry = [...work];
+    const remaining = input.limit - work.length;
+    if (remaining > 0) {
+      const client = await this.#pool.connect();
+      try {
+        await client.query('BEGIN');
+        const gate = await client.query('SELECT 1 FROM storage_entitlement WHERE tenant_id = $1 FOR UPDATE', [tenant]);
+        const fresh = await client.query<{hash: string}>(`SELECT m.hash FROM object_manifest m
+          WHERE m.tenant_id = $1 AND m.state IN ('pending', 'committed') AND m.ref_count = 0 AND m.updated_at < $2
+            AND NOT EXISTS (SELECT 1 FROM object_reference r WHERE r.tenant_id = m.tenant_id AND r.hash = m.hash)
+            AND NOT EXISTS (SELECT 1 FROM storage_reservation s WHERE s.tenant_id = m.tenant_id AND s.content_hash = m.hash AND s.state = 'reserved')
+          ORDER BY m.updated_at, m.hash LIMIT $3 FOR UPDATE OF m SKIP LOCKED`, [tenant, input.orphanBefore, remaining + 1]);
+        if (fresh.rows.length > 0 && gate.rowCount !== 1) throw new ByokCoreError('storage_entitlement_missing', 'Object collection requires the tenant entitlement gate.');
+        const hashes = fresh.rows.slice(0, remaining).map(row => row.hash);
+        if (hashes.length > 0) await client.query(`UPDATE object_manifest SET
+          gc_accounted_bytes = CASE WHEN state = 'committed' THEN byte_size ELSE 0 END,
+          gc_accounted_object = (state = 'committed'), state = 'delete_pending', delete_pending_at = $3, updated_at = $3
+          WHERE tenant_id = $1 AND hash = ANY($2::text[])`, [tenant, hashes, input.now]);
+        await client.query('COMMIT');
+        work.push(...hashes);
+      } catch (cause) { await client.query('ROLLBACK').catch(() => {}); throw cause; }
+      finally { client.release(); }
+    }
+    const wrapped: string[] = [];
+    if (work.length < input.limit) {
+      const retryWrapped = await this.#pool.query<{hash: string}>(`SELECT m.hash FROM object_manifest m
+        WHERE m.tenant_id = $1 AND m.state = 'delete_pending' AND m.ref_count = 0 AND m.hash <= $2
+          AND NOT (m.hash = ANY($3::text[])) AND m.gc_accounted_bytes IS NOT NULL AND m.gc_accounted_object IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM storage_reservation s WHERE s.tenant_id = m.tenant_id AND s.content_hash = m.hash AND s.state = 'reserved')
+        ORDER BY m.hash LIMIT $4`, [tenant, deleteCursor, work, input.limit - work.length]);
+      wrapped.push(...retryWrapped.rows.map(row => row.hash));
+      work.push(...wrapped);
+    }
+    // Persist selection progress before any physical deletion commits.
+    if (work.length > 0) await this.#pool.query(`INSERT INTO gc_cursor (tenant_id, cursor_kind, cursor_value, updated_at)
+      VALUES ($1, 'delete', $2, $3) ON CONFLICT (tenant_id, cursor_kind) DO UPDATE SET cursor_value = EXCLUDED.cursor_value, updated_at = EXCLUDED.updated_at`, [tenant, wrapped.at(-1) ?? firstRetry.at(-1) ?? '', input.now]);
+    let removed = 0, releasedBytes = 0n, failures = 0;
+    let firstFailure: unknown;
+    for (const hash of work) {
+      let client: PoolClient | undefined;
+      try {
+        client = await this.#pool.connect();
+        await client.query('BEGIN');
+        // Every DP exit updates this row. Hold it through physical deletion so
+        // another collector or operator cannot permit same-hash recreation.
+        const locked = await client.query(`SELECT 1 FROM object_manifest m
+          WHERE m.tenant_id = $1 AND m.hash = $2 AND m.state = 'delete_pending' AND m.ref_count = 0
+            AND m.gc_accounted_bytes IS NOT NULL AND m.gc_accounted_object IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM object_reference r WHERE r.tenant_id = m.tenant_id AND r.hash = m.hash)
+            AND NOT EXISTS (SELECT 1 FROM storage_reservation s WHERE s.tenant_id = m.tenant_id AND s.content_hash = m.hash AND s.state = 'reserved')
+          FOR UPDATE OF m SKIP LOCKED`, [tenant, hash]);
+        if (locked.rowCount !== 1) { await client.query('ROLLBACK'); continue; }
+        await this.objectStorage.deleteObject(tenant, hash as ContentHash);
+        const released = await settleDeletedObject(client, tenant, hash as ContentHash, input.now);
+        await client.query('COMMIT');
+        if (released !== undefined) { removed++; releasedBytes += released; }
+      } catch (cause) {
+        if (client !== undefined) await client.query('ROLLBACK').catch(() => {});
+        failures++; firstFailure ??= cause;
+      } finally { client?.release(); }
+    }
+    const committed = { removed, expired: 0, releasedBytes };
+    let more: boolean;
+    try {
+      const remainder = await this.#pool.query(`SELECT 1 FROM object_manifest m WHERE m.tenant_id = $1 AND m.ref_count = 0
+      AND (m.state = 'delete_pending' OR (m.state IN ('pending', 'committed') AND m.updated_at < $2))
+      AND NOT EXISTS (SELECT 1 FROM object_reference r WHERE r.tenant_id = m.tenant_id AND r.hash = m.hash)
+      AND NOT EXISTS (SELECT 1 FROM storage_reservation s WHERE s.tenant_id = m.tenant_id AND s.content_hash = m.hash AND s.state = 'reserved') LIMIT 1`, [tenant, input.orphanBefore]);
+      more = remainder.rowCount !== 0;
+    } catch (cause) {
+      // Confirmed units survive a failed remainder observation. Do not invent `more`.
+      throw new CollectExpiredFailure(committed, failures, undefined, { cause });
+    }
+    if (failures > 0) throw new CollectExpiredFailure(committed, failures, more, { cause: firstFailure });
+    return { ...committed, more };
   }
 
   async putManifest(

@@ -2117,6 +2117,43 @@ terminate the owned child. Pending prompt RPC has a 30-second deadline. Already
 admitted work is not recalled by a later dialog. GUI requests/concurrent commands
 are capped at 32. The TaskRunner unattended cancellation policy is unchanged.
 
+## Cloud maintenance contract
+
+`ByokCloud.runMaintenance({ tenant, now, policy, limit })` runs a closed sequence
+of ten tenant-first `collectExpired` ports: mailbox, receipts, nonces, pairing
+codes, presence, activity, approvals, device assertion replay, quota and
+objects. Every step has one batch budget, returns removed/expired counts,
+released bigint bytes and an eligible-remainder flag, and commits independently.
+Failures retain confirmed `committed` counts and `failedRows`; step faults use
+`failedRows: 0`. Unknown counts and `more` are omitted. A remainder-probe fault
+cannot erase prior committed counts. Observers receive the same report.
+
+The reference server always schedules one non-overlapping pass every five
+minutes with ±20% jitter, defaults to 500 rows/objects per step, and exposes
+`maintenance.runNow()` to join an in-flight pass. Shutdown awaits collection
+before releasing SQLite. Hosted schedulers invoke the same kernel with their
+stored policy. Retention durations are positive bigint milliseconds: acked
+mailbox 24h, unacked mailbox 7d, request receipts 24h and orphan grace 24h.
+There is no disable value or missing-policy substitution.
+
+Acked mailbox rows may be deleted; unacked rows only become retained dead
+letters. Mailbox collection reports zero released bytes and never touches a
+usage counter. The sole receipt classification table protects all 11 SDK
+families and unknown keys as identity; the request projection is empty.
+Redeemed pairing code rows remain reachable identity fences. Committed reservation rows remain accounting/replay identity; only expired/aborted settled rows are GC candidates. Durable tasks,
+egress, truth, board, memory, profile and terminal history do not expire.
+Objects need no references or live reservation and must pass orphan grace;
+physical byte deletion and accounted settlement are one protected unit. PG
+holds the manifest row through physical deletion, and SQLite commits its SQL
+and process-local ledger release without an asynchronous gap.
+
+The old mailbox façade, `collectRetired`, replay `deleteExpired`, public
+`expireReservations` and Postgres `runTenant` are removed. Hosted policy lives on `PostgresRetentionPolicyStore` in the
+Worker-loadable dataplane runtime entry. Operator
+dead-letter, reconciliation and usage-rebuild APIs remain. Installed
+`cleanup_job` rows are historical; no current code writes them. Client artifact
+retention and cloud-do alarms retain their own ownership boundaries.
+
 ## Durable execution recovery
 
 For a daemon configured with hostedJournal, the existing tenant-scoped taskId is an immutable execution identity reserved by cloud dispatch. Omitted IDs are minted by cloud; explicit host IDs are idempotency inputs, never permission to reopen or retarget an execution. Delivery retirement survives mailbox retention. Every lifecycle message is bound to the authenticated tenant, exact offered device and, for Agent executions, the exact AgentRef. Retry is an explicit new execution; daemon restart never reruns committed runtime side effects.

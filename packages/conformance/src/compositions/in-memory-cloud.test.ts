@@ -7,18 +7,21 @@
  * fixing.
  */
 import { createInMemoryCoreStores, createMutableClock } from '@byok-sdk/core';
-import { createInMemoryCloudStores, createWebCrypto } from '@byok-sdk/cloud';
+import { createInMemoryCloudStores, createInMemoryBlobBytes, createWebCrypto } from '@byok-sdk/cloud';
 import { runCloudConformance, type CloudCompositionFactory } from '../cloud/harness';
 
 const inMemoryFactory: CloudCompositionFactory = {
   create() {
     const clock = createMutableClock();
-    const core = createInMemoryCoreStores({ clock }).stores;
+    const crypto = createWebCrypto();
+    const objectBytes = createInMemoryBlobBytes(clock, crypto);
+  const core = createInMemoryCoreStores({ clock, objectBytes }).stores;
     const { stores, blobContentProxy } = createInMemoryCloudStores(
       clock,
-      createWebCrypto(),
+      crypto,
       core.objects,
       core.mailbox,
+    objectBytes,
     );
     return {
       // Exactly the certified ports, in `CLOUD_CONFORMANCE_PORTS` order: the

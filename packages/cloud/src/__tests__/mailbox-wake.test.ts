@@ -156,7 +156,7 @@ describe('wake-driven events hold', () => {
     await observed.first;
     clock.advance(1_000);
     const cutoff = clock.now().toISOString();
-    await harness.core.mailbox.collectRetired(TENANT_A, { deviceId: device.deviceId, ackedBefore: cutoff, expireUnackedBefore: cutoff });
+    await harness.core.mailbox.collectExpired(TENANT_A, { now: cutoff, limit: 500, ackedBefore: cutoff, expireUnackedBefore: cutoff });
     await vi.advanceTimersByTimeAsync(40);
     const response = await held;
     expect(response.status).toBe(409);

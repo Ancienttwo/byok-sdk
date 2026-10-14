@@ -565,7 +565,7 @@ export class R2CloudBlobStore implements CloudBlobStore {
 export type R2ObjectMaintenanceOptions = Omit<
   R2BlobStoreOptions,
   'objects' | 'presignTtlSeconds'
->;
+> & { readonly requestTimeoutMs?: number };
 
 /**
  * R2 maintenance adapter kept deliberately outside `CloudBlobStore`.
@@ -584,6 +584,7 @@ export class R2ObjectMaintenanceStore implements R2ObjectMaintenance {
   readonly #fetch: ObjectStoreFetch;
   readonly #maxAttempts: number;
   readonly #retryDelayMs: number;
+  readonly #requestTimeoutMs: number;
 
   constructor(options: R2ObjectMaintenanceOptions) {
     this.#signingClock = options.signingClock;
@@ -600,6 +601,10 @@ export class R2ObjectMaintenanceStore implements R2ObjectMaintenance {
     this.#fetch = options.fetch ?? ((request) => globalThis.fetch(request));
     this.#maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
     this.#retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
+    if (!Number.isSafeInteger(this.#maxAttempts) || this.#maxAttempts < 1 || this.#maxAttempts > DEFAULT_MAX_ATTEMPTS
+      || !Number.isSafeInteger(this.#retryDelayMs) || this.#retryDelayMs < 0 || this.#retryDelayMs > 2_147_483_647 / 2) throw new ByokCoreError('retention_input_invalid', 'R2 maintenance needs one to three attempts and a finite timer-safe retry delay.');
+    this.#requestTimeoutMs = options.requestTimeoutMs ?? 10_000;
+    if (!Number.isSafeInteger(this.#requestTimeoutMs) || this.#requestTimeoutMs <= 0 || this.#requestTimeoutMs > 2_147_483_647) throw new ByokCoreError('retention_input_invalid', 'R2 maintenance request timeout must be a positive integer within the timer range.');
   }
 
   async inspectObject(
@@ -711,7 +716,7 @@ export class R2ObjectMaintenanceStore implements R2ObjectMaintenance {
         aws: { datetime: this.#datetime() },
       });
       try {
-        const response = await this.#fetch(signed);
+        const response = await this.#fetch(new Request(signed, { signal: AbortSignal.timeout(this.#requestTimeoutMs) }));
         if (response.status !== 429 && response.status < 500) {
           return { response, attempts: attempt };
         }

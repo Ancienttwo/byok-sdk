@@ -1,3 +1,4 @@
+import { R2ObjectMaintenanceStore } from '../src/runtime';
 /**
  * The worker-smoke probe entry. Thin on purpose: one route per real data-path
  * family, each driving one store composition the way a host Worker would.
@@ -109,12 +110,12 @@ async function pairingProbe(connectionString: string) {
   }
 }
 
-async function mailboxProbe(connectionString: string) {
+async function mailboxProbe(connectionString: string, env: Env) {
   const pool = createByokPool({ connectionString });
   try {
     const who = tenant();
     const deviceId = `device-${globalThis.crypto.randomUUID()}`;
-    const stores = createPostgresCoreStores({ pool, clock });
+    const stores = createPostgresCoreStores({ pool, clock, objectStorage: { ...requireS3Config(env), signingClock: clock } });
     // A limited append is admitted against the tenant's mailbox limit, so the
     // probe seeds an entitlement the way a host would before its first offer.
     await stores.quota.writeEntitlement(who, {
@@ -157,14 +158,14 @@ async function mailboxProbe(connectionString: string) {
   }
 }
 
-async function truthProbe(connectionString: string) {
+async function truthProbe(connectionString: string, env: Env) {
   const pool = createByokPool({ connectionString });
   try {
     const who = tenant();
     const committer = new PostgresTruthCommitter({ pool, clock, crypto });
     // The committer's inline accounting reads the tenant's entitlement, so the
     // probe seeds one through the same core-store composition a host would.
-    const stores = createPostgresCoreStores({ pool, clock });
+    const stores = createPostgresCoreStores({ pool, clock, objectStorage: { ...requireS3Config(env), signingClock: clock } });
     await stores.quota.writeEntitlement(who, {
       version: 1n,
       hardLimitBytes: 10_000n,
@@ -246,7 +247,7 @@ function blobStore(pool: ReturnType<typeof createByokPool>, env: Env) {
   const s3 = requireS3Config(env);
   return new R2CloudBlobStore({
     ...s3,
-    objects: new PostgresObjectStore(pool, clock),
+    objects: new PostgresObjectStore(pool, clock, new R2ObjectMaintenanceStore({ ...requireS3Config(env), signingClock: clock })),
     signingClock: clock,
   });
 }
@@ -314,7 +315,7 @@ async function blobVerifyProbe(env: Env, stage1: { blobId: string; payload: stri
     if (hash !== stage1.blobId || reservation.contentHash !== stage1.blobId) {
       throw new Error('blob verify payload does not hash to the granted blobId');
     }
-    const objects = new PostgresObjectStore(pool, clock);
+    const objects = new PostgresObjectStore(pool, clock, new R2ObjectMaintenanceStore({ ...requireS3Config(env), signingClock: clock }));
     const observed = await blobStore(pool, env).observeUpload(
       reservation.tenantId,
       stage1.blobId,
@@ -343,9 +344,9 @@ export default {
         route === '/probe/pairing'
           ? await pairingProbe(env.BYOK_PG.connectionString)
           : route === '/probe/mailbox'
-            ? await mailboxProbe(env.BYOK_PG.connectionString)
+            ? await mailboxProbe(env.BYOK_PG.connectionString, env)
             : route === '/probe/truth'
-              ? await truthProbe(env.BYOK_PG.connectionString)
+              ? await truthProbe(env.BYOK_PG.connectionString, env)
               : route === '/probe/blob' && request.method === 'POST'
                 ? await blobGrantProbe(env)
                 : route === '/probe/blob/verify' && request.method === 'POST'

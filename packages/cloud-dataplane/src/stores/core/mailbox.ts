@@ -1,3 +1,4 @@
+import { assertCollectExpiredInput } from '@byok-sdk/core';
 /**
  * Postgres {@link MailboxStore} (§12.7.3).
  *
@@ -8,7 +9,7 @@
  * regression and future cursors are refused with the cursor state they lost
  * to rather than re-delivering or silently skipping work.
  *
- * `collectRetired` deletes acked rows and **marks** unacked ones `expired`. It
+ * `collectExpired` deletes acked rows and **marks** unacked ones `expired`. It
  * never deletes an unacked row. §12.7.5 requires an envelope that aged out
  * before anyone consumed it to stay visible; deleting it would make "we dropped
  * work" indistinguishable from "there was no work", and dead-lettering those
@@ -37,8 +38,8 @@ import {
   type MailboxPage,
   type MailboxReadQuery,
   type MailboxRecordDeliveryInput,
-  type MailboxRetentionInput,
-  type MailboxRetentionResult,
+  type MailboxCollectExpiredInput,
+  type CollectExpiredResult,
   type MailboxStore,
   type MailboxUsage,
   type TenantId,
@@ -168,7 +169,7 @@ export class PostgresMailboxStore implements MailboxStore {
    * One past the highest row this device lost, which is exactly the highest
    * `expired` seq — `1` when it has lost nothing.
    *
-   * No column and no migration, because `collectRetired` never deletes an
+   * No column and no migration, because `collectExpired` never deletes an
    * unacked row: §12.7.5 keeps the dead letter, so the loss is already durable
    * in `outbox` and a stored floor would be a second authority free to drift
    * from the sweep that moved it. Whatever eventually reaps dead letters (S4B,
@@ -313,50 +314,30 @@ export class PostgresMailboxStore implements MailboxStore {
     };
   }
 
-  async collectRetired(
-    tenant: TenantId,
-    input: MailboxRetentionInput,
-  ): Promise<MailboxRetentionResult> {
-    // Both cutoffs are compared against `appended_at` as text; the canonical
-    // form is what makes that a time comparison rather than an arbitrary one.
-    // Validate before the sweep so a malformed cutoff deletes nothing at all
-    // rather than a wrong prefix of history.
+  async collectExpired(tenant: TenantId, input: MailboxCollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
     assertCanonicalTimestamp(input.ackedBefore, 'ackedBefore');
     assertCanonicalTimestamp(input.expireUnackedBefore, 'expireUnackedBefore');
-
-    // Delete and dead-letter in one statement, so a sweep is all or nothing and
-    // the two counts an operator reads describe the same moment. The two CTEs
-    // select disjoint sets — one `acked`, one `pending` — so no row can be both
-    // counted and marked.
-    const swept = await this.#pool.query<RetentionRow>(
-      `WITH deleted AS (
-         DELETE FROM outbox
-          WHERE tenant_id = $1
-            AND ($2::text IS NULL OR device_id = $2::text)
-            AND state = 'acked'
-            AND appended_at < $3
-         RETURNING byte_size
+    const result = await this.#pool.query<{removed: string; expired: string; more: boolean}>(
+      `WITH acked AS MATERIALIZED (
+         SELECT ctid FROM outbox WHERE tenant_id = $1 AND state = 'acked' AND appended_at < $2
+         ORDER BY appended_at, ctid LIMIT $4 + 1 FOR UPDATE SKIP LOCKED
+       ), deleted AS (
+         DELETE FROM outbox WHERE ctid IN (SELECT ctid FROM acked LIMIT $4) RETURNING 1
+       ), pending AS MATERIALIZED (
+         SELECT ctid FROM outbox WHERE tenant_id = $1 AND state = 'pending' AND appended_at < $3
+         ORDER BY appended_at, ctid LIMIT $4 - (SELECT count(*) FROM deleted) + 1 FOR UPDATE SKIP LOCKED
        ), expired AS (
-         UPDATE outbox
-            SET state = 'expired'
-          WHERE tenant_id = $1
-            AND ($2::text IS NULL OR device_id = $2::text)
-            AND state = 'pending'
-            AND appended_at < $4
-         RETURNING 1
-       )
-       SELECT (SELECT count(*) FROM deleted)                           AS deleted_count,
-              (SELECT count(*) FROM expired)                           AS expired_count,
-              (SELECT COALESCE(SUM(byte_size), 0) FROM deleted)::bigint AS released_bytes`,
-      [tenant, input.deviceId ?? null, input.ackedBefore, input.expireUnackedBefore],
+         UPDATE outbox SET state = 'expired' WHERE ctid IN
+           (SELECT ctid FROM pending LIMIT $4 - (SELECT count(*) FROM deleted)) RETURNING 1
+       ) SELECT (SELECT count(*) FROM deleted)::text AS removed,
+                (SELECT count(*) FROM expired)::text AS expired,
+                EXISTS(SELECT 1 FROM acked OFFSET $4) OR
+                (SELECT count(*) FROM pending) > $4 - (SELECT count(*) FROM deleted) AS more`,
+      [tenant, input.ackedBefore, input.expireUnackedBefore, input.limit],
     );
-
-    const row = swept.rows[0]!;
-    return {
-      deletedCount: Number(row.deleted_count),
-      expiredCount: Number(row.expired_count),
-      releasedBytes: row.released_bytes,
-    };
+    const row = result.rows[0]!;
+    return { removed: Number(row.removed), expired: Number(row.expired), releasedBytes: 0n, more: row.more };
   }
 
   /**

@@ -1,3 +1,4 @@
+import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/core';
 import type { Clock, TenantId } from '@byok-sdk/core';
 import { ByokCloudError } from '../../errors';
 import {
@@ -74,4 +75,15 @@ export class InMemoryActivityStore implements ActivityStore {
     }
     return tail;
   }
+  async collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    let removed = 0, more = false;
+    for (const [key, tail] of this.#tails) {
+      if (tail.tenantId !== tenant || tail.expiresAt > input.now) continue;
+      if (removed === input.limit) { more = true; break; }
+      this.#tails.delete(key); removed++;
+    }
+    return { removed, expired: 0, releasedBytes: 0n, more };
+  }
+
 }

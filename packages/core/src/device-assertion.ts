@@ -1,3 +1,4 @@
+import type { CollectExpiredInput, CollectExpiredResult } from './retention';
 /**
  * Device assertion envelope, canonical signing bytes, and verifier
  * (plan `device-assertion-broker`, P3 ①-⑤).
@@ -500,6 +501,7 @@ export interface DeviceAssertionReplayConsumeInput {
  * never be translated into authenticated success.
  */
 export interface DeviceAssertionReplayAuthority {
+  collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
   consume(input: DeviceAssertionReplayConsumeInput): Promise<boolean>;
 }
 

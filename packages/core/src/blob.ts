@@ -1,3 +1,4 @@
+import type { CollectExpiredInput, CollectExpiredResult } from './retention';
 /**
  * Content addressing and the object manifest (§12.7.4, §12.7.8).
  *
@@ -204,6 +205,7 @@ export interface ObjectListQuery {
  * `deletePendingBefore` is not a canonical ISO-8601 UTC instant).
  */
 export interface ObjectStore {
+  collectExpired(tenant: TenantId, input: ObjectCollectExpiredInput): Promise<CollectExpiredResult>;
   /** Creates or returns the `pending` row for `hash`. Idempotent per (tenant, hash). */
   putManifest(tenant: TenantId, input: ObjectManifestInput): Promise<ObjectManifestEntry>;
   /** `pending` → `committed` after verifying observed size/type. */
@@ -218,3 +220,5 @@ export interface ObjectStore {
   /** Tombstone step 3: the object store delete succeeded. */
   markDeleted(tenant: TenantId, hash: ContentHash): Promise<ObjectManifestEntry>;
 }
+
+export interface ObjectCollectExpiredInput extends CollectExpiredInput { readonly orphanBefore: string; }

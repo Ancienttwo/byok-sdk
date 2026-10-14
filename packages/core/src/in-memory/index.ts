@@ -1,3 +1,5 @@
+import { InMemoryStorageLedger } from './storage-ledger';
+import type { InMemoryObjectBytes } from './blob';
 /**
  * The in-memory reference composition.
  *
@@ -29,6 +31,7 @@ export { InMemorySkillPackStore } from './skill-pack';
 export { InMemoryDeviceAssertionReplayAuthority } from './device-assertion-replay';
 
 export interface InMemoryCoreOptions {
+  readonly objectBytes: InMemoryObjectBytes;
   /** Defaults to a fresh {@link createMutableClock}, so TTL behavior is deterministic. */
   readonly clock?: Clock;
 }
@@ -40,11 +43,12 @@ export interface InMemoryCoreComposition {
 }
 
 export function createInMemoryCoreStores(
-  options: InMemoryCoreOptions = {},
+  options: InMemoryCoreOptions,
 ): InMemoryCoreComposition {
   const clock: Clock = options.clock ?? createMutableClock();
-  const objects = new InMemoryObjectStore(clock);
-  const quota = new InMemoryQuotaStore(clock, objects);
+  const ledger = new InMemoryStorageLedger(clock);
+  const objects = new InMemoryObjectStore(clock, { ledger, bytes: options.objectBytes });
+  const quota = new InMemoryQuotaStore(clock, objects, ledger);
   const stores: CoreStores = {
     mailbox: new InMemoryMailboxStore(clock, quota),
     board: new InMemoryBoardStore(clock),
@@ -58,10 +62,13 @@ export function createInMemoryCoreStores(
 }
 
 /** Convenience for tests that need to move time: returns the composition and its mutable clock. */
-export function createInMemoryCoreCompositionWithClock(): {
+export function createInMemoryCoreCompositionWithClock(objectBytes: InMemoryObjectBytes): {
   readonly stores: CoreStores;
   readonly clock: MutableClock;
 } {
   const clock = createMutableClock();
-  return { stores: createInMemoryCoreStores({ clock }).stores, clock };
+  return { stores: createInMemoryCoreStores({ clock, objectBytes }).stores, clock };
 }
+
+export { InMemoryStorageLedger } from './storage-ledger';
+export type { InMemoryObjectBytes } from './blob';

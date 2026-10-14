@@ -1,3 +1,7 @@
+import { CollectExpiredFailure } from '../retention';
+import { InMemoryStorageLedger, type ReservationRecord } from './storage-ledger';
+import { assertCollectExpiredInput, type CollectExpiredResult } from '../retention';
+import type { QuotaCollectExpiredInput } from '../quota';
 /**
  * In-memory {@link QuotaStore} reference (§12.7.6-12.7.7).
  *
@@ -37,20 +41,14 @@ import { assertCanonicalTimestamp } from '../time';
 const WARNING_NUMERATOR = 80n;
 const WARNING_DENOMINATOR = 100n;
 
-interface ReservationRecord {
-  reservation: StorageReservation;
-  deduplicated: boolean;
-}
+
 
 export class InMemoryQuotaStore implements QuotaStore {
   readonly #entitlements = new Map<string, TenantStorageEntitlement>();
-  readonly #usage = new Map<string, TenantStorageUsage>();
-  readonly #reservations = new Map<string, ReservationRecord>();
-  readonly #committedHashes = new Map<string, Set<string>>();
   readonly #clock: Clock;
   readonly #objects: ObjectStore;
 
-  constructor(clock: Clock, objects: ObjectStore) {
+  constructor(clock: Clock, objects: ObjectStore, private readonly ledger: InMemoryStorageLedger) {
     this.#clock = clock;
     this.#objects = objects;
   }
@@ -119,7 +117,7 @@ export class InMemoryQuotaStore implements QuotaStore {
     tenant: TenantId,
     reservationId: string,
   ): Promise<StorageReservation | undefined> {
-    return this.#reservations.get(tenantKey(tenant, reservationId))?.reservation;
+    return this.ledger.readReservation(tenantKey(tenant, reservationId))?.reservation;
   }
 
   async reserve(
@@ -130,9 +128,10 @@ export class InMemoryQuotaStore implements QuotaStore {
     // Admission is the bounded product-side reap point. A daemon may die
     // after receiving a grant and never call finalize/abort; expired holds
     // therefore have to be settled before they can deny the next write.
-    await this.expireReservations(tenant);
+    // Exhaust the same expiry iterator used by the bounded maintenance pass.
+    await Array.from(this.#expireReservations(tenant));
     const key = tenantKey(tenant, input.reservationId);
-    const existing = this.#reservations.get(key);
+    const existing = this.ledger.readReservation(key);
     if (existing !== undefined) {
       if (existing.reservation.state === 'reserved') {
         if (
@@ -192,7 +191,7 @@ export class InMemoryQuotaStore implements QuotaStore {
       createdAt: now,
       expiresAt: new Date(this.#clock.now().getTime() + input.ttlMs).toISOString(),
     };
-    this.#reservations.set(key, { reservation, deduplicated: false });
+    this.ledger.writeReservation(key, { reservation, deduplicated: false });
     this.#setUsage(tenant, { ...usage, reservedBytes: usage.reservedBytes + input.expectedBytes });
     return reservation;
   }
@@ -261,14 +260,13 @@ export class InMemoryQuotaStore implements QuotaStore {
       }
     }
 
-    const hashes = this.#hashesOf(tenant);
     // Same tenant, same hash, counted once (§12.7.6). `#settle` has already
     // released the reserved bytes, so a deduplicated finalize adds nothing.
-    const deduplicated = hashes.has(reservation.contentHash);
+    const deduplicated = this.ledger.isCounted(tenant, reservation.contentHash);
     const settled = this.#settle(tenant, key, record, 'committed', deduplicated);
 
     if (!deduplicated) {
-      hashes.add(reservation.contentHash);
+      this.ledger.recordCommitted(tenant, reservation);
       const current = this.#usageOf(tenant);
       this.#setUsage(tenant, {
         ...current,
@@ -298,17 +296,43 @@ export class InMemoryQuotaStore implements QuotaStore {
     return this.#settle(tenant, key, record, 'aborted');
   }
 
-  async expireReservations(tenant: TenantId): Promise<readonly StorageReservation[]> {
+  *#expireReservations(tenant: TenantId, now = this.#now(), limit = Number.MAX_SAFE_INTEGER): IterableIterator<StorageReservation> {
     const prefix = tenantKey(tenant, '');
-    const now = this.#now();
-    const expired: StorageReservation[] = [];
-    for (const [key, record] of [...this.#reservations.entries()]) {
-      if (!key.startsWith(prefix)) continue;
-      if (record.reservation.state !== 'reserved') continue;
-      if (now < record.reservation.expiresAt) continue;
-      expired.push(this.#settle(tenant, key, record, 'expired'));
+    let expired = 0;
+    for (const [key, record] of this.ledger.reservations()) {
+      if (!key.startsWith(prefix) || record.reservation.state !== 'reserved' || now < record.reservation.expiresAt) continue;
+      yield this.#settle(tenant, key, record, 'expired', false, now);
+      if (++expired === limit) return;
     }
-    return expired;
+  }
+
+  async collectExpired(tenant: TenantId, input: QuotaCollectExpiredInput): Promise<CollectExpiredResult> {
+    assertCollectExpiredInput(input);
+    assertCanonicalTimestamp(input.settledBefore, 'settledBefore');
+    let expired = 0, releasedBytes = 0n, removed = 0, more = false;
+    try {
+      for (const reservation of this.#expireReservations(tenant, input.now, input.limit)) {
+        expired++;
+        releasedBytes += reservation.expectedBytes;
+      }
+    } catch (cause) {
+      throw new CollectExpiredFailure({ removed, expired, releasedBytes }, 1, true, { cause });
+    }
+    const prefix = tenantKey(tenant, '');
+    try {
+      for (const [key, record] of this.ledger.reservations()) {
+        if (!key.startsWith(prefix)) continue;
+        const row = record.reservation;
+        const shouldExpire = row.state === 'reserved' && row.expiresAt <= input.now;
+        const shouldRemove = (row.state === 'expired' || row.state === 'aborted') && row.settledAt !== undefined && row.settledAt < input.settledBefore;
+        if (!shouldExpire && !shouldRemove) continue;
+        if (shouldExpire || removed + expired === input.limit) { more = true; continue; }
+        this.ledger.deleteReservation(key); removed++;
+      }
+    } catch (cause) {
+      throw new CollectExpiredFailure({ removed, expired, releasedBytes }, 0, undefined, { cause });
+    }
+    return { removed, expired, releasedBytes, more };
   }
 
   #settle(
@@ -317,16 +341,19 @@ export class InMemoryQuotaStore implements QuotaStore {
     record: ReservationRecord,
     state: Exclude<StorageReservation['state'], 'reserved'>,
     deduplicated = false,
+    settledAt = this.#now(),
   ): StorageReservation {
     const settled: StorageReservation = {
       ...record.reservation,
       state,
-      settledAt: this.#now(),
+      settledAt,
     };
-    this.#reservations.set(key, { reservation: settled, deduplicated });
     const usage = this.#usageOf(tenant);
-    const released = usage.reservedBytes - record.reservation.expectedBytes;
-    this.#setUsage(tenant, { ...usage, reservedBytes: released < 0n ? 0n : released });
+    if (usage.reservedBytes < record.reservation.expectedBytes) {
+      throw new ByokCoreError('storage_integrity_mismatch', 'Reservation settlement would underflow reserved usage.');
+    }
+    this.ledger.writeReservation(key, { reservation: settled, deduplicated });
+    this.#setUsage(tenant, { ...usage, reservedBytes: usage.reservedBytes - record.reservation.expectedBytes });
     return settled;
   }
 
@@ -356,30 +383,9 @@ export class InMemoryQuotaStore implements QuotaStore {
     return usage.committedObjectBytes + usage.committedInlineBytes + usage.reservedBytes;
   }
 
-  #usageOf(tenant: TenantId): TenantStorageUsage {
-    const existing = this.#usage.get(tenant);
-    if (existing !== undefined) return existing;
-    const empty: TenantStorageUsage = {
-      committedObjectBytes: 0n,
-      committedInlineBytes: 0n,
-      reservedBytes: 0n,
-      objectCount: 0n,
-      updatedAt: this.#now(),
-    };
-    this.#usage.set(tenant, empty);
-    return empty;
-  }
-
+  #usageOf(tenant: TenantId): TenantStorageUsage { return this.ledger.readUsage(tenant); }
   #setUsage(tenant: TenantId, usage: TenantStorageUsage): void {
-    this.#usage.set(tenant, { ...usage, updatedAt: this.#now() });
-  }
-
-  #hashesOf(tenant: TenantId): Set<string> {
-    const existing = this.#committedHashes.get(tenant);
-    if (existing !== undefined) return existing;
-    const created = new Set<string>();
-    this.#committedHashes.set(tenant, created);
-    return created;
+    this.ledger.writeUsage(tenant, { ...usage, updatedAt: this.#now() });
   }
 
   #requireEntitlement(tenant: TenantId): TenantStorageEntitlement {
@@ -394,7 +400,7 @@ export class InMemoryQuotaStore implements QuotaStore {
   }
 
   #requireReservation(tenant: TenantId, reservationId: string): ReservationRecord {
-    const record = this.#reservations.get(tenantKey(tenant, reservationId));
+    const record = this.ledger.readReservation(tenantKey(tenant, reservationId));
     if (record === undefined) {
       throw new ByokCoreError(
         'storage_reservation_not_found',

@@ -47,8 +47,8 @@ if (SKIP_DATAPLANE) {
         });
         const capabilities = fullCapabilityDeclaration();
         const cloud = createByokCloud({
-        mailboxWake: createInProcessMailboxWake(),
-          core: createPostgresCoreStores({ pool: scope.pool, clock }),
+          core: createPostgresCoreStores({ pool: scope.pool, clock, objectStorage: objectStorage.config }),
+          mailboxWake: createInProcessMailboxWake(),
           cloud: stores,
           crypto,
           tokenSigner: createHmacTokenSigner(new Uint8Array(32).fill(17), clock),

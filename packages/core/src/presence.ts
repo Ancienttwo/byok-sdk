@@ -1,3 +1,4 @@
+import type { CollectExpiredInput, CollectExpiredResult } from './retention';
 /**
  * Presence hints (§12.3).
  *
@@ -108,6 +109,7 @@ export interface PresenceHintInput {
  * expired hint is indistinguishable from one that was never written.
  */
 export interface PresenceStore {
+  collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
   publish(tenant: TenantId, input: PresenceHintInput): Promise<PresenceHint>;
   read(tenant: TenantId, deviceId: string): Promise<PresenceHint | undefined>;
   list(tenant: TenantId): Promise<readonly PresenceHint[]>;

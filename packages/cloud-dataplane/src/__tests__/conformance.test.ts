@@ -61,7 +61,7 @@ const postgresFactory: CloudCompositionFactory = {
       crypto: createWebCrypto(),
       objectStorage: objectStorage.config,
     });
-    const core = createPostgresCoreStores({ pool: scope.pool, clock });
+    const core = createPostgresCoreStores({ pool: scope.pool, clock, objectStorage: objectStorage.config });
 
     return {
       stores,
@@ -112,7 +112,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres offer delivery composition', () => {
       const objectStorage = await createObjectStorageScope();
       const clock = createMutableClock();
       const crypto = createWebCrypto();
-      const core = createPostgresCoreStores({ pool: scope.pool, clock });
+      const core = createPostgresCoreStores({ pool: scope.pool, clock, objectStorage: objectStorage.config });
       const stores = createPostgresCloudStores({
         pool: scope.pool,
         clock,
