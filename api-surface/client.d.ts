@@ -4730,7 +4730,9 @@ import type { RuntimeObservation } from '../runtime-detection';
  * `turn` record when the runtime reports `turn_end`, or when the turn is still
  * open as the task ends, the daemon stops, or the task is evicted.
  */
-export type DaemonRecord = {
+export type DaemonRecord = Extract<DaemonEvent, {
+    kind: 'outbound-rejected';
+}> | {
     kind: 'offered';
     ts: string;
     taskId: string;
