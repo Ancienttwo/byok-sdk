@@ -28,7 +28,7 @@ describe('Issues #112/#114/#115/#116/#117/#118/#120 reference-server regressions
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;

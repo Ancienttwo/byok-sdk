@@ -34,7 +34,7 @@ describe('additive-minor: task.complete.document projection', () => {
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server) await stopServer(server);
     server = undefined;

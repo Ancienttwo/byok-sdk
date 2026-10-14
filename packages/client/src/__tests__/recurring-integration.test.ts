@@ -63,7 +63,7 @@ it('runs two recurring executions through real HTTP and TaskRunner with distinct
     expect(accepted.map(item => item.payload.body)).toEqual(['A1', 'A2']);
   } finally {
     releaseClose?.();
-    await daemon.stop(); sdk.stop(); await stopServer(http.server);
+    await daemon.stop(); await sdk.close(); await stopServer(http.server);
     await fs.rm(root, { recursive: true, force: true });
   }
 }, 30000);

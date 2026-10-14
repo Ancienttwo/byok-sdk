@@ -47,7 +47,7 @@ describe('reference-server Agent egress contract', () => {
   let byok: ByokServer | undefined;
 
   afterEach(async () => {
-    byok?.stop();
+    await byok?.close();
     byok = undefined;
     if (server !== undefined) await stopServer(server);
     server = undefined;

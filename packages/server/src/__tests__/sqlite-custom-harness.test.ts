@@ -171,6 +171,7 @@ describe('SQLite custom-harness claim authority', () => {
         createEnvelope('task.claim', { deviceId, harnessId }, { taskId }))).toBe('accepted');
       await runtime.stores.close(); runtime = open();
       expect(await runtime.bound.tasks.get(taskId)).toMatchObject({ claimedHarnessId: harnessId });
+      await runtime.stores.close();
       const db = new DatabaseSync(path, { readOnly: true });
       try {
         expect(db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe('4');

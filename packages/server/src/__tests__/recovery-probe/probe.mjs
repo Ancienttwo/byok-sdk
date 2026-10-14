@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { promises as fs, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import net from 'node:net';
 import { fork } from 'node:child_process';
 import { once } from 'node:events';
@@ -9,7 +10,6 @@ import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { serve } from '@hono/node-server';
 import { createByokServer, createHmacTokenSigner } from '@byok-sdk/server';
-import { createDaemonWithAdapters, freezeRuntimeAdapterDescriptor, readDeviceEnrollmentStatus } from '@byok-sdk/client';
 import { encodeEnvelope } from '@byok-sdk/protocol';
 import { validateStarts, hasAcknowledgedOffer } from './evidence.mjs';
 
@@ -39,15 +39,57 @@ function select(dbPath, sql) {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   try { return db.prepare(sql).all(); } finally { db.close(); }
 }
-async function observation(root, config, serverUrl, deviceId) {
+/**
+ * Observe the real embedded owner without opening a competing SQLite connection.
+ * The spy exists only during synchronous construction and is always restored.
+ * This proves committed order; post-exit raw reads below prove crash durability.
+ */
+export async function createObservedServer(options) {
+  assert.equal(options.storage?.kind, 'sqlite', 'probe requires the real SQLite composition');
+  const prepare = DatabaseSync.prototype.prepare;
+  const handles = new Set();
+  let byok;
+  try {
+    DatabaseSync.prototype.prepare = function (...args) {
+      handles.add(this);
+      return Reflect.apply(prepare, this, args);
+    };
+    byok = createByokServer(options);
+  } finally {
+    DatabaseSync.prototype.prepare = prepare;
+  }
+  try {
+    const expected = await fs.realpath(options.storage.path);
+    const matches = [];
+    for (const handle of handles) {
+      assert.equal(handle.isTransaction, false, 'probe capture must observe committed state');
+      const main = Reflect.apply(prepare, handle, ['PRAGMA database_list']).all()
+        .find(row => row.name === 'main');
+      if (!main?.file) continue;
+      const canonical = await fs.realpath(main.file);
+      assert.notEqual(path.basename(canonical), 'daemon.db', 'probe must not capture the daemon journal');
+      if (canonical === expected) matches.push(handle);
+    }
+    assert.equal(matches.length, 1, 'probe must capture exactly one server.sqlite owner');
+    const database = matches[0];
+    return { byok, select(sql) {
+      assert.equal(database.isOpen, true, 'probe owner handle is closed');
+      assert.equal(database.isTransaction, false, 'probe read must observe committed state');
+      return database.prepare(sql).all();
+    } };
+  } catch (error) {
+    await byok.close();
+    throw error;
+  }
+}
+async function observation(root, config, serverUrl, deviceId, selectServer) {
   const namespace = hash(`${serverUrl}::${deviceId}`).slice(0, 32);
   let cursor = null;
   try {
     cursor = JSON.parse(await fs.readFile(path.join(root, 'device', `cursor-${namespace}.json`), 'utf8')).cursor;
     assert.ok(Number.isSafeInteger(cursor) && cursor >= 0, 'invalid observed cursor');
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  const serverPath = path.join(root, 'server.sqlite');
-  const mailbox = select(serverPath, 'SELECT seq, message_id, state, body FROM mailbox_message ORDER BY seq')
+  const mailbox = selectServer('SELECT seq, message_id, state, body FROM mailbox_message ORDER BY seq')
     .map(row => { const envelope = JSON.parse(row.body); return {
       seq: row.seq, offerId: row.message_id, state: row.state, type: envelope.type,
       taskId: envelope.task_id ?? null, envelopeId: envelope.id,
@@ -60,11 +102,16 @@ async function observation(root, config, serverUrl, deviceId) {
     terminals: select(journalPath, 'SELECT task_id, terminal_type, payload_hash, truth_state, attempt FROM journal_terminal ORDER BY task_id'),
   };
   return { serverUrl, deviceId, cursorNamespace: namespace, localCursor: cursor,
-    mailbox, serverCursors: select(serverPath, 'SELECT device_id, delivered_seq, acked_seq FROM mailbox_cursor'),
-    serverTasks: select(serverPath, 'SELECT task_id, status FROM task_attempt ORDER BY task_id'), journal };
+    mailbox, serverCursors: selectServer('SELECT device_id, delivered_seq, acked_seq FROM mailbox_cursor'),
+    serverTasks: selectServer('SELECT task_id, status FROM task_attempt ORDER BY task_id'), journal };
 }
 
 async function child(stage, root) {
+  // This repository-only integration probe uses the built client workspace.
+  // Load it only for the daemon stage: server's isolated dependency graph does
+  // not include client, and owner-observation checks need no daemon or Keychain.
+  const { createDaemonWithAdapters, freezeRuntimeAdapterDescriptor, readDeviceEnrollmentStatus } =
+    await import(new URL('../../../../client/dist/index.js', import.meta.url).href);
   const config = JSON.parse(await fs.readFile(path.join(root, 'config.json'), 'utf8'));
   const serverUrl = stage === 'first' ? config.firstUrl : config.recoverUrl;
   let order = 0; let tail = Promise.resolve(); let fatal;
@@ -99,13 +146,14 @@ async function child(stage, root) {
     storeDir: path.join(root, 'device'), workspaceRoot: path.join(root, 'workspace'),
     allowedRuntimes: ['pi'],
     ...(config.journal ? { hostedJournal: { mode: 'sqlite' } } : {}) };
-  let byok, http, daemon, diagnosticDeviceId;
+  let byok, http, daemon, diagnosticDeviceId, selectServer;
   try {
     daemon = createDaemonWithAdapters(daemonConfig, [adapter]);
     if (stage === 'cleanup') { await daemon.unpair(); return { kind: 'cleaned' }; }
-    byok = createByokServer({ productId: config.productId,
+    const observed = await createObservedServer({ productId: config.productId,
       storage: { kind: 'sqlite', path: path.join(root, 'server.sqlite') }, longPollHoldMs: 100,
       tokenSigner: createHmacTokenSigner(await fs.readFile(path.join(root, 'signer.key')), { now: () => new Date() }) });
+    byok = observed.byok; selectServer = observed.select;
     const fetch = async request => {
       try {
         const url = new URL(request.url);
@@ -170,11 +218,11 @@ async function child(stage, root) {
     assert.equal(enrollment.state, 'paired'); diagnosticDeviceId = enrollment.deviceId;
     await log({ kind: 'phase-start', serverUrl, deviceId: enrollment.deviceId, journal: config.journal,
       hostRequestId: config.hostRequestId });
-    const preStart = await observation(root, config, serverUrl, enrollment.deviceId);
+    const preStart = await observation(root, config, serverUrl, enrollment.deviceId, selectServer);
     await daemon.start();
     const checked = async predicate => { if (fatal) throw fatal; return predicate(); };
     await until(() => checked(async () => (await byok.machines.list()).some(machine => machine.deviceId === enrollment.deviceId && machine.connected)), 'connected (not recovery barrier)');
-    const snap = () => observation(root, config, serverUrl, enrollment.deviceId);
+    const snap = () => observation(root, config, serverUrl, enrollment.deviceId, selectServer);
     if (stage === 'first') {
       const handle = await byok.dispatch({ deviceId: enrollment.deviceId, instruction: 'attribution fixture', runtime: 'pi' });
       taskA = handle.taskId;
@@ -225,7 +273,9 @@ async function child(stage, root) {
     const finalState = await snap(); await tail;
     return { kind: 'recovered', taskA, taskB: taskB ?? null, preStart, recoveryBarrier, finalState };
   } catch (error) {
-    if (byok && diagnosticDeviceId) await log({ kind: 'failure-observation', state: await observation(root, config, serverUrl, diagnosticDeviceId) });
+    await daemon?.stop();
+    await byok?.close();
+    if (byok && diagnosticDeviceId) await log({ kind: 'failure-observation', state: await observation(root, config, serverUrl, diagnosticDeviceId, sql => select(path.join(root, 'server.sqlite'), sql)) });
     throw error;
   } finally {
     await daemon?.stop();
@@ -265,9 +315,27 @@ async function runScenario(scenario, outDir) {
   try {
     active = launch('first', root); report.first = await active.response;
     active.process.kill('SIGKILL'); const [, signal] = await active.exit; assert.equal(signal, 'SIGKILL');
+    // The killed owner is gone: inspect the actual persisted file, not its live
+    // handle or audit logs. Pending-terminal barriers may still advance ACKs
+    // before SIGKILL, so assert their terminal authority independently.
+    report.afterCrash = await observation(root, config, config.firstUrl, report.first.deviceId,
+      sql => select(path.join(root, 'server.sqlite'), sql));
+    const crashedOffer = report.afterCrash.mailbox.find(row => row.taskId === report.first.taskA && row.type.startsWith('task.offer'));
+    assert.ok(crashedOffer, 'offer must survive SIGKILL');
+    if (scenario.barrier === 'acked') assert.ok(hasAcknowledgedOffer(report.afterCrash, report.first.deviceId, report.first.taskA));
+    if (scenario.barrier === 'pending-ack') {
+      assert.equal(crashedOffer.state, 'pending');
+      const cursor = report.afterCrash.serverCursors.find(row => row.device_id === report.first.deviceId);
+      assert.ok(cursor.acked_seq < crashedOffer.seq, 'held ACK must remain uncommitted after SIGKILL');
+    }
     config.taskA = report.first.taskA; // Diagnostic identity receipt, never supplied as dispatch identity.
     await fs.writeFile(path.join(root, 'config.json'), JSON.stringify(config), { mode: 0o600 });
     active = launch('recover', root); report.recovery = await active.response; assert.deepEqual(await active.exit, [0, null]);
+    report.afterClose = await observation(root, config, config.recoverUrl, report.first.deviceId,
+      sql => select(path.join(root, 'server.sqlite'), sql));
+    assert.deepEqual(report.afterClose.mailbox, report.recovery.finalState.mailbox);
+    assert.deepEqual(report.afterClose.serverCursors, report.recovery.finalState.serverCursors);
+    assert.deepEqual(report.afterClose.serverTasks, report.recovery.finalState.serverTasks);
     report.events = await readEvents(root);
     assert.equal(report.first.deviceId, report.recovery.preStart.deviceId);
     assert.equal(report.first.state.serverUrl === report.recovery.preStart.serverUrl, !scenario.changeUrl);
@@ -300,7 +368,7 @@ if (process.argv[2] === '--child') {
   try { const result = await child(process.argv[3], process.argv[4]); process.send?.(result); }
   catch (error) { process.send?.({ kind: 'error', message: String(error.message).replaceAll(process.argv[4], '<test-root>') }); process.exitCode = 1; }
   finally { process.disconnect?.(); }
-} else {
+} else if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   assert.equal(process.env.BYOK_TEST_DEVICE_CREDENTIAL_STORE, undefined, 'probe requires actual OS test enrollment');
   const outAt = process.argv.indexOf('--out'); assert.ok(outAt >= 0 && process.argv[outAt + 1], '--out <new evidence directory> required');
   const outDir = path.resolve(process.argv[outAt + 1]); await fs.mkdir(outDir, { recursive: false, mode: 0o700 });

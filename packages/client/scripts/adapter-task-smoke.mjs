@@ -412,7 +412,7 @@ try {
       console.error(`daemon cleanup warning: ${error instanceof Error ? error.message : String(error)}`);
     });
   }
-  byok?.stop();
+  await byok?.close();
   await withTimeout(closeHttpServer(httpServer), 'HTTP server cleanup', 10_000).catch((error) => {
     console.error(`HTTP server cleanup warning: ${error instanceof Error ? error.message : String(error)}`);
   });

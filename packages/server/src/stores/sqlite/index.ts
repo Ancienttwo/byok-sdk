@@ -56,12 +56,10 @@ import {
 import { PROTOCOL_VERSION, byokBlobContentPath, type RuntimeCapabilities, type RuntimeId } from '@byok-sdk/protocol';
 import type { DatabaseSync } from 'node:sqlite';
 import {
-  acquireSqliteOwnership,
   closeSqliteDatabaseAfterInitializationFailure,
   openSqliteDatabase,
   secureSqliteFilePermissions,
   SqliteSchemaError,
-  type SqliteOwnership,
   type SqliteSchemaErrorCode,
 } from '../../sqlite-support';
 
@@ -190,7 +188,6 @@ export interface SqliteEmbeddedStores {
 /** One serialized owner for the synchronous SQLite handle and every transaction on it. */
 class SqliteCoordinator {
   readonly db: DatabaseSync;
-  readonly #ownership: SqliteOwnership | undefined;
   #tail: Promise<void> = Promise.resolve();
   #queued = false;
   #closing = false;
@@ -199,9 +196,7 @@ class SqliteCoordinator {
   constructor(
     path: string,
     migration: 'v1-to-v4' | 'v2-to-v4' | 'v3-to-v4' | undefined,
-    ownership: SqliteOwnership | undefined,
   ) {
-    this.#ownership = ownership;
     this.db = openSqliteDatabase(path);
     let foundVersion: string | undefined;
     const schemaError = (code: SqliteSchemaErrorCode, message: string, options?: ErrorOptions) =>
@@ -215,8 +210,8 @@ class SqliteCoordinator {
       }
     };
     try {
-      // The host must stop every old writer before this open. A version fence
-      // prevents later downgrade opens, not writes through an already-open handle.
+      // openSqliteDatabase holds EXCLUSIVE ownership before this schema
+      // transaction. Adoption still requires stopping writers and a backup.
       this.db.exec('BEGIN IMMEDIATE');
       try {
         const hasMetadata = this.db
@@ -366,11 +361,7 @@ class SqliteCoordinator {
   }
 
   #closeHandle(): void {
-    try {
-      this.db.close();
-    } finally {
-      this.#ownership?.release();
-    }
+    this.db.close();
   }
 }
 
@@ -1273,20 +1264,7 @@ export function createSqliteEmbeddedStores(
   options: SqliteEmbeddedStoreOptions,
   dependencies: { readonly clock: Clock; readonly crypto: CloudCrypto },
 ): SqliteEmbeddedStores {
-  // One file, one owning server process: taken before the file is touched, so
-  // a refused open never migrates, validates or writes anything.
-  const ownership = options.path === ':memory:' ? undefined : acquireSqliteOwnership(options.path);
-  let coordinator: SqliteCoordinator;
-  try {
-    coordinator = new SqliteCoordinator(options.path, options.migration, ownership);
-  } catch (error) {
-    try {
-      ownership?.release();
-    } catch (releaseError) {
-      throw new AggregateError([error, releaseError], 'SQLite open failed and its ownership could not be released');
-    }
-    throw error;
-  }
+  const coordinator = new SqliteCoordinator(options.path, options.migration);
   const objects = new SqliteObjectStore(coordinator, dependencies.clock);
   const quota = new InMemoryQuotaStore(dependencies.clock, objects);
   const mailbox = new SqliteMailboxStore(coordinator, dependencies.clock, quota);
